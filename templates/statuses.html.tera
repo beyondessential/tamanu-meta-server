@@ -1,0 +1,70 @@
+<!doctype html>
+<html>
+<head>
+  <title>{{ title }}</title>
+  <style>
+  td, th {
+    padding: 0.5em;
+    border-width: 1px 0;
+    border-style: solid;
+    border-color: black;
+  }
+
+  th, .success, .failure {
+    font-weight: bold;
+  }
+
+  table {
+    border-collapse: collapse;
+  }
+
+  .success {
+    background: green;
+    color: white;
+  }
+
+  .failure {
+    background: red;
+    color: white;
+  }
+  </style>
+</head>
+<body>
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Success</th>
+        <th>Version</th>
+        <th>Rank</th>
+        <th>Host</th>
+        <th>Latency</th>
+        <th>Error</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for status in statuses %}
+      <tr>
+        <td>{{ status.name }}</td>
+        {% if 'error' in status %}
+        <td class=failure>No</td>
+        <td></td>
+        <td>{{ status.type }}</td>
+        <td><a href="{{ status.host }}">{{ status.host }}</a></td>
+        <td></td>
+        <td>{{ status.error }}</td>
+        {% else %}
+        <td class=success>Yes</td>
+        <td>{{ status.version }}</td>
+        <td>{{ status.type }}</td>
+        <td><a href="{{ status.host }}">{{ status.host }}</a></td>
+        <td>{{ status.latency }}ms</td>
+        <td></td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</body>
+</html>
+

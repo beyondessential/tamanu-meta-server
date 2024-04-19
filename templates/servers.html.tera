@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+<head>
+  <title>{{ title }}</title>
+</head>
+<body>
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Rank</th>
+        <th>Host</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for server in servers %}
+      <tr>
+        <td>{{ server.name }}</td>
+        <td>{{ server.type }}</td>
+        <td><a href="{{ server.host }}">{{ server.host }}</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</body>
+</html>
+
