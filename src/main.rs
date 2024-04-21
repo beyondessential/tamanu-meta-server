@@ -3,7 +3,7 @@ extern crate rocket;
 
 use std::time::Instant;
 
-use futures::stream::{futures_unordered::FuturesUnordered, StreamExt};
+use futures::stream::{FuturesOrdered, StreamExt};
 use rocket::http::Header;
 use rocket::serde::{json::Json, Serialize};
 use rocket_dyn_templates::{context, Template};
@@ -53,11 +53,6 @@ impl From<ServerType> for Header<'_> {
             },
         )
     }
-}
-
-#[get("/")]
-fn index() -> TamanuHeaders<Json<serde_json::Value>> {
-    TamanuHeaders::new(Json(serde_json::json!({ "index": true })))
 }
 
 #[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
@@ -131,17 +126,6 @@ fn servers_list() -> TamanuHeaders<Json<Vec<Server>>> {
     TamanuHeaders::new(Json(get_servers()))
 }
 
-#[get("/servers/readable")]
-fn servers_view() -> TamanuHeaders<Template> {
-    TamanuHeaders::new(Template::render(
-        "servers",
-        context! {
-            title: "Server index",
-            servers: get_servers(),
-        },
-    ))
-}
-
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
 struct ServerStatus {
     #[serde(flatten)]
@@ -176,7 +160,7 @@ impl From<Result<ServerStatus, ServerError>> for ServerResult {
 }
 
 async fn ping_servers() -> Vec<ServerResult> {
-    let statuses = FuturesUnordered::from_iter(get_servers().into_iter().map(|server| async {
+    let statuses = FuturesOrdered::from_iter(get_servers().into_iter().map(|server| async {
         let start = Instant::now();
         reqwest::get(server.host.join("/api/").unwrap())
             .await
@@ -202,18 +186,14 @@ async fn ping_servers() -> Vec<ServerResult> {
                 server,
                 success: false,
                 error,
-            }).into()
+            })
+            .into()
     }));
 
     statuses.collect().await
 }
 
-#[get("/servers/status")]
-async fn statuses_list() -> TamanuHeaders<Json<Vec<ServerResult>>> {
-    TamanuHeaders::new(Json(ping_servers().await))
-}
-
-#[get("/servers/status/readable")]
+#[get("/")]
 async fn statuses_view() -> TamanuHeaders<Template> {
     TamanuHeaders::new(Template::render(
         "statuses",
@@ -234,15 +214,5 @@ fn rocket() -> _ {
     rocket::build()
         .attach(Template::fairing())
         .register("/", catchers![not_found])
-        .mount(
-            "/",
-            routes![
-                index,
-                versions,
-                servers_list,
-                servers_view,
-                statuses_list,
-                statuses_view
-            ],
-        )
+        .mount("/", routes![servers_list, statuses_view])
 }
