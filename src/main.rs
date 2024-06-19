@@ -20,7 +20,7 @@ impl<T> TamanuHeaders<T> {
 	pub fn new(inner: T) -> Self {
 		Self {
 			inner,
-			server_type: ServerType::Meta,
+			server_type: ServerType,
 			version: Version(node_semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap()),
 		}
 	}
@@ -35,54 +35,23 @@ impl From<Version> for Header<'_> {
 	}
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-enum ServerType {
-	Meta,
-	Central,
-	Facility,
-}
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
+struct ServerType;
 
 impl From<ServerType> for Header<'_> {
-	fn from(server: ServerType) -> Self {
-		Header::new(
-			"X-Tamanu-Server",
-			match server {
-				ServerType::Meta => "Tamanu Metadata Server",
-				ServerType::Central => "Tamanu Sync Server",
-				ServerType::Facility => "Tamanu LAN Server",
-			},
-		)
+	fn from(_: ServerType) -> Self {
+		Header::new("X-Tamanu-Server", "Tamanu Metadata Server")
 	}
 }
 
-#[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
-enum AppType {
-	#[default]
-	#[serde(rename = "desktop")]
-	Web,
-	#[serde(rename = "mobile")]
-	Mobile,
-	#[serde(rename = "lan")]
-	Facility,
-}
-
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
-struct AppVersion {
-	app_type: AppType,
-	app_version: node_semver::Version,
+struct VersionResponse {
+	version: node_semver::Version,
 }
 
-#[get("/version/<app_type>")]
-fn versions(app_type: &str) -> TamanuHeaders<Json<AppVersion>> {
-	TamanuHeaders::new(Json(AppVersion {
-		app_type: match app_type {
-			"desktop" | "web" => AppType::Web,
-			"mobile" => AppType::Mobile,
-			"facility" | "lan" => AppType::Facility,
-			_ => AppType::default(),
-		},
-		app_version: node_semver::Version::from((0, 0, 1)),
-	}))
+#[get("/version/<version>")]
+fn version_view(version: &str) -> TamanuHeaders<Json<VersionResponse>> {
+	todo!("resolve {version}")
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
@@ -214,5 +183,5 @@ fn rocket() -> _ {
 	rocket::build()
 		.attach(Template::fairing())
 		.register("/", catchers![not_found])
-		.mount("/", routes![servers_list, statuses_view])
+		.mount("/", routes![servers_list, statuses_view, version_view])
 }
