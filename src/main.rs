@@ -2,6 +2,7 @@
 extern crate rocket;
 
 pub(crate) mod launch;
+pub(crate) mod schema;
 pub(crate) mod servers;
 pub(crate) mod statuses;
 pub(crate) mod versions;

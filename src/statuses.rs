@@ -2,10 +2,11 @@ use std::time::Instant;
 
 use futures::stream::{FuturesOrdered, StreamExt};
 use rocket::serde::Serialize;
+use rocket_db_pools::Connection;
 use rocket_dyn_templates::{context, Template};
 
 use crate::{
-	launch::{TamanuHeaders, Version},
+	launch::{Db, TamanuHeaders, Version},
 	servers::{get_servers, Server},
 };
 
@@ -42,47 +43,48 @@ impl From<Result<ServerStatus, ServerError>> for ServerResult {
 	}
 }
 
-async fn ping_servers() -> Vec<ServerResult> {
-	let statuses = FuturesOrdered::from_iter(get_servers().into_iter().map(|server| async {
-		let start = Instant::now();
-		reqwest::get(server.host.join("/api/").unwrap())
-			.await
-			.map_err(|err| err.to_string())
-			.and_then(|res| {
-				let version = res
-					.headers()
-					.get("X-Version")
-					.ok_or_else(|| "X-Version header not present".to_string())
-					.and_then(|value| value.to_str().map_err(|err| err.to_string()))
-					.and_then(|value| {
-						node_semver::Version::parse(value).map_err(|err| err.to_string())
-					})?;
+async fn ping_servers(db: Connection<Db>) -> Vec<ServerResult> {
+	let statuses =
+		FuturesOrdered::from_iter(get_servers(db).await.into_iter().map(|server| async {
+			let start = Instant::now();
+			reqwest::get(server.host.0.join("/api/").unwrap())
+				.await
+				.map_err(|err| err.to_string())
+				.and_then(|res| {
+					let version = res
+						.headers()
+						.get("X-Version")
+						.ok_or_else(|| "X-Version header not present".to_string())
+						.and_then(|value| value.to_str().map_err(|err| err.to_string()))
+						.and_then(|value| {
+							node_semver::Version::parse(value).map_err(|err| err.to_string())
+						})?;
 
-				Ok(ServerStatus {
-					server: server.clone(),
-					success: true,
-					latency: start.elapsed().as_millis(),
-					version: Version(version),
+					Ok(ServerStatus {
+						server: server.clone(),
+						success: true,
+						latency: start.elapsed().as_millis(),
+						version: Version(version),
+					})
 				})
-			})
-			.map_err(|error| ServerError {
-				server,
-				success: false,
-				error,
-			})
-			.into()
-	}));
+				.map_err(|error| ServerError {
+					server,
+					success: false,
+					error,
+				})
+				.into()
+		}));
 
 	statuses.collect().await
 }
 
 #[get("/")]
-pub async fn view() -> TamanuHeaders<Template> {
+pub async fn view(db: Connection<Db>) -> TamanuHeaders<Template> {
 	TamanuHeaders::new(Template::render(
 		"statuses",
 		context! {
 			title: "Server statuses",
-			statuses: ping_servers().await,
+			statuses: ping_servers(db).await,
 		},
 	))
 }

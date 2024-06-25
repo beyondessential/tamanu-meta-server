@@ -1,0 +1,6 @@
+# Copy this file to Rocket.toml
+
+[default.databases.postgres]
+# postgres connection string or URI as described here:
+# https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNSTRING
+url = "postgresql:///tamanu_meta"

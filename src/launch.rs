@@ -1,5 +1,10 @@
 use rocket::{http::Header, serde::Serialize};
+use rocket_db_pools::{diesel::PgPool, Database};
 use rocket_dyn_templates::Template;
+
+#[derive(Database)]
+#[database("postgres")]
+pub struct Db(PgPool);
 
 #[derive(Debug, Responder)]
 pub struct TamanuHeaders<T> {
@@ -45,11 +50,14 @@ fn not_found() -> TamanuHeaders<()> {
 pub fn rocket() -> _ {
 	rocket::build()
 		.attach(Template::fairing())
+		.attach(Db::init())
 		.register("/", catchers![not_found])
 		.mount(
 			"/",
 			routes![
 				crate::servers::list,
+				crate::servers::create,
+				crate::servers::edit,
 				crate::statuses::view,
 				crate::versions::view
 			],
