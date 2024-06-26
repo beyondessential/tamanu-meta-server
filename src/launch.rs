@@ -1,9 +1,9 @@
 use diesel::{backend::Backend, deserialize, expression::AsExpression, serialize, sql_types::Text};
-use rocket::{http::Header, serde::Serialize};
+use rocket::{http::Header, serde::Serialize, Build, Rocket};
 use rocket_db_pools::{diesel::PgPool, Database};
 use rocket_dyn_templates::Template;
 
-#[derive(Database)]
+#[derive(Clone, Database)]
 #[database("postgres")]
 pub struct Db(PgPool);
 
@@ -75,8 +75,7 @@ fn not_found() -> TamanuHeaders<()> {
 	TamanuHeaders::new(())
 }
 
-#[launch]
-pub fn rocket() -> _ {
+pub fn rocket() -> Rocket<Build> {
 	rocket::build()
 		.attach(Template::fairing())
 		.attach(Db::init())

@@ -3,7 +3,7 @@ use std::time::Instant;
 use chrono::{DateTime, Utc};
 use futures::stream::{FuturesOrdered, StreamExt};
 use rocket::serde::Serialize;
-use rocket_db_pools::diesel::prelude::*;
+use rocket_db_pools::diesel::{prelude::*, AsyncPgConnection};
 use rocket_db_pools::Connection;
 use rocket_dyn_templates::{context, Template};
 use uuid::Uuid;
@@ -59,7 +59,7 @@ async fn ping_server(server: &Server) -> Status {
 	}
 }
 
-async fn ping_servers(db: &mut Connection<Db>) -> Vec<(Status, Server)> {
+async fn ping_servers(db: &mut AsyncPgConnection) -> Vec<(Status, Server)> {
 	let statuses = FuturesOrdered::from_iter(
 		get_servers(db)
 			.await
@@ -70,11 +70,10 @@ async fn ping_servers(db: &mut Connection<Db>) -> Vec<(Status, Server)> {
 	statuses.collect().await
 }
 
-#[get("/")]
-pub async fn view(mut db: Connection<Db>) -> TamanuHeaders<Template> {
+pub async fn ping_servers_and_save(db: &mut AsyncPgConnection) -> Vec<(Status, Server)> {
 	use crate::schema::statuses::dsl::*;
 
-	let servers = ping_servers(&mut db).await;
+	let servers = ping_servers(db).await;
 	diesel::insert_into(statuses)
 		.values(
 			&servers
@@ -82,10 +81,15 @@ pub async fn view(mut db: Connection<Db>) -> TamanuHeaders<Template> {
 				.map(|(status, _)| status.clone())
 				.collect::<Vec<_>>(),
 		)
-		.execute(&mut db)
+		.execute(db)
 		.await
 		.expect("Error inserting statuses");
+	servers
+}
 
+#[get("/")]
+pub async fn view(mut db: Connection<Db>) -> TamanuHeaders<Template> {
+	let servers = ping_servers_and_save(&mut db).await;
 	TamanuHeaders::new(Template::render(
 		"statuses",
 		context! {

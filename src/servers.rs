@@ -1,7 +1,7 @@
 use std::fmt::Display;
 
 use rocket::serde::{json::Json, Deserialize, Serialize};
-use rocket_db_pools::diesel::prelude::*;
+use rocket_db_pools::diesel::{prelude::*, AsyncPgConnection};
 use rocket_db_pools::Connection;
 use url::Url;
 use uuid::Uuid;
@@ -79,7 +79,7 @@ pub struct Server {
 	pub host: UrlField,
 }
 
-pub async fn get_servers(db: &mut Connection<Db>) -> Vec<Server> {
+pub async fn get_servers(db: &mut AsyncPgConnection) -> Vec<Server> {
 	crate::schema::servers::table
 		.select(Server::as_select())
 		.load(db)
