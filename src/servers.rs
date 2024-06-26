@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::launch::{Db, TamanuHeaders};
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ServerRank {
 	Live,
@@ -49,7 +49,7 @@ impl From<ServerRank> for String {
 	}
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UrlField(pub Url);
 
 impl TryFrom<String> for UrlField {
@@ -66,20 +66,7 @@ impl From<UrlField> for String {
 	}
 }
 
-#[derive(
-	Debug,
-	Clone,
-	Eq,
-	PartialEq,
-	Ord,
-	PartialOrd,
-	Hash,
-	Serialize,
-	Deserialize,
-	Queryable,
-	Selectable,
-	Insertable,
-)]
+#[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable)]
 #[diesel(table_name = crate::schema::servers)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Server {
@@ -92,17 +79,17 @@ pub struct Server {
 	pub host: UrlField,
 }
 
-pub async fn get_servers(mut db: Connection<Db>) -> Vec<Server> {
+pub async fn get_servers(db: &mut Connection<Db>) -> Vec<Server> {
 	crate::schema::servers::table
 		.select(Server::as_select())
-		.load(&mut db)
+		.load(db)
 		.await
 		.expect("Error loading servers")
 }
 
 #[get("/servers")]
-pub async fn list(db: Connection<Db>) -> TamanuHeaders<Json<Vec<Server>>> {
-	TamanuHeaders::new(Json(get_servers(db).await))
+pub async fn list(mut db: Connection<Db>) -> TamanuHeaders<Json<Vec<Server>>> {
+	TamanuHeaders::new(Json(get_servers(&mut db).await))
 }
 
 #[derive(Debug, Deserialize)]

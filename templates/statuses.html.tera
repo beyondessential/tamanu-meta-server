@@ -24,7 +24,7 @@
   }
 
   .failure {
-    background: red;
+    background: red;
     color: white;
   }
   </style>
@@ -43,22 +43,22 @@
       </tr>
     </thead>
     <tbody>
-      {% for status in statuses %}
+      {% for server in servers %}
       <tr>
-        <td>{{ status.name }}</td>
-        {% if 'error' in status %}
+        <td>{{ server.1.name }}</td>
+        {% if server.0.error %}
         <td class=failure>No</td>
         <td></td>
-        <td>{{ status.type }}</td>
-        <td><a href="{{ status.host }}">{{ status.host }}</a></td>
+        <td>{{ server.1.type }}</td>
+        <td><a href="{{ server.1.host }}">{{ server.1.host }}</a></td>
         <td></td>
-        <td>{{ status.error }}</td>
+        <td>{{ server.0.error }}</td>
         {% else %}
         <td class=success>Yes</td>
-        <td>{{ status.version }}</td>
-        <td>{{ status.type }}</td>
-        <td><a href="{{ status.host }}">{{ status.host }}</a></td>
-        <td>{{ status.latency }}ms</td>
+        <td>{{ server.0.version }}</td>
+        <td>{{ server.1.type }}</td>
+        <td><a href="{{ server.1.host }}">{{ server.1.host }}</a></td>
+        <td>{{ server.0.latency_ms }}ms</td>
         <td></td>
         {% endif %}
       </tr>
