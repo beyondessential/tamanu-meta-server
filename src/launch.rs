@@ -87,6 +87,7 @@ pub fn rocket() -> Rocket<Build> {
 				crate::servers::create,
 				crate::servers::edit,
 				crate::statuses::view,
+				crate::statuses::reload,
 				crate::versions::view
 			],
 		)

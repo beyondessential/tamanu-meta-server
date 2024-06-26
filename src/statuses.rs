@@ -146,3 +146,9 @@ pub async fn view(mut db: Connection<Db>) -> TamanuHeaders<Template> {
 		},
 	))
 }
+
+#[post("/reload")]
+pub async fn reload(mut db: Connection<Db>) -> TamanuHeaders<()> {
+	ping_servers_and_save(&mut db).await;
+	TamanuHeaders::new(())
+}
