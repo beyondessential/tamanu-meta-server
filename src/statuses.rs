@@ -36,9 +36,11 @@ impl Status {
 	}
 }
 
-async fn ping_server(server: &Server) -> Status {
+async fn ping_server(client: &reqwest::Client, server: &Server) -> Status {
 	let start = Instant::now();
-	let (version, error) = reqwest::get(server.host.0.join("/api/").unwrap())
+	let (version, error) = client
+		.get(server.host.0.join("/api/").unwrap())
+		.send()
 		.await
 		.map_err(|err| err.to_string())
 		.and_then(|res| {
@@ -65,12 +67,17 @@ async fn ping_server(server: &Server) -> Status {
 }
 
 async fn ping_servers(db: &mut AsyncPgConnection) -> Vec<(Status, Server)> {
-	let statuses = FuturesOrdered::from_iter(
-		get_servers(db)
-			.await
-			.into_iter()
-			.map(|server| async move { (ping_server(&server).await, server) }),
-	);
+	let client = reqwest::ClientBuilder::new()
+		.timeout(Duration::from_secs(10))
+		.build()
+		.unwrap();
+	let statuses = FuturesOrdered::from_iter(get_servers(db).await.into_iter().map({
+		let client = client.clone();
+		move |server| {
+			let client = client.clone();
+			async move { (ping_server(&client, &server).await, server) }
+		}
+	}));
 
 	statuses.collect().await
 }
