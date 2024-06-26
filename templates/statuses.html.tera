@@ -27,6 +27,18 @@
     background: red;
     color: white;
   }
+
+  .success ~ .error {
+    color: grey;
+  }
+
+  .failure ~ .error {
+    color: darkred;
+  }
+
+  .hastitle {
+    text-decoration: underline dotted;
+  }
   </style>
 </head>
 <body>
@@ -34,33 +46,35 @@
     <thead>
       <tr>
         <th>Name</th>
-        <th>Success</th>
-        <th>Version</th>
         <th>Rank</th>
         <th>Host</th>
+        <th>Up?</th>
         <th>Latency</th>
-        <th>Error</th>
+        <th>Version</th>
+        <th>Last seen</th>
+        <th>Last error</th>
       </tr>
     </thead>
     <tbody>
-      {% for server in servers %}
+      {% for entry in entries %}
       <tr>
-        <td>{{ server.1.name }}</td>
-        {% if server.0.error %}
-        <td class=failure>No</td>
-        <td></td>
-        <td>{{ server.1.type }}</td>
-        <td><a href="{{ server.1.host }}">{{ server.1.host }}</a></td>
-        <td></td>
-        <td>{{ server.0.error }}</td>
-        {% else %}
+        <td>{{ entry.server_name }}</td>
+        <td>{{ entry.server_rank }}</td>
+        <td><a href="{{ entry.server_host }}">{{ entry.server_host }}</a></td>
+        {% if entry.is_up %}
         <td class=success>Yes</td>
-        <td>{{ server.0.version }}</td>
-        <td>{{ server.1.type }}</td>
-        <td><a href="{{ server.1.host }}">{{ server.1.host }}</a></td>
-        <td>{{ server.0.latency_ms }}ms</td>
-        <td></td>
+        {% else %}
+        <td class=failure>No</td>
         {% endif %}
+        <td>{% if entry.latest_latency %}{{ entry.latest_latency }}ms{% endif %}</td>
+        <td>{{ entry.latest_success_version }}</td>
+        {% if entry.latest_success_ts %}<td class=hastitle title="{{ entry.latest_success_ts }}">{{ entry.latest_success_ago }}s ago</td>{% else %}<td>never</td>{% endif %}
+        <td class=error>
+          {% if entry.latest_error_message %}
+            {{ entry.latest_error_message }}
+            ({% if entry.latest_error_ts %}<span class=hastitle title="{{ entry.latest_error_ts }}">{{ entry.latest_error_ago }}s ago</span>{% endif %})
+          {% endif %}
+        </td>
       </tr>
       {% endfor %}
     </tbody>

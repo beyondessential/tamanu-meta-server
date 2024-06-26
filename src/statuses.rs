@@ -1,19 +1,24 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use futures::stream::{FuturesOrdered, StreamExt};
 use rocket::serde::Serialize;
-use rocket_db_pools::diesel::{prelude::*, AsyncPgConnection};
-use rocket_db_pools::Connection;
+use rocket_db_pools::{
+	diesel::{prelude::*, AsyncPgConnection},
+	Connection,
+};
 use rocket_dyn_templates::{context, Template};
 use uuid::Uuid;
 
+use crate::helper_types::pg_duration::PgDuration;
+use crate::servers::{ServerRank, UrlField};
 use crate::{
 	launch::{Db, TamanuHeaders, Version},
 	servers::{get_servers, Server},
 };
 
-#[derive(Debug, Clone, Serialize, Queryable, Selectable, Insertable)]
+#[derive(Debug, Clone, Serialize, Queryable, Selectable, Insertable, Associations)]
+#[diesel(belongs_to(Server))]
 #[diesel(table_name = crate::schema::statuses)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Status {
@@ -70,7 +75,7 @@ async fn ping_servers(db: &mut AsyncPgConnection) -> Vec<(Status, Server)> {
 	statuses.collect().await
 }
 
-pub async fn ping_servers_and_save(db: &mut AsyncPgConnection) -> Vec<(Status, Server)> {
+pub async fn ping_servers_and_save(db: &mut AsyncPgConnection) {
 	use crate::schema::statuses::dsl::*;
 
 	let servers = ping_servers(db).await;
@@ -84,17 +89,53 @@ pub async fn ping_servers_and_save(db: &mut AsyncPgConnection) -> Vec<(Status, S
 		.execute(db)
 		.await
 		.expect("Error inserting statuses");
-	servers
+}
+
+#[derive(Debug, Clone, Serialize, Queryable, Selectable, Insertable)]
+#[diesel(table_name = crate::views::latest_statuses)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct LatestStatus {
+	pub server_id: Uuid,
+	pub server_created_at: DateTime<Utc>,
+	pub server_updated_at: DateTime<Utc>,
+	pub server_name: String,
+	#[diesel(deserialize_as = String, serialize_as = String)]
+	pub server_rank: ServerRank,
+	#[diesel(deserialize_as = String, serialize_as = String)]
+	pub server_host: UrlField,
+
+	pub is_up: bool,
+	pub latest_latency: Option<i32>,
+
+	pub latest_success_id: Option<Uuid>,
+	pub latest_success_ts: Option<DateTime<Utc>>,
+	pub latest_success_ago: Option<PgDuration>,
+	pub latest_success_version: Option<Version>,
+
+	pub latest_error_id: Option<Uuid>,
+	pub latest_error_ts: Option<DateTime<Utc>>,
+	pub latest_error_ago: Option<PgDuration>,
+	pub latest_error_message: Option<String>,
+}
+
+pub async fn fetch_latest_statuses(db: &mut AsyncPgConnection) -> Vec<LatestStatus> {
+	use crate::views::latest_statuses::dsl::*;
+
+	latest_statuses
+		.select(LatestStatus::as_select())
+		.load(db)
+		.await
+		.expect("Error loading statuses")
 }
 
 #[get("/")]
 pub async fn view(mut db: Connection<Db>) -> TamanuHeaders<Template> {
-	let servers = ping_servers_and_save(&mut db).await;
+	let entries = fetch_latest_statuses(&mut db).await;
 	TamanuHeaders::new(Template::render(
 		"statuses",
 		context! {
 			title: "Server statuses",
-			servers,
+			entries,
 		},
 	))
 }
