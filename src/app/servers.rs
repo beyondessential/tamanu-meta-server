@@ -1,4 +1,4 @@
-use rocket::serde::json::Json;
+use rocket::{mtls::Certificate, serde::json::Json};
 use rocket_db_pools::{diesel::prelude::*, Connection};
 
 use crate::{
@@ -15,7 +15,11 @@ pub async fn list(mut db: Connection<Db>) -> TamanuHeaders<Json<Vec<Server>>> {
 }
 
 #[post("/servers", data = "<input>")]
-pub async fn create(mut db: Connection<Db>, input: Json<NewServer>) -> TamanuHeaders<Json<Server>> {
+pub async fn create(
+	_auth: Certificate<'_>,
+	mut db: Connection<Db>,
+	input: Json<NewServer>,
+) -> TamanuHeaders<Json<Server>> {
 	let input = input.into_inner();
 	let server = Server::from(input);
 
@@ -30,6 +34,7 @@ pub async fn create(mut db: Connection<Db>, input: Json<NewServer>) -> TamanuHea
 
 #[patch("/servers", data = "<input>")]
 pub async fn edit(
+	_auth: Certificate<'_>,
 	mut db: Connection<Db>,
 	input: Json<PartialServer>,
 ) -> TamanuHeaders<Json<Server>> {
@@ -56,7 +61,11 @@ pub async fn edit(
 }
 
 #[delete("/servers", data = "<input>")]
-pub async fn delete(mut db: Connection<Db>, input: Json<PartialServer>) -> TamanuHeaders<()> {
+pub async fn delete(
+	_auth: Certificate<'_>,
+	mut db: Connection<Db>,
+	input: Json<PartialServer>,
+) -> TamanuHeaders<()> {
 	use crate::schema::servers::dsl::*;
 
 	let input = input.into_inner();

@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use futures::stream::{FuturesOrdered, StreamExt};
-use rocket::serde::Serialize;
+use rocket::{mtls::Certificate, serde::Serialize};
 use rocket_db_pools::{
 	diesel::{prelude::*, AsyncPgConnection},
 	Connection,
@@ -149,7 +149,7 @@ pub async fn view(mut db: Connection<Db>) -> TamanuHeaders<Template> {
 }
 
 #[post("/reload")]
-pub async fn reload(mut db: Connection<Db>) -> TamanuHeaders<()> {
+pub async fn reload(_auth: Certificate<'_>, mut db: Connection<Db>) -> TamanuHeaders<()> {
 	ping_servers_and_save(&mut db).await;
 	TamanuHeaders::new(())
 }
