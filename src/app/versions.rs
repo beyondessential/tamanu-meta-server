@@ -1,6 +1,6 @@
 use rocket::serde::{json::Json, Serialize};
 
-use crate::launch::TamanuHeaders;
+use crate::app::TamanuHeaders;
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
 pub struct VersionResponse {

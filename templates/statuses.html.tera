@@ -36,7 +36,8 @@
     color: darkred;
   }
 
-  .hastitle {
+  .ago {
+    white-space: pre;
     text-decoration: underline dotted;
   }
   </style>
@@ -68,11 +69,11 @@
         {% endif %}
         <td>{% if entry.latest_latency %}{{ entry.latest_latency }}ms{% endif %}</td>
         <td>{{ entry.latest_success_version }}</td>
-        {% if entry.latest_success_ts %}<td class=hastitle title="{{ entry.latest_success_ts }}">{{ entry.latest_success_ago }}s ago</td>{% else %}<td>never</td>{% endif %}
+        {% if entry.latest_success_ts %}<td class=ago title="{{ entry.latest_success_ts }}">{{ entry.latest_success_ago }} ago</td>{% else %}<td>never</td>{% endif %}
         <td class=error>
           {% if entry.latest_error_message %}
             {{ entry.latest_error_message }}
-            ({% if entry.latest_error_ts %}<span class=hastitle title="{{ entry.latest_error_ts }}">{{ entry.latest_error_ago }}s ago</span>{% endif %})
+            {% if entry.is_up %}(<span class=ago title="{{ entry.latest_error_ts }}">{{ entry.latest_error_ago }} ago</span>){% endif %}
           {% endif %}
         </td>
       </tr>
@@ -81,4 +82,3 @@
   </table>
 </body>
 </html>
-

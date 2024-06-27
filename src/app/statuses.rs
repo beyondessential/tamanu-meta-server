@@ -10,11 +10,12 @@ use rocket_db_pools::{
 use rocket_dyn_templates::{context, Template};
 use uuid::Uuid;
 
-use crate::helper_types::pg_duration::PgDuration;
-use crate::servers::{ServerRank, UrlField};
 use crate::{
-	launch::{Db, TamanuHeaders, Version},
-	servers::{get_servers, Server},
+	app::{TamanuHeaders, Version},
+	db::{
+		pg_duration::PgHumanDuration, server_rank::ServerRank, servers::Server,
+		url_field::UrlField, Db,
+	},
 };
 
 #[derive(Debug, Clone, Serialize, Queryable, Selectable, Insertable, Associations)]
@@ -71,7 +72,7 @@ async fn ping_servers(db: &mut AsyncPgConnection) -> Vec<(Status, Server)> {
 		.timeout(Duration::from_secs(10))
 		.build()
 		.unwrap();
-	let statuses = FuturesOrdered::from_iter(get_servers(db).await.into_iter().map({
+	let statuses = FuturesOrdered::from_iter(Server::get_all(db).await.into_iter().map({
 		let client = client.clone();
 		move |server| {
 			let client = client.clone();
@@ -116,12 +117,12 @@ pub struct LatestStatus {
 
 	pub latest_success_id: Option<Uuid>,
 	pub latest_success_ts: Option<DateTime<Utc>>,
-	pub latest_success_ago: Option<PgDuration>,
+	pub latest_success_ago: Option<PgHumanDuration>,
 	pub latest_success_version: Option<Version>,
 
 	pub latest_error_id: Option<Uuid>,
 	pub latest_error_ts: Option<DateTime<Utc>>,
-	pub latest_error_ago: Option<PgDuration>,
+	pub latest_error_ago: Option<PgHumanDuration>,
 	pub latest_error_message: Option<String>,
 }
 
