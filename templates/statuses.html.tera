@@ -58,7 +58,7 @@
     </thead>
     <tbody>
       {% for entry in entries %}
-      <tr>
+      <tr data-id="{{ entry.server_id }}">
         <td>{{ entry.server_name }}</td>
         <td>{{ entry.server_rank }}</td>
         <td><a href="{{ entry.server_host }}">{{ entry.server_host }}</a></td>
@@ -80,5 +80,14 @@
       {% endfor %}
     </tbody>
   </table>
+  <script>
+  window.addEventListener("load", () =>
+    document.querySelectorAll("tr[data-id]").forEach(el =>
+      el.addEventListener("click", e =>
+        e.shiftKey && navigator.clipboard?.writeText(el.dataset.id)
+      )
+    )
+  );
+  </script>
 </body>
 </html>
