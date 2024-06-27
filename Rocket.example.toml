@@ -4,3 +4,16 @@
 # postgres connection string or URI as described here:
 # https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNSTRING
 url = "postgresql:///tamanu_meta"
+
+# Configure TLS for the HTTPS server.
+#
+# [default.tls]
+# certs = "felix.crt"
+# key = "felix.key"
+
+# Configure mutual TLS, this is required to enable the admin routes.
+# Any certificate valid and trusted by this CA will be allowed to modify
+# the server list and manually reload the statuses.
+#
+# [default.tls.mutual]
+# ca_certs = "/home/.step/certs/root_ca.crt"
