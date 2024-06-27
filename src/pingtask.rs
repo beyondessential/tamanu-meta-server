@@ -5,7 +5,7 @@ use rocket::tokio::{
 	time::sleep,
 };
 
-use crate::{app::statuses::ping_servers_and_save, db::Db};
+use crate::db::{statuses::Status, Db};
 
 pub fn spawn(pool: Db) -> JoinHandle<()> {
 	task::spawn(async move {
@@ -16,7 +16,7 @@ pub fn spawn(pool: Db) -> JoinHandle<()> {
 				continue;
 			};
 
-			ping_servers_and_save(&mut db).await;
+			Status::ping_servers_and_save(&mut db).await;
 		}
 	})
 }
