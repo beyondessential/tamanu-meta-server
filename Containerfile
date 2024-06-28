@@ -20,13 +20,13 @@ RUN true \
     && dpkg --add-architecture armhf \
     && apt-get -y update \
     && apt-get -y install \
-      clang \
-      mold \
-      musl \
-      musl-dev \
-      musl-dev:arm64 \
-      musl-dev:armhf \
-      musl-tools
+        clang \
+        mold \
+        musl \
+        musl-dev \
+        musl-dev:arm64 \
+        musl-dev:armhf \
+        musl-tools
 
 # Download and build dependencies (for cache)
 RUN echo "fn main() {}" > src/main.rs
@@ -37,14 +37,16 @@ RUN rm target/$(cat /.target)/$PROFILE/{tamanu-meta,deps/tamanu_meta*}
 # Build the actual project
 COPY src ./src
 RUN cargo build --locked --target $(cat /.target) --profile $PROFILE
-RUN cp target/$(cat /.target)/$PROFILE/tamanu-meta /built/
+RUN cp target/$(cat /.target)/$PROFILE/{server,migrate} /built/
 
 
 # Runtime image
 FROM --platform=$BUILDPLATFORM scratch
 COPY --from=builder /etc/passwd /etc/passwd
-USER tamanu
-COPY --from=builder --chmod=0755 /built/tamanu-meta /
+COPY --from=builder --chmod=0755 /built/server /
+COPY --from=builder --chmod=0755 /built/migrate /
 COPY templates /templates
+
+USER tamanu
 ENV ROCKET_ADDRESS=::
-ENTRYPOINT ["/tamanu-meta"]
+ENTRYPOINT ["/server"]
