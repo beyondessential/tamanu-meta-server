@@ -22,7 +22,7 @@ enum Mode {
 	Revert {
 		/// The number of migrations to revert
 		#[arg(default_value = "1")]
-		steps: usize,
+		n: usize,
 	},
 
 	/// Redo the last migration
@@ -48,8 +48,8 @@ async fn main() {
 				.run_pending_migrations(MIGRATIONS)
 				.expect("failed: run migrations");
 		}
-		Mode::Revert { steps } => {
-			for _ in 0..steps {
+		Mode::Revert { n } => {
+			for _ in 0..n {
 				migrator
 					.revert_last_migration(MIGRATIONS)
 					.expect("failed: revert migration");
