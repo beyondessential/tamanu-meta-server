@@ -25,7 +25,7 @@ jobs:
           - windows
 
     name: Test on ${{ matrix.platform }}
-    runs-on: ${{ matrix.platform }}
+    runs-on: ${{ matrix.platform }}-latest
     steps:
       - uses: actions/checkout@v4
       - name: Configure toolchain
