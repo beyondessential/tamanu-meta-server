@@ -14,7 +14,7 @@ repository = "https://github.com/beyondessential/tamanu-meta-server"
 [dependencies]
 chrono = { version = "0.4.38", features = ["serde"] }
 clap = { version = "4.5.7", features = ["derive"] }
-diesel = { version = "2.2.3", features = ["chrono", "postgres", "uuid"] }
+diesel = { version = "2.2.3", features = ["chrono", "uuid"] }
 diesel_migrations = "2.2.0"
 folktime = "0.2.1"
 futures = "0.3.30"
@@ -27,6 +27,16 @@ serde = { version = "1.0.198", features = ["derive"] }
 serde_json = "1.0.116"
 url = { version = "2.5.0", features = ["serde"] }
 uuid = { version = "1.8.0", features = ["serde", "v4"] }
+
+[features]
+default = ["migrations-with-tokio-postgres"]
+migrations-with-libpq = ["diesel/postgres"]
+migrations-with-tokio-postgres = [
+	# we use the postgres backend but only via tokio-postgres, not via
+	# diesel's own libpq-based postgres backend
+	"diesel/postgres_backend",
+	"diesel/i-implement-a-third-party-backend-and-opt-into-breaking-changes",
+]
 
 [profile.release]
 lto = false
