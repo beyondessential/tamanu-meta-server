@@ -10,7 +10,6 @@ pub(crate) mod schema;
 pub(crate) mod views;
 
 pub async fn server() {
-	use futures::TryFutureExt;
 	use rocket_db_pools::Database as _;
 
 	let ship = app::rocket()
@@ -22,17 +21,23 @@ pub async fn server() {
 		.expect("Failed to fetch database pool")
 		.clone();
 
-	let rocket = ship.launch().map_err(|err| {
-		err.pretty_print();
-		// pretty_print() side-effects logs the error, so we can drop its result
-	});
+	let rocket = ship.launch();
+	let pinger = pingtask::spawn(pool);
 
-	let pinger = pingtask::spawn(pool).map_err(|err| {
-		error!("pinger task failed: {:?}", err);
-		// do the same thing as above (error here, then return ())
-	});
-
-	rocket::tokio::try_join!(rocket, pinger).ok();
+	rocket::tokio::select! {
+		r = rocket => {
+			match r {
+				Ok(_) => info!("Rocket shut down gracefully"),
+				Err(e) => drop(e.pretty_print()),
+			}
+		}
+		p = pinger => {
+			match p {
+				Ok(()) => info!("Ping task shut down gracefully"),
+				Err(e) => error!("Ping task shut down with an error: {e:?}"),
+			}
+		}
+	}
 }
 
 pub fn db_config() -> rocket::figment::Result<rocket_db_pools::Config> {
