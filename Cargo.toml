@@ -14,15 +14,15 @@ repository = "https://github.com/beyondessential/tamanu-meta-server"
 [dependencies]
 chrono = { version = "0.4.38", features = ["serde"] }
 clap = { version = "4.5.7", features = ["derive"] }
-diesel = { version = "2.2.3", features = ["chrono", "uuid"] }
-diesel_migrations = "2.2.0"
+diesel = { version = "2.1.6", features = ["chrono", "uuid"] }
+diesel_migrations = "2.1.0"
 folktime = "0.2.1"
 futures = "0.3.30"
 node-semver = "2.1.0"
 reqwest = { version = "0.12.3", default-features = false, features = ["rustls-tls-native-roots", "gzip", "json"] }
-rocket = { version = "0.6.0-dev", features = ["json", "mtls", "uuid"], git = "https://github.com/rwf2/Rocket", branch = "master" }
-rocket_db_pools = { version = "0.1.0", features = ["diesel_postgres"], git = "https://github.com/rwf2/Rocket", branch = "master" }
-rocket_dyn_templates = { version = "0.1.0", features = ["tera"], git = "https://github.com/rwf2/Rocket", branch = "master" }
+rocket = { version = "0.5.1", features = ["json", "mtls", "uuid"] }
+rocket_db_pools = { version = "0.2.0", features = ["diesel_postgres"] }
+rocket_dyn_templates = { version = "0.2.0", features = ["tera"] }
 serde = { version = "1.0.198", features = ["derive"] }
 serde_json = "1.0.116"
 url = { version = "2.5.0", features = ["serde"] }

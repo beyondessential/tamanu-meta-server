@@ -23,7 +23,8 @@ pub async fn server() {
 		.clone();
 
 	let rocket = ship.launch().map_err(|err| {
-		eprintln!("{err}");
+		err.pretty_print();
+		// pretty_print() side-effects logs the error, so we can drop its result
 	});
 
 	let pinger = pingtask::spawn(pool).map_err(|err| {
