@@ -10,12 +10,14 @@ use super::url_field::UrlField;
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Server {
 	pub id: Uuid,
+
+	// name and host are required for the public API
 	pub name: String,
-	#[serde(rename = "type")]
-	#[diesel(deserialize_as = String, serialize_as = String)]
-	pub rank: ServerRank,
 	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub host: UrlField,
+
+	#[diesel(deserialize_as = String, serialize_as = String)]
+	pub rank: ServerRank,
 }
 
 impl Server {
