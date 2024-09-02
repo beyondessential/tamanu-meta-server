@@ -37,14 +37,22 @@ COPY src ./src
 RUN cargo build --locked --target $(cat /.target) --profile $PROFILE
 RUN cp target/$(cat /.target)/$PROFILE/{server,migrate} /built/
 
+# we can't run any commands in the runtime image because the platform
+# might not be the same as the build platform, so we need to prepare
+# this home folder here
+RUN mkdir /runhome && cd /runhome && ln -s config/Rocket.toml
 
 # Runtime image
 FROM busybox:glibc
 COPY --from=builder /etc/passwd /etc/passwd
-COPY --from=builder --chmod=0755 /built/server /
-COPY --from=builder --chmod=0755 /built/migrate /
-COPY templates /templates
+COPY --from=builder /etc/group /etc/group
+COPY --from=builder --chmod=0755 /built/server /usr/bin/server
+COPY --from=builder --chmod=0755 /built/migrate /usr/bin/migrate
+COPY --from=builder --chown=tamanu:tamanu /runhome /home/tamanu
+COPY --chown=tamanu:tamanu templates /home/tamanu/templates
 
 USER tamanu
+ENV HOME=/home/tamanu
+WORKDIR /home/tamanu
 ENV ROCKET_ADDRESS=::
-ENTRYPOINT ["/server"]
+CMD ["server"]
