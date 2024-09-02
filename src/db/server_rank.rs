@@ -5,7 +5,8 @@ use rocket::serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ServerRank {
-	Live,
+	Production,
+	Clone,
 	Demo,
 	Dev,
 }
@@ -24,7 +25,8 @@ impl TryFrom<String> for ServerRank {
 
 	fn try_from(value: String) -> Result<Self, Self::Error> {
 		match value.to_ascii_lowercase().as_ref() {
-			"live" => Ok(Self::Live),
+			"live" | "prod" | "production" => Ok(Self::Production),
+			"clone" | "staging" => Ok(Self::Clone),
 			"demo" => Ok(Self::Demo),
 			"dev" => Ok(Self::Dev),
 			_ => Err(ServerRankFromStringError),
@@ -35,7 +37,8 @@ impl TryFrom<String> for ServerRank {
 impl From<ServerRank> for String {
 	fn from(rank: ServerRank) -> Self {
 		match rank {
-			ServerRank::Live => "live",
+			ServerRank::Production => "production",
+			ServerRank::Clone => "clone",
 			ServerRank::Demo => "demo",
 			ServerRank::Dev => "dev",
 		}
