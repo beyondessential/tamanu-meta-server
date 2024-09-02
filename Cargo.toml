@@ -11,6 +11,8 @@ description = "BES Tamanu coordination server"
 keywords = ["bes", "tamanu"]
 repository = "https://github.com/beyondessential/tamanu-meta-server"
 
+default-run = "server"
+
 [dependencies]
 chrono = { version = "0.4.38", features = ["serde"] }
 clap = { version = "4.5.16", features = ["derive"] }
