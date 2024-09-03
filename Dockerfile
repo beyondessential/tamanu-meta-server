@@ -29,7 +29,7 @@ ENV RUSTFLAGS="-C target-feature=+crt-static"
 RUN echo "fn main() {}" > src/bin/server.rs
 COPY Cargo.lock Cargo.toml ./
 RUN cargo build --locked --target $(cat /.target) --profile $PROFILE
-RUN rm target/$(cat /.target)/$PROFILE/{tamanu-meta,deps/tamanu_meta*}
+RUN rm target/$(cat /.target)/$PROFILE/{server,deps/server*}
 
 # Build the actual project
 COPY migrations ./migrations
