@@ -7,6 +7,14 @@ The Meta service provides:
 - a server list and health check page
 - a list of available versions
 
+## Get
+
+We have a container image for linux/amd64 and linux/arm64:
+
+```
+ghcr.io/beyondessential/tamanu-meta:v0.0.0
+```
+
 ## API
 
 TODO
