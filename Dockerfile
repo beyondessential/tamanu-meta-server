@@ -4,7 +4,7 @@ SHELL ["/bin/bash", "-euxo", "pipefail", "-c"]
 ARG PROFILE=release
 ARG TARGETPLATFORM
 
-RUN mkdir -p /app/{.cargo,src} /built && useradd --system --user-group --uid 1000 tamanu
+RUN mkdir -p /app/{.cargo,src/bin} /built && useradd --system --user-group --uid 1000 tamanu
 WORKDIR /app
 
 RUN if [ "$TARGETPLATFORM" == "linux/amd64" ]; then \
@@ -26,7 +26,7 @@ RUN rustup target add "$(cat /.target)"
 ENV RUSTFLAGS="-C target-feature=+crt-static"
 
 # Download and build dependencies (for cache)
-RUN echo "fn main() {}" > src/main.rs
+RUN echo "fn main() {}" > src/bin/server.rs
 COPY Cargo.lock Cargo.toml ./
 RUN cargo build --locked --target $(cat /.target) --profile $PROFILE
 RUN rm target/$(cat /.target)/$PROFILE/{tamanu-meta,deps/tamanu_meta*}
