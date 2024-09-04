@@ -130,23 +130,41 @@ mod rust_postgres_migrator {
 	impl SimpleConnection for UnasyncMigrator {
 		fn batch_execute(&mut self, query: &str) -> QueryResult<()> {
 			let connection = &mut self.connection;
-			std::thread::scope(|s| s.spawn(|| {
-				let runtime = rocket::tokio::runtime::Builder::new_current_thread().build().unwrap();
-				runtime.block_on(async move {
-					connection.batch_execute(query).await?;
-					Ok(())
+			std::thread::scope(|s| {
+				s.spawn(|| {
+					let runtime = rocket::tokio::runtime::Builder::new_current_thread()
+						.build()
+						.unwrap();
+					runtime.block_on(async move {
+						connection.batch_execute(query).await?;
+						Ok(())
+					})
 				})
-			}).join()).unwrap()
+				.join()
+			})
+			.unwrap()
 		}
 	}
 
 	impl BoxableConnection<Pg> for UnasyncMigrator {
 		fn as_any(&self) -> &dyn std::any::Any {
-			todo!()
+			unimplemented!()
 		}
 
 		fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-			todo!()
+			unimplemented!()
+		}
+	}
+
+	impl UnasyncMigrator {
+		fn prepare(&mut self) -> diesel::migration::Result<()> {
+			self.batch_execute(&format!(
+				"CREATE TABLE IF NOT EXISTS __diesel_schema_migrations (
+					version varchar(50) primary key not null,
+					run_on timestamp without time zone not null default current_timestamp
+				)",
+			))?;
+			Ok(())
 		}
 	}
 
@@ -155,12 +173,7 @@ mod rust_postgres_migrator {
 			&mut self,
 			migration: &dyn diesel::migration::Migration<Pg>,
 		) -> diesel::migration::Result<diesel::migration::MigrationVersion<'static>> {
-			self.batch_execute(&format!(
-				"CREATE TABLE IF NOT EXISTS __diesel_schema_migrations (
-					version varchar(50) primary key not null,
-					run_on timestamp without time zone not null default current_timestamp
-				)",
-			))?;
+			self.prepare()?;
 			migration.run(self)?;
 			let version = migration.name().version();
 			self.batch_execute(&format!(
@@ -173,6 +186,7 @@ mod rust_postgres_migrator {
 			&mut self,
 			migration: &dyn diesel::migration::Migration<Pg>,
 		) -> diesel::migration::Result<diesel::migration::MigrationVersion<'static>> {
+			self.prepare()?;
 			migration.revert(self)?;
 			let version = migration.name().version();
 			self.batch_execute(&format!(
@@ -190,16 +204,25 @@ mod rust_postgres_migrator {
 				version: String,
 			}
 
-			std::thread::scope(|s| s.spawn(|| {
-				let runtime = rocket::tokio::runtime::Builder::new_current_thread().build().unwrap();
-				runtime.block_on(async move {
-					let rows: Vec<Version> =
-						sql_query("SELECT version FROM __diesel_schema_migrations ORDER BY version DESC")
-							.get_results(&mut self.connection)
-							.await?;
-					Ok(rows.into_iter().map(|v| v.version.into()).collect())
+			self.prepare()?;
+
+			std::thread::scope(|s| {
+				s.spawn(|| {
+					let runtime = rocket::tokio::runtime::Builder::new_current_thread()
+						.build()
+						.unwrap();
+					runtime.block_on(async move {
+						let rows: Vec<Version> = sql_query(
+							"SELECT version FROM __diesel_schema_migrations ORDER BY version DESC",
+						)
+						.get_results(&mut self.connection)
+						.await?;
+						Ok(rows.into_iter().map(|v| v.version.into()).collect())
+					})
 				})
-			}).join()).unwrap()
+				.join()
+			})
+			.unwrap()
 		}
 	}
 }
