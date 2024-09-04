@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [2.1.3](https://github.com/beyondessential/tamanu-meta-server/compare/v2.1.2..2.1.3) - 2024-09-04
+## [2.2.0](https://github.com/beyondessential/tamanu-meta-server/compare/v2.1.3..2.2.0) - 2024-09-04
+
+
+- **Feature:** Add test server rank - ([5320caf](https://github.com/beyondessential/tamanu-meta-server/commit/5320caf284d4e4c271093fe8f36ef0537413c58e))
+
+---
+## [2.1.3](https://github.com/beyondessential/tamanu-meta-server/compare/v2.1.2..v2.1.3) - 2024-09-04
 
 
 - **Bugfix:** Whoops didn't check if things compiled before shipping - ([e1f60d4](https://github.com/beyondessential/tamanu-meta-server/commit/e1f60d42c37e7ce2326964cbd6d068c05a729a3b))
