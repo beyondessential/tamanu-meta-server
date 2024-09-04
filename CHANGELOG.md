@@ -5,7 +5,16 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [2.0.1](https://github.com/beyondessential/tamanu-meta-server/compare/v2.0.0..2.0.1) - 2024-09-04
+## [2.0.2](https://github.com/beyondessential/tamanu-meta-server/compare/v2.0.1..2.0.2) - 2024-09-04
+
+
+
+### Migrate
+
+- **Bugfix:** Prepare migration table on every use - ([8cdf74b](https://github.com/beyondessential/tamanu-meta-server/commit/8cdf74bb9b4b5e5e4e2826af376a0f7585e991a6))
+
+---
+## [2.0.1](https://github.com/beyondessential/tamanu-meta-server/compare/v2.0.0..v2.0.1) - 2024-09-04
 
 
 - **Repo:** Add changelog - ([b512cde](https://github.com/beyondessential/tamanu-meta-server/commit/b512cdea227ed6395c701341e258f3dc52882876))
