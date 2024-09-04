@@ -32,7 +32,7 @@ impl Status {
 			.get(server.host.0.join("/api/").unwrap())
 			.send()
 			.await
-			.map_err(|err| err.to_string())
+			.map_err(|err| format!("{err:?}"))
 			.and_then(|res| {
 				res.headers()
 					.get("X-Version")
