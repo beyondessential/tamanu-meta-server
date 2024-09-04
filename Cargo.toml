@@ -32,7 +32,7 @@ url = { version = "2.5.0", features = ["serde"] }
 uuid = { version = "1.10.0", features = ["serde", "v4"] }
 
 [features]
-default = ["migrations-with-libpq", "tls-host-roots"]
+default = ["migrations-with-tokio-postgres", "tls-host-roots"]
 tls-host-roots = ["reqwest/rustls-tls-native-roots"]
 tls-embed-roots = ["reqwest/rustls-tls-webpki-roots"]
 migrations-with-libpq = ["diesel/postgres"]
