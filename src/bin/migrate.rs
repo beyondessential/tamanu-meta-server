@@ -155,6 +155,12 @@ mod rust_postgres_migrator {
 			&mut self,
 			migration: &dyn diesel::migration::Migration<Pg>,
 		) -> diesel::migration::Result<diesel::migration::MigrationVersion<'static>> {
+			self.batch_execute(&format!(
+				"CREATE TABLE IF NOT EXISTS __diesel_schema_migrations (
+					version varchar(50) primary key not null,
+					run_on timestamp without time zone not null default current_timestamp
+				)",
+			))?;
 			migration.run(self)?;
 			let version = migration.name().version();
 			self.batch_execute(&format!(
