@@ -5,7 +5,14 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [2.1.2](https://github.com/beyondessential/tamanu-meta-server/compare/v2.1.1..2.1.2) - 2024-09-04
+## [2.1.3](https://github.com/beyondessential/tamanu-meta-server/compare/v2.1.2..2.1.3) - 2024-09-04
+
+
+- **Bugfix:** Whoops didn't check if things compiled before shipping - ([e1f60d4](https://github.com/beyondessential/tamanu-meta-server/commit/e1f60d42c37e7ce2326964cbd6d068c05a729a3b))
+- **Deps:** Okay libpq is not friendly to windows and mac - ([0a242a7](https://github.com/beyondessential/tamanu-meta-server/commit/0a242a7fd424cd801c316d5a79582a45c59057ec))
+
+---
+## [2.1.2](https://github.com/beyondessential/tamanu-meta-server/compare/v2.1.1..v2.1.2) - 2024-09-04
 
 
 - **Deps:** Use libpq in development - ([5ec597a](https://github.com/beyondessential/tamanu-meta-server/commit/5ec597aeb4e13d53ca068c03e4674072d70791d8))
