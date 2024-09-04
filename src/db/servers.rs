@@ -33,7 +33,6 @@ impl Server {
 #[derive(Debug, Deserialize)]
 pub struct NewServer {
 	pub name: String,
-	#[serde(rename = "type")]
 	pub rank: ServerRank,
 	pub host: UrlField,
 }
@@ -55,7 +54,6 @@ impl From<NewServer> for Server {
 pub struct PartialServer {
 	pub id: Uuid,
 	pub name: Option<String>,
-	#[serde(rename = "type")]
 	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub rank: Option<ServerRank>,
 	#[diesel(deserialize_as = String, serialize_as = String)]
