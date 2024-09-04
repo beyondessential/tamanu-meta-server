@@ -52,8 +52,8 @@ jobs:
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          cache-from: type=gha,scope=container-${{ github.ref_name }}
-          cache-to: type=gha,mode=max,scope=container-${{ github.ref_name }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           push: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
           labels: ${{ steps.meta.outputs.labels }}
           tags: ${{ steps.meta.outputs.tags }}
