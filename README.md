@@ -17,7 +17,93 @@ ghcr.io/beyondessential/tamanu-meta:2.0.3
 
 ## API
 
-TODO
+### Authentication
+
+Routes marked with 🔐 require authentication, which is achieved by presenting a client TLS certificate.
+
+### GET `/servers`
+
+Get the full list of servers as JSON.
+
+```json
+[
+	{
+		"id":"8960470f-5282-496e-86f5-21df8cf67d62",
+		"name":"Dev (main)",
+		"host":"https://central.main.internal.tamanu.io/",
+		"rank":"dev"
+	}
+]
+```
+
+### POST `/servers` 🔐
+
+Add a server to the list.
+
+Pass a JSON body:
+
+```json
+{
+	"name":"Dev (main)",
+	"host":"https://central.main.internal.tamanu.io/",
+	"rank":"dev"
+}
+```
+
+Returns the server with its assigned ID:
+
+```json
+{
+	"id":"8960470f-5282-496e-86f5-21df8cf67d62",
+	"name":"Dev (main)",
+	"host":"https://central.main.internal.tamanu.io/",
+	"rank":"dev"
+}
+```
+
+### PATCH `/servers` 🔐
+
+Edit a server.
+
+Pass a JSON body, all fields optional except for `id`:
+
+```json
+{
+	"id":"8960470f-5282-496e-86f5-21df8cf67d62",
+	"name":"Test server (main)"
+}
+```
+
+Returns the edited server with its assigned ID:
+
+```json
+{
+	"id":"8960470f-5282-496e-86f5-21df8cf67d62",
+	"name":"Test server (main)",
+	"host":"https://central.main.internal.tamanu.io/",
+	"rank":"dev"
+}
+```
+
+### DELETE `/servers` 🔐
+
+Remove a server from the list.
+
+Pass a JSON body with the `id` field:
+
+```json
+{
+	"id":"8960470f-5282-496e-86f5-21df8cf67d62"
+}
+```
+
+### POST `/reload` 🔐
+
+Force a reload of the statuses.
+
+### GET `/version/<version>`
+
+Not yet implemented.
 
 ## Develop
 
