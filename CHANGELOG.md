@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
+## [2.0.1](https://github.com/beyondessential/tamanu-meta-server/compare/v2.0.0..2.0.1) - 2024-09-04
+
+
+- **Repo:** Add changelog - ([b512cde](https://github.com/beyondessential/tamanu-meta-server/commit/b512cdea227ed6395c701341e258f3dc52882876))
+
+### Migrate
+
+- **Bugfix:** Migration hack did not allow running from scratch - ([ba5227d](https://github.com/beyondessential/tamanu-meta-server/commit/ba5227de167844ce3471a8d3230f79120a28ed13))
+
+---
 ## [2.0.0] - 2024-09-03
 
 
