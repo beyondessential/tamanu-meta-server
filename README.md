@@ -85,6 +85,9 @@ Returns the edited server with its assigned ID:
 }
 ```
 
+There's a "hidden" feature in the UI where if you Shift-click a row, it will
+copy its ID to the clipboard.
+
 ### DELETE `/servers` 🔐
 
 Remove a server from the list.
