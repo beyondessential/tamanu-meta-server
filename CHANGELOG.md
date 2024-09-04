@@ -5,7 +5,14 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [2.1.1](https://github.com/beyondessential/tamanu-meta-server/compare/v2.1.0..2.1.1) - 2024-09-04
+## [2.1.2](https://github.com/beyondessential/tamanu-meta-server/compare/v2.1.1..2.1.2) - 2024-09-04
+
+
+- **Deps:** Use libpq in development - ([5ec597a](https://github.com/beyondessential/tamanu-meta-server/commit/5ec597aeb4e13d53ca068c03e4674072d70791d8))
+- **Feature:** Embed tls roots in container - ([be4b84f](https://github.com/beyondessential/tamanu-meta-server/commit/be4b84f4faad6b80267e0402adfb1eaf6595d6a2))
+
+---
+## [2.1.1](https://github.com/beyondessential/tamanu-meta-server/compare/v2.1.0..v2.1.1) - 2024-09-04
 
 
 - **Tweak:** Prettier source error - ([b57c491](https://github.com/beyondessential/tamanu-meta-server/commit/b57c491f02369e529cf53b848c13acd82f4f0a7a))
