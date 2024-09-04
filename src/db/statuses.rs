@@ -29,7 +29,7 @@ impl Status {
 	pub async fn ping_server(client: &reqwest::Client, server: &Server) -> Self {
 		let start = Instant::now();
 		let (version, error) = client
-			.get(server.host.0.join("/api/").unwrap())
+			.get(server.host.0.join("/api/public/ping").unwrap())
 			.send()
 			.await
 			.map_err(|err| format!("{err:?}"))
