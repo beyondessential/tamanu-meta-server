@@ -5,7 +5,14 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [2.2.0](https://github.com/beyondessential/tamanu-meta-server/compare/v2.1.3..2.2.0) - 2024-09-04
+## [2.3.0](https://github.com/beyondessential/tamanu-meta-server/compare/v2.2.0..2.3.0) - 2024-09-04
+
+
+- **Documentation:** Fix repo clone url - ([2a999c7](https://github.com/beyondessential/tamanu-meta-server/commit/2a999c72e707b6342cc61bcbf334774bb099fcc6))
+- **Feature:** Split pingtask - ([b322ab7](https://github.com/beyondessential/tamanu-meta-server/commit/b322ab71d0e0cdf46240d4845f376f1dfff5131f))
+
+---
+## [2.2.0](https://github.com/beyondessential/tamanu-meta-server/compare/v2.1.3..v2.2.0) - 2024-09-04
 
 
 - **Feature:** Add test server rank - ([5320caf](https://github.com/beyondessential/tamanu-meta-server/commit/5320caf284d4e4c271093fe8f36ef0537413c58e))
