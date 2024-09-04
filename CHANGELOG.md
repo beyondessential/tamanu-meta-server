@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [2.1.0](https://github.com/beyondessential/tamanu-meta-server/compare/v2.0.3..2.1.0) - 2024-09-04
+## [2.1.1](https://github.com/beyondessential/tamanu-meta-server/compare/v2.1.0..2.1.1) - 2024-09-04
+
+
+- **Tweak:** Prettier source error - ([b57c491](https://github.com/beyondessential/tamanu-meta-server/commit/b57c491f02369e529cf53b848c13acd82f4f0a7a))
+
+---
+## [2.1.0](https://github.com/beyondessential/tamanu-meta-server/compare/v2.0.3..v2.1.0) - 2024-09-04
 
 
 - **Documentation:** Describe the API - ([4cdab85](https://github.com/beyondessential/tamanu-meta-server/commit/4cdab85aea3e8e9450533a97e1e6c661fad3d1de))
