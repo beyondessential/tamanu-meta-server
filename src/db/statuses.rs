@@ -1,4 +1,7 @@
-use std::time::{Duration, Instant};
+use std::{
+	error::Error,
+	time::{Duration, Instant},
+};
 
 use chrono::{DateTime, Utc};
 use futures::stream::{FuturesOrdered, StreamExt};
@@ -32,7 +35,10 @@ impl Status {
 			.get(server.host.0.join("/api/public/ping").unwrap())
 			.send()
 			.await
-			.map_err(|err| format!("{err:?}"))
+			.map_err(|err| {
+				err.source()
+					.map_or_else(|| err.to_string(), |err| err.to_string())
+			})
 			.and_then(|res| {
 				res.headers()
 					.get("X-Version")
