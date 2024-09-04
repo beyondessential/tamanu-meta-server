@@ -29,14 +29,14 @@ ENV RUSTFLAGS="-C target-feature=+crt-static"
 RUN echo "fn main() {}" > src/bin/server.rs
 COPY Cargo.lock Cargo.toml ./
 RUN cargo build --locked --target $(cat /.target) --profile $PROFILE \
-	--no-default-features --features migrations-with-tokio-postgres
+	--no-default-features --features migrations-with-tokio-postgres,tls-embed-roots
 RUN rm target/$(cat /.target)/$PROFILE/{server,deps/server*}
 
 # Build the actual project
 COPY migrations ./migrations
 COPY src ./src
 RUN cargo build --locked --target $(cat /.target) --profile $PROFILE \
-	--no-default-features --features migrations-with-tokio-postgres
+	--no-default-features --features migrations-with-tokio-postgres,tls-embed-roots
 RUN cp target/$(cat /.target)/$PROFILE/{server,migrate} /built/
 
 # we can't run any commands in the runtime image because the platform

@@ -22,7 +22,7 @@ diesel_migrations = "2.1.0"
 folktime = "0.2.1"
 futures = "0.3.30"
 node-semver = "2.1.0"
-reqwest = { version = "0.12.7", default-features = false, features = ["rustls-tls-native-roots", "gzip", "json"] }
+reqwest = { version = "0.12.7", default-features = false, features = ["gzip", "json"] }
 rocket = { version = "0.5.1", features = ["json", "mtls", "uuid"] }
 rocket_db_pools = { version = "0.2.0", features = ["diesel_postgres"] }
 rocket_dyn_templates = { version = "0.2.0", features = ["tera"] }
@@ -32,7 +32,9 @@ url = { version = "2.5.0", features = ["serde"] }
 uuid = { version = "1.10.0", features = ["serde", "v4"] }
 
 [features]
-default = ["migrations-with-libpq"]
+default = ["migrations-with-libpq", "tls-host-roots"]
+tls-host-roots = ["reqwest/rustls-tls-native-roots"]
+tls-embed-roots = ["reqwest/rustls-tls-webpki-roots"]
 migrations-with-libpq = ["diesel/postgres"]
 migrations-with-tokio-postgres = [
 	# we use the postgres backend but only via tokio-postgres, not via
