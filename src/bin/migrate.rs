@@ -2,7 +2,7 @@ use clap::Parser;
 use diesel_migrations::{
 	embed_migrations, EmbeddedMigrations, HarnessWithOutput, MigrationHarness as _,
 };
-use rocket_db_pools::diesel::{AsyncConnection as _, AsyncPgConnection};
+
 pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!();
 
 #[derive(Debug, Parser)]
@@ -37,6 +37,8 @@ enum Mode {
 
 #[cfg(feature = "migrations-with-tokio-postgres")]
 async fn connection() -> rust_postgres_migrator::UnasyncMigrator {
+	use rocket_db_pools::diesel::{AsyncConnection as _, AsyncPgConnection};
+
 	let config = tamanu_meta::db_config().unwrap();
 	let connection = AsyncPgConnection::establish(&config.url).await.unwrap();
 	rust_postgres_migrator::UnasyncMigrator { connection }
@@ -44,6 +46,8 @@ async fn connection() -> rust_postgres_migrator::UnasyncMigrator {
 
 #[cfg(feature = "migrations-with-libpq")]
 async fn connection() -> diesel::pg::PgConnection {
+	use diesel::Connection as _;
+
 	let config = tamanu_meta::db_config().unwrap();
 	diesel::pg::PgConnection::establish(&config.url).unwrap()
 }
