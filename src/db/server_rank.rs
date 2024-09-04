@@ -8,6 +8,7 @@ pub enum ServerRank {
 	Production,
 	Clone,
 	Demo,
+	Test,
 	Dev,
 }
 
@@ -28,6 +29,7 @@ impl TryFrom<String> for ServerRank {
 			"live" | "prod" | "production" => Ok(Self::Production),
 			"clone" | "staging" => Ok(Self::Clone),
 			"demo" => Ok(Self::Demo),
+			"test" => Ok(Self::Test),
 			"dev" => Ok(Self::Dev),
 			_ => Err(ServerRankFromStringError),
 		}
@@ -40,6 +42,7 @@ impl From<ServerRank> for String {
 			ServerRank::Production => "production",
 			ServerRank::Clone => "clone",
 			ServerRank::Demo => "demo",
+			ServerRank::Test => "test",
 			ServerRank::Dev => "dev",
 		}
 		.into()
