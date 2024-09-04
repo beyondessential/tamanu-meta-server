@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
+## [2.1.0](https://github.com/beyondessential/tamanu-meta-server/compare/v2.0.3..2.1.0) - 2024-09-04
+
+
+- **Documentation:** Describe the API - ([4cdab85](https://github.com/beyondessential/tamanu-meta-server/commit/4cdab85aea3e8e9450533a97e1e6c661fad3d1de))
+- **Feature:** Rename type to rank on the api - ([ec0d979](https://github.com/beyondessential/tamanu-meta-server/commit/ec0d979ddbe597b2af551d18f22a821ad2637b20))
+- **Repo:** Fix readme for new container version scheme - ([d44c15c](https://github.com/beyondessential/tamanu-meta-server/commit/d44c15cf7d1a1707913a9c4aca0a9d5f4a5586b7))
+- **Tweak:** Use debug representation of http error for more clarity - ([ba3e6cb](https://github.com/beyondessential/tamanu-meta-server/commit/ba3e6cbc56e9b3855a0c17e31b79f94e6931487e))
+- **Tweak:** Ping /api/public/ping for status, instead of the now-private bare /api - ([aaa34cb](https://github.com/beyondessential/tamanu-meta-server/commit/aaa34cb5cdde06618eed1e46c2f351c13cb8945e))
+
+---
 ## [2.0.2](https://github.com/beyondessential/tamanu-meta-server/compare/v2.0.1..v2.0.2) - 2024-09-04
 
 
