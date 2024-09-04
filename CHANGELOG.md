@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [2.0.2](https://github.com/beyondessential/tamanu-meta-server/compare/v2.0.1..2.0.2) - 2024-09-04
+## [2.0.2](https://github.com/beyondessential/tamanu-meta-server/compare/v2.0.1..v2.0.2) - 2024-09-04
 
 
 
