@@ -4,5 +4,5 @@ tag-message = "release: {{version}}"
 pre-release-commit-message = "release: {{version}}"
 pre-release-hook = ["git", "cliff", "-c", "cliff.toml", "-o", "CHANGELOG.md", "--tag", "{{version}}"]
 pre-release-replacements = [
-  { file = "README.md", search = "tamanu-meta:v[0-9\\.]+", replace = "tamanu-meta:v{{version}}"},
+  { file = "README.md", search = "tamanu-meta:[0-9\\.]+", replace = "tamanu-meta:{{version}}"},
 ]
