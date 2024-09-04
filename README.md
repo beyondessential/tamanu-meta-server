@@ -111,7 +111,7 @@ Not yet implemented.
 - Clone the repo via git:
 
 ```bash
-$ git clone git@github.com:beyondessential/tamanu.git
+$ git clone git@github.com:beyondessential/tamanu-meta-server.git
 ```
 
 - Build the project:
