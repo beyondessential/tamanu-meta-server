@@ -8,19 +8,19 @@ RUN mkdir -p /app/{.cargo,src/bin} /built && useradd --system --user-group --uid
 WORKDIR /app
 
 RUN if [ "$TARGETPLATFORM" == "linux/amd64" ]; then \
-        echo "x86_64-unknown-linux-gnu" >/.target; \
-        apt-get -y update; \
-        apt-get -y install libc-dev; \
-    elif [ "$TARGETPLATFORM" == "linux/arm64" ]; then \
-        echo "aarch64-unknown-linux-gnu" >/.target; \
-        dpkg --add-architecture arm64; \
-        apt-get -y update; \
-        apt-get -y install --no-install-recommends \
-            libc-dev:arm64 \
-            {binutils,gcc,g++,gfortran}-aarch64-linux-gnu; \
-        echo -e '[target.aarch64-unknown-linux-gnu]\nlinker = "aarch64-linux-gnu-gcc"' >> .cargo/config.toml; \
-    else echo "Unknown architecture $TARGETPLATFORM"; exit 1; \
-    fi
+		echo "x86_64-unknown-linux-gnu" >/.target; \
+		apt-get -y update; \
+		apt-get -y install libc-dev; \
+	elif [ "$TARGETPLATFORM" == "linux/arm64" ]; then \
+		echo "aarch64-unknown-linux-gnu" >/.target; \
+		dpkg --add-architecture arm64; \
+		apt-get -y update; \
+		apt-get -y install --no-install-recommends \
+			libc-dev:arm64 \
+			{binutils,gcc,g++,gfortran}-aarch64-linux-gnu; \
+		echo -e '[target.aarch64-unknown-linux-gnu]\nlinker = "aarch64-linux-gnu-gcc"' >> .cargo/config.toml; \
+	else echo "Unknown architecture $TARGETPLATFORM"; exit 1; \
+	fi
 
 RUN rustup target add "$(cat /.target)"
 ENV RUSTFLAGS="-C target-feature=+crt-static"
@@ -28,13 +28,15 @@ ENV RUSTFLAGS="-C target-feature=+crt-static"
 # Download and build dependencies (for cache)
 RUN echo "fn main() {}" > src/bin/server.rs
 COPY Cargo.lock Cargo.toml ./
-RUN cargo build --locked --target $(cat /.target) --profile $PROFILE
+RUN cargo build --locked --target $(cat /.target) --profile $PROFILE \
+	--no-default-features --features migrations-with-tokio-postgres
 RUN rm target/$(cat /.target)/$PROFILE/{server,deps/server*}
 
 # Build the actual project
 COPY migrations ./migrations
 COPY src ./src
-RUN cargo build --locked --target $(cat /.target) --profile $PROFILE
+RUN cargo build --locked --target $(cat /.target) --profile $PROFILE \
+	--no-default-features --features migrations-with-tokio-postgres
 RUN cp target/$(cat /.target)/$PROFILE/{server,migrate} /built/
 
 # we can't run any commands in the runtime image because the platform

@@ -32,7 +32,7 @@ url = { version = "2.5.0", features = ["serde"] }
 uuid = { version = "1.10.0", features = ["serde", "v4"] }
 
 [features]
-default = ["migrations-with-tokio-postgres"]
+default = ["migrations-with-libpq"]
 migrations-with-libpq = ["diesel/postgres"]
 migrations-with-tokio-postgres = [
 	# we use the postgres backend but only via tokio-postgres, not via
