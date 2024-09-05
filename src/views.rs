@@ -21,3 +21,14 @@ diesel::table! {
 		latest_error_message -> Nullable<Text>,
 	}
 }
+
+diesel::table! {
+	ordered_servers (id) {
+		id -> Uuid,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
+		name -> Text,
+		rank -> Text,
+		host -> Text,
+	}
+}

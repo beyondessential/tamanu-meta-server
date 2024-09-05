@@ -23,7 +23,7 @@ pub async fn create(
 	let input = input.into_inner();
 	let server = Server::from(input);
 
-	diesel::insert_into(crate::schema::servers::table)
+	diesel::insert_into(crate::views::ordered_servers::table)
 		.values(server.clone())
 		.execute(&mut db)
 		.await
@@ -38,12 +38,12 @@ pub async fn edit(
 	mut db: Connection<Db>,
 	input: Json<PartialServer>,
 ) -> TamanuHeaders<Json<Server>> {
-	use crate::schema::servers::dsl::*;
+	use crate::views::ordered_servers::dsl::*;
 
 	let input = input.into_inner();
 	let input_id = input.id;
 
-	diesel::update(servers)
+	diesel::update(ordered_servers)
 		.filter(id.eq(input_id))
 		.set(input)
 		.execute(&mut db)
@@ -51,7 +51,7 @@ pub async fn edit(
 		.expect("Error updating server");
 
 	TamanuHeaders::new(Json(
-		servers
+		ordered_servers
 			.filter(id.eq(input_id))
 			.select(Server::as_select())
 			.first(&mut db)
