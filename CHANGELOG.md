@@ -5,7 +5,15 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [2.3.0](https://github.com/beyondessential/tamanu-meta-server/compare/v2.2.0..2.3.0) - 2024-09-04
+## [2.3.1](https://github.com/beyondessential/tamanu-meta-server/compare/v2.3.0..2.3.1) - 2024-09-05
+
+
+- **Documentation:** Expose "hidden" copy feature - ([598054e](https://github.com/beyondessential/tamanu-meta-server/commit/598054ee9e66de7afc6c568a78c835432a80f533))
+- **Documentation:** Explain how to do migrations in dev - ([91b6152](https://github.com/beyondessential/tamanu-meta-server/commit/91b6152fef3cc7c35829579c43daa6e6d8663e9c))
+- **Feature:** Use ordered_servers view transparently in place of servers table - ([6544306](https://github.com/beyondessential/tamanu-meta-server/commit/6544306a47cc1629ef5c579525fb209adc2008c4))
+
+---
+## [2.3.0](https://github.com/beyondessential/tamanu-meta-server/compare/v2.2.0..v2.3.0) - 2024-09-04
 
 
 - **Documentation:** Fix repo clone url - ([2a999c7](https://github.com/beyondessential/tamanu-meta-server/commit/2a999c72e707b6342cc61bcbf334774bb099fcc6))
