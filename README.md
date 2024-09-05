@@ -157,3 +157,8 @@ $ diesel migration run
 ```console
 $ diesel migration redo
 ```
+
+6. Run formatter:
+```console
+$ cargo fmt
+```
