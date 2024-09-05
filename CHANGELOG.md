@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [2.3.1](https://github.com/beyondessential/tamanu-meta-server/compare/v2.3.0..2.3.1) - 2024-09-05
+## [2.3.2](https://github.com/beyondessential/tamanu-meta-server/compare/v2.3.1..2.3.2) - 2024-09-05
+
+
+- **Tweak:** Use sans-serif font to aid clarity - ([af575d7](https://github.com/beyondessential/tamanu-meta-server/commit/af575d7391319b2dd603abb45519a3b8780c9b11))
+
+---
+## [2.3.1](https://github.com/beyondessential/tamanu-meta-server/compare/v2.3.0..v2.3.1) - 2024-09-05
 
 
 - **Documentation:** Expose "hidden" copy feature - ([598054e](https://github.com/beyondessential/tamanu-meta-server/commit/598054ee9e66de7afc6c568a78c835432a80f533))
