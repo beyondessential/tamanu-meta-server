@@ -136,3 +136,24 @@ $ cargo test
 ```
 
 We recommend using [Rust Analyzer](https://rust-analyzer.github.io/) or [Rust Rover](https://www.jetbrains.com/rust/) for development.
+
+### Migrations
+
+1. Install the diesel CLI tool: <https://diesel.rs/guides/getting-started.html#installing-diesel-cli>
+
+2. Create a migration
+```console
+$ diesel migration generate some_name_here
+```
+
+3. Write the migration's `up.sql` and `down.sql`
+
+4. Run the pending migrations:
+```console
+$ diesel migration run
+```
+
+5. Test your down:
+```console
+$ diesel migration redo
+```
