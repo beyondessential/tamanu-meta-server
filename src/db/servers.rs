@@ -30,6 +30,27 @@ impl Server {
 	}
 }
 
+#[test]
+fn test_server_serialization() {
+	let server = Server {
+		id: Uuid::nil(),
+		name: "Test Server".to_string(),
+		rank: ServerRank::Production,
+		host: UrlField("https://example.com/".parse().unwrap()),
+	};
+
+	let serialized = serde_json::to_string_pretty(&server).unwrap();
+	assert_eq!(
+		serialized,
+		r#"{
+  "id": "00000000-0000-0000-0000-000000000000",
+  "name": "Test Server",
+  "host": "https://example.com",
+  "rank": "production"
+}"#
+	);
+}
+
 #[derive(Debug, Deserialize)]
 pub struct NewServer {
 	pub name: String,
