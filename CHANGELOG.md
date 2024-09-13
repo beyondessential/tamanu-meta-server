@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [2.3.2](https://github.com/beyondessential/tamanu-meta-server/compare/v2.3.1..2.3.2) - 2024-09-05
+## [2.3.3](https://github.com/beyondessential/tamanu-meta-server/compare/v2.3.2..2.3.3) - 2024-09-13
+
+
+- **Bugfix:** Serialize UrlField without trailing slash - ([2c10f01](https://github.com/beyondessential/tamanu-meta-server/commit/2c10f018a2e8b0f5a7393bfcc6cfca78b5ea94d9))
+
+---
+## [2.3.2](https://github.com/beyondessential/tamanu-meta-server/compare/v2.3.1..v2.3.2) - 2024-09-05
 
 
 - **Tweak:** Use sans-serif font to aid clarity - ([af575d7](https://github.com/beyondessential/tamanu-meta-server/commit/af575d7391319b2dd603abb45519a3b8780c9b11))
