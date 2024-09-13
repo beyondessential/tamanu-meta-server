@@ -162,3 +162,17 @@ $ diesel migration redo
 ```console
 $ cargo fmt
 ```
+
+### Releasing
+
+On the main branch:
+
+```console
+$ cargo release --execute minor // or patch, major
+```
+
+Install `cargo-release` with:
+
+```console
+$ cargo install cargo-release
+```
