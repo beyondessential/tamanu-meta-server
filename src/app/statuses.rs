@@ -4,7 +4,7 @@ use rocket_dyn_templates::{context, Template};
 
 use crate::{
 	app::TamanuHeaders,
-	db::{latest_statuses::LatestStatus, statuses::Status, Db},
+	db::{latest_statuses::LatestStatus, server_rank::ServerRank, statuses::Status, Db},
 };
 
 use super::versions::LiveVersionsBracket;
@@ -16,7 +16,11 @@ pub async fn view(mut db: Connection<Db>) -> TamanuHeaders<Template> {
 	let mut versions = entries
 		.iter()
 		.filter_map(|status| {
-			if let (Some(version), true) = (status.latest_success_version.clone(), status.is_up) {
+			if let (Some(version), true, ServerRank::Production) = (
+				status.latest_success_version.clone(),
+				status.is_up,
+				status.server_rank,
+			) {
 				Some(version)
 			} else {
 				None
