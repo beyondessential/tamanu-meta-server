@@ -5,7 +5,14 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [2.3.3](https://github.com/beyondessential/tamanu-meta-server/compare/v2.3.2..2.3.3) - 2024-09-13
+## [2.4.0](https://github.com/beyondessential/tamanu-meta-server/compare/v2.3.3..2.4.0) - 2024-09-19
+
+
+- **Feature:** Display min and max versions in active use (#6) - ([998f39b](https://github.com/beyondessential/tamanu-meta-server/commit/998f39b37515426b1710dac00fcc76d228a0de89))
+- **Repo:** Add release instructions - ([635c290](https://github.com/beyondessential/tamanu-meta-server/commit/635c2904b70a5a7b95b0cb79fe61b4242fa18798))
+
+---
+## [2.3.3](https://github.com/beyondessential/tamanu-meta-server/compare/v2.3.2..v2.3.3) - 2024-09-13
 
 
 - **Bugfix:** Serialize UrlField without trailing slash - ([2c10f01](https://github.com/beyondessential/tamanu-meta-server/commit/2c10f018a2e8b0f5a7393bfcc6cfca78b5ea94d9))
