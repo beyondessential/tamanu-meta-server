@@ -45,4 +45,15 @@ impl LatestStatus {
 			.await
 			.expect("Error loading statuses")
 	}
+
+	pub async fn only_up(db: &mut AsyncPgConnection) -> Vec<Self> {
+		use crate::views::latest_statuses::dsl::*;
+
+		latest_statuses
+			.filter(is_up.eq(true))
+			.select(Self::as_select())
+			.load(db)
+			.await
+			.expect("Error loading statuses")
+	}
 }
