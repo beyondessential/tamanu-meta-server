@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [2.4.0](https://github.com/beyondessential/tamanu-meta-server/compare/v2.3.3..2.4.0) - 2024-09-19
+## [2.4.1](https://github.com/beyondessential/tamanu-meta-server/compare/v2.4.0..2.4.1) - 2024-09-19
+
+
+- **Bugfix:** Unique versions and show branches - ([e2eea01](https://github.com/beyondessential/tamanu-meta-server/commit/e2eea01d9ac924ae739ebdc93f28eaa540e06b2e))
+
+---
+## [2.4.0](https://github.com/beyondessential/tamanu-meta-server/compare/v2.3.3..v2.4.0) - 2024-09-19
 
 
 - **Feature:** Display min and max versions in active use (#6) - ([998f39b](https://github.com/beyondessential/tamanu-meta-server/commit/998f39b37515426b1710dac00fcc76d228a0de89))
