@@ -44,14 +44,21 @@
     white-space: pre;
     text-decoration: underline dotted;
   }
+
+  .versions {
+    color: grey;
+    margin-left: 1em;
+  }
   </style>
 </head>
 <body>
   <p>
-    {{ versions | length }} versions in active use:
-    <b>{{ bracket.min }}</b>
-    —
-    <b>{{ bracket.max }}</b>
+    {{ releases | length }} release branches in active use:
+    <b>{% for r in releases %}{{ r[0] }}.{{ r[1] }} {% endfor %}</b>
+    <span class=versions>({{ versions | length }} versions:
+      <b>{{ bracket.min }}</b>
+      —
+      <b>{{ bracket.max }}</b>)</span>
   </p>
   <table>
     <thead>

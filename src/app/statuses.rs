@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use rocket::mtls::Certificate;
 use rocket_db_pools::Connection;
 use rocket_dyn_templates::{context, Template};
@@ -13,7 +15,7 @@ use super::versions::LiveVersionsBracket;
 pub async fn view(mut db: Connection<Db>) -> TamanuHeaders<Template> {
 	let entries = LatestStatus::fetch(&mut db).await;
 
-	let mut versions = entries
+	let versions = entries
 		.iter()
 		.filter_map(|status| {
 			if let (Some(version), true, ServerRank::Production) = (
@@ -26,12 +28,15 @@ pub async fn view(mut db: Connection<Db>) -> TamanuHeaders<Template> {
 				None
 			}
 		})
-		.collect::<Vec<_>>();
-	versions.sort();
+		.collect::<BTreeSet<_>>();
 	let bracket = LiveVersionsBracket {
 		min: versions.first().cloned().unwrap(),
 		max: versions.last().cloned().unwrap(),
 	};
+	let releases = versions
+		.iter()
+		.map(|v| (v.0.major, v.0.minor))
+		.collect::<BTreeSet<_>>();
 	TamanuHeaders::new(Template::render(
 		"statuses",
 		context! {
@@ -39,6 +44,7 @@ pub async fn view(mut db: Connection<Db>) -> TamanuHeaders<Template> {
 			entries,
 			bracket,
 			versions,
+			releases,
 		},
 	))
 }

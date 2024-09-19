@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use rocket::serde::{json::Json, Serialize};
 use rocket_db_pools::Connection;
 
@@ -16,7 +18,7 @@ pub struct LiveVersionsBracket {
 #[get("/versions")]
 pub async fn view(mut db: Connection<Db>) -> TamanuHeaders<Json<LiveVersionsBracket>> {
 	let statuses = LatestStatus::only_up(&mut db).await;
-	let mut versions = statuses
+	let versions = statuses
 		.iter()
 		.filter_map(|status| {
 			if let (Some(version), ServerRank::Production) =
@@ -27,8 +29,7 @@ pub async fn view(mut db: Connection<Db>) -> TamanuHeaders<Json<LiveVersionsBrac
 				None
 			}
 		})
-		.collect::<Vec<_>>();
-	versions.sort();
+		.collect::<BTreeSet<_>>();
 	let min = versions.first().cloned().expect("no versions returned");
 	let max = versions.last().cloned().expect("no versions returned");
 	TamanuHeaders::new(LiveVersionsBracket { min, max }.into())
