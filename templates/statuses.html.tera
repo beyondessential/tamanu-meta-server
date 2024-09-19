@@ -47,6 +47,12 @@
   </style>
 </head>
 <body>
+  <p>
+    {{ versions | length }} versions in active use:
+    <b>{{ bracket.min }}</b>
+    —
+    <b>{{ bracket.max }}</b>
+  </p>
   <table>
     <thead>
       <tr>
