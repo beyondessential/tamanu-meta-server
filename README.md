@@ -5,7 +5,7 @@
 The Meta service provides:
 - a server discovery service for the Tamanu mobile app
 - a server list and health check page
-- a list of available versions
+- a range of active versions
 
 ## Get
 
@@ -104,9 +104,16 @@ Pass a JSON body with the `id` field:
 
 Force a reload of the statuses.
 
-### GET `/version/<version>`
+### GET `/versions`
 
-Not yet implemented.
+Returns the range of versions being used in production.
+
+```json
+{
+	"min": "2.1.0",
+	"max": "2.3.4"
+}
+```
 
 ## Develop
 
