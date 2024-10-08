@@ -16,11 +16,11 @@ default-run = "server"
 
 [dependencies]
 chrono = { version = "0.4.38", features = ["serde"] }
-clap = { version = "4.5.18", features = ["derive"] }
+clap = { version = "4.5.19", features = ["derive"] }
 diesel = { version = "2.1.6", features = ["chrono", "uuid"] }
 diesel_migrations = "2.1.0"
 folktime = "0.2.1"
-futures = "0.3.30"
+futures = "0.3.31"
 node-semver = "2.1.0"
 reqwest = { version = "0.12.8", default-features = false, features = ["gzip", "json"] }
 rocket = { version = "0.5.1", features = ["json", "mtls", "uuid"] }
