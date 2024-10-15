@@ -16,7 +16,7 @@ default-run = "server"
 
 [dependencies]
 chrono = { version = "0.4.38", features = ["serde"] }
-clap = { version = "4.5.19", features = ["derive"] }
+clap = { version = "4.5.20", features = ["derive"] }
 diesel = { version = "2.1.6", features = ["chrono", "uuid"] }
 diesel_migrations = "2.1.0"
 folktime = "0.2.1"
