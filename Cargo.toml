@@ -16,7 +16,7 @@ default-run = "server"
 
 [dependencies]
 chrono = { version = "0.4.38", features = ["serde"] }
-clap = { version = "4.5.19", features = ["derive"] }
+clap = { version = "4.5.20", features = ["derive"] }
 diesel = { version = "2.1.6", features = ["chrono", "uuid"] }
 diesel_migrations = "2.1.0"
 folktime = "0.2.1"
@@ -27,9 +27,9 @@ rocket = { version = "0.5.1", features = ["json", "mtls", "uuid"] }
 rocket_db_pools = { version = "0.2.0", features = ["diesel_postgres"] }
 rocket_dyn_templates = { version = "0.2.0", features = ["tera"] }
 serde = { version = "1.0.210", features = ["derive"] }
-serde_json = "1.0.128"
+serde_json = "1.0.132"
 url = { version = "2.5.0", features = ["serde"] }
-uuid = { version = "1.10.0", features = ["serde", "v4"] }
+uuid = { version = "1.11.0", features = ["serde", "v4"] }
 
 [features]
 default = ["migrations-with-tokio-postgres", "tls-host-roots"]
