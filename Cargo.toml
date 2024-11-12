@@ -26,9 +26,9 @@ reqwest = { version = "0.12.9", default-features = false, features = ["gzip", "j
 rocket = { version = "0.5.1", features = ["json", "mtls", "uuid"] }
 rocket_db_pools = { version = "0.2.0", features = ["diesel_postgres"] }
 rocket_dyn_templates = { version = "0.2.0", features = ["tera"] }
-serde = { version = "1.0.214", features = ["derive"] }
+serde = { version = "1.0.215", features = ["derive"] }
 serde_json = "1.0.132"
-url = { version = "2.5.0", features = ["serde"] }
+url = { version = "2.5.3", features = ["serde"] }
 uuid = { version = "1.11.0", features = ["serde", "v4"] }
 
 [features]
