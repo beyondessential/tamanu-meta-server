@@ -5,7 +5,14 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [2.4.1](https://github.com/beyondessential/tamanu-meta-server/compare/v2.4.0..2.4.1) - 2024-09-19
+## [2.4.2](https://github.com/beyondessential/tamanu-meta-server/compare/v2.4.1..2.4.2) - 2025-02-26
+
+
+- **Deps:** Update lockfile - ([e646644](https://github.com/beyondessential/tamanu-meta-server/commit/e64664465cae7e0e9988e8f6e7c3cd25e43b4864))
+- **Documentation:** /versions - ([70af0b5](https://github.com/beyondessential/tamanu-meta-server/commit/70af0b50efb09144e61e64fbe90c543fda90b84f))
+
+---
+## [2.4.1](https://github.com/beyondessential/tamanu-meta-server/compare/v2.4.0..v2.4.1) - 2024-09-19
 
 
 - **Bugfix:** Unique versions and show branches - ([e2eea01](https://github.com/beyondessential/tamanu-meta-server/commit/e2eea01d9ac924ae739ebdc93f28eaa540e06b2e))
