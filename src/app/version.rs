@@ -1,5 +1,6 @@
 use diesel::{backend::Backend, deserialize, expression::AsExpression, serialize, sql_types::Text};
-use rocket::{http::Header, serde::Serialize};
+use node_semver::SemverError;
+use rocket::{http::Header, request::FromParam, serde::Serialize};
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, AsExpression)]
 #[diesel(sql_type = Text)]
@@ -14,6 +15,14 @@ impl Default for Version {
 impl From<Version> for Header<'_> {
 	fn from(version: Version) -> Self {
 		Header::new("X-Tamanu-Version", version.0.to_string())
+	}
+}
+
+impl FromParam<'_> for Version {
+	type Error = SemverError;
+
+	fn from_param(param: &'_ str) -> Result<Self, Self::Error> {
+		param.parse().map(Self)
 	}
 }
 
