@@ -6,6 +6,7 @@ pub mod server_rank;
 pub mod servers;
 pub mod statuses;
 pub mod url_field;
+pub mod versions;
 
 #[derive(Clone, Database)]
 #[database("postgres")]

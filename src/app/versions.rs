@@ -1,36 +1,10 @@
-use std::collections::BTreeSet;
-
-use rocket::serde::{json::Json, Serialize};
+use rocket::serde::json::Json;
 use rocket_db_pools::Connection;
 
-use crate::{
-	app::{TamanuHeaders, Version},
-	db::{latest_statuses::LatestStatus, server_rank::ServerRank},
-	Db,
-};
-
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
-pub struct LiveVersionsBracket {
-	pub min: Version,
-	pub max: Version,
-}
+use crate::{app::TamanuHeaders, db::versions::Version, Db};
 
 #[get("/versions")]
-pub async fn view(mut db: Connection<Db>) -> TamanuHeaders<Json<LiveVersionsBracket>> {
-	let statuses = LatestStatus::only_up(&mut db).await;
-	let versions = statuses
-		.iter()
-		.filter_map(|status| {
-			if let (Some(version), ServerRank::Production) =
-				(status.latest_success_version.clone(), status.server_rank)
-			{
-				Some(version)
-			} else {
-				None
-			}
-		})
-		.collect::<BTreeSet<_>>();
-	let min = versions.first().cloned().expect("no versions returned");
-	let max = versions.last().cloned().expect("no versions returned");
-	TamanuHeaders::new(LiveVersionsBracket { min, max }.into())
+pub async fn view(mut db: Connection<Db>) -> TamanuHeaders<Json<Vec<Version>>> {
+	let list_of_versions = Version::get_all(&mut db).await;
+	TamanuHeaders::new(list_of_versions.into())
 }
