@@ -32,7 +32,8 @@ pub fn rocket() -> Rocket<Build> {
 				servers::delete,
 				statuses::view,
 				statuses::reload,
-				versions::view
+				versions::view,
+				versions::update_for,
 			],
 		)
 }
