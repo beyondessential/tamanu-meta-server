@@ -162,12 +162,12 @@ mod rust_postgres_migrator {
 
 	impl UnasyncMigrator {
 		fn prepare(&mut self) -> diesel::migration::Result<()> {
-			self.batch_execute(&format!(
+			self.batch_execute(
 				"CREATE TABLE IF NOT EXISTS __diesel_schema_migrations (
 					version varchar(50) primary key not null,
 					run_on timestamp without time zone not null default current_timestamp
 				)",
-			))?;
+			)?;
 			Ok(())
 		}
 	}

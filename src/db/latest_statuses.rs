@@ -46,6 +46,7 @@ impl LatestStatus {
 			.expect("Error loading statuses")
 	}
 
+	#[expect(dead_code)]
 	pub async fn only_up(db: &mut AsyncPgConnection) -> Vec<Self> {
 		use crate::views::latest_statuses::dsl::*;
 

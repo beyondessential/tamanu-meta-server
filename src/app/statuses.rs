@@ -3,13 +3,18 @@ use std::collections::BTreeSet;
 use rocket::mtls::Certificate;
 use rocket_db_pools::Connection;
 use rocket_dyn_templates::{context, Template};
+use rocket::serde::Serialize;
 
 use crate::{
-	app::TamanuHeaders,
+	app::{TamanuHeaders, Version},
 	db::{latest_statuses::LatestStatus, server_rank::ServerRank, statuses::Status, Db},
 };
 
-use super::versions::LiveVersionsBracket;
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
+pub struct LiveVersionsBracket {
+	pub min: Version,
+	pub max: Version,
+}
 
 #[get("/")]
 pub async fn view(mut db: Connection<Db>) -> TamanuHeaders<Template> {
@@ -30,8 +35,8 @@ pub async fn view(mut db: Connection<Db>) -> TamanuHeaders<Template> {
 		})
 		.collect::<BTreeSet<_>>();
 	let bracket = LiveVersionsBracket {
-		min: versions.first().cloned().unwrap(),
-		max: versions.last().cloned().unwrap(),
+		min: versions.first().cloned().unwrap_or_default(),
+		max: versions.last().cloned().unwrap_or_default(),
 	};
 	let releases = versions
 		.iter()

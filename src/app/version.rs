@@ -5,6 +5,12 @@ use rocket::{http::Header, serde::Serialize};
 #[diesel(sql_type = Text)]
 pub struct Version(pub node_semver::Version);
 
+impl Default for Version {
+	fn default() -> Self {
+		Self(node_semver::Version::new(0, 	0, 0))
+	}
+}
+
 impl From<Version> for Header<'_> {
 	fn from(version: Version) -> Self {
 		Header::new("X-Tamanu-Version", version.0.to_string())
