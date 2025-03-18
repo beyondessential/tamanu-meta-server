@@ -34,6 +34,7 @@ pub fn rocket() -> Rocket<Build> {
 				statuses::view,
 				statuses::reload,
 				versions::view,
+				versions::create,
 				versions::update_for,
 				artifacts::get_for_version,
 			],

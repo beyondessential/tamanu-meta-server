@@ -1,19 +1,46 @@
 use rocket::serde::json::Json;
-use rocket_db_pools::{Connection, diesel::prelude::*};
+use rocket_db_pools::{diesel::prelude::*, Connection};
 use rocket_dyn_templates::{context, Template};
 
-use crate::{app::{TamanuHeaders, Version as ParsedVersion}, db::versions::Version, Db};
+use crate::{
+	app::{TamanuHeaders, Version as ParsedVersion},
+	db::versions::Version,
+	Db,
+};
 
 #[get("/versions")]
 pub async fn view(mut db: Connection<Db>) -> TamanuHeaders<Template> {
 	let versions = Version::get_all(&mut db).await;
-	TamanuHeaders::new(Template::render("versions", context! {
-		versions,
-	}))
+	TamanuHeaders::new(Template::render(
+		"versions",
+		context! {
+			versions,
+		},
+	))
 }
 
+#[post("/versions", data = "<version>")]
+pub async fn create(
+	mut db: Connection<Db>,
+	version: Json<Version>,
+) -> TamanuHeaders<Json<Version>> {
+	let input = version.into_inner();
+	let version = Version::from(input);
+	diesel::insert_into(crate::schema::versions::table)
+		.values(version.clone())
+		.execute(&mut db)
+		.await
+		.expect("Error creating version");
+
+	TamanuHeaders::new(Json(version))
+}
+
+
 #[get("/versions/update-for/<version>")]
-pub async fn update_for(mut db: Connection<Db>, version: ParsedVersion) -> TamanuHeaders<Json<Vec<Version>>> {
+pub async fn update_for(
+	mut db: Connection<Db>,
+	version: ParsedVersion,
+) -> TamanuHeaders<Json<Vec<Version>>> {
 	let target_major = version.0.major as i32;
 	let target_minor = version.0.minor as i32;
 
@@ -26,7 +53,7 @@ pub async fn update_for(mut db: Connection<Db>, version: ParsedVersion) -> Taman
 		SELECT id, major, minor, patch, published
 		FROM ranked_versions
 		WHERE rn = 1
-		ORDER BY minor"
+		ORDER BY minor",
 	)
 	.bind::<diesel::sql_types::Integer, _>(target_major)
 	.bind::<diesel::sql_types::Integer, _>(target_minor)
