@@ -60,9 +60,10 @@ pub async fn delete(
 	TamanuHeaders::new(())
 }
 
-#[get("/versions/<version>/artifacts", rank = 1)]
+#[get("/versions/<version>/artifacts/<artifact_type>", rank = 2)]
 pub async fn get_artifacts_for_version(
 	version: ParsedVersion,
+	artifact_type: String,
 	mut db: Connection<Db>,
 ) -> TamanuHeaders<Json<Vec<Artifact>>> {
 	use crate::schema::{artifacts, versions};
@@ -72,6 +73,7 @@ pub async fn get_artifacts_for_version(
 		.filter(versions::major.eq(version.0.major as i32))
 		.filter(versions::minor.eq(version.0.minor as i32))
 		.filter(versions::patch.eq(version.0.patch as i32))
+		.filter(artifacts::artifact_type.eq(artifact_type))
 		.select(Artifact::as_select())
 		.load(&mut db)
 		.await
