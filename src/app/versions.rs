@@ -1,4 +1,3 @@
-use uuid::Uuid;
 use rocket::serde::json::Json;
 use rocket_db_pools::{diesel::prelude::*, Connection};
 use rocket_dyn_templates::{context, Template};
@@ -42,15 +41,18 @@ pub async fn create(
 	TamanuHeaders::new(Json(version))
 }
 
-#[delete("/versions/<version_id>")]
+#[delete("/versions/<version>")]
 pub async fn delete(
-	version_id: Uuid,
+	version: ParsedVersion,
 	mut db: Connection<Db>,
 ) -> TamanuHeaders<()> {
+
 	use crate::schema::versions::dsl::*;
 
 	diesel::delete(versions)
-		.filter(id.eq(version_id))
+		.filter(major.eq(version.0.major as i32))
+		.filter(minor.eq(version.0.minor as i32))
+		.filter(patch.eq(version.0.patch as i32))
 		.execute(&mut db)
 		.await
 		.expect("Error deleting version");
