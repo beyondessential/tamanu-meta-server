@@ -4,7 +4,7 @@ use rocket_dyn_templates::{context, Template};
 
 use crate::{
 	app::{TamanuHeaders, Version as ParsedVersion},
-	db::versions::Version,
+	db::{versions::Version, artifacts::Artifact},
 	Db,
 };
 
@@ -35,8 +35,27 @@ pub async fn create(
 	TamanuHeaders::new(Json(version))
 }
 
+#[get("/versions/<version>/artifacts", rank = 1)]
+pub async fn get_artifacts_for_version(
+	version: ParsedVersion,
+	mut db: Connection<Db>,
+) -> TamanuHeaders<Json<Vec<Artifact>>> {
+	use crate::schema::{artifacts, versions};
 
-#[get("/versions/update-for/<version>")]
+	let artifacts = artifacts::table
+		.inner_join(versions::table)
+		.filter(versions::major.eq(version.0.major as i32))
+		.filter(versions::minor.eq(version.0.minor as i32))
+		.filter(versions::patch.eq(version.0.patch as i32))
+		.select(Artifact::as_select())
+		.load(&mut db)
+		.await
+		.expect("Error loading artifacts");
+
+	TamanuHeaders::new(Json(artifacts))
+}
+
+#[get("/versions/update-for/<version>", rank = 2)]
 pub async fn update_for(
 	mut db: Connection<Db>,
 	version: ParsedVersion,
