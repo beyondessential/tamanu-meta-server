@@ -60,20 +60,31 @@ pub async fn delete(
 	TamanuHeaders::new(())
 }
 
-#[get("/versions/<version>/artifacts/<artifact_type>", rank = 2)]
+#[get("/versions/<version>/artifacts?<artifact_type>&<platform>", rank = 2)]
 pub async fn get_artifacts_for_version(
 	version: ParsedVersion,
-	artifact_type: String,
+	artifact_type: Option<String>,
+	platform: Option<String>,
 	mut db: Connection<Db>,
 ) -> TamanuHeaders<Json<Vec<Artifact>>> {
 	use crate::schema::{artifacts, versions};
 
-	let artifacts = artifacts::table
+	let mut query = artifacts::table
 		.inner_join(versions::table)
 		.filter(versions::major.eq(version.0.major as i32))
 		.filter(versions::minor.eq(version.0.minor as i32))
 		.filter(versions::patch.eq(version.0.patch as i32))
-		.filter(artifacts::artifact_type.eq(artifact_type))
+		.into_boxed();
+
+	if let Some(atype) = artifact_type {
+		query = query.filter(artifacts::artifact_type.eq(atype));
+	}
+
+	if let Some(plat) = platform {
+		query = query.filter(artifacts::platform.eq(plat));
+	}
+
+	let artifacts = query
 		.select(Artifact::as_select())
 		.load(&mut db)
 		.await
@@ -82,7 +93,7 @@ pub async fn get_artifacts_for_version(
 	TamanuHeaders::new(Json(artifacts))
 }
 
-#[get("/versions/update-for/<version>", rank = 2)]
+#[get("/versions/update-for/<version>", rank = 1)]
 pub async fn update_for(
 	mut db: Connection<Db>,
 	version: ParsedVersion,
