@@ -6,6 +6,7 @@ use crate::db::Db;
 
 pub use self::{tamanu_headers::TamanuHeaders, version::Version};
 
+pub mod artifacts;
 pub mod server_type;
 pub mod servers;
 pub mod statuses;
@@ -34,6 +35,7 @@ pub fn rocket() -> Rocket<Build> {
 				statuses::reload,
 				versions::view,
 				versions::update_for,
+				artifacts::get_for_version,
 			],
 		)
 }
