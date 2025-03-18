@@ -19,7 +19,6 @@ pub struct Artifact {
 impl Artifact {
     pub async fn get_all(db: &mut AsyncPgConnection) -> Vec<Self> {
         use crate::schema::artifacts::*;
-
         table
             .select(Self::as_select())
             .load(db)

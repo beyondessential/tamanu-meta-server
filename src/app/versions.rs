@@ -31,14 +31,13 @@ pub async fn create(
 	version: Json<Version>,
 ) -> TamanuHeaders<Json<Version>> {
 	let input = version.into_inner();
-	let version = Version::from(input);
 	diesel::insert_into(crate::schema::versions::table)
-		.values(version.clone())
+		.values(input.clone())
 		.execute(&mut db)
 		.await
 		.expect("Error creating version");
 
-	TamanuHeaders::new(Json(version))
+	TamanuHeaders::new(Json(input))
 }
 
 #[delete("/versions/<version>")]
