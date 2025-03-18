@@ -93,7 +93,7 @@ pub async fn update_for(
 			FROM versions
 			WHERE major = $1 AND (minor = $2 OR minor > $2)
 		)
-		SELECT id, major, minor, patch, published
+		SELECT *
 		FROM ranked_versions
 		WHERE rn = 1
 		ORDER BY minor",
