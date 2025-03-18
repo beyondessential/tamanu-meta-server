@@ -74,9 +74,12 @@ pub async fn get_artifacts_for_version(
 
 	let mut query = artifacts::table
 		.inner_join(versions::table)
-		.filter(versions::major.eq(version.0.major as i32))
-		.filter(versions::minor.eq(version.0.minor as i32))
-		.filter(versions::patch.eq(version.0.patch as i32))
+		.filter(
+			versions::major
+				.eq(version.0.major as i32)
+				.and(versions::minor.eq(version.0.minor as i32))
+				.and(versions::patch.eq(version.0.patch as i32)),
+		)
 		.into_boxed();
 
 	if let Some(atype) = artifact_type {
