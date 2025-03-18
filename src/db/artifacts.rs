@@ -26,15 +26,4 @@ impl Artifact {
             .await
             .expect("Error loading artifacts")
     }
-
-    pub async fn get_by_version(db: &mut AsyncPgConnection, target_version_id: Uuid) -> Vec<Self> {
-        use crate::schema::artifacts::*;
-
-        table
-            .filter(version_id.eq(target_version_id))
-            .select(Artifact::as_select())
-            .load(db)
-            .await
-            .expect("Error loading artifacts for version")
-    }
 }

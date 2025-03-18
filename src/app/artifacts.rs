@@ -3,7 +3,7 @@ use rocket_db_pools::{Connection, diesel::prelude::*};
 
 use crate::{app::{TamanuHeaders, Version as ParsedVersion}, db::artifacts::Artifact, Db};
 
-#[get("/artifacts/<version>")]
+#[get("/versions/<version>/artifacts")]
 pub async fn get_for_version(
     version: ParsedVersion,
     mut db: Connection<Db>,
