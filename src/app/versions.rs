@@ -105,6 +105,5 @@ pub async fn update_for(
 	version: ParsedVersion,
 ) -> TamanuHeaders<Json<Vec<Version>>> {
 	let updates = Version::get_updates_for_version(&mut db, version).await;
-
 	TamanuHeaders::new(Json(updates))
 }
