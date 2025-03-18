@@ -77,9 +77,6 @@ pub async fn update_for(
 	mut db: Connection<Db>,
 	version: ParsedVersion,
 ) -> TamanuHeaders<Json<Vec<Version>>> {
-	let target_major = version.0.major as i32;
-	let target_minor = version.0.minor as i32;
-
 	let updates = diesel::sql_query(
 		"WITH ranked_versions AS (
 			SELECT *, ROW_NUMBER() OVER (PARTITION BY minor ORDER BY patch DESC) as rn
@@ -91,8 +88,8 @@ pub async fn update_for(
 		WHERE rn = 1
 		ORDER BY minor",
 	)
-	.bind::<diesel::sql_types::Integer, _>(target_major)
-	.bind::<diesel::sql_types::Integer, _>(target_minor)
+	.bind::<diesel::sql_types::Integer, _>(version.0.major as i32)
+	.bind::<diesel::sql_types::Integer, _>(version.0.minor as i32)
 	.load::<Version>(&mut db)
 	.await
 	.expect("Error loading versions");
