@@ -20,6 +20,7 @@
 
   table {
     border-collapse: collapse;
+    width: 100%;
   }
 
   .published {
@@ -30,6 +31,31 @@
   .draft {
     background: yellow;
     color: black;
+  }
+
+  .version-row {
+    cursor: pointer;
+  }
+
+  .version-row:hover {
+    background-color: #f0f0f0;
+  }
+
+  .changelog-row {
+    display: none;
+  }
+
+  .changelog-row.expanded {
+    display: table-row;
+  }
+
+  .changelog-cell {
+    background-color: #f8f8f8;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    max-width: 100vw;
+    width: 100vw;
+    padding: 0;
   }
   </style>
 </head>
@@ -43,14 +69,36 @@
     </thead>
     <tbody>
       {% for version in versions %}
-      <tr>
+      <tr class="version-row" data-version="{{ version.major }}.{{ version.minor }}.{{ version.patch }}">
         <td>{{ version.major }}.{{ version.minor }}.{{ version.patch }}</td>
         <td class="{% if version.published %}published{% else %}draft{% endif %}">
           {% if version.published %}Published{% else %}Draft{% endif %}
         </td>
       </tr>
+      <tr class="changelog-row">
+        <td colspan="2" class="changelog-cell">{{ version.changelog }}</td>
+      </tr>
       {% endfor %}
     </tbody>
   </table>
+
+  <script>
+    document.querySelectorAll('.version-row').forEach(row => {
+      row.addEventListener('click', () => {
+        const changelogRow = row.nextElementSibling;
+        const isExpanded = changelogRow.classList.contains('expanded');
+
+        // Close all other expanded changelogs
+        document.querySelectorAll('.changelog-row.expanded').forEach(content => {
+          if (content !== changelogRow) {
+            content.classList.remove('expanded');
+          }
+        });
+
+        // Toggle current changelog
+        changelogRow.classList.toggle('expanded');
+      });
+    });
+  </script>
 </body>
 </html>
