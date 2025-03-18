@@ -33,6 +33,7 @@ pub fn rocket() -> Rocket<Build> {
 				servers::delete,
 				statuses::view,
 				statuses::reload,
+				versions::list,
 				versions::view,
 				versions::create,
 				versions::delete,

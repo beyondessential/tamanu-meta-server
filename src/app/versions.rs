@@ -10,6 +10,12 @@ use crate::{
 };
 
 #[get("/versions")]
+pub async fn list(mut db: Connection<Db>) -> TamanuHeaders<Json<Vec<Version>>> {
+	let versions = Version::get_all(&mut db).await;
+	TamanuHeaders::new(Json(versions))
+}
+
+#[get("/versions/list")]
 pub async fn view(mut db: Connection<Db>) -> TamanuHeaders<Template> {
 	let versions = Version::get_all(&mut db).await;
 	TamanuHeaders::new(Template::render(
