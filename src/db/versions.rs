@@ -1,6 +1,7 @@
 use rocket::serde::{Deserialize, Serialize};
 use rocket_db_pools::diesel::{prelude::*, AsyncPgConnection};
 use uuid::Uuid;
+use crate::app::Version as ParsedVersion;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable, QueryableByName)]
 #[diesel(table_name = crate::schema::versions)]
@@ -30,12 +31,12 @@ impl Version {
 
 	pub async fn get_updates_for_version(
 		db: &mut AsyncPgConnection,
-		major_target: i32,
-		minor_target: i32,
-		patch_target: i32,
+		version: ParsedVersion,
 	) -> Vec<Self> {
 		use crate::views::version_updates::dsl::*;
-
+		let minor_target: i32 = version.0.minor as i32;
+		let major_target: i32 = version.0.major as i32;
+		let patch_target: i32 = version.0.patch as i32;
 		version_updates
 			.filter(major.eq(major_target))
 			.filter(published.eq(true))

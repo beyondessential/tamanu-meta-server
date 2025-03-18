@@ -4,7 +4,7 @@ use rocket_dyn_templates::{context, Template};
 
 use crate::{
 	app::{TamanuHeaders, Version as ParsedVersion},
-	db::{versions::Version, artifacts::Artifact},
+	db::{artifacts::Artifact, versions::Version},
 	Db,
 };
 
@@ -47,13 +47,15 @@ pub async fn delete(
 	version: ParsedVersion,
 	mut db: Connection<Db>,
 ) -> TamanuHeaders<()> {
-
 	use crate::schema::versions::dsl::*;
 
 	diesel::delete(versions)
-		.filter(major.eq(version.0.major as i32))
-		.filter(minor.eq(version.0.minor as i32))
-		.filter(patch.eq(version.0.patch as i32))
+		.filter(
+			major
+				.eq(version.0.major as i32)
+				.and(minor.eq(version.0.minor as i32))
+				.and(patch.eq(version.0.patch as i32)),
+		)
 		.execute(&mut db)
 		.await
 		.expect("Error deleting version");
@@ -99,13 +101,7 @@ pub async fn update_for(
 	mut db: Connection<Db>,
 	version: ParsedVersion,
 ) -> TamanuHeaders<Json<Vec<Version>>> {
-	let updates = Version::get_updates_for_version(
-		&mut db,
-		version.0.major as i32,
-		version.0.minor as i32,
-		version.0.patch as i32,
-	)
-	.await;
+	let updates = Version::get_updates_for_version(&mut db, version).await;
 
 	TamanuHeaders::new(Json(updates))
 }
