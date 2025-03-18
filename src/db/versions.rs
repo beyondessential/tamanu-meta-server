@@ -14,18 +14,6 @@ pub struct Version {
 	pub changelog: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable, QueryableByName)]
-#[diesel(table_name = crate::views::version_updates)]
-#[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct VersionUpdate {
-	pub id: Uuid,
-	pub major: i32,
-	pub minor: i32,
-	pub patch: i32,
-	pub published: bool,
-	pub changelog: String,
-}
-
 impl Version {
 	pub async fn get_all(db: &mut AsyncPgConnection) -> Vec<Self> {
 		use crate::schema::versions::*;
@@ -48,26 +36,18 @@ impl Version {
 	) -> Vec<Self> {
 		use crate::views::version_updates::dsl::*;
 
-		let updates = version_updates
+		version_updates
 			.filter(major.eq(major_target))
+			.filter(published.eq(true))
 			.filter(
 				minor.gt(minor_target).or(
 					minor.eq(minor_target).and(patch.gt(patch_target))
 				)
 			)
 			.order_by(minor)
-			.select(VersionUpdate::as_select())
+			.select(version_updates::all_columns())
 			.load(db)
 			.await
-			.expect("Error loading version updates");
-
-		updates.into_iter().map(|u| Self {
-			id: u.id,
-			major: u.major,
-			minor: u.minor,
-			patch: u.patch,
-			published: u.published,
-			changelog: u.changelog,
-		}).collect()
+			.expect("Error loading version updates")
 	}
 }
