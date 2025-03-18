@@ -1,0 +1,56 @@
+<!doctype html>
+<html>
+<head>
+  <title>Tamanu Versions</title>
+  <style>
+  html {
+    font-family: sans-serif;
+  }
+
+  td, th {
+    padding: 0.5em;
+    border-width: 1px 0;
+    border-style: solid;
+    border-color: black;
+  }
+
+  th {
+    font-weight: bold;
+  }
+
+  table {
+    border-collapse: collapse;
+  }
+
+  .published {
+    background: green;
+    color: white;
+  }
+
+  .draft {
+    background: yellow;
+    color: black;
+  }
+  </style>
+</head>
+<body>
+  <table>
+    <thead>
+      <tr>
+        <th>Version</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for version in versions %}
+      <tr>
+        <td>{{ version.major }}.{{ version.minor }}.{{ version.patch }}</td>
+        <td class="{% if version.published %}published{% else %}draft{% endif %}">
+          {% if version.published %}Published{% else %}Draft{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</body>
+</html>

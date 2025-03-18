@@ -1,12 +1,15 @@
 use rocket::serde::json::Json;
 use rocket_db_pools::{Connection, diesel::prelude::*};
+use rocket_dyn_templates::{context, Template};
 
 use crate::{app::{TamanuHeaders, Version as ParsedVersion}, db::versions::Version, Db};
 
 #[get("/versions")]
-pub async fn view(mut db: Connection<Db>) -> TamanuHeaders<Json<Vec<Version>>> {
-	let list_of_versions = Version::get_all(&mut db).await;
-	TamanuHeaders::new(list_of_versions.into())
+pub async fn view(mut db: Connection<Db>) -> TamanuHeaders<Template> {
+	let versions = Version::get_all(&mut db).await;
+	TamanuHeaders::new(Template::render("versions", context! {
+		versions,
+	}))
 }
 
 #[get("/versions/update-for/<version>")]
