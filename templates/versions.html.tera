@@ -58,6 +58,7 @@
     white-space: pre-wrap;
     word-wrap: break-word;
     max-width: 500px;
+    height: 40px;
     width: 500px;
     padding: 0;
   }
