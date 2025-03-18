@@ -39,6 +39,7 @@ pub fn rocket() -> Rocket<Build> {
 				versions::delete,
 				versions::update_for,
 				versions::get_artifacts_for_version,
+				versions::view_artifacts,
 				artifacts::create,
 			],
 		)

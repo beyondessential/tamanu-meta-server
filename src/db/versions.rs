@@ -31,6 +31,21 @@ impl Version {
 			.expect("Error loading versions")
 	}
 
+	pub async fn get_version_by_id(db: &mut AsyncPgConnection, version: ParsedVersion) -> Self {
+		use crate::schema::versions::*;
+
+		table
+			.filter(
+				major.eq(version.0.major as i32)
+					.and(minor.eq(version.0.minor as i32))
+					.and(patch.eq(version.0.patch as i32)),
+			)
+			.select(Version::as_select())
+			.first(db)
+			.await
+			.expect("Error loading version")
+	}
+
 	pub async fn get_updates_for_version(
 		db: &mut AsyncPgConnection,
 		version: ParsedVersion,

@@ -63,7 +63,7 @@ pub async fn delete(
 	TamanuHeaders::new(())
 }
 
-#[get("/versions/<version>/artifacts?<artifact_type>&<platform>", rank = 2)]
+#[get("/versions/<version>/artifacts?<artifact_type>&<platform>", rank = 3)]
 pub async fn get_artifacts_for_version(
 	version: ParsedVersion,
 	artifact_type: Option<String>,
@@ -98,13 +98,29 @@ pub async fn get_artifacts_for_version(
 
 	TamanuHeaders::new(Json(artifacts))
 }
+#[get("/versions/<version>/artifacts", rank = 1)]
+pub async fn view_artifacts(
+	version: ParsedVersion,
+	mut db: Connection<Db>,
+) -> TamanuHeaders<Template> {
+	let target_version = Version::get_version_by_id(&mut db, version.clone()).await;
+	let artifacts = get_artifacts_for_version(version, None, None, db).await;
+	let artifacts = artifacts.take_inner().into_inner();
 
-#[get("/versions/update-for/<version>", rank = 1)]
+	TamanuHeaders::new(Template::render(
+		"artifacts",
+		context! {
+			version: target_version,
+			artifacts,
+		},
+	))
+}
+
+#[get("/versions/update-for/<version>", rank = 2)]
 pub async fn update_for(
 	mut db: Connection<Db>,
 	version: ParsedVersion,
 ) -> TamanuHeaders<Json<Vec<Version>>> {
 	let updates = Version::get_updates_for_version(&mut db, version).await;
-
 	TamanuHeaders::new(Json(updates))
 }

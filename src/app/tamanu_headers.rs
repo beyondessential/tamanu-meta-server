@@ -15,4 +15,8 @@ impl<T> TamanuHeaders<T> {
 			version: Version(node_semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap()),
 		}
 	}
+
+	pub fn take_inner(self) -> T {
+		self.inner
+	}
 }
