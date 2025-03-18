@@ -1,4 +1,4 @@
-use rocket::serde::json::Json;
+use rocket::{mtls::Certificate, serde::json::Json};
 use rocket_db_pools::{diesel::prelude::*, Connection};
 use rocket_dyn_templates::{context, Template};
 
@@ -27,6 +27,7 @@ pub async fn view(mut db: Connection<Db>) -> TamanuHeaders<Template> {
 
 #[post("/versions", data = "<version>")]
 pub async fn create(
+	_auth: Certificate<'_>,
 	mut db: Connection<Db>,
 	version: Json<Version>,
 ) -> TamanuHeaders<Json<Version>> {
@@ -42,6 +43,7 @@ pub async fn create(
 
 #[delete("/versions/<version>")]
 pub async fn delete(
+	_auth: Certificate<'_>,
 	version: ParsedVersion,
 	mut db: Connection<Db>,
 ) -> TamanuHeaders<()> {
