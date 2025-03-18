@@ -20,10 +20,10 @@ impl Version {
 		table
 			.select(Version::as_select())
 			.order_by(major.desc())
-			.order_by(minor.desc())
-			.order_by(patch.desc())
+			.then_order_by(minor.desc())
+			.then_order_by(patch.desc())
 			.load(db)
 			.await
-			.expect("Error loading servers")
+			.expect("Error loading versions")
 	}
 }
