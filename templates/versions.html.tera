@@ -92,15 +92,11 @@
       row.addEventListener('click', () => {
         const changelogRow = row.nextElementSibling;
         const isExpanded = changelogRow.classList.contains('expanded');
-
-        // Close all other expanded changelogs
         document.querySelectorAll('.changelog-row.expanded').forEach(content => {
           if (content !== changelogRow) {
             content.classList.remove('expanded');
           }
         });
-
-        // Toggle current changelog
         changelogRow.classList.toggle('expanded');
       });
     });
