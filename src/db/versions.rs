@@ -1,9 +1,11 @@
+use crate::app::Version as ParsedVersion;
 use rocket::serde::{Deserialize, Serialize};
 use rocket_db_pools::diesel::{prelude::*, AsyncPgConnection};
 use uuid::Uuid;
-use crate::app::Version as ParsedVersion;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable, QueryableByName)]
+#[derive(
+	Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable, QueryableByName,
+)]
 #[diesel(table_name = crate::schema::versions)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Version {
@@ -38,12 +40,12 @@ impl Version {
 		let major_target: i32 = version.0.major as i32;
 		let patch_target: i32 = version.0.patch as i32;
 		version_updates
-			.filter(major.eq(major_target))
-			.filter(published.eq(true))
 			.filter(
-				minor.gt(minor_target).or(
-					minor.eq(minor_target).and(patch.gt(patch_target))
-				)
+				major.eq(major_target).and(published.eq(true)).and(
+					minor
+						.gt(minor_target)
+						.or(minor.eq(minor_target).and(patch.gt(patch_target))),
+				),
 			)
 			.order_by(minor)
 			.select(version_updates::all_columns())
