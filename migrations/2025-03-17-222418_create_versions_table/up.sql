@@ -5,7 +5,8 @@ CREATE TABLE versions (
     major INT4 NOT NULL,
     minor INT4 NOT NULL,
     patch INT4 NOT NULL,
-    published BOOLEAN NOT NULL DEFAULT true
+    published BOOLEAN NOT NULL DEFAULT true,
+	changelog TEXT NOT NULL DEFAULT ''
 );
 ALTER TABLE versions ADD CONSTRAINT versions_version_number UNIQUE (
     major, minor, patch

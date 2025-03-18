@@ -31,6 +31,7 @@ diesel::table! {
         minor -> Int4,
         patch -> Int4,
         published -> Bool,
+        changelog -> Text,
     }
 }
 
