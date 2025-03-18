@@ -102,7 +102,11 @@ pub async fn update_for(
 		"WITH ranked_versions AS (
 			SELECT *, ROW_NUMBER() OVER (PARTITION BY minor ORDER BY patch DESC) as rn
 			FROM versions
-			WHERE major = $1 AND (minor = $2 OR minor > $2)
+			WHERE major = $1
+			AND (
+				(minor = $2 AND patch > $3) OR
+				minor > $2
+			)
 		)
 		SELECT *
 		FROM ranked_versions
@@ -111,6 +115,7 @@ pub async fn update_for(
 	)
 	.bind::<diesel::sql_types::Integer, _>(version.0.major as i32)
 	.bind::<diesel::sql_types::Integer, _>(version.0.minor as i32)
+	.bind::<diesel::sql_types::Integer, _>(version.0.patch as i32)
 	.load::<Version>(&mut db)
 	.await
 	.expect("Error loading versions");
