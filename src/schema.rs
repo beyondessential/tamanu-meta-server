@@ -1,5 +1,34 @@
 // @generated automatically by Diesel CLI.
 
+pub mod sql_types {
+	#[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+	#[diesel(postgres_type(name = "device_role"))]
+	pub struct DeviceRole;
+}
+
+diesel::table! {
+	device_connections (id) {
+		id -> Uuid,
+		created_at -> Timestamptz,
+		device_id -> Uuid,
+		ip -> Inet,
+		user_agent -> Nullable<Text>,
+	}
+}
+
+diesel::table! {
+	use diesel::sql_types::*;
+	use super::sql_types::DeviceRole;
+
+	devices (id) {
+		id -> Uuid,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
+		key_data -> Bytea,
+		role -> DeviceRole,
+	}
+}
+
 diesel::table! {
 	artifacts (id) {
 		id -> Uuid,
@@ -20,6 +49,7 @@ diesel::table! {
 		name -> Text,
 		rank -> Text,
 		host -> Text,
+		device_id -> Nullable<Uuid>,
 	}
 }
 
@@ -48,6 +78,8 @@ diesel::table! {
 }
 
 diesel::joinable!(artifacts -> versions (version_id));
+diesel::joinable!(device_connections -> devices (device_id));
+diesel::joinable!(servers -> devices (device_id));
 diesel::joinable!(statuses -> servers (server_id));
 
-diesel::allow_tables_to_appear_in_same_query!(artifacts, servers, statuses, versions,);
+diesel::allow_tables_to_appear_in_same_query!(artifacts, device_connections, devices, servers, statuses, versions,);

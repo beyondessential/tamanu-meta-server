@@ -1,9 +1,10 @@
-use rocket::{mtls::Certificate, serde::json::Json};
+use rocket::serde::json::Json;
 use rocket_db_pools::{diesel::prelude::*, Connection};
 
 use crate::{
 	app::TamanuHeaders,
 	db::{
+		devices::{AdminDevice, ServerDevice},
 		servers::{NewServer, PartialServer, Server},
 		Db,
 	},
@@ -16,7 +17,7 @@ pub async fn list(mut db: Connection<Db>) -> TamanuHeaders<Json<Vec<Server>>> {
 
 #[post("/servers", data = "<input>")]
 pub async fn create(
-	_auth: Certificate<'_>,
+	_device: ServerDevice,
 	mut db: Connection<Db>,
 	input: Json<NewServer>,
 ) -> TamanuHeaders<Json<Server>> {
@@ -34,7 +35,7 @@ pub async fn create(
 
 #[patch("/servers", data = "<input>")]
 pub async fn edit(
-	_auth: Certificate<'_>,
+	_device: ServerDevice,
 	mut db: Connection<Db>,
 	input: Json<PartialServer>,
 ) -> TamanuHeaders<Json<Server>> {
@@ -62,7 +63,7 @@ pub async fn edit(
 
 #[delete("/servers", data = "<input>")]
 pub async fn delete(
-	_auth: Certificate<'_>,
+	_device: AdminDevice,
 	mut db: Connection<Db>,
 	input: Json<PartialServer>,
 ) -> TamanuHeaders<()> {

@@ -1,14 +1,15 @@
 use std::collections::BTreeSet;
 
-use rocket::mtls::Certificate;
-use rocket::serde::Serialize;
 use rocket_db_pools::Connection;
 use rocket_dyn_templates::{context, Template};
+use serde::Serialize;
 
-use crate::{
-	app::{TamanuHeaders, Version},
-	db::{latest_statuses::LatestStatus, server_rank::ServerRank, statuses::Status, Db},
+use crate::db::{
+	devices::AdminDevice, latest_statuses::LatestStatus, server_rank::ServerRank, statuses::Status,
+	Db,
 };
+
+use super::{TamanuHeaders, Version};
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
 pub struct LiveVersionsBracket {
@@ -55,7 +56,7 @@ pub async fn view(mut db: Connection<Db>) -> TamanuHeaders<Template> {
 }
 
 #[post("/reload")]
-pub async fn reload(_auth: Certificate<'_>, mut db: Connection<Db>) -> TamanuHeaders<()> {
+pub async fn reload(_device: AdminDevice, mut db: Connection<Db>) -> TamanuHeaders<()> {
 	Status::ping_servers_and_save(&mut db).await;
 	TamanuHeaders::new(())
 }
