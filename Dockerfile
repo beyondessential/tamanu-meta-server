@@ -37,7 +37,7 @@ COPY migrations ./migrations
 COPY src ./src
 RUN cargo build --locked --target $(cat /.target) --profile $PROFILE \
 	--no-default-features --features migrations-with-tokio-postgres,tls-embed-roots
-RUN cp target/$(cat /.target)/$PROFILE/{server,migrate,pingtask} /built/
+RUN cp target/$(cat /.target)/$PROFILE/{server,migrate,pingtask,prune_untrusted_devices} /built/
 
 # we can't run any commands in the runtime image because the platform
 # might not be the same as the build platform, so we need to prepare
@@ -51,6 +51,7 @@ COPY --from=builder /etc/group /etc/group
 COPY --from=builder --chmod=0755 /built/server /usr/bin/server
 COPY --from=builder --chmod=0755 /built/migrate /usr/bin/migrate
 COPY --from=builder --chmod=0755 /built/pingtask /usr/bin/pingtask
+COPY --from=builder --chmod=0755 /built/prune_untrusted_devices /usr/bin/prune_untrusted_devices
 COPY --from=builder --chown=tamanu:tamanu /runhome /home/tamanu
 COPY --chown=tamanu:tamanu templates /home/tamanu/templates
 
