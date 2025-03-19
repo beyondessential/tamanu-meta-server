@@ -19,7 +19,14 @@ ghcr.io/beyondessential/tamanu-meta:2.4.2
 
 ### Authentication
 
-Routes marked with 🔐 require authentication, which is achieved by presenting a client TLS certificate.
+Routes marked with 🔐 require authentication.
+
+The `x-mtls-public-key` header should contain an ED25519 public key in hex,
+which matches a row in the `devices` table with the required `role`.
+
+In production, the header should be set from the public key of a client certificate,
+as terminated by a reverse proxy or load balancer,
+and any matching header on the incoming requests should be stripped.
 
 ### GET `/servers`
 
