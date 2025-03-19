@@ -41,6 +41,7 @@ pub async fn create(
 	TamanuHeaders::new(Json(input))
 }
 
+
 #[delete("/versions/<version>")]
 pub async fn delete(
 	_auth: Certificate<'_>,
@@ -50,12 +51,7 @@ pub async fn delete(
 	use crate::schema::versions::dsl::*;
 
 	diesel::update(versions)
-		.filter(
-			major
-				.eq(version.0.major as i32)
-				.and(minor.eq(version.0.minor as i32))
-				.and(patch.eq(version.0.patch as i32)),
-		)
+		.filter(crate::db::versions::predicate_version!(version.0))
 		.set(published.eq(false))
 		.execute(&mut db)
 		.await
@@ -75,12 +71,7 @@ pub async fn get_artifacts_for_version(
 
 	let mut query = artifacts::table
 		.inner_join(versions::table)
-		.filter(
-			versions::major
-				.eq(version.0.major as i32)
-				.and(versions::minor.eq(version.0.minor as i32))
-				.and(versions::patch.eq(version.0.patch as i32)),
-		)
+		.filter(crate::db::versions::predicate_version!(version.0))
 		.into_boxed();
 
 	if let Some(atype) = artifact_type {

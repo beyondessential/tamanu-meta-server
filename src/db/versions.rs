@@ -3,6 +3,25 @@ use rocket::serde::{Deserialize, Serialize};
 use rocket_db_pools::diesel::{prelude::*, AsyncPgConnection};
 use uuid::Uuid;
 
+#[macro_export]
+macro_rules! predicate_version {
+	($version:expr) => {{
+		use crate::schema::versions::dsl::*;
+		let node_semver::Version {
+			major: target_major,
+			minor: target_minor,
+			patch: target_patch,
+			..
+		} = $version;
+
+		major
+			.eq(target_major as i32)
+			.and(minor.eq(target_minor as i32))
+			.and(patch.eq(target_patch as i32))
+	}};
+}
+pub(crate) use predicate_version;
+
 #[derive(
 	Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable, QueryableByName,
 )]
@@ -35,11 +54,7 @@ impl Version {
 		use crate::schema::versions::*;
 
 		table
-			.filter(
-				major.eq(version.0.major as i32)
-					.and(minor.eq(version.0.minor as i32))
-					.and(patch.eq(version.0.patch as i32)),
-			)
+			.filter(predicate_version!(version.0))
 			.select(Version::as_select())
 			.first(db)
 			.await
@@ -51,15 +66,18 @@ impl Version {
 		version: ParsedVersion,
 	) -> Vec<Self> {
 		use crate::views::version_updates::dsl::*;
-		let minor_target: i32 = version.0.minor as i32;
-		let major_target: i32 = version.0.major as i32;
-		let patch_target: i32 = version.0.patch as i32;
+		let node_semver::Version {
+			major: target_major,
+			minor: target_minor,
+			patch: target_patch,
+			..
+		} = version.0;
 		version_updates
 			.filter(
-				major.eq(major_target).and(published.eq(true)).and(
-					minor
-						.gt(minor_target)
-						.or(minor.eq(minor_target).and(patch.gt(patch_target))),
+				major.eq(target_major as i32).and(published.eq(true)).and(
+					minor.gt(target_minor as i32).or(minor
+						.eq(target_minor as i32)
+						.and(patch.gt(target_patch as i32))),
 				),
 			)
 			.order_by(minor)
