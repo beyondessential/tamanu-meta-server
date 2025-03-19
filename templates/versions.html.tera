@@ -6,7 +6,7 @@
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             margin: 0;
-            padding: 0;
+            padding: 20px;
         }
         table {
             width: 100%;
@@ -38,13 +38,11 @@
             background-color: #f8f8f8;
             white-space: pre-wrap;
             word-wrap: break-word;
-            max-width: 100vw;
-            width: 100vw;
             padding: 0;
         }
         .changelog-text {
             padding: 20px;
-            max-width: calc(100vw - 40px);
+            max-width: calc(100vw - 80px);
             overflow-x: auto;
             margin: 0;
             font-family: monospace;
