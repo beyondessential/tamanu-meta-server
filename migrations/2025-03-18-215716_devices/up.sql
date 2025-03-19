@@ -32,13 +32,6 @@ CREATE INDEX device_connections_device ON device_connections USING HASH (device_
 ALTER TABLE servers ADD COLUMN device_id UUID REFERENCES devices (id) ON DELETE SET NULL ON UPDATE CASCADE;
 CREATE INDEX servers_device ON servers USING HASH (device_id);
 
-CREATE TABLE device_trust (
-	device UUID NOT NULL REFERENCES devices (id) ON DELETE CASCADE ON UPDATE CASCADE,
-	trusts UUID NOT NULL REFERENCES devices (id) ON DELETE CASCADE ON UPDATE CASCADE,
-	created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-	PRIMARY KEY (device, trusts)
-);
-
 CREATE FUNCTION prune_untrusted_devices()
 RETURNS void
 LANGUAGE SQL
