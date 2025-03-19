@@ -13,6 +13,9 @@ CREATE TABLE devices (
 );
 
 SELECT diesel_manage_updated_at('devices');
+CREATE INDEX devices_create ON devices (created_at DESC);
+CREATE INDEX devices_update ON devices (updated_at DESC);
+CREATE INDEX devices_key ON devices USING HASH (public_key);
 
 CREATE TABLE device_connections (
 	id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -25,6 +28,9 @@ CREATE TABLE device_connections (
 	tamanu_version TEXT,
 	status JSONB NOT NULL DEFAULT '{}'
 );
+
+CREATE INDEX device_connections_date ON device_connections (created_at DESC);
+CREATE INDEX device_connections_device ON device_connections USING HASH (device);
 
 ALTER TABLE servers
 	ADD COLUMN owner BYTEA REFERENCES devices (public_key) ON DELETE SET NULL ON UPDATE CASCADE;
