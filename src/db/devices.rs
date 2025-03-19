@@ -1,3 +1,5 @@
+use std::net::{IpAddr, Ipv6Addr};
+
 use ed25519_dalek::{SignatureError, VerifyingKey};
 use rocket::{
 	http::Status,
@@ -94,11 +96,11 @@ impl<'r> request::FromRequest<'r> for Device {
 			.map_err(|_| AppError::custom("public key is not 32-bytes long"))
 			.or_error(Status::InternalServerError));
 
-		if let Some(existing) = try_outcome!(Self::from_key(&mut db, key)
+		let device = if let Some(existing) = try_outcome!(Self::from_key(&mut db, key)
 			.await
 			.or_error(Status::InternalServerError))
 		{
-			Outcome::Success(existing)
+			existing
 		} else {
 			info!("recording new device: {header}");
 			let device = Self::new(key);
@@ -106,8 +108,22 @@ impl<'r> request::FromRequest<'r> for Device {
 				.create(&mut db)
 				.await
 				.or_error(Status::InternalServerError));
-			Outcome::Success(device)
+			device
+		};
+
+		try_outcome!(DeviceConnection {
+			device: device.public_key.clone(),
+			ip: req
+				.client_ip()
+				.unwrap_or(IpAddr::V6(Ipv6Addr::UNSPECIFIED))
+				.into(),
+			user_agent: req.headers().get_one("user-agent").map(|s| s.to_string()),
 		}
+		.create(&mut db)
+		.await
+		.or_error(Status::InternalServerError));
+
+		Outcome::Success(device)
 	}
 }
 
@@ -167,5 +183,25 @@ impl<'r> request::FromRequest<'r> for ServerDevice {
 				AppError::custom("device is not a server"),
 			))
 		}
+	}
+}
+
+#[derive(Clone, Debug, Queryable, Selectable, Insertable)]
+#[diesel(table_name = crate::schema::device_connections)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct DeviceConnection {
+	pub device: Vec<u8>,
+	pub ip: ipnet::IpNet,
+	pub user_agent: Option<String>,
+}
+
+impl DeviceConnection {
+	pub async fn create(&self, db: &mut AsyncPgConnection) -> Result<Self, AppError> {
+		diesel::insert_into(crate::schema::device_connections::dsl::device_connections)
+			.values(self)
+			.returning(Self::as_select())
+			.get_result(db)
+			.await
+			.map_err(|err| AppError::Database(err.to_string()))
 	}
 }
