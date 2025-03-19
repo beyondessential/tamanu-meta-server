@@ -8,7 +8,7 @@ pub struct Version(pub node_semver::Version);
 
 impl Default for Version {
 	fn default() -> Self {
-		Self(node_semver::Version::new(0, 	0, 0))
+		Self(node_semver::Version::new(0, 0, 0))
 	}
 }
 

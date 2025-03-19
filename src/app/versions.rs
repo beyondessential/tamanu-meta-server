@@ -41,7 +41,6 @@ pub async fn create(
 	TamanuHeaders::new(Json(input))
 }
 
-
 #[delete("/versions/<version>")]
 pub async fn delete(
 	_auth: Certificate<'_>,

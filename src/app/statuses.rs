@@ -1,9 +1,9 @@
 use std::collections::BTreeSet;
 
 use rocket::mtls::Certificate;
+use rocket::serde::Serialize;
 use rocket_db_pools::Connection;
 use rocket_dyn_templates::{context, Template};
-use rocket::serde::Serialize;
 
 use crate::{
 	app::{TamanuHeaders, Version},
