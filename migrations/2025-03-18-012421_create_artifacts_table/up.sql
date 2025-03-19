@@ -9,6 +9,6 @@ CREATE TABLE artifacts (
 );
 
 ALTER TABLE artifacts ADD CONSTRAINT artifacts_type_platform_version_id UNIQUE (
-    artifact_type, platform, version_id
+	artifact_type, platform, version_id
 );
 SELECT diesel_manage_updated_at('artifacts');
