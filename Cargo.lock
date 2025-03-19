@@ -3037,12 +3037,14 @@ dependencies = [
  "rocket",
  "rocket_db_pools",
  "rocket_dyn_templates",
+ "rustls-pemfile 1.0.4",
  "serde",
  "serde_json",
  "thiserror 2.0.12",
  "time",
  "url",
  "uuid",
+ "x509-parser",
 ]
 
 [[package]]

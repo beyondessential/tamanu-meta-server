@@ -1,7 +1,8 @@
 use std::net::{IpAddr, Ipv6Addr};
 
 use rocket::{
-	http::Status,
+	http::{RawStr, Status},
+	mtls::Certificate,
 	outcome::{try_outcome, IntoOutcome},
 	request::{self, Outcome},
 	serde::{Deserialize, Serialize},
@@ -19,30 +20,43 @@ use crate::db::Db;
 #[diesel(table_name = crate::schema::devices)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Device {
+	/// The ID of the device.
 	pub id: Uuid,
-	pub key_checksum: Vec<u8>,
+
+	/// The public key data in PublicKeyInfo form.
+	///
+	/// This is the RFC 5280, Section 4.1.2.7 form of the public key as contained by X.509
+	/// certificates or by RFC 7250 Raw Public Keys.
+	///
+	/// This contains both the public key and its algorithm, and is extensible to support all types
+	/// of keys that TLS or X.509 in general can support.
+	pub key_data: Vec<u8>,
+
+	/// The role of the device.
+	///
+	/// This is used for permission checks.
 	pub role: DeviceRole,
 }
 
 impl Device {
 	pub async fn from_key(
 		db: &mut AsyncPgConnection,
-		key_sha256: &[u8],
+		key: &[u8],
 	) -> Result<Option<Self>, AppError> {
 		use crate::schema::devices::*;
 		table
 			.select(Self::as_select())
-			.filter(key_checksum.eq(key_sha256))
+			.filter(key_data.eq(key))
 			.first(db)
 			.await
 			.optional()
 			.map_err(|err| AppError::Database(err.to_string()))
 	}
 
-	pub async fn create(db: &mut AsyncPgConnection, key_sha256: Vec<u8>) -> Result<Self, AppError> {
+	pub async fn create(db: &mut AsyncPgConnection, key: Vec<u8>) -> Result<Self, AppError> {
 		use crate::schema::devices::*;
 		diesel::insert_into(dsl::devices)
-			.values(&[(key_checksum.eq(key_sha256))])
+			.values(&[(key_data.eq(key))])
 			.returning(Self::as_select())
 			.get_result(db)
 			.await
@@ -55,6 +69,8 @@ impl<'r> request::FromRequest<'r> for Device {
 	type Error = AppError;
 
 	async fn from_request(req: &'r request::Request<'_>) -> Outcome<Self, Self::Error> {
+		use x509_parser::prelude::*;
+
 		let mut db = match req.guard::<Connection<Db>>().await {
 			Outcome::Success(db) => db,
 			Outcome::Forward(f) => return Outcome::Forward(f),
@@ -68,22 +84,40 @@ impl<'r> request::FromRequest<'r> for Device {
 			}
 		};
 
-		let headers = req.headers();
+		let key = match req.guard::<Certificate>().await {
+			Outcome::Success(cert) => cert.subject_pki.raw.to_vec(),
+			Outcome::Error((s, e)) => {
+				// certificate presented, but fails validation
+				return Outcome::Error((s, AppError::custom(e)));
+			}
+			Outcome::Forward(_) => {
+				// certificate not presented
 
-		let pkeysum = try_outcome!(headers
-			.get_one("x-mtls-public-key-sha256")
-			.ok_or_else(|| AppError::custom("missing x-mtls-public-key-sha256 header"))
-			.and_then(|s| hex::decode(s).map_err(AppError::custom))
-			.or_error(Status::BadRequest));
+				let pem = try_outcome!(req
+					.headers()
+					.get_one("mtls-certificate")
+					.ok_or_else(|| AppError::custom("missing mtls-certificate header"))
+					.and_then(|s| RawStr::new(s).url_decode().map_err(AppError::custom))
+					.or_error(Status::BadRequest));
 
-		let device = if let Some(existing) = try_outcome!(Self::from_key(&mut db, &pkeysum)
+				let (_, der) = try_outcome!(parse_x509_pem(&pem.as_bytes())
+					.map_err(AppError::custom)
+					.or_error(Status::BadRequest));
+				let (_, cert) = try_outcome!(parse_x509_certificate(&der.contents)
+					.map_err(AppError::custom)
+					.or_error(Status::BadRequest));
+
+				cert.tbs_certificate.subject_pki.raw.to_vec()
+			}
+		};
+
+		let device = if let Some(existing) = try_outcome!(Self::from_key(&mut db, &key)
 			.await
 			.or_error(Status::InternalServerError))
 		{
 			existing
 		} else {
-			info!("recording new device: {pkeysum:x?}");
-			try_outcome!(Device::create(&mut db, pkeysum)
+			try_outcome!(Device::create(&mut db, key)
 				.await
 				.or_error(Status::InternalServerError))
 		};
@@ -160,7 +194,7 @@ impl<'r> request::FromRequest<'r> for ServerDevice {
 	}
 }
 
-#[derive(Clone, Debug, Queryable, Selectable, Insertable)]
+#[derive(Clone, Debug, Insertable)]
 #[diesel(table_name = crate::schema::device_connections)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct DeviceConnection {
@@ -170,12 +204,12 @@ pub struct DeviceConnection {
 }
 
 impl DeviceConnection {
-	pub async fn create(&self, db: &mut AsyncPgConnection) -> Result<Self, AppError> {
+	pub async fn create(&self, db: &mut AsyncPgConnection) -> Result<(), AppError> {
 		diesel::insert_into(crate::schema::device_connections::dsl::device_connections)
 			.values(self)
-			.returning(Self::as_select())
-			.get_result(db)
+			.execute(db)
 			.await
-			.map_err(|err| AppError::Database(err.to_string()))
+			.map_err(|err| AppError::Database(err.to_string()))?;
+		Ok(())
 	}
 }

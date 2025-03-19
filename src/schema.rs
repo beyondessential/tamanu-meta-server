@@ -12,11 +12,7 @@ diesel::table! {
 		created_at -> Timestamptz,
 		device_id -> Uuid,
 		ip -> Inet,
-		tls_version -> Nullable<Text>,
-		latency -> Nullable<Interval>,
 		user_agent -> Nullable<Text>,
-		tamanu_version -> Nullable<Text>,
-		status -> Jsonb,
 	}
 }
 
@@ -36,7 +32,7 @@ diesel::table! {
 		id -> Uuid,
 		created_at -> Timestamptz,
 		updated_at -> Timestamptz,
-		key_checksum -> Bytea,
+		key_data -> Bytea,
 		role -> DeviceRole,
 	}
 }

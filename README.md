@@ -21,12 +21,15 @@ ghcr.io/beyondessential/tamanu-meta:2.4.2
 
 Routes marked with 🔐 require authentication.
 
-The `x-mtls-public-key` header should contain an ED25519 public key in hex,
-which matches a row in the `devices` table with the required `role`.
+The `mtls-certificate` header should contain a PEM-encoded (optionally URL-encoded) X509 certificate.
 
-In production, the header should be set from the public key of a client certificate,
-as terminated by a reverse proxy or load balancer,
-and any matching header on the incoming requests should be stripped.
+In production, the header should be set from a client certificate, as terminated by a reverse proxy or load balancer, and any matching header on the incoming requests should be stripped.
+
+- Nginx: use the `$ssl_client_escaped_cert` variable.
+- Caddy: use the `{http.request.tls.client.certificate_pem}` placeholder.
+
+Alternatively, Rocket can be configured to terminate TLS itself, and handles the client certificate itself directly.
+In this case, the certificate must be signed by the provided CA to pass validation.
 
 ### GET `/servers`
 
