@@ -82,4 +82,11 @@ diesel::joinable!(device_connections -> devices (device_id));
 diesel::joinable!(servers -> devices (device_id));
 diesel::joinable!(statuses -> servers (server_id));
 
-diesel::allow_tables_to_appear_in_same_query!(artifacts, device_connections, devices, servers, statuses, versions,);
+diesel::allow_tables_to_appear_in_same_query!(
+	artifacts,
+	device_connections,
+	devices,
+	servers,
+	statuses,
+	versions,
+);

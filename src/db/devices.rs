@@ -208,6 +208,26 @@ impl<'r> request::FromRequest<'r> for ServerDevice {
 	}
 }
 
+#[derive(Clone, Debug)]
+pub struct ReleaserDevice(#[allow(dead_code)] pub Device);
+
+#[rocket::async_trait]
+impl<'r> request::FromRequest<'r> for ReleaserDevice {
+	type Error = AppError;
+
+	async fn from_request(req: &'r request::Request<'_>) -> Outcome<Self, Self::Error> {
+		let device = try_outcome!(req.guard::<Device>().await);
+		if device.role == DeviceRole::Admin || device.role == DeviceRole::Releaser {
+			Outcome::Success(Self(device))
+		} else {
+			Outcome::Error((
+				Status::Forbidden,
+				AppError::custom("device is not a server"),
+			))
+		}
+	}
+}
+
 #[derive(Clone, Debug, Insertable)]
 #[diesel(table_name = crate::schema::device_connections)]
 #[diesel(check_for_backend(diesel::pg::Pg))]

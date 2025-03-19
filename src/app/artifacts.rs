@@ -1,11 +1,15 @@
-use rocket::{mtls::Certificate, serde::json::Json};
+use rocket::serde::json::Json;
 use rocket_db_pools::{diesel::prelude::*, Connection};
 
-use crate::{app::TamanuHeaders, db::artifacts::Artifact, Db};
+use crate::{
+	app::TamanuHeaders,
+	db::{artifacts::Artifact, devices::ReleaserDevice},
+	Db,
+};
 
 #[post("/artifacts", data = "<artifact>")]
 pub async fn create(
-	_auth: Certificate<'_>,
+	_device: ReleaserDevice,
 	mut db: Connection<Db>,
 	artifact: Json<Artifact>,
 ) -> TamanuHeaders<Json<Artifact>> {
