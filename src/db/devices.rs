@@ -1,6 +1,7 @@
 use std::net::{IpAddr, Ipv6Addr};
 
 use rocket::{
+	Config,
 	http::{RawStr, Status},
 	mtls::Certificate,
 	outcome::{try_outcome, IntoOutcome},
@@ -92,6 +93,15 @@ impl<'r> request::FromRequest<'r> for Device {
 			}
 			Outcome::Forward(_) => {
 				// certificate not presented
+
+				let Outcome::Success(config) = req.guard::<&Config>().await else {
+					panic!("Config guard always returns successfully")
+				};
+
+				if config.tls.as_ref().map_or(false, |tls| tls.mutual().is_some()) {
+					// rocket is handling mTLS, so refuse to process mtls-certificate header
+					return Outcome::Forward(Status::Forbidden);
+				}
 
 				let pem = try_outcome!(req
 					.headers()
