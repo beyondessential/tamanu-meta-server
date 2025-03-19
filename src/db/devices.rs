@@ -1,12 +1,12 @@
 use std::net::{IpAddr, Ipv6Addr};
 
 use rocket::{
-	Config,
 	http::{RawStr, Status},
 	mtls::Certificate,
 	outcome::{try_outcome, IntoOutcome},
 	request::{self, Outcome},
 	serde::{Deserialize, Serialize},
+	Config,
 };
 use rocket_db_pools::{
 	diesel::{prelude::*, AsyncPgConnection},
@@ -98,7 +98,11 @@ impl<'r> request::FromRequest<'r> for Device {
 					panic!("Config guard always returns successfully")
 				};
 
-				if config.tls.as_ref().map_or(false, |tls| tls.mutual().is_some()) {
+				if config
+					.tls
+					.as_ref()
+					.is_some_and(|tls| tls.mutual().is_some())
+				{
 					// rocket is handling mTLS, so refuse to process mtls-certificate header
 					return Outcome::Forward(Status::Forbidden);
 				}
@@ -110,7 +114,7 @@ impl<'r> request::FromRequest<'r> for Device {
 					.and_then(|s| RawStr::new(s).url_decode().map_err(AppError::custom))
 					.or_error(Status::BadRequest));
 
-				let (_, der) = try_outcome!(parse_x509_pem(&pem.as_bytes())
+				let (_, der) = try_outcome!(parse_x509_pem(pem.as_bytes())
 					.map_err(AppError::custom)
 					.or_error(Status::BadRequest));
 				let (_, cert) = try_outcome!(parse_x509_certificate(&der.contents)
