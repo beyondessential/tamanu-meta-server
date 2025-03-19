@@ -49,16 +49,17 @@ pub async fn delete(
 ) -> TamanuHeaders<()> {
 	use crate::schema::versions::dsl::*;
 
-	diesel::delete(versions)
+	diesel::update(versions)
 		.filter(
 			major
 				.eq(version.0.major as i32)
 				.and(minor.eq(version.0.minor as i32))
 				.and(patch.eq(version.0.patch as i32)),
 		)
+		.set(published.eq(false))
 		.execute(&mut db)
 		.await
-		.expect("Error deleting version");
+		.expect("Error updating version published status");
 
 	TamanuHeaders::new(())
 }
