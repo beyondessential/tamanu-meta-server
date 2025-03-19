@@ -3,6 +3,8 @@ use rocket::serde::{Deserialize, Serialize};
 use rocket_db_pools::diesel::{prelude::*, AsyncPgConnection};
 use uuid::Uuid;
 
+use crate::error::{AppError, Result};
+
 #[macro_export]
 macro_rules! predicate_version {
 	($version:expr) => {{
@@ -50,7 +52,10 @@ impl Version {
 			.expect("Error loading versions")
 	}
 
-	pub async fn get_version_by_id(db: &mut AsyncPgConnection, version: ParsedVersion) -> Self {
+	pub async fn get_version_by_id(
+		db: &mut AsyncPgConnection,
+		version: ParsedVersion,
+	) -> Result<Self> {
 		use crate::schema::versions::*;
 
 		table
@@ -58,7 +63,7 @@ impl Version {
 			.select(Version::as_select())
 			.first(db)
 			.await
-			.expect("Error loading version")
+			.map_err(|err| AppError::Database(err.to_string()))
 	}
 
 	pub async fn get_updates_for_version(

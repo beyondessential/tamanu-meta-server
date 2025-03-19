@@ -7,6 +7,18 @@ pub mod sql_types {
 }
 
 diesel::table! {
+	artifacts (id) {
+		id -> Uuid,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
+		version_id -> Uuid,
+		artifact_type -> Text,
+		platform -> Text,
+		download_url -> Text,
+	}
+}
+
+diesel::table! {
 	device_connections (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
@@ -26,18 +38,6 @@ diesel::table! {
 		updated_at -> Timestamptz,
 		key_data -> Bytea,
 		role -> DeviceRole,
-	}
-}
-
-diesel::table! {
-	artifacts (id) {
-		id -> Uuid,
-		created_at -> Timestamptz,
-		updated_at -> Timestamptz,
-		version_id -> Uuid,
-		artifact_type -> Text,
-		platform -> Text,
-		download_url -> Text,
 	}
 }
 

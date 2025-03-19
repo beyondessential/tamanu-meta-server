@@ -15,7 +15,10 @@ use rocket_db_pools::{
 use uuid::Uuid;
 
 use super::device_role::DeviceRole;
-use crate::db::Db;
+use crate::{
+	db::Db,
+	error::{AppError, Result},
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize, Queryable, Selectable, Insertable)]
 #[diesel(table_name = crate::schema::devices)]
@@ -40,10 +43,7 @@ pub struct Device {
 }
 
 impl Device {
-	pub async fn from_key(
-		db: &mut AsyncPgConnection,
-		key: &[u8],
-	) -> Result<Option<Self>, AppError> {
+	pub async fn from_key(db: &mut AsyncPgConnection, key: &[u8]) -> Result<Option<Self>> {
 		use crate::schema::devices::*;
 		table
 			.select(Self::as_select())
@@ -54,7 +54,7 @@ impl Device {
 			.map_err(|err| AppError::Database(err.to_string()))
 	}
 
-	pub async fn create(db: &mut AsyncPgConnection, key: Vec<u8>) -> Result<Self, AppError> {
+	pub async fn create(db: &mut AsyncPgConnection, key: Vec<u8>) -> Result<Self> {
 		use crate::schema::devices::*;
 		diesel::insert_into(dsl::devices)
 			.values(&[(key_data.eq(key))])
@@ -152,22 +152,6 @@ impl<'r> request::FromRequest<'r> for Device {
 	}
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum AppError {
-	#[error("{0}")]
-	Custom(String),
-
-	// it's practically impossible to wrangle rocket's actual db error here, so string it
-	#[error("database: {0}")]
-	Database(String),
-}
-
-impl AppError {
-	pub fn custom(err: impl ToString) -> Self {
-		Self::Custom(err.to_string())
-	}
-}
-
 #[derive(Clone, Debug)]
 pub struct AdminDevice(#[allow(dead_code)] pub Device);
 
@@ -238,7 +222,7 @@ pub struct DeviceConnection {
 }
 
 impl DeviceConnection {
-	pub async fn create(&self, db: &mut AsyncPgConnection) -> Result<(), AppError> {
+	pub async fn create(&self, db: &mut AsyncPgConnection) -> Result<()> {
 		diesel::insert_into(crate::schema::device_connections::dsl::device_connections)
 			.values(self)
 			.execute(db)

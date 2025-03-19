@@ -9,24 +9,25 @@ use crate::{
 		devices::{AdminDevice, ReleaserDevice},
 		versions::Version,
 	},
+	error::{AppError, Result},
 	Db,
 };
 
 #[get("/versions")]
-pub async fn list(mut db: Connection<Db>) -> TamanuHeaders<Json<Vec<Version>>> {
+pub async fn list(mut db: Connection<Db>) -> Result<TamanuHeaders<Json<Vec<Version>>>> {
 	let versions = Version::get_all(&mut db).await;
-	TamanuHeaders::new(Json(versions))
+	Ok(TamanuHeaders::new(Json(versions)))
 }
 
 #[get("/versions/list")]
-pub async fn view(mut db: Connection<Db>) -> TamanuHeaders<Template> {
+pub async fn view(mut db: Connection<Db>) -> Result<TamanuHeaders<Template>> {
 	let versions = Version::get_all(&mut db).await;
-	TamanuHeaders::new(Template::render(
+	Ok(TamanuHeaders::new(Template::render(
 		"versions",
 		context! {
 			versions,
 		},
-	))
+	)))
 }
 
 #[post("/versions", data = "<version>")]
@@ -34,15 +35,15 @@ pub async fn create(
 	_device: ReleaserDevice,
 	mut db: Connection<Db>,
 	version: Json<Version>,
-) -> TamanuHeaders<Json<Version>> {
+) -> Result<TamanuHeaders<Json<Version>>> {
 	let input = version.into_inner();
 	diesel::insert_into(crate::schema::versions::table)
 		.values(input.clone())
 		.execute(&mut db)
 		.await
-		.expect("Error creating version");
+		.map_err(|err| AppError::Database(err.to_string()))?;
 
-	TamanuHeaders::new(Json(input))
+	Ok(TamanuHeaders::new(Json(input)))
 }
 
 #[delete("/versions/<version>")]
@@ -50,7 +51,7 @@ pub async fn delete(
 	_device: AdminDevice,
 	version: ParsedVersion,
 	mut db: Connection<Db>,
-) -> TamanuHeaders<()> {
+) -> Result<TamanuHeaders<()>> {
 	use crate::schema::versions::dsl::*;
 
 	diesel::update(versions)
@@ -60,7 +61,7 @@ pub async fn delete(
 		.await
 		.expect("Error updating version published status");
 
-	TamanuHeaders::new(())
+	Ok(TamanuHeaders::new(()))
 }
 
 #[get("/versions/<version>/artifacts?<artifact_type>&<platform>", rank = 3)]
@@ -69,7 +70,7 @@ pub async fn get_artifacts_for_version(
 	artifact_type: Option<String>,
 	platform: Option<String>,
 	mut db: Connection<Db>,
-) -> TamanuHeaders<Json<Vec<Artifact>>> {
+) -> Result<TamanuHeaders<Json<Vec<Artifact>>>> {
 	use crate::schema::{artifacts, versions};
 
 	let mut query = artifacts::table
@@ -91,32 +92,32 @@ pub async fn get_artifacts_for_version(
 		.await
 		.expect("Error loading artifacts");
 
-	TamanuHeaders::new(Json(artifacts))
+	Ok(TamanuHeaders::new(Json(artifacts)))
 }
 
 #[get("/versions/<version>/artifacts", rank = 1)]
 pub async fn view_artifacts(
 	version: ParsedVersion,
 	mut db: Connection<Db>,
-) -> TamanuHeaders<Template> {
+) -> Result<TamanuHeaders<Template>> {
 	let version_clone = version.clone();
-	let target_version = Version::get_version_by_id(&mut db, version).await;
-	let artifacts = get_artifacts_for_version(version_clone, None, None, db).await;
+	let target_version = Version::get_version_by_id(&mut db, version).await?;
+	let artifacts = get_artifacts_for_version(version_clone, None, None, db).await?;
 
-	TamanuHeaders::new(Template::render(
+	Ok(TamanuHeaders::new(Template::render(
 		"artifacts",
 		context! {
 			version: target_version,
 			artifacts: artifacts.inner.into_inner(),
 		},
-	))
+	)))
 }
 
 #[get("/versions/update-for/<version>", rank = 2)]
 pub async fn update_for(
 	mut db: Connection<Db>,
 	version: ParsedVersion,
-) -> TamanuHeaders<Json<Vec<Version>>> {
+) -> Result<TamanuHeaders<Json<Vec<Version>>>> {
 	let updates = Version::get_updates_for_version(&mut db, version).await;
-	TamanuHeaders::new(Json(updates))
+	Ok(TamanuHeaders::new(Json(updates)))
 }

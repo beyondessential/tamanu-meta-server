@@ -7,6 +7,7 @@ use rocket_db_pools::Database;
 
 pub(crate) mod app;
 pub(crate) mod db;
+pub(crate) mod error;
 pub mod pingtask;
 pub(crate) mod schema;
 pub(crate) mod views;
