@@ -1,6 +1,5 @@
 use std::net::{IpAddr, Ipv6Addr};
 
-use ed25519_dalek::{SignatureError, VerifyingKey};
 use rocket::{
 	http::Status,
 	outcome::{try_outcome, IntoOutcome},
@@ -11,58 +10,43 @@ use rocket_db_pools::{
 	diesel::{prelude::*, AsyncPgConnection},
 	Connection,
 };
+use uuid::Uuid;
 
 use super::device_role::DeviceRole;
 use crate::db::Db;
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, Queryable, Selectable, Insertable)]
+#[derive(Clone, Debug, Serialize, Deserialize, Queryable, Selectable, Insertable)]
 #[diesel(table_name = crate::schema::devices)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Device {
-	public_key: Vec<u8>,
+	pub id: Uuid,
+	pub key_checksum: Vec<u8>,
 	pub role: DeviceRole,
 }
 
 impl Device {
 	pub async fn from_key(
 		db: &mut AsyncPgConnection,
-		key: [u8; 32],
+		key_sha256: &[u8],
 	) -> Result<Option<Self>, AppError> {
 		use crate::schema::devices::*;
 		table
 			.select(Self::as_select())
-			.find(key.as_slice())
+			.filter(key_checksum.eq(key_sha256))
 			.first(db)
 			.await
 			.optional()
 			.map_err(|err| AppError::Database(err.to_string()))
 	}
 
-	pub fn new(key: [u8; 32]) -> Self {
-		Self {
-			public_key: key.to_vec(),
-			..Default::default()
-		}
-	}
-
-	pub async fn create(&self, db: &mut AsyncPgConnection) -> Result<Self, AppError> {
-		diesel::insert_into(crate::schema::devices::dsl::devices)
-			.values(self)
+	pub async fn create(db: &mut AsyncPgConnection, key_sha256: Vec<u8>) -> Result<Self, AppError> {
+		use crate::schema::devices::*;
+		diesel::insert_into(dsl::devices)
+			.values(&[(key_checksum.eq(key_sha256))])
 			.returning(Self::as_select())
 			.get_result(db)
 			.await
 			.map_err(|err| AppError::Database(err.to_string()))
-	}
-
-	pub fn key(&self) -> Result<VerifyingKey, AppError> {
-		let bytes = <[u8; 32]>::try_from(self.public_key.as_slice())
-			.map_err(|_| AppError::custom("devices.public_key is not 32-bytes long"))?;
-		let key = VerifyingKey::from_bytes(&bytes)?;
-		if key.is_weak() {
-			Err(AppError::custom("weak keys are not allowed"))
-		} else {
-			Ok(key)
-		}
 	}
 }
 
@@ -84,35 +68,28 @@ impl<'r> request::FromRequest<'r> for Device {
 			}
 		};
 
-		let header = try_outcome!(req
-			.headers()
-			.get_one("x-mtls-public-key")
-			.ok_or_else(|| AppError::custom("missing x-mtls-public-key header"))
-			.or_error(Status::InternalServerError));
-		let bytes = try_outcome!(hex::decode(header)
-			.map_err(AppError::custom)
-			.or_error(Status::InternalServerError));
-		let key = try_outcome!(<[u8; 32]>::try_from(bytes.as_slice())
-			.map_err(|_| AppError::custom("public key is not 32-bytes long"))
-			.or_error(Status::InternalServerError));
+		let headers = req.headers();
 
-		let device = if let Some(existing) = try_outcome!(Self::from_key(&mut db, key)
+		let pkeysum = try_outcome!(headers
+			.get_one("x-mtls-public-key-sha256")
+			.ok_or_else(|| AppError::custom("missing x-mtls-public-key-sha256 header"))
+			.and_then(|s| hex::decode(s).map_err(AppError::custom))
+			.or_error(Status::BadRequest));
+
+		let device = if let Some(existing) = try_outcome!(Self::from_key(&mut db, &pkeysum)
 			.await
 			.or_error(Status::InternalServerError))
 		{
 			existing
 		} else {
-			info!("recording new device: {header}");
-			let device = Self::new(key);
-			try_outcome!(device
-				.create(&mut db)
+			info!("recording new device: {pkeysum:x?}");
+			try_outcome!(Device::create(&mut db, pkeysum)
 				.await
-				.or_error(Status::InternalServerError));
-			device
+				.or_error(Status::InternalServerError))
 		};
 
 		try_outcome!(DeviceConnection {
-			device: device.public_key.clone(),
+			device_id: device.id,
 			ip: req
 				.client_ip()
 				.unwrap_or(IpAddr::V6(Ipv6Addr::UNSPECIFIED))
@@ -135,9 +112,6 @@ pub enum AppError {
 	// it's practically impossible to wrangle rocket's actual db error here, so string it
 	#[error("database: {0}")]
 	Database(String),
-
-	#[error("crypto: {0}")]
-	Ed25519(#[from] SignatureError),
 }
 
 impl AppError {
@@ -190,7 +164,7 @@ impl<'r> request::FromRequest<'r> for ServerDevice {
 #[diesel(table_name = crate::schema::device_connections)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct DeviceConnection {
-	pub device: Vec<u8>,
+	pub device_id: Uuid,
 	pub ip: ipnet::IpNet,
 	pub user_agent: Option<String>,
 }

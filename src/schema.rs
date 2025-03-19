@@ -10,7 +10,7 @@ diesel::table! {
 	device_connections (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
-		device -> Bytea,
+		device_id -> Uuid,
 		ip -> Inet,
 		tls_version -> Nullable<Text>,
 		latency -> Nullable<Interval>,
@@ -22,8 +22,8 @@ diesel::table! {
 
 diesel::table! {
 	device_trust (device, trusts) {
-		device -> Bytea,
-		trusts -> Bytea,
+		device -> Uuid,
+		trusts -> Uuid,
 		created_at -> Timestamptz,
 	}
 }
@@ -32,10 +32,11 @@ diesel::table! {
 	use diesel::sql_types::*;
 	use super::sql_types::DeviceRole;
 
-	devices (public_key) {
-		public_key -> Bytea,
+	devices (id) {
+		id -> Uuid,
 		created_at -> Timestamptz,
 		updated_at -> Timestamptz,
+		key_checksum -> Bytea,
 		role -> DeviceRole,
 	}
 }
@@ -48,7 +49,7 @@ diesel::table! {
 		name -> Text,
 		rank -> Text,
 		host -> Text,
-		owner -> Nullable<Bytea>,
+		device_id -> Nullable<Uuid>,
 	}
 }
 
@@ -63,8 +64,8 @@ diesel::table! {
 	}
 }
 
-diesel::joinable!(device_connections -> devices (device));
-diesel::joinable!(servers -> devices (owner));
+diesel::joinable!(device_connections -> devices (device_id));
+diesel::joinable!(servers -> devices (device_id));
 diesel::joinable!(statuses -> servers (server_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
