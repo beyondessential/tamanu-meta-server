@@ -20,6 +20,30 @@ use crate::{
 	error::{AppError, Result},
 };
 
+macro_rules! device_role_struct {
+    ($name:ident, $($allowed_roles:expr),+) => {
+        #[derive(Clone, Debug)]
+        pub struct $name(#[allow(dead_code)] pub Device);
+
+        #[rocket::async_trait]
+        impl<'r> request::FromRequest<'r> for $name {
+            type Error = AppError;
+
+            async fn from_request(req: &'r request::Request<'_>) -> Outcome<Self, Self::Error> {
+                let device = try_outcome!(req.guard::<Device>().await);
+                if device.role == DeviceRole::Admin || $(device.role == $allowed_roles)||+ {
+                    Outcome::Success(Self(device))
+                } else {
+                    Outcome::Error((
+                        Status::Forbidden,
+                        AppError::custom(format!("device is not a {}", stringify!($name).to_lowercase())),
+                    ))
+                }
+            }
+        }
+    };
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, Queryable, Selectable, Insertable)]
 #[diesel(table_name = crate::schema::devices)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -152,65 +176,9 @@ impl<'r> request::FromRequest<'r> for Device {
 	}
 }
 
-#[derive(Clone, Debug)]
-pub struct AdminDevice(#[allow(dead_code)] pub Device);
-
-#[rocket::async_trait]
-impl<'r> request::FromRequest<'r> for AdminDevice {
-	type Error = AppError;
-
-	async fn from_request(req: &'r request::Request<'_>) -> Outcome<Self, Self::Error> {
-		let device = try_outcome!(req.guard::<Device>().await);
-		if device.role == DeviceRole::Admin {
-			Outcome::Success(Self(device))
-		} else {
-			Outcome::Error((
-				Status::Forbidden,
-				AppError::custom("device is not an admin"),
-			))
-		}
-	}
-}
-
-#[derive(Clone, Debug)]
-pub struct ServerDevice(#[allow(dead_code)] pub Device);
-
-#[rocket::async_trait]
-impl<'r> request::FromRequest<'r> for ServerDevice {
-	type Error = AppError;
-
-	async fn from_request(req: &'r request::Request<'_>) -> Outcome<Self, Self::Error> {
-		let device = try_outcome!(req.guard::<Device>().await);
-		if device.role == DeviceRole::Admin || device.role == DeviceRole::Server {
-			Outcome::Success(Self(device))
-		} else {
-			Outcome::Error((
-				Status::Forbidden,
-				AppError::custom("device is not a server"),
-			))
-		}
-	}
-}
-
-#[derive(Clone, Debug)]
-pub struct ReleaserDevice(#[allow(dead_code)] pub Device);
-
-#[rocket::async_trait]
-impl<'r> request::FromRequest<'r> for ReleaserDevice {
-	type Error = AppError;
-
-	async fn from_request(req: &'r request::Request<'_>) -> Outcome<Self, Self::Error> {
-		let device = try_outcome!(req.guard::<Device>().await);
-		if device.role == DeviceRole::Admin || device.role == DeviceRole::Releaser {
-			Outcome::Success(Self(device))
-		} else {
-			Outcome::Error((
-				Status::Forbidden,
-				AppError::custom("device is not a server"),
-			))
-		}
-	}
-}
+device_role_struct!(AdminDevice, DeviceRole::Admin);
+device_role_struct!(ServerDevice, DeviceRole::Server);
+device_role_struct!(ReleaserDevice, DeviceRole::Releaser);
 
 #[derive(Clone, Debug, Insertable)]
 #[diesel(table_name = crate::schema::device_connections)]
