@@ -16,7 +16,7 @@ pub struct Artifact {
 	pub download_url: String,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize)]
 pub struct NewArtifact {
 	pub version_id: Uuid,
 	pub platform: String,

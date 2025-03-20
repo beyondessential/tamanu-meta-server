@@ -38,6 +38,27 @@ pub struct Version {
 	pub changelog: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct NewVersion {
+	pub major: i32,
+	pub minor: i32,
+	pub patch: i32,
+	pub changelog: String,
+}
+
+impl From<NewVersion> for Version {
+	fn from(version: NewVersion) -> Self {
+		Version {
+			id: Uuid::new_v4(),
+			major: version.major,
+			minor: version.minor,
+			patch: version.patch,
+			published: false,
+			changelog: version.changelog,
+		}
+	}
+}
+
 impl Version {
 	pub async fn get_all(db: &mut AsyncPgConnection) -> Vec<Self> {
 		use crate::schema::versions::*;

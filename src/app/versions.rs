@@ -37,13 +37,14 @@ pub async fn create(
 	version: Json<Version>,
 ) -> Result<TamanuHeaders<Json<Version>>> {
 	let input = version.into_inner();
+	let version = Version::from(input);
 	diesel::insert_into(crate::schema::versions::table)
-		.values(input.clone())
+		.values(version.clone())
 		.execute(&mut db)
 		.await
 		.map_err(|err| AppError::Database(err.to_string()))?;
 
-	Ok(TamanuHeaders::new(Json(input)))
+	Ok(TamanuHeaders::new(Json(version)))
 }
 
 #[delete("/versions/<version>")]
