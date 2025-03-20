@@ -192,16 +192,10 @@ mod tests {
 
 		assert_eq!(response.status(), Status::Ok);
 		let updates: Vec<Version> = serde_json::from_str(&response.into_string().unwrap()).unwrap();
-		assert_eq!(updates.len(), 3);
-
-		assert_eq!(updates[0].major, 2);
-		assert_eq!(updates[0].minor, 1);
-		assert_eq!(updates[0].patch, 1);
-		assert_eq!(updates[1].major, 2);
-		assert_eq!(updates[1].minor, 2);
-		assert_eq!(updates[1].patch, 0);
-		assert_eq!(updates[2].major, 2);
-		assert_eq!(updates[2].minor, 3);
-		assert_eq!(updates[2].patch, 0);
+		assert_eq!(updates, vec![
+			Version(node_semver::Version::new(2,1,1)),
+			Version(node_semver::Version::new(2,2,0)),
+			Version(node_semver::Version::new(2,3,0)),
+		]);
 	}
 }
