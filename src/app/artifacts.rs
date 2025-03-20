@@ -4,7 +4,7 @@ use rocket_db_pools::{diesel::prelude::*, Connection};
 use crate::{
 	app::TamanuHeaders,
 	db::{artifacts::Artifact, devices::ReleaserDevice},
-	error::Result,
+	error::{AppError, Result},
 	Db,
 };
 
@@ -19,7 +19,7 @@ pub async fn create(
 		.values(input.clone())
 		.execute(&mut db)
 		.await
-		.expect("Error creating artifact");
+		.map_err(|err| AppError::Database(err.to_string()))?;
 
 	Ok(TamanuHeaders::new(Json(input)))
 }

@@ -8,7 +8,7 @@ use crate::{
 		servers::{NewServer, PartialServer, Server},
 		Db,
 	},
-	error::Result,
+	error::{AppError, Result},
 };
 
 #[get("/servers")]
@@ -29,7 +29,7 @@ pub async fn create(
 		.values(server.clone())
 		.execute(&mut db)
 		.await
-		.expect("Error creating server");
+		.map_err(|err| AppError::Database(err.to_string()))?;
 
 	Ok(TamanuHeaders::new(Json(server)))
 }
@@ -50,7 +50,7 @@ pub async fn edit(
 		.set(input)
 		.execute(&mut db)
 		.await
-		.expect("Error updating server");
+		.map_err(|err| AppError::Database(err.to_string()))?;
 
 	Ok(TamanuHeaders::new(Json(
 		ordered_servers
@@ -58,7 +58,7 @@ pub async fn edit(
 			.select(Server::as_select())
 			.first(&mut db)
 			.await
-			.expect("Error loading server"),
+			.map_err(|err| AppError::Database(err.to_string()))?,
 	)))
 }
 
@@ -76,7 +76,7 @@ pub async fn delete(
 		.filter(id.eq(input.id))
 		.execute(&mut db)
 		.await
-		.expect("Error deleting server");
+		.map_err(|err| AppError::Database(err.to_string()))?;
 
 	Ok(TamanuHeaders::new(()))
 }
