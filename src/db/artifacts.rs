@@ -16,6 +16,26 @@ pub struct Artifact {
 	pub download_url: String,
 }
 
+#[derive(Debug, Deserialize, Clone)]
+pub struct NewArtifact {
+	pub version_id: Uuid,
+	pub platform: String,
+	pub artifact_type: String,
+	pub download_url: String,
+}
+
+impl From<NewArtifact> for Artifact {
+	fn from(artifact: NewArtifact) -> Self {
+		Artifact {
+			id: Uuid::new_v4(),
+			version_id: artifact.version_id,
+			platform: artifact.platform,
+			artifact_type: artifact.artifact_type,
+			download_url: artifact.download_url,
+		}
+	}
+}
+
 impl Artifact {
 	pub async fn get_all(db: &mut AsyncPgConnection) -> Vec<Self> {
 		use crate::schema::artifacts::*;
