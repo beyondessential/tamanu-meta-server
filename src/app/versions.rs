@@ -59,7 +59,7 @@ pub async fn delete(
 		.set(published.eq(false))
 		.execute(&mut db)
 		.await
-		.expect("Error updating version published status");
+		.map_err(|err| AppError::Database(err.to_string()))?;
 
 	Ok(TamanuHeaders::new(()))
 }
@@ -90,7 +90,7 @@ pub async fn get_artifacts_for_version(
 		.select(Artifact::as_select())
 		.load(&mut db)
 		.await
-		.expect("Error loading artifacts");
+		.map_err(|err| AppError::Database(err.to_string()))?;
 
 	Ok(TamanuHeaders::new(Json(artifacts)))
 }

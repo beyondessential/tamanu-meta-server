@@ -4,9 +4,12 @@ use rocket_db_pools::Connection;
 use rocket_dyn_templates::{context, Template};
 use serde::Serialize;
 
-use crate::db::{
-	devices::AdminDevice, latest_statuses::LatestStatus, server_rank::ServerRank, statuses::Status,
-	Db,
+use crate::{
+	db::{
+		devices::AdminDevice, latest_statuses::LatestStatus, server_rank::ServerRank,
+		statuses::Status, Db,
+	},
+	error::Result,
 };
 
 use super::{TamanuHeaders, Version};
@@ -18,7 +21,7 @@ pub struct LiveVersionsBracket {
 }
 
 #[get("/")]
-pub async fn view(mut db: Connection<Db>) -> TamanuHeaders<Template> {
+pub async fn view(mut db: Connection<Db>) -> Result<TamanuHeaders<Template>> {
 	let entries = LatestStatus::fetch(&mut db).await;
 
 	let versions = entries
@@ -43,7 +46,7 @@ pub async fn view(mut db: Connection<Db>) -> TamanuHeaders<Template> {
 		.iter()
 		.map(|v| (v.0.major, v.0.minor))
 		.collect::<BTreeSet<_>>();
-	TamanuHeaders::new(Template::render(
+	Ok(TamanuHeaders::new(Template::render(
 		"statuses",
 		context! {
 			title: "Server statuses",
@@ -52,11 +55,11 @@ pub async fn view(mut db: Connection<Db>) -> TamanuHeaders<Template> {
 			versions,
 			releases,
 		},
-	))
+	)))
 }
 
 #[post("/reload")]
-pub async fn reload(_device: AdminDevice, mut db: Connection<Db>) -> TamanuHeaders<()> {
+pub async fn reload(_device: AdminDevice, mut db: Connection<Db>) -> Result<TamanuHeaders<()>> {
 	Status::ping_servers_and_save(&mut db).await;
-	TamanuHeaders::new(())
+	Ok(TamanuHeaders::new(()))
 }
