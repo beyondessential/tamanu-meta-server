@@ -8,7 +8,7 @@ use crate::error::{AppError, Result};
 #[macro_export]
 macro_rules! predicate_version {
 	($version:expr) => {{
-		use crate::schema::versions::dsl::*;
+		use $crate::schema::versions::dsl::*;
 		let node_semver::Version {
 			major: target_major,
 			minor: target_minor,
@@ -38,7 +38,7 @@ pub struct Version {
 	pub changelog: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct NewVersion {
 	pub major: i32,
 	pub minor: i32,

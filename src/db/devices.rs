@@ -21,27 +21,30 @@ use crate::{
 };
 
 macro_rules! device_role_struct {
-    ($name:ident, $allowed_role:expr) => {
-        #[derive(Clone, Debug)]
-        pub struct $name(#[allow(dead_code)] pub Device);
+	($name:ident, $allowed_role:expr) => {
+		#[derive(Clone, Debug)]
+		pub struct $name(#[allow(dead_code)] pub Device);
 
-        #[rocket::async_trait]
-        impl<'r> request::FromRequest<'r> for $name {
-            type Error = AppError;
+		#[rocket::async_trait]
+		impl<'r> request::FromRequest<'r> for $name {
+			type Error = AppError;
 
-            async fn from_request(req: &'r request::Request<'_>) -> Outcome<Self, Self::Error> {
-                let device = try_outcome!(req.guard::<Device>().await);
-                if device.role == DeviceRole::Admin || device.role == $allowed_role {
-                    Outcome::Success(Self(device))
-                } else {
-                    Outcome::Error((
-                        Status::Forbidden,
-                        AppError::custom(format!("device is not a {}", stringify!($name).to_lowercase())),
-                    ))
-                }
-            }
-        }
-    };
+			async fn from_request(req: &'r request::Request<'_>) -> Outcome<Self, Self::Error> {
+				let device = try_outcome!(req.guard::<Device>().await);
+				if device.role == DeviceRole::Admin || device.role == $allowed_role {
+					Outcome::Success(Self(device))
+				} else {
+					Outcome::Error((
+						Status::Forbidden,
+						AppError::custom(format!(
+							"device is not a {}",
+							stringify!($name).to_lowercase()
+						)),
+					))
+				}
+			}
+		}
+	};
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Queryable, Selectable, Insertable)]

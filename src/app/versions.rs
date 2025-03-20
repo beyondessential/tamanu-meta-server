@@ -122,3 +122,86 @@ pub async fn update_for(
 	let updates = Version::get_updates_for_version(&mut db, version).await;
 	Ok(TamanuHeaders::new(Json(updates)))
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use rocket::{
+		http::{ContentType, Status},
+		local::blocking::Client,
+		routes,
+	};
+	use rocket_db_pools::Database;
+
+	#[test]
+	fn test_version_updates_with_post() {
+		let figment = rocket::Config::figment();
+		let rocket = rocket::build()
+			.configure(figment)
+			.attach(Db::init())
+			.mount("/", routes![create, update_for]);
+
+		let client = Client::tracked(rocket).expect("valid rocket instance");
+
+		let versions = vec![
+			NewVersion {
+				major: 2,
+				minor: 1,
+				patch: 0,
+				changelog: "2.1.0 changelog".to_string(),
+			},
+			NewVersion {
+				major: 2,
+				minor: 1,
+				patch: 1,
+				changelog: "2.1.1 changelog".to_string(),
+			},
+			NewVersion {
+				major: 2,
+				minor: 2,
+				patch: 0,
+				changelog: "2.2.0 changelog".to_string(),
+			},
+			NewVersion {
+				major: 2,
+				minor: 3,
+				patch: 0,
+				changelog: "2.3.0 changelog".to_string(),
+			},
+		];
+
+		for version in versions {
+			let response = client
+				.post("/versions")
+				.header(ContentType::JSON)
+				// .header(Header::new("x-client-cert", test_cert.clone()))
+				.body(serde_json::to_string(&version).unwrap())
+				.dispatch();
+			assert_eq!(response.status(), Status::Ok);
+		}
+
+		// Test case 1: Latest version (2.3.0) should return empty list
+		let response = client.get("/versions/update-for/2.3.0").dispatch();
+
+		assert_eq!(response.status(), Status::Ok);
+		let updates: Vec<Version> = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+		assert!(updates.is_empty());
+
+		// Test case 2: 2.1.0 should return 2.1.1, 2.2.0, and 2.3.0
+		let response = client.get("/versions/update-for/2.1.0").dispatch();
+
+		assert_eq!(response.status(), Status::Ok);
+		let updates: Vec<Version> = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+		assert_eq!(updates.len(), 3);
+
+		assert_eq!(updates[0].major, 2);
+		assert_eq!(updates[0].minor, 1);
+		assert_eq!(updates[0].patch, 1);
+		assert_eq!(updates[1].major, 2);
+		assert_eq!(updates[1].minor, 2);
+		assert_eq!(updates[1].patch, 0);
+		assert_eq!(updates[2].major, 2);
+		assert_eq!(updates[2].minor, 3);
+		assert_eq!(updates[2].patch, 0);
+	}
+}
