@@ -8,11 +8,12 @@ use crate::{
 		servers::{NewServer, PartialServer, Server},
 		Db,
 	},
+	error::Result,
 };
 
 #[get("/servers")]
-pub async fn list(mut db: Connection<Db>) -> TamanuHeaders<Json<Vec<Server>>> {
-	TamanuHeaders::new(Json(Server::get_all(&mut db).await))
+pub async fn list(mut db: Connection<Db>) -> Result<TamanuHeaders<Json<Vec<Server>>>> {
+	Ok(TamanuHeaders::new(Json(Server::get_all(&mut db).await)))
 }
 
 #[post("/servers", data = "<input>")]
@@ -20,7 +21,7 @@ pub async fn create(
 	_device: ServerDevice,
 	mut db: Connection<Db>,
 	input: Json<NewServer>,
-) -> TamanuHeaders<Json<Server>> {
+) -> Result<TamanuHeaders<Json<Server>>> {
 	let input = input.into_inner();
 	let server = Server::from(input);
 
@@ -30,7 +31,7 @@ pub async fn create(
 		.await
 		.expect("Error creating server");
 
-	TamanuHeaders::new(Json(server))
+	Ok(TamanuHeaders::new(Json(server)))
 }
 
 #[patch("/servers", data = "<input>")]
@@ -38,7 +39,7 @@ pub async fn edit(
 	_device: ServerDevice,
 	mut db: Connection<Db>,
 	input: Json<PartialServer>,
-) -> TamanuHeaders<Json<Server>> {
+) -> Result<TamanuHeaders<Json<Server>>> {
 	use crate::views::ordered_servers::dsl::*;
 
 	let input = input.into_inner();
@@ -51,14 +52,14 @@ pub async fn edit(
 		.await
 		.expect("Error updating server");
 
-	TamanuHeaders::new(Json(
+	Ok(TamanuHeaders::new(Json(
 		ordered_servers
 			.filter(id.eq(input_id))
 			.select(Server::as_select())
 			.first(&mut db)
 			.await
 			.expect("Error loading server"),
-	))
+	)))
 }
 
 #[delete("/servers", data = "<input>")]
@@ -66,7 +67,7 @@ pub async fn delete(
 	_device: AdminDevice,
 	mut db: Connection<Db>,
 	input: Json<PartialServer>,
-) -> TamanuHeaders<()> {
+) -> Result<TamanuHeaders<()>> {
 	use crate::schema::servers::dsl::*;
 
 	let input = input.into_inner();
@@ -77,5 +78,5 @@ pub async fn delete(
 		.await
 		.expect("Error deleting server");
 
-	TamanuHeaders::new(())
+	Ok(TamanuHeaders::new(()))
 }
