@@ -192,10 +192,10 @@ mod tests {
 
 		assert_eq!(response.status(), Status::Ok);
 		let updates: Vec<Version> = serde_json::from_str(&response.into_string().unwrap()).unwrap();
-		assert_eq!(updates, vec![
-			Version(node_semver::Version::new(2,1,1)),
-			Version(node_semver::Version::new(2,2,0)),
-			Version(node_semver::Version::new(2,3,0)),
-		]);
+		assert!(matches!(updates.as_slice(), [
+			Version { major: 2, minor: 1, patch: 1, .. },
+			Version { major: 2, minor: 2, patch: 0, .. },
+			Version { major: 2, minor: 3, patch: 0, .. },
+		]));
 	}
 }
