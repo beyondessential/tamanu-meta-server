@@ -7,7 +7,7 @@ use crate::{
 	db::{
 		artifacts::Artifact,
 		devices::{AdminDevice, ReleaserDevice},
-		versions::Version,
+		versions::{NewVersion, Version},
 	},
 	error::{AppError, Result},
 	Db,
@@ -34,7 +34,7 @@ pub async fn view(mut db: Connection<Db>) -> Result<TamanuHeaders<Template>> {
 pub async fn create(
 	_device: ReleaserDevice,
 	mut db: Connection<Db>,
-	version: Json<Version>,
+	version: Json<NewVersion>,
 ) -> Result<TamanuHeaders<Json<Version>>> {
 	let input = version.into_inner();
 	let version = Version::from(input);
