@@ -174,7 +174,6 @@ mod tests {
 			let response = client
 				.post("/versions")
 				.header(ContentType::JSON)
-				// .header(Header::new("x-client-cert", test_cert.clone()))
 				.body(serde_json::to_string(&version).unwrap())
 				.dispatch();
 			assert_eq!(response.status(), Status::Ok);
