@@ -21,7 +21,7 @@ use crate::{
 };
 
 macro_rules! device_role_struct {
-    ($name:ident, $($allowed_roles:expr),+) => {
+    ($name:ident, $allowed_role:expr) => {
         #[derive(Clone, Debug)]
         pub struct $name(#[allow(dead_code)] pub Device);
 
@@ -31,7 +31,7 @@ macro_rules! device_role_struct {
 
             async fn from_request(req: &'r request::Request<'_>) -> Outcome<Self, Self::Error> {
                 let device = try_outcome!(req.guard::<Device>().await);
-                if device.role == DeviceRole::Admin || $(device.role == $allowed_roles)||+ {
+                if device.role == DeviceRole::Admin || device.role == $allowed_role {
                     Outcome::Success(Self(device))
                 } else {
                     Outcome::Error((
