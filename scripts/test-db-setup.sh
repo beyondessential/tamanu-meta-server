@@ -16,7 +16,7 @@ echo "Setting up test database: ${TEST_DB_NAME}" "${TEST_DB_URL}"
 psql -d "$POSTGRES_DB_URL" -c "DROP DATABASE IF EXISTS \"${TEST_DB_NAME}\";"
 psql -d "$POSTGRES_DB_URL" -c "CREATE DATABASE \"${TEST_DB_NAME}\";"
 
-echo "ROCKET_DEFAULT_DATABASES_POSTGRES='{url=\"${TEST_DB_URL}\"}'" >> "$NEXTEST_ENV"
+echo "ROCKET_DATABASES='{postgres={url=\"${TEST_DB_URL}\"}}'" >> "$NEXTEST_ENV"
 
 # Run diesel migrations on the test database
 DATABASE_URL="${TEST_DB_URL}" diesel migration run
