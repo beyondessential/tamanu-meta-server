@@ -5,7 +5,16 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [2.5.3](https://github.com/beyondessential/tamanu-meta-server/compare/v2.5.2..2.5.3) - 2025-03-21
+## [2.6.0](https://github.com/beyondessential/tamanu-meta-server/compare/v2.5.3..2.6.0) - 2025-03-21
+
+
+
+### Artifacts
+
+- **Feature:** Add mobile download page - ([7b135ab](https://github.com/beyondessential/tamanu-meta-server/commit/7b135ab2e12a3405fc899478ea2f00c20a301516))
+
+---
+## [2.5.3](https://github.com/beyondessential/tamanu-meta-server/compare/v2.5.2..v2.5.3) - 2025-03-21
 
 
 
