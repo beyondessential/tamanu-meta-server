@@ -95,7 +95,7 @@
                     </span>
                 </td>
                 <td>
-                    <a href="/versions/{{ version.major }}.{{ version.minor }}.{{ version.patch }}/artifacts" class="view-artifacts">
+                    <a href="/versions/{{ version.major }}.{{ version.minor }}.{{ version.patch }}" class="view-artifacts">
                         View Artifacts
                     </a>
                 </td>
