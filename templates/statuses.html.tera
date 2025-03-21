@@ -53,7 +53,6 @@
 </head>
 <body>
   <p>
-    [<a href="/versions/list">all versions</a>]
     {{ releases | length }} release branches in active use:
     <b>{% for r in releases %}{{ r[0] }}.{{ r[1] }} {% endfor %}</b>
     <span class=versions>({{ versions | length }} versions:

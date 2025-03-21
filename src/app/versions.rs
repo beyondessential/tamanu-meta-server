@@ -19,7 +19,7 @@ pub async fn list(mut db: Connection<Db>) -> Result<TamanuHeaders<Json<Vec<Versi
 	Ok(TamanuHeaders::new(Json(versions)))
 }
 
-#[get("/versions/list")]
+#[get("/")]
 pub async fn view(mut db: Connection<Db>) -> Result<TamanuHeaders<Template>> {
 	let versions = Version::get_all(&mut db).await?;
 	Ok(TamanuHeaders::new(Template::render(
