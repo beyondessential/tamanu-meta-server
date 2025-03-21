@@ -96,17 +96,8 @@ impl Device {
 impl<'r> request::FromRequest<'r> for Device {
 	type Error = AppError;
 
-	#[cfg_attr(test, allow(dead_code, unreachable_code, unused_variables))]
 	async fn from_request(req: &'r request::Request<'_>) -> Outcome<Self, Self::Error> {
 		use x509_parser::prelude::*;
-
-		#[cfg(test)] {
-			return Outcome::Success(Self {
-				id: Uuid::nil(),
-				key_data: Vec::new(),
-				role: DeviceRole::Admin,
-			});
-		}
 
 		let mut db = match req.guard::<Connection<Db>>().await {
 			Outcome::Success(db) => db,

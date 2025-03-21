@@ -38,7 +38,7 @@ pub struct Version {
 	pub changelog: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize)]
 pub struct NewVersion {
 	pub major: i32,
 	pub minor: i32,
