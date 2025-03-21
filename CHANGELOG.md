@@ -5,7 +5,18 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [2.5.2](https://github.com/beyondessential/tamanu-meta-server/compare/v2.5.1..2.5.2) - 2025-03-21
+## [2.5.3](https://github.com/beyondessential/tamanu-meta-server/compare/v2.5.2..2.5.3) - 2025-03-21
+
+
+
+### Artifacts
+
+- **Refactor:** Move database interaction to db/ - ([f22a00c](https://github.com/beyondessential/tamanu-meta-server/commit/f22a00c0a17ebc380e72cce93de26edc3e2642ec))
+- **Tweak:** Invert platform and type - ([1ca9aa3](https://github.com/beyondessential/tamanu-meta-server/commit/1ca9aa34555673118feb7215064d7ec77c4b1dfc))
+- **Tweak:** Simplify route - ([3d2e00e](https://github.com/beyondessential/tamanu-meta-server/commit/3d2e00e0f901149e01438068eff827b320fa9b8c))
+
+---
+## [2.5.2](https://github.com/beyondessential/tamanu-meta-server/compare/v2.5.1..v2.5.2) - 2025-03-21
 
 
 - **Bugfix:** Artifact endpoint - ([f969aa4](https://github.com/beyondessential/tamanu-meta-server/commit/f969aa464426de6d09c66068adb6de4b2fcd6b34))
