@@ -37,8 +37,8 @@ impl Artifact {
 		table
 			.select(Self::as_select())
 			.filter(version_id.eq(version))
-			.order_by(platform.asc())
-			.then_order_by(artifact_type.asc())
+			.order_by(artifact_type.asc())
+			.then_order_by(platform.asc())
 			.load(db)
 			.await
 			.map_err(|err| AppError::Database(err.to_string()))
