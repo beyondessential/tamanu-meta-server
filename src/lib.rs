@@ -7,6 +7,7 @@ use rocket_db_pools::Database;
 
 pub(crate) mod app;
 pub(crate) mod db;
+pub(crate) mod error;
 pub mod pingtask;
 pub(crate) mod schema;
 pub(crate) mod views;
@@ -78,6 +79,6 @@ pub async fn db_pool() -> Result<db::Db, rocket::Error> {
 		.into())
 }
 
-pub fn db_config() -> rocket::figment::Result<rocket_db_pools::Config> {
-	db_config_figment().extract()
+pub fn db_config() -> Result<rocket_db_pools::Config, Box<rocket::figment::Error>> {
+	db_config_figment().extract().map_err(Box::new)
 }

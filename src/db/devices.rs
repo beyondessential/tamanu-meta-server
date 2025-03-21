@@ -15,7 +15,37 @@ use rocket_db_pools::{
 use uuid::Uuid;
 
 use super::device_role::DeviceRole;
-use crate::db::Db;
+use crate::{
+	db::Db,
+	error::{AppError, Result},
+};
+
+macro_rules! device_role_struct {
+	($name:ident, $allowed_role:expr) => {
+		#[derive(Clone, Debug)]
+		pub struct $name(#[allow(dead_code)] pub Device);
+
+		#[rocket::async_trait]
+		impl<'r> request::FromRequest<'r> for $name {
+			type Error = AppError;
+
+			async fn from_request(req: &'r request::Request<'_>) -> Outcome<Self, Self::Error> {
+				let device = try_outcome!(req.guard::<Device>().await);
+				if device.role == DeviceRole::Admin || device.role == $allowed_role {
+					Outcome::Success(Self(device))
+				} else {
+					Outcome::Error((
+						Status::Forbidden,
+						AppError::custom(format!(
+							"device is not a {}",
+							stringify!($name).to_lowercase()
+						)),
+					))
+				}
+			}
+		}
+	};
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, Queryable, Selectable, Insertable)]
 #[diesel(table_name = crate::schema::devices)]
@@ -40,10 +70,7 @@ pub struct Device {
 }
 
 impl Device {
-	pub async fn from_key(
-		db: &mut AsyncPgConnection,
-		key: &[u8],
-	) -> Result<Option<Self>, AppError> {
+	pub async fn from_key(db: &mut AsyncPgConnection, key: &[u8]) -> Result<Option<Self>> {
 		use crate::schema::devices::*;
 		table
 			.select(Self::as_select())
@@ -54,7 +81,7 @@ impl Device {
 			.map_err(|err| AppError::Database(err.to_string()))
 	}
 
-	pub async fn create(db: &mut AsyncPgConnection, key: Vec<u8>) -> Result<Self, AppError> {
+	pub async fn create(db: &mut AsyncPgConnection, key: Vec<u8>) -> Result<Self> {
 		use crate::schema::devices::*;
 		diesel::insert_into(dsl::devices)
 			.values(&[(key_data.eq(key))])
@@ -152,61 +179,9 @@ impl<'r> request::FromRequest<'r> for Device {
 	}
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum AppError {
-	#[error("{0}")]
-	Custom(String),
-
-	// it's practically impossible to wrangle rocket's actual db error here, so string it
-	#[error("database: {0}")]
-	Database(String),
-}
-
-impl AppError {
-	pub fn custom(err: impl ToString) -> Self {
-		Self::Custom(err.to_string())
-	}
-}
-
-#[derive(Clone, Debug)]
-pub struct AdminDevice(#[allow(dead_code)] pub Device);
-
-#[rocket::async_trait]
-impl<'r> request::FromRequest<'r> for AdminDevice {
-	type Error = AppError;
-
-	async fn from_request(req: &'r request::Request<'_>) -> Outcome<Self, Self::Error> {
-		let device = try_outcome!(req.guard::<Device>().await);
-		if device.role == DeviceRole::Admin {
-			Outcome::Success(Self(device))
-		} else {
-			Outcome::Error((
-				Status::Forbidden,
-				AppError::custom("device is not an admin"),
-			))
-		}
-	}
-}
-
-#[derive(Clone, Debug)]
-pub struct ServerDevice(#[allow(dead_code)] pub Device);
-
-#[rocket::async_trait]
-impl<'r> request::FromRequest<'r> for ServerDevice {
-	type Error = AppError;
-
-	async fn from_request(req: &'r request::Request<'_>) -> Outcome<Self, Self::Error> {
-		let device = try_outcome!(req.guard::<Device>().await);
-		if device.role == DeviceRole::Admin || device.role == DeviceRole::Server {
-			Outcome::Success(Self(device))
-		} else {
-			Outcome::Error((
-				Status::Forbidden,
-				AppError::custom("device is not a server"),
-			))
-		}
-	}
-}
+device_role_struct!(AdminDevice, DeviceRole::Admin);
+device_role_struct!(ServerDevice, DeviceRole::Server);
+device_role_struct!(ReleaserDevice, DeviceRole::Releaser);
 
 #[derive(Clone, Debug, Insertable)]
 #[diesel(table_name = crate::schema::device_connections)]
@@ -218,7 +193,7 @@ pub struct DeviceConnection {
 }
 
 impl DeviceConnection {
-	pub async fn create(&self, db: &mut AsyncPgConnection) -> Result<(), AppError> {
+	pub async fn create(&self, db: &mut AsyncPgConnection) -> Result<()> {
 		diesel::insert_into(crate::schema::device_connections::dsl::device_connections)
 			.values(self)
 			.execute(db)

@@ -2,3 +2,4 @@
 Rocket.toml
 *.crt
 *.key
+identity.*.pem

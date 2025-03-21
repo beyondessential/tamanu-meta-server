@@ -2,7 +2,7 @@ use super::{server_type::ServerType, version::Version};
 
 #[derive(Debug, Responder)]
 pub struct TamanuHeaders<T> {
-	inner: T,
+	pub inner: T,
 	version: Version,
 	server_type: ServerType,
 }

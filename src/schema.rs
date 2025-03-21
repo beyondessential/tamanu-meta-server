@@ -7,6 +7,18 @@ pub mod sql_types {
 }
 
 diesel::table! {
+	artifacts (id) {
+		id -> Uuid,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
+		version_id -> Uuid,
+		artifact_type -> Text,
+		platform -> Text,
+		download_url -> Text,
+	}
+}
+
+diesel::table! {
 	device_connections (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
@@ -52,8 +64,29 @@ diesel::table! {
 	}
 }
 
+diesel::table! {
+	versions (id) {
+		id -> Uuid,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
+		major -> Int4,
+		minor -> Int4,
+		patch -> Int4,
+		published -> Bool,
+		changelog -> Text,
+	}
+}
+
+diesel::joinable!(artifacts -> versions (version_id));
 diesel::joinable!(device_connections -> devices (device_id));
 diesel::joinable!(servers -> devices (device_id));
 diesel::joinable!(statuses -> servers (server_id));
 
-diesel::allow_tables_to_appear_in_same_query!(device_connections, devices, servers, statuses,);
+diesel::allow_tables_to_appear_in_same_query!(
+	artifacts,
+	device_connections,
+	devices,
+	servers,
+	statuses,
+	versions,
+);
