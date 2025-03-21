@@ -35,7 +35,7 @@ pub async fn create(
 	_device: ReleaserDevice,
 	mut db: Connection<Db>,
 	version: ParsedVersion,
-	changelog: String
+	changelog: String,
 ) -> Result<TamanuHeaders<Json<Version>>> {
 	let version = diesel::insert_into(crate::schema::versions::table)
 		.values(NewVersion {
@@ -107,7 +107,7 @@ pub async fn view_artifacts(
 	mut db: Connection<Db>,
 ) -> Result<TamanuHeaders<Template>> {
 	let version_clone = version.clone();
-	let target_version = Version::get_version_by_id(&mut db, version).await?;
+	let target_version = Version::get_by_version(&mut db, version).await?;
 	let artifacts = get_artifacts_for_version(version_clone, None, None, db).await?;
 
 	Ok(TamanuHeaders::new(Template::render(

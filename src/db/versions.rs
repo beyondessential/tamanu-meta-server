@@ -62,7 +62,7 @@ impl Version {
 			.expect("Error loading versions")
 	}
 
-	pub async fn get_version_by_id(
+	pub async fn get_by_version(
 		db: &mut AsyncPgConnection,
 		version: ParsedVersion,
 	) -> Result<Self> {

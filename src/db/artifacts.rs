@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::db::versions::Version;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable, Associations)]
+#[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Associations)]
 #[diesel(belongs_to(Version))]
 #[diesel(table_name = crate::schema::artifacts)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -16,24 +16,15 @@ pub struct Artifact {
 	pub download_url: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Insertable)]
+#[diesel(belongs_to(Version))]
+#[diesel(table_name = crate::schema::artifacts)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewArtifact {
 	pub version_id: Uuid,
 	pub platform: String,
 	pub artifact_type: String,
 	pub download_url: String,
-}
-
-impl From<NewArtifact> for Artifact {
-	fn from(artifact: NewArtifact) -> Self {
-		Artifact {
-			id: Uuid::new_v4(),
-			version_id: artifact.version_id,
-			platform: artifact.platform,
-			artifact_type: artifact.artifact_type,
-			download_url: artifact.download_url,
-		}
-	}
 }
 
 impl Artifact {
