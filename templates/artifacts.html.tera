@@ -66,7 +66,11 @@
                 <td>{{ artifact.artifact_type }}</td>
                 <td>{{ artifact.platform }}</td>
                 <td>
+                  {% if artifact.download_url is starting_with("https://") %}
                     <a href="{{ artifact.download_url }}" class="download-link">Download</a>
+                  {% else %}
+                    <code>{{ artifact.download_url }}</code>
+                  {% endif %}
                 </td>
             </tr>
             {% endfor %}
