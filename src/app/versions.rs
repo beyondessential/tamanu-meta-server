@@ -70,7 +70,7 @@ pub async fn delete(
 	Ok(TamanuHeaders::new(()))
 }
 
-#[get("/versions/<version>/artifacts", rank = 1)]
+#[get("/versions/<version>", rank = 1)]
 pub async fn view_artifacts(
 	version: ParsedVersion,
 	mut db: Connection<Db>,
