@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [3.0.2](https://github.com/beyondessential/tamanu-meta-server/compare/v3.0.1..3.0.2) - 2025-03-21
+## [3.0.3](https://github.com/beyondessential/tamanu-meta-server/compare/v3.0.2..3.0.3) - 2025-03-21
+
+
+- **Bugfix:** Back link on artifact page - ([9142bc8](https://github.com/beyondessential/tamanu-meta-server/commit/9142bc8891f5b94b3f597241dbb94aed2eb691f7))
+
+---
+## [3.0.2](https://github.com/beyondessential/tamanu-meta-server/compare/v3.0.1..v3.0.2) - 2025-03-21
 
 
 - **Bugfix:** Only show download button if https - ([df3d2ec](https://github.com/beyondessential/tamanu-meta-server/commit/df3d2ec9e74140f95301f1e7bad3c076b10d042f))
