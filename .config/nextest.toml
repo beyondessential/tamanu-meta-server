@@ -1,0 +1,13 @@
+# Enable experimental features
+experimental = ["setup-scripts"]
+
+# Define the database setup script
+[script.db-setup]
+command = "scripts/test-db-setup.sh"
+capture-stdout = true
+capture-stderr = true
+
+# Configure when to run the script
+[[profile.default.scripts]]
+filter = "all()" # Run for all tests
+setup = "db-setup"
