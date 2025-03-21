@@ -5,7 +5,16 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [2.6.0](https://github.com/beyondessential/tamanu-meta-server/compare/v2.5.3..2.6.0) - 2025-03-21
+## [2.6.1](https://github.com/beyondessential/tamanu-meta-server/compare/v2.6.0..2.6.1) - 2025-03-21
+
+
+
+### Artifacts
+
+- **Tweak:** Fix sort order - ([50a263b](https://github.com/beyondessential/tamanu-meta-server/commit/50a263b596f3fee14ad652a7b2ce05c60e4542f7))
+
+---
+## [2.6.0](https://github.com/beyondessential/tamanu-meta-server/compare/v2.5.3..v2.6.0) - 2025-03-21
 
 
 
