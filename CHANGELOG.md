@@ -5,7 +5,17 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [2.4.2](https://github.com/beyondessential/tamanu-meta-server/compare/v2.4.1..2.4.2) - 2025-02-26
+## [2.5.0](https://github.com/beyondessential/tamanu-meta-server/compare/v2.4.2..2.5.0) - 2025-03-21
+
+
+- **Feature:** Add versions table (#29) - ([5fcd4ab](https://github.com/beyondessential/tamanu-meta-server/commit/5fcd4ab601355c4dc8155e12dba6e055a369654b))
+
+### Auth
+
+- **Feature:** Add devices and finer-grained authentication (#31) - ([8761dbf](https://github.com/beyondessential/tamanu-meta-server/commit/8761dbfb5057848f8eb6765d5657ac5a0b52dfba))
+
+---
+## [2.4.2](https://github.com/beyondessential/tamanu-meta-server/compare/v2.4.1..v2.4.2) - 2025-02-26
 
 
 - **Deps:** Update lockfile - ([e646644](https://github.com/beyondessential/tamanu-meta-server/commit/e64664465cae7e0e9988e8f6e7c3cd25e43b4864))
