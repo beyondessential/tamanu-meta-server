@@ -30,17 +30,22 @@ pub async fn view(mut db: Connection<Db>) -> Result<TamanuHeaders<Template>> {
 	)))
 }
 
-#[post("/versions", data = "<version>")]
+#[post("/versions/<version>", data = "<changelog>")]
 pub async fn create(
 	_device: ReleaserDevice,
 	mut db: Connection<Db>,
-	version: Json<NewVersion>,
+	version: ParsedVersion,
+	changelog: String
 ) -> Result<TamanuHeaders<Json<Version>>> {
-	let input = version.into_inner();
-	let version = Version::from(input);
-	diesel::insert_into(crate::schema::versions::table)
-		.values(version.clone())
-		.execute(&mut db)
+	let version = diesel::insert_into(crate::schema::versions::table)
+		.values(NewVersion {
+			major: version.0.major as _,
+			minor: version.0.minor as _,
+			patch: version.0.patch as _,
+			changelog,
+		})
+		.returning(Version::as_select())
+		.get_result(&mut db)
 		.await
 		.map_err(|err| AppError::Database(err.to_string()))?;
 
