@@ -112,11 +112,22 @@ impl Version {
 	) -> Result<Self> {
 		use crate::schema::versions::*;
 
+		let node_semver::Version {
+			major: target_major,
+			minor: target_minor,
+			patch: target_patch,
+			..
+		} = range.min_version().ok_or(AppError::UnusableRange)?;
+
 		table
 			.select(Version::as_select())
-			.filter(predicate_version!(range
-				.min_version()
-				.ok_or(AppError::UnusableRange)?))
+			.filter(
+				published
+					.eq(true)
+					.and(major.ge(target_major as i32))
+					.and(minor.ge(target_minor as i32))
+					.and(patch.ge(target_patch as i32)),
+			)
 			.order_by(major.desc())
 			.then_order_by(minor.desc())
 			.then_order_by(patch.desc())
