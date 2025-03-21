@@ -39,6 +39,8 @@ pub struct Version {
 }
 
 #[derive(Debug, Deserialize, Insertable)]
+#[diesel(table_name = crate::schema::versions)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewVersion {
 	pub major: i32,
 	pub minor: i32,
