@@ -2,7 +2,7 @@ use rocket::serde::{Deserialize, Serialize};
 use rocket_db_pools::diesel::{prelude::*, AsyncPgConnection};
 use uuid::Uuid;
 
-use crate::db::versions::Version;
+use crate::{error::{AppError, Result}, db::versions::Version};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Associations)]
 #[diesel(belongs_to(Version))]
@@ -28,12 +28,16 @@ pub struct NewArtifact {
 }
 
 impl Artifact {
-	pub async fn get_all(db: &mut AsyncPgConnection) -> Vec<Self> {
+	pub async fn get_for_version(db: &mut AsyncPgConnection, version: Uuid) -> Result<Vec<Self>> {
 		use crate::schema::artifacts::*;
+
 		table
 			.select(Self::as_select())
+			.filter(version_id.eq(version))
+			.order_by(platform.asc())
+			.then_order_by(artifact_type.asc())
 			.load(db)
 			.await
-			.expect("Error loading artifacts")
+			.map_err(|err| AppError::Database(err.to_string()))
 	}
 }

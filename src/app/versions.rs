@@ -75,16 +75,27 @@ pub async fn view_artifacts(
 	version: ParsedVersion,
 	mut db: Connection<Db>,
 ) -> Result<TamanuHeaders<Template>> {
-	let target_version = Version::get_by_version(&mut db, version.clone()).await?;
-	let artifacts = get_artifacts_for_version(version, None, None, db).await?;
+	let version = Version::get_by_version(&mut db, version).await?;
+	let artifacts = Artifact::get_for_version(&mut db, version.id).await?;
 
 	Ok(TamanuHeaders::new(Template::render(
 		"artifacts",
 		context! {
-			version: target_version,
-			artifacts: artifacts.inner.into_inner(),
+			version,
+			artifacts,
 		},
 	)))
+}
+
+#[get("/versions/<version>/artifacts", rank = 1)]
+pub async fn get_artifacts(
+	version: ParsedVersion,
+	mut db: Connection<Db>,
+) -> Result<TamanuHeaders<Json<Vec<Artifact>>>> {
+	let version = Version::get_by_version(&mut db, version).await?;
+	let artifacts = Artifact::get_for_version(&mut db, version.id).await?;
+
+	Ok(TamanuHeaders::new(Json(artifacts)))
 }
 
 #[get("/versions/update-for/<version>", rank = 2)]
