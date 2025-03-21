@@ -2,7 +2,10 @@ use rocket::serde::{Deserialize, Serialize};
 use rocket_db_pools::diesel::{prelude::*, AsyncPgConnection};
 use uuid::Uuid;
 
-use crate::{error::{AppError, Result}, db::versions::Version};
+use crate::{
+	db::versions::Version,
+	error::{AppError, Result},
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Associations)]
 #[diesel(belongs_to(Version))]

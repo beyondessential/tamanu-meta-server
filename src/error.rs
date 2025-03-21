@@ -17,6 +17,12 @@ pub enum AppError {
 	// it's practically impossible to wrangle rocket's actual db error here, so string it
 	#[error("database: {0}")]
 	Database(String),
+
+	#[error("no versions match given range")]
+	NoMatchingVersions,
+
+	#[error("version range is not usable")]
+	UnusableRange,
 }
 
 impl AppError {
@@ -34,7 +40,11 @@ impl<'r, 'o: 'r> Responder<'r, 'o> for AppError {
 
 		Ok(Response::build()
 			.header(ContentType::JSON)
-			.status(Status::InternalServerError)
+			.status(match self {
+				Self::NoMatchingVersions => Status::NotFound,
+				Self::UnusableRange => Status::BadRequest,
+				_ => Status::InternalServerError,
+			})
 			.sized_body(json.len(), Cursor::new(json))
 			.finalize())
 	}

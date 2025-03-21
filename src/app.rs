@@ -4,7 +4,10 @@ use rocket_dyn_templates::Template;
 
 use crate::db::Db;
 
-pub use self::{tamanu_headers::TamanuHeaders, version::Version};
+pub use self::{
+	tamanu_headers::TamanuHeaders,
+	version::{Version, VersionRange},
+};
 
 pub mod artifacts;
 pub mod server_type;
@@ -40,6 +43,7 @@ pub fn rocket() -> Rocket<Build> {
 				versions::update_for,
 				versions::get_artifacts,
 				versions::view_artifacts,
+				versions::view_mobile_install,
 				artifacts::create,
 			],
 		)

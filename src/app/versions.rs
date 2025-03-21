@@ -3,7 +3,7 @@ use rocket_db_pools::{diesel::prelude::*, Connection};
 use rocket_dyn_templates::{context, Template};
 
 use crate::{
-	app::{TamanuHeaders, Version as ParsedVersion},
+	app::{TamanuHeaders, Version as ParsedVersion, VersionRange},
 	db::{
 		artifacts::Artifact,
 		devices::{AdminDevice, ReleaserDevice},
@@ -15,13 +15,13 @@ use crate::{
 
 #[get("/versions")]
 pub async fn list(mut db: Connection<Db>) -> Result<TamanuHeaders<Json<Vec<Version>>>> {
-	let versions = Version::get_all(&mut db).await;
+	let versions = Version::get_all(&mut db).await?;
 	Ok(TamanuHeaders::new(Json(versions)))
 }
 
 #[get("/versions/list")]
 pub async fn view(mut db: Connection<Db>) -> Result<TamanuHeaders<Template>> {
-	let versions = Version::get_all(&mut db).await;
+	let versions = Version::get_all(&mut db).await?;
 	Ok(TamanuHeaders::new(Template::render(
 		"versions",
 		context! {
@@ -98,11 +98,32 @@ pub async fn get_artifacts(
 	Ok(TamanuHeaders::new(Json(artifacts)))
 }
 
+#[get("/versions/<range>/mobile", rank = 1)]
+pub async fn view_mobile_install(
+	range: VersionRange,
+	mut db: Connection<Db>,
+) -> Result<TamanuHeaders<Template>> {
+	let version = Version::get_latest_matching(&mut db, range.0).await?;
+	let artifacts = Artifact::get_for_version(&mut db, version.id)
+		.await?
+		.into_iter()
+		.filter(|a| a.artifact_type == "mobile")
+		.collect::<Vec<_>>();
+
+	Ok(TamanuHeaders::new(Template::render(
+		"mobile",
+		context! {
+			version,
+			artifacts,
+		},
+	)))
+}
+
 #[get("/versions/update-for/<version>", rank = 2)]
 pub async fn update_for(
 	mut db: Connection<Db>,
 	version: ParsedVersion,
 ) -> Result<TamanuHeaders<Json<Vec<Version>>>> {
-	let updates = Version::get_updates_for_version(&mut db, version).await;
+	let updates = Version::get_updates_for_version(&mut db, version).await?;
 	Ok(TamanuHeaders::new(Json(updates)))
 }

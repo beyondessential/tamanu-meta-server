@@ -52,3 +52,14 @@ where
 		<String as serialize::ToSql<Text, diesel::pg::Pg>>::to_sql(&v, &mut out.reborrow())
 	}
 }
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct VersionRange(pub node_semver::Range);
+
+impl FromParam<'_> for VersionRange {
+	type Error = SemverError;
+
+	fn from_param(param: &'_ str) -> Result<Self, Self::Error> {
+		param.parse().map(Self)
+	}
+}

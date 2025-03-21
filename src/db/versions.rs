@@ -49,7 +49,11 @@ pub struct NewVersion {
 }
 
 impl Version {
-	pub async fn get_all(db: &mut AsyncPgConnection) -> Vec<Self> {
+	pub fn as_semver(&self) -> node_semver::Version {
+		node_semver::Version::new(self.major as _, self.minor as _, self.patch as _)
+	}
+
+	pub async fn get_all(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
 		use crate::schema::versions::*;
 
 		table
@@ -59,7 +63,7 @@ impl Version {
 			.then_order_by(patch.desc())
 			.load(db)
 			.await
-			.expect("Error loading versions")
+			.map_err(|err| AppError::Database(err.to_string()))
 	}
 
 	pub async fn get_by_version(
@@ -79,7 +83,7 @@ impl Version {
 	pub async fn get_updates_for_version(
 		db: &mut AsyncPgConnection,
 		version: ParsedVersion,
-	) -> Vec<Self> {
+	) -> Result<Vec<Self>> {
 		use crate::views::version_updates::dsl::*;
 		let node_semver::Version {
 			major: target_major,
@@ -99,6 +103,29 @@ impl Version {
 			.select(version_updates::all_columns())
 			.load(db)
 			.await
-			.expect("Error loading version updates")
+			.map_err(|err| AppError::Database(err.to_string()))
+	}
+
+	pub async fn get_latest_matching(
+		db: &mut AsyncPgConnection,
+		range: node_semver::Range,
+	) -> Result<Self> {
+		use crate::schema::versions::*;
+
+		table
+			.select(Version::as_select())
+			.filter(predicate_version!(range
+				.min_version()
+				.ok_or(AppError::UnusableRange)?))
+			.order_by(major.desc())
+			.then_order_by(minor.desc())
+			.then_order_by(patch.desc())
+			.load(db)
+			.await
+			.map_err(|err| AppError::Database(err.to_string()))?
+			.into_iter()
+			.filter(|v| range.satisfies(&v.as_semver()))
+			.next()
+			.ok_or(AppError::NoMatchingVersions)
 	}
 }

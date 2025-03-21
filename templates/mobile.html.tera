@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tamanu Mobile Download</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+        font-family: "Roboto", "Helvetica", "Arial", sans-serif;
+      }
+
+      body {
+        display: flex;
+        min-height: 100vh;
+        color: #333;
+      }
+
+      .content-container {
+        width: 50%;
+        padding: 40px;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .brand {
+        margin-bottom: 80px;
+      }
+
+      .brand img {
+        height: 48px;
+        display: block;
+      }
+
+      .download-container {
+        max-width: 500px;
+        width: 100%;
+        margin: 0 auto;
+        flex-grow: 1;
+      }
+
+      .download-title {
+        font-size: 38px;
+        font-weight: 500;
+        color: rgb(68, 68, 68);
+        margin-bottom: 12px;
+        line-height: 32px;
+      }
+
+      .download-subtitle {
+        font-size: 14px;
+        color: rgb(136, 136, 136);
+        margin-bottom: 40px;
+        line-height: 18px;
+        font-weight: 400;
+      }
+
+      .version-info {
+        display: inline-block;
+        background-color: #edf2f7;
+        padding: 8px 16px;
+        border-radius: 20px;
+        margin-bottom: 30px;
+        font-size: 13px;
+        color: rgb(102, 102, 102);
+        font-weight: 400;
+      }
+
+      .version-number {
+        font-weight: 500;
+        color: #3d6894;
+      }
+
+      .platform-card {
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 24px;
+        display: flex;
+        align-items: center;
+        transition: all 0.2s ease;
+        margin-bottom: 20px;
+      }
+
+      .platform-card:hover {
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+        transform: translateY(-2px);
+      }
+
+      .platform-icon {
+        width: 48px;
+        height: 48px;
+        margin-right: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .platform-info {
+        flex: 1;
+      }
+
+      .platform-name {
+        font-size: 16px;
+        font-weight: 500;
+        margin-bottom: 4px;
+        color: rgb(68, 68, 68);
+        line-height: 20px;
+      }
+
+      .platform-description {
+        font-size: 13px;
+        color: rgb(136, 136, 136);
+        line-height: 16px;
+        font-weight: 400;
+      }
+
+      .download-btn {
+        background-color: #3d6894;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        padding: 10px 20px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background-color 0.2s ease;
+      }
+
+      .download-btn:hover {
+        background-color: #34597d;
+      }
+
+      .notes {
+        margin-top: 20px;
+        font-size: 13px;
+        color: rgb(136, 136, 136);
+        line-height: 16px;
+        font-weight: 400;
+      }
+
+      @media (max-width: 768px) {
+        .content-container {
+          width: 100%;
+        }
+      }
+
+      /* Installation instructions section */
+      .installation-instructions {
+        display: none;
+        margin-top: 20px;
+        margin-bottom: 30px;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 20px;
+        background-color: #f8fafc;
+      }
+
+      .installation-instructions.visible {
+        display: block;
+      }
+
+      .installation-instructions h3 {
+        font-size: 15px;
+        font-weight: 500;
+        margin-bottom: 16px;
+        color: rgb(68, 68, 68);
+        line-height: 20px;
+      }
+
+      .installation-instructions ol {
+        margin-left: 20px;
+        margin-bottom: 16px;
+      }
+
+      .installation-instructions li {
+        margin-bottom: 10px;
+        line-height: 18px;
+        font-size: 13px;
+        color: rgb(102, 102, 102);
+      }
+
+      .installation-instructions .note {
+        font-size: 12px;
+        color: rgb(136, 136, 136);
+        font-style: italic;
+        margin-top: 16px;
+        line-height: 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="content-container">
+      <div class="brand">
+        <img
+          src="data:image/png;base64,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"
+          alt="Tamanu Logo"
+          style="height: 48px"
+        />
+      </div>
+
+      <div class="download-container">
+        <h1 class="download-title">Tamanu Mobile</h1>
+        <p class="download-subtitle">
+          Download the Tamanu Mobile application to access patient information,
+          capture data, and provide care even when offline.
+        </p>
+
+        <div class="version-info">
+          Current version:
+          <span class="version-number" id="version-display">
+            {{ version.major }}.{{ version.minor }}.{{ version.patch }}
+          </span>
+        </div>
+
+        {% for artifact in artifacts %}
+        <div class="platform-card">
+          <div class="platform-icon">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="32"
+              height="32"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#3d6894"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
+              <line x1="12" y1="18" x2="12" y2="18" />
+            </svg>
+          </div>
+          <div class="platform-info">
+            {% if artifact.platform == "android" %}
+            <h3 class="platform-name">Android</h3>
+            <p class="platform-description">For Android phones and tablets</p>
+            {% elif artifact.platform == "ios" %}
+            <h3 class="platform-name">iOS</h3>
+            <p class="platform-description">For Apple phones and tablets</p>
+            {% endif %}
+          </div>
+          <a href="{{ artifact.download_url }}" class="download-btn">Download</a>
+        </div>
+        {% endfor %}
+
+        <!-- Installation instructions (hidden until the download button is hit) -->
+        <div class="installation-instructions" id="installation-instructions">
+          <h3>Installation Instructions</h3>
+          <ol>
+            <li>Open your <strong>Downloads</strong> folder</li>
+            <li>Tap the downloaded <strong>app-release.apk</strong> file</li>
+            <li>Tap <strong>"Install"</strong> when prompted</li>
+            <li>After installation completes, tap <strong>"Open"</strong></li>
+          </ol>
+          <p class="note">
+            If you encounter any issues, please contact your administrator for
+            assistance.
+          </p>
+        </div>
+
+        <div class="notes">
+          <p>
+            <strong>Note:</strong> After downloading, you'll need to install the
+            application manually.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // Show installation instructions when download button is clicked
+      for (const el of document.querySelectorAll(".download-btn"))
+        el.addEventListener("click", function (e) {
+          // Start the download
+          // No need to prevent default - let the link work normally
+
+          // Show installation instructions after a short delay
+          setTimeout(() => {
+            document
+              .getElementById("installation-instructions")
+              .classList.add("visible");
+          }, 500);
+        });
+    </script>
+  </body>
+</html>
