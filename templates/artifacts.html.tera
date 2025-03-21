@@ -77,6 +77,6 @@
         </tbody>
     </table>
 
-    <a href="/versions/list" class="back-link">←  All versions</a>
+    <a href="/" class="back-link">←  All versions</a>
 </body>
 </html>
