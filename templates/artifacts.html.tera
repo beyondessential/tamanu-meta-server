@@ -46,21 +46,25 @@
     </style>
 </head>
 <body>
-    <h1>Artifacts for Version {{ version.major }}.{{ version.minor }}.{{ version.patch }}</h1>
+    <h1>Version {{ version.major }}.{{ version.minor }}.{{ version.patch }}</h1>
 
+    <h2>Changelog</h2>
+    <pre>{{ version.changelog }}</pre>
+
+    <h2>Artifacts</h2>
     <table>
         <thead>
             <tr>
-                <th>Platform</th>
                 <th>Type</th>
-                <th>Actions</th>
+                <th>Platform</th>
+                <th></th>
             </tr>
         </thead>
         <tbody>
             {% for artifact in artifacts %}
             <tr>
-                <td>{{ artifact.platform }}</td>
                 <td>{{ artifact.artifact_type }}</td>
+                <td>{{ artifact.platform }}</td>
                 <td>
                     <a href="{{ artifact.download_url }}" class="download-link">Download</a>
                 </td>
@@ -69,6 +73,6 @@
         </tbody>
     </table>
 
-    <a href="/versions/list" class="back-link">← Back to Versions</a>
+    <a href="/versions/list" class="back-link">←  All versions</a>
 </body>
 </html>

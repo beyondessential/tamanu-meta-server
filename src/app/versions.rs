@@ -70,45 +70,13 @@ pub async fn delete(
 	Ok(TamanuHeaders::new(()))
 }
 
-#[get("/versions/<version>/artifacts?<artifact_type>&<platform>", rank = 3)]
-pub async fn get_artifacts_for_version(
-	version: ParsedVersion,
-	artifact_type: Option<String>,
-	platform: Option<String>,
-	mut db: Connection<Db>,
-) -> Result<TamanuHeaders<Json<Vec<Artifact>>>> {
-	use crate::schema::{artifacts, versions};
-
-	let mut query = artifacts::table
-		.inner_join(versions::table)
-		.filter(crate::db::versions::predicate_version!(version.0))
-		.into_boxed();
-
-	if let Some(atype) = artifact_type {
-		query = query.filter(artifacts::artifact_type.eq(atype));
-	}
-
-	if let Some(plat) = platform {
-		query = query.filter(artifacts::platform.eq(plat));
-	}
-
-	let artifacts = query
-		.select(Artifact::as_select())
-		.load(&mut db)
-		.await
-		.map_err(|err| AppError::Database(err.to_string()))?;
-
-	Ok(TamanuHeaders::new(Json(artifacts)))
-}
-
 #[get("/versions/<version>/artifacts", rank = 1)]
 pub async fn view_artifacts(
 	version: ParsedVersion,
 	mut db: Connection<Db>,
 ) -> Result<TamanuHeaders<Template>> {
-	let version_clone = version.clone();
-	let target_version = Version::get_by_version(&mut db, version).await?;
-	let artifacts = get_artifacts_for_version(version_clone, None, None, db).await?;
+	let target_version = Version::get_by_version(&mut db, version.clone()).await?;
+	let artifacts = get_artifacts_for_version(version, None, None, db).await?;
 
 	Ok(TamanuHeaders::new(Template::render(
 		"artifacts",

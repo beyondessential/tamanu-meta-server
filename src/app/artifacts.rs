@@ -14,13 +14,13 @@ use crate::{
 
 use super::Version as ParsedVersion;
 
-#[post("/artifacts/<version>/<platform>/<artifact_type>", data = "<url>")]
+#[post("/artifacts/<version>/<artifact_type>/<platform>", data = "<url>")]
 pub async fn create(
 	_device: ReleaserDevice,
 	mut db: Connection<Db>,
 	version: ParsedVersion,
-	platform: String,
 	artifact_type: String,
+	platform: String,
 	url: String,
 ) -> Result<TamanuHeaders<Json<Artifact>>> {
 	let Version { id, .. } = Version::get_by_version(&mut db, version).await?;
