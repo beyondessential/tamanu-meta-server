@@ -1,15 +1,20 @@
 use std::collections::BTreeSet;
 
-use rocket_db_pools::Connection;
+use rocket_db_pools::{diesel::prelude::*, Connection};
 use rocket_dyn_templates::{context, Template};
+use rocket::serde::json::Json;
 use serde::Serialize;
+use uuid::Uuid;
 
 use crate::{
 	db::{
-		devices::AdminDevice, latest_statuses::LatestStatus, server_rank::ServerRank,
-		statuses::Status, Db,
+		devices::{AdminDevice, ServerDevice},
+		latest_statuses::LatestStatus,
+		server_rank::ServerRank,
+		statuses::{Status, NewStatus},
+		Db,
 	},
-	error::Result,
+	error::{AppError, Result},
 };
 
 use super::{TamanuHeaders, Version};
@@ -62,4 +67,28 @@ pub async fn view(mut db: Connection<Db>) -> Result<TamanuHeaders<Template>> {
 pub async fn reload(_device: AdminDevice, mut db: Connection<Db>) -> Result<TamanuHeaders<()>> {
 	Status::ping_servers_and_save(&mut db).await;
 	Ok(TamanuHeaders::new(()))
+}
+
+#[post("/status/<server_id>/<current_version>")]
+pub async fn create(
+	_device: ServerDevice,
+	mut db: Connection<Db>,
+	server_id: Uuid,
+	current_version: Version,
+) -> Result<TamanuHeaders<Json<Status>>> {
+	let input = NewStatus {
+		server_id,
+		latency_ms: None,
+		error: None,
+		version: Some(current_version),
+	};
+
+	let status = diesel::insert_into(crate::schema::statuses::table)
+		.values(input)
+		.returning(Status::as_select())
+		.get_result(&mut db)
+		.await
+		.map_err(|err| AppError::Database(err.to_string()))?;
+
+	Ok(TamanuHeaders::new(Json(status)))
 }
