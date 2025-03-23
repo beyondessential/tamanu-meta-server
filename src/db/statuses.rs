@@ -5,7 +5,7 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use futures::stream::{FuturesOrdered, StreamExt};
-use rocket::serde::Serialize;
+use rocket::serde::{Deserialize, Serialize};
 use rocket_db_pools::diesel::{prelude::*, AsyncPgConnection};
 use uuid::Uuid;
 
@@ -18,6 +18,17 @@ use crate::{app::Version, db::servers::Server};
 pub struct Status {
 	pub id: Uuid,
 	pub created_at: DateTime<Utc>,
+	pub server_id: Uuid,
+	pub latency_ms: Option<i32>,
+	pub version: Option<Version>,
+	pub error: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Insertable)]
+#[diesel(belongs_to(Server))]
+#[diesel(table_name = crate::schema::statuses)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewStatus {
 	pub server_id: Uuid,
 	pub latency_ms: Option<i32>,
 	pub version: Option<Version>,
