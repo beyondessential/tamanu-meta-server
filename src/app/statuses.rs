@@ -44,8 +44,8 @@ pub async fn view(mut db: Connection<Db>) -> Result<TamanuHeaders<Template>> {
 		})
 		.collect::<BTreeSet<_>>();
 	let bracket = LiveVersionsBracket {
-		min: versions.first().cloned().unwrap_or_default(),
-		max: versions.last().cloned().unwrap_or_default(),
+		min: versions.iter().next().cloned().unwrap_or_default(),
+		max: versions.iter().next_back().cloned().unwrap_or_default(),
 	};
 	let releases = versions
 		.iter()
