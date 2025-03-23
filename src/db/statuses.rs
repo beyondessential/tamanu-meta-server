@@ -5,7 +5,7 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use futures::stream::{FuturesOrdered, StreamExt};
-use rocket::serde::{Deserialize, Serialize};
+use rocket::serde::{Serialize};
 use rocket_db_pools::diesel::{prelude::*, AsyncPgConnection};
 use uuid::Uuid;
 
@@ -24,7 +24,7 @@ pub struct Status {
 	pub error: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Insertable)]
+#[derive(Debug, Insertable)]
 #[diesel(belongs_to(Server))]
 #[diesel(table_name = crate::schema::statuses)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
