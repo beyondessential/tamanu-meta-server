@@ -5,7 +5,7 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use futures::stream::{FuturesOrdered, StreamExt};
-use rocket::serde::{Serialize};
+use rocket::serde::Serialize;
 use rocket_db_pools::diesel::{prelude::*, AsyncPgConnection};
 use uuid::Uuid;
 

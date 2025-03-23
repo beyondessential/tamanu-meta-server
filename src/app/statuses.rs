@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 
+use rocket::serde::json::Json;
 use rocket_db_pools::{diesel::prelude::*, Connection};
 use rocket_dyn_templates::{context, Template};
-use rocket::serde::json::Json;
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -11,7 +11,7 @@ use crate::{
 		devices::{AdminDevice, ServerDevice},
 		latest_statuses::LatestStatus,
 		server_rank::ServerRank,
-		statuses::{Status, NewStatus},
+		statuses::{NewStatus, Status},
 		Db,
 	},
 	error::{AppError, Result},

@@ -135,8 +135,7 @@ impl Version {
 			.await
 			.map_err(|err| AppError::Database(err.to_string()))?
 			.into_iter()
-			.filter(|v| range.satisfies(&v.as_semver()))
-			.next()
+			.find(|v| range.satisfies(&v.as_semver()))
 			.ok_or(AppError::NoMatchingVersions)
 	}
 }

@@ -2,9 +2,7 @@ use diesel::{backend::Backend, deserialize, expression::AsExpression, serialize,
 use node_semver::SemverError;
 use rocket::{http::Header, request::FromParam, serde::Serialize};
 
-#[derive(
-	Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, AsExpression,
-)]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, AsExpression)]
 #[diesel(sql_type = Text)]
 pub struct Version(pub node_semver::Version);
 
