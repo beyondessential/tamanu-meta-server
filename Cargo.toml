@@ -24,7 +24,7 @@ diesel_migrations = "2.1.0"
 folktime = "0.2.1"
 futures = "0.3.31"
 ipnet = { version = "2.11.0", features = ["serde"] }
-markdown = "1.0.0-alpha.14"
+pulldown-cmark = { version = "0.13", features = ["html"] }
 node-semver = "2.2.0"
 rcgen = "0.13.2"
 reqwest = { version = "0.12.14", default-features = false, features = ["gzip", "json"] }

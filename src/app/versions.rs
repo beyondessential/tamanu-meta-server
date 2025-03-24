@@ -1,7 +1,7 @@
 use rocket::serde::json::Json;
 use rocket_db_pools::{diesel::prelude::*, Connection};
 use rocket_dyn_templates::{context, Template};
-use markdown;
+use pulldown_cmark::{Parser, html};
 
 use crate::{
 	app::{TamanuHeaders, Version as ParsedVersion, VersionRange},
@@ -15,7 +15,10 @@ use crate::{
 };
 
 fn parse_markdown(text: &str) -> String {
-	markdown::to_html(text)
+	let parser = Parser::new(text);
+	let mut html_output = String::new();
+	html::push_html(&mut html_output, parser);
+	html_output
 }
 
 #[get("/versions")]
@@ -106,7 +109,8 @@ pub async fn get_artifacts(
 	version: ParsedVersion,
 	mut db: Connection<Db>,
 ) -> Result<TamanuHeaders<Json<Vec<Artifact>>>> {
-	let version = Version::get_by_version(&mut db, version).await?;
+	let mut version = Version::get_by_version(&mut db, version).await?;
+	version.changelog = parse_markdown(&version.changelog);
 	let artifacts = Artifact::get_for_version(&mut db, version.id).await?;
 
 	Ok(TamanuHeaders::new(Json(artifacts)))
