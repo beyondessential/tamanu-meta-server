@@ -38,6 +38,21 @@ pub struct NewStatus {
 	pub error: Option<String>,
 	pub remote_ip: Option<IpNet>,
 	pub server_type: Option<String>,
+	pub extra: serde_json::Value,
+}
+
+impl Default for NewStatus {
+	fn default() -> Self {
+		Self {
+			server_id: Default::default(),
+			latency_ms: Default::default(),
+			version: Default::default(),
+			error: Default::default(),
+			remote_ip: Default::default(),
+			server_type: Default::default(),
+			extra: serde_json::Value::Object(Default::default()),
+		}
+	}
 }
 
 impl Status {

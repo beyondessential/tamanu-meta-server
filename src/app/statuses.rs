@@ -75,7 +75,7 @@ pub async fn reload(_device: AdminDevice, mut db: Connection<Db>) -> Result<Tama
 	Ok(TamanuHeaders::new(()))
 }
 
-#[post("/status/<server_id>")]
+#[post("/status/<server_id>", data = "<extra>")]
 pub async fn create(
 	device: ServerDevice,
 	remote_addr: IpAddr,
@@ -83,6 +83,7 @@ pub async fn create(
 	current_version: VersionHeader,
 	mut db: Connection<Db>,
 	server_id: Uuid,
+	extra: Option<Json<serde_json::Value>>,
 ) -> Result<TamanuHeaders<Json<Status>>> {
 	use rocket_db_pools::diesel::prelude::*;
 	let Device { role, id, .. } = device.0;
@@ -100,11 +101,17 @@ pub async fn create(
 	let remote_ip = IpNet::new(remote_addr, 32).unwrap();
 	let input = NewStatus {
 		server_id,
-		latency_ms: None,
-		error: None,
 		version: Some(current_version.0),
 		remote_ip: Some(remote_ip),
 		server_type: Some(server_type.to_string()),
+		extra: extra.map_or_else(
+			|| serde_json::Value::Object(Default::default()),
+			|j| match j.0 {
+				serde_json::Value::Null => serde_json::Value::Object(Default::default()),
+				v => v,
+			},
+		),
+		..Default::default()
 	};
 
 	let status = diesel::insert_into(crate::schema::statuses::table)
