@@ -23,7 +23,7 @@ fn parse_markdown(text: &str) -> String {
 
 #[get("/versions")]
 pub async fn list(mut db: Connection<Db>) -> Result<TamanuHeaders<Json<Vec<Version>>>> {
-	let mut versions = Version::get_all(&mut db).await?;
+	let versions = Version::get_all(&mut db).await?;
 	Ok(TamanuHeaders::new(Json(versions)))
 }
 
