@@ -104,7 +104,7 @@ pub async fn create(
 		error: None,
 		version: Some(current_version.0),
 		remote_ip: Some(remote_ip),
-		server_type: Some(server_type.0),
+		server_type: server_type.into(),
 	};
 
 	let status = diesel::insert_into(crate::schema::statuses::table)

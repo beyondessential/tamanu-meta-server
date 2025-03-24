@@ -4,6 +4,10 @@ pub mod sql_types {
 	#[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
 	#[diesel(postgres_type(name = "device_role"))]
 	pub struct DeviceRole;
+
+	#[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+	#[diesel(postgres_type(name = "server_type"))]
+	pub struct ServerType;
 }
 
 diesel::table! {
@@ -54,6 +58,9 @@ diesel::table! {
 }
 
 diesel::table! {
+	use diesel::sql_types::*;
+	use super::sql_types::{DeviceRole, ServerType};
+
 	statuses (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
@@ -62,7 +69,7 @@ diesel::table! {
 		version -> Nullable<Text>,
 		error -> Nullable<Text>,
 		remote_ip -> Nullable<Inet>,
-		server_type -> Nullable<Text>,
+		server_type -> Nullable<ServerType>,
 	}
 }
 

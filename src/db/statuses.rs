@@ -10,7 +10,10 @@ use rocket::serde::Serialize;
 use rocket_db_pools::diesel::{prelude::*, AsyncPgConnection};
 use uuid::Uuid;
 
-use crate::{app::Version, db::servers::Server};
+use crate::{
+	app::{server_type::ServerType, Version},
+	db::servers::Server,
+};
 
 #[derive(Debug, Clone, Serialize, Queryable, Selectable, Insertable, Associations)]
 #[diesel(belongs_to(Server))]
@@ -24,7 +27,7 @@ pub struct Status {
 	pub version: Option<Version>,
 	pub error: Option<String>,
 	pub remote_ip: Option<IpNet>,
-	pub server_type: Option<String>,
+	pub server_type: Option<ServerType>,
 }
 
 #[derive(Debug, Insertable)]
@@ -37,7 +40,7 @@ pub struct NewStatus {
 	pub version: Option<Version>,
 	pub error: Option<String>,
 	pub remote_ip: Option<IpNet>,
-	pub server_type: Option<String>,
+	pub server_type: Option<ServerType>,
 }
 
 impl Status {

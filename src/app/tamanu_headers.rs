@@ -16,14 +16,26 @@ impl<T> TamanuHeaders<T> {
 	pub fn new(inner: T) -> Self {
 		Self {
 			inner,
-			server_type: ServerType,
+			server_type: ServerType::Meta,
 			version: Version(node_semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap()),
 		}
 	}
 }
 
 #[derive(Debug, Clone)]
-pub struct ServerTypeHeader(pub String);
+pub enum ServerTypeHeader {
+	Central,
+	Facility,
+}
+
+impl From<ServerTypeHeader> for Option<ServerType> {
+	fn from(val: ServerTypeHeader) -> Self {
+		match val {
+			ServerTypeHeader::Central => Some(ServerType::Central),
+			ServerTypeHeader::Facility => Some(ServerType::Facility),
+		}
+	}
+}
 
 #[rocket::async_trait]
 impl<'r> FromRequest<'r> for ServerTypeHeader {
@@ -31,7 +43,11 @@ impl<'r> FromRequest<'r> for ServerTypeHeader {
 
 	async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
 		match request.headers().get_one("X-Tamanu-Server") {
-			Some(value) => Outcome::Success(ServerTypeHeader(value.to_string())),
+			Some(value) => match value {
+				"Tamanu Sync Server" => Outcome::Success(ServerTypeHeader::Central),
+				"Tamanu LAN Server" => Outcome::Success(ServerTypeHeader::Facility),
+				_ => Outcome::Error((Status::BadRequest, ())),
+			},
 			None => Outcome::Forward(Status::BadRequest),
 		}
 	}
