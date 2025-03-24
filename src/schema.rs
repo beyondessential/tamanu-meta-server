@@ -59,7 +59,7 @@ diesel::table! {
 
 diesel::table! {
 	use diesel::sql_types::*;
-	use super::sql_types::{DeviceRole, ServerType};
+	use super::sql_types::ServerType;
 
 	statuses (id) {
 		id -> Uuid,
