@@ -61,6 +61,8 @@ diesel::table! {
 		latency_ms -> Nullable<Int4>,
 		version -> Nullable<Text>,
 		error -> Nullable<Text>,
+		remote_ip -> Nullable<Inet>,
+		server_type -> Nullable<Text>,
 	}
 }
 
