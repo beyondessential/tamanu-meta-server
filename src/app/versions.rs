@@ -60,7 +60,6 @@ pub async fn create(
 		.await
 		.map_err(|err| AppError::Database(err.to_string()))?;
 
-	let mut version = version;
 	Ok(TamanuHeaders::new(Json(version)))
 }
 
