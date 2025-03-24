@@ -19,7 +19,7 @@ use crate::{
 	error::{AppError, Result},
 };
 
-use super::{TamanuHeaders, Version};
+use super::{server_type::ServerTypeHeader, TamanuHeaders, Version};
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
 pub struct LiveVersionsBracket {
@@ -75,11 +75,11 @@ pub async fn reload(_device: AdminDevice, mut db: Connection<Db>) -> Result<Tama
 pub async fn create(
 	_device: ServerDevice,
 	remote_addr: SocketAddr,
+	server_type: ServerTypeHeader,
 	mut db: Connection<Db>,
 	server_id: Uuid,
 	current_version: Version,
 ) -> Result<TamanuHeaders<Json<Status>>> {
-	// convert remote_addr to IpNet
 	let remote_ip = IpNet::new(remote_addr.ip(), 32).unwrap();
 	let input = NewStatus {
 		server_id,
@@ -87,7 +87,7 @@ pub async fn create(
 		error: None,
 		version: Some(current_version),
 		remote_ip: Some(remote_ip),
-		server_type: None,
+		server_type: Some(server_type.0),
 	};
 
 	let status = diesel::insert_into(crate::schema::statuses::table)
