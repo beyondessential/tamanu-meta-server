@@ -1,11 +1,10 @@
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, net::IpAddr};
 
 use ipnet::IpNet;
 use rocket::serde::json::Json;
 use rocket_db_pools::{diesel::prelude::*, Connection};
 use rocket_dyn_templates::{context, Template};
 use serde::Serialize;
-use std::net::SocketAddr;
 use uuid::Uuid;
 
 use crate::{
@@ -74,13 +73,13 @@ pub async fn reload(_device: AdminDevice, mut db: Connection<Db>) -> Result<Tama
 #[post("/status/<server_id>/<current_version>")]
 pub async fn create(
 	_device: ServerDevice,
-	remote_addr: SocketAddr,
+	remote_addr: IpAddr,
 	server_type: ServerTypeHeader,
 	mut db: Connection<Db>,
 	server_id: Uuid,
 	current_version: Version,
 ) -> Result<TamanuHeaders<Json<Status>>> {
-	let remote_ip = IpNet::new(remote_addr.ip(), 32).unwrap();
+	let remote_ip = IpNet::new(remote_addr, 32).unwrap();
 	let input = NewStatus {
 		server_id,
 		latency_ms: None,
