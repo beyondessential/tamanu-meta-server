@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::{
 	db::{
-		devices::{AdminDevice, ServerDevice},
+		devices::{AdminDevice, Device, ServerDevice},
 		latest_statuses::LatestStatus,
 		server_rank::ServerRank,
 		statuses::{NewStatus, Status},
@@ -72,13 +72,14 @@ pub async fn reload(_device: AdminDevice, mut db: Connection<Db>) -> Result<Tama
 
 #[post("/status/<server_id>/<current_version>")]
 pub async fn create(
-	_device: ServerDevice,
+	device: ServerDevice,
 	remote_addr: IpAddr,
 	server_type: ServerTypeHeader,
 	mut db: Connection<Db>,
 	server_id: Uuid,
 	current_version: Version,
 ) -> Result<TamanuHeaders<Json<Status>>> {
+	let Device{role, id, ..} = device.0;
 	let remote_ip = IpNet::new(remote_addr, 32).unwrap();
 	let input = NewStatus {
 		server_id,
