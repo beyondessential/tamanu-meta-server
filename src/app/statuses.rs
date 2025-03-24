@@ -2,7 +2,7 @@ use std::{collections::BTreeSet, net::IpAddr};
 
 use ipnet::IpNet;
 use rocket::serde::json::Json;
-use rocket_db_pools::{diesel::prelude::*, Connection};
+use rocket_db_pools::Connection;
 use rocket_dyn_templates::{context, Template};
 use serde::Serialize;
 use uuid::Uuid;
@@ -47,8 +47,8 @@ pub async fn view(mut db: Connection<Db>) -> Result<TamanuHeaders<Template>> {
 		})
 		.collect::<BTreeSet<_>>();
 	let bracket = LiveVersionsBracket {
-		min: versions.iter().next().cloned().unwrap_or_default(),
-		max: versions.iter().next_back().cloned().unwrap_or_default(),
+		min: versions.first().cloned().unwrap_or_default(),
+		max: versions.last().cloned().unwrap_or_default(),
 	};
 	let releases = versions
 		.iter()
@@ -81,6 +81,7 @@ pub async fn create(
 	server_id: Uuid,
 	current_version: Version,
 ) -> Result<TamanuHeaders<Json<Status>>> {
+	use rocket_db_pools::diesel::prelude::*;
 	let Device { role, id, .. } = device.0;
 
 	let is_authorized = role == DeviceRole::Admin || {
