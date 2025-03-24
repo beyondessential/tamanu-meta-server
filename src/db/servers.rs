@@ -60,7 +60,8 @@ fn test_server_serialization() {
   "id": "00000000-0000-0000-0000-000000000000",
   "name": "Test Server",
   "host": "https://example.com",
-  "rank": "production"
+  "rank": "production",
+  "device_id": "00000000-0000-0000-0000-000000000000"
 }"#
 	);
 }
