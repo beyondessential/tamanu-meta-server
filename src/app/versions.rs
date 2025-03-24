@@ -61,7 +61,6 @@ pub async fn create(
 		.map_err(|err| AppError::Database(err.to_string()))?;
 
 	let mut version = version;
-	version.changelog = parse_markdown(&version.changelog);
 	Ok(TamanuHeaders::new(Json(version)))
 }
 
@@ -106,8 +105,7 @@ pub async fn get_artifacts(
 	version: ParsedVersion,
 	mut db: Connection<Db>,
 ) -> Result<TamanuHeaders<Json<Vec<Artifact>>>> {
-	let mut version = Version::get_by_version(&mut db, version).await?;
-	version.changelog = parse_markdown(&version.changelog);
+	let version = Version::get_by_version(&mut db, version).await?;
 	let artifacts = Artifact::get_for_version(&mut db, version.id).await?;
 
 	Ok(TamanuHeaders::new(Json(artifacts)))
