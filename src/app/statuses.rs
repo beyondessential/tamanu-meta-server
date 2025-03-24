@@ -20,7 +20,10 @@ use crate::{
 	error::{AppError, Result},
 };
 
-use super::{server_type::ServerTypeHeader, TamanuHeaders, Version};
+use super::{
+	tamanu_headers::{ServerTypeHeader, VersionHeader},
+	TamanuHeaders, Version,
+};
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
 pub struct LiveVersionsBracket {
@@ -72,14 +75,14 @@ pub async fn reload(_device: AdminDevice, mut db: Connection<Db>) -> Result<Tama
 	Ok(TamanuHeaders::new(()))
 }
 
-#[post("/status/<server_id>/<current_version>")]
+#[post("/status/<server_id>")]
 pub async fn create(
 	device: ServerDevice,
 	remote_addr: IpAddr,
 	server_type: ServerTypeHeader,
+	current_version: VersionHeader,
 	mut db: Connection<Db>,
 	server_id: Uuid,
-	current_version: Version,
 ) -> Result<TamanuHeaders<Json<Status>>> {
 	use rocket_db_pools::diesel::prelude::*;
 	let Device { role, id, .. } = device.0;
@@ -99,7 +102,7 @@ pub async fn create(
 		server_id,
 		latency_ms: None,
 		error: None,
-		version: Some(current_version),
+		version: Some(current_version.0),
 		remote_ip: Some(remote_ip),
 		server_type: Some(server_type.0),
 	};

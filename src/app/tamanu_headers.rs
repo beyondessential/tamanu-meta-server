@@ -1,4 +1,9 @@
 use super::{server_type::ServerType, version::Version};
+use rocket::{
+	http::Status,
+	request::{FromParam, FromRequest, Outcome},
+	Request,
+};
 
 #[derive(Debug, Responder)]
 pub struct TamanuHeaders<T> {
@@ -13,6 +18,42 @@ impl<T> TamanuHeaders<T> {
 			inner,
 			server_type: ServerType,
 			version: Version(node_semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap()),
+		}
+	}
+}
+
+#[derive(Debug, Clone)]
+pub struct ServerTypeHeader(pub String);
+
+#[rocket::async_trait]
+impl<'r> FromRequest<'r> for ServerTypeHeader {
+	type Error = ();
+
+	async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
+		match request.headers().get_one("X-Tamanu-Server") {
+			Some(value) => Outcome::Success(ServerTypeHeader(value.to_string())),
+			None => Outcome::Forward(Status::BadRequest),
+		}
+	}
+}
+
+#[derive(Debug, Clone)]
+pub struct VersionHeader(pub Version);
+
+#[rocket::async_trait]
+impl<'r> FromRequest<'r> for VersionHeader {
+	type Error = ();
+
+	async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
+		match request.headers().get_one("X-Version") {
+			Some(value) => {
+				// Parse the string into your Version type
+				match Version::from_param(value) {
+					Ok(version) => Outcome::Success(VersionHeader(version)),
+					Err(_) => Outcome::Forward(Status::BadRequest),
+				}
+			}
+			None => Outcome::Forward(Status::BadRequest),
 		}
 	}
 }
