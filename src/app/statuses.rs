@@ -9,9 +9,11 @@ use uuid::Uuid;
 
 use crate::{
 	db::{
+		device_role::DeviceRole,
 		devices::{AdminDevice, Device, ServerDevice},
 		latest_statuses::LatestStatus,
 		server_rank::ServerRank,
+		servers::Server,
 		statuses::{NewStatus, Status},
 		Db,
 	},
@@ -79,7 +81,18 @@ pub async fn create(
 	server_id: Uuid,
 	current_version: Version,
 ) -> Result<TamanuHeaders<Json<Status>>> {
-	let Device{role, id, ..} = device.0;
+	let Device { role, id, .. } = device.0;
+
+	let is_authorized = role == DeviceRole::Admin || {
+		Server::get_by_id(&mut db, server_id).await?.device_id == id
+	};
+
+	if !is_authorized {
+		return Err(AppError::custom(
+			"device is not authorized to create statuses",
+		));
+	}
+
 	let remote_ip = IpNet::new(remote_addr, 32).unwrap();
 	let input = NewStatus {
 		server_id,
