@@ -23,7 +23,8 @@ diesel-derive-enum = { version = "2.1.0", features = ["postgres"] }
 diesel_migrations = "2.1.0"
 folktime = "0.2.1"
 futures = "0.3.31"
-ipnet = "2.11.0"
+ipnet = { version = "2.11.0", features = ["serde"] }
+markdown = "1.0.0-alpha.14"
 node-semver = "2.2.0"
 rcgen = "0.13.2"
 reqwest = { version = "0.12.14", default-features = false, features = ["gzip", "json"] }
