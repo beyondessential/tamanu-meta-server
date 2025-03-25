@@ -16,7 +16,10 @@ pub fn spawn(pool: Db) -> JoinHandle<()> {
 				continue;
 			};
 
-			Status::ping_servers_and_save(&mut db).await;
+			if let Err(err) = Status::ping_servers_and_save(&mut db).await {
+				error!("Failed to ping servers: {err}");
+				continue;
+			}
 		}
 	})
 }

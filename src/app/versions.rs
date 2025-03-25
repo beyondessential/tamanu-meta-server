@@ -1,7 +1,7 @@
+use pulldown_cmark::{html, Parser};
 use rocket::serde::json::Json;
 use rocket_db_pools::{diesel::prelude::*, Connection};
 use rocket_dyn_templates::{context, Template};
-use pulldown_cmark::{Parser, html};
 
 use crate::{
 	app::{TamanuHeaders, Version as ParsedVersion, VersionRange},

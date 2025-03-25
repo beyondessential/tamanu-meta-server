@@ -25,12 +25,12 @@ pub struct Server {
 }
 
 impl Server {
-	pub async fn get_all(db: &mut AsyncPgConnection) -> Vec<Self> {
+	pub async fn get_all(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
 		crate::views::ordered_servers::table
 			.select(Server::as_select())
 			.load(db)
 			.await
-			.expect("Error loading servers")
+			.map_err(|err| AppError::Database(err.to_string()))
 	}
 
 	pub async fn get_by_id(db: &mut AsyncPgConnection, id: Uuid) -> Result<Self> {

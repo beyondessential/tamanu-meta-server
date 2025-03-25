@@ -13,7 +13,16 @@ use crate::{
 
 #[get("/servers")]
 pub async fn list(mut db: Connection<Db>) -> Result<TamanuHeaders<Json<Vec<Server>>>> {
-	Ok(TamanuHeaders::new(Json(Server::get_all(&mut db).await)))
+	Ok(TamanuHeaders::new(Json(
+		Server::get_all(&mut db)
+			.await?
+			.into_iter()
+			.map(|mut s| {
+				s.device_id = None;
+				s
+			})
+			.collect(),
+	)))
 }
 
 #[post("/servers", data = "<input>")]

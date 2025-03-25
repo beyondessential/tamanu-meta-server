@@ -71,7 +71,7 @@ pub async fn view(mut db: Connection<Db>) -> Result<TamanuHeaders<Template>> {
 
 #[post("/reload")]
 pub async fn reload(_device: AdminDevice, mut db: Connection<Db>) -> Result<TamanuHeaders<()>> {
-	Status::ping_servers_and_save(&mut db).await;
+	Status::ping_servers_and_save(&mut db).await?;
 	Ok(TamanuHeaders::new(()))
 }
 

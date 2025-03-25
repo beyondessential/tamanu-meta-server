@@ -10,7 +10,11 @@ use rocket::serde::Serialize;
 use rocket_db_pools::diesel::{prelude::*, AsyncPgConnection};
 use uuid::Uuid;
 
-use crate::{app::Version, db::servers::Server};
+use crate::{
+	app::Version,
+	db::servers::Server,
+	error::{AppError, Result},
+};
 
 #[derive(Debug, Clone, Serialize, Queryable, Selectable, Insertable, Associations)]
 #[diesel(belongs_to(Server))]
@@ -95,12 +99,12 @@ impl Status {
 		}
 	}
 
-	pub async fn ping_servers(db: &mut AsyncPgConnection) -> Vec<(Self, Server)> {
+	pub async fn ping_servers(db: &mut AsyncPgConnection) -> Result<Vec<(Self, Server)>> {
 		let client = reqwest::ClientBuilder::new()
 			.timeout(Duration::from_secs(10))
 			.build()
 			.unwrap();
-		let statuses = FuturesOrdered::from_iter(Server::get_all(db).await.into_iter().map({
+		let statuses = FuturesOrdered::from_iter(Server::get_all(db).await?.into_iter().map({
 			let client = client.clone();
 			move |server| {
 				let client = client.clone();
@@ -108,13 +112,13 @@ impl Status {
 			}
 		}));
 
-		statuses.collect().await
+		Ok(statuses.collect().await)
 	}
 
-	pub async fn ping_servers_and_save(db: &mut AsyncPgConnection) {
+	pub async fn ping_servers_and_save(db: &mut AsyncPgConnection) -> Result<()> {
 		use crate::schema::statuses::dsl::*;
 
-		let servers = Self::ping_servers(db).await;
+		let servers = Self::ping_servers(db).await?;
 		diesel::insert_into(statuses)
 			.values(
 				&servers
@@ -124,6 +128,8 @@ impl Status {
 			)
 			.execute(db)
 			.await
-			.expect("Error inserting statuses");
+			.map_err(|err| AppError::Database(err.to_string()))?;
+
+		Ok(())
 	}
 }
