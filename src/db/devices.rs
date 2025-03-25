@@ -137,6 +137,7 @@ impl<'r> request::FromRequest<'r> for Device {
 				let pem = try_outcome!(req
 					.headers()
 					.get_one("mtls-certificate")
+					.or_else(|| req.headers().get_one("ssl-client-cert"))
 					.ok_or_else(|| AppError::custom("missing mtls-certificate header"))
 					.and_then(|s| RawStr::new(s).url_decode().map_err(AppError::custom))
 					.or_error(Status::BadRequest));

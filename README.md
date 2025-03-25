@@ -21,7 +21,7 @@ ghcr.io/beyondessential/tamanu-meta:3.1.4
 
 Routes marked with 🔐 require authentication.
 
-The `mtls-certificate` header should contain a PEM-encoded (optionally URL-encoded) X509 certificate.
+The `mtls-certificate` (or `ssl-client-cert`) header should contain a PEM-encoded (optionally URL-encoded) X509 certificate.
 
 In production, the header should be set from a client certificate, as terminated by a reverse proxy or load balancer, and any matching header on the incoming requests should be stripped.
 
