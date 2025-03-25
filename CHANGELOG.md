@@ -5,7 +5,15 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [3.1.0](https://github.com/beyondessential/tamanu-meta-server/compare/v3.0.4..3.1.0) - 2025-03-25
+## [3.1.1](https://github.com/beyondessential/tamanu-meta-server/compare/v3.1.0..3.1.1) - 2025-03-25
+
+
+- **Bugfix:** Fix header names (#36) - ([7a42367](https://github.com/beyondessential/tamanu-meta-server/commit/7a42367a70defb3591b9b90c4c3a58714b9314c1))
+- **Tweak:** Strip device_id from server list - ([fd74160](https://github.com/beyondessential/tamanu-meta-server/commit/fd741606f595e1066ad03d3e7cc4a7d3e5f47770))
+- **Tweak:** Strip device_id from server list entirely - ([bbd2393](https://github.com/beyondessential/tamanu-meta-server/commit/bbd23939fb6084090f3b813acc291409c35f617d))
+
+---
+## [3.1.0](https://github.com/beyondessential/tamanu-meta-server/compare/v3.0.4..v3.1.0) - 2025-03-25
 
 
 - **Feature:** Parse release notes markdown (#35) - ([e69c440](https://github.com/beyondessential/tamanu-meta-server/commit/e69c440a85e96a4f6ec2a828565b086e40a4d52e))
