@@ -27,17 +27,17 @@ ipnet = { version = "2.11.0", features = ["serde"] }
 pulldown-cmark = { version = "0.13", features = ["html"] }
 node-semver = "2.2.0"
 rcgen = "0.13.2"
-reqwest = { version = "0.12.14", default-features = false, features = ["gzip", "json"] }
+reqwest = { version = "0.12.15", default-features = false, features = ["gzip", "json"] }
 rocket = { version = "0.5.1", features = ["json", "mtls", "uuid"] }
 rocket_db_pools = { version = "0.2.0", features = ["diesel_postgres"] }
 rocket_dyn_templates = { version = "0.2.0", features = ["tera"] }
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
 thiserror = "2.0.12"
-time = "0.3.40"
+time = "0.3.41"
 url = { version = "2.5.4", features = ["serde"] }
 uuid = { version = "1.16.0", features = ["serde", "v4"] }
-x509-parser = "0.13.0"
+x509-parser = "0.17.0"
 
 [features]
 default = ["migrations-with-tokio-postgres", "tls-host-roots"]
