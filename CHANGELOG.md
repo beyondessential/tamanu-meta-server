@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [3.1.1](https://github.com/beyondessential/tamanu-meta-server/compare/v3.1.0..3.1.1) - 2025-03-25
+## [3.1.2](https://github.com/beyondessential/tamanu-meta-server/compare/v3.1.1..3.1.2) - 2025-03-25
+
+
+- **Tweak:** Match client header case-insensitively - ([395f35f](https://github.com/beyondessential/tamanu-meta-server/commit/395f35fbfacfbd3ee4b4ea792de611b747008ba6))
+
+---
+## [3.1.1](https://github.com/beyondessential/tamanu-meta-server/compare/v3.1.0..v3.1.1) - 2025-03-25
 
 
 - **Bugfix:** Fix header names (#36) - ([7a42367](https://github.com/beyondessential/tamanu-meta-server/commit/7a42367a70defb3591b9b90c4c3a58714b9314c1))
