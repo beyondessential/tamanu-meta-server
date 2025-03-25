@@ -5,6 +5,6 @@ pub struct ServerType;
 
 impl From<ServerType> for Header<'_> {
 	fn from(_: ServerType) -> Self {
-		Header::new("X-Tamanu-Server", "Tamanu Metadata Server")
+		Header::new("X-Tamanu-Client", "Tamanu Metadata Server")
 	}
 }
