@@ -14,7 +14,7 @@ impl Default for Version {
 
 impl From<Version> for Header<'_> {
 	fn from(version: Version) -> Self {
-		Header::new("X-Tamanu-Version", version.0.to_string())
+		Header::new("X-Version", version.0.to_string())
 	}
 }
 
