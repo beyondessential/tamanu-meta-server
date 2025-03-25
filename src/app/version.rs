@@ -60,6 +60,11 @@ impl FromParam<'_> for VersionRange {
 	type Error = SemverError;
 
 	fn from_param(param: &'_ str) -> Result<Self, Self::Error> {
-		param.parse().map(Self)
+		// TEMPORARY WORKAROUND for a bad default parameter in Tamanu
+		if let Some(rest) = param.strip_prefix("^") {
+			format!("~{rest}").parse().map(Self)
+		} else {
+			param.parse().map(Self)
+		}
 	}
 }
