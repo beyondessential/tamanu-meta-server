@@ -36,9 +36,14 @@ impl<'r> FromRequest<'r> for ServerTypeHeader {
 	type Error = ();
 
 	async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
-		match request.headers().get_one("X-Tamanu-Client") {
-			Some("Tamanu Sync Server") => Outcome::Success(ServerTypeHeader::Central),
-			Some("Tamanu LAN Server") => Outcome::Success(ServerTypeHeader::Facility),
+		match request
+			.headers()
+			.get_one("X-Tamanu-Client")
+			.map(|s| s.to_ascii_lowercase())
+			.as_deref()
+		{
+			Some("tamanu sync server" | "central") => Outcome::Success(ServerTypeHeader::Central),
+			Some("tamanu lan server" | "facility") => Outcome::Success(ServerTypeHeader::Facility),
 			Some(value) => Outcome::Success(ServerTypeHeader::Unknown(value.to_string())),
 			None => Outcome::Forward(Status::BadRequest),
 		}
