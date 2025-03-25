@@ -21,6 +21,7 @@ pub struct Server {
 	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub rank: ServerRank,
 
+	#[serde(skip_serializing_if = "Option::is_none")]
 	pub device_id: Option<Uuid>,
 }
 
