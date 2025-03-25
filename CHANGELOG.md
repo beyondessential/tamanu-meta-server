@@ -5,7 +5,17 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [3.0.4](https://github.com/beyondessential/tamanu-meta-server/compare/v3.0.3..3.0.4) - 2025-03-21
+## [3.1.0](https://github.com/beyondessential/tamanu-meta-server/compare/v3.0.4..3.1.0) - 2025-03-25
+
+
+- **Feature:** Parse release notes markdown (#35) - ([e69c440](https://github.com/beyondessential/tamanu-meta-server/commit/e69c440a85e96a4f6ec2a828565b086e40a4d52e))
+
+### Statuses
+
+- **Feature:** KAM-65: Add post endpoint for creating status entry (#33) - ([cc3ebc4](https://github.com/beyondessential/tamanu-meta-server/commit/cc3ebc450af879ac43bc47cdac86ea72cd12ba46))
+
+---
+## [3.0.4](https://github.com/beyondessential/tamanu-meta-server/compare/v3.0.3..v3.0.4) - 2025-03-21
 
 
 - **Bugfix:** Range matching - ([30c63dd](https://github.com/beyondessential/tamanu-meta-server/commit/30c63ddb08a1e51dea983bc38ce1bcbe68f54aed))
