@@ -30,7 +30,7 @@ diesel::table! {
 		name -> Text,
 		rank -> Text,
 		host -> Text,
-		device_id -> Uuid,
+		device_id -> Nullable<Uuid>,
 	}
 }
 

@@ -89,7 +89,7 @@ pub async fn create(
 	let Device { role, id, .. } = device.0;
 
 	let is_authorized = role == DeviceRole::Admin || {
-		Server::get_by_id(&mut db, server_id).await?.device_id == id
+		Server::get_by_id(&mut db, server_id).await?.device_id == Some(id)
 	};
 
 	if !is_authorized {

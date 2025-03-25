@@ -68,12 +68,10 @@ impl<'r> FromRequest<'r> for VersionHeader {
 
 	async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
 		match request.headers().get_one("X-Version") {
-			Some(value) => {
-				match Version::from_param(value) {
-					Ok(version) => Outcome::Success(VersionHeader(version)),
-					Err(_) => Outcome::Forward(Status::BadRequest),
-				}
-			}
+			Some(value) => match Version::from_param(value) {
+				Ok(version) => Outcome::Success(VersionHeader(version)),
+				Err(_) => Outcome::Forward(Status::BadRequest),
+			},
 			None => Outcome::Forward(Status::BadRequest),
 		}
 	}

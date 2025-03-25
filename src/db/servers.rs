@@ -21,7 +21,7 @@ pub struct Server {
 	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub rank: ServerRank,
 
-	pub device_id: Uuid,
+	pub device_id: Option<Uuid>,
 }
 
 impl Server {
@@ -50,7 +50,7 @@ fn test_server_serialization() {
 		name: "Test Server".to_string(),
 		rank: ServerRank::Production,
 		host: UrlField("https://example.com/".parse().unwrap()),
-		device_id: Uuid::nil(),
+		device_id: Some(Uuid::nil()),
 	};
 
 	let serialized = serde_json::to_string_pretty(&server).unwrap();
@@ -81,7 +81,7 @@ impl From<NewServer> for Server {
 			name: server.name,
 			rank: server.rank,
 			host: server.host,
-			device_id: server.device_id,
+			device_id: Some(server.device_id),
 		}
 	}
 }
