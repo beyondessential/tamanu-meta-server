@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [3.1.3](https://github.com/beyondessential/tamanu-meta-server/compare/v3.1.2..3.1.3) - 2025-03-25
+## [3.1.4](https://github.com/beyondessential/tamanu-meta-server/compare/v3.1.3..3.1.4) - 2025-03-25
+
+
+- **Tweak:** Workaround for a mistake in Tamanu - ([b1a1e07](https://github.com/beyondessential/tamanu-meta-server/commit/b1a1e07c8c6eafd4ef05f94437da505d6b160f3a))
+
+---
+## [3.1.3](https://github.com/beyondessential/tamanu-meta-server/compare/v3.1.2..v3.1.3) - 2025-03-25
 
 
 - **Tweak:** Enable tables and github-style markdown options - ([6a47070](https://github.com/beyondessential/tamanu-meta-server/commit/6a470706e5e21b51c16549686f71a627bd6db4aa))
