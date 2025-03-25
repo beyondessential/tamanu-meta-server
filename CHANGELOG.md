@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [3.1.4](https://github.com/beyondessential/tamanu-meta-server/compare/v3.1.3..3.1.4) - 2025-03-25
+## [3.1.5](https://github.com/beyondessential/tamanu-meta-server/compare/v3.1.4..3.1.5) - 2025-03-25
+
+
+- **Tweak:** Support ssl-client-cert alternative header - ([aa0d989](https://github.com/beyondessential/tamanu-meta-server/commit/aa0d989d8fcb2a1d3a682bdddbb37a153d933a3f))
+
+---
+## [3.1.4](https://github.com/beyondessential/tamanu-meta-server/compare/v3.1.3..v3.1.4) - 2025-03-25
 
 
 - **Tweak:** Workaround for a mistake in Tamanu - ([b1a1e07](https://github.com/beyondessential/tamanu-meta-server/commit/b1a1e07c8c6eafd4ef05f94437da505d6b160f3a))
