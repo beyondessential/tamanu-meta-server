@@ -25,9 +25,12 @@ pub async fn create(
 	let input = input.into_inner();
 	let server = Server::from(input);
 
-	diesel::insert_into(crate::views::ordered_servers::table)
-		.values(server.clone())
-		.execute(&mut db)
+	let server = diesel::insert_into(crate::views::ordered_servers::table)
+		.values(server)
+		.on_conflict(crate::views::ordered_servers::host)
+		.do_nothing()
+		.returning(Server::as_select())
+		.get_result(&mut db)
 		.await
 		.map_err(|err| AppError::Database(err.to_string()))?;
 

@@ -5,6 +5,7 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use futures::stream::{FuturesOrdered, StreamExt};
+use ipnet::IpNet;
 use rocket::serde::Serialize;
 use rocket_db_pools::diesel::{prelude::*, AsyncPgConnection};
 use uuid::Uuid;
@@ -22,6 +23,36 @@ pub struct Status {
 	pub latency_ms: Option<i32>,
 	pub version: Option<Version>,
 	pub error: Option<String>,
+	pub remote_ip: Option<IpNet>,
+	pub server_type: Option<String>,
+}
+
+#[derive(Debug, Insertable)]
+#[diesel(belongs_to(Server))]
+#[diesel(table_name = crate::schema::statuses)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewStatus {
+	pub server_id: Uuid,
+	pub latency_ms: Option<i32>,
+	pub version: Option<Version>,
+	pub error: Option<String>,
+	pub remote_ip: Option<IpNet>,
+	pub server_type: Option<String>,
+	pub extra: serde_json::Value,
+}
+
+impl Default for NewStatus {
+	fn default() -> Self {
+		Self {
+			server_id: Default::default(),
+			latency_ms: Default::default(),
+			version: Default::default(),
+			error: Default::default(),
+			remote_ip: Default::default(),
+			server_type: Default::default(),
+			extra: serde_json::Value::Object(Default::default()),
+		}
+	}
 }
 
 impl Status {
@@ -59,6 +90,8 @@ impl Status {
 			latency_ms: Some(start.elapsed().as_millis().try_into().unwrap_or(i32::MAX)),
 			version,
 			error,
+			remote_ip: None,
+			server_type: None,
 		}
 	}
 

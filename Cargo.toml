@@ -18,7 +18,7 @@ default-run = "server"
 chrono = { version = "0.4.39", features = ["serde"] }
 clap = { version = "4.5.32", features = ["derive"] }
 deadpool = "0.12.2"
-diesel = { version = "2.1.6", features = ["chrono", "ipnet-address", "uuid"] }
+diesel = { version = "2.1.6", features = ["chrono", "ipnet-address", "serde_json", "uuid"] }
 diesel-derive-enum = { version = "2.1.0", features = ["postgres"] }
 diesel_migrations = "2.1.0"
 folktime = "0.2.1"

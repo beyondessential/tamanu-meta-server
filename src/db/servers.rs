@@ -5,6 +5,8 @@ use uuid::Uuid;
 use super::server_rank::ServerRank;
 use super::url_field::UrlField;
 
+use crate::error::{AppError, Result};
+
 #[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable)]
 #[diesel(table_name = crate::views::ordered_servers)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -18,6 +20,8 @@ pub struct Server {
 
 	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub rank: ServerRank,
+
+	pub device_id: Option<Uuid>,
 }
 
 impl Server {
@@ -28,6 +32,15 @@ impl Server {
 			.await
 			.expect("Error loading servers")
 	}
+
+	pub async fn get_by_id(db: &mut AsyncPgConnection, id: Uuid) -> Result<Self> {
+		crate::views::ordered_servers::table
+			.select(Server::as_select())
+			.filter(crate::views::ordered_servers::id.eq(id))
+			.first(db)
+			.await
+			.map_err(|err| AppError::Database(err.to_string()))
+	}
 }
 
 #[test]
@@ -37,6 +50,7 @@ fn test_server_serialization() {
 		name: "Test Server".to_string(),
 		rank: ServerRank::Production,
 		host: UrlField("https://example.com/".parse().unwrap()),
+		device_id: Some(Uuid::nil()),
 	};
 
 	let serialized = serde_json::to_string_pretty(&server).unwrap();
@@ -46,7 +60,8 @@ fn test_server_serialization() {
   "id": "00000000-0000-0000-0000-000000000000",
   "name": "Test Server",
   "host": "https://example.com",
-  "rank": "production"
+  "rank": "production",
+  "device_id": "00000000-0000-0000-0000-000000000000"
 }"#
 	);
 }
@@ -56,6 +71,7 @@ pub struct NewServer {
 	pub name: String,
 	pub rank: ServerRank,
 	pub host: UrlField,
+	pub device_id: Uuid,
 }
 
 impl From<NewServer> for Server {
@@ -65,6 +81,7 @@ impl From<NewServer> for Server {
 			name: server.name,
 			rank: server.rank,
 			host: server.host,
+			device_id: Some(server.device_id),
 		}
 	}
 }

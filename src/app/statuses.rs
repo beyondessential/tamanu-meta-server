@@ -1,18 +1,29 @@
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, net::IpAddr};
 
+use ipnet::IpNet;
+use rocket::serde::json::Json;
 use rocket_db_pools::Connection;
 use rocket_dyn_templates::{context, Template};
 use serde::Serialize;
+use uuid::Uuid;
 
 use crate::{
 	db::{
-		devices::AdminDevice, latest_statuses::LatestStatus, server_rank::ServerRank,
-		statuses::Status, Db,
+		device_role::DeviceRole,
+		devices::{AdminDevice, Device, ServerDevice},
+		latest_statuses::LatestStatus,
+		server_rank::ServerRank,
+		servers::Server,
+		statuses::{NewStatus, Status},
+		Db,
 	},
-	error::Result,
+	error::{AppError, Result},
 };
 
-use super::{TamanuHeaders, Version};
+use super::{
+	tamanu_headers::{ServerTypeHeader, VersionHeader},
+	TamanuHeaders, Version,
+};
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
 pub struct LiveVersionsBracket {
@@ -62,4 +73,53 @@ pub async fn view(mut db: Connection<Db>) -> Result<TamanuHeaders<Template>> {
 pub async fn reload(_device: AdminDevice, mut db: Connection<Db>) -> Result<TamanuHeaders<()>> {
 	Status::ping_servers_and_save(&mut db).await;
 	Ok(TamanuHeaders::new(()))
+}
+
+#[post("/status/<server_id>", data = "<extra>")]
+pub async fn create(
+	device: ServerDevice,
+	remote_addr: IpAddr,
+	server_type: ServerTypeHeader,
+	current_version: VersionHeader,
+	mut db: Connection<Db>,
+	server_id: Uuid,
+	extra: Option<Json<serde_json::Value>>,
+) -> Result<TamanuHeaders<Json<Status>>> {
+	use rocket_db_pools::diesel::prelude::*;
+	let Device { role, id, .. } = device.0;
+
+	let is_authorized = role == DeviceRole::Admin || {
+		Server::get_by_id(&mut db, server_id).await?.device_id == Some(id)
+	};
+
+	if !is_authorized {
+		return Err(AppError::custom(
+			"device is not authorized to create statuses",
+		));
+	}
+
+	let remote_ip = IpNet::new(remote_addr, 32).unwrap();
+	let input = NewStatus {
+		server_id,
+		version: Some(current_version.0),
+		remote_ip: Some(remote_ip),
+		server_type: Some(server_type.to_string()),
+		extra: extra.map_or_else(
+			|| serde_json::Value::Object(Default::default()),
+			|j| match j.0 {
+				serde_json::Value::Null => serde_json::Value::Object(Default::default()),
+				v => v,
+			},
+		),
+		..Default::default()
+	};
+
+	let status = diesel::insert_into(crate::schema::statuses::table)
+		.values(input)
+		.returning(Status::as_select())
+		.get_result(&mut db)
+		.await
+		.map_err(|err| AppError::Database(err.to_string()))?;
+
+	Ok(TamanuHeaders::new(Json(status)))
 }
