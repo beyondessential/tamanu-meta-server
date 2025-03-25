@@ -1,4 +1,4 @@
-use pulldown_cmark::{html, Parser};
+use pulldown_cmark::{html, Parser, Options};
 use rocket::serde::json::Json;
 use rocket_db_pools::{diesel::prelude::*, Connection};
 use rocket_dyn_templates::{context, Template};
@@ -15,7 +15,13 @@ use crate::{
 };
 
 fn parse_markdown(text: &str) -> String {
-	let parser = Parser::new(text);
+	let mut options = Options::empty();
+	options.insert(Options::ENABLE_FOOTNOTES);
+	options.insert(Options::ENABLE_GFM);
+	options.insert(Options::ENABLE_SMART_PUNCTUATION);
+	options.insert(Options::ENABLE_STRIKETHROUGH);
+	options.insert(Options::ENABLE_TABLES);
+	let parser = Parser::new_ext(text, options);
 	let mut html_output = String::new();
 	html::push_html(&mut html_output, parser);
 	html_output
