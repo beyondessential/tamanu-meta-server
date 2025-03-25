@@ -1,6 +1,7 @@
 use rocket::serde::json::Json;
 use rocket_db_pools::{diesel::prelude::*, Connection};
 use rocket_dyn_templates::{context, Template};
+use pulldown_cmark::{Parser, html};
 
 use crate::{
 	app::{TamanuHeaders, Version as ParsedVersion, VersionRange},
@@ -13,6 +14,13 @@ use crate::{
 	Db,
 };
 
+fn parse_markdown(text: &str) -> String {
+	let parser = Parser::new(text);
+	let mut html_output = String::new();
+	html::push_html(&mut html_output, parser);
+	html_output
+}
+
 #[get("/versions")]
 pub async fn list(mut db: Connection<Db>) -> Result<TamanuHeaders<Json<Vec<Version>>>> {
 	let versions = Version::get_all(&mut db).await?;
@@ -21,7 +29,10 @@ pub async fn list(mut db: Connection<Db>) -> Result<TamanuHeaders<Json<Vec<Versi
 
 #[get("/")]
 pub async fn view(mut db: Connection<Db>) -> Result<TamanuHeaders<Template>> {
-	let versions = Version::get_all(&mut db).await?;
+	let mut versions = Version::get_all(&mut db).await?;
+	for version in &mut versions {
+		version.changelog = parse_markdown(&version.changelog);
+	}
 	Ok(TamanuHeaders::new(Template::render(
 		"versions",
 		context! {
@@ -75,7 +86,8 @@ pub async fn view_artifacts(
 	version: ParsedVersion,
 	mut db: Connection<Db>,
 ) -> Result<TamanuHeaders<Template>> {
-	let version = Version::get_by_version(&mut db, version).await?;
+	let mut version = Version::get_by_version(&mut db, version).await?;
+	version.changelog = parse_markdown(&version.changelog);
 	let artifacts = Artifact::get_for_version(&mut db, version.id).await?;
 
 	Ok(TamanuHeaders::new(Template::render(
