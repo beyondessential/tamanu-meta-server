@@ -37,7 +37,8 @@ pub async fn create(
 	let server = diesel::insert_into(crate::views::ordered_servers::table)
 		.values(server)
 		.on_conflict(crate::views::ordered_servers::host)
-		.do_nothing()
+		.do_update()
+		.set(crate::views::ordered_servers::host.eq(crate::views::ordered_servers::host))
 		.returning(Server::as_select())
 		.get_result(&mut db)
 		.await

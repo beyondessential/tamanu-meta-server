@@ -69,8 +69,8 @@ fn test_server_serialization() {
 
 #[derive(Debug, Deserialize)]
 pub struct NewServer {
-	pub name: String,
-	pub rank: ServerRank,
+	pub name: Option<String>,
+	pub rank: Option<ServerRank>,
 	pub host: UrlField,
 	pub device_id: Uuid,
 }
@@ -79,8 +79,8 @@ impl From<NewServer> for Server {
 	fn from(server: NewServer) -> Self {
 		Server {
 			id: Uuid::new_v4(),
-			name: server.name,
-			rank: server.rank,
+			name: server.name.unwrap_or_default(),
+			rank: server.rank.unwrap_or_default(),
 			host: server.host,
 			device_id: Some(server.device_id),
 		}

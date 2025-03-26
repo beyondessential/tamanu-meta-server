@@ -34,6 +34,9 @@ pub struct LiveVersionsBracket {
 #[get("/status")]
 pub async fn view(mut db: Connection<Db>) -> Result<TamanuHeaders<Template>> {
 	let entries = LatestStatus::fetch(&mut db).await;
+	let entries: Vec<_> = entries.into_iter()
+		.filter(|status| !status.server_name.is_empty() && !matches!(status.server_rank, ServerRank::Dev))
+		.collect();
 
 	let versions = entries
 		.iter()
