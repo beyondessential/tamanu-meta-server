@@ -14,12 +14,12 @@ pub struct Server {
 	pub id: Uuid,
 
 	// name and host are required for the public API
-	pub name: String,
+	pub name: Option<String>,
 	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub host: UrlField,
 
 	#[diesel(deserialize_as = String, serialize_as = String)]
-	pub rank: ServerRank,
+	pub rank: Option<ServerRank>,
 
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub device_id: Option<Uuid>,
@@ -48,8 +48,8 @@ impl Server {
 fn test_server_serialization() {
 	let server = Server {
 		id: Uuid::nil(),
-		name: "Test Server".to_string(),
-		rank: ServerRank::Production,
+		name: Some("Test Server".to_string()),
+		rank: Some(ServerRank::Production),
 		host: UrlField("https://example.com/".parse().unwrap()),
 		device_id: Some(Uuid::nil()),
 	};
@@ -79,8 +79,8 @@ impl From<NewServer> for Server {
 	fn from(server: NewServer) -> Self {
 		Server {
 			id: Uuid::new_v4(),
-			name: server.name.unwrap_or_default(),
-			rank: server.rank.unwrap_or_default(),
+			name: server.name,
+			rank: server.rank,
 			host: server.host,
 			device_id: Some(server.device_id),
 		}
