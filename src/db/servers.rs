@@ -14,7 +14,9 @@ pub struct Server {
 	pub id: Uuid,
 
 	// name and host are required for the public API
+	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub name: Option<String>,
+
 	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub host: UrlField,
 
