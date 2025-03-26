@@ -15,9 +15,9 @@ pub struct LatestStatus {
 	pub server_id: Uuid,
 	pub server_created_at: DateTime<Utc>,
 	pub server_updated_at: DateTime<Utc>,
-	pub server_name: String,
+	pub server_name: Some<String>,
 	#[diesel(deserialize_as = String, serialize_as = String)]
-	pub server_rank: ServerRank,
+	pub server_rank: Some<ServerRank>,
 	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub server_host: UrlField,
 

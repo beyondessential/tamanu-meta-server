@@ -63,7 +63,7 @@ diesel::table! {
 		error -> Nullable<Text>,
 		remote_ip -> Nullable<Inet>,
 		server_type -> Nullable<Text>,
-		extra -> Jsonb,
+		extra -> Nullable<Jsonb>,
 	}
 }
 
