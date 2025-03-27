@@ -4,7 +4,10 @@ use rocket_db_pools::{diesel::prelude::*, Connection};
 use crate::{
 	app::TamanuHeaders,
 	db::{
-		device_role::DeviceRole, devices::{AdminDevice, ServerDevice}, servers::{NewServer, PartialServer, Server}, Db
+		device_role::DeviceRole,
+		devices::{AdminDevice, ServerDevice},
+		servers::{NewServer, PartialServer, Server},
+		Db,
 	},
 	error::{AppError, Result},
 };
@@ -36,28 +39,29 @@ pub async fn create(
 		.values(server.clone())
 		.returning(Server::as_select())
 		.get_result(&mut db)
-		.await {
-			Ok(server) => {
-				Ok(TamanuHeaders::new(Json(server)))
+		.await
+	{
+		Ok(server) => Ok(TamanuHeaders::new(Json(server))),
+		Err(diesel::result::Error::DatabaseError(
+			diesel::result::DatabaseErrorKind::UniqueViolation,
+			_,
+		)) => {
+			let target_server =
+				Server::get_by_host(&mut db, String::from(server.clone().host)).await?;
+			if device.0.role != DeviceRole::Admin && target_server.device_id != Some(device.0.id) {
+				return Err(AppError::custom("You are not allowed to edit this server"));
 			}
-			Err(diesel::result::Error::DatabaseError(diesel::result::DatabaseErrorKind::UniqueViolation, _)) => {
-				let target_server = Server::get_by_host(&mut db, String::from(server.clone().host)).await?;
-				if device.0.role != DeviceRole::Admin && target_server.device_id != Some(device.0.id) {
-					return Err(AppError::custom("You are not allowed to edit this server"));
-				}
-				let updated_server = diesel::update(crate::views::ordered_servers::table)
-					.filter(crate::views::ordered_servers::id.eq(target_server.id))
-					.set(server)
-					.returning(Server::as_select())
-					.get_result(&mut db)
-					.await
-					.map_err(|err| AppError::Database(err.to_string()))?;
-				Ok(TamanuHeaders::new(Json(updated_server)))
-			}
-			Err(err) => {
-				Err(AppError::Database(err.to_string()))
-			}
+			let updated_server = diesel::update(crate::views::ordered_servers::table)
+				.filter(crate::views::ordered_servers::id.eq(target_server.id))
+				.set(server)
+				.returning(Server::as_select())
+				.get_result(&mut db)
+				.await
+				.map_err(|err| AppError::Database(err.to_string()))?;
+			Ok(TamanuHeaders::new(Json(updated_server)))
 		}
+		Err(err) => Err(AppError::Database(err.to_string())),
+	}
 }
 
 #[patch("/servers", data = "<input>")]
