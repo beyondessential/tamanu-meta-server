@@ -7,7 +7,7 @@ use super::url_field::UrlField;
 
 use crate::error::{AppError, Result};
 
-#[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable)]
+#[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable, AsChangeset)]
 #[diesel(table_name = crate::views::ordered_servers)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Server {
@@ -38,6 +38,14 @@ impl Server {
 		crate::views::ordered_servers::table
 			.select(Server::as_select())
 			.filter(crate::views::ordered_servers::id.eq(id))
+			.first(db)
+			.await
+			.map_err(|err| AppError::Database(err.to_string()))
+	}
+	pub async fn get_by_host(db: &mut AsyncPgConnection, host: String) -> Result<Self> {
+		crate::views::ordered_servers::table
+			.select(Server::as_select())
+			.filter(crate::views::ordered_servers::host.eq(host))
 			.first(db)
 			.await
 			.map_err(|err| AppError::Database(err.to_string()))
