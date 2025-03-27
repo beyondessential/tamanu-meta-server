@@ -1,8 +1,16 @@
 use std::fmt::Display;
 
+use diesel::{
+	backend::Backend,
+	deserialize::{self, FromSql},
+	expression::AsExpression,
+	serialize::{self, Output, ToSql},
+	sql_types::Text,
+};
 use rocket::serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, AsExpression)]
+#[diesel(sql_type = Text)]
 #[serde(rename_all = "lowercase")]
 pub enum ServerRank {
 	Production,
@@ -46,5 +54,26 @@ impl From<ServerRank> for String {
 			ServerRank::Dev => "dev",
 		}
 		.into()
+	}
+}
+
+impl<DB> FromSql<Text, DB> for ServerRank
+where
+	DB: Backend,
+	String: FromSql<Text, DB>,
+{
+	fn from_sql(bytes: DB::RawValue<'_>) -> deserialize::Result<Self> {
+		let s = String::from_sql(bytes)?;
+		ServerRank::try_from(s.clone()).map_err(|_| format!("Unrecognized variant {}", s).into())
+	}
+}
+
+impl ToSql<Text, diesel::pg::Pg> for ServerRank
+where
+	String: ToSql<Text, diesel::pg::Pg>,
+{
+	fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, diesel::pg::Pg>) -> serialize::Result {
+		let v = String::from(*self);
+		<String as ToSql<Text, diesel::pg::Pg>>::to_sql(&v, &mut out.reborrow())
 	}
 }

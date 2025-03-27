@@ -18,7 +18,7 @@ pub struct Server {
 	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub host: UrlField,
 
-	#[diesel(deserialize_as = String, serialize_as = String)]
+	// #[diesel(deserialize_as = Option<String>, serialize_as = Option<String>)]
 	pub rank: Option<ServerRank>,
 
 	#[serde(skip_serializing_if = "Option::is_none")]

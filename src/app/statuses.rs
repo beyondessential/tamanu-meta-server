@@ -38,7 +38,7 @@ pub async fn view(mut db: Connection<Db>) -> Result<TamanuHeaders<Template>> {
 	let versions = entries
 		.iter()
 		.filter_map(|status| {
-			if let (Some(version), true, Some(ServerRank::Production)) = (
+			if let (Some(version), true, ServerRank::Production) = (
 				status.latest_success_version.clone(),
 				status.is_up,
 				status.server_rank,
