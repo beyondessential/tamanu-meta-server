@@ -1,6 +1,3 @@
-ALTER TABLE servers ALTER COLUMN name SET NOT NULL;
-ALTER TABLE servers ALTER COLUMN rank SET NOT NULL;
-
 CREATE OR REPLACE VIEW latest_statuses AS (
 	with
 	successes as (
@@ -62,3 +59,7 @@ CREATE OR REPLACE VIEW latest_statuses AS (
      END
     ), servers.name
 );
+
+ALTER TABLE servers ALTER COLUMN rank SET NOT NULL;
+ALTER TABLE servers ALTER COLUMN name SET NOT NULL;
+
