@@ -46,8 +46,8 @@ diesel::table! {
 		id -> Uuid,
 		created_at -> Timestamptz,
 		updated_at -> Timestamptz,
-		name -> Text,
-		rank -> Text,
+		name -> Nullable<Text>,
+		rank -> Nullable<Text>,
 		host -> Text,
 		device_id -> Nullable<Uuid>,
 	}
@@ -63,7 +63,7 @@ diesel::table! {
 		error -> Nullable<Text>,
 		remote_ip -> Nullable<Inet>,
 		server_type -> Nullable<Text>,
-		extra -> Jsonb,
+		extra -> Nullable<Jsonb>,
 	}
 }
 

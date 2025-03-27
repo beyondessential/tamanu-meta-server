@@ -7,19 +7,19 @@ use super::url_field::UrlField;
 
 use crate::error::{AppError, Result};
 
-#[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable)]
+#[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable, AsChangeset)]
 #[diesel(table_name = crate::views::ordered_servers)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Server {
 	pub id: Uuid,
 
-	// name and host are required for the public API
-	pub name: String,
+	pub name: Option<String>,
+
 	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub host: UrlField,
 
-	#[diesel(deserialize_as = String, serialize_as = String)]
-	pub rank: ServerRank,
+	// #[diesel(deserialize_as = Option<String>, serialize_as = Option<String>)]
+	pub rank: Option<ServerRank>,
 
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub device_id: Option<Uuid>,
@@ -42,14 +42,22 @@ impl Server {
 			.await
 			.map_err(|err| AppError::Database(err.to_string()))
 	}
+	pub async fn get_by_host(db: &mut AsyncPgConnection, host: String) -> Result<Self> {
+		crate::views::ordered_servers::table
+			.select(Server::as_select())
+			.filter(crate::views::ordered_servers::host.eq(host))
+			.first(db)
+			.await
+			.map_err(|err| AppError::Database(err.to_string()))
+	}
 }
 
 #[test]
 fn test_server_serialization() {
 	let server = Server {
 		id: Uuid::nil(),
-		name: "Test Server".to_string(),
-		rank: ServerRank::Production,
+		name: Some("Test Server".to_string()),
+		rank: Some(ServerRank::Production),
 		host: UrlField("https://example.com/".parse().unwrap()),
 		device_id: Some(Uuid::nil()),
 	};
@@ -69,8 +77,8 @@ fn test_server_serialization() {
 
 #[derive(Debug, Deserialize)]
 pub struct NewServer {
-	pub name: String,
-	pub rank: ServerRank,
+	pub name: Option<String>,
+	pub rank: Option<ServerRank>,
 	pub host: UrlField,
 	pub device_id: Uuid,
 }
