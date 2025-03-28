@@ -1,6 +1,9 @@
 ALTER TABLE servers ADD COLUMN kind TEXT NOT NULL DEFAULT 'central';
 CREATE INDEX servers_kind ON servers (kind);
 
+DROP INDEX statuses_server_type;
+ALTER TABLE statuses DROP COLUMN server_type CASCADE;
+
 CREATE FUNCTION rank_order(rank text) RETURNS int
 LANGUAGE SQL
 IMMUTABLE
@@ -89,6 +92,3 @@ CREATE OR REPLACE VIEW latest_statuses AS (
 		END
 	), servers.name
 );
-
-DROP INDEX statuses_server_type;
-ALTER TABLE statuses DROP COLUMN server_type CASCADE;

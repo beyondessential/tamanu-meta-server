@@ -1,6 +1,9 @@
 ALTER TABLE statuses ADD COLUMN server_type TEXT;
 CREATE INDEX statuses_server_type ON statuses (server_type);
 
+DROP INDEX servers_kind;
+ALTER TABLE servers DROP COLUMN kind CASCADE;
+
 CREATE OR REPLACE VIEW latest_statuses AS (
 	with
 	successes as (
@@ -65,9 +68,6 @@ CREATE OR REPLACE VIEW latest_statuses AS (
 		END
 	), servers.name
 );
-
-DROP INDEX servers_kind;
-ALTER TABLE servers DROP COLUMN kind CASCADE;
 
 CREATE OR REPLACE VIEW ordered_servers AS (
 	select * from servers
