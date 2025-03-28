@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [3.2.4](https://github.com/beyondessential/tamanu-meta-server/compare/v3.2.3..3.2.4) - 2025-03-28
+## [3.2.5](https://github.com/beyondessential/tamanu-meta-server/compare/v3.2.4..3.2.5) - 2025-03-28
+
+
+- **Refactor:** Add error handling on /status page - ([fef43fc](https://github.com/beyondessential/tamanu-meta-server/commit/fef43fc544a9219aeb6818949dc682688b1f6018))
+
+---
+## [3.2.4](https://github.com/beyondessential/tamanu-meta-server/compare/v3.2.3..v3.2.4) - 2025-03-28
 
 
 - **Tweak:** Only show public fields on /servers route - ([e85402e](https://github.com/beyondessential/tamanu-meta-server/commit/e85402e07c39f8a90bf0141e779905e8e9a73aec))
