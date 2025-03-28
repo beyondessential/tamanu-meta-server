@@ -5,7 +5,15 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [3.2.0](https://github.com/beyondessential/tamanu-meta-server/compare/v3.1.5..3.2.0) - 2025-03-27
+## [3.2.1](https://github.com/beyondessential/tamanu-meta-server/compare/v3.2.0..3.2.1) - 2025-03-28
+
+
+- **Feature:** Pull the server device_id from the submitting device - ([bd2ecb6](https://github.com/beyondessential/tamanu-meta-server/commit/bd2ecb68dccd1c5e59d005dbcdee6a9bd00e3c74))
+- **Tweak:** Shift statuses.server_type to servers.kind - ([f7a6e15](https://github.com/beyondessential/tamanu-meta-server/commit/f7a6e155cd5ad0049f6d1665cd7b3076b728793f))
+- **Tweak:** No longer do an upsert on POST /servers - ([c4d6f20](https://github.com/beyondessential/tamanu-meta-server/commit/c4d6f20e9542ab2db47be60121b423949ebcf408))
+
+---
+## [3.2.0](https://github.com/beyondessential/tamanu-meta-server/compare/v3.1.5..v3.2.0) - 2025-03-27
 
 
 - **Feature:** Update server post logic (#38) - ([af48475](https://github.com/beyondessential/tamanu-meta-server/commit/af48475ae59425126e8fb63ed68a91ba9d5eae01))
