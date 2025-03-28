@@ -35,6 +35,16 @@ impl Server {
 			.map_err(|err| AppError::Database(err.to_string()))
 	}
 
+	pub async fn all_pingable(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
+		use crate::views::ordered_servers::dsl::*;
+		ordered_servers
+			.select(Server::as_select())
+			.filter(device_id.is_null())
+			.load(db)
+			.await
+			.map_err(|err| AppError::Database(err.to_string()))
+	}
+
 	pub async fn get_by_id(db: &mut AsyncPgConnection, id: Uuid) -> Result<Self> {
 		crate::views::ordered_servers::table
 			.select(Server::as_select())

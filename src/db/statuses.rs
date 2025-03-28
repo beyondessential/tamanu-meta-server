@@ -100,13 +100,14 @@ impl Status {
 			.timeout(Duration::from_secs(10))
 			.build()
 			.unwrap();
-		let statuses = FuturesOrdered::from_iter(Server::get_all(db).await?.into_iter().map({
-			let client = client.clone();
-			move |server| {
+		let statuses =
+			FuturesOrdered::from_iter(Server::all_pingable(db).await?.into_iter().map({
 				let client = client.clone();
-				async move { (Self::ping_server(&client, &server).await, server) }
-			}
-		}));
+				move |server| {
+					let client = client.clone();
+					async move { (Self::ping_server(&client, &server).await, server) }
+				}
+			}));
 
 		Ok(statuses.collect().await)
 	}
