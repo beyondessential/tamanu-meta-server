@@ -27,11 +27,12 @@ pub async fn list(mut db: Connection<Db>) -> Result<TamanuHeaders<Json<Vec<Serve
 
 #[post("/servers", data = "<input>")]
 pub async fn create(
-	_device: ServerDevice,
+	device: ServerDevice,
 	mut db: Connection<Db>,
 	input: Json<NewServer>,
 ) -> Result<TamanuHeaders<Json<Server>>> {
 	let mut input = Server::from(input.into_inner());
+	input.device_id = Some(device.0.id);
 
 	let server = diesel::insert_into(crate::views::ordered_servers::table)
 		.values(input)
