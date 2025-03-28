@@ -30,7 +30,7 @@ pub struct LiveVersionsBracket {
 
 #[get("/status")]
 pub async fn view(mut db: Connection<Db>) -> Result<TamanuHeaders<Template>> {
-	let entries = LatestStatus::fetch(&mut db).await;
+	let entries = LatestStatus::fetch(&mut db).await?;
 
 	let versions = entries
 		.iter()

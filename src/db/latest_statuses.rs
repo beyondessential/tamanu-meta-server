@@ -5,6 +5,7 @@ use uuid::Uuid;
 
 use crate::{
 	app::Version,
+	error::{AppError, Result},
 	db::{pg_duration::PgHumanDuration, server_rank::ServerRank, url_field::UrlField},
 };
 
@@ -36,18 +37,18 @@ pub struct LatestStatus {
 }
 
 impl LatestStatus {
-	pub async fn fetch(db: &mut AsyncPgConnection) -> Vec<Self> {
+	pub async fn fetch(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
 		use crate::views::latest_statuses::dsl::*;
 
 		latest_statuses
 			.select(Self::as_select())
 			.load(db)
 			.await
-			.expect("Error loading statuses")
+			.map_err(|err| AppError::Database(err.to_string()))
 	}
 
 	#[expect(dead_code)]
-	pub async fn only_up(db: &mut AsyncPgConnection) -> Vec<Self> {
+	pub async fn only_up(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
 		use crate::views::latest_statuses::dsl::*;
 
 		latest_statuses
@@ -55,6 +56,6 @@ impl LatestStatus {
 			.select(Self::as_select())
 			.load(db)
 			.await
-			.expect("Error loading statuses")
+			.map_err(|err| AppError::Database(err.to_string()))
 	}
 }
