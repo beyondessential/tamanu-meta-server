@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [3.2.2](https://github.com/beyondessential/tamanu-meta-server/compare/v3.2.1..3.2.2) - 2025-03-28
+## [3.2.3](https://github.com/beyondessential/tamanu-meta-server/compare/v3.2.2..3.2.3) - 2025-03-28
+
+
+- **Tweak:** Put changelog after artifacts - ([7ae067a](https://github.com/beyondessential/tamanu-meta-server/commit/7ae067add80653436d3c18b76f3cf75fc1f53393))
+
+---
+## [3.2.2](https://github.com/beyondessential/tamanu-meta-server/compare/v3.2.1..v3.2.2) - 2025-03-28
 
 
 - **Tweak:** Don’t poll servers that are pushing statuses - ([1d26000](https://github.com/beyondessential/tamanu-meta-server/commit/1d26000e3d0e2bab8deaca9df1c01fbcff571cf9))
