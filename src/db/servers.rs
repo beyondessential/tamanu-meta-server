@@ -2,6 +2,7 @@ use rocket::serde::{Deserialize, Serialize};
 use rocket_db_pools::diesel::{prelude::*, AsyncPgConnection};
 use uuid::Uuid;
 
+use super::server_kind::ServerKind;
 use super::server_rank::ServerRank;
 use super::url_field::UrlField;
 
@@ -12,13 +13,13 @@ use crate::error::{AppError, Result};
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Server {
 	pub id: Uuid,
-
 	pub name: Option<String>,
 
 	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub host: UrlField,
 
-	// #[diesel(deserialize_as = Option<String>, serialize_as = Option<String>)]
+	#[diesel(deserialize_as = String, serialize_as = String)]
+	pub kind: ServerKind,
 	pub rank: Option<ServerRank>,
 
 	#[serde(skip_serializing_if = "Option::is_none")]
@@ -57,6 +58,7 @@ fn test_server_serialization() {
 	let server = Server {
 		id: Uuid::nil(),
 		name: Some("Test Server".to_string()),
+		kind: ServerKind::Central,
 		rank: Some(ServerRank::Production),
 		host: UrlField("https://example.com/".parse().unwrap()),
 		device_id: Some(Uuid::nil()),
@@ -69,6 +71,7 @@ fn test_server_serialization() {
   "id": "00000000-0000-0000-0000-000000000000",
   "name": "Test Server",
   "host": "https://example.com",
+  "kind": "central",
   "rank": "production",
   "device_id": "00000000-0000-0000-0000-000000000000"
 }"#
@@ -78,6 +81,7 @@ fn test_server_serialization() {
 #[derive(Debug, Deserialize)]
 pub struct NewServer {
 	pub name: Option<String>,
+	pub kind: ServerKind,
 	pub rank: Option<ServerRank>,
 	pub host: UrlField,
 	pub device_id: Uuid,
@@ -88,6 +92,7 @@ impl From<NewServer> for Server {
 		Server {
 			id: Uuid::new_v4(),
 			name: server.name,
+			kind: server.kind,
 			rank: server.rank,
 			host: server.host,
 			device_id: Some(server.device_id),
@@ -101,6 +106,7 @@ impl From<NewServer> for Server {
 pub struct PartialServer {
 	pub id: Uuid,
 	pub name: Option<String>,
+	pub kind: Option<ServerKind>,
 	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub rank: Option<ServerRank>,
 	#[diesel(deserialize_as = String, serialize_as = String)]

@@ -50,6 +50,7 @@ diesel::table! {
 		rank -> Nullable<Text>,
 		host -> Text,
 		device_id -> Nullable<Uuid>,
+		kind -> Text,
 	}
 }
 
@@ -62,8 +63,7 @@ diesel::table! {
 		version -> Nullable<Text>,
 		error -> Nullable<Text>,
 		remote_ip -> Nullable<Inet>,
-		server_type -> Nullable<Text>,
-		extra -> Nullable<Jsonb>,
+		extra -> Jsonb,
 	}
 }
 

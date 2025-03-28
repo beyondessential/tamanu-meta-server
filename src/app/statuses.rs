@@ -20,10 +20,7 @@ use crate::{
 	error::{AppError, Result},
 };
 
-use super::{
-	tamanu_headers::{ServerTypeHeader, VersionHeader},
-	TamanuHeaders, Version,
-};
+use super::{tamanu_headers::VersionHeader, TamanuHeaders, Version};
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
 pub struct LiveVersionsBracket {
@@ -79,7 +76,6 @@ pub async fn reload(_device: AdminDevice, mut db: Connection<Db>) -> Result<Tama
 pub async fn create(
 	device: ServerDevice,
 	remote_addr: IpAddr,
-	server_type: ServerTypeHeader,
 	current_version: VersionHeader,
 	mut db: Connection<Db>,
 	server_id: Uuid,
@@ -103,7 +99,6 @@ pub async fn create(
 		server_id,
 		version: Some(current_version.0),
 		remote_ip: Some(remote_ip),
-		server_type: Some(server_type.to_string()),
 		extra: extra.map_or_else(
 			|| serde_json::Value::Object(Default::default()),
 			|j| match j.0 {

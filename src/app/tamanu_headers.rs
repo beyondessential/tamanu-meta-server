@@ -1,5 +1,3 @@
-use std::fmt;
-
 use super::{server_type::ServerType, version::Version};
 use rocket::{
 	http::Status,
@@ -21,46 +19,6 @@ impl<T> TamanuHeaders<T> {
 			server_type: ServerType,
 			version: Version(node_semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap()),
 		}
-	}
-}
-
-#[derive(Debug, Clone)]
-pub enum ServerTypeHeader {
-	Central,
-	Facility,
-	Unknown(String),
-}
-
-#[rocket::async_trait]
-impl<'r> FromRequest<'r> for ServerTypeHeader {
-	type Error = ();
-
-	async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
-		match request
-			.headers()
-			.get_one("X-Tamanu-Client")
-			.map(|s| s.to_ascii_lowercase())
-			.as_deref()
-		{
-			Some("tamanu sync server" | "central") => Outcome::Success(ServerTypeHeader::Central),
-			Some("tamanu lan server" | "facility") => Outcome::Success(ServerTypeHeader::Facility),
-			Some(value) => Outcome::Success(ServerTypeHeader::Unknown(value.to_string())),
-			None => Outcome::Forward(Status::BadRequest),
-		}
-	}
-}
-
-impl fmt::Display for ServerTypeHeader {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(
-			f,
-			"{}",
-			match self {
-				Self::Central => "central",
-				Self::Facility => "facility",
-				Self::Unknown(s) => s,
-			}
-		)
 	}
 }
 

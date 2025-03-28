@@ -28,7 +28,6 @@ pub struct Status {
 	pub version: Option<Version>,
 	pub error: Option<String>,
 	pub remote_ip: Option<IpNet>,
-	pub server_type: Option<String>,
 }
 
 #[derive(Debug, Insertable)]
@@ -41,7 +40,6 @@ pub struct NewStatus {
 	pub version: Option<Version>,
 	pub error: Option<String>,
 	pub remote_ip: Option<IpNet>,
-	pub server_type: Option<String>,
 	pub extra: serde_json::Value,
 }
 
@@ -53,7 +51,6 @@ impl Default for NewStatus {
 			version: Default::default(),
 			error: Default::default(),
 			remote_ip: Default::default(),
-			server_type: Default::default(),
 			extra: serde_json::Value::Object(Default::default()),
 		}
 	}
@@ -95,7 +92,6 @@ impl Status {
 			version,
 			error,
 			remote_ip: None,
-			server_type: None,
 		}
 	}
 

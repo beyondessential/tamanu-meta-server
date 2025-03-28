@@ -4,6 +4,7 @@ diesel::table! {
 		server_created_at -> Timestamptz,
 		server_updated_at -> Timestamptz,
 		server_name -> Text,
+		server_kind -> Text,
 		server_rank -> Text,
 		server_host -> Text,
 
@@ -28,6 +29,7 @@ diesel::table! {
 		created_at -> Timestamptz,
 		updated_at -> Timestamptz,
 		name -> Nullable<Text>,
+		kind -> Text,
 		rank -> Nullable<Text>,
 		host -> Text,
 		device_id -> Nullable<Uuid>,
