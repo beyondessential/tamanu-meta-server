@@ -1,4 +1,4 @@
-use rocket::serde::json::Json;
+use rocket::serde::{Serialize, json::Json};
 use rocket_db_pools::{diesel::prelude::*, Connection};
 
 use crate::{
@@ -6,21 +6,31 @@ use crate::{
 	db::{
 		devices::{AdminDevice, ServerDevice},
 		servers::{NewServer, PartialServer, Server},
+		server_rank::ServerRank,
+		url_field::UrlField,
 		Db,
 	},
 	error::{AppError, Result},
 };
 
+#[derive(Debug, Serialize)]
+pub struct PublicServer {
+	pub name: String,
+	pub host: UrlField,
+	pub rank: Option<ServerRank>,
+}
+
 #[get("/servers")]
-pub async fn list(mut db: Connection<Db>) -> Result<TamanuHeaders<Json<Vec<Server>>>> {
+pub async fn list(mut db: Connection<Db>) -> Result<TamanuHeaders<Json<Vec<PublicServer>>>> {
 	Ok(TamanuHeaders::new(Json(
 		Server::get_all(&mut db)
 			.await?
 			.into_iter()
-			.map(|mut s| {
-				s.device_id = None;
-				s
-			})
+			.filter_map(|s| s.name.map(|name| PublicServer {
+				name,
+				host: s.host,
+				rank: s.rank,
+			}))
 			.collect(),
 	)))
 }
