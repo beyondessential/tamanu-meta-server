@@ -4,7 +4,6 @@ use rocket_db_pools::{diesel::prelude::*, Connection};
 use crate::{
 	app::TamanuHeaders,
 	db::{
-		device_role::DeviceRole,
 		devices::{AdminDevice, ServerDevice},
 		servers::{NewServer, PartialServer, Server},
 		Db,
@@ -28,40 +27,20 @@ pub async fn list(mut db: Connection<Db>) -> Result<TamanuHeaders<Json<Vec<Serve
 
 #[post("/servers", data = "<input>")]
 pub async fn create(
-	device: ServerDevice,
+	_device: ServerDevice,
 	mut db: Connection<Db>,
 	input: Json<NewServer>,
 ) -> Result<TamanuHeaders<Json<Server>>> {
-	let input = input.into_inner();
-	let server = Server::from(input);
+	let mut input = Server::from(input.into_inner());
 
-	match diesel::insert_into(crate::views::ordered_servers::table)
-		.values(server.clone())
+	let server = diesel::insert_into(crate::views::ordered_servers::table)
+		.values(input)
 		.returning(Server::as_select())
 		.get_result(&mut db)
 		.await
-	{
-		Ok(server) => Ok(TamanuHeaders::new(Json(server))),
-		Err(diesel::result::Error::DatabaseError(
-			diesel::result::DatabaseErrorKind::UniqueViolation,
-			_,
-		)) => {
-			let target_server =
-				Server::get_by_host(&mut db, String::from(server.clone().host)).await?;
-			if device.0.role != DeviceRole::Admin && target_server.device_id != Some(device.0.id) {
-				return Err(AppError::custom("You are not allowed to edit this server"));
-			}
-			let updated_server = diesel::update(crate::views::ordered_servers::table)
-				.filter(crate::views::ordered_servers::id.eq(target_server.id))
-				.set(server)
-				.returning(Server::as_select())
-				.get_result(&mut db)
-				.await
-				.map_err(|err| AppError::Database(err.to_string()))?;
-			Ok(TamanuHeaders::new(Json(updated_server)))
-		}
-		Err(err) => Err(AppError::Database(err.to_string())),
-	}
+		.map_err(|err| AppError::Database(err.to_string()))?;
+
+	Ok(TamanuHeaders::new(Json(server)))
 }
 
 #[patch("/servers", data = "<input>")]
