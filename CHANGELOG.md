@@ -5,7 +5,14 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [3.2.5](https://github.com/beyondessential/tamanu-meta-server/compare/v3.2.4..3.2.5) - 2025-03-28
+## [3.2.6](https://github.com/beyondessential/tamanu-meta-server/compare/v3.2.5..3.2.6) - 2025-03-28
+
+
+- **Bugfix:** Migration order - ([7570bbb](https://github.com/beyondessential/tamanu-meta-server/commit/7570bbb22c2de18875996b416d74468bb6a26c70))
+- **Bugfix:** Hide facility servers in /servers (for mobile) - ([06eb08c](https://github.com/beyondessential/tamanu-meta-server/commit/06eb08c40f761c2fee3cbec9338a3469cf261bf5))
+
+---
+## [3.2.5](https://github.com/beyondessential/tamanu-meta-server/compare/v3.2.4..v3.2.5) - 2025-03-28
 
 
 - **Refactor:** Add error handling on /status page - ([fef43fc](https://github.com/beyondessential/tamanu-meta-server/commit/fef43fc544a9219aeb6818949dc682688b1f6018))
