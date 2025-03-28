@@ -7,7 +7,7 @@ use diesel::{
 };
 use rocket::serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, AsExpression)]
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Serialize, Deserialize, AsExpression)]
 #[diesel(sql_type = Text)]
 #[serde(rename_all = "lowercase")]
 pub enum ServerKind {

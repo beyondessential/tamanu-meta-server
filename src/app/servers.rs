@@ -1,12 +1,13 @@
-use rocket::serde::{Serialize, json::Json};
+use rocket::serde::{json::Json, Serialize};
 use rocket_db_pools::{diesel::prelude::*, Connection};
 
 use crate::{
 	app::TamanuHeaders,
 	db::{
 		devices::{AdminDevice, ServerDevice},
-		servers::{NewServer, PartialServer, Server},
+		server_kind::ServerKind,
 		server_rank::ServerRank,
+		servers::{NewServer, PartialServer, Server},
 		url_field::UrlField,
 		Db,
 	},
@@ -26,11 +27,17 @@ pub async fn list(mut db: Connection<Db>) -> Result<TamanuHeaders<Json<Vec<Publi
 		Server::get_all(&mut db)
 			.await?
 			.into_iter()
-			.filter_map(|s| s.name.map(|name| PublicServer {
-				name,
-				host: s.host,
-				rank: s.rank,
-			}))
+			.filter_map(|s| {
+				(s.kind == ServerKind::Central)
+					.then(|| {
+						s.name.map(|name| PublicServer {
+							name,
+							host: s.host,
+							rank: s.rank,
+						})
+					})
+					.flatten()
+			})
 			.collect(),
 	)))
 }

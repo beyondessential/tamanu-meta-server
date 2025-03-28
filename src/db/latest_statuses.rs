@@ -5,8 +5,8 @@ use uuid::Uuid;
 
 use crate::{
 	app::Version,
-	error::{AppError, Result},
 	db::{pg_duration::PgHumanDuration, server_rank::ServerRank, url_field::UrlField},
+	error::{AppError, Result},
 };
 
 #[derive(Debug, Clone, Serialize, Queryable, Selectable, Insertable)]
