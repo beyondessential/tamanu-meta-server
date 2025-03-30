@@ -258,6 +258,8 @@ $ cargo fmt
 
 ### Releasing
 
+(You need write access to the main branch directly)
+
 On the main branch:
 
 ```console
@@ -268,4 +270,10 @@ Install `cargo-release` with:
 
 ```console
 $ cargo install cargo-release
+```
+
+Also install `git-cliff`:
+
+```console
+$ cargo install git-cliff
 ```
