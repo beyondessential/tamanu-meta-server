@@ -17,4 +17,5 @@ fn main() {
 
 	std::fs::write("identity.crt.pem", cert.pem()).expect("write identity.crt.pem");
 	std::fs::write("identity.key.pem", key.serialize_pem()).expect("write identity.key.pem");
+	std::fs::write("identity.pub.pem", key.public_key_pem()).expect("write identity.pub.pem");
 }
