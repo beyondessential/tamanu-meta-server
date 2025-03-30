@@ -45,6 +45,44 @@ and then use curl like:
 $ curl -H "mtls-certificate: $MTLS_CERT" ...
 ```
 
+#### Roles
+
+When you first connect to an authenticated API with a certificate, you'll get a 403.
+Your public key will be added to the `devices` table.
+
+Open the database, e.g. with PSQL, and change the role to `admin` (or as required).
+
+```sql
+UPDATE devices SET role = 'admin' WHERE id = '45886aa8-dff3-4cf7-92a9-31f42d4a0e1a';
+```
+
+In production, you need to do extra checks.
+
+- Show untrusted devices with their public key in PEM-ish format:
+
+```sql
+SELECT id, created_at, encode(key_data, 'base64') as pem
+FROM devices WHERE role = 'untrusted'
+ORDER BY created_at DESC \gx
+```
+
+- Compare the provided public key to the list to find the right `id`. You can also filter by the **last** few characters of the key (the first characters will all be the same):
+
+```sql
+SELECT id, created_at, encode(key_data, 'base64') as pem
+FROM devices WHERE role = 'untrusted'
+AND encode(key_data, 'base64') LIKE '%NWwjGDiHVWrBA=='
+ORDER BY created_at DESC \gx
+```
+
+- Once you have the `id`, look at the connection metadata to see if it matches what you know for additional verification:
+
+```sql
+SELECT * FROM device_connections
+WHERE id = '45886aa8-dff3-4cf7-92a9-31f42d4a0e1a'
+ORDER BY created_at DESC \gx
+```
+
 #### In production
 
 In production, the header should be set from a client certificate, as terminated by a reverse proxy or load balancer, and any matching header on the incoming requests should be stripped.
