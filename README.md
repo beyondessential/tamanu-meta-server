@@ -19,17 +19,38 @@ ghcr.io/beyondessential/tamanu-meta:3.2.6
 
 ### Authentication
 
-Routes marked with 🔐 require authentication.
+Routes marked with 🔐 require authentication; the word in (parens) after the emoji is the required `role`; `admin` role can do everything.
 
 The `mtls-certificate` (or `ssl-client-cert`) header should contain a PEM-encoded (optionally URL-encoded) X509 certificate.
+Alternatively, Rocket can be configured to terminate TLS itself, and handles the client certificate itself directly.
+In this case, the certificate must be signed by the provided CA (enabled by `default.tls.mutual`) to pass validation; you'll need to generate a CA with [smallstep CLI](https://smallstep.com/docs/step-cli/) in that case, this is not covered here.
+
+To get a certificate, run:
+
+```console
+$ cargo run --bin identity
+```
+
+Which will write the `identity.crt.pem` and `identity.key.pem`.
+
+You can then put it in an environment variable:
+
+```console
+$ export MTLS_CERT="$(jq -sRr @uri identity.crt.pem)"
+```
+
+and then use curl like:
+
+```console
+$ curl -H "mtls-certificate: $MTLS_CERT" ...
+```
+
+#### In production
 
 In production, the header should be set from a client certificate, as terminated by a reverse proxy or load balancer, and any matching header on the incoming requests should be stripped.
 
 - Nginx: use the `$ssl_client_escaped_cert` variable.
 - Caddy: use the `{http.request.tls.client.certificate_pem}` placeholder.
-
-Alternatively, Rocket can be configured to terminate TLS itself, and handles the client certificate itself directly.
-In this case, the certificate must be signed by the provided CA to pass validation.
 
 ### GET `/servers`
 
@@ -46,7 +67,7 @@ Get the full list of servers as JSON.
 ]
 ```
 
-### POST `/servers` 🔐
+### POST `/servers` 🔐 (server)
 
 Add a server to the list.
 
@@ -71,7 +92,7 @@ Returns the server with its assigned ID:
 }
 ```
 
-### PATCH `/servers` 🔐
+### PATCH `/servers` 🔐 (admin)
 
 Edit a server.
 
@@ -98,7 +119,7 @@ Returns the edited server with its assigned ID:
 There's a "hidden" feature in the UI where if you Shift-click a row, it will
 copy its ID to the clipboard.
 
-### DELETE `/servers` 🔐
+### DELETE `/servers` 🔐 (admin)
 
 Remove a server from the list.
 
@@ -110,53 +131,108 @@ Pass a JSON body with the `id` field:
 }
 ```
 
-### POST `/reload` 🔐
+### POST `/reload` 🔐 (admin)
 
 Force a reload of the statuses.
 
 ### GET `/versions`
 
-Returns the range of versions being used in production.
+Get a list of known Tamanu versions in JSON.
+
+```js
+[
+	{
+		"id": "967c7d15-7046-459e-a448-6584f72e55ce",
+		"major": 2,
+		"minor": 27,
+		"patch": 0,
+		"published": true,
+		"changelog": "..."
+	},
+	// ...
+]
+```
+
+### POST `/versions/<version>` 🔐 (releaser)
+
+Create the version `<version>` (must be a semver version string).
+
+Pass the changelog as the body (if using curl, use `--data-binary` to preserve whitespace):
+
+```text
+Blah
+blah
+
+blah
+```
+
+Returns the version with its assigned ID:
 
 ```json
 {
-	"min": "2.1.0",
-	"max": "2.3.4"
+	"id": "967c7d15-7046-459e-a448-6584f72e55ce",
+	"major": 2,
+	"minor": 27,
+	"patch": 0,
+	"published": true,
+	"changelog": "..."
 }
 ```
+
+### DELETE `/versions/<version>` 🔐 (admin)
+
+TO BE DOCUMENTED
+
+### GET `/versions/<version>/artifacts`
+
+TO BE DOCUMENTED
+
+### GET `/versions/update-for/<version>`
+
+TO BE DOCUMENTED
 
 ## Develop
 
 - Install [Rustup](https://rustup.rs/), which will install Rust and Cargo.
+- Install the diesel CLI tool: <https://diesel.rs/guides/getting-started.html#installing-diesel-cli>
 - Clone the repo via git:
 
-```bash
+```console
 $ git clone git@github.com:beyondessential/tamanu-meta-server.git
 ```
 
 - Build the project:
 
-```bash
+```console
 $ cargo check
+```
+
+- Create a new blank postgres database.
+- Create a `Rocket.toml` from the `Rocket.example.toml`.
+- Set the `DATABASE_URL` environment variable (for diesel).
+  You can do that per diesel command, or for your entire shell session using `export` (or `set -x` in fish, or `$env:DATABASE_URL =` in powershell) as usual for your preferred shell.
+
+- Run migrations:
+
+```console
+$ diesel migration run
 ```
 
 - Run with:
 
-```bash
+```console
 $ cargo run
 ```
 
 - Tests:
 
-```bash
+```console
 $ cargo test
 ```
 
 We recommend using [Rust Analyzer](https://rust-analyzer.github.io/) or [Rust Rover](https://www.jetbrains.com/rust/) for development.
 
 ### Migrations
-
-1. Install the diesel CLI tool: <https://diesel.rs/guides/getting-started.html#installing-diesel-cli>
 
 2. Create a migration
 ```console
