@@ -5,7 +5,23 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [3.2.6](https://github.com/beyondessential/tamanu-meta-server/compare/v3.2.5..3.2.6) - 2025-03-28
+## [3.2.7](https://github.com/beyondessential/tamanu-meta-server/compare/v3.2.6..3.2.7) - 2025-04-03
+
+
+- **Documentation:** More db and api instructions - ([f25658e](https://github.com/beyondessential/tamanu-meta-server/commit/f25658ed1082cad345650d663fcfcfe592e0f5bc))
+- **Documentation:** Need git-cliff to release - ([d02505e](https://github.com/beyondessential/tamanu-meta-server/commit/d02505e2cab9d76a67546d138e0ed61dbebd878c))
+- **Documentation:** Add trust info - ([68abfa0](https://github.com/beyondessential/tamanu-meta-server/commit/68abfa096b070d2c878e5525ac818c41cd1bc955))
+
+### Identity
+
+- **Tweak:** Write public key - ([a46e435](https://github.com/beyondessential/tamanu-meta-server/commit/a46e435d43ddce79db7d85f48eb7e1dd0cb912ef))
+
+### Versions
+
+- **Bugfix:** Allow large changelogs (up to 1MB) - ([f61eca8](https://github.com/beyondessential/tamanu-meta-server/commit/f61eca8f4ad251ee5cda710417d1939a308c6a1d))
+
+---
+## [3.2.6](https://github.com/beyondessential/tamanu-meta-server/compare/v3.2.5..v3.2.6) - 2025-03-28
 
 
 - **Bugfix:** Migration order - ([7570bbb](https://github.com/beyondessential/tamanu-meta-server/commit/7570bbb22c2de18875996b416d74468bb6a26c70))
