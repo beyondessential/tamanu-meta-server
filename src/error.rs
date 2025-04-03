@@ -18,6 +18,9 @@ pub enum AppError {
 	#[error("database: {0}")]
 	Database(String),
 
+	#[error("io: {0}")]
+	Io(String),
+
 	#[error("no versions match given range")]
 	NoMatchingVersions,
 
@@ -28,6 +31,16 @@ pub enum AppError {
 impl AppError {
 	pub fn custom(err: impl ToString) -> Self {
 		Self::Custom(err.to_string())
+	}
+
+	pub fn database(err: impl ToString) -> Self {
+		Self::Database(err.to_string())
+	}
+}
+
+impl From<std::io::Error> for AppError {
+	fn from(err: std::io::Error) -> Self {
+		Self::Io(err.to_string())
 	}
 }
 

@@ -1,5 +1,9 @@
 use pulldown_cmark::{html, Options, Parser};
-use rocket::serde::json::Json;
+use rocket::{
+	data::{Data, ToByteUnit},
+	serde::json::Json,
+	tokio::io::AsyncReadExt,
+};
 use rocket_db_pools::{diesel::prelude::*, Connection};
 use rocket_dyn_templates::{context, Template};
 
@@ -47,13 +51,16 @@ pub async fn view(mut db: Connection<Db>) -> Result<TamanuHeaders<Template>> {
 	)))
 }
 
-#[post("/versions/<version>", data = "<changelog>")]
+#[post("/versions/<version>", data = "<data>")]
 pub async fn create(
 	_device: ReleaserDevice,
 	mut db: Connection<Db>,
 	version: ParsedVersion,
-	changelog: String,
+	data: Data<'_>,
 ) -> Result<TamanuHeaders<Json<Version>>> {
+	let mut stream = data.open(1_u8.mebibytes());
+	let mut changelog = String::with_capacity(stream.hint());
+	stream.read_to_string(&mut changelog).await?;
 	let version = diesel::insert_into(crate::schema::versions::table)
 		.values(NewVersion {
 			major: version.0.major as _,
