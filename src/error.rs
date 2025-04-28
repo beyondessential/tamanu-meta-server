@@ -26,6 +26,10 @@ pub enum AppError {
 
 	#[error("version range is not usable")]
 	UnusableRange,
+
+	#[error("timesync: {0}")]
+	#[serde(serialize_with = "serialize_timesimp_error")]
+	Timesync(#[from] timesimp::ParseError),
 }
 
 impl AppError {
@@ -61,4 +65,14 @@ impl<'r, 'o: 'r> Responder<'r, 'o> for AppError {
 			.sized_body(json.len(), Cursor::new(json))
 			.finalize())
 	}
+}
+
+pub fn serialize_timesimp_error<S>(
+	value: &timesimp::ParseError,
+	serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+	S: serde::Serializer,
+{
+	value.to_string().serialize(serializer)
 }
