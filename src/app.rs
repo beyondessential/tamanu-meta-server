@@ -14,6 +14,7 @@ pub mod server_type;
 pub mod servers;
 pub mod statuses;
 pub mod tamanu_headers;
+pub mod timesync;
 pub mod version;
 pub mod versions;
 
@@ -37,6 +38,7 @@ pub fn rocket() -> Rocket<Build> {
 				statuses::view,
 				statuses::reload,
 				statuses::create,
+				timesync::endpoint,
 				versions::list,
 				versions::view,
 				versions::create,
