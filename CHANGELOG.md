@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [3.2.7](https://github.com/beyondessential/tamanu-meta-server/compare/v3.2.6..3.2.7) - 2025-04-03
+## [3.3.0](https://github.com/beyondessential/tamanu-meta-server/compare/v3.2.7..3.3.0) - 2025-04-28
+
+
+- **Feature:** Add timesync server (#40) - ([c283a22](https://github.com/beyondessential/tamanu-meta-server/commit/c283a222087cd135bd33fbe85312e08ce665f957))
+
+---
+## [3.2.7](https://github.com/beyondessential/tamanu-meta-server/compare/v3.2.6..v3.2.7) - 2025-04-03
 
 
 - **Documentation:** More db and api instructions - ([f25658e](https://github.com/beyondessential/tamanu-meta-server/commit/f25658ed1082cad345650d663fcfcfe592e0f5bc))

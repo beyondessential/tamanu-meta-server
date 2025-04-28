@@ -3037,7 +3037,7 @@ dependencies = [
 
 [[package]]
 name = "tamanu-meta"
-version = "3.2.7"
+version = "3.3.0"
 dependencies = [
  "chrono",
  "clap",
