@@ -1,4 +1,4 @@
-use rocket::{Build, Rocket};
+use rocket::{Build, Rocket, fs::FileServer};
 use rocket_db_pools::Database as _;
 use rocket_dyn_templates::Template;
 
@@ -50,4 +50,5 @@ pub fn rocket() -> Rocket<Build> {
 				artifacts::create,
 			],
 		)
+		.mount("/static", FileServer::from("static"))
 }
