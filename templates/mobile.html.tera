@@ -236,12 +236,12 @@
             {% if artifact.platform == "android" %}
             <h3 class="platform-name">Android</h3>
             <p class="platform-description">For Android phones and tablets</p>
-            {% elif artifact.platform == "ios" %}
-            <h3 class="platform-name">iOS</h3>
-            <p class="platform-description">For Apple phones and tablets</p>
             {% endif %}
           </div>
-          <a href="{{ artifact.download_url }}" class="download-btn">Download</a>
+          <div style="display: flex; align-items: center; gap: 1rem;">
+            <a href="{{ artifact.download_url }}" class="download-btn">Download</a>
+            {{ artifact.qr_code_svg | safe }}
+          </div>
         </div>
         {% endfor %}
 
