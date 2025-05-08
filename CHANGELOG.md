@@ -5,7 +5,14 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [3.3.0](https://github.com/beyondessential/tamanu-meta-server/compare/v3.2.7..3.3.0) - 2025-04-28
+## [3.4.0](https://github.com/beyondessential/tamanu-meta-server/compare/v3.3.0..3.4.0) - 2025-05-08
+
+
+- **Tweak:** Add QR code to installers page (#41) - ([979c00f](https://github.com/beyondessential/tamanu-meta-server/commit/979c00fc2ca0f71b91efbd879f64332358301779))
+- **Tweak:** Use svg logo on installers page (#42) - ([74f302d](https://github.com/beyondessential/tamanu-meta-server/commit/74f302d37debd06be0f4cdd372af3998cfa94730))
+
+---
+## [3.3.0](https://github.com/beyondessential/tamanu-meta-server/compare/v3.2.7..v3.3.0) - 2025-04-28
 
 
 - **Feature:** Add timesync server (#40) - ([c283a22](https://github.com/beyondessential/tamanu-meta-server/commit/c283a222087cd135bd33fbe85312e08ce665f957))
