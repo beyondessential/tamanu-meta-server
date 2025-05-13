@@ -16,7 +16,7 @@ default-run = "server"
 
 [dependencies]
 chrono = { version = "0.4.39", features = ["serde"] }
-clap = { version = "4.5.37", features = ["derive"] }
+clap = { version = "4.5.38", features = ["derive"] }
 deadpool = "0.12.2"
 diesel = { version = "2.1.6", features = ["chrono", "ipnet-address", "serde_json", "uuid"] }
 diesel-derive-enum = { version = "2.1.0", features = ["postgres"] }
@@ -38,7 +38,7 @@ time = "0.3.41"
 url = { version = "2.5.4", features = ["serde"] }
 uuid = { version = "1.16.0", features = ["serde", "v4"] }
 x509-parser = "0.17.0"
-qrcode = { version = "0.13", features = ["svg"] }
+qrcode = { version = "0.14", features = ["svg"] }
 timesimp = "1.0.0"
 
 [features]
