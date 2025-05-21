@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [3.4.0](https://github.com/beyondessential/tamanu-meta-server/compare/v3.3.0..3.4.0) - 2025-05-08
+## [3.5.0](https://github.com/beyondessential/tamanu-meta-server/compare/v3.4.0..3.5.0) - 2025-05-21
+
+
+- **Feature:** Add password generator - ([6ed28f4](https://github.com/beyondessential/tamanu-meta-server/commit/6ed28f498f095753d58fdc19165c0a6a78a6539a))
+
+---
+## [3.4.0](https://github.com/beyondessential/tamanu-meta-server/compare/v3.3.0..v3.4.0) - 2025-05-08
 
 
 - **Tweak:** Add QR code to installers page (#41) - ([979c00f](https://github.com/beyondessential/tamanu-meta-server/commit/979c00fc2ca0f71b91efbd879f64332358301779))
