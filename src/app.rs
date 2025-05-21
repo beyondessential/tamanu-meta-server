@@ -1,4 +1,4 @@
-use rocket::{Build, Rocket, fs::FileServer};
+use rocket::{fs::FileServer, Build, Rocket};
 use rocket_db_pools::Database as _;
 use rocket_dyn_templates::Template;
 
@@ -10,6 +10,7 @@ pub use self::{
 };
 
 pub mod artifacts;
+pub mod password;
 pub mod server_type;
 pub mod servers;
 pub mod statuses;
@@ -48,6 +49,7 @@ pub fn rocket() -> Rocket<Build> {
 				versions::view_artifacts,
 				versions::view_mobile_install,
 				artifacts::create,
+				password::view,
 			],
 		)
 		.mount("/static", FileServer::from("static"))
