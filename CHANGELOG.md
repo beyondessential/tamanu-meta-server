@@ -5,7 +5,17 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [3.5.0](https://github.com/beyondessential/tamanu-meta-server/compare/v3.4.0..3.5.0) - 2025-05-21
+## [3.5.1](https://github.com/beyondessential/tamanu-meta-server/compare/v3.5.0..3.5.1) - 2025-05-21
+
+
+
+### Password
+
+- **Feature:** Add verifier - ([c46a8a9](https://github.com/beyondessential/tamanu-meta-server/commit/c46a8a9431722bddaa0238b6d3b8352ba65e7e1c))
+- **Tweak:** Add checksum - ([f652c6c](https://github.com/beyondessential/tamanu-meta-server/commit/f652c6ceb8fe734756ca73f1d40234d9388ddc39))
+
+---
+## [3.5.0](https://github.com/beyondessential/tamanu-meta-server/compare/v3.4.0..v3.5.0) - 2025-05-21
 
 
 - **Feature:** Add password generator - ([6ed28f4](https://github.com/beyondessential/tamanu-meta-server/commit/6ed28f498f095753d58fdc19165c0a6a78a6539a))
