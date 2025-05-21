@@ -5,7 +5,17 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [3.5.1](https://github.com/beyondessential/tamanu-meta-server/compare/v3.5.0..3.5.1) - 2025-05-21
+## [3.5.2](https://github.com/beyondessential/tamanu-meta-server/compare/v3.5.1..3.5.2) - 2025-05-21
+
+
+
+### Password
+
+- **Tweak:** Do not store generated or verified passwords - ([5f98ff2](https://github.com/beyondessential/tamanu-meta-server/commit/5f98ff21f5b1dce912a32c3fcdc154d9322b4f3b))
+- **Tweak:** Vanity prefix for Other category - ([23ce06a](https://github.com/beyondessential/tamanu-meta-server/commit/23ce06a5bfd24ecf2a8d81b958c7982141ca495d))
+
+---
+## [3.5.1](https://github.com/beyondessential/tamanu-meta-server/compare/v3.5.0..v3.5.1) - 2025-05-21
 
 
 
