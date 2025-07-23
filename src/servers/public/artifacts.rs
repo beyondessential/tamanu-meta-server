@@ -1,15 +1,15 @@
 use rocket::serde::json::Json;
-use rocket_db_pools::{diesel::prelude::*, Connection};
+use rocket_db_pools::{Connection, diesel::prelude::*};
 
 use crate::{
-	app::TamanuHeaders,
+	Db,
 	db::{
 		artifacts::{Artifact, NewArtifact},
 		devices::ReleaserDevice,
 		versions::Version,
 	},
 	error::{AppError, Result},
-	Db,
+	servers::headers::TamanuHeaders,
 };
 
 use super::Version as ParsedVersion;

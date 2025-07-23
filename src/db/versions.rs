@@ -1,9 +1,11 @@
-use crate::app::Version as ParsedVersion;
 use rocket::serde::{Deserialize, Serialize};
-use rocket_db_pools::diesel::{prelude::*, AsyncPgConnection};
+use rocket_db_pools::diesel::{AsyncPgConnection, prelude::*};
 use uuid::Uuid;
 
-use crate::error::{AppError, Result};
+use crate::{
+	error::{AppError, Result},
+	servers::version::Version as ParsedVersion,
+};
 
 #[macro_export]
 macro_rules! predicate_version {

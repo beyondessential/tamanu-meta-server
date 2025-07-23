@@ -26,18 +26,18 @@ RUN rustup target add "$(cat /.target)"
 ENV RUSTFLAGS="-C target-feature=+crt-static"
 
 # Download and build dependencies (for cache)
-RUN echo "fn main() {}" > src/bin/server.rs
+RUN echo "fn main() {}" > src/bin/public_server.rs
 COPY Cargo.lock Cargo.toml ./
 RUN cargo build --locked --target $(cat /.target) --profile $PROFILE \
 	--no-default-features --features migrations-with-tokio-postgres,tls-embed-roots
-RUN rm target/$(cat /.target)/$PROFILE/{server,deps/server*}
+RUN rm target/$(cat /.target)/$PROFILE/{*_server,deps/*_server*}
 
 # Build the actual project
 COPY migrations ./migrations
 COPY src ./src
 RUN cargo build --locked --target $(cat /.target) --profile $PROFILE \
 	--no-default-features --features migrations-with-tokio-postgres,tls-embed-roots
-RUN cp target/$(cat /.target)/$PROFILE/{server,migrate,pingtask,prune_untrusted_devices} /built/
+RUN cp target/$(cat /.target)/$PROFILE/{{public,private}_server,migrate,pingtask,prune_untrusted_devices} /built/
 
 # we can't run any commands in the runtime image because the platform
 # might not be the same as the build platform, so we need to prepare
@@ -48,7 +48,8 @@ RUN mkdir /runhome && cd /runhome && ln -s config/Rocket.toml
 FROM busybox:glibc
 COPY --from=builder /etc/passwd /etc/passwd
 COPY --from=builder /etc/group /etc/group
-COPY --from=builder --chmod=0755 /built/server /usr/bin/server
+COPY --from=builder --chmod=0755 /built/public_server /usr/bin/public_server
+COPY --from=builder --chmod=0755 /built/private_server /usr/bin/private_server
 COPY --from=builder --chmod=0755 /built/migrate /usr/bin/migrate
 COPY --from=builder --chmod=0755 /built/pingtask /usr/bin/pingtask
 COPY --from=builder --chmod=0755 /built/prune_untrusted_devices /usr/bin/prune_untrusted_devices

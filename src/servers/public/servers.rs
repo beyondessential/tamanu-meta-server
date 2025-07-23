@@ -1,17 +1,17 @@
-use rocket::serde::{json::Json, Serialize};
-use rocket_db_pools::{diesel::prelude::*, Connection};
+use rocket::serde::{Serialize, json::Json};
+use rocket_db_pools::{Connection, diesel::prelude::*};
 
 use crate::{
-	app::TamanuHeaders,
 	db::{
+		Db,
 		devices::{AdminDevice, ServerDevice},
 		server_kind::ServerKind,
 		server_rank::ServerRank,
 		servers::{NewServer, PartialServer, Server},
 		url_field::UrlField,
-		Db,
 	},
 	error::{AppError, Result},
+	servers::headers::TamanuHeaders,
 };
 
 #[derive(Debug, Serialize)]

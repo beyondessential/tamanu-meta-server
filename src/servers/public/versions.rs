@@ -1,22 +1,25 @@
-use pulldown_cmark::{html, Options, Parser};
-use qrcode::{render::svg, QrCode};
+use pulldown_cmark::{Options, Parser, html};
+use qrcode::{QrCode, render::svg};
 use rocket::{
 	data::{Data, ToByteUnit},
-	serde::{json::Json, Deserialize, Serialize},
+	serde::{Deserialize, Serialize, json::Json},
 	tokio::io::AsyncReadExt,
 };
-use rocket_db_pools::{diesel::prelude::*, Connection};
-use rocket_dyn_templates::{context, Template};
+use rocket_db_pools::{Connection, diesel::prelude::*};
+use rocket_dyn_templates::{Template, context};
 
 use crate::{
-	app::{TamanuHeaders, Version as ParsedVersion, VersionRange},
+	Db,
 	db::{
 		artifacts::Artifact,
 		devices::{AdminDevice, ReleaserDevice},
 		versions::{NewVersion, Version},
 	},
 	error::{AppError, Result},
-	Db,
+	servers::{
+		headers::TamanuHeaders,
+		version::{Version as ParsedVersion, VersionRange},
+	},
 };
 
 // Add a derived struct for Artifact with QR code

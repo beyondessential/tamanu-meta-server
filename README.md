@@ -6,6 +6,7 @@ The Meta service provides:
 - a server discovery service for the Tamanu mobile app
 - a server list and health check page
 - a range of active versions
+- download URLs to available artifacts for active versions
 
 ## Get
 
@@ -15,7 +16,10 @@ We have a container image for linux/amd64 and linux/arm64:
 ghcr.io/beyondessential/tamanu-meta:3.5.4
 ```
 
-## API
+## Public API
+
+The `public_server` binary serves the public API and views, which are expected to be exposed to
+the internet (in production behind an ingress gateway or reverse proxy).
 
 ### Authentication
 
@@ -169,10 +173,6 @@ Pass a JSON body with the `id` field:
 }
 ```
 
-### POST `/reload` 🔐 (admin)
-
-Force a reload of the statuses.
-
 ### GET `/versions`
 
 Get a list of known Tamanu versions in JSON.
@@ -228,6 +228,15 @@ TO BE DOCUMENTED
 ### GET `/versions/update-for/<version>`
 
 TO BE DOCUMENTED
+
+## Private API
+
+The `private_server` binary serves the private API and views: it must not be exposed to the
+internet (at BES we run it within our Tailscale network).
+
+### POST `/reload`
+
+Force a reload of the statuses.
 
 ## Develop
 

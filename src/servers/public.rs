@@ -1,22 +1,16 @@
-use rocket::{fs::FileServer, Build, Rocket};
+use rocket::{Build, Rocket, fs::FileServer};
 use rocket_db_pools::Database as _;
 use rocket_dyn_templates::Template;
 
-use crate::db::Db;
+use crate::{db::Db, servers::version::Version};
 
-pub use self::{
-	tamanu_headers::TamanuHeaders,
-	version::{Version, VersionRange},
-};
+pub use super::headers::TamanuHeaders;
 
 pub mod artifacts;
 pub mod password;
-pub mod server_type;
 pub mod servers;
 pub mod statuses;
-pub mod tamanu_headers;
 pub mod timesync;
-pub mod version;
 pub mod versions;
 
 #[catch(404)]
@@ -36,8 +30,6 @@ pub fn rocket() -> Rocket<Build> {
 				servers::create,
 				servers::edit,
 				servers::delete,
-				statuses::view,
-				statuses::reload,
 				statuses::create,
 				timesync::endpoint,
 				versions::list,

@@ -1,8 +1,8 @@
 use timesimp::{Request, SignedDuration, Timesimp};
 
 use crate::{
-	app::TamanuHeaders,
 	error::{AppError, Result},
+	servers::headers::TamanuHeaders,
 };
 
 #[post("/timesync", data = "<request>")]

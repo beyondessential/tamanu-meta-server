@@ -7,13 +7,13 @@ use chrono::{DateTime, Utc};
 use futures::stream::{FuturesOrdered, StreamExt};
 use ipnet::IpNet;
 use rocket::serde::Serialize;
-use rocket_db_pools::diesel::{prelude::*, AsyncPgConnection};
+use rocket_db_pools::diesel::{AsyncPgConnection, prelude::*};
 use uuid::Uuid;
 
 use crate::{
-	app::Version,
 	db::servers::Server,
 	error::{AppError, Result},
+	servers::version::Version,
 };
 
 #[derive(Debug, Clone, Serialize, Queryable, Selectable, Insertable, Associations)]
