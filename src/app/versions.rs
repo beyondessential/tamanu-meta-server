@@ -1,15 +1,8 @@
 use pulldown_cmark::{html, Options, Parser};
-use qrcode::{
-	QrCode,
-	render::svg,
-};
+use qrcode::{render::svg, QrCode};
 use rocket::{
 	data::{Data, ToByteUnit},
-	serde::{
-		json::Json,
-		Deserialize,
-		Serialize,
-	},
+	serde::{json::Json, Deserialize, Serialize},
 	tokio::io::AsyncReadExt,
 };
 use rocket_db_pools::{diesel::prelude::*, Connection};
@@ -29,25 +22,26 @@ use crate::{
 // Add a derived struct for Artifact with QR code
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ArtifactWithQR {
-    #[serde(flatten)]
-    artifact: Artifact,
-    qr_code_svg: String,
+	#[serde(flatten)]
+	artifact: Artifact,
+	qr_code_svg: String,
 }
 
 impl From<Artifact> for ArtifactWithQR {
-    fn from(artifact: Artifact) -> Self {
-        let code = QrCode::new(&artifact.download_url).expect("Failed to generate QR code");
-        let svg_image = code.render::<svg::Color>()
-            .min_dimensions(100, 100)
-            .dark_color(svg::Color("#000000"))
-            .light_color(svg::Color("#ffffff"))
-            .build();
+	fn from(artifact: Artifact) -> Self {
+		let code = QrCode::new(&artifact.download_url).expect("Failed to generate QR code");
+		let svg_image = code
+			.render::<svg::Color>()
+			.min_dimensions(100, 100)
+			.dark_color(svg::Color("#000000"))
+			.light_color(svg::Color("#ffffff"))
+			.build();
 
-        Self {
-            artifact,
-            qr_code_svg: svg_image,
-        }
-    }
+		Self {
+			artifact,
+			qr_code_svg: svg_image,
+		}
+	}
 }
 
 fn parse_markdown(text: &str) -> String {

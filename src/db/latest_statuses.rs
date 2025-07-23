@@ -5,7 +5,10 @@ use uuid::Uuid;
 
 use crate::{
 	app::Version,
-	db::{pg_duration::PgHumanDuration, server_rank::ServerRank, url_field::UrlField},
+	db::{
+		pg_duration::PgHumanDuration, server_kind::ServerKind, server_rank::ServerRank,
+		url_field::UrlField,
+	},
 	error::{AppError, Result},
 };
 
@@ -21,6 +24,8 @@ pub struct LatestStatus {
 	pub server_rank: ServerRank,
 	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub server_host: UrlField,
+	#[diesel(deserialize_as = String, serialize_as = String)]
+	pub server_kind: ServerKind,
 
 	pub is_up: bool,
 	pub latest_latency: Option<i32>,

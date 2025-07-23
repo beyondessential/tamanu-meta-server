@@ -49,6 +49,14 @@
     color: grey;
     margin-left: 1em;
   }
+
+  tr[data-kind="facility"] {
+    opacity: 0.75;
+
+    & td:first-child {
+      font-size: 0.9em;
+    }
+  }
   </style>
 </head>
 <body>
@@ -75,7 +83,7 @@
     </thead>
     <tbody>
       {% for entry in entries %}
-      <tr data-id="{{ entry.server_id }}">
+      <tr data-id="{{ entry.server_id }}" data-kind="{{ entry.server_kind }}">
         <td>{{ entry.server_name }}</td>
         <td>{{ entry.server_rank }}</td>
         <td><a href="{{ entry.server_host }}">{{ entry.server_host }}</a></td>
