@@ -1,6 +1,6 @@
 [package]
 name = "tamanu-meta"
-version = "3.5.4"
+version = "4.0.0"
 edition = "2024"
 rust-version = "1.85.0"
 resolver = "3"
