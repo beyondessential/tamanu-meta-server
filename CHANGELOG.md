@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [4.0.3](https://github.com/beyondessential/tamanu-meta-server/compare/v4.0.2..4.0.3) - 2025-07-23
+## [4.0.4](https://github.com/beyondessential/tamanu-meta-server/compare/v4.0.3..4.0.4) - 2025-07-23
+
+
+- **Bugfix:** Fix something using a float - ([3db60e3](https://github.com/beyondessential/tamanu-meta-server/commit/3db60e361ef49e5aaad79f5e380eab5df05e35b7))
+
+---
+## [4.0.3](https://github.com/beyondessential/tamanu-meta-server/compare/v4.0.2..v4.0.3) - 2025-07-23
 
 
 - **Feature:** Add env vars to home page - ([6bc23c9](https://github.com/beyondessential/tamanu-meta-server/commit/6bc23c9becc9d980a3df3252e61590775b530e1f))
