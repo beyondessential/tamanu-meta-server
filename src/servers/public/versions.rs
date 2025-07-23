@@ -72,10 +72,12 @@ pub async fn view(mut db: Connection<Db>) -> Result<TamanuHeaders<Template>> {
 	for version in &mut versions {
 		version.changelog = parse_markdown(&version.changelog);
 	}
+	let env = std::env::vars().collect::<std::collections::BTreeMap<String, String>>();
 	Ok(TamanuHeaders::new(Template::render(
 		"versions",
 		context! {
 			versions,
+			env,
 		},
 	)))
 }
