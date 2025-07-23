@@ -4,7 +4,7 @@ use rocket_dyn_templates::Template;
 
 use crate::{db::Db, servers::version::Version};
 
-pub use super::headers::TamanuHeaders;
+pub use super::{headers::TamanuHeaders, health};
 
 pub mod artifacts;
 pub mod password;
@@ -26,6 +26,8 @@ pub fn rocket() -> Rocket<Build> {
 		.mount(
 			"/",
 			routes![
+				health::live,
+				health::ready,
 				servers::list,
 				servers::create,
 				servers::edit,

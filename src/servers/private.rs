@@ -4,7 +4,7 @@ use rocket_dyn_templates::Template;
 
 use crate::db::Db;
 
-pub use super::headers::TamanuHeaders;
+pub use super::{headers::TamanuHeaders, health};
 
 pub mod statuses;
 
@@ -20,7 +20,12 @@ pub fn rocket(prefix: String) -> Rocket<Build> {
 		.register(format!("{prefix}/"), catchers![not_found])
 		.mount(
 			format!("{prefix}/"),
-			routes![statuses::view, statuses::reload],
+			routes![
+				health::ready,
+				health::live,
+				statuses::view,
+				statuses::reload,
+			],
 		)
 		.mount(format!("{prefix}/static"), FileServer::from("static"))
 }
