@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [3.5.2](https://github.com/beyondessential/tamanu-meta-server/compare/v3.5.1..3.5.2) - 2025-05-21
+## [3.5.3](https://github.com/beyondessential/tamanu-meta-server/compare/v3.5.2..3.5.3) - 2025-07-23
+
+
+- **Bugfix:** Fix is_up in status view - ([0ccc62a](https://github.com/beyondessential/tamanu-meta-server/commit/0ccc62a0fe6580155f8dae42fa4bb45c58e281ed))
+
+---
+## [3.5.2](https://github.com/beyondessential/tamanu-meta-server/compare/v3.5.1..v3.5.2) - 2025-05-21
 
 
 
