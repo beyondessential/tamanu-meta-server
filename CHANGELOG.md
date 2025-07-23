@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [4.0.1](https://github.com/beyondessential/tamanu-meta-server/compare/v4.0.0..4.0.1) - 2025-07-23
+## [4.0.2](https://github.com/beyondessential/tamanu-meta-server/compare/v4.0.1..4.0.2) - 2025-07-23
+
+
+- **Feature:** Add health endpoints - ([7341772](https://github.com/beyondessential/tamanu-meta-server/commit/7341772ad15a96e474dbf9efce86274c67ecf9ac))
+
+---
+## [4.0.1](https://github.com/beyondessential/tamanu-meta-server/compare/v4.0.0..v4.0.1) - 2025-07-23
 
 
 - **Feature:** Add prefix to private server - ([abe9f27](https://github.com/beyondessential/tamanu-meta-server/commit/abe9f27ad7e3f5909680266a1fa702cd78dbabfd))
