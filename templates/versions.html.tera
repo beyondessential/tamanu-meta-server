@@ -118,7 +118,7 @@
     </style>
 </head>
 <body>
-    <p style="text-align: right">
+    <p style="float: right">
       <a href="{{ env.STATUS_PAGE_URL | default(value="/$/status") }}">
         Server statuses
       </a>
