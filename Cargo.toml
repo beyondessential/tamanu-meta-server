@@ -34,7 +34,7 @@ futures = "0.3.31"
 ipnet = { version = "2.11.0", features = ["serde"] }
 pulldown-cmark = { version = "0.13", features = ["html"] }
 node-semver = "2.2.0"
-rcgen = "0.13.2"
+rcgen = "0.14.3"
 reqwest = { version = "0.12.15", default-features = false, features = [
 	"gzip",
 	"json",
