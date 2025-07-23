@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [4.0.0](https://github.com/beyondessential/tamanu-meta-server/compare/v3.5.4..4.0.0) - 2025-07-23
+## [4.0.1](https://github.com/beyondessential/tamanu-meta-server/compare/v4.0.0..4.0.1) - 2025-07-23
+
+
+- **Feature:** Add prefix to private server - ([abe9f27](https://github.com/beyondessential/tamanu-meta-server/commit/abe9f27ad7e3f5909680266a1fa702cd78dbabfd))
+
+---
+## [4.0.0](https://github.com/beyondessential/tamanu-meta-server/compare/v3.5.4..v4.0.0) - 2025-07-23
 
 
 - **Feature:** Split public (internet) and private (tailscale) servers - ([7c4d90e](https://github.com/beyondessential/tamanu-meta-server/commit/7c4d90e740329c8ac8238c9afdf636b80c2eecba))
