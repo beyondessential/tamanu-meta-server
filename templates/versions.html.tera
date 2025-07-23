@@ -118,6 +118,12 @@
     </style>
 </head>
 <body>
+    <p style="text-align: right">
+      <a href="{{ env.STATUS_PAGE_URL | default(value="/$/status") }}">
+        Server statuses
+      </a>
+    </p>
+
     <h1>Tamanu Versions</h1>
     <table>
         <thead>
