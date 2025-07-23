@@ -232,9 +232,10 @@ TO BE DOCUMENTED
 ## Private API
 
 The `private_server` binary serves the private API and views: it must not be exposed to the
-internet (at BES we run it within our Tailscale network).
+internet (at BES we run it within our Tailscale network). By default this is served at the `/$`
+prefix, but that can be changed with the `--prefix` option.
 
-### POST `/reload`
+### POST `/$/reload`
 
 Force a reload of the statuses.
 

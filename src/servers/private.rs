@@ -13,11 +13,14 @@ fn not_found() -> TamanuHeaders<()> {
 	TamanuHeaders::new(())
 }
 
-pub fn rocket() -> Rocket<Build> {
+pub fn rocket(prefix: String) -> Rocket<Build> {
 	rocket::build()
 		.attach(Template::fairing())
 		.attach(Db::init())
-		.register("/", catchers![not_found])
-		.mount("/", routes![statuses::view, statuses::reload])
-		.mount("/static", FileServer::from("static"))
+		.register(format!("{prefix}/"), catchers![not_found])
+		.mount(
+			format!("{prefix}/"),
+			routes![statuses::view, statuses::reload],
+		)
+		.mount(format!("{prefix}/static"), FileServer::from("static"))
 }

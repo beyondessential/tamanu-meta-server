@@ -1,6 +1,6 @@
 use clap::Parser;
 use diesel_migrations::{
-	embed_migrations, EmbeddedMigrations, HarnessWithOutput, MigrationHarness as _,
+	EmbeddedMigrations, HarnessWithOutput, MigrationHarness as _, embed_migrations,
 };
 
 pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!();
@@ -118,13 +118,14 @@ mod rust_postgres_migrator {
 	//! harness on top of `AsyncPgConnection`, just good enough for migrations.
 
 	use diesel::{
+		QueryResult, QueryableByName,
 		connection::{BoxableConnection, SimpleConnection},
 		pg::Pg,
-		sql_query, QueryResult, QueryableByName,
+		sql_query,
 	};
 	use diesel_migrations::MigrationHarness;
 	use rocket_db_pools::diesel::{
-		prelude::RunQueryDsl, AsyncPgConnection, SimpleAsyncConnection as _,
+		AsyncPgConnection, SimpleAsyncConnection as _, prelude::RunQueryDsl,
 	};
 
 	pub(crate) struct UnasyncMigrator {

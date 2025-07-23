@@ -24,8 +24,8 @@ pub async fn public_server() {
 	}
 }
 
-pub async fn private_server() {
-	let ship = servers::private::rocket()
+pub async fn private_server(prefix: String) {
+	let ship = servers::private::rocket(prefix)
 		.ignite()
 		.await
 		.expect("Rocket failed to ignite");
