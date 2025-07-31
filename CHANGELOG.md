@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [4.0.4](https://github.com/beyondessential/tamanu-meta-server/compare/v4.0.3..4.0.4) - 2025-07-23
+## [4.0.5](https://github.com/beyondessential/tamanu-meta-server/compare/v4.0.4..4.0.5) - 2025-07-31
+
+
+- **Tweak:** Support version ranges on all GET /versions routes - ([63a5c86](https://github.com/beyondessential/tamanu-meta-server/commit/63a5c868881e14b25a41b2a1a2621b8ddaff34f8))
+
+---
+## [4.0.4](https://github.com/beyondessential/tamanu-meta-server/compare/v4.0.3..v4.0.4) - 2025-07-23
 
 
 - **Bugfix:** Fix something using a float - ([3db60e3](https://github.com/beyondessential/tamanu-meta-server/commit/3db60e361ef49e5aaad79f5e380eab5df05e35b7))
