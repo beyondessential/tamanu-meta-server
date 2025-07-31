@@ -127,10 +127,10 @@ pub async fn delete(
 
 #[get("/versions/<version>", rank = 1)]
 pub async fn view_artifacts(
-	version: ParsedVersion,
+	version: VersionRange,
 	mut db: Connection<Db>,
 ) -> Result<TamanuHeaders<Template>> {
-	let mut version = Version::get_by_version(&mut db, version).await?;
+	let mut version = Version::get_latest_matching(&mut db, version.0).await?;
 	version.changelog = parse_markdown(&version.changelog);
 	let artifacts = Artifact::get_for_version(&mut db, version.id).await?;
 
@@ -145,21 +145,21 @@ pub async fn view_artifacts(
 
 #[get("/versions/<version>/artifacts", rank = 1)]
 pub async fn get_artifacts(
-	version: ParsedVersion,
+	version: VersionRange,
 	mut db: Connection<Db>,
 ) -> Result<TamanuHeaders<Json<Vec<Artifact>>>> {
-	let version = Version::get_by_version(&mut db, version).await?;
+	let version = Version::get_latest_matching(&mut db, version.0).await?;
 	let artifacts = Artifact::get_for_version(&mut db, version.id).await?;
 
 	Ok(TamanuHeaders::new(Json(artifacts)))
 }
 
-#[get("/versions/<range>/mobile", rank = 1)]
+#[get("/versions/<version>/mobile", rank = 1)]
 pub async fn view_mobile_install(
-	range: VersionRange,
+	version: VersionRange,
 	mut db: Connection<Db>,
 ) -> Result<TamanuHeaders<Template>> {
-	let version = Version::get_latest_matching(&mut db, range.0).await?;
+	let version = Version::get_latest_matching(&mut db, version.0).await?;
 	let artifacts = Artifact::get_for_version(&mut db, version.id)
 		.await?
 		.into_iter()
