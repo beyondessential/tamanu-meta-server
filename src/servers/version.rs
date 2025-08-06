@@ -22,7 +22,11 @@ impl FromParam<'_> for Version {
 	type Error = SemverError;
 
 	fn from_param(param: &'_ str) -> Result<Self, Self::Error> {
-		param.parse().map(Self)
+		if let Some(v) = param.strip_prefix("v") {
+			v.parse().map(Self)
+		} else {
+			param.parse().map(Self)
+		}
 	}
 }
 
@@ -60,9 +64,11 @@ impl FromParam<'_> for VersionRange {
 	type Error = SemverError;
 
 	fn from_param(param: &'_ str) -> Result<Self, Self::Error> {
-		// TEMPORARY WORKAROUND for a bad default parameter in Tamanu
 		if let Some(rest) = param.strip_prefix("^") {
+			// TEMPORARY WORKAROUND for a bad default parameter in Tamanu
 			format!("~{rest}").parse().map(Self)
+		} else if let Some(v) = param.strip_prefix("v") {
+			v.parse().map(Self)
 		} else {
 			param.parse().map(Self)
 		}
