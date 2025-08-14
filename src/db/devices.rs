@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
-use rocket::serde::{Deserialize, Serialize};
-use rocket_db_pools::diesel::{AsyncPgConnection, prelude::*};
+use diesel::prelude::*;
+use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::device_role::DeviceRole;

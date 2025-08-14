@@ -2,7 +2,7 @@ use diesel::{
 	data_types::PgInterval, deserialize, expression::AsExpression, pg::Pg, serialize,
 	sql_types::Interval,
 };
-use rocket::serde::Serialize;
+use serde::Serialize;
 
 const DAYS_PER_MONTH: i32 = 30;
 const SECONDS_PER_DAY: i64 = 60 * 60 * 24;
@@ -15,7 +15,7 @@ pub struct PgDuration(pub chrono::Duration);
 impl Serialize for PgDuration {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
 	where
-		S: rocket::serde::Serializer,
+		S: serde::Serializer,
 	{
 		self.0.num_seconds().serialize(serializer)
 	}
@@ -80,7 +80,7 @@ impl std::fmt::Debug for PgHumanDuration {
 impl Serialize for PgHumanDuration {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
 	where
-		S: rocket::serde::Serializer,
+		S: serde::Serializer,
 	{
 		self.0.to_string().serialize(serializer)
 	}

@@ -1,12 +1,11 @@
 use std::fmt;
 
 use diesel::{QueryableByName, connection::SimpleConnection, pg::Pg, sql_query};
+use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl, SimpleAsyncConnection};
 use diesel_migrations::{
 	EmbeddedMigrations, HarnessWithOutput, MigrationHarness, embed_migrations,
 };
-use rocket_db_pools::diesel::{
-	AsyncConnection as _, AsyncPgConnection, SimpleAsyncConnection as _, prelude::RunQueryDsl,
-};
+
 use url::Url;
 use uuid::Uuid;
 
@@ -44,21 +43,16 @@ impl fmt::Debug for TestDb {
 }
 
 impl TestDb {
-	/// Creates a temporary database using the application's configured DB URL,
-	/// runs embedded migrations on it, and returns a handle to manage it.
-	async fn from_config() -> TestResult<Self> {
-		let config = tamanu_meta::db_config()?;
-		Self::from_base_url(&config.url).await
-	}
-
 	/// Creates a temporary database using the provided base URL,
 	/// runs embedded migrations on it, and returns a handle to manage it.
 	///
 	/// The base URL should be a standard Postgres URL, e.g.:
 	/// - postgres://user:pass@host:port/dbname
 	/// The `dbname` in the base URL is used only to derive the authority and is not used directly.
-	async fn from_base_url(base_url: &str) -> TestResult<Self> {
-		let base = Url::parse(base_url)?;
+	async fn init() -> TestResult<Self> {
+		let base = Url::parse(
+			&std::env::var("DATABASE_URL").expect("DATABASE_URL environment variable is not set"),
+		)?;
 		let mut admin_url = base.clone();
 		// Use the maintenance DB for admin operations
 		admin_url.set_path("postgres");
@@ -109,7 +103,7 @@ impl TestDb {
 		F: FnOnce(AsyncPgConnection) -> Fut,
 		Fut: Future<Output = T>,
 	{
-		let tdb = TestDb::from_config().await.expect("temp db");
+		let tdb = TestDb::init().await.expect("temp db");
 		let conn = tdb.connect().await.expect("connect to temp db");
 		let result = test(conn).await;
 		if let Err(err) = tdb.teardown().await {
@@ -144,7 +138,7 @@ impl diesel::connection::SimpleConnection for UnasyncMigrator {
 		let connection = &mut self.connection;
 		std::thread::scope(|s| {
 			s.spawn(|| {
-				let runtime = rocket::tokio::runtime::Builder::new_current_thread()
+				let runtime = tokio::runtime::Builder::new_current_thread()
 					.enable_all()
 					.build()
 					.unwrap();
@@ -221,7 +215,7 @@ impl MigrationHarness<Pg> for UnasyncMigrator {
 
 		std::thread::scope(|s| {
 			s.spawn(|| {
-				let runtime = rocket::tokio::runtime::Builder::new_current_thread()
+				let runtime = tokio::runtime::Builder::new_current_thread()
 					.enable_all()
 					.build()
 					.unwrap();

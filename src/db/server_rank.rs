@@ -7,7 +7,7 @@ use diesel::{
 	serialize::{self, Output, ToSql},
 	sql_types::Text,
 };
-use rocket::serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(
 	Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize, AsExpression,

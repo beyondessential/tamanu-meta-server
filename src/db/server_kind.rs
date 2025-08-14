@@ -5,7 +5,7 @@ use diesel::{
 	serialize::{self, Output, ToSql},
 	sql_types::Text,
 };
-use rocket::serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Serialize, Deserialize, AsExpression)]
 #[diesel(sql_type = Text)]

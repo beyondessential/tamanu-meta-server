@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use diesel::{backend::Backend, deserialize, expression::AsExpression, serialize, sql_types::Text};
 use node_semver::SemverError;
-use rocket::serde::Serialize;
+use serde::Serialize;
 
 use crate::error::AppError;
 

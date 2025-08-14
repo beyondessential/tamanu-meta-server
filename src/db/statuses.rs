@@ -5,10 +5,11 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
+use diesel::prelude::*;
+use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use futures::stream::{FuturesOrdered, StreamExt};
 use ipnet::IpNet;
-use rocket::serde::Serialize;
-use rocket_db_pools::diesel::{AsyncPgConnection, prelude::*};
+use serde::Serialize;
 use uuid::Uuid;
 
 use crate::{

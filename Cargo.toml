@@ -27,8 +27,10 @@ diesel = { version = "2.1.6", features = [
 	"ipnet-address",
 	"serde_json",
 	"uuid",
+	"postgres_backend",
+	"i-implement-a-third-party-backend-and-opt-into-breaking-changes",
 ] }
-diesel-async = { version = "0.4.1", features = ["mobc"] }
+diesel-async = { version = "0.4.1", features = ["mobc", "postgres"] }
 diesel-derive-enum = { version = "2.1.0", features = ["postgres"] }
 diesel_migrations = "2.1.0"
 folktime = "0.2.1"
@@ -47,9 +49,6 @@ reqwest = { version = "0.12.15", default-features = false, features = [
 	"gzip",
 	"json",
 ] }
-rocket = { version = "0.5.1", features = ["json", "uuid"] }
-rocket_db_pools = { version = "0.2.0", features = ["diesel_postgres"] }
-rocket_dyn_templates = { version = "0.2.0", features = ["tera"] }
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.142"
 tera = "1.20.0"
@@ -62,15 +61,6 @@ tracing = "0.1.41"
 url = { version = "2.5.4", features = ["serde"] }
 uuid = { version = "1.16.0", features = ["serde", "v4"] }
 x509-parser = "0.17.0"
-
-[features]
-default = ["migrations-with-tokio-postgres"]
-migrations-with-tokio-postgres = [
-	# we use the postgres backend but only via tokio-postgres, not via
-	# diesel's own libpq-based postgres backend
-	"diesel/postgres_backend",
-	"diesel/i-implement-a-third-party-backend-and-opt-into-breaking-changes",
-]
 
 [profile.release]
 lto = false

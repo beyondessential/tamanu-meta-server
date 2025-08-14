@@ -1,5 +1,5 @@
 use diesel::{QueryableByName, sql_query, sql_types};
-use rocket_db_pools::diesel::prelude::RunQueryDsl;
+use diesel_async::RunQueryDsl;
 use uuid::Uuid;
 
 #[path = "common/db.rs"]
@@ -18,7 +18,7 @@ struct RowDeviceId {
 	device_id: Option<Uuid>,
 }
 
-#[rocket::async_test]
+#[tokio::test]
 async fn deleting_device_nulls_status_device_id() {
 	TestDb::run(async |mut conn| {
 		// Prepare unique values

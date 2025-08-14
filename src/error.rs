@@ -1,11 +1,11 @@
-use std::{env::VarError, io::Cursor};
+use std::env::VarError;
 
-use diesel_async::pooled_connection::PoolError;
-use rocket::{
-	Response,
-	http::{ContentType, Status},
-	response::Responder,
+use axum::{
+	Json,
+	http::StatusCode,
+	response::{IntoResponse, Response},
 };
+use diesel_async::pooled_connection::PoolError;
 use serde::Serialize;
 
 pub type Result<T> = std::result::Result<T, AppError>;
@@ -64,25 +64,6 @@ impl From<std::io::Error> for AppError {
 	}
 }
 
-impl<'r, 'o: 'r> Responder<'r, 'o> for AppError {
-	fn respond_to(self, _request: &'r rocket::Request<'_>) -> rocket::response::Result<'o> {
-		let json = serde_json::to_string_pretty(&self).map_err(|err| {
-			error!("failed to serialize error: {err}");
-			Status::InternalServerError
-		})?;
-
-		Ok(Response::build()
-			.header(ContentType::JSON)
-			.status(match self {
-				Self::NoMatchingVersions => Status::NotFound,
-				Self::UnusableRange => Status::BadRequest,
-				_ => Status::InternalServerError,
-			})
-			.sized_body(json.len(), Cursor::new(json))
-			.finalize())
-	}
-}
-
 pub fn serialize_to_string<E: ToString, S>(
 	value: &E,
 	serializer: S,
@@ -93,10 +74,8 @@ where
 	value.to_string().serialize(serializer)
 }
 
-impl axum::response::IntoResponse for AppError {
-	fn into_response(self) -> axum::response::Response {
-		use axum::{Json, http::StatusCode};
-
+impl IntoResponse for AppError {
+	fn into_response(self) -> Response {
 		let status = match self {
 			Self::NoMatchingVersions => StatusCode::NOT_FOUND,
 			Self::UnusableRange => StatusCode::BAD_REQUEST,

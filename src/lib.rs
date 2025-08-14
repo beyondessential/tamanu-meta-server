@@ -1,6 +1,3 @@
-#[macro_use]
-extern crate rocket;
-
 use std::{net::SocketAddr, time::Duration};
 
 use axum::Router;

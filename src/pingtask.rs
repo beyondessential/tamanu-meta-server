@@ -1,9 +1,10 @@
 use std::time::Duration;
 
-use rocket::tokio::{
+use tokio::{
 	task::{self, JoinHandle},
 	time::sleep,
 };
+use tracing::error;
 
 use crate::{db::statuses::Status, state::AppState};
 

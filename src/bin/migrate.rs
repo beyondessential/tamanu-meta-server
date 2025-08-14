@@ -218,7 +218,7 @@ mod rust_postgres_migrator {
 
 			std::thread::scope(|s| {
 				s.spawn(|| {
-					let runtime = rocket::tokio::runtime::Builder::new_current_thread()
+					let runtime = tokio::runtime::Builder::new_current_thread()
 						.build()
 						.unwrap();
 					runtime.block_on(async move {

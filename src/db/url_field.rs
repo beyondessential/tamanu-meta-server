@@ -1,4 +1,4 @@
-use rocket::serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use url::Url;
 
 #[derive(Debug, Clone, Deserialize)]

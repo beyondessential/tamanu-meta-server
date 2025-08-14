@@ -1,7 +1,7 @@
 use std::fmt::Display;
 
 use diesel_derive_enum::DbEnum;
-use rocket::serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, DbEnum)]
 #[ExistingTypePath = "crate::schema::sql_types::DeviceRole"]
