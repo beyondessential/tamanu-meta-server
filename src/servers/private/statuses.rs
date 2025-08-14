@@ -11,7 +11,7 @@ use tera::{Context, Tera};
 use crate::{
 	db::{latest_statuses::LatestStatus, server_rank::ServerRank, statuses::Status},
 	error::Result,
-	servers::version::Version,
+	servers::version::VersionStr,
 	state::{AppState, Db},
 };
 
@@ -23,8 +23,8 @@ pub fn routes() -> Router<AppState> {
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
 pub struct LiveVersionsBracket {
-	pub min: Version,
-	pub max: Version,
+	pub min: VersionStr,
+	pub max: VersionStr,
 }
 
 async fn view(State(db): State<Db>, State(tera): State<Arc<Tera>>) -> Result<Html<String>> {

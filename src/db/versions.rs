@@ -4,12 +4,13 @@ use uuid::Uuid;
 
 use crate::{
 	error::{AppError, Result},
-	servers::version::Version as ParsedVersion,
+	servers::version::VersionStr,
 };
 
 #[macro_export]
 macro_rules! predicate_version {
 	($version:expr) => {{
+		use ::diesel::BoolExpressionMethods as _;
 		use $crate::schema::versions::dsl::*;
 		let node_semver::Version {
 			major: target_major,
@@ -68,10 +69,7 @@ impl Version {
 			.map_err(AppError::from)
 	}
 
-	pub async fn get_by_version(
-		db: &mut AsyncPgConnection,
-		version: ParsedVersion,
-	) -> Result<Self> {
+	pub async fn get_by_version(db: &mut AsyncPgConnection, version: VersionStr) -> Result<Self> {
 		use crate::schema::versions::*;
 
 		table
@@ -84,7 +82,7 @@ impl Version {
 
 	pub async fn get_updates_for_version(
 		db: &mut AsyncPgConnection,
-		version: ParsedVersion,
+		version: VersionStr,
 	) -> Result<Vec<Self>> {
 		use crate::views::version_updates::dsl::*;
 		let node_semver::Version {

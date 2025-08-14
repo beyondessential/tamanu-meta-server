@@ -1,5 +1,3 @@
-use rocket_db_pools::{Database, diesel::PgPool};
-
 pub mod artifacts;
 pub mod device_role;
 pub mod devices;
@@ -11,7 +9,3 @@ pub mod servers;
 pub mod statuses;
 pub mod url_field;
 pub mod versions;
-
-#[derive(Clone, Database)]
-#[database("postgres")]
-pub struct Db(PgPool);

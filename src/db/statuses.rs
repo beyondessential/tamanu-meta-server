@@ -1,5 +1,6 @@
 use std::{
 	error::Error,
+	str::FromStr as _,
 	time::{Duration, Instant},
 };
 
@@ -13,7 +14,7 @@ use uuid::Uuid;
 use crate::{
 	db::servers::Server,
 	error::{AppError, Result},
-	servers::version::Version,
+	servers::version::VersionStr,
 };
 
 #[derive(Debug, Clone, Serialize, Queryable, Selectable, Insertable, Associations)]
@@ -26,7 +27,7 @@ pub struct Status {
 	pub server_id: Uuid,
 	pub device_id: Option<Uuid>,
 	pub latency_ms: Option<i32>,
-	pub version: Option<Version>,
+	pub version: Option<VersionStr>,
 	pub error: Option<String>,
 	pub remote_ip: Option<IpNet>,
 	pub extra: serde_json::Value,
@@ -40,7 +41,7 @@ pub struct NewStatus {
 	pub server_id: Uuid,
 	pub device_id: Option<Uuid>,
 	pub latency_ms: Option<i32>,
-	pub version: Option<Version>,
+	pub version: Option<VersionStr>,
 	pub error: Option<String>,
 	pub remote_ip: Option<IpNet>,
 	pub extra: serde_json::Value,
@@ -84,11 +85,7 @@ impl Status {
 					.get("X-Version")
 					.ok_or_else(|| "X-Version header not present".to_string())
 					.and_then(|value| value.to_str().map_err(|err| err.to_string()))
-					.and_then(|value| {
-						node_semver::Version::parse(value)
-							.map(Version)
-							.map_err(|err| err.to_string())
-					})
+					.and_then(|value| VersionStr::from_str(value).map_err(|err| err.to_string()))
 			})
 			.map_or_else(|error| (None, Some(error)), |version| (Some(version), None));
 

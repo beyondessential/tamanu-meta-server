@@ -14,11 +14,9 @@ use crate::{
 		versions::Version,
 	},
 	error::Result,
-	servers::device_auth::ReleaserDevice,
+	servers::{device_auth::ReleaserDevice, version::VersionStr},
 	state::Db,
 };
-
-use super::Version as ParsedVersion;
 
 use crate::state::AppState;
 
@@ -35,7 +33,7 @@ async fn create(
 ) -> Result<Json<Artifact>> {
 	let mut db = db.get().await?;
 	let Version { id, .. } =
-		Version::get_by_version(&mut db, ParsedVersion::from_str(&version)?).await?;
+		Version::get_by_version(&mut db, VersionStr::from_str(&version)?).await?;
 
 	let input = NewArtifact {
 		version_id: id,

@@ -9,7 +9,7 @@ use crate::{
 		url_field::UrlField,
 	},
 	error::{AppError, Result},
-	servers::version::Version,
+	servers::version::VersionStr,
 };
 
 #[derive(Debug, Clone, Serialize, Queryable, Selectable, Insertable)]
@@ -33,7 +33,7 @@ pub struct LatestStatus {
 	pub latest_success_id: Option<Uuid>,
 	pub latest_success_ts: Option<DateTime<Utc>>,
 	pub latest_success_ago: Option<PgHumanDuration>,
-	pub latest_success_version: Option<Version>,
+	pub latest_success_version: Option<VersionStr>,
 
 	pub latest_error_id: Option<Uuid>,
 	pub latest_error_ts: Option<DateTime<Utc>>,
