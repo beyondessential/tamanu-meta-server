@@ -28,6 +28,7 @@ pub struct Status {
 	pub version: Option<Version>,
 	pub error: Option<String>,
 	pub remote_ip: Option<IpNet>,
+	pub extra: serde_json::Value,
 }
 
 #[derive(Debug, Insertable)]
@@ -59,6 +60,10 @@ impl Default for NewStatus {
 impl Status {
 	pub fn is_success(&self) -> bool {
 		self.error.is_none()
+	}
+
+	pub fn extra(&self, key: &str) -> Option<&serde_json::Value> {
+		self.extra.as_object().and_then(|obj| obj.get(key))
 	}
 
 	pub async fn ping_server(client: &reqwest::Client, server: &Server) -> Self {
