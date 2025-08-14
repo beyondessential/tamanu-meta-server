@@ -1,15 +1,21 @@
+use std::{str::FromStr as _, sync::Arc};
+
+use axum::{
+	Json,
+	body::Bytes,
+	extract::{Path, State},
+	response::Html,
+	routing::{Router, delete, get, post},
+};
+use diesel::{ExpressionMethods as _, SelectableHelper as _};
+use diesel_async::RunQueryDsl as _;
+use futures::AsyncReadExt;
 use pulldown_cmark::{Options, Parser, html};
 use qrcode::{QrCode, render::svg};
-use rocket::{
-	data::{Data, ToByteUnit},
-	serde::{Deserialize, Serialize, json::Json},
-	tokio::io::AsyncReadExt,
-};
-use rocket_db_pools::{Connection, diesel::prelude::*};
-use rocket_dyn_templates::{Template, context};
+use serde::{Deserialize, Serialize};
+use tera::{Context, Tera};
 
 use crate::{
-	Db,
 	db::{
 		artifacts::Artifact,
 		versions::{NewVersion, Version},
@@ -17,9 +23,21 @@ use crate::{
 	error::Result,
 	servers::{
 		device_auth::{AdminDevice, ReleaserDevice},
-		version::{Version as ParsedVersion, VersionRange},
+		version::{VersionRange, VersionStr},
 	},
+	state::{AppState, Db},
 };
+
+pub fn routes() -> Router<AppState> {
+	Router::new()
+		.route("/", get(list))
+		.route("/update-for/{version}", get(update_for))
+		.route("/{version}", post(create))
+		.route("/{version}", delete(remove))
+		.route("/{version}", get(view_artifacts))
+		.route("/{version}/artifacts", get(list_artifacts))
+		.route("/{version}/mobile", get(view_mobile_install))
+}
 
 // Add a derived struct for Artifact with QR code
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,22 +77,23 @@ pub fn parse_markdown(text: &str) -> String {
 	html_output
 }
 
-#[get("/versions")]
-pub async fn list(mut db: Connection<Db>) -> Result<Json<Vec<Version>>> {
+async fn list(State(db): State<Db>) -> Result<Json<Vec<Version>>> {
+	let mut db = db.get().await?;
 	let versions = Version::get_all(&mut db).await?;
 	Ok(Json(versions))
 }
 
-#[post("/versions/<version>", data = "<data>")]
-pub async fn create(
+async fn create(
 	_device: ReleaserDevice,
-	mut db: Connection<Db>,
-	version: ParsedVersion,
-	data: Data<'_>,
+	Path(version): Path<String>,
+	State(db): State<Db>,
+	data: Bytes,
 ) -> Result<Json<Version>> {
-	let mut stream = data.open(1_u8.mebibytes());
-	let mut changelog = String::with_capacity(stream.hint());
+	let mut db = db.get().await?;
+	let mut stream = data.take(1024 * 1024 * 1024); // up to a MiB
+	let mut changelog = String::with_capacity(data.len().min(1024 * 1024 * 1024));
 	stream.read_to_string(&mut changelog).await?;
+	let version = VersionStr::from_str(&version)?;
 	let version = diesel::insert_into(crate::schema::versions::table)
 		.values(NewVersion {
 			major: version.0.major as _,
@@ -89,14 +108,15 @@ pub async fn create(
 	Ok(Json(version))
 }
 
-#[delete("/versions/<version>")]
-pub async fn delete(
+async fn remove(
 	_device: AdminDevice,
-	version: ParsedVersion,
-	mut db: Connection<Db>,
+	Path(version): Path<String>,
+	State(db): State<Db>,
 ) -> Result<()> {
 	use crate::schema::versions::dsl::*;
 
+	let mut db = db.get().await?;
+	let version = VersionStr::from_str(&version)?;
 	diesel::update(versions)
 		.filter(crate::db::versions::predicate_version!(version.0))
 		.set(published.eq(false))
@@ -106,37 +126,42 @@ pub async fn delete(
 	Ok(())
 }
 
-#[get("/versions/<version>", rank = 1)]
-pub async fn view_artifacts(version: VersionRange, mut db: Connection<Db>) -> Result<Template> {
+async fn view_artifacts(
+	Path(version): Path<String>,
+	State(db): State<Db>,
+	State(tera): State<Arc<Tera>>,
+) -> Result<Html<String>> {
+	let mut db = db.get().await?;
+	let version = VersionRange::from_str(&version)?;
 	let mut version = Version::get_latest_matching(&mut db, version.0).await?;
 	version.changelog = parse_markdown(&version.changelog);
 	let artifacts = Artifact::get_for_version(&mut db, version.id).await?;
 
-	Ok(Template::render(
-		"artifacts",
-		context! {
-			version,
-			artifacts,
-		},
-	))
+	let mut context = Context::new();
+	context.insert("version", &version);
+	context.insert("artifacts", &artifacts);
+	Ok(Html(tera.render("artifacts", &context)?))
 }
 
-#[get("/versions/<version>/artifacts", rank = 1)]
-pub async fn get_artifacts(
-	version: VersionRange,
-	mut db: Connection<Db>,
+async fn list_artifacts(
+	Path(version): Path<String>,
+	State(db): State<Db>,
 ) -> Result<Json<Vec<Artifact>>> {
+	let mut db = db.get().await?;
+	let version = VersionRange::from_str(&version)?;
 	let version = Version::get_latest_matching(&mut db, version.0).await?;
 	let artifacts = Artifact::get_for_version(&mut db, version.id).await?;
 
 	Ok(Json(artifacts))
 }
 
-#[get("/versions/<version>/mobile", rank = 1)]
-pub async fn view_mobile_install(
-	version: VersionRange,
-	mut db: Connection<Db>,
-) -> Result<Template> {
+async fn view_mobile_install(
+	Path(version): Path<String>,
+	State(db): State<Db>,
+	State(tera): State<Arc<Tera>>,
+) -> Result<Html<String>> {
+	let mut db = db.get().await?;
+	let version = VersionRange::from_str(&version)?;
 	let version = Version::get_latest_matching(&mut db, version.0).await?;
 	let artifacts = Artifact::get_for_version(&mut db, version.id)
 		.await?
@@ -145,20 +170,18 @@ pub async fn view_mobile_install(
 		.map(ArtifactWithQR::from)
 		.collect::<Vec<_>>();
 
-	Ok(Template::render(
-		"mobile",
-		context! {
-			version,
-			artifacts,
-		},
-	))
+	let mut context = Context::new();
+	context.insert("version", &version);
+	context.insert("artifacts", &artifacts);
+	Ok(Html(tera.render("mobile", &context)?))
 }
 
-#[get("/versions/update-for/<version>", rank = 2)]
-pub async fn update_for(
-	mut db: Connection<Db>,
-	version: ParsedVersion,
+async fn update_for(
+	State(db): State<Db>,
+	Path(version): Path<String>,
 ) -> Result<Json<Vec<Version>>> {
+	let mut db = db.get().await?;
+	let version = VersionStr::from_str(&version)?;
 	let updates = Version::get_updates_for_version(&mut db, version).await?;
 	Ok(Json(updates))
 }

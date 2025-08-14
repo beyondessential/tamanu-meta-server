@@ -5,7 +5,6 @@ use axum::{
 	response::Html,
 	routing::{Router, get},
 };
-use rocket::{Build, Rocket};
 use tera::{Context, Tera};
 use tower_http::services::ServeDir;
 
@@ -23,21 +22,6 @@ pub mod servers;
 pub mod statuses;
 pub mod timesync;
 pub mod versions;
-
-pub fn rocket() -> Rocket<Build> {
-	rocket::build().mount(
-		"/",
-		routes![
-			versions::list,
-			versions::create,
-			versions::delete,
-			versions::update_for,
-			versions::get_artifacts,
-			versions::view_artifacts,
-			versions::view_mobile_install,
-		],
-	)
-}
 
 pub fn routes() -> Router<AppState> {
 	Router::new()
