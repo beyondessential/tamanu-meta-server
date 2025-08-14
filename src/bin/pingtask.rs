@@ -1,6 +1,25 @@
-#[rocket::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-	let db = tamanu_meta::db_pool().await?;
-	tamanu_meta::pingtask::spawn(db).await?;
+use clap::Parser;
+use lloggs::{LoggingArgs, PreArgs};
+use miette::IntoDiagnostic;
+
+#[derive(Debug, Parser)]
+struct Args {
+	#[command(flatten)]
+	logging: LoggingArgs,
+}
+
+#[tokio::main]
+async fn main() -> miette::Result<()> {
+	let mut _guard = PreArgs::parse().setup()?;
+	let args = Args::parse();
+	if _guard.is_none() {
+		_guard = Some(args.logging.setup(|v| match v {
+			0 => "info",
+			1 => "debug",
+			_ => "trace",
+		})?);
+	}
+
+	tamanu_meta::pingtask::spawn().await.into_diagnostic()?;
 	Ok(())
 }

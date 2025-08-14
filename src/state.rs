@@ -7,7 +7,7 @@ use diesel_async::{
 };
 use tera::Tera;
 
-use crate::error::AppError;
+use crate::error::Result;
 
 pub type Db = Pool<AsyncPgConnection>;
 
@@ -18,10 +18,12 @@ pub struct AppState {
 }
 
 impl AppState {
-	pub fn init() -> Result<Self, AppError> {
+	pub fn init_db() -> Result<Db> {
 		let config = AsyncDieselConnectionManager::<AsyncPgConnection>::new(var("DATABASE_URL")?);
-		let db = Pool::new(config);
+		Ok(Pool::new(config))
+	}
 
+	pub fn init_tera() -> Result<Arc<Tera>> {
 		let mut tera = Tera::default();
 
 		macro_rules! embed_template {
@@ -40,9 +42,13 @@ impl AppState {
 		embed_template!("statuses");
 		embed_template!("versions");
 
+		Ok(Arc::new(tera))
+	}
+
+	pub fn init() -> Result<Self> {
 		Ok(Self {
-			db,
-			tera: Arc::new(tera),
+			db: Self::init_db()?,
+			tera: Self::init_tera()?,
 		})
 	}
 }

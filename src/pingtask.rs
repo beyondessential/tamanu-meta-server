@@ -5,9 +5,10 @@ use rocket::tokio::{
 	time::sleep,
 };
 
-use crate::db::{Db, statuses::Status};
+use crate::{db::statuses::Status, state::AppState};
 
-pub fn spawn(pool: Db) -> JoinHandle<()> {
+pub fn spawn() -> JoinHandle<()> {
+	let pool = AppState::init_db().unwrap();
 	task::spawn(async move {
 		loop {
 			sleep(Duration::from_secs(60)).await;
