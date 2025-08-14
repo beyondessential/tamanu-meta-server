@@ -14,20 +14,17 @@ struct ServerSimp;
 impl Timesimp for ServerSimp {
 	type Err = AppError;
 
-	async fn load_offset(&self) -> Result<Option<SignedDuration>, Self::Err> {
+	async fn load_offset(&self) -> Result<Option<SignedDuration>> {
 		// server time is correct
 		Ok(Some(SignedDuration::ZERO))
 	}
 
-	async fn store_offset(&mut self, _offset: SignedDuration) -> Result<(), Self::Err> {
+	async fn store_offset(&mut self, _offset: SignedDuration) -> Result<()> {
 		// as time is correct, no need to store offset
 		unimplemented!()
 	}
 
-	async fn query_server(
-		&self,
-		_request: timesimp::Request,
-	) -> Result<timesimp::Response, Self::Err> {
+	async fn query_server(&self, _request: timesimp::Request) -> Result<timesimp::Response> {
 		// server has no upstream timesimp
 		unimplemented!()
 	}

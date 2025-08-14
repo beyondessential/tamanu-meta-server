@@ -8,7 +8,7 @@ use rocket::{
 };
 use serde::Serialize;
 
-pub type Result<T, E = AppError> = std::result::Result<T, E>;
+pub type Result<T> = std::result::Result<T, AppError>;
 
 #[derive(Debug, thiserror::Error, Serialize)]
 pub enum AppError {
@@ -33,6 +33,10 @@ pub enum AppError {
 	#[error("database: {0}")]
 	#[serde(serialize_with = "serialize_to_string")]
 	DatabaseQuery(#[from] diesel::result::Error),
+
+	#[error("render: {0}")]
+	#[serde(serialize_with = "serialize_to_string")]
+	Tera(#[from] tera::Error),
 
 	#[error("io: {0}")]
 	Io(String),
@@ -79,7 +83,10 @@ impl<'r, 'o: 'r> Responder<'r, 'o> for AppError {
 	}
 }
 
-pub fn serialize_to_string<E: ToString, S>(value: &E, serializer: S) -> Result<S::Ok, S::Error>
+pub fn serialize_to_string<E: ToString, S>(
+	value: &E,
+	serializer: S,
+) -> std::result::Result<S::Ok, S::Error>
 where
 	S: serde::Serializer,
 {
