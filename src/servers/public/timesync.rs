@@ -1,16 +1,13 @@
 use timesimp::{Request, SignedDuration, Timesimp};
 
-use crate::{
-	error::{AppError, Result},
-	servers::headers::TamanuHeaders,
-};
+use crate::error::{AppError, Result};
 
 #[post("/timesync", data = "<request>")]
-pub async fn endpoint(request: Vec<u8>) -> Result<TamanuHeaders<Vec<u8>>> {
+pub async fn endpoint(request: Vec<u8>) -> Result<Vec<u8>> {
 	let response = ServerSimp
 		.answer_client(Request::try_from(request.as_ref())?)
 		.await?;
-	Ok(TamanuHeaders::new(response.to_bytes().to_vec()))
+	Ok(response.to_bytes().to_vec())
 }
 
 struct ServerSimp;

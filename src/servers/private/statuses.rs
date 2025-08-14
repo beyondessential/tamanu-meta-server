@@ -7,7 +7,7 @@ use serde::Serialize;
 use crate::{
 	db::{Db, latest_statuses::LatestStatus, server_rank::ServerRank, statuses::Status},
 	error::Result,
-	servers::{headers::TamanuHeaders, version::Version},
+	servers::version::Version,
 };
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
@@ -17,7 +17,7 @@ pub struct LiveVersionsBracket {
 }
 
 #[get("/status")]
-pub async fn view(mut db: Connection<Db>) -> Result<TamanuHeaders<Template>> {
+pub async fn view(mut db: Connection<Db>) -> Result<Template> {
 	let entries = LatestStatus::fetch(&mut db).await?;
 
 	let versions = entries
@@ -42,7 +42,7 @@ pub async fn view(mut db: Connection<Db>) -> Result<TamanuHeaders<Template>> {
 		.iter()
 		.map(|v| (v.0.major, v.0.minor))
 		.collect::<BTreeSet<_>>();
-	Ok(TamanuHeaders::new(Template::render(
+	Ok(Template::render(
 		"statuses",
 		context! {
 			title: "Server statuses",
@@ -51,11 +51,11 @@ pub async fn view(mut db: Connection<Db>) -> Result<TamanuHeaders<Template>> {
 			versions,
 			releases,
 		},
-	)))
+	))
 }
 
 #[post("/reload")]
-pub async fn reload(mut db: Connection<Db>) -> Result<TamanuHeaders<()>> {
+pub async fn reload(mut db: Connection<Db>) -> Result<()> {
 	Status::ping_servers_and_save(&mut db).await?;
-	Ok(TamanuHeaders::new(()))
+	Ok(())
 }

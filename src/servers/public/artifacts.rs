@@ -8,7 +8,7 @@ use crate::{
 		versions::Version,
 	},
 	error::Result,
-	servers::{device_auth::ReleaserDevice, headers::TamanuHeaders},
+	servers::device_auth::ReleaserDevice,
 };
 
 use super::Version as ParsedVersion;
@@ -21,7 +21,7 @@ pub async fn create(
 	artifact_type: String,
 	platform: String,
 	url: String,
-) -> Result<TamanuHeaders<Json<Artifact>>> {
+) -> Result<Json<Artifact>> {
 	let Version { id, .. } = Version::get_by_version(&mut db, version).await?;
 
 	let input = NewArtifact {
@@ -37,5 +37,5 @@ pub async fn create(
 		.get_result(&mut db)
 		.await?;
 
-	Ok(TamanuHeaders::new(Json(artifact)))
+	Ok(Json(artifact))
 }

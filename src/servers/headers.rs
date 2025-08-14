@@ -1,6 +1,6 @@
 use crate::error::AppError;
 
-use super::{server_type::ServerType, version::Version};
+use super::version::Version;
 use rocket::{
 	Request,
 	http::Status,
@@ -8,23 +8,6 @@ use rocket::{
 };
 
 const X_VERSION: &str = "X-Version";
-
-#[derive(Debug, Responder)]
-pub struct TamanuHeaders<T> {
-	pub inner: T,
-	version: Version,
-	server_type: ServerType,
-}
-
-impl<T> TamanuHeaders<T> {
-	pub fn new(inner: T) -> Self {
-		Self {
-			inner,
-			server_type: ServerType,
-			version: Version(node_semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap()),
-		}
-	}
-}
 
 #[derive(Debug, Clone)]
 pub struct VersionHeader(pub Version);

@@ -4,7 +4,7 @@ use rocket_dyn_templates::Template;
 
 use crate::{db::Db, servers::version::Version};
 
-pub use super::{headers::TamanuHeaders, health};
+pub use super::health;
 
 pub mod artifacts;
 pub mod password;
@@ -14,9 +14,7 @@ pub mod timesync;
 pub mod versions;
 
 #[catch(404)]
-fn not_found() -> TamanuHeaders<()> {
-	TamanuHeaders::new(())
-}
+fn not_found() {}
 
 pub fn rocket() -> Rocket<Build> {
 	rocket::build()

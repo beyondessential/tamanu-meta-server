@@ -10,10 +10,7 @@ use crate::{
 		url_field::UrlField,
 	},
 	error::Result,
-	servers::{
-		device_auth::{AdminDevice, ServerDevice},
-		headers::TamanuHeaders,
-	},
+	servers::device_auth::{AdminDevice, ServerDevice},
 };
 
 #[derive(Debug, Serialize)]
@@ -24,8 +21,8 @@ pub struct PublicServer {
 }
 
 #[get("/servers")]
-pub async fn list(mut db: Connection<Db>) -> Result<TamanuHeaders<Json<Vec<PublicServer>>>> {
-	Ok(TamanuHeaders::new(Json(
+pub async fn list(mut db: Connection<Db>) -> Result<Json<Vec<PublicServer>>> {
+	Ok(Json(
 		Server::get_all(&mut db)
 			.await?
 			.into_iter()
@@ -41,7 +38,7 @@ pub async fn list(mut db: Connection<Db>) -> Result<TamanuHeaders<Json<Vec<Publi
 					.flatten()
 			})
 			.collect(),
-	)))
+	))
 }
 
 #[post("/servers", data = "<input>")]
@@ -49,7 +46,7 @@ pub async fn create(
 	device: ServerDevice,
 	mut db: Connection<Db>,
 	input: Json<NewServer>,
-) -> Result<TamanuHeaders<Json<Server>>> {
+) -> Result<Json<Server>> {
 	let mut input = Server::from(input.into_inner());
 	input.device_id = Some(device.0.id);
 
@@ -59,7 +56,7 @@ pub async fn create(
 		.get_result(&mut db)
 		.await?;
 
-	Ok(TamanuHeaders::new(Json(server)))
+	Ok(Json(server))
 }
 
 #[patch("/servers", data = "<input>")]
@@ -67,7 +64,7 @@ pub async fn edit(
 	_device: ServerDevice,
 	mut db: Connection<Db>,
 	input: Json<PartialServer>,
-) -> Result<TamanuHeaders<Json<Server>>> {
+) -> Result<Json<Server>> {
 	use crate::views::ordered_servers::dsl::*;
 
 	let input = input.into_inner();
@@ -79,13 +76,13 @@ pub async fn edit(
 		.execute(&mut db)
 		.await?;
 
-	Ok(TamanuHeaders::new(Json(
+	Ok(Json(
 		ordered_servers
 			.filter(id.eq(input_id))
 			.select(Server::as_select())
 			.first(&mut db)
 			.await?,
-	)))
+	))
 }
 
 #[delete("/servers", data = "<input>")]
@@ -93,7 +90,7 @@ pub async fn delete(
 	_device: AdminDevice,
 	mut db: Connection<Db>,
 	input: Json<PartialServer>,
-) -> Result<TamanuHeaders<()>> {
+) -> Result<()> {
 	use crate::schema::servers::dsl::*;
 
 	let input = input.into_inner();
@@ -103,5 +100,5 @@ pub async fn delete(
 		.execute(&mut db)
 		.await?;
 
-	Ok(TamanuHeaders::new(()))
+	Ok(())
 }

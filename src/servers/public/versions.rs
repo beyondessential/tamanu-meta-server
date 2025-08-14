@@ -17,7 +17,6 @@ use crate::{
 	error::Result,
 	servers::{
 		device_auth::{AdminDevice, ReleaserDevice},
-		headers::TamanuHeaders,
 		version::{Version as ParsedVersion, VersionRange},
 	},
 };
@@ -61,25 +60,25 @@ fn parse_markdown(text: &str) -> String {
 }
 
 #[get("/versions")]
-pub async fn list(mut db: Connection<Db>) -> Result<TamanuHeaders<Json<Vec<Version>>>> {
+pub async fn list(mut db: Connection<Db>) -> Result<Json<Vec<Version>>> {
 	let versions = Version::get_all(&mut db).await?;
-	Ok(TamanuHeaders::new(Json(versions)))
+	Ok(Json(versions))
 }
 
 #[get("/")]
-pub async fn view(mut db: Connection<Db>) -> Result<TamanuHeaders<Template>> {
+pub async fn view(mut db: Connection<Db>) -> Result<Template> {
 	let mut versions = Version::get_all(&mut db).await?;
 	for version in &mut versions {
 		version.changelog = parse_markdown(&version.changelog);
 	}
 	let env = std::env::vars().collect::<std::collections::BTreeMap<String, String>>();
-	Ok(TamanuHeaders::new(Template::render(
+	Ok(Template::render(
 		"versions",
 		context! {
 			versions,
 			env,
 		},
-	)))
+	))
 }
 
 #[post("/versions/<version>", data = "<data>")]
@@ -88,7 +87,7 @@ pub async fn create(
 	mut db: Connection<Db>,
 	version: ParsedVersion,
 	data: Data<'_>,
-) -> Result<TamanuHeaders<Json<Version>>> {
+) -> Result<Json<Version>> {
 	let mut stream = data.open(1_u8.mebibytes());
 	let mut changelog = String::with_capacity(stream.hint());
 	stream.read_to_string(&mut changelog).await?;
@@ -103,7 +102,7 @@ pub async fn create(
 		.get_result(&mut db)
 		.await?;
 
-	Ok(TamanuHeaders::new(Json(version)))
+	Ok(Json(version))
 }
 
 #[delete("/versions/<version>")]
@@ -111,7 +110,7 @@ pub async fn delete(
 	_device: AdminDevice,
 	version: ParsedVersion,
 	mut db: Connection<Db>,
-) -> Result<TamanuHeaders<()>> {
+) -> Result<()> {
 	use crate::schema::versions::dsl::*;
 
 	diesel::update(versions)
@@ -120,43 +119,40 @@ pub async fn delete(
 		.execute(&mut db)
 		.await?;
 
-	Ok(TamanuHeaders::new(()))
+	Ok(())
 }
 
 #[get("/versions/<version>", rank = 1)]
-pub async fn view_artifacts(
-	version: VersionRange,
-	mut db: Connection<Db>,
-) -> Result<TamanuHeaders<Template>> {
+pub async fn view_artifacts(version: VersionRange, mut db: Connection<Db>) -> Result<Template> {
 	let mut version = Version::get_latest_matching(&mut db, version.0).await?;
 	version.changelog = parse_markdown(&version.changelog);
 	let artifacts = Artifact::get_for_version(&mut db, version.id).await?;
 
-	Ok(TamanuHeaders::new(Template::render(
+	Ok(Template::render(
 		"artifacts",
 		context! {
 			version,
 			artifacts,
 		},
-	)))
+	))
 }
 
 #[get("/versions/<version>/artifacts", rank = 1)]
 pub async fn get_artifacts(
 	version: VersionRange,
 	mut db: Connection<Db>,
-) -> Result<TamanuHeaders<Json<Vec<Artifact>>>> {
+) -> Result<Json<Vec<Artifact>>> {
 	let version = Version::get_latest_matching(&mut db, version.0).await?;
 	let artifacts = Artifact::get_for_version(&mut db, version.id).await?;
 
-	Ok(TamanuHeaders::new(Json(artifacts)))
+	Ok(Json(artifacts))
 }
 
 #[get("/versions/<version>/mobile", rank = 1)]
 pub async fn view_mobile_install(
 	version: VersionRange,
 	mut db: Connection<Db>,
-) -> Result<TamanuHeaders<Template>> {
+) -> Result<Template> {
 	let version = Version::get_latest_matching(&mut db, version.0).await?;
 	let artifacts = Artifact::get_for_version(&mut db, version.id)
 		.await?
@@ -165,20 +161,20 @@ pub async fn view_mobile_install(
 		.map(ArtifactWithQR::from)
 		.collect::<Vec<_>>();
 
-	Ok(TamanuHeaders::new(Template::render(
+	Ok(Template::render(
 		"mobile",
 		context! {
 			version,
 			artifacts,
 		},
-	)))
+	))
 }
 
 #[get("/versions/update-for/<version>", rank = 2)]
 pub async fn update_for(
 	mut db: Connection<Db>,
 	version: ParsedVersion,
-) -> Result<TamanuHeaders<Json<Vec<Version>>>> {
+) -> Result<Json<Vec<Version>>> {
 	let updates = Version::get_updates_for_version(&mut db, version).await?;
-	Ok(TamanuHeaders::new(Json(updates)))
+	Ok(Json(updates))
 }

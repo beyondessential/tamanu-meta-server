@@ -4,14 +4,12 @@ use rocket_dyn_templates::Template;
 
 use crate::db::Db;
 
-pub use super::{headers::TamanuHeaders, health};
+pub use super::health;
 
 pub mod statuses;
 
 #[catch(404)]
-fn not_found() -> TamanuHeaders<()> {
-	TamanuHeaders::new(())
-}
+fn not_found() {}
 
 pub fn rocket(prefix: String) -> Rocket<Build> {
 	rocket::build()

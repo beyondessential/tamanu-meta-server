@@ -15,11 +15,7 @@ use crate::{
 		statuses::{NewStatus, Status},
 	},
 	error::{AppError, Result},
-	servers::{
-		device_auth::ServerDevice,
-		headers::{TamanuHeaders, VersionHeader},
-		version::Version,
-	},
+	servers::{device_auth::ServerDevice, headers::VersionHeader, version::Version},
 };
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
@@ -36,7 +32,7 @@ pub async fn create(
 	mut db: Connection<Db>,
 	server_id: Uuid,
 	extra: Option<Json<serde_json::Value>>,
-) -> Result<TamanuHeaders<Json<Status>>> {
+) -> Result<Json<Status>> {
 	use rocket_db_pools::diesel::prelude::*;
 	let Device { role, id, .. } = device.0;
 
@@ -72,5 +68,5 @@ pub async fn create(
 		.get_result(&mut db)
 		.await?;
 
-	Ok(TamanuHeaders::new(Json(status)))
+	Ok(Json(status))
 }
