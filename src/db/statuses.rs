@@ -157,7 +157,7 @@ impl Status {
 			.map_err(|err| AppError::Database(err.to_string()))
 	}
 
-	pub async fn latest_device_connection(
+	pub async fn device_connection(
 		&self,
 		db: &mut AsyncPgConnection,
 	) -> Result<Option<crate::db::devices::DeviceConnection>> {
@@ -168,7 +168,11 @@ impl Status {
 		use crate::schema::device_connections::dsl as dc;
 
 		let row = dc::device_connections
-			.filter(dc::device_id.eq(dev_id))
+			.filter(
+				dc::device_id
+					.eq(dev_id)
+					.and(dc::created_at.le(self.created_at)),
+			)
 			.order(dc::created_at.desc())
 			.select(crate::db::devices::DeviceConnection::as_select())
 			.first::<crate::db::devices::DeviceConnection>(db)

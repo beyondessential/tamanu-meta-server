@@ -12,7 +12,8 @@ use rocket::{
 use rocket_db_pools::{
 	Connection,
 	diesel::{AsyncPgConnection, prelude::*},
-uuid::Uuid;
+};
+use uuid::Uuid;
 
 use super::device_role::DeviceRole;
 use crate::{
@@ -172,8 +173,8 @@ impl<'r> request::FromRequest<'r> for Device {
 			)
 		};
 
-		try_outcome!(
-			DeviceConnection {
+		let _ = try_outcome!(
+			NewDeviceConnection {
 				device_id: device.id,
 				ip: req
 					.client_ip()
@@ -197,19 +198,32 @@ device_role_struct!(ReleaserDevice, DeviceRole::Releaser);
 #[derive(Clone, Debug, Insertable)]
 #[diesel(table_name = crate::schema::device_connections)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct DeviceConnection {
+pub struct NewDeviceConnection {
 	pub device_id: Uuid,
 	pub ip: ipnet::IpNet,
 	pub user_agent: Option<String>,
 }
 
-impl DeviceConnection {
-	pub async fn create(&self, db: &mut AsyncPgConnection) -> Result<()> {
-		diesel::insert_into(crate::schema::device_connections::dsl::device_connections)
+impl NewDeviceConnection {
+	pub async fn create(&self, db: &mut AsyncPgConnection) -> Result<DeviceConnection> {
+		use crate::schema::device_connections::dsl as dc;
+
+		diesel::insert_into(dc::device_connections)
 			.values(self)
-			.execute(db)
+			.returning(DeviceConnection::as_select())
+			.get_result::<DeviceConnection>(db)
 			.await
-			.map_err(|err| AppError::Database(err.to_string()))?;
-		Ok(())
+			.map_err(|err| AppError::Database(err.to_string()))
 	}
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Queryable, Selectable)]
+#[diesel(table_name = crate::schema::device_connections)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct DeviceConnection {
+	pub id: Uuid,
+	pub created_at: DateTime<Utc>,
+	pub device_id: Uuid,
+	pub ip: ipnet::IpNet,
+	pub user_agent: Option<String>,
 }
