@@ -18,6 +18,7 @@ repository = "https://github.com/beyondessential/tamanu-meta-server"
 default-run = "public_server"
 
 [dependencies]
+axum = { version = "0.8.4", features = ["json"] }
 chrono = { version = "0.4.39", features = ["serde"] }
 clap = { version = "4.5.42", features = ["derive"] }
 deadpool = "0.12.2"
@@ -27,13 +28,17 @@ diesel = { version = "2.1.6", features = [
 	"serde_json",
 	"uuid",
 ] }
+diesel-async = { version = "0.4.1", features = ["mobc"] }
 diesel-derive-enum = { version = "2.1.0", features = ["postgres"] }
 diesel_migrations = "2.1.0"
 folktime = "0.2.1"
 futures = "0.3.31"
 ipnet = { version = "2.11.0", features = ["serde"] }
-pulldown-cmark = { version = "0.13", features = ["html"] }
+mobc = ">=0.7,<0.9"
 node-semver = "2.2.0"
+percent-encoding = "2.3.1"
+pulldown-cmark = { version = "0.13", features = ["html"] }
+qrcode = { version = "0.14", features = ["svg"] }
 rcgen = "0.14.3"
 reqwest = { version = "0.12.15", default-features = false, features = [
 	"gzip",
@@ -46,13 +51,10 @@ serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.142"
 thiserror = "2.0.12"
 time = "0.3.41"
+timesimp = "1.0.0"
 url = { version = "2.5.4", features = ["serde"] }
 uuid = { version = "1.16.0", features = ["serde", "v4"] }
 x509-parser = "0.17.0"
-qrcode = { version = "0.14", features = ["svg"] }
-timesimp = "1.0.0"
-axum = { version = "0.8.4", features = ["json"] }
-percent-encoding = "2.3.1"
 
 [features]
 default = ["migrations-with-tokio-postgres"]

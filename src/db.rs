@@ -1,4 +1,4 @@
-use rocket_db_pools::{diesel::PgPool, Database};
+use rocket_db_pools::{Database, diesel::PgPool};
 
 pub mod artifacts;
 pub mod device_role;

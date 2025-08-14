@@ -10,6 +10,7 @@ pub(crate) mod error;
 pub mod pingtask;
 pub(crate) mod schema;
 pub(crate) mod servers;
+pub(crate) mod state;
 pub(crate) mod views;
 
 pub async fn public_server() {
