@@ -122,3 +122,47 @@ impl<'r> request::FromRequest<'r> for Device {
 device_role_struct!(AdminDevice, DeviceRole::Admin);
 device_role_struct!(ServerDevice, DeviceRole::Server);
 device_role_struct!(ReleaserDevice, DeviceRole::Releaser);
+
+impl<S> axum::extract::FromRequestParts<S> for Device
+where
+	S: Send + Sync,
+{
+	type Rejection = AppError;
+
+	async fn from_request_parts(
+		parts: &mut axum::http::request::Parts,
+		state: &S,
+	) -> Result<Self, Self::Rejection> {
+		use axum::{
+			Router,
+			extract::FromRequestParts,
+			http::{
+				StatusCode,
+				header::{HeaderValue, USER_AGENT},
+				request::Parts,
+			},
+			routing::get,
+		};
+		use x509_parser::prelude::*;
+
+		let key = {
+			let pem = parts
+				.headers
+				.get("mtls-certificate")
+				.or_else(|| parts.headers.get("ssl-client-cert"))
+				.ok_or_else(|| AppError::custom("missing mtls-certificate header"))
+				.and_then(|s| {
+					percent_encoding::percent_decode(s.as_bytes())
+						.decode_utf8()
+						.map_err(AppError::custom)
+				})?;
+
+			let (_, der) = parse_x509_pem(pem.as_bytes()).map_err(AppError::custom)?;
+			let (_, cert) = parse_x509_certificate(&der.contents).map_err(AppError::custom)?;
+
+			cert.tbs_certificate.subject_pki.raw.to_vec()
+		};
+
+		todo!()
+	}
+}

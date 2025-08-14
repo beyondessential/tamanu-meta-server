@@ -1,9 +1,9 @@
 use std::io::Cursor;
 
 use rocket::{
+	Response,
 	http::{ContentType, Status},
 	response::Responder,
-	Response,
 };
 use serde::Serialize;
 
@@ -75,4 +75,20 @@ where
 	S: serde::Serializer,
 {
 	value.to_string().serialize(serializer)
+}
+
+impl axum::response::IntoResponse for AppError {
+	fn into_response(self) -> axum::response::Response {
+		use axum::{Json, http::StatusCode};
+
+		let status = match self {
+			Self::NoMatchingVersions => StatusCode::NOT_FOUND,
+			Self::UnusableRange => StatusCode::BAD_REQUEST,
+			_ => StatusCode::INTERNAL_SERVER_ERROR,
+		};
+
+		let mut res = Json(self).into_response();
+		*res.status_mut() = status;
+		res
+	}
 }
