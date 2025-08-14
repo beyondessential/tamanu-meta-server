@@ -157,6 +157,19 @@ impl Status {
 			.map_err(|err| AppError::Database(err.to_string()))
 	}
 
+	pub async fn server(&self, db: &mut AsyncPgConnection) -> Result<crate::db::servers::Server> {
+		use crate::views::ordered_servers::dsl::*;
+
+		let row = ordered_servers
+			.filter(id.eq(self.server_id))
+			.select(crate::db::servers::Server::as_select())
+			.first::<crate::db::servers::Server>(db)
+			.await
+			.map_err(|err| AppError::Database(err.to_string()))?;
+
+		Ok(row)
+	}
+
 	pub async fn device_connection(
 		&self,
 		db: &mut AsyncPgConnection,

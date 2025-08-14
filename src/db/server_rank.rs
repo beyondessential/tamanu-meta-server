@@ -9,7 +9,9 @@ use diesel::{
 };
 use rocket::serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, AsExpression)]
+#[derive(
+	Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize, AsExpression,
+)]
 #[diesel(sql_type = Text)]
 #[serde(rename_all = "lowercase")]
 pub enum ServerRank {
