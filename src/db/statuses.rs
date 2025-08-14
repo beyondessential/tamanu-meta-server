@@ -24,6 +24,7 @@ pub struct Status {
 	pub id: Uuid,
 	pub created_at: DateTime<Utc>,
 	pub server_id: Uuid,
+	pub device_id: Option<Uuid>,
 	pub latency_ms: Option<i32>,
 	pub version: Option<Version>,
 	pub error: Option<String>,
@@ -37,6 +38,7 @@ pub struct Status {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewStatus {
 	pub server_id: Uuid,
+	pub device_id: Option<Uuid>,
 	pub latency_ms: Option<i32>,
 	pub version: Option<Version>,
 	pub error: Option<String>,
@@ -48,6 +50,7 @@ impl Default for NewStatus {
 	fn default() -> Self {
 		Self {
 			server_id: Default::default(),
+			device_id: Default::default(),
 			latency_ms: Default::default(),
 			version: Default::default(),
 			error: Default::default(),
@@ -92,11 +95,13 @@ impl Status {
 		Self {
 			id: Uuid::new_v4(),
 			server_id: server.id,
+			device_id: None,
 			created_at: Utc::now(),
 			latency_ms: Some(start.elapsed().as_millis().try_into().unwrap_or(i32::MAX)),
 			version,
 			error,
 			remote_ip: None,
+			extra: Default::default(),
 		}
 	}
 
@@ -133,5 +138,22 @@ impl Status {
 			.map_err(|err| AppError::Database(err.to_string()))?;
 
 		Ok(())
+	}
+
+	pub async fn latest_for_all_servers(db: &mut AsyncPgConnection) -> Result<Vec<Status>> {
+		use crate::schema::statuses::dsl::*;
+
+		statuses
+			.filter(error.is_null().and(
+				// error statuses are legacy
+				created_at.ge(diesel::dsl::sql("NOW() - INTERVAL '1 month'")),
+				// just to avoid going through all the data
+			))
+			.distinct_on(server_id)
+			.order((server_id, created_at.desc()))
+			.select(Status::as_select())
+			.load(db)
+			.await
+			.map_err(|err| AppError::Database(err.to_string()))
 	}
 }

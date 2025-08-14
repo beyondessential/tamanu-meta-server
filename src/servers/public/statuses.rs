@@ -52,6 +52,7 @@ pub async fn create(
 	let remote_ip = IpNet::new(remote_addr, 32).unwrap();
 	let input = NewStatus {
 		server_id,
+		device_id: Some(id),
 		version: Some(current_version.0),
 		remote_ip: Some(remote_ip),
 		extra: extra.map_or_else(
