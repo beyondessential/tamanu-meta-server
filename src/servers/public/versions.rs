@@ -14,7 +14,7 @@ use crate::{
 		artifacts::Artifact,
 		versions::{NewVersion, Version},
 	},
-	error::{AppError, Result},
+	error::Result,
 	servers::{
 		device_auth::{AdminDevice, ReleaserDevice},
 		headers::TamanuHeaders,
@@ -101,8 +101,7 @@ pub async fn create(
 		})
 		.returning(Version::as_select())
 		.get_result(&mut db)
-		.await
-		.map_err(|err| AppError::Database(err.to_string()))?;
+		.await?;
 
 	Ok(TamanuHeaders::new(Json(version)))
 }
@@ -119,8 +118,7 @@ pub async fn delete(
 		.filter(crate::db::versions::predicate_version!(version.0))
 		.set(published.eq(false))
 		.execute(&mut db)
-		.await
-		.map_err(|err| AppError::Database(err.to_string()))?;
+		.await?;
 
 	Ok(TamanuHeaders::new(()))
 }

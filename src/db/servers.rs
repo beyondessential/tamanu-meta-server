@@ -1,5 +1,5 @@
 use rocket::serde::{Deserialize, Serialize};
-use rocket_db_pools::diesel::{prelude::*, AsyncPgConnection};
+use rocket_db_pools::diesel::{AsyncPgConnection, prelude::*};
 use uuid::Uuid;
 
 use super::server_kind::ServerKind;
@@ -32,7 +32,7 @@ impl Server {
 			.select(Server::as_select())
 			.load(db)
 			.await
-			.map_err(|err| AppError::Database(err.to_string()))
+			.map_err(AppError::from)
 	}
 
 	pub async fn all_pingable(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
@@ -42,7 +42,7 @@ impl Server {
 			.filter(device_id.is_null())
 			.load(db)
 			.await
-			.map_err(|err| AppError::Database(err.to_string()))
+			.map_err(AppError::from)
 	}
 
 	pub async fn get_by_id(db: &mut AsyncPgConnection, id: Uuid) -> Result<Self> {
@@ -51,7 +51,7 @@ impl Server {
 			.filter(crate::views::ordered_servers::id.eq(id))
 			.first(db)
 			.await
-			.map_err(|err| AppError::Database(err.to_string()))
+			.map_err(AppError::from)
 	}
 	pub async fn get_by_host(db: &mut AsyncPgConnection, host: String) -> Result<Self> {
 		crate::views::ordered_servers::table
@@ -59,7 +59,7 @@ impl Server {
 			.filter(crate::views::ordered_servers::host.eq(host))
 			.first(db)
 			.await
-			.map_err(|err| AppError::Database(err.to_string()))
+			.map_err(AppError::from)
 	}
 }
 

@@ -135,7 +135,7 @@ impl Status {
 			)
 			.execute(db)
 			.await
-			.map_err(|err| AppError::Database(err.to_string()))?;
+			.map_err(AppError::from)?;
 
 		Ok(())
 	}
@@ -154,7 +154,7 @@ impl Status {
 			.select(Status::as_select())
 			.load(db)
 			.await
-			.map_err(|err| AppError::Database(err.to_string()))
+			.map_err(AppError::from)
 	}
 
 	pub async fn server(&self, db: &mut AsyncPgConnection) -> Result<crate::db::servers::Server> {
@@ -165,7 +165,7 @@ impl Status {
 			.select(crate::db::servers::Server::as_select())
 			.first::<crate::db::servers::Server>(db)
 			.await
-			.map_err(|err| AppError::Database(err.to_string()))?;
+			.map_err(AppError::from)?;
 
 		Ok(row)
 	}
@@ -191,7 +191,7 @@ impl Status {
 			.first::<crate::db::devices::DeviceConnection>(db)
 			.await
 			.optional()
-			.map_err(|err| AppError::Database(err.to_string()))?;
+			.map_err(AppError::from)?;
 
 		Ok(row)
 	}

@@ -1,5 +1,5 @@
 use rocket::serde::{Deserialize, Serialize};
-use rocket_db_pools::diesel::{prelude::*, AsyncPgConnection};
+use rocket_db_pools::diesel::{AsyncPgConnection, prelude::*};
 use uuid::Uuid;
 
 use crate::{
@@ -41,6 +41,6 @@ impl Artifact {
 			.then_order_by(platform.asc())
 			.load(db)
 			.await
-			.map_err(|err| AppError::Database(err.to_string()))
+			.map_err(AppError::from)
 	}
 }

@@ -1,5 +1,6 @@
 use std::{env::VarError, io::Cursor};
 
+use diesel_async::pooled_connection::PoolError;
 use rocket::{
 	Response,
 	http::{ContentType, Status},
@@ -25,9 +26,13 @@ pub enum AppError {
 	#[serde(serialize_with = "serialize_to_string")]
 	VersionParse(#[from] node_semver::SemverError),
 
-	// it's practically impossible to wrangle rocket's actual db error here, so string it
 	#[error("database: {0}")]
-	Database(String),
+	#[serde(serialize_with = "serialize_to_string")]
+	DatabasePool(#[from] mobc::Error<PoolError>),
+
+	#[error("database: {0}")]
+	#[serde(serialize_with = "serialize_to_string")]
+	DatabaseQuery(#[from] diesel::result::Error),
 
 	#[error("io: {0}")]
 	Io(String),
@@ -46,10 +51,6 @@ pub enum AppError {
 impl AppError {
 	pub fn custom(err: impl ToString) -> Self {
 		Self::Custom(err.to_string())
-	}
-
-	pub fn database(err: impl ToString) -> Self {
-		Self::Database(err.to_string())
 	}
 }
 

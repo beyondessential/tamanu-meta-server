@@ -57,7 +57,7 @@ impl<'r> request::FromRequest<'r> for Device {
 				return Outcome::Error((
 					s,
 					e.map_or(AppError::custom("unknown request db guard error"), |e| {
-						AppError::Database(format!("{e:?}"))
+						AppError::custom(format!("{e:?}"))
 					}),
 				));
 			}

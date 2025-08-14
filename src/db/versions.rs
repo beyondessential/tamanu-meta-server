@@ -65,7 +65,7 @@ impl Version {
 			.then_order_by(patch.desc())
 			.load(db)
 			.await
-			.map_err(|err| AppError::Database(err.to_string()))
+			.map_err(AppError::from)
 	}
 
 	pub async fn get_by_version(
@@ -79,7 +79,7 @@ impl Version {
 			.select(Version::as_select())
 			.first(db)
 			.await
-			.map_err(|err| AppError::Database(err.to_string()))
+			.map_err(AppError::from)
 	}
 
 	pub async fn get_updates_for_version(
@@ -105,7 +105,7 @@ impl Version {
 			.select(version_updates::all_columns())
 			.load(db)
 			.await
-			.map_err(|err| AppError::Database(err.to_string()))
+			.map_err(AppError::from)
 	}
 
 	pub async fn get_latest_matching(
@@ -135,7 +135,7 @@ impl Version {
 			.then_order_by(patch.desc())
 			.load(db)
 			.await
-			.map_err(|err| AppError::Database(err.to_string()))?
+			.map_err(AppError::from)?
 			.into_iter()
 			.find(|v| range.satisfies(&v.as_semver()))
 			.ok_or(AppError::NoMatchingVersions)

@@ -9,7 +9,7 @@ use crate::{
 		servers::{NewServer, PartialServer, Server},
 		url_field::UrlField,
 	},
-	error::{AppError, Result},
+	error::Result,
 	servers::{
 		device_auth::{AdminDevice, ServerDevice},
 		headers::TamanuHeaders,
@@ -57,8 +57,7 @@ pub async fn create(
 		.values(input)
 		.returning(Server::as_select())
 		.get_result(&mut db)
-		.await
-		.map_err(|err| AppError::Database(err.to_string()))?;
+		.await?;
 
 	Ok(TamanuHeaders::new(Json(server)))
 }
@@ -78,16 +77,14 @@ pub async fn edit(
 		.filter(id.eq(input_id))
 		.set(input)
 		.execute(&mut db)
-		.await
-		.map_err(|err| AppError::Database(err.to_string()))?;
+		.await?;
 
 	Ok(TamanuHeaders::new(Json(
 		ordered_servers
 			.filter(id.eq(input_id))
 			.select(Server::as_select())
 			.first(&mut db)
-			.await
-			.map_err(|err| AppError::Database(err.to_string()))?,
+			.await?,
 	)))
 }
 
@@ -104,8 +101,7 @@ pub async fn delete(
 	diesel::delete(servers)
 		.filter(id.eq(input.id))
 		.execute(&mut db)
-		.await
-		.map_err(|err| AppError::Database(err.to_string()))?;
+		.await?;
 
 	Ok(TamanuHeaders::new(()))
 }

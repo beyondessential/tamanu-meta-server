@@ -70,8 +70,7 @@ pub async fn create(
 		.values(input)
 		.returning(Status::as_select())
 		.get_result(&mut db)
-		.await
-		.map_err(|err| AppError::Database(err.to_string()))?;
+		.await?;
 
 	Ok(TamanuHeaders::new(Json(status)))
 }

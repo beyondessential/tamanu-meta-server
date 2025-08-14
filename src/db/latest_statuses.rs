@@ -49,7 +49,7 @@ impl LatestStatus {
 			.select(Self::as_select())
 			.load(db)
 			.await
-			.map_err(|err| AppError::Database(err.to_string()))
+			.map_err(AppError::from)
 	}
 
 	#[expect(dead_code)]
@@ -61,6 +61,6 @@ impl LatestStatus {
 			.select(Self::as_select())
 			.load(db)
 			.await
-			.map_err(|err| AppError::Database(err.to_string()))
+			.map_err(AppError::from)
 	}
 }

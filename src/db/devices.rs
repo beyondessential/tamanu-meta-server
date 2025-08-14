@@ -37,7 +37,7 @@ impl Device {
 			.first(db)
 			.await
 			.optional()
-			.map_err(|err| AppError::Database(err.to_string()))
+			.map_err(AppError::from)
 	}
 
 	pub async fn create(db: &mut AsyncPgConnection, key: Vec<u8>) -> Result<Self> {
@@ -47,7 +47,7 @@ impl Device {
 			.returning(Self::as_select())
 			.get_result(db)
 			.await
-			.map_err(|err| AppError::Database(err.to_string()))
+			.map_err(AppError::from)
 	}
 }
 
@@ -69,7 +69,7 @@ impl NewDeviceConnection {
 			.returning(DeviceConnection::as_select())
 			.get_result::<DeviceConnection>(db)
 			.await
-			.map_err(|err| AppError::Database(err.to_string()))
+			.map_err(AppError::from)
 	}
 }
 

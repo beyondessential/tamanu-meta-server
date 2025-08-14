@@ -7,7 +7,7 @@ use crate::{
 		artifacts::{Artifact, NewArtifact},
 		versions::Version,
 	},
-	error::{AppError, Result},
+	error::Result,
 	servers::{device_auth::ReleaserDevice, headers::TamanuHeaders},
 };
 
@@ -35,8 +35,7 @@ pub async fn create(
 		.values(input)
 		.returning(Artifact::as_select())
 		.get_result(&mut db)
-		.await
-		.map_err(|err| AppError::Database(err.to_string()))?;
+		.await?;
 
 	Ok(TamanuHeaders::new(Json(artifact)))
 }
