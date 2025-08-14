@@ -10,7 +10,7 @@ use serde::Serialize;
 
 pub type Result<T> = std::result::Result<T, AppError>;
 
-#[derive(Debug, thiserror::Error, Serialize)]
+#[derive(Debug, thiserror::Error, miette::Diagnostic, Serialize)]
 pub enum AppError {
 	#[error("{0}")]
 	Custom(String),

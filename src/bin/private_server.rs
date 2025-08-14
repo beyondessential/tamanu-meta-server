@@ -1,9 +1,13 @@
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 
 use clap::Parser;
+use lloggs::{LoggingArgs, PreArgs};
 
 #[derive(Debug, Parser)]
 struct Args {
+	#[command(flatten)]
+	logging: LoggingArgs,
+
 	#[arg(long, default_value = "/$")]
 	prefix: String,
 
@@ -15,10 +19,21 @@ struct Args {
 }
 
 #[tokio::main]
-async fn main() -> tamanu_meta::error::Result<()> {
+async fn main() -> miette::Result<()> {
+	let mut _guard = PreArgs::parse().setup()?;
 	let args = Args::parse();
+	if _guard.is_none() {
+		_guard = Some(args.logging.setup(|v| match v {
+			0 => "info",
+			1 => "debug",
+			_ => "trace",
+		})?);
+	}
+
 	let addr = args
 		.bind
 		.unwrap_or_else(|| SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, args.port, 0, 0)));
-	tamanu_meta::serve(tamanu_meta::private_routes(args.prefix), addr).await
+
+	tamanu_meta::serve(tamanu_meta::private_routes(args.prefix), addr).await?;
+	Ok(())
 }
