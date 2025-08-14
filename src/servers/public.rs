@@ -30,7 +30,6 @@ pub fn rocket() -> Rocket<Build> {
 			versions::view_artifacts,
 			versions::view_mobile_install,
 			artifacts::create,
-			password::view,
 		],
 	)
 }
@@ -39,6 +38,7 @@ pub fn routes() -> Router<AppState> {
 	Router::new()
 		.merge(health::routes())
 		.merge(timesync::routes())
+		.merge(password::routes())
 		.nest("/status", statuses::routes())
 		.nest_service("/static", ServeDir::new("static"))
 }

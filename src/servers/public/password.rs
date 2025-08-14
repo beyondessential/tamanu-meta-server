@@ -1,6 +1,18 @@
-use rocket_dyn_templates::{Template, context};
+use std::sync::Arc;
 
-#[get("/password")]
-pub async fn view() -> Template {
-	Template::render("password", context! {})
+use axum::{
+	extract::State,
+	response::Html,
+	routing::{Router, get},
+};
+use tera::{Context, Tera};
+
+use crate::state::AppState;
+
+pub fn routes() -> Router<AppState> {
+	Router::new().route("/password", get(view))
+}
+
+async fn view(State(tera): State<Arc<Tera>>) -> Html<String> {
+	Html(tera.render("password", &Context::new()).unwrap())
 }
