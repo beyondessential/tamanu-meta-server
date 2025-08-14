@@ -1,4 +1,4 @@
-use std::io::Cursor;
+use std::{env::VarError, io::Cursor};
 
 use rocket::{
 	Response,
@@ -14,6 +14,17 @@ pub enum AppError {
 	#[error("{0}")]
 	Custom(String),
 
+	#[error("environment: {0}")]
+	#[serde(serialize_with = "serialize_to_string")]
+	Environment(#[from] VarError),
+
+	#[error("header: {0}")]
+	Header(String),
+
+	#[error("version parse error: {0}")]
+	#[serde(serialize_with = "serialize_to_string")]
+	VersionParse(#[from] node_semver::SemverError),
+
 	// it's practically impossible to wrangle rocket's actual db error here, so string it
 	#[error("database: {0}")]
 	Database(String),
@@ -28,7 +39,7 @@ pub enum AppError {
 	UnusableRange,
 
 	#[error("timesync: {0}")]
-	#[serde(serialize_with = "serialize_timesimp_error")]
+	#[serde(serialize_with = "serialize_to_string")]
 	Timesync(#[from] timesimp::ParseError),
 }
 
@@ -67,10 +78,7 @@ impl<'r, 'o: 'r> Responder<'r, 'o> for AppError {
 	}
 }
 
-pub fn serialize_timesimp_error<S>(
-	value: &timesimp::ParseError,
-	serializer: S,
-) -> Result<S::Ok, S::Error>
+pub fn serialize_to_string<E: ToString, S>(value: &E, serializer: S) -> Result<S::Ok, S::Error>
 where
 	S: serde::Serializer,
 {

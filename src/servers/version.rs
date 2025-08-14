@@ -1,6 +1,10 @@
+use std::str::FromStr;
+
 use diesel::{backend::Backend, deserialize, expression::AsExpression, serialize, sql_types::Text};
 use node_semver::SemverError;
 use rocket::{http::Header, request::FromParam, serde::Serialize};
+
+use crate::error::AppError;
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, AsExpression)]
 #[diesel(sql_type = Text)]
@@ -9,6 +13,17 @@ pub struct Version(pub node_semver::Version);
 impl Default for Version {
 	fn default() -> Self {
 		Self(node_semver::Version::new(0, 0, 0))
+	}
+}
+
+impl FromStr for Version {
+	type Err = AppError;
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		Ok(Self(if let Some(v) = s.strip_prefix("v") {
+			node_semver::Version::parse(v)?
+		} else {
+			node_semver::Version::parse(s)?
+		}))
 	}
 }
 
