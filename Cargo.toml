@@ -65,7 +65,6 @@ x509-parser = "0.17.0"
 
 [features]
 default = ["migrations-with-tokio-postgres"]
-migrations-with-libpq = ["diesel/postgres"]
 migrations-with-tokio-postgres = [
 	# we use the postgres backend but only via tokio-postgres, not via
 	# diesel's own libpq-based postgres backend

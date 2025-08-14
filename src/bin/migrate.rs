@@ -2,15 +2,20 @@ use clap::Parser;
 use diesel_migrations::{
 	EmbeddedMigrations, HarnessWithOutput, MigrationHarness as _, embed_migrations,
 };
-
-pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!();
+use lloggs::{LoggingArgs, PreArgs};
+use miette::{WrapErr, bail, miette};
 
 #[derive(Debug, Parser)]
 #[command(flatten_help = true)]
-struct Cli {
+struct Args {
+	#[command(flatten)]
+	logging: LoggingArgs,
+
 	#[command(subcommand)]
 	mode: Option<Mode>,
 }
+
+pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!();
 
 #[derive(Debug, Default, Parser)]
 enum Mode {
@@ -35,54 +40,56 @@ enum Mode {
 	IsOk,
 }
 
-#[cfg(feature = "migrations-with-tokio-postgres")]
-async fn connection() -> rust_postgres_migrator::UnasyncMigrator {
-	use rocket_db_pools::diesel::{AsyncConnection as _, AsyncPgConnection};
-
-	let config = tamanu_meta::db_config().unwrap();
-	let connection = AsyncPgConnection::establish(&config.url).await.unwrap();
-	rust_postgres_migrator::UnasyncMigrator { connection }
+async fn connection() -> miette::Result<rust_postgres_migrator::UnasyncMigrator> {
+	let pool = tamanu_meta::state::AppState::init_db()?;
+	Ok(rust_postgres_migrator::UnasyncMigrator { pool })
 }
 
-#[cfg(feature = "migrations-with-libpq")]
-async fn connection() -> diesel::pg::PgConnection {
-	use diesel::Connection as _;
+#[tokio::main]
+async fn main() -> miette::Result<()> {
+	let mut _guard = PreArgs::parse().setup()?;
+	let args = Args::parse();
+	if _guard.is_none() {
+		_guard = Some(args.logging.setup(|v| match v {
+			0 => "info",
+			1 => "debug",
+			_ => "trace",
+		})?);
+	}
 
-	let config = tamanu_meta::db_config().unwrap();
-	diesel::pg::PgConnection::establish(&config.url).unwrap()
-}
-
-#[rocket::main]
-async fn main() {
-	let mut connection = connection().await;
+	let mut connection = connection().await?;
 	let mut migrator = HarnessWithOutput::write_to_stdout(&mut connection);
 
-	match Cli::parse().mode.unwrap_or_default() {
+	match args.mode.unwrap_or_default() {
 		Mode::Run => {
 			migrator
 				.run_pending_migrations(MIGRATIONS)
-				.expect("failed: run migrations");
+				.map_err(|err| miette!("{err}"))
+				.wrap_err("failed: run migrations")?;
 		}
 		Mode::Revert { n } => {
 			for _ in 0..n {
 				migrator
 					.revert_last_migration(MIGRATIONS)
-					.expect("failed: revert migration");
+					.map_err(|err| miette!("{err}"))
+					.wrap_err("failed: revert migration")?;
 			}
 		}
 		Mode::Redo => {
 			migrator
 				.revert_last_migration(MIGRATIONS)
-				.expect("failed: revert last migration");
+				.map_err(|err| miette!("{err}"))
+				.wrap_err("failed: revert last migration")?;
 			migrator
 				.run_pending_migrations(MIGRATIONS)
-				.expect("failed: run migrations");
+				.map_err(|err| miette!("{err}"))
+				.wrap_err("failed: run migrations")?;
 		}
 		Mode::List => {
 			println!("Pending migrations:");
 			for migration in migrator
 				.pending_migrations(MIGRATIONS)
-				.expect("failed: list migrations")
+				.map_err(|err| miette!("{err}"))?
 			{
 				println!(
 					"{} ({}/up.sql)",
@@ -94,7 +101,7 @@ async fn main() {
 			println!("\nApplied migrations:");
 			for migration in migrator
 				.applied_migrations()
-				.expect("failed: list migrations")
+				.map_err(|err| miette!("{err}"))?
 			{
 				println!("{migration}");
 			}
@@ -102,17 +109,16 @@ async fn main() {
 		Mode::IsOk => {
 			if migrator
 				.has_pending_migration(MIGRATIONS)
-				.expect("failed: check if up-to-date")
+				.map_err(|err| miette!("{err}"))?
 			{
-				std::process::exit(1);
-			} else {
-				std::process::exit(0);
+				bail!("Pending migrations")
 			}
 		}
 	}
+
+	Ok(())
 }
 
-#[cfg(feature = "migrations-with-tokio-postgres")]
 mod rust_postgres_migrator {
 	//! to avoid needing libpq-dev or building pq-src, we hack up a migration
 	//! harness on top of `AsyncPgConnection`, just good enough for migrations.
@@ -123,24 +129,23 @@ mod rust_postgres_migrator {
 		pg::Pg,
 		sql_query,
 	};
+	use diesel_async::SimpleAsyncConnection as _;
 	use diesel_migrations::MigrationHarness;
-	use rocket_db_pools::diesel::{
-		AsyncPgConnection, SimpleAsyncConnection as _, prelude::RunQueryDsl,
-	};
+	use tamanu_meta::state::Db;
 
 	pub(crate) struct UnasyncMigrator {
-		pub(crate) connection: AsyncPgConnection,
+		pub(crate) pool: Db,
 	}
 
 	impl SimpleConnection for UnasyncMigrator {
 		fn batch_execute(&mut self, query: &str) -> QueryResult<()> {
-			let connection = &mut self.connection;
 			std::thread::scope(|s| {
 				s.spawn(|| {
-					let runtime = rocket::tokio::runtime::Builder::new_current_thread()
+					let runtime = tokio::runtime::Builder::new_current_thread()
 						.build()
 						.unwrap();
 					runtime.block_on(async move {
+						let mut connection = self.pool.get().await.unwrap();
 						connection.batch_execute(query).await?;
 						Ok(())
 					})
@@ -217,10 +222,12 @@ mod rust_postgres_migrator {
 						.build()
 						.unwrap();
 					runtime.block_on(async move {
+						use diesel_async::RunQueryDsl as _;
+						let mut connection = self.pool.get().await.unwrap();
 						let rows: Vec<Version> = sql_query(
 							"SELECT version FROM __diesel_schema_migrations ORDER BY version DESC",
 						)
-						.get_results(&mut self.connection)
+						.get_results(&mut connection)
 						.await?;
 						Ok(rows.into_iter().map(|v| v.version.into()).collect())
 					})
