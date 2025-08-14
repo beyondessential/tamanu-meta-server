@@ -1,18 +1,18 @@
 use std::net::{IpAddr, Ipv6Addr};
 
+use chrono::{DateTime, Utc};
 use rocket::{
+	Config,
 	http::{RawStr, Status},
 	mtls::Certificate,
-	outcome::{try_outcome, IntoOutcome},
+	outcome::{IntoOutcome, try_outcome},
 	request::{self, Outcome},
 	serde::{Deserialize, Serialize},
-	Config,
 };
 use rocket_db_pools::{
-	diesel::{prelude::*, AsyncPgConnection},
 	Connection,
-};
-use uuid::Uuid;
+	diesel::{AsyncPgConnection, prelude::*},
+uuid::Uuid;
 
 use super::device_role::DeviceRole;
 use crate::{
@@ -108,7 +108,7 @@ impl<'r> request::FromRequest<'r> for Device {
 					e.map_or(AppError::custom("unknown request db guard error"), |e| {
 						AppError::Database(format!("{e:?}"))
 					}),
-				))
+				));
 			}
 		};
 
@@ -134,47 +134,57 @@ impl<'r> request::FromRequest<'r> for Device {
 					return Outcome::Forward(Status::Forbidden);
 				}
 
-				let pem = try_outcome!(req
-					.headers()
-					.get_one("mtls-certificate")
-					.or_else(|| req.headers().get_one("ssl-client-cert"))
-					.ok_or_else(|| AppError::custom("missing mtls-certificate header"))
-					.and_then(|s| RawStr::new(s).url_decode().map_err(AppError::custom))
-					.or_error(Status::BadRequest));
+				let pem = try_outcome!(
+					req.headers()
+						.get_one("mtls-certificate")
+						.or_else(|| req.headers().get_one("ssl-client-cert"))
+						.ok_or_else(|| AppError::custom("missing mtls-certificate header"))
+						.and_then(|s| RawStr::new(s).url_decode().map_err(AppError::custom))
+						.or_error(Status::BadRequest)
+				);
 
-				let (_, der) = try_outcome!(parse_x509_pem(pem.as_bytes())
-					.map_err(AppError::custom)
-					.or_error(Status::BadRequest));
-				let (_, cert) = try_outcome!(parse_x509_certificate(&der.contents)
-					.map_err(AppError::custom)
-					.or_error(Status::BadRequest));
+				let (_, der) = try_outcome!(
+					parse_x509_pem(pem.as_bytes())
+						.map_err(AppError::custom)
+						.or_error(Status::BadRequest)
+				);
+				let (_, cert) = try_outcome!(
+					parse_x509_certificate(&der.contents)
+						.map_err(AppError::custom)
+						.or_error(Status::BadRequest)
+				);
 
 				cert.tbs_certificate.subject_pki.raw.to_vec()
 			}
 		};
 
-		let device = if let Some(existing) = try_outcome!(Self::from_key(&mut db, &key)
-			.await
-			.or_error(Status::InternalServerError))
-		{
+		let device = if let Some(existing) = try_outcome!(
+			Self::from_key(&mut db, &key)
+				.await
+				.or_error(Status::InternalServerError)
+		) {
 			existing
 		} else {
-			try_outcome!(Device::create(&mut db, key)
-				.await
-				.or_error(Status::InternalServerError))
+			try_outcome!(
+				Device::create(&mut db, key)
+					.await
+					.or_error(Status::InternalServerError)
+			)
 		};
 
-		try_outcome!(DeviceConnection {
-			device_id: device.id,
-			ip: req
-				.client_ip()
-				.unwrap_or(IpAddr::V6(Ipv6Addr::UNSPECIFIED))
-				.into(),
-			user_agent: req.headers().get_one("user-agent").map(|s| s.to_string()),
-		}
-		.create(&mut db)
-		.await
-		.or_error(Status::InternalServerError));
+		try_outcome!(
+			DeviceConnection {
+				device_id: device.id,
+				ip: req
+					.client_ip()
+					.unwrap_or(IpAddr::V6(Ipv6Addr::UNSPECIFIED))
+					.into(),
+				user_agent: req.headers().get_one("user-agent").map(|s| s.to_string()),
+			}
+			.create(&mut db)
+			.await
+			.or_error(Status::InternalServerError)
+		);
 
 		Outcome::Success(device)
 	}

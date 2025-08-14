@@ -156,4 +156,26 @@ impl Status {
 			.await
 			.map_err(|err| AppError::Database(err.to_string()))
 	}
+
+	pub async fn latest_device_connection(
+		&self,
+		db: &mut AsyncPgConnection,
+	) -> Result<Option<crate::db::devices::DeviceConnection>> {
+		let Some(dev_id) = self.device_id else {
+			return Ok(None);
+		};
+
+		use crate::schema::device_connections::dsl as dc;
+
+		let row = dc::device_connections
+			.filter(dc::device_id.eq(dev_id))
+			.order(dc::created_at.desc())
+			.select(crate::db::devices::DeviceConnection::as_select())
+			.first::<crate::db::devices::DeviceConnection>(db)
+			.await
+			.optional()
+			.map_err(|err| AppError::Database(err.to_string()))?;
+
+		Ok(row)
+	}
 }
