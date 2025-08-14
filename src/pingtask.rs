@@ -5,7 +5,7 @@ use rocket::tokio::{
 	time::sleep,
 };
 
-use crate::db::{statuses::Status, Db};
+use crate::db::{Db, statuses::Status};
 
 pub fn spawn(pool: Db) -> JoinHandle<()> {
 	task::spawn(async move {

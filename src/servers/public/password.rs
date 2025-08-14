@@ -1,4 +1,4 @@
-use rocket_dyn_templates::{context, Template};
+use rocket_dyn_templates::{Template, context};
 
 #[get("/password")]
 pub async fn view() -> Template {

@@ -67,13 +67,13 @@ pub struct PgHumanDuration(pub folktime::duration::Duration);
 
 impl Clone for PgHumanDuration {
 	fn clone(&self) -> Self {
-		Self(folktime::duration::Duration::new(self.0 .0))
+		Self(folktime::duration::Duration::new(self.0.0))
 	}
 }
 
 impl std::fmt::Debug for PgHumanDuration {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		f.debug_tuple("PgHumanDuration").field(&self.0 .0).finish()
+		f.debug_tuple("PgHumanDuration").field(&self.0.0).finish()
 	}
 }
 
@@ -88,7 +88,7 @@ impl Serialize for PgHumanDuration {
 
 impl serialize::ToSql<Interval, Pg> for PgHumanDuration {
 	fn to_sql<'b>(&'b self, out: &mut serialize::Output<'b, '_, Pg>) -> serialize::Result {
-		let chrono_duration = chrono::Duration::from_std(self.0 .0).unwrap();
+		let chrono_duration = chrono::Duration::from_std(self.0.0).unwrap();
 		<PgDuration as serialize::ToSql<Interval, Pg>>::to_sql(
 			&PgDuration(chrono_duration),
 			&mut out.reborrow(),
