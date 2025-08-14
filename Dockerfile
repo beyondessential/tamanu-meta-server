@@ -54,7 +54,6 @@ COPY --from=builder --chmod=0755 /built/migrate /usr/bin/migrate
 COPY --from=builder --chmod=0755 /built/pingtask /usr/bin/pingtask
 COPY --from=builder --chmod=0755 /built/prune_untrusted_devices /usr/bin/prune_untrusted_devices
 COPY --from=builder --chown=tamanu:tamanu /runhome /home/tamanu
-COPY --chown=tamanu:tamanu templates /home/tamanu/templates
 COPY --chown=tamanu:tamanu static /home/tamanu/static
 
 USER tamanu
