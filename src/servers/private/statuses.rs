@@ -15,6 +15,12 @@ use crate::{
 	state::{AppState, Db},
 };
 
+pub fn routes() -> Router<AppState> {
+	Router::new()
+		.route("/status", get(view))
+		.route("/reload", post(reload))
+}
+
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
 pub struct LiveVersionsBracket {
 	pub min: Version,
@@ -62,10 +68,4 @@ async fn reload(State(AppState { db, .. }): State<AppState>) -> Result<()> {
 	let mut db = db.get().await?;
 	Status::ping_servers_and_save(&mut db).await?;
 	Ok(())
-}
-
-pub fn routes() -> Router<AppState> {
-	Router::new()
-		.route("/status", get(view))
-		.route("/reload", post(reload))
 }

@@ -1,8 +1,8 @@
-use rocket::{Build, Rocket, fs::FileServer};
-use rocket_db_pools::Database as _;
-use rocket_dyn_templates::Template;
+use axum::routing::Router;
+use rocket::{Build, Rocket};
+use tower_http::services::ServeDir;
 
-use crate::{db::Db, servers::version::Version};
+use crate::{servers::version::Version, state::AppState};
 
 pub use super::health;
 
@@ -13,36 +13,32 @@ pub mod statuses;
 pub mod timesync;
 pub mod versions;
 
-#[catch(404)]
-fn not_found() {}
-
 pub fn rocket() -> Rocket<Build> {
-	rocket::build()
-		.attach(Template::fairing())
-		.attach(Db::init())
-		.register("/", catchers![not_found])
-		.mount(
-			"/",
-			routes![
-				health::live,
-				health::ready,
-				servers::list,
-				servers::create,
-				servers::edit,
-				servers::delete,
-				statuses::create,
-				timesync::endpoint,
-				versions::list,
-				versions::view,
-				versions::create,
-				versions::delete,
-				versions::update_for,
-				versions::get_artifacts,
-				versions::view_artifacts,
-				versions::view_mobile_install,
-				artifacts::create,
-				password::view,
-			],
-		)
-		.mount("/static", FileServer::from("static"))
+	rocket::build().mount(
+		"/",
+		routes![
+			servers::list,
+			servers::create,
+			servers::edit,
+			servers::delete,
+			timesync::endpoint,
+			versions::list,
+			versions::view,
+			versions::create,
+			versions::delete,
+			versions::update_for,
+			versions::get_artifacts,
+			versions::view_artifacts,
+			versions::view_mobile_install,
+			artifacts::create,
+			password::view,
+		],
+	)
+}
+
+pub fn routes() -> Router<AppState> {
+	Router::new()
+		.merge(health::routes())
+		.nest("/status", statuses::routes())
+		.nest_service("/static", ServeDir::new("static"))
 }

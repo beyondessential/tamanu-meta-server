@@ -1,39 +1,40 @@
-use std::net::IpAddr;
+use std::net::SocketAddr;
 
+use axum::{
+	Json,
+	extract::{ConnectInfo, Path, State},
+	routing::{Router, post},
+};
+use diesel::SelectableHelper as _;
+use diesel_async::RunQueryDsl as _;
 use ipnet::IpNet;
-use rocket::serde::json::Json;
-use rocket_db_pools::Connection;
-use serde::Serialize;
 use uuid::Uuid;
 
 use crate::{
 	db::{
-		Db,
 		device_role::DeviceRole,
 		devices::Device,
 		servers::Server,
 		statuses::{NewStatus, Status},
 	},
 	error::{AppError, Result},
-	servers::{device_auth::ServerDevice, headers::VersionHeader, version::Version},
+	servers::{device_auth::ServerDevice, headers::VersionHeader},
+	state::{AppState, Db},
 };
 
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
-pub struct LiveVersionsBracket {
-	pub min: Version,
-	pub max: Version,
+pub fn routes() -> Router<AppState> {
+	Router::new().route("/{server_id}", post(create))
 }
 
-#[post("/status/<server_id>", data = "<extra>")]
-pub async fn create(
+async fn create(
+	Path(server_id): Path<Uuid>,
+	State(db): State<Db>,
 	device: ServerDevice,
-	remote_addr: IpAddr,
+	connect_info: ConnectInfo<SocketAddr>,
 	current_version: VersionHeader,
-	mut db: Connection<Db>,
-	server_id: Uuid,
 	extra: Option<Json<serde_json::Value>>,
 ) -> Result<Json<Status>> {
-	use rocket_db_pools::diesel::prelude::*;
+	let mut db = db.get().await?;
 	let Device { role, id, .. } = device.0;
 
 	let is_authorized = role == DeviceRole::Admin || {
@@ -46,7 +47,7 @@ pub async fn create(
 		));
 	}
 
-	let remote_ip = IpNet::new(remote_addr, 32).unwrap();
+	let remote_ip = IpNet::new(connect_info.ip(), 32).unwrap();
 	let input = NewStatus {
 		server_id,
 		device_id: Some(id),

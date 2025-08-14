@@ -11,7 +11,7 @@ use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
 
 pub use servers::private::routes as private_routes;
-// pub use servers::public::routes as public_routes;
+pub use servers::public::routes as public_routes;
 use state::AppState;
 use tracing::Span;
 
