@@ -46,7 +46,7 @@ impl From<Artifact> for ArtifactWithQR {
 	}
 }
 
-fn parse_markdown(text: &str) -> String {
+pub fn parse_markdown(text: &str) -> String {
 	let mut options = Options::empty();
 	options.insert(Options::ENABLE_FOOTNOTES);
 	options.insert(Options::ENABLE_GFM);
@@ -63,22 +63,6 @@ fn parse_markdown(text: &str) -> String {
 pub async fn list(mut db: Connection<Db>) -> Result<Json<Vec<Version>>> {
 	let versions = Version::get_all(&mut db).await?;
 	Ok(Json(versions))
-}
-
-#[get("/")]
-pub async fn view(mut db: Connection<Db>) -> Result<Template> {
-	let mut versions = Version::get_all(&mut db).await?;
-	for version in &mut versions {
-		version.changelog = parse_markdown(&version.changelog);
-	}
-	let env = std::env::vars().collect::<std::collections::BTreeMap<String, String>>();
-	Ok(Template::render(
-		"versions",
-		context! {
-			versions,
-			env,
-		},
-	))
 }
 
 #[post("/versions/<version>", data = "<data>")]
