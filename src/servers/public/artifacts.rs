@@ -1,28 +1,41 @@
-use rocket::serde::json::Json;
-use rocket_db_pools::{Connection, diesel::prelude::*};
+use std::str::FromStr as _;
+
+use axum::{
+	Json,
+	extract::{Path, State},
+	routing::{Router, post},
+};
+use diesel::SelectableHelper as _;
+use diesel_async::RunQueryDsl as _;
 
 use crate::{
-	Db,
 	db::{
 		artifacts::{Artifact, NewArtifact},
 		versions::Version,
 	},
 	error::Result,
 	servers::device_auth::ReleaserDevice,
+	state::Db,
 };
 
 use super::Version as ParsedVersion;
 
-#[post("/artifacts/<version>/<artifact_type>/<platform>", data = "<url>")]
-pub async fn create(
+use crate::state::AppState;
+
+pub fn routes() -> Router<AppState> {
+	Router::new().route("/{version}/{artifact_type}/{platform}", post(create))
+}
+
+#[axum::debug_handler]
+async fn create(
 	_device: ReleaserDevice,
-	mut db: Connection<Db>,
-	version: ParsedVersion,
-	artifact_type: String,
-	platform: String,
+	State(db): State<Db>,
+	Path((version, artifact_type, platform)): Path<(String, String, String)>,
 	url: String,
 ) -> Result<Json<Artifact>> {
-	let Version { id, .. } = Version::get_by_version(&mut db, version).await?;
+	let mut db = db.get().await?;
+	let Version { id, .. } =
+		Version::get_by_version(&mut db, ParsedVersion::from_str(&version)?).await?;
 
 	let input = NewArtifact {
 		version_id: id,
