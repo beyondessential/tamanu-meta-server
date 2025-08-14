@@ -17,10 +17,6 @@ pub fn rocket() -> Rocket<Build> {
 	rocket::build().mount(
 		"/",
 		routes![
-			servers::list,
-			servers::create,
-			servers::edit,
-			servers::delete,
 			versions::list,
 			versions::view,
 			versions::create,
@@ -39,6 +35,7 @@ pub fn routes() -> Router<AppState> {
 		.merge(timesync::routes())
 		.merge(password::routes())
 		.nest("/artifacts", artifacts::routes())
+		.nest("/servers", servers::routes())
 		.nest("/status", statuses::routes())
 		.nest_service("/static", ServeDir::new("static"))
 }

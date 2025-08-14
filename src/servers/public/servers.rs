@@ -1,9 +1,14 @@
-use rocket::serde::{Serialize, json::Json};
-use rocket_db_pools::{Connection, diesel::prelude::*};
+use axum::{
+	Json,
+	extract::State,
+	routing::{Router, delete, get, patch, post},
+};
+use diesel::{ExpressionMethods as _, QueryDsl as _, SelectableHelper as _};
+use diesel_async::RunQueryDsl as _;
+use serde::Serialize;
 
 use crate::{
 	db::{
-		Db,
 		server_kind::ServerKind,
 		server_rank::ServerRank,
 		servers::{NewServer, PartialServer, Server},
@@ -11,7 +16,16 @@ use crate::{
 	},
 	error::Result,
 	servers::device_auth::{AdminDevice, ServerDevice},
+	state::{AppState, Db},
 };
+
+pub fn routes() -> Router<AppState> {
+	Router::new()
+		.route("/", get(list))
+		.route("/", post(create))
+		.route("/", patch(edit))
+		.route("/", delete(remove))
+}
 
 #[derive(Debug, Serialize)]
 pub struct PublicServer {
@@ -20,8 +34,8 @@ pub struct PublicServer {
 	pub rank: Option<ServerRank>,
 }
 
-#[get("/servers")]
-pub async fn list(mut db: Connection<Db>) -> Result<Json<Vec<PublicServer>>> {
+pub async fn list(State(db): State<Db>) -> Result<Json<Vec<PublicServer>>> {
+	let mut db = db.get().await?;
 	Ok(Json(
 		Server::get_all(&mut db)
 			.await?
@@ -41,13 +55,13 @@ pub async fn list(mut db: Connection<Db>) -> Result<Json<Vec<PublicServer>>> {
 	))
 }
 
-#[post("/servers", data = "<input>")]
 pub async fn create(
 	device: ServerDevice,
-	mut db: Connection<Db>,
-	input: Json<NewServer>,
+	State(db): State<Db>,
+	Json(input): Json<NewServer>,
 ) -> Result<Json<Server>> {
-	let mut input = Server::from(input.into_inner());
+	let mut db = db.get().await?;
+	let mut input = Server::from(input);
 	input.device_id = Some(device.0.id);
 
 	let server = diesel::insert_into(crate::views::ordered_servers::table)
@@ -59,15 +73,14 @@ pub async fn create(
 	Ok(Json(server))
 }
 
-#[patch("/servers", data = "<input>")]
 pub async fn edit(
 	_device: ServerDevice,
-	mut db: Connection<Db>,
-	input: Json<PartialServer>,
+	State(db): State<Db>,
+	Json(input): Json<PartialServer>,
 ) -> Result<Json<Server>> {
 	use crate::views::ordered_servers::dsl::*;
 
-	let input = input.into_inner();
+	let mut db = db.get().await?;
 	let input_id = input.id;
 
 	diesel::update(ordered_servers)
@@ -85,15 +98,14 @@ pub async fn edit(
 	))
 }
 
-#[delete("/servers", data = "<input>")]
-pub async fn delete(
+pub async fn remove(
 	_device: AdminDevice,
-	mut db: Connection<Db>,
-	input: Json<PartialServer>,
+	State(db): State<Db>,
+	Json(input): Json<PartialServer>,
 ) -> Result<()> {
 	use crate::schema::servers::dsl::*;
 
-	let input = input.into_inner();
+	let mut db = db.get().await?;
 
 	diesel::delete(servers)
 		.filter(id.eq(input.id))
