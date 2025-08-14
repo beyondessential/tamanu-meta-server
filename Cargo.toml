@@ -39,7 +39,7 @@ reqwest = { version = "0.12.15", default-features = false, features = [
 	"gzip",
 	"json",
 ] }
-rocket = { version = "0.5.1", features = ["json", "mtls", "uuid"] }
+rocket = { version = "0.5.1", features = ["json", "uuid"] }
 rocket_db_pools = { version = "0.2.0", features = ["diesel_postgres"] }
 rocket_dyn_templates = { version = "0.2.0", features = ["tera"] }
 serde = { version = "1.0.219", features = ["derive"] }
@@ -53,9 +53,7 @@ qrcode = { version = "0.14", features = ["svg"] }
 timesimp = "1.0.0"
 
 [features]
-default = ["migrations-with-tokio-postgres", "tls-host-roots"]
-tls-host-roots = ["reqwest/rustls-tls-native-roots"]
-tls-embed-roots = ["reqwest/rustls-tls-webpki-roots"]
+default = ["migrations-with-tokio-postgres"]
 migrations-with-libpq = ["diesel/postgres"]
 migrations-with-tokio-postgres = [
 	# we use the postgres backend but only via tokio-postgres, not via
