@@ -1,9 +1,19 @@
+use axum::{
+	body::Bytes,
+	routing::{Router, post},
+};
 use timesimp::{Request, SignedDuration, Timesimp};
 
-use crate::error::{AppError, Result};
+use crate::{
+	error::{AppError, Result},
+	state::AppState,
+};
 
-#[post("/timesync", data = "<request>")]
-pub async fn endpoint(request: Vec<u8>) -> Result<Vec<u8>> {
+pub fn routes() -> Router<AppState> {
+	Router::new().route("/timesync", post(endpoint))
+}
+
+async fn endpoint(request: Bytes) -> Result<Vec<u8>> {
 	let response = ServerSimp
 		.answer_client(Request::try_from(request.as_ref())?)
 		.await?;
@@ -30,6 +40,6 @@ impl Timesimp for ServerSimp {
 	}
 
 	async fn sleep(duration: std::time::Duration) {
-		rocket::tokio::time::sleep(duration).await;
+		tokio::time::sleep(duration).await;
 	}
 }

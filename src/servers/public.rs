@@ -21,7 +21,6 @@ pub fn rocket() -> Rocket<Build> {
 			servers::create,
 			servers::edit,
 			servers::delete,
-			timesync::endpoint,
 			versions::list,
 			versions::view,
 			versions::create,
@@ -39,6 +38,7 @@ pub fn rocket() -> Rocket<Build> {
 pub fn routes() -> Router<AppState> {
 	Router::new()
 		.merge(health::routes())
+		.merge(timesync::routes())
 		.nest("/status", statuses::routes())
 		.nest_service("/static", ServeDir::new("static"))
 }
