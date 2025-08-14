@@ -5,11 +5,10 @@ use crate::{
 	Db,
 	db::{
 		artifacts::{Artifact, NewArtifact},
-		devices::ReleaserDevice,
 		versions::Version,
 	},
 	error::{AppError, Result},
-	servers::headers::TamanuHeaders,
+	servers::{device_auth::ReleaserDevice, headers::TamanuHeaders},
 };
 
 use super::Version as ParsedVersion;

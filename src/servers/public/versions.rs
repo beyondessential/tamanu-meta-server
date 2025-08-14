@@ -12,11 +12,11 @@ use crate::{
 	Db,
 	db::{
 		artifacts::Artifact,
-		devices::{AdminDevice, ReleaserDevice},
 		versions::{NewVersion, Version},
 	},
 	error::{AppError, Result},
 	servers::{
+		device_auth::{AdminDevice, ReleaserDevice},
 		headers::TamanuHeaders,
 		version::{Version as ParsedVersion, VersionRange},
 	},

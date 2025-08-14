@@ -4,14 +4,16 @@ use rocket_db_pools::{Connection, diesel::prelude::*};
 use crate::{
 	db::{
 		Db,
-		devices::{AdminDevice, ServerDevice},
 		server_kind::ServerKind,
 		server_rank::ServerRank,
 		servers::{NewServer, PartialServer, Server},
 		url_field::UrlField,
 	},
 	error::{AppError, Result},
-	servers::headers::TamanuHeaders,
+	servers::{
+		device_auth::{AdminDevice, ServerDevice},
+		headers::TamanuHeaders,
+	},
 };
 
 #[derive(Debug, Serialize)]

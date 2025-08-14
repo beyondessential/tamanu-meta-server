@@ -10,12 +10,13 @@ use crate::{
 	db::{
 		Db,
 		device_role::DeviceRole,
-		devices::{Device, ServerDevice},
+		devices::Device,
 		servers::Server,
 		statuses::{NewStatus, Status},
 	},
 	error::{AppError, Result},
 	servers::{
+		device_auth::ServerDevice,
 		headers::{TamanuHeaders, VersionHeader},
 		version::Version,
 	},

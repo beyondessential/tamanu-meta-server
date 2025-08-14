@@ -1,3 +1,4 @@
+pub mod device_auth;
 pub mod headers;
 pub mod health;
 pub mod private;
