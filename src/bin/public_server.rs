@@ -8,7 +8,7 @@ struct Args {
 	#[command(flatten)]
 	logging: LoggingArgs,
 
-	#[arg(long, short, default_value = "8081", env = "PORT")]
+	#[arg(long, short, default_value = "8080", env = "PORT")]
 	port: u16,
 
 	#[arg(long, env = "BIND_ADDRESS", conflicts_with = "port")]
