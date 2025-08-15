@@ -28,15 +28,13 @@ ENV RUSTFLAGS="-C target-feature=+crt-static"
 # Download and build dependencies (for cache)
 RUN echo "fn main() {}" > src/bin/public_server.rs
 COPY Cargo.lock Cargo.toml ./
-RUN cargo build --locked --target $(cat /.target) --profile $PROFILE \
-	--no-default-features --features migrations-with-tokio-postgres,tls-embed-roots
+RUN cargo build --locked --target $(cat /.target) --profile $PROFILE
 RUN rm target/$(cat /.target)/$PROFILE/{*_server,deps/*_server*}
 
 # Build the actual project
 COPY migrations ./migrations
 COPY src ./src
-RUN cargo build --locked --target $(cat /.target) --profile $PROFILE \
-	--no-default-features --features migrations-with-tokio-postgres,tls-embed-roots
+RUN cargo build --locked --target $(cat /.target) --profile $PROFILE
 RUN cp target/$(cat /.target)/$PROFILE/{{public,private}_server,migrate,pingtask,prune_untrusted_devices} /built/
 
 # we can't run any commands in the runtime image because the platform
