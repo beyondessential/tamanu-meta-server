@@ -35,9 +35,12 @@ pub async fn serve(routes: Router<AppState>, addr: SocketAddr) -> error::Result<
 				})
 				.on_response(
 					|response: &http::Response<_>, latency: Duration, span: &Span| {
-						span.record("res.version", &format!("{:?}", response.version()));
-						span.record("res.status", &response.status().as_u16());
-						span.record("latency", &format!("{:?}", latency));
+						span.record("latency", &tracing::field::debug(latency));
+						span.record("res.version", &tracing::field::debug(response.version()));
+						span.record(
+							"res.status",
+							&tracing::field::display(response.status().as_u16()),
+						);
 						tracing::info!("response");
 					},
 				),
