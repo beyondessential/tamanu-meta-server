@@ -71,8 +71,7 @@ impl IntoResponse for AppError {
 			.with_title(self.to_string())
 			.with_type(
 				Uri::from_str(&format!(
-					"https://github.com/beyondessential/tamanu-meta-server/blob/{version}/ERRORS.md#{slug}",
-					version = env!("CARGO_PKG_VERSION"),
+					"/errors/{slug}",
 					slug = match self {
 						Self::Custom(_) => "other",
 						Self::Environment(_) => "environment",

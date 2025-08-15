@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use axum::{
-	extract::State,
-	response::Html,
+	extract::{Path, State},
+	response::{Html, Redirect},
 	routing::{Router, get},
 };
 use tera::{Context, Tera};
@@ -26,6 +26,7 @@ pub mod versions;
 pub fn routes() -> Router<AppState> {
 	Router::new()
 		.route("/", get(index))
+		.route("/errors/{slug}", get(error))
 		.merge(health::routes())
 		.merge(timesync::routes())
 		.merge(password::routes())
@@ -48,4 +49,11 @@ async fn index(State(db): State<Db>, State(tera): State<Arc<Tera>>) -> Result<Ht
 	context.insert("env", &env);
 	let html = tera.render("versions", &context)?;
 	Ok(Html(html))
+}
+
+async fn error(Path(slug): Path<String>) -> Redirect {
+	Redirect::temporary(&format!(
+		"https://github.com/beyondessential/tamanu-meta-server/blob/{version}/ERRORS.md#{slug}",
+		version = env!("CARGO_PKG_VERSION")
+	))
 }
