@@ -41,6 +41,7 @@ miette = { version = "7.6.0", features = ["fancy"] }
 mobc = ">=0.7,<0.9"
 node-semver = "2.2.0"
 percent-encoding = "2.3.1"
+problem_details = { version = "0.8.0", features = ["axum"] }
 pulldown-cmark = { version = "0.13", features = ["html"] }
 qrcode = { version = "0.14", features = ["svg"] }
 rcgen = "0.14.3"
@@ -55,7 +56,7 @@ thiserror = "2.0.12"
 time = "0.3.41"
 timesimp = "1.0.0"
 tokio = { version = "1.47.1", features = ["macros", "net", "rt-multi-thread"] }
-tower-http = { version = "0.6.6", features = ["fs", "trace"] }
+tower-http = { version = "0.6.6", features = ["compression-full", "fs", "trace"] }
 tracing = "0.1.41"
 url = { version = "2.5.4", features = ["serde"] }
 uuid = { version = "1.16.0", features = ["serde", "v4"] }
