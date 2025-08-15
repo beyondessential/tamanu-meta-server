@@ -59,5 +59,5 @@ COPY --chown=tamanu:tamanu static /home/tamanu/static
 USER tamanu
 ENV HOME=/home/tamanu
 WORKDIR /home/tamanu
-ENV ROCKET_ADDRESS=::
+ENV BIND_ADDRESS=[::]:8000
 CMD ["server"]

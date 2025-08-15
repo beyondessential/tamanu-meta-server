@@ -26,8 +26,6 @@ the internet (in production behind an ingress gateway or reverse proxy).
 Routes marked with 🔐 require authentication; the word in (parens) after the emoji is the required `role`; `admin` role can do everything.
 
 The `mtls-certificate` (or `ssl-client-cert`) header should contain a PEM-encoded (optionally URL-encoded) X509 certificate.
-Alternatively, Rocket can be configured to terminate TLS itself, and handles the client certificate itself directly.
-In this case, the certificate must be signed by the provided CA (enabled by `default.tls.mutual`) to pass validation; you'll need to generate a CA with [smallstep CLI](https://smallstep.com/docs/step-cli/) in that case, this is not covered here.
 
 To get a certificate, run:
 
@@ -256,8 +254,7 @@ $ cargo check
 ```
 
 - Create a new blank postgres database.
-- Create a `Rocket.toml` from the `Rocket.example.toml`.
-- Set the `DATABASE_URL` environment variable (for diesel).
+- Set the `DATABASE_URL` environment variable.
   You can do that per diesel command, or for your entire shell session using `export` (or `set -x` in fish, or `$env:DATABASE_URL =` in powershell) as usual for your preferred shell.
 
 - Run migrations:
