@@ -69,6 +69,7 @@ impl IntoResponse for AppError {
 		let problem = ProblemDetails::new()
 			.with_status(status)
 			.with_title(self.to_string())
+			.with_detail(format!("{self:?}"))
 			.with_type(
 				Uri::from_str(&format!(
 					"/errors/{slug}",

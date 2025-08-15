@@ -1,7 +1,6 @@
 pub mod artifacts;
 pub mod device_role;
 pub mod devices;
-pub mod latest_statuses;
 pub mod pg_duration;
 pub mod server_kind;
 pub mod server_rank;

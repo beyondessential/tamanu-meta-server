@@ -22,22 +22,29 @@
     border-collapse: collapse;
   }
 
-  .success {
+  .status.up {
     background: green;
     color: white;
   }
 
-  .failure {
+  .status.down {
     background: red;
     color: white;
   }
 
-  .success ~ .error {
-    color: grey;
+  .status.gone {
+    background: black;
+    color: white;
   }
 
-  .failure ~ .error {
-    color: darkred;
+  .status.away {
+    background: orange;
+    color: black;
+  }
+
+  .status.blip {
+    background: yellow;
+    color: black;
   }
 
   .ago {
@@ -52,9 +59,10 @@
 
   tr[data-kind="facility"] {
     opacity: 0.75;
+    font-size: 0.95em;
 
-    & td:first-child {
-      font-size: 0.9em;
+    & .name, & .host {
+      font-size: 0.85em;
     }
   }
   </style>
@@ -71,36 +79,37 @@
   <table>
     <thead>
       <tr>
+        <th>Status</th>
         <th>Name</th>
         <th>Rank</th>
         <th>Host</th>
-        <th>Up?</th>
-        <th>Latency</th>
         <th>Version</th>
+        <th>Platform</th>
+        <th>Postgres</th>
+        <th>Timezone</th>
         <th>Last seen</th>
-        <th>Last error</th>
       </tr>
     </thead>
     <tbody>
       {% for entry in entries %}
-      <tr data-id="{{ entry.server_id }}" data-kind="{{ entry.server_kind }}">
-        <td>{{ entry.server_name }}</td>
-        <td>{{ entry.server_rank }}</td>
-        <td><a href="{{ entry.server_host }}">{{ entry.server_host }}</a></td>
-        {% if entry.is_up %}
-        <td class=success>Yes</td>
+      <tr data-id="{{ entry.server.id }}" data-kind="{{ entry.server.kind }}">
+        <td class="status {{ entry.up }}">{{ entry.up | capitalize }}</td>
+        <td class="name">{{ entry.server.name }}</td>
+        <td class="rank">{{ entry.server.rank }}</td>
+        <td class="host"><a href="{{ entry.server.host }}">{{ entry.server.host }}</a></td>
+        {% if entry.status %}
+          <td class="version">{{ entry.status.version }}</td>
+          <td class="platform">{{ entry.platform }}</td>
+          <td class="postgres">{{ entry.postgres }}</td>
+          <td class="timezone">
+            {% if entry.status.extra %}
+              {{ entry.status.extra.timezone }}
+            {% endif %}
+          </td>
+          <td class="ago" title="{{ entry.status.created_at }}">{{ entry.since }} minutes ago</td>
         {% else %}
-        <td class=failure>No</td>
+          <td colspan=5></td>
         {% endif %}
-        <td>{% if entry.latest_latency %}{{ entry.latest_latency }}ms{% endif %}</td>
-        <td>{{ entry.latest_success_version }}</td>
-        {% if entry.latest_success_ts %}<td class=ago title="{{ entry.latest_success_ts }}">{{ entry.latest_success_ago }} ago</td>{% else %}<td>never</td>{% endif %}
-        <td class=error>
-          {% if entry.latest_error_message %}
-            {{ entry.latest_error_message }}
-            {% if entry.is_up %}(<span class=ago title="{{ entry.latest_error_ts }}">{{ entry.latest_error_ago }} ago</span>){% endif %}
-          {% endif %}
-        </td>
       </tr>
       {% endfor %}
     </tbody>
