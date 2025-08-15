@@ -3,7 +3,7 @@ use std::{net::SocketAddr, time::Duration};
 use axum::Router;
 use state::AppState;
 use tokio::net::TcpListener;
-use tower_http::trace::TraceLayer;
+use tower_http::{compression::CompressionLayer, trace::TraceLayer};
 use tracing::Span;
 
 pub use servers::private::routes as private_routes;
@@ -45,6 +45,7 @@ pub async fn serve(routes: Router<AppState>, addr: SocketAddr) -> error::Result<
 					},
 				),
 		)
+		.layer(CompressionLayer::new())
 		.into_make_service();
 
 	let listener = TcpListener::bind(addr).await?;
