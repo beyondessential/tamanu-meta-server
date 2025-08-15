@@ -28,13 +28,14 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest
-      - uses: tj-actions/install-postgresql@v3
-        with:
-          postgresql-version: 17
+      - run: |
+          sudo systemctl start postgresql.service
+          psql --host "$PGHOST" --username=postgres --dbname=postgres --command="CREATE USER meta PASSWORD 'meta'" --command="\du"
+          createdb --owner=meta --username=postgres meta
       - uses: Swatinem/rust-cache@v2
       - run: cargo nextest run
         env:
-          DATABASE_URL: postgresql://postgres@localhost:5432/test
+          DATABASE_URL: postgresql://meta:meta@localhost:5432/meta
 
   clippy:
     name: Clippy
