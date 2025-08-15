@@ -4,7 +4,6 @@ use uuid::Uuid;
 
 #[path = "common/db.rs"]
 mod test_db;
-use test_db::TestDb;
 
 #[derive(QueryableByName)]
 struct RowId {
@@ -20,7 +19,7 @@ struct RowDeviceId {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn deleting_device_nulls_status_device_id() {
-	TestDb::run(async |mut conn| {
+	test_db::TestDb::run(async |mut conn, _| {
 		// Prepare unique values
 		let key_uuid = Uuid::new_v4();
 		let key_data = key_uuid.as_bytes().to_vec();

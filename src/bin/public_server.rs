@@ -2,7 +2,7 @@ use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 
 use clap::Parser;
 use lloggs::{LoggingArgs, PreArgs};
-use tamanu_meta::state::AppState;
+use tamanu_meta::{router, serve, state::AppState};
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -32,6 +32,10 @@ async fn main() -> miette::Result<()> {
 		.bind
 		.unwrap_or_else(|| SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, args.port, 0, 0)));
 
-	tamanu_meta::serve(AppState::init()?, tamanu_meta::public_routes(), addr).await?;
+	serve(
+		router(AppState::init()?, tamanu_meta::public_routes()),
+		addr,
+	)
+	.await?;
 	Ok(())
 }

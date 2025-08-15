@@ -82,6 +82,7 @@ overflow-checks = false
 incremental = false
 
 [dev-dependencies]
+axum-test = "17.3.0"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 
 [profile.release.build-override]

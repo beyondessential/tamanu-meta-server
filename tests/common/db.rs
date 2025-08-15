@@ -19,11 +19,11 @@ pub struct TestDb {
 
 impl TestDb {
 	async fn init() -> miette::Result<Self> {
+		let _ = tracing_subscriber::fmt::try_init();
+
 		if Handle::current().runtime_flavor() == RuntimeFlavor::CurrentThread {
 			panic!(r#"You need to use #[tokio::test(flavor = "multi_thread")]"#);
 		}
-
-		tracing_subscriber::fmt::init();
 
 		let base = Url::parse(
 			&std::env::var("DATABASE_URL").expect("DATABASE_URL environment variable is not set"),
@@ -82,12 +82,12 @@ impl TestDb {
 	/// Run a test in a temporary database
 	pub async fn run<F, T, Fut>(test: F) -> T
 	where
-		F: FnOnce(AsyncPgConnection) -> Fut,
+		F: FnOnce(AsyncPgConnection, String) -> Fut,
 		Fut: Future<Output = T>,
 	{
 		let tdb = TestDb::init().await.expect("temp db");
 		let conn = tdb.connect(false).await.expect("connect to temp db");
-		let result = test(conn).await;
+		let result = test(conn, tdb.url.clone()).await;
 		if let Err(err) = tdb.teardown().await {
 			eprintln!("Failed to teardown temp db: {err}");
 		}

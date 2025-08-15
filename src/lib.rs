@@ -18,12 +18,8 @@ pub(crate) mod servers;
 pub mod state;
 pub(crate) mod views;
 
-pub async fn serve(
-	state: AppState,
-	routes: Router<AppState>,
-	addr: SocketAddr,
-) -> error::Result<()> {
-	let service = routes
+pub fn router(state: AppState, routes: Router<AppState>) -> Router<()> {
+	routes
 		.with_state(state)
 		.layer(
 			TraceLayer::new_for_http()
@@ -51,8 +47,10 @@ pub async fn serve(
 				),
 		)
 		.layer(CompressionLayer::new())
-		.into_make_service();
+}
 
+pub async fn serve(routes: Router<()>, addr: SocketAddr) -> error::Result<()> {
+	let service = routes.into_make_service();
 	let listener = TcpListener::bind(addr).await?;
 	tracing::info!("listening on {}", listener.local_addr()?);
 	axum::serve(listener, service).await?;
