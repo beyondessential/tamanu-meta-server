@@ -9,7 +9,7 @@ use tracing::error;
 use crate::{db::statuses::Status, state::AppState};
 
 pub fn spawn() -> JoinHandle<()> {
-	let pool = AppState::init_db().unwrap();
+	let pool = AppState::init_db();
 	task::spawn(async move {
 		loop {
 			sleep(Duration::from_secs(60)).await;

@@ -18,9 +18,13 @@ pub(crate) mod servers;
 pub mod state;
 pub(crate) mod views;
 
-pub async fn serve(routes: Router<AppState>, addr: SocketAddr) -> error::Result<()> {
+pub async fn serve(
+	state: AppState,
+	routes: Router<AppState>,
+	addr: SocketAddr,
+) -> error::Result<()> {
 	let service = routes
-		.with_state(AppState::init()?)
+		.with_state(state)
 		.layer(
 			TraceLayer::new_for_http()
 				.make_span_with(|request: &http::Request<_>| {

@@ -21,7 +21,7 @@ async fn main() -> miette::Result<()> {
 		})?);
 	}
 
-	let db = tamanu_meta::state::AppState::init_db()?;
+	let db = tamanu_meta::state::AppState::init_db();
 	let mut conn = db.get().await.into_diagnostic()?;
 	conn.batch_execute("SELECT prune_untrusted_devices();")
 		.await

@@ -18,9 +18,12 @@ pub struct AppState {
 }
 
 impl AppState {
-	pub fn init_db() -> Result<Db> {
-		let config = AsyncDieselConnectionManager::<AsyncPgConnection>::new(var("DATABASE_URL")?);
-		Ok(Pool::new(config))
+	pub fn init_db() -> Db {
+		Self::init_db_to(&var("DATABASE_URL").expect("DATABASE_URL must be set"))
+	}
+
+	pub fn init_db_to(url: &str) -> Db {
+		Pool::new(AsyncDieselConnectionManager::<AsyncPgConnection>::new(url))
 	}
 
 	pub fn init_tera() -> Result<Arc<Tera>> {
@@ -47,7 +50,7 @@ impl AppState {
 
 	pub fn init() -> Result<Self> {
 		Ok(Self {
-			db: Self::init_db()?,
+			db: Self::init_db(),
 			tera: Self::init_tera()?,
 		})
 	}
