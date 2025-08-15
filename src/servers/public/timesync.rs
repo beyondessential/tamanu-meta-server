@@ -14,8 +14,13 @@ pub fn routes() -> Router<AppState> {
 }
 
 async fn endpoint(request: Bytes) -> Result<Vec<u8>> {
+	let payload = request.as_ref();
+	if payload.len() != 8 {
+		return Err(AppError::custom("payload size mismatch"));
+	}
+
 	let response = ServerSimp
-		.answer_client(Request::try_from(request.as_ref())?)
+		.answer_client(Request::try_from(payload)?)
 		.await?;
 	Ok(response.to_bytes().to_vec())
 }
