@@ -81,6 +81,9 @@ debug-assertions = false
 overflow-checks = false
 incremental = false
 
+[dev-dependencies]
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+
 [profile.release.build-override]
 opt-level = 0
 codegen-units = 1024

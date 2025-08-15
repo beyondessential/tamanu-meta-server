@@ -11,6 +11,7 @@ pub use servers::public::routes as public_routes;
 
 pub(crate) mod db;
 pub mod error;
+pub mod migrator;
 pub mod pingtask;
 pub(crate) mod schema;
 pub(crate) mod servers;

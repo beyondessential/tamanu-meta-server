@@ -2430,6 +2430,7 @@ dependencies = [
  "tokio",
  "tower-http",
  "tracing",
+ "tracing-subscriber",
  "url",
  "uuid",
  "x509-parser",

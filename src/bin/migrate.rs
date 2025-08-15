@@ -4,6 +4,7 @@ use diesel_migrations::{
 };
 use lloggs::{LoggingArgs, PreArgs};
 use miette::{WrapErr, bail, miette};
+use tamanu_meta::migrator::UnasyncMigrator;
 
 #[derive(Debug, Parser)]
 #[command(flatten_help = true)]
@@ -40,11 +41,6 @@ enum Mode {
 	IsOk,
 }
 
-async fn connection() -> miette::Result<rust_postgres_migrator::UnasyncMigrator> {
-	let pool = tamanu_meta::state::AppState::init_db()?;
-	Ok(rust_postgres_migrator::UnasyncMigrator { pool })
-}
-
 #[tokio::main]
 async fn main() -> miette::Result<()> {
 	let mut _guard = PreArgs::parse().setup()?;
@@ -57,7 +53,7 @@ async fn main() -> miette::Result<()> {
 		})?);
 	}
 
-	let mut connection = connection().await?;
+	let mut connection = UnasyncMigrator::connect().await?;
 	let mut migrator = HarnessWithOutput::write_to_stdout(&mut connection);
 
 	match args.mode.unwrap_or_default() {
@@ -117,124 +113,4 @@ async fn main() -> miette::Result<()> {
 	}
 
 	Ok(())
-}
-
-mod rust_postgres_migrator {
-	//! to avoid needing libpq-dev or building pq-src, we hack up a migration
-	//! harness on top of `AsyncPgConnection`, just good enough for migrations.
-
-	use diesel::{
-		QueryResult, QueryableByName,
-		connection::{BoxableConnection, SimpleConnection},
-		pg::Pg,
-		sql_query,
-	};
-	use diesel_async::SimpleAsyncConnection as _;
-	use diesel_migrations::MigrationHarness;
-	use tamanu_meta::state::Db;
-
-	pub(crate) struct UnasyncMigrator {
-		pub(crate) pool: Db,
-	}
-
-	impl SimpleConnection for UnasyncMigrator {
-		fn batch_execute(&mut self, query: &str) -> QueryResult<()> {
-			std::thread::scope(|s| {
-				s.spawn(|| {
-					let runtime = tokio::runtime::Builder::new_current_thread()
-						.build()
-						.unwrap();
-					runtime.block_on(async move {
-						let mut connection = self.pool.get().await.unwrap();
-						connection.batch_execute(query).await?;
-						Ok(())
-					})
-				})
-				.join()
-			})
-			.unwrap()
-		}
-	}
-
-	impl BoxableConnection<Pg> for UnasyncMigrator {
-		fn as_any(&self) -> &dyn std::any::Any {
-			unimplemented!()
-		}
-
-		fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-			unimplemented!()
-		}
-	}
-
-	impl UnasyncMigrator {
-		fn prepare(&mut self) -> diesel::migration::Result<()> {
-			self.batch_execute(
-				"CREATE TABLE IF NOT EXISTS __diesel_schema_migrations (
-					version varchar(50) primary key not null,
-					run_on timestamp without time zone not null default current_timestamp
-				)",
-			)?;
-			Ok(())
-		}
-	}
-
-	impl MigrationHarness<Pg> for UnasyncMigrator {
-		fn run_migration(
-			&mut self,
-			migration: &dyn diesel::migration::Migration<Pg>,
-		) -> diesel::migration::Result<diesel::migration::MigrationVersion<'static>> {
-			self.prepare()?;
-			migration.run(self)?;
-			let version = migration.name().version();
-			self.batch_execute(&format!(
-				"INSERT INTO __diesel_schema_migrations (version) VALUES ('{version}')",
-			))?;
-			Ok(version.as_owned())
-		}
-
-		fn revert_migration(
-			&mut self,
-			migration: &dyn diesel::migration::Migration<Pg>,
-		) -> diesel::migration::Result<diesel::migration::MigrationVersion<'static>> {
-			self.prepare()?;
-			migration.revert(self)?;
-			let version = migration.name().version();
-			self.batch_execute(&format!(
-				"DELETE FROM __diesel_schema_migrations WHERE version = '{version}'",
-			))?;
-			Ok(version.as_owned())
-		}
-
-		fn applied_migrations(
-			&mut self,
-		) -> diesel::migration::Result<Vec<diesel::migration::MigrationVersion<'static>>> {
-			#[derive(QueryableByName)]
-			struct Version {
-				#[diesel(sql_type = diesel::sql_types::Text)]
-				version: String,
-			}
-
-			self.prepare()?;
-
-			std::thread::scope(|s| {
-				s.spawn(|| {
-					let runtime = tokio::runtime::Builder::new_current_thread()
-						.build()
-						.unwrap();
-					runtime.block_on(async move {
-						use diesel_async::RunQueryDsl as _;
-						let mut connection = self.pool.get().await.unwrap();
-						let rows: Vec<Version> = sql_query(
-							"SELECT version FROM __diesel_schema_migrations ORDER BY version DESC",
-						)
-						.get_results(&mut connection)
-						.await?;
-						Ok(rows.into_iter().map(|v| v.version.into()).collect())
-					})
-				})
-				.join()
-			})
-			.unwrap()
-		}
-	}
 }

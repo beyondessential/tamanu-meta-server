@@ -18,7 +18,7 @@ struct RowDeviceId {
 	device_id: Option<Uuid>,
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn deleting_device_nulls_status_device_id() {
 	TestDb::run(async |mut conn| {
 		// Prepare unique values
