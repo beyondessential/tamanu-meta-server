@@ -22,7 +22,7 @@ async fn empty_list() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn with_servers() {
+async fn with_server() {
 	test_server::run(async |mut conn, public, _| {
 		conn.batch_execute(
 			"INSERT INTO servers (name, host, rank) VALUES ('Test Server', 'https://test.com', 'production')",
@@ -39,6 +39,22 @@ async fn with_servers() {
 				rank: Some("production".to_string()),
 			}
 		]);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn with_unnamed_server() {
+	test_server::run(async |mut conn, public, _| {
+		conn.batch_execute(
+			"INSERT INTO servers (host, rank) VALUES ('https://test.com', 'production')",
+		)
+		.await
+		.unwrap();
+
+		let response = public.get("/servers").await;
+		response.assert_status_ok();
+		response.assert_json::<Vec<Server>>(&Vec::new());
 	})
 	.await
 }
