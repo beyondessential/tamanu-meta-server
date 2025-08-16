@@ -5,7 +5,19 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [4.1.5](https://github.com/beyondessential/tamanu-meta-server/compare/v4.1.4..4.1.5) - 2025-08-16
+## [4.1.6](https://github.com/beyondessential/tamanu-meta-server/compare/v4.1.5..4.1.6) - 2025-08-16
+
+
+- **Feature:** Display nodejs version - ([b26041f](https://github.com/beyondessential/tamanu-meta-server/commit/b26041f0a56ebe1ed2f4d231f03dab36c3063e93))
+- **Test:** Fix clientip testing - ([5ed3ba1](https://github.com/beyondessential/tamanu-meta-server/commit/5ed3ba13eeee65c0a94006f4011db6049c3bbc05))
+- **Tweak:** No longer store status errors - ([520a466](https://github.com/beyondessential/tamanu-meta-server/commit/520a46603941f049dd63a05c5f40cffc50d05155))
+- **Tweak:** Remove unused latest_statuses view - ([520a466](https://github.com/beyondessential/tamanu-meta-server/commit/520a46603941f049dd63a05c5f40cffc50d05155))
+- **Tweak:** Remove statuses.remote_ip - ([d88e4de](https://github.com/beyondessential/tamanu-meta-server/commit/d88e4de2a15937f00779b3164b316fa46926ba14))
+- **Tweak:** Remove statuses.latency_ms - ([b0a622c](https://github.com/beyondessential/tamanu-meta-server/commit/b0a622c97a923e0f73241a3383dcd82417d60057))
+- **Tweak:** Add btree on statuses.created_at for sorting performance - ([f2aee12](https://github.com/beyondessential/tamanu-meta-server/commit/f2aee12df04fc3ed39280f2b9c5f5cbc2e16bc79))
+
+---
+## [4.1.5](https://github.com/beyondessential/tamanu-meta-server/compare/v4.1.4..v4.1.5) - 2025-08-16
 
 
 - **Feature:** More robust client ip parsing - ([b1b8d25](https://github.com/beyondessential/tamanu-meta-server/commit/b1b8d255b6ab7fb902fdc6cbf3062f49a94ad937))
