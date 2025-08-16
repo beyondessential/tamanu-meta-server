@@ -5,7 +5,15 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [4.2.1](https://github.com/beyondessential/tamanu-meta-server/compare/v4.2.0..4.2.1) - 2025-08-16
+## [4.2.2](https://github.com/beyondessential/tamanu-meta-server/compare/v4.2.1..4.2.2) - 2025-08-16
+
+
+- **Bugfix:** Return proper error codes for auth - ([c404691](https://github.com/beyondessential/tamanu-meta-server/commit/c404691d7bf322711d7676bdca80eee55139188f))
+- **Documentation:** Document new auth errors - ([8da9192](https://github.com/beyondessential/tamanu-meta-server/commit/8da9192957be8a7096905d0c912774b15bc718a1))
+- **Test:** Add more /servers tests - ([1f76d1b](https://github.com/beyondessential/tamanu-meta-server/commit/1f76d1b64b437328b6e84bca5b38993671397f56))
+
+---
+## [4.2.1](https://github.com/beyondessential/tamanu-meta-server/compare/v4.2.0..v4.2.1) - 2025-08-16
 
 
 - **Bugfix:** Decode encoded tailscale name - ([b94602b](https://github.com/beyondessential/tamanu-meta-server/commit/b94602b6949179592bbc1224a4f656ac4c1c39e3))
