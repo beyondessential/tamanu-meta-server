@@ -44,6 +44,7 @@ struct ServerData {
 	since: Option<String>,
 	platform: Option<&'static str>,
 	postgres: Option<String>,
+	nodejs: Option<String>,
 }
 
 async fn servers_with_status(db: Db) -> Result<Vec<ServerData>> {
@@ -102,6 +103,14 @@ async fn servers_with_status(db: Db) -> Result<Vec<ServerData>> {
 				.and_then(|pg| pg.as_str())
 				.and_then(|pg| pg.split_ascii_whitespace().skip(1).next())
 				.map(|vers| vers.trim_end_matches(',').into()),
+			nodejs: device
+				.as_ref()
+				.and_then(|d| d.user_agent.as_ref())
+				.and_then(|ua| {
+					ua.split_ascii_whitespace()
+						.find_map(|p| p.strip_prefix("Node.js/"))
+						.map(ToOwned::to_owned)
+				}),
 			server,
 			device,
 			status,
