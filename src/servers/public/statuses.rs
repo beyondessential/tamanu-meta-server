@@ -1,13 +1,11 @@
-use std::net::SocketAddr;
-
 use axum::{
 	Json,
-	extract::{ConnectInfo, Path, State},
+	extract::{Path, State},
 	routing::{Router, post},
 };
+use axum_client_ip::ClientIp;
 use diesel::SelectableHelper as _;
 use diesel_async::RunQueryDsl as _;
-use ipnet::IpNet;
 use uuid::Uuid;
 
 use crate::{
@@ -30,7 +28,7 @@ async fn create(
 	Path(server_id): Path<Uuid>,
 	State(db): State<Db>,
 	device: ServerDevice,
-	connect_info: ConnectInfo<SocketAddr>,
+	ClientIp(client_ip): ClientIp,
 	current_version: VersionHeader,
 	extra: Option<Json<serde_json::Value>>,
 ) -> Result<Json<Status>> {
@@ -47,12 +45,11 @@ async fn create(
 		));
 	}
 
-	let remote_ip = IpNet::new(connect_info.ip(), 32).unwrap();
 	let input = NewStatus {
 		server_id,
 		device_id: Some(id),
 		version: Some(current_version.0),
-		remote_ip: Some(remote_ip),
+		remote_ip: Some(client_ip.into()),
 		extra: extra.map_or_else(
 			|| serde_json::Value::Object(Default::default()),
 			|j| match j.0 {

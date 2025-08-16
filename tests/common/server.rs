@@ -1,5 +1,6 @@
 use ::time::OffsetDateTime;
 use axum::extract::connect_info::MockConnectInfo;
+use axum_client_ip::ClientIpSource;
 use axum_test::TestServer;
 use diesel::{QueryableByName, sql_query, sql_types};
 use diesel_async::AsyncPgConnection;
@@ -48,10 +49,14 @@ where
 
 		// Add ConnectInfo layer for test servers
 		let mock_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
-		let public_router =
-			router(state.clone(), public_routes()).layer(MockConnectInfo(mock_addr));
-		let private_router =
-			router(state.clone(), private_routes("/$".into())).layer(MockConnectInfo(mock_addr));
+		let public_router = router(state.clone(), public_routes(), ClientIpSource::ConnectInfo)
+			.layer(MockConnectInfo(mock_addr));
+		let private_router = router(
+			state.clone(),
+			private_routes("/$".into()),
+			ClientIpSource::ConnectInfo,
+		)
+		.layer(MockConnectInfo(mock_addr));
 
 		test(
 			conn,

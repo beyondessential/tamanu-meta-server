@@ -1,5 +1,6 @@
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 
+use axum_client_ip::ClientIpSource;
 use clap::Parser;
 use lloggs::{LoggingArgs, PreArgs};
 use tamanu_meta::{router, serve, state::AppState};
@@ -17,6 +18,9 @@ struct Args {
 
 	#[arg(long, env = "BIND_ADDRESS", conflicts_with = "port")]
 	bind: Option<SocketAddr>,
+
+	#[arg(long, env = "CLIENT_IP_SOURCE", default_value = "ConnectInfo")]
+	client_ip_source: ClientIpSource,
 }
 
 #[tokio::main]
@@ -36,7 +40,11 @@ async fn main() -> miette::Result<()> {
 		.unwrap_or_else(|| SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, args.port, 0, 0)));
 
 	serve(
-		router(AppState::init()?, tamanu_meta::private_routes(args.prefix)),
+		router(
+			AppState::init()?,
+			tamanu_meta::private_routes(args.prefix),
+			args.client_ip_source,
+		),
 		addr,
 	)
 	.await?;

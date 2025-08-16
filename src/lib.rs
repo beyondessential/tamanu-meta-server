@@ -1,6 +1,7 @@
 use std::{net::SocketAddr, time::Duration};
 
 use axum::Router;
+use axum_client_ip::ClientIpSource;
 use state::AppState;
 use tokio::net::TcpListener;
 use tower_http::{compression::CompressionLayer, trace::TraceLayer};
@@ -18,9 +19,14 @@ pub(crate) mod servers;
 pub mod state;
 pub(crate) mod views;
 
-pub fn router(state: AppState, routes: Router<AppState>) -> Router<()> {
+pub fn router(
+	state: AppState,
+	routes: Router<AppState>,
+	client_ip_source: ClientIpSource,
+) -> Router<()> {
 	routes
 		.with_state(state)
+		.layer(client_ip_source.into_extension())
 		.layer(
 			TraceLayer::new_for_http()
 				.make_span_with(|request: &http::Request<_>| {

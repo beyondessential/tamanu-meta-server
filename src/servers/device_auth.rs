@@ -1,12 +1,7 @@
-use std::{
-	net::{IpAddr, Ipv6Addr, SocketAddr},
-	str::FromStr as _,
-};
+use std::net::{IpAddr, Ipv6Addr};
 
-use axum::{
-	RequestPartsExt as _,
-	extract::{ConnectInfo, FromRef},
-};
+use axum::{RequestPartsExt as _, extract::FromRef};
+use axum_client_ip::ClientIp;
 
 use crate::{
 	db::{
@@ -97,14 +92,8 @@ where
 			.and_then(|s| s.to_str().ok())
 			.map(|s| s.to_owned());
 
-		let client_ip: Option<ConnectInfo<SocketAddr>> = parts.extract().await.ok();
-		let ip = parts
-			.headers
-			.get("x-forwarded-for")
-			.and_then(|s| s.to_str().ok())
-			.and_then(|s| IpAddr::from_str(s).ok())
-			.or_else(|| client_ip.map(|c| c.ip()))
-			.unwrap_or(IpAddr::V6(Ipv6Addr::UNSPECIFIED));
+		let client_ip: Option<ClientIp> = parts.extract().await.ok();
+		let ip = client_ip.map_or(IpAddr::V6(Ipv6Addr::UNSPECIFIED), |c| c.0);
 
 		NewDeviceConnection {
 			device_id: device.id,
