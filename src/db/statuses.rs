@@ -1,5 +1,4 @@
 use std::{
-	error::Error,
 	str::FromStr as _,
 	time::{Duration, Instant},
 };
@@ -76,37 +75,31 @@ impl Status {
 		let start = Instant::now();
 		let url = server.host.0.join("/api/public/ping").unwrap();
 		debug!(%url, "pinging");
-		if let Ok(version) = client
-			.get(url)
-			.send()
-			.await
-			.map_err(|err| {
-				err.source()
-					.map_or_else(|| err.to_string(), |err| err.to_string())
-			})
-			.and_then(|res| {
-				res.headers()
-					.get("X-Version")
-					.ok_or_else(|| "X-Version header not present".to_string())
-					.and_then(|value| value.to_str().map_err(|err| err.to_string()))
-					.and_then(|value| VersionStr::from_str(value).map_err(|err| err.to_string()))
-			}) {
-			let latency = start.elapsed().as_millis().try_into().unwrap_or(i32::MAX);
-			info!(server=%server.id, host=%server.host.0, %latency, "ping success");
-			Some(Self {
-				id: Uuid::new_v4(),
-				server_id: server.id,
-				device_id: None,
-				created_at: Utc::now(),
-				latency_ms: Some(latency),
-				version: Some(version),
-				error: None,
-				remote_ip: None,
-				extra: Default::default(),
-			})
-		} else {
-			warn!(server=%server.id, host=%server.host.0, "ping failure");
-			None
+		match client.get(url).send().await.map(|res| {
+			res.headers()
+				.get("X-Version")
+				.and_then(|value| value.to_str().ok())
+				.and_then(|value| VersionStr::from_str(value).ok())
+		}) {
+			Ok(version) => {
+				let latency = start.elapsed().as_millis().try_into().unwrap_or(i32::MAX);
+				info!(server=%server.id, host=%server.host.0, %latency, "ping success");
+				Some(Self {
+					id: Uuid::new_v4(),
+					server_id: server.id,
+					device_id: None,
+					created_at: Utc::now(),
+					latency_ms: Some(latency),
+					version,
+					error: None,
+					remote_ip: None,
+					extra: Default::default(),
+				})
+			}
+			Err(err) => {
+				warn!(server=%server.id, host=%server.host.0, "ping failure: {err}");
+				None
+			}
 		}
 	}
 
