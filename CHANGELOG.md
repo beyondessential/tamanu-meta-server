@@ -5,7 +5,25 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [4.0.6](https://github.com/beyondessential/tamanu-meta-server/compare/v4.0.5..4.0.6) - 2025-08-06
+## [4.1.0](https://github.com/beyondessential/tamanu-meta-server/compare/v4.0.6..4.1.0) - 2025-08-16
+
+
+- **Bugfix:** Fix public port - ([a8117ac](https://github.com/beyondessential/tamanu-meta-server/commit/a8117acb508747cfbf27cdf1595101f4c164b78c))
+- **Bugfix:** Fix logging - ([33af436](https://github.com/beyondessential/tamanu-meta-server/commit/33af4367ff8b11f78f4a2b49f7bd1ad19a2f8f5a))
+- **Bugfix:** Fix error type uris to ourselves - ([43d38cf](https://github.com/beyondessential/tamanu-meta-server/commit/43d38cf73eb1de8ad1a79343a3a8f419d356406c))
+- **Bugfix:** Fix docker build - ([1962d6b](https://github.com/beyondessential/tamanu-meta-server/commit/1962d6b745bf69baff0985e1809157c7dfbdabac))
+- **Bugfix:** Fix test - ([e8a69d9](https://github.com/beyondessential/tamanu-meta-server/commit/e8a69d9dac6727890c0f3ea1f7a672413d7423c2))
+- **Bugfix:** Fix migrator error - ([78356f7](https://github.com/beyondessential/tamanu-meta-server/commit/78356f742440b3bee98c2c6659f4822021d3b478))
+- **Documentation:** Document errors - ([0c8e1d6](https://github.com/beyondessential/tamanu-meta-server/commit/0c8e1d6a1d5c5cb730ad5714e85a6ff90582be3c))
+- **Refactor:** Add extra() convenience accessor - ([25e1189](https://github.com/beyondessential/tamanu-meta-server/commit/25e11898faa41d54bd618d975cf03bcf59e129ba))
+- **Test:** Add test harness and device fkey behaviour check - ([0c8af78](https://github.com/beyondessential/tamanu-meta-server/commit/0c8af784123bcb474cd93c21256f764472c890fc))
+- **Test:** Test /servers exclusion - ([cc2d10a](https://github.com/beyondessential/tamanu-meta-server/commit/cc2d10a3021da3cc8517d5fd7cc6fc44b3704428))
+- **Tweak:** Track device that originated a status - ([c8135c6](https://github.com/beyondessential/tamanu-meta-server/commit/c8135c6aa1f73b22a7143faa717e289236ffcef9))
+- **Tweak:** Obtain device connection for status - ([afce121](https://github.com/beyondessential/tamanu-meta-server/commit/afce1216f6c86c13d45d059f8a208b132d6f7874))
+- **Tweak:** Obtain the connection info for this status - ([a0ad670](https://github.com/beyondessential/tamanu-meta-server/commit/a0ad670915ac200560beb0500e01bbef142125b1))
+
+---
+## [4.0.6](https://github.com/beyondessential/tamanu-meta-server/compare/v4.0.5..v4.0.6) - 2025-08-06
 
 
 - **Tweak:** Allow leading v in versions in api - ([7089e3f](https://github.com/beyondessential/tamanu-meta-server/commit/7089e3f241bf3b7b62c10a515191580a32e06943))

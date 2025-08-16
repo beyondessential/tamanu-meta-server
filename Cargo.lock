@@ -2506,7 +2506,7 @@ dependencies = [
 
 [[package]]
 name = "tamanu-meta"
-version = "4.0.6"
+version = "4.1.0"
 dependencies = [
  "axum",
  "axum-test",
