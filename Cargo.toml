@@ -21,7 +21,7 @@ default-run = "public_server"
 axum = { version = "0.8.4", features = ["json", "macros"] }
 axum-client-ip = { version = "1.1.3", features = ["forwarded-header"] }
 chrono = { version = "0.4.39", features = ["serde"] }
-clap = { version = "4.5.42", features = ["derive", "env"] }
+clap = { version = "4.5.45", features = ["derive", "env"] }
 diesel = { version = "2.1.6", features = [
 	"chrono",
 	"ipnet-address",
@@ -46,7 +46,7 @@ problem_details = { version = "0.8.0", features = ["axum"] }
 pulldown-cmark = { version = "0.13", features = ["html"] }
 qrcode = { version = "0.14", features = ["svg"] }
 rcgen = "0.14.3"
-reqwest = { version = "0.12.15", default-features = false, features = [
+reqwest = { version = "0.12.23", default-features = false, features = [
 	"gzip",
 	"json",
 	"rustls-tls",
@@ -54,7 +54,7 @@ reqwest = { version = "0.12.15", default-features = false, features = [
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.142"
 tera = "1.20.0"
-thiserror = "2.0.12"
+thiserror = "2.0.14"
 time = "0.3.41"
 timesimp = "1.0.0"
 tokio = { version = "1.47.1", features = ["macros", "net", "rt-multi-thread"] }
@@ -65,7 +65,7 @@ tower-http = { version = "0.6.6", features = [
 ] }
 tracing = "0.1.41"
 url = { version = "2.5.4", features = ["serde"] }
-uuid = { version = "1.16.0", features = ["serde", "v4"] }
+uuid = { version = "1.18.0", features = ["serde", "v4"] }
 x509-parser = "0.17.0"
 
 [profile.release]
