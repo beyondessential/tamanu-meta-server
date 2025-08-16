@@ -1,33 +1,12 @@
-use ::time::OffsetDateTime;
 use diesel::{QueryableByName, sql_query, sql_types};
 use diesel_async::RunQueryDsl;
-use percent_encoding::utf8_percent_encode;
-use rcgen::{
-	CertificateParams, DistinguishedName, ExtendedKeyUsagePurpose, IsCa, KeyPair, KeyUsagePurpose,
-	PKCS_ECDSA_P256_SHA256,
-};
 use uuid::Uuid;
-use x509_parser::prelude::*;
-
-fn make_certificate() -> rcgen::Certificate {
-	let key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("keygen");
-	let mut cert = CertificateParams::default();
-	cert.is_ca = IsCa::NoCa;
-	cert.not_before = OffsetDateTime::now_utc();
-	cert.key_usages = vec![KeyUsagePurpose::DigitalSignature];
-	cert.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
-	cert.use_authority_key_identifier_extension = true;
-	cert.distinguished_name = DistinguishedName::new();
-	cert.self_signed(&key).expect("sign cert")
-}
 
 #[path = "common/server.rs"]
 mod test_server;
 
 #[derive(QueryableByName)]
 struct StatusResult {
-	#[diesel(sql_type = sql_types::Uuid)]
-	id: Uuid,
 	#[diesel(sql_type = sql_types::Uuid)]
 	server_id: Uuid,
 	#[diesel(sql_type = sql_types::Nullable<sql_types::Uuid>)]
@@ -40,32 +19,7 @@ struct StatusResult {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn submit_status() {
-	test_server::run(async |mut conn, public, _| {
-		// 1. Generate a certificate and extract the public key
-		let cert = make_certificate();
-		let cert_pem = cert.pem();
-
-		// Parse the certificate to get the public key data for device registration
-		let (_remainder, pem_parsed) = parse_x509_pem(cert_pem.as_bytes()).expect("parse pem");
-		let (_remainder, x509_cert) =
-			parse_x509_certificate(&pem_parsed.contents).expect("parse cert");
-		let key_data = x509_cert.tbs_certificate.subject_pki.raw.to_vec();
-
-		// 2. Insert a device with server role
-		let device_row: StatusResult = sql_query(
-			r#"
-				INSERT INTO devices (key_data, role)
-				VALUES ($1, 'server')
-				RETURNING id, id as server_id, id as device_id, 'test' as version, '{}'::jsonb as extra
-			"#,
-		)
-		.bind::<sql_types::Binary, _>(key_data)
-		.get_result(&mut conn)
-		.await
-		.expect("insert device");
-		let device_id = device_row.id;
-
-		// 3. Insert a server and associate it with the device
+	test_server::run_with_device_auth("server", async |mut conn, cert, device_id, public, _| {
 		let server_id = Uuid::new_v4();
 		sql_query(
 			r#"
@@ -79,31 +33,17 @@ async fn submit_status() {
 		.await
 		.expect("insert server");
 
-		// 4. URL encode the certificate for the header
-		let encoded_cert =
-			utf8_percent_encode(&cert_pem, &percent_encoding::NON_ALPHANUMERIC).to_string();
-
-		// 5. Submit the status with proper authentication
-		let status_data = serde_json::json!({
-			"uptime": 3600,
-			"memory_usage": 0.75,
-			"disk_space": 0.85
-		});
-
 		let response = public
 			.post(&format!("/status/{}", server_id))
-			.add_header("mtls-certificate", &encoded_cert)
+			.add_header("mtls-certificate", &cert)
 			.add_header("X-Version", "1.2.3")
-			.json(&status_data)
+			.json(&serde_json::json!({ "uptime": 3600 }))
 			.await;
-
-		// 6. Verify the response is successful
 		response.assert_status_ok();
 		response.assert_header("content-type", "application/json");
 
-		// 7. Verify the returned status data
+		// Verify the returned status data
 		let returned_status: serde_json::Value = response.json();
-
 		assert!(returned_status.get("id").is_some());
 		assert_eq!(
 			returned_status.get("server_id").and_then(|v| v.as_str()),
@@ -117,20 +57,13 @@ async fn submit_status() {
 			returned_status.get("version").and_then(|v| v.as_str()),
 			Some("1.2.3")
 		);
-
-		// Verify extra data was stored
 		let extra = returned_status.get("extra").expect("extra field");
 		assert_eq!(extra.get("uptime").and_then(|v| v.as_i64()), Some(3600));
-		assert_eq!(
-			extra.get("memory_usage").and_then(|v| v.as_f64()),
-			Some(0.75)
-		);
-		assert_eq!(extra.get("disk_space").and_then(|v| v.as_f64()), Some(0.85));
 
-		// 8. Verify the status was actually stored in the database
+		// Verify the status was actually stored in the database
 		let db_status: StatusResult = sql_query(
 			r#"
-				SELECT id, server_id, device_id, version, extra
+				SELECT server_id, device_id, version, extra
 				FROM statuses
 				WHERE server_id = $1
 				ORDER BY created_at DESC
