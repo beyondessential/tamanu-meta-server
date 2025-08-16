@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use futures::stream::{FuturesOrdered, StreamExt};
-use ipnet::IpNet;
+
 use serde::Serialize;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
@@ -29,7 +29,7 @@ pub struct Status {
 	pub device_id: Option<Uuid>,
 	pub latency_ms: Option<i32>,
 	pub version: Option<VersionStr>,
-	pub remote_ip: Option<IpNet>,
+
 	pub extra: serde_json::Value,
 }
 
@@ -42,7 +42,7 @@ pub struct NewStatus {
 	pub device_id: Option<Uuid>,
 	pub latency_ms: Option<i32>,
 	pub version: Option<VersionStr>,
-	pub remote_ip: Option<IpNet>,
+
 	pub extra: serde_json::Value,
 }
 
@@ -53,7 +53,6 @@ impl Default for NewStatus {
 			device_id: Default::default(),
 			latency_ms: Default::default(),
 			version: Default::default(),
-			remote_ip: Default::default(),
 			extra: serde_json::Value::Object(Default::default()),
 		}
 	}
@@ -84,7 +83,7 @@ impl Status {
 					created_at: Utc::now(),
 					latency_ms: Some(latency),
 					version,
-					remote_ip: None,
+
 					extra: Default::default(),
 				})
 			}

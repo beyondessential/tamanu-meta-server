@@ -34,7 +34,6 @@ struct StatusInfo {
 	device_id: Option<String>,
 	latency_ms: Option<i32>,
 	version: Option<String>,
-	remote_ip: Option<String>,
 	extra: Value,
 }
 

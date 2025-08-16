@@ -3,7 +3,7 @@ use axum::{
 	extract::{Path, State},
 	routing::{Router, post},
 };
-use axum_client_ip::ClientIp;
+
 use diesel::SelectableHelper as _;
 use diesel_async::RunQueryDsl as _;
 use uuid::Uuid;
@@ -28,7 +28,6 @@ async fn create(
 	Path(server_id): Path<Uuid>,
 	State(db): State<Db>,
 	device: ServerDevice,
-	ClientIp(client_ip): ClientIp,
 	current_version: VersionHeader,
 	extra: Option<Json<serde_json::Value>>,
 ) -> Result<Json<Status>> {
@@ -48,8 +47,8 @@ async fn create(
 	let input = NewStatus {
 		server_id,
 		device_id: Some(id),
+		latency_ms: None,
 		version: Some(current_version.0),
-		remote_ip: Some(client_ip.into()),
 		extra: extra.map_or_else(
 			|| serde_json::Value::Object(Default::default()),
 			|j| match j.0 {
@@ -57,7 +56,6 @@ async fn create(
 				v => v,
 			},
 		),
-		..Default::default()
 	};
 
 	let status = diesel::insert_into(crate::schema::statuses::table)
