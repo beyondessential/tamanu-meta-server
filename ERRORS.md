@@ -38,6 +38,26 @@ Issued when a version range is syntactically valid, but not usable to obtain con
 
 Issued for the /timesync endpoint.
 
+## Auth: missing certificate
+
+Issued when a client certificate is required but not provided.
+
+## Auth: invalid certificate
+
+Issued when the provided client certificate is malformed, expired, revoked, or otherwise invalid.
+
+## Auth: certificate not found
+
+Issued when the provided certificate is well-formed but does not match any known device identity.
+
+## Auth: insufficient permissions
+
+Issued when the authenticated device is valid but lacks the necessary role.
+
+## Auth: failed
+
+Issued when authentication fails for unspecified reasons.
+
 ## Other
 
 An unclassified error.
