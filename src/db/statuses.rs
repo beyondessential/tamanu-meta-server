@@ -10,6 +10,7 @@ use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use futures::stream::{FuturesOrdered, StreamExt};
 use ipnet::IpNet;
 use serde::Serialize;
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::{
@@ -71,10 +72,12 @@ impl Status {
 		self.extra.as_object().and_then(|obj| obj.get(key))
 	}
 
-	pub async fn ping_server(client: &reqwest::Client, server: &Server) -> Self {
+	pub async fn ping_server(client: &reqwest::Client, server: &Server) -> Option<Self> {
 		let start = Instant::now();
-		let (version, error) = client
-			.get(server.host.0.join("/api/public/ping").unwrap())
+		let url = server.host.0.join("/api/public/ping").unwrap();
+		debug!(%url, "pinging");
+		if let Ok(version) = client
+			.get(url)
 			.send()
 			.await
 			.map_err(|err| {
@@ -87,19 +90,23 @@ impl Status {
 					.ok_or_else(|| "X-Version header not present".to_string())
 					.and_then(|value| value.to_str().map_err(|err| err.to_string()))
 					.and_then(|value| VersionStr::from_str(value).map_err(|err| err.to_string()))
+			}) {
+			let latency = start.elapsed().as_millis().try_into().unwrap_or(i32::MAX);
+			info!(server=%server.id, host=%server.host.0, %latency, "ping success");
+			Some(Self {
+				id: Uuid::new_v4(),
+				server_id: server.id,
+				device_id: None,
+				created_at: Utc::now(),
+				latency_ms: Some(latency),
+				version: Some(version),
+				error: None,
+				remote_ip: None,
+				extra: Default::default(),
 			})
-			.map_or_else(|error| (None, Some(error)), |version| (Some(version), None));
-
-		Self {
-			id: Uuid::new_v4(),
-			server_id: server.id,
-			device_id: None,
-			created_at: Utc::now(),
-			latency_ms: Some(start.elapsed().as_millis().try_into().unwrap_or(i32::MAX)),
-			version,
-			error,
-			remote_ip: None,
-			extra: Default::default(),
+		} else {
+			warn!(server=%server.id, host=%server.host.0, "ping failure");
+			None
 		}
 	}
 
@@ -113,11 +120,20 @@ impl Status {
 				let client = client.clone();
 				move |server| {
 					let client = client.clone();
-					async move { (Self::ping_server(&client, &server).await, server) }
+					async move {
+						Self::ping_server(&client, &server)
+							.await
+							.map(|ping| (ping, server))
+					}
 				}
 			}));
 
-		Ok(statuses.collect().await)
+		Ok(statuses
+			.collect::<Vec<Option<_>>>()
+			.await
+			.into_iter()
+			.filter_map(|o| o)
+			.collect())
 	}
 
 	pub async fn ping_servers_and_save(db: &mut AsyncPgConnection) -> Result<()> {
