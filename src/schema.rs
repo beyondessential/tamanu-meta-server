@@ -61,7 +61,6 @@ diesel::table! {
 		server_id -> Uuid,
 		latency_ms -> Nullable<Int4>,
 		version -> Nullable<Text>,
-		error -> Nullable<Text>,
 		remote_ip -> Nullable<Inet>,
 		extra -> Jsonb,
 		device_id -> Nullable<Uuid>,
@@ -81,7 +80,11 @@ diesel::table! {
 	}
 }
 
+diesel::joinable!(artifacts -> versions (version_id));
+diesel::joinable!(device_connections -> devices (device_id));
+diesel::joinable!(servers -> devices (device_id));
 diesel::joinable!(statuses -> devices (device_id));
+diesel::joinable!(statuses -> servers (server_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
 	artifacts,

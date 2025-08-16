@@ -29,7 +29,6 @@ pub struct Status {
 	pub device_id: Option<Uuid>,
 	pub latency_ms: Option<i32>,
 	pub version: Option<VersionStr>,
-	pub error: Option<String>,
 	pub remote_ip: Option<IpNet>,
 	pub extra: serde_json::Value,
 }
@@ -43,7 +42,6 @@ pub struct NewStatus {
 	pub device_id: Option<Uuid>,
 	pub latency_ms: Option<i32>,
 	pub version: Option<VersionStr>,
-	pub error: Option<String>,
 	pub remote_ip: Option<IpNet>,
 	pub extra: serde_json::Value,
 }
@@ -55,7 +53,6 @@ impl Default for NewStatus {
 			device_id: Default::default(),
 			latency_ms: Default::default(),
 			version: Default::default(),
-			error: Default::default(),
 			remote_ip: Default::default(),
 			extra: serde_json::Value::Object(Default::default()),
 		}
@@ -63,10 +60,6 @@ impl Default for NewStatus {
 }
 
 impl Status {
-	pub fn is_success(&self) -> bool {
-		self.error.is_none()
-	}
-
 	pub fn extra(&self, key: &str) -> Option<&serde_json::Value> {
 		self.extra.as_object().and_then(|obj| obj.get(key))
 	}
@@ -91,7 +84,6 @@ impl Status {
 					created_at: Utc::now(),
 					latency_ms: Some(latency),
 					version,
-					error: None,
 					remote_ip: None,
 					extra: Default::default(),
 				})
@@ -151,11 +143,7 @@ impl Status {
 		use crate::schema::statuses::dsl::*;
 
 		statuses
-			.filter(error.is_null().and(
-				// error statuses are legacy
-				created_at.ge(diesel::dsl::sql("NOW() - INTERVAL '1 month'")),
-				// just to avoid going through all the data
-			))
+			.filter(created_at.ge(diesel::dsl::sql("NOW() - INTERVAL '1 month'")))
 			.distinct_on(server_id)
 			.order((server_id, created_at.desc()))
 			.select(Status::as_select())
