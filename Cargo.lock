@@ -728,7 +728,7 @@ dependencies = [
  "diesel",
  "futures-core",
  "futures-util",
- "mobc 0.9.0",
+ "mobc",
  "scoped-futures",
  "tokio",
  "tokio-postgres",
@@ -1731,25 +1731,6 @@ dependencies = [
  "libc",
  "wasi 0.11.1+wasi-snapshot-preview1",
  "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "mobc"
-version = "0.8.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "316a7d198b51958a0ab57248bf5f42d8409551203cb3c821d5925819a8d5415f"
-dependencies = [
- "async-trait",
- "futures-channel",
- "futures-core",
- "futures-timer",
- "futures-util",
- "log",
- "metrics 0.23.1",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -2778,7 +2759,7 @@ dependencies = [
  "ipnet",
  "lloggs",
  "miette",
- "mobc 0.8.5",
+ "mobc",
  "node-semver",
  "percent-encoding",
  "problem_details",
