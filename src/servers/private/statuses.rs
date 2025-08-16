@@ -10,6 +10,7 @@ use axum::{
 	routing::{Router, get, post},
 };
 use chrono::{TimeDelta, Utc};
+use folktime::duration::{Duration as FolktimeDuration, Style};
 use serde::Serialize;
 use tera::{Context, Tera};
 use uuid::Uuid;
@@ -40,7 +41,7 @@ struct ServerData {
 	device: Option<DeviceConnection>,
 	status: Option<Status>,
 	up: &'static str,
-	since: Option<i64>,
+	since: Option<String>,
 	platform: Option<&'static str>,
 	postgres: Option<String>,
 }
@@ -80,10 +81,9 @@ async fn servers_with_status(db: Db) -> Result<Vec<ServerData>> {
 				}
 			}),
 			since: status.as_ref().map(|st| {
-				st.created_at
-					.signed_duration_since(Utc::now())
-					.num_minutes()
-					.abs()
+				let duration = st.created_at.signed_duration_since(Utc::now()).abs();
+				FolktimeDuration(duration.to_std().unwrap_or_default(), Style::OneUnitWhole)
+					.to_string()
 			}),
 			platform: status
 				.as_ref()

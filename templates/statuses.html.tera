@@ -59,11 +59,14 @@
 
   tr[data-kind="facility"] {
     opacity: 0.75;
-    font-size: 0.95em;
 
     & .name, & .host {
-      font-size: 0.85em;
+      font-size: 0.9em;
     }
+  }
+
+  .ago {
+    border-right: 1px dashed black;
   }
   </style>
 </head>
@@ -79,15 +82,15 @@
   <table>
     <thead>
       <tr>
-        <th>Status</th>
-        <th>Name</th>
-        <th>Rank</th>
-        <th>Host</th>
-        <th>Version</th>
-        <th>Platform</th>
-        <th>Postgres</th>
-        <th>Timezone</th>
-        <th>Last seen</th>
+        <th class="status">Status</th>
+        <th class="name">Name</th>
+        <th class="rank">Rank</th>
+        <th class="host">Host</th>
+        <th class="ago">Last seen</th>
+        <th class="version">Version</th>
+        <th class="platform">Platform</th>
+        <th class="postgres">Postgres</th>
+        <th class="timezone">Timezone</th>
       </tr>
     </thead>
     <tbody>
@@ -98,6 +101,7 @@
         <td class="rank">{{ entry.server.rank }}</td>
         <td class="host"><a href="{{ entry.server.host }}">{{ entry.server.host }}</a></td>
         {% if entry.status %}
+          <td class="ago" title="{{ entry.status.created_at }}">{{ entry.since }} ago</td>
           <td class="version">{{ entry.status.version }}</td>
           <td class="platform">{{ entry.platform }}</td>
           <td class="postgres">{{ entry.postgres }}</td>
@@ -106,9 +110,9 @@
               {{ entry.status.extra.timezone }}
             {% endif %}
           </td>
-          <td class="ago" title="{{ entry.status.created_at }}">{{ entry.since }} minutes ago</td>
         {% else %}
-          <td colspan=5></td>
+          <td class="ago" title="more than one month ago">never</td>
+          <td colspan=4></td>
         {% endif %}
       </tr>
       {% endfor %}

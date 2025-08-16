@@ -12,7 +12,7 @@ struct ServerData {
 	device: Option<Value>,
 	status: Option<StatusInfo>,
 	up: String,
-	since: Option<i64>,
+	since: Option<String>,
 	platform: Option<String>,
 	postgres: Option<String>,
 }
@@ -222,7 +222,8 @@ async fn private_status_json_server_with_recent_status() {
 		assert_eq!(server.up, "up"); // Recent status means "up"
 		assert!(server.status.is_some());
 		assert!(server.since.is_some());
-		assert!(server.since.unwrap() < 2); // Should be less than 2 minutes ago
+		let since_text = server.since.as_ref().unwrap();
+		assert!(since_text.contains("ms"));
 
 		let status = server.status.as_ref().unwrap();
 		assert_eq!(status.version, Some("1.2.3".to_string()));
@@ -336,6 +337,63 @@ async fn private_status_json_unnamed_servers_excluded() {
 		let servers: Vec<ServerData> = response.json();
 		assert_eq!(servers.len(), 1);
 		assert_eq!(servers[0].server.name, Some("Named Server".to_string()));
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn private_status_json_blip_status() {
+	test_server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO servers (id, name, host, rank, kind) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Blip Server', 'https://blip.example.com', 'production', 'central');
+
+			INSERT INTO statuses (server_id, version, created_at) VALUES
+			('11111111-1111-1111-1111-111111111111', '1.0.0', NOW() - INTERVAL '4 minutes')"
+		)
+		.await
+		.unwrap();
+
+		let response = private.get("/$/status.json").await;
+		response.assert_status_ok();
+
+		let servers: Vec<ServerData> = response.json();
+		assert_eq!(servers.len(), 1);
+
+		let server = &servers[0];
+		assert_eq!(server.server.name, Some("Blip Server".to_string()));
+		assert_eq!(server.up, "blip");
+
+		let since_text = server.since.as_ref().unwrap();
+		assert!(since_text.contains("m"));
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn private_status_json_gone_server() {
+	test_server::run(async |mut conn, _, private| {
+		// Insert server with no status (should be "gone")
+		conn.batch_execute(
+			"INSERT INTO servers (id, name, host, rank, kind) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Gone Server', 'https://gone.example.com', 'production', 'central')"
+		)
+		.await
+		.unwrap();
+
+		let response = private.get("/$/status.json").await;
+		response.assert_status_ok();
+
+		let servers: Vec<ServerData> = response.json();
+		assert_eq!(servers.len(), 1);
+
+		let server = &servers[0];
+		assert_eq!(server.server.name, Some("Gone Server".to_string()));
+		assert_eq!(server.up, "gone"); // No status means "gone"
+		assert!(server.status.is_none());
+		assert!(server.since.is_none());
+		assert!(server.platform.is_none());
+		assert!(server.postgres.is_none());
 	})
 	.await
 }
