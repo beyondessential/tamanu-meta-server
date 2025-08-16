@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [4.2.0](https://github.com/beyondessential/tamanu-meta-server/compare/v4.1.6..4.2.0) - 2025-08-16
+## [4.2.1](https://github.com/beyondessential/tamanu-meta-server/compare/v4.2.0..4.2.1) - 2025-08-16
+
+
+- **Bugfix:** Decode encoded tailscale name - ([b94602b](https://github.com/beyondessential/tamanu-meta-server/commit/b94602b6949179592bbc1224a4f656ac4c1c39e3))
+
+---
+## [4.2.0](https://github.com/beyondessential/tamanu-meta-server/compare/v4.1.6..v4.2.0) - 2025-08-16
 
 
 - **Deps:** Upgrade compatibles - ([be66875](https://github.com/beyondessential/tamanu-meta-server/commit/be66875fb8dba84f3b7609d5cb058eba30b30ee4))
