@@ -5,7 +5,14 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [4.1.2](https://github.com/beyondessential/tamanu-meta-server/compare/v4.1.1..4.1.2) - 2025-08-16
+## [4.1.3](https://github.com/beyondessential/tamanu-meta-server/compare/v4.1.2..4.1.3) - 2025-08-16
+
+
+- **Bugfix:** Connect info layer - ([3132150](https://github.com/beyondessential/tamanu-meta-server/commit/313215022b8cafa79d37cebf97dfe2935744c037))
+- **Bugfix:** Re-enable connectinfo ip fallback - ([70b4422](https://github.com/beyondessential/tamanu-meta-server/commit/70b44221968c145f699885fbfa5f760914ac5761))
+
+---
+## [4.1.2](https://github.com/beyondessential/tamanu-meta-server/compare/v4.1.1..v4.1.2) - 2025-08-16
 
 
 - **Bugfix:** Re-enable TLS for ping client - ([c7c4096](https://github.com/beyondessential/tamanu-meta-server/commit/c7c4096edad1c97d7206e396aea8e17077ab74d2))
