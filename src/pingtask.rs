@@ -12,7 +12,7 @@ pub fn spawn() -> JoinHandle<()> {
 	let pool = AppState::init_db();
 	task::spawn(async move {
 		loop {
-			sleep(Duration::from_secs(10)).await;
+			sleep(Duration::from_secs(60)).await;
 			let Ok(mut db) = pool.get().await else {
 				error!("Failed to get database connection");
 				continue;
