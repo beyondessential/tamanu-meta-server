@@ -34,7 +34,6 @@ struct StatusInfo {
 	device_id: Option<String>,
 	latency_ms: Option<i32>,
 	version: Option<String>,
-	error: Option<String>,
 	remote_ip: Option<String>,
 	extra: Value,
 }
@@ -153,31 +152,6 @@ async fn private_status_with_mixed_server_ranks() {
 		assert!(body.contains("Production Server"));
 		assert!(body.contains("Staging Server"));
 		assert!(body.contains("Dev Server"));
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn private_status_with_server_statuses() {
-	test_server::run(async |mut conn, _, private| {
-		// Insert servers and their status reports
-		conn.batch_execute(
-			"INSERT INTO servers (id, name, host, rank, kind) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Test Server', 'https://test.example.com', 'production', 'central');
-
-			INSERT INTO statuses (server_id, version, latency_ms, error, extra) VALUES
-			('11111111-1111-1111-1111-111111111111', '1.2.3', 150, null, '{\"uptime\": 3600}'::jsonb),
-			('11111111-1111-1111-1111-111111111111', '1.2.4', 200, 'Connection timeout', '{}'::jsonb)",
-		)
-		.await
-		.unwrap();
-
-		let response = private.get("/$/status").await;
-		eprintln!("{}", response.text());
-		response.assert_status_ok();
-
-		let body = response.text();
-		assert!(body.contains("Test Server"));
 	})
 	.await
 }
@@ -317,36 +291,6 @@ async fn private_status_json_platform_detection() {
 		assert_eq!(linux_server.platform, Some("Linux".to_string()));
 		assert_eq!(win_server.postgres, Some("13.7".to_string()));
 		assert_eq!(linux_server.postgres, Some("17.2".to_string()));
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn private_status_json_server_with_error() {
-	test_server::run(async |mut conn, _, private| {
-		conn.batch_execute(
-			"INSERT INTO servers (id, name, host, rank, kind) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Error Server', 'https://error.example.com', 'test', 'facility');
-
-			INSERT INTO statuses (server_id, version, latency_ms, error, created_at) VALUES
-			('11111111-1111-1111-1111-111111111111', '1.0.0', 5000, 'Connection timeout', NOW())"
-		)
-		.await
-		.unwrap();
-
-		let response = private.get("/$/status.json").await;
-		response.assert_status_ok();
-
-		let servers: Vec<ServerData> = response.json();
-		assert_eq!(servers.len(), 1);
-
-		let server = &servers[0];
-		assert_eq!(server.server.name, Some("Error Server".to_string()));
-		assert_eq!(server.up, "up"); // Still "up" because it's recent
-
-		let status = server.status.as_ref().unwrap();
-		assert_eq!(status.error, Some("Connection timeout".to_string()));
-		assert_eq!(status.latency_ms, Some(5000));
 	})
 	.await
 }
