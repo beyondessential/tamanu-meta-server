@@ -47,8 +47,9 @@ async fn main() -> miette::Result<()> {
 	let args = Args::parse();
 	if _guard.is_none() {
 		_guard = Some(args.logging.setup(|v| match v {
-			0 => "info",
-			1 => "debug",
+			0 => "warn",
+			1 => "info",
+			2 => "debug",
 			_ => "trace",
 		})?);
 	}

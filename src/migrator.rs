@@ -23,7 +23,7 @@ pub struct UnasyncMigrator {
 
 impl UnasyncMigrator {
 	pub async fn connect() -> miette::Result<Self> {
-		Self::connect_to(&std::env::var("DATABASE_URL").unwrap()).await
+		Self::connect_to(&std::env::var("DATABASE_URL").expect("DATABASE_URL required")).await
 	}
 
 	pub async fn connect_to(db_url: &str) -> miette::Result<Self> {
