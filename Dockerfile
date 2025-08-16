@@ -34,6 +34,7 @@ RUN rm target/$(cat /.target)/$PROFILE/{*_server,deps/*_server*}
 # Build the actual project
 COPY migrations ./migrations
 COPY src ./src
+COPY templates ./templates
 RUN cargo build --locked --target $(cat /.target) --profile $PROFILE
 RUN cp target/$(cat /.target)/$PROFILE/{{public,private}_server,migrate,pingtask,prune_untrusted_devices} /built/
 
