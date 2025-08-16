@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [4.1.3](https://github.com/beyondessential/tamanu-meta-server/compare/v4.1.2..4.1.3) - 2025-08-16
+## [4.1.4](https://github.com/beyondessential/tamanu-meta-server/compare/v4.1.3..4.1.4) - 2025-08-16
+
+
+- **Bugfix:** Revert pingtask to 10s - ([24669d5](https://github.com/beyondessential/tamanu-meta-server/commit/24669d5b42ffdb4bf79c98acf440a5dba3f8408d))
+
+---
+## [4.1.3](https://github.com/beyondessential/tamanu-meta-server/compare/v4.1.2..v4.1.3) - 2025-08-16
 
 
 - **Bugfix:** Connect info layer - ([3132150](https://github.com/beyondessential/tamanu-meta-server/commit/313215022b8cafa79d37cebf97dfe2935744c037))
