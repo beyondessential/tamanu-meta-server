@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
+## [4.1.2](https://github.com/beyondessential/tamanu-meta-server/compare/v4.1.1..4.1.2) - 2025-08-16
+
+
+- **Bugfix:** Re-enable TLS for ping client - ([c7c4096](https://github.com/beyondessential/tamanu-meta-server/commit/c7c4096edad1c97d7206e396aea8e17077ab74d2))
+- **Tweak:** Stop collecting ping errors - ([5befb8e](https://github.com/beyondessential/tamanu-meta-server/commit/5befb8ef017b5ac4e20148f2c83712ee5c1c6673))
+
+---
 ## [4.1.0](https://github.com/beyondessential/tamanu-meta-server/compare/v4.0.6..v4.1.0) - 2025-08-16
 
 
