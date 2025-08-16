@@ -5,7 +5,14 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [4.1.4](https://github.com/beyondessential/tamanu-meta-server/compare/v4.1.3..4.1.4) - 2025-08-16
+## [4.1.5](https://github.com/beyondessential/tamanu-meta-server/compare/v4.1.4..4.1.5) - 2025-08-16
+
+
+- **Feature:** More robust client ip parsing - ([b1b8d25](https://github.com/beyondessential/tamanu-meta-server/commit/b1b8d255b6ab7fb902fdc6cbf3062f49a94ad937))
+- **Tweak:** Add client ip to logs - ([f0807bc](https://github.com/beyondessential/tamanu-meta-server/commit/f0807bc7a7c061bf66334f777821288d54bf5aa0))
+
+---
+## [4.1.4](https://github.com/beyondessential/tamanu-meta-server/compare/v4.1.3..v4.1.4) - 2025-08-16
 
 
 - **Bugfix:** Revert pingtask to 10s - ([24669d5](https://github.com/beyondessential/tamanu-meta-server/commit/24669d5b42ffdb4bf79c98acf440a5dba3f8408d))
