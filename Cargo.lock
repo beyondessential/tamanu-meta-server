@@ -2732,7 +2732,7 @@ dependencies = [
 
 [[package]]
 name = "tamanu-meta"
-version = "4.1.6"
+version = "4.2.0"
 dependencies = [
  "axum",
  "axum-client-ip",

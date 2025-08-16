@@ -5,7 +5,20 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [4.1.6](https://github.com/beyondessential/tamanu-meta-server/compare/v4.1.5..4.1.6) - 2025-08-16
+## [4.2.0](https://github.com/beyondessential/tamanu-meta-server/compare/v4.1.6..4.2.0) - 2025-08-16
+
+
+- **Deps:** Upgrade compatibles - ([be66875](https://github.com/beyondessential/tamanu-meta-server/commit/be66875fb8dba84f3b7609d5cb058eba30b30ee4))
+- **Deps:** Upgrade diesel to 2.2 - ([4a96666](https://github.com/beyondessential/tamanu-meta-server/commit/4a966664dd4b85582e1fe071481977ecbb0b0312))
+- **Deps:** Update transitives - ([b21448f](https://github.com/beyondessential/tamanu-meta-server/commit/b21448f45ed5785802560a340e4b27e86e640c9c))
+- **Deps:** Fix mobc version - ([255ceb9](https://github.com/beyondessential/tamanu-meta-server/commit/255ceb97e761b08317dda5cc51bf21481bc13b3c))
+- **Deps:** Upgrade lockfile - ([aae959f](https://github.com/beyondessential/tamanu-meta-server/commit/aae959f99fcaf02a2dec8f71cec45b7a5b9bffc0))
+- **Deps:** Bump actions/checkout from 4 to 5 (#51) - ([afa82d3](https://github.com/beyondessential/tamanu-meta-server/commit/afa82d310d25ee45b6342d850169a2ce3323ce15))
+- **Feature:** Decouple devices and their keys - ([a1da2b2](https://github.com/beyondessential/tamanu-meta-server/commit/a1da2b2236711c05ede2d303ece2d128af129e03))
+- **Feature:** Greet the user - ([48f1762](https://github.com/beyondessential/tamanu-meta-server/commit/48f1762e4ae54c3d124b6e1b1478397ce6bfa9ce))
+
+---
+## [4.1.6](https://github.com/beyondessential/tamanu-meta-server/compare/v4.1.5..v4.1.6) - 2025-08-16
 
 
 - **Feature:** Display nodejs version - ([b26041f](https://github.com/beyondessential/tamanu-meta-server/commit/b26041f0a56ebe1ed2f4d231f03dab36c3063e93))
