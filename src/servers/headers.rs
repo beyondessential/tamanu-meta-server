@@ -5,6 +5,7 @@ use crate::error::AppError;
 use super::version::VersionStr;
 
 const X_VERSION: &str = "X-Version";
+const TAILSCALE_USER_NAME: &str = "Tailscale-User-Name";
 
 #[derive(Debug, Clone)]
 pub struct VersionHeader(pub VersionStr);
@@ -25,5 +26,25 @@ where
 			.parse()?;
 
 		Ok(VersionHeader(param))
+	}
+}
+
+#[derive(Debug, Clone)]
+pub struct TailscaleUserName(pub Option<String>);
+
+impl<S> FromRequestParts<S> for TailscaleUserName
+where
+	S: Send + Sync,
+{
+	type Rejection = std::convert::Infallible;
+
+	async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
+		let user_name = parts
+			.headers
+			.get(TAILSCALE_USER_NAME)
+			.and_then(|value| value.to_str().ok())
+			.map(|s| s.to_string());
+
+		Ok(TailscaleUserName(user_name))
 	}
 }

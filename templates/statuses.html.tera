@@ -7,6 +7,18 @@
     font-family: sans-serif;
   }
 
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1em;
+  }
+
+  .greeting {
+    font-weight: bold;
+    color: #333;
+  }
+
   td, th {
     padding: 0.5em;
     border-width: 1px 0;
@@ -71,14 +83,19 @@
   </style>
 </head>
 <body>
-  <p>
-    {{ releases | length }} release branches in active use:
-    <b>{% for r in releases %}{{ r[0] }}.{{ r[1] }} {% endfor %}</b>
-    <span class=versions>({{ versions | length }} versions:
-      <b>{{ bracket.min }}</b>
-      —
-      <b>{{ bracket.max }}</b>)</span>
-  </p>
+  <div class="header">
+    <div>
+      <p>
+        {{ releases | length }} release branches in active use:
+        <b>{% for r in releases %}{{ r[0] }}.{{ r[1] }} {% endfor %}</b>
+        <span class=versions>({{ versions | length }} versions:
+          <b>{{ bracket.min }}</b>
+          —
+          <b>{{ bracket.max }}</b>)</span>
+      </p>
+    </div>
+    <div class="greeting">{{ greeting }}</div>
+  </div>
   <table>
     <thead>
       <tr>

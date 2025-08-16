@@ -18,7 +18,7 @@ use uuid::Uuid;
 use crate::{
 	db::{devices::DeviceConnection, server_rank::ServerRank, servers::Server, statuses::Status},
 	error::Result,
-	servers::version::VersionStr,
+	servers::{headers::TailscaleUserName, version::VersionStr},
 	state::{AppState, Db},
 };
 
@@ -120,7 +120,11 @@ async fn servers_with_status(db: Db) -> Result<Vec<ServerData>> {
 	Ok(entries)
 }
 
-async fn view(State(db): State<Db>, State(tera): State<Arc<Tera>>) -> Result<Html<String>> {
+async fn view(
+	State(db): State<Db>,
+	State(tera): State<Arc<Tera>>,
+	TailscaleUserName(user_name): TailscaleUserName,
+) -> Result<Html<String>> {
 	let entries = servers_with_status(db).await?;
 	let versions = entries
 		.iter()
@@ -144,12 +148,18 @@ async fn view(State(db): State<Db>, State(tera): State<Arc<Tera>>) -> Result<Htm
 		.map(|v| (v.0.major, v.0.minor))
 		.collect::<BTreeSet<_>>();
 
+	let greeting = match user_name {
+		Some(name) => format!("Hi {}!", name),
+		None => "Kia Ora!".to_string(),
+	};
+
 	let mut context = Context::new();
 	context.insert("title", "Server statuses");
 	context.insert("entries", &entries);
 	context.insert("bracket", &bracket);
 	context.insert("versions", &versions);
 	context.insert("releases", &releases);
+	context.insert("greeting", &greeting);
 	let html = tera.render("statuses", &context)?;
 	Ok(Html(html))
 }
