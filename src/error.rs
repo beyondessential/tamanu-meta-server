@@ -44,6 +44,22 @@ pub enum AppError {
 
 	#[error("timesync: {0}")]
 	Timesync(#[from] timesimp::ParseError),
+
+	// Authentication errors
+	#[error("missing authentication certificate")]
+	AuthMissingCertificate,
+
+	#[error("invalid certificate format")]
+	AuthInvalidCertificate(String),
+
+	#[error("certificate not found or inactive")]
+	AuthCertificateNotFound,
+
+	#[error("insufficient permissions: {required} role required")]
+	AuthInsufficientPermissions { required: String },
+
+	#[error("authentication failed: {reason}")]
+	AuthFailed { reason: String },
 }
 
 impl AppError {
@@ -63,6 +79,11 @@ impl IntoResponse for AppError {
 		let status = match self {
 			Self::NoMatchingVersions => StatusCode::NOT_FOUND,
 			Self::UnusableRange => StatusCode::BAD_REQUEST,
+			Self::AuthMissingCertificate => StatusCode::UNAUTHORIZED,
+			Self::AuthInvalidCertificate(_) => StatusCode::BAD_REQUEST,
+			Self::AuthCertificateNotFound => StatusCode::UNAUTHORIZED,
+			Self::AuthInsufficientPermissions { .. } => StatusCode::FORBIDDEN,
+			Self::AuthFailed { .. } => StatusCode::UNAUTHORIZED,
 			_ => StatusCode::INTERNAL_SERVER_ERROR,
 		};
 
@@ -85,6 +106,11 @@ impl IntoResponse for AppError {
 						Self::NoMatchingVersions => "no-matching-versions",
 						Self::UnusableRange => "unusable-range",
 						Self::Timesync(_) => "timesync",
+						Self::AuthMissingCertificate => "auth-missing-certificate",
+						Self::AuthInvalidCertificate(_) => "auth-invalid-certificate",
+						Self::AuthCertificateNotFound => "auth-certificate-not-found",
+						Self::AuthInsufficientPermissions { .. } => "auth-insufficient-permissions",
+						Self::AuthFailed { .. } => "auth-failed",
 					}
 				))
 				.unwrap(),

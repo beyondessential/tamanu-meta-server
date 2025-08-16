@@ -32,10 +32,9 @@ macro_rules! device_role_struct {
 				if device.role == DeviceRole::Admin || device.role == $allowed_role {
 					Ok(Self(device))
 				} else {
-					Err(AppError::custom(format!(
-						"device is not a {}",
-						stringify!($name).to_lowercase()
-					)))
+					Err(AppError::AuthInsufficientPermissions {
+						required: format!("{} or admin", stringify!($name).to_lowercase()),
+					})
 				}
 			}
 		}
@@ -67,15 +66,24 @@ where
 				.headers
 				.get("mtls-certificate")
 				.or_else(|| parts.headers.get("ssl-client-cert"))
-				.ok_or_else(|| AppError::custom("missing mtls-certificate header"))
+				.ok_or(AppError::AuthMissingCertificate)
 				.and_then(|s| {
 					percent_encoding::percent_decode(s.as_bytes())
 						.decode_utf8()
-						.map_err(AppError::custom)
+						.map_err(|e| {
+							AppError::AuthInvalidCertificate(format!(
+								"Invalid UTF-8 in certificate: {}",
+								e
+							))
+						})
 				})?;
 
-			let (_, der) = parse_x509_pem(pem.as_bytes()).map_err(AppError::custom)?;
-			let (_, cert) = parse_x509_certificate(&der.contents).map_err(AppError::custom)?;
+			let (_, der) = parse_x509_pem(pem.as_bytes()).map_err(|e| {
+				AppError::AuthInvalidCertificate(format!("Invalid PEM format: {}", e))
+			})?;
+			let (_, cert) = parse_x509_certificate(&der.contents).map_err(|e| {
+				AppError::AuthInvalidCertificate(format!("Invalid X.509 certificate: {}", e))
+			})?;
 
 			cert.tbs_certificate.subject_pki.raw.to_vec()
 		};
@@ -83,7 +91,13 @@ where
 		let device = if let Some(existing) = Self::from_key(&mut db, &key).await? {
 			existing
 		} else {
-			Device::create(&mut db, key).await?
+			// Create new device for unknown certificates (existing behavior)
+			// In production, you may want to disable auto-creation for security
+			Device::create(&mut db, key)
+				.await
+				.map_err(|e| AppError::AuthFailed {
+					reason: format!("Failed to create device: {}", e),
+				})?
 		};
 
 		let user_agent = parts
