@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [4.1.0](https://github.com/beyondessential/tamanu-meta-server/compare/v4.0.6..4.1.0) - 2025-08-16
+## [4.1.0](https://github.com/beyondessential/tamanu-meta-server/compare/v4.0.6..v4.1.0) - 2025-08-16
 
 
 - **Bugfix:** Fix public port - ([a8117ac](https://github.com/beyondessential/tamanu-meta-server/commit/a8117acb508747cfbf27cdf1595101f4c164b78c))
