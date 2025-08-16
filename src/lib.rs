@@ -50,7 +50,7 @@ pub fn router(state: AppState, routes: Router<AppState>) -> Router<()> {
 }
 
 pub async fn serve(routes: Router<()>, addr: SocketAddr) -> error::Result<()> {
-	let service = routes.into_make_service();
+	let service = routes.into_make_service_with_connect_info::<SocketAddr>();
 	let listener = TcpListener::bind(addr).await?;
 	tracing::info!("listening on {}", listener.local_addr()?);
 	axum::serve(listener, service).await?;
