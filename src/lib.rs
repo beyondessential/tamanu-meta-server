@@ -1,7 +1,10 @@
 use std::{net::SocketAddr, time::Duration};
 
-use axum::Router;
-use axum_client_ip::ClientIpSource;
+use axum::extract::Request;
+use axum::middleware::Next;
+use axum::response::Response;
+use axum::{Router, middleware};
+use axum_client_ip::{ClientIp, ClientIpSource};
 use state::AppState;
 use tokio::net::TcpListener;
 use tower_http::{compression::CompressionLayer, trace::TraceLayer};
@@ -26,6 +29,8 @@ pub fn router(
 ) -> Router<()> {
 	routes
 		.with_state(state)
+		// ordering of the client ip middlewares is critical, do not change
+		.layer(middleware::from_fn(ip_into_response))
 		.layer(client_ip_source.into_extension())
 		.layer(
 			TraceLayer::new_for_http()
@@ -35,6 +40,7 @@ pub fn router(
 						req.version = ?request.version(),
 						req.uri = %request.uri(),
 						req.method = %request.method(),
+						req.ip = tracing::field::Empty,
 						res.version = tracing::field::Empty,
 						res.status = tracing::field::Empty,
 						latency = tracing::field::Empty,
@@ -42,6 +48,10 @@ pub fn router(
 				})
 				.on_response(
 					|response: &http::Response<_>, latency: Duration, span: &Span| {
+						if let Some(ip) = response.extensions().get::<ClientIp>().map(|r| &r.0) {
+							span.record("req.ip", &tracing::field::debug(ip));
+						}
+
 						span.record("latency", &tracing::field::debug(latency));
 						span.record("res.version", &tracing::field::debug(response.version()));
 						span.record(
@@ -61,4 +71,10 @@ pub async fn serve(routes: Router<()>, addr: SocketAddr) -> error::Result<()> {
 	tracing::info!("listening on {}", listener.local_addr()?);
 	axum::serve(listener, service).await?;
 	Ok(())
+}
+
+async fn ip_into_response(ip: ClientIp, request: Request, next: Next) -> Response {
+	let mut response = next.run(request).await;
+	response.extensions_mut().insert(ip);
+	response
 }
