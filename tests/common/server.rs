@@ -1,5 +1,4 @@
 use ::time::OffsetDateTime;
-use axum::extract::connect_info::MockConnectInfo;
 use axum_client_ip::ClientIpSource;
 use axum_test::TestServer;
 use diesel::{QueryableByName, sql_query, sql_types};
@@ -10,7 +9,6 @@ use rcgen::{
 	CertificateParams, DistinguishedName, ExtendedKeyUsagePurpose, IsCa, KeyPair, KeyUsagePurpose,
 	PKCS_ECDSA_P256_SHA256,
 };
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tamanu_meta::{private_routes, public_routes, router, state::AppState};
 use uuid::Uuid;
 use x509_parser::prelude::*;
@@ -47,25 +45,22 @@ where
 			tera: AppState::init_tera().unwrap(),
 		};
 
-		// Add ConnectInfo layer for test servers
-		let mock_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
 		let public_router = router(
-			state.clone(),
-			public_routes().layer(MockConnectInfo(mock_addr)),
-			ClientIpSource::ConnectInfo,
+			public_routes().with_state(state.clone()),
+			ClientIpSource::RightmostForwarded,
 		);
 		let private_router = router(
-			state.clone(),
-			private_routes("/$".into()).layer(MockConnectInfo(mock_addr)),
-			ClientIpSource::ConnectInfo,
+			private_routes("/$".into()).with_state(state),
+			ClientIpSource::RightmostForwarded,
 		);
 
-		test(
-			conn,
-			TestServer::new(public_router).unwrap(),
-			TestServer::new(private_router).unwrap(),
-		)
-		.await
+		let mut public_server = TestServer::new(public_router).unwrap();
+		public_server.add_header("Forwarded", "for=192.0.1.60");
+
+		let mut private_server = TestServer::new(private_router).unwrap();
+		private_server.add_header("Forwarded", "for=192.0.2.60");
+
+		test(conn, public_server, private_server).await
 	})
 	.await
 }

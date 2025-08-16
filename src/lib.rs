@@ -5,7 +5,6 @@ use axum::middleware::Next;
 use axum::response::Response;
 use axum::{Router, middleware};
 use axum_client_ip::{ClientIp, ClientIpSource};
-use state::AppState;
 use tokio::net::TcpListener;
 use tower_http::{compression::CompressionLayer, trace::TraceLayer};
 use tracing::Span;
@@ -22,13 +21,8 @@ pub(crate) mod servers;
 pub mod state;
 pub(crate) mod views;
 
-pub fn router(
-	state: AppState,
-	routes: Router<AppState>,
-	client_ip_source: ClientIpSource,
-) -> Router<()> {
+pub fn router(routes: Router<()>, client_ip_source: ClientIpSource) -> Router<()> {
 	routes
-		.with_state(state)
 		// ordering of the client ip middlewares is critical, do not change
 		.layer(middleware::from_fn(ip_into_response))
 		.layer(client_ip_source.into_extension())
@@ -74,6 +68,7 @@ pub async fn serve(routes: Router<()>, addr: SocketAddr) -> error::Result<()> {
 }
 
 async fn ip_into_response(ip: ClientIp, request: Request, next: Next) -> Response {
+	tracing::trace!(?ip, "ip_into_response middleware");
 	let mut response = next.run(request).await;
 	response.extensions_mut().insert(ip);
 	response

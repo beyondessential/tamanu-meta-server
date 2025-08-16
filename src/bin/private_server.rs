@@ -41,8 +41,7 @@ async fn main() -> miette::Result<()> {
 
 	serve(
 		router(
-			AppState::init()?,
-			tamanu_meta::private_routes(args.prefix),
+			tamanu_meta::private_routes(args.prefix).with_state(AppState::init()?),
 			args.client_ip_source,
 		),
 		addr,
