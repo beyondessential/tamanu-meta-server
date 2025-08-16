@@ -1,12 +1,9 @@
 use std::{
-	net::{IpAddr, Ipv6Addr, SocketAddr},
+	net::{IpAddr, Ipv6Addr},
 	str::FromStr as _,
 };
 
-use axum::{
-	RequestPartsExt,
-	extract::{ConnectInfo, FromRef},
-};
+use axum::extract::FromRef;
 
 use crate::{
 	db::{
