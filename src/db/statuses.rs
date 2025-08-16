@@ -27,7 +27,6 @@ pub struct Status {
 	pub created_at: DateTime<Utc>,
 	pub server_id: Uuid,
 	pub device_id: Option<Uuid>,
-	pub latency_ms: Option<i32>,
 	pub version: Option<VersionStr>,
 
 	pub extra: serde_json::Value,
@@ -40,7 +39,6 @@ pub struct Status {
 pub struct NewStatus {
 	pub server_id: Uuid,
 	pub device_id: Option<Uuid>,
-	pub latency_ms: Option<i32>,
 	pub version: Option<VersionStr>,
 
 	pub extra: serde_json::Value,
@@ -51,7 +49,6 @@ impl Default for NewStatus {
 		Self {
 			server_id: Default::default(),
 			device_id: Default::default(),
-			latency_ms: Default::default(),
 			version: Default::default(),
 			extra: serde_json::Value::Object(Default::default()),
 		}
@@ -81,7 +78,6 @@ impl Status {
 					server_id: server.id,
 					device_id: None,
 					created_at: Utc::now(),
-					latency_ms: Some(latency),
 					version,
 
 					extra: Default::default(),

@@ -59,7 +59,6 @@ diesel::table! {
         id -> Uuid,
         created_at -> Timestamptz,
         server_id -> Uuid,
-        latency_ms -> Nullable<Int4>,
         version -> Nullable<Text>,
         extra -> Jsonb,
         device_id -> Nullable<Uuid>,

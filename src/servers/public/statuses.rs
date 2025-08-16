@@ -47,7 +47,6 @@ async fn create(
 	let input = NewStatus {
 		server_id,
 		device_id: Some(id),
-		latency_ms: None,
 		version: Some(current_version.0),
 		extra: extra.map_or_else(
 			|| serde_json::Value::Object(Default::default()),

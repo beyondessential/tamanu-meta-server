@@ -32,7 +32,7 @@ struct StatusInfo {
 	created_at: String,
 	server_id: String,
 	device_id: Option<String>,
-	latency_ms: Option<i32>,
+
 	version: Option<String>,
 	extra: Value,
 }
@@ -204,8 +204,8 @@ async fn private_status_json_server_with_recent_status() {
 			"INSERT INTO servers (id, name, host, rank, kind) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Active Server', 'https://active.example.com', 'production', 'facility');
 
-			INSERT INTO statuses (server_id, version, latency_ms, extra, created_at) VALUES
-			('11111111-1111-1111-1111-111111111111', '1.2.3', 100, '{\"uptime\": 3600}'::jsonb, NOW())"
+			INSERT INTO statuses (server_id, version, extra, created_at) VALUES
+			('11111111-1111-1111-1111-111111111111', '1.2.3', '{\"uptime\": 3600}'::jsonb, NOW())"
 		)
 		.await
 		.unwrap();
@@ -226,7 +226,6 @@ async fn private_status_json_server_with_recent_status() {
 
 		let status = server.status.as_ref().unwrap();
 		assert_eq!(status.version, Some("1.2.3".to_string()));
-		assert_eq!(status.latency_ms, Some(100));
 	})
 	.await
 }
