@@ -102,7 +102,7 @@
           <td class="platform">{{ entry.platform }}</td>
           <td class="postgres">{{ entry.postgres }}</td>
           <td class="timezone">
-            {% if entry.status.extra %}
+            {% if entry.status.extra and entry.status.extra.timezone %}
               {{ entry.status.extra.timezone }}
             {% endif %}
           </td>
