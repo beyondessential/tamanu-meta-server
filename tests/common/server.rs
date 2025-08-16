@@ -19,7 +19,7 @@ struct Device {
 	id: Uuid,
 }
 
-fn make_certificate() -> rcgen::Certificate {
+pub fn make_certificate() -> (Vec<u8>, String) {
 	let key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("keygen");
 	let mut cert = CertificateParams::default();
 	cert.is_ca = IsCa::NoCa;
@@ -28,7 +28,16 @@ fn make_certificate() -> rcgen::Certificate {
 	cert.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
 	cert.use_authority_key_identifier_extension = true;
 	cert.distinguished_name = DistinguishedName::new();
-	cert.self_signed(&key).expect("sign cert")
+	let cert = cert.self_signed(&key).expect("sign cert");
+
+	let cert_pem = cert.pem();
+	let cert = utf8_percent_encode(&cert_pem, &percent_encoding::NON_ALPHANUMERIC).to_string();
+
+	let (_, pem_parsed) = parse_x509_pem(cert_pem.as_bytes()).expect("parse pem");
+	let (_, x509_cert) = parse_x509_certificate(&pem_parsed.contents).expect("parse cert");
+	let key_data = x509_cert.tbs_certificate.subject_pki.raw.to_vec();
+
+	(key_data, cert)
 }
 
 #[path = "./db.rs"]
@@ -71,29 +80,35 @@ where
 	F: FnOnce(AsyncPgConnection, String, Uuid, TestServer, TestServer) -> Fut,
 	Fut: Future<Output = T>,
 {
-	run(async |mut conn, public, private| {
-		let cert = make_certificate();
-		let cert_pem = cert.pem();
-		let cert = utf8_percent_encode(&cert_pem, &percent_encoding::NON_ALPHANUMERIC).to_string();
-
-		let (_, pem_parsed) = parse_x509_pem(cert_pem.as_bytes()).expect("parse pem");
-		let (_, x509_cert) = parse_x509_certificate(&pem_parsed.contents).expect("parse cert");
-		let key_data = x509_cert.tbs_certificate.subject_pki.raw.to_vec();
+	run(async |mut conn, mut public, private| {
+		let (key_data, cert) = make_certificate();
 
 		let device_row: Device = sql_query(
 			r#"
-				INSERT INTO devices (key_data, role)
-				VALUES ($1, $2::device_role)
+				INSERT INTO devices (role)
+				VALUES ($1::device_role)
 				RETURNING id
 			"#,
 		)
-		.bind::<sql_types::Binary, _>(key_data)
 		.bind::<sql_types::Text, _>(role)
 		.get_result(&mut conn)
 		.await
 		.expect("insert device");
 		let device_id = device_row.id;
 
+		sql_query(
+			r#"
+				INSERT INTO device_keys (device_id, key_data, name, is_active)
+				VALUES ($1, $2, 'Test Key', true)
+			"#,
+		)
+		.bind::<sql_types::Uuid, _>(device_id)
+		.bind::<sql_types::Binary, _>(key_data)
+		.execute(&mut conn)
+		.await
+		.expect("insert device key");
+
+		public.add_header("X-Version", "3.4.5");
 		test(conn, cert, device_id, public, private).await
 	})
 	.await

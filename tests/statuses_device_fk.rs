@@ -21,20 +21,17 @@ struct RowDeviceId {
 async fn deleting_device_nulls_status_device_id() {
 	test_db::TestDb::run(async |mut conn, _| {
 		// Prepare unique values
-		let key_uuid = Uuid::new_v4();
-		let key_data = key_uuid.as_bytes().to_vec();
 		let host_uuid = Uuid::new_v4();
 		let host = format!("http://test.invalid/{}", host_uuid);
 
 		// 1) Insert a device and keep its id
 		let device_row: RowId = sql_query(
 			r#"
-				INSERT INTO devices (key_data, role)
-				VALUES ($1, 'server')
+				INSERT INTO devices (role)
+				VALUES ('server')
 				RETURNING id
 			"#,
 		)
-		.bind::<sql_types::Binary, _>(key_data)
 		.get_result(&mut conn)
 		.await
 		.expect("insert device");

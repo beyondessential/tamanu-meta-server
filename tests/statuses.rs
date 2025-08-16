@@ -11,8 +11,6 @@ struct StatusResult {
 	server_id: Uuid,
 	#[diesel(sql_type = sql_types::Nullable<sql_types::Uuid>)]
 	device_id: Option<Uuid>,
-	#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
-	version: Option<String>,
 	#[diesel(sql_type = sql_types::Jsonb)]
 	extra: serde_json::Value,
 }
@@ -36,7 +34,6 @@ async fn submit_status() {
 		let response = public
 			.post(&format!("/status/{}", server_id))
 			.add_header("mtls-certificate", &cert)
-			.add_header("X-Version", "1.2.3")
 			.json(&serde_json::json!({ "uptime": 3600 }))
 			.await;
 		response.assert_status_ok();
@@ -52,10 +49,6 @@ async fn submit_status() {
 		assert_eq!(
 			returned_status.get("device_id").and_then(|v| v.as_str()),
 			Some(device_id.to_string().as_str())
-		);
-		assert_eq!(
-			returned_status.get("version").and_then(|v| v.as_str()),
-			Some("1.2.3")
 		);
 		let extra = returned_status.get("extra").expect("extra field");
 		assert_eq!(extra.get("uptime").and_then(|v| v.as_i64()), Some(3600));
@@ -77,7 +70,6 @@ async fn submit_status() {
 
 		assert_eq!(db_status.server_id, server_id);
 		assert_eq!(db_status.device_id, Some(device_id));
-		assert_eq!(db_status.version.as_deref(), Some("1.2.3"));
 		assert_eq!(
 			db_status.extra.get("uptime").and_then(|v| v.as_i64()),
 			Some(3600)

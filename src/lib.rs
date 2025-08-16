@@ -12,7 +12,7 @@ use tracing::Span;
 pub use servers::private::routes as private_routes;
 pub use servers::public::routes as public_routes;
 
-pub(crate) mod db;
+pub mod db;
 pub mod error;
 pub mod migrator;
 pub mod pingtask;
