@@ -39,11 +39,11 @@ where
 	type Rejection = std::convert::Infallible;
 
 	async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
-		let user_name = parts
-			.headers
-			.get(TAILSCALE_USER_NAME)
-			.and_then(|value| value.to_str().ok())
-			.map(|s| s.to_string());
+		let user_name = parts.headers.get(TAILSCALE_USER_NAME).and_then(|value| {
+			rfc2047_decoder::decode(value.as_bytes())
+				.ok()
+				.or_else(|| value.to_str().ok().map(ToOwned::to_owned))
+		});
 
 		Ok(TailscaleUserName(user_name))
 	}
