@@ -5,7 +5,16 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [4.2.2](https://github.com/beyondessential/tamanu-meta-server/compare/v4.2.1..4.2.2) - 2025-08-16
+## [4.2.3](https://github.com/beyondessential/tamanu-meta-server/compare/v4.2.2..4.2.3) - 2025-08-18
+
+
+- **Feature:** Add server timing header - ([26546a3](https://github.com/beyondessential/tamanu-meta-server/commit/26546a3cffc457c67794546ccf11755170add196))
+- **Refactor:** Optimise the status fetch - ([ddf76a0](https://github.com/beyondessential/tamanu-meta-server/commit/ddf76a04318f37a0770dd98e8304458e7993c428))
+- **Repo:** Add some token-saving rules for agent - ([039caca](https://github.com/beyondessential/tamanu-meta-server/commit/039caca93a7190c65eea8ac362e82ade75817f99))
+- **Tweak:** Always return 404 for missing resources - ([db0aeef](https://github.com/beyondessential/tamanu-meta-server/commit/db0aeef4f51cdb124bba6bcf793b83c981d3e5eb))
+
+---
+## [4.2.2](https://github.com/beyondessential/tamanu-meta-server/compare/v4.2.1..v4.2.2) - 2025-08-16
 
 
 - **Bugfix:** Return proper error codes for auth - ([c404691](https://github.com/beyondessential/tamanu-meta-server/commit/c404691d7bf322711d7676bdca80eee55139188f))
