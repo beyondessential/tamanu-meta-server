@@ -5,7 +5,6 @@ use uuid::Uuid;
 
 #[path = "common/server.rs"]
 mod test_server;
-use test_server::run_with_device_auth;
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 pub struct Version {
@@ -194,7 +193,7 @@ async fn version_not_found_artifacts() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn artifacts_create_version_not_found() {
-	run_with_device_auth("releaser", async |_conn, cert, _device_id, public, _| {
+	test_server::run_with_device_auth("releaser", async |_conn, cert, _device_id, public, _| {
 		let response = public
 			.post("/artifacts/999.999.999/installer/windows")
 			.add_header("mtls-certificate", &cert)

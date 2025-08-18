@@ -1,0 +1,41 @@
+# Agent Rules for tamanu-meta-server
+
+## Database Connection
+- Use `DATABASE_URL=postgres://localhost/tamanu_meta` for running tests
+- Always run tests with the DATABASE_URL environment variable set
+
+## Code Style & Patterns
+- Follow existing Rust conventions in the codebase
+- Use `AppError` variants for error handling, map to appropriate HTTP status codes in `IntoResponse`
+- Update ERRORS.md when adding new error types, the heading must match the error problem type
+
+## Testing
+- Use `#[tokio::test(flavor = "multi_thread")]` for async tests
+- Use `test_server::run` for basic tests, `test_server::run_with_device_auth` for authenticated endpoints
+- For authenticated tests, add `mtls-certificate` header: `.add_header("mtls-certificate", &cert)`
+- Use `.add_header("mtls-certificate", &cert)` on test requests, do not set it on `public` or `private` server directly (these should not be `mut` in tests)
+- Test both success and error scenarios (especially 404 cases for non-existent resources)
+
+Import test helpers with, e.g.
+
+```rust
+#[path = "common/server.rs"]
+mod test_server;
+```
+
+and then use the fully-qualified path at the call point:
+
+```rust
+test_server::run(async |_conn, public, _| {});
+```
+
+## File Structure
+- Database models in `src/db/`
+- Server routes in `src/servers/public/` and `src/servers/private/`
+- Error handling in `src/error.rs`
+- Tests in `tests/` directory with common utilities in `tests/common/`
+
+## Development Workflow
+- Run full test suite before major changes: `cargo nextest run`
+- Check specific test files: `cargo nextest run <test_name>`
+- Verify no compilation warnings in tests and main code
