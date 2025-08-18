@@ -5,6 +5,7 @@ use uuid::Uuid;
 
 #[path = "common/server.rs"]
 mod test_server;
+use test_server::run_with_device_auth;
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 pub struct Version {
@@ -177,6 +178,28 @@ async fn update_for_version_with_newer() {
 async fn version_not_found() {
 	test_server::run(async |_conn, public, _| {
 		let response = public.get("/versions/999.999.999").await;
+		response.assert_status(StatusCode::NOT_FOUND);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn version_not_found_artifacts() {
+	test_server::run(async |_conn, public, _| {
+		let response = public.get("/versions/999.999.999/artifacts").await;
+		response.assert_status(StatusCode::NOT_FOUND);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn artifacts_create_version_not_found() {
+	run_with_device_auth("releaser", async |_conn, cert, _device_id, public, _| {
+		let response = public
+			.post("/artifacts/999.999.999/installer/windows")
+			.add_header("mtls-certificate", &cert)
+			.text("https://example.com/installer.exe")
+			.await;
 		response.assert_status(StatusCode::NOT_FOUND);
 	})
 	.await

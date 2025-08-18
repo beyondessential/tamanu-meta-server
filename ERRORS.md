@@ -26,6 +26,10 @@ HTML template errors.
 
 I/O errors, typically issued when handling too-large bodies.
 
+## Resource not found
+
+Issued when a database resource (such as a version, server, or other entity) cannot be found.
+
 ## No matching versions
 
 Issued when a version range is valid, but does not match any of the available versions.

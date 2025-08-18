@@ -79,6 +79,7 @@ impl IntoResponse for AppError {
 		let status = match self {
 			Self::NoMatchingVersions => StatusCode::NOT_FOUND,
 			Self::UnusableRange => StatusCode::BAD_REQUEST,
+			Self::DatabaseQuery(diesel::result::Error::NotFound) => StatusCode::NOT_FOUND,
 			Self::AuthMissingCertificate => StatusCode::UNAUTHORIZED,
 			Self::AuthInvalidCertificate(_) => StatusCode::BAD_REQUEST,
 			Self::AuthCertificateNotFound => StatusCode::UNAUTHORIZED,
@@ -100,6 +101,8 @@ impl IntoResponse for AppError {
 						Self::Header(_) => "header",
 						Self::VersionParse(_) => "version-parse",
 						Self::DatabasePool(_) => "database",
+						Self::DatabaseQuery(diesel::result::Error::NotFound) =>
+							"resource-not-found",
 						Self::DatabaseQuery(_) => "database",
 						Self::Tera(_) => "render",
 						Self::Io(_) => "io",
