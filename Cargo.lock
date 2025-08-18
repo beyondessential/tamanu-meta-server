@@ -296,6 +296,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "axum-server-timing"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2b9973d768bf4f20c794b00858d5b3dc66dd060d0757f6dcf18addef66dd553"
+dependencies = [
+ "http",
+ "pin-project-lite",
+ "tower",
+]
+
+[[package]]
 name = "axum-test"
 version = "17.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2823,6 +2834,7 @@ version = "4.2.2"
 dependencies = [
  "axum",
  "axum-client-ip",
+ "axum-server-timing",
  "axum-test",
  "chrono",
  "clap",

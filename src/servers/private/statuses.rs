@@ -1,14 +1,16 @@
 use std::{
 	collections::{BTreeSet, HashMap},
 	sync::Arc,
+	time::Instant,
 };
 
 use axum::{
-	Json,
+	Extension, Json,
 	extract::State,
 	response::Html,
 	routing::{Router, get, post},
 };
+use axum_server_timing::ServerTimingExtension;
 use chrono::{TimeDelta, Utc};
 use folktime::duration::{Duration as FolktimeDuration, Style};
 use serde::Serialize;
@@ -47,13 +49,20 @@ struct ServerData {
 	nodejs: Option<String>,
 }
 
-async fn servers_with_status(db: Db) -> Result<Vec<ServerData>> {
+async fn servers_with_status(db: Db, timing: ServerTimingExtension) -> Result<Vec<ServerData>> {
+	let start = Instant::now();
 	let mut conn = db.get().await?;
 	let statuses: HashMap<Uuid, Status> = Status::latest_for_all_servers(&mut conn)
 		.await?
 		.into_iter()
 		.map(|status| (status.server_id, status))
 		.collect();
+	timing
+		.lock()
+		.unwrap()
+		.record_timing("statuses".to_string(), start.elapsed(), None);
+
+	let start = Instant::now();
 	let device_to_server_ids: HashMap<Uuid, Uuid> = statuses
 		.values()
 		.filter_map(|status| status.device_id.map(|id| (id, status.server_id)))
@@ -72,9 +81,19 @@ async fn servers_with_status(db: Db) -> Result<Vec<ServerData>> {
 		}
 	})
 	.collect();
+	timing
+		.lock()
+		.unwrap()
+		.record_timing("devices".to_string(), start.elapsed(), None);
 
+	let start = Instant::now();
 	let servers = Server::get_all(&mut conn).await?;
+	timing
+		.lock()
+		.unwrap()
+		.record_timing("servers".to_string(), start.elapsed(), None);
 
+	let start = Instant::now();
 	let mut entries = Vec::with_capacity(statuses.len());
 	for server in servers {
 		if server.name.is_none() {
@@ -132,6 +151,11 @@ async fn servers_with_status(db: Db) -> Result<Vec<ServerData>> {
 		});
 	}
 	entries.sort_by_key(|s| (s.server.rank, s.server.name.clone()));
+	timing
+		.lock()
+		.unwrap()
+		.record_timing("processing".to_string(), start.elapsed(), None);
+
 	Ok(entries)
 }
 
@@ -139,8 +163,9 @@ async fn view(
 	State(db): State<Db>,
 	State(tera): State<Arc<Tera>>,
 	TailscaleUserName(user_name): TailscaleUserName,
+	Extension(timing): Extension<ServerTimingExtension>,
 ) -> Result<Html<String>> {
-	let entries = servers_with_status(db).await?;
+	let entries = servers_with_status(db, timing).await?;
 	let versions = entries
 		.iter()
 		.filter_map(|status| {
@@ -179,8 +204,11 @@ async fn view(
 	Ok(Html(html))
 }
 
-async fn data(State(db): State<Db>) -> Result<Json<Vec<ServerData>>> {
-	Ok(Json(servers_with_status(db).await?))
+async fn data(
+	State(db): State<Db>,
+	Extension(timing): Extension<ServerTimingExtension>,
+) -> Result<Json<Vec<ServerData>>> {
+	Ok(Json(servers_with_status(db, timing).await?))
 }
 
 async fn reload(State(AppState { db, .. }): State<AppState>) -> Result<()> {
