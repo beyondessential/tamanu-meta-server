@@ -159,3 +159,22 @@ pub struct DeviceConnection {
 	pub ip: ipnet::IpNet,
 	pub user_agent: Option<String>,
 }
+
+impl DeviceConnection {
+	pub async fn get_latest_from_device_ids(
+		db: &mut AsyncPgConnection,
+		device_ids: impl Iterator<Item = Uuid>,
+	) -> Result<Vec<Self>> {
+		use crate::schema::device_connections::dsl as dc;
+
+		let ids: Vec<Uuid> = device_ids.collect();
+		dc::device_connections
+			.select(Self::as_select())
+			.distinct_on(dc::device_id)
+			.filter(dc::device_id.eq_any(ids))
+			.order((dc::device_id, dc::created_at.desc()))
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+}

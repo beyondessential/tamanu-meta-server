@@ -54,14 +54,29 @@ async fn servers_with_status(db: Db) -> Result<Vec<ServerData>> {
 		.into_iter()
 		.map(|status| (status.server_id, status))
 		.collect();
-	let mut devices = HashMap::with_capacity(statuses.len());
-	for (id, status) in &statuses {
-		if let Some(d) = status.device_connection(&mut conn).await? {
-			devices.insert(*id, d);
+	let device_to_server_ids: HashMap<Uuid, Uuid> = statuses
+		.values()
+		.filter_map(|status| status.device_id.map(|id| (id, status.server_id)))
+		.collect();
+	let devices: HashMap<Uuid, DeviceConnection> = DeviceConnection::get_latest_from_device_ids(
+		&mut conn,
+		device_to_server_ids.keys().copied(),
+	)
+	.await?
+	.into_iter()
+	.filter_map(|device| {
+		if let Some(server_id) = device_to_server_ids.get(&device.device_id) {
+			Some((*server_id, device))
+		} else {
+			None
 		}
-	}
+	})
+	.collect();
+
+	let servers = Server::get_all(&mut conn).await?;
+
 	let mut entries = Vec::with_capacity(statuses.len());
-	for server in Server::get_all(&mut conn).await? {
+	for server in servers {
 		if server.name.is_none() {
 			continue;
 		}

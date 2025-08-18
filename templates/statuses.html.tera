@@ -80,7 +80,11 @@
   .ago {
     border-right: 1px dashed black;
   }
-  </style>
+
+  .ago, .platform, .timezone {
+    text-align: right;
+  }
+</style>
 </head>
 <body>
   <div class="header">
@@ -130,7 +134,7 @@
             {% endif %}
           </td>
         {% else %}
-          <td class="ago" title="more than one month ago">never</td>
+          <td class="ago never" title="never or more than a week ago">&gt;7d ago</td>
           <td colspan=5></td>
         {% endif %}
       </tr>

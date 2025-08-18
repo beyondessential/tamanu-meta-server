@@ -138,51 +138,12 @@ impl Status {
 		use crate::schema::statuses::dsl::*;
 
 		statuses
-			.filter(created_at.ge(diesel::dsl::sql("NOW() - INTERVAL '1 month'")))
-			.distinct_on(server_id)
-			.order((server_id, created_at.desc()))
 			.select(Status::as_select())
+			.distinct_on(server_id)
+			.filter(created_at.ge(diesel::dsl::sql("NOW() - INTERVAL '7 days'")))
+			.order((server_id, created_at.desc()))
 			.load(db)
 			.await
 			.map_err(AppError::from)
-	}
-
-	pub async fn server(&self, db: &mut AsyncPgConnection) -> Result<crate::db::servers::Server> {
-		use crate::views::ordered_servers::dsl::*;
-
-		let row = ordered_servers
-			.filter(id.eq(self.server_id))
-			.select(crate::db::servers::Server::as_select())
-			.first::<crate::db::servers::Server>(db)
-			.await
-			.map_err(AppError::from)?;
-
-		Ok(row)
-	}
-
-	pub async fn device_connection(
-		&self,
-		db: &mut AsyncPgConnection,
-	) -> Result<Option<crate::db::devices::DeviceConnection>> {
-		let Some(dev_id) = self.device_id else {
-			return Ok(None);
-		};
-
-		use crate::schema::device_connections::dsl as dc;
-
-		let row = dc::device_connections
-			.filter(
-				dc::device_id
-					.eq(dev_id)
-					.and(dc::created_at.le(self.created_at)),
-			)
-			.order(dc::created_at.desc())
-			.select(crate::db::devices::DeviceConnection::as_select())
-			.first::<crate::db::devices::DeviceConnection>(db)
-			.await
-			.optional()
-			.map_err(AppError::from)?;
-
-		Ok(row)
 	}
 }
