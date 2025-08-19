@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [4.2.4](https://github.com/beyondessential/tamanu-meta-server/compare/v4.2.3..4.2.4) - 2025-08-19
+## [4.2.5](https://github.com/beyondessential/tamanu-meta-server/compare/v4.2.4..4.2.5) - 2025-08-19
+
+
+- **Bugfix:** Exclude from default views the own-server - ([484bf62](https://github.com/beyondessential/tamanu-meta-server/commit/484bf620538dc478e13b6db1927ab8c9c285833c))
+
+---
+## [4.2.4](https://github.com/beyondessential/tamanu-meta-server/compare/v4.2.3..v4.2.4) - 2025-08-19
 
 
 - **Feature:** Record own status - ([90a5f9a](https://github.com/beyondessential/tamanu-meta-server/commit/90a5f9acc48f2b013b781c78937e81009d69b20d))
