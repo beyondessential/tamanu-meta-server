@@ -14,6 +14,7 @@ pub enum ServerKind {
 	#[default]
 	Central,
 	Facility,
+	Meta,
 }
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -27,6 +28,7 @@ impl TryFrom<String> for ServerKind {
 		match value.to_ascii_lowercase().as_ref() {
 			"tamanu sync server" | "central" => Ok(Self::Central),
 			"tamanu lan server" | "facility" => Ok(Self::Facility),
+			"meta" => Ok(Self::Meta),
 			s => Err(ServerKindFromStringError(s.into())),
 		}
 	}
@@ -37,6 +39,7 @@ impl From<ServerKind> for String {
 		match rank {
 			ServerKind::Central => "central",
 			ServerKind::Facility => "facility",
+			ServerKind::Meta => "meta",
 		}
 		.into()
 	}

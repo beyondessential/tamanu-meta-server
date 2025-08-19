@@ -55,6 +55,17 @@ impl Default for NewStatus {
 	}
 }
 
+impl NewStatus {
+	pub async fn save(self, db: &mut AsyncPgConnection) -> Result<Status> {
+		diesel::insert_into(crate::schema::statuses::table)
+			.values(self)
+			.returning(Status::as_select())
+			.get_result(db)
+			.await
+			.map_err(AppError::from)
+	}
+}
+
 impl Status {
 	pub fn extra(&self, key: &str) -> Option<&serde_json::Value> {
 		self.extra.as_object().and_then(|obj| obj.get(key))

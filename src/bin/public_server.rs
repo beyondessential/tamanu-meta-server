@@ -32,6 +32,8 @@ async fn main() -> miette::Result<()> {
 		})?);
 	}
 
+	tamanu_meta::ownstatus::spawn();
+
 	let addr = args
 		.bind
 		.unwrap_or_else(|| SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, args.port, 0, 0)));

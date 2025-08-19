@@ -3,9 +3,6 @@ use axum::{
 	extract::{Path, State},
 	routing::{Router, post},
 };
-
-use diesel::SelectableHelper as _;
-use diesel_async::RunQueryDsl as _;
 use uuid::Uuid;
 
 use crate::{
@@ -44,7 +41,7 @@ async fn create(
 		));
 	}
 
-	let input = NewStatus {
+	let status = NewStatus {
 		server_id,
 		device_id: Some(id),
 		version: Some(current_version.0),
@@ -55,13 +52,9 @@ async fn create(
 				v => v,
 			},
 		),
-	};
-
-	let status = diesel::insert_into(crate::schema::statuses::table)
-		.values(input)
-		.returning(Status::as_select())
-		.get_result(&mut db)
-		.await?;
+	}
+	.save(&mut db)
+	.await?;
 
 	Ok(Json(status))
 }

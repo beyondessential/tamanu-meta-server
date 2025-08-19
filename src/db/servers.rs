@@ -30,7 +30,7 @@ pub struct Server {
 impl Server {
 	pub async fn get_all(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
 		crate::views::ordered_servers::table
-			.select(Server::as_select())
+			.select(Self::as_select())
 			.load(db)
 			.await
 			.map_err(AppError::from)
@@ -39,7 +39,7 @@ impl Server {
 	pub async fn all_pingable(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
 		use crate::views::ordered_servers::dsl::*;
 		ordered_servers
-			.select(Server::as_select())
+			.select(Self::as_select())
 			.filter(device_id.is_null())
 			.load(db)
 			.await
@@ -48,16 +48,26 @@ impl Server {
 
 	pub async fn get_by_id(db: &mut AsyncPgConnection, id: Uuid) -> Result<Self> {
 		crate::views::ordered_servers::table
-			.select(Server::as_select())
+			.select(Self::as_select())
 			.filter(crate::views::ordered_servers::id.eq(id))
 			.first(db)
 			.await
 			.map_err(AppError::from)
 	}
+
 	pub async fn get_by_host(db: &mut AsyncPgConnection, host: String) -> Result<Self> {
 		crate::views::ordered_servers::table
-			.select(Server::as_select())
+			.select(Self::as_select())
 			.filter(crate::views::ordered_servers::host.eq(host))
+			.first(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	pub async fn own(db: &mut AsyncPgConnection) -> Result<Self> {
+		crate::views::ordered_servers::table
+			.select(Self::as_select())
+			.filter(crate::views::ordered_servers::id.eq(Uuid::nil()))
 			.first(db)
 			.await
 			.map_err(AppError::from)
