@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [4.2.6](https://github.com/beyondessential/tamanu-meta-server/compare/v4.2.5..4.2.6) - 2025-08-19
+## [4.2.7](https://github.com/beyondessential/tamanu-meta-server/compare/v4.2.6..4.2.7) - 2025-08-19
+
+
+- **Bugfix:** Whoops forgot a dep - ([b6d9707](https://github.com/beyondessential/tamanu-meta-server/commit/b6d970731e6c7d717cc63ebc84dfa8d1fd276667))
+
+---
+## [4.2.6](https://github.com/beyondessential/tamanu-meta-server/compare/v4.2.5..v4.2.6) - 2025-08-19
 
 
 - **Tweak:** Recording the hostname is more meaningful - ([4a0363c](https://github.com/beyondessential/tamanu-meta-server/commit/4a0363ca438bdb12f6f5113ee43b5e8c7cdac466))
