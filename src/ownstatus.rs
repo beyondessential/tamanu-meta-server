@@ -23,7 +23,7 @@ async fn record_own_status(pool: Db, start: Instant) -> Result<()> {
 		version: Some(env!("CARGO_PKG_VERSION").parse().unwrap()),
 		extra: json!({
 			"uptime": start.elapsed().as_millis(),
-			"pid": std::process::id(),
+			"hostname": hostname::get().unwrap(),
 		}),
 		..Default::default()
 	}
