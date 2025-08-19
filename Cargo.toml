@@ -55,9 +55,9 @@ reqwest = { version = "0.12.23", default-features = false, features = [
 ] }
 rfc2047-decoder = "1.0.6"
 serde = { version = "1.0.219", features = ["derive"] }
-serde_json = "1.0.142"
+serde_json = "1.0.143"
 tera = "1.20.0"
-thiserror = "2.0.14"
+thiserror = "2.0.15"
 time = "0.3.41"
 timesimp = "1.0.0"
 tokio = { version = "1.47.1", features = ["macros", "net", "rt-multi-thread"] }
