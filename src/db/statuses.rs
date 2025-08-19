@@ -151,7 +151,11 @@ impl Status {
 		statuses
 			.select(Status::as_select())
 			.distinct_on(server_id)
-			.filter(created_at.ge(diesel::dsl::sql("NOW() - INTERVAL '7 days'")))
+			.filter(
+				created_at
+					.ge(diesel::dsl::sql("NOW() - INTERVAL '7 days'"))
+					.and(id.ne(Uuid::nil())),
+			)
 			.order((server_id, created_at.desc()))
 			.load(db)
 			.await
