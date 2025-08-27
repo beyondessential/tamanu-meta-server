@@ -43,7 +43,7 @@ lloggs = { version = "1.1.0", features = ["miette-7"] }
 miette = { version = "7.6.0", features = ["fancy"] }
 mobc = "0.9.0"
 node-semver = "2.2.0"
-percent-encoding = "2.3.1"
+percent-encoding = "2.3.2"
 problem_details = { version = "0.8.0", features = ["axum"] }
 pulldown-cmark = { version = "0.13", features = ["html"] }
 qrcode = { version = "0.14", features = ["svg"] }
@@ -57,7 +57,7 @@ rfc2047-decoder = "1.0.6"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.143"
 tera = "1.20.0"
-thiserror = "2.0.15"
+thiserror = "2.0.16"
 time = "0.3.41"
 timesimp = "1.0.0"
 tokio = { version = "1.47.1", features = ["macros", "net", "rt-multi-thread"] }
@@ -67,7 +67,7 @@ tower-http = { version = "0.6.6", features = [
 	"trace",
 ] }
 tracing = "0.1.41"
-url = { version = "2.5.4", features = ["serde"] }
+url = { version = "2.5.7", features = ["serde"] }
 uuid = { version = "1.18.0", features = ["serde", "v4"] }
 x509-parser = "0.17.0"
 
@@ -91,7 +91,7 @@ overflow-checks = false
 incremental = false
 
 [dev-dependencies]
-axum-test = "17.3.0"
+axum-test = "18.0.0"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 
 [profile.release.build-override]
