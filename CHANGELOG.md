@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [4.2.7](https://github.com/beyondessential/tamanu-meta-server/compare/v4.2.6..4.2.7) - 2025-08-19
+## [4.2.8](https://github.com/beyondessential/tamanu-meta-server/compare/v4.2.7..4.2.8) - 2025-09-23
+
+
+- **Bugfix:** Parsing windows from postgres 17 version string - ([f7bc914](https://github.com/beyondessential/tamanu-meta-server/commit/f7bc914ab3a403aee6cc651dae77659771fa5683))
+
+---
+## [4.2.7](https://github.com/beyondessential/tamanu-meta-server/compare/v4.2.6..v4.2.7) - 2025-08-19
 
 
 - **Bugfix:** Whoops forgot a dep - ([b6d9707](https://github.com/beyondessential/tamanu-meta-server/commit/b6d970731e6c7d717cc63ebc84dfa8d1fd276667))
