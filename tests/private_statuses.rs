@@ -268,11 +268,13 @@ async fn private_status_json_platform_detection() {
 		conn.batch_execute(
 			"INSERT INTO servers (id, name, host, rank, kind) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Windows Server', 'https://win.example.com', 'production', 'central'),
-			('22222222-2222-2222-2222-222222222222', 'Linux Server', 'https://linux.example.com', 'production', 'central');
+			('22222222-2222-2222-2222-222222222222', 'Linux Server', 'https://linux.example.com', 'production', 'central'),
+			('33333333-3333-3333-3333-333333333333', 'Windows Server 2', 'https://win2.example.com', 'production', 'central');
 
 			INSERT INTO statuses (server_id, version, extra, created_at) VALUES
 			('11111111-1111-1111-1111-111111111111', '1.0.0', '{\"pgVersion\": \"PostgreSQL 13.7 on x86_64-pc-windows-msvc, compiled by Visual C++ build 1914\"}'::jsonb, NOW()),
-			('22222222-2222-2222-2222-222222222222', '1.0.0', '{\"pgVersion\": \"PostgreSQL 17.2, (x86_64-pc-linux-gnu, compiled by gcc)\"}'::jsonb, NOW())"
+			('22222222-2222-2222-2222-222222222222', '1.0.0', '{\"pgVersion\": \"PostgreSQL 17.2, (x86_64-pc-linux-gnu, compiled by gcc)\"}'::jsonb, NOW()),
+			('33333333-3333-3333-3333-333333333333', '1.0.0', '{\"pgVersion\": \"PostgreSQL 17.6 on x86_64-windows, compiled by msvc-19.44.35213, 64-bit\"}'::jsonb, NOW())"
 		)
 		.await
 		.unwrap();
@@ -281,15 +283,18 @@ async fn private_status_json_platform_detection() {
 		response.assert_status_ok();
 
 		let servers: Vec<ServerData> = response.json();
-		assert_eq!(servers.len(), 2);
+		assert_eq!(servers.len(), 3);
 
 		let win_server = servers.iter().find(|s| s.server.name.as_deref() == Some("Windows Server")).unwrap();
 		let linux_server = servers.iter().find(|s| s.server.name.as_deref() == Some("Linux Server")).unwrap();
+		let win2_server = servers.iter().find(|s| s.server.name.as_deref() == Some("Windows Server 2")).unwrap();
 
 		assert_eq!(win_server.platform, Some("Windows".to_string()));
 		assert_eq!(linux_server.platform, Some("Linux".to_string()));
+		assert_eq!(win2_server.platform, Some("Windows".to_string()));
 		assert_eq!(win_server.postgres, Some("13.7".to_string()));
 		assert_eq!(linux_server.postgres, Some("17.2".to_string()));
+		assert_eq!(win2_server.postgres, Some("17.6".to_string()));
 	})
 	.await
 }

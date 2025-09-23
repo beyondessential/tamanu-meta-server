@@ -125,7 +125,7 @@ async fn servers_with_status(db: Db, timing: ServerTimingExtension) -> Result<Ve
 				.and_then(|st| st.extra("pgVersion"))
 				.and_then(|pg| pg.as_str())
 				.map(|pg| {
-					if pg.contains("Visual C++") {
+					if pg.contains("Visual C++") || pg.contains("windows") {
 						"Windows"
 					} else {
 						"Linux"
