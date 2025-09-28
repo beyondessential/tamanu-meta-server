@@ -2,8 +2,18 @@ use commons_errors::{AppError, Result};
 use commons_versions::VersionStr;
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use diesel_derive_enum::DbEnum;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, DbEnum)]
+#[ExistingTypePath = "crate::schema::sql_types::VersionStatus"]
+#[serde(rename_all = "lowercase")]
+pub enum VersionStatus {
+	Pending,
+	Published,
+	Yanked,
+}
 
 #[macro_export]
 macro_rules! predicate_version {
@@ -35,7 +45,7 @@ pub struct Version {
 	pub major: i32,
 	pub minor: i32,
 	pub patch: i32,
-	pub published: bool,
+	pub status: VersionStatus,
 	pub changelog: String,
 }
 

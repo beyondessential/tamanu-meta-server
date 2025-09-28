@@ -1,9 +1,13 @@
 // @generated automatically by Diesel CLI.
 
 pub mod sql_types {
-    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
-    #[diesel(postgres_type(name = "device_role"))]
-    pub struct DeviceRole;
+	#[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+	#[diesel(postgres_type(name = "device_role"))]
+	pub struct DeviceRole;
+
+	#[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+	#[diesel(postgres_type(name = "version_status"))]
+	pub struct VersionStatus;
 }
 
 diesel::table! {
@@ -73,27 +77,19 @@ diesel::table! {
 }
 
 diesel::table! {
-    statuses (id) {
-        id -> Uuid,
-        created_at -> Timestamptz,
-        server_id -> Uuid,
-        version -> Nullable<Text>,
-        extra -> Jsonb,
-        device_id -> Nullable<Uuid>,
-    }
-}
+	use diesel::sql_types::*;
+	use super::sql_types::VersionStatus;
 
-diesel::table! {
-    versions (id) {
-        id -> Uuid,
-        created_at -> Timestamptz,
-        updated_at -> Timestamptz,
-        major -> Int4,
-        minor -> Int4,
-        patch -> Int4,
-        changelog -> Text,
-        published -> Bool,
-    }
+	versions (id) {
+		id -> Uuid,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
+		major -> Int4,
+		minor -> Int4,
+		patch -> Int4,
+		changelog -> Text,
+		status -> VersionStatus,
+	}
 }
 
 diesel::joinable!(artifacts -> versions (version_id));
