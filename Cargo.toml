@@ -18,11 +18,11 @@ repository = "https://github.com/beyondessential/tamanu-meta-server"
 default-run = "public_server"
 
 [dependencies]
-axum = { version = "0.8.4", features = ["json", "macros"] }
+axum = { version = "0.8.5", features = ["json", "macros"] }
 axum-client-ip = { version = "1.1.3", features = ["forwarded-header"] }
 axum-server-timing = "3.0.0"
 chrono = { version = "0.4.42", features = ["serde"] }
-clap = { version = "4.5.47", features = ["derive", "env"] }
+clap = { version = "4.5.48", features = ["derive", "env"] }
 diesel = { version = "2.2.12", features = [
 	"chrono",
 	"ipnet-address",
@@ -39,7 +39,7 @@ futures = "0.3.31"
 hostname = "0.4.1"
 http = "1.3.1"
 ipnet = { version = "2.11.0", features = ["serde"] }
-lloggs = { version = "1.1.0", features = ["miette-7"] }
+lloggs = { version = "1.2.1", features = ["miette-7"] }
 miette = { version = "7.6.0", features = ["fancy"] }
 mobc = "0.9.0"
 node-semver = "2.2.0"
@@ -47,7 +47,7 @@ percent-encoding = "2.3.2"
 problem_details = { version = "0.8.0", features = ["axum"] }
 pulldown-cmark = { version = "0.13", features = ["html"] }
 qrcode = { version = "0.14", features = ["svg"] }
-rcgen = "0.14.3"
+rcgen = "0.14.5"
 reqwest = { version = "0.12.23", default-features = false, features = [
 	"gzip",
 	"json",
@@ -55,10 +55,10 @@ reqwest = { version = "0.12.23", default-features = false, features = [
 ] }
 rfc2047-decoder = "1.0.6"
 serde = { version = "1.0.219", features = ["derive"] }
-serde_json = "1.0.143"
+serde_json = "1.0.145"
 tera = "1.20.0"
-thiserror = "2.0.16"
-time = "0.3.43"
+thiserror = "2.0.17"
+time = "0.3.44"
 timesimp = "1.0.0"
 tokio = { version = "1.47.1", features = ["macros", "net", "rt-multi-thread"] }
 tower-http = { version = "0.6.6", features = [
