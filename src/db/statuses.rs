@@ -123,7 +123,7 @@ impl Status {
 			.collect::<Vec<Option<_>>>()
 			.await
 			.into_iter()
-			.filter_map(|o| o)
+			.flatten()
 			.collect())
 	}
 

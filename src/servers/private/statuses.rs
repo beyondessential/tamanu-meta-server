@@ -74,11 +74,9 @@ async fn servers_with_status(db: Db, timing: ServerTimingExtension) -> Result<Ve
 	.await?
 	.into_iter()
 	.filter_map(|device| {
-		if let Some(server_id) = device_to_server_ids.get(&device.device_id) {
-			Some((*server_id, device))
-		} else {
-			None
-		}
+		device_to_server_ids
+			.get(&device.device_id)
+			.map(|server_id| (*server_id, device))
 	})
 	.collect();
 	timing
@@ -135,7 +133,7 @@ async fn servers_with_status(db: Db, timing: ServerTimingExtension) -> Result<Ve
 				.as_ref()
 				.and_then(|st| st.extra("pgVersion"))
 				.and_then(|pg| pg.as_str())
-				.and_then(|pg| pg.split_ascii_whitespace().skip(1).next())
+				.and_then(|pg| pg.split_ascii_whitespace().nth(1))
 				.map(|vers| vers.trim_end_matches(',').into()),
 			nodejs: device
 				.as_ref()

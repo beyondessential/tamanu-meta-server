@@ -25,7 +25,6 @@ async fn record_own_status(pool: Db, start: Instant) -> Result<()> {
 			"uptime": start.elapsed().as_millis(),
 			"hostname": hostname::get().unwrap(),
 		}),
-		..Default::default()
 	}
 	.save(&mut db)
 	.await?;

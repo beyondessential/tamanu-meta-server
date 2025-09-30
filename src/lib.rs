@@ -45,14 +45,14 @@ pub fn router(routes: Router<()>, client_ip_source: ClientIpSource) -> Router<()
 				.on_response(
 					|response: &http::Response<_>, latency: Duration, span: &Span| {
 						if let Some(ip) = response.extensions().get::<ClientIp>().map(|r| &r.0) {
-							span.record("req.ip", &tracing::field::debug(ip));
+							span.record("req.ip", tracing::field::debug(ip));
 						}
 
-						span.record("latency", &tracing::field::debug(latency));
-						span.record("res.version", &tracing::field::debug(response.version()));
+						span.record("latency", tracing::field::debug(latency));
+						span.record("res.version", tracing::field::debug(response.version()));
 						span.record(
 							"res.status",
-							&tracing::field::display(response.status().as_u16()),
+							tracing::field::display(response.status().as_u16()),
 						);
 						tracing::info!("response");
 					},
