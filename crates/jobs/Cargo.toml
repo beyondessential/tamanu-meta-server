@@ -3,7 +3,6 @@ publish = false
 name = "jobs"
 version = "4.2.8"
 edition = "2024"
-rust-version = "1.85.0"
 resolver = "3"
 license = "GPL-3.0-or-later"
 authors = [

@@ -57,10 +57,12 @@ where
 			ClientIpSource::RightmostForwarded,
 		);
 		let private_router = router(
-			private_server::routes("/$".into()).with_state(private_server::state::AppState {
-				db: database::init_to(&url),
-				tera: private_server::state::AppState::init_tera().unwrap(),
-			}),
+			private_server::routes(
+				"/$".into(),
+				private_server::state::AppState {
+					db: database::init_to(&url),
+				},
+			),
 			ClientIpSource::RightmostForwarded,
 		);
 

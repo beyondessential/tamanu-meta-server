@@ -3,7 +3,6 @@ publish = false
 name = "commons-tests"
 version = "4.2.8"
 edition = "2024"
-rust-version = "1.85.0"
 resolver = "3"
 license = "GPL-3.0-or-later"
 authors = [
@@ -23,7 +22,7 @@ diesel-async.workspace = true
 diesel_migrations = "2.2.0"
 miette.workspace = true
 percent-encoding = "2.3.2"
-private-server = { path = "../private-server" }
+private-server = { path = "../private-server", features = ["ssr"] }
 public-server = { path = "../public-server" }
 rcgen = "0.14.3"
 time = "0.3.43"

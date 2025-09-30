@@ -1,7 +1,6 @@
-FROM --platform=$BUILDPLATFORM rust AS builder
+FROM --platform=$BUILDPLATFORM rust AS builder-base
 SHELL ["/bin/bash", "-euxo", "pipefail", "-c"]
 
-ARG PROFILE=release
 ARG TARGETPLATFORM
 
 RUN mkdir -p /app/{.cargo,src/bin} /built && useradd --system --user-group --uid 1000 tamanu
@@ -25,37 +24,38 @@ RUN if [ "$TARGETPLATFORM" == "linux/amd64" ]; then \
 RUN rustup target add "$(cat /.target)"
 ENV RUSTFLAGS="-C target-feature=+crt-static"
 
-# Server builds
 COPY migrations ./migrations
 COPY crates ./crates
 COPY Cargo.toml Cargo.lock ./
-RUN cargo build --locked --target $(cat /.target) --profile $PROFILE
-RUN cp target/$(cat /.target)/$PROFILE/{{public,private}-server,migrate,ownstatus,pingtask,prune_untrusted_devices} /built/
 
-# Frontend build
-FROM --platform=$BUILDPLATFORM node AS web-builder
-WORKDIR /app
-COPY web/private/package.json web/private/package-lock.json ./
-RUN npm ci
-COPY web/private/ ./
-RUN npm run build
+FROM --platform=$BUILDPLATFORM builder-base AS builder-server
+ENV LEPTOS_OUTPUT_NAME=private-server
+RUN cargo build --locked --target $(cat /.target) --release
+RUN cp target/$(cat /.target)/release/{{public,private}-server,migrate,ownstatus,pingtask,prune_untrusted_devices} /built/
+
+FROM --platform=$BUILDPLATFORM builder-base AS builder-web
+RUN rustup target add wasm32-unknown-unknown
+RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+RUN cargo binstall -y cargo-leptos
+COPY static ./static
+RUN cargo leptos build --release --frontend-only --precompress --split
 
 # Runtime image
 FROM busybox:glibc
-COPY --from=builder /etc/passwd /etc/passwd
-COPY --from=builder /etc/group /etc/group
-COPY --from=builder --chmod=0755 /built/public-server /usr/bin/public-server
-COPY --from=builder --chmod=0755 /built/private-server /usr/bin/private-server
-COPY --from=builder --chmod=0755 /built/migrate /usr/bin/migrate
-COPY --from=builder --chmod=0755 /built/ownstatus /usr/bin/ownstatus
-COPY --from=builder --chmod=0755 /built/pingtask /usr/bin/pingtask
-COPY --from=builder --chmod=0755 /built/prune_untrusted_devices /usr/bin/prune_untrusted_devices
+COPY --from=builder-base /etc/passwd /etc/passwd
+COPY --from=builder-base /etc/group /etc/group
+COPY --from=builder-server --chmod=0755 /built/public-server /usr/bin/public-server
+COPY --from=builder-server --chmod=0755 /built/migrate /usr/bin/migrate
+COPY --from=builder-server --chmod=0755 /built/ownstatus /usr/bin/ownstatus
+COPY --from=builder-server --chmod=0755 /built/pingtask /usr/bin/pingtask
+COPY --from=builder-server --chmod=0755 /built/prune_untrusted_devices /usr/bin/prune_untrusted_devices
+COPY --from=builder-server --chmod=0755 /built/private-server /usr/bin/private-server
+COPY --from=builder-web --chown=tamanu:tamanu /app/target/site /home/tamanu/target/site
 COPY --chown=tamanu:tamanu static /home/tamanu/static
-COPY --from=web-builder --chown=tamanu:tamanu /app/dist /home/tamanu/web/private/dist
 
 # back-compat, remove when no longer needed
-COPY --from=builder --chmod=0755 /built/public-server /usr/bin/public_server
-COPY --from=builder --chmod=0755 /built/private-server /usr/bin/private_server
+COPY --from=builder-server --chmod=0755 /built/public-server /usr/bin/public_server
+COPY --from=builder-server --chmod=0755 /built/private-server /usr/bin/private_server
 
 USER tamanu
 ENV HOME=/home/tamanu

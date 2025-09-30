@@ -31,15 +31,14 @@ tokio = "1.47.1"
 tracing = "0.1.41"
 
 [profile.release]
-lto = false
-codegen-units = 16
-strip = "symbols"
-
-[profile.dist]
-inherits = "release"
 lto = true
 codegen-units = 1
 strip = "symbols"
+
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"
+panic = "abort"
 
 [profile.dev.build-override]
 opt-level = 0
@@ -56,3 +55,17 @@ debug = false
 debug-assertions = false
 overflow-checks = false
 incremental = false
+
+[[workspace.metadata.leptos]]
+name = "private-server"
+output-name = "private-server"
+site-root = "target/site"
+assets-dir = "static"
+site-addr = "[::1]:8081"
+reload-port = 8082
+env = "DEV"
+bin-package = "private-server"
+bin-features = ["ssr"]
+lib-package = "private-server"
+lib-features = ["hydrate"]
+lib-profile-release = "wasm-release"

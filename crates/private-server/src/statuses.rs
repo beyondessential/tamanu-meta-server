@@ -1,6 +1,5 @@
 use std::{
 	collections::{BTreeSet, HashMap},
-	sync::Arc,
 	time::Instant,
 };
 
@@ -20,7 +19,6 @@ use database::{
 };
 use folktime::duration::{Duration as FolktimeDuration, Style};
 use serde::Serialize;
-use tera::{Context, Tera};
 use uuid::Uuid;
 
 use crate::state::AppState;
@@ -160,7 +158,6 @@ async fn servers_with_status(db: Db, timing: ServerTimingExtension) -> Result<Ve
 
 async fn view(
 	State(db): State<Db>,
-	State(tera): State<Arc<Tera>>,
 	TailscaleUserName(user_name): TailscaleUserName,
 	Extension(timing): Extension<ServerTimingExtension>,
 ) -> Result<Html<String>> {
@@ -178,29 +175,21 @@ async fn view(
 			}
 		})
 		.collect::<BTreeSet<_>>();
-	let bracket = LiveVersionsBracket {
+	let _bracket = LiveVersionsBracket {
 		min: versions.first().cloned().unwrap_or_default(),
 		max: versions.last().cloned().unwrap_or_default(),
 	};
-	let releases = versions
+	let _releases = versions
 		.iter()
 		.map(|v| (v.0.major, v.0.minor))
 		.collect::<BTreeSet<_>>();
 
-	let greeting = match user_name {
+	let _greeting = match user_name {
 		Some(name) => format!("Hi {}!", name),
 		None => "Kia Ora!".to_string(),
 	};
 
-	let mut context = Context::new();
-	context.insert("title", "Server statuses");
-	context.insert("entries", &entries);
-	context.insert("bracket", &bracket);
-	context.insert("versions", &versions);
-	context.insert("releases", &releases);
-	context.insert("greeting", &greeting);
-	let html = tera.render("statuses", &context)?;
-	Ok(Html(html))
+	todo!()
 }
 
 async fn data(
