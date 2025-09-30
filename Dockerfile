@@ -53,6 +53,10 @@ COPY --from=builder --chmod=0755 /built/prune_untrusted_devices /usr/bin/prune_u
 COPY --chown=tamanu:tamanu static /home/tamanu/static
 COPY --from=web-builder --chown=tamanu:tamanu /app/dist /home/tamanu/web/private/dist
 
+# back-compat, remove when no longer needed
+COPY --from=builder --chmod=0755 /built/public-server /usr/bin/public_server
+COPY --from=builder --chmod=0755 /built/private-server /usr/bin/private_server
+
 USER tamanu
 ENV HOME=/home/tamanu
 WORKDIR /home/tamanu
