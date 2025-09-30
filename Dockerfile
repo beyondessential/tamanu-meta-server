@@ -25,23 +25,12 @@ RUN if [ "$TARGETPLATFORM" == "linux/amd64" ]; then \
 RUN rustup target add "$(cat /.target)"
 ENV RUSTFLAGS="-C target-feature=+crt-static"
 
-# Download and build dependencies (for cache)
-RUN echo "fn main() {}" > src/bin/public_server.rs
-COPY Cargo.lock Cargo.toml ./
-RUN cargo build --locked --target $(cat /.target) --profile $PROFILE
-RUN rm target/$(cat /.target)/$PROFILE/{*_server,deps/*_server*}
-
-# Build the actual project
+# Server builds
 COPY migrations ./migrations
-COPY src ./src
-COPY templates ./templates
+COPY crates ./crates
+COPY Cargo.toml Cargo.lock ./
 RUN cargo build --locked --target $(cat /.target) --profile $PROFILE
-RUN cp target/$(cat /.target)/$PROFILE/{{public,private}_server,migrate,pingtask,prune_untrusted_devices} /built/
-
-# we can't run any commands in the runtime image because the platform
-# might not be the same as the build platform, so we need to prepare
-# this home folder here
-RUN mkdir /runhome && cd /runhome && ln -s config/Rocket.toml
+RUN cp target/$(cat /.target)/$PROFILE/{{public,private}-server,migrate,ownstatus,pingtask,prune_untrusted_devices} /built/
 
 # Frontend build
 FROM --platform=$BUILDPLATFORM node AS web-builder
@@ -55,12 +44,12 @@ RUN npm run build
 FROM busybox:glibc
 COPY --from=builder /etc/passwd /etc/passwd
 COPY --from=builder /etc/group /etc/group
-COPY --from=builder --chmod=0755 /built/public_server /usr/bin/public_server
-COPY --from=builder --chmod=0755 /built/private_server /usr/bin/private_server
+COPY --from=builder --chmod=0755 /built/public-server /usr/bin/public-server
+COPY --from=builder --chmod=0755 /built/private-server /usr/bin/private-server
 COPY --from=builder --chmod=0755 /built/migrate /usr/bin/migrate
+COPY --from=builder --chmod=0755 /built/ownstatus /usr/bin/ownstatus
 COPY --from=builder --chmod=0755 /built/pingtask /usr/bin/pingtask
 COPY --from=builder --chmod=0755 /built/prune_untrusted_devices /usr/bin/prune_untrusted_devices
-COPY --from=builder --chown=tamanu:tamanu /runhome /home/tamanu
 COPY --chown=tamanu:tamanu static /home/tamanu/static
 COPY --from=web-builder --chown=tamanu:tamanu /app/dist /home/tamanu/web/private/dist
 
@@ -68,4 +57,4 @@ USER tamanu
 ENV HOME=/home/tamanu
 WORKDIR /home/tamanu
 ENV BIND_ADDRESS=[::]:8000
-CMD ["server"]
+CMD ["public-server"]

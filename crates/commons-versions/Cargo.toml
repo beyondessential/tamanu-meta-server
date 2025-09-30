@@ -1,0 +1,18 @@
+[package]
+publish = false
+name = "commons-versions"
+version = "4.2.8"
+edition = "2024"
+rust-version = "1.85.0"
+resolver = "3"
+license = "GPL-3.0-or-later"
+authors = [
+	"Félix Saparelli <felix@passcod.name>",
+	"BES Developers <contact@bes.au>",
+]
+
+[dependencies]
+commons-errors = { path = "../commons-errors" }
+diesel.workspace = true
+node-semver.workspace = true
+serde = { workspace = true, features = ["derive"] }

@@ -1,0 +1,25 @@
+[package]
+publish = false
+name = "commons-errors"
+version = "4.2.8"
+edition = "2024"
+rust-version = "1.85.0"
+resolver = "3"
+license = "GPL-3.0-or-later"
+authors = [
+	"Félix Saparelli <felix@passcod.name>",
+	"BES Developers <contact@bes.au>",
+]
+
+[dependencies]
+axum = { workspace = true, features = ["json", "macros"] }
+diesel.workspace = true
+diesel-async.workspace = true
+http.workspace = true
+miette.workspace = true
+mobc.workspace = true
+node-semver.workspace = true
+problem_details = { workspace = true, features = ["axum"] }
+tera.workspace = true
+thiserror = "2.0.16"
+timesimp.workspace = true
