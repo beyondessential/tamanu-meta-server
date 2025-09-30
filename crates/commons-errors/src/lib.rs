@@ -1,12 +1,16 @@
 use std::{env::VarError, str::FromStr as _};
 
-use axum::{
-	http::StatusCode,
-	response::{IntoResponse, Response},
-};
+#[cfg(feature = "ssr")]
+use axum::response::{IntoResponse, Response};
+#[cfg(feature = "ssr")]
 use diesel_async::pooled_connection::PoolError;
-use http::Uri;
+use http::{StatusCode, Uri};
+use leptos::{
+	prelude::{FromServerFnError, ServerFnErrorErr},
+	server_fn::codec::JsonEncoding,
+};
 use problem_details::ProblemDetails;
+use serde::{Deserialize, Serialize};
 
 pub type Result<T> = std::result::Result<T, AppError>;
 
@@ -14,6 +18,12 @@ pub type Result<T> = std::result::Result<T, AppError>;
 pub enum AppError {
 	#[error("{0}")]
 	Custom(String),
+
+	#[error("{0}")]
+	Problem(#[from] ProblemDetails),
+
+	#[error("not implemented")]
+	NotImplemented,
 
 	#[error("environment: {0}")]
 	Environment(#[from] VarError),
@@ -24,12 +34,15 @@ pub enum AppError {
 	#[error("version parse error: {0}")]
 	VersionParse(#[from] node_semver::SemverError),
 
+	#[cfg(feature = "ssr")]
 	#[error("database: {0}")]
 	DatabasePool(#[from] mobc::Error<PoolError>),
 
+	#[cfg(feature = "ssr")]
 	#[error("database: {0}")]
 	DatabaseQuery(#[from] diesel::result::Error),
 
+	#[cfg(feature = "ssr")]
 	#[error("render: {0}")]
 	Tera(#[from] tera::Error),
 
@@ -42,6 +55,7 @@ pub enum AppError {
 	#[error("version range is not usable")]
 	UnusableRange,
 
+	#[cfg(feature = "ssr")]
 	#[error("timesync: {0}")]
 	Timesync(#[from] timesimp::ParseError),
 
@@ -60,6 +74,9 @@ pub enum AppError {
 
 	#[error("authentication failed: {reason}")]
 	AuthFailed { reason: String },
+
+	#[error("server error: {0}")]
+	ServerFn(#[from] ServerFnErrorErr),
 }
 
 impl AppError {
@@ -74,11 +91,37 @@ impl From<std::io::Error> for AppError {
 	}
 }
 
+impl FromServerFnError for AppError {
+	type Encoder = JsonEncoding;
+	fn from_server_fn_error(value: ServerFnErrorErr) -> Self {
+		AppError::ServerFn(value)
+	}
+}
+
+#[cfg(feature = "ssr")]
 impl IntoResponse for AppError {
 	fn into_response(self) -> Response {
-		let status = match self {
+		let status = self.to_http_status();
+		let problem = self.to_problem_details();
+		let mut res = problem.into_response();
+		*res.status_mut() = status;
+		res
+	}
+}
+
+impl Clone for AppError {
+	fn clone(&self) -> Self {
+		Self::Problem(self.to_problem_details())
+	}
+}
+
+impl AppError {
+	fn to_http_status(&self) -> StatusCode {
+		match self {
+			Self::NotImplemented => StatusCode::NOT_IMPLEMENTED,
 			Self::NoMatchingVersions => StatusCode::NOT_FOUND,
 			Self::UnusableRange => StatusCode::BAD_REQUEST,
+			#[cfg(feature = "ssr")]
 			Self::DatabaseQuery(diesel::result::Error::NotFound) => StatusCode::NOT_FOUND,
 			Self::AuthMissingCertificate => StatusCode::UNAUTHORIZED,
 			Self::AuthInvalidCertificate(_) => StatusCode::BAD_REQUEST,
@@ -86,9 +129,16 @@ impl IntoResponse for AppError {
 			Self::AuthInsufficientPermissions { .. } => StatusCode::FORBIDDEN,
 			Self::AuthFailed { .. } => StatusCode::UNAUTHORIZED,
 			_ => StatusCode::INTERNAL_SERVER_ERROR,
-		};
+		}
+	}
 
-		let problem = ProblemDetails::new()
+	fn to_problem_details(&self) -> ProblemDetails {
+		if let Self::Problem(problem) = self {
+			return problem.clone();
+		}
+
+		let status = self.to_http_status();
+		ProblemDetails::new()
 			.with_status(status)
 			.with_title(self.to_string())
 			.with_detail(format!("{self:?}"))
@@ -97,30 +147,52 @@ impl IntoResponse for AppError {
 					"/errors/{slug}",
 					slug = match self {
 						Self::Custom(_) => "other",
+						Self::NotImplemented => "not-implemented",
 						Self::Environment(_) => "environment",
 						Self::Header(_) => "header",
 						Self::VersionParse(_) => "version-parse",
+						#[cfg(feature = "ssr")]
 						Self::DatabasePool(_) => "database",
-						Self::DatabaseQuery(diesel::result::Error::NotFound) =>
-							"resource-not-found",
+						#[cfg(feature = "ssr")]
+						Self::DatabaseQuery(diesel::result::Error::NotFound) => "resource-not-found",
+						#[cfg(feature = "ssr")]
 						Self::DatabaseQuery(_) => "database",
+						#[cfg(feature = "ssr")]
 						Self::Tera(_) => "render",
 						Self::Io(_) => "io",
 						Self::NoMatchingVersions => "no-matching-versions",
 						Self::UnusableRange => "unusable-range",
+						#[cfg(feature = "ssr")]
 						Self::Timesync(_) => "timesync",
 						Self::AuthMissingCertificate => "auth-missing-certificate",
 						Self::AuthInvalidCertificate(_) => "auth-invalid-certificate",
 						Self::AuthCertificateNotFound => "auth-certificate-not-found",
 						Self::AuthInsufficientPermissions { .. } => "auth-insufficient-permissions",
 						Self::AuthFailed { .. } => "auth-failed",
+						Self::ServerFn(_) => "server-fn",
+						Self::Problem(_) => unreachable!(),
 					}
 				))
 				.unwrap(),
-			);
+			)
+	}
+}
 
-		let mut res = problem.into_response();
-		*res.status_mut() = status;
-		res
+impl Serialize for AppError {
+	fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+	where
+		S: serde::Serializer,
+	{
+		self.to_problem_details().serialize(serializer)
+	}
+}
+
+impl<'de> Deserialize<'de> for AppError {
+	fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+	where
+		D: serde::Deserializer<'de>,
+	{
+		let value = ProblemDetails::deserialize(deserializer)?;
+		Ok(AppError::Problem(value))
 	}
 }

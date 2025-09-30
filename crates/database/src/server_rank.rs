@@ -22,6 +22,18 @@ pub enum ServerRank {
 	Dev,
 }
 
+impl Display for ServerRank {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			ServerRank::Production => write!(f, "production"),
+			ServerRank::Clone => write!(f, "clone"),
+			ServerRank::Demo => write!(f, "demo"),
+			ServerRank::Test => write!(f, "test"),
+			ServerRank::Dev => write!(f, "dev"),
+		}
+	}
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct ServerRankFromStringError;
 impl std::error::Error for ServerRankFromStringError {}

@@ -11,7 +11,11 @@ authors = [
 ]
 
 [dependencies]
-commons-errors = { path = "../commons-errors" }
-diesel.workspace = true
+commons-errors = { path = "../commons-errors", default-features = false }
+diesel = { workspace = true, optional = true }
 node-semver.workspace = true
 serde = { workspace = true, features = ["derive"] }
+
+[features]
+default = ["ssr"]
+ssr = ["dep:diesel", "commons-errors/ssr"]

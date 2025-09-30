@@ -59,9 +59,7 @@ where
 		let private_router = router(
 			private_server::routes(
 				"/$".into(),
-				private_server::state::AppState {
-					db: database::init_to(&url),
-				},
+				private_server::state::AppState::from_db_url(&url).unwrap(),
 			),
 			ClientIpSource::RightmostForwarded,
 		);

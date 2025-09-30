@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use diesel::{
 	backend::Backend,
 	deserialize::{self, FromSql},
@@ -15,6 +17,16 @@ pub enum ServerKind {
 	Central,
 	Facility,
 	Meta,
+}
+
+impl Display for ServerKind {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			ServerKind::Central => write!(f, "central"),
+			ServerKind::Facility => write!(f, "facility"),
+			ServerKind::Meta => write!(f, "meta"),
+		}
+	}
 }
 
 #[derive(Debug, Clone, thiserror::Error)]

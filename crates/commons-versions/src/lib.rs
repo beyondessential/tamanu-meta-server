@@ -1,13 +1,21 @@
-use std::str::FromStr;
+use std::{fmt::Display, str::FromStr};
 
 use commons_errors::AppError;
+#[cfg(feature = "ssr")]
 use diesel::{backend::Backend, deserialize, expression::AsExpression, serialize, sql_types::Text};
 use node_semver::SemverError;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, AsExpression)]
-#[diesel(sql_type = Text)]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ssr", derive(AsExpression))]
+#[cfg_attr(feature = "ssr", diesel(sql_type = Text))]
 pub struct VersionStr(pub node_semver::Version);
+
+impl Display for VersionStr {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "{}", self.0)
+	}
+}
 
 impl Default for VersionStr {
 	fn default() -> Self {
@@ -26,6 +34,7 @@ impl FromStr for VersionStr {
 	}
 }
 
+#[cfg(feature = "ssr")]
 impl<DB> deserialize::FromSql<Text, DB> for VersionStr
 where
 	DB: Backend,
@@ -40,6 +49,7 @@ where
 	}
 }
 
+#[cfg(feature = "ssr")]
 impl serialize::ToSql<Text, diesel::pg::Pg> for VersionStr
 where
 	String: serialize::ToSql<Text, diesel::pg::Pg>,

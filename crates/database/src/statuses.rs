@@ -9,13 +9,13 @@ use commons_versions::VersionStr;
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use futures::stream::{FuturesOrdered, StreamExt};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::servers::Server;
 
-#[derive(Debug, Clone, Serialize, Queryable, Selectable, Insertable, Associations)]
+#[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable, Associations)]
 #[diesel(belongs_to(Server))]
 #[diesel(table_name = crate::schema::statuses)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
