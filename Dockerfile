@@ -8,17 +8,17 @@ RUN mkdir -p /app/{.cargo,src/bin} /built && useradd --system --user-group --uid
 WORKDIR /app
 
 RUN if [ "$TARGETPLATFORM" == "linux/amd64" ]; then \
-		echo "x86_64-unknown-linux-gnu" >/.target; \
-		apt-get -y update; \
-		apt-get -y install libc-dev; \
+	echo "x86_64-unknown-linux-gnu" >/.target; \
+	apt-get -y update; \
+	apt-get -y install libc-dev; \
 	elif [ "$TARGETPLATFORM" == "linux/arm64" ]; then \
-		echo "aarch64-unknown-linux-gnu" >/.target; \
-		dpkg --add-architecture arm64; \
-		apt-get -y update; \
-		apt-get -y install --no-install-recommends \
-			libc-dev:arm64 \
-			{binutils,gcc,g++,gfortran}-aarch64-linux-gnu; \
-		echo -e '[target.aarch64-unknown-linux-gnu]\nlinker = "aarch64-linux-gnu-gcc"' >> .cargo/config.toml; \
+	echo "aarch64-unknown-linux-gnu" >/.target; \
+	dpkg --add-architecture arm64; \
+	apt-get -y update; \
+	apt-get -y install --no-install-recommends \
+	libc-dev:arm64 \
+	{binutils,gcc,g++,gfortran}-aarch64-linux-gnu; \
+	echo -e '[target.aarch64-unknown-linux-gnu]\nlinker = "aarch64-linux-gnu-gcc"' >> .cargo/config.toml; \
 	else echo "Unknown architecture $TARGETPLATFORM"; exit 1; \
 	fi
 
@@ -43,6 +43,14 @@ RUN cp target/$(cat /.target)/$PROFILE/{{public,private}_server,migrate,pingtask
 # this home folder here
 RUN mkdir /runhome && cd /runhome && ln -s config/Rocket.toml
 
+# Frontend build
+FROM --platform=$BUILDPLATFORM node AS web-builder
+WORKDIR /app
+COPY web/private/package.json web/private/package-lock.json ./
+RUN npm ci
+COPY web/private/ ./
+RUN npm run build
+
 # Runtime image
 FROM busybox:glibc
 COPY --from=builder /etc/passwd /etc/passwd
@@ -54,6 +62,7 @@ COPY --from=builder --chmod=0755 /built/pingtask /usr/bin/pingtask
 COPY --from=builder --chmod=0755 /built/prune_untrusted_devices /usr/bin/prune_untrusted_devices
 COPY --from=builder --chown=tamanu:tamanu /runhome /home/tamanu
 COPY --chown=tamanu:tamanu static /home/tamanu/static
+COPY --from=web-builder --chown=tamanu:tamanu /app/dist /home/tamanu/web/private/dist
 
 USER tamanu
 ENV HOME=/home/tamanu

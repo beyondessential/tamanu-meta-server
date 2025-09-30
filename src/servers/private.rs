@@ -13,6 +13,7 @@ pub fn routes(prefix: String) -> Router<AppState> {
 		Router::new()
 			.merge(health::routes())
 			.merge(statuses::routes())
-			.nest_service("/static", ServeDir::new("static")),
+			.nest_service("/static", ServeDir::new("static"))
+			.fallback_service(ServeDir::new("web/private/dist")),
 	)
 }
