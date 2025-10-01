@@ -1,4 +1,3 @@
-use axum::http::StatusCode;
 use commons_tests::diesel_async::SimpleAsyncConnection;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

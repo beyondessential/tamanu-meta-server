@@ -13,6 +13,8 @@ use rcgen::{
 use uuid::Uuid;
 use x509_parser::prelude::*;
 
+use crate::db::TestDb;
+
 #[derive(QueryableByName)]
 struct Device {
 	#[diesel(sql_type = sql_types::Uuid)]
@@ -31,7 +33,7 @@ pub fn make_certificate() -> (Vec<u8>, String) {
 	let cert = cert.self_signed(&key).expect("sign cert");
 
 	let cert_pem = cert.pem();
-	let cert = utf8_percent_encode(&cert_pem, &percent_encoding::NON_ALPHANUMERIC).to_string();
+	let cert = utf8_percent_encode(&cert_pem, percent_encoding::NON_ALPHANUMERIC).to_string();
 
 	let (_, pem_parsed) = parse_x509_pem(cert_pem.as_bytes()).expect("parse pem");
 	let (_, x509_cert) = parse_x509_certificate(&pem_parsed.contents).expect("parse cert");
@@ -40,15 +42,12 @@ pub fn make_certificate() -> (Vec<u8>, String) {
 	(key_data, cert)
 }
 
-#[path = "./db.rs"]
-mod test_db;
-
 pub async fn run<F, T, Fut>(test: F) -> T
 where
 	F: FnOnce(AsyncPgConnection, TestServer, TestServer) -> Fut,
 	Fut: Future<Output = T>,
 {
-	test_db::TestDb::run(async |conn, url| {
+	TestDb::run(async |conn, url| {
 		let public_router = router(
 			public_server::routes().with_state(public_server::state::AppState {
 				db: database::init_to(&url),
