@@ -18,7 +18,7 @@ ghcr.io/beyondessential/tamanu-meta:5.0.2
 
 ## Public API
 
-The `public_server` binary serves the public API and views, which are expected to be exposed to
+The `public-server` binary serves the public API and views, which are expected to be exposed to
 the internet (in production behind an ingress gateway or reverse proxy).
 
 ### Authentication
@@ -229,9 +229,10 @@ TO BE DOCUMENTED
 
 ## Private API
 
-The `private_server` binary serves the private API and views: it must not be exposed to the
+The `private-server` binary serves the private API and views: it must not be exposed to the
 internet (at BES we run it within our Tailscale network). By default this is served at the `/$`
-prefix, but that can be changed with the `--prefix` option.
+prefix, but that can be changed with the `--prefix` option. If you do, you also need to change
+`server-fn-prefix` in the Cargo.toml and `SERVER_FN_PREFIX` in the Dockerfile.
 
 ### POST `/$/reload`
 
@@ -240,7 +241,9 @@ Force a reload of the statuses.
 ## Develop
 
 - Install [Rustup](https://rustup.rs/), which will install Rust and Cargo.
-- Install the diesel CLI tool: <https://diesel.rs/guides/getting-started.html#installing-diesel-cli>
+- Install [cargo-nextest](https://nextest.rs/)
+- Install [cargo-leptos](https://leptos.dev/)
+- Install [the diesel CLI tool](https://diesel.rs/guides/getting-started.html#installing-diesel-cli)
 - Clone the repo via git:
 
 ```console
@@ -263,16 +266,22 @@ $ cargo check
 $ diesel migration run
 ```
 
-- Run with:
+- Run (public server and other binaries):
 
 ```console
 $ cargo run
 ```
 
+- Run (private server):
+
+```console
+$ cargo leptos watch
+```
+
 - Tests:
 
 ```console
-$ cargo test
+$ cargo nextest run
 ```
 
 We recommend using [Rust Analyzer](https://rust-analyzer.github.io/) or [Rust Rover](https://www.jetbrains.com/rust/) for development.
@@ -308,7 +317,7 @@ $ cargo fmt
 On the main branch:
 
 ```console
-$ cargo release --execute minor // or patch, major
+$ cargo release --workspace --execute minor // or patch, major
 ```
 
 Install `cargo-release` with:
