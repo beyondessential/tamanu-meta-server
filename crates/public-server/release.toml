@@ -1,0 +1,4 @@
+pre-release-hook = ["git", "cliff", "-c", "../../cliff.toml", "-o", "../../CHANGELOG.md", "--tag", "{{version}}"]
+pre-release-replacements = [
+  { file = "../../README.md", search = "tamanu-meta:[0-9\\.]+", replace = "tamanu-meta:{{version}}"},
+]
