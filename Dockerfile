@@ -30,7 +30,8 @@ COPY Cargo.toml Cargo.lock ./
 
 FROM --platform=$BUILDPLATFORM builder-base AS builder-server
 ENV LEPTOS_OUTPUT_NAME=private-server
-RUN cargo build --locked --target $(cat /.target) --release
+ENV SERVER_FN_PREFIX="/$/api"
+RUN cargo build --locked --target $(cat /.target) --release --bins
 RUN cp target/$(cat /.target)/release/{{public,private}-server,migrate,ownstatus,pingtask,prune_untrusted_devices} /built/
 
 FROM --platform=$BUILDPLATFORM builder-base AS builder-web
@@ -52,10 +53,6 @@ COPY --from=builder-server --chmod=0755 /built/prune_untrusted_devices /usr/bin/
 COPY --from=builder-server --chmod=0755 /built/private-server /usr/bin/private-server
 COPY --from=builder-web --chown=tamanu:tamanu /app/target/site /home/tamanu/target/site
 COPY --chown=tamanu:tamanu static /home/tamanu/static
-
-# back-compat, remove when no longer needed
-COPY --from=builder-server --chmod=0755 /built/public-server /usr/bin/public_server
-COPY --from=builder-server --chmod=0755 /built/private-server /usr/bin/private_server
 
 USER tamanu
 ENV HOME=/home/tamanu
