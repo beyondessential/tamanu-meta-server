@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [5.0.0](https://github.com/beyondessential/tamanu-meta-server/compare/v4.2.8..5.0.0) - 2025-10-01
+## [5.0.0](https://github.com/beyondessential/tamanu-meta-server/compare/v4.2.8..v5.0.0) - 2025-10-01
 
 
 - **Refactor:** Break into crates - ([7aeee9f](https://github.com/beyondessential/tamanu-meta-server/commit/7aeee9f58f3a8ecc6e6338f20d672de82ca37a9b))
