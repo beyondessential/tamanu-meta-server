@@ -95,21 +95,20 @@ pub fn Table() -> impl IntoView {
 							<td class="name">{entry.server_name.clone()}</td>
 							<td class="rank">{entry.server_rank.clone()}</td>
 							<td class="host"><a href="{entry.server_host.clone()}">{entry.server_host.clone()}</a></td>
-							{if let Some(date) = entry.updated_at.as_ref() {
-								view! {
-									<td class="ago" title={date.clone()}>{entry.since.clone()} ago</td>
-									<td class="version">{entry.version.clone()}</td>
-									<td class="platform">{entry.platform.clone()}</td>
-									<td class="nodejs">{entry.nodejs.clone()}</td>
-									<td class="postgres">{entry.postgres.clone()}</td>
-									<td class="timezone">{entry.timezone.clone()}</td>
-								}
-							} else {
-								view! {
+							<Show
+								when={ let entry = entry.clone(); move || entry.updated_at.is_some() }
+								fallback=|| view! {
 									<td class="ago never" title="never or more than a week ago">&gt;7d ago</td>
 									<td colspan=5></td>
 								}
-							}}
+							>
+								<td class="ago" title={entry.updated_at.clone()}>{entry.since.clone()} ago</td>
+								<td class="version">{entry.version.clone()}</td>
+								<td class="platform">{entry.platform.clone()}</td>
+								<td class="nodejs">{entry.nodejs.clone()}</td>
+								<td class="postgres">{entry.postgres.clone()}</td>
+								<td class="timezone">{entry.timezone.clone()}</td>
+							</Show>
 						</tr>
 						</For>
 					</tbody>
