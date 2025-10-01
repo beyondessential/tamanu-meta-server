@@ -707,6 +707,7 @@ dependencies = [
  "commons-versions",
  "database",
  "diesel",
+ "diesel-async",
  "http",
  "node-semver",
  "percent-encoding",

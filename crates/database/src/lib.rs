@@ -3,6 +3,7 @@ use diesel_async::{
 	pooled_connection::{AsyncDieselConnectionManager, mobc::Pool},
 };
 
+pub mod admins;
 pub mod artifacts;
 pub mod device_role;
 pub mod devices;

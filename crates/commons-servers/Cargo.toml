@@ -25,6 +25,7 @@ diesel = { workspace = true, features = [
 	"postgres_backend",
 	"i-implement-a-third-party-backend-and-opt-into-breaking-changes",
 ] }
+diesel-async.workspace = true
 http.workspace = true
 node-semver.workspace = true
 percent-encoding = "2.3.2"
