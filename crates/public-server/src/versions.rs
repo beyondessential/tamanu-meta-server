@@ -16,7 +16,7 @@ use commons_versions::{VersionRange, VersionStr};
 use database::{
 	Db,
 	artifacts::Artifact,
-	versions::{NewVersion, Version},
+	versions::{NewVersion, Version, VersionStatus},
 };
 use diesel::{ExpressionMethods as _, SelectableHelper as _};
 use diesel_async::RunQueryDsl as _;
@@ -133,7 +133,7 @@ async fn remove(
 	let version = VersionStr::from_str(&version)?;
 	diesel::update(versions)
 		.filter(database::versions::predicate_version!(version.0))
-		.set(published.eq(false))
+		.set(status.eq(VersionStatus::Yanked))
 		.execute(&mut db)
 		.await?;
 

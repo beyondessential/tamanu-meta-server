@@ -101,11 +101,14 @@ impl Version {
 		} = version.0;
 		version_updates
 			.filter(
-				major.eq(target_major as i32).and(published.eq(true)).and(
-					minor.gt(target_minor as i32).or(minor
-						.eq(target_minor as i32)
-						.and(patch.gt(target_patch as i32))),
-				),
+				major
+					.eq(target_major as i32)
+					.and(status.eq(VersionStatus::Published))
+					.and(
+						minor.gt(target_minor as i32).or(minor
+							.eq(target_minor as i32)
+							.and(patch.gt(target_patch as i32))),
+					),
 			)
 			.order_by(minor)
 			.select(version_updates::all_columns())
@@ -130,8 +133,8 @@ impl Version {
 		table
 			.select(Version::as_select())
 			.filter(
-				published
-					.eq(true)
+				status
+					.eq(VersionStatus::Published)
 					.and(major.ge(target_major as i32))
 					.and(minor.ge(target_minor as i32))
 					.and(patch.ge(target_patch as i32)),
