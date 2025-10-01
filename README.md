@@ -310,6 +310,14 @@ $ diesel migration redo
 $ cargo fmt
 ```
 
+### Download a database
+
+```console
+kubectl exec -n tamanu-meta-dev meta-db-1 -c postgres -- pg_dump -Fc -d app > dev.dump
+createdb tamanu_meta_dev
+pg_restore --no-owner --role=$USER -d tamanu_meta_dev --verbose < dev.dump
+```
+
 ### Releasing
 
 (You need write access to the main branch directly)
