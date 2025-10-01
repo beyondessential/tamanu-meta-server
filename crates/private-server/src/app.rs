@@ -41,7 +41,7 @@ pub fn Status() -> impl IntoView {
 	let data = Resource::new(move || status_list_r.get(), async |_| summary().await);
 
 	view! {
-		<Suspense fallback=|| view! { <div class="loading">Loading...</div> }>{move || {
+		<Suspense fallback=|| view! { <div class="loading">"Loading…"</div> }>{move || {
 			let data = data.get().and_then(|d| d.ok());
 			view! {
 				<p>
@@ -67,7 +67,7 @@ pub fn Table() -> impl IntoView {
 	let data = Resource::new(move || entries_r.get(), async |_| table().await);
 
 	view! {
-		<Suspense fallback=|| view! { <div class="loading">Loading...</div> }>{move || {
+		<Suspense fallback=|| view! { <div class="loading">"Loading…"</div> }>{move || {
 			view! {
 				<table>
 					<thead>
@@ -98,7 +98,7 @@ pub fn Table() -> impl IntoView {
 							<Show
 								when={ let entry = entry.clone(); move || entry.updated_at.is_some() }
 								fallback=|| view! {
-									<td class="ago never" title="never or more than a week ago">&gt;7d ago</td>
+									<td class="ago never" title="never or more than a week ago">"<7d ago"</td>
 									<td colspan=5></td>
 								}
 							>
