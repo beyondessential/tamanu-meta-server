@@ -36,6 +36,7 @@ tower-http = { version = "0.6.6", optional = true, features = ["fs"] }
 tracing.workspace = true
 uuid = { version = "1.18.1", optional = true, features = ["serde", "v4"] }
 wasm-bindgen = { version = "0.2.104", optional = true }
+web-sys = { version = "0.3.81", features = ["Clipboard", "Navigator", "Window"] }
 
 [dev-dependencies]
 commons-tests = { path = "../commons-tests" }

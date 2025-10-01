@@ -91,7 +91,17 @@ pub fn Table() -> impl IntoView {
 							let(entry)
 						>
 						<tr>
-							<td class=format!("status {}", entry.up)>{entry.up.clone()}</td>
+							<td
+								class=format!("status {}", entry.up)
+								on:click={
+									let id = entry.server_id.clone();
+									move |_| {
+										web_sys::window().map(|window| {
+											window.navigator().clipboard().write_text(&id)
+										});
+									}
+								}
+							>{entry.up.clone()}</td>
 							<td class="name">{entry.server_name.clone()}</td>
 							<td class="rank">{entry.server_rank.clone()}</td>
 							<td class="host"><a href={entry.server_host.clone()}>{entry.server_host.clone()}</a></td>
