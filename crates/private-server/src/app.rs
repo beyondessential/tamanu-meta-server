@@ -106,7 +106,7 @@ pub fn Table() -> impl IntoView {
 							<td class="rank">{entry.server_rank.clone()}</td>
 							<td class="host"><a href={entry.server_host.clone()}>{entry.server_host.clone()}</a></td>
 							<Show
-								when={ let entry = entry.clone(); move || entry.updated_at.is_some() }
+								when={ let up = entry.updated_at.is_some(); move || up }
 								fallback=|| view! {
 									<td class="ago never" title="never or more than a week ago">"<7d ago"</td>
 									<td colspan=5></td>
