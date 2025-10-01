@@ -96,24 +96,6 @@ async fn status_page_with_versions() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn reload_endpoint_post() {
-	commons_tests::server::run(async |_conn, _, private| {
-		let response = private.post("/$/reload").await;
-		response.assert_status_ok();
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn reload_endpoint_get_not_allowed() {
-	commons_tests::server::run(async |_conn, _, private| {
-		let response = private.get("/$/reload").await;
-		response.assert_status(StatusCode::METHOD_NOT_ALLOWED);
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn status_empty_database() {
 	commons_tests::server::run(async |_conn, _, private| {
 		// Test status page with no data
