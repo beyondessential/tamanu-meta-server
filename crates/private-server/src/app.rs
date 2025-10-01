@@ -94,7 +94,7 @@ pub fn Table() -> impl IntoView {
 							<td class=format!("status {}", entry.up)>{entry.up.clone()}</td>
 							<td class="name">{entry.server_name.clone()}</td>
 							<td class="rank">{entry.server_rank.clone()}</td>
-							<td class="host"><a href="{entry.server_host.clone()}">{entry.server_host.clone()}</a></td>
+							<td class="host"><a href={entry.server_host.clone()}>{entry.server_host.clone()}</a></td>
 							<Show
 								when={ let entry = entry.clone(); move || entry.updated_at.is_some() }
 								fallback=|| view! {
