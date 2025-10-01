@@ -112,7 +112,7 @@ pub fn Table() -> impl IntoView {
 									<td colspan=5></td>
 								}
 							>
-								<td class="ago" title={entry.updated_at.clone()}>{entry.since.clone()} ago</td>
+								<td class="ago" title={entry.updated_at.clone()}>{entry.since.clone()} " ago"</td>
 								<td class="version">{entry.version.clone()}</td>
 								<td class="platform">{entry.platform.clone()}</td>
 								<td class="nodejs">{entry.nodejs.clone()}</td>
