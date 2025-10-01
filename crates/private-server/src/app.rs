@@ -41,7 +41,7 @@ pub fn Status() -> impl IntoView {
 	let data = Resource::new(move || status_list_r.get(), async |_| summary().await);
 
 	view! {
-		<Suspense fallback=|| view! { <div class="loading">Loading…</div> }>{move || {
+		<Suspense fallback=|| view! { <div class="loading">Loading...</div> }>{move || {
 			let data = data.get().and_then(|d| d.ok());
 			view! {
 				<p>
