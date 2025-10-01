@@ -20,7 +20,7 @@ pub enum AppError {
 	Custom(String),
 
 	#[error("{0}")]
-	Problem(#[from] ProblemDetails),
+	Problem(Box<ProblemDetails>),
 
 	#[error("not implemented")]
 	NotImplemented,
@@ -32,7 +32,7 @@ pub enum AppError {
 	Header(String),
 
 	#[error("version parse error: {0}")]
-	VersionParse(#[from] node_semver::SemverError),
+	VersionParse(Box<node_semver::SemverError>),
 
 	#[cfg(feature = "ssr")]
 	#[error("database: {0}")]
@@ -91,6 +91,18 @@ impl From<std::io::Error> for AppError {
 	}
 }
 
+impl From<ProblemDetails> for AppError {
+	fn from(err: ProblemDetails) -> Self {
+		Self::Problem(Box::new(err))
+	}
+}
+
+impl From<node_semver::SemverError> for AppError {
+	fn from(err: node_semver::SemverError) -> Self {
+		Self::VersionParse(Box::new(err))
+	}
+}
+
 impl FromServerFnError for AppError {
 	type Encoder = JsonEncoding;
 	fn from_server_fn_error(value: ServerFnErrorErr) -> Self {
@@ -111,7 +123,7 @@ impl IntoResponse for AppError {
 
 impl Clone for AppError {
 	fn clone(&self) -> Self {
-		Self::Problem(self.to_problem_details())
+		Self::Problem(Box::new(self.to_problem_details()))
 	}
 }
 
@@ -134,7 +146,7 @@ impl AppError {
 
 	fn to_problem_details(&self) -> ProblemDetails {
 		if let Self::Problem(problem) = self {
-			return problem.clone();
+			return *problem.clone();
 		}
 
 		let status = self.to_http_status();
@@ -193,6 +205,6 @@ impl<'de> Deserialize<'de> for AppError {
 		D: serde::Deserializer<'de>,
 	{
 		let value = ProblemDetails::deserialize(deserializer)?;
-		Ok(AppError::Problem(value))
+		Ok(AppError::Problem(Box::new(value)))
 	}
 }
