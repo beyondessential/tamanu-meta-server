@@ -1,5 +1,9 @@
 use leptos::prelude::*;
 use leptos_meta::{MetaTags, Stylesheet, Title, provide_meta_context};
+use leptos_router::{
+	components::{A, Route, Router, Routes},
+	path,
+};
 
 mod greeting;
 mod status;
@@ -31,10 +35,24 @@ pub fn App() -> impl IntoView {
 	provide_meta_context();
 
 	view! {
-		<header class="header">
-			<status::Status/>
-			<greeting::Greeting />
-		</header>
-		<statuses::Table />
+		<div id="root">
+			<Router>
+				<main>
+					<Routes fallback=|| Index>
+						<Route path=path!("") view=Index />
+						<Route path=path!("status") view=statuses::Page />
+					</Routes>
+				</main>
+			</Router>
+		</div>
+	}
+}
+
+#[component]
+pub fn Index() -> impl IntoView {
+	view! {
+		<nav>
+			<A href="/$/status">"Status"</A>
+		</nav>
 	}
 }

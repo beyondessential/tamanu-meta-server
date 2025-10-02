@@ -28,8 +28,10 @@ folktime = { version = "0.2.1", optional = true }
 leptos = { workspace = true, features = ["islands"] }
 leptos_axum = { version = "0.8.0", optional = true }
 leptos_meta = "0.8.0"
+leptos_router = { version = "0.8.8", features = ["tracing"] }
 lloggs = { workspace = true, optional = true, features = ["miette-7"] }
 miette = { workspace = true, optional = true }
+public-server = { path = "../public-server", optional = true, default-features = false }
 serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, optional = true, features = ["macros", "net", "rt-multi-thread", "signal"] }
 tower-http = { version = "0.6.6", optional = true, features = ["fs"] }
@@ -55,12 +57,13 @@ ssr = [
 	"dep:axum-server-timing",
 	"dep:chrono",
 	"dep:clap",
-	"dep:database",
 	"dep:commons-servers",
+	"dep:database",
 	"dep:folktime",
 	"dep:leptos_axum",
 	"dep:lloggs",
 	"dep:miette",
+	"dep:public-server",
 	"dep:tokio",
 	"dep:tower-http",
 	"dep:uuid",
@@ -68,4 +71,5 @@ ssr = [
 	"commons-versions/ssr",
     "leptos/ssr",
     "leptos_meta/ssr",
+    "leptos_router/ssr",
 ]

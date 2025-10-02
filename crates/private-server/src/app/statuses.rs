@@ -1,5 +1,22 @@
-use crate::statuses::table;
 use leptos::prelude::*;
+
+use crate::{
+	app::{greeting::Greeting, status::Status},
+	statuses::table,
+};
+
+#[component]
+pub fn Page() -> impl IntoView {
+	view! {
+		<header class="header">
+			<Status/>
+			<Greeting />
+		</header>
+		<article>
+			<Table />
+		</article>
+	}
+}
 
 #[island]
 pub fn Table() -> impl IntoView {

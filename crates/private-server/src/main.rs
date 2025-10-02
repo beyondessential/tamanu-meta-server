@@ -4,9 +4,6 @@ struct Args {
 	#[command(flatten)]
 	logging: lloggs::LoggingArgs,
 
-	#[arg(long, default_value = "/$")]
-	prefix: String,
-
 	#[arg(long, short, default_value = "8081", env = "PORT")]
 	port: u16,
 
@@ -48,7 +45,7 @@ async fn main() -> miette::Result<()> {
 		}
 		res = serve(
 			router(
-				private_server::routes(args.prefix, AppState::init()?),
+				private_server::routes(AppState::init()?)?,
 				args.client_ip_source,
 			),
 			addr,
