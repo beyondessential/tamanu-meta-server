@@ -66,13 +66,11 @@ pub fn DeviceManagement() -> impl IntoView {
 	let (message, set_message) = signal(String::new());
 	let (refresh_trigger, set_refresh_trigger) = signal(0);
 
-	// Load untrusted devices
 	let untrusted_devices = Resource::new(
 		move || refresh_trigger.get(),
 		async |_| crate::fns::devices::list_untrusted_devices().await,
 	);
 
-	// Search results
 	let search_results = Resource::new(
 		move || search_query.get(),
 		async |query| {
@@ -90,7 +88,6 @@ pub fn DeviceManagement() -> impl IntoView {
 		async move { crate::fns::devices::trust_device(device_id, role).await }
 	});
 
-	// Handle trust device results
 	Effect::new(move |_| {
 		if let Some(result) = trust_device_action.value().get() {
 			match result {
@@ -226,7 +223,6 @@ pub fn DeviceRow(
 
 	let device_id = device.device.id.clone();
 
-	// Load connection history when expanded
 	let connection_history = {
 		let device_id = device_id.clone();
 		Resource::new(
