@@ -230,27 +230,8 @@ impl Device {
 		use diesel::sql_query;
 		use diesel::sql_types::{Binary, Bool, Uuid as SqlUuid};
 
-		// Try to decode hex query (with or without colons/spaces)
-		let search_bytes = if let Ok(hex_bytes) = hex::decode(query.replace([' ', ':'], "")) {
-			hex_bytes
-		} else {
-			// For PEM format, try to extract the base64 part and decode it
-			if query.contains("-----BEGIN") && query.contains("-----END") {
-				let base64_part = query
-					.lines()
-					.filter(|line| !line.starts_with("-----"))
-					.collect::<Vec<_>>()
-					.join("");
-
-				if let Ok(decoded) = base64::prelude::BASE64_STANDARD.decode(base64_part) {
-					decoded
-				} else {
-					query.as_bytes().to_vec()
-				}
-			} else {
-				query.as_bytes().to_vec()
-			}
-		};
+		// Try different search strategies
+		let mut matching_device_ids: Vec<Uuid> = Vec::new();
 
 		#[derive(QueryableByName)]
 		struct MatchingDevice {
@@ -258,19 +239,138 @@ impl Device {
 			device_id: Uuid,
 		}
 
-		// Use PostgreSQL's position function to search for the byte sequence
-		let matching_device_ids: Vec<Uuid> = sql_query(
-			"SELECT DISTINCT device_id FROM device_keys
-			 WHERE is_active = $1 AND position($2 in key_data) > 0",
-		)
-		.bind::<Bool, _>(true)
-		.bind::<Binary, _>(&search_bytes)
-		.load::<MatchingDevice>(db)
-		.await
-		.map_err(AppError::from)?
-		.into_iter()
-		.map(|m| m.device_id)
-		.collect();
+		// Strategy 1: Try hex decode and binary search
+		if let Ok(hex_bytes) = hex::decode(query.replace([' ', ':'], "")) {
+			let hex_matches: Vec<Uuid> = sql_query(
+				"SELECT DISTINCT device_id FROM device_keys
+				 WHERE is_active = $1 AND position($2 in key_data) > 0",
+			)
+			.bind::<Bool, _>(true)
+			.bind::<Binary, _>(&hex_bytes)
+			.load::<MatchingDevice>(db)
+			.await
+			.map_err(AppError::from)?
+			.into_iter()
+			.map(|m| m.device_id)
+			.collect();
+			matching_device_ids.extend(hex_matches);
+		}
+
+		// Strategy 2: For PEM format, extract base64 and decode
+		// Handle both newline-separated and space-separated PEM (from text input fields)
+		if query.contains("-----BEGIN") && query.contains("-----END") {
+			// Extract everything between BEGIN and END markers
+			let begin_marker = "-----BEGIN";
+			let end_marker = "-----END";
+
+			if let Some(begin_pos) = query.find(begin_marker) {
+				if let Some(end_pos) = query.find(end_marker) {
+					// Get the content between the markers
+					// Find the end of the BEGIN header line
+					let begin_header_end = if let Some(newline_pos) = query[begin_pos..].find('\n')
+					{
+						begin_pos + newline_pos + 1
+					} else {
+						// For space-separated PEM, find the end of the header
+						// Look for "-----" after the key type (e.g., "PUBLIC KEY-----")
+						let after_begin = begin_pos + begin_marker.len(); // Skip "-----BEGIN"
+						if let Some(end_marker_pos) = query[after_begin..].find("-----") {
+							let header_end = after_begin + end_marker_pos + 5; // +5 for "-----"
+							// Find the first space after the complete header
+							if let Some(space_pos) = query[header_end..].find(' ') {
+								header_end + space_pos + 1
+							} else {
+								header_end
+							}
+						} else {
+							begin_pos
+						}
+					};
+					let content_start = begin_header_end;
+
+					let pem_content = &query[content_start..end_pos];
+
+					// Check if this is malformed PEM with indented base64 lines
+					// Only reject multi-line PEM with indented content, not space-separated single-line PEM
+					let lines: Vec<&str> = pem_content.lines().collect();
+					let has_indented_lines = lines.len() > 1
+						&& lines.iter().any(|line| {
+							let trimmed = line.trim();
+							!trimmed.is_empty()
+								&& !trimmed.starts_with("-----")
+								&& line.starts_with([' ', '\t'])
+						});
+
+					if !has_indented_lines {
+						// Remove any remaining header/footer fragments and whitespace
+						let base64_part = pem_content
+							.split_whitespace()
+							.filter(|part| !part.starts_with("-----") && !part.is_empty())
+							.collect::<Vec<_>>()
+							.join("");
+
+						if let Ok(decoded) = base64::prelude::BASE64_STANDARD.decode(base64_part) {
+							let pem_matches: Vec<Uuid> = sql_query(
+								"SELECT DISTINCT device_id FROM device_keys
+								 WHERE is_active = $1 AND position($2 in key_data) > 0",
+							)
+							.bind::<Bool, _>(true)
+							.bind::<Binary, _>(&decoded)
+							.load::<MatchingDevice>(db)
+							.await
+							.map_err(AppError::from)?
+							.into_iter()
+							.map(|m| m.device_id)
+							.collect();
+							matching_device_ids.extend(pem_matches);
+						}
+					}
+				}
+			}
+		}
+
+		// Strategy 3: Base64 string search by encoding PostgreSQL binary data
+		// PostgreSQL's encode() adds line breaks every 76 chars, so we need to remove them
+		if query.len() > 3
+			&& query
+				.chars()
+				.all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=')
+		{
+			let base64_matches: Vec<Uuid> = sql_query(
+				"SELECT DISTINCT device_id FROM device_keys
+				 WHERE is_active = $1 AND replace(encode(key_data, 'base64'), E'\\n', '') LIKE '%' || $2 || '%'",
+			)
+			.bind::<Bool, _>(true)
+			.bind::<diesel::sql_types::Text, _>(query)
+			.load::<MatchingDevice>(db)
+			.await
+			.map_err(AppError::from)?
+			.into_iter()
+			.map(|m| m.device_id)
+			.collect();
+			matching_device_ids.extend(base64_matches);
+		}
+
+		// Strategy 4: Raw byte search as fallback
+		if matching_device_ids.is_empty() {
+			let raw_matches: Vec<Uuid> = sql_query(
+				"SELECT DISTINCT device_id FROM device_keys
+				 WHERE is_active = $1 AND position($2 in key_data) > 0",
+			)
+			.bind::<Bool, _>(true)
+			.bind::<Binary, _>(query.as_bytes())
+			.load::<MatchingDevice>(db)
+			.await
+			.map_err(AppError::from)?
+			.into_iter()
+			.map(|m| m.device_id)
+			.collect();
+			matching_device_ids.extend(raw_matches);
+		}
+
+		// Remove duplicates
+		matching_device_ids.sort();
+		matching_device_ids.dedup();
 
 		if matching_device_ids.is_empty() {
 			return Ok(vec![]);
