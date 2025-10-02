@@ -1,6 +1,62 @@
 use leptos::prelude::*;
 use leptos_meta::{Stylesheet, provide_meta_context};
 
+#[derive(Debug, Clone)]
+pub struct ConnectionGroup {
+	ip: String,
+	user_agent: Option<String>,
+	count: usize,
+	earliest_time: String,
+	latest_time: String,
+	earliest_relative: String,
+	latest_relative: String,
+}
+
+fn group_consecutive_connections(
+	connections: Vec<crate::fns::devices::DeviceConnectionData>,
+) -> Vec<ConnectionGroup> {
+	if connections.is_empty() {
+		return vec![];
+	}
+
+	let mut groups = Vec::new();
+	let mut current_group = vec![connections[0].clone()];
+
+	for conn in connections.into_iter().skip(1) {
+		let last_in_group = current_group.last().unwrap();
+
+		if conn.ip == last_in_group.ip && conn.user_agent == last_in_group.user_agent {
+			current_group.push(conn);
+		} else {
+			let group = create_group(current_group);
+			groups.push(group);
+			current_group = vec![conn];
+		}
+	}
+
+	if !current_group.is_empty() {
+		groups.push(create_group(current_group));
+	}
+
+	groups
+}
+
+fn create_group(connections: Vec<crate::fns::devices::DeviceConnectionData>) -> ConnectionGroup {
+	let count = connections.len();
+	let first = &connections[0];
+	let last = connections.last().unwrap();
+
+	ConnectionGroup {
+		ip: first.ip.clone(),
+		user_agent: first.user_agent.clone(),
+		count,
+		earliest_time: last.created_at.clone(), // last in list is earliest chronologically
+		latest_time: first.created_at.clone(),  // first in list is latest chronologically
+		earliest_relative: last.created_at_relative.clone(),
+		latest_relative: first.created_at_relative.clone(),
+	}
+}
+
 #[island]
 pub fn Page() -> impl IntoView {
 	provide_meta_context();
@@ -380,16 +436,8 @@ pub fn DeviceRow(
 											} else {
 												view! {
 													<div class="history-list">
-														<For each=move || connections.clone() key=|conn| conn.id.clone() let:conn>
-															<div class="history-item">
-																<div class="history-time timestamp-hover" title={conn.created_at.clone()}>{conn.created_at_relative.clone()}</div>
-																<div class="history-ip">{conn.ip.clone()}</div>
-																{conn.user_agent.as_ref().map(|ua| {
-																	view! {
-																		<div class="history-ua">{ua.clone()}</div>
-																	}
-																})}
-															</div>
+														<For each=move || group_consecutive_connections(connections.clone()) key=|group| format!("{}_{}", group.ip, group.count) let:group>
+															<ConnectionGroupRow group=group />
 														</For>
 													</div>
 												}.into_any()
@@ -409,6 +457,40 @@ pub fn DeviceRow(
 					view! {}.into_any()
 				}
 			}}
+		</div>
+	}
+}
+
+#[component]
+pub fn ConnectionGroupRow(group: ConnectionGroup) -> impl IntoView {
+	let time_display = if group.count == 1 {
+		group.latest_relative.clone()
+	} else {
+		format!("{} to {}", group.earliest_relative, group.latest_relative)
+	};
+
+	let time_tooltip = if group.count == 1 {
+		group.latest_time.clone()
+	} else {
+		format!("{} to {}", group.earliest_time, group.latest_time)
+	};
+
+	let count_display = if group.count > 1 {
+		format!("{}×", group.count)
+	} else {
+		String::new()
+	};
+
+	view! {
+		<div class="history-item">
+			<div class="history-count">{count_display}</div>
+			<div class="history-time timestamp-hover" title={time_tooltip}>{time_display}</div>
+			<div class="history-ip">{group.ip}</div>
+			{group.user_agent.as_ref().map(|ua| {
+				view! {
+					<div class="history-ua">{ua.clone()}</div>
+				}
+			})}
 		</div>
 	}
 }

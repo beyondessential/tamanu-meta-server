@@ -355,13 +355,20 @@
 
 		.history-item {
 			display: grid;
-			grid-template-columns: auto auto 1fr;
+			grid-template-columns: auto auto auto 1fr;
 			gap: 1em;
 			padding: 0.75em;
 			background: oklch(1 0 0);
 			border: 1px solid oklch(0.92 0.01 240);
 			border-radius: 4px;
 			font-size: 0.9em;
+
+			.history-count {
+				font-weight: 600;
+				color: oklch(0.5 0.1 20);
+				min-width: 2em;
+				text-align: right;
+			}
 
 			.history-time {
 				font-family: monospace;
