@@ -56,7 +56,7 @@ body {
 
 	.nav-links {
 		display: flex;
-		gap: 2em;
+		gap: 0;
 
 		a {
 			color: oklch(0.3 0.1 240);
