@@ -50,7 +50,7 @@ pub fn App() -> impl IntoView {
 	}
 }
 
-#[island]
+#[component]
 pub fn GlobalNav() -> impl IntoView {
 	let is_admin = Resource::new(
 		|| (),
