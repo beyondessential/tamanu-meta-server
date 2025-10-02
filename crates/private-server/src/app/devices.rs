@@ -276,7 +276,7 @@ pub fn DeviceRow(
 ) -> impl IntoView {
 	let (key_format, set_key_format) = signal("pem".to_string());
 	let (show_history, set_show_history) = signal(false);
-	let (selected_role, set_selected_role) = signal("admin".to_string());
+	let (selected_role, set_selected_role) = signal("server".to_string());
 
 	let device_id = device.device.id.clone();
 
@@ -439,9 +439,8 @@ pub fn DeviceRow(
 						prop:value=move || selected_role.get()
 						on:change=move |ev| set_selected_role.set(event_target_value(&ev))
 					>
-						<option value="admin">"Admin"</option>
-						<option value="releaser">"Releaser"</option>
 						<option value="server">"Server"</option>
+						<option value="releaser">"Releaser"</option>
 					</select>
 					<button
 						class="trust-btn"
