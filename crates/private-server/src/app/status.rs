@@ -13,8 +13,8 @@ pub fn Status() -> impl IntoView {
 			view! {
 				<p>
 					{data.as_ref().map(|d| d.releases.len())} " release branches in active use: "
-					<b>{data.as_ref().map(|d| d.releases.iter().map(|(maj, min)| format!("{}.{}", maj, min)).collect::<Vec<_>>().join(", "))}</b>
-					<span class="versions">"("
+					<b class="monospace">{data.as_ref().map(|d| d.releases.iter().map(|(maj, min)| format!("{}.{}", maj, min)).collect::<Vec<_>>().join(", "))}</b>
+					<span class="versions monospace">"("
 					{data.as_ref().map(|d| d.versions.len())}
 					" versions: "
 					{data.as_ref().map(|d| d.bracket.min.to_string())}

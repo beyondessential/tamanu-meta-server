@@ -73,10 +73,10 @@ pub fn Table() -> impl IntoView {
 								}
 							>
 								<td class="ago" title={entry.updated_at.clone()}>{entry.since.clone()} " ago"</td>
-								<td class="version">{entry.version.clone()}</td>
-								<td class="platform">{entry.platform.clone()}</td>
-								<td class="nodejs">{entry.nodejs.clone()}</td>
-								<td class="postgres">{entry.postgres.clone()}</td>
+								<td class="version monospace">{entry.version.clone()}</td>
+								<td class="platform monospace">{entry.platform.clone()}</td>
+								<td class="nodejs monospace">{entry.nodejs.clone()}</td>
+								<td class="postgres monospace">{entry.postgres.clone()}</td>
 								<td class="timezone">{entry.timezone.clone()}</td>
 							</Show>
 						</tr>

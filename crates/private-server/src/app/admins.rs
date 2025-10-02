@@ -166,7 +166,7 @@ pub fn AdminManagement() -> impl IntoView {
 								<ul class="admin-items">
 									<For each=move || admins.clone() key=|a| a.clone() let:admin>
 										<li class="admin-item">
-											<span class="admin-email">{admin.clone()}</span>
+											<span class="admin-email monospace">{admin.clone()}</span>
 											<button
 												class="delete-btn"
 												on:click=move |_| {

@@ -4,22 +4,24 @@
 
 		h1 {
 			font-size: 2em;
-			color: oklch(0.25 0.05 220);
+			color: oklch(0.3 0.1 240);
 			margin-bottom: 1em;
+			font-weight: 500;
 		}
 	}
 
 	.add-admin-form {
-		background: oklch(0.97 0.005 240);
+		background: oklch(0.99 0.005 240);
 		padding: 1.5em;
 		border-radius: 8px;
 		margin-bottom: 2em;
-		border: 1px solid oklch(0.87 0.01 240);
+		border: 1px solid oklch(0.9 0.01 240);
 
 		h2 {
 			margin-top: 0;
 			margin-bottom: 1em;
-			color: oklch(0.35 0.05 240);
+			color: oklch(0.4 0.08 240);
+			font-weight: 500;
 		}
 
 		form {
@@ -35,37 +37,39 @@
 		}
 
 		label {
-			font-weight: bold;
-			color: oklch(0.45 0.03 240);
+			font-weight: 500;
+			color: oklch(0.45 0.05 240);
 		}
 
 		input[type="email"] {
 			padding: 0.75em;
-			border: 1px solid oklch(0.8 0.01 240);
+			border: 1px solid oklch(0.85 0.01 240);
 			border-radius: 4px;
 			font-size: 1em;
 			max-width: 300px;
+			font-family: inherit;
 
 			&:focus {
 				outline: none;
-				border-color: oklch(0.75 0.15 240);
-				box-shadow: 0 0 0 2px oklch(0.75 0.15 240 / 0.25);
+				border-color: oklch(0.7 0.15 240);
+				box-shadow: 0 0 0 2px oklch(0.7 0.15 240 / 0.25);
 			}
 		}
 
 		button[type="submit"] {
 			padding: 0.75em 1.5em;
-			background: oklch(0.75 0.15 240);
+			background: oklch(0.7 0.15 240);
 			color: oklch(1 0 0);
 			border: none;
 			border-radius: 4px;
 			font-size: 1em;
+			font-weight: 500;
 			cursor: pointer;
 			max-width: 150px;
 			transition: background-color 0.2s;
 
 			&:hover:not(:disabled) {
-				background: oklch(0.65 0.15 240);
+				background: oklch(0.6 0.15 240);
 			}
 
 			&:disabled {
@@ -79,22 +83,23 @@
 		padding: 0.75em;
 		border-radius: 4px;
 		margin-top: 1em;
-		font-weight: bold;
-		background: oklch(0.92 0.08 140);
-		color: oklch(0.25 0.15 140);
-		border: 1px solid oklch(0.85 0.1 140);
+		font-weight: 500;
+		background: oklch(0.9 0.1 140);
+		color: oklch(0.3 0.15 140);
+		border: 1px solid oklch(0.8 0.1 140);
 
 		&:contains("Error") {
-			background: oklch(0.92 0.08 20);
-			color: oklch(0.25 0.15 20);
-			border: 1px solid oklch(0.85 0.1 20);
+			background: oklch(0.9 0.1 20);
+			color: oklch(0.3 0.15 20);
+			border: 1px solid oklch(0.8 0.1 20);
 		}
 	}
 
 	.admin-list {
 		h2 {
 			margin-bottom: 1em;
-			color: oklch(0.35 0.05 240);
+			color: oklch(0.4 0.08 240);
+			font-weight: 500;
 		}
 	}
 
@@ -111,15 +116,15 @@
 		padding: 1em;
 		margin-bottom: 0.5em;
 		background: oklch(1 0 0);
-		border: 1px solid oklch(0.87 0.01 240);
+		border: 1px solid oklch(0.9 0.01 240);
 		border-radius: 4px;
-		box-shadow: 0 1px 3px oklch(0 0 0 / 0.1);
+		box-shadow: 0 1px 3px oklch(0 0 0 / 0.05);
 	}
 
 	.admin-email {
-		font-family: monospace;
 		font-size: 1.1em;
-		color: oklch(0.35 0.05 240);
+		color: oklch(0.35 0.08 240);
+		font-weight: 400;
 	}
 
 	.delete-btn {
@@ -130,6 +135,7 @@
 		border-radius: 4px;
 		cursor: pointer;
 		font-size: 0.9em;
+		font-weight: 500;
 		transition: background-color 0.2s;
 
 		&:hover:not(:disabled) {
@@ -145,25 +151,25 @@
 	.no-admins {
 		padding: 2em;
 		text-align: center;
-		color: oklch(0.5 0.02 240);
+		color: oklch(0.55 0.02 240);
 		font-style: italic;
-		background: oklch(0.98 0.005 240);
-		border: 1px solid oklch(0.9 0.01 240);
+		background: oklch(0.99 0.005 240);
+		border: 1px solid oklch(0.92 0.01 240);
 		border-radius: 4px;
 	}
 
 	.loading {
 		padding: 2em;
 		text-align: center;
-		color: oklch(0.5 0.02 240);
+		color: oklch(0.55 0.02 240);
 		font-style: italic;
 	}
 
 	.error {
 		padding: 1.5em;
-		background: oklch(0.92 0.08 20);
-		color: oklch(0.25 0.15 20);
-		border: 1px solid oklch(0.85 0.1 20);
+		background: oklch(0.9 0.1 20);
+		color: oklch(0.3 0.15 20);
+		border: 1px solid oklch(0.8 0.1 20);
 		border-radius: 8px;
 		margin: 1em 0;
 		font-size: 1.1em;
@@ -176,15 +182,15 @@
 		.back-link {
 			display: inline-block;
 			padding: 0.75em 1.5em;
-			background: oklch(0.25 0.15 20);
+			background: oklch(0.3 0.15 20);
 			color: oklch(1 0 0);
 			text-decoration: none;
 			border-radius: 4px;
-			font-weight: bold;
+			font-weight: 500;
 			transition: background-color 0.2s;
 
 			&:hover {
-				background: oklch(0.2 0.15 20);
+				background: oklch(0.25 0.15 20);
 			}
 		}
 	}
