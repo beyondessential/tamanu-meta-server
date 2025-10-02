@@ -47,8 +47,14 @@ pub async fn list_untrusted_devices() -> Result<Vec<DeviceInfo>> {
 pub async fn get_device_connection_history(
 	device_id: String,
 	limit: Option<i64>,
+	offset: Option<i64>,
 ) -> Result<Vec<DeviceConnectionData>> {
-	ssr::get_device_connection_history(device_id, limit).await
+	ssr::get_device_connection_history(device_id, limit, offset).await
+}
+
+#[server]
+pub async fn get_device_connection_count(device_id: String) -> Result<i64> {
+	ssr::get_device_connection_count(device_id).await
 }
 
 #[server]
@@ -169,6 +175,7 @@ mod ssr {
 	pub async fn get_device_connection_history(
 		device_id: String,
 		limit: Option<i64>,
+		offset: Option<i64>,
 	) -> Result<Vec<DeviceConnectionData>> {
 		let db = crate::fns::commons::admin_guard().await?;
 		let mut conn = db.get().await?;
@@ -176,13 +183,27 @@ mod ssr {
 		let device_uuid = Uuid::parse_str(&device_id)
 			.map_err(|_| commons_errors::AppError::custom("Invalid device ID"))?;
 
-		let connections =
-			DeviceConnection::get_history_for_device(&mut conn, device_uuid, limit.unwrap_or(50))
-				.await?;
+		let connections = DeviceConnection::get_history_for_device_paginated(
+			&mut conn,
+			device_uuid,
+			limit.unwrap_or(100),
+			offset.unwrap_or(0),
+		)
+		.await?;
 		Ok(connections
 			.into_iter()
 			.map(DeviceConnectionData::from)
 			.collect())
+	}
+
+	pub async fn get_device_connection_count(device_id: String) -> Result<i64> {
+		let db = crate::fns::commons::admin_guard().await?;
+		let mut conn = db.get().await?;
+
+		let device_uuid = Uuid::parse_str(&device_id)
+			.map_err(|_| commons_errors::AppError::custom("Invalid device ID"))?;
+
+		DeviceConnection::get_connection_count_for_device(&mut conn, device_uuid).await
 	}
 
 	pub async fn trust_device(device_id: String, role: String) -> Result<()> {

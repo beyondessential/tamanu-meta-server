@@ -394,6 +394,40 @@
 			color: oklch(0.55 0.02 240);
 			font-style: italic;
 		}
+
+		.history-content {
+			display: flex;
+			flex-direction: column;
+			gap: 1em;
+		}
+
+		.load-more-section {
+			display: flex;
+			justify-content: center;
+			padding: 1em;
+			border-top: 1px solid oklch(0.92 0.01 240);
+		}
+
+		.load-more-btn {
+			padding: 0.75em 1.5em;
+			background: oklch(0.7 0.15 240);
+			color: oklch(1 0 0);
+			border: none;
+			border-radius: 4px;
+			font-size: 0.9em;
+			font-weight: 500;
+			cursor: pointer;
+			transition: background-color 0.2s;
+
+			&:hover:not(:disabled) {
+				background: oklch(0.6 0.15 240);
+			}
+
+			&:disabled {
+				background: oklch(0.5 0.02 240);
+				cursor: not-allowed;
+			}
+		}
 	}
 
 	.no-devices {

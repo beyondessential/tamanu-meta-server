@@ -1,5 +1,6 @@
 use leptos::prelude::*;
 use leptos_meta::{Stylesheet, provide_meta_context};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct ConnectionGroup {
@@ -279,25 +280,64 @@ pub fn DeviceRow(
 
 	let device_id = device.device.id.clone();
 
-	let connection_history = {
+	let (history_offset, set_history_offset) = signal(0i64);
+	let (all_connections, set_all_connections) =
+		signal(HashMap::<String, crate::fns::devices::DeviceConnectionData>::new());
+	let (has_more, set_has_more) = signal(false);
+
+	// Get total connection count
+	let connection_count = {
 		let device_id = device_id.clone();
 		Resource::new(
-			move || {
-				if show_history.get() {
-					Some(device_id.clone())
-				} else {
-					None
-				}
-			},
-			async |maybe_id| {
-				if let Some(id) = maybe_id {
-					crate::fns::devices::get_device_connection_history(id, Some(10)).await
-				} else {
-					Ok(vec![])
-				}
-			},
+			move || device_id.clone(),
+			async |id| crate::fns::devices::get_device_connection_count(id).await,
 		)
 	};
+
+	// Load more connections action
+	let load_more_action = {
+		let device_id = device_id.clone();
+		Action::new(move |offset: &i64| {
+			let device_id = device_id.clone();
+			let offset = *offset;
+			async move {
+				crate::fns::devices::get_device_connection_history(
+					device_id,
+					Some(100),
+					Some(offset),
+				)
+				.await
+			}
+		})
+	};
+
+	// Effect to handle loading more connections
+	Effect::new(move |_| {
+		if let Some(result) = load_more_action.value().get() {
+			match result {
+				Ok(new_connections) => {
+					let has_more_data = new_connections.len() == 100;
+					set_has_more.set(has_more_data);
+
+					set_all_connections.update(|existing| {
+						for conn in new_connections {
+							existing.insert(conn.id.clone(), conn);
+						}
+					});
+				}
+				Err(_) => {
+					set_has_more.set(false);
+				}
+			}
+		}
+	});
+
+	// Load initial data when history is shown
+	Effect::new(move |_| {
+		if show_history.get() && history_offset.get() == 0 && all_connections.get().is_empty() {
+			load_more_action.dispatch(0);
+		}
+	});
 
 	let on_trust_click = {
 		let device_id = device_id.clone();
@@ -416,7 +456,18 @@ pub fn DeviceRow(
 					class="history-toggle"
 					on:click=move |_| set_show_history.update(|show| *show = !*show)
 				>
-					{move || if show_history.get() { "Hide History" } else { "Show Connection History" }}
+					{move || {
+						let count_text = connection_count.get()
+							.and_then(|result| result.ok())
+							.map(|count| format!(" ({})", count))
+							.unwrap_or_default();
+
+						if show_history.get() {
+							format!("Hide History{}", count_text)
+						} else {
+							format!("Show Connection History{}", count_text)
+						}
+					}}
 				</button>
 			</div>
 
@@ -426,30 +477,49 @@ pub fn DeviceRow(
 						<details class="connection-history" open=true>
 							<summary>"Connection History"</summary>
 							<Suspense fallback=|| view! { <div class="loading">"Loading history..."</div> }>
-								{move || connection_history.get().map(|result| {
-									match result {
-										Ok(connections) => {
-											if connections.is_empty() {
-												view! {
-													<div class="no-history">"No connection history found"</div>
-												}.into_any()
-											} else {
-												view! {
-													<div class="history-list">
-														<For each=move || group_consecutive_connections(connections.clone()) key=|group| format!("{}_{}", group.ip, group.count) let:group>
-															<ConnectionGroupRow group=group />
-														</For>
-													</div>
-												}.into_any()
-											}
-										}
-										Err(e) => {
-											view! {
-												<div class="error">{format!("Error loading history: {}", e)}</div>
-											}.into_any()
-										}
+								{move || {
+									let connections_map = all_connections.get();
+									if connections_map.is_empty() && !load_more_action.pending().get() {
+										view! {
+											<div class="no-history">"No connection history found"</div>
+										}.into_any()
+									} else {
+										// Convert HashMap to Vec and sort by created_at (descending)
+										let mut connections_vec: Vec<_> = connections_map.values().cloned().collect();
+										connections_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+										view! {
+											<div class="history-content">
+												<div class="history-list">
+													<For each=move || group_consecutive_connections(connections_vec.clone()) key=|group| format!("{}_{}_{}", group.ip, group.earliest_time, group.latest_time) let:group>
+														<ConnectionGroupRow group=group />
+													</For>
+												</div>
+												{move || {
+													if has_more.get() {
+														view! {
+															<div class="load-more-section">
+																<button
+																	class="load-more-btn"
+																	on:click=move |_| {
+																		let current_count = all_connections.get().len() as i64;
+																		set_history_offset.set(current_count);
+																		load_more_action.dispatch(current_count);
+																	}
+																	disabled=move || load_more_action.pending().get()
+																>
+																	{move || if load_more_action.pending().get() { "Loading..." } else { "Load More (100)" }}
+																</button>
+															</div>
+														}.into_any()
+													} else {
+														view! {}.into_any()
+													}
+												}}
+											</div>
+										}.into_any()
 									}
-								})}
+								}}
 							</Suspense>
 						</details>
 					}.into_any()
@@ -492,5 +562,106 @@ pub fn ConnectionGroupRow(group: ConnectionGroup) -> impl IntoView {
 				}
 			})}
 		</div>
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn create_test_connection(
+		id: &str,
+		ip: &str,
+		user_agent: Option<&str>,
+		time_offset: i32,
+	) -> crate::fns::devices::DeviceConnectionData {
+		crate::fns::devices::DeviceConnectionData {
+			id: id.to_string(),
+			created_at: format!("2024-01-01T12:{}:00Z", time_offset.abs()),
+			created_at_relative: format!("{}m ago", time_offset.abs()),
+			device_id: "test-device".to_string(),
+			ip: ip.to_string(),
+			user_agent: user_agent.map(|s| s.to_string()),
+		}
+	}
+
+	#[test]
+	fn test_group_consecutive_connections() {
+		let connections = vec![
+			create_test_connection("1", "192.168.1.1", Some("Chrome"), 1),
+			create_test_connection("2", "192.168.1.1", Some("Chrome"), 2),
+			create_test_connection("3", "192.168.1.1", Some("Chrome"), 3),
+			create_test_connection("4", "192.168.1.2", Some("Chrome"), 4),
+			create_test_connection("5", "192.168.1.1", Some("Chrome"), 5),
+			create_test_connection("6", "192.168.1.2", Some("Chrome"), 6),
+			create_test_connection("7", "192.168.1.2", Some("Chrome"), 7),
+			create_test_connection("8", "192.168.1.2", Some("Chrome"), 8),
+		];
+
+		let groups = group_consecutive_connections(connections);
+
+		assert_eq!(groups.len(), 4);
+
+		assert_eq!(groups[0].count, 3);
+		assert_eq!(groups[0].ip, "192.168.1.1");
+
+		assert_eq!(groups[1].count, 1);
+		assert_eq!(groups[1].ip, "192.168.1.2");
+
+		assert_eq!(groups[2].count, 1);
+		assert_eq!(groups[2].ip, "192.168.1.1");
+
+		assert_eq!(groups[3].count, 3);
+		assert_eq!(groups[3].ip, "192.168.1.2");
+	}
+
+	#[test]
+	fn test_group_different_user_agents() {
+		let connections = vec![
+			create_test_connection("1", "192.168.1.1", Some("Chrome"), 1),
+			create_test_connection("2", "192.168.1.1", Some("Firefox"), 2),
+			create_test_connection("3", "192.168.1.1", Some("Chrome"), 3),
+		];
+
+		let groups = group_consecutive_connections(connections);
+
+		assert_eq!(groups.len(), 3);
+		assert_eq!(groups[0].count, 1);
+		assert_eq!(groups[1].count, 1);
+		assert_eq!(groups[2].count, 1);
+	}
+
+	#[test]
+	fn test_group_empty_connections() {
+		let connections = vec![];
+		let groups = group_consecutive_connections(connections);
+		assert_eq!(groups.len(), 0);
+	}
+
+	#[test]
+	fn test_hashmap_deduplication() {
+		use std::collections::HashMap;
+
+		let mut connections_map = HashMap::new();
+
+		// Add initial connections
+		let conn1 = create_test_connection("1", "192.168.1.1", Some("Chrome"), 1);
+		let conn2 = create_test_connection("2", "192.168.1.2", Some("Firefox"), 2);
+		connections_map.insert(conn1.id.clone(), conn1);
+		connections_map.insert(conn2.id.clone(), conn2);
+		assert_eq!(connections_map.len(), 2);
+
+		// Add duplicate (same ID) - should replace, not add
+		let conn1_duplicate = create_test_connection("1", "192.168.1.1", Some("Chrome"), 1);
+		connections_map.insert(conn1_duplicate.id.clone(), conn1_duplicate);
+		assert_eq!(connections_map.len(), 2); // Still 2, not 3
+
+		// Convert to sorted vec for grouping (as done in frontend)
+		let mut connections_vec: Vec<_> = connections_map.values().cloned().collect();
+		connections_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+		assert_eq!(connections_vec.len(), 2);
+		assert!(connections_vec.iter().any(|c| c.id == "1"));
+		assert!(connections_vec.iter().any(|c| c.id == "2"));
 	}
 }

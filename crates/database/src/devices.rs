@@ -386,4 +386,39 @@ impl DeviceConnection {
 			.await
 			.map_err(AppError::from)
 	}
+
+	/// Get paginated connection history for a specific device.
+	pub async fn get_history_for_device_paginated(
+		db: &mut AsyncPgConnection,
+		device_id: Uuid,
+		limit: i64,
+		offset: i64,
+	) -> Result<Vec<Self>> {
+		use crate::schema::device_connections::dsl as dc;
+
+		dc::device_connections
+			.select(Self::as_select())
+			.filter(dc::device_id.eq(device_id))
+			.order(dc::created_at.desc())
+			.limit(limit)
+			.offset(offset)
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// Get total connection count for a specific device.
+	pub async fn get_connection_count_for_device(
+		db: &mut AsyncPgConnection,
+		device_id: Uuid,
+	) -> Result<i64> {
+		use crate::schema::device_connections::dsl as dc;
+
+		dc::device_connections
+			.filter(dc::device_id.eq(device_id))
+			.count()
+			.get_result(db)
+			.await
+			.map_err(AppError::from)
+	}
 }
