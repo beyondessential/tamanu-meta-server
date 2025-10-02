@@ -1,4 +1,5 @@
 pub mod admins;
+pub mod commons;
 pub mod statuses;
 
 #[cfg(feature = "ssr")]

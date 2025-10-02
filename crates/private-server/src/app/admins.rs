@@ -5,7 +5,7 @@ use leptos_meta::Stylesheet;
 pub fn Page() -> impl IntoView {
 	let is_admin = Resource::new(
 		|| (),
-		|_| async { crate::fns::admins::is_current_user_admin().await },
+		|_| async { crate::fns::commons::is_current_user_admin().await },
 	);
 
 	view! {

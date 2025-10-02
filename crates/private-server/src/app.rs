@@ -52,7 +52,12 @@ pub fn App() -> impl IntoView {
 pub fn GlobalNav() -> impl IntoView {
 	let is_admin = Resource::new(
 		|| (),
-		|_| async { crate::fns::admins::is_current_user_admin().await },
+		|_| async { crate::fns::commons::is_current_user_admin().await },
+	);
+
+	let public_url = Resource::new(
+		|| (),
+		|_| async { crate::fns::commons::get_public_url().await },
 	);
 
 	view! {
@@ -70,6 +75,19 @@ pub fn GlobalNav() -> impl IntoView {
 							if result.unwrap_or(false) {
 								Some(view! {
 									<A href="/admins">"Admins"</A>
+								})
+							} else {
+								None
+							}
+						})
+					}}
+				</Suspense>
+				<Suspense fallback=|| view! {}>
+					{move || {
+						public_url.get().and_then(|result| {
+							if let Ok(Some(url)) = result {
+								Some(view! {
+									<a href={url} target="_blank">"Public"</a>
 								})
 							} else {
 								None
