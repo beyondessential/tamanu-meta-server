@@ -1,41 +1,78 @@
 # Agent Rules for tamanu-meta-server
 
+## Project Structure Overview
+- **Database crate**: Models, migrations, and database logic
+- **Public server**: Internet-exposed API endpoints for device registration and updates
+- **Private server**: Admin web interface using Leptos (SSR + hydration)
+- **Commons**: Shared utilities, authentication, error handling
+
 ## Database Connection
 - Use `DATABASE_URL=postgres://localhost/tamanu_meta` for running tests
 - Always run tests with the DATABASE_URL environment variable set
+- Database models are in `crates/database/src/` with re-exports in `lib.rs`
+- Use migrations in `migrations/` directory for schema changes
+- Use PostgreSQL native functions where possible (e.g., `position()` for binary substring searches)
+- Complex queries: Prefer database-level operations over in-memory filtering
 
 ## Code Style & Patterns
 - Follow existing Rust conventions in the codebase
 - Use `AppError` variants for error handling, map to appropriate HTTP status codes in `IntoResponse`
 - Update ERRORS.md when adding new error types, the heading must match the error problem type
+- Use `commons_tests::db::TestDb::run()` for database-only tests
+- Use `commons_tests::server::run()` for HTTP endpoint tests
+- Use `commons_tests::server::run_with_device_auth()` for authenticated device tests in the public server
+- Admin pages: Restrict frontend with `is_current_user_admin()` resource and use `admin_guard()` in server functions
 
-## Testing
+## Leptos Private Server Architecture
+- **Frontend/Backend Separation**: Code must build in both SSR and hydrate modes
+- **SSR Pattern**: Put database/backend imports in `#[cfg(feature = "ssr")]` sections, following `fns/statuses.rs` structure
+- **Server Functions**: Use `#[server]` functions that delegate to `ssr::` module functions
+- **Data Structures**: Create separate serializable structs for frontend (no direct database types)
+- **Admin Guard**: Use `crate::fns::commons::admin_guard()` for admin authentication
+- **Page Structure**: Follow pattern in `app/statuses.rs` and `app/admins.rs`
+
+Example Leptos server function pattern:
+```rust
+#[server]
+pub async fn my_function() -> Result<MyData> {
+    ssr::my_function().await
+}
+
+#[cfg(feature = "ssr")]
+mod ssr {
+    use database::MyModel; // SSR-only imports here
+
+    pub async fn my_function() -> Result<MyData> {
+        let db = crate::fns::commons::admin_guard().await?;
+        // Implementation here
+    }
+}
+```
+
+## Testing Patterns
 - Use `#[tokio::test(flavor = "multi_thread")]` for async tests
-- Use `test_server::run` for basic tests, `test_server::run_with_device_auth` for authenticated endpoints
-- For authenticated tests, add `mtls-certificate` header: `.add_header("mtls-certificate", &cert)`
-- Use `.add_header("mtls-certificate", &cert)` on test requests, do not set it on `public` or `private` server directly (these should not be `mut` in tests)
+- Database tests: `commons_tests::db::TestDb::run(|mut conn, _url| async move { ... })`
+- HTTP tests: `commons_tests::server::run(|conn, public, private| async move { ... })`
+- Device auth tests: `commons_tests::server::run_with_device_auth("role", |conn, cert, device_id, public, private| async move { ... })`
+- In public-server, for authenticated tests, add `mtls-certificate` header: `.add_header("mtls-certificate", &cert)`
+- In public-server, use `.add_header("mtls-certificate", &cert)` on test requests, do not set it on `public` or `private` server directly (these should not be `mut` in tests)
 - Test both success and error scenarios (especially 404 cases for non-existent resources)
+- For database tests, use direct model functions instead of HTTP endpoints
+- Always include `use database::ModelName;` imports in test files
+- Do not include `_test` suffix or prefix in test filenames in `tests/` directory
 
-Import test helpers with, e.g.
-
-```rust
-#[path = "common/server.rs"]
-mod test_server;
-```
-
-and then use the fully-qualified path at the call point:
-
-```rust
-test_server::run(async |_conn, public, _| {});
-```
-
-## File Structure
-- Database models in `src/db/`
-- Server routes in `src/servers/public/` and `src/servers/private/`
-- Error handling in `src/error.rs`
-- Tests in `tests/` directory with common utilities in `tests/common/`
+## Frontend Development
+- Pages go in `crates/private-server/src/app/`
+- Server functions go in `crates/private-server/src/fns/`
+- CSS files go in `static/private/`
+- Add routes in `crates/private-server/src/app.rs`
+- Add navigation links in the `GlobalNav` component
+- Use Leptos signals for state management
+- Handle async operations with `Resource` and `Action`
 
 ## Development Workflow
-- Run full test suite before major changes: `cargo nextest run`
-- Check specific test files: `cargo nextest run <test_name>`
+- Always check: `cargo check` for basic compilation
+- Always check: `cargo leptos build --frontend-only` for frontend compatibility
+- Run full test suite: `DATABASE_URL=postgres://localhost/tamanu_meta cargo nextest run`
+- Run specific tests: `DATABASE_URL=postgres://localhost/tamanu_meta cargo nextest run -p <crate> <test_name>`
 - Verify no compilation warnings in tests and main code
