@@ -16,9 +16,9 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
 			<head>
 				<meta charset="utf-8"/>
 				<meta name="viewport" content="width=device-width, initial-scale=1"/>
-				<Stylesheet id="main" href="/$/static/main.css" />
+				<Stylesheet id="main" href="/static/main.css" />
 				<AutoReload options=options.clone() />
-				<HydrationScripts options islands=true root="/$" />
+				<HydrationScripts options islands=true />
 				<MetaTags/>
 				<Title text="Tamanu Meta" />
 			</head>
@@ -52,7 +52,7 @@ pub fn App() -> impl IntoView {
 pub fn Index() -> impl IntoView {
 	view! {
 		<nav>
-			<A href="/$/status">"Status"</A>
+			<A href="/status">"Status"</A>
 		</nav>
 	}
 }

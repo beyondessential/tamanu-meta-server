@@ -36,7 +36,7 @@ struct StatusInfo {
 #[tokio::test(flavor = "multi_thread")]
 async fn status_page() {
 	commons_tests::server::run(async |_conn, _, private| {
-		let response = private.get("/$/").await;
+		let response = private.get("/").await;
 		response.assert_status_ok();
 		response.assert_header("content-type", "text/html; charset=utf-8");
 	})
@@ -46,7 +46,7 @@ async fn status_page() {
 #[tokio::test(flavor = "multi_thread")]
 async fn status_json_empty_database() {
 	commons_tests::server::run(async |_conn, _, private| {
-		let response = private.get("/$/status.json").await;
+		let response = private.get("/status.json").await;
 		response.assert_status_ok();
 		response.assert_header("content-type", "application/json");
 
@@ -66,7 +66,7 @@ async fn status_json_basic_server() {
 		.await
 		.unwrap();
 
-		let response = private.get("/$/status.json").await;
+		let response = private.get("/status.json").await;
 		response.assert_status_ok();
 		response.assert_header("content-type", "application/json");
 
@@ -98,7 +98,7 @@ async fn status_json_server_with_recent_status() {
 		.await
 		.unwrap();
 
-		let response = private.get("/$/status.json").await;
+		let response = private.get("/status.json").await;
 		response.assert_status_ok();
 
 		let servers: Vec<ServerData> = response.json();
@@ -133,7 +133,7 @@ async fn status_json_server_status_ages() {
 		.await
 		.unwrap();
 
-		let response = private.get("/$/status.json").await;
+		let response = private.get("/status.json").await;
 		response.assert_status_ok();
 
 		let servers: Vec<ServerData> = response.json();
@@ -167,7 +167,7 @@ async fn status_json_platform_detection() {
 		.await
 		.unwrap();
 
-		let response = private.get("/$/status.json").await;
+		let response = private.get("/status.json").await;
 		response.assert_status_ok();
 
 		let servers: Vec<ServerData> = response.json();
@@ -199,7 +199,7 @@ async fn status_json_mixed_server_ranks() {
 		.await
 		.unwrap();
 
-		let response = private.get("/$/status.json").await;
+		let response = private.get("/status.json").await;
 		response.assert_status_ok();
 
 		let servers: Vec<ServerData> = response.json();
@@ -222,7 +222,7 @@ async fn status_json_unnamed_servers_excluded() {
 		.await
 		.unwrap();
 
-		let response = private.get("/$/status.json").await;
+		let response = private.get("/status.json").await;
 		response.assert_status_ok();
 
 		let servers: Vec<ServerData> = response.json();
@@ -245,7 +245,7 @@ async fn status_json_blip_status() {
 		.await
 		.unwrap();
 
-		let response = private.get("/$/status.json").await;
+		let response = private.get("/status.json").await;
 		response.assert_status_ok();
 
 		let servers: Vec<ServerData> = response.json();
@@ -272,7 +272,7 @@ async fn status_json_gone_server() {
 		.await
 		.unwrap();
 
-		let response = private.get("/$/status.json").await;
+		let response = private.get("/status.json").await;
 		response.assert_status_ok();
 
 		let servers: Vec<ServerData> = response.json();
