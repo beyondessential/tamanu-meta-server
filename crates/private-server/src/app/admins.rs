@@ -1,16 +1,58 @@
 use leptos::prelude::*;
 use leptos_meta::Stylesheet;
 
-#[component]
+#[island]
 pub fn Page() -> impl IntoView {
+	let is_admin = Resource::new(
+		|| (),
+		|_| async { crate::fns::admins::is_current_user_admin().await },
+	);
+
 	view! {
 		<Stylesheet id="admin" href="/static/admin.css" />
-		<div id="admin-page">
-			<div class="page-header">
-				<h1>"Admin Management"</h1>
-			</div>
-			<AdminManagement />
-		</div>
+		<Suspense fallback=|| view! { <div class="loading">"Checking permissions..."</div> }>
+			{move || {
+				is_admin.get().map(|result| {
+					match result {
+						Ok(true) => {
+							view! {
+								<div id="admin-page">
+									<div class="page-header">
+										<h1>"Admin Management"</h1>
+									</div>
+									<AdminManagement />
+								</div>
+							}.into_any()
+						}
+						Ok(false) => {
+							view! {
+								<div id="admin-page">
+									<div class="page-header">
+										<h1>"Access Denied"</h1>
+									</div>
+									<div class="error">
+										<p>"You do not have permission to access the admin panel."</p>
+										<a href="/" class="back-link">"← Return to Home"</a>
+									</div>
+								</div>
+							}.into_any()
+						}
+						Err(e) => {
+							view! {
+								<div id="admin-page">
+									<div class="page-header">
+										<h1>"Error"</h1>
+									</div>
+									<div class="error">
+										{format!("Error checking permissions: {}", e)}
+									</div>
+								</div>
+							}.into_any()
+						}
+					}
+				})
+			}}
+		</Suspense>
 	}
 }
 

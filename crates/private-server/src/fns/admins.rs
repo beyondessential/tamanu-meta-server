@@ -58,3 +58,16 @@ pub async fn delete_admin(email: String) -> Result<()> {
 	Admin::delete(&mut conn, &email).await?;
 	Ok(())
 }
+
+#[server]
+pub async fn is_current_user_admin() -> Result<bool> {
+	use crate::state::AppState;
+	use commons_servers::tailscale_auth::TailscaleAdmin;
+	use leptos::prelude::expect_context;
+	use leptos_axum::extract_with_state;
+
+	let state = expect_context::<AppState>();
+	let TailscaleAdmin(_) = extract_with_state(&state).await?;
+
+	Ok(true)
+}

@@ -153,17 +153,39 @@
 	}
 
 	.loading {
-		padding: 1em;
+		padding: 2em;
 		text-align: center;
 		color: oklch(0.5 0.02 240);
+		font-style: italic;
 	}
 
 	.error {
-		padding: 1em;
+		padding: 1.5em;
 		background: oklch(0.92 0.08 20);
 		color: oklch(0.25 0.15 20);
 		border: 1px solid oklch(0.85 0.1 20);
-		border-radius: 4px;
+		border-radius: 8px;
 		margin: 1em 0;
+		font-size: 1.1em;
+		text-align: center;
+
+		p {
+			margin-bottom: 1.5em;
+		}
+
+		.back-link {
+			display: inline-block;
+			padding: 0.75em 1.5em;
+			background: oklch(0.25 0.15 20);
+			color: oklch(1 0 0);
+			text-decoration: none;
+			border-radius: 4px;
+			font-weight: bold;
+			transition: background-color 0.2s;
+
+			&:hover {
+				background: oklch(0.2 0.15 20);
+			}
+		}
 	}
 }

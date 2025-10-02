@@ -49,8 +49,13 @@ pub fn App() -> impl IntoView {
 	}
 }
 
-#[component]
+#[island]
 pub fn GlobalNav() -> impl IntoView {
+	let is_admin = Resource::new(
+		|| (),
+		|_| async { crate::fns::admins::is_current_user_admin().await },
+	);
+
 	view! {
 		<nav id="global-nav">
 			<div class="nav-brand">
@@ -59,7 +64,19 @@ pub fn GlobalNav() -> impl IntoView {
 			<div class="nav-links">
 				<A href="/" exact=true>"Home"</A>
 				<A href="/status">"Status"</A>
-				<A href="/admins">"Admins"</A>
+				<Suspense fallback=|| view! {}>
+					{move || {
+						is_admin.get().and_then(|result| {
+							if result.unwrap_or(false) {
+								Some(view! {
+									<A href="/admins">"Admins"</A>
+								})
+							} else {
+								None
+							}
+						})
+					}}
+				</Suspense>
 			</div>
 		</nav>
 	}
