@@ -25,6 +25,9 @@ body {
 
 	.nav-brand {
 		a {
+			display: flex;
+			align-items: center;
+			gap: 0.5em;
 			color: oklch(1 0 0);
 			text-decoration: none;
 			font-size: 1.5em;
@@ -32,6 +35,17 @@ body {
 
 			&:hover {
 				color: oklch(0.75 0.15 240);
+			}
+
+			.logo {
+				height: 32px;
+				width: auto;
+				filter: brightness(1.2) contrast(1.1);
+				transition: filter 0.2s ease;
+			}
+
+			&:hover .logo {
+				filter: brightness(1.4) contrast(1.2);
 			}
 		}
 	}
@@ -67,6 +81,10 @@ body {
 		.nav-brand {
 			a {
 				font-size: 1.3em;
+
+				.logo {
+					height: 28px;
+				}
 			}
 		}
 

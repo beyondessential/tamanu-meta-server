@@ -58,7 +58,9 @@ pub fn GlobalNav() -> impl IntoView {
 	view! {
 		<nav id="global-nav">
 			<div class="nav-brand">
-				<A href="/status">"Tamanu Meta"</A>
+				<A href="/status">
+					<img src="/static/images/tamanu_logo.svg" alt="Tamanu Logo" class="logo" />
+				</A>
 			</div>
 			<div class="nav-links">
 				<A href="/status">"Status"</A>
