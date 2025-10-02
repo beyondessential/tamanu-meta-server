@@ -56,10 +56,8 @@ where
 			ClientIpSource::RightmostForwarded,
 		);
 		let private_router = router(
-			private_server::routes(
-				"/$".into(),
-				private_server::state::AppState::from_db_url(&url).unwrap(),
-			),
+			private_server::routes(private_server::state::AppState::from_db_url(&url).unwrap())
+				.unwrap(),
 			ClientIpSource::RightmostForwarded,
 		);
 

@@ -59,7 +59,9 @@ pub enum AppError {
 	#[error("timesync: {0}")]
 	Timesync(#[from] timesimp::ParseError),
 
-	// Authentication errors
+	#[error("missing authentication header: {0}")]
+	AuthMissingHeader(&'static str),
+
 	#[error("missing authentication certificate")]
 	AuthMissingCertificate,
 
@@ -135,6 +137,7 @@ impl AppError {
 			Self::UnusableRange => StatusCode::BAD_REQUEST,
 			#[cfg(feature = "ssr")]
 			Self::DatabaseQuery(diesel::result::Error::NotFound) => StatusCode::NOT_FOUND,
+			Self::AuthMissingHeader(_) => StatusCode::UNAUTHORIZED,
 			Self::AuthMissingCertificate => StatusCode::UNAUTHORIZED,
 			Self::AuthInvalidCertificate(_) => StatusCode::BAD_REQUEST,
 			Self::AuthCertificateNotFound => StatusCode::UNAUTHORIZED,
@@ -176,6 +179,7 @@ impl AppError {
 						Self::UnusableRange => "unusable-range",
 						#[cfg(feature = "ssr")]
 						Self::Timesync(_) => "timesync",
+						Self::AuthMissingHeader(_) => "auth-missing-header",
 						Self::AuthMissingCertificate => "auth-missing-certificate",
 						Self::AuthInvalidCertificate(_) => "auth-invalid-certificate",
 						Self::AuthCertificateNotFound => "auth-certificate-not-found",

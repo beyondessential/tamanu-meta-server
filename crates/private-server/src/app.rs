@@ -1,18 +1,25 @@
 use leptos::prelude::*;
 use leptos_meta::{MetaTags, Stylesheet, Title, provide_meta_context};
+use leptos_router::{
+	components::{A, Redirect, Route, Router, Routes},
+	path,
+};
 
-use crate::statuses::{summary, table};
+mod admins;
+mod status;
+mod statuses;
 
 pub fn shell(options: LeptosOptions) -> impl IntoView {
+	provide_meta_context();
 	view! {
 		<!DOCTYPE html>
 		<html lang="en">
 			<head>
 				<meta charset="utf-8"/>
 				<meta name="viewport" content="width=device-width, initial-scale=1"/>
-				<Stylesheet id="main" href="/$/static/main.css" />
+				<Stylesheet id="main" href="/static/main.css" />
 				<AutoReload options=options.clone() />
-				<HydrationScripts options islands=true root="/$" />
+				<HydrationScripts options islands=true />
 				<MetaTags/>
 				<Title text="Tamanu Meta" />
 			</head>
@@ -24,120 +31,53 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
 }
 
 #[component]
-pub fn Greeting() -> impl IntoView {
-	let greeting = crate::statuses::greeting();
-
-	view! {
-		<Await future=greeting let:data>
-			<div class="greeting">{data.clone().ok()}</div>
-		</Await>
-	}
-}
-
-#[island]
-pub fn Status() -> impl IntoView {
-	let (status_list_r, status_list_w) = signal(0);
-	Effect::new(move |_| status_list_w.set(1));
-	let data = Resource::new(move || status_list_r.get(), async |_| summary().await);
-
-	view! {
-		<Suspense fallback=|| view! { <div class="loading">"Loading…"</div> }>{move || {
-			let data = data.get().and_then(|d| d.ok());
-			view! {
-				<p>
-					{data.as_ref().map(|d| d.releases.len())} " release branches in active use: "
-					<b>{data.as_ref().map(|d| d.releases.iter().map(|(maj, min)| format!("{}.{}", maj, min)).collect::<Vec<_>>().join(", "))}</b>
-					<span class="versions">"("
-					{data.as_ref().map(|d| d.versions.len())}
-					" versions: "
-					{data.as_ref().map(|d| d.bracket.min.to_string())}
-					" — "
-					{data.as_ref().map(|d| d.bracket.max.to_string())}
-					")"</span>
-				</p>
-			}
-		}}</Suspense>
-	}
-}
-
-#[island]
-pub fn Table() -> impl IntoView {
-	let (entries_r, entries_w) = signal(0);
-	Effect::new(move |_| entries_w.set(1));
-	let data = Resource::new(move || entries_r.get(), async |_| table().await);
-
-	view! {
-		<Suspense fallback=|| view! { <div class="loading">"Loading…"</div> }>{move || {
-			view! {
-				<table>
-					<thead>
-					  <tr>
-						<th class="status">Status</th>
-						<th class="name">Name</th>
-						<th class="rank">Rank</th>
-						<th class="host">Host</th>
-						<th class="ago">Last seen</th>
-						<th class="version">Version</th>
-						<th class="platform">Platform</th>
-						<th class="nodejs">Node.js</th>
-						<th class="postgres">Postgres</th>
-						<th class="timezone">Timezone</th>
-					  </tr>
-					</thead>
-					<tbody>
-						<For
-							each=move || data.get().and_then(|d| d.ok()).unwrap_or_default()
-							key=|entry| entry.server_id.clone()
-							let(entry)
-						>
-						<tr>
-							<td
-								class=format!("status {}", entry.up)
-								on:click={
-									let id = entry.server_id.clone();
-									move |_| {
-										web_sys::window().map(|window| {
-											window.navigator().clipboard().write_text(&id)
-										});
-									}
-								}
-							>{entry.up.clone()}</td>
-							<td class="name">{entry.server_name.clone()}</td>
-							<td class="rank">{entry.server_rank.clone()}</td>
-							<td class="host"><a href={entry.server_host.clone()}>{entry.server_host.clone()}</a></td>
-							<Show
-								when={ let up = entry.updated_at.is_some(); move || up }
-								fallback=|| view! {
-									<td class="ago never" title="never or more than a week ago">"<7d ago"</td>
-									<td colspan=5></td>
-								}
-							>
-								<td class="ago" title={entry.updated_at.clone()}>{entry.since.clone()} " ago"</td>
-								<td class="version">{entry.version.clone()}</td>
-								<td class="platform">{entry.platform.clone()}</td>
-								<td class="nodejs">{entry.nodejs.clone()}</td>
-								<td class="postgres">{entry.postgres.clone()}</td>
-								<td class="timezone">{entry.timezone.clone()}</td>
-							</Show>
-						</tr>
-						</For>
-					</tbody>
-				</table>
-			}
-		}}</Suspense>
-	}
-}
-
-#[component]
 pub fn App() -> impl IntoView {
-	// Provides context that manages stylesheets, titles, meta tags, etc.
-	provide_meta_context();
+	view! {
+		<div id="root">
+			<Router>
+				<GlobalNav />
+				<main>
+					<Routes fallback=|| view! { <Redirect path="/status" /> }>
+						<Route path=path!("") view=|| view! { <Redirect path="/status" /> } />
+						<Route path=path!("status") view=statuses::Page />
+						<Route path=path!("admins") view=admins::Page />
+					</Routes>
+				</main>
+			</Router>
+		</div>
+	}
+}
+
+#[island]
+pub fn GlobalNav() -> impl IntoView {
+	let is_admin = Resource::new(
+		|| (),
+		|_| async { crate::fns::admins::is_current_user_admin().await },
+	);
 
 	view! {
-		<header class="header">
-			<Status/>
-			<Greeting />
-		</header>
-		<Table />
+		<nav id="global-nav">
+			<div class="nav-brand">
+				<A href="/status">
+					<img src="/static/images/tamanu_logo.svg" alt="Tamanu Logo" class="logo" />
+				</A>
+			</div>
+			<div class="nav-links">
+				<A href="/status">"Status"</A>
+				<Suspense fallback=|| view! {}>
+					{move || {
+						is_admin.get().and_then(|result| {
+							if result.unwrap_or(false) {
+								Some(view! {
+									<A href="/admins">"Admins"</A>
+								})
+							} else {
+								None
+							}
+						})
+					}}
+				</Suspense>
+			</div>
+		</nav>
 	}
 }

@@ -60,7 +60,6 @@ incremental = false
 [[workspace.metadata.leptos]]
 name = "private-server"
 output-name = "private-server"
-server-fn-prefix = "/$/api"
 server-fn-mod-path = true
 disable-server-fn-hash = true
 site-root = "target/site"

@@ -1,0 +1,107 @@
+#status-page {
+	.page-header {
+		margin-bottom: 2em;
+
+		h1 {
+			font-size: 2em;
+			color: oklch(0.3 0.1 240);
+			margin-bottom: 1em;
+			font-weight: 500;
+		}
+
+		.header-info {
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			background: oklch(0.99 0.005 240);
+			padding: 1em;
+			border-radius: 8px;
+			border: 1px solid oklch(0.9 0.01 240);
+		}
+	}
+
+	.greeting {
+		font-weight: 500;
+		color: oklch(0.4 0.08 240);
+	}
+
+	td,
+	th {
+		padding: 0.5em;
+		border-width: 1px 0;
+		border-style: solid;
+		border-color: oklch(0.8 0.01 240);
+	}
+
+	th,
+	.success,
+	.failure {
+		font-weight: 500;
+	}
+
+	table {
+		border-collapse: collapse;
+		font-family: inherit;
+	}
+
+	.status {
+		&.up {
+			background: oklch(0.65 0.2 140);
+			color: oklch(1 0 0);
+		}
+
+		&.down {
+			background: oklch(0.6 0.2 20);
+			color: oklch(1 0 0);
+		}
+
+		&.gone {
+			background: oklch(0.2 0.02 240);
+			color: oklch(1 0 0);
+		}
+
+		&.away {
+			background: oklch(0.85 0.15 90);
+			color: oklch(0.2 0.1 240);
+		}
+
+		&.blip {
+			background: oklch(0.9 0.1 85);
+			color: oklch(0.2 0.1 240);
+		}
+	}
+
+	.ago {
+		white-space: pre;
+		text-decoration: underline dotted;
+		border-right: 1px dashed oklch(0.8 0.01 240);
+		text-align: right;
+	}
+
+	.versions {
+		color: oklch(0.55 0.02 240);
+		margin-left: 1em;
+		font-size: 0.9em;
+	}
+
+	tr[data-kind="facility"] {
+		opacity: 0.75;
+
+		.name,
+		.host {
+			font-size: 0.9em;
+		}
+	}
+
+	.platform,
+	.timezone {
+		text-align: right;
+	}
+
+	.loading {
+		padding: 1em;
+		text-align: center;
+		color: oklch(0.55 0.02 240);
+		font-style: italic;
+	}
+}

@@ -26,7 +26,6 @@ RUN if [ "$TARGETPLATFORM" == "linux/amd64" ]; then \
 
 RUN rustup target add "$(cat /.target)"
 ENV LEPTOS_OUTPUT_NAME=private-server
-ENV SERVER_FN_PREFIX="/$/api"
 ENV SERVER_FN_MOD_PATH=true
 ENV DISABLE_SERVER_FN_HASH=true
 

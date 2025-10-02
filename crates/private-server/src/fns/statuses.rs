@@ -65,7 +65,7 @@ mod ssr {
 	use axum_server_timing::ServerTimingExtension;
 	use chrono::{TimeDelta, Utc};
 	use commons_errors::Result;
-	use commons_servers::headers::TailscaleUserName;
+	use commons_servers::tailscale_auth::TailscaleUser;
 	use database::{
 		Db, devices::DeviceConnection, server_rank::ServerRank, servers::Server, statuses::Status,
 	};
@@ -203,11 +203,13 @@ mod ssr {
 
 	pub async fn greeting() -> Result<String> {
 		let state = expect_context::<AppState>();
-		let TailscaleUserName(user_name): TailscaleUserName = extract_with_state(&state).await?;
-		Ok(match user_name {
-			Some(name) => format!("Hi {name}!"),
-			None => "Kia Ora!".to_string(),
-		})
+		Ok(
+			if let Some(TailscaleUser { name, .. }) = extract_with_state(&state).await? {
+				format!("Hi {name}!")
+			} else {
+				"Kia Ora!".to_string()
+			},
+		)
 	}
 
 	pub async fn summary() -> Result<SummaryData> {

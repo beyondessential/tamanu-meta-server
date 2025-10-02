@@ -1,10 +1,13 @@
-use std::{str::FromStr as _, sync::Arc};
+use std::str::FromStr as _;
+#[cfg(feature = "ui")]
+use std::sync::Arc;
 
+#[cfg(feature = "ui")]
+use axum::response::Html;
 use axum::{
 	Json,
 	body::Bytes,
 	extract::{Path, State},
-	response::Html,
 	routing::{Router, delete, get, post},
 };
 use commons_errors::Result;
@@ -18,25 +21,37 @@ use database::{
 use diesel::{ExpressionMethods as _, SelectableHelper as _};
 use diesel_async::RunQueryDsl as _;
 use futures::AsyncReadExt;
+#[cfg(feature = "ui")]
 use pulldown_cmark::{Options, Parser, html};
+#[cfg(feature = "ui")]
 use qrcode::{QrCode, render::svg};
+#[cfg(feature = "ui")]
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "ui")]
 use tera::{Context, Tera};
 
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
-	Router::new()
+	#[cfg_attr(not(feature = "ui"), expect(unused_mut))]
+	let mut router = Router::new()
 		.route("/", get(list))
 		.route("/update-for/{version}", get(update_for))
 		.route("/{version}", post(create))
 		.route("/{version}", delete(remove))
-		.route("/{version}", get(view_artifacts))
-		.route("/{version}/artifacts", get(list_artifacts))
-		.route("/{version}/mobile", get(view_mobile_install))
+		.route("/{version}/artifacts", get(list_artifacts));
+
+	#[cfg(feature = "ui")]
+	{
+		router = router
+			.route("/{version}", get(view_artifacts))
+			.route("/{version}/mobile", get(view_mobile_install));
+	}
+
+	router
 }
 
-// Add a derived struct for Artifact with QR code
+#[cfg(feature = "ui")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ArtifactWithQR {
 	#[serde(flatten)]
@@ -44,6 +59,7 @@ struct ArtifactWithQR {
 	qr_code_svg: String,
 }
 
+#[cfg(feature = "ui")]
 impl From<Artifact> for ArtifactWithQR {
 	fn from(artifact: Artifact) -> Self {
 		let code = QrCode::new(&artifact.download_url).expect("Failed to generate QR code");
@@ -61,6 +77,7 @@ impl From<Artifact> for ArtifactWithQR {
 	}
 }
 
+#[cfg(feature = "ui")]
 pub fn parse_markdown(text: &str) -> String {
 	let mut options = Options::empty();
 	options.insert(Options::ENABLE_FOOTNOTES);
@@ -123,6 +140,7 @@ async fn remove(
 	Ok(())
 }
 
+#[cfg(feature = "ui")]
 async fn view_artifacts(
 	Path(version): Path<String>,
 	State(db): State<Db>,
@@ -152,6 +170,7 @@ async fn list_artifacts(
 	Ok(Json(artifacts))
 }
 
+#[cfg(feature = "ui")]
 async fn view_mobile_install(
 	Path(version): Path<String>,
 	State(db): State<Db>,

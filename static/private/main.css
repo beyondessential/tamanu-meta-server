@@ -1,87 +1,130 @@
+@import url("https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,100;0,300;0,400;0,500;0,700;0,900;1,100;1,300;1,400;1,500;1,700;1,900&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;600;700&display=swap");
+
 html {
-	font-family: sans-serif;
+	font-family: Roboto, Helvetica, Arial, sans-serif;
 }
 
-.header {
+body {
+	margin: 0;
+	padding: 0;
+	background-color: oklch(0.97 0.01 240);
+}
+
+#root {
+	min-height: 100vh;
+	display: flex;
+	flex-direction: column;
+}
+
+#global-nav {
 	display: flex;
 	justify-content: space-between;
 	align-items: center;
-	margin-bottom: 1em;
-}
+	padding: 0.5em 2em;
+	background: oklch(1 0 0);
+	color: oklch(0.3 0.1 240);
+	border-bottom: 2px solid oklch(0.7 0.15 240);
+	margin-bottom: 1rem;
 
-.greeting {
-	font-weight: bold;
-	color: #333;
-}
+	.nav-brand {
+		a {
+			display: flex;
+			align-items: center;
+			gap: 0.5em;
+			color: oklch(0.3 0.1 240);
+			text-decoration: none;
+			font-size: 1.5em;
+			font-weight: 500;
 
-td,
-th {
-	padding: 0.5em;
-	border-width: 1px 0;
-	border-style: solid;
-	border-color: black;
-}
+			&:hover {
+				color: oklch(0.7 0.15 240);
+			}
 
-th,
-.success,
-.failure {
-	font-weight: bold;
-}
+			.logo {
+				height: 32px;
+				width: auto;
+				filter: brightness(0.9) contrast(1.1);
+				transition: filter 0.2s ease;
+			}
 
-table {
-	border-collapse: collapse;
-}
+			&:hover .logo {
+				filter: brightness(1) contrast(1.2);
+			}
+		}
+	}
 
-.status.up {
-	background: green;
-	color: white;
-}
+	.nav-links {
+		display: flex;
+		gap: 2em;
 
-.status.down {
-	background: red;
-	color: white;
-}
+		a {
+			color: oklch(0.3 0.1 240);
+			text-decoration: none;
+			padding: 0.5em 1em;
+			border-radius: 4px;
+			font-weight: 400;
+			transition: all 0.2s ease;
 
-.status.gone {
-	background: black;
-	color: white;
-}
+			&:hover {
+				background: oklch(0.95 0.05 240);
+				color: oklch(0.7 0.15 240);
+			}
 
-.status.away {
-	background: orange;
-	color: black;
-}
+			&.active {
+				background: oklch(0.7 0.15 240);
+				color: oklch(1 0 0);
+				font-weight: 500;
+			}
+		}
+	}
 
-.status.blip {
-	background: yellow;
-	color: black;
-}
+	@media (max-width: 768px) {
+		flex-direction: column;
+		gap: 0.5em;
+		padding: 0.75em 1em;
 
-.ago {
-	white-space: pre;
-	text-decoration: underline dotted;
-}
+		.nav-brand {
+			a {
+				font-size: 1.3em;
 
-.versions {
-	color: grey;
-	margin-left: 1em;
-}
+				.logo {
+					height: 28px;
+				}
+			}
+		}
 
-tr[data-kind="facility"] {
-	opacity: 0.75;
+		.nav-links {
+			gap: 1em;
+			flex-wrap: wrap;
+			justify-content: center;
 
-	& .name,
-	& .host {
-		font-size: 0.9em;
+			a {
+				padding: 0.4em 0.8em;
+				font-size: 0.9em;
+			}
+		}
 	}
 }
 
-.ago {
-	border-right: 1px dashed black;
+main {
+	flex: 1;
+	padding: 2em;
+	background: oklch(1 0 0);
+	margin: 0 2em 2em;
+	border-radius: 8px;
+	box-shadow: 0 2px 4px oklch(0 0 0 / 0.05);
 }
 
-.ago,
-.platform,
-.timezone {
-	text-align: right;
+.loading {
+	padding: 1em;
+	text-align: center;
+	color: oklch(0.55 0.02 240);
+	font-style: italic;
+}
+
+.monospace {
+	font-family:
+		"Fira Code", "SF Mono", Monaco, "Cascadia Code", "Roboto Mono",
+		Consolas, "Courier New", monospace;
 }

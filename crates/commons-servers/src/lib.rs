@@ -13,6 +13,7 @@ use tracing::Span;
 pub mod device_auth;
 pub mod headers;
 pub mod health;
+pub mod tailscale_auth;
 
 pub fn router(routes: Router<()>, client_ip_source: ClientIpSource) -> Router<()> {
 	routes

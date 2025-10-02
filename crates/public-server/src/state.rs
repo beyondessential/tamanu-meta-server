@@ -1,17 +1,21 @@
+#[cfg(feature = "ui")]
 use std::sync::Arc;
 
 use axum::extract::FromRef;
 use commons_errors::Result;
 use database::Db;
+#[cfg(feature = "ui")]
 use tera::Tera;
 
 #[derive(Clone, Debug)]
 pub struct AppState {
 	pub db: Db,
+	#[cfg(feature = "ui")]
 	pub tera: Arc<Tera>,
 }
 
 impl AppState {
+	#[cfg(feature = "ui")]
 	pub fn init_tera() -> Result<Arc<Tera>> {
 		let mut tera = Tera::default();
 
@@ -34,8 +38,13 @@ impl AppState {
 	}
 
 	pub fn init() -> Result<Self> {
+		Self::from_db(database::init())
+	}
+
+	pub fn from_db(db: Db) -> Result<Self> {
 		Ok(Self {
-			db: database::init(),
+			db,
+			#[cfg(feature = "ui")]
 			tera: Self::init_tera()?,
 		})
 	}
@@ -47,6 +56,7 @@ impl FromRef<AppState> for Db {
 	}
 }
 
+#[cfg(feature = "ui")]
 impl FromRef<AppState> for Arc<Tera> {
 	fn from_ref(state: &AppState) -> Self {
 		state.tera.clone()
