@@ -51,9 +51,12 @@ pub fn App() -> impl IntoView {
 #[component]
 pub fn Index() -> impl IntoView {
 	view! {
-		<nav>
-			<A href="/status">"Status"</A>
-			<A href="/admins">"Admins"</A>
-		</nav>
+		<Stylesheet id="index" href="/static/index.css" />
+		<div id="index-page">
+			<nav>
+				<A href="/status">"Status"</A>
+				<A href="/admins">"Admins"</A>
+			</nav>
+		</div>
 	}
 }

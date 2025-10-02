@@ -1,4 +1,5 @@
 use leptos::prelude::*;
+use leptos_meta::Stylesheet;
 
 use crate::{
 	app::{greeting::Greeting, status::Status},
@@ -8,13 +9,16 @@ use crate::{
 #[component]
 pub fn Page() -> impl IntoView {
 	view! {
-		<header class="header">
-			<Status/>
-			<Greeting />
-		</header>
-		<article>
-			<Table />
-		</article>
+		<Stylesheet id="status" href="/static/status.css" />
+		<div id="status-page">
+			<header class="header">
+				<Status/>
+				<Greeting />
+			</header>
+			<article>
+				<Table />
+			</article>
+		</div>
 	}
 }
 

@@ -1,10 +1,14 @@
 use leptos::prelude::*;
+use leptos_meta::Stylesheet;
 
 #[component]
 pub fn Page() -> impl IntoView {
 	view! {
-		<header class="header">"Admin Management"</header>
-		<AdminManagement />
+		<Stylesheet id="admin" href="/static/admin.css" />
+		<div id="admin-page">
+			<header class="header">"Admin Management"</header>
+			<AdminManagement />
+		</div>
 	}
 }
 
@@ -47,7 +51,6 @@ pub fn AdminManagement() -> impl IntoView {
 		set_email.set(String::new());
 	};
 
-	// Handle add admin result
 	Effect::new(move |_| {
 		if let Some(result) = add_admin.value().get() {
 			match result {
@@ -55,7 +58,6 @@ pub fn AdminManagement() -> impl IntoView {
 					set_message.set("Admin added successfully".to_string());
 					set_refresh_trigger.update(|n| *n += 1);
 
-					// Clear success message after 3 seconds
 					set_timeout(
 						move || set_message.set(String::new()),
 						std::time::Duration::from_millis(3000),
@@ -68,7 +70,6 @@ pub fn AdminManagement() -> impl IntoView {
 		}
 	});
 
-	// Handle delete admin result
 	Effect::new(move |_| {
 		if let Some(result) = delete_admin.value().get() {
 			match result {

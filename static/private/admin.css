@@ -1,0 +1,159 @@
+#admin-page {
+	.add-admin-form {
+		background: #f5f5f5;
+		padding: 1.5em;
+		border-radius: 8px;
+		margin-bottom: 2em;
+		border: 1px solid #ddd;
+
+		h2 {
+			margin-top: 0;
+			margin-bottom: 1em;
+			color: #333;
+		}
+
+		form {
+			display: flex;
+			flex-direction: column;
+			gap: 1em;
+
+			> div {
+				display: flex;
+				flex-direction: column;
+				gap: 0.5em;
+			}
+		}
+
+		label {
+			font-weight: bold;
+			color: #555;
+		}
+
+		input[type="email"] {
+			padding: 0.75em;
+			border: 1px solid #ccc;
+			border-radius: 4px;
+			font-size: 1em;
+			max-width: 300px;
+
+			&:focus {
+				outline: none;
+				border-color: #007bff;
+				box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+			}
+		}
+
+		button[type="submit"] {
+			padding: 0.75em 1.5em;
+			background: #007bff;
+			color: white;
+			border: none;
+			border-radius: 4px;
+			font-size: 1em;
+			cursor: pointer;
+			max-width: 150px;
+			transition: background-color 0.2s;
+
+			&:hover:not(:disabled) {
+				background: #0056b3;
+			}
+
+			&:disabled {
+				background: #6c757d;
+				cursor: not-allowed;
+			}
+		}
+	}
+
+	.message {
+		padding: 0.75em;
+		border-radius: 4px;
+		margin-top: 1em;
+		font-weight: bold;
+		background: #d4edda;
+		color: #155724;
+		border: 1px solid #c3e6cb;
+
+		&:contains("Error") {
+			background: #f8d7da;
+			color: #721c24;
+			border: 1px solid #f5c6cb;
+		}
+	}
+
+	.admin-list {
+		h2 {
+			margin-bottom: 1em;
+			color: #333;
+		}
+	}
+
+	.admin-items {
+		list-style: none;
+		padding: 0;
+		margin: 0;
+	}
+
+	.admin-item {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding: 1em;
+		margin-bottom: 0.5em;
+		background: white;
+		border: 1px solid #ddd;
+		border-radius: 4px;
+		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+	}
+
+	.admin-email {
+		font-family: monospace;
+		font-size: 1.1em;
+		color: #333;
+	}
+
+	.delete-btn {
+		padding: 0.5em 1em;
+		background: #dc3545;
+		color: white;
+		border: none;
+		border-radius: 4px;
+		cursor: pointer;
+		font-size: 0.9em;
+		transition: background-color 0.2s;
+
+		&:hover:not(:disabled) {
+			background: #c82333;
+		}
+
+		&:disabled {
+			background: #6c757d;
+			cursor: not-allowed;
+		}
+	}
+
+	.no-admins {
+		padding: 2em;
+		text-align: center;
+		color: #666;
+		font-style: italic;
+		background: #f8f9fa;
+		border: 1px solid #dee2e6;
+		border-radius: 4px;
+	}
+
+	.loading {
+		padding: 1em;
+		text-align: center;
+		color: #666;
+	}
+
+	.error {
+		padding: 1em;
+		background: #f8d7da;
+		color: #721c24;
+		border: 1px solid #f5c6cb;
+		border-radius: 4px;
+		margin: 1em 0;
+	}
+}

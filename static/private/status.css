@@ -1,0 +1,90 @@
+#status-page {
+	.header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 1em;
+	}
+
+	.greeting {
+		font-weight: bold;
+		color: #333;
+	}
+
+	td,
+	th {
+		padding: 0.5em;
+		border-width: 1px 0;
+		border-style: solid;
+		border-color: black;
+	}
+
+	th,
+	.success,
+	.failure {
+		font-weight: bold;
+	}
+
+	table {
+		border-collapse: collapse;
+	}
+
+	.status {
+		&.up {
+			background: green;
+			color: white;
+		}
+
+		&.down {
+			background: red;
+			color: white;
+		}
+
+		&.gone {
+			background: black;
+			color: white;
+		}
+
+		&.away {
+			background: orange;
+			color: black;
+		}
+
+		&.blip {
+			background: yellow;
+			color: black;
+		}
+	}
+
+	.ago {
+		white-space: pre;
+		text-decoration: underline dotted;
+		border-right: 1px dashed black;
+		text-align: right;
+	}
+
+	.versions {
+		color: grey;
+		margin-left: 1em;
+	}
+
+	tr[data-kind="facility"] {
+		opacity: 0.75;
+
+		.name,
+		.host {
+			font-size: 0.9em;
+		}
+	}
+
+	.platform,
+	.timezone {
+		text-align: right;
+	}
+
+	.loading {
+		padding: 1em;
+		text-align: center;
+		color: #666;
+	}
+}
