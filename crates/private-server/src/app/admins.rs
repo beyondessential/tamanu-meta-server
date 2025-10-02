@@ -17,9 +17,6 @@ pub fn Page() -> impl IntoView {
 						Ok(true) => {
 							view! {
 								<div id="admin-page">
-									<div class="page-header">
-										<h1>"Admin Management"</h1>
-									</div>
 									<AdminManagement />
 								</div>
 							}.into_any()

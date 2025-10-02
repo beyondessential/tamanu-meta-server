@@ -1,12 +1,11 @@
 use leptos::prelude::*;
 use leptos_meta::{MetaTags, Stylesheet, Title, provide_meta_context};
 use leptos_router::{
-	components::{A, Route, Router, Routes},
+	components::{A, Redirect, Route, Router, Routes},
 	path,
 };
 
 mod admins;
-mod greeting;
 mod status;
 mod statuses;
 
@@ -38,8 +37,8 @@ pub fn App() -> impl IntoView {
 			<Router>
 				<GlobalNav />
 				<main>
-					<Routes fallback=|| Index>
-						<Route path=path!("") view=Index />
+					<Routes fallback=|| view! { <Redirect path="/status" /> }>
+						<Route path=path!("") view=|| view! { <Redirect path="/status" /> } />
 						<Route path=path!("status") view=statuses::Page />
 						<Route path=path!("admins") view=admins::Page />
 					</Routes>
@@ -59,10 +58,9 @@ pub fn GlobalNav() -> impl IntoView {
 	view! {
 		<nav id="global-nav">
 			<div class="nav-brand">
-				<A href="/">"Tamanu Meta"</A>
+				<A href="/status">"Tamanu Meta"</A>
 			</div>
 			<div class="nav-links">
-				<A href="/" exact=true>"Home"</A>
 				<A href="/status">"Status"</A>
 				<Suspense fallback=|| view! {}>
 					{move || {
@@ -79,18 +77,5 @@ pub fn GlobalNav() -> impl IntoView {
 				</Suspense>
 			</div>
 		</nav>
-	}
-}
-
-#[component]
-pub fn Index() -> impl IntoView {
-	view! {
-		<Stylesheet id="index" href="/static/index.css" />
-		<div id="index-page">
-			<div class="welcome-content">
-				<h1>"Welcome to Tamanu Meta Server"</h1>
-				<p>"Choose from the navigation above to manage your Tamanu infrastructure."</p>
-			</div>
-		</div>
 	}
 }
