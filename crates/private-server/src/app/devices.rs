@@ -220,7 +220,7 @@ pub fn DeviceRow(
 	device: crate::fns::devices::DeviceInfo,
 	trust_action: Action<(String, String), Result<(), commons_errors::AppError>>,
 ) -> impl IntoView {
-	let (key_format, set_key_format) = signal("hex".to_string());
+	let (key_format, set_key_format) = signal("pem".to_string());
 	let (show_history, set_show_history) = signal(false);
 	let (selected_role, set_selected_role) = signal("admin".to_string());
 
