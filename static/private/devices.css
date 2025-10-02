@@ -4,29 +4,29 @@
 
 		h1 {
 			font-size: 2em;
-			color: oklch(0.3 0.1 240);
+			color: var(--color-text-primary);
 			margin-bottom: 0.5em;
 			font-weight: 500;
 		}
 
 		.page-description {
-			color: oklch(0.5 0.05 240);
+			color: var(--color-text-muted);
 			font-size: 1.1em;
 			margin-bottom: 0;
 		}
 	}
 
 	.device-search {
-		background: oklch(0.99 0.005 240);
+		background: var(--color-bg-light);
 		padding: 1.5em;
 		border-radius: 8px;
 		margin-bottom: 2em;
-		border: 1px solid oklch(0.9 0.01 240);
+		border: 1px solid var(--color-border-light);
 
 		h2 {
 			margin-top: 0;
 			margin-bottom: 1em;
-			color: oklch(0.4 0.08 240);
+			color: var(--color-text-secondary);
 			font-weight: 500;
 		}
 
@@ -38,34 +38,34 @@
 
 		.search-input {
 			padding: 0.75em;
-			border: 1px solid oklch(0.85 0.01 240);
+			border: 1px solid var(--color-border-dark);
 			border-radius: 4px;
 			font-size: 1em;
 			font-family:
 				"SF Mono", "Monaco", "Inconsolata", "Fira Code", "Fira Mono",
 				"Droid Sans Mono", "Cascadia Code", monospace;
-			background: oklch(1 0 0);
+			background: var(--color-bg-white);
 
 			&:focus {
 				outline: none;
-				border-color: oklch(0.7 0.15 240);
-				box-shadow: 0 0 0 2px oklch(0.7 0.15 240 / 0.25);
+				border-color: var(--color-primary);
+				box-shadow: 0 0 0 2px var(--color-primary-focus);
 			}
 		}
 
 		.search-help {
 			font-size: 0.9em;
-			color: oklch(0.55 0.02 240);
+			color: var(--color-text-light);
 			margin: 0;
 		}
 
 		.search-results {
 			margin-top: 1.5em;
 			padding-top: 1.5em;
-			border-top: 1px solid oklch(0.9 0.01 240);
+			border-top: 1px solid var(--color-border-light);
 
 			h3 {
-				color: oklch(0.4 0.08 240);
+				color: var(--color-text-secondary);
 				font-weight: 500;
 				margin-bottom: 1em;
 			}
@@ -75,9 +75,9 @@
 			margin-top: 1em;
 			padding: 1em;
 			text-align: center;
-			color: oklch(0.55 0.02 240);
+			color: var(--color-text-light);
 			font-style: italic;
-			background: oklch(0.97 0.005 240);
+			background: var(--color-bg-body);
 			border-radius: 4px;
 		}
 	}
@@ -87,8 +87,8 @@
 			display: flex;
 			gap: 0;
 			margin-bottom: 2em;
-			border-bottom: 2px solid oklch(0.9 0.01 240);
-			background: oklch(0.98 0.005 240);
+			border-bottom: 2px solid var(--color-border-light);
+			background: var(--color-bg-lighter);
 			border-radius: 8px 8px 0 0;
 
 			.tab-button {
@@ -97,21 +97,21 @@
 				padding: 1em 2em;
 				font-size: 1em;
 				font-weight: 500;
-				color: oklch(0.5 0.05 240);
+				color: var(--color-text-muted);
 				cursor: pointer;
 				transition: all 0.2s;
 				border-radius: 8px 8px 0 0;
 				position: relative;
 
 				&:hover {
-					background: oklch(0.95 0.005 240);
-					color: oklch(0.4 0.08 240);
+					background: var(--color-bg-medium);
+					color: var(--color-text-secondary);
 				}
 
 				&.active {
-					background: oklch(1 0 0);
-					color: oklch(0.3 0.1 240);
-					border-bottom: 2px solid oklch(0.7 0.15 240);
+					background: var(--color-bg-white);
+					color: var(--color-text-primary);
+					border-bottom: 2px solid var(--color-primary);
 					margin-bottom: -2px;
 				}
 			}
@@ -119,7 +119,7 @@
 
 		.tab-content {
 			.section-description {
-				color: oklch(0.55 0.02 240);
+				color: var(--color-text-light);
 				margin-bottom: 1.5em;
 				font-size: 1em;
 			}
@@ -130,12 +130,12 @@
 	.trusted-devices {
 		h2 {
 			margin-bottom: 0.5em;
-			color: oklch(0.4 0.08 240);
+			color: var(--color-text-secondary);
 			font-weight: 500;
 		}
 
 		.section-description {
-			color: oklch(0.55 0.02 240);
+			color: var(--color-text-light);
 			margin-bottom: 1.5em;
 		}
 	}
@@ -147,11 +147,11 @@
 	}
 
 	.device-row {
-		background: oklch(1 0 0);
-		border: 1px solid oklch(0.9 0.01 240);
+		background: var(--color-bg-white);
+		border: 1px solid var(--color-border-light);
 		border-radius: 8px;
 		padding: 1.5em;
-		box-shadow: 0 2px 4px oklch(0 0 0 / 0.05);
+		box-shadow: 0 2px 4px var(--color-shadow);
 	}
 
 	.device-header {
@@ -160,7 +160,7 @@
 		gap: 2em;
 		margin-bottom: 1.5em;
 		padding-bottom: 1em;
-		border-bottom: 1px solid oklch(0.92 0.01 240);
+		border-bottom: 1px solid var(--color-border-medium);
 	}
 
 	.device-info {
@@ -172,7 +172,7 @@
 
 			h3 {
 				margin: 0;
-				color: oklch(0.35 0.08 240);
+				color: var(--color-text-dark);
 				font-size: 1.2em;
 				font-weight: 500;
 				display: flex;
@@ -180,8 +180,8 @@
 				gap: 0.75em;
 
 				.role-badge-header {
-					background: oklch(0.85 0.1 240);
-					color: oklch(0.3 0.15 240);
+					background: var(--color-primary-light);
+					color: var(--color-text-primary);
 					padding: 0.25em 0.75em;
 					border-radius: 12px;
 					font-weight: 500;
@@ -193,17 +193,17 @@
 
 		.copy-id-btn {
 			background: none;
-			border: 1px solid oklch(0.85 0.01 240);
+			border: 1px solid var(--color-border-dark);
 			border-radius: 4px;
 			padding: 0.25em 0.5em;
 			cursor: pointer;
 			font-size: 0.9em;
-			color: oklch(0.5 0.05 240);
+			color: var(--color-text-muted);
 			transition: all 0.2s;
 
 			&:hover {
-				background: oklch(0.95 0.005 240);
-				border-color: oklch(0.7 0.15 240);
+				background: var(--color-bg-medium);
+				border-color: var(--color-primary);
 			}
 		}
 
@@ -211,7 +211,7 @@
 			display: flex;
 			gap: 1em;
 			font-size: 0.9em;
-			color: oklch(0.5 0.05 240);
+			color: var(--color-text-muted);
 			align-items: center;
 
 			.connection-ip {
@@ -221,7 +221,7 @@
 
 			.connection-ua {
 				font-size: 0.85em;
-				color: oklch(0.55 0.02 240);
+				color: var(--color-text-light);
 				max-width: 300px;
 				overflow: hidden;
 				text-overflow: ellipsis;
@@ -236,7 +236,7 @@
 		flex-direction: column;
 		gap: 0.5em;
 		font-size: 0.9em;
-		color: oklch(0.5 0.05 240);
+		color: var(--color-text-muted);
 
 		.device-first-seen,
 		.device-last-seen,
@@ -256,7 +256,7 @@
 
 			h4 {
 				margin: 0;
-				color: oklch(0.4 0.08 240);
+				color: var(--color-text-secondary);
 				font-weight: 500;
 			}
 
@@ -269,7 +269,7 @@
 					align-items: center;
 					gap: 0.3em;
 					font-size: 0.9em;
-					color: oklch(0.5 0.05 240);
+					color: var(--color-text-muted);
 					cursor: pointer;
 
 					input[type="radio"] {
@@ -286,14 +286,14 @@
 		}
 
 		.key-item {
-			background: oklch(0.98 0.005 240);
-			border: 1px solid oklch(0.92 0.01 240);
+			background: var(--color-bg-lighter);
+			border: 1px solid var(--color-border-medium);
 			border-radius: 4px;
 			padding: 1em;
 
 			.key-name {
 				font-weight: 500;
-				color: oklch(0.4 0.08 240);
+				color: var(--color-text-secondary);
 				margin-bottom: 0.5em;
 				font-size: 0.9em;
 			}
@@ -308,8 +308,8 @@
 					line-height: 1.3;
 					margin: 0;
 					padding: 0.75em;
-					background: oklch(0.95 0.005 240);
-					border: 1px solid oklch(0.88 0.01 240);
+					background: var(--color-bg-medium);
+					border: 1px solid var(--color-border-variant);
 					border-radius: 3px;
 					overflow-x: auto;
 					white-space: pre;
@@ -324,8 +324,8 @@
 					line-height: 1.6;
 					display: block;
 					padding: 0.75em;
-					background: oklch(0.95 0.005 240);
-					border: 1px solid oklch(0.88 0.01 240);
+					background: var(--color-bg-medium);
+					border: 1px solid var(--color-border-variant);
 					border-radius: 3px;
 					word-break: break-all;
 				}
@@ -338,7 +338,7 @@
 		justify-content: space-between;
 		align-items: flex-start;
 		padding-top: 1em;
-		border-top: 1px solid oklch(0.92 0.01 240);
+		border-top: 1px solid var(--color-border-medium);
 		gap: 2em;
 
 		.trust-device {
@@ -348,27 +348,27 @@
 
 			label {
 				font-weight: 500;
-				color: oklch(0.4 0.08 240);
+				color: var(--color-text-secondary);
 			}
 
 			select {
 				padding: 0.5em;
-				border: 1px solid oklch(0.85 0.01 240);
+				border: 1px solid var(--color-border-dark);
 				border-radius: 4px;
 				font-size: 0.9em;
-				background: oklch(1 0 0);
+				background: var(--color-bg-white);
 
 				&:focus {
 					outline: none;
-					border-color: oklch(0.7 0.15 240);
-					box-shadow: 0 0 0 2px oklch(0.7 0.15 240 / 0.25);
+					border-color: var(--color-primary);
+					box-shadow: 0 0 0 2px var(--color-primary-focus);
 				}
 			}
 
 			.trust-btn {
 				padding: 0.5em 1em;
-				background: oklch(0.7 0.15 140);
-				color: oklch(1 0 0);
+				background: var(--color-success);
+				color: var(--color-bg-white);
 				border: none;
 				border-radius: 4px;
 				font-size: 0.9em;
@@ -377,11 +377,11 @@
 				transition: background-color 0.2s;
 
 				&:hover:not(:disabled) {
-					background: oklch(0.6 0.15 140);
+					background: var(--color-success-hover);
 				}
 
 				&:disabled {
-					background: oklch(0.5 0.02 240);
+					background: var(--color-disabled);
 					cursor: not-allowed;
 				}
 			}
@@ -402,22 +402,22 @@
 
 			.actions-row select {
 				padding: 0.4em;
-				border: 1px solid oklch(0.85 0.01 240);
+				border: 1px solid var(--color-border-dark);
 				border-radius: 4px;
 				font-size: 0.85em;
-				background: oklch(1 0 0);
+				background: var(--color-bg-white);
 
 				&:focus {
 					outline: none;
-					border-color: oklch(0.7 0.15 240);
-					box-shadow: 0 0 0 2px oklch(0.7 0.15 240 / 0.25);
+					border-color: var(--color-primary);
+					box-shadow: 0 0 0 2px var(--color-primary-focus);
 				}
 			}
 
 			.actions-row .update-role-btn {
 				padding: 0.4em 0.8em;
-				background: oklch(0.7 0.15 240);
-				color: oklch(1 0 0);
+				background: var(--color-primary);
+				color: var(--color-bg-white);
 				border: none;
 				border-radius: 4px;
 				font-size: 0.85em;
@@ -426,20 +426,20 @@
 				transition: background-color 0.2s;
 
 				&:hover:not(:disabled) {
-					background: oklch(0.6 0.15 240);
+					background: var(--color-primary-hover);
 				}
 
 				&:disabled {
-					background: oklch(0.5 0.02 240);
+					background: var(--color-disabled);
 					cursor: not-allowed;
 				}
 			}
 
 			.actions-row .untrust-btn {
 				padding: 0.4em 0.8em;
-				background: oklch(0.85 0.1 20);
-				color: oklch(0.3 0.15 20);
-				border: 1px solid oklch(0.7 0.1 20);
+				background: var(--color-error-light-bg);
+				color: var(--color-error-text);
+				border: 1px solid var(--color-error-light-border);
 				border-radius: 4px;
 				font-size: 0.85em;
 				font-weight: 500;
@@ -447,8 +447,8 @@
 				transition: all 0.2s;
 
 				&:hover {
-					background: oklch(0.8 0.1 20);
-					border-color: oklch(0.6 0.1 20);
+					background: var(--color-error-light-hover);
+					border-color: var(--color-error-light-border-hover);
 				}
 			}
 
@@ -460,13 +460,13 @@
 
 				.confirm-text {
 					font-weight: 500;
-					color: oklch(0.3 0.15 20);
+					color: var(--color-error-text);
 				}
 
 				.untrust-confirm-btn {
 					padding: 0.3em 0.6em;
-					background: oklch(0.6 0.15 20);
-					color: oklch(1 0 0);
+					background: var(--color-error-confirm);
+					color: var(--color-bg-white);
 					border: none;
 					border-radius: 4px;
 					font-size: 0.85em;
@@ -475,28 +475,28 @@
 					transition: background-color 0.2s;
 
 					&:hover:not(:disabled) {
-						background: oklch(0.5 0.15 20);
+						background: var(--color-error-confirm-hover);
 					}
 
 					&:disabled {
-						background: oklch(0.5 0.02 240);
+						background: var(--color-disabled);
 						cursor: not-allowed;
 					}
 				}
 
 				.untrust-cancel-btn {
 					padding: 0.3em 0.6em;
-					background: oklch(0.95 0.005 240);
-					color: oklch(0.4 0.08 240);
-					border: 1px solid oklch(0.85 0.01 240);
+					background: var(--color-bg-medium);
+					color: var(--color-text-secondary);
+					border: 1px solid var(--color-border-dark);
 					border-radius: 4px;
 					font-size: 0.85em;
 					cursor: pointer;
 					transition: all 0.2s;
 
 					&:hover {
-						background: oklch(0.92 0.005 240);
-						border-color: oklch(0.8 0.01 240);
+						background: var(--color-bg-medium-dark);
+						border-color: var(--color-border-darker);
 					}
 				}
 			}
@@ -504,9 +504,9 @@
 
 		.history-toggle {
 			padding: 0.5em 1em;
-			background: oklch(0.95 0.005 240);
-			color: oklch(0.4 0.08 240);
-			border: 1px solid oklch(0.85 0.01 240);
+			background: var(--color-bg-medium);
+			color: var(--color-text-secondary);
+			border: 1px solid var(--color-border-dark);
 			border-radius: 4px;
 			font-size: 0.9em;
 			cursor: pointer;
@@ -514,27 +514,27 @@
 			flex-shrink: 0;
 
 			&:hover {
-				background: oklch(0.92 0.005 240);
-				border-color: oklch(0.8 0.01 240);
+				background: var(--color-bg-medium-dark);
+				border-color: var(--color-border-darker);
 			}
 		}
 	}
 
 	.connection-history {
 		margin-top: 1em;
-		border: 1px solid oklch(0.9 0.01 240);
+		border: 1px solid var(--color-border-light);
 		border-radius: 4px;
-		background: oklch(0.99 0.005 240);
+		background: var(--color-bg-light);
 
 		summary {
 			padding: 1em;
 			cursor: pointer;
 			font-weight: 500;
-			color: oklch(0.4 0.08 240);
-			border-bottom: 1px solid oklch(0.92 0.01 240);
+			color: var(--color-text-secondary);
+			border-bottom: 1px solid var(--color-border-medium);
 
 			&:hover {
-				background: oklch(0.97 0.005 240);
+				background: var(--color-bg-body);
 			}
 		}
 
@@ -550,14 +550,14 @@
 			grid-template-columns: auto auto auto 1fr;
 			gap: 1em;
 			padding: 0.75em;
-			background: oklch(1 0 0);
-			border: 1px solid oklch(0.92 0.01 240);
+			background: var(--color-bg-white);
+			border: 1px solid var(--color-border-medium);
 			border-radius: 4px;
 			font-size: 0.9em;
 
 			.history-count {
 				font-weight: 600;
-				color: oklch(0.5 0.1 20);
+				color: var(--color-error-text);
 				min-width: 2em;
 				text-align: right;
 			}
@@ -565,16 +565,16 @@
 			.history-time {
 				font-family: monospace;
 				font-weight: 500;
-				color: oklch(0.4 0.08 240);
+				color: var(--color-text-secondary);
 			}
 
 			.history-ip {
 				font-family: monospace;
-				color: oklch(0.5 0.05 240);
+				color: var(--color-text-muted);
 			}
 
 			.history-ua {
-				color: oklch(0.55 0.02 240);
+				color: var(--color-text-light);
 				font-size: 0.85em;
 				word-break: break-all;
 			}
@@ -583,7 +583,7 @@
 		.no-history {
 			padding: 1.5em;
 			text-align: center;
-			color: oklch(0.55 0.02 240);
+			color: var(--color-text-light);
 			font-style: italic;
 		}
 
@@ -597,13 +597,13 @@
 			display: flex;
 			justify-content: center;
 			padding: 1em;
-			border-top: 1px solid oklch(0.92 0.01 240);
+			border-top: 1px solid var(--color-border-medium);
 		}
 
 		.load-more-btn {
 			padding: 0.75em 1.5em;
-			background: oklch(0.7 0.15 240);
-			color: oklch(1 0 0);
+			background: var(--color-primary);
+			color: var(--color-bg-white);
 			border: none;
 			border-radius: 4px;
 			font-size: 0.9em;
@@ -612,11 +612,11 @@
 			transition: background-color 0.2s;
 
 			&:hover:not(:disabled) {
-				background: oklch(0.6 0.15 240);
+				background: var(--color-primary-hover);
 			}
 
 			&:disabled {
-				background: oklch(0.5 0.02 240);
+				background: var(--color-disabled);
 				cursor: not-allowed;
 			}
 		}
@@ -625,17 +625,17 @@
 	.no-devices {
 		padding: 2em;
 		text-align: center;
-		color: oklch(0.55 0.02 240);
+		color: var(--color-text-light);
 		font-style: italic;
-		background: oklch(0.99 0.005 240);
-		border: 1px solid oklch(0.92 0.01 240);
+		background: var(--color-bg-light);
+		border: 1px solid var(--color-border-medium);
 		border-radius: 8px;
 	}
 
 	.loading {
 		padding: 2em;
 		text-align: center;
-		color: oklch(0.55 0.02 240);
+		color: var(--color-text-light);
 		font-style: italic;
 	}
 
@@ -644,22 +644,22 @@
 		border-radius: 4px;
 		margin: 1em 0;
 		font-weight: 500;
-		background: oklch(0.9 0.1 140);
-		color: oklch(0.3 0.15 140);
-		border: 1px solid oklch(0.8 0.1 140);
+		background: var(--color-success-bg);
+		color: var(--color-success-text);
+		border: 1px solid var(--color-success-border);
 
 		&:contains("Error") {
-			background: oklch(0.9 0.1 20);
-			color: oklch(0.3 0.15 20);
-			border: 1px solid oklch(0.8 0.1 20);
+			background: var(--color-error-bg);
+			color: var(--color-error-text);
+			border: 1px solid var(--color-error-border);
 		}
 	}
 
 	.error {
 		padding: 1.5em;
-		background: oklch(0.9 0.1 20);
-		color: oklch(0.3 0.15 20);
-		border: 1px solid oklch(0.8 0.1 20);
+		background: var(--color-error-bg);
+		color: var(--color-error-text);
+		border: 1px solid var(--color-error-border);
 		border-radius: 8px;
 		margin: 1em 0;
 		font-size: 1.1em;
@@ -672,15 +672,15 @@
 		.back-link {
 			display: inline-block;
 			padding: 0.75em 1.5em;
-			background: oklch(0.3 0.15 20);
-			color: oklch(1 0 0);
+			background: var(--color-error-text);
+			color: var(--color-bg-white);
 			text-decoration: none;
 			border-radius: 4px;
 			font-weight: 500;
 			transition: background-color 0.2s;
 
 			&:hover {
-				background: oklch(0.25 0.15 20);
+				background: var(--color-error-dark);
 			}
 		}
 	}
@@ -688,14 +688,14 @@
 	.timestamp-hover {
 		text-decoration: underline;
 		text-decoration-style: dotted;
-		text-decoration-color: oklch(0.6 0.05 240);
+		text-decoration-color: var(--color-text-muted);
 		text-underline-offset: 2px;
 		cursor: help;
 		transition: text-decoration-color 0.2s;
 
 		&:hover {
 			text-decoration-style: solid;
-			text-decoration-color: oklch(0.4 0.08 240);
+			text-decoration-color: var(--color-text-secondary);
 		}
 	}
 
@@ -744,7 +744,7 @@
 
 				&.active {
 					border-bottom: none;
-					border-left: 3px solid oklch(0.7 0.15 240);
+					border-left: 3px solid var(--color-primary);
 					margin-bottom: 0;
 					margin-left: -3px;
 				}

@@ -1,5 +1,7 @@
 # Agent Rules for tamanu-meta-server
 
+Avoid writing large summaries of actions taken when done.
+
 ## Project Structure Overview
 - **Database crate**: Models, migrations, and database logic
 - **Public server**: Internet-exposed API endpoints for device registration and updates
