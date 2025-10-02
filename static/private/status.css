@@ -1,9 +1,22 @@
 #status-page {
-	.header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-bottom: 1em;
+	.page-header {
+		margin-bottom: 2em;
+
+		h1 {
+			font-size: 2em;
+			color: #2c3e50;
+			margin-bottom: 1em;
+		}
+
+		.header-info {
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			background: #f8f9fa;
+			padding: 1em;
+			border-radius: 8px;
+			border: 1px solid #dee2e6;
+		}
 	}
 
 	.greeting {

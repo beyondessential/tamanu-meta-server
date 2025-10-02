@@ -36,6 +36,7 @@ pub fn App() -> impl IntoView {
 	view! {
 		<div id="root">
 			<Router>
+				<GlobalNav />
 				<main>
 					<Routes fallback=|| Index>
 						<Route path=path!("") view=Index />
@@ -49,14 +50,30 @@ pub fn App() -> impl IntoView {
 }
 
 #[component]
+pub fn GlobalNav() -> impl IntoView {
+	view! {
+		<nav id="global-nav">
+			<div class="nav-brand">
+				<A href="/">"Tamanu Meta"</A>
+			</div>
+			<div class="nav-links">
+				<A href="/" exact=true>"Home"</A>
+				<A href="/status">"Status"</A>
+				<A href="/admins">"Admins"</A>
+			</div>
+		</nav>
+	}
+}
+
+#[component]
 pub fn Index() -> impl IntoView {
 	view! {
 		<Stylesheet id="index" href="/static/index.css" />
 		<div id="index-page">
-			<nav>
-				<A href="/status">"Status"</A>
-				<A href="/admins">"Admins"</A>
-			</nav>
+			<div class="welcome-content">
+				<h1>"Welcome to Tamanu Meta Server"</h1>
+				<p>"Choose from the navigation above to manage your Tamanu infrastructure."</p>
+			</div>
 		</div>
 	}
 }

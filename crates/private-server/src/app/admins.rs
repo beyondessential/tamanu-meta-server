@@ -6,7 +6,9 @@ pub fn Page() -> impl IntoView {
 	view! {
 		<Stylesheet id="admin" href="/static/admin.css" />
 		<div id="admin-page">
-			<header class="header">"Admin Management"</header>
+			<div class="page-header">
+				<h1>"Admin Management"</h1>
+			</div>
 			<AdminManagement />
 		</div>
 	}

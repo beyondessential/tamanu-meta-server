@@ -11,10 +11,13 @@ pub fn Page() -> impl IntoView {
 	view! {
 		<Stylesheet id="status" href="/static/status.css" />
 		<div id="status-page">
-			<header class="header">
-				<Status/>
-				<Greeting />
-			</header>
+			<div class="page-header">
+				<h1>"Server Status Dashboard"</h1>
+				<div class="header-info">
+					<Status/>
+					<Greeting />
+				</div>
+			</div>
 			<article>
 				<Table />
 			</article>
