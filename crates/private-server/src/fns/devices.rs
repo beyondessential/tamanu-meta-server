@@ -126,7 +126,7 @@ mod ssr {
 				created_at: conn.created_at.to_string(),
 				created_at_relative: format_relative_time(conn.created_at),
 				device_id: conn.device_id.to_string(),
-				ip: conn.ip.to_string(),
+				ip: conn.ip.addr().to_string(),
 				user_agent: conn.user_agent,
 			}
 		}
