@@ -151,6 +151,54 @@ impl Device {
 		Ok(result)
 	}
 
+	/// List all trusted devices with their keys and latest connection info.
+	pub async fn list_trusted_with_info(db: &mut AsyncPgConnection) -> Result<Vec<DeviceWithInfo>> {
+		use crate::schema::{device_keys, devices};
+
+		let trusted_devices: Vec<Self> = devices::table
+			.select(Self::as_select())
+			.filter(devices::role.ne(DeviceRole::Untrusted))
+			.order(devices::created_at.desc())
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		let device_ids: Vec<Uuid> = trusted_devices.iter().map(|d| d.id).collect();
+
+		let device_keys: Vec<DeviceKey> = device_keys::table
+			.select(DeviceKey::as_select())
+			.filter(device_keys::device_id.eq_any(&device_ids))
+			.filter(device_keys::is_active.eq(true))
+			.order(device_keys::created_at.asc())
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		let latest_connections =
+			DeviceConnection::get_latest_from_device_ids(db, device_ids.iter().copied()).await?;
+
+		let mut keys_by_device: HashMap<Uuid, Vec<DeviceKey>> = HashMap::new();
+		for key in device_keys {
+			keys_by_device.entry(key.device_id).or_default().push(key);
+		}
+
+		let mut connections_by_device: HashMap<Uuid, DeviceConnection> = HashMap::new();
+		for connection in latest_connections {
+			connections_by_device.insert(connection.device_id, connection);
+		}
+
+		let result = trusted_devices
+			.into_iter()
+			.map(|device| DeviceWithInfo {
+				keys: keys_by_device.remove(&device.id).unwrap_or_default(),
+				latest_connection: connections_by_device.remove(&device.id),
+				device,
+			})
+			.collect();
+
+		Ok(result)
+	}
+
 	/// Trust a device by updating its role.
 	pub async fn trust(
 		db: &mut AsyncPgConnection,
@@ -166,6 +214,11 @@ impl Device {
 			.map_err(AppError::from)?;
 
 		Ok(())
+	}
+
+	/// Untrust a device by setting its role to Untrusted.
+	pub async fn untrust(db: &mut AsyncPgConnection, device_id: Uuid) -> Result<()> {
+		Self::trust(db, device_id, DeviceRole::Untrusted).await
 	}
 
 	/// Search devices by key data (supports partial matches).

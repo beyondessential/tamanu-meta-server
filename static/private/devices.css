@@ -82,7 +82,52 @@
 		}
 	}
 
-	.untrusted-devices {
+	.device-tabs {
+		.tab-nav {
+			display: flex;
+			gap: 0;
+			margin-bottom: 2em;
+			border-bottom: 2px solid oklch(0.9 0.01 240);
+			background: oklch(0.98 0.005 240);
+			border-radius: 8px 8px 0 0;
+
+			.tab-button {
+				background: none;
+				border: none;
+				padding: 1em 2em;
+				font-size: 1em;
+				font-weight: 500;
+				color: oklch(0.5 0.05 240);
+				cursor: pointer;
+				transition: all 0.2s;
+				border-radius: 8px 8px 0 0;
+				position: relative;
+
+				&:hover {
+					background: oklch(0.95 0.005 240);
+					color: oklch(0.4 0.08 240);
+				}
+
+				&.active {
+					background: oklch(1 0 0);
+					color: oklch(0.3 0.1 240);
+					border-bottom: 2px solid oklch(0.7 0.15 240);
+					margin-bottom: -2px;
+				}
+			}
+		}
+
+		.tab-content {
+			.section-description {
+				color: oklch(0.55 0.02 240);
+				margin-bottom: 1.5em;
+				font-size: 1em;
+			}
+		}
+	}
+
+	.untrusted-devices,
+	.trusted-devices {
 		h2 {
 			margin-bottom: 0.5em;
 			color: oklch(0.4 0.08 240);
@@ -277,9 +322,10 @@
 	.device-actions {
 		display: flex;
 		justify-content: space-between;
-		align-items: center;
+		align-items: flex-start;
 		padding-top: 1em;
 		border-top: 1px solid oklch(0.92 0.01 240);
+		gap: 2em;
 
 		.trust-device {
 			display: flex;
@@ -327,6 +373,149 @@
 			}
 		}
 
+		.trusted-device-actions {
+			display: flex;
+			flex-direction: column;
+			gap: 1em;
+			flex: 1;
+
+			.current-role {
+				display: flex;
+				align-items: center;
+				gap: 0.5em;
+				font-size: 0.9em;
+
+				.role-badge {
+					background: oklch(0.85 0.1 240);
+					color: oklch(0.3 0.15 240);
+					padding: 0.25em 0.75em;
+					border-radius: 12px;
+					font-weight: 500;
+					font-size: 0.8em;
+					text-transform: capitalize;
+				}
+			}
+
+			.role-update {
+				display: flex;
+				align-items: center;
+				gap: 1em;
+
+				label {
+					font-weight: 500;
+					color: oklch(0.4 0.08 240);
+					font-size: 0.9em;
+				}
+
+				select {
+					padding: 0.4em;
+					border: 1px solid oklch(0.85 0.01 240);
+					border-radius: 4px;
+					font-size: 0.85em;
+					background: oklch(1 0 0);
+
+					&:focus {
+						outline: none;
+						border-color: oklch(0.7 0.15 240);
+						box-shadow: 0 0 0 2px oklch(0.7 0.15 240 / 0.25);
+					}
+				}
+
+				.update-role-btn {
+					padding: 0.4em 0.8em;
+					background: oklch(0.7 0.15 240);
+					color: oklch(1 0 0);
+					border: none;
+					border-radius: 4px;
+					font-size: 0.85em;
+					font-weight: 500;
+					cursor: pointer;
+					transition: background-color 0.2s;
+
+					&:hover:not(:disabled) {
+						background: oklch(0.6 0.15 240);
+					}
+
+					&:disabled {
+						background: oklch(0.5 0.02 240);
+						cursor: not-allowed;
+					}
+				}
+			}
+
+			.untrust-section {
+				.untrust-btn {
+					padding: 0.4em 0.8em;
+					background: oklch(0.85 0.1 20);
+					color: oklch(0.3 0.15 20);
+					border: 1px solid oklch(0.7 0.1 20);
+					border-radius: 4px;
+					font-size: 0.85em;
+					font-weight: 500;
+					cursor: pointer;
+					transition: all 0.2s;
+
+					&:hover {
+						background: oklch(0.8 0.1 20);
+						border-color: oklch(0.6 0.1 20);
+					}
+				}
+
+				.untrust-confirm {
+					display: flex;
+					flex-direction: column;
+					gap: 0.75em;
+					padding: 1em;
+					background: oklch(0.95 0.05 20);
+					border: 1px solid oklch(0.8 0.1 20);
+					border-radius: 6px;
+
+					.confirm-text {
+						font-weight: 500;
+						color: oklch(0.3 0.15 20);
+						font-size: 0.9em;
+					}
+
+					.untrust-confirm-btn {
+						padding: 0.5em 1em;
+						background: oklch(0.6 0.15 20);
+						color: oklch(1 0 0);
+						border: none;
+						border-radius: 4px;
+						font-size: 0.85em;
+						font-weight: 500;
+						cursor: pointer;
+						transition: background-color 0.2s;
+
+						&:hover:not(:disabled) {
+							background: oklch(0.5 0.15 20);
+						}
+
+						&:disabled {
+							background: oklch(0.5 0.02 240);
+							cursor: not-allowed;
+						}
+					}
+
+					.untrust-cancel-btn {
+						padding: 0.5em 1em;
+						background: oklch(0.95 0.005 240);
+						color: oklch(0.4 0.08 240);
+						border: 1px solid oklch(0.85 0.01 240);
+						border-radius: 4px;
+						font-size: 0.85em;
+						cursor: pointer;
+						transition: all 0.2s;
+
+						&:hover {
+							background: oklch(0.92 0.005 240);
+							border-color: oklch(0.8 0.01 240);
+						}
+					}
+				}
+			}
+		}
+
 		.history-toggle {
 			padding: 0.5em 1em;
 			background: oklch(0.95 0.005 240);
@@ -336,6 +525,7 @@
 			font-size: 0.9em;
 			cursor: pointer;
 			transition: all 0.2s;
+			flex-shrink: 0;
 
 			&:hover {
 				background: oklch(0.92 0.005 240);
@@ -549,6 +739,29 @@
 
 			.trust-device {
 				justify-content: space-between;
+			}
+
+			.trusted-device-actions {
+				.role-update {
+					flex-wrap: wrap;
+					gap: 0.5em;
+				}
+			}
+		}
+
+		.device-tabs .tab-nav {
+			flex-direction: column;
+
+			.tab-button {
+				border-radius: 0;
+				text-align: left;
+
+				&.active {
+					border-bottom: none;
+					border-left: 3px solid oklch(0.7 0.15 240);
+					margin-bottom: 0;
+					margin-left: -3px;
+				}
 			}
 		}
 

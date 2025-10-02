@@ -50,6 +50,100 @@ async fn test_trust_device() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_list_trusted_devices() {
+	commons_tests::db::TestDb::run(|mut conn, _url| async move {
+		// Create two devices
+		let key_data1 = b"test-device-key-data-1";
+		let key_data2 = b"test-device-key-data-2";
+		let device1 = Device::create(&mut conn, key_data1.to_vec()).await.unwrap();
+		let device2 = Device::create(&mut conn, key_data2.to_vec()).await.unwrap();
+
+		// Trust one device as admin and another as server
+		Device::trust(&mut conn, device1.id, DeviceRole::Admin)
+			.await
+			.unwrap();
+		Device::trust(&mut conn, device2.id, DeviceRole::Server)
+			.await
+			.unwrap();
+
+		// List trusted devices and verify both appear
+		let trusted_devices = Device::list_trusted_with_info(&mut conn).await.unwrap();
+		assert_eq!(trusted_devices.len(), 2);
+
+		let device_ids: Vec<_> = trusted_devices.iter().map(|d| d.device.id).collect();
+		assert!(device_ids.contains(&device1.id));
+		assert!(device_ids.contains(&device2.id));
+
+		// Verify roles are correct
+		for device in &trusted_devices {
+			if device.device.id == device1.id {
+				assert_eq!(device.device.role, DeviceRole::Admin);
+			} else if device.device.id == device2.id {
+				assert_eq!(device.device.role, DeviceRole::Server);
+			}
+		}
+
+		// Verify untrusted list is empty
+		let untrusted_devices = Device::list_untrusted_with_info(&mut conn).await.unwrap();
+		assert!(untrusted_devices.is_empty());
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_untrust_device() {
+	commons_tests::db::TestDb::run(|mut conn, _url| async move {
+		// Create and trust a device
+		let key_data = b"test-device-key-data";
+		let device = Device::create(&mut conn, key_data.to_vec()).await.unwrap();
+		Device::trust(&mut conn, device.id, DeviceRole::Admin)
+			.await
+			.unwrap();
+
+		// Verify it's in trusted list
+		let trusted_devices = Device::list_trusted_with_info(&mut conn).await.unwrap();
+		assert_eq!(trusted_devices.len(), 1);
+
+		// Untrust the device
+		Device::untrust(&mut conn, device.id).await.unwrap();
+
+		// Verify it's back in untrusted list
+		let untrusted_devices = Device::list_untrusted_with_info(&mut conn).await.unwrap();
+		assert_eq!(untrusted_devices.len(), 1);
+		assert_eq!(untrusted_devices[0].device.id, device.id);
+		assert_eq!(untrusted_devices[0].device.role, DeviceRole::Untrusted);
+
+		// Verify trusted list is empty
+		let trusted_devices = Device::list_trusted_with_info(&mut conn).await.unwrap();
+		assert!(trusted_devices.is_empty());
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_update_device_role() {
+	commons_tests::db::TestDb::run(|mut conn, _url| async move {
+		// Create and trust a device as server
+		let key_data = b"test-device-key-data";
+		let device = Device::create(&mut conn, key_data.to_vec()).await.unwrap();
+		Device::trust(&mut conn, device.id, DeviceRole::Server)
+			.await
+			.unwrap();
+
+		// Update role to admin
+		Device::trust(&mut conn, device.id, DeviceRole::Admin)
+			.await
+			.unwrap();
+
+		// Verify role was updated
+		let trusted_devices = Device::list_trusted_with_info(&mut conn).await.unwrap();
+		assert_eq!(trusted_devices.len(), 1);
+		assert_eq!(trusted_devices[0].device.role, DeviceRole::Admin);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_search_devices_by_hex() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
 		// Create a device with specific key data
@@ -176,6 +270,34 @@ async fn test_device_with_multiple_keys() {
 			.collect();
 		assert!(key_data_values.contains(&key_data1.as_slice()));
 		assert!(key_data_values.contains(&key_data2.as_slice()));
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_server_function_list_trusted() {
+	commons_tests::db::TestDb::run(|mut conn, _url| async move {
+		// Create and trust some devices
+		let key_data1 = b"test-device-key-data-1";
+		let key_data2 = b"test-device-key-data-2";
+		let device1 = Device::create(&mut conn, key_data1.to_vec()).await.unwrap();
+		let device2 = Device::create(&mut conn, key_data2.to_vec()).await.unwrap();
+
+		Device::trust(&mut conn, device1.id, DeviceRole::Admin)
+			.await
+			.unwrap();
+		Device::trust(&mut conn, device2.id, DeviceRole::Server)
+			.await
+			.unwrap();
+
+		// Test list_trusted function directly (this would normally be called via HTTP)
+		// Since we're testing the database layer, this verifies the core functionality
+		let trusted_devices = Device::list_trusted_with_info(&mut conn).await.unwrap();
+		assert_eq!(trusted_devices.len(), 2);
+
+		let device_ids: Vec<_> = trusted_devices.iter().map(|d| d.device.id).collect();
+		assert!(device_ids.contains(&device1.id));
+		assert!(device_ids.contains(&device2.id));
 	})
 	.await;
 }
