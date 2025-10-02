@@ -5,7 +5,7 @@ html {
 body {
 	margin: 0;
 	padding: 0;
-	background-color: #f8f9fa;
+	background-color: oklch(0.98 0.005 240);
 }
 
 #root {
@@ -19,19 +19,19 @@ body {
 	justify-content: space-between;
 	align-items: center;
 	padding: 1em 2em;
-	background: #2c3e50;
-	color: white;
-	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+	background: oklch(0.25 0.05 220);
+	color: oklch(1 0 0);
+	box-shadow: 0 2px 4px oklch(0 0 0 / 0.1);
 
 	.nav-brand {
 		a {
-			color: white;
+			color: oklch(1 0 0);
 			text-decoration: none;
 			font-size: 1.5em;
 			font-weight: bold;
 
 			&:hover {
-				color: #3498db;
+				color: oklch(0.75 0.15 240);
 			}
 		}
 	}
@@ -41,20 +41,20 @@ body {
 		gap: 2em;
 
 		a {
-			color: white;
+			color: oklch(1 0 0);
 			text-decoration: none;
 			padding: 0.5em 1em;
 			border-radius: 4px;
 			transition: all 0.2s ease;
 
 			&:hover {
-				background: #34495e;
-				color: #3498db;
+				background: oklch(0.3 0.05 220);
+				color: oklch(0.75 0.15 240);
 			}
 
 			&.active {
-				background: #3498db;
-				color: white;
+				background: oklch(0.75 0.15 240);
+				color: oklch(1 0 0);
 			}
 		}
 	}
@@ -86,15 +86,15 @@ body {
 main {
 	flex: 1;
 	padding: 2em;
-	background: white;
+	background: oklch(1 0 0);
 	margin: 0 2em 2em;
 	border-radius: 8px;
-	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+	box-shadow: 0 2px 4px oklch(0 0 0 / 0.05);
 }
 
 .loading {
 	padding: 1em;
 	text-align: center;
-	color: #666;
+	color: oklch(0.5 0.02 240);
 	font-style: italic;
 }

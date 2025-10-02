@@ -9,14 +9,18 @@
 			font-size: 3em;
 			font-weight: bold;
 			margin-bottom: 1em;
-			background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+			background: linear-gradient(
+				135deg,
+				oklch(0.7 0.15 260) 0%,
+				oklch(0.6 0.2 300) 100%
+			);
 			background-clip: text;
 			color: transparent;
 		}
 
 		p {
 			font-size: 1.2em;
-			color: #666;
+			color: oklch(0.5 0.02 240);
 			line-height: 1.6;
 			margin-bottom: 2em;
 		}
@@ -27,7 +31,11 @@
 		display: block;
 		width: 100px;
 		height: 4px;
-		background: linear-gradient(90deg, #667eea, #764ba2);
+		background: linear-gradient(
+			90deg,
+			oklch(0.7 0.15 260),
+			oklch(0.6 0.2 300)
+		);
 		margin: 2em auto;
 		border-radius: 2px;
 	}

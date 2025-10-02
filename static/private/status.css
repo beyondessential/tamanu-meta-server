@@ -4,7 +4,7 @@
 
 		h1 {
 			font-size: 2em;
-			color: #2c3e50;
+			color: oklch(0.25 0.05 220);
 			margin-bottom: 1em;
 		}
 
@@ -12,16 +12,16 @@
 			display: flex;
 			justify-content: space-between;
 			align-items: center;
-			background: #f8f9fa;
+			background: oklch(0.98 0.005 240);
 			padding: 1em;
 			border-radius: 8px;
-			border: 1px solid #dee2e6;
+			border: 1px solid oklch(0.9 0.01 240);
 		}
 	}
 
 	.greeting {
 		font-weight: bold;
-		color: #333;
+		color: oklch(0.35 0.05 240);
 	}
 
 	td,
@@ -29,7 +29,7 @@
 		padding: 0.5em;
 		border-width: 1px 0;
 		border-style: solid;
-		border-color: black;
+		border-color: oklch(0 0 0);
 	}
 
 	th,
@@ -44,40 +44,40 @@
 
 	.status {
 		&.up {
-			background: green;
-			color: white;
+			background: oklch(0.6 0.15 140);
+			color: oklch(1 0 0);
 		}
 
 		&.down {
-			background: red;
-			color: white;
+			background: oklch(0.6 0.2 20);
+			color: oklch(1 0 0);
 		}
 
 		&.gone {
-			background: black;
-			color: white;
+			background: oklch(0.1 0 0);
+			color: oklch(1 0 0);
 		}
 
 		&.away {
-			background: orange;
-			color: black;
+			background: oklch(0.75 0.15 70);
+			color: oklch(0 0 0);
 		}
 
 		&.blip {
-			background: yellow;
-			color: black;
+			background: oklch(0.85 0.15 90);
+			color: oklch(0 0 0);
 		}
 	}
 
 	.ago {
 		white-space: pre;
 		text-decoration: underline dotted;
-		border-right: 1px dashed black;
+		border-right: 1px dashed oklch(0 0 0);
 		text-align: right;
 	}
 
 	.versions {
-		color: grey;
+		color: oklch(0.5 0.02 240);
 		margin-left: 1em;
 	}
 
@@ -98,6 +98,6 @@
 	.loading {
 		padding: 1em;
 		text-align: center;
-		color: #666;
+		color: oklch(0.5 0.02 240);
 	}
 }
