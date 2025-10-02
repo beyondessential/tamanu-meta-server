@@ -15,6 +15,7 @@ pub struct DeviceData {
 	pub created_at: String,
 	pub created_at_relative: String,
 	pub updated_at: String,
+	pub updated_at_relative: String,
 	pub role: String,
 }
 
@@ -104,6 +105,7 @@ mod ssr {
 					created_at: device_with_info.device.created_at.to_string(),
 					created_at_relative: format_relative_time(device_with_info.device.created_at),
 					updated_at: device_with_info.device.updated_at.to_string(),
+					updated_at_relative: format_relative_time(device_with_info.device.updated_at),
 					role: String::from(device_with_info.device.role),
 				},
 				keys: device_with_info

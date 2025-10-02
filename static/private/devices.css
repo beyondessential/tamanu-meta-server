@@ -175,6 +175,19 @@
 				color: oklch(0.35 0.08 240);
 				font-size: 1.2em;
 				font-weight: 500;
+				display: flex;
+				align-items: center;
+				gap: 0.75em;
+
+				.role-badge-header {
+					background: oklch(0.85 0.1 240);
+					color: oklch(0.3 0.15 240);
+					padding: 0.25em 0.75em;
+					border-radius: 12px;
+					font-weight: 500;
+					font-size: 0.7em;
+					text-transform: capitalize;
+				}
 			}
 		}
 
@@ -226,7 +239,8 @@
 		color: oklch(0.5 0.05 240);
 
 		.device-first-seen,
-		.device-last-seen {
+		.device-last-seen,
+		.device-last-updated {
 			font-weight: 500;
 		}
 	}
@@ -379,51 +393,79 @@
 			gap: 1em;
 			flex: 1;
 
-			.current-role {
-				display: flex;
-				align-items: center;
-				gap: 0.5em;
-				font-size: 0.9em;
-
-				.role-badge {
-					background: oklch(0.85 0.1 240);
-					color: oklch(0.3 0.15 240);
-					padding: 0.25em 0.75em;
-					border-radius: 12px;
-					font-weight: 500;
-					font-size: 0.8em;
-					text-transform: capitalize;
-				}
-			}
-
-			.role-update {
+			.actions-row {
 				display: flex;
 				align-items: center;
 				gap: 1em;
+				flex-wrap: wrap;
+			}
 
-				label {
+			.actions-row select {
+				padding: 0.4em;
+				border: 1px solid oklch(0.85 0.01 240);
+				border-radius: 4px;
+				font-size: 0.85em;
+				background: oklch(1 0 0);
+
+				&:focus {
+					outline: none;
+					border-color: oklch(0.7 0.15 240);
+					box-shadow: 0 0 0 2px oklch(0.7 0.15 240 / 0.25);
+				}
+			}
+
+			.actions-row .update-role-btn {
+				padding: 0.4em 0.8em;
+				background: oklch(0.7 0.15 240);
+				color: oklch(1 0 0);
+				border: none;
+				border-radius: 4px;
+				font-size: 0.85em;
+				font-weight: 500;
+				cursor: pointer;
+				transition: background-color 0.2s;
+
+				&:hover:not(:disabled) {
+					background: oklch(0.6 0.15 240);
+				}
+
+				&:disabled {
+					background: oklch(0.5 0.02 240);
+					cursor: not-allowed;
+				}
+			}
+
+			.actions-row .untrust-btn {
+				padding: 0.4em 0.8em;
+				background: oklch(0.85 0.1 20);
+				color: oklch(0.3 0.15 20);
+				border: 1px solid oklch(0.7 0.1 20);
+				border-radius: 4px;
+				font-size: 0.85em;
+				font-weight: 500;
+				cursor: pointer;
+				transition: all 0.2s;
+
+				&:hover {
+					background: oklch(0.8 0.1 20);
+					border-color: oklch(0.6 0.1 20);
+				}
+			}
+
+			.untrust-confirm-inline {
+				display: flex;
+				align-items: center;
+				gap: 0.5em;
+				font-size: 0.85em;
+
+				.confirm-text {
 					font-weight: 500;
-					color: oklch(0.4 0.08 240);
-					font-size: 0.9em;
+					color: oklch(0.3 0.15 20);
 				}
 
-				select {
-					padding: 0.4em;
-					border: 1px solid oklch(0.85 0.01 240);
-					border-radius: 4px;
-					font-size: 0.85em;
-					background: oklch(1 0 0);
-
-					&:focus {
-						outline: none;
-						border-color: oklch(0.7 0.15 240);
-						box-shadow: 0 0 0 2px oklch(0.7 0.15 240 / 0.25);
-					}
-				}
-
-				.update-role-btn {
-					padding: 0.4em 0.8em;
-					background: oklch(0.7 0.15 240);
+				.untrust-confirm-btn {
+					padding: 0.3em 0.6em;
+					background: oklch(0.6 0.15 20);
 					color: oklch(1 0 0);
 					border: none;
 					border-radius: 4px;
@@ -433,7 +475,7 @@
 					transition: background-color 0.2s;
 
 					&:hover:not(:disabled) {
-						background: oklch(0.6 0.15 240);
+						background: oklch(0.5 0.15 20);
 					}
 
 					&:disabled {
@@ -441,76 +483,20 @@
 						cursor: not-allowed;
 					}
 				}
-			}
 
-			.untrust-section {
-				.untrust-btn {
-					padding: 0.4em 0.8em;
-					background: oklch(0.85 0.1 20);
-					color: oklch(0.3 0.15 20);
-					border: 1px solid oklch(0.7 0.1 20);
+				.untrust-cancel-btn {
+					padding: 0.3em 0.6em;
+					background: oklch(0.95 0.005 240);
+					color: oklch(0.4 0.08 240);
+					border: 1px solid oklch(0.85 0.01 240);
 					border-radius: 4px;
 					font-size: 0.85em;
-					font-weight: 500;
 					cursor: pointer;
 					transition: all 0.2s;
 
 					&:hover {
-						background: oklch(0.8 0.1 20);
-						border-color: oklch(0.6 0.1 20);
-					}
-				}
-
-				.untrust-confirm {
-					display: flex;
-					flex-direction: column;
-					gap: 0.75em;
-					padding: 1em;
-					background: oklch(0.95 0.05 20);
-					border: 1px solid oklch(0.8 0.1 20);
-					border-radius: 6px;
-
-					.confirm-text {
-						font-weight: 500;
-						color: oklch(0.3 0.15 20);
-						font-size: 0.9em;
-					}
-
-					.untrust-confirm-btn {
-						padding: 0.5em 1em;
-						background: oklch(0.6 0.15 20);
-						color: oklch(1 0 0);
-						border: none;
-						border-radius: 4px;
-						font-size: 0.85em;
-						font-weight: 500;
-						cursor: pointer;
-						transition: background-color 0.2s;
-
-						&:hover:not(:disabled) {
-							background: oklch(0.5 0.15 20);
-						}
-
-						&:disabled {
-							background: oklch(0.5 0.02 240);
-							cursor: not-allowed;
-						}
-					}
-
-					.untrust-cancel-btn {
-						padding: 0.5em 1em;
-						background: oklch(0.95 0.005 240);
-						color: oklch(0.4 0.08 240);
-						border: 1px solid oklch(0.85 0.01 240);
-						border-radius: 4px;
-						font-size: 0.85em;
-						cursor: pointer;
-						transition: all 0.2s;
-
-						&:hover {
-							background: oklch(0.92 0.005 240);
-							border-color: oklch(0.8 0.01 240);
-						}
+						background: oklch(0.92 0.005 240);
+						border-color: oklch(0.8 0.01 240);
 					}
 				}
 			}
@@ -742,7 +728,7 @@
 			}
 
 			.trusted-device-actions {
-				.role-update {
+				.actions-row {
 					flex-wrap: wrap;
 					gap: 0.5em;
 				}

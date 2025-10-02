@@ -406,7 +406,12 @@ pub fn DeviceRow(
 ) -> impl IntoView {
 	let (key_format, set_key_format) = signal("pem".to_string());
 	let (show_history, set_show_history) = signal(false);
-	let (selected_role, set_selected_role) = signal("admin".to_string());
+	let default_role = if device.device.role != "untrusted" {
+		device.device.role.clone()
+	} else {
+		"server".to_string()
+	};
+	let (selected_role, set_selected_role) = signal(default_role);
 	let (show_untrust_confirm, set_show_untrust_confirm) = signal(false);
 
 	let device_id = device.device.id.clone();
@@ -483,7 +488,10 @@ pub fn DeviceRow(
 			<div class="device-header">
 				<div class="device-info">
 					<div class="device-id-section">
-						<h3>{device.device.id.clone()}</h3>
+						<h3>
+							{device.device.id.clone()}
+							<span class="role-badge-header">{device.device.role.clone()}</span>
+						</h3>
 						<button class="copy-id-btn" on:click=copy_device_id title="Copy device ID">
 							"📋"
 						</button>
@@ -513,6 +521,9 @@ pub fn DeviceRow(
 							</span>
 						}
 					})}
+					<span class="device-last-updated timestamp-hover" title={device.device.updated_at.clone()}>
+						{format!("Last updated: {}", device.device.updated_at_relative)}
+					</span>
 				</div>
 			</div>
 
@@ -821,12 +832,7 @@ pub fn TrustedDeviceActions(
 ) -> impl IntoView {
 	view! {
 		<div class="trusted-device-actions">
-			<div class="current-role">
-				<strong>"Current Role: "</strong>
-				<span class="role-badge">{current_role.clone()}</span>
-			</div>
-			<div class="role-update">
-				<label for={format!("role-{}", device_id)}>"Change Role:"</label>
+			<div class="actions-row">
 				<select
 					id={format!("role-{}", device_id.clone())}
 					prop:value=move || selected_role.get()
@@ -845,17 +851,18 @@ pub fn TrustedDeviceActions(
 							update_role_action.dispatch((device_id.clone(), role));
 						}
 					}
-					disabled=move || update_role_action.pending().get() || selected_role.get() == current_role
+					disabled={
+						let current_role = current_role.clone();
+						move || update_role_action.pending().get() || selected_role.get() == current_role
+					}
 				>
 					{move || if update_role_action.pending().get() { "Updating..." } else { "Update Role" }}
 				</button>
-			</div>
-			<div class="untrust-section">
 				{move || {
 					if show_untrust_confirm.get() {
 						view! {
-							<div class="untrust-confirm">
-								<span class="confirm-text">"Are you sure you want to untrust this device?"</span>
+							<div class="untrust-confirm-inline">
+								<span class="confirm-text">"Are you sure?"</span>
 								<button
 									class="untrust-confirm-btn"
 									on:click={
@@ -867,7 +874,7 @@ pub fn TrustedDeviceActions(
 									}
 									disabled=move || untrust_action.pending().get()
 								>
-									{move || if untrust_action.pending().get() { "Untrusting..." } else { "Yes, Untrust" }}
+									{move || if untrust_action.pending().get() { "Untrusting..." } else { "Yes" }}
 								</button>
 								<button
 									class="untrust-cancel-btn"
@@ -883,7 +890,7 @@ pub fn TrustedDeviceActions(
 								class="untrust-btn"
 								on:click=move |_| set_show_untrust_confirm.set(true)
 							>
-								"Untrust Device"
+								"Untrust"
 							</button>
 						}.into_any()
 					}
