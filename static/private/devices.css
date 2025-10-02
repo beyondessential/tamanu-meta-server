@@ -119,54 +119,70 @@
 	}
 
 	.device-info {
-		h3 {
-			margin: 0 0 0.5em 0;
-			color: oklch(0.35 0.08 240);
-			font-size: 1.2em;
-			font-weight: 500;
+		.device-id-section {
+			display: flex;
+			align-items: center;
+			gap: 0.5em;
+			margin-bottom: 0.5em;
+
+			h3 {
+				margin: 0;
+				color: oklch(0.35 0.08 240);
+				font-size: 1.2em;
+				font-weight: 500;
+			}
 		}
 
-		.device-meta {
-			display: flex;
-			gap: 1.5em;
+		.copy-id-btn {
+			background: none;
+			border: 1px solid oklch(0.85 0.01 240);
+			border-radius: 4px;
+			padding: 0.25em 0.5em;
+			cursor: pointer;
 			font-size: 0.9em;
 			color: oklch(0.5 0.05 240);
+			transition: all 0.2s;
+
+			&:hover {
+				background: oklch(0.95 0.005 240);
+				border-color: oklch(0.7 0.15 240);
+			}
 		}
 
-		.device-role {
-			font-weight: 500;
-			padding: 0.25em 0.5em;
-			background: oklch(0.95 0.05 20);
-			color: oklch(0.4 0.1 20);
-			border-radius: 3px;
+		.latest-connection-inline {
+			display: flex;
+			gap: 1em;
+			font-size: 0.9em;
+			color: oklch(0.5 0.05 240);
+			align-items: center;
+
+			.connection-ip {
+				font-family: monospace;
+				font-weight: 500;
+			}
+
+			.connection-ua {
+				font-size: 0.85em;
+				color: oklch(0.55 0.02 240);
+				max-width: 300px;
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+			}
 		}
 	}
 
-	.latest-connection {
+	.device-times {
 		text-align: right;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5em;
+		font-size: 0.9em;
+		color: oklch(0.5 0.05 240);
 
-		h4 {
-			margin: 0 0 0.5em 0;
-			color: oklch(0.4 0.08 240);
-			font-size: 1em;
+		.device-first-seen,
+		.device-last-seen {
 			font-weight: 500;
-		}
-
-		.connection-details {
-			font-size: 0.9em;
-			color: oklch(0.5 0.05 240);
-			line-height: 1.4;
-		}
-
-		.connection-ip {
-			font-family: monospace;
-			font-weight: 500;
-		}
-
-		.connection-ua {
-			font-size: 0.8em;
-			max-width: 200px;
-			word-break: break-all;
 		}
 	}
 
@@ -513,8 +529,17 @@
 			gap: 1em;
 		}
 
-		.latest-connection {
+		.device-times {
 			text-align: left;
+		}
+
+		.device-info .latest-connection-inline {
+			flex-wrap: wrap;
+			gap: 0.5em;
+
+			.connection-ua {
+				max-width: 100%;
+			}
 		}
 
 		.device-actions {

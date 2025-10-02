@@ -1,6 +1,7 @@
 use leptos::prelude::*;
 use leptos_meta::{Stylesheet, provide_meta_context};
 use std::collections::HashMap;
+use web_sys::window;
 
 #[derive(Debug, Clone)]
 pub struct ConnectionGroup {
@@ -226,7 +227,7 @@ pub fn DeviceManagement() -> impl IntoView {
 		<div class="untrusted-devices">
 			<h2>"Untrusted Devices"</h2>
 			<p class="section-description">
-				"Devices that have connected but haven't been assigned a trust level yet"
+				"Devices that have connected but haven't been assigned a role yet"
 			</p>
 
 			<Suspense fallback=|| view! { <div class="loading">"Loading devices..."</div> }>
@@ -347,35 +348,53 @@ pub fn DeviceRow(
 		}
 	};
 
+	let copy_device_id = {
+		let device_id = device.device.id.clone();
+		move |_| {
+			if let Some(window) = window() {
+				let navigator = window.navigator();
+				let clipboard = navigator.clipboard();
+				let _ = clipboard.write_text(&device_id);
+			}
+		}
+	};
+
 	view! {
 		<div class="device-row">
 			<div class="device-header">
 				<div class="device-info">
-					<h3>"Device " {device.device.id.clone()}</h3>
-					<div class="device-meta">
-						<span class="device-role">{format!("Role: {}", device.device.role)}</span>
-						<span class="device-created timestamp-hover" title={device.device.created_at.clone()}>
-							{format!("Created: {}", device.device.created_at_relative)}
-						</span>
+					<div class="device-id-section">
+						<h3>{device.device.id.clone()}</h3>
+						<button class="copy-id-btn" on:click=copy_device_id title="Copy device ID">
+							"📋"
+						</button>
 					</div>
-				</div>
-
-				{device.latest_connection.as_ref().map(|conn| {
-					view! {
-						<div class="latest-connection">
-							<h4>"Latest Connection"</h4>
-							<div class="connection-details">
-								<div class="connection-ip">{format!("IP: {}", conn.ip)}</div>
-								<div class="connection-time timestamp-hover" title={conn.created_at.clone()}>{format!("Time: {}", conn.created_at_relative)}</div>
+					{device.latest_connection.as_ref().map(|conn| {
+						view! {
+							<div class="latest-connection-inline">
+								<span class="connection-ip">{conn.ip.clone()}</span>
 								{conn.user_agent.as_ref().map(|ua| {
 									view! {
-										<div class="connection-ua">{format!("User Agent: {}", ua)}</div>
+										<span class="connection-ua">{ua.clone()}</span>
 									}
 								})}
 							</div>
-						</div>
-					}
-				})}
+						}
+					})}
+				</div>
+
+				<div class="device-times">
+					<span class="device-first-seen timestamp-hover" title={device.device.created_at.clone()}>
+						{format!("First seen: {}", device.device.created_at_relative)}
+					</span>
+					{device.latest_connection.as_ref().map(|conn| {
+						view! {
+							<span class="device-last-seen timestamp-hover" title={conn.created_at.clone()}>
+								{format!("Last seen: {}", conn.created_at_relative)}
+							</span>
+						}
+					})}
+				</div>
 			</div>
 
 			<div class="device-keys">
