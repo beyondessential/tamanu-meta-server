@@ -2,8 +2,18 @@ use commons_errors::{AppError, Result};
 use commons_versions::VersionStr;
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use diesel_derive_enum::DbEnum;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, DbEnum)]
+#[ExistingTypePath = "crate::schema::sql_types::VersionStatus"]
+#[serde(rename_all = "lowercase")]
+pub enum VersionStatus {
+	Pending,
+	Published,
+	Yanked,
+}
 
 #[macro_export]
 macro_rules! predicate_version {
@@ -35,7 +45,7 @@ pub struct Version {
 	pub major: i32,
 	pub minor: i32,
 	pub patch: i32,
-	pub published: bool,
+	pub status: VersionStatus,
 	pub changelog: String,
 }
 
@@ -91,11 +101,14 @@ impl Version {
 		} = version.0;
 		version_updates
 			.filter(
-				major.eq(target_major as i32).and(published.eq(true)).and(
-					minor.gt(target_minor as i32).or(minor
-						.eq(target_minor as i32)
-						.and(patch.gt(target_patch as i32))),
-				),
+				major
+					.eq(target_major as i32)
+					.and(status.eq(VersionStatus::Published))
+					.and(
+						minor.gt(target_minor as i32).or(minor
+							.eq(target_minor as i32)
+							.and(patch.gt(target_patch as i32))),
+					),
 			)
 			.order_by(minor)
 			.select(version_updates::all_columns())
@@ -120,8 +133,8 @@ impl Version {
 		table
 			.select(Version::as_select())
 			.filter(
-				published
-					.eq(true)
+				status
+					.eq(VersionStatus::Published)
 					.and(major.ge(target_major as i32))
 					.and(minor.ge(target_minor as i32))
 					.and(patch.ge(target_patch as i32)),
