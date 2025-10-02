@@ -107,6 +107,14 @@ where
 	type Rejection = AppError;
 
 	async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+		if cfg!(debug_assertions) {
+			return Ok(TailscaleAdmin(TailscaleUser {
+				login: "admin@localhost".into(),
+				name: "You".into(),
+				profile_pic: None,
+			}));
+		}
+
 		let user = <TailscaleUser as FromRequestParts<S>>::from_request_parts(parts, state).await?;
 		let mut db = Db::from_ref(state).get().await?;
 		if user.is_admin(&mut db).await? {

@@ -2,7 +2,7 @@ use leptos::prelude::*;
 
 use crate::{
 	app::{greeting::Greeting, status::Status},
-	statuses::table,
+	fns::statuses::table,
 };
 
 #[component]

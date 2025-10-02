@@ -5,11 +5,13 @@ use leptos_router::{
 	path,
 };
 
+mod admins;
 mod greeting;
 mod status;
 mod statuses;
 
 pub fn shell(options: LeptosOptions) -> impl IntoView {
+	provide_meta_context();
 	view! {
 		<!DOCTYPE html>
 		<html lang="en">
@@ -31,9 +33,6 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
 
 #[component]
 pub fn App() -> impl IntoView {
-	// Provides context that manages stylesheets, titles, meta tags, etc.
-	provide_meta_context();
-
 	view! {
 		<div id="root">
 			<Router>
@@ -41,6 +40,7 @@ pub fn App() -> impl IntoView {
 					<Routes fallback=|| Index>
 						<Route path=path!("") view=Index />
 						<Route path=path!("status") view=statuses::Page />
+						<Route path=path!("admins") view=admins::Page />
 					</Routes>
 				</main>
 			</Router>
@@ -53,6 +53,7 @@ pub fn Index() -> impl IntoView {
 	view! {
 		<nav>
 			<A href="/status">"Status"</A>
+			<A href="/admins">"Admins"</A>
 		</nav>
 	}
 }

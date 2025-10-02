@@ -23,6 +23,15 @@ impl Admin {
 			.map(|count: i64| count > 0)
 	}
 
+	pub async fn list(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
+		use crate::schema::admins::dsl;
+		dsl::admins
+			.select(Self::as_select())
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	pub async fn add(db: &mut AsyncPgConnection, email: &str) -> Result<Self> {
 		use crate::schema::admins::dsl;
 		diesel::insert_into(dsl::admins)

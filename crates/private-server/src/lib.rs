@@ -1,8 +1,8 @@
 pub mod app;
 
+pub mod fns;
 #[cfg(feature = "ssr")]
 pub mod state;
-pub mod statuses;
 
 #[cfg(feature = "ssr")]
 pub fn routes(state: crate::state::AppState) -> commons_errors::Result<axum::routing::Router<()>> {
@@ -18,7 +18,7 @@ pub fn routes(state: crate::state::AppState) -> commons_errors::Result<axum::rou
 				.with_state(public_server::state::AppState::from_db(state.db.clone())?),
 		)
 		.merge(commons_servers::health::routes())
-		.merge(statuses::routes())
+		.merge(fns::routes())
 		.nest_service(
 			"/static",
 			ServeDir::new("target/site/private")

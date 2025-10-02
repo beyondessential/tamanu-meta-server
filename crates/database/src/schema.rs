@@ -91,8 +91,8 @@ diesel::table! {
         major -> Int4,
         minor -> Int4,
         patch -> Int4,
-        published -> Bool,
         changelog -> Text,
+        published -> Bool,
     }
 }
 

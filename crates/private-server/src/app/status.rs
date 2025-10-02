@@ -1,4 +1,4 @@
-use crate::statuses::summary;
+use crate::fns::statuses::summary;
 use leptos::prelude::*;
 
 #[island]
