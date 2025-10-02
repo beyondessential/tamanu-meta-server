@@ -1,8 +1,11 @@
+use base64::Engine;
 use chrono::{DateTime, Utc};
 use commons_errors::{AppError, Result};
+use diesel::QueryableByName;
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 use super::device_role::DeviceRole;
@@ -13,6 +16,12 @@ use super::device_role::DeviceRole;
 pub struct Device {
 	/// The ID of the device.
 	pub id: Uuid,
+
+	/// The created timestamp.
+	pub created_at: DateTime<Utc>,
+
+	/// The updated timestamp.
+	pub updated_at: DateTime<Utc>,
 
 	/// The role of the device.
 	///
@@ -26,6 +35,12 @@ pub struct Device {
 pub struct DeviceKey {
 	/// The ID of the device key.
 	pub id: Uuid,
+
+	/// The created timestamp.
+	pub created_at: DateTime<Utc>,
+
+	/// The updated timestamp.
+	pub updated_at: DateTime<Utc>,
 
 	/// The device this key belongs to.
 	pub device_id: Uuid,
@@ -44,6 +59,14 @@ pub struct DeviceKey {
 
 	/// Whether this key is active and can be used for authentication.
 	pub is_active: bool,
+}
+
+/// Device with its keys and latest connection info for management purposes.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DeviceWithInfo {
+	pub device: Device,
+	pub keys: Vec<DeviceKey>,
+	pub latest_connection: Option<DeviceConnection>,
 }
 
 impl Device {
@@ -76,6 +99,174 @@ impl Device {
 		DeviceKey::create(db, device.id, key, Some("Initial Key".to_string())).await?;
 
 		Ok(device)
+	}
+
+	/// List all untrusted devices with their keys and latest connection info.
+	pub async fn list_untrusted_with_info(
+		db: &mut AsyncPgConnection,
+	) -> Result<Vec<DeviceWithInfo>> {
+		use crate::schema::{device_keys, devices};
+
+		let untrusted_devices: Vec<Self> = devices::table
+			.select(Self::as_select())
+			.filter(devices::role.eq(DeviceRole::Untrusted))
+			.order(devices::created_at.desc())
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		let device_ids: Vec<Uuid> = untrusted_devices.iter().map(|d| d.id).collect();
+
+		let device_keys: Vec<DeviceKey> = device_keys::table
+			.select(DeviceKey::as_select())
+			.filter(device_keys::device_id.eq_any(&device_ids))
+			.filter(device_keys::is_active.eq(true))
+			.order(device_keys::created_at.asc())
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		let latest_connections =
+			DeviceConnection::get_latest_from_device_ids(db, device_ids.iter().copied()).await?;
+
+		let mut keys_by_device: HashMap<Uuid, Vec<DeviceKey>> = HashMap::new();
+		for key in device_keys {
+			keys_by_device.entry(key.device_id).or_default().push(key);
+		}
+
+		let mut connections_by_device: HashMap<Uuid, DeviceConnection> = HashMap::new();
+		for connection in latest_connections {
+			connections_by_device.insert(connection.device_id, connection);
+		}
+
+		let result = untrusted_devices
+			.into_iter()
+			.map(|device| DeviceWithInfo {
+				keys: keys_by_device.remove(&device.id).unwrap_or_default(),
+				latest_connection: connections_by_device.remove(&device.id),
+				device,
+			})
+			.collect();
+
+		Ok(result)
+	}
+
+	/// Trust a device by updating its role.
+	pub async fn trust_device(
+		db: &mut AsyncPgConnection,
+		device_id: Uuid,
+		new_role: DeviceRole,
+	) -> Result<()> {
+		use crate::schema::devices::dsl;
+
+		diesel::update(dsl::devices.filter(dsl::id.eq(device_id)))
+			.set(dsl::role.eq(new_role))
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+
+		Ok(())
+	}
+
+	/// Search devices by key data (supports partial matches).
+	pub async fn search_by_key(
+		db: &mut AsyncPgConnection,
+		query: &str,
+	) -> Result<Vec<DeviceWithInfo>> {
+		use crate::schema::{device_keys, devices};
+		use diesel::sql_query;
+		use diesel::sql_types::{Binary, Bool, Uuid as SqlUuid};
+
+		// Try to decode hex query (with or without colons/spaces)
+		let search_bytes = if let Ok(hex_bytes) = hex::decode(query.replace([' ', ':'], "")) {
+			hex_bytes
+		} else {
+			// For PEM format, try to extract the base64 part and decode it
+			if query.contains("-----BEGIN") && query.contains("-----END") {
+				let base64_part = query
+					.lines()
+					.filter(|line| !line.starts_with("-----"))
+					.collect::<Vec<_>>()
+					.join("");
+
+				if let Ok(decoded) = base64::prelude::BASE64_STANDARD.decode(base64_part) {
+					decoded
+				} else {
+					query.as_bytes().to_vec()
+				}
+			} else {
+				query.as_bytes().to_vec()
+			}
+		};
+
+		#[derive(QueryableByName)]
+		struct MatchingDevice {
+			#[diesel(sql_type = SqlUuid)]
+			device_id: Uuid,
+		}
+
+		// Use PostgreSQL's position function to search for the byte sequence
+		let matching_device_ids: Vec<Uuid> = sql_query(
+			"SELECT DISTINCT device_id FROM device_keys
+			 WHERE is_active = $1 AND position($2 in key_data) > 0",
+		)
+		.bind::<Bool, _>(true)
+		.bind::<Binary, _>(&search_bytes)
+		.load::<MatchingDevice>(db)
+		.await
+		.map_err(AppError::from)?
+		.into_iter()
+		.map(|m| m.device_id)
+		.collect();
+
+		if matching_device_ids.is_empty() {
+			return Ok(vec![]);
+		}
+
+		// Get the matching devices
+		let matching_devices: Vec<Self> = devices::table
+			.select(Self::as_select())
+			.filter(devices::id.eq_any(&matching_device_ids))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		let device_ids: Vec<Uuid> = matching_devices.iter().map(|d| d.id).collect();
+
+		// Get all keys for matching devices
+		let matching_keys: Vec<DeviceKey> = device_keys::table
+			.select(DeviceKey::as_select())
+			.filter(device_keys::device_id.eq_any(&device_ids))
+			.filter(device_keys::is_active.eq(true))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		// Get latest connections
+		let latest_connections =
+			DeviceConnection::get_latest_from_device_ids(db, device_ids.iter().copied()).await?;
+
+		// Group data
+		let mut keys_by_device: HashMap<Uuid, Vec<DeviceKey>> = HashMap::new();
+		for key in matching_keys {
+			keys_by_device.entry(key.device_id).or_default().push(key);
+		}
+
+		let mut connections_by_device: HashMap<Uuid, DeviceConnection> = HashMap::new();
+		for connection in latest_connections {
+			connections_by_device.insert(connection.device_id, connection);
+		}
+
+		let result = matching_devices
+			.into_iter()
+			.map(|device| DeviceWithInfo {
+				keys: keys_by_device.remove(&device.id).unwrap_or_default(),
+				latest_connection: connections_by_device.remove(&device.id),
+				device,
+			})
+			.collect();
+
+		Ok(result)
 	}
 }
 
@@ -173,6 +364,24 @@ impl DeviceConnection {
 			.distinct_on(dc::device_id)
 			.filter(dc::device_id.eq_any(ids))
 			.order((dc::device_id, dc::created_at.desc()))
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// Get connection history for a specific device.
+	pub async fn get_history_for_device(
+		db: &mut AsyncPgConnection,
+		device_id: Uuid,
+		limit: i64,
+	) -> Result<Vec<Self>> {
+		use crate::schema::device_connections::dsl as dc;
+
+		dc::device_connections
+			.select(Self::as_select())
+			.filter(dc::device_id.eq(device_id))
+			.order(dc::created_at.desc())
+			.limit(limit)
 			.load(db)
 			.await
 			.map_err(AppError::from)
