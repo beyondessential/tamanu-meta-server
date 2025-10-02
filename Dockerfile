@@ -51,7 +51,7 @@ FROM --platform=$BUILDPLATFORM cacher AS builder-web
 RUN rustup target add wasm32-unknown-unknown
 RUN cargo binstall -y cargo-leptos
 COPY static ./static
-RUN cargo leptos build --release --frontend-only --precompress --split
+RUN cargo leptos build --release --frontend-only --precompress
 
 # Runtime image
 FROM busybox:glibc
