@@ -152,7 +152,7 @@ impl Device {
 	}
 
 	/// Trust a device by updating its role.
-	pub async fn trust_device(
+	pub async fn trust(
 		db: &mut AsyncPgConnection,
 		device_id: Uuid,
 		new_role: DeviceRole,

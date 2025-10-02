@@ -126,7 +126,7 @@ pub fn DeviceManagement() -> impl IntoView {
 
 	let untrusted_devices = Resource::new(
 		move || refresh_trigger.get(),
-		async |_| crate::fns::devices::list_untrusted_devices().await,
+		async |_| crate::fns::devices::list_untrusted().await,
 	);
 
 	let search_results = Resource::new(
@@ -135,7 +135,7 @@ pub fn DeviceManagement() -> impl IntoView {
 			if query.trim().is_empty() {
 				Ok(vec![])
 			} else {
-				crate::fns::devices::search_devices(query).await
+				crate::fns::devices::search(query).await
 			}
 		},
 	);
@@ -143,7 +143,7 @@ pub fn DeviceManagement() -> impl IntoView {
 	let trust_device_action = Action::new(move |(device_id, role): &(String, String)| {
 		let device_id = device_id.clone();
 		let role = role.clone();
-		async move { crate::fns::devices::trust_device(device_id, role).await }
+		async move { crate::fns::devices::trust(device_id, role).await }
 	});
 
 	Effect::new(move |_| {
@@ -291,7 +291,7 @@ pub fn DeviceRow(
 		let device_id = device_id.clone();
 		Resource::new(
 			move || device_id.clone(),
-			async |id| crate::fns::devices::get_device_connection_count(id).await,
+			async |id| crate::fns::devices::connection_count(id).await,
 		)
 	};
 
@@ -302,12 +302,7 @@ pub fn DeviceRow(
 			let device_id = device_id.clone();
 			let offset = *offset;
 			async move {
-				crate::fns::devices::get_device_connection_history(
-					device_id,
-					Some(100),
-					Some(offset),
-				)
-				.await
+				crate::fns::devices::connection_history(device_id, Some(100), Some(offset)).await
 			}
 		})
 	};

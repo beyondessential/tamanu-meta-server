@@ -39,32 +39,32 @@ pub struct DeviceConnectionData {
 }
 
 #[server]
-pub async fn list_untrusted_devices() -> Result<Vec<DeviceInfo>> {
-	ssr::list_untrusted_devices().await
+pub async fn list_untrusted() -> Result<Vec<DeviceInfo>> {
+	ssr::list_untrusted().await
 }
 
 #[server]
-pub async fn get_device_connection_history(
+pub async fn connection_history(
 	device_id: String,
 	limit: Option<i64>,
 	offset: Option<i64>,
 ) -> Result<Vec<DeviceConnectionData>> {
-	ssr::get_device_connection_history(device_id, limit, offset).await
+	ssr::connection_history(device_id, limit, offset).await
 }
 
 #[server]
-pub async fn get_device_connection_count(device_id: String) -> Result<i64> {
-	ssr::get_device_connection_count(device_id).await
+pub async fn connection_count(device_id: String) -> Result<i64> {
+	ssr::connection_count(device_id).await
 }
 
 #[server]
-pub async fn trust_device(device_id: String, role: String) -> Result<()> {
-	ssr::trust_device(device_id, role).await
+pub async fn trust(device_id: String, role: String) -> Result<()> {
+	ssr::trust(device_id, role).await
 }
 
 #[server]
-pub async fn search_devices(query: String) -> Result<Vec<DeviceInfo>> {
-	ssr::search_devices(query).await
+pub async fn search(query: String) -> Result<Vec<DeviceInfo>> {
+	ssr::search(query).await
 }
 
 #[cfg(feature = "ssr")]
@@ -161,7 +161,7 @@ mod ssr {
 			.to_uppercase()
 	}
 
-	pub async fn list_untrusted_devices() -> Result<Vec<DeviceInfo>> {
+	pub async fn list_untrusted() -> Result<Vec<DeviceInfo>> {
 		let db = crate::fns::commons::admin_guard().await?;
 		let mut conn = db.get().await?;
 
@@ -172,7 +172,7 @@ mod ssr {
 			.collect())
 	}
 
-	pub async fn get_device_connection_history(
+	pub async fn connection_history(
 		device_id: String,
 		limit: Option<i64>,
 		offset: Option<i64>,
@@ -196,7 +196,7 @@ mod ssr {
 			.collect())
 	}
 
-	pub async fn get_device_connection_count(device_id: String) -> Result<i64> {
+	pub async fn connection_count(device_id: String) -> Result<i64> {
 		let db = crate::fns::commons::admin_guard().await?;
 		let mut conn = db.get().await?;
 
@@ -206,7 +206,7 @@ mod ssr {
 		DeviceConnection::get_connection_count_for_device(&mut conn, device_uuid).await
 	}
 
-	pub async fn trust_device(device_id: String, role: String) -> Result<()> {
+	pub async fn trust(device_id: String, role: String) -> Result<()> {
 		let db = crate::fns::commons::admin_guard().await?;
 		let mut conn = db.get().await?;
 
@@ -223,10 +223,10 @@ mod ssr {
 			));
 		}
 
-		Device::trust_device(&mut conn, device_uuid, device_role).await
+		Device::trust(&mut conn, device_uuid, device_role).await
 	}
 
-	pub async fn search_devices(query: String) -> Result<Vec<DeviceInfo>> {
+	pub async fn search(query: String) -> Result<Vec<DeviceInfo>> {
 		let db = crate::fns::commons::admin_guard().await?;
 		let mut conn = db.get().await?;
 

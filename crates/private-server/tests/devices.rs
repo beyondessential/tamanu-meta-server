@@ -38,7 +38,7 @@ async fn test_trust_device() {
 		let device = Device::create(&mut conn, key_data.to_vec()).await.unwrap();
 
 		// Trust the device as admin
-		Device::trust_device(&mut conn, device.id, DeviceRole::Admin)
+		Device::trust(&mut conn, device.id, DeviceRole::Admin)
 			.await
 			.unwrap();
 

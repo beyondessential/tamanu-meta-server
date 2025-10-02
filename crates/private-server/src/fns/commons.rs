@@ -2,7 +2,7 @@ use commons_errors::Result;
 use leptos::server;
 
 #[server]
-pub async fn get_public_url() -> Result<Option<String>> {
+pub async fn public_url() -> Result<Option<String>> {
 	use std::env;
 
 	Ok(env::var("PUBLIC_URL").ok())

@@ -57,10 +57,7 @@ pub fn GlobalNav() -> impl IntoView {
 		|_| async { crate::fns::commons::is_current_user_admin().await },
 	);
 
-	let public_url = Resource::new(
-		|| (),
-		|_| async { crate::fns::commons::get_public_url().await },
-	);
+	let public_url = Resource::new(|| (), |_| async { crate::fns::commons::public_url().await });
 
 	view! {
 		<nav id="global-nav">
