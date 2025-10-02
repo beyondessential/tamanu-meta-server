@@ -66,12 +66,12 @@ pub fn AdminManagement() -> impl IntoView {
 
 	let add_admin = Action::new(move |email: &String| {
 		let email = email.clone();
-		async move { crate::fns::admins::add_admin(email).await }
+		async move { crate::fns::admins::add(email).await }
 	});
 
 	let delete_admin = Action::new(move |email: &String| {
 		let email = email.clone();
-		async move { crate::fns::admins::delete_admin(email).await }
+		async move { crate::fns::admins::delete(email).await }
 	});
 
 	let on_submit = move |ev: web_sys::SubmitEvent| {
