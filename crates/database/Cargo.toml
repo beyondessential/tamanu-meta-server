@@ -11,6 +11,7 @@ authors = [
 ]
 
 [dependencies]
+base64 = "0.22.1"
 chrono = { workspace = true, features = ["serde"] }
 clap = { workspace = true, features = ["derive", "env"] }
 commons-errors = { path = "../commons-errors" }
@@ -28,6 +29,7 @@ diesel-derive-enum = { version = "2.1.0", features = ["postgres"] }
 diesel_migrations = "2.2.0"
 folktime = "0.2.1"
 futures = "0.3.31"
+hex = "0.4.3"
 ipnet = { version = "2.11.0", features = ["serde"] }
 lloggs = { workspace = true, features = ["miette-7"] }
 miette.workspace = true

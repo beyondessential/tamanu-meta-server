@@ -18,6 +18,10 @@ pub mod url_field;
 pub mod versions;
 pub mod views;
 
+// Re-export commonly used types
+pub use device_role::DeviceRole;
+pub use devices::{Device, DeviceConnection, DeviceKey, DeviceWithInfo};
+
 pub type Db = Pool<AsyncPgConnection>;
 
 pub fn init() -> Db {

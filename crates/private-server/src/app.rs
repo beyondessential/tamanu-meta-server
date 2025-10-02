@@ -6,6 +6,7 @@ use leptos_router::{
 };
 
 mod admins;
+mod devices;
 mod status;
 mod statuses;
 
@@ -41,6 +42,7 @@ pub fn App() -> impl IntoView {
 						<Route path=path!("") view=|| view! { <Redirect path="/status" /> } />
 						<Route path=path!("status") view=statuses::Page />
 						<Route path=path!("admins") view=admins::Page />
+						<Route path=path!("devices") view=devices::Page />
 					</Routes>
 				</main>
 			</Router>
@@ -48,17 +50,14 @@ pub fn App() -> impl IntoView {
 	}
 }
 
-#[island]
+#[component]
 pub fn GlobalNav() -> impl IntoView {
 	let is_admin = Resource::new(
 		|| (),
 		|_| async { crate::fns::commons::is_current_user_admin().await },
 	);
 
-	let public_url = Resource::new(
-		|| (),
-		|_| async { crate::fns::commons::get_public_url().await },
-	);
+	let public_url = Resource::new(|| (), |_| async { crate::fns::commons::public_url().await });
 
 	view! {
 		<nav id="global-nav">
@@ -75,6 +74,7 @@ pub fn GlobalNav() -> impl IntoView {
 							if result.unwrap_or(false) {
 								Some(view! {
 									<A href="/admins">"Admins"</A>
+									<A href="/devices">"Devices"</A>
 								})
 							} else {
 								None

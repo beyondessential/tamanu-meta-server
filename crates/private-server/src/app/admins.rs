@@ -1,8 +1,9 @@
 use leptos::prelude::*;
-use leptos_meta::Stylesheet;
+use leptos_meta::{Stylesheet, provide_meta_context};
 
 #[island]
 pub fn Page() -> impl IntoView {
+	provide_meta_context();
 	let is_admin = Resource::new(
 		|| (),
 		|_| async { crate::fns::commons::is_current_user_admin().await },

@@ -2,7 +2,7 @@ use commons_errors::Result;
 use leptos::server;
 
 #[server]
-pub async fn get_public_url() -> Result<Option<String>> {
+pub async fn public_url() -> Result<Option<String>> {
 	use std::env;
 
 	Ok(env::var("PUBLIC_URL").ok())
@@ -19,4 +19,19 @@ pub async fn is_current_user_admin() -> Result<bool> {
 	let TailscaleAdmin(_) = extract_with_state(&state).await?;
 
 	Ok(true)
+}
+
+#[cfg(feature = "ssr")]
+pub async fn admin_guard() -> Result<database::Db> {
+	use crate::state::AppState;
+	use axum::extract::State;
+	use commons_servers::tailscale_auth::TailscaleAdmin;
+	use database::Db;
+	use leptos::prelude::expect_context;
+	use leptos_axum::extract_with_state;
+
+	let state = expect_context::<AppState>();
+	let TailscaleAdmin(_) = extract_with_state(&state).await?;
+	let State(db): State<Db> = extract_with_state(&state).await?;
+	Ok(db)
 }
