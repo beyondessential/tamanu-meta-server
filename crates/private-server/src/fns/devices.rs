@@ -13,6 +13,7 @@ pub struct DeviceInfo {
 pub struct DeviceData {
 	pub id: String,
 	pub created_at: String,
+	pub created_at_relative: String,
 	pub updated_at: String,
 	pub role: String,
 }
@@ -31,6 +32,7 @@ pub struct DeviceKeyInfo {
 pub struct DeviceConnectionData {
 	pub id: String,
 	pub created_at: String,
+	pub created_at_relative: String,
 	pub device_id: String,
 	pub ip: String,
 	pub user_agent: Option<String>,
@@ -63,7 +65,15 @@ pub async fn search_devices(query: String) -> Result<Vec<DeviceInfo>> {
 mod ssr {
 	use super::*;
 	use database::{Device, DeviceConnection, DeviceKey, DeviceRole, DeviceWithInfo};
+	use folktime::duration::Style;
 	use uuid::Uuid;
+
+	fn format_relative_time(datetime: chrono::DateTime<chrono::Utc>) -> String {
+		let now = chrono::Utc::now();
+		let duration = (now - datetime).to_std().unwrap_or_default();
+		let relative = folktime::duration::Duration(duration, Style::OneUnitWhole);
+		format!("{} ago", relative)
+	}
 
 	impl From<DeviceWithInfo> for DeviceInfo {
 		fn from(device_with_info: DeviceWithInfo) -> Self {
@@ -71,6 +81,7 @@ mod ssr {
 				device: DeviceData {
 					id: device_with_info.device.id.to_string(),
 					created_at: device_with_info.device.created_at.to_string(),
+					created_at_relative: format_relative_time(device_with_info.device.created_at),
 					updated_at: device_with_info.device.updated_at.to_string(),
 					role: String::from(device_with_info.device.role),
 				},
@@ -107,6 +118,7 @@ mod ssr {
 			Self {
 				id: conn.id.to_string(),
 				created_at: conn.created_at.to_string(),
+				created_at_relative: format_relative_time(conn.created_at),
 				device_id: conn.device_id.to_string(),
 				ip: conn.ip.to_string(),
 				user_agent: conn.user_agent,
