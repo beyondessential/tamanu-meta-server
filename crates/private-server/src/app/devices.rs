@@ -262,7 +262,7 @@ pub fn DeviceRow(
 					<h3>"Device " {device.device.id.clone()}</h3>
 					<div class="device-meta">
 						<span class="device-role">{format!("Role: {}", device.device.role)}</span>
-						<span class="device-created" title={device.device.created_at.clone()}>
+						<span class="device-created timestamp-hover" title={device.device.created_at.clone()}>
 							{format!("Created: {}", device.device.created_at_relative)}
 						</span>
 					</div>
@@ -274,7 +274,7 @@ pub fn DeviceRow(
 							<h4>"Latest Connection"</h4>
 							<div class="connection-details">
 								<div class="connection-ip">{format!("IP: {}", conn.ip)}</div>
-								<div class="connection-time" title={conn.created_at.clone()}>{format!("Time: {}", conn.created_at_relative)}</div>
+								<div class="connection-time timestamp-hover" title={conn.created_at.clone()}>{format!("Time: {}", conn.created_at_relative)}</div>
 								{conn.user_agent.as_ref().map(|ua| {
 									view! {
 										<div class="connection-ua">{format!("User Agent: {}", ua)}</div>
@@ -386,7 +386,7 @@ pub fn DeviceRow(
 													<div class="history-list">
 														<For each=move || connections.clone() key=|conn| conn.id.clone() let:conn>
 															<div class="history-item">
-																<div class="history-time" title={conn.created_at.clone()}>{conn.created_at_relative.clone()}</div>
+																<div class="history-time timestamp-hover" title={conn.created_at.clone()}>{conn.created_at_relative.clone()}</div>
 																<div class="history-ip">{conn.ip.clone()}</div>
 																{conn.user_agent.as_ref().map(|ua| {
 																	view! {

@@ -16,6 +16,7 @@
 
 ## Code Style & Patterns
 - Follow existing Rust conventions in the codebase
+- Never add useless comments if what the code does is obvious enough, especially in CSS
 - Use `AppError` variants for error handling, map to appropriate HTTP status codes in `IntoResponse`
 - Update ERRORS.md when adding new error types, the heading must match the error problem type
 - Use `commons_tests::db::TestDb::run()` for database-only tests
