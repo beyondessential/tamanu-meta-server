@@ -14,7 +14,7 @@ members = [
 [workspace.dependencies]
 axum = "0.8.4"
 chrono = "0.4.42"
-clap = "4.5.47"
+clap = "4.5.49"
 diesel = "2.2.12"
 diesel-async = "0.6.1"
 futures = "0.3.31"
