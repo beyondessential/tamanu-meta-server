@@ -158,4 +158,25 @@ impl Status {
 			.await
 			.map_err(AppError::from)
 	}
+
+	pub async fn latest_for_server(
+		db: &mut AsyncPgConnection,
+		server: Uuid,
+	) -> Result<Option<Status>> {
+		use crate::schema::statuses::dsl::*;
+
+		statuses
+			.select(Status::as_select())
+			.filter(
+				server_id
+					.eq(server)
+					.and(created_at.ge(diesel::dsl::sql("NOW() - INTERVAL '7 days'")))
+					.and(id.ne(Uuid::nil())),
+			)
+			.order(created_at.desc())
+			.first(db)
+			.await
+			.optional()
+			.map_err(AppError::from)
+	}
 }

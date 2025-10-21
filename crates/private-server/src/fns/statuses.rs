@@ -20,24 +20,18 @@ pub struct SummaryData {
 	pub versions: BTreeSet<VersionStr>,
 }
 
-#[server]
-pub async fn greeting() -> Result<String> {
-	ssr::greeting().await
-}
-
-#[server]
-pub async fn summary() -> Result<SummaryData> {
-	ssr::summary().await
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerDetailsData {
+	pub id: String,
+	pub name: String,
+	pub kind: String,
+	pub rank: String,
+	pub host: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServerTableRow {
+pub struct ServerStatusData {
 	pub up: String,
-	pub server_id: String,
-	pub server_name: String,
-	pub server_kind: String,
-	pub server_rank: String,
-	pub server_host: String,
 	pub updated_at: Option<String>,
 	pub since: Option<String>,
 	pub version: Option<String>,
@@ -48,8 +42,28 @@ pub struct ServerTableRow {
 }
 
 #[server]
-pub async fn table() -> Result<Vec<ServerTableRow>> {
-	ssr::table().await
+pub async fn greeting() -> Result<String> {
+	ssr::greeting().await
+}
+
+#[server]
+pub async fn summary() -> Result<SummaryData> {
+	ssr::summary().await
+}
+
+#[server]
+pub async fn server_ids() -> Result<Vec<String>> {
+	ssr::server_ids().await
+}
+
+#[server]
+pub async fn server_details(server_id: String) -> Result<ServerDetailsData> {
+	ssr::server_details(server_id).await
+}
+
+#[server]
+pub async fn server_status(server_id: String) -> Result<ServerStatusData> {
+	ssr::server_status(server_id).await
 }
 
 #[cfg(feature = "ssr")]
@@ -64,7 +78,7 @@ mod ssr {
 	use axum::{Extension, Json, Router, extract::State, routing::get};
 	use axum_server_timing::ServerTimingExtension;
 	use chrono::{TimeDelta, Utc};
-	use commons_errors::Result;
+	use commons_errors::{AppError, Result};
 	use commons_servers::tailscale_auth::TailscaleUser;
 	use database::{
 		Db, devices::DeviceConnection, server_rank::ServerRank, servers::Server, statuses::Status,
@@ -248,40 +262,119 @@ mod ssr {
 		})
 	}
 
-	pub async fn table() -> Result<Vec<ServerTableRow>> {
+	pub async fn server_ids() -> Result<Vec<String>> {
 		let state = expect_context::<AppState>();
 		let State(db): State<Db> = extract_with_state(&state).await?;
-		let Extension(timing): Extension<ServerTimingExtension> =
-			extract_with_state(&state).await?;
-		let servers = servers_with_status(db, timing).await?;
+		let mut conn = db.get().await?;
+		let mut servers = Server::get_all(&mut conn).await?;
 
-		Ok(servers
-			.into_iter()
-			.map(|s| ServerTableRow {
-				up: s.up,
-				server_id: s.server.id.to_string(),
-				server_name: s.server.name.unwrap_or_default(),
-				server_kind: s.server.kind.to_string(),
-				server_rank: s
-					.server
-					.rank
-					.map_or("unknown".to_string(), |r| r.to_string()),
-				server_host: s.server.host.0.to_string(),
-				updated_at: s.status.as_ref().map(|s| s.created_at.to_string()),
-				since: s.since,
-				version: s
-					.status
-					.as_ref()
-					.and_then(|s| s.version.as_ref().map(|v| v.to_string())),
-				platform: s.platform,
-				postgres: s.postgres,
-				nodejs: s.nodejs,
-				timezone: s.status.and_then(|s| {
-					s.extra("timezone")
-						.and_then(|s| s.as_str().map(|s| s.to_string()))
-				}),
-			})
-			.collect())
+		servers.retain(|s| s.name.is_some());
+		servers.sort_by_key(|s| (s.rank, s.name.clone()));
+
+		Ok(servers.into_iter().map(|s| s.id.to_string()).collect())
+	}
+
+	pub async fn server_details(server_id: String) -> Result<super::ServerDetailsData> {
+		let state = expect_context::<AppState>();
+		let State(db): State<Db> = extract_with_state(&state).await?;
+		let mut conn = db.get().await?;
+		let id = server_id
+			.parse::<Uuid>()
+			.map_err(|e| AppError::custom(format!("Invalid server ID: {}", e)))?;
+		let server = Server::get_by_id(&mut conn, id).await?;
+
+		Ok(super::ServerDetailsData {
+			id: server.id.to_string(),
+			name: server.name.unwrap_or_default(),
+			kind: server.kind.to_string(),
+			rank: server.rank.map_or("unknown".to_string(), |r| r.to_string()),
+			host: server.host.0.to_string(),
+		})
+	}
+
+	pub async fn server_status(server_id: String) -> Result<super::ServerStatusData> {
+		let state = expect_context::<AppState>();
+		let State(db): State<Db> = extract_with_state(&state).await?;
+		let mut conn = db.get().await?;
+		let id = server_id
+			.parse::<Uuid>()
+			.map_err(|e| AppError::custom(format!("Invalid server ID: {}", e)))?;
+
+		let status = Status::latest_for_server(&mut conn, id).await?;
+
+		let device_id = status.as_ref().and_then(|s| s.device_id);
+		let device = if let Some(device_id) = device_id {
+			let devices =
+				DeviceConnection::get_latest_from_device_ids(&mut conn, [device_id].into_iter())
+					.await?;
+			devices.into_iter().next()
+		} else {
+			None
+		};
+
+		let up = status.as_ref().map_or("gone".into(), |st| {
+			let since = st.created_at.signed_duration_since(Utc::now()).abs();
+			if since > TimeDelta::minutes(30) {
+				"down"
+			} else if since > TimeDelta::minutes(10) {
+				"away"
+			} else if since > TimeDelta::minutes(2) {
+				"blip"
+			} else {
+				"up"
+			}
+			.into()
+		});
+
+		let since = status.as_ref().map(|st| {
+			let duration = st.created_at.signed_duration_since(Utc::now()).abs();
+			FolktimeDuration(duration.to_std().unwrap_or_default(), Style::OneUnitWhole).to_string()
+		});
+
+		let platform = status
+			.as_ref()
+			.and_then(|st| st.extra("pgVersion"))
+			.and_then(|pg| pg.as_str())
+			.map(|pg| {
+				if pg.contains("Visual C++") || pg.contains("windows") {
+					"Windows"
+				} else {
+					"Linux"
+				}
+				.into()
+			});
+
+		let postgres = status
+			.as_ref()
+			.and_then(|st| st.extra("pgVersion"))
+			.and_then(|pg| pg.as_str())
+			.and_then(|pg| pg.split_ascii_whitespace().nth(1))
+			.map(|vers| vers.trim_end_matches(',').into());
+
+		let nodejs = device
+			.as_ref()
+			.and_then(|d| d.user_agent.as_ref())
+			.and_then(|ua| {
+				ua.split_ascii_whitespace()
+					.find_map(|p| p.strip_prefix("Node.js/"))
+					.map(ToOwned::to_owned)
+			});
+
+		Ok(super::ServerStatusData {
+			up,
+			updated_at: status.as_ref().map(|s| s.created_at.to_string()),
+			since,
+			version: status
+				.as_ref()
+				.and_then(|s| s.version.as_ref().map(|v| v.to_string())),
+			platform,
+			postgres,
+			nodejs,
+			timezone: status.and_then(|s| {
+				s.extra("timezone")
+					.and_then(|s| s.as_str().map(|s| s.to_string()))
+			}),
+		})
 	}
 
 	pub async fn data(
