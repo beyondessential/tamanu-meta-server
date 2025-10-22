@@ -31,7 +31,6 @@ pub struct ServerDetailsData {
 pub struct ServerStatusData {
 	pub up: String,
 	pub updated_at: Option<String>,
-	pub since: Option<String>,
 	pub version: Option<String>,
 	pub platform: Option<String>,
 	pub postgres: Option<String>,
@@ -68,7 +67,6 @@ mod ssr {
 	use chrono::{TimeDelta, Utc};
 	use commons_errors::{AppError, Result};
 	use database::{Db, devices::DeviceConnection, servers::Server, statuses::Status};
-	use folktime::duration::{Duration as FolktimeDuration, Style};
 	use leptos::prelude::expect_context;
 	use leptos_axum::extract_with_state;
 	use uuid::Uuid;
@@ -165,11 +163,6 @@ mod ssr {
 			.into()
 		});
 
-		let since = status.as_ref().map(|st| {
-			let duration = st.created_at.signed_duration_since(Utc::now()).abs();
-			FolktimeDuration(duration.to_std().unwrap_or_default(), Style::OneUnitWhole).to_string()
-		});
-
 		let platform = status
 			.as_ref()
 			.and_then(|st| st.extra("pgVersion"))
@@ -202,7 +195,6 @@ mod ssr {
 		Ok(super::ServerStatusData {
 			up,
 			updated_at: status.as_ref().map(|s| s.created_at.to_string()),
-			since,
 			version: status
 				.as_ref()
 				.and_then(|s| s.version.as_ref().map(|v| v.to_string())),
