@@ -62,6 +62,60 @@ pub fn TableIsland() -> impl IntoView {
 		}
 	});
 
+	// Auto-reload every minute when page is visible
+	#[cfg(not(feature = "ssr"))]
+	Effect::new(move |_| {
+		if is_client.get() {
+			use wasm_bindgen::JsCast;
+			use wasm_bindgen::closure::Closure;
+
+			// Track last reload time
+			let last_reload = std::rc::Rc::new(std::cell::Cell::new(web_sys::js_sys::Date::now()));
+
+			// Set up interval for regular reloads
+			let _ = leptos::prelude::set_interval(
+				{
+					let last_reload = last_reload.clone();
+					move || {
+						if let Some(document) = web_sys::window().and_then(|w| w.document()) {
+							if !document.hidden() {
+								reload_ctx.set_trigger.update(|n| *n += 1);
+								last_reload.set(web_sys::js_sys::Date::now());
+							}
+						}
+					}
+				},
+				std::time::Duration::from_secs(60),
+			);
+
+			// Listen for visibility changes
+			if let Some(document) = web_sys::window().and_then(|w| w.document()) {
+				let visibility_callback = Closure::wrap(Box::new(move || {
+					if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+						if !doc.hidden() {
+							let now = web_sys::js_sys::Date::now();
+							let elapsed = now - last_reload.get();
+
+							// If more than 60 seconds since last reload, reload now
+							if elapsed > 60_000.0 {
+								reload_ctx.set_trigger.update(|n| *n += 1);
+								last_reload.set(now);
+							}
+						}
+					}
+				}) as Box<dyn FnMut()>);
+
+				let _ = document.add_event_listener_with_callback(
+					"visibilitychange",
+					visibility_callback.as_ref().unchecked_ref(),
+				);
+
+				// Keep the closure alive
+				visibility_callback.forget();
+			}
+		}
+	});
+
 	view! {
 		<div>
 			<Show when=move || is_client.get() fallback=|| view! {
@@ -85,38 +139,42 @@ pub fn TableIsland() -> impl IntoView {
 					</tbody>
 				</table>
 			}>
-				<button on:click=move |_| reload_ctx.set_trigger.update(|n| *n += 1)>
+				<button
+					class="reload-button"
+					on:click=move |_| reload_ctx.set_trigger.update(|n| *n += 1)
+					title="Reload server status"
+				>
 					"Reload"
 				</button>
 				<Suspense fallback=|| view! { <div class="loading">"Loading…"</div> }>{move || {
-				view! {
-					<table>
-						<thead>
-						  <tr>
-							<th class="status">Status</th>
-							<th class="name">Name</th>
-							<th class="rank">Rank</th>
-							<th class="host">Host</th>
-							<th class="ago">Last seen</th>
-							<th class="version">Version</th>
-							<th class="platform">Platform</th>
-							<th class="nodejs">Node.js</th>
-							<th class="postgres">Postgres</th>
-							<th class="timezone">Timezone</th>
-						  </tr>
-						</thead>
-						<tbody>
-							<For
-								each=move || server_ids_resource.get().and_then(|d| d.ok()).unwrap_or_default()
-								key=|id| id.clone()
-								let:server_id
-							>
-								<ServerRow server_id={server_id.clone()} />
-							</For>
-						</tbody>
-					</table>
-				}
-			}}</Suspense>
+					view! {
+						<table>
+							<thead>
+							  <tr>
+								<th class="status">Status</th>
+								<th class="name">Name</th>
+								<th class="rank">Rank</th>
+								<th class="host">Host</th>
+								<th class="ago">Last seen</th>
+								<th class="version">Version</th>
+								<th class="platform">Platform</th>
+								<th class="nodejs">Node.js</th>
+								<th class="postgres">Postgres</th>
+								<th class="timezone">Timezone</th>
+							  </tr>
+							</thead>
+							<tbody>
+								<For
+									each=move || server_ids_resource.get().and_then(|d| d.ok()).unwrap_or_default()
+									key=|id| id.clone()
+									let:server_id
+								>
+									<ServerRow server_id={server_id.clone()} />
+								</For>
+							</tbody>
+						</table>
+					}
+				}}</Suspense>
 			</Show>
 		</div>
 	}
@@ -124,35 +182,17 @@ pub fn TableIsland() -> impl IntoView {
 
 #[component]
 pub fn ServerRow(server_id: String) -> impl IntoView {
-	leptos::logging::log!("ServerRow created for {}", server_id);
-
 	let reload_ctx = expect_context::<ReloadContext>();
 
 	let server_id_for_details = server_id.clone();
 	let details = Resource::new(
-		move || {
-			let trigger = reload_ctx.trigger.get();
-			leptos::logging::log!(
-				"Details source function called for {} with trigger {}",
-				server_id_for_details,
-				trigger
-			);
-			(server_id_for_details.clone(), trigger)
-		},
+		move || (server_id_for_details.clone(), reload_ctx.trigger.get()),
 		|(id, _)| async move { server_details(id).await },
 	);
 
 	let server_id_for_status = server_id.clone();
 	let status = Resource::new(
-		move || {
-			let trigger = reload_ctx.trigger.get();
-			leptos::logging::log!(
-				"Status source function called for {} with trigger {}",
-				server_id_for_status,
-				trigger
-			);
-			(server_id_for_status.clone(), trigger)
-		},
+		move || (server_id_for_status.clone(), reload_ctx.trigger.get()),
 		|(id, _)| async move { server_status(id).await },
 	);
 

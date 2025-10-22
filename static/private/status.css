@@ -104,4 +104,26 @@
 		color: var(--color-text-light);
 		font-style: italic;
 	}
+
+	.reload-button {
+		float: right;
+		margin-bottom: 1em;
+		padding: 0.5em 1em;
+		background: var(--color-primary);
+		color: var(--color-bg-white);
+		border: none;
+		border-radius: 0.5em;
+		cursor: pointer;
+		font-size: 1em;
+		font-weight: 500;
+		transition: background 0.2s ease;
+
+		&:hover {
+			background: var(--color-primary-dark);
+		}
+
+		&:active {
+			transform: translateY(1px);
+		}
+	}
 }

@@ -6,6 +6,7 @@
 	--color-primary: oklch(0.7 0.15 240);
 	--color-primary-hover: oklch(0.6 0.15 240);
 	--color-primary-light: oklch(0.85 0.1 240);
+	--color-primary-dark: oklch(0.45 0.1 240);
 	--color-primary-focus: oklch(0.7 0.15 240 / 0.25);
 
 	/* Background colors */
