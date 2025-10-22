@@ -142,23 +142,6 @@ impl Status {
 		Ok(())
 	}
 
-	pub async fn latest_for_all_servers(db: &mut AsyncPgConnection) -> Result<Vec<Status>> {
-		use crate::schema::statuses::dsl::*;
-
-		statuses
-			.select(Status::as_select())
-			.distinct_on(server_id)
-			.filter(
-				created_at
-					.ge(diesel::dsl::sql("NOW() - INTERVAL '7 days'"))
-					.and(id.ne(Uuid::nil())),
-			)
-			.order((server_id, created_at.desc()))
-			.load(db)
-			.await
-			.map_err(AppError::from)
-	}
-
 	pub async fn latest_for_server(
 		db: &mut AsyncPgConnection,
 		server: Uuid,
@@ -177,6 +160,47 @@ impl Status {
 			.first(db)
 			.await
 			.optional()
+			.map_err(AppError::from)
+	}
+
+	pub async fn production_versions(
+		db: &mut AsyncPgConnection,
+	) -> Result<Vec<commons_versions::VersionStr>> {
+		use crate::schema::statuses::dsl as statuses_dsl;
+		use crate::views::ordered_servers::dsl as servers_dsl;
+
+		let production_server_ids: Vec<Uuid> = servers_dsl::ordered_servers
+			.select(servers_dsl::id)
+			.filter(servers_dsl::rank.eq(crate::server_rank::ServerRank::Production))
+			.load(db)
+			.await?;
+
+		statuses_dsl::statuses
+			.select((
+				statuses_dsl::server_id,
+				statuses_dsl::created_at,
+				statuses_dsl::version,
+			))
+			.filter(
+				statuses_dsl::server_id
+					.eq_any(&production_server_ids)
+					.and(statuses_dsl::created_at.ge(diesel::dsl::sql("NOW() - INTERVAL '7 days'")))
+					.and(statuses_dsl::id.ne(Uuid::nil())),
+			)
+			.order((statuses_dsl::server_id, statuses_dsl::created_at.desc()))
+			.distinct_on(statuses_dsl::server_id)
+			.load::<(
+				Uuid,
+				chrono::DateTime<Utc>,
+				Option<commons_versions::VersionStr>,
+			)>(db)
+			.await
+			.map(|results| {
+				results
+					.into_iter()
+					.filter_map(|(_, _, version)| version)
+					.collect()
+			})
 			.map_err(AppError::from)
 	}
 }
