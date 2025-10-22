@@ -3036,6 +3036,7 @@ dependencies = [
  "database",
  "folktime",
  "hex",
+ "js-sys",
  "leptos",
  "leptos_axum",
  "leptos_meta",

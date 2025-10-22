@@ -27,6 +27,7 @@ console_error_panic_hook = { version = "0.1.0", optional = true }
 database = { path = "../database", optional = true }
 folktime = { version = "0.2.1", optional = true }
 hex = "0.4.3"
+js-sys = { version = "0.3.81", optional = true }
 leptos = { workspace = true, features = ["islands"] }
 leptos_axum = { version = "0.8.0", optional = true }
 leptos_meta = "0.8.0"
@@ -40,7 +41,7 @@ tower-http = { version = "0.6.6", optional = true, features = ["fs"] }
 tracing.workspace = true
 uuid = { version = "1.18.1", optional = true, features = ["serde", "v4"] }
 wasm-bindgen = { version = "0.2.104", optional = true }
-web-sys = { version = "0.3.81", features = ["Clipboard", "Navigator", "Window"] }
+web-sys = { version = "0.3.81", features = ["Clipboard", "Document", "Navigator", "Window"] }
 
 [dev-dependencies]
 commons-tests = { path = "../commons-tests" }
@@ -51,6 +52,7 @@ default = ["ssr"]
 hydrate = [
     "leptos/hydrate",
     "dep:console_error_panic_hook",
+    "dep:js-sys",
     "dep:wasm-bindgen",
 ]
 ssr = [
