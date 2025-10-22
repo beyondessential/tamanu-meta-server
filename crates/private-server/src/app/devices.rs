@@ -79,7 +79,7 @@ pub fn Page() -> impl IntoView {
 									<div class="page-header">
 										<h1>"Device Management"</h1>
 										<p class="page-description">
-											"Manage device approvals and trust levels. Untrusted devices appear here after their first connection attempt."
+											"Manage device approvals and trust levels."
 										</p>
 									</div>
 									<DeviceManagement />
@@ -118,22 +118,12 @@ pub fn Page() -> impl IntoView {
 	}
 }
 
-#[island]
+#[component]
 pub fn DeviceManagement() -> impl IntoView {
 	let (search_query, set_search_query) = signal(String::new());
 	let (message, set_message) = signal(String::new());
 	let (refresh_trigger, set_refresh_trigger) = signal(0);
 	let (active_tab, set_active_tab) = signal("untrusted");
-
-	let untrusted_devices = Resource::new(
-		move || refresh_trigger.get(),
-		async |_| crate::fns::devices::list_untrusted().await,
-	);
-
-	let trusted_devices = Resource::new(
-		move || refresh_trigger.get(),
-		async |_| crate::fns::devices::list_trusted().await,
-	);
 
 	let search_results = Resource::new(
 		move || search_query.get(),
@@ -146,60 +136,10 @@ pub fn DeviceManagement() -> impl IntoView {
 		},
 	);
 
-	let trust_device_action = Action::new(move |(device_id, role): &(String, String)| {
-		let device_id = device_id.clone();
-		let role = role.clone();
-		async move { crate::fns::devices::trust(device_id, role).await }
-	});
-
-	let untrust_device_action = Action::new(move |device_id: &String| {
-		let device_id = device_id.clone();
-		async move { crate::fns::devices::untrust(device_id).await }
-	});
-
 	let update_role_action = Action::new(move |(device_id, role): &(String, String)| {
 		let device_id = device_id.clone();
 		let role = role.clone();
 		async move { crate::fns::devices::update_role(device_id, role).await }
-	});
-
-	Effect::new(move |_| {
-		if let Some(result) = trust_device_action.value().get() {
-			match result {
-				Ok(_) => {
-					set_message.set("Device trusted successfully".to_string());
-					set_refresh_trigger.update(|n| *n += 1);
-
-					set_timeout(
-						move || set_message.set(String::new()),
-						std::time::Duration::from_millis(3000),
-					);
-				}
-				Err(e) => {
-					set_message.set(format!("Error trusting device: {}", e));
-				}
-			}
-		}
-	});
-
-	Effect::new(move |_| {
-		if let Some(result) = untrust_device_action.value().get() {
-			match result {
-				Ok(_) => {
-					set_message.set("Device untrusted successfully".to_string());
-					set_refresh_trigger.update(|n| *n += 1);
-					set_active_tab.set("untrusted"); // Switch to untrusted tab
-
-					set_timeout(
-						move || set_message.set(String::new()),
-						std::time::Duration::from_millis(3000),
-					);
-				}
-				Err(e) => {
-					set_message.set(format!("Error untrusting device: {}", e));
-				}
-			}
-		}
 	});
 
 	Effect::new(move |_| {
@@ -256,9 +196,6 @@ pub fn DeviceManagement() -> impl IntoView {
 												<h3>{format!("Search Results ({} found)", devices.len())}</h3>
 												<DeviceTable
 													devices=devices.clone()
-													trust_action=trust_device_action
-													untrust_action=untrust_device_action
-													update_role_action=update_role_action
 												/>
 											</div>
 										}.into_any()
@@ -305,74 +242,10 @@ pub fn DeviceManagement() -> impl IntoView {
 				{move || {
 					match active_tab.get().as_ref() {
 						"trusted" => view! {
-							<div class="trusted-devices">
-								<p class="section-description">
-									"Devices that have been assigned a role and are trusted"
-								</p>
-
-								<Suspense fallback=|| view! { <div class="loading">"Loading devices..."</div> }>
-									{move || trusted_devices.get().map(|result| {
-										match result {
-											Ok(devices) => {
-												if devices.is_empty() {
-													view! {
-														<div class="no-devices">"No trusted devices found"</div>
-													}.into_any()
-												} else {
-													view! {
-														<DeviceTable
-															devices=devices.clone()
-															trust_action=trust_device_action
-															untrust_action=untrust_device_action
-															update_role_action=update_role_action
-														/>
-													}.into_any()
-												}
-											}
-											Err(e) => {
-												view! {
-													<div class="error">{format!("Error loading devices: {}", e)}</div>
-												}.into_any()
-											}
-										}
-									})}
-								</Suspense>
-							</div>
+							<Trusted refresh_trigger=refresh_trigger set_refresh_trigger=set_refresh_trigger set_message=set_message update_role_action=update_role_action set_active_tab=set_active_tab />
 						}.into_any(),
 						_ => view! {
-							<div class="untrusted-devices">
-								<p class="section-description">
-									"Devices that have connected but haven't been assigned a role yet"
-								</p>
-
-								<Suspense fallback=|| view! { <div class="loading">"Loading devices..."</div> }>
-									{move || untrusted_devices.get().map(|result| {
-										match result {
-											Ok(devices) => {
-												if devices.is_empty() {
-													view! {
-														<div class="no-devices">"No untrusted devices found"</div>
-													}.into_any()
-												} else {
-													view! {
-														<DeviceTable
-															devices=devices.clone()
-															trust_action=trust_device_action
-															untrust_action=untrust_device_action
-															update_role_action=update_role_action
-														/>
-													}.into_any()
-												}
-											}
-											Err(e) => {
-												view! {
-													<div class="error">{format!("Error loading devices: {}", e)}</div>
-												}.into_any()
-											}
-										}
-									})}
-								</Suspense>
-							</div>
+							<Untrusted refresh_trigger=refresh_trigger set_refresh_trigger=set_refresh_trigger set_message=set_message />
 						}.into_any()
 					}
 				}}
@@ -382,11 +255,160 @@ pub fn DeviceManagement() -> impl IntoView {
 }
 
 #[component]
+pub fn Trusted(
+	refresh_trigger: ReadSignal<i32>,
+	set_refresh_trigger: WriteSignal<i32>,
+	set_message: WriteSignal<String>,
+	update_role_action: Action<(String, String), Result<(), commons_errors::AppError>>,
+	set_active_tab: WriteSignal<&'static str>,
+) -> impl IntoView {
+	let trusted_devices = Resource::new(
+		move || refresh_trigger.get(),
+		async |_| crate::fns::devices::list_trusted().await,
+	);
+
+	let untrust_device_action = Action::new(move |device_id: &String| {
+		let device_id = device_id.clone();
+		async move { crate::fns::devices::untrust(device_id).await }
+	});
+
+	Effect::new(move |_| {
+		if let Some(result) = untrust_device_action.value().get() {
+			match result {
+				Ok(_) => {
+					set_message.set("Device untrusted successfully".to_string());
+					set_refresh_trigger.update(|n| *n += 1);
+					set_active_tab.set("untrusted"); // Switch to untrusted tab
+
+					set_timeout(
+						move || set_message.set(String::new()),
+						std::time::Duration::from_millis(3000),
+					);
+				}
+				Err(e) => {
+					set_message.set(format!("Error untrusting device: {}", e));
+				}
+			}
+		}
+	});
+
+	view! {
+		<div class="trusted-devices">
+			<p class="section-description">
+				"Devices that have been assigned a role and are trusted"
+			</p>
+
+			<Suspense fallback=|| view! { <div class="loading">"Loading devices..."</div> }>
+				{move || trusted_devices.get().map(|result| {
+					match result {
+						Ok(devices) => {
+							if devices.is_empty() {
+								view! {
+									<div class="no-devices">"No trusted devices found"</div>
+								}.into_any()
+							} else {
+								view! {
+									<DeviceTable
+										devices=devices.clone()
+										untrust_action=untrust_device_action
+										update_role_action=update_role_action
+									/>
+								}.into_any()
+							}
+						}
+						Err(e) => {
+							view! {
+								<div class="error">{format!("Error loading devices: {}", e)}</div>
+							}.into_any()
+						}
+					}
+				})}
+			</Suspense>
+		</div>
+	}
+}
+
+#[component]
+pub fn Untrusted(
+	refresh_trigger: ReadSignal<i32>,
+	set_refresh_trigger: WriteSignal<i32>,
+	set_message: WriteSignal<String>,
+) -> impl IntoView {
+	let untrusted_devices = Resource::new(
+		move || refresh_trigger.get(),
+		async |_| crate::fns::devices::list_untrusted().await,
+	);
+
+	let trust_device_action = Action::new(move |(device_id, role): &(String, String)| {
+		let device_id = device_id.clone();
+		let role = role.clone();
+		async move { crate::fns::devices::trust(device_id, role).await }
+	});
+
+	Effect::new(move |_| {
+		if let Some(result) = trust_device_action.value().get() {
+			match result {
+				Ok(_) => {
+					set_message.set("Device trusted successfully".to_string());
+					set_refresh_trigger.update(|n| *n += 1);
+
+					set_timeout(
+						move || set_message.set(String::new()),
+						std::time::Duration::from_millis(3000),
+					);
+				}
+				Err(e) => {
+					set_message.set(format!("Error trusting device: {}", e));
+				}
+			}
+		}
+	});
+
+	view! {
+		<div class="untrusted-devices">
+			<p class="section-description">
+				"Devices that have connected but haven't been assigned a role yet"
+			</p>
+
+			<Suspense fallback=|| view! { <div class="loading">"Loading devices..."</div> }>
+				{move || untrusted_devices.get().map(|result| {
+					match result {
+						Ok(devices) => {
+							if devices.is_empty() {
+								view! {
+									<div class="no-devices">"No untrusted devices found"</div>
+								}.into_any()
+							} else {
+								view! {
+									<DeviceTable
+										devices=devices.clone()
+										trust_action=trust_device_action
+									/>
+								}.into_any()
+							}
+						}
+						Err(e) => {
+							view! {
+								<div class="error">{format!("Error loading devices: {}", e)}</div>
+							}.into_any()
+						}
+					}
+				})}
+			</Suspense>
+		</div>
+	}
+}
+
+#[component]
 pub fn DeviceTable(
 	devices: Vec<crate::fns::devices::DeviceInfo>,
-	trust_action: Action<(String, String), Result<(), commons_errors::AppError>>,
-	untrust_action: Action<String, Result<(), commons_errors::AppError>>,
-	update_role_action: Action<(String, String), Result<(), commons_errors::AppError>>,
+	#[prop(optional)] trust_action: Option<
+		Action<(String, String), Result<(), commons_errors::AppError>>,
+	>,
+	#[prop(optional)] untrust_action: Option<Action<String, Result<(), commons_errors::AppError>>>,
+	#[prop(optional)] update_role_action: Option<
+		Action<(String, String), Result<(), commons_errors::AppError>>,
+	>,
 ) -> impl IntoView {
 	view! {
 		<div class="device-table">
@@ -400,9 +422,9 @@ pub fn DeviceTable(
 #[component]
 pub fn DeviceRow(
 	device: crate::fns::devices::DeviceInfo,
-	trust_action: Action<(String, String), Result<(), commons_errors::AppError>>,
-	untrust_action: Action<String, Result<(), commons_errors::AppError>>,
-	update_role_action: Action<(String, String), Result<(), commons_errors::AppError>>,
+	trust_action: Option<Action<(String, String), Result<(), commons_errors::AppError>>>,
+	untrust_action: Option<Action<String, Result<(), commons_errors::AppError>>>,
+	update_role_action: Option<Action<(String, String), Result<(), commons_errors::AppError>>>,
 ) -> impl IntoView {
 	let (key_format, set_key_format) = signal("pem".to_string());
 	let (show_history, set_show_history) = signal(false);
@@ -581,7 +603,7 @@ pub fn DeviceRow(
 			</div>
 
 			<div class="device-actions">
-				{if device_role != "untrusted" {
+				{if let (Some(update_role_action), Some(untrust_action)) = (update_role_action, untrust_action) && device_role != "untrusted" {
 					view! {
 						<TrustedDeviceActions
 							device_id=device_id.clone()
@@ -594,7 +616,7 @@ pub fn DeviceRow(
 							untrust_action=untrust_action
 						/>
 					}.into_any()
-				} else {
+				} else if let Some(trust_action) = trust_action {
 					view! {
 						<UntrustedDeviceActions
 							device_id=device_id.clone()
@@ -603,6 +625,8 @@ pub fn DeviceRow(
 							trust_action=trust_action
 						/>
 					}.into_any()
+				} else {
+					view! {}.into_any()
 				}}
 
 				<button

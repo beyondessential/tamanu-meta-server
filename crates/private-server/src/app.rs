@@ -43,6 +43,13 @@ pub fn App() -> impl IntoView {
 						<Route path=path!("status") view=statuses::Page />
 						<Route path=path!("admins") view=admins::Page />
 						<Route path=path!("devices") view=devices::Page />
+						/*
+							 <ParentRoute path=path!("devices") view=devices::Page>
+								<Route path=path!("") view=devices::Summary />
+								<Route path=path!("untrusted") view=devices::Untrusted />
+								<Route path=path!("trusted") view=devices::Trusted />
+							</ParentRoute>
+						 */
 					</Routes>
 				</main>
 			</Router>
