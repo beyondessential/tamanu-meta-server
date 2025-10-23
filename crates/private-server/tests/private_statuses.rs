@@ -33,6 +33,26 @@ struct StatusInfo {
 	extra: Value,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+struct ServerDetailsResponse {
+	id: String,
+	name: String,
+	kind: String,
+	rank: String,
+	host: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct ServerStatusResponse {
+	up: String,
+	updated_at: Option<String>,
+	version: Option<String>,
+	platform: Option<String>,
+	postgres: Option<String>,
+	nodejs: Option<String>,
+	timezone: Option<String>,
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn status_page() {
 	commons_tests::server::run(async |_conn, _, private| {
@@ -46,12 +66,14 @@ async fn status_page() {
 #[tokio::test(flavor = "multi_thread")]
 async fn status_json_empty_database() {
 	commons_tests::server::run(async |_conn, _, private| {
-		let response = private.get("/status.json").await;
-		response.assert_status_ok();
-		response.assert_header("content-type", "application/json");
+		// Get server IDs
+		let server_ids_response = private
+			.post("/api/private_server/fns/statuses/server_ids")
+			.await;
+		server_ids_response.assert_status_ok();
+		let server_ids: Vec<String> = server_ids_response.json();
 
-		let servers: Vec<ServerData> = response.json();
-		assert!(servers.is_empty());
+		assert!(server_ids.is_empty());
 	})
 	.await
 }
@@ -66,21 +88,36 @@ async fn status_json_basic_server() {
 		.await
 		.unwrap();
 
-		let response = private.get("/status.json").await;
-		response.assert_status_ok();
-		response.assert_header("content-type", "application/json");
+		// Get server IDs
+		let server_ids_response = private.post("/api/private_server/fns/statuses/server_ids").await;
+		server_ids_response.assert_status_ok();
+		let server_ids: Vec<String> = server_ids_response.json();
+		assert_eq!(server_ids.len(), 1);
 
-		let servers: Vec<ServerData> = response.json();
-		assert_eq!(servers.len(), 1);
+		let server_id = &server_ids[0];
 
-		let server = &servers[0];
-		assert_eq!(server.server.name, Some("Test Server".to_string()));
-		assert_eq!(server.server.host, "https://test.example.com");
-		assert_eq!(server.server.rank, Some("production".to_string()));
-		assert_eq!(server.server.kind, "central");
-		assert_eq!(server.up, "gone"); // No status means "gone"
-		assert!(server.status.is_none());
-		assert!(server.since.is_none());
+		// Get server details
+		let details_response = private
+			.post("/api/private_server/fns/statuses/server_details")
+			.form(&[("server_id", server_id)])
+			.await;
+		details_response.assert_status_ok();
+		let details: ServerDetailsResponse = details_response.json();
+
+		assert_eq!(details.name, "Test Server");
+		assert_eq!(details.host, "https://test.example.com/");
+		assert_eq!(details.rank, "production");
+		assert_eq!(details.kind, "central");
+
+		// Get server status
+		let status_response = private
+			.post("/api/private_server/fns/statuses/server_status")
+			.form(&[("server_id", server_id)])
+			.await;
+		status_response.assert_status_ok();
+		let status: ServerStatusResponse = status_response.json();
+
+		assert_eq!(status.up, "gone"); // No status means "gone"
 	})
 	.await
 }
@@ -98,21 +135,34 @@ async fn status_json_server_with_recent_status() {
 		.await
 		.unwrap();
 
-		let response = private.get("/status.json").await;
-		response.assert_status_ok();
+		// Get server IDs
+		let server_ids_response = private.post("/api/private_server/fns/statuses/server_ids").await;
+		server_ids_response.assert_status_ok();
+		let server_ids: Vec<String> = server_ids_response.json();
+		assert_eq!(server_ids.len(), 1);
 
-		let servers: Vec<ServerData> = response.json();
-		assert_eq!(servers.len(), 1);
+		let server_id = &server_ids[0];
 
-		let server = &servers[0];
-		assert_eq!(server.server.name, Some("Active Server".to_string()));
-		assert_eq!(server.up, "up"); // Recent status means "up"
-		assert!(server.status.is_some());
-		assert!(server.since.is_some());
-		let since_text = server.since.as_ref().unwrap();
-		assert!(since_text.contains("ms"));
+		// Get server details
+		let details_response = private
+			.post("/api/private_server/fns/statuses/server_details")
+			.form(&[("server_id", server_id)])
+			.await;
+		details_response.assert_status_ok();
+		let details: ServerDetailsResponse = details_response.json();
 
-		let status = server.status.as_ref().unwrap();
+		assert_eq!(details.name, "Active Server");
+
+		// Get server status
+		let status_response = private
+			.post("/api/private_server/fns/statuses/server_status")
+			.form(&[("server_id", server_id)])
+			.await;
+		status_response.assert_status_ok();
+		let status: ServerStatusResponse = status_response.json();
+
+		assert_eq!(status.up, "up"); // Recent status means "up"
+		assert!(status.updated_at.is_some());
 		assert_eq!(status.version, Some("1.2.3".to_string()));
 	})
 	.await
@@ -133,18 +183,40 @@ async fn status_json_server_status_ages() {
 		.await
 		.unwrap();
 
-		let response = private.get("/status.json").await;
-		response.assert_status_ok();
+		// Get server IDs
+		let server_ids_response = private.post("/api/private_server/fns/statuses/server_ids").await;
+		server_ids_response.assert_status_ok();
+		let server_ids: Vec<String> = server_ids_response.json();
+		assert_eq!(server_ids.len(), 2);
 
-		let servers: Vec<ServerData> = response.json();
-		assert_eq!(servers.len(), 2);
+		// Get status for each server
+		let mut down_status = None;
+		let mut away_status = None;
 
-		// Find servers by name since ordering might vary
-		let down_server = servers.iter().find(|s| s.server.name.as_deref() == Some("Down Server")).unwrap();
-		let away_server = servers.iter().find(|s| s.server.name.as_deref() == Some("Away Server")).unwrap();
+		for server_id in &server_ids {
+			let details_response = private
+				.post("/api/private_server/fns/statuses/server_details")
+				.form(&[("server_id", server_id.as_str())])
+				.await;
+			details_response.assert_status_ok();
+			let details: ServerDetailsResponse = details_response.json();
 
-		assert_eq!(down_server.up, "down"); // 45 minutes ago
-		assert_eq!(away_server.up, "away"); // 15 minutes ago
+			let status_response = private
+				.post("/api/private_server/fns/statuses/server_status")
+				.form(&[("server_id", server_id.as_str())])
+				.await;
+			status_response.assert_status_ok();
+			let status: ServerStatusResponse = status_response.json();
+
+			if details.name == "Down Server" {
+				down_status = Some(status);
+			} else if details.name == "Away Server" {
+				away_status = Some(status);
+			}
+		}
+
+		assert_eq!(down_status.unwrap().up, "down"); // 45 minutes ago
+		assert_eq!(away_status.unwrap().up, "away"); // 15 minutes ago
 	})
 	.await
 }
@@ -167,22 +239,51 @@ async fn status_json_platform_detection() {
 		.await
 		.unwrap();
 
-		let response = private.get("/status.json").await;
-		response.assert_status_ok();
+		// Get server IDs
+		let server_ids_response = private.post("/api/private_server/fns/statuses/server_ids").await;
+		server_ids_response.assert_status_ok();
+		let server_ids: Vec<String> = server_ids_response.json();
+		assert_eq!(server_ids.len(), 3);
 
-		let servers: Vec<ServerData> = response.json();
-		assert_eq!(servers.len(), 3);
+		// Get status for each server
+		let mut win_status = None;
+		let mut linux_status = None;
+		let mut win2_status = None;
 
-		let win_server = servers.iter().find(|s| s.server.name.as_deref() == Some("Windows Server")).unwrap();
-		let linux_server = servers.iter().find(|s| s.server.name.as_deref() == Some("Linux Server")).unwrap();
-		let win2_server = servers.iter().find(|s| s.server.name.as_deref() == Some("Windows Server 2")).unwrap();
+		for server_id in &server_ids {
+			let details_response = private
+				.post("/api/private_server/fns/statuses/server_details")
+				.form(&[("server_id", server_id.as_str())])
+				.await;
+			details_response.assert_status_ok();
+			let details: ServerDetailsResponse = details_response.json();
 
-		assert_eq!(win_server.platform, Some("Windows".to_string()));
-		assert_eq!(linux_server.platform, Some("Linux".to_string()));
-		assert_eq!(win2_server.platform, Some("Windows".to_string()));
-		assert_eq!(win_server.postgres, Some("13.7".to_string()));
-		assert_eq!(linux_server.postgres, Some("17.2".to_string()));
-		assert_eq!(win2_server.postgres, Some("17.6".to_string()));
+			let status_response = private
+				.post("/api/private_server/fns/statuses/server_status")
+				.form(&[("server_id", server_id.as_str())])
+				.await;
+			status_response.assert_status_ok();
+			let status: ServerStatusResponse = status_response.json();
+
+			if details.name == "Windows Server" {
+				win_status = Some(status);
+			} else if details.name == "Linux Server" {
+				linux_status = Some(status);
+			} else if details.name == "Windows Server 2" {
+				win2_status = Some(status);
+			}
+		}
+
+		let win_status = win_status.unwrap();
+		let linux_status = linux_status.unwrap();
+		let win2_status = win2_status.unwrap();
+
+		assert_eq!(win_status.platform, Some("Windows".to_string()));
+		assert_eq!(linux_status.platform, Some("Linux".to_string()));
+		assert_eq!(win2_status.platform, Some("Windows".to_string()));
+		assert_eq!(win_status.postgres, Some("13.7".to_string()));
+		assert_eq!(linux_status.postgres, Some("17.2".to_string()));
+		assert_eq!(win2_status.postgres, Some("17.6".to_string()));
 	})
 	.await
 }
@@ -199,14 +300,22 @@ async fn status_json_mixed_server_ranks() {
 		.await
 		.unwrap();
 
-		let response = private.get("/status.json").await;
-		response.assert_status_ok();
+		// Get server IDs
+		let server_ids_response = private.post("/api/private_server/fns/statuses/server_ids").await;
+		server_ids_response.assert_status_ok();
+		let server_ids: Vec<String> = server_ids_response.json();
+		assert_eq!(server_ids.len(), 3);
 
-		let servers: Vec<ServerData> = response.json();
-		assert_eq!(servers.len(), 3);
+		// Get first server details (should be production due to ordering)
+		let details_response = private
+			.post("/api/private_server/fns/statuses/server_details")
+			.form(&[("server_id", &server_ids[0])])
+			.await;
+		details_response.assert_status_ok();
+		let details: ServerDetailsResponse = details_response.json();
 
-		assert_eq!(servers[0].server.name, Some("Production Server".to_string()));
-		assert_eq!(servers[0].server.rank, Some("production".to_string()));
+		assert_eq!(details.name, "Production Server");
+		assert_eq!(details.rank, "production");
 	})
 	.await
 }
@@ -222,12 +331,21 @@ async fn status_json_unnamed_servers_excluded() {
 		.await
 		.unwrap();
 
-		let response = private.get("/status.json").await;
-		response.assert_status_ok();
+		// Get server IDs
+		let server_ids_response = private.post("/api/private_server/fns/statuses/server_ids").await;
+		server_ids_response.assert_status_ok();
+		let server_ids: Vec<String> = server_ids_response.json();
+		assert_eq!(server_ids.len(), 1);
 
-		let servers: Vec<ServerData> = response.json();
-		assert_eq!(servers.len(), 1);
-		assert_eq!(servers[0].server.name, Some("Named Server".to_string()));
+		// Get server details
+		let details_response = private
+			.post("/api/private_server/fns/statuses/server_details")
+			.form(&[("server_id", &server_ids[0])])
+			.await;
+		details_response.assert_status_ok();
+		let details: ServerDetailsResponse = details_response.json();
+
+		assert_eq!(details.name, "Named Server");
 	})
 	.await
 }
@@ -245,18 +363,34 @@ async fn status_json_blip_status() {
 		.await
 		.unwrap();
 
-		let response = private.get("/status.json").await;
-		response.assert_status_ok();
+		// Get server IDs
+		let server_ids_response = private.post("/api/private_server/fns/statuses/server_ids").await;
+		server_ids_response.assert_status_ok();
+		let server_ids: Vec<String> = server_ids_response.json();
+		assert_eq!(server_ids.len(), 1);
 
-		let servers: Vec<ServerData> = response.json();
-		assert_eq!(servers.len(), 1);
+		let server_id = &server_ids[0];
 
-		let server = &servers[0];
-		assert_eq!(server.server.name, Some("Blip Server".to_string()));
-		assert_eq!(server.up, "blip");
+		// Get server details
+		let details_response = private
+			.post("/api/private_server/fns/statuses/server_details")
+			.form(&[("server_id", server_id)])
+			.await;
+		details_response.assert_status_ok();
+		let details: ServerDetailsResponse = details_response.json();
 
-		let since_text = server.since.as_ref().unwrap();
-		assert!(since_text.contains("m"));
+		assert_eq!(details.name, "Blip Server");
+
+		// Get server status
+		let status_response = private
+			.post("/api/private_server/fns/statuses/server_status")
+			.form(&[("server_id", server_id)])
+			.await;
+		status_response.assert_status_ok();
+		let status: ServerStatusResponse = status_response.json();
+
+		assert_eq!(status.up, "blip");
+		assert!(status.updated_at.is_some());
 	})
 	.await
 }
@@ -272,19 +406,36 @@ async fn status_json_gone_server() {
 		.await
 		.unwrap();
 
-		let response = private.get("/status.json").await;
-		response.assert_status_ok();
+		// Get server IDs
+		let server_ids_response = private.post("/api/private_server/fns/statuses/server_ids").await;
+		server_ids_response.assert_status_ok();
+		let server_ids: Vec<String> = server_ids_response.json();
+		assert_eq!(server_ids.len(), 1);
 
-		let servers: Vec<ServerData> = response.json();
-		assert_eq!(servers.len(), 1);
+		let server_id = &server_ids[0];
 
-		let server = &servers[0];
-		assert_eq!(server.server.name, Some("Gone Server".to_string()));
-		assert_eq!(server.up, "gone"); // No status means "gone"
-		assert!(server.status.is_none());
-		assert!(server.since.is_none());
-		assert!(server.platform.is_none());
-		assert!(server.postgres.is_none());
+		// Get server details
+		let details_response = private
+			.post("/api/private_server/fns/statuses/server_details")
+			.form(&[("server_id", server_id)])
+			.await;
+		details_response.assert_status_ok();
+		let details: ServerDetailsResponse = details_response.json();
+
+		assert_eq!(details.name, "Gone Server");
+
+		// Get server status
+		let status_response = private
+			.post("/api/private_server/fns/statuses/server_status")
+			.form(&[("server_id", server_id)])
+			.await;
+		status_response.assert_status_ok();
+		let status: ServerStatusResponse = status_response.json();
+
+		assert_eq!(status.up, "gone"); // No status means "gone"
+		assert!(status.updated_at.is_none());
+		assert!(status.platform.is_none());
+		assert!(status.postgres.is_none());
 	})
 	.await
 }
