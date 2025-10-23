@@ -27,6 +27,7 @@ struct ServerDetailResponse {
 	server: ServerDetailsResponse,
 	device_info: Option<DeviceInfo>,
 	last_status: Option<ServerLastStatusData>,
+	up: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -486,6 +487,7 @@ async fn server_detail_basic() {
 		assert_eq!(detail.server.kind, "central");
 		assert!(detail.device_info.is_none());
 		assert!(detail.last_status.is_none());
+		assert_eq!(detail.up, "gone");
 	})
 	.await
 }
@@ -518,6 +520,7 @@ async fn server_detail_with_status() {
 		assert_eq!(status.timezone, Some("Pacific/Auckland".to_string()));
 		assert_eq!(status.platform, Some("Linux".to_string()));
 		assert_eq!(status.postgres, Some("17.2".to_string()));
+		assert_eq!(detail.up, "up");
 	})
 	.await
 }
@@ -556,6 +559,7 @@ async fn server_detail_with_device() {
 		let connection = device_info.latest_connection.unwrap();
 		assert_eq!(connection.ip, "192.168.1.100");
 		assert_eq!(connection.user_agent, Some("Tamanu/1.0.0 Node.js/18.20.5".to_string()));
+		assert_eq!(detail.up, "gone");
 	})
 	.await
 }

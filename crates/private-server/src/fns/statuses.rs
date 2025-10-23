@@ -44,6 +44,7 @@ pub struct ServerDetailData {
 	pub server: ServerDetailsData,
 	pub device_info: Option<super::devices::DeviceInfo>,
 	pub last_status: Option<ServerLastStatusData>,
+	pub up: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -254,6 +255,20 @@ mod ssr {
 
 		let status = Status::latest_for_server(&mut conn, id).await?;
 
+		let up = status.as_ref().map_or("gone".into(), |st| {
+			let since = st.created_at.signed_duration_since(Utc::now()).abs();
+			if since > TimeDelta::minutes(30) {
+				"down"
+			} else if since > TimeDelta::minutes(10) {
+				"away"
+			} else if since > TimeDelta::minutes(2) {
+				"blip"
+			} else {
+				"up"
+			}
+			.into()
+		});
+
 		let last_status = if let Some(st) = status.as_ref() {
 			let device = if let Some(device_id) = st.device_id {
 				DeviceConnection::get_latest_from_device_ids(&mut conn, [device_id].into_iter())
@@ -316,6 +331,7 @@ mod ssr {
 			server: server_details,
 			device_info,
 			last_status,
+			up,
 		})
 	}
 

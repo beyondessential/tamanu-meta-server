@@ -25,6 +25,7 @@ pub fn Page() -> impl IntoView {
 								let server = data.server.clone();
 								let device_info = data.device_info.clone();
 								let last_status = data.last_status.clone();
+								let up = data.up.clone();
 
 								view! {
 									<div class="detail-container">
@@ -32,7 +33,10 @@ pub fn Page() -> impl IntoView {
 											<div class="header-top">
 												<a href="/status" class="back-link">"← Back to Status"</a>
 											</div>
-											<h1>{server.name.clone()}</h1>
+											<h1>
+												<span class={format!("status-dot {}", up)} title={up.clone()}></span>
+												{server.name.clone()}
+											</h1>
 											<span class="server-rank">{server.rank.clone()}</span>
 										</div>
 

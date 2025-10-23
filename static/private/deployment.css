@@ -28,6 +28,37 @@
 			color: var(--color-text-primary);
 			margin-bottom: 0.25em;
 			font-weight: 500;
+			display: flex;
+			align-items: center;
+			gap: 0.5em;
+		}
+
+		.status-dot {
+			width: 0.4em;
+			height: 0.4em;
+			border-radius: 50%;
+			display: inline-block;
+			flex-shrink: 0;
+
+			&.up {
+				background: var(--color-success-status);
+			}
+
+			&.down {
+				background: var(--color-error);
+			}
+
+			&.gone {
+				background: var(--color-status-gone);
+			}
+
+			&.away {
+				background: var(--color-warning-bg);
+			}
+
+			&.blip {
+				background: var(--color-warning-light-bg);
+			}
 		}
 
 		.server-meta {
