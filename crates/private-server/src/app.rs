@@ -1,9 +1,11 @@
 use leptos::prelude::*;
 use leptos_meta::{MetaTags, Stylesheet, Title, provide_meta_context};
 use leptos_router::{
-	components::{A, Redirect, Route, Router, Routes},
+	components::{A, ParentRoute, Redirect, Route, Router, Routes},
 	path,
 };
+
+use crate::components::toast::Toast;
 
 mod admins;
 mod devices;
@@ -37,21 +39,20 @@ pub fn App() -> impl IntoView {
 		<div id="root">
 			<Router>
 				<GlobalNav />
-				<main>
-					<Routes fallback=|| view! { <Redirect path="/status" /> }>
-						<Route path=path!("") view=|| view! { <Redirect path="/status" /> } />
-						<Route path=path!("status") view=statuses::Page />
-						<Route path=path!("admins") view=admins::Page />
-						<Route path=path!("devices") view=devices::Page />
-						/*
+				<Toast>
+					<main>
+						<Routes fallback=|| view! { <Redirect path="/status" /> }>
+							<Route path=path!("") view=|| view! { <Redirect path="/status" /> } />
+							<Route path=path!("status") view=statuses::Page />
+							<Route path=path!("admins") view=admins::Page />
 							 <ParentRoute path=path!("devices") view=devices::Page>
-								<Route path=path!("") view=devices::Summary />
+								<Route path=path!("") view=devices::Search />
 								<Route path=path!("untrusted") view=devices::Untrusted />
 								<Route path=path!("trusted") view=devices::Trusted />
 							</ParentRoute>
-						 */
-					</Routes>
-				</main>
+						</Routes>
+					</main>
+				</Toast>
 			</Router>
 		</div>
 	}

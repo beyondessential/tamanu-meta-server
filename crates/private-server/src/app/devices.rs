@@ -1,7 +1,10 @@
 use leptos::prelude::*;
 use leptos_meta::{Stylesheet, provide_meta_context};
+use leptos_router::components::A;
 use std::collections::HashMap;
 use web_sys::window;
+
+use crate::components::{sub_tabs::SubTabs, toast::ToastCtx};
 
 #[derive(Debug, Clone)]
 pub struct ConnectionGroup {
@@ -82,7 +85,11 @@ pub fn Page() -> impl IntoView {
 											"Manage device approvals and trust levels."
 										</p>
 									</div>
-									<DeviceManagement />
+									<SubTabs>
+										<A href="" exact=true>Search</A>
+										<A href="untrusted">Untrusted Devices</A>
+										<A href="trusted">Trusted Devices</A>
+									</SubTabs>
 								</div>
 							}.into_any()
 						}
@@ -119,11 +126,8 @@ pub fn Page() -> impl IntoView {
 }
 
 #[component]
-pub fn DeviceManagement() -> impl IntoView {
+pub fn Search() -> impl IntoView {
 	let (search_query, set_search_query) = signal(String::new());
-	let (message, set_message) = signal(String::new());
-	let (refresh_trigger, set_refresh_trigger) = signal(0);
-	let (active_tab, set_active_tab) = signal("untrusted");
 
 	let search_results = Resource::new(
 		move || search_query.get(),
@@ -135,31 +139,6 @@ pub fn DeviceManagement() -> impl IntoView {
 			}
 		},
 	);
-
-	let update_role_action = Action::new(move |(device_id, role): &(String, String)| {
-		let device_id = device_id.clone();
-		let role = role.clone();
-		async move { crate::fns::devices::update_role(device_id, role).await }
-	});
-
-	Effect::new(move |_| {
-		if let Some(result) = update_role_action.value().get() {
-			match result {
-				Ok(_) => {
-					set_message.set("Device role updated successfully".to_string());
-					set_refresh_trigger.update(|n| *n += 1);
-
-					set_timeout(
-						move || set_message.set(String::new()),
-						std::time::Duration::from_millis(3000),
-					);
-				}
-				Err(e) => {
-					set_message.set(format!("Error updating device role: {}", e));
-				}
-			}
-		}
-	});
 
 	view! {
 		<div class="device-search">
@@ -194,9 +173,7 @@ pub fn DeviceManagement() -> impl IntoView {
 										view! {
 											<div class="search-results">
 												<h3>{format!("Search Results ({} found)", devices.len())}</h3>
-												<DeviceTable
-													devices=devices.clone()
-												/>
+												<DeviceTable devices=devices />
 											</div>
 										}.into_any()
 									}
@@ -212,56 +189,38 @@ pub fn DeviceManagement() -> impl IntoView {
 				}}
 			</Suspense>
 		</div>
-
-		{move || {
-			let msg = message.get();
-			if !msg.is_empty() {
-				view! { <div class="message">{msg}</div> }.into_any()
-			} else {
-				view! {}.into_any()
-			}
-		}}
-
-		<div class="device-tabs">
-			<nav class="tab-nav">
-				<button
-					class={move || if active_tab.get() == "untrusted" { "tab-button active" } else { "tab-button" }}
-					on:click=move |_| set_active_tab.set("untrusted")
-				>
-					"Untrusted Devices"
-				</button>
-				<button
-					class={move || if active_tab.get() == "trusted" { "tab-button active" } else { "tab-button" }}
-					on:click=move |_| set_active_tab.set("trusted")
-				>
-					"Trusted Devices"
-				</button>
-			</nav>
-
-			<div class="tab-content">
-				{move || {
-					match active_tab.get().as_ref() {
-						"trusted" => view! {
-							<Trusted refresh_trigger=refresh_trigger set_refresh_trigger=set_refresh_trigger set_message=set_message update_role_action=update_role_action set_active_tab=set_active_tab />
-						}.into_any(),
-						_ => view! {
-							<Untrusted refresh_trigger=refresh_trigger set_refresh_trigger=set_refresh_trigger set_message=set_message />
-						}.into_any()
-					}
-				}}
-			</div>
-		</div>
 	}
 }
 
 #[component]
-pub fn Trusted(
-	refresh_trigger: ReadSignal<i32>,
-	set_refresh_trigger: WriteSignal<i32>,
-	set_message: WriteSignal<String>,
-	update_role_action: Action<(String, String), Result<(), commons_errors::AppError>>,
-	set_active_tab: WriteSignal<&'static str>,
-) -> impl IntoView {
+pub fn Trusted() -> impl IntoView {
+	let ToastCtx(set_message) = use_context().unwrap();
+	let (refresh_trigger, set_refresh_trigger) = signal(0);
+
+	let update_role_action = Action::new(move |(device_id, role): &(String, String)| {
+		let device_id = device_id.clone();
+		let role = role.clone();
+		async move { crate::fns::devices::update_role(device_id, role).await }
+	});
+
+	Effect::new(move |_| {
+		if let Some(result) = update_role_action.value().get() {
+			match result {
+				Ok(_) => {
+					set_message.set(Some("Device role updated successfully".to_string()));
+
+					set_timeout(
+						move || set_message.set(None),
+						std::time::Duration::from_millis(3000),
+					);
+				}
+				Err(e) => {
+					set_message.set(Some(format!("Error updating device role: {}", e)));
+				}
+			}
+		}
+	});
+
 	let trusted_devices = Resource::new(
 		move || refresh_trigger.get(),
 		async |_| crate::fns::devices::list_trusted().await,
@@ -276,17 +235,16 @@ pub fn Trusted(
 		if let Some(result) = untrust_device_action.value().get() {
 			match result {
 				Ok(_) => {
-					set_message.set("Device untrusted successfully".to_string());
+					set_message.set(Some("Device untrusted successfully".to_string()));
 					set_refresh_trigger.update(|n| *n += 1);
-					set_active_tab.set("untrusted"); // Switch to untrusted tab
 
 					set_timeout(
-						move || set_message.set(String::new()),
+						move || set_message.set(None),
 						std::time::Duration::from_millis(3000),
 					);
 				}
 				Err(e) => {
-					set_message.set(format!("Error untrusting device: {}", e));
+					set_message.set(Some(format!("Error untrusting device: {}", e)));
 				}
 			}
 		}
@@ -329,11 +287,10 @@ pub fn Trusted(
 }
 
 #[component]
-pub fn Untrusted(
-	refresh_trigger: ReadSignal<i32>,
-	set_refresh_trigger: WriteSignal<i32>,
-	set_message: WriteSignal<String>,
-) -> impl IntoView {
+pub fn Untrusted() -> impl IntoView {
+	let ToastCtx(set_message) = use_context().unwrap();
+	let (refresh_trigger, set_refresh_trigger) = signal(0);
+
 	let untrusted_devices = Resource::new(
 		move || refresh_trigger.get(),
 		async |_| crate::fns::devices::list_untrusted().await,
@@ -349,16 +306,16 @@ pub fn Untrusted(
 		if let Some(result) = trust_device_action.value().get() {
 			match result {
 				Ok(_) => {
-					set_message.set("Device trusted successfully".to_string());
+					set_message.set(Some("Device trusted successfully".to_string()));
 					set_refresh_trigger.update(|n| *n += 1);
 
 					set_timeout(
-						move || set_message.set(String::new()),
+						move || set_message.set(None),
 						std::time::Duration::from_millis(3000),
 					);
 				}
 				Err(e) => {
-					set_message.set(format!("Error trusting device: {}", e));
+					set_message.set(Some(format!("Error trusting device: {}", e)));
 				}
 			}
 		}

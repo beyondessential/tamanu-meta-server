@@ -1,7 +1,7 @@
 #![recursion_limit = "256"]
 
 pub mod app;
-
+pub mod components;
 pub mod fns;
 #[cfg(feature = "ssr")]
 pub mod state;
