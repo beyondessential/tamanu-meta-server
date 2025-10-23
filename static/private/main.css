@@ -139,7 +139,7 @@ body {
 				color: var(--color-primary);
 			}
 
-			&.active {
+			&[aria-current="page"] {
 				background: var(--color-primary);
 				color: var(--color-bg-white);
 				font-weight: 500;
