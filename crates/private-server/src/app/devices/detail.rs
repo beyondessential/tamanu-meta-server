@@ -25,6 +25,16 @@ pub fn Detail() -> impl IntoView {
 		},
 	);
 
+	let servers_resource = Resource::new(
+		move || device_id(),
+		async |id| {
+			if id.is_empty() {
+				return Ok(vec![]);
+			}
+			crate::fns::devices::get_servers_for_device(id).await
+		},
+	);
+
 	let update_role_action = Action::new(move |(device_id, role): &(String, String)| {
 		let device_id = device_id.clone();
 		let role = role.clone();
@@ -350,6 +360,53 @@ pub fn Detail() -> impl IntoView {
 												().into_any()
 											}
 										}}
+									</div>
+
+									<div class="device-servers">
+										<h3>"Associated Servers"</h3>
+										<Suspense fallback=|| view! { <div class="loading">"Loading servers..."</div> }>
+											{move || {
+												servers_resource.get().map(|result| {
+													match result {
+														Ok(servers) => {
+															if servers.is_empty() {
+																view! {
+																	<div class="no-servers">"No servers are associated with this device"</div>
+																}.into_any()
+															} else {
+																view! {
+																	<div class="servers-list">
+																		<For each=move || servers.clone() key=|server| server.id.clone() let:server>
+																			<div class="server-item">
+																				<div class="server-header">
+																					<span class="server-name">
+																						{server.name.clone().unwrap_or_else(|| "Unnamed Server".to_string())}
+																					</span>
+																					<span class="server-kind">{server.kind.clone()}</span>
+																				</div>
+																				<div class="server-details">
+																					<span class="server-host">{server.host.clone()}</span>
+																					{server.rank.as_ref().map(|rank| {
+																						view! {
+																							<span class="server-rank">{rank.clone()}</span>
+																						}
+																					})}
+																				</div>
+																			</div>
+																		</For>
+																	</div>
+																}.into_any()
+															}
+														}
+														Err(e) => {
+															view! {
+																<div class="error">{format!("Error loading servers: {}", e)}</div>
+															}.into_any()
+														}
+													}
+												})
+											}}
+										</Suspense>
 									</div>
 								}.into_any()
 							}

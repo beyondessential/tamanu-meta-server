@@ -3,6 +3,15 @@ use leptos::server;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerInfo {
+	pub id: String,
+	pub name: Option<String>,
+	pub host: String,
+	pub kind: String,
+	pub rank: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceInfo {
 	pub device: DeviceData,
 	pub keys: Vec<DeviceKeyInfo>,
@@ -47,6 +56,11 @@ pub async fn get_device_by_id(device_id: String) -> Result<DeviceInfo> {
 #[server]
 pub async fn list_untrusted(limit: Option<i64>, offset: Option<i64>) -> Result<Vec<DeviceInfo>> {
 	ssr::list_untrusted(limit, offset).await
+}
+
+#[server]
+pub async fn get_servers_for_device(device_id: String) -> Result<Vec<ServerInfo>> {
+	ssr::get_servers_for_device(device_id).await
 }
 
 #[server]
@@ -101,6 +115,7 @@ pub async fn search(query: String) -> Result<Vec<DeviceInfo>> {
 #[cfg(feature = "ssr")]
 mod ssr {
 	use super::*;
+	use database::servers::Server;
 	use database::{Device, DeviceConnection, DeviceKey, DeviceRole, DeviceWithInfo};
 	use folktime::duration::Style;
 	use uuid::Uuid;
@@ -202,6 +217,26 @@ mod ssr {
 
 		let device_with_info = Device::get_with_info(&mut conn, device_uuid).await?;
 		Ok(DeviceInfo::from(device_with_info))
+	}
+
+	pub async fn get_servers_for_device(device_id: String) -> Result<Vec<ServerInfo>> {
+		let db = crate::fns::commons::admin_guard().await?;
+		let mut conn = db.get().await?;
+
+		let device_uuid = Uuid::parse_str(&device_id)
+			.map_err(|_| commons_errors::AppError::custom("Invalid device ID"))?;
+
+		let servers = Server::get_by_device_id(&mut conn, device_uuid).await?;
+		Ok(servers
+			.into_iter()
+			.map(|s| ServerInfo {
+				id: s.id.to_string(),
+				name: s.name,
+				host: s.host.into(),
+				kind: s.kind.to_string(),
+				rank: s.rank.map(|r| r.to_string()),
+			})
+			.collect())
 	}
 
 	pub async fn list_untrusted(

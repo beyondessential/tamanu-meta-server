@@ -310,6 +310,87 @@
 		}
 	}
 
+	.device-detail .device-servers {
+		margin-top: 2em;
+		padding-top: 2em;
+		border-top: 1px solid var(--color-border-light);
+
+		h3 {
+			margin: 0 0 1em 0;
+			color: var(--color-text-secondary);
+			font-weight: 500;
+		}
+
+		.no-servers {
+			padding: 2em;
+			text-align: center;
+			color: var(--color-text-light);
+			font-style: italic;
+			background: var(--color-bg-light);
+			border: 1px solid var(--color-border-medium);
+			border-radius: 6px;
+		}
+
+		.servers-list {
+			display: flex;
+			flex-direction: column;
+			gap: 0.75em;
+		}
+
+		.server-item {
+			padding: 1em 1.25em;
+			background: var(--color-bg-light);
+			border: 1px solid var(--color-border-medium);
+			border-radius: 6px;
+			transition: all 0.2s;
+
+			&:hover {
+				border-color: var(--color-primary);
+				background: var(--color-bg-white);
+			}
+		}
+
+		.server-header {
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			margin-bottom: 0.5em;
+		}
+
+		.server-name {
+			font-weight: 500;
+			color: var(--color-text-dark);
+			font-size: 1em;
+		}
+
+		.server-kind {
+			background: var(--color-primary-light);
+			color: var(--color-text-primary);
+			padding: 0.2em 0.6em;
+			border-radius: 10px;
+			font-size: 0.75em;
+			font-weight: 500;
+			text-transform: capitalize;
+		}
+
+		.server-details {
+			display: flex;
+			gap: 1em;
+			align-items: center;
+			font-size: 0.9em;
+		}
+
+		.server-host {
+			font-family: monospace;
+			color: var(--color-text-muted);
+		}
+
+		.server-rank {
+			color: var(--color-text-light);
+			text-transform: capitalize;
+		}
+	}
+
 	.device-detail .device-keys {
 		margin-bottom: 1.5em;
 
@@ -797,6 +878,20 @@
 
 			.connection-ua {
 				max-width: 100%;
+			}
+		}
+
+		.device-detail .device-servers {
+			.server-header {
+				flex-direction: column;
+				align-items: flex-start;
+				gap: 0.5em;
+			}
+
+			.server-details {
+				flex-direction: column;
+				align-items: flex-start;
+				gap: 0.25em;
 			}
 		}
 
