@@ -1,6 +1,6 @@
 use leptos::prelude::*;
 
-use super::DeviceTable;
+use super::DeviceList;
 
 #[component]
 pub fn Search() -> impl IntoView {
@@ -50,7 +50,7 @@ pub fn Search() -> impl IntoView {
 										view! {
 											<div class="search-results">
 												<h3>{format!("Search Results ({} found)", devices.len())}</h3>
-												<DeviceTable devices=devices />
+												<DeviceList devices=devices />
 											</div>
 										}.into_any()
 									}

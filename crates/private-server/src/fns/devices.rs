@@ -40,6 +40,11 @@ pub struct DeviceConnectionData {
 }
 
 #[server]
+pub async fn get_device_by_id(device_id: String) -> Result<DeviceInfo> {
+	ssr::get_device_by_id(device_id).await
+}
+
+#[server]
 pub async fn list_untrusted() -> Result<Vec<DeviceInfo>> {
 	ssr::list_untrusted().await
 }
@@ -176,6 +181,17 @@ mod ssr {
 			.collect::<Vec<_>>()
 			.join(":")
 			.to_uppercase()
+	}
+
+	pub async fn get_device_by_id(device_id: String) -> Result<DeviceInfo> {
+		let db = crate::fns::commons::admin_guard().await?;
+		let mut conn = db.get().await?;
+
+		let device_uuid = Uuid::parse_str(&device_id)
+			.map_err(|_| commons_errors::AppError::custom("Invalid device ID"))?;
+
+		let device_with_info = Device::get_with_info(&mut conn, device_uuid).await?;
+		Ok(DeviceInfo::from(device_with_info))
 	}
 
 	pub async fn list_untrusted() -> Result<Vec<DeviceInfo>> {

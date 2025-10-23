@@ -2,6 +2,26 @@ use base64::Engine;
 use database::{Device, DeviceConnection, DeviceKey, DeviceRole};
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_get_device_by_id() {
+	commons_tests::db::TestDb::run(|mut conn, _url| async move {
+		// Create a device
+		let key_data = b"test-device-key-data";
+		let device = Device::create(&mut conn, key_data.to_vec()).await.unwrap();
+
+		// Get device by ID
+		let device_info = Device::get_with_info(&mut conn, device.id).await.unwrap();
+
+		// Verify device info
+		assert_eq!(device_info.device.id, device.id);
+		assert_eq!(device_info.device.role, DeviceRole::Untrusted);
+		assert_eq!(device_info.keys.len(), 1);
+		assert_eq!(device_info.keys[0].key_data, key_data);
+		assert!(device_info.latest_connection.is_none());
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_list_untrusted_devices_empty() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
 		// Test that listing untrusted devices returns empty when none exist
