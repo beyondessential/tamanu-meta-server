@@ -22,7 +22,7 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
 				<meta name="viewport" content="width=device-width, initial-scale=1"/>
 				<Stylesheet id="main" href="/static/main.css" />
 				<AutoReload options=options.clone() />
-				<HydrationScripts options islands=true />
+				<HydrationScripts options />
 				<MetaTags/>
 				<Title text="Tamanu Meta" />
 			</head>

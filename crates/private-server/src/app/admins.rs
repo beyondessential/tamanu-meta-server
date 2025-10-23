@@ -1,7 +1,7 @@
 use leptos::prelude::*;
 use leptos_meta::{Stylesheet, provide_meta_context};
 
-#[island]
+#[component]
 pub fn Page() -> impl IntoView {
 	provide_meta_context();
 	let is_admin = Resource::new(
@@ -54,7 +54,7 @@ pub fn Page() -> impl IntoView {
 	}
 }
 
-#[island]
+#[component]
 pub fn AdminManagement() -> impl IntoView {
 	let (email, set_email) = signal(String::new());
 	let (message, set_message) = signal(String::new());

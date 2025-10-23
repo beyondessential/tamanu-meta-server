@@ -10,7 +10,7 @@ pub fn Toast(children: Children) -> impl IntoView {
 	provide_context(ToastCtx(set_message));
 
 	view! {
-		<dialog open={message.get().is_some()}>
+		<dialog open={move || message.get().is_some()}>
 			<p>{message}</p>
 		</dialog>
 		{children()}

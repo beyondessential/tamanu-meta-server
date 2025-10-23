@@ -62,7 +62,7 @@ fn create_group(connections: Vec<crate::fns::devices::DeviceConnectionData>) -> 
 	}
 }
 
-#[island]
+#[component]
 pub fn Page() -> impl IntoView {
 	provide_meta_context();
 	let is_admin = Resource::new(

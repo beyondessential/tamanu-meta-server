@@ -104,15 +104,6 @@ pub fn Page() -> impl IntoView {
 
 #[component]
 pub fn Table() -> impl IntoView {
-	view! {
-		<article>
-			<TableIsland />
-		</article>
-	}
-}
-
-#[island]
-pub fn TableIsland() -> impl IntoView {
 	let (is_client, set_is_client) = signal(false);
 
 	// Set to true only on client side
@@ -208,7 +199,7 @@ pub fn TableIsland() -> impl IntoView {
 	});
 
 	view! {
-		<div>
+		<article>
 			<Show when=move || is_client.get() fallback=|| view! {
 				<table>
 					<thead>
@@ -260,7 +251,7 @@ pub fn TableIsland() -> impl IntoView {
 					}
 				}}</Suspense>
 			</Show>
-		</div>
+		</article>
 	}
 }
 
