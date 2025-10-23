@@ -19,86 +19,117 @@ ghcr.io/beyondessential/tamanu-meta:5.1.2
 ## Develop
 
 - Install [Rustup](https://rustup.rs/), which will install Rust and Cargo.
-- Install [cargo-nextest](https://nextest.rs/)
-- Install [cargo-leptos](https://leptos.dev/)
-- Install [the diesel CLI tool](https://diesel.rs/guides/getting-started.html#installing-diesel-cli)
+- Install [just](https://just.systems/) command runner
 - Clone the repo via git:
 
 ```console
 $ git clone git@github.com:beyondessential/tamanu-meta-server.git
 ```
 
-- Build the project:
+- Install development dependencies:
 
 ```console
-$ cargo check
+$ just install-deps
 ```
 
+This will install [cargo-nextest](https://nextest.rs), [cargo-leptos](https://leptos.dev),
+[diesel CLI](https://diesel.rs/guides/getting-started.html#installing-diesel-cli),
+[cargo-release](https://github.com/crate-ci/cargo-release), [git-cliff](https://git-cliff.org),
+and [watchexec](https://github.com/watchexec/watchexec).
+
+### Quick Start
+
 - Create a new blank postgres database.
-- Set the `DATABASE_URL` environment variable.
-  You can do that per diesel command, or for your entire shell session using `export` (or `set -x` in fish, or `$env:DATABASE_URL =` in powershell) as usual for your preferred shell.
+- Optionally set the `DATABASE_URL` environment variable (if your database isn't named the default `tamanu_meta`):
+
+```console
+$ export DATABASE_URL=postgres://localhost/tamanu_meta_dev
+```
 
 - Run migrations:
 
 ```console
-$ diesel migration run
+$ just migrate
 ```
 
-- Run (public server and other binaries):
+- Build the project:
 
 ```console
-$ cargo run
+$ just check
 ```
 
-- Run (private server):
+- Run public server:
 
 ```console
-$ cargo leptos watch
+$ cargo watch-public
+```
+
+- Run private server:
+
+```console
+$ just watch-private
+```
+
+- Run other binaries:
+
+```console
+$ cargo run --bin binary_name_here
 ```
 
 - Tests:
 
 ```console
-$ cargo nextest run
+$ just test
 ```
 
-You'll also need these environment variables for the private-server tests:
-- `LEPTOS_OUTPUT_NAME=private-server`
-- `SERVER_FN_MOD_PATH=true`
-- `DISABLE_SERVER_FN_HASH=true`
+- Lints:
+
+```console
+$ just lint
+```
+
+- Format, lint, and test in one command:
+
+```console
+$ just dev
+```
+
+### Available Commands
+
+See all available commands:
+
+```console
+$ just --list
+```
 
 We recommend using [Rust Analyzer](https://rust-analyzer.github.io/) or [Rust Rover](https://www.jetbrains.com/rust/) for development.
 
 ### Migrations
 
-2. Create a migration
+1. Create a migration:
 ```console
-$ diesel migration generate some_name_here
+$ just migration some_name_here
 ```
 
-3. Write the migration's `up.sql` and `down.sql`
+2. Write the migration's `up.sql` and `down.sql`
 
-4. Run the pending migrations:
+3. Run the pending migrations:
 ```console
-$ diesel migration run
+$ just migrate
 ```
 
-5. Test your down:
+4. Test your down:
 ```console
-$ diesel migration redo
-```
-
-6. Run formatter:
-```console
-$ cargo fmt
+$ just migrate-redo
 ```
 
 ### Download a database
 
+You'll need to have `kubectl` installed and authorised.
+
 ```console
-kubectl exec -n tamanu-meta-dev meta-db-1 -c postgres -- pg_dump -Fc -d app > dev.dump
-createdb tamanu_meta_dev
-pg_restore --no-owner --role=$USER -d tamanu_meta_dev --verbose < dev.dump
+# just download-db {database name} {kubernetes namespace} [dump file]
+$ just download-db tamanu_meta tamanu-meta-prod
 ```
 
 ### Releasing
@@ -108,20 +139,10 @@ pg_restore --no-owner --role=$USER -d tamanu_meta_dev --verbose < dev.dump
 On the main branch:
 
 ```console
-$ cargo release --workspace --execute minor // or patch, major
+$ just release minor
 ```
 
-Install `cargo-release` with:
-
-```console
-$ cargo install cargo-release
-```
-
-Also install `git-cliff`:
-
-```console
-$ cargo install git-cliff
-```
+(or use `patch` or `major` instead of `minor`)
 
 ### Public API Authentication
 
@@ -133,10 +154,10 @@ The `mtls-certificate` (or `ssl-client-cert`) header should contain a PEM-encode
 To get a certificate, run:
 
 ```console
-$ cargo run --bin identity
+$ just identity
 ```
 
-Which will write the `identity.crt.pem` and `identity.key.pem`.
+This will write the `identity.crt.pem` and `identity.key.pem`.
 
 You can then put it in an environment variable:
 
