@@ -376,9 +376,19 @@ pub fn Detail() -> impl IntoView {
 																		<For each=move || servers.clone() key=|server| server.id.clone() let:server>
 																			<div class="server-item">
 																				<div class="server-header">
-																					<span class="server-name">
-																						{server.name.clone().unwrap_or_else(|| "Unnamed Server".to_string())}
-																					</span>
+																					{if server.kind == "central" {
+																						view! {
+																							<a href={format!("/status/{}", server.id)} class="server-name">
+																								{server.name.clone().unwrap_or_else(|| "Unnamed Server".to_string())}
+																							</a>
+																						}.into_any()
+																					} else {
+																						view! {
+																							<span class="server-name">
+																								{server.name.clone().unwrap_or_else(|| "Unnamed Server".to_string())}
+																							</span>
+																						}.into_any()
+																					}}
 																					<span class="server-kind">{server.kind.clone()}</span>
 																				</div>
 																				<div class="server-details">

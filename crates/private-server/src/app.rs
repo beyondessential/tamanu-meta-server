@@ -8,6 +8,7 @@ use leptos_router::{
 use crate::components::toast::Toast;
 
 mod admins;
+mod deployment;
 mod devices;
 mod status;
 mod statuses;
@@ -44,6 +45,7 @@ pub fn App() -> impl IntoView {
 						<Routes fallback=|| view! { <Redirect path="/status" /> }>
 							<Route path=path!("") view=|| view! { <Redirect path="/status" /> } />
 							<Route path=path!("status") view=statuses::Page />
+							<Route path=path!("status/:id") view=deployment::Page />
 							<Route path=path!("admins") view=admins::Page />
 							 <ParentRoute path=path!("devices") view=devices::Page>
 								<Route path=path!("") view=devices::Search />

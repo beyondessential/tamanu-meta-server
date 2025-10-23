@@ -292,7 +292,9 @@ pub fn ServerRow(server_id: String) -> impl IntoView {
 										}
 									}
 								>{status.up.clone()}</td>
-								<td class="name">{details.name.clone()}</td>
+								<td class="name">
+									<a href={format!("/status/{}", details.id.clone())}>{details.name.clone()}</a>
+								</td>
 								<td class="rank">{details.rank.clone()}</td>
 								<td class="host"><a href={details.host.clone()}>{details.host.clone()}</a></td>
 								{
