@@ -159,6 +159,18 @@ pub fn DeviceListItem(device: crate::fns::devices::DeviceInfo) -> impl IntoView 
 		.as_ref()
 		.and_then(|c| c.user_agent.clone())
 		.unwrap_or_else(|| "—".to_string());
+	let first_seen = device.device.created_at_relative.clone();
+	let first_seen_full = device.device.created_at.clone();
+	let last_seen = device
+		.latest_connection
+		.as_ref()
+		.map(|c| c.created_at_relative.clone())
+		.unwrap_or_else(|| "Never".to_string());
+	let last_seen_full = device
+		.latest_connection
+		.as_ref()
+		.map(|c| c.created_at.clone())
+		.unwrap_or_default();
 
 	view! {
 		<A href={format!("/devices/{}", device_id)} {..} class="device-list-item">
@@ -168,6 +180,14 @@ pub fn DeviceListItem(device: crate::fns::devices::DeviceInfo) -> impl IntoView 
 			</div>
 			<div class="device-list-ip">{latest_ip}</div>
 			<div class="device-list-ua">{latest_user_agent}</div>
+			<div class="device-list-times">
+				<span class="timestamp-hover" title={first_seen_full}>
+					{format!("First seen: {}", first_seen)}
+				</span>
+				<span class="timestamp-hover" title={last_seen_full}>
+					{format!("Last seen: {}", last_seen)}
+				</span>
+			</div>
 		</A>
 	}
 }

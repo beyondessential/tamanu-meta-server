@@ -45,8 +45,13 @@ pub async fn get_device_by_id(device_id: String) -> Result<DeviceInfo> {
 }
 
 #[server]
-pub async fn list_untrusted() -> Result<Vec<DeviceInfo>> {
-	ssr::list_untrusted().await
+pub async fn list_untrusted(limit: Option<i64>, offset: Option<i64>) -> Result<Vec<DeviceInfo>> {
+	ssr::list_untrusted(limit, offset).await
+}
+
+#[server]
+pub async fn count_untrusted() -> Result<i64> {
+	ssr::count_untrusted().await
 }
 
 #[server]
@@ -69,8 +74,13 @@ pub async fn trust(device_id: String, role: String) -> Result<()> {
 }
 
 #[server]
-pub async fn list_trusted() -> Result<Vec<DeviceInfo>> {
-	ssr::list_trusted().await
+pub async fn list_trusted(limit: Option<i64>, offset: Option<i64>) -> Result<Vec<DeviceInfo>> {
+	ssr::list_trusted(limit, offset).await
+}
+
+#[server]
+pub async fn count_trusted() -> Result<i64> {
+	ssr::count_trusted().await
 }
 
 #[server]
@@ -194,26 +204,53 @@ mod ssr {
 		Ok(DeviceInfo::from(device_with_info))
 	}
 
-	pub async fn list_untrusted() -> Result<Vec<DeviceInfo>> {
+	pub async fn list_untrusted(
+		limit: Option<i64>,
+		offset: Option<i64>,
+	) -> Result<Vec<DeviceInfo>> {
 		let db = crate::fns::commons::admin_guard().await?;
 		let mut conn = db.get().await?;
 
-		let devices_with_info = Device::list_untrusted_with_info(&mut conn).await?;
+		let devices_with_info = Device::list_untrusted_with_info_paginated(
+			&mut conn,
+			limit.unwrap_or(10),
+			offset.unwrap_or(0),
+		)
+		.await?;
 		Ok(devices_with_info
 			.into_iter()
 			.map(DeviceInfo::from)
 			.collect())
 	}
 
-	pub async fn list_trusted() -> Result<Vec<DeviceInfo>> {
+	pub async fn count_untrusted() -> Result<i64> {
 		let db = crate::fns::commons::admin_guard().await?;
 		let mut conn = db.get().await?;
 
-		let devices_with_info = Device::list_trusted_with_info(&mut conn).await?;
+		Device::count_untrusted(&mut conn).await
+	}
+
+	pub async fn list_trusted(limit: Option<i64>, offset: Option<i64>) -> Result<Vec<DeviceInfo>> {
+		let db = crate::fns::commons::admin_guard().await?;
+		let mut conn = db.get().await?;
+
+		let devices_with_info = Device::list_trusted_with_info_paginated(
+			&mut conn,
+			limit.unwrap_or(10),
+			offset.unwrap_or(0),
+		)
+		.await?;
 		Ok(devices_with_info
 			.into_iter()
 			.map(DeviceInfo::from)
 			.collect())
+	}
+
+	pub async fn count_trusted() -> Result<i64> {
+		let db = crate::fns::commons::admin_guard().await?;
+		let mut conn = db.get().await?;
+
+		Device::count_trusted(&mut conn).await
 	}
 
 	pub async fn connection_history(

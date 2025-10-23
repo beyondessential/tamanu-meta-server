@@ -140,12 +140,23 @@ impl Device {
 	pub async fn list_untrusted_with_info(
 		db: &mut AsyncPgConnection,
 	) -> Result<Vec<DeviceWithInfo>> {
+		Self::list_untrusted_with_info_paginated(db, i64::MAX, 0).await
+	}
+
+	/// List untrusted devices with pagination.
+	pub async fn list_untrusted_with_info_paginated(
+		db: &mut AsyncPgConnection,
+		limit: i64,
+		offset: i64,
+	) -> Result<Vec<DeviceWithInfo>> {
 		use crate::schema::{device_keys, devices};
 
 		let untrusted_devices: Vec<Self> = devices::table
 			.select(Self::as_select())
 			.filter(devices::role.eq(DeviceRole::Untrusted))
 			.order(devices::created_at.desc())
+			.limit(limit)
+			.offset(offset)
 			.load(db)
 			.await
 			.map_err(AppError::from)?;
@@ -188,12 +199,23 @@ impl Device {
 
 	/// List all trusted devices with their keys and latest connection info.
 	pub async fn list_trusted_with_info(db: &mut AsyncPgConnection) -> Result<Vec<DeviceWithInfo>> {
+		Self::list_trusted_with_info_paginated(db, i64::MAX, 0).await
+	}
+
+	/// List trusted devices with pagination.
+	pub async fn list_trusted_with_info_paginated(
+		db: &mut AsyncPgConnection,
+		limit: i64,
+		offset: i64,
+	) -> Result<Vec<DeviceWithInfo>> {
 		use crate::schema::{device_keys, devices};
 
 		let trusted_devices: Vec<Self> = devices::table
 			.select(Self::as_select())
 			.filter(devices::role.ne(DeviceRole::Untrusted))
 			.order(devices::created_at.desc())
+			.limit(limit)
+			.offset(offset)
 			.load(db)
 			.await
 			.map_err(AppError::from)?;
@@ -234,7 +256,33 @@ impl Device {
 		Ok(result)
 	}
 
-	/// Trust a device by updating its role.
+	/// Count untrusted devices.
+	pub async fn count_untrusted(db: &mut AsyncPgConnection) -> Result<i64> {
+		use crate::schema::devices;
+		use diesel::dsl::count_star;
+
+		devices::table
+			.filter(devices::role.eq(DeviceRole::Untrusted))
+			.select(count_star())
+			.first(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// Count trusted devices.
+	pub async fn count_trusted(db: &mut AsyncPgConnection) -> Result<i64> {
+		use crate::schema::devices;
+		use diesel::dsl::count_star;
+
+		devices::table
+			.filter(devices::role.ne(DeviceRole::Untrusted))
+			.select(count_star())
+			.first(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// Trust a device by setting its role.
 	pub async fn trust(
 		db: &mut AsyncPgConnection,
 		device_id: Uuid,

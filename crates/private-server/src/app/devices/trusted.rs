@@ -4,7 +4,18 @@ use super::DeviceList;
 
 #[component]
 pub fn Trusted() -> impl IntoView {
-	let trusted_devices = Resource::new(|| (), async |_| crate::fns::devices::list_trusted().await);
+	let (page, set_page) = signal(0i64);
+	const PAGE_SIZE: i64 = 10;
+
+	let total_count = Resource::new(|| (), async |_| crate::fns::devices::count_trusted().await);
+
+	let trusted_devices = Resource::new(
+		move || page.get(),
+		|p| async move {
+			let offset = p * PAGE_SIZE;
+			crate::fns::devices::list_trusted(Some(PAGE_SIZE), Some(offset)).await
+		},
+	);
 
 	view! {
 		<div class="trusted-devices">
@@ -22,7 +33,39 @@ pub fn Trusted() -> impl IntoView {
 								}.into_any()
 							} else {
 								view! {
-									<DeviceList devices=devices.clone() />
+									<div>
+										<DeviceList devices=devices.clone() />
+										<div class="pagination">
+											<button
+												class="pagination-btn"
+												on:click=move |_| set_page.update(|p| *p = (*p).saturating_sub(1))
+												disabled=move || page.get() == 0
+											>
+												"← Previous"
+											</button>
+											<span class="pagination-info">
+												{move || {
+													total_count.get().and_then(|r| r.ok()).map(|total| {
+														let current_page = page.get() + 1;
+														let total_pages = ((total as f64) / (PAGE_SIZE as f64)).ceil() as i64;
+														format!("Page {} of {}", current_page, total_pages.max(1))
+													}).unwrap_or_else(|| "Loading...".to_string())
+												}}
+											</span>
+											<button
+												class="pagination-btn"
+												on:click=move |_| set_page.update(|p| *p += 1)
+												disabled=move || {
+													total_count.get()
+														.and_then(|r| r.ok())
+														.map(|total| (page.get() + 1) * PAGE_SIZE >= total)
+														.unwrap_or(true)
+												}
+											>
+												"Next →"
+											</button>
+										</div>
+									</div>
 								}.into_any()
 							}
 						}

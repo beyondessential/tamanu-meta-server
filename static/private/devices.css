@@ -104,7 +104,7 @@
 
 	.device-list-item {
 		display: grid;
-		grid-template-columns: 2fr 1fr 2fr;
+		grid-template-columns: 2fr 1fr 2fr 1fr;
 		gap: 1.5em;
 		padding: 1em 1.5em;
 		background: var(--color-bg-white);
@@ -120,6 +120,14 @@
 			box-shadow: 0 2px 6px var(--color-shadow);
 			transform: translateY(-1px);
 		}
+	}
+
+	.device-list-times {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25em;
+		font-size: 0.85em;
+		color: var(--color-text-muted);
 	}
 
 	.device-list-id {
@@ -157,6 +165,45 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+	}
+
+	.pagination {
+		display: flex;
+		justify-content: center;
+		align-items: center;
+		gap: 1.5em;
+		margin-top: 2em;
+		padding: 1em 0;
+	}
+
+	.pagination-btn {
+		padding: 0.6em 1.2em;
+		background: var(--color-primary);
+		color: var(--color-bg-white);
+		border: none;
+		border-radius: 4px;
+		font-size: 0.9em;
+		font-weight: 500;
+		cursor: pointer;
+		transition: background-color 0.2s;
+
+		&:hover:not(:disabled) {
+			background: var(--color-primary-hover);
+		}
+
+		&:disabled {
+			background: var(--color-disabled);
+			cursor: not-allowed;
+			opacity: 0.5;
+		}
+	}
+
+	.pagination-info {
+		font-size: 0.9em;
+		color: var(--color-text-muted);
+		font-weight: 500;
+		min-width: 120px;
+		text-align: center;
 	}
 
 	.device-detail {
@@ -715,11 +762,24 @@
 	@media (max-width: 768px) {
 		.device-list-item {
 			grid-template-columns: 1fr;
-			gap: 0.5em;
+			gap: 0.75em;
 		}
 
 		.device-list-ua {
 			white-space: normal;
+		}
+
+		.device-list-times {
+			font-size: 0.8em;
+		}
+
+		.pagination {
+			flex-direction: column;
+			gap: 1em;
+		}
+
+		.pagination-btn {
+			width: 100%;
 		}
 
 		.device-detail .device-header {
