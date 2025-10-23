@@ -16,228 +16,6 @@ We have a container image for linux/amd64 and linux/arm64:
 ghcr.io/beyondessential/tamanu-meta:5.1.2
 ```
 
-## Public API
-
-The `public-server` binary serves the public API and views, which are expected to be exposed to
-the internet (in production behind an ingress gateway or reverse proxy).
-
-### Authentication
-
-Routes marked with 🔐 require authentication; the word in (parens) after the emoji is the required `role`; `admin` role can do everything.
-
-The `mtls-certificate` (or `ssl-client-cert`) header should contain a PEM-encoded (optionally URL-encoded) X509 certificate.
-
-To get a certificate, run:
-
-```console
-$ cargo run --bin identity
-```
-
-Which will write the `identity.crt.pem` and `identity.key.pem`.
-
-You can then put it in an environment variable:
-
-```console
-$ export MTLS_CERT="$(jq -sRr @uri identity.crt.pem)"
-```
-
-and then use curl like:
-
-```console
-$ curl -H "mtls-certificate: $MTLS_CERT" ...
-```
-
-#### Roles
-
-When you first connect to an authenticated API with a certificate, you'll get a 403.
-Your public key will be added to the `devices` table.
-
-Open the database, e.g. with PSQL, and change the role to `admin` (or as required).
-
-```sql
-UPDATE devices SET role = 'admin' WHERE id = '45886aa8-dff3-4cf7-92a9-31f42d4a0e1a';
-```
-
-In production, you need to do extra checks.
-
-- Show untrusted devices with their public key in PEM-ish format:
-
-```sql
-SELECT id, created_at, encode(key_data, 'base64') as pem
-FROM devices WHERE role = 'untrusted'
-ORDER BY created_at DESC \gx
-```
-
-- Compare the provided public key to the list to find the right `id`. You can also filter by the **last** few characters of the key (the first characters will all be the same):
-
-```sql
-SELECT id, created_at, encode(key_data, 'base64') as pem
-FROM devices WHERE role = 'untrusted'
-AND encode(key_data, 'base64') LIKE '%NWwjGDiHVWrBA=='
-ORDER BY created_at DESC \gx
-```
-
-- Once you have the `id`, look at the connection metadata to see if it matches what you know for additional verification:
-
-```sql
-SELECT * FROM device_connections
-WHERE id = '45886aa8-dff3-4cf7-92a9-31f42d4a0e1a'
-ORDER BY created_at DESC \gx
-```
-
-#### In production
-
-In production, the header should be set from a client certificate, as terminated by a reverse proxy or load balancer, and any matching header on the incoming requests should be stripped.
-
-- Nginx: use the `$ssl_client_escaped_cert` variable.
-- Caddy: use the `{http.request.tls.client.certificate_pem}` placeholder.
-
-### GET `/servers`
-
-Get the full list of servers as JSON.
-
-```json
-[
-	{
-		"id":"8960470f-5282-496e-86f5-21df8cf67d62",
-		"name":"Dev (main)",
-		"host":"https://central.main.internal.tamanu.io/",
-		"rank":"dev"
-	}
-]
-```
-
-### POST `/servers` 🔐 (server)
-
-Add a server to the list.
-
-Pass a JSON body:
-
-```json
-{
-	"name":"Dev (main)",
-	"host":"https://central.main.internal.tamanu.io/",
-	"rank":"dev"
-}
-```
-
-Returns the server with its assigned ID:
-
-```json
-{
-	"id":"8960470f-5282-496e-86f5-21df8cf67d62",
-	"name":"Dev (main)",
-	"host":"https://central.main.internal.tamanu.io/",
-	"rank":"dev"
-}
-```
-
-### PATCH `/servers` 🔐 (admin)
-
-Edit a server.
-
-Pass a JSON body, all fields optional except for `id`:
-
-```json
-{
-	"id":"8960470f-5282-496e-86f5-21df8cf67d62",
-	"name":"Test server (main)"
-}
-```
-
-Returns the edited server with its assigned ID:
-
-```json
-{
-	"id":"8960470f-5282-496e-86f5-21df8cf67d62",
-	"name":"Test server (main)",
-	"host":"https://central.main.internal.tamanu.io/",
-	"rank":"dev"
-}
-```
-
-There's a "hidden" feature in the UI where if you Shift-click a row, it will
-copy its ID to the clipboard.
-
-### DELETE `/servers` 🔐 (admin)
-
-Remove a server from the list.
-
-Pass a JSON body with the `id` field:
-
-```json
-{
-	"id":"8960470f-5282-496e-86f5-21df8cf67d62"
-}
-```
-
-### GET `/versions`
-
-Get a list of known Tamanu versions in JSON.
-
-```js
-[
-	{
-		"id": "967c7d15-7046-459e-a448-6584f72e55ce",
-		"major": 2,
-		"minor": 27,
-		"patch": 0,
-		"published": true,
-		"changelog": "..."
-	},
-	// ...
-]
-```
-
-### POST `/versions/<version>` 🔐 (releaser)
-
-Create the version `<version>` (must be a semver version string).
-
-Pass the changelog as the body (if using curl, use `--data-binary` to preserve whitespace):
-
-```text
-Blah
-blah
-
-blah
-```
-
-Returns the version with its assigned ID:
-
-```json
-{
-	"id": "967c7d15-7046-459e-a448-6584f72e55ce",
-	"major": 2,
-	"minor": 27,
-	"patch": 0,
-	"published": true,
-	"changelog": "..."
-}
-```
-
-### DELETE `/versions/<version>` 🔐 (admin)
-
-TO BE DOCUMENTED
-
-### GET `/versions/<version>/artifacts`
-
-TO BE DOCUMENTED
-
-### GET `/versions/update-for/<version>`
-
-TO BE DOCUMENTED
-
-## Private API
-
-The `private-server` binary serves the private API and views: it must not be exposed to the
-internet (at BES we run it within our Tailscale network). By default this is served at the `/$`
-prefix, but that can be changed with the `--prefix` option. If you do, you also need to change
-`server-fn-prefix` in the Cargo.toml and `SERVER_FN_PREFIX` in the Dockerfile.
-
-### POST `/$/reload`
-
-Force a reload of the statuses.
-
 ## Develop
 
 - Install [Rustup](https://rustup.rs/), which will install Rust and Cargo.
@@ -283,6 +61,11 @@ $ cargo leptos watch
 ```console
 $ cargo nextest run
 ```
+
+You'll also need these environment variables for the private-server tests:
+- `LEPTOS_OUTPUT_NAME=private-server`
+- `SERVER_FN_MOD_PATH=true`
+- `DISABLE_SERVER_FN_HASH=true`
 
 We recommend using [Rust Analyzer](https://rust-analyzer.github.io/) or [Rust Rover](https://www.jetbrains.com/rust/) for development.
 
@@ -339,3 +122,37 @@ Also install `git-cliff`:
 ```console
 $ cargo install git-cliff
 ```
+
+### Public API Authentication
+
+The `public-server` binary serves the public API and views, which are expected to be exposed to
+the internet (in production behind an ingress gateway or reverse proxy).
+
+The `mtls-certificate` (or `ssl-client-cert`) header should contain a PEM-encoded (optionally URL-encoded) X509 certificate.
+
+To get a certificate, run:
+
+```console
+$ cargo run --bin identity
+```
+
+Which will write the `identity.crt.pem` and `identity.key.pem`.
+
+You can then put it in an environment variable:
+
+```console
+$ export MTLS_CERT="$(jq -sRr @uri identity.crt.pem)"
+```
+
+and then use curl like:
+
+```console
+$ curl -H "mtls-certificate: $MTLS_CERT" ...
+```
+
+#### In production
+
+In production, the header should be set from a client certificate, as terminated by a reverse proxy or load balancer, and any matching header on the incoming requests should be stripped.
+
+- Nginx: use the `$ssl_client_escaped_cert` variable.
+- Caddy: use the `{http.request.tls.client.certificate_pem}` placeholder.
