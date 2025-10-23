@@ -1,37 +1,6 @@
+use axum::http::StatusCode;
 use commons_tests::diesel_async::SimpleAsyncConnection;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
-struct ServerData {
-	server: ServerInfo,
-	device: Option<Value>,
-	status: Option<StatusInfo>,
-	up: String,
-	since: Option<String>,
-	platform: Option<String>,
-	postgres: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
-struct ServerInfo {
-	id: String,
-	name: Option<String>,
-	host: String,
-	kind: String,
-	rank: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
-struct StatusInfo {
-	id: String,
-	created_at: String,
-	server_id: String,
-	device_id: Option<String>,
-
-	version: Option<String>,
-	extra: Value,
-}
 
 #[derive(Debug, Deserialize, Serialize)]
 struct ServerDetailsResponse {
@@ -51,6 +20,61 @@ struct ServerStatusResponse {
 	postgres: Option<String>,
 	nodejs: Option<String>,
 	timezone: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct ServerDetailResponse {
+	server: ServerDetailsResponse,
+	device_info: Option<DeviceInfo>,
+	last_status: Option<ServerLastStatusData>,
+	up: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct DeviceInfo {
+	device: DeviceData,
+	keys: Vec<DeviceKeyInfo>,
+	latest_connection: Option<DeviceConnectionData>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct DeviceData {
+	id: String,
+	created_at: String,
+	created_at_relative: String,
+	updated_at: String,
+	updated_at_relative: String,
+	role: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct DeviceKeyInfo {
+	id: String,
+	device_id: String,
+	name: Option<String>,
+	pem_data: String,
+	hex_data: String,
+	created_at: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct ServerLastStatusData {
+	id: String,
+	created_at: String,
+	version: Option<String>,
+	platform: Option<String>,
+	postgres: Option<String>,
+	nodejs: Option<String>,
+	timezone: Option<String>,
+	extra: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct DeviceConnectionData {
+	id: String,
+	created_at: String,
+	ip: String,
+	user_agent: Option<String>,
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -436,6 +460,130 @@ async fn status_json_gone_server() {
 		assert!(status.updated_at.is_none());
 		assert!(status.platform.is_none());
 		assert!(status.postgres.is_none());
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn server_detail_basic() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO servers (id, name, host, rank, kind) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Detail Server', 'https://detail.example.com', 'production', 'central')"
+		)
+		.await
+		.unwrap();
+
+		let response = private
+			.post("/api/private_server/fns/statuses/server_detail")
+			.form(&[("server_id", "11111111-1111-1111-1111-111111111111")])
+			.await;
+		response.assert_status_ok();
+		let detail: ServerDetailResponse = response.json();
+
+		assert_eq!(detail.server.name, "Detail Server");
+		assert_eq!(detail.server.host, "https://detail.example.com/");
+		assert_eq!(detail.server.rank, "production");
+		assert_eq!(detail.server.kind, "central");
+		assert!(detail.device_info.is_none());
+		assert!(detail.last_status.is_none());
+		assert_eq!(detail.up, "gone");
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn server_detail_with_status() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO servers (id, name, host, rank, kind) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Status Server', 'https://status.example.com', 'test', 'central');
+
+			INSERT INTO statuses (server_id, version, extra, created_at) VALUES
+			('11111111-1111-1111-1111-111111111111', '2.5.1', '{\"timezone\": \"Pacific/Auckland\", \"pgVersion\": \"PostgreSQL 17.2, (x86_64-pc-linux-gnu, compiled by gcc)\"}'::jsonb, NOW())"
+		)
+		.await
+		.unwrap();
+
+		let response = private
+			.post("/api/private_server/fns/statuses/server_detail")
+			.form(&[("server_id", "11111111-1111-1111-1111-111111111111")])
+			.await;
+		response.assert_status_ok();
+		let detail: ServerDetailResponse = response.json();
+
+		assert_eq!(detail.server.name, "Status Server");
+		assert!(detail.last_status.is_some());
+
+		let status = detail.last_status.unwrap();
+		assert_eq!(status.version, Some("2.5.1".to_string()));
+		assert_eq!(status.timezone, Some("Pacific/Auckland".to_string()));
+		assert_eq!(status.platform, Some("Linux".to_string()));
+		assert_eq!(status.postgres, Some("17.2".to_string()));
+		assert_eq!(detail.up, "up");
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn server_detail_with_device() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO devices (id, role) VALUES
+			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'server');
+
+			INSERT INTO servers (id, name, host, rank, kind, device_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Device Server', 'https://device.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+
+			INSERT INTO device_connections (device_id, ip, user_agent) VALUES
+			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '192.168.1.100', 'Tamanu/1.0.0 Node.js/18.20.5')"
+		)
+		.await
+		.unwrap();
+
+		let response = private
+			.post("/api/private_server/fns/statuses/server_detail")
+			.form(&[("server_id", "11111111-1111-1111-1111-111111111111")])
+			.await;
+		response.assert_status_ok();
+		let detail: ServerDetailResponse = response.json();
+
+		assert_eq!(detail.server.name, "Device Server");
+		assert!(detail.device_info.is_some());
+
+		let device_info = detail.device_info.unwrap();
+		assert_eq!(device_info.device.id, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+		assert_eq!(device_info.device.role, "server");
+		assert!(device_info.latest_connection.is_some());
+
+		let connection = device_info.latest_connection.unwrap();
+		assert_eq!(connection.ip, "192.168.1.100");
+		assert_eq!(connection.user_agent, Some("Tamanu/1.0.0 Node.js/18.20.5".to_string()));
+		assert_eq!(detail.up, "gone");
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn server_detail_not_found() {
+	commons_tests::server::run(async |_conn, _, private| {
+		let response = private
+			.post("/api/private_server/fns/statuses/server_detail")
+			.form(&[("server_id", "99999999-9999-9999-9999-999999999999")])
+			.await;
+		response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn server_detail_invalid_id() {
+	commons_tests::server::run(async |_conn, _, private| {
+		let response = private
+			.post("/api/private_server/fns/statuses/server_detail")
+			.form(&[("server_id", "not-a-uuid")])
+			.await;
+		response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
 	})
 	.await
 }

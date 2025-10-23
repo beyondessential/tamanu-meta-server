@@ -5,29 +5,29 @@ use leptos_router::{
 	path,
 };
 
-use crate::components::toast::Toast;
+use crate::components::Toast;
 
 mod admins;
+mod deployment;
 mod devices;
 mod status;
 mod statuses;
 
 pub fn shell(options: LeptosOptions) -> impl IntoView {
-	provide_meta_context();
 	view! {
 		<!DOCTYPE html>
 		<html lang="en">
 			<head>
-				<meta charset="utf-8"/>
-				<meta name="viewport" content="width=device-width, initial-scale=1"/>
-				<Stylesheet id="main" href="/static/main.css" />
+				<meta charset="utf-8" />
+				<meta name="viewport" content="width=device-width, initial-scale=1" />
+				<Stylesheet id="css-main" href="/static/main.css" />
 				<AutoReload options=options.clone() />
 				<HydrationScripts options />
-				<MetaTags/>
+				<MetaTags />
 				<Title text="Tamanu Meta" />
 			</head>
 			<body>
-				<App/>
+				<App />
 			</body>
 		</html>
 	}
@@ -35,6 +35,7 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
 
 #[component]
 pub fn App() -> impl IntoView {
+	provide_meta_context();
 	view! {
 		<div id="root">
 			<Router>
@@ -44,11 +45,13 @@ pub fn App() -> impl IntoView {
 						<Routes fallback=|| view! { <Redirect path="/status" /> }>
 							<Route path=path!("") view=|| view! { <Redirect path="/status" /> } />
 							<Route path=path!("status") view=statuses::Page />
+							<Route path=path!("status/:id") view=deployment::Page />
 							<Route path=path!("admins") view=admins::Page />
-							 <ParentRoute path=path!("devices") view=devices::Page>
+							<ParentRoute path=path!("devices") view=devices::Page>
 								<Route path=path!("") view=devices::Search />
 								<Route path=path!("untrusted") view=devices::Untrusted />
 								<Route path=path!("trusted") view=devices::Trusted />
+								<Route path=path!(":id") view=devices::Detail />
 							</ParentRoute>
 						</Routes>
 					</main>
@@ -78,29 +81,39 @@ pub fn GlobalNav() -> impl IntoView {
 				<A href="/status">"Status"</A>
 				<Suspense>
 					{move || {
-						is_admin.get().and_then(|result| {
-							if result.unwrap_or(false) {
-								Some(view! {
-									<A href="/admins">"Admins"</A>
-									<A href="/devices">"Devices"</A>
-								})
-							} else {
-								None
-							}
-						})
+						is_admin
+							.get()
+							.and_then(|result| {
+								if result.unwrap_or(false) {
+									Some(
+										view! {
+											<A href="/admins">"Admins"</A>
+											<A href="/devices">"Devices"</A>
+										},
+									)
+								} else {
+									None
+								}
+							})
 					}}
 				</Suspense>
 				<Suspense>
 					{move || {
-						public_url.get().and_then(|result| {
-							if let Ok(Some(url)) = result {
-								Some(view! {
-									<a href={url} target="_blank">"Public"</a>
-								})
-							} else {
-								None
-							}
-						})
+						public_url
+							.get()
+							.and_then(|result| {
+								if let Ok(Some(url)) = result {
+									Some(
+										view! {
+											<a href=url target="_blank">
+												"Public"
+											</a>
+										},
+									)
+								} else {
+									None
+								}
+							})
 					}}
 				</Suspense>
 			</div>

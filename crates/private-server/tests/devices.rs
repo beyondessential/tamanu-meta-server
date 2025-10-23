@@ -1,5 +1,173 @@
 use base64::Engine;
+use database::servers::Server;
 use database::{Device, DeviceConnection, DeviceKey, DeviceRole};
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_count_untrusted_devices() {
+	commons_tests::db::TestDb::run(|mut conn, _url| async move {
+		// Initially should be 0
+		let count = Device::count_untrusted(&mut conn).await.unwrap();
+		assert_eq!(count, 0);
+
+		// Create 3 untrusted devices
+		for i in 0..3 {
+			Device::create(&mut conn, vec![i, i + 1, i + 2])
+				.await
+				.unwrap();
+		}
+
+		// Count should now be 3
+		let count = Device::count_untrusted(&mut conn).await.unwrap();
+		assert_eq!(count, 3);
+
+		// Trust one device
+		let devices = Device::list_untrusted_with_info(&mut conn).await.unwrap();
+		Device::trust(&mut conn, devices[0].device.id, DeviceRole::Server)
+			.await
+			.unwrap();
+
+		// Count should now be 2
+		let count = Device::count_untrusted(&mut conn).await.unwrap();
+		assert_eq!(count, 2);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_count_trusted_devices() {
+	commons_tests::db::TestDb::run(|mut conn, _url| async move {
+		// Initially should be 0
+		let count = Device::count_trusted(&mut conn).await.unwrap();
+		assert_eq!(count, 0);
+
+		// Create 3 devices and trust 2 of them
+		for i in 0..3 {
+			let device = Device::create(&mut conn, vec![i, i + 1, i + 2])
+				.await
+				.unwrap();
+			if i < 2 {
+				Device::trust(&mut conn, device.id, DeviceRole::Server)
+					.await
+					.unwrap();
+			}
+		}
+
+		// Count should be 2
+		let count = Device::count_trusted(&mut conn).await.unwrap();
+		assert_eq!(count, 2);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_list_untrusted_pagination() {
+	commons_tests::db::TestDb::run(|mut conn, _url| async move {
+		// Create 15 untrusted devices
+		for i in 0..15 {
+			Device::create(&mut conn, vec![i as u8]).await.unwrap();
+		}
+
+		// Get first page (10 items)
+		let page1 = Device::list_untrusted_with_info_paginated(&mut conn, 10, 0)
+			.await
+			.unwrap();
+		assert_eq!(page1.len(), 10);
+
+		// Get second page (5 items)
+		let page2 = Device::list_untrusted_with_info_paginated(&mut conn, 10, 10)
+			.await
+			.unwrap();
+		assert_eq!(page2.len(), 5);
+
+		// Verify no overlap
+		let page1_ids: Vec<_> = page1.iter().map(|d| d.device.id).collect();
+		let page2_ids: Vec<_> = page2.iter().map(|d| d.device.id).collect();
+		for id in &page1_ids {
+			assert!(!page2_ids.contains(id));
+		}
+
+		// Verify ordered by created_at desc (newer first)
+		for i in 1..page1.len() {
+			assert!(page1[i - 1].device.created_at >= page1[i].device.created_at);
+		}
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_list_trusted_pagination() {
+	commons_tests::db::TestDb::run(|mut conn, _url| async move {
+		// Create 15 devices and trust them all
+		for i in 0..15 {
+			let device = Device::create(&mut conn, vec![i as u8]).await.unwrap();
+			Device::trust(&mut conn, device.id, DeviceRole::Server)
+				.await
+				.unwrap();
+		}
+
+		// Get first page (10 items)
+		let page1 = Device::list_trusted_with_info_paginated(&mut conn, 10, 0)
+			.await
+			.unwrap();
+		assert_eq!(page1.len(), 10);
+
+		// Get second page (5 items)
+		let page2 = Device::list_trusted_with_info_paginated(&mut conn, 10, 10)
+			.await
+			.unwrap();
+		assert_eq!(page2.len(), 5);
+
+		// Verify no overlap
+		let page1_ids: Vec<_> = page1.iter().map(|d| d.device.id).collect();
+		let page2_ids: Vec<_> = page2.iter().map(|d| d.device.id).collect();
+		for id in &page1_ids {
+			assert!(!page2_ids.contains(id));
+		}
+
+		// Verify ordered by created_at desc (newer first)
+		for i in 1..page1.len() {
+			assert!(page1[i - 1].device.created_at >= page1[i].device.created_at);
+		}
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_get_device_by_id() {
+	commons_tests::db::TestDb::run(|mut conn, _url| async move {
+		// Create a device
+		let key_data = b"test-device-key-data";
+		let device = Device::create(&mut conn, key_data.to_vec()).await.unwrap();
+
+		// Get device by ID
+		let device_info = Device::get_with_info(&mut conn, device.id).await.unwrap();
+
+		// Verify device info
+		assert_eq!(device_info.device.id, device.id);
+		assert_eq!(device_info.device.role, DeviceRole::Untrusted);
+		assert_eq!(device_info.keys.len(), 1);
+		assert_eq!(device_info.keys[0].key_data, key_data);
+		assert!(device_info.latest_connection.is_none());
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_get_servers_for_device() {
+	commons_tests::db::TestDb::run(|mut conn, _url| async move {
+		// Create a device
+		let device = Device::create(&mut conn, vec![1, 2, 3]).await.unwrap();
+
+		// Get servers for the device (should be empty initially)
+		let servers = Server::get_by_device_id(&mut conn, device.id)
+			.await
+			.unwrap();
+
+		// Should be empty since no servers have been associated
+		assert_eq!(servers.len(), 0);
+	})
+	.await;
+}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_list_untrusted_devices_empty() {

@@ -129,7 +129,7 @@ async fn auth_header_malformed_pem() {
 				"mtls-certificate",
 				utf8_percent_encode(
 					"-----BEGIN CERTIFICATE-----\ninvalid\n-----END CERTIFICATE-----",
-					&percent_encoding::NON_ALPHANUMERIC,
+					percent_encoding::NON_ALPHANUMERIC,
 				)
 				.to_string(),
 			)

@@ -10,7 +10,7 @@ pub fn Page() -> impl IntoView {
 	);
 
 	view! {
-		<Stylesheet id="admin" href="/static/admin.css" />
+		<Stylesheet id="css-admin" href="/static/admin.css" />
 		<Suspense fallback=|| view! { <div class="loading">"Checking permissions..."</div> }>
 			{move || {
 				is_admin.get().map(|result| {

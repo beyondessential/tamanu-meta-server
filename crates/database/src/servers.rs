@@ -74,6 +74,16 @@ impl Server {
 			.await
 			.map_err(AppError::from)
 	}
+
+	pub async fn get_by_device_id(db: &mut AsyncPgConnection, dev_id: Uuid) -> Result<Vec<Self>> {
+		use crate::views::ordered_servers::dsl::*;
+		ordered_servers
+			.select(Self::as_select())
+			.filter(device_id.eq(dev_id))
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
 }
 
 #[test]

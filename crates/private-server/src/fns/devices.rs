@@ -3,6 +3,15 @@ use leptos::server;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerInfo {
+	pub id: String,
+	pub name: Option<String>,
+	pub host: String,
+	pub kind: String,
+	pub rank: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceInfo {
 	pub device: DeviceData,
 	pub keys: Vec<DeviceKeyInfo>,
@@ -40,8 +49,23 @@ pub struct DeviceConnectionData {
 }
 
 #[server]
-pub async fn list_untrusted() -> Result<Vec<DeviceInfo>> {
-	ssr::list_untrusted().await
+pub async fn get_device_by_id(device_id: String) -> Result<DeviceInfo> {
+	ssr::get_device_by_id(device_id).await
+}
+
+#[server]
+pub async fn list_untrusted(limit: Option<i64>, offset: Option<i64>) -> Result<Vec<DeviceInfo>> {
+	ssr::list_untrusted(limit, offset).await
+}
+
+#[server]
+pub async fn get_servers_for_device(device_id: String) -> Result<Vec<ServerInfo>> {
+	ssr::get_servers_for_device(device_id).await
+}
+
+#[server]
+pub async fn count_untrusted() -> Result<i64> {
+	ssr::count_untrusted().await
 }
 
 #[server]
@@ -64,8 +88,13 @@ pub async fn trust(device_id: String, role: String) -> Result<()> {
 }
 
 #[server]
-pub async fn list_trusted() -> Result<Vec<DeviceInfo>> {
-	ssr::list_trusted().await
+pub async fn list_trusted(limit: Option<i64>, offset: Option<i64>) -> Result<Vec<DeviceInfo>> {
+	ssr::list_trusted(limit, offset).await
+}
+
+#[server]
+pub async fn count_trusted() -> Result<i64> {
+	ssr::count_trusted().await
 }
 
 #[server]
@@ -86,6 +115,7 @@ pub async fn search(query: String) -> Result<Vec<DeviceInfo>> {
 #[cfg(feature = "ssr")]
 mod ssr {
 	use super::*;
+	use database::servers::Server;
 	use database::{Device, DeviceConnection, DeviceKey, DeviceRole, DeviceWithInfo};
 	use folktime::duration::Style;
 	use uuid::Uuid;
@@ -102,9 +132,9 @@ mod ssr {
 			Self {
 				device: DeviceData {
 					id: device_with_info.device.id.to_string(),
-					created_at: device_with_info.device.created_at.to_string(),
+					created_at: device_with_info.device.created_at.to_rfc3339(),
 					created_at_relative: format_relative_time(device_with_info.device.created_at),
-					updated_at: device_with_info.device.updated_at.to_string(),
+					updated_at: device_with_info.device.updated_at.to_rfc3339(),
 					updated_at_relative: format_relative_time(device_with_info.device.updated_at),
 					role: String::from(device_with_info.device.role),
 				},
@@ -131,7 +161,7 @@ mod ssr {
 				name: key.name,
 				pem_data,
 				hex_data,
-				created_at: key.created_at.to_string(),
+				created_at: key.created_at.to_rfc3339(),
 			}
 		}
 	}
@@ -140,7 +170,7 @@ mod ssr {
 		fn from(conn: DeviceConnection) -> Self {
 			Self {
 				id: conn.id.to_string(),
-				created_at: conn.created_at.to_string(),
+				created_at: conn.created_at.to_rfc3339(),
 				created_at_relative: format_relative_time(conn.created_at),
 				device_id: conn.device_id.to_string(),
 				ip: conn.ip.addr().to_string(),
@@ -178,26 +208,84 @@ mod ssr {
 			.to_uppercase()
 	}
 
-	pub async fn list_untrusted() -> Result<Vec<DeviceInfo>> {
+	pub async fn get_device_by_id(device_id: String) -> Result<DeviceInfo> {
 		let db = crate::fns::commons::admin_guard().await?;
 		let mut conn = db.get().await?;
 
-		let devices_with_info = Device::list_untrusted_with_info(&mut conn).await?;
+		let device_uuid = Uuid::parse_str(&device_id)
+			.map_err(|_| commons_errors::AppError::custom("Invalid device ID"))?;
+
+		let device_with_info = Device::get_with_info(&mut conn, device_uuid).await?;
+		Ok(DeviceInfo::from(device_with_info))
+	}
+
+	pub async fn get_servers_for_device(device_id: String) -> Result<Vec<ServerInfo>> {
+		let db = crate::fns::commons::admin_guard().await?;
+		let mut conn = db.get().await?;
+
+		let device_uuid = Uuid::parse_str(&device_id)
+			.map_err(|_| commons_errors::AppError::custom("Invalid device ID"))?;
+
+		let servers = Server::get_by_device_id(&mut conn, device_uuid).await?;
+		Ok(servers
+			.into_iter()
+			.map(|s| ServerInfo {
+				id: s.id.to_string(),
+				name: s.name,
+				host: s.host.into(),
+				kind: s.kind.to_string(),
+				rank: s.rank.map(|r| r.to_string()),
+			})
+			.collect())
+	}
+
+	pub async fn list_untrusted(
+		limit: Option<i64>,
+		offset: Option<i64>,
+	) -> Result<Vec<DeviceInfo>> {
+		let db = crate::fns::commons::admin_guard().await?;
+		let mut conn = db.get().await?;
+
+		let devices_with_info = Device::list_untrusted_with_info_paginated(
+			&mut conn,
+			limit.unwrap_or(10),
+			offset.unwrap_or(0),
+		)
+		.await?;
 		Ok(devices_with_info
 			.into_iter()
 			.map(DeviceInfo::from)
 			.collect())
 	}
 
-	pub async fn list_trusted() -> Result<Vec<DeviceInfo>> {
+	pub async fn count_untrusted() -> Result<i64> {
 		let db = crate::fns::commons::admin_guard().await?;
 		let mut conn = db.get().await?;
 
-		let devices_with_info = Device::list_trusted_with_info(&mut conn).await?;
+		Device::count_untrusted(&mut conn).await
+	}
+
+	pub async fn list_trusted(limit: Option<i64>, offset: Option<i64>) -> Result<Vec<DeviceInfo>> {
+		let db = crate::fns::commons::admin_guard().await?;
+		let mut conn = db.get().await?;
+
+		let devices_with_info = Device::list_trusted_with_info_paginated(
+			&mut conn,
+			limit.unwrap_or(10),
+			offset.unwrap_or(0),
+		)
+		.await?;
 		Ok(devices_with_info
 			.into_iter()
 			.map(DeviceInfo::from)
 			.collect())
+	}
+
+	pub async fn count_trusted() -> Result<i64> {
+		let db = crate::fns::commons::admin_guard().await?;
+		let mut conn = db.get().await?;
+
+		Device::count_trusted(&mut conn).await
 	}
 
 	pub async fn connection_history(

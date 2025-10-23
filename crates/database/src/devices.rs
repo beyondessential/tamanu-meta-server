@@ -101,9 +101,53 @@ impl Device {
 		Ok(device)
 	}
 
+	/// Get a single device by ID with its keys and latest connection info.
+	pub async fn get_with_info(
+		db: &mut AsyncPgConnection,
+		device_id: Uuid,
+	) -> Result<DeviceWithInfo> {
+		use crate::schema::{device_keys, devices};
+
+		let device: Self = devices::table
+			.select(Self::as_select())
+			.filter(devices::id.eq(device_id))
+			.first(db)
+			.await
+			.map_err(AppError::from)?;
+
+		let keys: Vec<DeviceKey> = device_keys::table
+			.select(DeviceKey::as_select())
+			.filter(device_keys::device_id.eq(device_id))
+			.filter(device_keys::is_active.eq(true))
+			.order(device_keys::created_at.asc())
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		let latest_connections =
+			DeviceConnection::get_latest_from_device_ids(db, std::iter::once(device_id)).await?;
+
+		let latest_connection = latest_connections.into_iter().next();
+
+		Ok(DeviceWithInfo {
+			device,
+			keys,
+			latest_connection,
+		})
+	}
+
 	/// List all untrusted devices with their keys and latest connection info.
 	pub async fn list_untrusted_with_info(
 		db: &mut AsyncPgConnection,
+	) -> Result<Vec<DeviceWithInfo>> {
+		Self::list_untrusted_with_info_paginated(db, i64::MAX, 0).await
+	}
+
+	/// List untrusted devices with pagination.
+	pub async fn list_untrusted_with_info_paginated(
+		db: &mut AsyncPgConnection,
+		limit: i64,
+		offset: i64,
 	) -> Result<Vec<DeviceWithInfo>> {
 		use crate::schema::{device_keys, devices};
 
@@ -111,6 +155,8 @@ impl Device {
 			.select(Self::as_select())
 			.filter(devices::role.eq(DeviceRole::Untrusted))
 			.order(devices::created_at.desc())
+			.limit(limit)
+			.offset(offset)
 			.load(db)
 			.await
 			.map_err(AppError::from)?;
@@ -153,12 +199,23 @@ impl Device {
 
 	/// List all trusted devices with their keys and latest connection info.
 	pub async fn list_trusted_with_info(db: &mut AsyncPgConnection) -> Result<Vec<DeviceWithInfo>> {
+		Self::list_trusted_with_info_paginated(db, i64::MAX, 0).await
+	}
+
+	/// List trusted devices with pagination.
+	pub async fn list_trusted_with_info_paginated(
+		db: &mut AsyncPgConnection,
+		limit: i64,
+		offset: i64,
+	) -> Result<Vec<DeviceWithInfo>> {
 		use crate::schema::{device_keys, devices};
 
 		let trusted_devices: Vec<Self> = devices::table
 			.select(Self::as_select())
 			.filter(devices::role.ne(DeviceRole::Untrusted))
 			.order(devices::created_at.desc())
+			.limit(limit)
+			.offset(offset)
 			.load(db)
 			.await
 			.map_err(AppError::from)?;
@@ -199,7 +256,33 @@ impl Device {
 		Ok(result)
 	}
 
-	/// Trust a device by updating its role.
+	/// Count untrusted devices.
+	pub async fn count_untrusted(db: &mut AsyncPgConnection) -> Result<i64> {
+		use crate::schema::devices;
+		use diesel::dsl::count_star;
+
+		devices::table
+			.filter(devices::role.eq(DeviceRole::Untrusted))
+			.select(count_star())
+			.first(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// Count trusted devices.
+	pub async fn count_trusted(db: &mut AsyncPgConnection) -> Result<i64> {
+		use crate::schema::devices;
+		use diesel::dsl::count_star;
+
+		devices::table
+			.filter(devices::role.ne(DeviceRole::Untrusted))
+			.select(count_star())
+			.first(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// Trust a device by setting its role.
 	pub async fn trust(
 		db: &mut AsyncPgConnection,
 		device_id: Uuid,
@@ -264,68 +347,68 @@ impl Device {
 			let end_marker = "-----END";
 
 			if let Some(begin_pos) = query.find(begin_marker)
-				&& let Some(end_pos) = query.find(end_marker) {
-					// Get the content between the markers
-					// Find the end of the BEGIN header line
-					let begin_header_end = if let Some(newline_pos) = query[begin_pos..].find('\n')
-					{
-						begin_pos + newline_pos + 1
-					} else {
-						// For space-separated PEM, find the end of the header
-						// Look for "-----" after the key type (e.g., "PUBLIC KEY-----")
-						let after_begin = begin_pos + begin_marker.len(); // Skip "-----BEGIN"
-						if let Some(end_marker_pos) = query[after_begin..].find("-----") {
-							let header_end = after_begin + end_marker_pos + 5; // +5 for "-----"
-							// Find the first space after the complete header
-							if let Some(space_pos) = query[header_end..].find(' ') {
-								header_end + space_pos + 1
-							} else {
-								header_end
-							}
+				&& let Some(end_pos) = query.find(end_marker)
+			{
+				// Get the content between the markers
+				// Find the end of the BEGIN header line
+				let begin_header_end = if let Some(newline_pos) = query[begin_pos..].find('\n') {
+					begin_pos + newline_pos + 1
+				} else {
+					// For space-separated PEM, find the end of the header
+					// Look for "-----" after the key type (e.g., "PUBLIC KEY-----")
+					let after_begin = begin_pos + begin_marker.len(); // Skip "-----BEGIN"
+					if let Some(end_marker_pos) = query[after_begin..].find("-----") {
+						let header_end = after_begin + end_marker_pos + 5; // +5 for "-----"
+						// Find the first space after the complete header
+						if let Some(space_pos) = query[header_end..].find(' ') {
+							header_end + space_pos + 1
 						} else {
-							begin_pos
+							header_end
 						}
-					};
-					let content_start = begin_header_end;
+					} else {
+						begin_pos
+					}
+				};
+				let content_start = begin_header_end;
 
-					let pem_content = &query[content_start..end_pos];
+				let pem_content = &query[content_start..end_pos];
 
-					// Check if this is malformed PEM with indented base64 lines
-					// Only reject multi-line PEM with indented content, not space-separated single-line PEM
-					let lines: Vec<&str> = pem_content.lines().collect();
-					let has_indented_lines = lines.len() > 1
-						&& lines.iter().any(|line| {
-							let trimmed = line.trim();
-							!trimmed.is_empty()
-								&& !trimmed.starts_with("-----")
-								&& line.starts_with([' ', '\t'])
-						});
+				// Check if this is malformed PEM with indented base64 lines
+				// Only reject multi-line PEM with indented content, not space-separated single-line PEM
+				let lines: Vec<&str> = pem_content.lines().collect();
+				let has_indented_lines = lines.len() > 1
+					&& lines.iter().any(|line| {
+						let trimmed = line.trim();
+						!trimmed.is_empty()
+							&& !trimmed.starts_with("-----")
+							&& line.starts_with([' ', '\t'])
+					});
 
-					if !has_indented_lines {
-						// Remove any remaining header/footer fragments and whitespace
-						let base64_part = pem_content
-							.split_whitespace()
-							.filter(|part| !part.starts_with("-----") && !part.is_empty())
-							.collect::<Vec<_>>()
-							.join("");
+				if !has_indented_lines {
+					// Remove any remaining header/footer fragments and whitespace
+					let base64_part = pem_content
+						.split_whitespace()
+						.filter(|part| !part.starts_with("-----") && !part.is_empty())
+						.collect::<Vec<_>>()
+						.join("");
 
-						if let Ok(decoded) = base64::prelude::BASE64_STANDARD.decode(base64_part) {
-							let pem_matches: Vec<Uuid> = sql_query(
-								"SELECT DISTINCT device_id FROM device_keys
+					if let Ok(decoded) = base64::prelude::BASE64_STANDARD.decode(base64_part) {
+						let pem_matches: Vec<Uuid> = sql_query(
+							"SELECT DISTINCT device_id FROM device_keys
 								 WHERE is_active = $1 AND position($2 in key_data) > 0",
-							)
-							.bind::<Bool, _>(true)
-							.bind::<Binary, _>(&decoded)
-							.load::<MatchingDevice>(db)
-							.await
-							.map_err(AppError::from)?
-							.into_iter()
-							.map(|m| m.device_id)
-							.collect();
-							matching_device_ids.extend(pem_matches);
-						}
+						)
+						.bind::<Bool, _>(true)
+						.bind::<Binary, _>(&decoded)
+						.load::<MatchingDevice>(db)
+						.await
+						.map_err(AppError::from)?
+						.into_iter()
+						.map(|m| m.device_id)
+						.collect();
+						matching_device_ids.extend(pem_matches);
 					}
 				}
+			}
 		}
 
 		// Strategy 3: Base64 string search by encoding PostgreSQL binary data

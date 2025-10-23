@@ -1,66 +1,22 @@
 use leptos::prelude::*;
 
-use crate::components::toast::ToastCtx;
-
-use super::DeviceTable;
+use super::DeviceList;
+use crate::components::PaginatedList;
 
 #[component]
 pub fn Trusted() -> impl IntoView {
-	let ToastCtx(set_message) = use_context().unwrap();
-	let (refresh_trigger, set_refresh_trigger) = signal(0);
+	let (page, set_page) = signal(0i64);
+	const PAGE_SIZE: i64 = 10;
 
-	let update_role_action = Action::new(move |(device_id, role): &(String, String)| {
-		let device_id = device_id.clone();
-		let role = role.clone();
-		async move { crate::fns::devices::update_role(device_id, role).await }
-	});
-
-	Effect::new(move |_| {
-		if let Some(result) = update_role_action.value().get() {
-			match result {
-				Ok(_) => {
-					set_message.set(Some("Device role updated successfully".to_string()));
-
-					set_timeout(
-						move || set_message.set(None),
-						std::time::Duration::from_millis(3000),
-					);
-				}
-				Err(e) => {
-					set_message.set(Some(format!("Error updating device role: {}", e)));
-				}
-			}
-		}
-	});
+	let total_count = Resource::new(|| (), async |_| crate::fns::devices::count_trusted().await);
 
 	let trusted_devices = Resource::new(
-		move || refresh_trigger.get(),
-		async |_| crate::fns::devices::list_trusted().await,
+		move || page.get(),
+		|p| async move {
+			let offset = p * PAGE_SIZE;
+			crate::fns::devices::list_trusted(Some(PAGE_SIZE), Some(offset)).await
+		},
 	);
-
-	let untrust_device_action = Action::new(move |device_id: &String| {
-		let device_id = device_id.clone();
-		async move { crate::fns::devices::untrust(device_id).await }
-	});
-
-	Effect::new(move |_| {
-		if let Some(result) = untrust_device_action.value().get() {
-			match result {
-				Ok(_) => {
-					set_message.set(Some("Device untrusted successfully".to_string()));
-					set_refresh_trigger.update(|n| *n += 1);
-
-					set_timeout(
-						move || set_message.set(None),
-						std::time::Duration::from_millis(3000),
-					);
-				}
-				Err(e) => {
-					set_message.set(Some(format!("Error untrusting device: {}", e)));
-				}
-			}
-		}
-	});
 
 	view! {
 		<div class="trusted-devices">
@@ -78,11 +34,14 @@ pub fn Trusted() -> impl IntoView {
 								}.into_any()
 							} else {
 								view! {
-									<DeviceTable
-										devices=devices.clone()
-										untrust_action=untrust_device_action
-										update_role_action=update_role_action
-									/>
+									<PaginatedList
+										page=page
+										set_page=set_page
+										total_count=Signal::derive(move || total_count.get().and_then(|r| r.ok()))
+										page_size=PAGE_SIZE
+									>
+										<DeviceList devices=devices.clone() />
+									</PaginatedList>
 								}.into_any()
 							}
 						}
