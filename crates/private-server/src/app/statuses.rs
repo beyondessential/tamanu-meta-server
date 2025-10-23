@@ -223,7 +223,15 @@ pub fn ServerRow(server_id: String) -> impl IntoView {
 									}
 								>{status.up.clone()}</td>
 								<td class="name">
-									<a href={format!("/status/{}", details.id.clone())}>{details.name.clone()}</a>
+									{if details.kind == "central" {
+										view! {
+											<a href={format!("/status/{}", details.id.clone())}>{details.name.clone()}</a>
+										}.into_any()
+									} else {
+										view! {
+											<span>{details.name.clone()}</span>
+										}.into_any()
+									}}
 								</td>
 								<td class="rank">{details.rank.clone()}</td>
 								<td class="host"><a href={details.host.clone()}>{details.host.clone()}</a></td>
