@@ -9,8 +9,6 @@ Avoid writing large summaries of actions taken when done.
 - **Commons**: Shared utilities, authentication, error handling
 
 ## Database Connection
-- Use `DATABASE_URL=postgres://localhost/tamanu_meta` for running tests
-- Always run tests with the DATABASE_URL environment variable set
 - Database models are in `crates/database/src/` with re-exports in `lib.rs`
 - Use migrations in `migrations/` directory for schema changes
 - Use PostgreSQL native functions where possible (e.g., `position()` for binary substring searches)
@@ -63,10 +61,6 @@ mod ssr {
 - For database tests, use direct model functions instead of HTTP endpoints
 - Always include `use database::ModelName;` imports in test files
 - Do not include `_test` suffix or prefix in test filenames in `tests/` directory
-- Required environment variables for private-server tests:
-  - `LEPTOS_OUTPUT_NAME=private-server`
-  - `SERVER_FN_MOD_PATH=true`
-  - `DISABLE_SERVER_FN_HASH=true`
 - Calling Leptos Server Functions in private-server tests:
   - Server functions are exposed at `/api/private_server/fns/<module>/<function>` (e.g., `/api/private_server/fns/statuses/server_ids`)
   - Use `.form(&[("param_name", "param_value")])` for parameters (not `.json()`)
@@ -75,15 +69,15 @@ mod ssr {
 ## Frontend Development
 - Pages go in `crates/private-server/src/app/`
 - Server functions go in `crates/private-server/src/fns/`
+- Common components go in `crates/private-server/src/components/`
 - CSS files go in `static/private/`
 - Add routes in `crates/private-server/src/app.rs`
-- Add navigation links in the `GlobalNav` component
 - Use Leptos signals for state management
 - Handle async operations with `Resource` and `Action`
 
 ## Development Workflow
 - Always check: `cargo check` for basic compilation
 - Always check: `cargo leptos build --frontend-only` for frontend compatibility
-- Run full test suite: `DATABASE_URL=postgres://localhost/tamanu_meta cargo nextest run`
-- Run specific tests: `DATABASE_URL=postgres://localhost/tamanu_meta cargo nextest run -p <crate> <test_name>`
+- Run full test suite: `just test`
+- Run specific tests: `just test-name <test_name>`
 - Verify no compilation warnings in tests and main code

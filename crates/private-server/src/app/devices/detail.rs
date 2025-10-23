@@ -25,15 +25,12 @@ pub fn Detail() -> impl IntoView {
 		},
 	);
 
-	let servers_resource = Resource::new(
-		move || device_id(),
-		async |id| {
-			if id.is_empty() {
-				return Ok(vec![]);
-			}
-			crate::fns::devices::get_servers_for_device(id).await
-		},
-	);
+	let servers_resource = Resource::new(device_id, async |id| {
+		if id.is_empty() {
+			return Ok(vec![]);
+		}
+		crate::fns::devices::get_servers_for_device(id).await
+	});
 
 	let update_role_action = Action::new(move |(device_id, role): &(String, String)| {
 		let device_id = device_id.clone();

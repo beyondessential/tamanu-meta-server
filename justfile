@@ -73,15 +73,11 @@ fmt-check:
 
 # Run clippy lints
 lint:
-    cargo clippy
-
-# Run clippy with all features
-lint-all:
-    cargo clippy --all-features
+	cargo clippy --all-features --all-targets
 
 # Fix clippy warnings automatically where possible
 lint-fix:
-    cargo clippy --fix --allow-dirty --allow-staged
+	cargo clippy --all-features --all-targets --fix --allow-dirty --allow-staged
 
 # Generate identity certificate for API authentication
 identity:

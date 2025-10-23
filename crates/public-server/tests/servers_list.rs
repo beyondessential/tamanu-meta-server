@@ -503,7 +503,7 @@ async fn post_create_server_malformed_pem() {
 		use percent_encoding::utf8_percent_encode;
 		let malformed_pem = utf8_percent_encode(
 			"-----BEGIN CERTIFICATE-----\ninvalid-data\n-----END CERTIFICATE-----",
-			&percent_encoding::NON_ALPHANUMERIC,
+			percent_encoding::NON_ALPHANUMERIC,
 		)
 		.to_string();
 

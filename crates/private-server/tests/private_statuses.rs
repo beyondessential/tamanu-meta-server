@@ -1,37 +1,5 @@
 use commons_tests::diesel_async::SimpleAsyncConnection;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
-struct ServerData {
-	server: ServerInfo,
-	device: Option<Value>,
-	status: Option<StatusInfo>,
-	up: String,
-	since: Option<String>,
-	platform: Option<String>,
-	postgres: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
-struct ServerInfo {
-	id: String,
-	name: Option<String>,
-	host: String,
-	kind: String,
-	rank: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
-struct StatusInfo {
-	id: String,
-	created_at: String,
-	server_id: String,
-	device_id: Option<String>,
-
-	version: Option<String>,
-	extra: Value,
-}
 
 #[derive(Debug, Deserialize, Serialize)]
 struct ServerDetailsResponse {
