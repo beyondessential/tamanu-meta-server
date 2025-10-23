@@ -220,7 +220,7 @@ mod ssr {
 
 		Ok(super::ServerStatusData {
 			up,
-			updated_at: status.as_ref().map(|s| s.created_at.to_string()),
+			updated_at: status.as_ref().map(|s| s.created_at.to_rfc3339()),
 			version: status
 				.as_ref()
 				.and_then(|s| s.version.as_ref().map(|v| v.to_string())),
@@ -305,7 +305,7 @@ mod ssr {
 
 			Some(super::ServerLastStatusData {
 				id: st.id.to_string(),
-				created_at: st.created_at.to_string(),
+				created_at: st.created_at.to_rfc3339(),
 				version: st.version.as_ref().map(|v| v.to_string()),
 				platform,
 				postgres,
@@ -379,9 +379,9 @@ mod ssr {
 		crate::fns::devices::DeviceInfo {
 			device: crate::fns::devices::DeviceData {
 				id: device_with_info.device.id.to_string(),
-				created_at: device_with_info.device.created_at.to_string(),
+				created_at: device_with_info.device.created_at.to_rfc3339(),
 				created_at_relative: format_relative_time(device_with_info.device.created_at),
-				updated_at: device_with_info.device.updated_at.to_string(),
+				updated_at: device_with_info.device.updated_at.to_rfc3339(),
 				updated_at_relative: format_relative_time(device_with_info.device.updated_at),
 				role: String::from(device_with_info.device.role),
 			},
@@ -398,14 +398,14 @@ mod ssr {
 						name: key.name,
 						pem_data,
 						hex_data,
-						created_at: key.created_at.to_string(),
+						created_at: key.created_at.to_rfc3339(),
 					}
 				})
 				.collect(),
 			latest_connection: device_with_info.latest_connection.map(|conn| {
 				crate::fns::devices::DeviceConnectionData {
 					id: conn.id.to_string(),
-					created_at: conn.created_at.to_string(),
+					created_at: conn.created_at.to_rfc3339(),
 					created_at_relative: format_relative_time(conn.created_at),
 					device_id: conn.device_id.to_string(),
 					ip: conn.ip.addr().to_string(),

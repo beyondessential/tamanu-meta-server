@@ -1,8 +1,9 @@
 use leptos::prelude::*;
+use leptos_meta::Title;
 use leptos_router::hooks::use_params_map;
 use web_sys::window;
 
-use crate::components::toast::ToastCtx;
+use crate::components::ToastCtx;
 
 #[component]
 pub fn Detail() -> impl IntoView {
@@ -104,6 +105,7 @@ pub fn Detail() -> impl IntoView {
 	});
 
 	view! {
+		<Title text=move || format!("Tamanu Meta Device {}", device_id()) />
 		<div class="device-detail">
 			<Suspense fallback=|| view! { <div class="loading">"Loading device..."</div> }>
 				{move || {

@@ -72,8 +72,6 @@
 	}
 
 	.ago {
-		white-space: pre;
-		text-decoration: underline dotted;
 		border-right: 1px dashed var(--color-border-darker);
 		text-align: right;
 	}

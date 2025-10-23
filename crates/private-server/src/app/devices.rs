@@ -3,7 +3,7 @@ use leptos_meta::{Stylesheet, provide_meta_context};
 use leptos_router::components::A;
 use std::collections::HashMap;
 
-use crate::components::sub_tabs::SubTabs;
+use crate::components::SubTabs;
 
 mod detail;
 mod search;
@@ -80,7 +80,7 @@ pub fn Page() -> impl IntoView {
 	);
 
 	view! {
-		<Stylesheet id="devices" href="/static/devices.css" />
+		<Stylesheet id="css-devices" href="/static/devices.css" />
 		<Suspense fallback=|| view! { <div class="loading">"Checking permissions..."</div> }>
 			{move || {
 				is_admin.get().map(|result| {

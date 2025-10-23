@@ -20,7 +20,7 @@ struct ReloadContext {
 #[component]
 pub fn Page() -> impl IntoView {
 	view! {
-		<Stylesheet id="status" href="/static/status.css" />
+		<Stylesheet id="css-status" href="/static/status.css" />
 		<div id="status-page">
 			<div class="page-header">
 				<div class="header-info">
@@ -238,7 +238,7 @@ pub fn ServerRow(server_id: String) -> impl IntoView {
 								{
 									if let Some(ref updated_at) = status.updated_at {
 										view! {
-											<td class="ago" title={updated_at.clone()}><TimeAgo timestamp={updated_at.clone()} /> " ago"</td>
+											<td class="ago"><TimeAgo timestamp={updated_at.clone()} /></td>
 											<td class="version monospace">{status.version.clone()}</td>
 											<td class="platform monospace">{status.platform.clone()}</td>
 											<td class="nodejs monospace">{status.nodejs.clone()}</td>

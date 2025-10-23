@@ -66,6 +66,7 @@ migrate-revert:
 # Format code
 fmt:
     cargo fmt
+    leptosfmt crates/private-server/**/*.rs
 
 # Check formatting without making changes
 fmt-check:
@@ -93,8 +94,8 @@ build-frontend:
 
 # Install development dependencies
 install-deps:
-	cargo install cargo-binstall
-	cargo binstall -y cargo-nextest cargo-leptos cargo-release git-cliff watchexec diesel_cli
+	cargo binstall -y cargo-binstall || cargo install cargo-binstall
+	cargo binstall -y cargo-nextest cargo-leptos leptosfmt cargo-release git-cliff watchexec-cli diesel_cli
 
 # Download database from Kubernetes
 download-db dbname namespace="tamanu-meta-dev" output="app.dump":

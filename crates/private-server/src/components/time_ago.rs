@@ -24,27 +24,16 @@ pub fn TimeAgo(timestamp: String) -> impl IntoView {
 			if let Some(timestamp_ms) = parsed_timestamp_ms {
 				let now_ms = web_sys::js_sys::Date::now();
 				let diff_ms = now_ms - timestamp_ms;
-				let total_seconds = (diff_ms / 1000.0).abs() as i64;
-
-				if total_seconds < 3600 {
-					let minutes = total_seconds / 60;
-					format!("{}m", minutes)
-				} else if total_seconds < 86400 {
-					let hours = total_seconds / 3600;
-					format!("{}h", hours)
-				} else {
-					let days = total_seconds / 86400;
-					format!("{}d", days)
-				}
+				format_secs((diff_ms / 1000.0).abs() as _)
 			} else {
-				"unknown".to_string()
+				"?".to_string()
 			}
 		};
 
 		// Update immediately
 		set_ago_text.set(format_duration());
 
-		// Set up interval to update every second while page is visible
+		// Set up interval to update every 10 seconds while page is visible
 		Effect::new(move |_| {
 			let _ = leptos::prelude::set_interval(
 				move || {
@@ -54,19 +43,43 @@ pub fn TimeAgo(timestamp: String) -> impl IntoView {
 						}
 					}
 				},
-				std::time::Duration::from_secs(1),
+				std::time::Duration::from_secs(10),
 			);
 		});
 	}
 
 	#[cfg(feature = "ssr")]
 	{
-		// On SSR, just show a placeholder
-		let _ = timestamp; // Suppress unused variable warning
-		set_ago_text.set("...".to_string());
+		use std::str::FromStr as _;
+		match jiff::Timestamp::from_str(&timestamp) {
+			Ok(parsed) => {
+				let now = jiff::Timestamp::now();
+				let diff = now.duration_since(parsed);
+				let secs = diff.as_secs().abs() as u64;
+				set_ago_text.set(format_secs(secs));
+			}
+			Err(err) => {
+				set_ago_text.set(err.to_string());
+			}
+		}
 	}
 
 	view! {
-		{move || ago_text.get()}
+		<span class="time-ago" title={timestamp.clone()}>
+		{move || ago_text.get()} " ago"
+		</span>
+	}
+}
+
+fn format_secs(secs: u64) -> String {
+	if secs < 3600 {
+		let minutes = secs / 60;
+		format!("{}m", minutes)
+	} else if secs < 86400 {
+		let hours = secs / 3600;
+		format!("{}h", hours)
+	} else {
+		let days = secs / 86400;
+		format!("{}d", days)
 	}
 }

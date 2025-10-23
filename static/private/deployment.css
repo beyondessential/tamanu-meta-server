@@ -5,6 +5,9 @@
 
 	.page-header {
 		margin-bottom: 2em;
+		display: flex;
+		align-items: first baseline;
+		justify-content: space-between;
 
 		.header-top {
 			margin-bottom: 1em;
@@ -77,8 +80,8 @@
 		}
 
 		.server-rank {
-			background: var(--color-primary-light);
-			color: var(--color-primary);
+			border: 1px solid var(--color-primary-light);
+			color: var(--color-primary-dark);
 		}
 
 		.server-kind {

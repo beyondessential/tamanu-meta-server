@@ -132,9 +132,9 @@ mod ssr {
 			Self {
 				device: DeviceData {
 					id: device_with_info.device.id.to_string(),
-					created_at: device_with_info.device.created_at.to_string(),
+					created_at: device_with_info.device.created_at.to_rfc3339(),
 					created_at_relative: format_relative_time(device_with_info.device.created_at),
-					updated_at: device_with_info.device.updated_at.to_string(),
+					updated_at: device_with_info.device.updated_at.to_rfc3339(),
 					updated_at_relative: format_relative_time(device_with_info.device.updated_at),
 					role: String::from(device_with_info.device.role),
 				},
@@ -161,7 +161,7 @@ mod ssr {
 				name: key.name,
 				pem_data,
 				hex_data,
-				created_at: key.created_at.to_string(),
+				created_at: key.created_at.to_rfc3339(),
 			}
 		}
 	}
@@ -170,7 +170,7 @@ mod ssr {
 		fn from(conn: DeviceConnection) -> Self {
 			Self {
 				id: conn.id.to_string(),
-				created_at: conn.created_at.to_string(),
+				created_at: conn.created_at.to_rfc3339(),
 				created_at_relative: format_relative_time(conn.created_at),
 				device_id: conn.device_id.to_string(),
 				ip: conn.ip.addr().to_string(),

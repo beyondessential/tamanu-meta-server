@@ -16,7 +16,7 @@ pub fn Page() -> impl IntoView {
 		Resource::new(move || server_id(), async move |id| server_detail(id).await);
 
 	view! {
-		<Stylesheet id="status-detail" href="/static/deployment.css" />
+		<Stylesheet id="css-deployment" href="/static/deployment.css" />
 		<div id="status-detail-page">
 			<Suspense fallback=|| view! { <div class="loading">"Loading server details..."</div> }>
 				{move || {
@@ -31,9 +31,6 @@ pub fn Page() -> impl IntoView {
 								view! {
 									<div class="detail-container">
 										<div class="page-header">
-											<div class="header-top">
-												<a href="/status" class="back-link">"← Back to Status"</a>
-											</div>
 											<h1>
 												<span class={format!("status-dot {}", up)} title={up.clone()}></span>
 												{server.name.clone()}
@@ -45,18 +42,10 @@ pub fn Page() -> impl IntoView {
 											<h2>"Central server"</h2>
 											<div class="info-grid">
 												<div class="info-item">
-													<span class="info-label">"ID"</span>
-													<span class="info-value monospace">{server.id.clone()}</span>
-												</div>
-												<div class="info-item">
 													<span class="info-label">"Host"</span>
 													<span class="info-value">
 														<a href={server.host.clone()} target="_blank">{server.host.clone()}</a>
 													</span>
-												</div>
-												<div class="info-item">
-													<span class="info-label">"Rank"</span>
-													<span class="info-value">{server.rank.clone()}</span>
 												</div>
 											</div>
 											{device_info.as_ref().map(|device_info| {
@@ -78,10 +67,8 @@ pub fn Page() -> impl IntoView {
 													<div class="info-grid">
 														<div class="info-item">
 															<span class="info-label">"Reported At"</span>
-															<span class="info-value" title={status.created_at.clone()}>
-																<TimeAgo timestamp={status.created_at.clone()} />
-																" ago"
-															</span>
+															<TimeAgo timestamp={status.created_at.clone()} {..} class="info-value" />
+
 														</div>
 														{status.platform.as_ref().map(|p| {
 															let p = p.clone();

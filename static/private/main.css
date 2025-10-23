@@ -344,3 +344,8 @@ main {
 		text-align: center;
 	}
 }
+
+.time-ago {
+	white-space: pre;
+	text-decoration: underline dotted;
+}
