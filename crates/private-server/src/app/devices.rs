@@ -1,7 +1,18 @@
 use leptos::prelude::*;
 use leptos_meta::{Stylesheet, provide_meta_context};
+use leptos_router::components::A;
 use std::collections::HashMap;
 use web_sys::window;
+
+use crate::components::sub_tabs::SubTabs;
+
+mod search;
+mod trusted;
+mod untrusted;
+
+pub use search::Search;
+pub use trusted::Trusted;
+pub use untrusted::Untrusted;
 
 #[derive(Debug, Clone)]
 pub struct ConnectionGroup {
@@ -59,7 +70,7 @@ fn create_group(connections: Vec<crate::fns::devices::DeviceConnectionData>) -> 
 	}
 }
 
-#[island]
+#[component]
 pub fn Page() -> impl IntoView {
 	provide_meta_context();
 	let is_admin = Resource::new(
@@ -79,10 +90,14 @@ pub fn Page() -> impl IntoView {
 									<div class="page-header">
 										<h1>"Device Management"</h1>
 										<p class="page-description">
-											"Manage device approvals and trust levels. Untrusted devices appear here after their first connection attempt."
+											"Manage device approvals and trust levels."
 										</p>
 									</div>
-									<DeviceManagement />
+									<SubTabs>
+										<A href="" exact=true>Search</A>
+										<A href="untrusted">Untrusted Devices</A>
+										<A href="trusted">Trusted Devices</A>
+									</SubTabs>
 								</div>
 							}.into_any()
 						}
@@ -118,275 +133,16 @@ pub fn Page() -> impl IntoView {
 	}
 }
 
-#[island]
-pub fn DeviceManagement() -> impl IntoView {
-	let (search_query, set_search_query) = signal(String::new());
-	let (message, set_message) = signal(String::new());
-	let (refresh_trigger, set_refresh_trigger) = signal(0);
-	let (active_tab, set_active_tab) = signal("untrusted");
-
-	let untrusted_devices = Resource::new(
-		move || refresh_trigger.get(),
-		async |_| crate::fns::devices::list_untrusted().await,
-	);
-
-	let trusted_devices = Resource::new(
-		move || refresh_trigger.get(),
-		async |_| crate::fns::devices::list_trusted().await,
-	);
-
-	let search_results = Resource::new(
-		move || search_query.get(),
-		async |query| {
-			if query.trim().is_empty() {
-				Ok(vec![])
-			} else {
-				crate::fns::devices::search(query).await
-			}
-		},
-	);
-
-	let trust_device_action = Action::new(move |(device_id, role): &(String, String)| {
-		let device_id = device_id.clone();
-		let role = role.clone();
-		async move { crate::fns::devices::trust(device_id, role).await }
-	});
-
-	let untrust_device_action = Action::new(move |device_id: &String| {
-		let device_id = device_id.clone();
-		async move { crate::fns::devices::untrust(device_id).await }
-	});
-
-	let update_role_action = Action::new(move |(device_id, role): &(String, String)| {
-		let device_id = device_id.clone();
-		let role = role.clone();
-		async move { crate::fns::devices::update_role(device_id, role).await }
-	});
-
-	Effect::new(move |_| {
-		if let Some(result) = trust_device_action.value().get() {
-			match result {
-				Ok(_) => {
-					set_message.set("Device trusted successfully".to_string());
-					set_refresh_trigger.update(|n| *n += 1);
-
-					set_timeout(
-						move || set_message.set(String::new()),
-						std::time::Duration::from_millis(3000),
-					);
-				}
-				Err(e) => {
-					set_message.set(format!("Error trusting device: {}", e));
-				}
-			}
-		}
-	});
-
-	Effect::new(move |_| {
-		if let Some(result) = untrust_device_action.value().get() {
-			match result {
-				Ok(_) => {
-					set_message.set("Device untrusted successfully".to_string());
-					set_refresh_trigger.update(|n| *n += 1);
-					set_active_tab.set("untrusted"); // Switch to untrusted tab
-
-					set_timeout(
-						move || set_message.set(String::new()),
-						std::time::Duration::from_millis(3000),
-					);
-				}
-				Err(e) => {
-					set_message.set(format!("Error untrusting device: {}", e));
-				}
-			}
-		}
-	});
-
-	Effect::new(move |_| {
-		if let Some(result) = update_role_action.value().get() {
-			match result {
-				Ok(_) => {
-					set_message.set("Device role updated successfully".to_string());
-					set_refresh_trigger.update(|n| *n += 1);
-
-					set_timeout(
-						move || set_message.set(String::new()),
-						std::time::Duration::from_millis(3000),
-					);
-				}
-				Err(e) => {
-					set_message.set(format!("Error updating device role: {}", e));
-				}
-			}
-		}
-	});
-
-	view! {
-		<div class="device-search">
-			<h2>"Search Devices by Key"</h2>
-			<div class="search-box">
-				<input
-					type="text"
-					placeholder="Paste PEM or hex key fragment..."
-					prop:value=move || search_query.get()
-					on:input=move |ev| set_search_query.set(event_target_value(&ev))
-					class="search-input"
-				/>
-				<p class="search-help">
-					"Search by pasting a key fragment in PEM format or hex (with or without colons)"
-				</p>
-			</div>
-
-			<Suspense fallback=|| view! { <div class="loading">"Searching..."</div> }>
-				{move || {
-					let query = search_query.get();
-					if query.trim().is_empty() {
-						view! {}.into_any()
-					} else {
-						search_results.get().map(|result| {
-							match result {
-								Ok(devices) => {
-									if devices.is_empty() {
-										view! {
-											<div class="no-results">"No devices found matching your search"</div>
-										}.into_any()
-									} else {
-										view! {
-											<div class="search-results">
-												<h3>{format!("Search Results ({} found)", devices.len())}</h3>
-												<DeviceTable
-													devices=devices.clone()
-													trust_action=trust_device_action
-													untrust_action=untrust_device_action
-													update_role_action=update_role_action
-												/>
-											</div>
-										}.into_any()
-									}
-								}
-								Err(e) => {
-									view! {
-										<div class="error">{format!("Search error: {}", e)}</div>
-									}.into_any()
-								}
-							}
-						}).unwrap_or_else(|| view! {}.into_any())
-					}
-				}}
-			</Suspense>
-		</div>
-
-		{move || {
-			let msg = message.get();
-			if !msg.is_empty() {
-				view! { <div class="message">{msg}</div> }.into_any()
-			} else {
-				view! {}.into_any()
-			}
-		}}
-
-		<div class="device-tabs">
-			<nav class="tab-nav">
-				<button
-					class={move || if active_tab.get() == "untrusted" { "tab-button active" } else { "tab-button" }}
-					on:click=move |_| set_active_tab.set("untrusted")
-				>
-					"Untrusted Devices"
-				</button>
-				<button
-					class={move || if active_tab.get() == "trusted" { "tab-button active" } else { "tab-button" }}
-					on:click=move |_| set_active_tab.set("trusted")
-				>
-					"Trusted Devices"
-				</button>
-			</nav>
-
-			<div class="tab-content">
-				{move || {
-					match active_tab.get().as_ref() {
-						"trusted" => view! {
-							<div class="trusted-devices">
-								<p class="section-description">
-									"Devices that have been assigned a role and are trusted"
-								</p>
-
-								<Suspense fallback=|| view! { <div class="loading">"Loading devices..."</div> }>
-									{move || trusted_devices.get().map(|result| {
-										match result {
-											Ok(devices) => {
-												if devices.is_empty() {
-													view! {
-														<div class="no-devices">"No trusted devices found"</div>
-													}.into_any()
-												} else {
-													view! {
-														<DeviceTable
-															devices=devices.clone()
-															trust_action=trust_device_action
-															untrust_action=untrust_device_action
-															update_role_action=update_role_action
-														/>
-													}.into_any()
-												}
-											}
-											Err(e) => {
-												view! {
-													<div class="error">{format!("Error loading devices: {}", e)}</div>
-												}.into_any()
-											}
-										}
-									})}
-								</Suspense>
-							</div>
-						}.into_any(),
-						_ => view! {
-							<div class="untrusted-devices">
-								<p class="section-description">
-									"Devices that have connected but haven't been assigned a role yet"
-								</p>
-
-								<Suspense fallback=|| view! { <div class="loading">"Loading devices..."</div> }>
-									{move || untrusted_devices.get().map(|result| {
-										match result {
-											Ok(devices) => {
-												if devices.is_empty() {
-													view! {
-														<div class="no-devices">"No untrusted devices found"</div>
-													}.into_any()
-												} else {
-													view! {
-														<DeviceTable
-															devices=devices.clone()
-															trust_action=trust_device_action
-															untrust_action=untrust_device_action
-															update_role_action=update_role_action
-														/>
-													}.into_any()
-												}
-											}
-											Err(e) => {
-												view! {
-													<div class="error">{format!("Error loading devices: {}", e)}</div>
-												}.into_any()
-											}
-										}
-									})}
-								</Suspense>
-							</div>
-						}.into_any()
-					}
-				}}
-			</div>
-		</div>
-	}
-}
-
 #[component]
 pub fn DeviceTable(
 	devices: Vec<crate::fns::devices::DeviceInfo>,
-	trust_action: Action<(String, String), Result<(), commons_errors::AppError>>,
-	untrust_action: Action<String, Result<(), commons_errors::AppError>>,
-	update_role_action: Action<(String, String), Result<(), commons_errors::AppError>>,
+	#[prop(optional)] trust_action: Option<
+		Action<(String, String), Result<(), commons_errors::AppError>>,
+	>,
+	#[prop(optional)] untrust_action: Option<Action<String, Result<(), commons_errors::AppError>>>,
+	#[prop(optional)] update_role_action: Option<
+		Action<(String, String), Result<(), commons_errors::AppError>>,
+	>,
 ) -> impl IntoView {
 	view! {
 		<div class="device-table">
@@ -400,9 +156,9 @@ pub fn DeviceTable(
 #[component]
 pub fn DeviceRow(
 	device: crate::fns::devices::DeviceInfo,
-	trust_action: Action<(String, String), Result<(), commons_errors::AppError>>,
-	untrust_action: Action<String, Result<(), commons_errors::AppError>>,
-	update_role_action: Action<(String, String), Result<(), commons_errors::AppError>>,
+	trust_action: Option<Action<(String, String), Result<(), commons_errors::AppError>>>,
+	untrust_action: Option<Action<String, Result<(), commons_errors::AppError>>>,
+	update_role_action: Option<Action<(String, String), Result<(), commons_errors::AppError>>>,
 ) -> impl IntoView {
 	let (key_format, set_key_format) = signal("pem".to_string());
 	let (show_history, set_show_history) = signal(false);
@@ -581,7 +337,7 @@ pub fn DeviceRow(
 			</div>
 
 			<div class="device-actions">
-				{if device_role != "untrusted" {
+				{if let (Some(update_role_action), Some(untrust_action)) = (update_role_action, untrust_action) && device_role != "untrusted" {
 					view! {
 						<TrustedDeviceActions
 							device_id=device_id.clone()
@@ -594,7 +350,7 @@ pub fn DeviceRow(
 							untrust_action=untrust_action
 						/>
 					}.into_any()
-				} else {
+				} else if let Some(trust_action) = trust_action {
 					view! {
 						<UntrustedDeviceActions
 							device_id=device_id.clone()
@@ -603,6 +359,8 @@ pub fn DeviceRow(
 							trust_action=trust_action
 						/>
 					}.into_any()
+				} else {
+					().into_any()
 				}}
 
 				<button
@@ -666,7 +424,7 @@ pub fn DeviceRow(
 															</div>
 														}.into_any()
 													} else {
-														view! {}.into_any()
+														 ().into_any()
 													}
 												}}
 											</div>
@@ -677,7 +435,7 @@ pub fn DeviceRow(
 						</details>
 					}.into_any()
 				} else {
-					view! {}.into_any()
+					 ().into_any()
 				}
 			}}
 		</div>
@@ -715,107 +473,6 @@ pub fn ConnectionGroupRow(group: ConnectionGroup) -> impl IntoView {
 				}
 			})}
 		</div>
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-
-	fn create_test_connection(
-		id: &str,
-		ip: &str,
-		user_agent: Option<&str>,
-		time_offset: i32,
-	) -> crate::fns::devices::DeviceConnectionData {
-		crate::fns::devices::DeviceConnectionData {
-			id: id.to_string(),
-			created_at: format!("2024-01-01T12:{}:00Z", time_offset.abs()),
-			created_at_relative: format!("{}m ago", time_offset.abs()),
-			device_id: "test-device".to_string(),
-			ip: ip.to_string(),
-			user_agent: user_agent.map(|s| s.to_string()),
-		}
-	}
-
-	#[test]
-	fn test_group_consecutive_connections() {
-		let connections = vec![
-			create_test_connection("1", "192.168.1.1", Some("Chrome"), 1),
-			create_test_connection("2", "192.168.1.1", Some("Chrome"), 2),
-			create_test_connection("3", "192.168.1.1", Some("Chrome"), 3),
-			create_test_connection("4", "192.168.1.2", Some("Chrome"), 4),
-			create_test_connection("5", "192.168.1.1", Some("Chrome"), 5),
-			create_test_connection("6", "192.168.1.2", Some("Chrome"), 6),
-			create_test_connection("7", "192.168.1.2", Some("Chrome"), 7),
-			create_test_connection("8", "192.168.1.2", Some("Chrome"), 8),
-		];
-
-		let groups = group_consecutive_connections(connections);
-
-		assert_eq!(groups.len(), 4);
-
-		assert_eq!(groups[0].count, 3);
-		assert_eq!(groups[0].ip, "192.168.1.1");
-
-		assert_eq!(groups[1].count, 1);
-		assert_eq!(groups[1].ip, "192.168.1.2");
-
-		assert_eq!(groups[2].count, 1);
-		assert_eq!(groups[2].ip, "192.168.1.1");
-
-		assert_eq!(groups[3].count, 3);
-		assert_eq!(groups[3].ip, "192.168.1.2");
-	}
-
-	#[test]
-	fn test_group_different_user_agents() {
-		let connections = vec![
-			create_test_connection("1", "192.168.1.1", Some("Chrome"), 1),
-			create_test_connection("2", "192.168.1.1", Some("Firefox"), 2),
-			create_test_connection("3", "192.168.1.1", Some("Chrome"), 3),
-		];
-
-		let groups = group_consecutive_connections(connections);
-
-		assert_eq!(groups.len(), 3);
-		assert_eq!(groups[0].count, 1);
-		assert_eq!(groups[1].count, 1);
-		assert_eq!(groups[2].count, 1);
-	}
-
-	#[test]
-	fn test_group_empty_connections() {
-		let connections = vec![];
-		let groups = group_consecutive_connections(connections);
-		assert_eq!(groups.len(), 0);
-	}
-
-	#[test]
-	fn test_hashmap_deduplication() {
-		use std::collections::HashMap;
-
-		let mut connections_map = HashMap::new();
-
-		// Add initial connections
-		let conn1 = create_test_connection("1", "192.168.1.1", Some("Chrome"), 1);
-		let conn2 = create_test_connection("2", "192.168.1.2", Some("Firefox"), 2);
-		connections_map.insert(conn1.id.clone(), conn1);
-		connections_map.insert(conn2.id.clone(), conn2);
-		assert_eq!(connections_map.len(), 2);
-
-		// Add duplicate (same ID) - should replace, not add
-		let conn1_duplicate = create_test_connection("1", "192.168.1.1", Some("Chrome"), 1);
-		connections_map.insert(conn1_duplicate.id.clone(), conn1_duplicate);
-		assert_eq!(connections_map.len(), 2); // Still 2, not 3
-
-		// Convert to sorted vec for grouping (as done in frontend)
-		let mut connections_vec: Vec<_> = connections_map.values().cloned().collect();
-		connections_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-
-		assert_eq!(connections_vec.len(), 2);
-		assert!(connections_vec.iter().any(|c| c.id == "1"));
-		assert!(connections_vec.iter().any(|c| c.id == "2"));
 	}
 }
 
@@ -933,5 +590,106 @@ pub fn UntrustedDeviceActions(
 				{move || if trust_action.pending().get() { "Trusting..." } else { "Trust Device" }}
 			</button>
 		</div>
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn create_test_connection(
+		id: &str,
+		ip: &str,
+		user_agent: Option<&str>,
+		time_offset: i32,
+	) -> crate::fns::devices::DeviceConnectionData {
+		crate::fns::devices::DeviceConnectionData {
+			id: id.to_string(),
+			created_at: format!("2024-01-01T12:{}:00Z", time_offset.abs()),
+			created_at_relative: format!("{}m ago", time_offset.abs()),
+			device_id: "test-device".to_string(),
+			ip: ip.to_string(),
+			user_agent: user_agent.map(|s| s.to_string()),
+		}
+	}
+
+	#[test]
+	fn test_group_consecutive_connections() {
+		let connections = vec![
+			create_test_connection("1", "192.168.1.1", Some("Chrome"), 1),
+			create_test_connection("2", "192.168.1.1", Some("Chrome"), 2),
+			create_test_connection("3", "192.168.1.1", Some("Chrome"), 3),
+			create_test_connection("4", "192.168.1.2", Some("Chrome"), 4),
+			create_test_connection("5", "192.168.1.1", Some("Chrome"), 5),
+			create_test_connection("6", "192.168.1.2", Some("Chrome"), 6),
+			create_test_connection("7", "192.168.1.2", Some("Chrome"), 7),
+			create_test_connection("8", "192.168.1.2", Some("Chrome"), 8),
+		];
+
+		let groups = group_consecutive_connections(connections);
+
+		assert_eq!(groups.len(), 4);
+
+		assert_eq!(groups[0].count, 3);
+		assert_eq!(groups[0].ip, "192.168.1.1");
+
+		assert_eq!(groups[1].count, 1);
+		assert_eq!(groups[1].ip, "192.168.1.2");
+
+		assert_eq!(groups[2].count, 1);
+		assert_eq!(groups[2].ip, "192.168.1.1");
+
+		assert_eq!(groups[3].count, 3);
+		assert_eq!(groups[3].ip, "192.168.1.2");
+	}
+
+	#[test]
+	fn test_group_different_user_agents() {
+		let connections = vec![
+			create_test_connection("1", "192.168.1.1", Some("Chrome"), 1),
+			create_test_connection("2", "192.168.1.1", Some("Firefox"), 2),
+			create_test_connection("3", "192.168.1.1", Some("Chrome"), 3),
+		];
+
+		let groups = group_consecutive_connections(connections);
+
+		assert_eq!(groups.len(), 3);
+		assert_eq!(groups[0].count, 1);
+		assert_eq!(groups[1].count, 1);
+		assert_eq!(groups[2].count, 1);
+	}
+
+	#[test]
+	fn test_group_empty_connections() {
+		let connections = vec![];
+		let groups = group_consecutive_connections(connections);
+		assert_eq!(groups.len(), 0);
+	}
+
+	#[test]
+	fn test_hashmap_deduplication() {
+		use std::collections::HashMap;
+
+		let mut connections_map = HashMap::new();
+
+		// Add initial connections
+		let conn1 = create_test_connection("1", "192.168.1.1", Some("Chrome"), 1);
+		let conn2 = create_test_connection("2", "192.168.1.2", Some("Firefox"), 2);
+		connections_map.insert(conn1.id.clone(), conn1);
+		connections_map.insert(conn2.id.clone(), conn2);
+		assert_eq!(connections_map.len(), 2);
+
+		// Add duplicate (same ID) - should replace, not add
+		let conn1_duplicate = create_test_connection("1", "192.168.1.1", Some("Chrome"), 1);
+		connections_map.insert(conn1_duplicate.id.clone(), conn1_duplicate);
+		assert_eq!(connections_map.len(), 2); // Still 2, not 3
+
+		// Convert to sorted vec for grouping (as done in frontend)
+		let mut connections_vec: Vec<_> = connections_map.values().cloned().collect();
+		connections_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+		assert_eq!(connections_vec.len(), 2);
+		assert!(connections_vec.iter().any(|c| c.id == "1"));
+		assert!(connections_vec.iter().any(|c| c.id == "2"));
 	}
 }

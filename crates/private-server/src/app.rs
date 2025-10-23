@@ -1,9 +1,11 @@
 use leptos::prelude::*;
 use leptos_meta::{MetaTags, Stylesheet, Title, provide_meta_context};
 use leptos_router::{
-	components::{A, Redirect, Route, Router, Routes},
+	components::{A, ParentRoute, Redirect, Route, Router, Routes},
 	path,
 };
+
+use crate::components::toast::Toast;
 
 mod admins;
 mod devices;
@@ -20,7 +22,7 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
 				<meta name="viewport" content="width=device-width, initial-scale=1"/>
 				<Stylesheet id="main" href="/static/main.css" />
 				<AutoReload options=options.clone() />
-				<HydrationScripts options islands=true />
+				<HydrationScripts options />
 				<MetaTags/>
 				<Title text="Tamanu Meta" />
 			</head>
@@ -37,14 +39,20 @@ pub fn App() -> impl IntoView {
 		<div id="root">
 			<Router>
 				<GlobalNav />
-				<main>
-					<Routes fallback=|| view! { <Redirect path="/status" /> }>
-						<Route path=path!("") view=|| view! { <Redirect path="/status" /> } />
-						<Route path=path!("status") view=statuses::Page />
-						<Route path=path!("admins") view=admins::Page />
-						<Route path=path!("devices") view=devices::Page />
-					</Routes>
-				</main>
+				<Toast>
+					<main>
+						<Routes fallback=|| view! { <Redirect path="/status" /> }>
+							<Route path=path!("") view=|| view! { <Redirect path="/status" /> } />
+							<Route path=path!("status") view=statuses::Page />
+							<Route path=path!("admins") view=admins::Page />
+							 <ParentRoute path=path!("devices") view=devices::Page>
+								<Route path=path!("") view=devices::Search />
+								<Route path=path!("untrusted") view=devices::Untrusted />
+								<Route path=path!("trusted") view=devices::Trusted />
+							</ParentRoute>
+						</Routes>
+					</main>
+				</Toast>
 			</Router>
 		</div>
 	}
@@ -68,7 +76,7 @@ pub fn GlobalNav() -> impl IntoView {
 			</div>
 			<div class="nav-links">
 				<A href="/status">"Status"</A>
-				<Suspense fallback=|| view! {}>
+				<Suspense>
 					{move || {
 						is_admin.get().and_then(|result| {
 							if result.unwrap_or(false) {
@@ -82,7 +90,7 @@ pub fn GlobalNav() -> impl IntoView {
 						})
 					}}
 				</Suspense>
-				<Suspense fallback=|| view! {}>
+				<Suspense>
 					{move || {
 						public_url.get().and_then(|result| {
 							if let Ok(Some(url)) = result {

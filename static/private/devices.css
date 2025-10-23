@@ -82,50 +82,6 @@
 		}
 	}
 
-	.device-tabs {
-		.tab-nav {
-			display: flex;
-			gap: 0;
-			margin-bottom: 2em;
-			border-bottom: 2px solid var(--color-border-light);
-			background: var(--color-bg-lighter);
-			border-radius: 8px 8px 0 0;
-
-			.tab-button {
-				background: none;
-				border: none;
-				padding: 1em 2em;
-				font-size: 1em;
-				font-weight: 500;
-				color: var(--color-text-muted);
-				cursor: pointer;
-				transition: all 0.2s;
-				border-radius: 8px 8px 0 0;
-				position: relative;
-
-				&:hover {
-					background: var(--color-bg-medium);
-					color: var(--color-text-secondary);
-				}
-
-				&.active {
-					background: var(--color-bg-white);
-					color: var(--color-text-primary);
-					border-bottom: 2px solid var(--color-primary);
-					margin-bottom: -2px;
-				}
-			}
-		}
-
-		.tab-content {
-			.section-description {
-				color: var(--color-text-light);
-				margin-bottom: 1.5em;
-				font-size: 1em;
-			}
-		}
-	}
-
 	.untrusted-devices,
 	.trusted-devices {
 		h2 {

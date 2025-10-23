@@ -1,7 +1,7 @@
 use crate::fns::statuses::summary;
 use leptos::prelude::*;
 
-#[island]
+#[component]
 pub fn Status() -> impl IntoView {
 	let (status_list_r, status_list_w) = signal(0);
 	Effect::new(move |_| status_list_w.set(1));

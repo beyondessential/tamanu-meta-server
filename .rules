@@ -63,6 +63,14 @@ mod ssr {
 - For database tests, use direct model functions instead of HTTP endpoints
 - Always include `use database::ModelName;` imports in test files
 - Do not include `_test` suffix or prefix in test filenames in `tests/` directory
+- Required environment variables for private-server tests:
+  - `LEPTOS_OUTPUT_NAME=private-server`
+  - `SERVER_FN_MOD_PATH=true`
+  - `DISABLE_SERVER_FN_HASH=true`
+- Calling Leptos Server Functions in private-server tests:
+  - Server functions are exposed at `/api/private_server/fns/<module>/<function>` (e.g., `/api/private_server/fns/statuses/server_ids`)
+  - Use `.form(&[("param_name", "param_value")])` for parameters (not `.json()`)
+  - Use `.post()` without body for functions with no parameters
 
 ## Frontend Development
 - Pages go in `crates/private-server/src/app/`
