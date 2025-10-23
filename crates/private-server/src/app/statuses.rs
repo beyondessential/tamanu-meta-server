@@ -12,7 +12,6 @@ fn TimeAgo(timestamp: String) -> impl IntoView {
 
 	#[cfg(not(feature = "ssr"))]
 	{
-		// Parse timestamp using JavaScript Date API
 		let parsed_timestamp_ms = {
 			if let Some(_window) = web_sys::window() {
 				let js_date = web_sys::js_sys::Date::new(&timestamp.clone().into());
@@ -27,16 +26,13 @@ fn TimeAgo(timestamp: String) -> impl IntoView {
 			}
 		};
 
-		// Function to format the duration
 		let format_duration = move || -> String {
 			if let Some(timestamp_ms) = parsed_timestamp_ms {
 				let now_ms = web_sys::js_sys::Date::now();
 				let diff_ms = now_ms - timestamp_ms;
 				let total_seconds = (diff_ms / 1000.0).abs() as i64;
 
-				if total_seconds < 60 {
-					format!("{}s", total_seconds)
-				} else if total_seconds < 3600 {
+				if total_seconds < 3600 {
 					let minutes = total_seconds / 60;
 					format!("{}m", minutes)
 				} else if total_seconds < 86400 {
