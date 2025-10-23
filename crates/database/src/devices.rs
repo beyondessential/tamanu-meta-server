@@ -263,8 +263,8 @@ impl Device {
 			let begin_marker = "-----BEGIN";
 			let end_marker = "-----END";
 
-			if let Some(begin_pos) = query.find(begin_marker) {
-				if let Some(end_pos) = query.find(end_marker) {
+			if let Some(begin_pos) = query.find(begin_marker)
+				&& let Some(end_pos) = query.find(end_marker) {
 					// Get the content between the markers
 					// Find the end of the BEGIN header line
 					let begin_header_end = if let Some(newline_pos) = query[begin_pos..].find('\n')
@@ -326,7 +326,6 @@ impl Device {
 						}
 					}
 				}
-			}
 		}
 
 		// Strategy 3: Base64 string search by encoding PostgreSQL binary data

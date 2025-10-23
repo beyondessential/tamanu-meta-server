@@ -37,7 +37,7 @@ pub fn Search() -> impl IntoView {
 				{move || {
 					let query = search_query.get();
 					if query.trim().is_empty() {
-						view! {}.into_any()
+						().into_any()
 					} else {
 						search_results.get().map(|result| {
 							match result {
@@ -61,7 +61,7 @@ pub fn Search() -> impl IntoView {
 									}.into_any()
 								}
 							}
-						}).unwrap_or_else(|| view! {}.into_any())
+						}).unwrap_or_else(|| ().into_any())
 					}
 				}}
 			</Suspense>

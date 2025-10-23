@@ -76,7 +76,7 @@ pub fn GlobalNav() -> impl IntoView {
 			</div>
 			<div class="nav-links">
 				<A href="/status">"Status"</A>
-				<Suspense fallback=|| view! {}>
+				<Suspense>
 					{move || {
 						is_admin.get().and_then(|result| {
 							if result.unwrap_or(false) {
@@ -90,7 +90,7 @@ pub fn GlobalNav() -> impl IntoView {
 						})
 					}}
 				</Suspense>
-				<Suspense fallback=|| view! {}>
+				<Suspense>
 					{move || {
 						public_url.get().and_then(|result| {
 							if let Ok(Some(url)) = result {

@@ -360,7 +360,7 @@ pub fn DeviceRow(
 						/>
 					}.into_any()
 				} else {
-					view! {}.into_any()
+					().into_any()
 				}}
 
 				<button
@@ -424,7 +424,7 @@ pub fn DeviceRow(
 															</div>
 														}.into_any()
 													} else {
-														view! {}.into_any()
+														 ().into_any()
 													}
 												}}
 											</div>
@@ -435,7 +435,7 @@ pub fn DeviceRow(
 						</details>
 					}.into_any()
 				} else {
-					view! {}.into_any()
+					 ().into_any()
 				}
 			}}
 		</div>

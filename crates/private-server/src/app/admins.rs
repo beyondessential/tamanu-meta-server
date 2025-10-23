@@ -148,7 +148,7 @@ pub fn AdminManagement() -> impl IntoView {
 				if !msg.is_empty() {
 					view! { <div class="message">{msg}</div> }.into_any()
 				} else {
-					view! {}.into_any()
+					().into_any()
 				}
 			}}
 		</div>
