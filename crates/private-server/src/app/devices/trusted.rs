@@ -1,6 +1,7 @@
 use leptos::prelude::*;
 
 use super::DeviceList;
+use crate::components::PaginatedList;
 
 #[component]
 pub fn Trusted() -> impl IntoView {
@@ -33,39 +34,14 @@ pub fn Trusted() -> impl IntoView {
 								}.into_any()
 							} else {
 								view! {
-									<div>
+									<PaginatedList
+										page=page
+										set_page=set_page
+										total_count=Signal::derive(move || total_count.get().and_then(|r| r.ok()))
+										page_size=PAGE_SIZE
+									>
 										<DeviceList devices=devices.clone() />
-										<div class="pagination">
-											<button
-												class="pagination-btn"
-												on:click=move |_| set_page.update(|p| *p = (*p).saturating_sub(1))
-												disabled=move || page.get() == 0
-											>
-												"← Previous"
-											</button>
-											<span class="pagination-info">
-												{move || {
-													total_count.get().and_then(|r| r.ok()).map(|total| {
-														let current_page = page.get() + 1;
-														let total_pages = ((total as f64) / (PAGE_SIZE as f64)).ceil() as i64;
-														format!("Page {} of {}", current_page, total_pages.max(1))
-													}).unwrap_or_else(|| "Loading...".to_string())
-												}}
-											</span>
-											<button
-												class="pagination-btn"
-												on:click=move |_| set_page.update(|p| *p += 1)
-												disabled=move || {
-													total_count.get()
-														.and_then(|r| r.ok())
-														.map(|total| (page.get() + 1) * PAGE_SIZE >= total)
-														.unwrap_or(true)
-												}
-											>
-												"Next →"
-											</button>
-										</div>
-									</div>
+									</PaginatedList>
 								}.into_any()
 							}
 						}
