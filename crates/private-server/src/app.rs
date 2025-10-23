@@ -14,7 +14,6 @@ mod status;
 mod statuses;
 
 pub fn shell(options: LeptosOptions) -> impl IntoView {
-	provide_meta_context();
 	view! {
 		<!DOCTYPE html>
 		<html lang="en">
@@ -36,6 +35,7 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
 
 #[component]
 pub fn App() -> impl IntoView {
+	provide_meta_context();
 	view! {
 		<div id="root">
 			<Router>

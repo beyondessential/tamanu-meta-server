@@ -4,6 +4,7 @@ use leptos_meta::Stylesheet;
 use leptos_router::hooks::use_params_map;
 
 use crate::app::devices::DeviceListItem;
+use crate::components::TimeAgo;
 use crate::fns::statuses::server_detail;
 
 #[component]
@@ -77,7 +78,10 @@ pub fn Page() -> impl IntoView {
 													<div class="info-grid">
 														<div class="info-item">
 															<span class="info-label">"Reported At"</span>
-															<span class="info-value">{status.created_at.clone()}</span>
+															<span class="info-value" title={status.created_at.clone()}>
+																<TimeAgo timestamp={status.created_at.clone()} />
+																" ago"
+															</span>
 														</div>
 														{status.platform.as_ref().map(|p| {
 															let p = p.clone();
