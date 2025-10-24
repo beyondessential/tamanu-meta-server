@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
+## [5.3.3](https://github.com/beyondessential/tamanu-meta-server/compare/v5.3.2..v5.3.3) - 2025-10-24
+
+
+- **Repo:** Release - ([0681ecb](https://github.com/beyondessential/tamanu-meta-server/commit/0681ecb3691bdf16a6256006a5cee9afedd343bd))
+
+---
 ## [5.3.2](https://github.com/beyondessential/tamanu-meta-server/compare/v5.3.1..v5.3.2) - 2025-10-24
 
 
