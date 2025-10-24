@@ -84,6 +84,17 @@ pub async fn server_detail(server_id: String) -> Result<ServerDetailData> {
 	ssr::server_detail(server_id).await
 }
 
+#[server]
+pub async fn update_server(
+	server_id: String,
+	name: Option<String>,
+	host: Option<String>,
+	rank: Option<String>,
+	device_id: Option<String>,
+) -> Result<ServerDetailsData> {
+	ssr::update_server(server_id, name, host, rank, device_id).await
+}
+
 #[cfg(feature = "ssr")]
 mod ssr {
 	use super::*;
@@ -413,5 +424,72 @@ mod ssr {
 				}
 			}),
 		}
+	}
+
+	pub async fn update_server(
+		server_id: String,
+		name: Option<String>,
+		host: Option<String>,
+		rank: Option<String>,
+		device_id: Option<String>,
+	) -> Result<super::ServerDetailsData> {
+		use database::{
+			server_rank::ServerRank, servers::PartialServer, servers::Server, url_field::UrlField,
+		};
+
+		let db = crate::fns::commons::admin_guard().await?;
+		let mut conn = db.get().await?;
+
+		let id = server_id
+			.parse::<Uuid>()
+			.map_err(|e| AppError::custom(format!("Invalid server ID: {}", e)))?;
+
+		let parsed_host = if let Some(host_str) = host {
+			Some(UrlField(host_str.parse().map_err(|e| {
+				AppError::custom(format!("Invalid URL: {}", e))
+			})?))
+		} else {
+			None
+		};
+
+		let parsed_rank = if let Some(rank_str) = rank {
+			Some(
+				ServerRank::try_from(rank_str)
+					.map_err(|_| AppError::custom("Invalid server rank"))?,
+			)
+		} else {
+			None
+		};
+
+		let parsed_device_id = if let Some(device_id_str) = device_id {
+			if device_id_str.is_empty() {
+				Some(None)
+			} else {
+				Some(Some(device_id_str.parse::<Uuid>().map_err(|e| {
+					AppError::custom(format!("Invalid device ID: {}", e))
+				})?))
+			}
+		} else {
+			None
+		};
+
+		let update_data = PartialServer {
+			id,
+			name,
+			kind: None,
+			rank: parsed_rank,
+			host: parsed_host,
+			device_id: parsed_device_id,
+		};
+
+		let server = Server::update(&mut conn, id, update_data).await?;
+
+		Ok(super::ServerDetailsData {
+			id: server.id.to_string(),
+			name: server.name.unwrap_or_default(),
+			kind: server.kind.to_string(),
+			rank: server.rank.map_or("unknown".to_string(), |r| r.to_string()),
+			host: server.host.0.to_string(),
+		})
 	}
 }

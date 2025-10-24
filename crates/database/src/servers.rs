@@ -84,6 +84,22 @@ impl Server {
 			.await
 			.map_err(AppError::from)
 	}
+
+	pub async fn update(
+		db: &mut AsyncPgConnection,
+		server_id: Uuid,
+		updates: PartialServer,
+	) -> Result<Self> {
+		use crate::views::ordered_servers::dsl;
+
+		diesel::update(dsl::ordered_servers.filter(dsl::id.eq(server_id)))
+			.set(updates)
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+
+		Self::get_by_id(db, server_id).await
+	}
 }
 
 #[test]
@@ -144,4 +160,5 @@ pub struct PartialServer {
 	pub rank: Option<ServerRank>,
 	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub host: Option<UrlField>,
+	pub device_id: Option<Option<Uuid>>,
 }

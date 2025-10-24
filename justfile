@@ -98,10 +98,10 @@ install-deps:
 	cargo binstall -y cargo-nextest cargo-leptos leptosfmt cargo-release git-cliff watchexec-cli diesel_cli
 
 # Download database from Kubernetes
-download-db dbname namespace="tamanu-meta-dev" output="app.dump":
+download-db dbname namespace="tamanu-meta-dev" pod="meta-db-1" output="app.dump":
 	dropdb {{dbname}} || true
 	createdb {{dbname}} || true
-	kubectl exec -n {{namespace}} meta-db-1 -c postgres -- pg_dump -Fc -d app > {{output}}
+	kubectl exec -n {{namespace}} {{pod}} -c postgres -- pg_dump -Fc -d app > {{output}}
 	pg_restore --no-owner --role=$USER -d {{dbname}} --verbose < {{output}}
 
 # Development cycle: format, lint, test
