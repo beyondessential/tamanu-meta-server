@@ -20,7 +20,6 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
 			<head>
 				<meta charset="utf-8" />
 				<meta name="viewport" content="width=device-width, initial-scale=1" />
-				<Stylesheet id="css-main" href="/static/main.css" />
 				<AutoReload options=options.clone() />
 				<HydrationScripts options />
 				<MetaTags />
@@ -29,6 +28,12 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
 			<body>
 				<App />
 			</body>
+			// There's a bug in leptos where the stylesheets are not being
+			// replaced correctly when client-side navigation occurs.
+			// Putting the main stylesheet at the bottom works around this
+			// by ensuring that the dynamic stylesheets (from the page) are
+			// swapped, but the main stylesheet is not.
+			<Stylesheet id="css-main" href="/static/main.css" />
 		</html>
 	}
 }
