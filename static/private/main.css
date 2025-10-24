@@ -55,6 +55,7 @@
 	--color-error-confirm-hover: oklch(0.5 0.15 20);
 
 	/* Warning/Orange colors */
+	--color-warning: oklch(0.7 0.35 90);
 	--color-warning-bg: oklch(0.85 0.15 90);
 	--color-warning-text: oklch(0.2 0.1 240);
 	--color-warning-light-bg: oklch(0.9 0.1 85);
@@ -356,6 +357,43 @@ main {
 		font-weight: 500;
 		min-width: 120px;
 		text-align: center;
+	}
+}
+
+.version-display {
+	display: flex;
+	align-items: center;
+	gap: 0.5em;
+
+	.version-text {
+		font-family: monospace, monospace;
+	}
+
+	.version-indicator {
+		width: 0.6em;
+		height: 0.6em;
+		display: inline-block;
+		flex-shrink: 0;
+
+		&.version-up-to-date {
+			background: var(--color-success-status);
+		}
+
+		&.version-okay {
+			background: var(--color-primary);
+		}
+
+		&.version-outdated {
+			background: var(--color-warning);
+		}
+
+		&.version-very-outdated {
+			background: var(--color-error);
+		}
+
+		&.version-unknown {
+			background: var(--color-text-light);
+		}
 	}
 }
 

@@ -51,6 +51,7 @@ pub struct ServerLastStatusData {
 	pub id: String,
 	pub created_at: String,
 	pub version: Option<String>,
+	pub version_distance: Option<i32>,
 	pub platform: Option<String>,
 	pub postgres: Option<String>,
 	pub nodejs: Option<String>,
@@ -108,9 +109,10 @@ mod ssr {
 	use axum::extract::State;
 	use chrono::{TimeDelta, Utc};
 	use commons_errors::{AppError, Result};
+
 	use database::{
 		Db, Device, devices::DeviceConnection, server_rank::ServerRank, servers::PartialServer,
-		servers::Server, statuses::Status, url_field::UrlField,
+		servers::Server, statuses::Status, url_field::UrlField, versions::Version,
 	};
 	use leptos::prelude::expect_context;
 	use leptos_axum::extract_with_state;
@@ -304,10 +306,39 @@ mod ssr {
 						.map(ToOwned::to_owned)
 				});
 
+			// Compute version distance
+			let version_distance = if let Some(ref v) = st.version {
+				// Get all published versions and compute distance from latest
+				let all_versions = Version::get_all(&mut conn).await.ok();
+				all_versions.and_then(|versions| {
+					let published_versions: Vec<_> =
+						versions.into_iter().filter(|ver| ver.published).collect();
+					if published_versions.is_empty() {
+						return None;
+					}
+
+					let latest = published_versions.first()?;
+					let latest_semver = latest.as_semver();
+					let current_semver = &v.0;
+
+					// Calculate distance: 1000 + minor diff if major differs, else just minor diff
+					let distance = if latest_semver.major != current_semver.major {
+						1000 + (latest_semver.minor as i32 - current_semver.minor as i32).abs()
+					} else {
+						(latest_semver.minor as i32 - current_semver.minor as i32).abs()
+					};
+
+					Some(distance)
+				})
+			} else {
+				None
+			};
+
 			Some(super::ServerLastStatusData {
 				id: st.id.to_string(),
 				created_at: st.created_at.to_rfc3339(),
 				version: st.version.as_ref().map(|v| v.to_string()),
+				version_distance,
 				platform,
 				postgres,
 				nodejs,
@@ -391,10 +422,40 @@ mod ssr {
 								.map(ToOwned::to_owned)
 						});
 
+					// Compute version distance
+					let version_distance = if let Some(ref v) = st.version {
+						// Get all published versions and compute distance from latest
+						let all_versions = Version::get_all(&mut conn).await.ok();
+						all_versions.and_then(|versions| {
+							let published_versions: Vec<_> =
+								versions.into_iter().filter(|ver| ver.published).collect();
+							if published_versions.is_empty() {
+								return None;
+							}
+
+							let latest = published_versions.first()?;
+							let latest_semver = latest.as_semver();
+							let current_semver = &v.0;
+
+							// Calculate distance: 1000 + minor diff if major differs, else just minor diff
+							let distance = if latest_semver.major != current_semver.major {
+								1000 + (latest_semver.minor as i32 - current_semver.minor as i32)
+									.abs()
+							} else {
+								(latest_semver.minor as i32 - current_semver.minor as i32).abs()
+							};
+
+							Some(distance)
+						})
+					} else {
+						None
+					};
+
 					Some(super::ServerLastStatusData {
 						id: st.id.to_string(),
 						created_at: st.created_at.to_rfc3339(),
 						version: st.version.as_ref().map(|v| v.to_string()),
+						version_distance,
 						platform,
 						postgres,
 						nodejs,

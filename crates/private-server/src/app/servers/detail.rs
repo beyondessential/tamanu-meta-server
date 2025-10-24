@@ -6,12 +6,23 @@ use leptos_router::components::Redirect;
 use leptos_router::hooks::use_params_map;
 
 use crate::app::devices::DeviceListItem;
-use crate::components::TimeAgo;
+use crate::components::{TimeAgo, VersionIndicator};
 use crate::fns::devices::DeviceInfo;
 use crate::fns::servers::{
 	ChildServerData, ServerDetailData, ServerLastStatusData, assign_parent_server,
 	search_central_servers, server_detail, update_server,
 };
+
+fn is_admin_resource() -> Resource<bool> {
+	Resource::new(
+		|| (),
+		|_| async {
+			crate::fns::commons::is_current_user_admin()
+				.await
+				.unwrap_or(false)
+		},
+	)
+}
 
 #[component]
 pub fn Detail() -> impl IntoView {
@@ -28,12 +39,7 @@ pub fn Detail() -> impl IntoView {
 	let edit_device_id = RwSignal::new(String::new());
 	let edit_parent_id = RwSignal::new(String::new());
 
-	let is_admin = Resource::new(
-		|| (),
-		|_| async { crate::fns::commons::is_current_user_admin().await },
-	)
-	.map(|result| *result.as_ref().ok().unwrap_or(&false))
-	.unwrap_or(false);
+	let is_admin = is_admin_resource();
 
 	let update_action = Action::new(
 		move |(name, host, rank, device_id, parent_id): &(
@@ -72,7 +78,7 @@ pub fn Detail() -> impl IntoView {
 								if data.server.kind != "central" && !is_editing.get() {
 									if let Some(parent_id) = &data.server.parent_server_id {
 										// Check if user is admin before redirecting
-										if !is_admin {
+										if !is_admin.get().unwrap_or(false) {
 											return view! {
 												<Redirect path={format!("/servers/{}", parent_id)} />
 											}.into_any();
@@ -110,7 +116,7 @@ pub fn Detail() -> impl IntoView {
 fn ServerDetailView(
 	data: ServerDetailData,
 	is_editing: RwSignal<bool>,
-	is_admin: bool,
+	is_admin: Resource<bool>,
 	edit_name: RwSignal<String>,
 	edit_host: RwSignal<String>,
 	edit_rank: RwSignal<String>,
@@ -244,18 +250,13 @@ fn PageHeader(
 	let rank_clone = server_rank.clone();
 	let device_id_clone = device_id_str.clone();
 
-	let is_admin = Resource::new(
-		|| (),
-		|_| async { crate::fns::commons::is_current_user_admin().await },
-	)
-	.map(|result| *result.as_ref().ok().unwrap_or(&false))
-	.unwrap_or(false);
+	let is_admin = is_admin_resource();
 
 	view! {
 		<div class="page-header">
 			<Suspense>
 				{move || {
-					if is_admin && !is_editing.get() {
+					if is_admin.get().unwrap_or(false) && !is_editing.get() {
 						let name = name_clone.clone();
 						let host = host_clone.clone();
 						let rank = rank_clone.clone();
@@ -503,10 +504,14 @@ fn StatusSection(status: ServerLastStatusData) -> impl IntoView {
 				})}
 				{status.version.as_ref().map(|v| {
 					let v = v.clone();
+					let distance = status.version_distance;
+
 					view! {
 						<div class:info-item class:version>
 							<span class="info-label">"Tamanu"</span>
-							<span class:info-value class:monospace>{v}</span>
+							<span class:info-value class:monospace>
+								<VersionIndicator version={v} distance={distance} />
+							</span>
 						</div>
 					}
 				})}
@@ -548,7 +553,10 @@ fn StatusSection(status: ServerLastStatusData) -> impl IntoView {
 }
 
 #[component]
-fn ChildServersSection(child_servers: Vec<ChildServerData>, is_admin: bool) -> impl IntoView {
+fn ChildServersSection(
+	child_servers: Vec<ChildServerData>,
+	is_admin: Resource<bool>,
+) -> impl IntoView {
 	view! {
 		<section class="detail-section">
 			<h2>"Facility servers (" {child_servers.len()} ")"</h2>
@@ -564,7 +572,7 @@ fn ChildServersSection(child_servers: Vec<ChildServerData>, is_admin: bool) -> i
 }
 
 #[component]
-fn ChildServerCard(child: ChildServerData, is_admin: bool) -> impl IntoView {
+fn ChildServerCard(child: ChildServerData, is_admin: Resource<bool>) -> impl IntoView {
 	view! {
 		<div class="child-server-card">
 			<div class="child-server-header">
@@ -574,7 +582,7 @@ fn ChildServerCard(child: ChildServerData, is_admin: bool) -> impl IntoView {
 				</a>
 				<Suspense>
 					{move || {
-						if is_admin {
+						if is_admin.get().unwrap_or(false) {
 							Some(view! {
 								<A class:edit-button href={format!("/servers/{}/edit", child.id)}>
 									"Edit"
@@ -667,12 +675,7 @@ fn AssignParentSection(server_id: String) -> impl IntoView {
 	let server_id_clone = server_id.clone();
 	let server_id_clone2 = server_id.clone();
 
-	let is_admin = Resource::new(
-		|| (),
-		|_| async { crate::fns::commons::is_current_user_admin().await },
-	)
-	.map(|result| *result.as_ref().ok().unwrap_or(&false))
-	.unwrap_or(false);
+	let is_admin = is_admin_resource();
 
 	let detail_resource = Resource::new(
 		move || server_id_clone.clone(),
@@ -722,7 +725,7 @@ fn AssignParentSection(server_id: String) -> impl IntoView {
 		<section class="detail-section">
 			<Suspense>
 				{move || {
-					if is_admin {
+					if is_admin.get().unwrap_or(false) {
 							Some(view! {
 								<>
 									<h2>"Assign Parent Server"</h2>

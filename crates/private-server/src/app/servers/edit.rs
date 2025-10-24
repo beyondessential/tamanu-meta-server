@@ -191,7 +191,7 @@ fn EditView(
 			{if let Some(parent_id) = server.parent_server_id.as_ref() {
 				view! { <a href={format!("/servers/{parent_id}")} class="back-link">"← Back to central"</a> }
 			} else {
-				view! { <a href="/servers/facilities" class="back-link">"← Back to list"</a> }
+				view! { <a href="/servers/facilities".to_string() class="back-link">"← Back to list"</a> }
 			}}
 				<h1>"Edit " {server.name.clone()}</h1>
 			</div>
