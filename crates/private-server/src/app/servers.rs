@@ -53,8 +53,15 @@ pub fn ListPage() -> impl IntoView {
 
 #[component]
 fn ServerCard(server: ServerListItem) -> impl IntoView {
+	let is_local = server.host.contains("localhost") || server.host.contains(".local");
+	let card_class = if is_local {
+		"server-card local-server"
+	} else {
+		"server-card"
+	};
+
 	view! {
-		<a href={format!("/servers/{}", server.id)} class="server-card">
+		<a href={format!("/servers/{}", server.id)} class={card_class}>
 			<div class="server-card-header">
 				<h3>{server.name.clone().unwrap_or_else(|| "(unnamed)".to_string())}</h3>
 				{server.rank.as_ref().map(|rank| {

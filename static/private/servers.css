@@ -35,6 +35,15 @@
 			box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 			transform: translateY(-2px);
 		}
+
+		&.local-server {
+			opacity: 0.5;
+			background: var(--color-bg-light);
+
+			&:hover {
+				opacity: 0.6;
+			}
+		}
 	}
 
 	.server-card-header {
