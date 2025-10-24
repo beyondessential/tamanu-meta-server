@@ -53,6 +53,7 @@ pub fn App() -> impl IntoView {
 							<ParentRoute path=path!("servers") view=servers::Page>
 								<Route path=path!("") view=servers::Centrals />
 								<Route path=path!("facilities") view=servers::Facilities />
+								<Route path=path!(":id/edit") view=servers::Edit />
 								<Route path=path!(":id") view=servers::Detail />
 							</ParentRoute>
 							<Route path=path!("admins") view=admins::Page />

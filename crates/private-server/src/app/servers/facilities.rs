@@ -93,36 +93,59 @@ fn ServerCard(server: ServerListItem) -> impl IntoView {
 		"server-card"
 	};
 
+	let server_id = server.id.clone();
+	let is_admin = Resource::new(
+		|| (),
+		|_| async { crate::fns::commons::is_current_user_admin().await },
+	);
+
 	view! {
-		<a href={format!("/servers/{}", server.id)} class={card_class}>
-			<div class="server-card-header">
-				<h3>{server.name.clone().unwrap_or_else(|| "(unnamed)".to_string())}</h3>
-				{server.rank.as_ref().map(|rank| {
-					let rank = rank.clone();
-					view! {
-						<span class="server-rank">{rank}</span>
-					}
-				})}
-			</div>
-			<div class="server-card-body">
-				<div class="server-info">
-					<span class="label">"Kind:"</span>
-					<span class="value">{server.kind}</span>
+		<div class={card_class}>
+			<a href={format!("/servers/{}", server.id)} class="server-card-link">
+				<div class="server-card-header">
+					<h3>{server.name.clone().unwrap_or_else(|| "(unnamed)".to_string())}</h3>
+					{server.rank.as_ref().map(|rank| {
+						let rank = rank.clone();
+						view! {
+							<span class="server-rank">{rank}</span>
+						}
+					})}
 				</div>
-				<div class="server-info">
-					<span class="label">"Host:"</span>
-					<span class="value host">{server.host}</span>
+				<div class="server-card-body">
+					<div class="server-info">
+						<span class="label">"Kind:"</span>
+						<span class="value">{server.kind}</span>
+					</div>
+					<div class="server-info">
+						<span class="label">"Host:"</span>
+						<span class="value host">{server.host}</span>
+					</div>
+					{server.parent_server_name.as_ref().map(|parent_name| {
+						let parent_name = parent_name.clone();
+						view! {
+							<div class="server-info">
+								<span class="label">"Parent:"</span>
+								<span class="value">{parent_name}</span>
+							</div>
+						}
+					})}
 				</div>
-				{server.parent_server_name.as_ref().map(|parent_name| {
-					let parent_name = parent_name.clone();
-					view! {
-						<div class="server-info">
-							<span class="label">"Parent:"</span>
-							<span class="value">{parent_name}</span>
-						</div>
-					}
-				})}
-			</div>
-		</a>
+			</a>
+			<Suspense>
+				{move || {
+					is_admin.get().and_then(|result| {
+						if result.ok().unwrap_or(false) {
+							Some(view! {
+								<a href={format!("/servers/{}/edit", server_id)} class="edit-button-link">
+									<button class="edit-button">"Edit"</button>
+								</a>
+							})
+						} else {
+							None
+						}
+					})
+				}}
+			</Suspense>
+		</div>
 	}
 }

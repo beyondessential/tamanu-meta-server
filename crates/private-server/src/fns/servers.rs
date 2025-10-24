@@ -42,6 +42,7 @@ pub struct ChildServerData {
 	pub host: String,
 	pub up: String,
 	pub last_status: Option<ServerLastStatusData>,
+	pub device_info: Option<super::devices::DeviceInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -83,8 +84,9 @@ pub async fn update_server(
 	host: Option<String>,
 	rank: Option<String>,
 	device_id: Option<String>,
+	parent_id: Option<String>,
 ) -> Result<ServerDetailsData> {
-	ssr::update_server(server_id, name, host, rank, device_id).await
+	ssr::update_server(server_id, name, host, rank, device_id, parent_id).await
 }
 
 #[server]
@@ -321,6 +323,13 @@ mod ssr {
 			let mut child_data = Vec::new();
 
 			for child in children {
+				let child_device_info = if let Some(device_id) = child.device_id {
+					let device_with_info = Device::get_with_info(&mut conn, device_id).await?;
+					Some(convert_device_with_info_to_device_info(device_with_info))
+				} else {
+					None
+				};
+
 				let child_status = Status::latest_for_server(&mut conn, child.id).await?;
 				let child_up = child_status.as_ref().map_or("gone".into(), |st| {
 					let since = st.created_at.signed_duration_since(Utc::now()).abs();
@@ -397,6 +406,7 @@ mod ssr {
 					host: child.host.0.to_string(),
 					up: child_up,
 					last_status: child_last_status,
+					device_info: child_device_info,
 				});
 			}
 			child_data
@@ -419,6 +429,7 @@ mod ssr {
 		host: Option<String>,
 		rank: Option<String>,
 		device_id: Option<String>,
+		parent_id: Option<String>,
 	) -> Result<super::ServerDetailsData> {
 		let db = crate::fns::commons::admin_guard().await?;
 		let mut conn = db.get().await?;
@@ -456,6 +467,26 @@ mod ssr {
 			None
 		};
 
+		let parsed_parent_id = if let Some(parent_id_str) = parent_id {
+			if parent_id_str.is_empty() {
+				Some(None)
+			} else {
+				let parent_uuid = parent_id_str
+					.parse::<Uuid>()
+					.map_err(|e| AppError::custom(format!("Invalid parent server ID: {}", e)))?;
+
+				// Verify parent is a central server
+				let parent = Server::get_by_id(&mut conn, parent_uuid).await?;
+				if parent.kind != database::server_kind::ServerKind::Central {
+					return Err(AppError::custom("Parent server must be of kind 'central'"));
+				}
+
+				Some(Some(parent_uuid))
+			}
+		} else {
+			None
+		};
+
 		let update_data = PartialServer {
 			id,
 			name,
@@ -463,7 +494,7 @@ mod ssr {
 			rank: parsed_rank,
 			host: parsed_host,
 			device_id: parsed_device_id,
-			parent_server_id: None,
+			parent_server_id: parsed_parent_id,
 		};
 
 		let server = Server::update(&mut conn, id, update_data).await?;

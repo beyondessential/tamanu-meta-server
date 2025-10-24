@@ -6,10 +6,12 @@ use crate::components::SubTabs;
 
 mod centrals;
 mod detail;
+mod edit;
 mod facilities;
 
 pub use centrals::Centrals;
 pub use detail::Detail;
+pub use edit::Edit;
 pub use facilities::Facilities;
 
 #[component]

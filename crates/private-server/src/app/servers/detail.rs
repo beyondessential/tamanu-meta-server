@@ -25,9 +25,16 @@ pub fn Detail() -> impl IntoView {
 	let edit_host = RwSignal::new(String::new());
 	let edit_rank = RwSignal::new(String::new());
 	let edit_device_id = RwSignal::new(String::new());
+	let edit_parent_id = RwSignal::new(String::new());
+
+	let is_admin = Resource::new(
+		|| (),
+		|_| async { crate::fns::commons::is_current_user_admin().await },
+	);
 
 	let update_action = Action::new(
-		move |(name, host, rank, device_id): &(
+		move |(name, host, rank, device_id, parent_id): &(
+			Option<String>,
 			Option<String>,
 			Option<String>,
 			Option<String>,
@@ -37,9 +44,10 @@ pub fn Detail() -> impl IntoView {
 			let host = host.clone();
 			let rank = rank.clone();
 			let device_id = device_id.clone();
+			let parent_id = parent_id.clone();
 			let id = server_id();
 			async move {
-				let result = update_server(id, name, host, rank, device_id).await;
+				let result = update_server(id, name, host, rank, device_id, parent_id).await;
 				if result.is_ok() {
 					is_editing.set(false);
 					detail_resource.refetch();
@@ -57,12 +65,20 @@ pub fn Detail() -> impl IntoView {
 					detail_resource.get().map(|result| {
 						match result {
 							Ok(data) => {
-								// If server is not central and has a parent, redirect to parent
-								if data.server.kind != "central" {
+								// If server is not central and has a parent, redirect to parent (unless editing)
+								if data.server.kind != "central" && !is_editing.get() {
 									if let Some(parent_id) = &data.server.parent_server_id {
-										return view! {
-											<Redirect path={format!("/servers/{}", parent_id)} />
-										}.into_any();
+										// Check if user is admin before redirecting
+										let should_redirect = is_admin.get()
+											.and_then(|result| result.ok())
+											.map(|is_admin| !is_admin)
+											.unwrap_or(true);
+
+										if should_redirect {
+											return view! {
+												<Redirect path={format!("/servers/{}", parent_id)} />
+											}.into_any();
+										}
 									}
 								}
 
@@ -74,6 +90,7 @@ pub fn Detail() -> impl IntoView {
 										edit_host=edit_host
 										edit_rank=edit_rank
 										edit_device_id=edit_device_id
+										edit_parent_id=edit_parent_id
 										update_action=update_action
 										server_id=server_id()
 									/>
@@ -98,8 +115,10 @@ fn ServerDetailView(
 	edit_host: RwSignal<String>,
 	edit_rank: RwSignal<String>,
 	edit_device_id: RwSignal<String>,
+	edit_parent_id: RwSignal<String>,
 	update_action: Action<
 		(
+			Option<String>,
 			Option<String>,
 			Option<String>,
 			Option<String>,
@@ -128,6 +147,7 @@ fn ServerDetailView(
 	let server_host_for_effect = server_host.clone();
 	let server_rank_for_effect = server_rank.clone();
 	let device_id_for_effect = device_id_str.clone();
+	let parent_id_for_effect = server.parent_server_id.clone();
 
 	Effect::new(move |_| {
 		if !is_editing.get() {
@@ -135,6 +155,7 @@ fn ServerDetailView(
 			edit_host.set(server_host_for_effect.clone());
 			edit_rank.set(server_rank_for_effect.clone());
 			edit_device_id.set(device_id_for_effect.clone());
+			edit_parent_id.set(parent_id_for_effect.clone().unwrap_or_default());
 		}
 	});
 
@@ -153,6 +174,7 @@ fn ServerDetailView(
 				edit_host=edit_host
 				edit_rank=edit_rank
 				edit_device_id=edit_device_id
+				_edit_parent_id=edit_parent_id
 			/>
 
 			{move || {
@@ -163,8 +185,10 @@ fn ServerDetailView(
 							edit_host=edit_host
 							edit_rank=edit_rank
 							edit_device_id=edit_device_id
+							edit_parent_id=edit_parent_id
 							update_action=update_action
 							is_editing=is_editing
+							server_kind=server_kind.clone()
 						/>
 					}.into_any()
 				} else {
@@ -212,6 +236,7 @@ fn PageHeader(
 	edit_host: RwSignal<String>,
 	edit_rank: RwSignal<String>,
 	edit_device_id: RwSignal<String>,
+	_edit_parent_id: RwSignal<String>,
 ) -> impl IntoView {
 	let name_clone = server_name.clone();
 	let host_clone = server_host.clone();
@@ -241,6 +266,7 @@ fn PageHeader(
 										edit_host.set(host.clone());
 										edit_rank.set(rank.clone());
 										edit_device_id.set(device_id.clone());
+										// edit_parent_id already set by Effect
 										is_editing.set(true);
 									}
 								>
@@ -280,8 +306,10 @@ fn EditForm(
 	edit_host: RwSignal<String>,
 	edit_rank: RwSignal<String>,
 	edit_device_id: RwSignal<String>,
+	edit_parent_id: RwSignal<String>,
 	update_action: Action<
 		(
+			Option<String>,
 			Option<String>,
 			Option<String>,
 			Option<String>,
@@ -290,6 +318,7 @@ fn EditForm(
 		Result<crate::fns::servers::ServerDetailsData, commons_errors::AppError>,
 	>,
 	is_editing: RwSignal<bool>,
+	server_kind: String,
 ) -> impl IntoView {
 	view! {
 		<section class="detail-section edit-form">
@@ -304,11 +333,20 @@ fn EditForm(
 						Some(id)
 					}
 				};
+				let parent_id = {
+					let id = edit_parent_id.get();
+					if id.is_empty() {
+						Some(String::new())
+					} else {
+						Some(id)
+					}
+				};
 				update_action.dispatch((
 					Some(edit_name.get()),
 					Some(edit_host.get()),
 					Some(edit_rank.get()),
 					device_id,
+					parent_id,
 				));
 			}>
 				<div class="form-group">
@@ -360,6 +398,24 @@ fn EditForm(
 					/>
 					<small class="help-text">"Optional UUID of the device associated with this server"</small>
 				</div>
+
+				{if server_kind != "central" {
+					view! {
+						<div class="form-group">
+							<label for="edit-parent-id">"Parent Server ID"</label>
+							<input
+								type="text"
+								id="edit-parent-id"
+								prop:value=move || edit_parent_id.get()
+								on:input=move |ev| edit_parent_id.set(event_target_value(&ev))
+								placeholder="Leave empty to unset parent"
+							/>
+							<small class="help-text">"Optional UUID of the parent central server"</small>
+						</div>
+					}.into_any()
+				} else {
+					().into_any()
+				}}
 
 				{move || {
 					update_action.value().get().and_then(|result| {
@@ -578,6 +634,15 @@ fn ChildServerCard(child: ChildServerData) -> impl IntoView {
 					</details>
 				}
 			})}
+			{child.device_info.as_ref().map(|device_info| {
+				let device_info = device_info.clone();
+				view! {
+					<div class="child-server-device">
+						<h4>"Device"</h4>
+						<DeviceListItem device=device_info />
+					</div>
+				}
+			})}
 		</div>
 	}
 }
@@ -587,13 +652,29 @@ fn AssignParentSection(server_id: String) -> impl IntoView {
 	let search_query = RwSignal::new(String::new());
 	let search_results = RwSignal::new(Vec::new());
 
+	let current_rank = RwSignal::new(String::new());
+
+	let server_id_clone = server_id.clone();
+	let server_id_clone2 = server_id.clone();
+
 	let is_admin = Resource::new(
 		|| (),
 		|_| async { crate::fns::commons::is_current_user_admin().await },
 	);
 
+	let detail_resource = Resource::new(
+		move || server_id_clone.clone(),
+		async move |id| server_detail(id).await,
+	);
+
+	Effect::new(move |_| {
+		if let Some(Ok(data)) = detail_resource.get() {
+			current_rank.set(data.server.rank);
+		}
+	});
+
 	let assign_action = Action::new(move |parent_id: &String| {
-		let server_id = server_id.clone();
+		let server_id = server_id_clone2.clone();
 		let parent_id = parent_id.clone();
 		async move {
 			let result = assign_parent_server(server_id, parent_id.clone()).await;
@@ -650,15 +731,36 @@ fn AssignParentSection(server_id: String) -> impl IntoView {
 											if search_action.pending().get() {
 												view! { <div class="search-status">"Searching..."</div> }.into_any()
 											} else if !search_results.get().is_empty() {
+												let rank = current_rank.get();
+												let mut results = search_results.get();
+
+												// Sort: matching rank first, then others
+												results.sort_by(|a, b| {
+													let a_matches = a.rank.as_ref().map(|r| r == &rank).unwrap_or(false);
+													let b_matches = b.rank.as_ref().map(|r| r == &rank).unwrap_or(false);
+													match (a_matches, b_matches) {
+														(true, false) => std::cmp::Ordering::Less,
+														(false, true) => std::cmp::Ordering::Greater,
+														_ => std::cmp::Ordering::Equal,
+													}
+												});
+
 												view! {
 													<div class="search-results">
-														{search_results.get().into_iter().map(|server| {
+														{results.into_iter().map(|server| {
 															let server_id = server.id.clone();
+															let rank_matches = server.rank.as_ref().map(|r| r == &rank).unwrap_or(false);
+															let opacity_class = if rank_matches { "" } else { "faded" };
 															view! {
-																<div class="search-result-item">
+																<div class={format!("search-result-item {}", opacity_class)}>
 																	<div class="search-result-info">
 																		<strong>{server.name.unwrap_or_else(|| "(unnamed)".to_string())}</strong>
 																		<span class="search-result-host">{server.host}</span>
+																		{server.rank.as_ref().map(|rank| {
+																			view! {
+																				<span class="search-result-rank">{rank.clone()}</span>
+																			}
+																		})}
 																	</div>
 																	<button
 																		class="assign-button"
