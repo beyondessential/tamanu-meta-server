@@ -197,6 +197,7 @@ fn ServerDetailView(
 							<ServerInfoSection
 								host=server.host.clone()
 								device_info=device_info.clone()
+								up=up.clone()
 							/>
 							{last_status.as_ref().map(|status| {
 								view! {
@@ -450,12 +451,12 @@ fn EditForm(
 }
 
 #[component]
-fn ServerInfoSection(host: String, device_info: Option<DeviceInfo>) -> impl IntoView {
+fn ServerInfoSection(host: String, device_info: Option<DeviceInfo>, up: String) -> impl IntoView {
 	let host_clone = host.clone();
 	view! {
 		<section class="detail-section">
 			<h2>
-				<span class="section-status-dot status-dot up"></span>
+				<span class={format!("section-status-dot status-dot {}", up)}></span>
 				"Central server"
 			</h2>
 			<div class="info-grid">

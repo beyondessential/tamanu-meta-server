@@ -349,3 +349,73 @@ main {
 	white-space: pre;
 	text-decoration: underline dotted;
 }
+
+@media (max-width: 768px) {
+	main {
+		padding: 1em;
+		margin: 0 1em 1em;
+	}
+
+	.device-list-item {
+		grid-template-columns: 1fr;
+		gap: 0.75em;
+		padding: 1em;
+
+		.device-list-id {
+			flex-wrap: wrap;
+		}
+
+		.device-list-ua {
+			white-space: normal;
+			word-break: break-word;
+		}
+
+		.device-list-times {
+			font-size: 0.8em;
+		}
+	}
+
+	.pagination {
+		flex-direction: column;
+		gap: 1em;
+
+		.pagination-btn {
+			width: 100%;
+		}
+	}
+}
+
+@media (max-width: 500px) {
+	main {
+		padding: 0.75em;
+		margin: 0 0.5em 1em;
+	}
+
+	.device-list-item {
+		padding: 0.75em;
+		gap: 0.5em;
+
+		.device-list-id {
+			.id-text {
+				font-size: 0.85em;
+				word-break: break-all;
+			}
+
+			.role-badge {
+				font-size: 0.7em;
+			}
+		}
+
+		.device-list-ip {
+			font-size: 0.85em;
+		}
+
+		.device-list-ua {
+			font-size: 0.8em;
+		}
+
+		.device-list-times {
+			font-size: 0.75em;
+		}
+	}
+}
