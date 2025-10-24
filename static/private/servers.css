@@ -166,7 +166,8 @@
 	}
 }
 
-#status-detail-page {
+#status-detail-page,
+#server-edit-page {
 	max-width: 1200px;
 	margin: 0 auto;
 	padding: 2em;
@@ -458,6 +459,16 @@
 			border-radius: 4px;
 			padding: 1em;
 			color: var(--color-error);
+			margin-bottom: 1em;
+			font-size: 0.9em;
+		}
+
+		.success-message {
+			background: var(--color-success-bg);
+			border: 1px solid var(--color-success-border);
+			border-radius: 4px;
+			padding: 1em;
+			color: var(--color-success-text);
 			margin-bottom: 1em;
 			font-size: 0.9em;
 		}
@@ -794,6 +805,9 @@
 				background: var(--color-bg-light);
 				color: var(--color-text-secondary);
 				border: 1px solid var(--color-border-light);
+				padding: 1em;
+				border-radius: 0.2em;
+				text-decoration: none;
 
 				&:hover:not(:disabled) {
 					background: var(--color-border-light);

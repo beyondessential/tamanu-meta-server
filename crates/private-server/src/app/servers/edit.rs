@@ -188,9 +188,98 @@ fn EditView(
 	view! {
 		<div class="detail-container">
 			<div class="page-header">
-				<a href={format!("/servers/{}", server.id)} class="back-link">"← Back to Server"</a>
-				<h1>"Edit Server: " {server.name.clone()}</h1>
+				<a href={format!("/servers/{}", server.id)} class="back-link">"← Back to central"</a>
+				<h1>"Edit " {server.name.clone()}</h1>
 			</div>
+
+			<section class="detail-section">
+				<h2>"Assign to central"</h2>
+				<p class="help-text">"Search and select a central server to change the parent assignment."</p>
+				<div class="parent-search">
+					<input
+						type="text"
+						placeholder="Search for central server..."
+						prop:value=move || search_query.get()
+						on:input=move |ev| {
+							let query = event_target_value(&ev);
+							search_query.set(query.clone());
+							search_action.dispatch(query);
+						}
+					/>
+					{move || {
+						if search_action.pending().get() {
+							view! { <div class="search-status">"Searching..."</div> }.into_any()
+						} else if !search_results.get().is_empty() {
+							let current_rank_clone = current_rank.clone();
+							let mut results = search_results.get();
+
+							// Sort: matching rank first, then others
+							results.sort_by(|a, b| {
+								let a_matches = a.rank.as_ref().map(|r| r == &current_rank_clone).unwrap_or(false);
+								let b_matches = b.rank.as_ref().map(|r| r == &current_rank_clone).unwrap_or(false);
+								match (a_matches, b_matches) {
+									(true, false) => std::cmp::Ordering::Less,
+									(false, true) => std::cmp::Ordering::Greater,
+									_ => std::cmp::Ordering::Equal,
+								}
+							});
+
+							view! {
+								<div class="search-results">
+									{results.into_iter().map(|server| {
+										let server_id = server.id.clone();
+										let rank_matches = server.rank.as_ref().map(|r| r == &current_rank).unwrap_or(false);
+										let opacity_class = if rank_matches { "" } else { "faded" };
+										view! {
+											<div class={format!("search-result-item {}", opacity_class)}>
+												<div class="search-result-info">
+													<strong>{server.name.unwrap_or_else(|| "(unnamed)".to_string())}</strong>
+													<span class="search-result-host">{server.host}</span>
+													{server.rank.as_ref().map(|rank| {
+														view! {
+															<span class="search-result-rank">{rank.clone()}</span>
+														}
+													})}
+												</div>
+												<button
+													class="assign-button"
+													on:click=move |_| {
+														assign_action.dispatch(server_id.clone());
+													}
+													disabled=move || assign_action.pending().get()
+												>
+													"Assign"
+												</button>
+											</div>
+										}
+									}).collect::<Vec<_>>()}
+								</div>
+							}.into_any()
+						} else if !search_query.get().is_empty() {
+							view! { <div class="search-status">"No central servers found"</div> }.into_any()
+						} else {
+							().into_any()
+						}
+					}}
+					{move || {
+						assign_action.value().get().and_then(|result| {
+							if let Err(e) = result {
+								Some(view! {
+									<div class="error-message">
+										{format!("Error assigning parent: {}", e)}
+									</div>
+								})
+							} else {
+								Some(view! {
+									<div class="success-message">
+										{"Parent server assigned successfully".to_string()}
+									</div>
+								})
+							}
+						})
+					}}
+				</div>
+			</section>
 
 			<section class="detail-section edit-form">
 				<h2>"Server Details"</h2>
@@ -293,95 +382,6 @@ fn EditView(
 						</a>
 					</div>
 				</form>
-			</section>
-
-			<section class="detail-section">
-				<h2>"Change Parent Server"</h2>
-				<p class="help-text">"Search and select a central server to change the parent assignment."</p>
-				<div class="parent-search">
-					<input
-						type="text"
-						placeholder="Search for central server..."
-						prop:value=move || search_query.get()
-						on:input=move |ev| {
-							let query = event_target_value(&ev);
-							search_query.set(query.clone());
-							search_action.dispatch(query);
-						}
-					/>
-					{move || {
-						if search_action.pending().get() {
-							view! { <div class="search-status">"Searching..."</div> }.into_any()
-						} else if !search_results.get().is_empty() {
-							let current_rank_clone = current_rank.clone();
-							let mut results = search_results.get();
-
-							// Sort: matching rank first, then others
-							results.sort_by(|a, b| {
-								let a_matches = a.rank.as_ref().map(|r| r == &current_rank_clone).unwrap_or(false);
-								let b_matches = b.rank.as_ref().map(|r| r == &current_rank_clone).unwrap_or(false);
-								match (a_matches, b_matches) {
-									(true, false) => std::cmp::Ordering::Less,
-									(false, true) => std::cmp::Ordering::Greater,
-									_ => std::cmp::Ordering::Equal,
-								}
-							});
-
-							view! {
-								<div class="search-results">
-									{results.into_iter().map(|server| {
-										let server_id = server.id.clone();
-										let rank_matches = server.rank.as_ref().map(|r| r == &current_rank).unwrap_or(false);
-										let opacity_class = if rank_matches { "" } else { "faded" };
-										view! {
-											<div class={format!("search-result-item {}", opacity_class)}>
-												<div class="search-result-info">
-													<strong>{server.name.unwrap_or_else(|| "(unnamed)".to_string())}</strong>
-													<span class="search-result-host">{server.host}</span>
-													{server.rank.as_ref().map(|rank| {
-														view! {
-															<span class="search-result-rank">{rank.clone()}</span>
-														}
-													})}
-												</div>
-												<button
-													class="assign-button"
-													on:click=move |_| {
-														assign_action.dispatch(server_id.clone());
-													}
-													disabled=move || assign_action.pending().get()
-												>
-													"Assign"
-												</button>
-											</div>
-										}
-									}).collect::<Vec<_>>()}
-								</div>
-							}.into_any()
-						} else if !search_query.get().is_empty() {
-							view! { <div class="search-status">"No central servers found"</div> }.into_any()
-						} else {
-							().into_any()
-						}
-					}}
-					{move || {
-						assign_action.value().get().and_then(|result| {
-							if let Err(e) = result {
-								Some(view! {
-									<div class="error-message">
-										{format!("Error assigning parent: {}", e)}
-									</div>
-								})
-							} else {
-								Some(view! {
-									<div class="success-message">
-										{"Parent server assigned successfully".to_string()}
-									</div>
-								})
-							}
-						})
-					}}
-				</div>
 			</section>
 		</div>
 	}
