@@ -50,8 +50,11 @@ pub fn App() -> impl IntoView {
 						<Routes fallback=|| view! { <Redirect path="/status" /> }>
 							<Route path=path!("") view=|| view! { <Redirect path="/status" /> } />
 							<Route path=path!("status") view=statuses::Page />
-							<Route path=path!("servers") view=servers::ListPage />
-							<Route path=path!("servers/:id") view=servers::DetailPage />
+							<ParentRoute path=path!("servers") view=servers::Page>
+								<Route path=path!("") view=servers::Centrals />
+								<Route path=path!("facilities") view=servers::Facilities />
+								<Route path=path!(":id") view=servers::Detail />
+							</ParentRoute>
 							<Route path=path!("admins") view=admins::Page />
 							<ParentRoute path=path!("devices") view=devices::Page>
 								<Route path=path!("") view=devices::Search />

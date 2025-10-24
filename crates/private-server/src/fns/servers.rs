@@ -20,6 +20,8 @@ pub struct ServerListItem {
 	pub kind: String,
 	pub rank: Option<String>,
 	pub host: String,
+	pub parent_server_id: Option<String>,
+	pub parent_server_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,6 +59,16 @@ pub struct ServerLastStatusData {
 #[server]
 pub async fn list_all_servers() -> Result<Vec<ServerListItem>> {
 	ssr::list_all_servers().await
+}
+
+#[server]
+pub async fn list_central_servers() -> Result<Vec<ServerListItem>> {
+	ssr::list_central_servers().await
+}
+
+#[server]
+pub async fn list_facility_servers() -> Result<Vec<ServerListItem>> {
+	ssr::list_facility_servers().await
 }
 
 #[server]
@@ -117,8 +129,98 @@ mod ssr {
 				kind: s.kind.to_string(),
 				rank: s.rank.map(|r| r.to_string()),
 				host: s.host.0.to_string(),
+				parent_server_id: s.parent_server_id.map(|id| id.to_string()),
+				parent_server_name: None,
 			})
 			.collect())
+	}
+
+	pub async fn list_central_servers() -> Result<Vec<super::ServerListItem>> {
+		let db = crate::fns::commons::admin_guard().await?;
+		let mut conn = db.get().await?;
+
+		let servers = Server::get_all(&mut conn).await?;
+
+		let mut centrals: Vec<_> = servers
+			.into_iter()
+			.filter(|s| s.kind.to_string() == "central")
+			.collect();
+
+		// Sort: unnamed first, then by name
+		centrals.sort_by(|a, b| match (&a.name, &b.name) {
+			(None, None) => std::cmp::Ordering::Equal,
+			(None, Some(_)) => std::cmp::Ordering::Less,
+			(Some(_), None) => std::cmp::Ordering::Greater,
+			(Some(a_name), Some(b_name)) => a_name.cmp(b_name),
+		});
+
+		Ok(centrals
+			.into_iter()
+			.map(|s| super::ServerListItem {
+				id: s.id.to_string(),
+				name: s.name,
+				kind: s.kind.to_string(),
+				rank: s.rank.map(|r| r.to_string()),
+				host: s.host.0.to_string(),
+				parent_server_id: s.parent_server_id.map(|id| id.to_string()),
+				parent_server_name: None,
+			})
+			.collect())
+	}
+
+	pub async fn list_facility_servers() -> Result<Vec<super::ServerListItem>> {
+		let db = crate::fns::commons::admin_guard().await?;
+		let mut conn = db.get().await?;
+
+		let servers = Server::get_all(&mut conn).await?;
+
+		let mut facilities: Vec<_> = servers
+			.into_iter()
+			.filter(|s| s.kind.to_string() != "central")
+			.collect();
+
+		// Sort: unaffiliated first, then unnamed, then by name
+		facilities.sort_by(|a, b| match (&a.parent_server_id, &b.parent_server_id) {
+			(None, None) => match (&a.name, &b.name) {
+				(None, None) => std::cmp::Ordering::Equal,
+				(None, Some(_)) => std::cmp::Ordering::Less,
+				(Some(_), None) => std::cmp::Ordering::Greater,
+				(Some(a_name), Some(b_name)) => a_name.cmp(b_name),
+			},
+			(None, Some(_)) => std::cmp::Ordering::Less,
+			(Some(_), None) => std::cmp::Ordering::Greater,
+			(Some(_), Some(_)) => match (&a.name, &b.name) {
+				(None, None) => std::cmp::Ordering::Equal,
+				(None, Some(_)) => std::cmp::Ordering::Less,
+				(Some(_), None) => std::cmp::Ordering::Greater,
+				(Some(a_name), Some(b_name)) => a_name.cmp(b_name),
+			},
+		});
+
+		// Get parent server names for facilities
+		let mut result = Vec::new();
+		for s in facilities {
+			let parent_name = if let Some(parent_id) = s.parent_server_id {
+				Server::get_by_id(&mut conn, parent_id)
+					.await
+					.ok()
+					.and_then(|parent| parent.name)
+			} else {
+				None
+			};
+
+			result.push(super::ServerListItem {
+				id: s.id.to_string(),
+				name: s.name,
+				kind: s.kind.to_string(),
+				rank: s.rank.map(|r| r.to_string()),
+				host: s.host.0.to_string(),
+				parent_server_id: s.parent_server_id.map(|id| id.to_string()),
+				parent_server_name: parent_name,
+			});
+		}
+
+		Ok(result)
 	}
 
 	pub async fn server_detail(server_id: String) -> Result<super::ServerDetailData> {
@@ -390,6 +492,8 @@ mod ssr {
 				kind: s.kind.to_string(),
 				rank: s.rank.map(|r| r.to_string()),
 				host: s.host.0.to_string(),
+				parent_server_id: s.parent_server_id.map(|id| id.to_string()),
+				parent_server_name: None,
 			})
 			.collect())
 	}

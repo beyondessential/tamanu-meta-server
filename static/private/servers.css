@@ -114,6 +114,25 @@
 		padding: 1.5em;
 		color: var(--color-error);
 	}
+
+	.empty-state {
+		padding: 3em;
+		text-align: center;
+		color: var(--color-text-light);
+		font-style: italic;
+	}
+
+	.section-break {
+		grid-column: 1 / -1;
+		height: 1px;
+		background: var(--color-border-light);
+		margin: 1em 0;
+	}
+
+	.unaffiliated {
+		color: var(--color-warning);
+		font-weight: 500;
+	}
 }
 
 #status-detail-page {
