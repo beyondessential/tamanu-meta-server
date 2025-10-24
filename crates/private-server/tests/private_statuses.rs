@@ -9,6 +9,7 @@ struct ServerDetailsResponse {
 	kind: String,
 	rank: String,
 	host: String,
+	parent_server_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -28,6 +29,18 @@ struct ServerDetailResponse {
 	device_info: Option<DeviceInfo>,
 	last_status: Option<ServerLastStatusData>,
 	up: String,
+	child_servers: Vec<ChildServerData>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct ChildServerData {
+	id: String,
+	name: String,
+	kind: String,
+	rank: String,
+	host: String,
+	up: String,
+	last_status: Option<ServerLastStatusData>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -475,7 +488,7 @@ async fn server_detail_basic() {
 		.unwrap();
 
 		let response = private
-			.post("/api/private_server/fns/statuses/server_detail")
+			.post("/api/private_server/fns/servers/server_detail")
 			.form(&[("server_id", "11111111-1111-1111-1111-111111111111")])
 			.await;
 		response.assert_status_ok();
@@ -488,6 +501,7 @@ async fn server_detail_basic() {
 		assert!(detail.device_info.is_none());
 		assert!(detail.last_status.is_none());
 		assert_eq!(detail.up, "gone");
+		assert!(detail.child_servers.is_empty());
 	})
 	.await
 }
@@ -506,7 +520,7 @@ async fn server_detail_with_status() {
 		.unwrap();
 
 		let response = private
-			.post("/api/private_server/fns/statuses/server_detail")
+			.post("/api/private_server/fns/servers/server_detail")
 			.form(&[("server_id", "11111111-1111-1111-1111-111111111111")])
 			.await;
 		response.assert_status_ok();
@@ -542,7 +556,7 @@ async fn server_detail_with_device() {
 		.unwrap();
 
 		let response = private
-			.post("/api/private_server/fns/statuses/server_detail")
+			.post("/api/private_server/fns/servers/server_detail")
 			.form(&[("server_id", "11111111-1111-1111-1111-111111111111")])
 			.await;
 		response.assert_status_ok();
@@ -550,6 +564,7 @@ async fn server_detail_with_device() {
 
 		assert_eq!(detail.server.name, "Device Server");
 		assert!(detail.device_info.is_some());
+		assert!(detail.child_servers.is_empty());
 
 		let device_info = detail.device_info.unwrap();
 		assert_eq!(device_info.device.id, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
@@ -568,7 +583,7 @@ async fn server_detail_with_device() {
 async fn server_detail_not_found() {
 	commons_tests::server::run(async |_conn, _, private| {
 		let response = private
-			.post("/api/private_server/fns/statuses/server_detail")
+			.post("/api/private_server/fns/servers/server_detail")
 			.form(&[("server_id", "99999999-9999-9999-9999-999999999999")])
 			.await;
 		response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
@@ -580,7 +595,7 @@ async fn server_detail_not_found() {
 async fn server_detail_invalid_id() {
 	commons_tests::server::run(async |_conn, _, private| {
 		let response = private
-			.post("/api/private_server/fns/statuses/server_detail")
+			.post("/api/private_server/fns/servers/server_detail")
 			.form(&[("server_id", "not-a-uuid")])
 			.await;
 		response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
