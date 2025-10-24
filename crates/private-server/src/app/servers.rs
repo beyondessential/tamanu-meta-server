@@ -554,7 +554,7 @@ fn StatusSection(status: ServerLastStatusData) -> impl IntoView {
 fn ChildServersSection(child_servers: Vec<ChildServerData>) -> impl IntoView {
 	view! {
 		<section class="detail-section">
-			<h2>"Child Servers (" {child_servers.len()} ")"</h2>
+			<h2>"Facility servers (" {child_servers.len()} ")"</h2>
 			<div class="child-servers-list">
 				{child_servers.into_iter().map(|child| {
 					view! {
