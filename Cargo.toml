@@ -14,7 +14,7 @@ members = [
 [workspace.dependencies]
 axum = "0.8.4"
 chrono = "0.4.42"
-clap = "4.5.47"
+clap = "4.5.50"
 diesel = "2.2.12"
 diesel-async = "0.6.1"
 futures = "0.3.31"
@@ -28,7 +28,7 @@ problem_details = "0.8.0"
 serde = "1.0.219"
 tera = "1.20.0"
 timesimp = "1.0.0"
-tokio = "1.47.1"
+tokio = "1.48.0"
 tracing = "0.1.41"
 
 [profile.release]
