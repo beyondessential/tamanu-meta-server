@@ -648,7 +648,16 @@ fn AssignParentSection(server_id: String) -> impl IntoView {
 	let assign_action = Action::new(move |parent_id: &String| {
 		let server_id = server_id.clone();
 		let parent_id = parent_id.clone();
-		async move { assign_parent_server(server_id, parent_id).await }
+		async move {
+			let result = assign_parent_server(server_id, parent_id.clone()).await;
+			if result.is_ok() {
+				leptos_router::hooks::use_navigate()(
+					&format!("/servers/{}", parent_id),
+					Default::default(),
+				);
+			}
+			result
+		}
 	});
 
 	let search_action = Action::new(move |query: &String| {
