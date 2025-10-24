@@ -187,10 +187,12 @@ fn ServerDetailView(
 	let device_info = data.device_info.clone();
 	let last_status = data.last_status.clone();
 	let up = data.up.clone();
+	let child_servers = data.child_servers.clone();
 
 	let server_name = server.name.clone();
 	let server_host = server.host.clone();
 	let server_rank = server.rank.clone();
+	let server_kind = server.kind.clone();
 	let device_id_str = device_info
 		.as_ref()
 		.map(|d| d.device.id.clone())
@@ -216,8 +218,10 @@ fn ServerDetailView(
 				server_name=server_name.clone()
 				server_host=server_host.clone()
 				server_rank=server.rank.clone()
+				server_kind=server_kind.clone()
 				up=up.clone()
 				device_id_str=device_id_str.clone()
+				child_servers=child_servers.clone()
 				is_editing=is_editing
 				edit_name=edit_name
 				edit_host=edit_host
@@ -243,6 +247,7 @@ fn ServerDetailView(
 							<ServerInfoSection
 								host=server.host.clone()
 								device_info=device_info.clone()
+								up=up.clone()
 							/>
 							{last_status.as_ref().map(|status| {
 								view! {
@@ -273,8 +278,10 @@ fn PageHeader(
 	server_name: String,
 	server_host: String,
 	server_rank: String,
+	server_kind: String,
 	up: String,
 	device_id_str: String,
+	child_servers: Vec<ChildServerData>,
 	is_editing: RwSignal<bool>,
 	edit_name: RwSignal<String>,
 	edit_host: RwSignal<String>,
@@ -322,7 +329,19 @@ fn PageHeader(
 				}}
 			</Suspense>
 			<h1>
-				<span class={format!("status-dot {}", up)} title={up.clone()}></span>
+				<span class={format!("status-dot {up}")} title={format!("{server_name}: {up}")}></span>
+				{if server_kind == "central" {
+					child_servers.into_iter().map(|child| {
+						view! {
+							<span
+								class={format!("status-dot facility-dot {}", child.up)}
+								title={format!("{}: {}", child.name, child.up)}
+							></span>
+						}
+					}).collect_view().into_any()
+				} else {
+					().into_any()
+				}}
 				{server_name.clone()}
 			</h1>
 			<span class="server-rank">{server_rank.clone()}</span>
@@ -422,7 +441,7 @@ fn EditForm(
 						if let Err(e) = result {
 							Some(view! {
 								<div class="error-message">
-									{format!("Error updating server: {}", e)}
+									{format!("Error updating server: {e}")}
 								</div>
 							})
 						} else {
@@ -450,11 +469,14 @@ fn EditForm(
 }
 
 #[component]
-fn ServerInfoSection(host: String, device_info: Option<DeviceInfo>) -> impl IntoView {
+fn ServerInfoSection(host: String, device_info: Option<DeviceInfo>, up: String) -> impl IntoView {
 	let host_clone = host.clone();
 	view! {
 		<section class="detail-section">
-			<h2>"Central server"</h2>
+			<h2>
+				<span class={format!("status-dot section-status-dot {up}")} title={format!("{up}")}></span>
+				"Central server"
+			</h2>
 			<div class="info-grid">
 				<div class="info-item">
 					<span class="info-label">"Host"</span>

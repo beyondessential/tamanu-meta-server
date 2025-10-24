@@ -147,6 +147,15 @@
 		&.blip {
 			background: var(--color-warning-light-bg);
 		}
+
+		&.facility-dot {
+			opacity: 0.5;
+		}
+	}
+
+	.section-status-dot {
+		margin-right: 0.5em;
+		vertical-align: middle;
 	}
 
 	.page-header {
