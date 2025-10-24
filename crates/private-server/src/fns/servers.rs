@@ -121,7 +121,8 @@ mod ssr {
 	use crate::state::AppState;
 
 	pub async fn list_all_servers() -> Result<Vec<super::ServerListItem>> {
-		let db = crate::fns::commons::admin_guard().await?;
+		let state = expect_context::<AppState>();
+		let State(db): State<Db> = extract_with_state(&state).await?;
 		let mut conn = db.get().await?;
 
 		let servers = Server::get_all(&mut conn).await?;
@@ -141,7 +142,8 @@ mod ssr {
 	}
 
 	pub async fn list_central_servers() -> Result<Vec<super::ServerListItem>> {
-		let db = crate::fns::commons::admin_guard().await?;
+		let state = expect_context::<AppState>();
+		let State(db): State<Db> = extract_with_state(&state).await?;
 		let mut conn = db.get().await?;
 
 		let servers = Server::get_all(&mut conn).await?;
@@ -174,7 +176,8 @@ mod ssr {
 	}
 
 	pub async fn list_facility_servers() -> Result<Vec<super::ServerListItem>> {
-		let db = crate::fns::commons::admin_guard().await?;
+		let state = expect_context::<AppState>();
+		let State(db): State<Db> = extract_with_state(&state).await?;
 		let mut conn = db.get().await?;
 
 		let servers = Server::get_all(&mut conn).await?;
