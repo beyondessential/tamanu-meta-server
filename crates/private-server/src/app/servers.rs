@@ -124,7 +124,7 @@ pub fn DetailPage() -> impl IntoView {
 	);
 
 	view! {
-		<Stylesheet id="css-deployment" href="/static/deployment.css" />
+		<Stylesheet id="css-servers" href="/static/servers.css" />
 		<div id="status-detail-page">
 			<Suspense fallback=|| view! { <div class="loading">"Loading server details..."</div> }>
 				{move || {
