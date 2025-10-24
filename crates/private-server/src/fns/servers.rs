@@ -11,6 +11,7 @@ pub struct ServerDetailsData {
 	pub rank: String,
 	pub host: String,
 	pub parent_server_id: Option<String>,
+	pub parent_server_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -236,6 +237,13 @@ mod ssr {
 		let server = Server::get_by_id(&mut conn, id).await?;
 		let device_id = server.device_id;
 
+		let parent_server_name = if let Some(parent_id) = server.parent_server_id {
+			let parent = Server::get_by_id(&mut conn, parent_id).await?;
+			parent.name
+		} else {
+			None
+		};
+
 		let server_details = super::ServerDetailsData {
 			id: server.id.to_string(),
 			name: server.name.clone().unwrap_or_default(),
@@ -243,6 +251,7 @@ mod ssr {
 			rank: server.rank.map_or("unknown".to_string(), |r| r.to_string()),
 			host: server.host.0.to_string(),
 			parent_server_id: server.parent_server_id.map(|id| id.to_string()),
+			parent_server_name,
 		};
 
 		let status = Status::latest_for_server(&mut conn, id).await?;
@@ -499,6 +508,13 @@ mod ssr {
 
 		let server = Server::update(&mut conn, id, update_data).await?;
 
+		let parent_server_name = if let Some(parent_id) = server.parent_server_id {
+			let parent = Server::get_by_id(&mut conn, parent_id).await?;
+			parent.name
+		} else {
+			None
+		};
+
 		Ok(super::ServerDetailsData {
 			id: server.id.to_string(),
 			name: server.name.unwrap_or_default(),
@@ -506,6 +522,7 @@ mod ssr {
 			rank: server.rank.map_or("unknown".to_string(), |r| r.to_string()),
 			host: server.host.0.to_string(),
 			parent_server_id: server.parent_server_id.map(|id| id.to_string()),
+			parent_server_name,
 		})
 	}
 
@@ -562,6 +579,13 @@ mod ssr {
 
 		let server = Server::update(&mut conn, id, update_data).await?;
 
+		let parent_server_name = if let Some(parent_id) = server.parent_server_id {
+			let parent = Server::get_by_id(&mut conn, parent_id).await?;
+			parent.name
+		} else {
+			None
+		};
+
 		Ok(super::ServerDetailsData {
 			id: server.id.to_string(),
 			name: server.name.unwrap_or_default(),
@@ -569,6 +593,7 @@ mod ssr {
 			rank: server.rank.map_or("unknown".to_string(), |r| r.to_string()),
 			host: server.host.0.to_string(),
 			parent_server_id: server.parent_server_id.map(|id| id.to_string()),
+			parent_server_name,
 		})
 	}
 

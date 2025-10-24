@@ -194,6 +194,18 @@ fn EditView(
 
 			<section class="detail-section">
 				<h2>"Assign to central"</h2>
+				{server.parent_server_id.as_ref().map(|parent_id| {
+					let parent_name = server.parent_server_name.clone().unwrap_or_else(|| "(unnamed)".to_string());
+					let parent_id = parent_id.clone();
+					view! {
+						<div class="current-parent">
+							<span class="info-label">"Currently assigned to: "</span>
+							<a href={format!("/servers/{}", parent_id)} class="parent-link">
+								{parent_name}
+							</a>
+						</div>
+					}
+				})}
 				<p class="help-text">"Search and select a central server to change the parent assignment."</p>
 				<div class="parent-search">
 					<input
