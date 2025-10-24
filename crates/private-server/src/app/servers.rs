@@ -6,10 +6,80 @@ use leptos_router::hooks::use_params_map;
 use crate::app::devices::DeviceListItem;
 use crate::components::TimeAgo;
 use crate::fns::devices::DeviceInfo;
-use crate::fns::statuses::{ServerDetailData, ServerLastStatusData, server_detail, update_server};
+use crate::fns::servers::{
+	ServerDetailData, ServerLastStatusData, ServerListItem, list_all_servers, server_detail,
+	update_server,
+};
 
 #[component]
-pub fn Page() -> impl IntoView {
+pub fn ListPage() -> impl IntoView {
+	let servers = Resource::new(|| (), |_| async { list_all_servers().await });
+
+	view! {
+		<Stylesheet id="css-servers" href="/static/servers.css" />
+		<div id="servers-list-page">
+			<div class="page-header">
+				<h1>"Servers"</h1>
+			</div>
+			<Suspense fallback=|| view! { <div class="loading">"Loading servers..."</div> }>
+				{move || {
+					servers.get().map(|result| {
+						match result {
+							Ok(server_list) => {
+								view! {
+									<div class="servers-grid">
+										{server_list.into_iter().map(|server| {
+											view! {
+												<ServerCard server=server />
+											}
+										}).collect::<Vec<_>>()}
+									</div>
+								}.into_any()
+							}
+							Err(e) => {
+								view! {
+									<div class="error-message">
+										{format!("Failed to load servers: {}", e)}
+									</div>
+								}.into_any()
+							}
+						}
+					})
+				}}
+			</Suspense>
+		</div>
+	}
+}
+
+#[component]
+fn ServerCard(server: ServerListItem) -> impl IntoView {
+	view! {
+		<a href={format!("/servers/{}", server.id)} class="server-card">
+			<div class="server-card-header">
+				<h3>{server.name.clone().unwrap_or_else(|| "(unnamed)".to_string())}</h3>
+				{server.rank.as_ref().map(|rank| {
+					let rank = rank.clone();
+					view! {
+						<span class="server-rank">{rank}</span>
+					}
+				})}
+			</div>
+			<div class="server-card-body">
+				<div class="server-info">
+					<span class="label">"Kind:"</span>
+					<span class="value">{server.kind}</span>
+				</div>
+				<div class="server-info">
+					<span class="label">"Host:"</span>
+					<span class="value host">{server.host}</span>
+				</div>
+			</div>
+		</a>
+	}
+}
+
+#[component]
+pub fn DetailPage() -> impl IntoView {
 	let params = use_params_map();
 	let server_id = move || params.read().get("id").unwrap_or_default();
 
@@ -91,7 +161,7 @@ fn ServerDetailView(
 			Option<String>,
 			Option<String>,
 		),
-		Result<crate::fns::statuses::ServerDetailsData, commons_errors::AppError>,
+		Result<crate::fns::servers::ServerDetailsData, commons_errors::AppError>,
 	>,
 ) -> impl IntoView {
 	let server = data.server.clone();
@@ -243,7 +313,7 @@ fn EditForm(
 			Option<String>,
 			Option<String>,
 		),
-		Result<crate::fns::statuses::ServerDetailsData, commons_errors::AppError>,
+		Result<crate::fns::servers::ServerDetailsData, commons_errors::AppError>,
 	>,
 	is_editing: RwSignal<bool>,
 ) -> impl IntoView {

@@ -8,8 +8,8 @@ use leptos_router::{
 use crate::components::Toast;
 
 mod admins;
-mod deployment;
 mod devices;
+mod servers;
 mod status;
 mod statuses;
 
@@ -50,7 +50,8 @@ pub fn App() -> impl IntoView {
 						<Routes fallback=|| view! { <Redirect path="/status" /> }>
 							<Route path=path!("") view=|| view! { <Redirect path="/status" /> } />
 							<Route path=path!("status") view=statuses::Page />
-							<Route path=path!("status/:id") view=deployment::Page />
+							<Route path=path!("servers") view=servers::ListPage />
+							<Route path=path!("servers/:id") view=servers::DetailPage />
 							<Route path=path!("admins") view=admins::Page />
 							<ParentRoute path=path!("devices") view=devices::Page>
 								<Route path=path!("") view=devices::Search />
@@ -84,6 +85,7 @@ pub fn GlobalNav() -> impl IntoView {
 			</div>
 			<div class="nav-links">
 				<A href="/status">"Status"</A>
+				<A href="/servers">"Servers"</A>
 				<Suspense>
 					{move || {
 						is_admin

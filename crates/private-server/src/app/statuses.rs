@@ -225,7 +225,7 @@ pub fn ServerRow(server_id: String) -> impl IntoView {
 								<td class="name">
 									{if details.kind == "central" {
 										view! {
-											<a href={format!("/status/{}", details.id.clone())}>{details.name.clone()}</a>
+											<a href={format!("/servers/{}", details.id.clone())}>{details.name.clone()}</a>
 										}.into_any()
 									} else {
 										view! {

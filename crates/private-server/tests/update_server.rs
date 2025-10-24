@@ -26,7 +26,7 @@ async fn update_server_basic_fields() {
 			.unwrap();
 
 		let response = private
-			.post("/api/private_server/fns/statuses/update_server")
+			.post("/api/private_server/fns/servers/update_server")
 			.form(&[
 				("server_id", "22222222-2222-2222-2222-222222222222"),
 				("name", "Updated Server"),
@@ -60,7 +60,7 @@ async fn update_server_partial_update() {
 			.unwrap();
 
 		let response = private
-			.post("/api/private_server/fns/statuses/update_server")
+			.post("/api/private_server/fns/servers/update_server")
 			.form(&[
 				("server_id", "33333333-3333-3333-3333-333333333333"),
 				("rank", "clone"),
@@ -99,7 +99,7 @@ async fn update_server_device_id() {
 			.unwrap();
 
 		let response = private
-			.post("/api/private_server/fns/statuses/update_server")
+			.post("/api/private_server/fns/servers/update_server")
 			.form(&[
 				("server_id", "55555555-5555-5555-5555-555555555555"),
 				("device_id", "44444444-4444-4444-4444-444444444444"),
@@ -128,7 +128,7 @@ async fn update_server_invalid_rank() {
 			.unwrap();
 
 		let response = private
-			.post("/api/private_server/fns/statuses/update_server")
+			.post("/api/private_server/fns/servers/update_server")
 			.form(&[
 				("server_id", "66666666-6666-6666-6666-666666666666"),
 				("rank", "invalid_rank"),
@@ -147,7 +147,7 @@ async fn update_server_not_found() {
 			.unwrap();
 
 		let response = private
-			.post("/api/private_server/fns/statuses/update_server")
+			.post("/api/private_server/fns/servers/update_server")
 			.form(&[
 				("server_id", "77777777-7777-7777-7777-777777777777"),
 				("name", "Non-existent"),
