@@ -602,3 +602,128 @@ async fn server_detail_invalid_id() {
 	})
 	.await
 }
+
+#[derive(Debug, Deserialize, Serialize)]
+struct GroupedServersResponse {
+	production: Vec<CentralServerCardResponse>,
+	clone: Vec<CentralServerCardResponse>,
+	demo: Vec<CentralServerCardResponse>,
+	test: Vec<CentralServerCardResponse>,
+	dev: Vec<CentralServerCardResponse>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct CentralServerCardResponse {
+	id: String,
+	name: String,
+	rank: String,
+	host: String,
+	up: String,
+	version: Option<String>,
+	version_distance: Option<i32>,
+	facility_servers: Vec<FacilityServerCardResponse>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct FacilityServerCardResponse {
+	id: String,
+	name: String,
+	up: String,
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn grouped_central_servers_empty() {
+	commons_tests::server::run(async |_conn, _, private| {
+		let response = private
+			.post("/api/private_server/fns/statuses/grouped_central_servers")
+			.await;
+		response.assert_status_ok();
+
+		let data: GroupedServersResponse = response.json();
+		assert!(data.production.is_empty());
+		assert!(data.clone.is_empty());
+		assert!(data.demo.is_empty());
+		assert!(data.test.is_empty());
+		assert!(data.dev.is_empty());
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn grouped_central_servers_with_data() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		// Create central servers with different ranks
+		conn.batch_execute(
+			"INSERT INTO servers (id, name, host, rank, kind) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Production Central', 'https://prod.example.com', 'production', 'central'),
+			('22222222-2222-2222-2222-222222222222', 'Clone Central', 'https://clone.example.com', 'clone', 'central'),
+			('33333333-3333-3333-3333-333333333333', 'Demo Central', 'https://demo.example.com', 'demo', 'central')"
+		)
+		.await
+		.unwrap();
+
+		// Add facility servers for production central
+		conn.batch_execute(
+			"INSERT INTO servers (id, name, host, rank, kind, parent_server_id) VALUES
+			('44444444-4444-4444-4444-444444444444', 'Facility A', 'https://facility-a.example.com', 'production', 'facility', '11111111-1111-1111-1111-111111111111'),
+			('55555555-5555-5555-5555-555555555555', 'Facility B', 'https://facility-b.example.com', 'production', 'facility', '11111111-1111-1111-1111-111111111111')"
+		)
+		.await
+		.unwrap();
+
+		let response = private
+			.post("/api/private_server/fns/statuses/grouped_central_servers")
+			.await;
+		response.assert_status_ok();
+
+		let data: GroupedServersResponse = response.json();
+		
+		// Check production servers
+		assert_eq!(data.production.len(), 1);
+		let prod_server = &data.production[0];
+		assert_eq!(prod_server.name, "Production Central");
+		assert_eq!(prod_server.rank, "production");
+		assert_eq!(prod_server.host, "https://prod.example.com/");
+		assert_eq!(prod_server.up, "gone"); // No status, so should be gone
+		assert_eq!(prod_server.facility_servers.len(), 2);
+		
+		// Check clone servers
+		assert_eq!(data.clone.len(), 1);
+		assert_eq!(data.clone[0].name, "Clone Central");
+		
+		// Check demo servers
+		assert_eq!(data.demo.len(), 1);
+		assert_eq!(data.demo[0].name, "Demo Central");
+		
+		// Other ranks should be empty
+		assert!(data.test.is_empty());
+		assert!(data.dev.is_empty());
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn grouped_central_servers_excludes_unnamed() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		// Create central servers, one with name and one without
+		conn.batch_execute(
+			"INSERT INTO servers (id, name, host, rank, kind) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Named Central', 'https://named.example.com', 'production', 'central'),
+			('22222222-2222-2222-2222-222222222222', NULL, 'https://unnamed.example.com', 'production', 'central')"
+		)
+		.await
+		.unwrap();
+
+		let response = private
+			.post("/api/private_server/fns/statuses/grouped_central_servers")
+			.await;
+		response.assert_status_ok();
+
+		let data: GroupedServersResponse = response.json();
+		
+		// Only the named central should be included
+		assert_eq!(data.production.len(), 1);
+		assert_eq!(data.production[0].name, "Named Central");
+	})
+	.await
+}

@@ -15,7 +15,17 @@ use uuid::Uuid;
 
 use crate::servers::Server;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable, Associations)]
+#[derive(
+	Debug,
+	Clone,
+	Serialize,
+	Deserialize,
+	Queryable,
+	Selectable,
+	Insertable,
+	Associations,
+	QueryableByName,
+)]
 #[diesel(belongs_to(Server))]
 #[diesel(table_name = crate::schema::statuses)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -161,6 +171,28 @@ impl Status {
 			.await
 			.optional()
 			.map_err(AppError::from)
+	}
+
+	pub async fn latest_for_servers(
+		db: &mut AsyncPgConnection,
+		server_ids: &[Uuid],
+	) -> Result<Vec<Status>> {
+		if server_ids.is_empty() {
+			return Ok(Vec::new());
+		}
+
+		// Get the latest status for each server using DISTINCT ON
+		let query = diesel::sql_query(
+			"SELECT DISTINCT ON (server_id) id, created_at, server_id, device_id, version, extra
+				FROM statuses
+				WHERE server_id = ANY($1)
+				AND created_at >= NOW() - INTERVAL '7 days'
+				AND id != '00000000-0000-0000-0000-000000000000'
+				ORDER BY server_id, created_at DESC",
+		)
+		.bind::<diesel::sql_types::Array<diesel::sql_types::Uuid>, _>(server_ids);
+
+		query.load::<Status>(db).await.map_err(AppError::from)
 	}
 
 	pub async fn production_versions(
