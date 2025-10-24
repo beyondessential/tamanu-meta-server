@@ -1,14 +1,15 @@
 use leptos::prelude::*;
 use leptos::serde_json;
 use leptos_meta::Stylesheet;
+use leptos_router::components::Redirect;
 use leptos_router::hooks::use_params_map;
 
 use crate::app::devices::DeviceListItem;
 use crate::components::TimeAgo;
 use crate::fns::devices::DeviceInfo;
 use crate::fns::servers::{
-	ServerDetailData, ServerLastStatusData, ServerListItem, list_all_servers, server_detail,
-	update_server,
+	ChildServerData, ServerDetailData, ServerLastStatusData, ServerListItem, assign_parent_server,
+	list_all_servers, search_central_servers, server_detail, update_server,
 };
 
 #[component]
@@ -130,6 +131,15 @@ pub fn DetailPage() -> impl IntoView {
 					detail_resource.get().map(|result| {
 						match result {
 							Ok(data) => {
+								// If server is not central and has a parent, redirect to parent
+								if data.server.kind != "central" {
+									if let Some(parent_id) = &data.server.parent_server_id {
+										return view! {
+											<Redirect path={format!("/servers/{}", parent_id)} />
+										}.into_any();
+									}
+								}
+
 								view! {
 									<ServerDetailView
 										data=data
@@ -139,6 +149,7 @@ pub fn DetailPage() -> impl IntoView {
 										edit_rank=edit_rank
 										edit_device_id=edit_device_id
 										update_action=update_action
+										server_id=server_id()
 									/>
 								}.into_any()
 							}
@@ -170,6 +181,7 @@ fn ServerDetailView(
 		),
 		Result<crate::fns::servers::ServerDetailsData, commons_errors::AppError>,
 	>,
+	server_id: String,
 ) -> impl IntoView {
 	let server = data.server.clone();
 	let device_info = data.device_info.clone();
@@ -237,6 +249,17 @@ fn ServerDetailView(
 									<StatusSection status=status.clone() />
 								}
 							})}
+							{if server.kind == "central" && !data.child_servers.is_empty() {
+								view! {
+									<ChildServersSection child_servers=data.child_servers.clone() />
+								}.into_any()
+							} else if server.kind != "central" && server.parent_server_id.is_none() {
+								view! {
+									<AssignParentSection server_id=server_id.clone() />
+								}.into_any()
+							} else {
+								().into_any()
+							}}
 						</>
 					}.into_any()
 				}
@@ -523,6 +546,211 @@ fn StatusSection(status: ServerLastStatusData) -> impl IntoView {
 					().into_any()
 				}
 			}
+		</section>
+	}
+}
+
+#[component]
+fn ChildServersSection(child_servers: Vec<ChildServerData>) -> impl IntoView {
+	view! {
+		<section class="detail-section">
+			<h2>"Child Servers (" {child_servers.len()} ")"</h2>
+			<div class="child-servers-list">
+				{child_servers.into_iter().map(|child| {
+					view! {
+						<ChildServerCard child=child />
+					}
+				}).collect::<Vec<_>>()}
+			</div>
+		</section>
+	}
+}
+
+#[component]
+fn ChildServerCard(child: ChildServerData) -> impl IntoView {
+	view! {
+		<div class="child-server-card">
+			<div class="child-server-header">
+				<span class={format!("status-dot {}", child.up)} title={child.up.clone()}></span>
+				<a href={format!("/servers/{}", child.id)} class="child-server-name">
+					{child.name.clone()}
+				</a>
+				<span class="child-server-rank">{child.rank.clone()}</span>
+			</div>
+			<div class="child-server-info">
+				<span class="info-label">"Host:"</span>
+				<span class="info-value">{child.host.clone()}</span>
+			</div>
+			{child.last_status.as_ref().map(|status| {
+				let status = status.clone();
+				view! {
+					<details class="child-server-details">
+						<summary>"Status Information"</summary>
+						<div class="child-status-info">
+							<div class="info-item">
+								<span class="info-label">"Reported At"</span>
+								<TimeAgo timestamp={status.created_at.clone()} {..} class="info-value" />
+							</div>
+							{status.version.as_ref().map(|v| {
+								let v = v.clone();
+								view! {
+									<div class="info-item">
+										<span class="info-label">"Tamanu"</span>
+										<span class="info-value monospace">{v}</span>
+									</div>
+								}
+							})}
+							{status.platform.as_ref().map(|p| {
+								let p = p.clone();
+								view! {
+									<div class="info-item">
+										<span class="info-label">"Platform"</span>
+										<span class="info-value">{p}</span>
+									</div>
+								}
+							})}
+							{status.postgres.as_ref().map(|pg| {
+								let pg = pg.clone();
+								view! {
+									<div class="info-item">
+										<span class="info-label">"PostgreSQL"</span>
+										<span class="info-value monospace">{pg}</span>
+									</div>
+								}
+							})}
+							{status.nodejs.as_ref().map(|node| {
+								let node = node.clone();
+								view! {
+									<div class="info-item">
+										<span class="info-label">"Node.js"</span>
+										<span class="info-value monospace">{node}</span>
+									</div>
+								}
+							})}
+						</div>
+					</details>
+				}
+			})}
+		</div>
+	}
+}
+
+#[component]
+fn AssignParentSection(server_id: String) -> impl IntoView {
+	let search_query = RwSignal::new(String::new());
+	let search_results = RwSignal::new(Vec::new());
+
+	let is_admin = Resource::new(
+		|| (),
+		|_| async { crate::fns::commons::is_current_user_admin().await },
+	);
+
+	let assign_action = Action::new(move |parent_id: &String| {
+		let server_id = server_id.clone();
+		let parent_id = parent_id.clone();
+		async move { assign_parent_server(server_id, parent_id).await }
+	});
+
+	let search_action = Action::new(move |query: &String| {
+		let query = query.clone();
+		async move {
+			if query.is_empty() {
+				search_results.set(Vec::new());
+				Ok(())
+			} else {
+				match search_central_servers(query).await {
+					Ok(results) => {
+						search_results.set(results);
+						Ok(())
+					}
+					Err(e) => Err(e),
+				}
+			}
+		}
+	});
+
+	view! {
+		<section class="detail-section">
+			<Suspense>
+				{move || {
+					is_admin.get().and_then(|result| {
+						if result.ok().unwrap_or(false) {
+							Some(view! {
+								<>
+									<h2>"Assign Parent Server"</h2>
+									<p class="help-text">"This server is not affiliated with a central server. Search and select a central server to assign as parent."</p>
+									<div class="parent-search">
+										<input
+											type="text"
+											placeholder="Search for central server..."
+											prop:value=move || search_query.get()
+											on:input=move |ev| {
+												let query = event_target_value(&ev);
+												search_query.set(query.clone());
+												search_action.dispatch(query);
+											}
+										/>
+										{move || {
+											if search_action.pending().get() {
+												view! { <div class="search-status">"Searching..."</div> }.into_any()
+											} else if !search_results.get().is_empty() {
+												view! {
+													<div class="search-results">
+														{search_results.get().into_iter().map(|server| {
+															let server_id = server.id.clone();
+															view! {
+																<div class="search-result-item">
+																	<div class="search-result-info">
+																		<strong>{server.name.unwrap_or_else(|| "(unnamed)".to_string())}</strong>
+																		<span class="search-result-host">{server.host}</span>
+																	</div>
+																	<button
+																		class="assign-button"
+																		on:click=move |_| {
+																			assign_action.dispatch(server_id.clone());
+																		}
+																		disabled=move || assign_action.pending().get()
+																	>
+																		"Assign"
+																	</button>
+																</div>
+															}
+														}).collect::<Vec<_>>()}
+													</div>
+												}.into_any()
+											} else if !search_query.get().is_empty() {
+												view! { <div class="search-status">"No central servers found"</div> }.into_any()
+											} else {
+												().into_any()
+											}
+										}}
+										{move || {
+											assign_action.value().get().and_then(|result| {
+												if let Err(e) = result {
+													Some(view! {
+														<div class="error-message">
+															{format!("Error assigning parent: {}", e)}
+														</div>
+													})
+												} else {
+													None
+												}
+											})
+										}}
+									</div>
+								</>
+							}.into_any())
+						} else {
+							Some(view! {
+								<>
+									<h2>"Unaffiliated Server"</h2>
+									<p class="help-text">"This server is not affiliated with a central server and needs an administrator to finish configuring it."</p>
+								</>
+							}.into_any())
+						}
+					})
+				}}
+			</Suspense>
 		</section>
 	}
 }

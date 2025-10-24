@@ -98,6 +98,37 @@ impl Server {
 			.map_err(AppError::from)
 	}
 
+	pub async fn search_central(
+		db: &mut AsyncPgConnection,
+		query: &str,
+		limit: i64,
+	) -> Result<Vec<Self>> {
+		use crate::views::ordered_servers::dsl::*;
+		let search_pattern = format!("%{}%", query);
+
+		let mut query_builder = ordered_servers
+			.select(Self::as_select())
+			.filter(kind.eq(ServerKind::Central.to_string()))
+			.into_boxed();
+
+		if let Ok(query_uuid) = query.parse::<Uuid>() {
+			query_builder = query_builder.filter(
+				name.ilike(&search_pattern)
+					.or(host.ilike(&search_pattern))
+					.or(id.eq(query_uuid)),
+			);
+		} else {
+			query_builder =
+				query_builder.filter(name.ilike(&search_pattern).or(host.ilike(&search_pattern)));
+		}
+
+		query_builder
+			.limit(limit)
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	pub async fn update(
 		db: &mut AsyncPgConnection,
 		server_id: Uuid,

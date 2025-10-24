@@ -10,6 +10,7 @@ pub struct ServerDetailsData {
 	pub kind: String,
 	pub rank: String,
 	pub host: String,
+	pub parent_server_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,6 +28,18 @@ pub struct ServerDetailData {
 	pub device_info: Option<super::devices::DeviceInfo>,
 	pub last_status: Option<ServerLastStatusData>,
 	pub up: String,
+	pub child_servers: Vec<ChildServerData>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChildServerData {
+	pub id: String,
+	pub name: String,
+	pub kind: String,
+	pub rank: String,
+	pub host: String,
+	pub up: String,
+	pub last_status: Option<ServerLastStatusData>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,6 +73,19 @@ pub async fn update_server(
 	device_id: Option<String>,
 ) -> Result<ServerDetailsData> {
 	ssr::update_server(server_id, name, host, rank, device_id).await
+}
+
+#[server]
+pub async fn search_central_servers(query: String) -> Result<Vec<ServerListItem>> {
+	ssr::search_central_servers(query).await
+}
+
+#[server]
+pub async fn assign_parent_server(
+	server_id: String,
+	parent_server_id: String,
+) -> Result<ServerDetailsData> {
+	ssr::assign_parent_server(server_id, parent_server_id).await
 }
 
 #[cfg(feature = "ssr")]
@@ -108,10 +134,11 @@ mod ssr {
 
 		let server_details = super::ServerDetailsData {
 			id: server.id.to_string(),
-			name: server.name.unwrap_or_default(),
+			name: server.name.clone().unwrap_or_default(),
 			kind: server.kind.to_string(),
 			rank: server.rank.map_or("unknown".to_string(), |r| r.to_string()),
 			host: server.host.0.to_string(),
+			parent_server_id: server.parent_server_id.map(|id| id.to_string()),
 		};
 
 		let status = Status::latest_for_server(&mut conn, id).await?;
@@ -187,11 +214,100 @@ mod ssr {
 			None
 		};
 
+		let child_servers = if server.kind.to_string() == "central" {
+			let children = Server::get_children(&mut conn, id).await?;
+			let mut child_data = Vec::new();
+
+			for child in children {
+				let child_status = Status::latest_for_server(&mut conn, child.id).await?;
+				let child_up = child_status.as_ref().map_or("gone".into(), |st| {
+					let since = st.created_at.signed_duration_since(Utc::now()).abs();
+					if since > TimeDelta::minutes(30) {
+						"down"
+					} else if since > TimeDelta::minutes(10) {
+						"away"
+					} else if since > TimeDelta::minutes(2) {
+						"blip"
+					} else {
+						"up"
+					}
+					.into()
+				});
+
+				let child_last_status = if let Some(st) = child_status.as_ref() {
+					let device = if let Some(device_id) = st.device_id {
+						DeviceConnection::get_latest_from_device_ids(
+							&mut conn,
+							[device_id].into_iter(),
+						)
+						.await?
+						.into_iter()
+						.next()
+					} else {
+						None
+					};
+
+					let platform = st.extra("pgVersion").and_then(|pg| pg.as_str()).map(|pg| {
+						if pg.contains("Visual C++") || pg.contains("windows") {
+							"Windows"
+						} else {
+							"Linux"
+						}
+						.into()
+					});
+
+					let postgres = st
+						.extra("pgVersion")
+						.and_then(|pg| pg.as_str())
+						.and_then(|pg| pg.split_ascii_whitespace().nth(1))
+						.map(|vers| vers.trim_end_matches(',').into());
+
+					let nodejs = device
+						.as_ref()
+						.and_then(|d| d.user_agent.as_ref())
+						.and_then(|ua| {
+							ua.split_ascii_whitespace()
+								.find_map(|p| p.strip_prefix("Node.js/"))
+								.map(ToOwned::to_owned)
+						});
+
+					Some(super::ServerLastStatusData {
+						id: st.id.to_string(),
+						created_at: st.created_at.to_rfc3339(),
+						version: st.version.as_ref().map(|v| v.to_string()),
+						platform,
+						postgres,
+						nodejs,
+						timezone: st
+							.extra("timezone")
+							.and_then(|s| s.as_str().map(|s| s.to_string())),
+						extra: st.extra.clone(),
+					})
+				} else {
+					None
+				};
+
+				child_data.push(super::ChildServerData {
+					id: child.id.to_string(),
+					name: child.name.unwrap_or_default(),
+					kind: child.kind.to_string(),
+					rank: child.rank.map_or("unknown".to_string(), |r| r.to_string()),
+					host: child.host.0.to_string(),
+					up: child_up,
+					last_status: child_last_status,
+				});
+			}
+			child_data
+		} else {
+			Vec::new()
+		};
+
 		Ok(super::ServerDetailData {
 			server: server_details,
 			device_info,
 			last_status,
 			up,
+			child_servers,
 		})
 	}
 
@@ -256,6 +372,68 @@ mod ssr {
 			kind: server.kind.to_string(),
 			rank: server.rank.map_or("unknown".to_string(), |r| r.to_string()),
 			host: server.host.0.to_string(),
+			parent_server_id: server.parent_server_id.map(|id| id.to_string()),
+		})
+	}
+
+	pub async fn search_central_servers(query: String) -> Result<Vec<super::ServerListItem>> {
+		let db = crate::fns::commons::admin_guard().await?;
+		let mut conn = db.get().await?;
+
+		let servers = Server::search_central(&mut conn, &query, 10).await?;
+
+		Ok(servers
+			.into_iter()
+			.map(|s| super::ServerListItem {
+				id: s.id.to_string(),
+				name: s.name,
+				kind: s.kind.to_string(),
+				rank: s.rank.map(|r| r.to_string()),
+				host: s.host.0.to_string(),
+			})
+			.collect())
+	}
+
+	pub async fn assign_parent_server(
+		server_id: String,
+		parent_server_id: String,
+	) -> Result<super::ServerDetailsData> {
+		let db = crate::fns::commons::admin_guard().await?;
+		let mut conn = db.get().await?;
+
+		let id = server_id
+			.parse::<Uuid>()
+			.map_err(|e| AppError::custom(format!("Invalid server ID: {}", e)))?;
+
+		let parent_id = parent_server_id
+			.parse::<Uuid>()
+			.map_err(|e| AppError::custom(format!("Invalid parent server ID: {}", e)))?;
+
+		// Verify parent is a central server
+		let parent = Server::get_by_id(&mut conn, parent_id).await?;
+		if parent.kind != database::server_kind::ServerKind::Central {
+			return Err(AppError::custom("Parent server must be of kind 'central'"));
+		}
+
+		let update_data = PartialServer {
+			id,
+			name: None,
+			kind: None,
+			rank: None,
+			host: None,
+			device_id: None,
+			parent_server_id: Some(Some(parent_id)),
+		};
+
+		let server = Server::update(&mut conn, id, update_data).await?;
+
+		Ok(super::ServerDetailsData {
+			id: server.id.to_string(),
+			name: server.name.unwrap_or_default(),
+			kind: server.kind.to_string(),
+			rank: server.rank.map_or("unknown".to_string(), |r| r.to_string()),
+			host: server.host.0.to_string(),
+			parent_server_id: server.parent_server_id.map(|id| id.to_string()),
 		})
 	}
 
