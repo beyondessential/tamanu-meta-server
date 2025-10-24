@@ -24,6 +24,9 @@ pub struct Server {
 
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub device_id: Option<Uuid>,
+
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub parent_server_id: Option<Uuid>,
 }
 
 impl Server {
@@ -85,6 +88,16 @@ impl Server {
 			.map_err(AppError::from)
 	}
 
+	pub async fn get_children(db: &mut AsyncPgConnection, parent_id: Uuid) -> Result<Vec<Self>> {
+		use crate::views::ordered_servers::dsl::*;
+		ordered_servers
+			.select(Self::as_select())
+			.filter(parent_server_id.eq(parent_id))
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	pub async fn update(
 		db: &mut AsyncPgConnection,
 		server_id: Uuid,
@@ -111,6 +124,7 @@ fn test_server_serialization() {
 		rank: Some(ServerRank::Production),
 		host: UrlField("https://example.com/".parse().unwrap()),
 		device_id: Some(Uuid::nil()),
+		parent_server_id: None,
 	};
 
 	let serialized = serde_json::to_string_pretty(&server).unwrap();
@@ -145,6 +159,7 @@ impl From<NewServer> for Server {
 			rank: server.rank,
 			host: server.host,
 			device_id: server.device_id,
+			parent_server_id: None,
 		}
 	}
 }
@@ -161,4 +176,5 @@ pub struct PartialServer {
 	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub host: Option<UrlField>,
 	pub device_id: Option<Option<Uuid>>,
+	pub parent_server_id: Option<Option<Uuid>>,
 }

@@ -69,6 +69,7 @@ diesel::table! {
 		host -> Text,
 		device_id -> Nullable<Uuid>,
 		kind -> Text,
+		parent_server_id -> Nullable<Uuid>,
 	}
 }
 
@@ -91,8 +92,8 @@ diesel::table! {
 		major -> Int4,
 		minor -> Int4,
 		patch -> Int4,
-		changelog -> Text,
 		published -> Bool,
+		changelog -> Text,
 	}
 }
 

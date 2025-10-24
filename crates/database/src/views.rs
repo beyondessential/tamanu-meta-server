@@ -8,6 +8,7 @@ diesel::table! {
 		rank -> Nullable<Text>,
 		host -> Text,
 		device_id -> Nullable<Uuid>,
+		parent_server_id -> Nullable<Uuid>,
 	}
 }
 

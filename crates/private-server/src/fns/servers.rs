@@ -245,6 +245,7 @@ mod ssr {
 			rank: parsed_rank,
 			host: parsed_host,
 			device_id: parsed_device_id,
+			parent_server_id: None,
 		};
 
 		let server = Server::update(&mut conn, id, update_data).await?;
