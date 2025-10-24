@@ -1,6 +1,7 @@
 use leptos::prelude::*;
 use leptos::serde_json;
 use leptos_meta::Stylesheet;
+use leptos_router::components::A;
 use leptos_router::components::Redirect;
 use leptos_router::hooks::use_params_map;
 
@@ -30,7 +31,9 @@ pub fn Detail() -> impl IntoView {
 	let is_admin = Resource::new(
 		|| (),
 		|_| async { crate::fns::commons::is_current_user_admin().await },
-	);
+	)
+	.map(|result| *result.as_ref().ok().unwrap_or(&false))
+	.unwrap_or(false);
 
 	let update_action = Action::new(
 		move |(name, host, rank, device_id, parent_id): &(
@@ -69,12 +72,7 @@ pub fn Detail() -> impl IntoView {
 								if data.server.kind != "central" && !is_editing.get() {
 									if let Some(parent_id) = &data.server.parent_server_id {
 										// Check if user is admin before redirecting
-										let should_redirect = is_admin.get()
-											.and_then(|result| result.ok())
-											.map(|is_admin| !is_admin)
-											.unwrap_or(true);
-
-										if should_redirect {
+										if !is_admin {
 											return view! {
 												<Redirect path={format!("/servers/{}", parent_id)} />
 											}.into_any();
@@ -84,14 +82,15 @@ pub fn Detail() -> impl IntoView {
 
 								view! {
 									<ServerDetailView
-										data=data
-										is_editing=is_editing
-										edit_name=edit_name
-										edit_host=edit_host
-										edit_rank=edit_rank
-										edit_device_id=edit_device_id
-										edit_parent_id=edit_parent_id
-										update_action=update_action
+										data
+										is_editing
+										is_admin
+										edit_name
+										edit_host
+										edit_rank
+										edit_device_id
+										edit_parent_id
+										update_action
 										server_id=server_id()
 									/>
 								}.into_any()
@@ -111,6 +110,7 @@ pub fn Detail() -> impl IntoView {
 fn ServerDetailView(
 	data: ServerDetailData,
 	is_editing: RwSignal<bool>,
+	is_admin: bool,
 	edit_name: RwSignal<String>,
 	edit_host: RwSignal<String>,
 	edit_rank: RwSignal<String>,
@@ -206,7 +206,7 @@ fn ServerDetailView(
 							})}
 							{if server.kind == "central" && !data.child_servers.is_empty() {
 								view! {
-									<ChildServersSection child_servers=data.child_servers.clone() />
+									<ChildServersSection child_servers=data.child_servers.clone() is_admin />
 								}.into_any()
 							} else if server.kind != "central" && server.parent_server_id.is_none() {
 								view! {
@@ -247,37 +247,37 @@ fn PageHeader(
 	let is_admin = Resource::new(
 		|| (),
 		|_| async { crate::fns::commons::is_current_user_admin().await },
-	);
+	)
+	.map(|result| *result.as_ref().ok().unwrap_or(&false))
+	.unwrap_or(false);
 
 	view! {
 		<div class="page-header">
 			<Suspense>
 				{move || {
-					is_admin.get().and_then(|result| {
-						if result.ok().unwrap_or(false) && !is_editing.get() {
-							let name = name_clone.clone();
-							let host = host_clone.clone();
-							let rank = rank_clone.clone();
-							let device_id = device_id_clone.clone();
-							Some(view! {
-								<button
-									class="edit-button"
-									on:click=move |_| {
-										edit_name.set(name.clone());
-										edit_host.set(host.clone());
-										edit_rank.set(rank.clone());
-										edit_device_id.set(device_id.clone());
-										// edit_parent_id already set by Effect
-										is_editing.set(true);
-									}
-								>
-									"Edit"
-								</button>
-							})
-						} else {
-							None
-						}
-					})
+					if is_admin && !is_editing.get() {
+						let name = name_clone.clone();
+						let host = host_clone.clone();
+						let rank = rank_clone.clone();
+						let device_id = device_id_clone.clone();
+						Some(view! {
+							<button
+								class="edit-button"
+								on:click=move |_| {
+									edit_name.set(name.clone());
+									edit_host.set(host.clone());
+									edit_rank.set(rank.clone());
+									edit_device_id.set(device_id.clone());
+									// edit_parent_id already set by Effect
+									is_editing.set(true);
+								}
+							>
+								"Edit"
+							</button>
+						})
+					} else {
+						None
+					}
 				}}
 			</Suspense>
 			<h1>
@@ -458,15 +458,8 @@ fn ServerInfoSection(host: String, device_info: Option<DeviceInfo>, up: String) 
 			<h2>
 				<span class={format!("section-status-dot status-dot {}", up)}></span>
 				"Central server"
+				<a class="detail-host" href={host} target="_blank">{host_clone}</a>
 			</h2>
-			<div class="info-grid">
-				<div class="info-item">
-					<span class="info-label">"Host"</span>
-					<span class="info-value">
-						<a href={host} target="_blank">{host_clone}</a>
-					</span>
-				</div>
-			</div>
 			{device_info.as_ref().map(|device_info| {
 				let device_info = device_info.clone();
 				view! {
@@ -483,55 +476,55 @@ fn ServerInfoSection(host: String, device_info: Option<DeviceInfo>, up: String) 
 #[component]
 fn StatusSection(status: ServerLastStatusData) -> impl IntoView {
 	view! {
-		<section class="detail-section">
+		<section class:detail-section>
 			<h2>"Latest status"</h2>
-			<div class="info-grid">
-				<div class="info-item">
-					<span class="info-label">"Reported At"</span>
-					<TimeAgo timestamp={status.created_at.clone()} {..} class="info-value" />
+			<div class:info-grid>
+				<div class:info-item>
+				<span class="info-label">"Reported At"</span>
+				<TimeAgo timestamp={status.created_at.clone()} {..} class:info-value />
 				</div>
 				{status.platform.as_ref().map(|p| {
 					let p = p.clone();
 					view! {
-						<div class="info-item">
-							<span class="info-label">"Platform"</span>
-							<span class="info-value">{p}</span>
+						<div class:info-item>
+						<span class="info-label">"Platform"</span>
+						<span class:info-value>{p}</span>
 						</div>
 					}
 				})}
 				{status.timezone.as_ref().map(|tz| {
 					let tz = tz.clone();
 					view! {
-						<div class="info-item">
+						<div class:info-item>
 							<span class="info-label">"Timezone"</span>
-							<span class="info-value">{tz}</span>
+							<span class:info-value>{tz}</span>
 						</div>
 					}
 				})}
 				{status.version.as_ref().map(|v| {
 					let v = v.clone();
 					view! {
-						<div class="info-item">
+						<div class:info-item class:version>
 							<span class="info-label">"Tamanu"</span>
-							<span class="info-value monospace">{v}</span>
+							<span class:info-value class:monospace>{v}</span>
 						</div>
 					}
 				})}
 				{status.postgres.as_ref().map(|pg| {
 					let pg = pg.clone();
 					view! {
-						<div class="info-item">
+						<div class:info-item class:version>
 							<span class="info-label">"PostgreSQL"</span>
-							<span class="info-value monospace">{pg}</span>
+							<span class:info-value class:monospace>{pg}</span>
 						</div>
 					}
 				})}
 				{status.nodejs.as_ref().map(|node| {
 					let node = node.clone();
 					view! {
-						<div class="info-item">
+						<div class:info-item class:version>
 							<span class="info-label">"Node.js"</span>
-							<span class="info-value monospace">{node}</span>
+							<span class:info-value class:monospace>{node}</span>
 						</div>
 					}
 				})}
@@ -555,14 +548,14 @@ fn StatusSection(status: ServerLastStatusData) -> impl IntoView {
 }
 
 #[component]
-fn ChildServersSection(child_servers: Vec<ChildServerData>) -> impl IntoView {
+fn ChildServersSection(child_servers: Vec<ChildServerData>, is_admin: bool) -> impl IntoView {
 	view! {
 		<section class="detail-section">
 			<h2>"Facility servers (" {child_servers.len()} ")"</h2>
 			<div class="child-servers-list">
 				{child_servers.into_iter().map(|child| {
 					view! {
-						<ChildServerCard child=child />
+						<ChildServerCard child is_admin />
 					}
 				}).collect::<Vec<_>>()}
 			</div>
@@ -571,7 +564,7 @@ fn ChildServersSection(child_servers: Vec<ChildServerData>) -> impl IntoView {
 }
 
 #[component]
-fn ChildServerCard(child: ChildServerData) -> impl IntoView {
+fn ChildServerCard(child: ChildServerData, is_admin: bool) -> impl IntoView {
 	view! {
 		<div class="child-server-card">
 			<div class="child-server-header">
@@ -579,60 +572,76 @@ fn ChildServerCard(child: ChildServerData) -> impl IntoView {
 				<a href={format!("/servers/{}", child.id)} class="child-server-name">
 					{child.name.clone()}
 				</a>
-				<span class="child-server-rank">{child.rank.clone()}</span>
+				<Suspense>
+					{move || {
+						if is_admin {
+							Some(view! {
+								<A class:edit-button href={format!("/servers/{}/edit", child.id)}>
+									"Edit"
+								</A>
+							})
+						} else {
+							None
+						}
+					}}
+				</Suspense>
 			</div>
-			<div class="child-server-info">
-				<span class="info-label">"Host:"</span>
-				<span class="info-value">{child.host.clone()}</span>
+			<div>
+				<a class="detail-host" href={child.host.clone()} target="_blank">{child.host.clone()}</a>
 			</div>
 			{child.last_status.as_ref().map(|status| {
 				let status = status.clone();
 				view! {
-					<details class="child-server-details">
-						<summary>"Status Information"</summary>
-						<div class="child-status-info">
-							<div class="info-item">
-								<span class="info-label">"Reported At"</span>
-								<TimeAgo timestamp={status.created_at.clone()} {..} class="info-value" />
+					<div class:child-server-details>
+						<div class:child-server-info>
+							<div class:info-item>
+								<span class="info-label">"Rank"</span>
+								<span class:info-value>{child.rank.clone()}</span>
 							</div>
-							{status.version.as_ref().map(|v| {
-								let v = v.clone();
-								view! {
-									<div class="info-item">
-										<span class="info-label">"Tamanu"</span>
-										<span class="info-value monospace">{v}</span>
-									</div>
-								}
-							})}
+							<div class:info-item>
+								<span class="info-label">"Reported At"</span>
+								<TimeAgo timestamp={status.created_at.clone()} {..} class:info-value />
+							</div>
 							{status.platform.as_ref().map(|p| {
 								let p = p.clone();
 								view! {
-									<div class="info-item">
+									<div class:info-item>
 										<span class="info-label">"Platform"</span>
-										<span class="info-value">{p}</span>
+										<span class:info-value>{p}</span>
+									</div>
+								}
+							})}
+						</div>
+						<div class:child-status-info>
+							{status.version.as_ref().map(|v| {
+								let v = v.clone();
+								view! {
+									<div class:info-item class:version>
+										<span class="info-label">"Tamanu"</span>
+										<span class:info-value>{v}</span>
 									</div>
 								}
 							})}
 							{status.postgres.as_ref().map(|pg| {
 								let pg = pg.clone();
 								view! {
-									<div class="info-item">
+									<div class:info-item class:version>
 										<span class="info-label">"PostgreSQL"</span>
-										<span class="info-value monospace">{pg}</span>
+										<span class:info-value>{pg}</span>
 									</div>
 								}
 							})}
 							{status.nodejs.as_ref().map(|node| {
 								let node = node.clone();
 								view! {
-									<div class="info-item">
+									<div class:info-item class:version>
 										<span class="info-label">"Node.js"</span>
-										<span class="info-value monospace">{node}</span>
+										<span class:info-value>{node}</span>
 									</div>
 								}
 							})}
 						</div>
-					</details>
+					</div>
 				}
 			})}
 			{child.device_info.as_ref().map(|device_info| {
@@ -640,7 +649,7 @@ fn ChildServerCard(child: ChildServerData) -> impl IntoView {
 				view! {
 					<div class="child-server-device">
 						<h4>"Device"</h4>
-						<DeviceListItem device=device_info />
+						<DeviceListItem device=device_info class:vertical class:hide-id />
 					</div>
 				}
 			})}
@@ -661,7 +670,9 @@ fn AssignParentSection(server_id: String) -> impl IntoView {
 	let is_admin = Resource::new(
 		|| (),
 		|_| async { crate::fns::commons::is_current_user_admin().await },
-	);
+	)
+	.map(|result| *result.as_ref().ok().unwrap_or(&false))
+	.unwrap_or(false);
 
 	let detail_resource = Resource::new(
 		move || server_id_clone.clone(),
@@ -711,8 +722,7 @@ fn AssignParentSection(server_id: String) -> impl IntoView {
 		<section class="detail-section">
 			<Suspense>
 				{move || {
-					is_admin.get().and_then(|result| {
-						if result.ok().unwrap_or(false) {
+					if is_admin {
 							Some(view! {
 								<>
 									<h2>"Assign Parent Server"</h2>
@@ -806,9 +816,7 @@ fn AssignParentSection(server_id: String) -> impl IntoView {
 									<p class="help-text">"This server is not affiliated with a central server and needs an administrator to finish configuring it."</p>
 								</>
 							}.into_any())
-						}
-					})
-				}}
+				}}}
 			</Suspense>
 		</section>
 	}

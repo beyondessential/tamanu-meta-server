@@ -242,8 +242,7 @@ main {
 }
 
 .device-list-item {
-	display: grid;
-	grid-template-columns: 2fr 1fr 2fr 1fr;
+	display: flex;
 	gap: 1.5em;
 	padding: 1em 1.5em;
 	background: var(--color-bg-white);
@@ -260,18 +259,31 @@ main {
 		transform: translateY(-1px);
 	}
 
+	&.vertical {
+		flex-direction: column;
+		align-items: flex-start;
+	}
+
+	&.hide-id {
+		.device-list-id {
+			display: none !important;
+		}
+	}
+
 	.device-list-times {
 		display: flex;
 		flex-direction: column;
 		gap: 0.25em;
 		font-size: 0.85em;
 		color: var(--color-text-muted);
+		flex: 0 0 auto;
 	}
 
 	.device-list-id {
 		display: flex;
 		align-items: center;
 		gap: 0.75em;
+		flex: 2;
 
 		.id-text {
 			font-family: monospace;
@@ -295,6 +307,7 @@ main {
 		font-family: monospace;
 		color: var(--color-text-muted);
 		font-size: 0.9em;
+		flex: 1;
 	}
 
 	.device-list-ua {
@@ -303,6 +316,7 @@ main {
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+		flex: 2;
 	}
 }
 

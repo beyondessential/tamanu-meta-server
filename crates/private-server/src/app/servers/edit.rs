@@ -188,7 +188,11 @@ fn EditView(
 	view! {
 		<div class="detail-container">
 			<div class="page-header">
-				<a href={format!("/servers/{}", server.id)} class="back-link">"← Back to central"</a>
+			{if let Some(parent_id) = server.parent_server_id.as_ref() {
+				view! { <a href={format!("/servers/{parent_id}")} class="back-link">"← Back to central"</a> }
+			} else {
+				view! { <a href="/servers/facilities" class="back-link">"← Back to list"</a> }
+			}}
 				<h1>"Edit " {server.name.clone()}</h1>
 			</div>
 
@@ -200,7 +204,7 @@ fn EditView(
 					view! {
 						<div class="current-parent">
 							<span class="info-label">"Currently assigned to: "</span>
-							<a href={format!("/servers/{}", parent_id)} class="parent-link">
+							<a href={format!("/servers/{parent_id}")} class="parent-link">
 								{parent_name}
 							</a>
 						</div>
@@ -389,9 +393,6 @@ fn EditView(
 						<button type="submit" class="save-button" disabled=move || update_action.pending().get()>
 							{move || if update_action.pending().get() { "Saving..." } else { "Save Changes" }}
 						</button>
-						<a href={format!("/servers/{}", server.id)} class="cancel-button">
-							"Cancel"
-						</a>
 					</div>
 				</form>
 			</section>
