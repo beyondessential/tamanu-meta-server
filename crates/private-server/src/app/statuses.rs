@@ -60,6 +60,7 @@ pub fn ServerCards() -> impl IntoView {
 						if let Some(document) = web_sys::window().and_then(|w| w.document()) {
 							if !document.hidden() {
 								last_reload.set(web_sys::js_sys::Date::now());
+								set_trigger.update(|v| *v += 1);
 							}
 						}
 					}
@@ -79,6 +80,7 @@ pub fn ServerCards() -> impl IntoView {
 							// If more than 60 seconds since last reload, reload now
 							if elapsed > 60_000.0 {
 								last_reload_clone.set(now);
+								set_trigger.update(|v| *v += 1);
 							}
 						}
 					}
@@ -96,6 +98,7 @@ pub fn ServerCards() -> impl IntoView {
 				// Usage: document.dispatchEvent(new Event('tamanu-reload-status'))
 				let reload_event_callback = Closure::wrap(Box::new(move || {
 					last_reload.set(web_sys::js_sys::Date::now());
+					set_trigger.update(|v| *v += 1);
 				}) as Box<dyn FnMut()>);
 
 				let _ = document.add_event_listener_with_callback(
