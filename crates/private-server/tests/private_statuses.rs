@@ -26,17 +26,6 @@ struct ServerDetailsDataResponse {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-struct ServerStatusResponse {
-	up: String,
-	updated_at: Option<String>,
-	version: Option<String>,
-	platform: Option<String>,
-	postgres: Option<String>,
-	nodejs: Option<String>,
-	timezone: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
 struct ServerDetailResponse {
 	server: ServerDetailsDataResponse,
 	device_info: Option<DeviceInfo>,

@@ -84,7 +84,7 @@ where
 		let device_row: Device = sql_query(
 			r#"
 				INSERT INTO devices (role)
-				VALUES ($1::device_role)
+				VALUES ($1)
 				RETURNING id
 			"#,
 		)
