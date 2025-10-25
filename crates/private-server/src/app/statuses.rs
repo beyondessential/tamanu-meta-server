@@ -117,29 +117,40 @@ pub fn ServerCards() -> impl IntoView {
 			<Show when=move || is_client.get() fallback=|| view! {
 				<div class="loading">"Loading servers..."</div>
 			}>
-				<Suspense fallback=|| view! { <div class="loading">"Loading…"</div> }>{move || {
-					grouped_ids_resource.get().and_then(|result| result.ok()).map(|groups| {
-						view! {
-							<div class="grouped-servers">
-								{groups.get("production").map(|ids| {
-									view! { <RankSection rank="production" server_ids={ids.clone()} trigger={trigger} /> }.into_any()
-								})}
-								{groups.get("clone").map(|ids| {
-									view! { <RankSection rank="clone" server_ids={ids.clone()} trigger={trigger} /> }.into_any()
-								})}
-								{groups.get("demo").map(|ids| {
-									view! { <RankSection rank="demo" server_ids={ids.clone()} trigger={trigger} /> }.into_any()
-								})}
-								{groups.get("test").map(|ids| {
-									view! { <RankSection rank="test" server_ids={ids.clone()} trigger={trigger} /> }.into_any()
-								})}
-								{groups.get("dev").map(|ids| {
-									view! { <RankSection rank="dev" server_ids={ids.clone()} trigger={trigger} /> }.into_any()
-								})}
-							</div>
+				{move || {
+					match grouped_ids_resource.get() {
+						None => {
+							// No data yet, show loading spinner
+							view! { <div class="loading">"Loading…"</div> }.into_any()
 						}
-					})
-				}}</Suspense>
+						Some(Ok(groups)) => {
+							// Data loaded successfully, show the servers
+							view! {
+								<div class="grouped-servers">
+									{groups.get("production").map(|ids| {
+										view! { <RankSection rank="production" server_ids={ids.clone()} trigger={trigger} /> }.into_any()
+									})}
+									{groups.get("clone").map(|ids| {
+										view! { <RankSection rank="clone" server_ids={ids.clone()} trigger={trigger} /> }.into_any()
+									})}
+									{groups.get("demo").map(|ids| {
+										view! { <RankSection rank="demo" server_ids={ids.clone()} trigger={trigger} /> }.into_any()
+									})}
+									{groups.get("test").map(|ids| {
+										view! { <RankSection rank="test" server_ids={ids.clone()} trigger={trigger} /> }.into_any()
+									})}
+									{groups.get("dev").map(|ids| {
+										view! { <RankSection rank="dev" server_ids={ids.clone()} trigger={trigger} /> }.into_any()
+									})}
+								</div>
+							}.into_any()
+						}
+						Some(Err(_)) => {
+							// Error occurred, show nothing
+							view! { <div></div> }.into_any()
+						}
+					}
+				}}
 			</Show>
 		</article>
 	}
@@ -190,17 +201,26 @@ pub fn ServerCardLoader(server_id: String, trigger: ReadSignal<i32>) -> impl Int
 	);
 
 	view! {
-		<Suspense fallback=move || view! {
-			<div class="server-card loading-card">
-				<div class="loading-placeholder"></div>
-			</div>
-		}>
-			{move || {
-				server_resource.get().and_then(|result| result.ok()).map(|server| {
-					view! { <ServerCard server={server} /> }
-				})
-			}}
-		</Suspense>
+		{move || {
+			match server_resource.get() {
+				None => {
+					// No data yet, show loading spinner
+					view! {
+						<div class="server-card loading-card">
+							<div class="loading-placeholder"></div>
+						</div>
+					}.into_any()
+				}
+				Some(Ok(server)) => {
+					// Data loaded successfully, show the card
+					view! { <ServerCard server={server} /> }.into_any()
+				}
+				Some(Err(err)) => {
+					// Error occurred but we don't have old data, show nothing or error state
+					view! { <div class="server-card">{err.to_string()}</div> }.into_any()
+				}
+			}
+		}}
 	}
 }
 
