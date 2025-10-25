@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
+## [5.4.1](https://github.com/beyondessential/tamanu-meta-server/compare/v5.4.0..5.4.1) - 2025-10-25
+
+
+- **Refactor:** Unstring all the shit - ([8654614](https://github.com/beyondessential/tamanu-meta-server/commit/8654614bb6b7420cf09f5e0d619d916b9f0a5379))
+
+### Servers
+
+- **Refactor:** Tests - ([c112431](https://github.com/beyondessential/tamanu-meta-server/commit/c112431c574fe1c2ba0ae0ce68b9262e50bce538))
+
+---
+## [5.4.0](https://github.com/beyondessential/tamanu-meta-server/compare/v5.3.3..v5.4.0) - 2025-10-24
+
+
+- **Repo:** Release - ([7a55925](https://github.com/beyondessential/tamanu-meta-server/commit/7a55925f935e466ead33c362192cf70a1f1a594d))
+
+---
 ## [5.3.3](https://github.com/beyondessential/tamanu-meta-server/compare/v5.3.2..v5.3.3) - 2025-10-24
 
 
