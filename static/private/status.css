@@ -56,7 +56,10 @@
 
 		.servers-grid {
 			display: grid;
-			grid-template-columns: repeat(auto-fill, minmax(25em, 1fr));
+			grid-template-columns: repeat(
+				auto-fill,
+				minmax(calc(min(20em, 95vw)), 1fr)
+			);
 			gap: 0.75em;
 		}
 	}
