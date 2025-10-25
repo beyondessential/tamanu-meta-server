@@ -604,15 +604,6 @@ async fn server_detail_invalid_id() {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-struct GroupedServersResponse {
-	production: Vec<CentralServerCardResponse>,
-	clone: Vec<CentralServerCardResponse>,
-	demo: Vec<CentralServerCardResponse>,
-	test: Vec<CentralServerCardResponse>,
-	dev: Vec<CentralServerCardResponse>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
 struct CentralServerCardResponse {
 	id: String,
 	name: String,
@@ -632,26 +623,30 @@ struct FacilityServerCardResponse {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn grouped_central_servers_empty() {
+async fn server_grouped_ids_empty() {
 	commons_tests::server::run(async |_conn, _, private| {
 		let response = private
-			.post("/api/private_server/fns/statuses/grouped_central_servers")
+			.post("/api/private_server/fns/statuses/server_grouped_ids")
 			.await;
 		response.assert_status_ok();
 
-		let data: GroupedServersResponse = response.json();
-		assert!(data.production.is_empty());
-		assert!(data.clone.is_empty());
-		assert!(data.demo.is_empty());
-		assert!(data.test.is_empty());
-		assert!(data.dev.is_empty());
+		let data: std::collections::BTreeMap<String, Vec<String>> = response.json();
+		assert!(data.is_empty());
 	})
 	.await
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn grouped_central_servers_with_data() {
+async fn server_grouped_ids_with_data() {
 	commons_tests::server::run(async |mut conn, _, private| {
+		// Add a version to satisfy server_details requirement
+		conn.batch_execute(
+			"INSERT INTO versions (id, major, minor, patch, changelog, created_at) VALUES
+			('00000000-0000-0000-0000-000000000001', 1, 0, 0, 'Test version', NOW())"
+		)
+		.await
+		.unwrap();
+
 		// Create central servers with different ranks
 		conn.batch_execute(
 			"INSERT INTO servers (id, name, host, rank, kind) VALUES
@@ -672,15 +667,26 @@ async fn grouped_central_servers_with_data() {
 		.unwrap();
 
 		let response = private
-			.post("/api/private_server/fns/statuses/grouped_central_servers")
+			.post("/api/private_server/fns/statuses/server_grouped_ids")
 			.await;
 		response.assert_status_ok();
 
-		let data: GroupedServersResponse = response.json();
+		let data: std::collections::BTreeMap<String, Vec<String>> = response.json();
 
 		// Check production servers
-		assert_eq!(data.production.len(), 1);
-		let prod_server = &data.production[0];
+		assert_eq!(data.get("production").map(|v| v.len()), Some(1));
+		assert_eq!(
+			data.get("production").and_then(|v| v.first()),
+			Some(&"11111111-1111-1111-1111-111111111111".to_string())
+		);
+
+		// Verify server_details returns correct data for production server
+		let details_response = private
+			.post("/api/private_server/fns/statuses/server_details")
+			.form(&[("server_id", "11111111-1111-1111-1111-111111111111")])
+			.await;
+		details_response.assert_status_ok();
+		let prod_server: CentralServerCardResponse = details_response.json();
 		assert_eq!(prod_server.name, "Production Central");
 		assert_eq!(prod_server.rank, "production");
 		assert_eq!(prod_server.host, "https://prod.example.com/");
@@ -688,22 +694,28 @@ async fn grouped_central_servers_with_data() {
 		assert_eq!(prod_server.facility_servers.len(), 2);
 
 		// Check clone servers
-		assert_eq!(data.clone.len(), 1);
-		assert_eq!(data.clone[0].name, "Clone Central");
+		assert_eq!(data.get("clone").map(|v| v.len()), Some(1));
+		assert_eq!(
+			data.get("clone").and_then(|v| v.first()),
+			Some(&"22222222-2222-2222-2222-222222222222".to_string())
+		);
 
 		// Check demo servers
-		assert_eq!(data.demo.len(), 1);
-		assert_eq!(data.demo[0].name, "Demo Central");
+		assert_eq!(data.get("demo").map(|v| v.len()), Some(1));
+		assert_eq!(
+			data.get("demo").and_then(|v| v.first()),
+			Some(&"33333333-3333-3333-3333-333333333333".to_string())
+		);
 
-		// Other ranks should be empty
-		assert!(data.test.is_empty());
-		assert!(data.dev.is_empty());
+		// Other ranks should not exist
+		assert!(data.get("test").is_none());
+		assert!(data.get("dev").is_none());
 	})
 	.await
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn grouped_central_servers_excludes_unnamed() {
+async fn server_grouped_ids_excludes_unnamed() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		// Create central servers, one with name and one without
 		conn.batch_execute(
@@ -715,15 +727,18 @@ async fn grouped_central_servers_excludes_unnamed() {
 		.unwrap();
 
 		let response = private
-			.post("/api/private_server/fns/statuses/grouped_central_servers")
+			.post("/api/private_server/fns/statuses/server_grouped_ids")
 			.await;
 		response.assert_status_ok();
 
-		let data: GroupedServersResponse = response.json();
+		let data: std::collections::BTreeMap<String, Vec<String>> = response.json();
 
 		// Only the named central should be included
-		assert_eq!(data.production.len(), 1);
-		assert_eq!(data.production[0].name, "Named Central");
+		assert_eq!(data.get("production").map(|v| v.len()), Some(1));
+		assert_eq!(
+			data.get("production").and_then(|v| v.first()),
+			Some(&"11111111-1111-1111-1111-111111111111".to_string())
+		);
 	})
 	.await
 }

@@ -1,6 +1,7 @@
 use base64::Engine;
+use commons_types::device::DeviceRole;
 use database::servers::Server;
-use database::{Device, DeviceConnection, DeviceKey, DeviceRole};
+use database::{Device, DeviceConnection, DeviceKey};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_count_untrusted_devices() {

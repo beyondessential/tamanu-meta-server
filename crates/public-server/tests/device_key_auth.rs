@@ -183,7 +183,7 @@ async fn multiple_keys_authenticate_same_device() {
 		assert_eq!(device_emergency.id, device_id);
 
 		// All should have the same role
-		use database::device_role::DeviceRole;
+		use commons_types::device::DeviceRole;
 		assert_eq!(device_backup.role, DeviceRole::Admin);
 		assert_eq!(device_emergency.role, DeviceRole::Admin);
 
