@@ -1,5 +1,6 @@
-use std::fmt::Display;
+use std::{fmt::Display, str::FromStr};
 
+#[cfg(feature = "ssr")]
 use diesel::{
 	backend::Backend,
 	deserialize::{self, FromSql},
@@ -10,15 +11,17 @@ use diesel::{
 use serde::{Deserialize, Serialize};
 
 #[derive(
-	Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize, AsExpression,
+	Debug, Clone, Copy, Default, PartialOrd, Ord, PartialEq, Eq, Hash, Serialize, Deserialize,
 )]
-#[diesel(sql_type = Text)]
+#[cfg_attr(feature = "ssr", derive(AsExpression))]
+#[cfg_attr(feature = "ssr", diesel(sql_type = Text))]
 #[serde(rename_all = "lowercase")]
 pub enum ServerRank {
 	Production,
 	Clone,
 	Demo,
 	Test,
+	#[default]
 	Dev,
 }
 
@@ -47,7 +50,21 @@ impl TryFrom<String> for ServerRank {
 	type Error = ServerRankFromStringError;
 
 	fn try_from(value: String) -> Result<Self, Self::Error> {
-		match value.to_ascii_lowercase().as_ref() {
+		value.parse()
+	}
+}
+
+impl From<ServerRank> for String {
+	fn from(rank: ServerRank) -> Self {
+		rank.to_string()
+	}
+}
+
+impl FromStr for ServerRank {
+	type Err = ServerRankFromStringError;
+
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		match s.to_ascii_lowercase().as_ref() {
 			"live" | "prod" | "production" => Ok(Self::Production),
 			"clone" | "staging" => Ok(Self::Clone),
 			"demo" => Ok(Self::Demo),
@@ -58,19 +75,7 @@ impl TryFrom<String> for ServerRank {
 	}
 }
 
-impl From<ServerRank> for String {
-	fn from(rank: ServerRank) -> Self {
-		match rank {
-			ServerRank::Production => "production",
-			ServerRank::Clone => "clone",
-			ServerRank::Demo => "demo",
-			ServerRank::Test => "test",
-			ServerRank::Dev => "dev",
-		}
-		.into()
-	}
-}
-
+#[cfg(feature = "ssr")]
 impl<DB> FromSql<Text, DB> for ServerRank
 where
 	DB: Backend,
@@ -82,6 +87,7 @@ where
 	}
 }
 
+#[cfg(feature = "ssr")]
 impl ToSql<Text, diesel::pg::Pg> for ServerRank
 where
 	String: ToSql<Text, diesel::pg::Pg>,

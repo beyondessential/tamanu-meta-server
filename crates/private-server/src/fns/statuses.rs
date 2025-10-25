@@ -1,7 +1,7 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use commons_errors::Result;
-use commons_versions::VersionStr;
+use commons_types::{server::cards::CentralServerCard, version::VersionStr};
 use leptos::server;
 use serde::{Deserialize, Serialize};
 
@@ -39,31 +39,12 @@ pub struct ServerStatusData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FacilityServerCardData {
-	pub id: String,
-	pub name: String,
-	pub up: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CentralServerCardData {
-	pub id: String,
-	pub name: String,
-	pub rank: String,
-	pub host: String,
-	pub up: String,
-	pub version: Option<String>,
-	pub version_distance: Option<i32>,
-	pub facility_servers: Vec<FacilityServerCardData>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GroupedServersData {
-	pub production: Vec<CentralServerCardData>,
-	pub clone: Vec<CentralServerCardData>,
-	pub demo: Vec<CentralServerCardData>,
-	pub test: Vec<CentralServerCardData>,
-	pub dev: Vec<CentralServerCardData>,
+	pub production: Vec<CentralServerCard>,
+	pub clone: Vec<CentralServerCard>,
+	pub demo: Vec<CentralServerCard>,
+	pub test: Vec<CentralServerCard>,
+	pub dev: Vec<CentralServerCard>,
 }
 
 #[server]
@@ -72,18 +53,13 @@ pub async fn summary() -> Result<SummaryData> {
 }
 
 #[server]
-pub async fn server_ids() -> Result<Vec<String>> {
-	ssr::server_ids().await
+pub async fn server_grouped_ids() -> Result<BTreeMap<String, Vec<String>>> {
+	ssr::server_grouped_ids().await
 }
 
 #[server]
-pub async fn server_details(server_id: String) -> Result<ServerDetailsData> {
+pub async fn server_details(server_id: String) -> Result<CentralServerCard> {
 	ssr::server_details(server_id).await
-}
-
-#[server]
-pub async fn server_status(server_id: String) -> Result<ServerStatusData> {
-	ssr::server_status(server_id).await
 }
 
 #[server]
@@ -94,36 +70,21 @@ pub async fn grouped_central_servers() -> Result<GroupedServersData> {
 #[cfg(feature = "ssr")]
 mod ssr {
 	use super::*;
-	use std::collections::BTreeSet;
+	use std::collections::{BTreeMap, BTreeSet};
 
 	use axum::extract::State;
-	use chrono::{TimeDelta, Utc};
 	use commons_errors::{AppError, Result};
-	use database::{
-		Db, devices::DeviceConnection, server_kind::ServerKind, servers::Server, statuses::Status,
-		versions::Version,
+	use commons_types::{
+		server::{cards::FacilityServerStatus, kind::ServerKind, rank::ServerRank},
+		version::VersionStr,
 	};
+	use database::{Db, servers::Server, statuses::Status, versions::Version};
+	use itertools::Itertools;
 	use leptos::prelude::expect_context;
 	use leptos_axum::extract_with_state;
 	use uuid::Uuid;
 
 	use crate::state::AppState;
-
-	fn calculate_up_status(status: Option<&Status>) -> String {
-		status.map_or("gone".into(), |st| {
-			let since = st.created_at.signed_duration_since(Utc::now()).abs();
-			if since > TimeDelta::minutes(30) {
-				"down"
-			} else if since > TimeDelta::minutes(10) {
-				"away"
-			} else if since > TimeDelta::minutes(2) {
-				"blip"
-			} else {
-				"up"
-			}
-			.into()
-		})
-	}
 
 	pub async fn summary() -> Result<SummaryData> {
 		let state = expect_context::<AppState>();
@@ -151,19 +112,33 @@ mod ssr {
 		})
 	}
 
-	pub async fn server_ids() -> Result<Vec<String>> {
+	pub async fn server_grouped_ids() -> Result<BTreeMap<String, Vec<String>>> {
 		let state = expect_context::<AppState>();
 		let State(db): State<Db> = extract_with_state(&state).await?;
 		let mut conn = db.get().await?;
-		let mut servers = Server::get_all(&mut conn).await?;
+		let servers = Server::get_all(&mut conn).await?;
 
-		servers.retain(|s| s.name.is_some());
-		servers.sort_by_key(|s| (s.rank, s.name.clone()));
+		let groups = servers
+			.into_iter()
+			.filter(|s| s.name.is_some() && s.kind == ServerKind::Central && s.rank.is_some())
+			.sorted_by_key(|s| s.rank)
+			.chunk_by(|s| s.rank.unwrap());
 
-		Ok(servers.into_iter().map(|s| s.id.to_string()).collect())
+		Ok(groups
+			.into_iter()
+			.map(|(rank, group)| {
+				(
+					rank.to_string(),
+					group
+						.sorted_by_key(|s| s.name.clone().unwrap())
+						.map(|s| s.id.to_string())
+						.collect(),
+				)
+			})
+			.collect())
 	}
 
-	pub async fn server_details(server_id: String) -> Result<super::ServerDetailsData> {
+	pub async fn server_details(server_id: String) -> Result<super::CentralServerCard> {
 		let state = expect_context::<AppState>();
 		let State(db): State<Db> = extract_with_state(&state).await?;
 		let mut conn = db.get().await?;
@@ -172,79 +147,19 @@ mod ssr {
 			.map_err(|e| AppError::custom(format!("Invalid server ID: {}", e)))?;
 		let server = Server::get_by_id(&mut conn, id).await?;
 
-		Ok(super::ServerDetailsData {
-			id: server.id.to_string(),
+		let _latest_version = Version::get_latest_matching(&mut conn, "*".parse()?)
+			.await?
+			.as_semver();
+
+		Ok(super::CentralServerCard {
+			id: server.id,
 			name: server.name.unwrap_or_default(),
-			kind: server.kind.to_string(),
-			rank: server.rank.map_or("unknown".to_string(), |r| r.to_string()),
+			rank: server.rank,
 			host: server.host.0.to_string(),
-		})
-	}
-
-	pub async fn server_status(server_id: String) -> Result<super::ServerStatusData> {
-		let state = expect_context::<AppState>();
-		let State(db): State<Db> = extract_with_state(&state).await?;
-		let mut conn = db.get().await?;
-		let id = server_id
-			.parse::<Uuid>()
-			.map_err(|e| AppError::custom(format!("Invalid server ID: {}", e)))?;
-
-		let status = Status::latest_for_server(&mut conn, id).await?;
-
-		let device_id = status.as_ref().and_then(|s| s.device_id);
-		let device = if let Some(device_id) = device_id {
-			let devices =
-				DeviceConnection::get_latest_from_device_ids(&mut conn, [device_id].into_iter())
-					.await?;
-			devices.into_iter().next()
-		} else {
-			None
-		};
-
-		let up = calculate_up_status(status.as_ref());
-
-		let platform = status
-			.as_ref()
-			.and_then(|st| st.extra("pgVersion"))
-			.and_then(|pg| pg.as_str())
-			.map(|pg| {
-				if pg.contains("Visual C++") || pg.contains("windows") {
-					"Windows"
-				} else {
-					"Linux"
-				}
-				.into()
-			});
-
-		let postgres = status
-			.as_ref()
-			.and_then(|st| st.extra("pgVersion"))
-			.and_then(|pg| pg.as_str())
-			.and_then(|pg| pg.split_ascii_whitespace().nth(1))
-			.map(|vers| vers.trim_end_matches(',').into());
-
-		let nodejs = device
-			.as_ref()
-			.and_then(|d| d.user_agent.as_ref())
-			.and_then(|ua| {
-				ua.split_ascii_whitespace()
-					.find_map(|p| p.strip_prefix("Node.js/"))
-					.map(ToOwned::to_owned)
-			});
-
-		Ok(super::ServerStatusData {
-			up,
-			updated_at: status.as_ref().map(|s| s.created_at.to_rfc3339()),
-			version: status
-				.as_ref()
-				.and_then(|s| s.version.as_ref().map(|v| v.to_string())),
-			platform,
-			postgres,
-			nodejs,
-			timezone: status.and_then(|s| {
-				s.extra("timezone")
-					.and_then(|s| s.as_str().map(|s| s.to_string()))
-			}),
+			up: todo!(),
+			version: todo!(),
+			version_distance: todo!(),
+			facility_servers: todo!(),
 		})
 	}
 
@@ -270,68 +185,43 @@ mod ssr {
 		let status_map: std::collections::HashMap<Uuid, &Status> =
 			statuses.iter().map(|s| (s.server_id, s)).collect();
 
-		// Get all published versions once for version distance calculation
-		let all_versions = Version::get_all(&mut conn).await.ok();
-		let published_versions: Option<Vec<_>> =
-			all_versions.map(|versions| versions.into_iter().filter(|ver| ver.published).collect());
+		let latest_version = Version::get_latest_matching(&mut conn, "*".parse()?)
+			.await?
+			.as_semver();
 
 		// Process each central server
-		let mut cards: Vec<super::CentralServerCardData> = Vec::new();
+		let mut cards: Vec<super::CentralServerCard> = Vec::new();
 
 		for central in central_servers {
 			let central_status = status_map.get(&central.id);
-			let up = calculate_up_status(central_status.copied());
-
-			// Calculate version distance
-			let version_distance =
-				central_status
-					.and_then(|st| st.version.as_ref())
-					.and_then(|v| {
-						published_versions.as_ref().and_then(|versions| {
-							if versions.is_empty() {
-								return None;
-							}
-
-							let latest = versions.first()?;
-							let latest_semver = latest.as_semver();
-							let current_semver = &v.0;
-
-							// Calculate distance: 1000 + minor diff if major differs, else just minor diff
-							let distance = if latest_semver.major != current_semver.major {
-								1000 + (latest_semver.minor as i32 - current_semver.minor as i32)
-									.abs()
-							} else {
-								(latest_semver.minor as i32 - current_semver.minor as i32).abs()
-							};
-
-							Some(distance)
-						})
-					});
+			let up = central_status.map(|s| s.short_status()).unwrap_or_default();
+			let version_distance = central_status
+				.map(|s| s.distance_from_version(&latest_version))
+				.flatten();
 
 			// Get facility servers for this central
-			let facility_servers: Vec<super::FacilityServerCardData> = servers
+			let facility_servers: Vec<FacilityServerStatus> = servers
 				.iter()
 				.filter(|s| s.parent_server_id == Some(central.id))
 				.map(|facility| {
 					let facility_status = status_map.get(&facility.id);
-					let facility_up = calculate_up_status(facility_status.copied());
-					super::FacilityServerCardData {
-						id: facility.id.to_string(),
+					FacilityServerStatus {
+						id: facility.id,
 						name: facility.name.clone().unwrap_or_default(),
-						up: facility_up,
+						up: facility_status
+							.map(|s| s.short_status())
+							.unwrap_or_default(),
 					}
 				})
 				.collect();
 
-			cards.push(super::CentralServerCardData {
-				id: central.id.to_string(),
+			cards.push(CentralServerCard {
+				id: central.id,
 				name: central.name.clone().unwrap_or_default(),
-				rank: central
-					.rank
-					.map_or("unknown".to_string(), |r| r.to_string()),
+				rank: central.rank,
 				host: central.host.0.to_string(),
 				up,
-				version: central_status.and_then(|s| s.version.as_ref().map(|v| v.to_string())),
+				version: central_status.and_then(|s| s.version.clone()),
 				version_distance,
 				facility_servers,
 			});
@@ -345,13 +235,12 @@ mod ssr {
 		let mut dev = Vec::new();
 
 		for card in cards {
-			match card.rank.as_str() {
-				"production" => production.push(card),
-				"clone" => clone.push(card),
-				"demo" => demo.push(card),
-				"test" => test.push(card),
-				"dev" => dev.push(card),
-				_ => {} // Skip unknown ranks
+			match card.rank.unwrap_or_default() {
+				ServerRank::Production => production.push(card),
+				ServerRank::Clone => clone.push(card),
+				ServerRank::Demo => demo.push(card),
+				ServerRank::Test => test.push(card),
+				ServerRank::Dev => dev.push(card),
 			}
 		}
 

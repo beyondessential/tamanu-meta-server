@@ -1,5 +1,5 @@
 use commons_errors::{AppError, Result};
-use commons_versions::VersionStr;
+use commons_types::version::VersionStr;
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use serde::{Deserialize, Serialize};

@@ -704,7 +704,7 @@ dependencies = [
  "axum-client-ip",
  "axum-server-timing",
  "commons-errors",
- "commons-versions",
+ "commons-types",
  "database",
  "diesel",
  "diesel-async",
@@ -749,13 +749,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "commons-versions"
+name = "commons-types"
 version = "5.4.0"
 dependencies = [
  "commons-errors",
  "diesel",
  "node-semver",
  "serde",
+ "thiserror 2.0.17",
+ "uuid",
 ]
 
 [[package]]
@@ -1002,7 +1004,7 @@ dependencies = [
  "clap",
  "commons-errors",
  "commons-tests",
- "commons-versions",
+ "commons-types",
  "diesel",
  "diesel-async",
  "diesel-derive-enum",
@@ -3031,11 +3033,12 @@ dependencies = [
  "commons-errors",
  "commons-servers",
  "commons-tests",
- "commons-versions",
+ "commons-types",
  "console_error_panic_hook",
  "database",
  "folktime",
  "hex",
+ "itertools",
  "jiff",
  "js-sys",
  "leptos",
@@ -3142,7 +3145,7 @@ dependencies = [
  "commons-errors",
  "commons-servers",
  "commons-tests",
- "commons-versions",
+ "commons-types",
  "database",
  "diesel",
  "diesel-async",

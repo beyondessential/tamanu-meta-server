@@ -5,10 +5,9 @@ use axum::{
 };
 use commons_errors::Result;
 use commons_servers::device_auth::{AdminDevice, ServerDevice};
+use commons_types::server::{kind::ServerKind, rank::ServerRank};
 use database::{
 	Db,
-	server_kind::ServerKind,
-	server_rank::ServerRank,
 	servers::{NewServer, PartialServer, Server},
 	url_field::UrlField,
 };

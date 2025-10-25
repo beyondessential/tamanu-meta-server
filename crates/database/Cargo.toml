@@ -15,7 +15,7 @@ base64 = "0.22.1"
 chrono = { workspace = true, features = ["serde"] }
 clap = { workspace = true, features = ["derive", "env"] }
 commons-errors = { path = "../commons-errors" }
-commons-versions = { path = "../commons-versions" }
+commons-types = { path = "../commons-types" }
 diesel = { workspace = true, features = [
 	"chrono",
 	"ipnet-address",

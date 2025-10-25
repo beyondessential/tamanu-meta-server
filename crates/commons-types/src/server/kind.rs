@@ -1,5 +1,6 @@
 use std::fmt::Display;
 
+#[cfg(feature = "ssr")]
 use diesel::{
 	backend::Backend,
 	deserialize::{self, FromSql},
@@ -9,8 +10,9 @@ use diesel::{
 };
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Serialize, Deserialize, AsExpression)]
-#[diesel(sql_type = Text)]
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ssr", derive(AsExpression))]
+#[cfg_attr(feature = "ssr", diesel(sql_type = Text))]
 #[serde(rename_all = "lowercase")]
 pub enum ServerKind {
 	#[default]
@@ -57,6 +59,7 @@ impl From<ServerKind> for String {
 	}
 }
 
+#[cfg(feature = "ssr")]
 impl<DB> FromSql<Text, DB> for ServerKind
 where
 	DB: Backend,
@@ -68,6 +71,7 @@ where
 	}
 }
 
+#[cfg(feature = "ssr")]
 impl ToSql<Text, diesel::pg::Pg> for ServerKind
 where
 	String: ToSql<Text, diesel::pg::Pg>,

@@ -1,3 +1,4 @@
+use commons_types::{Uuid, server::rank::ServerRank};
 use leptos::prelude::*;
 use leptos_meta::Stylesheet;
 use leptos_router::components::Redirect;
@@ -10,16 +11,23 @@ use crate::fns::servers::{
 #[component]
 pub fn Edit() -> impl IntoView {
 	let params = use_params_map();
-	let server_id = move || params.read().get("id").unwrap_or_default();
+	let server_id = move || {
+		params
+			.read()
+			.get("id")
+			.map(|id| id.parse().ok())
+			.flatten()
+			.unwrap_or_default()
+	};
 
 	let detail_resource =
 		Resource::new(move || server_id(), async move |id| server_detail(id).await);
 
 	let edit_name = RwSignal::new(String::new());
 	let edit_host = RwSignal::new(String::new());
-	let edit_rank = RwSignal::new(String::new());
-	let edit_device_id = RwSignal::new(String::new());
-	let edit_parent_id = RwSignal::new(String::new());
+	let edit_rank = RwSignal::new(None::<ServerRank>);
+	let edit_device_id = RwSignal::new(None::<Uuid>);
+	let edit_parent_id = RwSignal::new(None::<Uuid>);
 
 	let search_query = RwSignal::new(String::new());
 	let search_results = RwSignal::new(Vec::<ServerListItem>::new());
@@ -33,16 +41,16 @@ pub fn Edit() -> impl IntoView {
 		move |(name, host, rank, device_id, parent_id): &(
 			Option<String>,
 			Option<String>,
-			Option<String>,
-			Option<String>,
-			Option<String>,
+			Option<ServerRank>,
+			Option<Uuid>,
+			Option<Uuid>,
 		)| {
 			let name = name.clone();
 			let host = host.clone();
-			let rank = rank.clone();
-			let device_id = device_id.clone();
-			let parent_id = parent_id.clone();
 			let id = server_id();
+			let rank = *rank;
+			let device_id = *device_id;
+			let parent_id = *parent_id;
 			async move {
 				let result =
 					update_server(id.clone(), name, host, rank, device_id, parent_id).await;
@@ -57,13 +65,13 @@ pub fn Edit() -> impl IntoView {
 		},
 	);
 
-	let assign_action = Action::new(move |parent_id: &String| {
+	let assign_action = Action::new(move |parent_id: &Uuid| {
 		let server_id = server_id();
-		let parent_id = parent_id.clone();
+		let parent_id = *parent_id;
 		async move {
-			let result = assign_parent_server(server_id.clone(), parent_id.clone()).await;
+			let result = assign_parent_server(server_id, parent_id).await;
 			if result.is_ok() {
-				edit_parent_id.set(parent_id);
+				edit_parent_id.set(Some(parent_id));
 				search_query.set(String::new());
 				search_results.set(Vec::new());
 			}
@@ -102,27 +110,21 @@ pub fn Edit() -> impl IntoView {
 						detail_resource.get().map(|result| {
 							match result {
 								Ok(data) => {
-									if data.server.kind == "central" {
-										return view! { <Redirect path={format!("/servers/{}", server_id())} /> }.into_any();
-									}
-
 									let server = data.server.clone();
 									let server_name = server.name.clone();
 									let server_host = server.host.clone();
-									let server_rank = server.rank.clone();
-									let device_id_str = data.device_info
+									let server_rank = server.rank;
+									let device_id = data.device_info
 										.as_ref()
-										.map(|d| d.device.id.clone())
-										.unwrap_or_default();
-									let parent_id_str = server.parent_server_id.clone().unwrap_or_default();
-									let current_rank = server.rank.clone();
+										.map(|d| d.device.id);
+									let current_rank = server.rank;
 
 									Effect::new(move |_| {
 										edit_name.set(server_name.clone());
 										edit_host.set(server_host.clone());
-										edit_rank.set(server_rank.clone());
-										edit_device_id.set(device_id_str.clone());
-										edit_parent_id.set(parent_id_str.clone());
+										edit_rank.set(server_rank);
+										edit_device_id.set(device_id);
+										edit_parent_id.set(server.parent_server_id);
 									});
 
 									view! {
@@ -163,16 +165,16 @@ fn EditView(
 	server: crate::fns::servers::ServerDetailsData,
 	edit_name: RwSignal<String>,
 	edit_host: RwSignal<String>,
-	edit_rank: RwSignal<String>,
-	edit_device_id: RwSignal<String>,
-	edit_parent_id: RwSignal<String>,
+	edit_rank: RwSignal<Option<ServerRank>>,
+	edit_device_id: RwSignal<Option<Uuid>>,
+	edit_parent_id: RwSignal<Option<Uuid>>,
 	update_action: Action<
 		(
 			Option<String>,
 			Option<String>,
-			Option<String>,
-			Option<String>,
-			Option<String>,
+			Option<ServerRank>,
+			Option<Uuid>,
+			Option<Uuid>,
 		),
 		Result<crate::fns::servers::ServerDetailsData, commons_errors::AppError>,
 	>,
@@ -180,10 +182,10 @@ fn EditView(
 	search_results: RwSignal<Vec<ServerListItem>>,
 	search_action: Action<String, Result<(), commons_errors::AppError>>,
 	assign_action: Action<
-		String,
+		Uuid,
 		Result<crate::fns::servers::ServerDetailsData, commons_errors::AppError>,
 	>,
-	current_rank: String,
+	current_rank: Option<ServerRank>,
 ) -> impl IntoView {
 	view! {
 		<div class="detail-container">
@@ -226,13 +228,12 @@ fn EditView(
 						if search_action.pending().get() {
 							view! { <div class="search-status">"Searching..."</div> }.into_any()
 						} else if !search_results.get().is_empty() {
-							let current_rank_clone = current_rank.clone();
 							let mut results = search_results.get();
 
 							// Sort: matching rank first, then others
 							results.sort_by(|a, b| {
-								let a_matches = a.rank.as_ref().map(|r| r == &current_rank_clone).unwrap_or(false);
-								let b_matches = b.rank.as_ref().map(|r| r == &current_rank_clone).unwrap_or(false);
+								let a_matches = a.rank == current_rank;
+								let b_matches = b.rank == current_rank;
 								match (a_matches, b_matches) {
 									(true, false) => std::cmp::Ordering::Less,
 									(false, true) => std::cmp::Ordering::Greater,
@@ -244,7 +245,7 @@ fn EditView(
 								<div class="search-results">
 									{results.into_iter().map(|server| {
 										let server_id = server.id.clone();
-										let rank_matches = server.rank.as_ref().map(|r| r == &current_rank).unwrap_or(false);
+										let rank_matches = server.rank == current_rank;
 										let opacity_class = if rank_matches { "" } else { "faded" };
 										view! {
 											<div class={format!("search-result-item {}", opacity_class)}>
@@ -253,7 +254,7 @@ fn EditView(
 													<span class="search-result-host">{server.host}</span>
 													{server.rank.as_ref().map(|rank| {
 														view! {
-															<span class="search-result-rank">{rank.clone()}</span>
+															<span class="search-result-rank">{rank.to_string()}</span>
 														}
 													})}
 												</div>
@@ -301,26 +302,12 @@ fn EditView(
 				<h2>"Server Details"</h2>
 				<form on:submit=move |ev| {
 					ev.prevent_default();
-					let device_id = {
-						let id = edit_device_id.get();
-						if id.is_empty() {
-							Some(String::new())
-						} else {
-							Some(id)
-						}
-					};
-					let parent_id = {
-						let id = edit_parent_id.get();
-						if id.is_empty() {
-							Some(String::new())
-						} else {
-							Some(id)
-						}
-					};
+					let device_id = edit_device_id.get();
+					let parent_id = edit_parent_id.get();
 					update_action.dispatch((
 						Some(edit_name.get()),
 						Some(edit_host.get()),
-						Some(edit_rank.get()),
+						edit_rank.get(),
 						device_id,
 						parent_id,
 					));
@@ -351,15 +338,15 @@ fn EditView(
 						<label for="edit-rank">"Server Rank"</label>
 						<select
 							id="edit-rank"
-							prop:value=move || edit_rank.get()
-							on:change=move |ev| edit_rank.set(event_target_value(&ev))
+							prop:value=move || edit_rank.get().map(|r| r.to_string()).unwrap_or_default()
+							on:change=move |ev| edit_rank.set(event_target_value(&ev).parse().ok())
 							required
 						>
-							<option value="production" selected=move || edit_rank.get() == "production">"Production"</option>
-							<option value="clone" selected=move || edit_rank.get() == "clone">"Clone"</option>
-							<option value="demo" selected=move || edit_rank.get() == "demo">"Demo"</option>
-							<option value="test" selected=move || edit_rank.get() == "test">"Test"</option>
-							<option value="dev" selected=move || edit_rank.get() == "dev">"Dev"</option>
+							<option value={ServerRank::Production.to_string()} selected=move || edit_rank.get() == Some(ServerRank::Production)>"Production"</option>
+							<option value={ServerRank::Clone.to_string()} selected=move || edit_rank.get() == Some(ServerRank::Clone)>"Clone"</option>
+							<option value={ServerRank::Demo.to_string()} selected=move || edit_rank.get() == Some(ServerRank::Demo)>"Demo"</option>
+							<option value={ServerRank::Test.to_string()} selected=move || edit_rank.get() == Some(ServerRank::Test)>"Test"</option>
+							<option value={ServerRank::Dev.to_string()} selected=move || edit_rank.get() == Some(ServerRank::Dev)>"Dev"</option>
 						</select>
 					</div>
 
@@ -368,8 +355,8 @@ fn EditView(
 						<input
 							type="text"
 							id="edit-device-id"
-							prop:value=move || edit_device_id.get()
-							on:input=move |ev| edit_device_id.set(event_target_value(&ev))
+							prop:value=move || edit_device_id.get().map(|id| id.to_string()).unwrap_or_default()
+							on:input=move |ev| edit_device_id.set(event_target_value(&ev).parse().ok())
 							placeholder="Leave empty to unset"
 						/>
 						<small class="help-text">"Optional UUID of the device associated with this server"</small>

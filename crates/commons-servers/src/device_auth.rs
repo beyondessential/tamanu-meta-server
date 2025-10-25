@@ -3,9 +3,9 @@ use std::net::{IpAddr, Ipv6Addr};
 use axum::{RequestPartsExt as _, extract::FromRef};
 use axum_client_ip::ClientIp;
 use commons_errors::AppError;
+use commons_types::device::DeviceRole;
 use database::{
 	Db,
-	device_role::DeviceRole,
 	devices::{Device, NewDeviceConnection},
 };
 

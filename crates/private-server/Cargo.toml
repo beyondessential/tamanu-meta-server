@@ -22,11 +22,12 @@ chrono = { workspace = true, optional = true, features = ["serde"] }
 clap = { workspace = true, optional = true, features = ["derive", "env"] }
 commons-errors = { path = "../commons-errors", default-features = false }
 commons-servers = { path = "../commons-servers", optional = true }
-commons-versions = { path = "../commons-versions", default-features = false }
+commons-types = { path = "../commons-types", default-features = false }
 console_error_panic_hook = { version = "0.1.0", optional = true }
 database = { path = "../database", optional = true }
 folktime = { version = "0.2.1", optional = true }
 hex = "0.4.3"
+itertools = { version = "0.14.0", optional = true }
 jiff = { version = "0.2.15", optional = true }
 js-sys = { version = "0.3.81", optional = true }
 leptos.workspace = true
@@ -65,6 +66,7 @@ ssr = [
 	"dep:commons-servers",
 	"dep:database",
 	"dep:folktime",
+	"dep:itertools",
 	"dep:jiff",
 	"dep:leptos_axum",
 	"dep:lloggs",
@@ -74,7 +76,7 @@ ssr = [
 	"dep:tower-http",
 	"dep:uuid",
 	"commons-errors/ssr",
-	"commons-versions/ssr",
+	"commons-types/ssr",
     "leptos/ssr",
     "leptos_meta/ssr",
     "leptos_router/ssr",

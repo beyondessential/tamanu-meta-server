@@ -1,6 +1,6 @@
 use axum::{extract::FromRequestParts, http::request::Parts};
 use commons_errors::AppError;
-use commons_versions::VersionStr;
+use commons_types::version::VersionStr;
 
 const X_VERSION: &str = "X-Version";
 

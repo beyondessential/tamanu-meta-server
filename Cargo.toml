@@ -4,7 +4,7 @@ members = [
 	"crates/commons-errors",
 	"crates/commons-servers",
 	"crates/commons-tests",
-	"crates/commons-versions",
+	"crates/commons-types",
 	"crates/database",
 	"crates/jobs",
 	"crates/private-server",

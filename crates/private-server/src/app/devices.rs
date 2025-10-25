@@ -1,3 +1,4 @@
+use commons_types::Uuid;
 use leptos::prelude::*;
 use leptos_meta::{Stylesheet, provide_meta_context};
 use leptos_router::components::A;
@@ -148,7 +149,7 @@ pub fn DeviceList(devices: Vec<crate::fns::devices::DeviceInfo>) -> impl IntoVie
 #[component]
 pub fn DeviceListItem(device: crate::fns::devices::DeviceInfo) -> impl IntoView {
 	let device_id = device.device.id.clone();
-	let role = device.device.role.clone();
+	let role = device.device.role;
 	let latest_ip = device
 		.latest_connection
 		.as_ref()
@@ -173,10 +174,10 @@ pub fn DeviceListItem(device: crate::fns::devices::DeviceInfo) -> impl IntoView 
 		.unwrap_or_default();
 
 	view! {
-		<A href={format!("/devices/{}", device_id)} {..} class="device-list-item">
+		<A href={format!("/devices/{device_id}")} {..} class="device-list-item">
 			<div class="device-list-id">
-				<span class="id-text">{device_id}</span>
-				<span class="role-badge">{role}</span>
+				<span class="id-text">{device_id.to_string()}</span>
+				<span class="role-badge">{role.to_string()}</span>
 			</div>
 			<div class="device-list-ip">{latest_ip}</div>
 			<div class="device-list-ua">{latest_user_agent}</div>
@@ -193,10 +194,10 @@ pub fn DeviceListItem(device: crate::fns::devices::DeviceInfo) -> impl IntoView 
 }
 
 #[component]
-pub fn DeviceConnectionHistory(device_id: String) -> impl IntoView {
+pub fn DeviceConnectionHistory(device_id: Uuid) -> impl IntoView {
 	let (history_offset, set_history_offset) = signal(0i64);
 	let (all_connections, set_all_connections) =
-		signal(HashMap::<String, crate::fns::devices::DeviceConnectionData>::new());
+		signal(HashMap::<Uuid, crate::fns::devices::DeviceConnectionData>::new());
 	let (has_more, set_has_more) = signal(false);
 
 	let connection_count = {
@@ -227,7 +228,7 @@ pub fn DeviceConnectionHistory(device_id: String) -> impl IntoView {
 
 					set_all_connections.update(|existing| {
 						for conn in new_connections {
-							existing.insert(conn.id.clone(), conn);
+							existing.insert(conn.id, conn);
 						}
 					});
 				}

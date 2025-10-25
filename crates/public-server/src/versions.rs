@@ -12,7 +12,7 @@ use axum::{
 };
 use commons_errors::Result;
 use commons_servers::device_auth::{AdminDevice, ReleaserDevice};
-use commons_versions::{VersionRange, VersionStr};
+use commons_types::version::{VersionRange, VersionStr};
 use database::{
 	Db,
 	artifacts::Artifact,

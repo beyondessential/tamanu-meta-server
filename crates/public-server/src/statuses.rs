@@ -5,9 +5,9 @@ use axum::{
 };
 use commons_errors::{AppError, Result};
 use commons_servers::{device_auth::ServerDevice, headers::VersionHeader};
+use commons_types::device::DeviceRole;
 use database::{
 	Db,
-	device_role::DeviceRole,
 	devices::Device,
 	servers::Server,
 	statuses::{NewStatus, Status},

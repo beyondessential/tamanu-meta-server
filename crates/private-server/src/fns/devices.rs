@@ -1,14 +1,19 @@
 use commons_errors::Result;
+use commons_types::{
+	Uuid,
+	device::DeviceRole,
+	server::{kind::ServerKind, rank::ServerRank},
+};
 use leptos::server;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerInfo {
-	pub id: String,
+	pub id: Uuid,
 	pub name: Option<String>,
 	pub host: String,
-	pub kind: String,
-	pub rank: Option<String>,
+	pub kind: ServerKind,
+	pub rank: Option<ServerRank>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,18 +25,18 @@ pub struct DeviceInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceData {
-	pub id: String,
+	pub id: Uuid,
 	pub created_at: String,
 	pub created_at_relative: String,
 	pub updated_at: String,
 	pub updated_at_relative: String,
-	pub role: String,
+	pub role: DeviceRole,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceKeyInfo {
-	pub id: String,
-	pub device_id: String,
+	pub id: Uuid,
+	pub device_id: Uuid,
 	pub name: Option<String>,
 	pub pem_data: String,
 	pub hex_data: String,
@@ -40,16 +45,16 @@ pub struct DeviceKeyInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceConnectionData {
-	pub id: String,
+	pub id: Uuid,
 	pub created_at: String,
 	pub created_at_relative: String,
-	pub device_id: String,
+	pub device_id: Uuid,
 	pub ip: String,
 	pub user_agent: Option<String>,
 }
 
 #[server]
-pub async fn get_device_by_id(device_id: String) -> Result<DeviceInfo> {
+pub async fn get_device_by_id(device_id: Uuid) -> Result<DeviceInfo> {
 	ssr::get_device_by_id(device_id).await
 }
 
@@ -59,7 +64,7 @@ pub async fn list_untrusted(limit: Option<i64>, offset: Option<i64>) -> Result<V
 }
 
 #[server]
-pub async fn get_servers_for_device(device_id: String) -> Result<Vec<ServerInfo>> {
+pub async fn get_servers_for_device(device_id: Uuid) -> Result<Vec<ServerInfo>> {
 	ssr::get_servers_for_device(device_id).await
 }
 
@@ -70,7 +75,7 @@ pub async fn count_untrusted() -> Result<i64> {
 
 #[server]
 pub async fn connection_history(
-	device_id: String,
+	device_id: Uuid,
 	limit: Option<i64>,
 	offset: Option<i64>,
 ) -> Result<Vec<DeviceConnectionData>> {
@@ -78,12 +83,12 @@ pub async fn connection_history(
 }
 
 #[server]
-pub async fn connection_count(device_id: String) -> Result<i64> {
+pub async fn connection_count(device_id: Uuid) -> Result<i64> {
 	ssr::connection_count(device_id).await
 }
 
 #[server]
-pub async fn trust(device_id: String, role: String) -> Result<()> {
+pub async fn trust(device_id: Uuid, role: DeviceRole) -> Result<()> {
 	ssr::trust(device_id, role).await
 }
 
@@ -98,12 +103,12 @@ pub async fn count_trusted() -> Result<i64> {
 }
 
 #[server]
-pub async fn untrust(device_id: String) -> Result<()> {
+pub async fn untrust(device_id: Uuid) -> Result<()> {
 	ssr::untrust(device_id).await
 }
 
 #[server]
-pub async fn update_role(device_id: String, role: String) -> Result<()> {
+pub async fn update_role(device_id: Uuid, role: DeviceRole) -> Result<()> {
 	ssr::update_role(device_id, role).await
 }
 
@@ -115,8 +120,9 @@ pub async fn search(query: String) -> Result<Vec<DeviceInfo>> {
 #[cfg(feature = "ssr")]
 mod ssr {
 	use super::*;
+	use commons_types::device::DeviceRole;
 	use database::servers::Server;
-	use database::{Device, DeviceConnection, DeviceKey, DeviceRole, DeviceWithInfo};
+	use database::{Device, DeviceConnection, DeviceKey, DeviceWithInfo};
 	use folktime::duration::Style;
 	use uuid::Uuid;
 
@@ -131,12 +137,12 @@ mod ssr {
 		fn from(device_with_info: DeviceWithInfo) -> Self {
 			Self {
 				device: DeviceData {
-					id: device_with_info.device.id.to_string(),
+					id: device_with_info.device.id,
 					created_at: device_with_info.device.created_at.to_rfc3339(),
 					created_at_relative: format_relative_time(device_with_info.device.created_at),
 					updated_at: device_with_info.device.updated_at.to_rfc3339(),
 					updated_at_relative: format_relative_time(device_with_info.device.updated_at),
-					role: String::from(device_with_info.device.role),
+					role: device_with_info.device.role,
 				},
 				keys: device_with_info
 					.keys
@@ -156,8 +162,8 @@ mod ssr {
 			let hex_data = format_key_as_hex(&key.key_data);
 
 			Self {
-				id: key.id.to_string(),
-				device_id: key.device_id.to_string(),
+				id: key.id,
+				device_id: key.device_id,
 				name: key.name,
 				pem_data,
 				hex_data,
@@ -169,10 +175,10 @@ mod ssr {
 	impl From<DeviceConnection> for DeviceConnectionData {
 		fn from(conn: DeviceConnection) -> Self {
 			Self {
-				id: conn.id.to_string(),
+				id: conn.id,
 				created_at: conn.created_at.to_rfc3339(),
 				created_at_relative: format_relative_time(conn.created_at),
-				device_id: conn.device_id.to_string(),
+				device_id: conn.device_id,
 				ip: conn.ip.addr().to_string(),
 				user_agent: conn.user_agent,
 			}
@@ -208,33 +214,27 @@ mod ssr {
 			.to_uppercase()
 	}
 
-	pub async fn get_device_by_id(device_id: String) -> Result<DeviceInfo> {
+	pub async fn get_device_by_id(device_id: Uuid) -> Result<DeviceInfo> {
 		let db = crate::fns::commons::admin_guard().await?;
 		let mut conn = db.get().await?;
 
-		let device_uuid = Uuid::parse_str(&device_id)
-			.map_err(|_| commons_errors::AppError::custom("Invalid device ID"))?;
-
-		let device_with_info = Device::get_with_info(&mut conn, device_uuid).await?;
+		let device_with_info = Device::get_with_info(&mut conn, device_id).await?;
 		Ok(DeviceInfo::from(device_with_info))
 	}
 
-	pub async fn get_servers_for_device(device_id: String) -> Result<Vec<ServerInfo>> {
+	pub async fn get_servers_for_device(device_id: Uuid) -> Result<Vec<ServerInfo>> {
 		let db = crate::fns::commons::admin_guard().await?;
 		let mut conn = db.get().await?;
 
-		let device_uuid = Uuid::parse_str(&device_id)
-			.map_err(|_| commons_errors::AppError::custom("Invalid device ID"))?;
-
-		let servers = Server::get_by_device_id(&mut conn, device_uuid).await?;
+		let servers = Server::get_by_device_id(&mut conn, device_id).await?;
 		Ok(servers
 			.into_iter()
 			.map(|s| ServerInfo {
-				id: s.id.to_string(),
+				id: s.id,
 				name: s.name,
 				host: s.host.into(),
-				kind: s.kind.to_string(),
-				rank: s.rank.map(|r| r.to_string()),
+				kind: s.kind,
+				rank: s.rank,
 			})
 			.collect())
 	}
@@ -289,19 +289,16 @@ mod ssr {
 	}
 
 	pub async fn connection_history(
-		device_id: String,
+		device_id: Uuid,
 		limit: Option<i64>,
 		offset: Option<i64>,
 	) -> Result<Vec<DeviceConnectionData>> {
 		let db = crate::fns::commons::admin_guard().await?;
 		let mut conn = db.get().await?;
 
-		let device_uuid = Uuid::parse_str(&device_id)
-			.map_err(|_| commons_errors::AppError::custom("Invalid device ID"))?;
-
 		let connections = DeviceConnection::get_history_for_device_paginated(
 			&mut conn,
-			device_uuid,
+			device_id,
 			limit.unwrap_or(100),
 			offset.unwrap_or(0),
 		)
@@ -312,64 +309,46 @@ mod ssr {
 			.collect())
 	}
 
-	pub async fn connection_count(device_id: String) -> Result<i64> {
+	pub async fn connection_count(device_id: Uuid) -> Result<i64> {
 		let db = crate::fns::commons::admin_guard().await?;
 		let mut conn = db.get().await?;
 
-		let device_uuid = Uuid::parse_str(&device_id)
-			.map_err(|_| commons_errors::AppError::custom("Invalid device ID"))?;
-
-		DeviceConnection::get_connection_count_for_device(&mut conn, device_uuid).await
+		DeviceConnection::get_connection_count_for_device(&mut conn, device_id).await
 	}
 
-	pub async fn trust(device_id: String, role: String) -> Result<()> {
+	pub async fn trust(device_id: Uuid, role: DeviceRole) -> Result<()> {
 		let db = crate::fns::commons::admin_guard().await?;
 		let mut conn = db.get().await?;
 
-		let device_uuid = Uuid::parse_str(&device_id)
-			.map_err(|_| commons_errors::AppError::custom("Invalid device ID"))?;
-
-		let device_role = DeviceRole::try_from(role)
-			.map_err(|_| commons_errors::AppError::custom("Invalid device role"))?;
-
 		// Prevent setting role to untrusted (that's the default for new devices)
-		if device_role == DeviceRole::Untrusted {
+		if role == DeviceRole::Untrusted {
 			return Err(commons_errors::AppError::custom(
 				"Cannot set device role to untrusted",
 			));
 		}
 
-		Device::trust(&mut conn, device_uuid, device_role).await
+		Device::trust(&mut conn, device_id, role).await
 	}
 
-	pub async fn untrust(device_id: String) -> Result<()> {
+	pub async fn untrust(device_id: Uuid) -> Result<()> {
 		let db = crate::fns::commons::admin_guard().await?;
 		let mut conn = db.get().await?;
 
-		let device_uuid = Uuid::parse_str(&device_id)
-			.map_err(|_| commons_errors::AppError::custom("Invalid device ID"))?;
-
-		Device::untrust(&mut conn, device_uuid).await
+		Device::untrust(&mut conn, device_id).await
 	}
 
-	pub async fn update_role(device_id: String, role: String) -> Result<()> {
+	pub async fn update_role(device_id: Uuid, role: DeviceRole) -> Result<()> {
 		let db = crate::fns::commons::admin_guard().await?;
 		let mut conn = db.get().await?;
-
-		let device_uuid = Uuid::parse_str(&device_id)
-			.map_err(|_| commons_errors::AppError::custom("Invalid device ID"))?;
-
-		let device_role = DeviceRole::try_from(role)
-			.map_err(|_| commons_errors::AppError::custom("Invalid device role"))?;
 
 		// Prevent setting role to untrusted (use untrust function instead)
-		if device_role == DeviceRole::Untrusted {
+		if role == DeviceRole::Untrusted {
 			return Err(commons_errors::AppError::custom(
 				"Use untrust function to set device role to untrusted",
 			));
 		}
 
-		Device::trust(&mut conn, device_uuid, device_role).await
+		Device::trust(&mut conn, device_id, role).await
 	}
 
 	pub async fn search(query: String) -> Result<Vec<DeviceInfo>> {

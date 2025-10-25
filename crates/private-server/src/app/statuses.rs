@@ -1,10 +1,9 @@
+use commons_types::server::cards::CentralServerCard;
 use leptos::prelude::*;
 use leptos_meta::Stylesheet;
 
 use crate::{
-	app::status::Status,
-	components::VersionIndicator,
-	fns::statuses::{CentralServerCardData, grouped_central_servers},
+	app::status::Status, components::VersionIndicator, fns::statuses::grouped_central_servers,
 };
 
 #[component]
@@ -135,7 +134,7 @@ pub fn ServerCards() -> impl IntoView {
 }
 
 #[component]
-pub fn RankSection(rank: &'static str, servers: Vec<CentralServerCardData>) -> impl IntoView {
+pub fn RankSection(rank: &'static str, servers: Vec<CentralServerCard>) -> impl IntoView {
 	if servers.is_empty() {
 		return view! { <div></div> }.into_any();
 	}
@@ -167,7 +166,7 @@ pub fn RankSection(rank: &'static str, servers: Vec<CentralServerCardData>) -> i
 }
 
 #[component]
-pub fn ServerCard(server: CentralServerCardData) -> impl IntoView {
+pub fn ServerCard(server: CentralServerCard) -> impl IntoView {
 	let server_id = server.id.clone();
 	let server_name = server.name.clone();
 	let server_host = server.host.clone();
@@ -197,7 +196,7 @@ pub fn ServerCard(server: CentralServerCardData) -> impl IntoView {
 			</div>
 			<div class="status-dots">
 				<span
-					class:status-dot class={server_up.clone()}
+					class:status-dot class={server_up.to_string()}
 					title={format!("{}: {}", server_name, server_up)}
 				></span>
 				<For
@@ -206,7 +205,7 @@ pub fn ServerCard(server: CentralServerCardData) -> impl IntoView {
 					let:facility
 				>
 					<span
-						class:status-dot class:facility-dot class={facility.up.clone()}
+						class:status-dot class:facility-dot class={facility.up.to_string()}
 						title={format!("{}: {}", facility.name, facility.up)}
 					></span>
 				</For>

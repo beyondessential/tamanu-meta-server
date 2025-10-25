@@ -7,7 +7,7 @@ use axum::{
 };
 use commons_errors::Result;
 use commons_servers::device_auth::ReleaserDevice;
-use commons_versions::VersionStr;
+use commons_types::version::VersionStr;
 use database::{
 	Db,
 	artifacts::{Artifact, NewArtifact},

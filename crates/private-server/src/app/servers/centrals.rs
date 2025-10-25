@@ -79,17 +79,16 @@ fn ServerCard(server: ServerListItem) -> impl IntoView {
 		<a href={format!("/servers/{}", server.id)} class={card_class}>
 			<div class="server-card-header">
 				<h3>{server.name.clone().unwrap_or_else(|| "(unnamed)".to_string())}</h3>
-				{server.rank.as_ref().map(|rank| {
-					let rank = rank.clone();
+				{server.rank.map(|rank| {
 					view! {
-						<span class="server-rank">{rank}</span>
+						<span class="server-rank">{rank.to_string()}</span>
 					}
 				})}
 			</div>
 			<div class="server-card-body">
 				<div class="server-info">
 					<span class="label">"Kind:"</span>
-					<span class="value">{server.kind}</span>
+					<span class="value">{server.kind.to_string()}</span>
 				</div>
 				<div class="server-info">
 					<span class="label">"Host:"</span>

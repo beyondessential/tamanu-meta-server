@@ -1,3 +1,8 @@
+use commons_types::{
+	Uuid,
+	server::{kind::ServerKind, rank::ServerRank},
+	status::ShortStatus,
+};
 use leptos::prelude::*;
 use leptos::serde_json;
 use leptos_meta::Stylesheet;
@@ -27,7 +32,14 @@ fn is_admin_resource() -> Resource<bool> {
 #[component]
 pub fn Detail() -> impl IntoView {
 	let params = use_params_map();
-	let server_id = move || params.read().get("id").unwrap_or_default();
+	let server_id = move || {
+		params
+			.read()
+			.get("id")
+			.map(|id| id.parse::<Uuid>().ok())
+			.flatten()
+			.unwrap_or_default()
+	};
 
 	let detail_resource =
 		Resource::new(move || server_id(), async move |id| server_detail(id).await);
@@ -35,9 +47,9 @@ pub fn Detail() -> impl IntoView {
 	let is_editing = RwSignal::new(false);
 	let edit_name = RwSignal::new(String::new());
 	let edit_host = RwSignal::new(String::new());
-	let edit_rank = RwSignal::new(String::new());
-	let edit_device_id = RwSignal::new(String::new());
-	let edit_parent_id = RwSignal::new(String::new());
+	let edit_rank = RwSignal::new(None::<ServerRank>);
+	let edit_device_id = RwSignal::new(None::<Uuid>);
+	let edit_parent_id = RwSignal::new(None::<Uuid>);
 
 	let is_admin = is_admin_resource();
 
@@ -45,16 +57,16 @@ pub fn Detail() -> impl IntoView {
 		move |(name, host, rank, device_id, parent_id): &(
 			Option<String>,
 			Option<String>,
-			Option<String>,
-			Option<String>,
-			Option<String>,
+			Option<ServerRank>,
+			Option<Uuid>,
+			Option<Uuid>,
 		)| {
 			let name = name.clone();
 			let host = host.clone();
-			let rank = rank.clone();
-			let device_id = device_id.clone();
-			let parent_id = parent_id.clone();
 			let id = server_id();
+			let rank = *rank;
+			let device_id = *device_id;
+			let parent_id = *parent_id;
 			async move {
 				let result = update_server(id, name, host, rank, device_id, parent_id).await;
 				if result.is_ok() {
@@ -75,7 +87,7 @@ pub fn Detail() -> impl IntoView {
 						match result {
 							Ok(data) => {
 								// If server is not central and has a parent, redirect to parent (unless editing)
-								if data.server.kind != "central" && !is_editing.get() {
+								if data.server.kind != ServerKind::Central && !is_editing.get() {
 									if let Some(parent_id) = &data.server.parent_server_id {
 										// Check if user is admin before redirecting
 										if !is_admin.get().unwrap_or(false) {
@@ -119,20 +131,20 @@ fn ServerDetailView(
 	is_admin: Resource<bool>,
 	edit_name: RwSignal<String>,
 	edit_host: RwSignal<String>,
-	edit_rank: RwSignal<String>,
-	edit_device_id: RwSignal<String>,
-	edit_parent_id: RwSignal<String>,
+	edit_rank: RwSignal<Option<ServerRank>>,
+	edit_device_id: RwSignal<Option<Uuid>>,
+	edit_parent_id: RwSignal<Option<Uuid>>,
 	update_action: Action<
 		(
 			Option<String>,
 			Option<String>,
-			Option<String>,
-			Option<String>,
-			Option<String>,
+			Option<ServerRank>,
+			Option<Uuid>,
+			Option<Uuid>,
 		),
 		Result<crate::fns::servers::ServerDetailsData, commons_errors::AppError>,
 	>,
-	server_id: String,
+	server_id: Uuid,
 ) -> impl IntoView {
 	let server = data.server.clone();
 	let device_info = data.device_info.clone();
@@ -142,26 +154,20 @@ fn ServerDetailView(
 
 	let server_name = server.name.clone();
 	let server_host = server.host.clone();
-	let server_rank = server.rank.clone();
-	let server_kind = server.kind.clone();
-	let device_id_str = device_info
-		.as_ref()
-		.map(|d| d.device.id.clone())
-		.unwrap_or_default();
+	let server_rank = server.rank;
+	let server_kind = server.kind;
+	let device_id = device_info.as_ref().map(|d| d.device.id);
 
 	let server_name_for_effect = server_name.clone();
 	let server_host_for_effect = server_host.clone();
-	let server_rank_for_effect = server_rank.clone();
-	let device_id_for_effect = device_id_str.clone();
-	let parent_id_for_effect = server.parent_server_id.clone();
 
 	Effect::new(move |_| {
 		if !is_editing.get() {
 			edit_name.set(server_name_for_effect.clone());
 			edit_host.set(server_host_for_effect.clone());
-			edit_rank.set(server_rank_for_effect.clone());
-			edit_device_id.set(device_id_for_effect.clone());
-			edit_parent_id.set(parent_id_for_effect.clone().unwrap_or_default());
+			edit_rank.set(server_rank);
+			edit_device_id.set(device_id);
+			edit_parent_id.set(server.parent_server_id);
 		}
 	});
 
@@ -170,10 +176,10 @@ fn ServerDetailView(
 			<PageHeader
 				server_name=server_name.clone()
 				server_host=server_host.clone()
-				server_rank=server.rank.clone()
-				server_kind=server_kind.clone()
-				up=up.clone()
-				device_id_str=device_id_str.clone()
+				server_rank=server.rank
+				server_kind=server_kind
+				up=up
+				device_id=device_id
 				child_servers=child_servers.clone()
 				is_editing=is_editing
 				edit_name=edit_name
@@ -194,7 +200,7 @@ fn ServerDetailView(
 							edit_parent_id=edit_parent_id
 							update_action=update_action
 							is_editing=is_editing
-							server_kind=server_kind.clone()
+							server_kind=server_kind
 						/>
 					}.into_any()
 				} else {
@@ -203,18 +209,18 @@ fn ServerDetailView(
 							<ServerInfoSection
 								host=server.host.clone()
 								device_info=device_info.clone()
-								up=up.clone()
+								up=up.to_string()
 							/>
 							{last_status.as_ref().map(|status| {
 								view! {
 									<StatusSection status=status.clone() />
 								}
 							})}
-							{if server.kind == "central" && !data.child_servers.is_empty() {
+							{if server.kind == ServerKind::Central && !data.child_servers.is_empty() {
 								view! {
 									<ChildServersSection child_servers=data.child_servers.clone() is_admin />
 								}.into_any()
-							} else if server.kind != "central" && server.parent_server_id.is_none() {
+							} else if server.kind != ServerKind::Central && server.parent_server_id.is_none() {
 								view! {
 									<AssignParentSection server_id=server_id.clone() />
 								}.into_any()
@@ -233,22 +239,20 @@ fn ServerDetailView(
 fn PageHeader(
 	server_name: String,
 	server_host: String,
-	server_rank: String,
-	server_kind: String,
-	up: String,
-	device_id_str: String,
+	server_rank: Option<ServerRank>,
+	server_kind: ServerKind,
+	up: ShortStatus,
+	device_id: Option<Uuid>,
 	child_servers: Vec<ChildServerData>,
 	is_editing: RwSignal<bool>,
 	edit_name: RwSignal<String>,
 	edit_host: RwSignal<String>,
-	edit_rank: RwSignal<String>,
-	edit_device_id: RwSignal<String>,
-	_edit_parent_id: RwSignal<String>,
+	edit_rank: RwSignal<Option<ServerRank>>,
+	edit_device_id: RwSignal<Option<Uuid>>,
+	_edit_parent_id: RwSignal<Option<Uuid>>,
 ) -> impl IntoView {
 	let name_clone = server_name.clone();
 	let host_clone = server_host.clone();
-	let rank_clone = server_rank.clone();
-	let device_id_clone = device_id_str.clone();
 
 	let is_admin = is_admin_resource();
 
@@ -259,16 +263,14 @@ fn PageHeader(
 					if is_admin.get().unwrap_or(false) && !is_editing.get() {
 						let name = name_clone.clone();
 						let host = host_clone.clone();
-						let rank = rank_clone.clone();
-						let device_id = device_id_clone.clone();
 						Some(view! {
 							<button
 								class="edit-button"
 								on:click=move |_| {
 									edit_name.set(name.clone());
 									edit_host.set(host.clone());
-									edit_rank.set(rank.clone());
-									edit_device_id.set(device_id.clone());
+									edit_rank.set(server_rank);
+									edit_device_id.set(device_id);
 									// edit_parent_id already set by Effect
 									is_editing.set(true);
 								}
@@ -282,8 +284,8 @@ fn PageHeader(
 				}}
 			</Suspense>
 			<h1>
-				<span class={format!("status-dot {}", up)} title={format!("{}: {}", server_name, up)}></span>
-				{if server_kind == "central" {
+				<span class={format!("status-dot {up}")} title={format!("{server_name}: {up}")}></span>
+				{if server_kind == ServerKind::Central {
 					child_servers.into_iter().map(|child| {
 						view! {
 							<span
@@ -297,7 +299,7 @@ fn PageHeader(
 				}}
 				{server_name.clone()}
 			</h1>
-			<span class="server-rank">{server_rank.clone()}</span>
+			<span class="server-rank">{server_rank.map(|r| r.to_string()).unwrap_or_default()}</span>
 		</div>
 	}
 }
@@ -306,47 +308,33 @@ fn PageHeader(
 fn EditForm(
 	edit_name: RwSignal<String>,
 	edit_host: RwSignal<String>,
-	edit_rank: RwSignal<String>,
-	edit_device_id: RwSignal<String>,
-	edit_parent_id: RwSignal<String>,
+	edit_rank: RwSignal<Option<ServerRank>>,
+	edit_device_id: RwSignal<Option<Uuid>>,
+	edit_parent_id: RwSignal<Option<Uuid>>,
 	update_action: Action<
 		(
 			Option<String>,
 			Option<String>,
-			Option<String>,
-			Option<String>,
-			Option<String>,
+			Option<ServerRank>,
+			Option<Uuid>,
+			Option<Uuid>,
 		),
 		Result<crate::fns::servers::ServerDetailsData, commons_errors::AppError>,
 	>,
 	is_editing: RwSignal<bool>,
-	server_kind: String,
+	server_kind: ServerKind,
 ) -> impl IntoView {
 	view! {
 		<section class="detail-section edit-form">
 			<h2>"Edit Server Details"</h2>
 			<form on:submit=move |ev| {
 				ev.prevent_default();
-				let device_id = {
-					let id = edit_device_id.get();
-					if id.is_empty() {
-						Some(String::new())
-					} else {
-						Some(id)
-					}
-				};
-				let parent_id = {
-					let id = edit_parent_id.get();
-					if id.is_empty() {
-						Some(String::new())
-					} else {
-						Some(id)
-					}
-				};
+				let device_id = edit_device_id.get();
+				let parent_id = edit_parent_id.get();
 				update_action.dispatch((
 					Some(edit_name.get()),
 					Some(edit_host.get()),
-					Some(edit_rank.get()),
+					edit_rank.get(),
 					device_id,
 					parent_id,
 				));
@@ -377,15 +365,15 @@ fn EditForm(
 					<label for="edit-rank">"Server Rank"</label>
 					<select
 						id="edit-rank"
-						prop:value=move || edit_rank.get()
-						on:change=move |ev| edit_rank.set(event_target_value(&ev))
+						prop:value=move || edit_rank.get().map(|r| r.to_string()).unwrap_or_default()
+						on:change=move |ev| edit_rank.set(event_target_value(&ev).parse().ok())
 						required
 					>
-						<option value="production" selected=move || edit_rank.get() == "production">"Production"</option>
-						<option value="clone" selected=move || edit_rank.get() == "clone">"Clone"</option>
-						<option value="demo" selected=move || edit_rank.get() == "demo">"Demo"</option>
-						<option value="test" selected=move || edit_rank.get() == "test">"Test"</option>
-						<option value="dev" selected=move || edit_rank.get() == "dev">"Dev"</option>
+						<option value={ServerRank::Production.to_string()} selected=move || edit_rank.get() == Some(ServerRank::Production)>"Production"</option>
+						<option value={ServerRank::Clone.to_string()} selected=move || edit_rank.get() == Some(ServerRank::Clone)>"Clone"</option>
+						<option value={ServerRank::Demo.to_string()} selected=move || edit_rank.get() == Some(ServerRank::Demo)>"Demo"</option>
+						<option value={ServerRank::Test.to_string()} selected=move || edit_rank.get() == Some(ServerRank::Test)>"Test"</option>
+						<option value={ServerRank::Dev.to_string()} selected=move || edit_rank.get() == Some(ServerRank::Dev)>"Dev"</option>
 					</select>
 				</div>
 
@@ -394,22 +382,22 @@ fn EditForm(
 					<input
 						type="text"
 						id="edit-device-id"
-						prop:value=move || edit_device_id.get()
-						on:input=move |ev| edit_device_id.set(event_target_value(&ev))
+						prop:value=move || edit_device_id.get().map(|id| id.to_string()).unwrap_or_default()
+						on:input=move |ev| edit_device_id.set(event_target_value(&ev).parse().ok())
 						placeholder="Leave empty to unset"
 					/>
 					<small class="help-text">"Optional UUID of the device associated with this server"</small>
 				</div>
 
-				{if server_kind != "central" {
+				{if server_kind != ServerKind::Central {
 					view! {
 						<div class="form-group">
 							<label for="edit-parent-id">"Parent Server ID"</label>
 							<input
 								type="text"
 								id="edit-parent-id"
-								prop:value=move || edit_parent_id.get()
-								on:input=move |ev| edit_parent_id.set(event_target_value(&ev))
+								prop:value=move || edit_parent_id.get().map(|id| id.to_string()).unwrap_or_default()
+								on:input=move |ev| edit_parent_id.set(event_target_value(&ev).parse().ok())
 								placeholder="Leave empty to unset parent"
 							/>
 							<small class="help-text">"Optional UUID of the parent central server"</small>
@@ -457,7 +445,7 @@ fn ServerInfoSection(host: String, device_info: Option<DeviceInfo>, up: String) 
 	view! {
 		<section class="detail-section">
 			<h2>
-				<span class={format!("section-status-dot status-dot {}", up)}></span>
+				<span class={format!("section-status-dot status-dot {up}")}></span>
 				"Central server"
 				<a class="detail-host" href={host} target="_blank">{host_clone}</a>
 			</h2>
@@ -576,7 +564,7 @@ fn ChildServerCard(child: ChildServerData, is_admin: Resource<bool>) -> impl Int
 	view! {
 		<div class="child-server-card">
 			<div class="child-server-header">
-				<span class={format!("status-dot {}", child.up)} title={child.up.clone()}></span>
+				<span class={format!("status-dot {}", child.up)} title={child.up.to_string()}></span>
 				<a href={format!("/servers/{}", child.id)} class="child-server-name">
 					{child.name.clone()}
 				</a>
@@ -604,7 +592,7 @@ fn ChildServerCard(child: ChildServerData, is_admin: Resource<bool>) -> impl Int
 						<div class:child-server-info>
 							<div class:info-item>
 								<span class="info-label">"Rank"</span>
-								<span class:info-value>{child.rank.clone()}</span>
+								<span class:info-value>{child.rank.map(|r| r.to_string()).unwrap_or_default()}</span>
 							</div>
 							<div class:info-item>
 								<span class="info-label">"Reported At"</span>
@@ -626,7 +614,7 @@ fn ChildServerCard(child: ChildServerData, is_admin: Resource<bool>) -> impl Int
 								view! {
 									<div class:info-item class:version>
 										<span class="info-label">"Tamanu"</span>
-										<span class:info-value>{v}</span>
+										<span class:info-value>{v.to_string()}</span>
 									</div>
 								}
 							})}
@@ -666,21 +654,15 @@ fn ChildServerCard(child: ChildServerData, is_admin: Resource<bool>) -> impl Int
 }
 
 #[component]
-fn AssignParentSection(server_id: String) -> impl IntoView {
+fn AssignParentSection(server_id: Uuid) -> impl IntoView {
 	let search_query = RwSignal::new(String::new());
 	let search_results = RwSignal::new(Vec::new());
 
-	let current_rank = RwSignal::new(String::new());
-
-	let server_id_clone = server_id.clone();
-	let server_id_clone2 = server_id.clone();
+	let current_rank = RwSignal::new(None::<ServerRank>);
 
 	let is_admin = is_admin_resource();
 
-	let detail_resource = Resource::new(
-		move || server_id_clone.clone(),
-		async move |id| server_detail(id).await,
-	);
+	let detail_resource = Resource::new(move || server_id, async move |id| server_detail(id).await);
 
 	Effect::new(move |_| {
 		if let Some(Ok(data)) = detail_resource.get() {
@@ -688,11 +670,10 @@ fn AssignParentSection(server_id: String) -> impl IntoView {
 		}
 	});
 
-	let assign_action = Action::new(move |parent_id: &String| {
-		let server_id = server_id_clone2.clone();
-		let parent_id = parent_id.clone();
+	let assign_action = Action::new(move |parent_id: &Uuid| {
+		let parent_id = *parent_id;
 		async move {
-			let result = assign_parent_server(server_id, parent_id.clone()).await;
+			let result = assign_parent_server(server_id, parent_id).await;
 			if result.is_ok() {
 				leptos_router::hooks::use_navigate()(
 					&format!("/servers/{}", parent_id),
@@ -729,7 +710,7 @@ fn AssignParentSection(server_id: String) -> impl IntoView {
 							Some(view! {
 								<>
 									<h2>"Assign Parent Server"</h2>
-									<p class="help-text">"This server is not affiliated with a central server. Search and select a central server to assign as parent."</p>
+									<p class="help-text">"This server does not have a parent server. Search and select a central server to assign as parent."</p>
 									<div class="parent-search">
 										<input
 											type="text"
@@ -750,8 +731,8 @@ fn AssignParentSection(server_id: String) -> impl IntoView {
 
 												// Sort: matching rank first, then others
 												results.sort_by(|a, b| {
-													let a_matches = a.rank.as_ref().map(|r| r == &rank).unwrap_or(false);
-													let b_matches = b.rank.as_ref().map(|r| r == &rank).unwrap_or(false);
+													let a_matches = a.rank == rank;
+													let b_matches = b.rank == rank;
 													match (a_matches, b_matches) {
 														(true, false) => std::cmp::Ordering::Less,
 														(false, true) => std::cmp::Ordering::Greater,
@@ -763,7 +744,7 @@ fn AssignParentSection(server_id: String) -> impl IntoView {
 													<div class="search-results">
 														{results.into_iter().map(|server| {
 															let server_id = server.id.clone();
-															let rank_matches = server.rank.as_ref().map(|r| r == &rank).unwrap_or(false);
+															let rank_matches = server.rank == rank;
 															let opacity_class = if rank_matches { "" } else { "faded" };
 															view! {
 																<div class={format!("search-result-item {}", opacity_class)}>
@@ -772,7 +753,7 @@ fn AssignParentSection(server_id: String) -> impl IntoView {
 																		<span class="search-result-host">{server.host}</span>
 																		{server.rank.as_ref().map(|rank| {
 																			view! {
-																				<span class="search-result-rank">{rank.clone()}</span>
+																				<span class="search-result-rank">{rank.to_string()}</span>
 																			}
 																		})}
 																	</div>

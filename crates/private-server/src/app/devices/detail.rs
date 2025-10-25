@@ -1,3 +1,4 @@
+use commons_types::{Uuid, device::DeviceRole, server::kind::ServerKind};
 use leptos::prelude::*;
 use leptos_meta::Title;
 use leptos_router::hooks::use_params_map;
@@ -9,7 +10,13 @@ use crate::components::ToastCtx;
 pub fn Detail() -> impl IntoView {
 	let ToastCtx(set_message) = use_context().unwrap();
 	let params = use_params_map();
-	let device_id = move || params.read().get("id").unwrap_or_default();
+	let device_id = move || {
+		params
+			.read()
+			.get("id")
+			.map(|s| s.parse::<Uuid>().ok())
+			.flatten()
+	};
 
 	let (refresh_trigger, set_refresh_trigger) = signal(0);
 	let (key_format, set_key_format) = signal("pem".to_string());
@@ -19,23 +26,25 @@ pub fn Detail() -> impl IntoView {
 	let device_resource = Resource::new(
 		move || (device_id(), refresh_trigger.get()),
 		async |(id, _)| {
-			if id.is_empty() {
-				return Err(commons_errors::AppError::custom("No device ID provided"));
+			if let Some(id) = id {
+				crate::fns::devices::get_device_by_id(id).await
+			} else {
+				Err(commons_errors::AppError::custom("No device ID provided"))
 			}
-			crate::fns::devices::get_device_by_id(id).await
 		},
 	);
 
 	let servers_resource = Resource::new(device_id, async |id| {
-		if id.is_empty() {
-			return Ok(vec![]);
+		if let Some(id) = id {
+			crate::fns::devices::get_servers_for_device(id).await
+		} else {
+			Ok(Vec::new())
 		}
-		crate::fns::devices::get_servers_for_device(id).await
 	});
 
-	let update_role_action = Action::new(move |(device_id, role): &(String, String)| {
-		let device_id = device_id.clone();
-		let role = role.clone();
+	let update_role_action = Action::new(move |(device_id, role): &(Uuid, DeviceRole)| {
+		let device_id = *device_id;
+		let role = *role;
 		async move { crate::fns::devices::update_role(device_id, role).await }
 	});
 
@@ -57,8 +66,8 @@ pub fn Detail() -> impl IntoView {
 		}
 	});
 
-	let untrust_action = Action::new(move |device_id: &String| {
-		let device_id = device_id.clone();
+	let untrust_action = Action::new(move |device_id: &Uuid| {
+		let device_id = *device_id;
 		async move { crate::fns::devices::untrust(device_id).await }
 	});
 
@@ -80,9 +89,9 @@ pub fn Detail() -> impl IntoView {
 		}
 	});
 
-	let trust_action = Action::new(move |(device_id, role): &(String, String)| {
-		let device_id = device_id.clone();
-		let role = role.clone();
+	let trust_action = Action::new(move |(device_id, role): &(Uuid, DeviceRole)| {
+		let device_id = *device_id;
+		let role = *role;
 		async move { crate::fns::devices::trust(device_id, role).await }
 	});
 
@@ -105,7 +114,7 @@ pub fn Detail() -> impl IntoView {
 	});
 
 	view! {
-		<Title text=move || format!("Tamanu Meta Device {}", device_id()) />
+		<Title text=move || format!("Tamanu Meta Device {}", device_id().map(|id| id.to_string()).unwrap_or_default()) />
 		<div class="device-detail">
 			<Suspense fallback=|| view! { <div class="loading">"Loading device..."</div> }>
 				{move || {
@@ -116,13 +125,11 @@ pub fn Detail() -> impl IntoView {
 								let device_id_for_untrust = device_id.clone();
 								let device_id_for_trust = device_id.clone();
 								let device_id_for_update = device_id.clone();
-								let device_id_for_history = device_id.clone();
-								let device_role = device_info.device.role.clone();
-								let device_role_for_disabled = device_role.clone();
-								let default_role = if device_role != "untrusted" {
-									device_role.clone()
+								let device_role = device_info.device.role;
+								let default_role = if device_role != DeviceRole::Untrusted {
+									device_role
 								} else {
-									"server".to_string()
+									DeviceRole::Server
 								};
 								let (selected_role, set_selected_role) = signal(default_role);
 
@@ -132,7 +139,7 @@ pub fn Detail() -> impl IntoView {
 										if let Some(window) = window() {
 											let navigator = window.navigator();
 											let clipboard = navigator.clipboard();
-											let _ = clipboard.write_text(&device_id);
+											let _ = clipboard.write_text(&device_id.to_string());
 										}
 									}
 								};
@@ -143,8 +150,8 @@ pub fn Detail() -> impl IntoView {
 											<div class="device-info">
 												<div class="device-id-section">
 													<h2>
-														{device_info.device.id.clone()}
-														<span class="role-badge-header">{device_info.device.role.clone()}</span>
+														{device_info.device.id.to_string()}
+														<span class="role-badge-header">{device_info.device.role.to_string()}</span>
 													</h2>
 													<button class="copy-id-btn" on:click=copy_device_id title="Copy device ID">
 														"📋"
@@ -235,18 +242,18 @@ pub fn Detail() -> impl IntoView {
 										</div>
 
 										<div class="device-actions">
-											{if device_role != "untrusted" {
+											{if device_role != DeviceRole::Untrusted {
 												view! {
 													<div class="trusted-device-actions">
 														<div class="actions-row">
 															<label>"Change Role:"</label>
 															<select
-																prop:value=move || selected_role.get()
-																on:change=move |ev| set_selected_role.set(event_target_value(&ev))
+																prop:value=move || selected_role.get().to_string()
+																on:change=move |ev| set_selected_role.set(event_target_value(&ev).parse().unwrap_or_default())
 															>
-																<option value="server">"Server"</option>
-																<option value="facility">"Facility"</option>
-																<option value="admin">"Admin"</option>
+																<option value={DeviceRole::Server.to_string()}>"Server"</option>
+																<option value={DeviceRole::Releaser.to_string()}>"Releaser"</option>
+																<option value={DeviceRole::Admin.to_string()}>"Admin"</option>
 															</select>
 															<button
 																class="update-role-btn"
@@ -254,11 +261,10 @@ pub fn Detail() -> impl IntoView {
 																	let device_id = device_id_for_update.clone();
 																	move |_| {
 																		let role = selected_role.get();
-																		update_role_action.dispatch((device_id.clone(), role));
+																		update_role_action.dispatch((device_id, role));
 																	}
 																}
 																disabled={
-																	let device_role = device_role_for_disabled.clone();
 																	move || {
 																		update_role_action.pending().get() || selected_role.get() == device_role
 																	}
@@ -278,7 +284,7 @@ pub fn Detail() -> impl IntoView {
 																			<button
 																				class="untrust-confirm-btn"
 																				on:click=move |_| {
-																					untrust_action.dispatch(device_id.clone());
+																					untrust_action.dispatch(device_id);
 																					set_show_untrust_confirm.set(false);
 																				}
 																				disabled=move || untrust_action.pending().get()
@@ -312,12 +318,12 @@ pub fn Detail() -> impl IntoView {
 													<div class="trust-device">
 														<label>"Trust this device as:"</label>
 														<select
-															prop:value=move || selected_role.get()
-															on:change=move |ev| set_selected_role.set(event_target_value(&ev))
+															prop:value=move || selected_role.get().to_string()
+															on:change=move |ev| set_selected_role.set(event_target_value(&ev).parse().unwrap_or_default())
 														>
-															<option value="server">"Server"</option>
-															<option value="facility">"Facility"</option>
-															<option value="admin">"Admin"</option>
+															<option value={DeviceRole::Server.to_string()}>"Server"</option>
+															<option value={DeviceRole::Releaser.to_string()}>"Releaser"</option>
+															<option value={DeviceRole::Admin.to_string()}>"Admin"</option>
 														</select>
 														<button
 															class="trust-btn"
@@ -325,7 +331,7 @@ pub fn Detail() -> impl IntoView {
 																let device_id = device_id_for_trust.clone();
 																move |_| {
 																	let role = selected_role.get();
-																	trust_action.dispatch((device_id.clone(), role));
+																	trust_action.dispatch((device_id, role));
 																}
 															}
 															disabled=move || trust_action.pending().get()
@@ -353,7 +359,7 @@ pub fn Detail() -> impl IntoView {
 										{move || {
 											if show_history.get() {
 												view! {
-													<super::DeviceConnectionHistory device_id=device_id_for_history.clone() />
+													<super::DeviceConnectionHistory device_id />
 												}.into_any()
 											} else {
 												().into_any()
@@ -378,7 +384,7 @@ pub fn Detail() -> impl IntoView {
 																		<For each=move || servers.clone() key=|server| server.id.clone() let:server>
 																			<div class="server-item">
 																				<div class="server-header">
-																					{if server.kind == "central" {
+																					{if server.kind == ServerKind::Central {
 																						view! {
 																							<a href={format!("/status/{}", server.id)} class="server-name">
 																								{server.name.clone().unwrap_or_else(|| "Unnamed Server".to_string())}
@@ -391,13 +397,13 @@ pub fn Detail() -> impl IntoView {
 																							</span>
 																						}.into_any()
 																					}}
-																					<span class="server-kind">{server.kind.clone()}</span>
+																					<span class="server-kind">{server.kind.to_string()}</span>
 																				</div>
 																				<div class="server-details">
 																					<span class="server-host">{server.host.clone()}</span>
 																					{server.rank.as_ref().map(|rank| {
 																						view! {
-																							<span class="server-rank">{rank.clone()}</span>
+																							<span class="server-rank">{rank.to_string()}</span>
 																						}
 																					})}
 																				</div>

@@ -1,11 +1,10 @@
 use commons_errors::{AppError, Result};
+use commons_types::server::{kind::ServerKind, rank::ServerRank};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::server_kind::ServerKind;
-use super::server_rank::ServerRank;
 use super::url_field::UrlField;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable, AsChangeset)]

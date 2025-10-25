@@ -1,14 +1,13 @@
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use commons_errors::{AppError, Result};
+use commons_types::device::DeviceRole;
 use diesel::QueryableByName;
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
-
-use super::device_role::DeviceRole;
 
 #[derive(Clone, Debug, Serialize, Deserialize, Queryable, Selectable, Insertable)]
 #[diesel(table_name = crate::schema::devices)]
@@ -26,6 +25,7 @@ pub struct Device {
 	/// The role of the device.
 	///
 	/// This is used for permission checks.
+	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub role: DeviceRole,
 }
 
@@ -655,5 +655,13 @@ impl DeviceConnection {
 			.get_result(db)
 			.await
 			.map_err(AppError::from)
+	}
+
+	pub fn nodejs_version(&self) -> Option<String> {
+		self.user_agent.as_ref().and_then(|ua| {
+			ua.split_ascii_whitespace()
+				.find_map(|p| p.strip_prefix("Node.js/"))
+				.map(ToOwned::to_owned)
+		})
 	}
 }

@@ -677,7 +677,7 @@ async fn grouped_central_servers_with_data() {
 		response.assert_status_ok();
 
 		let data: GroupedServersResponse = response.json();
-		
+
 		// Check production servers
 		assert_eq!(data.production.len(), 1);
 		let prod_server = &data.production[0];
@@ -686,15 +686,15 @@ async fn grouped_central_servers_with_data() {
 		assert_eq!(prod_server.host, "https://prod.example.com/");
 		assert_eq!(prod_server.up, "gone"); // No status, so should be gone
 		assert_eq!(prod_server.facility_servers.len(), 2);
-		
+
 		// Check clone servers
 		assert_eq!(data.clone.len(), 1);
 		assert_eq!(data.clone[0].name, "Clone Central");
-		
+
 		// Check demo servers
 		assert_eq!(data.demo.len(), 1);
 		assert_eq!(data.demo[0].name, "Demo Central");
-		
+
 		// Other ranks should be empty
 		assert!(data.test.is_empty());
 		assert!(data.dev.is_empty());
@@ -720,7 +720,7 @@ async fn grouped_central_servers_excludes_unnamed() {
 		response.assert_status_ok();
 
 		let data: GroupedServersResponse = response.json();
-		
+
 		// Only the named central should be included
 		assert_eq!(data.production.len(), 1);
 		assert_eq!(data.production[0].name, "Named Central");

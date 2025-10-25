@@ -3,12 +3,13 @@ use std::{
 	time::{Duration, Instant},
 };
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use commons_errors::{AppError, Result};
-use commons_versions::VersionStr;
+use commons_types::{server::rank::ServerRank, status::ShortStatus, version::VersionStr};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use futures::stream::{FuturesOrdered, StreamExt};
+use node_semver::Version;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
@@ -195,15 +196,13 @@ impl Status {
 		query.load::<Status>(db).await.map_err(AppError::from)
 	}
 
-	pub async fn production_versions(
-		db: &mut AsyncPgConnection,
-	) -> Result<Vec<commons_versions::VersionStr>> {
+	pub async fn production_versions(db: &mut AsyncPgConnection) -> Result<Vec<VersionStr>> {
 		use crate::schema::statuses::dsl as statuses_dsl;
 		use crate::views::ordered_servers::dsl as servers_dsl;
 
 		let production_server_ids: Vec<Uuid> = servers_dsl::ordered_servers
 			.select(servers_dsl::id)
-			.filter(servers_dsl::rank.eq(crate::server_rank::ServerRank::Production))
+			.filter(servers_dsl::rank.eq(ServerRank::Production))
 			.load(db)
 			.await?;
 
@@ -221,11 +220,7 @@ impl Status {
 			)
 			.order((statuses_dsl::server_id, statuses_dsl::created_at.desc()))
 			.distinct_on(statuses_dsl::server_id)
-			.load::<(
-				Uuid,
-				chrono::DateTime<Utc>,
-				Option<commons_versions::VersionStr>,
-			)>(db)
+			.load::<(Uuid, chrono::DateTime<Utc>, Option<VersionStr>)>(db)
 			.await
 			.map(|results| {
 				results
@@ -234,5 +229,48 @@ impl Status {
 					.collect()
 			})
 			.map_err(AppError::from)
+	}
+
+	pub fn platform(&self) -> Option<String> {
+		self.extra("pgVersion")
+			.and_then(|pg| pg.as_str())
+			.map(|pg| {
+				if pg.contains("Visual C++") || pg.contains("windows") {
+					"Windows"
+				} else {
+					"Linux"
+				}
+				.into()
+			})
+	}
+
+	pub fn postgres_version(&self) -> Option<String> {
+		self.extra("pgVersion")
+			.and_then(|pg| pg.as_str())
+			.and_then(|pg| pg.split_ascii_whitespace().nth(1))
+			.map(|vers| vers.trim_end_matches(',').into())
+	}
+
+	pub fn short_status(&self) -> ShortStatus {
+		let since = self.created_at.signed_duration_since(Utc::now()).abs();
+		if since > TimeDelta::minutes(30) {
+			ShortStatus::Down
+		} else if since > TimeDelta::minutes(10) {
+			ShortStatus::Away
+		} else if since > TimeDelta::minutes(2) {
+			ShortStatus::Blip
+		} else {
+			ShortStatus::Up
+		}
+	}
+
+	pub fn distance_from_version(&self, version: &Version) -> Option<u64> {
+		let Some(current) = &self.version.as_ref().map(|v| &v.0) else {
+			return None;
+		};
+
+		let minor_distance = version.minor.saturating_sub(current.minor);
+		let major_distance = version.major.saturating_sub(current.major);
+		Some(major_distance * 1000 + minor_distance)
 	}
 }
