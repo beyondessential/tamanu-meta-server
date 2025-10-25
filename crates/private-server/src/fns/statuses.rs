@@ -70,7 +70,7 @@ pub async fn grouped_central_servers() -> Result<GroupedServersData> {
 #[cfg(feature = "ssr")]
 mod ssr {
 	use super::*;
-	use std::collections::{BTreeMap, BTreeSet};
+	use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 	use axum::extract::State;
 	use commons_errors::{AppError, Result};
@@ -145,21 +145,52 @@ mod ssr {
 		let id = server_id
 			.parse::<Uuid>()
 			.map_err(|e| AppError::custom(format!("Invalid server ID: {}", e)))?;
-		let server = Server::get_by_id(&mut conn, id).await?;
+		let central = Server::get_by_id(&mut conn, id).await?;
 
-		let _latest_version = Version::get_latest_matching(&mut conn, "*".parse()?)
+		let latest_version = Version::get_latest_matching(&mut conn, "*".parse()?)
 			.await?
 			.as_semver();
 
+		let central_status = Status::latest_for_server(&mut conn, id).await?;
+		let central_up = central_status
+			.as_ref()
+			.map(|s| s.short_status())
+			.unwrap_or_default();
+		let version_distance = central_status
+			.as_ref()
+			.map(|s| s.distance_from_version(&latest_version))
+			.flatten();
+
+		let facilities = central.get_children(&mut conn).await?;
+		let facility_ids = facilities.iter().map(|f| f.id).collect::<Vec<_>>();
+		let facility_statuses = Status::latest_for_servers(&mut conn, &facility_ids)
+			.await?
+			.into_iter()
+			.map(|s| (s.server_id, s))
+			.collect::<HashMap<_, _>>();
+		let facility_servers = facilities
+			.into_iter()
+			.map(|f| {
+				let facility_status = facility_statuses.get(&f.id);
+				FacilityServerStatus {
+					id: f.id,
+					name: f.name.clone().unwrap_or_default(),
+					up: facility_status
+						.map(|s| s.short_status())
+						.unwrap_or_default(),
+				}
+			})
+			.collect();
+
 		Ok(super::CentralServerCard {
-			id: server.id,
-			name: server.name.unwrap_or_default(),
-			rank: server.rank,
-			host: server.host.0.to_string(),
-			up: todo!(),
-			version: todo!(),
-			version_distance: todo!(),
-			facility_servers: todo!(),
+			id: central.id,
+			name: central.name.unwrap_or_default(),
+			rank: central.rank,
+			host: central.host.0.to_string(),
+			up: central_up,
+			version: central_status.map(|s| s.version).flatten(),
+			version_distance,
+			facility_servers,
 		})
 	}
 

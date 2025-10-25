@@ -313,7 +313,7 @@ mod ssr {
 		};
 
 		let child_servers = if server.kind.to_string() == "central" {
-			let children = Server::get_children(&mut conn, server.id).await?;
+			let children = server.get_children(&mut conn).await?;
 			let mut child_data = Vec::new();
 
 			for child in children {

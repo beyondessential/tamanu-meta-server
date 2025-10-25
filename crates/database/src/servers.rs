@@ -87,11 +87,11 @@ impl Server {
 			.map_err(AppError::from)
 	}
 
-	pub async fn get_children(db: &mut AsyncPgConnection, parent_id: Uuid) -> Result<Vec<Self>> {
+	pub async fn get_children(&self, db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
 		use crate::views::ordered_servers::dsl::*;
 		ordered_servers
 			.select(Self::as_select())
-			.filter(parent_server_id.eq(parent_id))
+			.filter(parent_server_id.eq(self.id))
 			.load(db)
 			.await
 			.map_err(AppError::from)
