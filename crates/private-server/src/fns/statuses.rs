@@ -38,15 +38,6 @@ pub struct ServerStatusData {
 	pub timezone: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GroupedServersData {
-	pub production: Vec<CentralServerCard>,
-	pub clone: Vec<CentralServerCard>,
-	pub demo: Vec<CentralServerCard>,
-	pub test: Vec<CentralServerCard>,
-	pub dev: Vec<CentralServerCard>,
-}
-
 #[server]
 pub async fn summary() -> Result<SummaryData> {
 	ssr::summary().await
@@ -62,11 +53,6 @@ pub async fn server_details(server_id: String) -> Result<CentralServerCard> {
 	ssr::server_details(server_id).await
 }
 
-#[server]
-pub async fn grouped_central_servers() -> Result<GroupedServersData> {
-	ssr::grouped_central_servers().await
-}
-
 #[cfg(feature = "ssr")]
 mod ssr {
 	use super::*;
@@ -75,7 +61,7 @@ mod ssr {
 	use axum::extract::State;
 	use commons_errors::{AppError, Result};
 	use commons_types::{
-		server::{cards::FacilityServerStatus, kind::ServerKind, rank::ServerRank},
+		server::{cards::FacilityServerStatus, kind::ServerKind},
 		version::VersionStr,
 	};
 	use database::{Db, servers::Server, statuses::Status, versions::Version};
@@ -182,7 +168,7 @@ mod ssr {
 			})
 			.collect();
 
-		Ok(super::CentralServerCard {
+		Ok(CentralServerCard {
 			id: central.id,
 			name: central.name.unwrap_or_default(),
 			rank: central.rank,
@@ -191,96 +177,6 @@ mod ssr {
 			version: central_status.map(|s| s.version).flatten(),
 			version_distance,
 			facility_servers,
-		})
-	}
-
-	pub async fn grouped_central_servers() -> Result<super::GroupedServersData> {
-		let state = expect_context::<AppState>();
-		let State(db): State<Db> = extract_with_state(&state).await?;
-		let mut conn = db.get().await?;
-
-		// Get all servers
-		let servers = Server::get_all(&mut conn).await?;
-
-		// Separate central and facility servers
-		let central_servers: Vec<_> = servers
-			.iter()
-			.filter(|s| s.kind == ServerKind::Central && s.name.is_some())
-			.collect();
-
-		// Get latest statuses for all servers in one query
-		let server_ids: Vec<Uuid> = servers.iter().map(|s| s.id).collect();
-		let statuses = Status::latest_for_servers(&mut conn, &server_ids).await?;
-
-		// Build a map of server_id -> status
-		let status_map: std::collections::HashMap<Uuid, &Status> =
-			statuses.iter().map(|s| (s.server_id, s)).collect();
-
-		let latest_version = Version::get_latest_matching(&mut conn, "*".parse()?)
-			.await?
-			.as_semver();
-
-		// Process each central server
-		let mut cards: Vec<super::CentralServerCard> = Vec::new();
-
-		for central in central_servers {
-			let central_status = status_map.get(&central.id);
-			let up = central_status.map(|s| s.short_status()).unwrap_or_default();
-			let version_distance = central_status
-				.map(|s| s.distance_from_version(&latest_version))
-				.flatten();
-
-			// Get facility servers for this central
-			let facility_servers: Vec<FacilityServerStatus> = servers
-				.iter()
-				.filter(|s| s.parent_server_id == Some(central.id))
-				.map(|facility| {
-					let facility_status = status_map.get(&facility.id);
-					FacilityServerStatus {
-						id: facility.id,
-						name: facility.name.clone().unwrap_or_default(),
-						up: facility_status
-							.map(|s| s.short_status())
-							.unwrap_or_default(),
-					}
-				})
-				.collect();
-
-			cards.push(CentralServerCard {
-				id: central.id,
-				name: central.name.clone().unwrap_or_default(),
-				rank: central.rank,
-				host: central.host.0.to_string(),
-				up,
-				version: central_status.and_then(|s| s.version.clone()),
-				version_distance,
-				facility_servers,
-			});
-		}
-
-		// Group by rank
-		let mut production = Vec::new();
-		let mut clone = Vec::new();
-		let mut demo = Vec::new();
-		let mut test = Vec::new();
-		let mut dev = Vec::new();
-
-		for card in cards {
-			match card.rank.unwrap_or_default() {
-				ServerRank::Production => production.push(card),
-				ServerRank::Clone => clone.push(card),
-				ServerRank::Demo => demo.push(card),
-				ServerRank::Test => test.push(card),
-				ServerRank::Dev => dev.push(card),
-			}
-		}
-
-		Ok(super::GroupedServersData {
-			production,
-			clone,
-			demo,
-			test,
-			dev,
 		})
 	}
 }

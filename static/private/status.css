@@ -161,4 +161,28 @@
 			opacity: 0.5;
 		}
 	}
+
+	.loading-card {
+		background: var(--color-bg-light);
+		border: 1px solid var(--color-border-light);
+		min-height: 6em;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+
+		.loading-placeholder {
+			width: 2em;
+			height: 2em;
+			border: 3px solid var(--color-border-light);
+			border-top-color: var(--color-primary);
+			border-radius: 50%;
+			animation: spin 1s linear infinite;
+		}
+	}
+
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
 }

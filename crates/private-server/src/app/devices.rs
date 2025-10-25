@@ -349,10 +349,10 @@ mod tests {
 		relative: &str,
 	) -> crate::fns::devices::DeviceConnectionData {
 		crate::fns::devices::DeviceConnectionData {
-			id: uuid::Uuid::new_v4().to_string(),
+			id: uuid::Uuid::new_v4(),
 			created_at: time.to_string(),
 			created_at_relative: relative.to_string(),
-			device_id: uuid::Uuid::new_v4().to_string(),
+			device_id: uuid::Uuid::new_v4(),
 			ip: ip.to_string(),
 			user_agent: user_agent.map(|s| s.to_string()),
 		}

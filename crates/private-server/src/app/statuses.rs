@@ -1,9 +1,10 @@
-use commons_types::server::cards::CentralServerCard;
 use leptos::prelude::*;
 use leptos_meta::Stylesheet;
 
 use crate::{
-	app::status::Status, components::VersionIndicator, fns::statuses::grouped_central_servers,
+	app::status::Status,
+	components::VersionIndicator,
+	fns::statuses::{server_details, server_grouped_ids},
 };
 
 #[component]
@@ -31,10 +32,8 @@ pub fn ServerCards() -> impl IntoView {
 	});
 
 	let (trigger, set_trigger) = signal(0);
-	let grouped_servers_resource = Resource::new(
-		move || trigger.get(),
-		async |_| grouped_central_servers().await,
-	);
+	let grouped_ids_resource =
+		Resource::new(move || trigger.get(), async |_| server_grouped_ids().await);
 
 	// Start loading only on client side
 	Effect::new(move |_| {
@@ -116,14 +115,24 @@ pub fn ServerCards() -> impl IntoView {
 				<div class="loading">"Loading servers..."</div>
 			}>
 				<Suspense fallback=|| view! { <div class="loading">"Loading…"</div> }>{move || {
-					grouped_servers_resource.get().and_then(|result| result.ok()).map(|data| {
+					grouped_ids_resource.get().and_then(|result| result.ok()).map(|groups| {
 						view! {
 							<div class="grouped-servers">
-								<RankSection rank="production" servers={data.production.clone()} />
-								<RankSection rank="clone" servers={data.clone.clone()} />
-								<RankSection rank="demo" servers={data.demo.clone()} />
-								<RankSection rank="test" servers={data.test.clone()} />
-								<RankSection rank="dev" servers={data.dev.clone()} />
+								{groups.get("production").map(|ids| {
+									view! { <RankSection rank="production" server_ids={ids.clone()} trigger={trigger} /> }.into_any()
+								})}
+								{groups.get("clone").map(|ids| {
+									view! { <RankSection rank="clone" server_ids={ids.clone()} trigger={trigger} /> }.into_any()
+								})}
+								{groups.get("demo").map(|ids| {
+									view! { <RankSection rank="demo" server_ids={ids.clone()} trigger={trigger} /> }.into_any()
+								})}
+								{groups.get("test").map(|ids| {
+									view! { <RankSection rank="test" server_ids={ids.clone()} trigger={trigger} /> }.into_any()
+								})}
+								{groups.get("dev").map(|ids| {
+									view! { <RankSection rank="dev" server_ids={ids.clone()} trigger={trigger} /> }.into_any()
+								})}
 							</div>
 						}
 					})
@@ -134,8 +143,12 @@ pub fn ServerCards() -> impl IntoView {
 }
 
 #[component]
-pub fn RankSection(rank: &'static str, servers: Vec<CentralServerCard>) -> impl IntoView {
-	if servers.is_empty() {
+pub fn RankSection(
+	rank: &'static str,
+	server_ids: Vec<String>,
+	trigger: ReadSignal<i32>,
+) -> impl IntoView {
+	if server_ids.is_empty() {
 		return view! { <div></div> }.into_any();
 	}
 
@@ -153,11 +166,11 @@ pub fn RankSection(rank: &'static str, servers: Vec<CentralServerCard>) -> impl 
 			<h2 class="rank-heading">{rank_display}</h2>
 			<div class="servers-grid">
 				<For
-					each=move || servers.clone()
-					key=|server| server.id.clone()
-					let:server
+					each=move || server_ids.clone()
+					key=|id| id.clone()
+					let:server_id
 				>
-					<ServerCard server={server} />
+					<ServerCardLoader server_id={server_id} trigger={trigger} />
 				</For>
 			</div>
 		</div>
@@ -166,7 +179,30 @@ pub fn RankSection(rank: &'static str, servers: Vec<CentralServerCard>) -> impl 
 }
 
 #[component]
-pub fn ServerCard(server: CentralServerCard) -> impl IntoView {
+pub fn ServerCardLoader(server_id: String, trigger: ReadSignal<i32>) -> impl IntoView {
+	let server_id_clone = server_id.clone();
+	let server_resource = Resource::new(
+		move || (trigger.get(), server_id_clone.clone()),
+		async |(_, id)| server_details(id).await,
+	);
+
+	view! {
+		<Suspense fallback=move || view! {
+			<div class="server-card loading-card">
+				<div class="loading-placeholder"></div>
+			</div>
+		}>
+			{move || {
+				server_resource.get().and_then(|result| result.ok()).map(|server| {
+					view! { <ServerCard server={server} /> }
+				})
+			}}
+		</Suspense>
+	}
+}
+
+#[component]
+pub fn ServerCard(server: commons_types::server::cards::CentralServerCard) -> impl IntoView {
 	let server_id = server.id.clone();
 	let server_name = server.name.clone();
 	let server_host = server.host.clone();
