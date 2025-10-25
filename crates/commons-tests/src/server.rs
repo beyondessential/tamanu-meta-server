@@ -52,6 +52,7 @@ where
 			public_server::routes().with_state(public_server::state::AppState {
 				db: database::init_to(&url),
 				tera: public_server::state::AppState::init_tera().unwrap(),
+				server_versions_secret: Some("test-secret".to_string()),
 			}),
 			ClientIpSource::RightmostForwarded,
 		);

@@ -22,7 +22,7 @@ build-image:
 
 # Run the public server and reload on change
 watch-public:
-	watchexec -w crates -- cargo run --bin public-server
+	watchexec -w crates -E SERVER_VERSIONS_SECRET=test -- cargo run --bin public-server
 
 # Run the private server with live reload
 watch-private:

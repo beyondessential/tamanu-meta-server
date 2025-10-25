@@ -7,6 +7,8 @@ use crate::state::AppState;
 pub mod artifacts;
 #[cfg(feature = "ui")]
 pub mod password;
+#[cfg(feature = "ui")]
+pub mod server_versions;
 pub mod servers;
 pub mod state;
 pub mod statuses;
@@ -33,6 +35,9 @@ pub fn routes() -> Router<AppState> {
 			.merge(timesync::routes())
 			.merge(password::routes())
 			.nest_service("/static", ServeDir::new("static"));
+
+		// Mount server-versions route (secret is checked in the handler)
+		router = router.nest("/server-versions", server_versions::routes());
 	}
 
 	router

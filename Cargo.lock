@@ -3141,6 +3141,7 @@ version = "5.4.1"
 dependencies = [
  "axum",
  "axum-client-ip",
+ "axum-test",
  "clap",
  "commons-errors",
  "commons-servers",
@@ -3159,6 +3160,7 @@ dependencies = [
  "qrcode",
  "serde",
  "serde_json",
+ "subtle",
  "tera",
  "timesimp",
  "tokio",

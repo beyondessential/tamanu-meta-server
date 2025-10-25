@@ -12,6 +12,8 @@ pub struct AppState {
 	pub db: Db,
 	#[cfg(feature = "ui")]
 	pub tera: Arc<Tera>,
+	#[cfg(feature = "ui")]
+	pub server_versions_secret: Option<String>,
 }
 
 impl AppState {
@@ -32,6 +34,7 @@ impl AppState {
 		embed_template!("artifacts");
 		embed_template!("mobile");
 		embed_template!("password");
+		embed_template!("server_versions");
 		embed_template!("versions");
 
 		Ok(Arc::new(tera))
@@ -46,6 +49,8 @@ impl AppState {
 			db,
 			#[cfg(feature = "ui")]
 			tera: Self::init_tera()?,
+			#[cfg(feature = "ui")]
+			server_versions_secret: std::env::var("SERVER_VERSIONS_SECRET").ok(),
 		})
 	}
 }
