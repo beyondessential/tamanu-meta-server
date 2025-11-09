@@ -3,7 +3,7 @@ use leptos_meta::Stylesheet;
 
 use crate::{
 	app::status::Status,
-	components::VersionIndicator,
+	components::{StatusLegend, VersionIndicator, VersionLegend},
 	fns::statuses::{server_details, server_grouped_ids},
 };
 
@@ -18,6 +18,10 @@ pub fn Page() -> impl IntoView {
 				</div>
 			</div>
 			<ServerCards />
+			<div class="legends-container">
+				<VersionLegend />
+				<StatusLegend />
+			</div>
 		</div>
 	}
 }

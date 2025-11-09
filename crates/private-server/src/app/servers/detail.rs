@@ -11,7 +11,7 @@ use leptos_router::components::Redirect;
 use leptos_router::hooks::use_params_map;
 
 use crate::app::devices::DeviceListItem;
-use crate::components::{TimeAgo, VersionIndicator};
+use crate::components::{StatusLegend, TimeAgo, VersionIndicator, VersionLegend};
 use crate::fns::devices::DeviceInfo;
 use crate::fns::servers::{
 	ChildServerData, ServerDetailData, ServerLastStatusData, assign_parent_server,
@@ -231,6 +231,11 @@ fn ServerDetailView(
 					}.into_any()
 				}
 			}}
+
+			<div class="legends-container">
+				<VersionLegend />
+				<StatusLegend />
+			</div>
 		</div>
 	}
 }
