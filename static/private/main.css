@@ -368,32 +368,32 @@ main {
 	.version-text {
 		font-family: monospace, monospace;
 	}
+}
 
-	.version-indicator {
-		width: 0.6em;
-		height: 0.6em;
-		display: inline-block;
-		flex-shrink: 0;
+.version-indicator {
+	width: 0.6em;
+	height: 0.6em;
+	display: inline-block;
+	flex-shrink: 0;
 
-		&.version-up-to-date {
-			background: var(--color-success-status);
-		}
+	&.version-up-to-date {
+		background: var(--color-success-status);
+	}
 
-		&.version-okay {
-			background: var(--color-primary);
-		}
+	&.version-okay {
+		background: var(--color-primary);
+	}
 
-		&.version-outdated {
-			background: var(--color-warning);
-		}
+	&.version-outdated {
+		background: var(--color-warning);
+	}
 
-		&.version-very-outdated {
-			background: var(--color-error);
-		}
+	&.version-very-outdated {
+		background: var(--color-error);
+	}
 
-		&.version-unknown {
-			background: var(--color-text-light);
-		}
+	&.version-unknown {
+		background: var(--color-text-light);
 	}
 }
 
