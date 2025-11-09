@@ -80,6 +80,11 @@ pub fn GlobalNav() -> impl IntoView {
 
 	let public_url = Resource::new(|| (), |_| async { crate::fns::commons::public_url().await });
 
+	let server_versions_url = Resource::new(
+		|| (),
+		|_| async { crate::fns::commons::server_versions_url().await },
+	);
+
 	view! {
 		<nav id="global-nav">
 			<div class="nav-brand">
@@ -118,6 +123,25 @@ pub fn GlobalNav() -> impl IntoView {
 										view! {
 											<a href=url target="_blank">
 												"Public"
+											</a>
+										},
+									)
+								} else {
+									None
+								}
+							})
+					}}
+				</Suspense>
+				<Suspense>
+					{move || {
+						server_versions_url
+							.get()
+							.and_then(|result| {
+								if let Ok(Some(url)) = result {
+									Some(
+										view! {
+											<a href=url target="_blank">
+												"Versions"
 											</a>
 										},
 									)
