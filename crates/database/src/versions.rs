@@ -25,13 +25,13 @@ macro_rules! predicate_version {
 }
 pub use predicate_version;
 
-#[derive(
-	Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable, QueryableByName,
-)]
+#[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, QueryableByName)]
 #[diesel(table_name = crate::schema::versions)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Version {
 	pub id: Uuid,
+	pub created_at: chrono::DateTime<chrono::Utc>,
+	pub updated_at: chrono::DateTime<chrono::Utc>,
 	pub major: i32,
 	pub minor: i32,
 	pub patch: i32,
@@ -135,5 +135,31 @@ impl Version {
 			.into_iter()
 			.find(|v| range.satisfies(&v.as_semver()))
 			.ok_or(AppError::NoMatchingVersions)
+	}
+
+	pub async fn get_head_release_date(
+		db: &mut AsyncPgConnection,
+		version: VersionStr,
+	) -> Result<chrono::DateTime<chrono::Utc>> {
+		use crate::schema::versions::*;
+
+		let node_semver::Version {
+			major: target_major,
+			minor: target_minor,
+			..
+		} = version.0;
+
+		table
+			.select(Version::as_select())
+			.filter(
+				major
+					.eq(target_major as i32)
+					.and(minor.eq(target_minor as i32))
+					.and(patch.eq(0)),
+			)
+			.first(db)
+			.await
+			.map(|v: Version| v.created_at)
+			.map_err(AppError::from)
 	}
 }

@@ -1,9 +1,9 @@
 #![recursion_limit = "256"]
 
 pub mod app;
+pub mod chrome_cache;
 pub mod components;
 pub mod fns;
-#[cfg(feature = "ssr")]
 pub mod state;
 
 #[cfg(feature = "ssr")]

@@ -58,6 +58,7 @@ pub struct ServerLastStatusData {
 	pub created_at: String,
 	pub version: Option<VersionStr>,
 	pub version_distance: Option<u64>,
+	pub min_chrome_version: Option<u32>,
 	pub platform: Option<String>,
 	pub postgres: Option<String>,
 	pub nodejs: Option<String>,
@@ -288,11 +289,18 @@ mod ssr {
 
 			let version_distance = st.distance_from_version(&latest_version);
 
+			let min_chrome_version = if let Some(ref version) = st.version {
+				compute_min_chrome_version(&state, &mut conn, version).await
+			} else {
+				None
+			};
+
 			Some(super::ServerLastStatusData {
 				id: st.id,
 				created_at: st.created_at.to_rfc3339(),
 				version: st.version.clone(),
 				version_distance,
+				min_chrome_version,
 				platform,
 				postgres,
 				nodejs,
@@ -369,11 +377,18 @@ mod ssr {
 
 					let version_distance = st.distance_from_version(&latest_version);
 
+					let min_chrome_version = if let Some(ref version) = st.version {
+						compute_min_chrome_version(&state, &mut conn, version).await
+					} else {
+						None
+					};
+
 					Some(super::ServerLastStatusData {
 						id: st.id,
 						created_at: st.created_at.to_rfc3339(),
 						version: st.version.clone(),
 						version_distance,
+						min_chrome_version,
 						platform,
 						postgres,
 						nodejs,
@@ -600,5 +615,28 @@ mod ssr {
 				}
 			}),
 		}
+	}
+
+	async fn compute_min_chrome_version(
+		state: &AppState,
+		conn: &mut database::diesel_async::AsyncPgConnection,
+		version: &commons_types::version::VersionStr,
+	) -> Option<u32> {
+		let head_release_date = Version::get_head_release_date(conn, version.clone())
+			.await
+			.ok()?;
+
+		let supported_versions = state
+			.chrome_cache
+			.get_supported_versions_at_date(head_release_date)
+			.await
+			.ok()?;
+
+		if supported_versions.is_empty() {
+			return None;
+		}
+
+		let min = supported_versions.iter().min().copied()?;
+		Some(min.saturating_sub(1))
 	}
 }

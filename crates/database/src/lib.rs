@@ -20,6 +20,9 @@ pub use devices::{Device, DeviceConnection, DeviceKey, DeviceWithInfo};
 
 pub type Db = Pool<AsyncPgConnection>;
 
+// Re-export for use in other crates
+pub use diesel_async;
+
 pub fn init() -> Db {
 	init_to(&std::env::var("DATABASE_URL").expect("DATABASE_URL must be set"))
 }

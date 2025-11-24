@@ -469,6 +469,7 @@ fn ServerInfoSection(host: String, device_info: Option<DeviceInfo>, up: String) 
 
 #[component]
 fn StatusSection(status: ServerLastStatusData) -> impl IntoView {
+	let min_chrome_version = status.min_chrome_version;
 	view! {
 		<section class:detail-section>
 			<h2>"Latest status"</h2>
@@ -523,6 +524,14 @@ fn StatusSection(status: ServerLastStatusData) -> impl IntoView {
 						<div class:info-item class:version>
 							<span class="info-label">"Node.js"</span>
 							<span class:info-value class:monospace>{node}</span>
+						</div>
+					}
+				})}
+				{min_chrome_version.map(|chrome_ver| {
+					view! {
+						<div class="info-item version">
+							<span class="info-label">"Min chrome version"</span>
+							<span class="info-value monospace">{format!("{chrome_ver} or later")}</span>
 						</div>
 					}
 				})}
