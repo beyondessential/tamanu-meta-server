@@ -15,9 +15,9 @@ async fn index_page() {
 async fn index_page_with_versions() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		conn.batch_execute(
-			"INSERT INTO versions (major, minor, patch, changelog, published) VALUES
-			(1, 0, 0, '# Initial Release\n\nFirst version of the software.', true),
-			(1, 0, 1, '# Bug Fixes\n\n- Fixed critical bug\n- Improved performance', true)",
+			"INSERT INTO versions (major, minor, patch, changelog, status) VALUES
+			(1, 0, 0, '# Initial Release\n\nFirst version of the software.', 'published'),
+			(1, 0, 1, '# Bug Fixes\n\n- Fixed critical bug\n- Improved performance', 'published')",
 		)
 		.await
 		.unwrap();

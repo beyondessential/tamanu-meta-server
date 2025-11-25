@@ -127,13 +127,14 @@ async fn remove(
 	Path(version): Path<String>,
 	State(db): State<Db>,
 ) -> Result<()> {
+	use commons_types::version::VersionStatus;
 	use database::schema::versions::dsl::*;
 
 	let mut db = db.get().await?;
 	let version = VersionStr::from_str(&version)?;
 	diesel::update(versions)
 		.filter(database::versions::predicate_version!(version.0))
-		.set(published.eq(false))
+		.set(status.eq(VersionStatus::Yanked))
 		.execute(&mut db)
 		.await?;
 

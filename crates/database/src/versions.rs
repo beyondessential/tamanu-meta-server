@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use commons_errors::{AppError, Result};
-use commons_types::version::VersionStr;
+use commons_types::version::{VersionStatus, VersionStr};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use serde::{Deserialize, Serialize};
@@ -36,7 +36,8 @@ pub struct Version {
 	pub major: i32,
 	pub minor: i32,
 	pub patch: i32,
-	pub published: bool,
+	#[diesel(deserialize_as = String, serialize_as = String)]
+	pub status: VersionStatus,
 	pub changelog: String,
 }
 
@@ -48,7 +49,8 @@ pub struct ViewVersion {
 	pub major: i32,
 	pub minor: i32,
 	pub patch: i32,
-	pub published: bool,
+	#[diesel(deserialize_as = String, serialize_as = String)]
+	pub status: VersionStatus,
 	pub changelog: String,
 }
 
@@ -72,7 +74,7 @@ impl Version {
 
 		table
 			.select(Version::as_select())
-			.filter(published.eq(true))
+			.filter(status.eq(VersionStatus::Published))
 			.order_by(major.desc())
 			.then_order_by(minor.desc())
 			.then_order_by(patch.desc())
@@ -105,11 +107,14 @@ impl Version {
 		} = version.0;
 		version_updates
 			.filter(
-				major.eq(target_major as i32).and(published.eq(true)).and(
-					minor.gt(target_minor as i32).or(minor
-						.eq(target_minor as i32)
-						.and(patch.gt(target_patch as i32))),
-				),
+				major
+					.eq(target_major as i32)
+					.and(status.eq(VersionStatus::Published))
+					.and(
+						minor.gt(target_minor as i32).or(minor
+							.eq(target_minor as i32)
+							.and(patch.gt(target_patch as i32))),
+					),
 			)
 			.order_by(minor)
 			.select(version_updates::all_columns())
@@ -134,8 +139,8 @@ impl Version {
 		table
 			.select(Version::as_select())
 			.filter(
-				published
-					.eq(true)
+				status
+					.eq(VersionStatus::Published)
 					.and(major.ge(target_major as i32))
 					.and(minor.ge(target_minor as i32))
 					.and(patch.ge(target_patch as i32)),

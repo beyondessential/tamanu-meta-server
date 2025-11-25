@@ -87,7 +87,7 @@ async fn versions_delete_without_auth() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		// Create a version first
 		conn.batch_execute(
-			"INSERT INTO versions (major, minor, patch, changelog, published) VALUES (1, 0, 0, 'Test version', true)",
+			"INSERT INTO versions (major, minor, patch, changelog, status) VALUES (1, 0, 0, 'Test version', 'published')",
 		)
 		.await
 		.unwrap();
@@ -106,7 +106,7 @@ async fn artifacts_create_without_auth() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		// Create a version first
 		conn.batch_execute(
-			"INSERT INTO versions (major, minor, patch, changelog, published) VALUES (1, 0, 0, 'Test version', true)",
+			"INSERT INTO versions (major, minor, patch, changelog, status) VALUES (1, 0, 0, 'Test version', 'published')",
 		)
 		.await
 		.unwrap();
@@ -192,7 +192,7 @@ async fn versions_sequential_access() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		// Create a version
 		conn.batch_execute(
-			"INSERT INTO versions (major, minor, patch, changelog, published) VALUES (1, 0, 0, 'Test version', true)",
+			"INSERT INTO versions (major, minor, patch, changelog, status) VALUES (1, 0, 0, 'Test version', 'published')",
 		)
 		.await
 		.unwrap();

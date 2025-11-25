@@ -1,4 +1,5 @@
 use commons_tests::diesel_async::SimpleAsyncConnection;
+use commons_types::version::VersionStatus;
 use database::{statuses::Status, versions::Version};
 
 #[tokio::test(flavor = "multi_thread")]
@@ -14,9 +15,9 @@ async fn version_distance_calculation_up_to_date() {
 
 		// Create published versions
 		conn.batch_execute(
-			"INSERT INTO versions (id, major, minor, patch, published, changelog) VALUES
-			('22222222-2222-2222-2222-222222222222', 2, 10, 0, true, 'Latest version'),
-			('33333333-3333-3333-3333-333333333333', 2, 9, 5, true, 'Previous version')"
+			"INSERT INTO versions (id, major, minor, patch, status, changelog) VALUES
+			('22222222-2222-2222-2222-222222222222', 2, 10, 0, 'published', 'Latest version'),
+			('33333333-3333-3333-3333-333333333333', 2, 9, 5, 'published', 'Previous version')"
 		)
 		.await
 		.unwrap();
@@ -42,7 +43,7 @@ async fn version_distance_calculation_up_to_date() {
 		let all_versions = Version::get_all(&mut conn).await.unwrap();
 		let published_versions: Vec<_> = all_versions
 			.into_iter()
-			.filter(|v| v.published)
+			.filter(|v| v.status == VersionStatus::Published)
 			.collect();
 
 		assert!(!published_versions.is_empty());
@@ -75,9 +76,9 @@ async fn version_distance_calculation_minor_behind() {
 
 		// Create published versions - latest is 2.12.0
 		conn.batch_execute(
-			"INSERT INTO versions (id, major, minor, patch, published, changelog) VALUES
-			('22222222-2222-2222-2222-222222222222', 2, 12, 0, true, 'Latest version'),
-			('33333333-3333-3333-3333-333333333333', 2, 10, 0, true, 'Previous version')"
+			"INSERT INTO versions (id, major, minor, patch, status, changelog) VALUES
+			('22222222-2222-2222-2222-222222222222', 2, 12, 0, 'published', 'Latest version'),
+			('33333333-3333-3333-3333-333333333333', 2, 10, 0, 'published', 'Previous version')"
 		)
 		.await
 		.unwrap();
@@ -99,7 +100,7 @@ async fn version_distance_calculation_minor_behind() {
 		let all_versions = Version::get_all(&mut conn).await.unwrap();
 		let published_versions: Vec<_> = all_versions
 			.into_iter()
-			.filter(|v| v.published)
+			.filter(|v| v.status == VersionStatus::Published)
 			.collect();
 
 		let latest = published_versions.first().unwrap();
@@ -130,9 +131,9 @@ async fn version_distance_calculation_major_behind() {
 
 		// Create published versions - latest is 3.2.0
 		conn.batch_execute(
-			"INSERT INTO versions (id, major, minor, patch, published, changelog) VALUES
-			('22222222-2222-2222-2222-222222222222', 3, 2, 0, true, 'Latest version'),
-			('33333333-3333-3333-3333-333333333333', 2, 10, 0, true, 'Old major version')"
+			"INSERT INTO versions (id, major, minor, patch, status, changelog) VALUES
+			('22222222-2222-2222-2222-222222222222', 3, 2, 0, 'published', 'Latest version'),
+			('33333333-3333-3333-3333-333333333333', 2, 10, 0, 'published', 'Old major version')"
 		)
 		.await
 		.unwrap();
@@ -154,7 +155,7 @@ async fn version_distance_calculation_major_behind() {
 		let all_versions = Version::get_all(&mut conn).await.unwrap();
 		let published_versions: Vec<_> = all_versions
 			.into_iter()
-			.filter(|v| v.published)
+			.filter(|v| v.status == VersionStatus::Published)
 			.collect();
 
 		let latest = published_versions.first().unwrap();
@@ -186,8 +187,8 @@ async fn version_distance_none_when_no_published_versions() {
 
 		// Create only unpublished versions
 		conn.batch_execute(
-			"INSERT INTO versions (id, major, minor, patch, published, changelog) VALUES
-			('22222222-2222-2222-2222-222222222222', 2, 10, 0, false, 'Unpublished version')"
+			"INSERT INTO versions (id, major, minor, patch, status, changelog) VALUES
+			('22222222-2222-2222-2222-222222222222', 2, 10, 0, 'draft', 'Unpublished version')"
 		)
 		.await
 		.unwrap();
@@ -203,7 +204,7 @@ async fn version_distance_none_when_no_published_versions() {
 		let all_versions = Version::get_all(&mut conn).await.unwrap();
 		let published_versions: Vec<_> = all_versions
 			.into_iter()
-			.filter(|v| v.published)
+			.filter(|v| v.status == VersionStatus::Published)
 			.collect();
 
 		// Should have no published versions
@@ -217,16 +218,19 @@ async fn version_distance_orders_versions_correctly() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
 		// Create multiple published versions out of order
 		conn.batch_execute(
-			"INSERT INTO versions (id, major, minor, patch, published, changelog) VALUES
-			('11111111-1111-1111-1111-111111111111', 2, 8, 0, true, 'Old version'),
-			('22222222-2222-2222-2222-222222222222', 2, 12, 0, true, 'Latest version'),
-			('33333333-3333-3333-3333-333333333333', 2, 10, 0, true, 'Middle version')",
+			"INSERT INTO versions (id, major, minor, patch, status, changelog) VALUES
+			('11111111-1111-1111-1111-111111111111', 2, 8, 0, 'published', 'Old version'),
+			('22222222-2222-2222-2222-222222222222', 2, 12, 0, 'published', 'Latest version'),
+			('33333333-3333-3333-3333-333333333333', 2, 10, 0, 'published', 'Middle version')",
 		)
 		.await
 		.unwrap();
 
 		let all_versions = Version::get_all(&mut conn).await.unwrap();
-		let published_versions: Vec<_> = all_versions.into_iter().filter(|v| v.published).collect();
+		let published_versions: Vec<_> = all_versions
+			.into_iter()
+			.filter(|v| v.status == VersionStatus::Published)
+			.collect();
 
 		// First should be the latest (2.12.0)
 		let latest = published_versions.first().unwrap();

@@ -38,10 +38,10 @@ async fn server_versions_correct_secret() {
 
 		// Add versions and statuses
 		conn.batch_execute(
-			"INSERT INTO versions (id, major, minor, patch, published, changelog) VALUES
-			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 2, 10, 0, true, 'Version 2.10.0'),
-			('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 2, 11, 0, true, 'Version 2.11.0'),
-			('cccccccc-cccc-cccc-cccc-cccccccccccc', 2, 12, 0, true, 'Version 2.12.0')",
+			"INSERT INTO versions (id, major, minor, patch, status, changelog) VALUES
+			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 2, 10, 0, 'published', 'Version 2.10.0'),
+			('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 2, 11, 0, 'published', 'Version 2.11.0'),
+			('cccccccc-cccc-cccc-cccc-cccccccccccc', 2, 12, 0, 'published', 'Version 2.12.0')",
 		)
 		.await
 		.unwrap();

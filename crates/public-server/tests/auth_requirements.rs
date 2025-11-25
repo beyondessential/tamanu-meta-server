@@ -9,7 +9,7 @@ async fn artifacts_create_requires_releaser_auth() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		// Create a version first
 		conn.batch_execute(
-			"INSERT INTO versions (major, minor, patch, changelog, published) VALUES (1, 0, 0, 'Test version', true)",
+			"INSERT INTO versions (major, minor, patch, changelog, status) VALUES (1, 0, 0, 'Test version', 'published')",
 		)
 		.await
 		.unwrap();
@@ -44,7 +44,7 @@ async fn version_delete_requires_admin_auth() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		// Create a version first
 		conn.batch_execute(
-			"INSERT INTO versions (major, minor, patch, changelog, published) VALUES (1, 0, 0, 'Test version', true)",
+			"INSERT INTO versions (major, minor, patch, changelog, status) VALUES (1, 0, 0, 'Test version', 'published')",
 		)
 		.await
 		.unwrap();
@@ -82,7 +82,7 @@ async fn status_create_requires_server_auth() {
 async fn auth_header_missing_completely() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		conn.batch_execute(
-			"INSERT INTO versions (major, minor, patch, changelog, published) VALUES (1, 0, 0, 'Test version', true)",
+			"INSERT INTO versions (major, minor, patch, changelog, status) VALUES (1, 0, 0, 'Test version', 'published')",
 		)
 		.await
 		.unwrap();
@@ -102,7 +102,7 @@ async fn auth_header_missing_completely() {
 async fn auth_header_invalid_certificate() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		conn.batch_execute(
-			"INSERT INTO versions (major, minor, patch, changelog, published) VALUES (1, 0, 0, 'Test version', true)",
+			"INSERT INTO versions (major, minor, patch, changelog, status) VALUES (1, 0, 0, 'Test version', 'published')",
 		)
 		.await
 		.unwrap();

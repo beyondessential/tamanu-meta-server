@@ -2,9 +2,86 @@ use std::{fmt::Display, str::FromStr};
 
 use commons_errors::AppError;
 #[cfg(feature = "ssr")]
-use diesel::{backend::Backend, deserialize, expression::AsExpression, serialize, sql_types::Text};
+use diesel::{
+	backend::Backend,
+	deserialize::{self, FromSql},
+	expression::AsExpression,
+	serialize::{self, Output, ToSql},
+	sql_types::Text,
+};
 use node_semver::SemverError;
 use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ssr", derive(AsExpression))]
+#[cfg_attr(feature = "ssr", diesel(sql_type = Text))]
+#[serde(rename_all = "lowercase")]
+pub enum VersionStatus {
+	Draft,
+	Published,
+	Yanked,
+}
+
+impl Display for VersionStatus {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			VersionStatus::Draft => write!(f, "draft"),
+			VersionStatus::Published => write!(f, "published"),
+			VersionStatus::Yanked => write!(f, "yanked"),
+		}
+	}
+}
+
+impl Default for VersionStatus {
+	fn default() -> Self {
+		Self::Draft
+	}
+}
+
+impl From<String> for VersionStatus {
+	fn from(value: String) -> Self {
+		match value.to_ascii_lowercase().as_ref() {
+			"draft" => Self::Draft,
+			"published" => Self::Published,
+			"yanked" => Self::Yanked,
+			_ => Self::default(),
+		}
+	}
+}
+
+impl From<VersionStatus> for String {
+	fn from(status: VersionStatus) -> Self {
+		match status {
+			VersionStatus::Draft => "draft",
+			VersionStatus::Published => "published",
+			VersionStatus::Yanked => "yanked",
+		}
+		.into()
+	}
+}
+
+#[cfg(feature = "ssr")]
+impl<DB> FromSql<Text, DB> for VersionStatus
+where
+	DB: Backend,
+	String: FromSql<Text, DB>,
+{
+	fn from_sql(bytes: DB::RawValue<'_>) -> deserialize::Result<Self> {
+		let s = String::from_sql(bytes)?;
+		Ok(VersionStatus::from(s))
+	}
+}
+
+#[cfg(feature = "ssr")]
+impl ToSql<Text, diesel::pg::Pg> for VersionStatus
+where
+	String: ToSql<Text, diesel::pg::Pg>,
+{
+	fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, diesel::pg::Pg>) -> serialize::Result {
+		let v = String::from(*self);
+		<String as ToSql<Text, diesel::pg::Pg>>::to_sql(&v, &mut out.reborrow())
+	}
+}
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "ssr", derive(AsExpression))]

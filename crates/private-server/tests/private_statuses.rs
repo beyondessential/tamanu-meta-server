@@ -124,8 +124,8 @@ async fn status_json_basic_server() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		// Add a version to satisfy server_details requirement
 		conn.batch_execute(
-			"INSERT INTO versions (id, major, minor, patch, changelog, created_at) VALUES
-			('00000000-0000-0000-0000-000000000001', 1, 0, 0, 'Test version', NOW())"
+			"INSERT INTO versions (id, major, minor, patch, status, changelog, created_at) VALUES
+			('00000000-0000-0000-0000-000000000001', 1, 0, 0, 'published', 'Test version', NOW())"
 		)
 		.await
 		.unwrap();
@@ -167,8 +167,8 @@ async fn status_json_server_with_recent_status() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		// Add a version to satisfy server_details requirement
 		conn.batch_execute(
-			"INSERT INTO versions (id, major, minor, patch, changelog, created_at) VALUES
-			('00000000-0000-0000-0000-000000000001', 1, 0, 0, 'Test version', NOW())"
+			"INSERT INTO versions (id, major, minor, patch, status, changelog, created_at) VALUES
+			('00000000-0000-0000-0000-000000000001', 1, 0, 0, 'published', 'Test version', NOW())"
 		)
 		.await
 		.unwrap();
@@ -212,8 +212,8 @@ async fn status_json_server_status_ages() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		// Add a version to satisfy server_details requirement
 		conn.batch_execute(
-			"INSERT INTO versions (id, major, minor, patch, changelog, created_at) VALUES
-			('00000000-0000-0000-0000-000000000001', 1, 0, 0, 'Test version', NOW())"
+			"INSERT INTO versions (id, major, minor, patch, status, changelog, created_at) VALUES
+			('00000000-0000-0000-0000-000000000001', 1, 0, 0, 'published', 'Test version', NOW())"
 		)
 		.await
 		.unwrap();
@@ -267,8 +267,8 @@ async fn status_json_platform_detection() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		// Add a version to satisfy server_details requirement
 		conn.batch_execute(
-			"INSERT INTO versions (id, major, minor, patch, changelog, created_at) VALUES
-			('00000000-0000-0000-0000-000000000001', 1, 0, 0, 'Test version', NOW())"
+			"INSERT INTO versions (id, major, minor, patch, status, changelog, created_at) VALUES
+			('00000000-0000-0000-0000-000000000001', 1, 0, 0, 'published', 'Test version', NOW())"
 		)
 		.await
 		.unwrap();
@@ -331,8 +331,8 @@ async fn status_json_mixed_server_ranks() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		// Add a version to satisfy server_details requirement
 		conn.batch_execute(
-			"INSERT INTO versions (id, major, minor, patch, changelog, created_at) VALUES
-			('00000000-0000-0000-0000-000000000001', 1, 0, 0, 'Test version', NOW())"
+			"INSERT INTO versions (id, major, minor, patch, status, changelog, created_at) VALUES
+			('00000000-0000-0000-0000-000000000001', 1, 0, 0, 'published', 'Test version', NOW())"
 		)
 		.await
 		.unwrap();
@@ -378,8 +378,8 @@ async fn status_json_unnamed_servers_excluded() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		// Add a version to satisfy server_details requirement
 		conn.batch_execute(
-			"INSERT INTO versions (id, major, minor, patch, changelog, created_at) VALUES
-			('00000000-0000-0000-0000-000000000001', 1, 0, 0, 'Test version', NOW())"
+			"INSERT INTO versions (id, major, minor, patch, status, changelog, created_at) VALUES
+			('00000000-0000-0000-0000-000000000001', 1, 0, 0, 'published', 'Test version', NOW())"
 		)
 		.await
 		.unwrap();
@@ -417,8 +417,8 @@ async fn status_json_blip_status() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		// Add a version to satisfy server_details requirement
 		conn.batch_execute(
-			"INSERT INTO versions (id, major, minor, patch, changelog, created_at) VALUES
-			('00000000-0000-0000-0000-000000000001', 1, 0, 0, 'Test version', NOW())"
+			"INSERT INTO versions (id, major, minor, patch, status, changelog, created_at) VALUES
+			('00000000-0000-0000-0000-000000000001', 1, 0, 0, 'published', 'Test version', NOW())"
 		)
 		.await
 		.unwrap();
@@ -461,8 +461,8 @@ async fn status_json_gone_server() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		// Add a version to satisfy server_details requirement
 		conn.batch_execute(
-			"INSERT INTO versions (id, major, minor, patch, changelog, created_at) VALUES
-			('00000000-0000-0000-0000-000000000001', 1, 0, 0, 'Test version', NOW())"
+			"INSERT INTO versions (id, major, minor, patch, status, changelog, created_at) VALUES
+			('00000000-0000-0000-0000-000000000001', 1, 0, 0, 'published', 'Test version', NOW())"
 		)
 		.await
 		.unwrap();
@@ -503,8 +503,8 @@ async fn server_detail_basic() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		// Add a version to satisfy server_details requirement
 		conn.batch_execute(
-			"INSERT INTO versions (id, major, minor, patch, changelog, created_at) VALUES
-			('00000000-0000-0000-0000-000000000001', 1, 0, 0, 'Test version', NOW())"
+			"INSERT INTO versions (id, major, minor, patch, status, changelog, created_at) VALUES
+			('00000000-0000-0000-0000-000000000001', 1, 0, 0, 'published', 'Test version', NOW())"
 		)
 		.await
 		.unwrap();
@@ -539,8 +539,8 @@ async fn server_detail_with_status() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		// Add a version to satisfy server_detail requirement
 		conn.batch_execute(
-			"INSERT INTO versions (id, major, minor, patch, changelog, created_at) VALUES
-			('00000000-0000-0000-0000-000000000001', 1, 0, 0, 'Test version', NOW())"
+			"INSERT INTO versions (id, major, minor, patch, status, changelog, created_at) VALUES
+			('00000000-0000-0000-0000-000000000001', 1, 0, 0, 'published', 'Test version', NOW())"
 		)
 		.await
 		.unwrap();
@@ -580,8 +580,8 @@ async fn server_detail_with_device() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		// Add a version to satisfy server_details requirement
 		conn.batch_execute(
-			"INSERT INTO versions (id, major, minor, patch, changelog, created_at) VALUES
-			('00000000-0000-0000-0000-000000000001', 1, 0, 0, 'Test version', NOW())"
+			"INSERT INTO versions (id, major, minor, patch, status, changelog, created_at) VALUES
+			('00000000-0000-0000-0000-000000000001', 1, 0, 0, 'published', 'Test version', NOW())"
 		)
 		.await
 		.unwrap();
@@ -685,8 +685,8 @@ async fn server_grouped_ids_with_data() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		// Add a version to satisfy server_details requirement
 		conn.batch_execute(
-			"INSERT INTO versions (id, major, minor, patch, changelog, created_at) VALUES
-			('00000000-0000-0000-0000-000000000001', 1, 0, 0, 'Test version', NOW())"
+			"INSERT INTO versions (id, major, minor, patch, status, changelog, created_at) VALUES
+			('00000000-0000-0000-0000-000000000001', 1, 0, 0, 'published', 'Test version', NOW())"
 		)
 		.await
 		.unwrap();

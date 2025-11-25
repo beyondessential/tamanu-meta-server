@@ -7,7 +7,7 @@ async fn device_key_authentication_works() {
 	commons_tests::server::run_with_device_auth("releaser", async |mut conn, cert, _device_id, public, _| {
 		// Create a version first so we can test authenticated endpoint
 		conn.batch_execute(
-			"INSERT INTO versions (major, minor, patch, changelog, published) VALUES (1, 0, 0, 'Test version', true)",
+			"INSERT INTO versions (major, minor, patch, changelog, status) VALUES (1, 0, 0, 'Test version', 'published')",
 		)
 		.await
 		.unwrap();
@@ -65,7 +65,7 @@ async fn inactive_keys_not_used_for_auth() {
 	commons_tests::server::run_with_device_auth("admin", async |mut conn, cert, device_id, public, _| {
 		// First verify the key works
 		conn.batch_execute(
-			"INSERT INTO versions (major, minor, patch, changelog, published) VALUES (2, 0, 0, 'Test version', true)",
+			"INSERT INTO versions (major, minor, patch, changelog, status) VALUES (2, 0, 0, 'Test version', 'published')",
 		)
 		.await
 		.unwrap();
@@ -189,7 +189,7 @@ async fn multiple_keys_authenticate_same_device() {
 
 		// Test actual HTTP authentication with the certificate
 		conn.batch_execute(
-			"INSERT INTO versions (major, minor, patch, changelog, published) VALUES (3, 0, 0, 'Multi-key test', true)",
+			"INSERT INTO versions (major, minor, patch, changelog, status) VALUES (3, 0, 0, 'Multi-key test', 'published')",
 		)
 		.await
 		.unwrap();
@@ -293,7 +293,7 @@ async fn device_key_management() {
 
 		// Test that the device can still authenticate and perform releaser actions
 		conn.batch_execute(
-			"INSERT INTO versions (major, minor, patch, changelog, published) VALUES (4, 0, 0, 'Key management test', true)",
+			"INSERT INTO versions (major, minor, patch, changelog, status) VALUES (4, 0, 0, 'Key management test', 'published')",
 		)
 		.await
 		.unwrap();

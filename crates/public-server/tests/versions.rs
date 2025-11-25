@@ -1,4 +1,5 @@
 use axum::http::StatusCode;
+use commons_types::version::VersionStatus;
 use diesel_async::SimpleAsyncConnection;
 use serde::Deserialize;
 use uuid::Uuid;
@@ -10,7 +11,7 @@ pub struct Version {
 	pub minor: i32,
 	pub patch: i32,
 	pub changelog: String,
-	pub published: bool,
+	pub status: VersionStatus,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -36,7 +37,7 @@ async fn empty_versions_list() {
 async fn versions_list_with_data() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		conn.batch_execute(
-			"INSERT INTO versions (major, minor, patch, changelog, published) VALUES (1, 0, 0, 'Initial release', true)",
+			"INSERT INTO versions (major, minor, patch, changelog, status) VALUES (1, 0, 0, 'Initial release', 'published')",
 		)
 		.await
 		.unwrap();
@@ -49,7 +50,7 @@ async fn versions_list_with_data() {
 		assert_eq!(versions[0].minor, 0);
 		assert_eq!(versions[0].patch, 0);
 		assert_eq!(versions[0].changelog, "Initial release");
-		assert!(versions[0].published);
+		assert_eq!(versions[0].status, VersionStatus::Published);
 	})
 	.await
 }
@@ -58,7 +59,7 @@ async fn versions_list_with_data() {
 async fn view_version_artifacts_html() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		conn.batch_execute(
-			"INSERT INTO versions (major, minor, patch, changelog, published) VALUES (1, 0, 0, 'Test version', true)",
+			"INSERT INTO versions (major, minor, patch, changelog, status) VALUES (1, 0, 0, 'Test version', 'published')",
 		)
 		.await
 		.unwrap();
@@ -74,7 +75,7 @@ async fn view_version_artifacts_html() {
 async fn list_version_artifacts_empty() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		conn.batch_execute(
-			"INSERT INTO versions (major, minor, patch, changelog, published) VALUES (1, 0, 0, 'Test version', true)",
+			"INSERT INTO versions (major, minor, patch, changelog, status) VALUES (1, 0, 0, 'Test version', 'published')",
 		)
 		.await
 		.unwrap();
@@ -90,7 +91,7 @@ async fn list_version_artifacts_empty() {
 async fn list_version_artifacts_with_data() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		conn.batch_execute(
-			"INSERT INTO versions (id, major, minor, patch, changelog, published) VALUES ('11111111-1111-1111-1111-111111111111', 1, 0, 0, 'Test version', true);
+			"INSERT INTO versions (id, major, minor, patch, changelog, status) VALUES ('11111111-1111-1111-1111-111111111111', 1, 0, 0, 'Test version', 'published');
 			INSERT INTO artifacts (version_id, platform, artifact_type, download_url) VALUES
 			('11111111-1111-1111-1111-111111111111', 'windows', 'installer', 'https://example.com/installer.exe'),
 			('11111111-1111-1111-1111-111111111111', 'macos', 'dmg', 'https://example.com/installer.dmg')",
@@ -118,7 +119,7 @@ async fn list_version_artifacts_with_data() {
 async fn view_mobile_install_page() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		conn.batch_execute(
-			"INSERT INTO versions (major, minor, patch, changelog, published) VALUES (1, 0, 0, 'Test version', true)",
+			"INSERT INTO versions (major, minor, patch, changelog, status) VALUES (1, 0, 0, 'Test version', 'published')",
 		)
 		.await
 		.unwrap();
@@ -134,7 +135,7 @@ async fn view_mobile_install_page() {
 async fn update_for_version_empty() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		conn.batch_execute(
-			"INSERT INTO versions (major, minor, patch, changelog, published) VALUES (1, 0, 0, 'Test version', true)",
+			"INSERT INTO versions (major, minor, patch, changelog, status) VALUES (1, 0, 0, 'Test version', 'published')",
 		)
 		.await
 		.unwrap();
@@ -151,10 +152,10 @@ async fn update_for_version_empty() {
 async fn update_for_version_with_newer() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		conn.batch_execute(
-			"INSERT INTO versions (major, minor, patch, changelog, published) VALUES
-			(1, 0, 0, 'Old version', true),
-			(1, 0, 1, 'Patch update', true),
-			(1, 1, 0, 'Minor update', true)",
+			"INSERT INTO versions (major, minor, patch, changelog, status) VALUES
+			(1, 0, 0, 'Old version', 'published'),
+			(1, 0, 1, 'Patch update', 'published'),
+			(1, 1, 0, 'Minor update', 'published')",
 		)
 		.await
 		.unwrap();
@@ -210,10 +211,10 @@ async fn artifacts_create_version_not_found() {
 async fn version_range_latest_matching() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		conn.batch_execute(
-			"INSERT INTO versions (major, minor, patch, changelog, published) VALUES
-			(1, 0, 0, 'Version 1.0.0', true),
-			(1, 0, 1, 'Version 1.0.1', true),
-			(1, 0, 2, 'Version 1.0.2', true)",
+			"INSERT INTO versions (major, minor, patch, changelog, status) VALUES
+			(1, 0, 0, 'Version 1.0.0', 'published'),
+			(1, 0, 1, 'Version 1.0.1', 'published'),
+			(1, 0, 2, 'Version 1.0.2', 'published')",
 		)
 		.await
 		.unwrap();
