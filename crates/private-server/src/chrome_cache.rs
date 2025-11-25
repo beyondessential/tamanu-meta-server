@@ -1,11 +1,7 @@
-#[cfg(feature = "ssr")]
 use chrono::{DateTime, Utc};
-#[cfg(feature = "ssr")]
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "ssr")]
 use std::sync::{Arc, RwLock};
 
-#[cfg(feature = "ssr")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChromeRelease {
 	pub name: String,
@@ -17,32 +13,44 @@ pub struct ChromeRelease {
 	pub eol_from: Option<String>,
 }
 
-#[cfg(feature = "ssr")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ChromeApiResponse {
 	result: ChromeResult,
 }
 
-#[cfg(feature = "ssr")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ChromeResult {
 	releases: Vec<ChromeRelease>,
 }
 
-#[cfg(feature = "ssr")]
 #[derive(Debug, Default, Clone)]
 pub struct ChromeVersionCache {
 	cache: Arc<RwLock<Option<Arc<Vec<ChromeRelease>>>>>,
 }
 
-#[cfg(feature = "ssr")]
 impl ChromeVersionCache {
-	pub fn new() -> Self {
-		Self {
-			cache: Arc::new(RwLock::new(None)),
-		}
-	}
+	pub fn spawn() -> Self {
+		let this = Self::default();
+		let cache = this.clone();
+		tokio::spawn(async move {
+			// Initial fetch
+			if let Err(e) = cache.fetch().await {
+				tracing::error!("Failed to fetch Chrome versions initially: {}", e);
+			}
 
+			// Refresh every 24 hours
+			let mut interval = tokio::time::interval(std::time::Duration::from_secs(24 * 60 * 60));
+			interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+			loop {
+				interval.tick().await;
+				if let Err(e) = cache.fetch().await {
+					tracing::error!("Failed to refresh Chrome versions: {}", e);
+				}
+			}
+		});
+		this
+	}
 	pub async fn get_supported_versions_at_date(
 		&self,
 		date: DateTime<Utc>,

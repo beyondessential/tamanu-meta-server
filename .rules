@@ -81,3 +81,6 @@ mod ssr {
 - Run full test suite: `just test`
 - Run specific tests: `just test-name <test_name>`
 - Verify no compilation warnings in tests and main code
+
+## Troubleshooting
+- When encountering a wasm-bindgen version mismatch, run `just install-deps` and then retry.
