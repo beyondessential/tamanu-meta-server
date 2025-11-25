@@ -48,17 +48,91 @@ async fn index(
 	State(db): State<database::Db>,
 	State(tera): State<std::sync::Arc<tera::Tera>>,
 ) -> commons_errors::Result<axum::response::Html<String>> {
+	use commons_types::version::VersionStatus;
 	use database::versions::Version;
+	use serde::Serialize;
+	use std::collections::BTreeMap;
 	use tera::Context;
 
-	let mut db = db.get().await?;
-	let mut versions = Version::get_all(&mut db).await?;
-	for version in &mut versions {
-		version.changelog = versions::parse_markdown(&version.changelog);
+	#[derive(Debug, Clone, Serialize)]
+	struct VersionData {
+		major: i32,
+		minor: i32,
+		patch: i32,
+		status: String,
+		created_at: String,
 	}
+
+	#[derive(Debug, Clone, Serialize)]
+	struct MinorVersionGroup {
+		major: i32,
+		minor: i32,
+		count: usize,
+		latest_patch: i32,
+		first_created_at: String,
+		versions: Vec<VersionData>,
+	}
+
+	let mut db = db.get().await?;
+	let versions = Version::get_all_including_drafts(&mut db).await?;
+
+	let mut grouped: BTreeMap<(i32, i32), Vec<Version>> = BTreeMap::new();
+	for version in versions {
+		grouped
+			.entry((version.major, version.minor))
+			.or_insert_with(Vec::new)
+			.push(version);
+	}
+
+	let mut groups: Vec<MinorVersionGroup> = grouped
+		.into_iter()
+		.filter_map(|((major, minor), mut versions)| {
+			// Filter to only published versions
+			versions.retain(|v| v.status == VersionStatus::Published);
+
+			// Skip groups with no published versions
+			if versions.is_empty() {
+				return None;
+			}
+
+			versions.sort_by(|a, b| b.patch.cmp(&a.patch));
+
+			let count = versions.len();
+			let latest_patch = versions.first().map(|v| v.patch).unwrap_or(0);
+
+			let first_created_at = versions
+				.iter()
+				.find(|v| v.patch == 0)
+				.map(|v| v.created_at)
+				.unwrap_or_else(|| versions.last().map(|v| v.created_at).unwrap());
+
+			let version_data: Vec<VersionData> = versions
+				.into_iter()
+				.map(|v| VersionData {
+					major: v.major,
+					minor: v.minor,
+					patch: v.patch,
+					status: v.status.to_string().to_lowercase(),
+					created_at: v.created_at.format("%Y-%m-%d").to_string(),
+				})
+				.collect();
+
+			Some(MinorVersionGroup {
+				major,
+				minor,
+				count,
+				latest_patch,
+				first_created_at: first_created_at.format("%Y-%m-%d").to_string(),
+				versions: version_data,
+			})
+		})
+		.collect();
+
+	groups.sort_by(|a, b| b.major.cmp(&a.major).then_with(|| b.minor.cmp(&a.minor)));
+
 	let env = std::env::vars().collect::<std::collections::BTreeMap<String, String>>();
 	let mut context = Context::new();
-	context.insert("versions", &versions);
+	context.insert("groups", &groups);
 	context.insert("env", &env);
 	let html = tera.render("versions", &context)?;
 	Ok(axum::response::Html(html))

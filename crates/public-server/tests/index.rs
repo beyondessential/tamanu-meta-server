@@ -28,7 +28,7 @@ async fn index_page_with_versions() {
 
 		// The response should contain rendered HTML with version information
 		let body = response.text();
-		assert!(body.contains("1.0.0") || body.contains("1.0.1"));
+		assert!(body.contains("1.0") || body.contains("1.0.0") || body.contains("1.0.1"));
 	})
 	.await
 }
