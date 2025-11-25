@@ -39,6 +39,7 @@ pub struct Version {
 	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub status: VersionStatus,
 	pub changelog: String,
+	pub device_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, QueryableByName)]
@@ -63,6 +64,7 @@ pub struct NewVersion {
 	pub patch: i32,
 	pub changelog: String,
 	pub status: VersionStatus,
+	pub device_id: Option<Uuid>,
 }
 
 impl Version {
@@ -222,6 +224,22 @@ impl Version {
 		diesel::update(versions)
 			.filter(predicate_version!(version.0))
 			.set(changelog.eq(new_changelog))
+			.execute(db)
+			.await?;
+
+		Ok(())
+	}
+
+	pub async fn update_device_id(
+		db: &mut AsyncPgConnection,
+		version: VersionStr,
+		new_device_id: Uuid,
+	) -> Result<()> {
+		use crate::schema::versions::dsl::*;
+
+		diesel::update(versions)
+			.filter(predicate_version!(version.0))
+			.set(device_id.eq(new_device_id))
 			.execute(db)
 			.await?;
 

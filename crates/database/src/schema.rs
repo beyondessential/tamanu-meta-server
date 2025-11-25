@@ -16,6 +16,7 @@ diesel::table! {
 		artifact_type -> Text,
 		platform -> Text,
 		download_url -> Text,
+		device_id -> Nullable<Uuid>,
 	}
 }
 
@@ -85,15 +86,18 @@ diesel::table! {
 		patch -> Int4,
 		changelog -> Text,
 		status -> Text,
+		device_id -> Nullable<Uuid>,
 	}
 }
 
+diesel::joinable!(artifacts -> devices (device_id));
 diesel::joinable!(artifacts -> versions (version_id));
 diesel::joinable!(device_connections -> devices (device_id));
 diesel::joinable!(device_keys -> devices (device_id));
 diesel::joinable!(servers -> devices (device_id));
 diesel::joinable!(statuses -> devices (device_id));
 diesel::joinable!(statuses -> servers (server_id));
+diesel::joinable!(versions -> devices (device_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
 	admins,

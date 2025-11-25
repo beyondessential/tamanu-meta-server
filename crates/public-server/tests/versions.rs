@@ -12,6 +12,7 @@ pub struct Version {
 	pub patch: i32,
 	pub changelog: String,
 	pub status: VersionStatus,
+	pub device_id: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -21,6 +22,7 @@ pub struct Artifact {
 	pub platform: String,
 	pub artifact_type: String,
 	pub download_url: String,
+	pub device_id: Option<Uuid>,
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -197,7 +199,7 @@ async fn artifacts_create_draft_version_if_not_found() {
 
 	commons_tests::server::run_with_device_auth(
 		"releaser",
-		async |mut conn, cert, _device_id, public, _| {
+		async |mut conn, cert, device_id, public, _| {
 			let response = public
 				.post("/artifacts/999.999.999/installer/windows")
 				.add_header("mtls-certificate", &cert)
@@ -209,6 +211,7 @@ async fn artifacts_create_draft_version_if_not_found() {
 			assert_eq!(artifact.platform, "windows");
 			assert_eq!(artifact.artifact_type, "installer");
 			assert_eq!(artifact.download_url, "https://example.com/installer.exe");
+			assert_eq!(artifact.device_id, Some(device_id));
 
 			// Verify the version was created as a draft
 			let version = Version::get_by_version(&mut conn, "999.999.999".parse().unwrap())
@@ -219,6 +222,7 @@ async fn artifacts_create_draft_version_if_not_found() {
 			assert_eq!(version.minor, 999);
 			assert_eq!(version.patch, 999);
 			assert_eq!(version.changelog, "");
+			assert_eq!(version.device_id, Some(device_id));
 		},
 	)
 	.await
@@ -230,7 +234,7 @@ async fn version_create_publishes_draft_if_exists() {
 
 	commons_tests::server::run_with_device_auth(
 		"releaser",
-		async |mut conn, cert, _device_id, public, _| {
+		async |mut conn, cert, device_id, public, _| {
 			// First, create a draft version by creating an artifact
 			let response = public
 				.post("/artifacts/2.0.0/installer/windows")
@@ -245,6 +249,7 @@ async fn version_create_publishes_draft_if_exists() {
 				.unwrap();
 			assert_eq!(version.status, VersionStatus::Draft);
 			assert_eq!(version.changelog, "");
+			assert_eq!(version.device_id, Some(device_id));
 
 			// Now create/publish the version with a changelog
 			let changelog = "# Version 2.0.0\n\nNew features and improvements";
@@ -261,13 +266,15 @@ async fn version_create_publishes_draft_if_exists() {
 			assert_eq!(published_version.major, 2);
 			assert_eq!(published_version.minor, 0);
 			assert_eq!(published_version.patch, 0);
+			assert_eq!(published_version.device_id, Some(device_id));
 
-			// Verify the version in the database is now published with the new changelog
+			// Verify the version in the database is now published with the new changelog and device_id
 			let db_version = Version::get_by_version(&mut conn, "2.0.0".parse().unwrap())
 				.await
 				.unwrap();
 			assert_eq!(db_version.status, VersionStatus::Published);
 			assert_eq!(db_version.changelog, changelog);
+			assert_eq!(db_version.device_id, Some(device_id));
 		},
 	)
 	.await

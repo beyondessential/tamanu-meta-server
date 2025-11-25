@@ -24,13 +24,14 @@ pub fn routes() -> Router<AppState> {
 
 #[axum::debug_handler]
 async fn create(
-	_device: ReleaserDevice,
+	device: ReleaserDevice,
 	State(db): State<Db>,
 	Path((version, artifact_type, platform)): Path<(String, String, String)>,
 	url: String,
 ) -> Result<Json<Artifact>> {
 	let mut db = db.get().await?;
 	let version_str = VersionStr::from_str(&version)?;
+	let device_id = device.0.0.id;
 
 	// Try to get the version, or create it as a draft if it doesn't exist
 	let version_id = match Version::get_by_version(&mut db, version_str.clone()).await {
@@ -43,6 +44,7 @@ async fn create(
 				patch: version_str.0.patch as _,
 				changelog: String::new(),
 				status: VersionStatus::Draft,
+				device_id: Some(device_id),
 			};
 
 			let version = diesel::insert_into(database::schema::versions::table)
@@ -60,6 +62,7 @@ async fn create(
 		platform,
 		artifact_type,
 		download_url: url,
+		device_id: Some(device_id),
 	};
 
 	let artifact = diesel::insert_into(database::schema::artifacts::table)

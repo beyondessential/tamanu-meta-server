@@ -11,6 +11,7 @@ Avoid writing large summaries of actions taken when done.
 ## Database Connection
 - Database models are in `crates/database/src/` with re-exports in `lib.rs`
 - Use migrations in `migrations/` directory for schema changes
+- Use `just migrate` to run migrations
 - Use PostgreSQL native functions where possible (e.g., `position()` for binary substring searches)
 - Complex queries: Prefer database-level operations over in-memory filtering
 

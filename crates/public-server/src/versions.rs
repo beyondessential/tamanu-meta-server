@@ -98,7 +98,7 @@ async fn list(State(db): State<Db>) -> Result<Json<Vec<Version>>> {
 }
 
 async fn create(
-	_device: ReleaserDevice,
+	device: ReleaserDevice,
 	Path(version): Path<String>,
 	State(db): State<Db>,
 	data: Bytes,
@@ -110,6 +110,7 @@ async fn create(
 	let mut changelog = String::with_capacity(data.len().min(1024 * 1024 * 1024));
 	stream.read_to_string(&mut changelog).await?;
 	let version_str = VersionStr::from_str(&version)?;
+	let device_id = device.0.0.id;
 
 	// Check if a draft version already exists
 	let version = match Version::get_by_version(&mut db, version_str.clone()).await {
@@ -117,6 +118,7 @@ async fn create(
 			// Update the draft to published and replace the changelog
 			Version::update_status(&mut db, version_str.clone(), VersionStatus::Published).await?;
 			Version::update_changelog(&mut db, version_str.clone(), changelog).await?;
+			Version::update_device_id(&mut db, version_str.clone(), device_id).await?;
 			Version::get_by_version(&mut db, version_str).await?
 		}
 		Ok(_) => {
@@ -128,6 +130,7 @@ async fn create(
 					patch: version_str.0.patch as _,
 					changelog,
 					status: VersionStatus::Published,
+					device_id: Some(device_id),
 				})
 				.returning(Version::as_select())
 				.get_result(&mut db)
@@ -142,6 +145,7 @@ async fn create(
 					patch: version_str.0.patch as _,
 					changelog,
 					status: VersionStatus::Published,
+					device_id: Some(device_id),
 				})
 				.returning(Version::as_select())
 				.get_result(&mut db)

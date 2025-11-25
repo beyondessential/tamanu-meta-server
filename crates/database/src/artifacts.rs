@@ -16,6 +16,7 @@ pub struct Artifact {
 	pub artifact_type: String,
 	pub platform: String,
 	pub download_url: String,
+	pub device_id: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize, Insertable)]
@@ -27,6 +28,7 @@ pub struct NewArtifact {
 	pub artifact_type: String,
 	pub platform: String,
 	pub download_url: String,
+	pub device_id: Option<Uuid>,
 }
 
 impl Artifact {
@@ -78,6 +80,7 @@ impl Artifact {
 			artifact_type: art_type,
 			platform: plat,
 			download_url: url,
+			device_id: None,
 		};
 
 		diesel::insert_into(artifacts)
