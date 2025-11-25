@@ -200,4 +200,38 @@
 		color: var(--color-text-tertiary);
 		font-family: monospace;
 	}
+
+	.version-link {
+		text-decoration: none;
+		color: inherit;
+
+		&:hover {
+			text-decoration: none;
+		}
+	}
+}
+
+.version-detail-content {
+	max-width: 1200px;
+	margin: 0 auto;
+	padding: 2em;
+
+	.back-link {
+		display: inline-block;
+		padding: 0.75em 1.5em;
+		background: var(--color-bg-light);
+		color: var(--color-text-primary);
+		text-decoration: none;
+		border-radius: 4px;
+		border: 1px solid var(--color-border-light);
+		font-weight: 500;
+		transition:
+			background-color 0.2s,
+			border-color 0.2s;
+
+		&:hover {
+			background: var(--color-bg-medium);
+			border-color: var(--color-border-medium);
+		}
+	}
 }

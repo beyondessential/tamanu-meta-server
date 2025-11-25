@@ -173,7 +173,7 @@
 	<div class="container">
 		<div class="page-header">
 			<h1>Production Server Versions</h1>
-			<p>Latest version: <span class="version-text">{{ latest_version }}</span></p>
+			<p>Latest version: <a class="version-text" href="/versions/{{ latest_version }}">{{ latest_version }}</a>
 		</div>
 		<div class="servers-grid">
 			{% for server in servers %}
@@ -183,7 +183,7 @@
 				{% if server.version %}
 				<div class="version-container">
 					<span class="version-display">
-						<span class="version-text">{{ server.version }}</span>
+						<a class="version-text" href="/versions/{{ server.version }}">{{ server.version }}</a>
 						{% if server.version_distance == 0 %}
 							<span class="version-indicator version-up-to-date" title="Up to date"></span>
 						{% elif server.version_distance < 2 %}

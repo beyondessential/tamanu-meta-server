@@ -9,12 +9,15 @@ pub fn VersionIndicator(
 	#[prop(default = None)]
 	distance: Option<u64>,
 ) -> impl IntoView {
+	let version_str = version.to_string();
+	let version_link = format!("/versions/{}", version_str);
+
 	let Some(distance) = distance else {
 		return view! {
-			<span class="version-display">
-				<span class="version-text">{version.to_string()}</span>
+			<a href={version_link.clone()} class="version-display version-link">
+				<span class="version-text">{version_str}</span>
 				<span class:version-indicator class="version-unknown" title="Unknown version"></span>
-			</span>
+			</a>
 		}
 		.into_any();
 	};
@@ -28,10 +31,10 @@ pub fn VersionIndicator(
 	};
 
 	view! {
-		<span class="version-display">
-			<span class="version-text">{version.to_string()}</span>
+		<a href={version_link} class="version-display version-link">
+			<span class="version-text">{version_str}</span>
 			<span class:version-indicator class={color_class} title={title}></span>
-		</span>
+		</a>
 	}
 	.into_any()
 }

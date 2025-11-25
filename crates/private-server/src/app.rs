@@ -59,6 +59,7 @@ pub fn App() -> impl IntoView {
 							</ParentRoute>
 							<Route path=path!("admins") view=admins::Page />
 							<Route path=path!("versions") view=versions::Page />
+							<Route path=path!("versions/:version") view=versions::Detail />
 
 							<ParentRoute path=path!("devices") view=devices::Page>
 								<Route path=path!("") view=devices::Search />

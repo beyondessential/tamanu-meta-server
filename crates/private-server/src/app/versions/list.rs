@@ -81,10 +81,10 @@ pub fn MinorVersionGroupComponent(group: MinorVersionGroup) -> impl IntoView {
 				<div class="versions">
 					<For each=move || versions.clone() key=|v| (v.major, v.minor, v.patch) let:v>
 						<div class:version-item class={format!("version-status-{}", v.status.to_lowercase())}>
-							<div class="version-number">
+							<a href={format!("/versions/{}.{}.{}", v.major, v.minor, v.patch)} class="version-number version-link">
 								{v.major} "." {v.minor}
 								<span class="version-patch">"." {v.patch}</span>
-							</div>
+							</a>
 							{(v.status.to_lowercase() != "published").then(|| {
 								view! {
 									<div class="version-status">{v.status.clone()}</div>
