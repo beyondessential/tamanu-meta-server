@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
+## [5.7.0](https://github.com/beyondessential/tamanu-meta-server/compare/v5.6.2..5.7.0) - 2025-11-25
+
+
+
+### Public
+
+- **Bugfix:** Tests - ([97a460c](https://github.com/beyondessential/tamanu-meta-server/commit/97a460cb118020500dbf58fe67da6dfa8a3eb724))
+
+### Versions
+
+- **Feature:** Add status enum and allow yanking - ([ccb442b](https://github.com/beyondessential/tamanu-meta-server/commit/ccb442b619e9e107a87910fef43d36ecf67092d6))
+- **Feature:** Add grouping behaviour to the public view too - ([1fec795](https://github.com/beyondessential/tamanu-meta-server/commit/1fec795e1eb285cee264ae18002a7e6c3e625575))
+- **Feature:** Revise the public artifacts page - ([b023f7a](https://github.com/beyondessential/tamanu-meta-server/commit/b023f7a62413cca92ecd9e115ea97be23dd860fb))
+- **Feature:** Link versions to a private page - ([cf16b36](https://github.com/beyondessential/tamanu-meta-server/commit/cf16b3696bdd90c0a33430c2f48a33f2dd7f61fc))
+- **Feature:** KAM-432: allow submitting artifacts for non-existent - ([7667d70](https://github.com/beyondessential/tamanu-meta-server/commit/7667d70bdd465dd8f0ced661728ba656a1f105c2))
+- **Feature:** Keep track of which device submitted a version or - ([f027ead](https://github.com/beyondessential/tamanu-meta-server/commit/f027eadd254639c07a381e64c62f2571cb2fa9de))
+- **Tweak:** Mobile-friendly pages - ([2538cca](https://github.com/beyondessential/tamanu-meta-server/commit/2538ccaad6dd1b940d4f09313b03de9216dcfbed))
+
+---
+## [5.6.2](https://github.com/beyondessential/tamanu-meta-server/compare/v5.6.1..v5.6.2) - 2025-11-09
+
+
+- **Repo:** Release - ([9e02d84](https://github.com/beyondessential/tamanu-meta-server/commit/9e02d84ec857187e08a618bf45265e5b12b9f635))
+
+---
 ## [5.6.1](https://github.com/beyondessential/tamanu-meta-server/compare/v5.6.0..v5.6.1) - 2025-11-09
 
 

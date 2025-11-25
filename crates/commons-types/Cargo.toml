@@ -2,7 +2,7 @@
 publish = false
 name = "commons-types"
 description = "Serialisable types that can be shared between client and server"
-version = "5.6.2"
+version = "5.7.0"
 edition = "2024"
 resolver = "3"
 license = "GPL-3.0-or-later"
