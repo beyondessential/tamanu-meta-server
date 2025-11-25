@@ -12,6 +12,7 @@ mod devices;
 mod servers;
 mod status;
 mod statuses;
+mod versions;
 
 pub fn shell(options: LeptosOptions) -> impl IntoView {
 	view! {
@@ -57,6 +58,8 @@ pub fn App() -> impl IntoView {
 								<Route path=path!(":id") view=servers::Detail />
 							</ParentRoute>
 							<Route path=path!("admins") view=admins::Page />
+							<Route path=path!("versions") view=versions::Page />
+
 							<ParentRoute path=path!("devices") view=devices::Page>
 								<Route path=path!("") view=devices::Search />
 								<Route path=path!("untrusted") view=devices::Untrusted />
@@ -95,6 +98,7 @@ pub fn GlobalNav() -> impl IntoView {
 			<div class="nav-links">
 				<A href="/status">"Status"</A>
 				<A href="/servers">"Servers"</A>
+				<A href="/versions">"Versions"</A>
 				<Suspense>
 					{move || {
 						is_admin

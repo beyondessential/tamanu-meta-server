@@ -157,6 +157,3 @@ async fn update_server_not_found() {
 	})
 	.await
 }
-
-// Note: Admin authentication test cannot be properly tested in debug mode
-// because TailscaleAdmin always returns admin@localhost in debug_assertions mode

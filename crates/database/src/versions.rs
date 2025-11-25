@@ -83,6 +83,19 @@ impl Version {
 			.map_err(AppError::from)
 	}
 
+	pub async fn get_all_including_drafts(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
+		use crate::schema::versions::*;
+
+		table
+			.select(Version::as_select())
+			.order_by(major.desc())
+			.then_order_by(minor.desc())
+			.then_order_by(patch.desc())
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	pub async fn get_by_version(db: &mut AsyncPgConnection, version: VersionStr) -> Result<Self> {
 		use crate::schema::versions::*;
 
