@@ -645,6 +645,7 @@
 				flex-direction: column;
 				gap: 0.25em;
 				flex: 1;
+				align-items: baseline;
 
 				strong {
 					color: var(--color-text-primary);
