@@ -1,4 +1,5 @@
 use commons_errors::Result;
+use commons_types::version::VersionStatus;
 use leptos::server;
 use serde::{Deserialize, Serialize};
 
@@ -7,7 +8,7 @@ pub struct VersionData {
 	pub major: i32,
 	pub minor: i32,
 	pub patch: i32,
-	pub status: String,
+	pub status: VersionStatus,
 	pub created_at: String,
 }
 
@@ -92,7 +93,7 @@ mod ssr {
 						major: v.major,
 						minor: v.minor,
 						patch: v.patch,
-						status: v.status.to_string(),
+						status: v.status,
 						created_at: v.created_at.format("%Y-%m-%d").to_string(),
 					})
 					.collect();

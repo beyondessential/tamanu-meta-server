@@ -1,5 +1,7 @@
+use commons_types::version::VersionStatus;
 use leptos::prelude::*;
 use leptos_meta::Stylesheet;
+use leptos_router::components::A;
 
 use crate::fns::versions::{MinorVersionGroup, get_grouped_versions};
 
@@ -80,18 +82,18 @@ pub fn MinorVersionGroupComponent(group: MinorVersionGroup) -> impl IntoView {
 			<div class="group-content" class:expanded=move || expanded.get()>
 				<div class="versions">
 					<For each=move || versions.clone() key=|v| (v.major, v.minor, v.patch) let:v>
-						<div class:version-item class={format!("version-status-{}", v.status.to_lowercase())}>
-							<a href={format!("/versions/{}.{}.{}", v.major, v.minor, v.patch)} class="version-number version-link">
+						<A href={format!("/versions/{}.{}.{}", v.major, v.minor, v.patch)} class:version-item {..} data-version-status={v.status.to_string()}>
+							<div class="version-number">
 								{v.major} "." {v.minor}
 								<span class="version-patch">"." {v.patch}</span>
-							</a>
-							{(v.status.to_lowercase() != "published").then(|| {
+							</div>
+							{(v.status != VersionStatus::Published).then(|| {
 								view! {
-									<div class="version-status">{v.status.clone()}</div>
+									<div class="version-status">{v.status.to_string()}</div>
 								}
 							})}
 							<div class="version-date">{v.created_at.clone()}</div>
-						</div>
+						</A>
 					</For>
 				</div>
 			</div>

@@ -156,6 +156,11 @@
 		background: var(--color-bg-light);
 		border-radius: 4px;
 		border: 1px solid var(--color-border-light);
+		text-decoration: none;
+
+		&:hover {
+			background: var(--color-bg-medium);
+		}
 
 		&.version-status-draft {
 			background: var(--color-bg-medium);
@@ -199,15 +204,6 @@
 		font-size: 0.9em;
 		color: var(--color-text-tertiary);
 		font-family: monospace;
-	}
-
-	.version-link {
-		text-decoration: none;
-		color: inherit;
-
-		&:hover {
-			text-decoration: none;
-		}
 	}
 }
 
