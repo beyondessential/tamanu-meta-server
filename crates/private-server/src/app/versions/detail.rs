@@ -3,8 +3,8 @@ use leptos_meta::Stylesheet;
 use leptos_router::hooks::use_params_map;
 
 use crate::fns::versions::{
-	ArtifactData, VersionDetail, get_version_artifacts, get_version_detail, update_artifact,
-	update_version_changelog, update_version_status,
+	ArtifactData, VersionDetail, create_artifact, delete_artifact, get_artifacts_by_version_id,
+	get_version_detail, update_artifact, update_version_changelog, update_version_status,
 };
 use commons_types::version::VersionStatus;
 
@@ -214,39 +214,28 @@ fn StatusSelection(detail: VersionDetail, is_admin: bool) -> impl IntoView {
 
 #[component]
 fn ArtifactsSection(version: String, is_admin: bool) -> impl IntoView {
-	let artifacts = Resource::new(
+	let version_detail = Resource::new(
 		move || version.clone(),
-		|v| async move { get_version_artifacts(v).await },
+		|v| async move { get_version_detail(v).await },
 	);
 
 	view! {
 		<section class="detail-section">
 			<h2>"Artifacts"</h2>
-			<Suspense fallback=|| view! { <div class="loading">"Loading artifacts..."</div> }>
+			<Suspense fallback=|| view! { <div class="loading">"Loading version details..."</div> }>
 				{move || {
-					artifacts
+					version_detail
 						.get()
 						.map(|data| match data {
-							Ok(artifacts) => {
-								if artifacts.is_empty() {
-									view! {
-										<div class="no-artifacts">"No artifacts found for this version"</div>
-									}
-										.into_any()
-								} else {
-									view! {
-										<div class="artifacts-list">
-											<For each=move || artifacts.clone() key=|a| a.id let:artifact>
-												<ArtifactItem artifact=artifact is_admin=is_admin />
-											</For>
-										</div>
-									}
-										.into_any()
+							Ok(detail) => {
+								view! {
+									<ArtifactsContent version_id=detail.id is_admin=is_admin />
 								}
+									.into_any()
 							}
 							Err(e) => {
 								view! {
-									<div class="error-message">{format!("Error loading artifacts: {}", e)}</div>
+									<div class="error-message">{format!("Error loading version: {}", e)}</div>
 								}
 									.into_any()
 							}
@@ -258,6 +247,166 @@ fn ArtifactsSection(version: String, is_admin: bool) -> impl IntoView {
 }
 
 #[component]
+fn ArtifactsContent(version_id: uuid::Uuid, is_admin: bool) -> impl IntoView {
+	let (show_create_form, set_show_create_form) = signal(false);
+
+	view! {
+		<div>
+			{if is_admin {
+				view! {
+					<button
+						class="add-artifact-button"
+						on:click=move |_| set_show_create_form.set(!show_create_form.get())
+					>
+						{move || if show_create_form.get() { "Cancel" } else { "+ Add Artifact" }}
+					</button>
+				}
+					.into_any()
+			} else {
+				view! { <span></span> }.into_any()
+			}}
+
+			{move || {
+				if show_create_form.get() {
+					view! { <CreateArtifactForm version_id=version_id /> }.into_any()
+				} else {
+					view! { <span></span> }.into_any()
+				}
+			}}
+
+			<ArtifactsList version_id=version_id is_admin=is_admin />
+		</div>
+	}
+}
+
+#[component]
+fn ArtifactsList(version_id: uuid::Uuid, is_admin: bool) -> impl IntoView {
+	let artifacts = Resource::new(
+		move || version_id,
+		|id| async move { get_artifacts_by_version_id(id).await },
+	);
+
+	view! {
+		<Suspense fallback=|| view! { <div class="loading">"Loading artifacts..."</div> }>
+			{move || {
+				artifacts
+					.get()
+					.map(|data| match data {
+						Ok(artifacts) => {
+							if artifacts.is_empty() {
+								view! {
+									<div class="no-artifacts">"No artifacts found for this version"</div>
+								}
+									.into_any()
+							} else {
+								view! {
+									<div class="artifacts-list">
+										<For each=move || artifacts.clone() key=|a| a.id let:artifact>
+											<ArtifactItem artifact=artifact is_admin=is_admin />
+										</For>
+									</div>
+								}
+									.into_any()
+							}
+						}
+						Err(e) => {
+							view! {
+								<div class="error-message">{format!("Error loading artifacts: {}", e)}</div>
+							}
+								.into_any()
+						}
+					})
+			}}
+		</Suspense>
+	}
+}
+
+#[component]
+fn CreateArtifactForm(version_id: uuid::Uuid) -> impl IntoView {
+	let (artifact_type, set_artifact_type) = signal(String::new());
+	let (platform, set_platform) = signal(String::new());
+	let (download_url, set_download_url) = signal(String::new());
+
+	let create_action = Action::new(
+		move |(id, art_type, plat, url): &(uuid::Uuid, String, String, String)| {
+			let id = *id;
+			let art_type = art_type.clone();
+			let plat = plat.clone();
+			let url = url.clone();
+			async move { create_artifact(id, art_type, plat, url).await }
+		},
+	);
+
+	Effect::new(move || {
+		if let Some(Ok(_)) = create_action.value().get() {
+			window().location().reload().expect("Failed to reload page");
+		}
+	});
+
+	view! {
+		<div class="create-artifact-form">
+			<input
+				type="text"
+				class="artifact-input"
+				placeholder="Type (e.g., mobile, server)"
+				prop:value=move || artifact_type.get()
+				on:input=move |ev| {
+					set_artifact_type.set(event_target_value(&ev));
+				}
+			/>
+			<input
+				type="text"
+				class="artifact-input"
+				placeholder="Platform (e.g., android, ios)"
+				prop:value=move || platform.get()
+				on:input=move |ev| {
+					set_platform.set(event_target_value(&ev));
+				}
+			/>
+			<input
+				type="text"
+				class="artifact-input artifact-url-input"
+				placeholder="URL"
+				prop:value=move || download_url.get()
+				on:input=move |ev| {
+					set_download_url.set(event_target_value(&ev));
+				}
+			/>
+			<button
+				class="save-button"
+				on:click=move |_| {
+					create_action
+						.dispatch((
+							version_id,
+							artifact_type.get(),
+							platform.get(),
+							download_url.get(),
+						));
+				}
+
+				disabled=move || create_action.pending().get()
+			>
+				{move || if create_action.pending().get() { "Creating..." } else { "Create" }}
+			</button>
+			{move || {
+				create_action
+					.value()
+					.get()
+					.and_then(|result| {
+						result
+							.err()
+							.map(|e| {
+								view! {
+									<div class="error-message">{format!("Error: {}", e)}</div>
+								}
+							})
+					})
+			}}
+		</div>
+	}
+}
+
+#[component]
 fn ArtifactItem(artifact: ArtifactData, is_admin: bool) -> impl IntoView {
 	let artifact_id = StoredValue::new(artifact.id);
 	let original_type = StoredValue::new(artifact.artifact_type.clone());
@@ -265,6 +414,7 @@ fn ArtifactItem(artifact: ArtifactData, is_admin: bool) -> impl IntoView {
 	let original_url = StoredValue::new(artifact.download_url.clone());
 
 	let (is_editing, set_is_editing) = signal(false);
+	let (show_delete_confirm, set_show_delete_confirm) = signal(false);
 	let (artifact_type, set_artifact_type) = signal(artifact.artifact_type.clone());
 	let (platform, set_platform) = signal(artifact.platform.clone());
 	let (download_url, set_download_url) = signal(artifact.download_url.clone());
@@ -279,8 +429,19 @@ fn ArtifactItem(artifact: ArtifactData, is_admin: bool) -> impl IntoView {
 		},
 	);
 
+	let delete_artifact_action = Action::new(move |id: &uuid::Uuid| {
+		let id = *id;
+		async move { delete_artifact(id).await }
+	});
+
 	Effect::new(move || {
 		if let Some(Ok(())) = update_artifact_action.value().get() {
+			window().location().reload().expect("Failed to reload page");
+		}
+	});
+
+	Effect::new(move || {
+		if let Some(Ok(())) = delete_artifact_action.value().get() {
 			window().location().reload().expect("Failed to reload page");
 		}
 	});
@@ -382,9 +543,51 @@ fn ArtifactItem(artifact: ArtifactData, is_admin: bool) -> impl IntoView {
 						<div class="artifact-url">{original_url.get_value()}</div>
 						{if is_admin {
 							view! {
-								<button class="edit-button" on:click=move |_| set_is_editing.set(true)>
-									"Edit"
-								</button>
+								<div class="artifact-actions">
+									<button class="edit-button" on:click=move |_| set_is_editing.set(true)>
+										"Edit"
+									</button>
+									{if show_delete_confirm.get() {
+										view! {
+											<span class="delete-confirm">
+												<button
+													class="delete-confirm-button"
+													on:click=move |_| {
+														delete_artifact_action.dispatch(artifact_id.get_value());
+													}
+
+													disabled=move || delete_artifact_action.pending().get()
+												>
+													{move || {
+														if delete_artifact_action.pending().get() {
+															"Deleting..."
+														} else {
+															"Confirm"
+														}
+													}}
+												</button>
+												<button
+													class="delete-cancel-button"
+													on:click=move |_| set_show_delete_confirm.set(false)
+												>
+													"Cancel"
+												</button>
+											</span>
+										}
+											.into_any()
+									} else {
+										view! {
+											<button
+												class="delete-button"
+												on:click=move |_| set_show_delete_confirm.set(true)
+												title="Delete artifact"
+											>
+												"🗑️"
+											</button>
+										}
+											.into_any()
+									}}
+								</div>
 							}.into_any()
 						} else {
 							view! { <span></span> }.into_any()

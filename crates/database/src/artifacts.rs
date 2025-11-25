@@ -24,8 +24,8 @@ pub struct Artifact {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewArtifact {
 	pub version_id: Uuid,
-	pub platform: String,
 	pub artifact_type: String,
+	pub platform: String,
 	pub download_url: String,
 }
 
@@ -58,6 +58,40 @@ impl Artifact {
 				platform.eq(new_platform),
 				download_url.eq(new_url),
 			))
+			.execute(db)
+			.await?;
+
+		Ok(())
+	}
+
+	pub async fn create(
+		db: &mut AsyncPgConnection,
+		ver_id: Uuid,
+		art_type: String,
+		plat: String,
+		url: String,
+	) -> Result<Self> {
+		use crate::schema::artifacts::dsl::*;
+
+		let new_artifact = NewArtifact {
+			version_id: ver_id,
+			artifact_type: art_type,
+			platform: plat,
+			download_url: url,
+		};
+
+		diesel::insert_into(artifacts)
+			.values(new_artifact)
+			.returning(Self::as_select())
+			.get_result(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	pub async fn delete(db: &mut AsyncPgConnection, artifact_id: Uuid) -> Result<()> {
+		use crate::schema::artifacts::dsl::*;
+
+		diesel::delete(artifacts.filter(id.eq(artifact_id)))
 			.execute(db)
 			.await?;
 

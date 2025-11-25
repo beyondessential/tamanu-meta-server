@@ -62,6 +62,11 @@ pub async fn get_version_artifacts(version: String) -> Result<Vec<ArtifactData>>
 }
 
 #[server]
+pub async fn get_artifacts_by_version_id(version_id: Uuid) -> Result<Vec<ArtifactData>> {
+	ssr::get_artifacts_by_version_id(version_id).await
+}
+
+#[server]
 pub async fn update_version_status(version: String, status: String) -> Result<()> {
 	ssr::update_version_status(version, status).await
 }
@@ -79,6 +84,21 @@ pub async fn update_artifact(
 	download_url: String,
 ) -> Result<()> {
 	ssr::update_artifact(artifact_id, artifact_type, platform, download_url).await
+}
+
+#[server]
+pub async fn create_artifact(
+	version_id: Uuid,
+	artifact_type: String,
+	platform: String,
+	download_url: String,
+) -> Result<ArtifactData> {
+	ssr::create_artifact(version_id, artifact_type, platform, download_url).await
+}
+
+#[server]
+pub async fn delete_artifact(artifact_id: Uuid) -> Result<()> {
+	ssr::delete_artifact(artifact_id).await
 }
 
 #[cfg(feature = "ssr")]
@@ -247,12 +267,27 @@ mod ssr {
 			.collect())
 	}
 
-	pub async fn update_version_status(version_str: String, status_str: String) -> Result<()> {
+	pub async fn get_artifacts_by_version_id(version_id: Uuid) -> Result<Vec<super::ArtifactData>> {
 		let state = expect_context::<AppState>();
 		let State(db): State<Db> = extract_with_state(&state).await?;
 		let mut conn = db.get().await?;
 
-		crate::fns::commons::admin_guard().await?;
+		let artifacts = Artifact::get_for_version(&mut conn, version_id).await?;
+
+		Ok(artifacts
+			.into_iter()
+			.map(|a| super::ArtifactData {
+				id: a.id,
+				artifact_type: a.artifact_type,
+				platform: a.platform,
+				download_url: a.download_url,
+			})
+			.collect())
+	}
+
+	pub async fn update_version_status(version_str: String, status_str: String) -> Result<()> {
+		let db = crate::fns::commons::admin_guard().await?;
+		let mut conn = db.get().await?;
 
 		let version = VersionStr::from_str(&version_str)?;
 		let new_status = VersionStatus::from(status_str);
@@ -278,11 +313,8 @@ mod ssr {
 		version_str: String,
 		new_changelog: String,
 	) -> Result<()> {
-		let state = expect_context::<AppState>();
-		let State(db): State<Db> = extract_with_state(&state).await?;
+		let db = crate::fns::commons::admin_guard().await?;
 		let mut conn = db.get().await?;
-
-		crate::fns::commons::admin_guard().await?;
 
 		let version = VersionStr::from_str(&version_str)?;
 
@@ -297,11 +329,8 @@ mod ssr {
 		platform: String,
 		download_url: String,
 	) -> Result<()> {
-		let state = expect_context::<AppState>();
-		let State(db): State<Db> = extract_with_state(&state).await?;
+		let db = crate::fns::commons::admin_guard().await?;
 		let mut conn = db.get().await?;
-
-		crate::fns::commons::admin_guard().await?;
 
 		database::artifacts::Artifact::update(
 			&mut conn,
@@ -311,6 +340,41 @@ mod ssr {
 			download_url,
 		)
 		.await?;
+
+		Ok(())
+	}
+
+	pub async fn create_artifact(
+		version_id: Uuid,
+		artifact_type: String,
+		platform: String,
+		download_url: String,
+	) -> Result<super::ArtifactData> {
+		let db = crate::fns::commons::admin_guard().await?;
+		let mut conn = db.get().await?;
+
+		let artifact = database::artifacts::Artifact::create(
+			&mut conn,
+			version_id,
+			artifact_type,
+			platform,
+			download_url,
+		)
+		.await?;
+
+		Ok(super::ArtifactData {
+			id: artifact.id,
+			artifact_type: artifact.artifact_type,
+			platform: artifact.platform,
+			download_url: artifact.download_url,
+		})
+	}
+
+	pub async fn delete_artifact(artifact_id: Uuid) -> Result<()> {
+		let db = crate::fns::commons::admin_guard().await?;
+		let mut conn = db.get().await?;
+
+		database::artifacts::Artifact::delete(&mut conn, artifact_id).await?;
 
 		Ok(())
 	}
