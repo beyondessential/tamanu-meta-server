@@ -25,6 +25,7 @@ miette = "7.6.0"
 mobc = "0.9.0"
 node-semver = "2.2.0"
 problem_details = "0.8.0"
+reqwest = { version = "0.12.23", default-features = false, features = ["json", "rustls-tls"] }
 serde = "1.0.219"
 tera = "1.20.0"
 timesimp = "1.0.0"
