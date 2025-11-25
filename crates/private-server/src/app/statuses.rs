@@ -200,9 +200,14 @@ pub fn RankSection(
 pub fn ServerCardLoader(server_id: String, trigger: ReadSignal<i32>) -> impl IntoView {
 	let server_id_clone = server_id.clone();
 	let server_resource = Resource::new(
-		move || (trigger.get(), server_id_clone.clone()),
-		async |(_, id)| server_details(id).await,
+		move || server_id_clone.clone(),
+		async |id| server_details(id).await,
 	);
+
+	Effect::new(move || {
+		trigger.get();
+		server_resource.refetch();
+	});
 
 	view! {
 		{move || {
@@ -211,7 +216,7 @@ pub fn ServerCardLoader(server_id: String, trigger: ReadSignal<i32>) -> impl Int
 					// No data yet, show loading spinner
 					view! {
 						<div class="server-card loading-card">
-							<div class="loading-placeholder"></div>
+							"Thinking…"
 						</div>
 					}.into_any()
 				}
@@ -253,7 +258,7 @@ pub fn ServerCard(server: commons_types::server::cards::CentralServerCard) -> im
 			<div class="version-container">
 				{version.map(|v| {
 					view! {
-						<VersionIndicator version={v} distance={version_distance} />
+						<VersionIndicator version={v} distance={version_distance} add_link=false />
 					}.into_any()
 				})}
 			</div>
