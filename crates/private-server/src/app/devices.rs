@@ -306,11 +306,9 @@ pub fn DeviceConnectionHistory(device_id: Uuid) -> impl IntoView {
 
 #[component]
 pub fn AssociatedServers(device_id: Uuid, device_role: DeviceRole) -> impl IntoView {
-	let (servers_refresh_trigger, set_servers_refresh_trigger) = signal(0);
-
 	let servers_resource = Resource::new(
-		move || (device_id, servers_refresh_trigger.get()),
-		async |(id, _)| crate::fns::devices::get_servers_for_device(id).await,
+		move || device_id,
+		async |id| crate::fns::devices::get_servers_for_device(id).await,
 	);
 
 	view! {
@@ -322,10 +320,10 @@ pub fn AssociatedServers(device_id: Uuid, device_role: DeviceRole) -> impl IntoV
 							<h3>"Associated Servers"</h3>
 							<button
 								class="refresh-servers-btn"
-								on:click=move |_| set_servers_refresh_trigger.update(|n| *n += 1)
+								on:click=move |_| servers_resource.refetch()
 								title="Refresh servers list"
 							>
-								"↻"
+								"Refresh"
 							</button>
 						</div>
 						<Suspense fallback=|| view! { <div class="loading">"Loading servers..."</div> }>
