@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Tamanu Versions</title>
     <style>
         :root {
@@ -119,14 +121,14 @@
         }
 
         .group-content {
-            max-height: 0;
+            max-height: 2000px;
             overflow: hidden;
             transition: max-height 0.3s ease-out;
         }
 
-        .group-content.expanded {
-            max-height: 10000px;
-            transition: max-height 0.5s ease-in;
+        .group-content.collapsed {
+            max-height: 0;
+            transition: max-height 0.3s ease-out;
         }
 
         .versions {
@@ -148,20 +150,22 @@
             transition: background-color 0.2s;
             text-decoration: none;
             color: inherit;
+
+            &:hover {
+                background: var(--color-bg-medium);
+            }
+
+            .version-number {
+                font-size: 1.1em;
+                color: var(--color-text-light);
+            }
+
+            .version-patch {
+                color: var(--color-text-primary);
+            }
+
         }
 
-        .version-item:hover {
-            background: var(--color-bg-medium);
-        }
-
-        .version-number {
-            font-size: 1.1em;
-            color: var(--color-text-light);
-        }
-
-        .version-patch {
-            color: var(--color-text-primary);
-        }
 
         .version-date {
             margin-left: auto;
@@ -227,6 +231,73 @@
             border-left: 0.25em solid #dfe2e5;
             margin: 0 0 16px 0;
         }
+
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+
+            .container {
+                padding: 0;
+            }
+
+            .header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 0.5em;
+                margin-bottom: 1em;
+            }
+
+            h1 {
+                font-size: 1.5em;
+            }
+
+            .header-link {
+                align-self: flex-end;
+                padding: 0.25em 0.5em;
+            }
+
+            .version-group {
+                border-radius: 4px;
+            }
+
+            .group-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 0.5em;
+                padding: 1em;
+            }
+
+            .version-number {
+                font-size: 1.5em;
+            }
+
+            .details {
+                align-self: stretch;
+                text-align: left;
+
+                & > div {
+                    text-align: left;
+                    font-size: 0.9em;
+                }
+            }
+
+            .versions {
+                padding: 0.5em 1em 1em 1em;
+            }
+
+            .version-item {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 0.5em;
+                padding: 0.75em;
+            }
+
+            .version-date {
+                margin-left: 0;
+                align-self: flex-end;
+            }
+        }
     </style>
 </head>
 <body>
@@ -268,9 +339,16 @@
     </div>
 
     <script>
+        // Collapse all groups on page load (progressive enhancement)
+        document.addEventListener('DOMContentLoaded', function() {
+            document.querySelectorAll('.group-content').forEach(function(content) {
+                content.classList.add('collapsed');
+            });
+        });
+
         function toggleGroup(header) {
             const content = header.nextElementSibling;
-            content.classList.toggle('expanded');
+            content.classList.toggle('collapsed');
         }
     </script>
 </body>
