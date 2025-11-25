@@ -19,6 +19,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Free up space
+        run: sudo rm -rf /opt/hostedtoolcache /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup || true
       - name: Login to ghcr.io
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u $ --password-stdin
 

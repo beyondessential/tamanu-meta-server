@@ -23,12 +23,13 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     steps:
+      - name: Free up space
+        run: sudo rm -rf /opt/hostedtoolcache /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup || true
       - uses: actions/checkout@v5
       - name: Configure toolchain
         run: |
           rustup toolchain install --profile minimal --no-self-update stable
           rustup default stable
-          rm -rf /opt/hostedtoolcache
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest
@@ -45,13 +46,14 @@ jobs:
     name: Clippy
     runs-on: ubuntu-latest
     steps:
+      - name: Free up space
+        run: sudo rm -rf /opt/hostedtoolcache /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup || true
       - uses: actions/checkout@v5
       - name: Configure toolchain
         run: |
           rustup toolchain install --profile minimal --no-self-update stable
           rustup default stable
           rustup component add clippy
-          rm -rf /opt/hostedtoolcache
       - uses: taiki-e/install-action@v2
         with:
           tool: just
