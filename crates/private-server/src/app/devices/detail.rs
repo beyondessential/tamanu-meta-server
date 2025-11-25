@@ -1,4 +1,4 @@
-use commons_types::{Uuid, device::DeviceRole, server::kind::ServerKind};
+use commons_types::{Uuid, device::DeviceRole};
 use leptos::prelude::*;
 use leptos_meta::Title;
 use leptos_router::hooks::use_params_map;
@@ -33,14 +33,6 @@ pub fn Detail() -> impl IntoView {
 			}
 		},
 	);
-
-	let servers_resource = Resource::new(device_id, async |id| {
-		if let Some(id) = id {
-			crate::fns::devices::get_servers_for_device(id).await
-		} else {
-			Ok(Vec::new())
-		}
-	});
 
 	let update_role_action = Action::new(move |(device_id, role): &(Uuid, DeviceRole)| {
 		let device_id = *device_id;
@@ -367,62 +359,7 @@ pub fn Detail() -> impl IntoView {
 										}}
 									</div>
 
-									<div class="device-servers">
-										<h3>"Associated Servers"</h3>
-										<Suspense fallback=|| view! { <div class="loading">"Loading servers..."</div> }>
-											{move || {
-												servers_resource.get().map(|result| {
-													match result {
-														Ok(servers) => {
-															if servers.is_empty() {
-																view! {
-																	<div class="no-servers">"No servers are associated with this device"</div>
-																}.into_any()
-															} else {
-																view! {
-																	<div class="servers-list">
-																		<For each=move || servers.clone() key=|server| server.id.clone() let:server>
-																			<div class="server-item">
-																				<div class="server-header">
-																					{if server.kind == ServerKind::Central {
-																						view! {
-																							<a href={format!("/status/{}", server.id)} class="server-name">
-																								{server.name.clone().unwrap_or_else(|| "Unnamed Server".to_string())}
-																							</a>
-																						}.into_any()
-																					} else {
-																						view! {
-																							<span class="server-name">
-																								{server.name.clone().unwrap_or_else(|| "Unnamed Server".to_string())}
-																							</span>
-																						}.into_any()
-																					}}
-																					<span class="server-kind">{server.kind.to_string()}</span>
-																				</div>
-																				<div class="server-details">
-																					<span class="server-host">{server.host.clone()}</span>
-																					{server.rank.as_ref().map(|rank| {
-																						view! {
-																							<span class="server-rank">{rank.to_string()}</span>
-																						}
-																					})}
-																				</div>
-																			</div>
-																		</For>
-																	</div>
-																}.into_any()
-															}
-														}
-														Err(e) => {
-															view! {
-																<div class="error">{format!("Error loading servers: {}", e)}</div>
-															}.into_any()
-														}
-													}
-												})
-											}}
-										</Suspense>
-									</div>
+									<super::AssociatedServers device_id device_role />
 								}.into_any()
 							}
 							Err(e) => {

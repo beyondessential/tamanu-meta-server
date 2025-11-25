@@ -1,4 +1,4 @@
-use commons_types::Uuid;
+use commons_types::{Uuid, device::DeviceRole};
 use leptos::prelude::*;
 use leptos_meta::{Stylesheet, provide_meta_context};
 use leptos_router::components::A;
@@ -301,6 +301,82 @@ pub fn DeviceConnectionHistory(device_id: Uuid) -> impl IntoView {
 				}}
 			</Suspense>
 		</div>
+	}
+}
+
+#[component]
+pub fn AssociatedServers(device_id: Uuid, device_role: DeviceRole) -> impl IntoView {
+	let (servers_refresh_trigger, set_servers_refresh_trigger) = signal(0);
+
+	let servers_resource = Resource::new(
+		move || (device_id, servers_refresh_trigger.get()),
+		async |(id, _)| crate::fns::devices::get_servers_for_device(id).await,
+	);
+
+	view! {
+		{move || {
+			if device_role != DeviceRole::Untrusted {
+				view! {
+					<div class="device-servers">
+						<div class="servers-header">
+							<h3>"Associated Servers"</h3>
+							<button
+								class="refresh-servers-btn"
+								on:click=move |_| set_servers_refresh_trigger.update(|n| *n += 1)
+								title="Refresh servers list"
+							>
+								"↻"
+							</button>
+						</div>
+						<Suspense fallback=|| view! { <div class="loading">"Loading servers..."</div> }>
+							{move || {
+								servers_resource.get().map(|result| {
+									match result {
+										Ok(servers) => {
+											if servers.is_empty() {
+												view! {
+													<div class="no-servers">"No servers are associated with this device"</div>
+												}.into_any()
+											} else {
+												view! {
+													<div class="servers-list">
+														<For each=move || servers.clone() key=|server| server.id.clone() let:server>
+															<div class="server-item">
+																<div class="server-header">
+																	<a href={format!("/servers/{}", server.id)} class="server-name">
+																		{server.name.clone().unwrap_or_else(|| "Unnamed Server".to_string())}
+																	</a>
+																	<span class="server-kind">{server.kind.to_string()}</span>
+																</div>
+																<div class="server-details">
+																	<span class="server-host">{server.host.clone()}</span>
+																	{server.rank.as_ref().map(|rank| {
+																		view! {
+																			<span class="server-rank">{rank.to_string()}</span>
+																		}
+																	})}
+																</div>
+															</div>
+														</For>
+													</div>
+												}.into_any()
+											}
+										}
+										Err(e) => {
+											view! {
+												<div class="error">{format!("Error loading servers: {}", e)}</div>
+											}.into_any()
+										}
+									}
+								})
+							}}
+						</Suspense>
+					</div>
+				}.into_any()
+			} else {
+				().into_any()
+			}
+		}}
 	}
 }
 
