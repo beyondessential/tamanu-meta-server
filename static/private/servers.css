@@ -286,11 +286,31 @@
 			padding-bottom: 0.5em;
 		}
 
-		.detail-host {
-			font-size: 0.9em;
+		.header-url {
 			color: var(--color-text-secondary);
+			font-size: 0.9em;
 			font-weight: 500;
 			margin-left: 1em;
+		}
+
+		.detail-host,
+		.detail-device {
+			color: var(--color-text-secondary);
+			font-size: 0.9em;
+			font-weight: 500;
+
+			a {
+				color: inherit;
+			}
+		}
+
+		.detail-host {
+			font-size: 0.9em;
+		}
+
+		.detail-device {
+			font-size: 0.8em;
+			margin-top: 0.5em;
 		}
 
 		.info-grid {

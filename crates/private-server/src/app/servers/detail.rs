@@ -452,7 +452,7 @@ fn ServerInfoSection(host: String, device_info: Option<DeviceInfo>, up: String) 
 			<h2>
 				<span class={format!("section-status-dot status-dot {up}")}></span>
 				"Central server"
-				<a class="detail-host" href={host} target="_blank">{host_clone}</a>
+				<a class="header-url" href={host} target="_blank">{host_clone}</a>
 			</h2>
 			{device_info.as_ref().map(|device_info| {
 				let device_info = device_info.clone();
@@ -596,9 +596,21 @@ fn ChildServerCard(child: ChildServerData, is_admin: Resource<bool>) -> impl Int
 					}}
 				</Suspense>
 			</div>
-			<div>
-				<a class="detail-host" href={child.host.clone()} target="_blank">{child.host.clone()}</a>
+			<div class="detail-host">
+				"Link: "
+				<a href={child.host.clone()} target="_blank">{child.host.clone()}</a>
 			</div>
+			{child.device_info.as_ref().map(|device_info| {
+				let device_info = device_info.clone();
+				view! {
+					<div class="detail-device">
+						"Device: "
+						<A href=format!("/devices/{}", device_info.device.id)>{
+							device_info.latest_connection.map(|c| c.ip.to_string()).unwrap_or_else(|| device_info.device.role.to_string())
+						}</A>
+					</div>
+				}
+			})}
 			{child.last_status.as_ref().map(|status| {
 				let status = status.clone();
 				view! {
@@ -651,15 +663,6 @@ fn ChildServerCard(child: ChildServerData, is_admin: Resource<bool>) -> impl Int
 								}
 							})}
 						</div>
-					</div>
-				}
-			})}
-			{child.device_info.as_ref().map(|device_info| {
-				let device_info = device_info.clone();
-				view! {
-					<div class="child-server-device">
-						<h4>"Device"</h4>
-						<DeviceListItem device=device_info class:vertical class:hide-id />
 					</div>
 				}
 			})}
