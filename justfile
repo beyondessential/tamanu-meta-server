@@ -90,7 +90,10 @@ clean:
 
 # Build the frontend only (private server)
 build-frontend:
-    cargo leptos build --frontend-only
+	#!/usr/bin/env bash
+	set -x
+	export LEPTOS_WASM_BINDGEN_VERSION=$(cargo metadata --format-version 1 --locked | jq -r 'first(.packages[] | select(.name=="wasm-bindgen") | .version)')
+	cargo leptos build --frontend-only
 
 # Install development dependencies
 install-deps:

@@ -23,6 +23,7 @@ RUN if [ "$TARGETPLATFORM" == "linux/amd64" ]; then \
 	echo -e '[target.aarch64-unknown-linux-gnu]\nlinker = "aarch64-linux-gnu-gcc"' >> .cargo/config.toml; \
 	else echo "Unknown architecture $TARGETPLATFORM"; exit 1; \
 	fi
+RUN apt-get -y install jq
 
 RUN rustup target add "$(cat /.target)"
 ENV LEPTOS_OUTPUT_NAME=private-server
@@ -51,7 +52,8 @@ FROM --platform=$BUILDPLATFORM cacher AS builder-web
 RUN rustup target add wasm32-unknown-unknown
 RUN cargo binstall -y cargo-leptos
 COPY static ./static
-RUN cargo leptos build --release --frontend-only --precompress
+RUN env LEPTOS_WASM_BINDGEN_VERSION=$(cargo metadata --format-version 1 --locked | jq -r 'first(.packages[] | select(.name=="wasm-bindgen") | .version)') \
+	cargo leptos build --release --frontend-only --precompress
 
 # Runtime image
 FROM busybox:glibc
