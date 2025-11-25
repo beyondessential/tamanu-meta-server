@@ -655,7 +655,7 @@
 
 	.detail-section header {
 		display: flex;
-		align-items: center;
+		align-items: baseline;
 		justify-content: space-between;
 	}
 

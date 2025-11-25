@@ -208,21 +208,36 @@ fn StatusSelection(detail: VersionDetail) -> impl IntoView {
 
 #[component]
 fn ArtifactsSection(id: Uuid, is_admin: bool) -> impl IntoView {
+	let (is_unlocked, set_is_unlocked) = signal(false);
+
 	view! {
 		<section class="detail-section">
-			<h2>"Artifacts"</h2>
-			<ArtifactsContent version_id=id is_admin=is_admin />
+			<header>
+				<h2>"Artifacts"</h2>
+				{is_admin.then(|| {
+					view! {
+						<button class="edit-button" on:click=move |_| set_is_unlocked.set(!is_unlocked.get())>
+							{move || if is_unlocked.get() { "Lock" } else { "Unlock" }}
+						</button>
+					}
+				})}
+			</header>
+			<ArtifactsContent version_id=id is_admin=is_admin is_unlocked=is_unlocked />
 		</section>
 	}
 }
 
 #[component]
-fn ArtifactsContent(version_id: Uuid, is_admin: bool) -> impl IntoView {
+fn ArtifactsContent(
+	version_id: Uuid,
+	is_admin: bool,
+	is_unlocked: ReadSignal<bool>,
+) -> impl IntoView {
 	let (show_create_form, set_show_create_form) = signal(false);
 
 	view! {
 		<div>
-			<ArtifactsList version_id is_admin />
+			<ArtifactsList version_id is_admin is_unlocked />
 
 			{move || {
 				show_create_form.get().then(|| {
@@ -230,7 +245,7 @@ fn ArtifactsContent(version_id: Uuid, is_admin: bool) -> impl IntoView {
 				})
 			}}
 
-			{is_admin.then(|| {
+			{move || { (is_admin && is_unlocked.get()).then(|| {
 				view! {
 					<button
 						class="add-artifact-button"
@@ -239,13 +254,13 @@ fn ArtifactsContent(version_id: Uuid, is_admin: bool) -> impl IntoView {
 						{move || if show_create_form.get() { "Cancel" } else { "+ Add Artifact" }}
 					</button>
 				}
-			})}
+			}) }}
 		</div>
 	}
 }
 
 #[component]
-fn ArtifactsList(version_id: Uuid, is_admin: bool) -> impl IntoView {
+fn ArtifactsList(version_id: Uuid, is_admin: bool, is_unlocked: ReadSignal<bool>) -> impl IntoView {
 	let artifacts = Resource::new(
 		move || version_id,
 		|id| async move { get_artifacts_by_version_id(id).await },
@@ -267,7 +282,7 @@ fn ArtifactsList(version_id: Uuid, is_admin: bool) -> impl IntoView {
 						} else {
 							view! {
 								<For each=move || artifacts.clone() key=|a| a.id let:artifact>
-									<ArtifactItem artifact=artifact is_admin=is_admin />
+									<ArtifactItem artifact=artifact is_admin=is_admin is_unlocked=is_unlocked />
 								</For>
 							}
 								.into_any()
@@ -365,7 +380,11 @@ fn CreateArtifactForm(version_id: Uuid) -> impl IntoView {
 }
 
 #[component]
-fn ArtifactItem(artifact: ArtifactData, is_admin: bool) -> impl IntoView {
+fn ArtifactItem(
+	artifact: ArtifactData,
+	is_admin: bool,
+	is_unlocked: ReadSignal<bool>,
+) -> impl IntoView {
 	let artifact_id = StoredValue::new(artifact.id);
 	let original_type = StoredValue::new(artifact.artifact_type.clone());
 	let original_platform = StoredValue::new(artifact.platform.clone());
@@ -499,7 +518,7 @@ fn ArtifactItem(artifact: ArtifactData, is_admin: bool) -> impl IntoView {
 						<div class="artifact-type">{original_type.get_value()}</div>
 						<div class="artifact-platform">{original_platform.get_value()}</div>
 						<div class="artifact-url">{original_url.get_value()}</div>
-						{if is_admin {
+						{if is_admin && is_unlocked.get() {
 							view! {
 								<div class="artifact-actions">
 									{if show_delete_confirm.get() {
