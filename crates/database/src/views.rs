@@ -15,8 +15,6 @@ diesel::table! {
 diesel::table! {
 	version_updates (id) {
 		id -> Uuid,
-		created_at -> Timestamptz,
-		updated_at -> Timestamptz,
 		major -> Int4,
 		minor -> Int4,
 		patch -> Int4,

@@ -140,6 +140,7 @@ async fn update_for_version_empty() {
 		.unwrap();
 
 		let response = public.get("/versions/update-for/1.0.0").await;
+		println!("{:?}", response.as_bytes());
 		response.assert_status_ok();
 		response.assert_json::<Vec<Version>>(&Vec::new());
 	})
@@ -159,6 +160,7 @@ async fn update_for_version_with_newer() {
 		.unwrap();
 
 		let response = public.get("/versions/update-for/1.0.0").await;
+		println!("{:?}", response.as_bytes());
 		response.assert_status_ok();
 		let updates: Vec<Version> = response.json();
 		assert_eq!(updates.len(), 2);

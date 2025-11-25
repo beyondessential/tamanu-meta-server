@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use commons_errors::{AppError, Result};
 use commons_types::version::VersionStr;
 use diesel::prelude::*;
@@ -30,8 +31,20 @@ pub use predicate_version;
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Version {
 	pub id: Uuid,
-	pub created_at: chrono::DateTime<chrono::Utc>,
-	pub updated_at: chrono::DateTime<chrono::Utc>,
+	pub created_at: DateTime<Utc>,
+	pub updated_at: DateTime<Utc>,
+	pub major: i32,
+	pub minor: i32,
+	pub patch: i32,
+	pub published: bool,
+	pub changelog: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, QueryableByName)]
+#[diesel(table_name = crate::views::version_updates)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct ViewVersion {
+	pub id: Uuid,
 	pub major: i32,
 	pub minor: i32,
 	pub patch: i32,
@@ -81,7 +94,7 @@ impl Version {
 	pub async fn get_updates_for_version(
 		db: &mut AsyncPgConnection,
 		version: VersionStr,
-	) -> Result<Vec<Self>> {
+	) -> Result<Vec<ViewVersion>> {
 		use crate::views::version_updates::dsl::*;
 		let node_semver::Version {
 			major: target_major,
@@ -140,7 +153,7 @@ impl Version {
 	pub async fn get_head_release_date(
 		db: &mut AsyncPgConnection,
 		version: VersionStr,
-	) -> Result<chrono::DateTime<chrono::Utc>> {
+	) -> Result<DateTime<Utc>> {
 		use crate::schema::versions::*;
 
 		let node_semver::Version {

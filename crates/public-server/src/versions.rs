@@ -16,7 +16,7 @@ use commons_types::version::{VersionRange, VersionStr};
 use database::{
 	Db,
 	artifacts::Artifact,
-	versions::{NewVersion, Version},
+	versions::{NewVersion, Version, ViewVersion},
 };
 use diesel::{ExpressionMethods as _, SelectableHelper as _};
 use diesel_async::RunQueryDsl as _;
@@ -195,7 +195,7 @@ async fn view_mobile_install(
 async fn update_for(
 	State(db): State<Db>,
 	Path(version): Path<String>,
-) -> Result<Json<Vec<Version>>> {
+) -> Result<Json<Vec<ViewVersion>>> {
 	let mut db = db.get().await?;
 	let version = VersionStr::from_str(&version)?;
 	let updates = Version::get_updates_for_version(&mut db, version).await?;
