@@ -72,6 +72,7 @@ impl Version {
 
 		table
 			.select(Version::as_select())
+			.filter(published.eq(true))
 			.order_by(major.desc())
 			.then_order_by(minor.desc())
 			.then_order_by(patch.desc())
