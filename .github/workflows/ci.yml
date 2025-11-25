@@ -28,6 +28,7 @@ jobs:
         run: |
           rustup toolchain install --profile minimal --no-self-update stable
           rustup default stable
+          rm -rf /opt/hostedtoolcache
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest
@@ -50,6 +51,7 @@ jobs:
           rustup toolchain install --profile minimal --no-self-update stable
           rustup default stable
           rustup component add clippy
+          rm -rf /opt/hostedtoolcache
       - uses: taiki-e/install-action@v2
         with:
           tool: just
