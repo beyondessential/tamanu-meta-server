@@ -55,7 +55,7 @@ pub fn TimeAgo(timestamp: String) -> impl IntoView {
 			Ok(parsed) => {
 				let now = jiff::Timestamp::now();
 				let diff = now.duration_since(parsed);
-				let secs = diff.as_secs().abs() as u64;
+				let secs = diff.as_secs().unsigned_abs();
 				set_ago_text.set(format_secs(secs));
 			}
 			Err(err) => {

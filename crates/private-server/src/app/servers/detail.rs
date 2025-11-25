@@ -36,13 +36,12 @@ pub fn Detail() -> impl IntoView {
 		params
 			.read()
 			.get("id")
-			.map(|id| id.parse::<Uuid>().ok())
-			.flatten()
+			.and_then(|id| id.parse::<Uuid>().ok())
 			.unwrap_or_default()
 	};
 
 	let detail_resource =
-		Resource::new(move || server_id(), async move |id| server_detail(id).await);
+		Resource::new(&server_id, async move |id| server_detail(id).await);
 
 	let is_editing = RwSignal::new(false);
 	let edit_name = RwSignal::new(String::new());
@@ -87,13 +86,12 @@ pub fn Detail() -> impl IntoView {
 						match result {
 							Ok(data) => {
 								// If server is not central and has a parent, redirect to parent (unless editing)
-								if data.server.kind != ServerKind::Central && !is_editing.get() {
-									if let Some(parent_id) = &data.server.parent_server_id {
+								if data.server.kind != ServerKind::Central && !is_editing.get()
+									&& let Some(parent_id) = &data.server.parent_server_id {
 										return view! {
 											<Redirect path={format!("/servers/{}", parent_id)} />
 										}.into_any();
 									}
-								}
 
 								view! {
 									<ServerDetailView
@@ -146,7 +144,7 @@ fn ServerDetailView(
 	let server = data.server.clone();
 	let device_info = data.device_info.clone();
 	let last_status = data.last_status.clone();
-	let up = data.up.clone();
+	let up = data.up;
 	let child_servers = data.child_servers.clone();
 
 	let server_name = server.name.clone();
@@ -219,7 +217,7 @@ fn ServerDetailView(
 								}.into_any()
 							} else if server.kind != ServerKind::Central && server.parent_server_id.is_none() {
 								view! {
-									<AssignParentSection server_id=server_id.clone() />
+									<AssignParentSection server_id=server_id />
 								}.into_any()
 							} else {
 								().into_any()
@@ -757,7 +755,7 @@ fn AssignParentSection(server_id: Uuid) -> impl IntoView {
 												view! {
 													<div class="search-results">
 														{results.into_iter().map(|server| {
-															let server_id = server.id.clone();
+															let server_id = server.id;
 															let rank_matches = server.rank == rank;
 															let opacity_class = if rank_matches { "" } else { "faded" };
 															view! {
@@ -774,7 +772,7 @@ fn AssignParentSection(server_id: Uuid) -> impl IntoView {
 																	<button
 																		class="assign-button"
 																		on:click=move |_| {
-																			assign_action.dispatch(server_id.clone());
+																			assign_action.dispatch(server_id);
 																		}
 																		disabled=move || assign_action.pending().get()
 																	>

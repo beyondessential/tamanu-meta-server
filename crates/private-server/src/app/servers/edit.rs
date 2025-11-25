@@ -15,13 +15,12 @@ pub fn Edit() -> impl IntoView {
 		params
 			.read()
 			.get("id")
-			.map(|id| id.parse().ok())
-			.flatten()
+			.and_then(|id| id.parse().ok())
 			.unwrap_or_default()
 	};
 
 	let detail_resource =
-		Resource::new(move || server_id(), async move |id| server_detail(id).await);
+		Resource::new(&server_id, async move |id| server_detail(id).await);
 
 	let edit_name = RwSignal::new(String::new());
 	let edit_host = RwSignal::new(String::new());
@@ -53,7 +52,7 @@ pub fn Edit() -> impl IntoView {
 			let parent_id = *parent_id;
 			async move {
 				let result =
-					update_server(id.clone(), name, host, rank, device_id, parent_id).await;
+					update_server(id, name, host, rank, device_id, parent_id).await;
 				if result.is_ok() {
 					leptos_router::hooks::use_navigate()(
 						&format!("/servers/{}", id),
@@ -202,7 +201,7 @@ fn EditView(
 				<h2>"Assign to central"</h2>
 				{server.parent_server_id.as_ref().map(|parent_id| {
 					let parent_name = server.parent_server_name.clone().unwrap_or_else(|| "(unnamed)".to_string());
-					let parent_id = parent_id.clone();
+					let parent_id = *parent_id;
 					view! {
 						<div class="current-parent">
 							<span class="info-label">"Currently assigned to: "</span>
@@ -244,7 +243,7 @@ fn EditView(
 							view! {
 								<div class="search-results">
 									{results.into_iter().map(|server| {
-										let server_id = server.id.clone();
+										let server_id = server.id;
 										let rank_matches = server.rank == current_rank;
 										let opacity_class = if rank_matches { "" } else { "faded" };
 										view! {
@@ -261,7 +260,7 @@ fn EditView(
 												<button
 													class="assign-button"
 													on:click=move |_| {
-														assign_action.dispatch(server_id.clone());
+														assign_action.dispatch(server_id);
 													}
 													disabled=move || assign_action.pending().get()
 												>
@@ -279,19 +278,19 @@ fn EditView(
 						}
 					}}
 					{move || {
-						assign_action.value().get().and_then(|result| {
+						assign_action.value().get().map(|result| {
 							if let Err(e) = result {
-								Some(view! {
+								view! {
 									<div class="error-message">
 										{format!("Error assigning parent: {}", e)}
 									</div>
-								})
+								}
 							} else {
-								Some(view! {
+								view! {
 									<div class="success-message">
 										{"Parent server assigned successfully".to_string()}
 									</div>
-								})
+								}
 							}
 						})
 					}}

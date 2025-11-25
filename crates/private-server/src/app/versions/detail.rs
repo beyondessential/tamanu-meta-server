@@ -30,7 +30,7 @@ fn VersionDetailView() -> impl IntoView {
 	);
 
 	let version_detail = Resource::new(
-		move || version(),
+		version,
 		|v| async move { get_version_detail(v).await },
 	);
 

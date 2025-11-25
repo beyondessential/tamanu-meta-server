@@ -138,8 +138,7 @@ pub fn Detail() -> impl IntoView {
 		params
 			.read()
 			.get("id")
-			.map(|s| s.parse::<Uuid>().ok())
-			.flatten()
+			.and_then(|s| s.parse::<Uuid>().ok())
 	};
 
 	let (refresh_trigger, set_refresh_trigger) = signal(0);
@@ -237,10 +236,10 @@ pub fn Detail() -> impl IntoView {
 					device_resource.get().map(|result| {
 						match result {
 							Ok(device_info) => {
-								let device_id = device_info.device.id.clone();
-								let device_id_for_untrust = device_id.clone();
-								let device_id_for_trust = device_id.clone();
-								let device_id_for_update = device_id.clone();
+								let device_id = device_info.device.id;
+								let device_id_for_untrust = device_id;
+								let device_id_for_trust = device_id;
+								let device_id_for_update = device_id;
 								let device_role = device_info.device.role;
 								let default_role = if device_role != DeviceRole::Untrusted {
 									device_role
@@ -250,7 +249,7 @@ pub fn Detail() -> impl IntoView {
 								let (selected_role, set_selected_role) = signal(default_role);
 
 								let copy_device_id = {
-									let device_id = device_id.clone();
+									let device_id = device_id;
 									move |_| {
 										if let Some(window) = window() {
 											let navigator = window.navigator();
@@ -332,10 +331,10 @@ pub fn Detail() -> impl IntoView {
 											</div>
 
 											<div class="keys-list">
-												<For each=move || device_info.keys.clone() key=|key| key.id.clone() let:key>
+												<For each=move || device_info.keys.clone() key=|key| key.id let:key>
 													<KeyItem
 														key_id=key.id
-														_device_id=device_id.clone()
+														_device_id=device_id
 														name=key.name.clone()
 														pem_data=key.pem_data.clone()
 														hex_data=key.hex_data.clone()
@@ -363,7 +362,7 @@ pub fn Detail() -> impl IntoView {
 															<button
 																class="update-role-btn"
 																on:click={
-																	let device_id = device_id_for_update.clone();
+																	let device_id = device_id_for_update;
 																	move |_| {
 																		let role = selected_role.get();
 																		update_role_action.dispatch((device_id, role));
@@ -382,7 +381,7 @@ pub fn Detail() -> impl IntoView {
 														<div class="actions-row">
 															{move || {
 																if show_untrust_confirm.get() {
-																	let device_id = device_id_for_untrust.clone();
+																	let device_id = device_id_for_untrust;
 																	view! {
 																		<div class="untrust-confirm-inline">
 																			<span class="confirm-text">"Are you sure?"</span>
@@ -433,7 +432,7 @@ pub fn Detail() -> impl IntoView {
 														<button
 															class="trust-btn"
 															on:click={
-																let device_id = device_id_for_trust.clone();
+																let device_id = device_id_for_trust;
 																move |_| {
 																	let role = selected_role.get();
 																	trust_action.dispatch((device_id, role));
