@@ -144,7 +144,8 @@ mod ssr {
 			.unwrap_or_default();
 		let version_distance = central_status
 			.as_ref()
-			.and_then(|s| s.distance_from_version(&latest_version));
+			.map(|s| s.distance_from_version(&latest_version))
+			.flatten();
 
 		let facilities = central.get_children(&mut conn).await?;
 		let facility_ids = facilities.iter().map(|f| f.id).collect::<Vec<_>>();
@@ -173,7 +174,7 @@ mod ssr {
 			rank: central.rank,
 			host: central.host.0.to_string(),
 			up: central_up,
-			version: central_status.and_then(|s| s.version),
+			version: central_status.map(|s| s.version).flatten(),
 			version_distance,
 			facility_servers,
 		})

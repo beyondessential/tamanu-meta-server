@@ -109,7 +109,7 @@ async fn server_versions_page(
 		let up = status.map(|s| s.short_status()).unwrap_or_default();
 
 		let version_distance = if let (Some(_), Some(latest)) = (&version, &latest_version) {
-			status.and_then(|s| s.distance_from_version(latest))
+			status.and_then(|s| s.distance_from_version(&latest))
 		} else {
 			None
 		};

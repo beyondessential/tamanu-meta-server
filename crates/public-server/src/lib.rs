@@ -80,7 +80,7 @@ async fn index(
 	for version in versions {
 		grouped
 			.entry((version.major, version.minor))
-			.or_default()
+			.or_insert_with(Vec::new)
 			.push(version);
 	}
 

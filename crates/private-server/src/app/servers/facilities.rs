@@ -93,7 +93,7 @@ fn ServerCard(server: ServerListItem) -> impl IntoView {
 		"server-card"
 	};
 
-	let server_id = server.id;
+	let server_id = server.id.clone();
 	let is_admin = Resource::new(
 		|| (),
 		|_| async { crate::fns::commons::is_current_user_admin().await },

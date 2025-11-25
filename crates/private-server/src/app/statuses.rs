@@ -235,10 +235,10 @@ pub fn ServerCardLoader(server_id: String, trigger: ReadSignal<i32>) -> impl Int
 
 #[component]
 pub fn ServerCard(server: commons_types::server::cards::CentralServerCard) -> impl IntoView {
-	let server_id = server.id;
+	let server_id = server.id.clone();
 	let server_name = server.name.clone();
 	let server_host = server.host.clone();
-	let server_up = server.up;
+	let server_up = server.up.clone();
 	let facility_servers = server.facility_servers.clone();
 	let version = server.version.clone();
 	let version_distance = server.version_distance;
@@ -269,7 +269,7 @@ pub fn ServerCard(server: commons_types::server::cards::CentralServerCard) -> im
 				></span>
 				<For
 					each=move || facility_servers.clone()
-					key=|facility| facility.id
+					key=|facility| facility.id.clone()
 					let:facility
 				>
 					<span

@@ -139,7 +139,7 @@ pub fn Page() -> impl IntoView {
 pub fn DeviceList(devices: Vec<crate::fns::devices::DeviceInfo>) -> impl IntoView {
 	view! {
 		<div class="device-list">
-			<For each=move || devices.clone() key=|device| device.device.id let:device>
+			<For each=move || devices.clone() key=|device| device.device.id.clone() let:device>
 				<DeviceListItem device=device />
 			</For>
 		</div>
@@ -148,7 +148,7 @@ pub fn DeviceList(devices: Vec<crate::fns::devices::DeviceInfo>) -> impl IntoVie
 
 #[component]
 pub fn DeviceListItem(device: crate::fns::devices::DeviceInfo) -> impl IntoView {
-	let device_id = device.device.id;
+	let device_id = device.device.id.clone();
 	let role = device.device.role;
 	let latest_ip = device
 		.latest_connection
@@ -201,17 +201,17 @@ pub fn DeviceConnectionHistory(device_id: Uuid) -> impl IntoView {
 	let (has_more, set_has_more) = signal(false);
 
 	let connection_count = {
-		let device_id = device_id;
+		let device_id = device_id.clone();
 		Resource::new(
-			move || device_id,
+			move || device_id.clone(),
 			async |id| crate::fns::devices::connection_count(id).await,
 		)
 	};
 
 	let load_more_action = {
-		let device_id = device_id;
+		let device_id = device_id.clone();
 		Action::new(move |offset: &i64| {
-			let device_id = device_id;
+			let device_id = device_id.clone();
 			let offset = *offset;
 			async move {
 				crate::fns::devices::connection_history(device_id, Some(100), Some(offset)).await
@@ -338,7 +338,7 @@ pub fn AssociatedServers(device_id: Uuid, device_role: DeviceRole) -> impl IntoV
 											} else {
 												view! {
 													<div class="servers-list">
-														<For each=move || servers.clone() key=|server| server.id let:server>
+														<For each=move || servers.clone() key=|server| server.id.clone() let:server>
 															<div class="server-item">
 																<div class="server-header">
 																	<a href={format!("/servers/{}", server.id)} class="server-name">
