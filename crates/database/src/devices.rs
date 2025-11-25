@@ -551,6 +551,22 @@ impl DeviceKey {
 
 		Ok(())
 	}
+
+	pub async fn update_name(
+		db: &mut AsyncPgConnection,
+		key_id: Uuid,
+		name: Option<String>,
+	) -> Result<()> {
+		use crate::schema::device_keys::dsl;
+
+		diesel::update(dsl::device_keys.filter(dsl::id.eq(key_id)))
+			.set(dsl::name.eq(name))
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+
+		Ok(())
+	}
 }
 
 #[derive(Clone, Debug, Insertable)]

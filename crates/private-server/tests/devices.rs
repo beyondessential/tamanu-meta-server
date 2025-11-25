@@ -1029,3 +1029,70 @@ async fn test_search_devices_overlapping_base64_patterns() {
 	})
 	.await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_update_key_name() {
+	commons_tests::server::run(|mut conn, _public, private| async move {
+		// Create a device with a key
+		let key_data = b"test-key-data-for-naming";
+		let device = Device::create(&mut conn, key_data.to_vec()).await.unwrap();
+
+		// Trust the device so we can access it
+		Device::trust(&mut conn, device.id, DeviceRole::Server)
+			.await
+			.unwrap();
+
+		// Get the key ID
+		let keys = DeviceKey::find_by_device(&mut conn, device.id)
+			.await
+			.unwrap();
+		assert_eq!(keys.len(), 1);
+		let key_id = keys[0].id;
+		assert_eq!(keys[0].name, Some("Initial Key".to_string()));
+
+		// Update the key name via server function
+		let response = private
+			.post("/api/private_server/fns/devices/update_key_name")
+			.form(&[
+				("key_id", key_id.to_string().as_str()),
+				("name", "My Test Key"),
+			])
+			.await;
+		assert_eq!(response.status_code(), 200);
+
+		// Verify the name was updated
+		let updated_keys = DeviceKey::find_by_device(&mut conn, device.id)
+			.await
+			.unwrap();
+		assert_eq!(updated_keys.len(), 1);
+		assert_eq!(updated_keys[0].name, Some("My Test Key".to_string()));
+
+		// Update to a different name
+		let response = private
+			.post("/api/private_server/fns/devices/update_key_name")
+			.form(&[
+				("key_id", key_id.to_string().as_str()),
+				("name", "Renamed Key"),
+			])
+			.await;
+		assert_eq!(response.status_code(), 200);
+
+		let updated_keys = DeviceKey::find_by_device(&mut conn, device.id)
+			.await
+			.unwrap();
+		assert_eq!(updated_keys[0].name, Some("Renamed Key".to_string()));
+
+		// Update to None (clear the name)
+		let response = private
+			.post("/api/private_server/fns/devices/update_key_name")
+			.form(&[("key_id", key_id.to_string().as_str())])
+			.await;
+		assert_eq!(response.status_code(), 200);
+
+		let updated_keys = DeviceKey::find_by_device(&mut conn, device.id)
+			.await
+			.unwrap();
+		assert_eq!(updated_keys[0].name, None);
+	})
+	.await;
+}

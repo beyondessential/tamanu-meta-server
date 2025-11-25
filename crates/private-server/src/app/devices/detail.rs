@@ -7,6 +7,130 @@ use web_sys::window;
 use crate::components::ToastCtx;
 
 #[component]
+fn KeyItem(
+	key_id: Uuid,
+	_device_id: Uuid,
+	name: Option<String>,
+	pem_data: String,
+	hex_data: String,
+	#[prop(into)] key_format: Signal<String>,
+	on_update: impl Fn() + 'static + Copy,
+) -> impl IntoView {
+	let ToastCtx(set_message) = use_context().unwrap();
+	let (editing, set_editing) = signal(false);
+	let (new_name, set_new_name) = signal(name.clone().unwrap_or_default());
+
+	let update_key_name_action = Action::new(move |(key_id, name): &(Uuid, Option<String>)| {
+		let key_id = *key_id;
+		let name = name.clone();
+		async move { crate::fns::devices::update_key_name(key_id, name).await }
+	});
+
+	Effect::new(move |_| {
+		if let Some(result) = update_key_name_action.value().get() {
+			match result {
+				Ok(_) => {
+					set_message.set(Some("Key name updated successfully".to_string()));
+					set_editing.set(false);
+					on_update();
+					set_timeout(
+						move || set_message.set(None),
+						std::time::Duration::from_millis(3000),
+					);
+				}
+				Err(e) => {
+					set_message.set(Some(format!("Error updating key name: {}", e)));
+				}
+			}
+		}
+	});
+
+	let original_name = name.clone();
+
+	view! {
+		<div class="key-item">
+			{move || {
+				let editing_val = editing.get();
+				let name_display = name.clone();
+				let original_name_for_cancel = original_name.clone();
+
+				if editing_val {
+					view! {
+						<div class="key-name-edit">
+							<input
+								type="text"
+								class="key-name-input"
+								prop:value=move || new_name.get()
+								on:input=move |ev| set_new_name.set(event_target_value(&ev))
+								placeholder="Key name (optional)"
+							/>
+							<button
+								class="key-name-save-btn"
+								on:click=move |_| {
+									let name_value = new_name.get().trim().to_string();
+									let name_to_save = if name_value.is_empty() {
+										None
+									} else {
+										Some(name_value)
+									};
+									update_key_name_action.dispatch((key_id, name_to_save));
+								}
+								disabled=move || update_key_name_action.pending().get()
+							>
+								{move || if update_key_name_action.pending().get() { "Saving..." } else { "Save" }}
+							</button>
+							<button
+								class="key-name-cancel-btn"
+								on:click=move |_| {
+									set_new_name.set(original_name_for_cancel.clone().unwrap_or_default());
+									set_editing.set(false);
+								}
+							>
+								"Cancel"
+							</button>
+						</div>
+					}.into_any()
+				} else {
+					view! {
+						<div class="key-name-display">
+							{name_display.as_ref().map(|n| {
+								view! {
+									<div class="key-name">{n.clone()}</div>
+								}.into_any()
+							}).unwrap_or_else(|| {
+								view! {
+									<div class="key-name key-name-empty">"Unnamed key"</div>
+								}.into_any()
+							})}
+							<button
+								class="key-name-edit-btn"
+								on:click=move |_| set_editing.set(true)
+								title="Edit key name"
+							>
+								"✏️"
+							</button>
+						</div>
+					}.into_any()
+				}
+			}}
+			<div class="key-data">
+				{move || {
+					if key_format.get() == "pem" {
+						view! {
+							<pre class="key-pem">{pem_data.clone()}</pre>
+						}.into_any()
+					} else {
+						view! {
+							<code class="key-hex">{hex_data.clone()}</code>
+						}.into_any()
+					}
+				}}
+			</div>
+		</div>
+	}
+}
+
+#[component]
 pub fn Detail() -> impl IntoView {
 	let ToastCtx(set_message) = use_context().unwrap();
 	let params = use_params_map();
@@ -209,26 +333,15 @@ pub fn Detail() -> impl IntoView {
 
 											<div class="keys-list">
 												<For each=move || device_info.keys.clone() key=|key| key.id.clone() let:key>
-													<div class="key-item">
-														{key.name.as_ref().map(|name| {
-															view! {
-																<div class="key-name">{name.clone()}</div>
-															}
-														})}
-														<div class="key-data">
-															{move || {
-																if key_format.get() == "pem" {
-																	view! {
-																		<pre class="key-pem">{key.pem_data.clone()}</pre>
-																	}.into_any()
-																} else {
-																	view! {
-																		<code class="key-hex">{key.hex_data.clone()}</code>
-																	}.into_any()
-																}
-															}}
-														</div>
-													</div>
+													<KeyItem
+														key_id=key.id
+														_device_id=device_id.clone()
+														name=key.name.clone()
+														pem_data=key.pem_data.clone()
+														hex_data=key.hex_data.clone()
+														key_format
+														on_update=move || set_refresh_trigger.update(|n| *n += 1)
+													/>
 												</For>
 											</div>
 										</div>

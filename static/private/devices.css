@@ -376,6 +376,89 @@
 				font-size: 0.9em;
 			}
 
+			.key-name-empty {
+				color: var(--color-text-muted);
+				font-style: italic;
+			}
+
+			.key-name-display {
+				display: flex;
+				align-items: center;
+				gap: 0.5em;
+				margin-bottom: 0.5em;
+			}
+
+			.key-name-edit-btn {
+				background: none;
+				border: none;
+				cursor: pointer;
+				padding: 0.2em 0.4em;
+				font-size: 0.9em;
+				opacity: 0.6;
+				transition: opacity 0.2s;
+
+				&:hover {
+					opacity: 1;
+				}
+			}
+
+			.key-name-edit {
+				display: flex;
+				align-items: center;
+				gap: 0.5em;
+				margin-bottom: 0.5em;
+			}
+
+			.key-name-input {
+				flex: 1;
+				padding: 0.4em 0.6em;
+				border: 1px solid var(--color-border-medium);
+				border-radius: 3px;
+				background: var(--color-bg-medium);
+				color: var(--color-text-primary);
+				font-size: 0.9em;
+
+				&:focus {
+					outline: none;
+					border-color: var(--color-primary);
+				}
+			}
+
+			.key-name-save-btn {
+				padding: 0.4em 0.8em;
+				background: var(--color-primary);
+				color: white;
+				border: none;
+				border-radius: 3px;
+				cursor: pointer;
+				font-size: 0.85em;
+				transition: background-color 0.2s;
+
+				&:hover:not(:disabled) {
+					background: var(--color-primary-hover);
+				}
+
+				&:disabled {
+					opacity: 0.6;
+					cursor: not-allowed;
+				}
+			}
+
+			.key-name-cancel-btn {
+				padding: 0.4em 0.8em;
+				background: var(--color-bg-medium);
+				color: var(--color-text-secondary);
+				border: 1px solid var(--color-border-medium);
+				border-radius: 3px;
+				cursor: pointer;
+				font-size: 0.85em;
+				transition: background-color 0.2s;
+
+				&:hover {
+					background: var(--color-bg-lighter);
+				}
+			}
+
 			.key-data {
 				.key-pem {
 					font-family:

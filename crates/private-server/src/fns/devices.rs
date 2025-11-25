@@ -117,6 +117,11 @@ pub async fn search(query: String) -> Result<Vec<DeviceInfo>> {
 	ssr::search(query).await
 }
 
+#[server]
+pub async fn update_key_name(key_id: Uuid, name: Option<String>) -> Result<()> {
+	ssr::update_key_name(key_id, name).await
+}
+
 #[cfg(feature = "ssr")]
 mod ssr {
 	use super::*;
@@ -364,5 +369,12 @@ mod ssr {
 			.into_iter()
 			.map(DeviceInfo::from)
 			.collect())
+	}
+
+	pub async fn update_key_name(key_id: Uuid, name: Option<String>) -> Result<()> {
+		let db = crate::fns::commons::admin_guard().await?;
+		let mut conn = db.get().await?;
+
+		DeviceKey::update_name(&mut conn, key_id, name).await
 	}
 }
