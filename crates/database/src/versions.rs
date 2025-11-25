@@ -62,6 +62,7 @@ pub struct NewVersion {
 	pub minor: i32,
 	pub patch: i32,
 	pub changelog: String,
+	pub status: VersionStatus,
 }
 
 impl Version {

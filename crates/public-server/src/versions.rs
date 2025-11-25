@@ -103,21 +103,51 @@ async fn create(
 	State(db): State<Db>,
 	data: Bytes,
 ) -> Result<Json<Version>> {
+	use commons_types::version::VersionStatus;
+
 	let mut db = db.get().await?;
 	let mut stream = data.take(1024 * 1024 * 1024); // up to a MiB
 	let mut changelog = String::with_capacity(data.len().min(1024 * 1024 * 1024));
 	stream.read_to_string(&mut changelog).await?;
-	let version = VersionStr::from_str(&version)?;
-	let version = diesel::insert_into(database::schema::versions::table)
-		.values(NewVersion {
-			major: version.0.major as _,
-			minor: version.0.minor as _,
-			patch: version.0.patch as _,
-			changelog,
-		})
-		.returning(Version::as_select())
-		.get_result(&mut db)
-		.await?;
+	let version_str = VersionStr::from_str(&version)?;
+
+	// Check if a draft version already exists
+	let version = match Version::get_by_version(&mut db, version_str.clone()).await {
+		Ok(existing_version) if existing_version.status == VersionStatus::Draft => {
+			// Update the draft to published and replace the changelog
+			Version::update_status(&mut db, version_str.clone(), VersionStatus::Published).await?;
+			Version::update_changelog(&mut db, version_str.clone(), changelog).await?;
+			Version::get_by_version(&mut db, version_str).await?
+		}
+		Ok(_) => {
+			// Version exists but is not a draft, let the insert fail with constraint violation
+			diesel::insert_into(database::schema::versions::table)
+				.values(NewVersion {
+					major: version_str.0.major as _,
+					minor: version_str.0.minor as _,
+					patch: version_str.0.patch as _,
+					changelog,
+					status: VersionStatus::Published,
+				})
+				.returning(Version::as_select())
+				.get_result(&mut db)
+				.await?
+		}
+		Err(_) => {
+			// Version doesn't exist, create it as published
+			diesel::insert_into(database::schema::versions::table)
+				.values(NewVersion {
+					major: version_str.0.major as _,
+					minor: version_str.0.minor as _,
+					patch: version_str.0.patch as _,
+					changelog,
+					status: VersionStatus::Published,
+				})
+				.returning(Version::as_select())
+				.get_result(&mut db)
+				.await?
+		}
+	};
 
 	Ok(Json(version))
 }

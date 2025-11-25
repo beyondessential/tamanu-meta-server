@@ -192,16 +192,114 @@ async fn version_not_found_artifacts() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn artifacts_create_version_not_found() {
+async fn artifacts_create_draft_version_if_not_found() {
+	use database::versions::Version;
+
 	commons_tests::server::run_with_device_auth(
 		"releaser",
-		async |_conn, cert, _device_id, public, _| {
+		async |mut conn, cert, _device_id, public, _| {
 			let response = public
 				.post("/artifacts/999.999.999/installer/windows")
 				.add_header("mtls-certificate", &cert)
 				.text("https://example.com/installer.exe")
 				.await;
-			response.assert_status(StatusCode::NOT_FOUND);
+			response.assert_status_ok();
+
+			let artifact: Artifact = response.json();
+			assert_eq!(artifact.platform, "windows");
+			assert_eq!(artifact.artifact_type, "installer");
+			assert_eq!(artifact.download_url, "https://example.com/installer.exe");
+
+			// Verify the version was created as a draft
+			let version = Version::get_by_version(&mut conn, "999.999.999".parse().unwrap())
+				.await
+				.unwrap();
+			assert_eq!(version.status, VersionStatus::Draft);
+			assert_eq!(version.major, 999);
+			assert_eq!(version.minor, 999);
+			assert_eq!(version.patch, 999);
+			assert_eq!(version.changelog, "");
+		},
+	)
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn version_create_publishes_draft_if_exists() {
+	use database::versions::Version;
+
+	commons_tests::server::run_with_device_auth(
+		"releaser",
+		async |mut conn, cert, _device_id, public, _| {
+			// First, create a draft version by creating an artifact
+			let response = public
+				.post("/artifacts/2.0.0/installer/windows")
+				.add_header("mtls-certificate", &cert)
+				.text("https://example.com/installer.exe")
+				.await;
+			response.assert_status_ok();
+
+			// Verify it's a draft
+			let version = Version::get_by_version(&mut conn, "2.0.0".parse().unwrap())
+				.await
+				.unwrap();
+			assert_eq!(version.status, VersionStatus::Draft);
+			assert_eq!(version.changelog, "");
+
+			// Now create/publish the version with a changelog
+			let changelog = "# Version 2.0.0\n\nNew features and improvements";
+			let response = public
+				.post("/versions/2.0.0")
+				.add_header("mtls-certificate", &cert)
+				.text(changelog)
+				.await;
+			response.assert_status_ok();
+
+			let published_version: Version = response.json();
+			assert_eq!(published_version.status, VersionStatus::Published);
+			assert_eq!(published_version.changelog, changelog);
+			assert_eq!(published_version.major, 2);
+			assert_eq!(published_version.minor, 0);
+			assert_eq!(published_version.patch, 0);
+
+			// Verify the version in the database is now published with the new changelog
+			let db_version = Version::get_by_version(&mut conn, "2.0.0".parse().unwrap())
+				.await
+				.unwrap();
+			assert_eq!(db_version.status, VersionStatus::Published);
+			assert_eq!(db_version.changelog, changelog);
+		},
+	)
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn version_create_duplicate_published_fails() {
+	commons_tests::server::run_with_device_auth(
+		"releaser",
+		async |mut conn, cert, _device_id, public, _| {
+			// Create a published version
+			conn.batch_execute(
+				"INSERT INTO versions (major, minor, patch, changelog, status) VALUES (3, 0, 0, 'First changelog', 'published')",
+			)
+			.await
+			.unwrap();
+
+			// Try to create the same version again - should fail
+			let changelog = "# Version 3.0.0\n\nDifferent changelog";
+			let response = public
+				.post("/versions/3.0.0")
+				.add_header("mtls-certificate", &cert)
+				.text(changelog)
+				.await;
+
+			// Should fail with a database constraint error (500 or 409)
+			assert!(
+				response.status_code() == StatusCode::INTERNAL_SERVER_ERROR
+				|| response.status_code() == StatusCode::CONFLICT,
+				"Expected 500 or 409, got {}",
+				response.status_code()
+			);
 		},
 	)
 	.await
