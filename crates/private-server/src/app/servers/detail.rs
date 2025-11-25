@@ -530,7 +530,7 @@ fn StatusSection(status: ServerLastStatusData) -> impl IntoView {
 				{min_chrome_version.map(|chrome_ver| {
 					view! {
 						<div class="info-item version">
-							<span class="info-label">"Min chrome version"</span>
+							<span class="info-label">"Chrome"</span>
 							<span class="info-value monospace">{format!("{chrome_ver} or later")}</span>
 						</div>
 					}
