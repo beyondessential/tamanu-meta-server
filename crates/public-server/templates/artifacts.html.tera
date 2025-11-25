@@ -3,50 +3,219 @@
 <head>
     <title>Tamanu {{ version.major }}.{{ version.minor }}.{{ version.patch }} — Artifacts</title>
     <style>
+        :root {
+            --color-primary: oklch(0.7 0.15 240);
+            --color-bg-body: oklch(0.97 0.01 240);
+            --color-bg-white: oklch(1 0 0);
+            --color-bg-light: oklch(0.99 0.005 240);
+            --color-bg-medium: oklch(0.95 0.005 240);
+            --color-text-primary: oklch(0.3 0.1 240);
+            --color-text-secondary: oklch(0.4 0.08 240);
+            --color-text-tertiary: oklch(0.45 0.05 240);
+            --color-text-light: oklch(0.55 0.02 240);
+            --color-border-light: oklch(0.9 0.01 240);
+            --color-warning-bg: oklch(0.85 0.15 90);
+            --color-warning-text: oklch(0.2 0.1 240);
+            --color-warning: oklch(0.7 0.35 90);
+            --color-shadow: oklch(0 0 0 / 0.05);
+        }
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             margin: 0;
             padding: 20px;
+            line-height: 1.6;
+            background-color: var(--color-bg-body);
+            color: var(--color-text-primary);
         }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 20px;
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
         }
-        th, td {
-            padding: 12px;
-            text-align: left;
-            border-bottom: 1px solid #ddd;
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2em;
         }
-        th {
-            background-color: #f5f5f5;
-            font-weight: bold;
+
+        h1 {
+            font-size: 2em;
+            color: var(--color-text-primary);
+            margin: 0;
+            font-weight: 500;
+            font-family: monospace;
         }
-        .download-link {
-            display: inline-block;
-            background: #3498db;
-            color: white;
-            padding: 6px 12px;
+
+        .back-link {
+            color: var(--color-primary);
+            text-decoration: none;
+            padding: 0.5em 1em;
+            border-radius: 4px;
+            transition: background-color 0.2s;
+        }
+
+        .back-link:hover {
+            background-color: var(--color-bg-medium);
+        }
+
+        .outdated-banner {
+            background: var(--color-warning-bg);
+            color: var(--color-warning-text);
+            padding: 1em 1.5em;
+            border-radius: 8px;
+            margin-bottom: 2em;
+            border: 1px solid var(--color-warning);
+            display: flex;
+            align-items: center;
+            gap: 1em;
+        }
+
+        .outdated-banner-icon {
+            font-size: 1.5em;
+        }
+
+        .outdated-banner-content {
+            flex: 1;
+        }
+
+        .outdated-banner-link {
+            color: var(--color-primary);
+            text-decoration: none;
+            font-weight: 600;
+            padding: 0.5em 1em;
+            background: var(--color-bg-white);
+            border-radius: 4px;
+            transition: background-color 0.2s;
+        }
+
+        .outdated-banner-link:hover {
+            background-color: var(--color-bg-medium);
+        }
+
+        .section {
+            background: var(--color-bg-white);
+            border: 1px solid var(--color-border-light);
+            border-radius: 8px;
+            padding: 2em;
+            margin-bottom: 2em;
+            box-shadow: 0 1px 3px var(--color-shadow);
+        }
+
+        h2 {
+            margin-top: 0;
+            margin-bottom: 1.5em;
+            color: var(--color-text-secondary);
+            font-weight: 500;
+            font-size: 1.5em;
+        }
+
+        .artifacts-list {
+            display: flex;
+            flex-direction: column;
+            gap: 1em;
+        }
+
+        .artifact-item {
+            display: flex;
+            align-items: center;
+            gap: 1em;
+            padding: 1em;
+            background: var(--color-bg-light);
+            border: 1px solid var(--color-border-light);
+            border-radius: 4px;
+        }
+
+        .artifact-type {
+            font-weight: 600;
+            color: var(--color-text-primary);
+            width: 120px;
+            min-width: 120px;
+        }
+
+        .artifact-platform {
+            font-family: monospace;
+            color: var(--color-text-secondary);
+            min-width: 100px;
+        }
+
+        .artifact-url {
+            flex: 1;
+            font-family: monospace;
+            font-size: 0.9em;
+            color: var(--color-text-tertiary);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .artifact-actions {
+            display: flex;
+            gap: 0.5em;
+        }
+
+        .btn {
+            padding: 0.5em 1em;
             border-radius: 4px;
             text-decoration: none;
-            transition: background 0.2s;
+            font-weight: 500;
+            transition: background-color 0.2s;
+            border: none;
+            cursor: pointer;
+            font-size: 0.9em;
         }
-        .download-link:hover {
-            background: #2980b9;
+
+        .btn-primary {
+            background: var(--color-primary);
+            color: white;
         }
-        .back-link {
-            display: inline-block;
-            margin-top: 20px;
-            color: #3498db;
-            text-decoration: none;
+
+        .btn-primary:hover {
+            background: oklch(0.6 0.15 240);
         }
-        .back-link:hover {
-            text-decoration: underline;
+
+        .btn-secondary {
+            background: var(--color-bg-medium);
+            color: var(--color-text-primary);
         }
+
+        .btn-secondary:hover {
+            background: oklch(0.92 0.005 240);
+        }
+
+        .copy-feedback {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: var(--color-primary);
+            color: white;
+            padding: 1em 1.5em;
+            border-radius: 4px;
+            box-shadow: 0 4px 12px var(--color-shadow);
+            opacity: 0;
+            transform: translateY(20px);
+            transition: opacity 0.3s, transform 0.3s;
+            pointer-events: none;
+        }
+
+        .copy-feedback.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .no-artifacts {
+            padding: 2em;
+            text-align: center;
+            color: var(--color-text-light);
+            font-style: italic;
+        }
+
         .markdown-body {
             line-height: 1.6;
-            margin-bottom: 20px;
         }
+
         .markdown-body h1,
         .markdown-body h2,
         .markdown-body h3 {
@@ -55,9 +224,17 @@
             font-weight: 600;
             line-height: 1.25;
         }
+
+        .markdown-body h1:first-child,
+        .markdown-body h2:first-child,
+        .markdown-body h3:first-child {
+            margin-top: 0;
+        }
+
         .markdown-body p {
             margin-bottom: 16px;
         }
+
         .markdown-body code {
             padding: 0.2em 0.4em;
             margin: 0;
@@ -66,6 +243,7 @@
             border-radius: 3px;
             font-family: "SFMono-Regular",Consolas,"Liberation Mono",Menlo,Courier,monospace;
         }
+
         .markdown-body pre {
             padding: 16px;
             overflow: auto;
@@ -74,40 +252,93 @@
             background-color: #f6f8fa;
             border-radius: 3px;
         }
+
+        .markdown-body ul,
+        .markdown-body ol {
+            padding-left: 2em;
+            margin-bottom: 16px;
+        }
+
+        .markdown-body li {
+            margin: 0.25em 0;
+        }
+
+        .markdown-body blockquote {
+            padding: 0 1em;
+            color: #6a737d;
+            border-left: 0.25em solid #dfe2e5;
+            margin: 0 0 16px 0;
+        }
     </style>
 </head>
 <body>
-    <h1>Tamanu {{ version.major }}.{{ version.minor }}.{{ version.patch }}</h1>
+    <div class="container">
+        <div class="header">
+            <h1>{{ version.major }}.{{ version.minor }}.{{ version.patch }}</h1>
+            <a href="/" class="back-link">← All versions</a>
+        </div>
 
-    <h2>Artifacts</h2>
-    <table>
-        <thead>
-            <tr>
-                <th>Type</th>
-                <th>Platform</th>
-                <th></th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for artifact in artifacts %}
-            <tr>
-                <td>{{ artifact.artifact_type }}</td>
-                <td>{{ artifact.platform }}</td>
-                <td>
-                  {% if artifact.download_url is starting_with("https://") %}
-                    <a href="{{ artifact.download_url }}" class="download-link">Download</a>
-                  {% else %}
-                    <code>{{ artifact.download_url }}</code>
-                  {% endif %}
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+        {% if is_latest == false and latest_version %}
+        <div class="outdated-banner">
+            <div class="outdated-banner-icon">⚠️</div>
+            <div class="outdated-banner-content">
+                <strong>This is not the latest version.</strong>
+                A newer version {{ latest_version }} is available.
+            </div>
+            <a href="/versions/{{ latest_version }}" class="outdated-banner-link">
+                View {{ latest_version }}
+            </a>
+        </div>
+        {% endif %}
 
-    <h2>Changelog</h2>
-    <div class="markdown-body">{{ version.changelog | safe }}</div>
+        <div class="section">
+            <h2>Artifacts</h2>
+            {% if artifacts %}
+            <div class="artifacts-list">
+                {% for artifact in artifacts %}
+                <div class="artifact-item">
+                    <div class="artifact-type">{{ artifact.artifact_type }}</div>
+                    <div class="artifact-platform">{{ artifact.platform }}</div>
+                    <div class="artifact-url">{{ artifact.download_url }}</div>
+                    <div class="artifact-actions">
+                        {% if artifact.download_url is starting_with("https://") %}
+                        <a href="{{ artifact.download_url }}" class="btn btn-primary">Download</a>
+                        {% endif %}
+                        <button class="btn btn-secondary" onclick="copyToClipboard('{{ artifact.download_url }}')">
+                            Copy URL
+                        </button>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="no-artifacts">No artifacts available for this version.</div>
+            {% endif %}
+        </div>
 
-    <a href="/" class="back-link">←  All versions</a>
+        <div class="section">
+            <h2>Changelog</h2>
+            <div class="markdown-body">{{ version.changelog | safe }}</div>
+        </div>
+    </div>
+
+    <div class="copy-feedback" id="copyFeedback">
+        Copied to clipboard!
+    </div>
+
+    <script>
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                const feedback = document.getElementById('copyFeedback');
+                feedback.classList.add('show');
+                setTimeout(() => {
+                    feedback.classList.remove('show');
+                }, 2000);
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+                alert('Failed to copy to clipboard');
+            });
+        }
+    </script>
 </body>
 </html>

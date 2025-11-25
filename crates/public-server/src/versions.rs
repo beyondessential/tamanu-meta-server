@@ -147,15 +147,42 @@ async fn view_artifacts(
 	State(db): State<Db>,
 	State(tera): State<Arc<Tera>>,
 ) -> Result<Html<String>> {
+	use commons_types::version::VersionStatus;
+	use diesel::QueryDsl;
+
 	let mut db = db.get().await?;
 	let version = VersionRange::from_str(&version)?;
 	let mut version = Version::get_latest_matching(&mut db, version.0).await?;
 	version.changelog = parse_markdown(&version.changelog);
 	let artifacts = Artifact::get_for_version(&mut db, version.id).await?;
 
+	// Check if this is the latest published version in its minor
+	let latest_in_minor = {
+		use database::schema::versions::dsl::*;
+		versions
+			.filter(major.eq(version.major))
+			.filter(minor.eq(version.minor))
+			.filter(status.eq(VersionStatus::Published))
+			.order_by(patch.desc())
+			.select(Version::as_select())
+			.first(&mut db)
+			.await
+			.ok()
+	};
+
+	let is_latest = latest_in_minor
+		.as_ref()
+		.map(|v| v.patch == version.patch)
+		.unwrap_or(true);
+
+	let latest_version_str =
+		latest_in_minor.map(|v| format!("{}.{}.{}", v.major, v.minor, v.patch));
+
 	let mut context = Context::new();
 	context.insert("version", &version);
 	context.insert("artifacts", &artifacts);
+	context.insert("is_latest", &is_latest);
+	context.insert("latest_version", &latest_version_str);
 	Ok(Html(tera.render("artifacts", &context)?))
 }
 

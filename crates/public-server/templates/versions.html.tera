@@ -146,18 +146,20 @@
             border: 1px solid var(--color-border-light);
             cursor: pointer;
             transition: background-color 0.2s;
+            text-decoration: none;
+            color: inherit;
         }
 
         .version-item:hover {
             background: var(--color-bg-medium);
         }
 
-        .version-item .version-number {
+        .version-number {
             font-size: 1.1em;
             color: var(--color-text-light);
         }
 
-        .version-item .version-patch {
+        .version-patch {
             color: var(--color-text-primary);
         }
 
@@ -166,14 +168,6 @@
             font-size: 0.9em;
             color: var(--color-text-tertiary);
             font-family: monospace;
-        }
-
-        .version-link {
-            display: flex;
-            align-items: center;
-            gap: 1em;
-            text-decoration: none;
-            color: inherit;
         }
 
         .markdown-body {
@@ -259,14 +253,12 @@
                 <div class="group-content">
                     <div class="versions">
                         {% for version in group.versions %}
-                        <div class="version-item">
-                            <a href="/versions/{{ version.major }}.{{ version.minor }}.{{ version.patch }}" class="version-link">
-                                <div class="version-number">
-                                    {{ version.major }}.{{ version.minor }}.<span class="version-patch">{{ version.patch }}</span>
-                                </div>
-                                <div class="version-date">{{ version.created_at }}</div>
-                            </a>
-                        </div>
+                        <a href="/versions/{{ version.major }}.{{ version.minor }}.{{ version.patch }}" class="version-item">
+                            <div class="version-number">
+                                {{ version.major }}.{{ version.minor }}.<span class="version-patch">{{ version.patch }}</span>
+                            </div>
+                            <div class="version-date">{{ version.created_at }}</div>
+                        </a>
                         {% endfor %}
                     </div>
                 </div>
