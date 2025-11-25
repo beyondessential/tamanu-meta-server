@@ -89,12 +89,9 @@ pub fn Detail() -> impl IntoView {
 								// If server is not central and has a parent, redirect to parent (unless editing)
 								if data.server.kind != ServerKind::Central && !is_editing.get() {
 									if let Some(parent_id) = &data.server.parent_server_id {
-										// Check if user is admin before redirecting
-										if !is_admin.get().unwrap_or(false) {
-											return view! {
-												<Redirect path={format!("/servers/{}", parent_id)} />
-											}.into_any();
-										}
+										return view! {
+											<Redirect path={format!("/servers/{}", parent_id)} />
+										}.into_any();
 									}
 								}
 
