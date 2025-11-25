@@ -194,4 +194,60 @@ impl Version {
 			.map(|v: Version| v.created_at)
 			.map_err(AppError::from)
 	}
+
+	pub async fn update_status(
+		db: &mut AsyncPgConnection,
+		version: VersionStr,
+		new_status: VersionStatus,
+	) -> Result<()> {
+		use crate::schema::versions::dsl::*;
+
+		diesel::update(versions)
+			.filter(predicate_version!(version.0))
+			.set(status.eq(new_status))
+			.execute(db)
+			.await?;
+
+		Ok(())
+	}
+
+	pub async fn update_changelog(
+		db: &mut AsyncPgConnection,
+		version: VersionStr,
+		new_changelog: String,
+	) -> Result<()> {
+		use crate::schema::versions::dsl::*;
+
+		diesel::update(versions)
+			.filter(predicate_version!(version.0))
+			.set(changelog.eq(new_changelog))
+			.execute(db)
+			.await?;
+
+		Ok(())
+	}
+
+	pub async fn is_latest_in_minor(
+		db: &mut AsyncPgConnection,
+		version: VersionStr,
+	) -> Result<bool> {
+		use crate::schema::versions::dsl::*;
+
+		let version_record = Self::get_by_version(db, version.clone()).await?;
+
+		let latest_in_minor: Option<Version> = versions
+			.filter(major.eq(version_record.major))
+			.filter(minor.eq(version_record.minor))
+			.filter(status.eq(VersionStatus::Published))
+			.order_by(patch.desc())
+			.select(Version::as_select())
+			.first(db)
+			.await
+			.ok();
+
+		Ok(latest_in_minor
+			.as_ref()
+			.map(|v| v.patch == version_record.patch)
+			.unwrap_or(true))
+	}
 }

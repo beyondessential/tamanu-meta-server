@@ -3048,6 +3048,7 @@ dependencies = [
  "lloggs",
  "miette",
  "public-server",
+ "pulldown-cmark 0.12.2",
  "reqwest",
  "serde",
  "serde_json",
@@ -3158,7 +3159,7 @@ dependencies = [
  "miette",
  "node-semver",
  "percent-encoding",
- "pulldown-cmark",
+ "pulldown-cmark 0.13.0",
  "qrcode",
  "serde",
  "serde_json",
@@ -3168,6 +3169,19 @@ dependencies = [
  "tokio",
  "tower-http",
  "uuid",
+]
+
+[[package]]
+name = "pulldown-cmark"
+version = "0.12.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f86ba2052aebccc42cbbb3ed234b8b13ce76f75c3551a303cb2bcffcff12bb14"
+dependencies = [
+ "bitflags",
+ "getopts",
+ "memchr",
+ "pulldown-cmark-escape",
+ "unicase",
 ]
 
 [[package]]

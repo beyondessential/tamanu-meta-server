@@ -76,11 +76,13 @@ mod ssr {
 - Handle async operations with `Resource` and `Action`
 
 ## Development Workflow
-- Always check: `cargo check` for basic compilation
-- Always check: `cargo leptos build --frontend-only` for frontend compatibility
+- Always check: `just check` for basic compilation
+- Always check: `just build-frontend` for frontend compatibility
 - Run full test suite: `just test`
 - Run specific tests: `just test-name <test_name>`
 - Verify no compilation warnings in tests and main code
 
-## Troubleshooting
-- When encountering a wasm-bindgen version mismatch, run `just install-deps` and then retry.
+## Troubleshooting and common mistakes
+- Always use just for tests, never use `cargo test`.
+- Unless you've done wide-ranging changes, prefer to test specific packages with `just test-package <package_name>` instead of the full test suite.
+- If you're trying to import diesel in the private-server crate, stop that and put database stuff in the database crate instead.
