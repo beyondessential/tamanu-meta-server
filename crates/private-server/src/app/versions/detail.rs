@@ -3,7 +3,7 @@ use leptos_meta::Stylesheet;
 use leptos_router::hooks::use_params_map;
 
 use crate::fns::versions::{
-	ArtifactData, VersionDetail, get_version_artifacts, get_version_detail,
+	ArtifactData, VersionDetail, get_version_artifacts, get_version_detail, update_artifact,
 	update_version_changelog, update_version_status,
 };
 use commons_types::version::VersionStatus;
@@ -232,13 +232,135 @@ fn ArtifactsSection(version: String) -> impl IntoView {
 
 #[component]
 fn ArtifactItem(artifact: ArtifactData) -> impl IntoView {
+	let artifact_id = StoredValue::new(artifact.id);
+	let original_type = StoredValue::new(artifact.artifact_type.clone());
+	let original_platform = StoredValue::new(artifact.platform.clone());
+	let original_url = StoredValue::new(artifact.download_url.clone());
+
+	let (is_editing, set_is_editing) = signal(false);
+	let (artifact_type, set_artifact_type) = signal(artifact.artifact_type.clone());
+	let (platform, set_platform) = signal(artifact.platform.clone());
+	let (download_url, set_download_url) = signal(artifact.download_url.clone());
+
+	let update_artifact_action = Action::new(
+		move |(id, art_type, plat, url): &(uuid::Uuid, String, String, String)| {
+			let id = *id;
+			let art_type = art_type.clone();
+			let plat = plat.clone();
+			let url = url.clone();
+			async move { update_artifact(id, art_type, plat, url).await }
+		},
+	);
+
+	Effect::new(move || {
+		if let Some(Ok(())) = update_artifact_action.value().get() {
+			window().location().reload().expect("Failed to reload page");
+		}
+	});
+
 	view! {
 		<div class="artifact-item">
-			<div class="artifact-type">{artifact.artifact_type.clone()}</div>
-			<div class="artifact-platform">{artifact.platform.clone()}</div>
-			<a href={artifact.download_url.clone()} class="artifact-download" target="_blank">
-				"Download"
-			</a>
+			{move || {
+				if is_editing.get() {
+					view! {
+						<div class="artifact-edit-form">
+							<input
+								type="text"
+								class="artifact-input"
+								placeholder="Type"
+								prop:value=move || artifact_type.get()
+								on:input=move |ev| {
+									set_artifact_type.set(event_target_value(&ev));
+								}
+							/>
+							<input
+								type="text"
+								class="artifact-input"
+								placeholder="Platform"
+								prop:value=move || platform.get()
+								on:input=move |ev| {
+									set_platform.set(event_target_value(&ev));
+								}
+							/>
+							<input
+								type="text"
+								class="artifact-input artifact-url-input"
+								placeholder="URL"
+								prop:value=move || download_url.get()
+								on:input=move |ev| {
+									set_download_url.set(event_target_value(&ev));
+								}
+							/>
+							<div class="artifact-edit-actions">
+								<button
+									class="save-button"
+									on:click=move |_| {
+										update_artifact_action
+											.dispatch((
+												artifact_id.get_value(),
+												artifact_type.get(),
+												platform.get(),
+												download_url.get(),
+											));
+										set_is_editing.set(false);
+									}
+
+									disabled=move || update_artifact_action.pending().get()
+								>
+									{move || {
+										if update_artifact_action.pending().get() {
+											"Saving..."
+										} else {
+											"Save"
+										}
+									}}
+
+								</button>
+								<button
+									class="cancel-button"
+									on:click=move |_| {
+										set_artifact_type.set(original_type.get_value());
+										set_platform.set(original_platform.get_value());
+										set_download_url.set(original_url.get_value());
+										set_is_editing.set(false);
+									}
+
+									disabled=move || update_artifact_action.pending().get()
+								>
+									"Cancel"
+								</button>
+							</div>
+							{move || {
+								update_artifact_action
+									.value()
+									.get()
+									.and_then(|result| {
+										result
+											.err()
+											.map(|e| {
+												view! {
+													<div class="error-message">{format!("Error: {}", e)}</div>
+												}
+											})
+									})
+							}}
+
+						</div>
+					}
+						.into_any()
+				} else {
+					view! {
+						<div class="artifact-type">{original_type.get_value()}</div>
+						<div class="artifact-platform">{original_platform.get_value()}</div>
+						<div class="artifact-url">{original_url.get_value()}</div>
+						<button class="edit-button" on:click=move |_| set_is_editing.set(true)>
+							"Edit"
+						</button>
+					}
+						.into_any()
+				}
+			}}
+
 		</div>
 	}
 }

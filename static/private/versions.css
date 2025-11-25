@@ -367,20 +367,95 @@
 		.artifact-platform {
 			font-family: monospace;
 			color: var(--color-text-secondary);
-			flex: 1;
+			min-width: 150px;
 		}
 
-		.artifact-download {
+		.artifact-url {
+			font-family: monospace;
+			color: var(--color-text-secondary);
+			flex: 1;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.edit-button {
 			padding: 0.5em 1em;
-			background: var(--color-primary);
-			color: white;
-			text-decoration: none;
+			background: var(--color-bg-light);
+			color: var(--color-text-primary);
+			border: 1px solid var(--color-border-light);
 			border-radius: 4px;
 			font-weight: 500;
-			transition: background-color 0.2s;
+			cursor: pointer;
+			transition:
+				background-color 0.2s,
+				border-color 0.2s;
 
 			&:hover {
-				background: var(--color-primary-dark);
+				background: var(--color-bg-medium);
+				border-color: var(--color-border-medium);
+			}
+		}
+
+		.artifact-edit-form {
+			display: flex;
+			flex-direction: column;
+			gap: 1em;
+			width: 100%;
+
+			.artifact-input {
+				padding: 0.5em;
+				font-size: 1em;
+				border: 1px solid var(--color-border-medium);
+				border-radius: 4px;
+				background: var(--color-bg-white);
+				color: var(--color-text-primary);
+
+				&:focus {
+					outline: none;
+					border-color: var(--color-primary);
+				}
+
+				&.artifact-url-input {
+					font-family: monospace;
+				}
+			}
+
+			.artifact-edit-actions {
+				display: flex;
+				gap: 1em;
+
+				button {
+					padding: 0.5em 1em;
+					border: none;
+					border-radius: 4px;
+					font-weight: 500;
+					cursor: pointer;
+					transition: background-color 0.2s;
+
+					&:disabled {
+						opacity: 0.5;
+						cursor: not-allowed;
+					}
+				}
+
+				.save-button {
+					background: var(--color-primary);
+					color: white;
+
+					&:hover:not(:disabled) {
+						background: var(--color-primary-dark);
+					}
+				}
+
+				.cancel-button {
+					background: var(--color-bg-medium);
+					color: var(--color-text-primary);
+
+					&:hover:not(:disabled) {
+						background: var(--color-bg-dark);
+					}
+				}
 			}
 		}
 	}

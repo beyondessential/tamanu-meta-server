@@ -42,4 +42,25 @@ impl Artifact {
 			.await
 			.map_err(AppError::from)
 	}
+
+	pub async fn update(
+		db: &mut AsyncPgConnection,
+		artifact_id: Uuid,
+		new_type: String,
+		new_platform: String,
+		new_url: String,
+	) -> Result<()> {
+		use crate::schema::artifacts::dsl::*;
+
+		diesel::update(artifacts.filter(id.eq(artifact_id)))
+			.set((
+				artifact_type.eq(new_type),
+				platform.eq(new_platform),
+				download_url.eq(new_url),
+			))
+			.execute(db)
+			.await?;
+
+		Ok(())
+	}
 }

@@ -71,6 +71,16 @@ pub async fn update_version_changelog(version: String, changelog: String) -> Res
 	ssr::update_version_changelog(version, changelog).await
 }
 
+#[server]
+pub async fn update_artifact(
+	artifact_id: Uuid,
+	artifact_type: String,
+	platform: String,
+	download_url: String,
+) -> Result<()> {
+	ssr::update_artifact(artifact_id, artifact_type, platform, download_url).await
+}
+
 #[cfg(feature = "ssr")]
 mod ssr {
 	use super::*;
@@ -277,6 +287,30 @@ mod ssr {
 		let version = VersionStr::from_str(&version_str)?;
 
 		Version::update_changelog(&mut conn, version, new_changelog).await?;
+
+		Ok(())
+	}
+
+	pub async fn update_artifact(
+		artifact_id: Uuid,
+		artifact_type: String,
+		platform: String,
+		download_url: String,
+	) -> Result<()> {
+		let state = expect_context::<AppState>();
+		let State(db): State<Db> = extract_with_state(&state).await?;
+		let mut conn = db.get().await?;
+
+		crate::fns::commons::admin_guard().await?;
+
+		database::artifacts::Artifact::update(
+			&mut conn,
+			artifact_id,
+			artifact_type,
+			platform,
+			download_url,
+		)
+		.await?;
 
 		Ok(())
 	}
