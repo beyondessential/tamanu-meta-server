@@ -339,7 +339,7 @@
 	}
 
 	.add-artifact-button {
-		margin-bottom: 1em;
+		margin-top: 1em;
 		padding: 0.75em 1.5em;
 		background: var(--color-primary);
 		color: white;
@@ -445,24 +445,6 @@
 			white-space: nowrap;
 		}
 
-		.edit-button {
-			padding: 0.5em 1em;
-			background: var(--color-bg-light);
-			color: var(--color-text-primary);
-			border: 1px solid var(--color-border-light);
-			border-radius: 4px;
-			font-weight: 500;
-			cursor: pointer;
-			transition:
-				background-color 0.2s,
-				border-color 0.2s;
-
-			&:hover {
-				background: var(--color-bg-medium);
-				border-color: var(--color-border-medium);
-			}
-		}
-
 		.artifact-edit-form {
 			display: flex;
 			flex-direction: column;
@@ -523,70 +505,52 @@
 					}
 				}
 			}
+		}
 
-			.artifact-actions {
-				display: flex;
-				gap: 0.5em;
-				align-items: center;
-			}
-
-			.delete-button {
-				padding: 0.5em 1em;
-				background: var(--color-bg-light);
-				color: var(--color-text-primary);
-				border: 1px solid var(--color-border-light);
-				border-radius: 4px;
-				font-weight: 500;
-				cursor: pointer;
-				transition:
-					background-color 0.2s,
-					border-color 0.2s;
-
-				&:hover {
-					background: var(--color-bg-medium);
-					border-color: var(--color-border-medium);
-				}
-			}
+		.artifact-actions {
+			display: flex;
+			gap: 0.5em;
+			align-items: center;
 
 			.delete-confirm {
 				display: flex;
 				gap: 0.5em;
 				align-items: center;
-			}
 
-			.delete-confirm-button {
-				padding: 0.5em 1em;
-				background: var(--color-error-bg);
-				color: var(--color-error-text);
-				border: 1px solid var(--color-error-border);
-				border-radius: 4px;
-				font-weight: 500;
-				cursor: pointer;
-				transition: background-color 0.2s;
+				.delete-confirm-button {
+					padding: 0.5em 1em;
+					background: var(--color-error-bg);
+					color: var(--color-error-text);
+					border: 1px solid var(--color-error-border);
+					border-radius: 4px;
+					font-weight: 500;
+					cursor: pointer;
+					transition: background-color 0.2s;
 
-				&:hover:not(:disabled) {
-					background: var(--color-error-border);
-					color: var(--color-bg-white);
+					&:hover:not(:disabled) {
+						background: var(--color-error-border);
+						color: var(--color-bg-white);
+					}
+
+					&:disabled {
+						opacity: 0.5;
+						cursor: not-allowed;
+					}
 				}
 
-				&:disabled {
-					opacity: 0.5;
-					cursor: not-allowed;
-				}
-			}
+				.delete-cancel-button {
+					padding: 0.5em 1em;
+					background: var(--color-bg-medium);
+					color: var(--color-text-primary);
+					border: none;
+					border-radius: 4px;
+					font-weight: 500;
+					cursor: pointer;
+					transition: background-color 0.2s;
 
-			.delete-cancel-button {
-				padding: 0.5em 1em;
-				background: var(--color-bg-medium);
-				color: var(--color-text-primary);
-				border: none;
-				border-radius: 4px;
-				font-weight: 500;
-				cursor: pointer;
-				transition: background-color 0.2s;
-
-				&:hover {
-					background: var(--color-bg-dark);
+					&:hover {
+						background: var(--color-bg-dark);
+					}
 				}
 			}
 		}
@@ -695,24 +659,6 @@
 		justify-content: space-between;
 	}
 
-	.edit-button {
-		background: var(--color-bg-light);
-		color: var(--color-text-primary);
-		border: 1px solid var(--color-border-light);
-		border-radius: 0.5em;
-		padding: 0.5em 1em;
-		font-weight: 500;
-		cursor: pointer;
-		transition:
-			background-color 0.2s,
-			border-color 0.2s;
-
-		&:hover {
-			background: var(--color-bg-medium);
-			border-color: var(--color-border-medium);
-		}
-	}
-
 	.markdown-content {
 		padding-right: 5em;
 		line-height: 1.6;
@@ -810,6 +756,34 @@
 			&:hover {
 				text-decoration: underline;
 			}
+		}
+	}
+}
+
+.edit-button {
+	padding: 0.5em 1em;
+	margin-left: 0.5em;
+	background: var(--color-bg-light);
+	color: var(--color-text-primary);
+	border: 1px solid var(--color-border-light);
+	border-radius: 4px;
+	font-weight: 500;
+	cursor: pointer;
+
+	&:hover {
+		background: var(--color-bg-medium);
+		border-color: var(--color-border-medium);
+	}
+
+	&.delete-button {
+		background: var(--color-error-bg);
+		color: var(--color-error-text);
+		border-color: var(--color-error-border);
+
+		&:hover {
+			background: var(--color-error-hover);
+			border-color: var(--color-error-dark);
+			color: var(--color-error-bg);
 		}
 	}
 }

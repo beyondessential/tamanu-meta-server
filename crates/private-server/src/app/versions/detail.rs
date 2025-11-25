@@ -1,6 +1,7 @@
 use leptos::prelude::*;
 use leptos_meta::Stylesheet;
 use leptos_router::hooks::use_params_map;
+use uuid::Uuid;
 
 use crate::fns::versions::{
 	ArtifactData, VersionDetail, create_artifact, delete_artifact, get_artifacts_by_version_id,
@@ -44,9 +45,8 @@ fn VersionDetailView() -> impl IntoView {
 							view! {
 								<div class="version-detail">
 									<VersionHeader detail=detail.clone() />
-									<VersionInfo detail=detail.clone() />
-									<StatusSection detail=detail.clone() is_admin=is_admin_result />
-									<ArtifactsSection version=version() is_admin=is_admin_result />
+									<VersionInfo detail=detail.clone() is_admin=is_admin_result />
+									<ArtifactsSection id=detail.id is_admin=is_admin_result />
 									<ChangelogSection detail=detail.clone() is_admin=is_admin_result />
 								</div>
 							}
@@ -76,10 +76,9 @@ fn VersionHeader(detail: VersionDetail) -> impl IntoView {
 }
 
 #[component]
-fn VersionInfo(detail: VersionDetail) -> impl IntoView {
+fn VersionInfo(detail: VersionDetail, is_admin: bool) -> impl IntoView {
 	view! {
 		<section class="detail-section">
-			<h2>"Information"</h2>
 			<div class="info-grid">
 				<div class="info-item">
 					<span class="info-label">"Created"</span>
@@ -99,23 +98,28 @@ fn VersionInfo(detail: VersionDetail) -> impl IntoView {
 						</div>
 					}
 				})}
+				{(!is_admin).then(|| {
+					view! {
+						<div class="info-item">
+							<span class="info-label">"Status"</span>
+							<span class="info-value">
+								{detail.status.to_string()}
+							</span>
+						</div>
+					}
+				})}
 			</div>
+			{is_admin.then(|| {
+				view! {
+					<StatusSelection detail />
+				}
+			})}
 		</section>
 	}
 }
 
 #[component]
-fn StatusSection(detail: VersionDetail, is_admin: bool) -> impl IntoView {
-	view! {
-		<section class="detail-section">
-			<h2>"Status"</h2>
-			<StatusSelection detail is_admin />
-		</section>
-	}
-}
-
-#[component]
-fn StatusSelection(detail: VersionDetail, is_admin: bool) -> impl IntoView {
+fn StatusSelection(detail: VersionDetail) -> impl IntoView {
 	let (selected_status, set_selected_status) = signal(detail.status);
 	let (is_changing, set_is_changing) = signal(false);
 	let version_str = format!("{}.{}.{}", detail.major, detail.minor, detail.patch);
@@ -145,114 +149,88 @@ fn StatusSelection(detail: VersionDetail, is_admin: bool) -> impl IntoView {
 	});
 
 	view! {
-		{if is_admin {
-			view! {
-				<form class="status-form" on:submit=on_submit>
-					<select
-						class="status-select"
-						prop:value=move || selected_status.get().to_string()
-						on:change=move |ev| {
-							let value = event_target_value(&ev);
-							let status = VersionStatus::from(value);
-							set_selected_status.set(status);
-							on_change(ev);
-						}
-					>
-						<option
-							value="draft"
-							selected=move || selected_status.get() == VersionStatus::Draft
-							disabled=!can_switch_to_draft
-						>
-							"Draft"
-						</option>
-						<option
-							value="published"
-							selected=move || selected_status.get() == VersionStatus::Published
-						>
-							"Published"
-						</option>
-						<option value="yanked" selected=move || selected_status.get() == VersionStatus::Yanked>
-							"Yanked"
-						</option>
-					</select>
-					<button
-						type="submit"
-						class="change-button"
-						disabled=move || !is_changing.get() || update_status.pending().get()
-					>
-						{move || {
-							if update_status.pending().get() {
-								"Changing..."
-							} else {
-								"Change"
-							}
-						}}
-					</button>
-				</form>
+		<form class="status-form" on:submit=on_submit>
+			<select
+				class="status-select"
+				prop:value=move || selected_status.get().to_string()
+				on:change=move |ev| {
+					let value = event_target_value(&ev);
+					let status = VersionStatus::from(value);
+					set_selected_status.set(status);
+					on_change(ev);
+				}
+			>
+				<option
+					value="draft"
+					selected=move || selected_status.get() == VersionStatus::Draft
+					disabled=!can_switch_to_draft
+				>
+					"Draft"
+				</option>
+				<option
+					value="published"
+					selected=move || selected_status.get() == VersionStatus::Published
+				>
+					"Published"
+				</option>
+				<option value="yanked" selected=move || selected_status.get() == VersionStatus::Yanked>
+					"Yanked"
+				</option>
+			</select>
+			<button
+				type="submit"
+				class="change-button"
+				disabled=move || !is_changing.get() || update_status.pending().get()
+			>
 				{move || {
-					update_status
-						.value()
-						.get()
-						.and_then(|result| {
-							result
-								.err()
-								.map(|e| {
-									view! { <div class="error-message">{format!("Error: {}", e)}</div> }
-								})
-						})
+					if update_status.pending().get() {
+						"Changing..."
+					} else {
+						"Change"
+					}
 				}}
-			}.into_any()
-		} else {
-			view! {
-				<div class="status-display">
-					<span class="status-value">{detail.status.to_string()}</span>
-				</div>
-			}.into_any()
+			</button>
+		</form>
+		{move || {
+			update_status
+				.value()
+				.get()
+				.and_then(|result| {
+					result
+						.err()
+						.map(|e| {
+							view! { <div class="error-message">{format!("Error: {}", e)}</div> }
+						})
+				})
 		}}
 	}
 }
 
 #[component]
-fn ArtifactsSection(version: String, is_admin: bool) -> impl IntoView {
-	let version_detail = Resource::new(
-		move || version.clone(),
-		|v| async move { get_version_detail(v).await },
-	);
-
+fn ArtifactsSection(id: Uuid, is_admin: bool) -> impl IntoView {
 	view! {
 		<section class="detail-section">
 			<h2>"Artifacts"</h2>
-			<Suspense fallback=|| view! { <div class="loading">"Loading version details..."</div> }>
-				{move || {
-					version_detail
-						.get()
-						.map(|data| match data {
-							Ok(detail) => {
-								view! {
-									<ArtifactsContent version_id=detail.id is_admin=is_admin />
-								}
-									.into_any()
-							}
-							Err(e) => {
-								view! {
-									<div class="error-message">{format!("Error loading version: {}", e)}</div>
-								}
-									.into_any()
-							}
-						})
-				}}
-			</Suspense>
+			<ArtifactsContent version_id=id is_admin=is_admin />
 		</section>
 	}
 }
 
 #[component]
-fn ArtifactsContent(version_id: uuid::Uuid, is_admin: bool) -> impl IntoView {
+fn ArtifactsContent(version_id: Uuid, is_admin: bool) -> impl IntoView {
 	let (show_create_form, set_show_create_form) = signal(false);
 
 	view! {
 		<div>
-			{if is_admin {
+			<ArtifactsList version_id is_admin />
+
+			{move || {
+				show_create_form.get().then(|| {
+					view! { <CreateArtifactForm version_id /> }.into_any()
+				})
+			}}
+
+			{is_admin.then(|| {
 				view! {
 					<button
 						class="add-artifact-button"
@@ -261,74 +239,54 @@ fn ArtifactsContent(version_id: uuid::Uuid, is_admin: bool) -> impl IntoView {
 						{move || if show_create_form.get() { "Cancel" } else { "+ Add Artifact" }}
 					</button>
 				}
-					.into_any()
-			} else {
-				view! { <span></span> }.into_any()
-			}}
-
-			{move || {
-				if show_create_form.get() {
-					view! { <CreateArtifactForm version_id=version_id /> }.into_any()
-				} else {
-					view! { <span></span> }.into_any()
-				}
-			}}
-
-			<ArtifactsList version_id=version_id is_admin=is_admin />
+			})}
 		</div>
 	}
 }
 
 #[component]
-fn ArtifactsList(version_id: uuid::Uuid, is_admin: bool) -> impl IntoView {
+fn ArtifactsList(version_id: Uuid, is_admin: bool) -> impl IntoView {
 	let artifacts = Resource::new(
 		move || version_id,
 		|id| async move { get_artifacts_by_version_id(id).await },
 	);
 
 	view! {
+		<div class="artifacts-list">
 		<Suspense fallback=|| view! { <div class="loading">"Loading artifacts..."</div> }>
 			{move || {
 				artifacts
 					.get()
-					.map(|data| match data {
-						Ok(artifacts) => {
-							if artifacts.is_empty() {
-								view! {
-									<div class="no-artifacts">"No artifacts found for this version"</div>
-								}
-									.into_any()
-							} else {
-								view! {
-									<div class="artifacts-list">
-										<For each=move || artifacts.clone() key=|a| a.id let:artifact>
-											<ArtifactItem artifact=artifact is_admin=is_admin />
-										</For>
-									</div>
-								}
-									.into_any()
-							}
-						}
-						Err(e) => {
+					.map(|data| {
+						let artifacts = data.unwrap_or_default();
+						if artifacts.is_empty() {
 							view! {
-								<div class="error-message">{format!("Error loading artifacts: {}", e)}</div>
+								<div class="no-artifacts">"No artifacts found for this version"</div>
+							}
+								.into_any()
+						} else {
+							view! {
+								<For each=move || artifacts.clone() key=|a| a.id let:artifact>
+									<ArtifactItem artifact=artifact is_admin=is_admin />
+								</For>
 							}
 								.into_any()
 						}
 					})
 			}}
 		</Suspense>
+		</div>
 	}
 }
 
 #[component]
-fn CreateArtifactForm(version_id: uuid::Uuid) -> impl IntoView {
+fn CreateArtifactForm(version_id: Uuid) -> impl IntoView {
 	let (artifact_type, set_artifact_type) = signal(String::new());
 	let (platform, set_platform) = signal(String::new());
 	let (download_url, set_download_url) = signal(String::new());
 
 	let create_action = Action::new(
-		move |(id, art_type, plat, url): &(uuid::Uuid, String, String, String)| {
+		move |(id, art_type, plat, url): &(Uuid, String, String, String)| {
 			let id = *id;
 			let art_type = art_type.clone();
 			let plat = plat.clone();
@@ -420,7 +378,7 @@ fn ArtifactItem(artifact: ArtifactData, is_admin: bool) -> impl IntoView {
 	let (download_url, set_download_url) = signal(artifact.download_url.clone());
 
 	let update_artifact_action = Action::new(
-		move |(id, art_type, plat, url): &(uuid::Uuid, String, String, String)| {
+		move |(id, art_type, plat, url): &(Uuid, String, String, String)| {
 			let id = *id;
 			let art_type = art_type.clone();
 			let plat = plat.clone();
@@ -429,7 +387,7 @@ fn ArtifactItem(artifact: ArtifactData, is_admin: bool) -> impl IntoView {
 		},
 	);
 
-	let delete_artifact_action = Action::new(move |id: &uuid::Uuid| {
+	let delete_artifact_action = Action::new(move |id: &Uuid| {
 		let id = *id;
 		async move { delete_artifact(id).await }
 	});
@@ -544,9 +502,6 @@ fn ArtifactItem(artifact: ArtifactData, is_admin: bool) -> impl IntoView {
 						{if is_admin {
 							view! {
 								<div class="artifact-actions">
-									<button class="edit-button" on:click=move |_| set_is_editing.set(true)>
-										"Edit"
-									</button>
 									{if show_delete_confirm.get() {
 										view! {
 											<span class="delete-confirm">
@@ -577,12 +532,15 @@ fn ArtifactItem(artifact: ArtifactData, is_admin: bool) -> impl IntoView {
 											.into_any()
 									} else {
 										view! {
+											<button class="edit-button" on:click=move |_| set_is_editing.set(true)>
+												"Edit"
+											</button>
 											<button
-												class="delete-button"
+												class="edit-button delete-button"
 												on:click=move |_| set_show_delete_confirm.set(true)
 												title="Delete artifact"
 											>
-												"🗑️"
+												"Delete"
 											</button>
 										}
 											.into_any()
@@ -622,87 +580,82 @@ fn ChangelogSection(detail: VersionDetail, is_admin: bool) -> impl IntoView {
 
 	view! {
 		<section class="detail-section">
-			<details class="changelog-details" open>
-				<summary>
-					<h2>"Changelog"</h2>
-				</summary>
-				<div class="changelog-content">
-					{move || {
-						if is_editing.get() {
-							view! {
-								<div class="changelog-editor">
-									<textarea
-										class="changelog-textarea"
-										prop:value=move || changelog_text.get()
-										on:input=move |ev| {
-											set_changelog_text.set(event_target_value(&ev));
-										}
-									></textarea>
-									<div class="changelog-actions">
-										<button
-											class="save-button"
-											on:click=move |_| {
-												update_changelog.dispatch(changelog_text.get());
-												set_is_editing.set(false);
-											}
-											disabled=move || update_changelog.pending().get()
-										>
-											{move || {
-												if update_changelog.pending().get() {
-													"Saving..."
-												} else {
-													"Save"
-												}
-											}}
-										</button>
-										<button
-											class="cancel-button"
-											on:click=move |_| {
-												set_changelog_text.set(original_changelog.get_value());
-												set_is_editing.set(false);
-											}
-											disabled=move || update_changelog.pending().get()
-										>
-											"Cancel"
-										</button>
-									</div>
+			{move || {
+				if is_editing.get() {
+					view! {
+						<header>
+							<h2>"Changelog"</h2>
+						</header>
+						<div class="changelog-editor">
+							<textarea
+								class="changelog-textarea"
+								prop:value=move || changelog_text.get()
+								on:input=move |ev| {
+									set_changelog_text.set(event_target_value(&ev));
+								}
+							></textarea>
+							<div class="changelog-actions">
+								<button
+									class="save-button"
+									on:click=move |_| {
+										update_changelog.dispatch(changelog_text.get());
+										set_is_editing.set(false);
+									}
+									disabled=move || update_changelog.pending().get()
+								>
 									{move || {
-										update_changelog
-											.value()
-											.get()
-											.and_then(|result| {
-												result
-													.err()
-													.map(|e| {
-														view! {
-															<div class="error-message">{format!("Error: {}", e)}</div>
-														}
-													})
+										if update_changelog.pending().get() {
+											"Saving..."
+										} else {
+											"Save"
+										}
+									}}
+								</button>
+								<button
+									class="cancel-button"
+									on:click=move |_| {
+										set_changelog_text.set(original_changelog.get_value());
+										set_is_editing.set(false);
+									}
+									disabled=move || update_changelog.pending().get()
+								>
+									"Cancel"
+								</button>
+							</div>
+							{move || {
+								update_changelog
+									.value()
+									.get()
+									.and_then(|result| {
+										result
+											.err()
+											.map(|e| {
+												view! {
+													<div class="error-message">{format!("Error: {}", e)}</div>
+												}
 											})
-									}}
-								</div>
-							}
-								.into_any()
-						} else {
-							view! {
-								<div class="changelog-display">
-									{if is_admin {
-										view! {
-											<button class="edit-button" on:click=move |_| set_is_editing.set(true)>
-												"Edit"
-											</button>
-										}.into_any()
-									} else {
-										view! { <span></span> }.into_any()
-									}}
-									<div class="markdown-content" inner_html=parse_markdown(&detail.changelog)></div>
-								</div>
-							}
-								.into_any()
-						}
-					}}
-				</div>
-			</details>
+									})
+							}}
+						</div>
+					}
+						.into_any()
+				} else {
+					view! {
+						<header>
+							<h2>Changelog</h2>
+							{is_admin.then(|| {
+								view! {
+									<button class="edit-button" on:click=move |_| set_is_editing.set(true)>
+										"Edit"
+									</button>
+								}
+							})}
+						</header>
+						<div class="markdown-content" inner_html=parse_markdown(&detail.changelog)></div>
+					}
+						.into_any()
+				}
+			}}
 		</section>
 	}
 }
