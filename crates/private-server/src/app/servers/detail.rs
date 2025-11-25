@@ -50,16 +50,18 @@ pub fn Detail() -> impl IntoView {
 	let edit_rank = RwSignal::new(None::<ServerRank>);
 	let edit_device_id = RwSignal::new(None::<Uuid>);
 	let edit_parent_id = RwSignal::new(None::<Uuid>);
+	let edit_listed = RwSignal::new(false);
 
 	let is_admin = is_admin_resource();
 
 	let update_action = Action::new(
-		move |(name, host, rank, device_id, parent_id): &(
+		move |(name, host, rank, device_id, parent_id, listed): &(
 			Option<String>,
 			Option<String>,
 			Option<ServerRank>,
 			Option<Uuid>,
 			Option<Uuid>,
+			Option<bool>,
 		)| {
 			let name = name.clone();
 			let host = host.clone();
@@ -67,8 +69,10 @@ pub fn Detail() -> impl IntoView {
 			let rank = *rank;
 			let device_id = *device_id;
 			let parent_id = *parent_id;
+			let listed = *listed;
 			async move {
-				let result = update_server(id, name, host, rank, device_id, parent_id).await;
+				let result =
+					update_server(id, name, host, rank, device_id, parent_id, listed).await;
 				if result.is_ok() {
 					is_editing.set(false);
 					detail_resource.refetch();
@@ -105,6 +109,7 @@ pub fn Detail() -> impl IntoView {
 										edit_rank
 										edit_device_id
 										edit_parent_id
+										edit_listed
 										update_action
 										server_id=server_id()
 									/>
@@ -131,6 +136,7 @@ fn ServerDetailView(
 	edit_rank: RwSignal<Option<ServerRank>>,
 	edit_device_id: RwSignal<Option<Uuid>>,
 	edit_parent_id: RwSignal<Option<Uuid>>,
+	edit_listed: RwSignal<bool>,
 	update_action: Action<
 		(
 			Option<String>,
@@ -138,6 +144,7 @@ fn ServerDetailView(
 			Option<ServerRank>,
 			Option<Uuid>,
 			Option<Uuid>,
+			Option<bool>,
 		),
 		Result<crate::fns::servers::ServerDetailsData, commons_errors::AppError>,
 	>,
@@ -165,6 +172,7 @@ fn ServerDetailView(
 			edit_rank.set(server_rank);
 			edit_device_id.set(device_id);
 			edit_parent_id.set(server.parent_server_id);
+			edit_listed.set(server.listed);
 		}
 	});
 
@@ -195,6 +203,7 @@ fn ServerDetailView(
 							edit_rank=edit_rank
 							edit_device_id=edit_device_id
 							edit_parent_id=edit_parent_id
+							edit_listed=edit_listed
 							update_action=update_action
 							is_editing=is_editing
 							server_kind=server_kind
@@ -313,6 +322,7 @@ fn EditForm(
 	edit_rank: RwSignal<Option<ServerRank>>,
 	edit_device_id: RwSignal<Option<Uuid>>,
 	edit_parent_id: RwSignal<Option<Uuid>>,
+	edit_listed: RwSignal<bool>,
 	update_action: Action<
 		(
 			Option<String>,
@@ -320,6 +330,7 @@ fn EditForm(
 			Option<ServerRank>,
 			Option<Uuid>,
 			Option<Uuid>,
+			Option<bool>,
 		),
 		Result<crate::fns::servers::ServerDetailsData, commons_errors::AppError>,
 	>,
@@ -333,12 +344,14 @@ fn EditForm(
 				ev.prevent_default();
 				let device_id = edit_device_id.get();
 				let parent_id = edit_parent_id.get();
+				let listed = edit_listed.get();
 				update_action.dispatch((
 					Some(edit_name.get()),
 					Some(edit_host.get()),
 					edit_rank.get(),
 					device_id,
 					parent_id,
+					Some(listed),
 				));
 			}>
 				<div class="form-group">
@@ -406,7 +419,20 @@ fn EditForm(
 						</div>
 					}.into_any()
 				} else {
-					().into_any()
+					view! {
+						<div class="form-group">
+							<label for="edit-listed">
+								<input
+									type="checkbox"
+									id="edit-listed"
+									prop:checked=move || edit_listed.get()
+									on:change=move |ev| edit_listed.set(event_target_checked(&ev))
+								/>
+								" Listed in Tamanu mobile"
+							</label>
+							<small class="help-text">"When checked, this server will appear in the public Tamanu mobile server list"</small>
+						</div>
+					}.into_any()
 				}}
 
 				{move || {

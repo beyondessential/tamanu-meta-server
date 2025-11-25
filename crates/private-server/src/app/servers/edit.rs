@@ -53,7 +53,7 @@ pub fn Edit() -> impl IntoView {
 			let parent_id = *parent_id;
 			async move {
 				let result =
-					update_server(id.clone(), name, host, rank, device_id, parent_id).await;
+					update_server(id.clone(), name, host, rank, device_id, parent_id, None).await;
 				if result.is_ok() {
 					leptos_router::hooks::use_navigate()(
 						&format!("/servers/{}", id),

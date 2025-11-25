@@ -18,6 +18,7 @@ pub struct ServerDetailsData {
 	pub host: String,
 	pub parent_server_id: Option<Uuid>,
 	pub parent_server_name: Option<String>,
+	pub listed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -94,8 +95,18 @@ pub async fn update_server(
 	rank: Option<ServerRank>,
 	device_id: Option<Uuid>,
 	parent_server_id: Option<Uuid>,
+	listed: Option<bool>,
 ) -> Result<ServerDetailsData> {
-	ssr::update_server(server_id, name, host, rank, device_id, parent_server_id).await
+	ssr::update_server(
+		server_id,
+		name,
+		host,
+		rank,
+		device_id,
+		parent_server_id,
+		listed,
+	)
+	.await
 }
 
 #[server]
@@ -261,6 +272,7 @@ mod ssr {
 			host: server.host.0.to_string(),
 			parent_server_id: server.parent_server_id,
 			parent_server_name,
+			listed: server.listed,
 		};
 
 		let status = Status::latest_for_server(&mut conn, server.id).await?;
@@ -433,6 +445,7 @@ mod ssr {
 		rank: Option<ServerRank>,
 		device_id: Option<Uuid>,
 		parent_server_id: Option<Uuid>,
+		listed: Option<bool>,
 	) -> Result<super::ServerDetailsData> {
 		let db = crate::fns::commons::admin_guard().await?;
 		let mut conn = db.get().await?;
@@ -453,6 +466,7 @@ mod ssr {
 			host: parsed_host,
 			device_id: Some(device_id),
 			parent_server_id: Some(parent_server_id),
+			listed,
 		};
 
 		let server = Server::update(&mut conn, server_id, update_data).await?;
@@ -472,6 +486,7 @@ mod ssr {
 			host: server.host.0.to_string(),
 			parent_server_id: server.parent_server_id,
 			parent_server_name,
+			listed: server.listed,
 		})
 	}
 
@@ -516,6 +531,7 @@ mod ssr {
 			host: None,
 			device_id: None,
 			parent_server_id: Some(Some(parent_id)),
+			listed: None,
 		};
 
 		let server = Server::update(&mut conn, id, update_data).await?;
@@ -535,6 +551,7 @@ mod ssr {
 			host: server.host.0.to_string(),
 			parent_server_id: server.parent_server_id,
 			parent_server_name,
+			listed: server.listed,
 		})
 	}
 

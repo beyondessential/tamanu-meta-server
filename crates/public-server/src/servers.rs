@@ -39,7 +39,7 @@ pub async fn list(State(db): State<Db>) -> Result<Json<Vec<PublicServer>>> {
 			.await?
 			.into_iter()
 			.filter_map(|s| {
-				(s.kind == ServerKind::Central)
+				(s.kind == ServerKind::Central && s.listed)
 					.then(|| {
 						s.name.map(|name| PublicServer {
 							name,

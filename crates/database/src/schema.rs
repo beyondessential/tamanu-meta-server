@@ -62,6 +62,7 @@ diesel::table! {
 		device_id -> Nullable<Uuid>,
 		kind -> Text,
 		parent_server_id -> Nullable<Uuid>,
+		listed -> Bool,
 	}
 }
 

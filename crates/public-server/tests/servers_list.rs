@@ -63,7 +63,7 @@ async fn get_empty_list() {
 async fn get_with_central_server() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		conn.batch_execute(
-			"INSERT INTO servers (name, host, kind, rank) VALUES ('Test Server', 'https://test.com', 'central', 'production')",
+			"INSERT INTO servers (name, host, kind, rank, listed) VALUES ('Test Server', 'https://test.com', 'central', 'production', true)",
 		)
 		.await
 		.unwrap();
@@ -85,7 +85,7 @@ async fn get_with_central_server() {
 async fn get_with_unnamed_server() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		conn.batch_execute(
-			"INSERT INTO servers (host, kind, rank) VALUES ('https://test.com', 'central', 'production')",
+			"INSERT INTO servers (host, kind, rank, listed) VALUES ('https://test.com', 'central', 'production', true)",
 		)
 		.await
 		.unwrap();
@@ -101,9 +101,9 @@ async fn get_with_unnamed_server() {
 async fn get_filters_facility_servers() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		conn.batch_execute(
-			"INSERT INTO servers (name, host, kind, rank) VALUES
-			('Central Server', 'https://central.com', 'central', 'production'),
-			('Facility Server', 'https://facility.com', 'facility', 'production')",
+			"INSERT INTO servers (name, host, kind, rank, listed) VALUES
+			('Central Server', 'https://central.com', 'central', 'production', true),
+			('Facility Server', 'https://facility.com', 'facility', 'production', false)",
 		)
 		.await
 		.unwrap();
@@ -123,9 +123,9 @@ async fn get_filters_facility_servers() {
 async fn get_multiple_central_servers() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		conn.batch_execute(
-			"INSERT INTO servers (name, host, kind, rank) VALUES
-			('Server A', 'https://a.com', 'central', 'production'),
-			('Server B', 'https://b.com', 'central', 'staging')",
+			"INSERT INTO servers (name, host, kind, rank, listed) VALUES
+			('Server A', 'https://a.com', 'central', 'production', true),
+			('Server B', 'https://b.com', 'central', 'staging', true)",
 		)
 		.await
 		.unwrap();
@@ -617,16 +617,7 @@ async fn integration_full_crud_cycle() {
 				.await;
 			response.assert_status_ok();
 
-			// Get the created server from the list
-			let response = public.get("/servers").await;
-			response.assert_status_ok();
-			let servers: Vec<PublicServer> = response.json();
-			let _created_server = servers
-				.iter()
-				.find(|s| s.name == "CRUD Test Server")
-				.unwrap();
-
-			// Get server ID from database for editing/deletion
+			// Get server ID from database - new servers aren't listed by default
 			let server_rows: Vec<ServerRow> = sql_query(
 				"SELECT id, name, host, kind, rank FROM servers WHERE name = 'CRUD Test Server'",
 			)
@@ -634,6 +625,20 @@ async fn integration_full_crud_cycle() {
 			.await
 			.unwrap();
 			let server_id = server_rows[0].id;
+
+			sql_query("UPDATE servers SET listed = true WHERE id = $1")
+				.bind::<diesel::sql_types::Uuid, _>(server_id)
+				.execute(&mut conn)
+				.await
+				.unwrap();
+
+			let response = public.get("/servers").await;
+			response.assert_status_ok();
+			let servers: Vec<PublicServer> = response.json();
+			let _created_server = servers
+				.iter()
+				.find(|s| s.name == "CRUD Test Server")
+				.unwrap();
 
 			// Update the server
 			let partial_server = PartialServer {

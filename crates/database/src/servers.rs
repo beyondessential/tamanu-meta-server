@@ -26,6 +26,8 @@ pub struct Server {
 
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub parent_server_id: Option<Uuid>,
+
+	pub listed: bool,
 }
 
 impl Server {
@@ -108,6 +110,7 @@ impl Server {
 		let mut query_builder = ordered_servers
 			.select(Self::as_select())
 			.filter(kind.eq(ServerKind::Central.to_string()))
+			.filter(listed.eq(true))
 			.into_boxed();
 
 		if let Ok(query_uuid) = query.parse::<Uuid>() {
@@ -155,6 +158,7 @@ fn test_server_serialization() {
 		host: UrlField("https://example.com/".parse().unwrap()),
 		device_id: Some(Uuid::nil()),
 		parent_server_id: None,
+		listed: true,
 	};
 
 	let serialized = serde_json::to_string_pretty(&server).unwrap();
@@ -166,7 +170,8 @@ fn test_server_serialization() {
   "host": "https://example.com",
   "kind": "central",
   "rank": "production",
-  "device_id": "00000000-0000-0000-0000-000000000000"
+  "device_id": "00000000-0000-0000-0000-000000000000",
+  "listed": true
 }"#
 	);
 }
@@ -190,6 +195,7 @@ impl From<NewServer> for Server {
 			host: server.host,
 			device_id: server.device_id,
 			parent_server_id: None,
+			listed: false,
 		}
 	}
 }
@@ -207,4 +213,5 @@ pub struct PartialServer {
 	pub host: Option<UrlField>,
 	pub device_id: Option<Option<Uuid>>,
 	pub parent_server_id: Option<Option<Uuid>>,
+	pub listed: Option<bool>,
 }
