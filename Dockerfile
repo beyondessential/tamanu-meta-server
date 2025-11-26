@@ -52,7 +52,7 @@ FROM --platform=$BUILDPLATFORM cacher AS builder-web
 RUN rustup target add wasm32-unknown-unknown
 RUN cargo binstall -y cargo-leptos
 COPY static ./static
-RUN env LEPTOS_WASM_BINDGEN_VERSION=$(cargo metadata --format-version 1 --locked | jq -r 'first(.packages[] | select(.name=="wasm-bindgen") | .version)') \
+RUN env LEPTOS_WASM_OPT_VERSION=$(cargo metadata --format-version 1 --locked | jq -r 'first(.packages[] | select(.name=="wasm-bindgen") | .version)') \
 	cargo leptos build --release --frontend-only --precompress
 
 # Runtime image

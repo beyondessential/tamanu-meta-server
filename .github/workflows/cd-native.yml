@@ -139,24 +139,19 @@ jobs:
           name: frontend
           path: .github/build-context/frontend/
 
+      - name: Debug build context structure
+        run: |
+          echo "=== Build context structure ==="
+          ls -laR .github/build-context/
+          echo "=== AMD64 binaries ==="
+          ls -lh .github/build-context/amd64/
+          echo "=== ARM64 binaries ==="
+          ls -lh .github/build-context/arm64/
+          echo "=== Frontend assets ==="
+          ls -lh .github/build-context/frontend/
+
       - name: Setup buildkit
         uses: docker/setup-buildx-action@v3
-
-      - uses: docker/metadata-action@v5
-        id: meta
-        with:
-          images: ghcr.io/beyondessential/tamanu-meta
-          tags: |
-            type=semver,value=v${{ steps.version.outputs.version }},pattern={{version}}
-            type=semver,value=v${{ steps.version.outputs.version }},pattern={{major}}.{{minor}}
-            type=semver,value=v${{ steps.version.outputs.version }},pattern={{major}}
-          labels: |
-            org.opencontainers.image.vendor=BES
-            org.opencontainers.image.title=Tamanu Meta Server
-            org.opencontainers.image.url=https://www.bes.au/products/tamanu/
-            org.opencontainers.image.source=https://github.com/beyondessential/tamanu-meta-server/
-            org.opencontainers.image.version=${{ steps.version.outputs.version }}
-            org.opencontainers.image.licenses=GPL-3.0-or-later
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -164,6 +159,5 @@ jobs:
           context: .github/build-context
           file: .github/Dockerfile.native
           platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
-          labels: ${{ steps.meta.outputs.labels }}
-          tags: ${{ steps.meta.outputs.tags }}
+          push: true
+          tags: ghcr.io/beyondessential/tamanu-meta:experimental

@@ -5,9 +5,11 @@ ARG TARGETPLATFORM
 # Create user and group
 RUN addgroup -g 1000 tamanu && adduser -D -u 1000 -G tamanu tamanu
 
-# Copy binaries - the build context will be structured with amd64/ and arm64/ directories
-# We use a shell to select the right directory based on TARGETPLATFORM
-COPY --chmod=0755 amd64/ arm64/ /tmp/bins/
+# Copy all binaries from both architectures
+COPY --chmod=0755 amd64/ /tmp/bins/amd64/
+COPY --chmod=0755 arm64/ /tmp/bins/arm64/
+
+# Select and copy the correct binaries based on target platform
 RUN if [ "$TARGETPLATFORM" = "linux/amd64" ]; then \
         cp /tmp/bins/amd64/* /usr/bin/; \
     elif [ "$TARGETPLATFORM" = "linux/arm64" ]; then \

@@ -105,14 +105,14 @@ _bindgen-version:
 build-frontend: _bindgen-version
 	#!/usr/bin/env bash
 	set -x
-	export LEPTOS_WASM_BINDGEN_VERSION=$(cat target/wasm-bindgen-version)
+	export LEPTOS_WASM_OPT_VERSION=$(cat target/wasm-bindgen-version)
 	cargo leptos build --frontend-only
 
 # Build the frontend for production (with compression)
 build-frontend-release: _bindgen-version
 	#!/usr/bin/env bash
 	set -x
-	export LEPTOS_WASM_BINDGEN_VERSION=$(cat target/wasm-bindgen-version)
+	export LEPTOS_WASM_OPT_VERSION=$(cat target/wasm-bindgen-version)
 	cargo leptos build --release --frontend-only --precompress
 
 # Install development dependencies

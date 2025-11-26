@@ -83,7 +83,7 @@ impl RcEnvironment {
 			return None;
 		}
 
-		// Probe both portal and patient URLs for patient link
+		// Probe both portal and patient URLs in parallel for patient link
 		let portal_url = format!(
 			"https://portal.release-{}-{}.cd.tamanu.app/",
 			self.major, self.minor
@@ -93,9 +93,12 @@ impl RcEnvironment {
 			self.major, self.minor
 		);
 
-		if Self::probe_url(&portal_url).await {
+		let (portal_available, patient_available) =
+			futures::join!(Self::probe_url(&portal_url), Self::probe_url(&patient_url));
+
+		if portal_available {
 			self.patient = Some(portal_url);
-		} else if Self::probe_url(&patient_url).await {
+		} else if patient_available {
 			self.patient = Some(patient_url);
 		} else {
 			self.patient = None;
