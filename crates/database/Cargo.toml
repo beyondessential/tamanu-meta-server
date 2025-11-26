@@ -24,7 +24,7 @@ diesel = { workspace = true, features = [
 	"postgres_backend",
 	"i-implement-a-third-party-backend-and-opt-into-breaking-changes",
 ] }
-diesel-async = { workspace = true, features = ["mobc", "postgres"] }
+diesel-async = { workspace = true, features = ["mobc", "postgres", "migrations", "async-connection-wrapper"] }
 diesel-derive-enum = { version = "2.1.0", features = ["postgres"] }
 diesel_migrations = "2.3.0"
 folktime = "0.2.1"

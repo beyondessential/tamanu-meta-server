@@ -1,7 +1,7 @@
-use diesel_async::{AsyncConnection as _, AsyncPgConnection, SimpleAsyncConnection as _};
-use diesel_migrations::{
-	EmbeddedMigrations, HarnessWithOutput, MigrationHarness, embed_migrations,
+use diesel_async::{
+	AsyncConnection as _, AsyncMigrationHarness, AsyncPgConnection, SimpleAsyncConnection as _,
 };
+use diesel_migrations::{EmbeddedMigrations, MigrationHarness, embed_migrations};
 
 use miette::{IntoDiagnostic, WrapErr, miette};
 use tokio::runtime::{Handle, RuntimeFlavor};
@@ -46,9 +46,9 @@ impl TestDb {
 
 		this.prepare().await?;
 
-		let mut migrator = database::migrator::UnasyncMigrator::new(this.connect(false).await?);
-		let mut harness = HarnessWithOutput::write_to_stdout(&mut migrator);
-		harness
+		let conn = this.connect(false).await?;
+		let mut migrator = AsyncMigrationHarness::new(conn);
+		migrator
 			.run_pending_migrations(MIGRATIONS)
 			.map_err(|err| miette!("{err}"))
 			.wrap_err("failed: run migrations")?;

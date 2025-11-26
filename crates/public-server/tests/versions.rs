@@ -1,10 +1,10 @@
 use axum::http::StatusCode;
 use commons_types::version::VersionStatus;
 use diesel_async::SimpleAsyncConnection;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct Version {
 	pub id: Uuid,
 	pub major: i32,
@@ -15,7 +15,7 @@ pub struct Version {
 	pub device_id: Option<Uuid>,
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct Artifact {
 	pub id: Uuid,
 	pub version_id: Uuid,

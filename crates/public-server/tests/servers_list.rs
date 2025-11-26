@@ -4,7 +4,7 @@ use http::StatusCode;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct PublicServer {
 	pub name: String,
 	pub host: String,

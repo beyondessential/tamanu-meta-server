@@ -1,10 +1,8 @@
 use clap::Parser;
-use database::migrator::UnasyncMigrator;
-use diesel_migrations::{
-	EmbeddedMigrations, HarnessWithOutput, MigrationHarness as _, embed_migrations,
-};
+use diesel_async::{AsyncConnection, AsyncMigrationHarness, AsyncPgConnection};
+use diesel_migrations::{EmbeddedMigrations, MigrationHarness as _, embed_migrations};
 use lloggs::{LoggingArgs, PreArgs};
-use miette::{WrapErr, bail, miette};
+use miette::{IntoDiagnostic, WrapErr, bail, miette};
 
 #[derive(Debug, Parser)]
 #[command(flatten_help = true)]
@@ -54,8 +52,13 @@ async fn main() -> miette::Result<()> {
 		})?);
 	}
 
-	let mut connection = UnasyncMigrator::connect().await?;
-	let mut migrator = HarnessWithOutput::write_to_stdout(&mut connection);
+	let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL required");
+	let connection = AsyncPgConnection::establish(&database_url)
+		.await
+		.into_diagnostic()
+		.wrap_err("failed to establish database connection")?;
+
+	let mut migrator = AsyncMigrationHarness::new(connection);
 
 	match args.mode.unwrap_or_default() {
 		Mode::Run => {

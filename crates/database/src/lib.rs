@@ -6,7 +6,6 @@ use diesel_async::{
 pub mod admins;
 pub mod artifacts;
 pub mod devices;
-pub mod migrator;
 pub mod pg_duration;
 pub mod schema;
 pub mod servers;
