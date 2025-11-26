@@ -33,7 +33,7 @@ futures.workspace = true
 lloggs = { workspace = true, optional = true, features = ["miette-7"] }
 miette = { workspace = true, optional = true, features = ["fancy"] }
 node-semver.workspace = true
-pulldown-cmark = { version = "0.13", optional = true, features = ["html"] }
+pulldown-cmark = { workspace = true, optional = true }
 qrcode = { version = "0.14", optional = true, features = ["svg"] }
 serde = { workspace = true, features = ["derive"] }
 tera = { workspace = true, optional = true }
@@ -50,7 +50,7 @@ axum-client-ip = { version = "1.1.3", optional = true }
 subtle = { version = "2.6", optional = true }
 
 [dev-dependencies]
-axum-test = "17.3.0"
+axum-test.workspace = true
 commons-tests = { path = "../commons-tests" }
 http.workspace = true
 percent-encoding = "2.3.2"
