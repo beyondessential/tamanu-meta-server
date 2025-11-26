@@ -9,7 +9,7 @@ CREATE TABLE device_connections_regular (
     created_at timestamptz NOT NULL DEFAULT now(),
     device_id uuid NOT NULL,
     ip inet NOT NULL,
-    user_agent text NOT NULL
+    user_agent text
 );
 
 -- Step 2: Copy all data from partitioned table to regular table

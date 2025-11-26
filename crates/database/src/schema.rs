@@ -26,7 +26,7 @@ diesel::table! {
 		created_at -> Timestamptz,
 		device_id -> Uuid,
 		ip -> Inet,
-		user_agent -> Text,
+		user_agent -> Nullable<Text>,
 	}
 }
 
