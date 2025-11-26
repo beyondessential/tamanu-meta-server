@@ -46,7 +46,7 @@ COPY Cargo.toml Cargo.lock ./
 FROM --platform=$BUILDPLATFORM cacher AS builder-server
 ENV RUSTFLAGS="-C target-feature=+crt-static"
 RUN cargo build --locked --target $(cat /.target) --release --bins
-RUN cp target/$(cat /.target)/release/{{public,private}-server,migrate,ownstatus,pingtask,prune_untrusted_devices} /built/
+RUN cp target/$(cat /.target)/release/{{public,private}-server,migrate,ownstatus,pingtask} /built/
 
 FROM --platform=$BUILDPLATFORM cacher AS builder-web
 RUN rustup target add wasm32-unknown-unknown
@@ -63,7 +63,6 @@ COPY --from=builder-server --chmod=0755 /built/public-server /usr/bin/public-ser
 COPY --from=builder-server --chmod=0755 /built/migrate /usr/bin/migrate
 COPY --from=builder-server --chmod=0755 /built/ownstatus /usr/bin/ownstatus
 COPY --from=builder-server --chmod=0755 /built/pingtask /usr/bin/pingtask
-COPY --from=builder-server --chmod=0755 /built/prune_untrusted_devices /usr/bin/prune_untrusted_devices
 COPY --from=builder-server --chmod=0755 /built/private-server /usr/bin/private-server
 COPY --from=builder-web --chown=tamanu:tamanu /app/target/site /home/tamanu/target/site
 COPY --chown=tamanu:tamanu static /home/tamanu/static
