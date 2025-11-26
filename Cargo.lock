@@ -3245,6 +3245,7 @@ dependencies = [
  "percent-encoding",
  "pulldown-cmark",
  "qrcode",
+ "reqwest",
  "serde",
  "serde_json",
  "subtle",

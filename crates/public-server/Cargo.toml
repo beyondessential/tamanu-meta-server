@@ -35,6 +35,7 @@ miette = { workspace = true, optional = true, features = ["fancy"] }
 node-semver.workspace = true
 pulldown-cmark = { workspace = true, optional = true }
 qrcode = { version = "0.14", optional = true, features = ["svg"] }
+reqwest = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"] }
 tera = { workspace = true, optional = true }
 tokio.workspace = true
@@ -68,6 +69,7 @@ cli = [
 ui = [
 	"dep:pulldown-cmark",
 	"dep:qrcode",
+	"dep:reqwest",
 	"dep:subtle",
 	"dep:tera",
 	"dep:timesimp",

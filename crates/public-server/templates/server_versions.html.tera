@@ -67,6 +67,50 @@
 			grid-template-columns: auto 1fr auto;
 		}
 
+		.rc-grid {
+			display: grid;
+			grid-template-columns: repeat(auto-fit, minmax(min(12em, 95vw), 1fr));
+			gap: 1em;
+			margin-bottom: 2em;
+		}
+
+		.rc-column {
+			display: flex;
+			flex-direction: column;
+			gap: 0.5em;
+		}
+
+		.rc-column-header {
+			font-size: 1.3em;
+			font-weight: 500;
+			color: var(--color-text-primary);
+			text-align: center;
+			margin-bottom: 0.5em;
+		}
+
+		.rc-card {
+			background: var(--color-bg-white);
+			border: 1px solid var(--color-border-light);
+			border-radius: 6px;
+			padding: 0.75em 1em;
+			text-decoration: none;
+			display: block;
+			color: var(--color-text-primary);
+			transition: all 0.2s;
+			text-align: center;
+			min-height: 3em;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+		}
+
+		.rc-card:hover {
+			background: var(--color-bg-light);
+			border-color: var(--color-primary);
+			transform: translateY(-2px);
+			box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+		}
+
 		.host-link {
 			grid-area: host;
 			font-size: 1em;
@@ -225,6 +269,29 @@
 				<span class="legend-label">10+ versions behind</span>
 			</span>
 		</div>
+
+		{% if rc_environments %}
+		<div class="page-header" style="margin-top: 3em;">
+			<h1>RC</h1>
+		</div>
+		<div class="rc-grid">
+			{% for env in rc_environments %}
+			<div class="rc-column">
+				<div class="rc-column-header">{{ env.major }}.{{ env.minor }}</div>
+				<a href="{{ env.central }}" class="rc-card" target="_blank" title="{{ env.central }}">Central</a>
+				{% if env.patient %}
+				<a href="{{ env.patient }}" class="rc-card" target="_blank" title="{{ env.patient }}">Patient</a>
+				{% endif %}
+				{% if env.facility_1 %}
+				<a href="{{ env.facility_1 }}" class="rc-card" target="_blank" title="{{ env.facility_1 }}">Facility 1</a>
+				{% endif %}
+				{% if env.facility_2 %}
+				<a href="{{ env.facility_2 }}" class="rc-card" target="_blank" title="{{ env.facility_2 }}">Facility 2</a>
+				{% endif %}
+			</div>
+			{% endfor %}
+		</div>
+		{% endif %}
 	</div>
 </body>
 </html>

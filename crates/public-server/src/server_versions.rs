@@ -16,6 +16,7 @@ use commons_types::{
 use database::{statuses::Status, versions::Version};
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
+use futures::future::join_all;
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use tera::Context;
@@ -36,6 +37,84 @@ struct ServerVersionInfo {
 	version: Option<VersionStr>,
 	version_distance: Option<u64>,
 	up: ShortStatus,
+}
+
+#[derive(Debug, Serialize)]
+struct RcEnvironment {
+	major: i32,
+	minor: i32,
+	central: String,
+	patient: Option<String>,
+	facility_1: Option<String>,
+	facility_2: Option<String>,
+}
+
+impl RcEnvironment {
+	fn new(major: i32, minor: i32) -> Self {
+		Self {
+			major,
+			minor,
+			central: format!("https://central.release-{major}-{minor}.cd.tamanu.app/"),
+			patient: None, // Will be set during probing
+			facility_1: Some(format!(
+				"https://facility-1.release-{major}-{minor}.cd.tamanu.app/"
+			)),
+			facility_2: Some(format!(
+				"https://facility-2.release-{major}-{minor}.cd.tamanu.app/"
+			)),
+		}
+	}
+
+	async fn probe_url(url: &str) -> bool {
+		let client = reqwest::ClientBuilder::new()
+			.timeout(std::time::Duration::from_secs(5))
+			.build()
+			.unwrap();
+
+		match client.head(url).send().await {
+			Ok(response) => response.status().is_success(),
+			Err(_) => false,
+		}
+	}
+
+	async fn probe_and_update(mut self) -> Option<Self> {
+		// If central doesn't resolve, omit the entire RC
+		if !Self::probe_url(&self.central).await {
+			return None;
+		}
+
+		// Probe both portal and patient URLs for patient link
+		let portal_url = format!(
+			"https://portal.release-{}-{}.cd.tamanu.app/",
+			self.major, self.minor
+		);
+		let patient_url = format!(
+			"https://patient.release-{}-{}.cd.tamanu.app/",
+			self.major, self.minor
+		);
+
+		if Self::probe_url(&portal_url).await {
+			self.patient = Some(portal_url);
+		} else if Self::probe_url(&patient_url).await {
+			self.patient = Some(patient_url);
+		} else {
+			self.patient = None;
+		}
+
+		if let Some(ref url) = self.facility_1 {
+			if !Self::probe_url(url).await {
+				self.facility_1 = None;
+			}
+		}
+
+		if let Some(ref url) = self.facility_2 {
+			if !Self::probe_url(url).await {
+				self.facility_2 = None;
+			}
+		}
+
+		Some(self)
+	}
 }
 
 pub fn routes() -> Router<AppState> {
@@ -124,9 +203,27 @@ async fn server_versions_page(
 		});
 	}
 
+	let rc_environments = if let Some(ref latest) = latest_version {
+		let current_major = latest.major as i32;
+		let current_minor = latest.minor as i32;
+		let candidates = vec![
+			RcEnvironment::new(current_major, current_minor),
+			RcEnvironment::new(current_major, current_minor + 1),
+			RcEnvironment::new(current_major, current_minor + 2),
+		];
+
+		let futures = candidates.into_iter().map(|env| env.probe_and_update());
+		let results = join_all(futures).await;
+
+		results.into_iter().filter_map(|env| env).collect()
+	} else {
+		Vec::new()
+	};
+
 	let mut context = Context::new();
 	context.insert("latest_version", &latest_version);
 	context.insert("servers", &server_infos);
+	context.insert("rc_environments", &rc_environments);
 
 	let html = tera.render("server_versions", &context)?;
 	Ok(Html(html).into_response())

@@ -91,3 +91,26 @@ async fn server_versions_constant_time_comparison() {
 	})
 	.await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn server_versions_rc_section() {
+	server::run(|mut conn, public, _private| async move {
+		// Create a published version to establish the current minor
+		conn.batch_execute(
+			"INSERT INTO versions (id, major, minor, patch, status, changelog) VALUES
+			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 2, 15, 0, 'published', 'Version 2.15.0')",
+		)
+		.await
+		.unwrap();
+
+		// Request with correct secret
+		let response = public.get("/server-versions?s=test-secret").await;
+		assert_eq!(response.status_code(), StatusCode::OK);
+		let body = response.text();
+
+		// RC section should not be shown since the environments are not actually available
+		// (the probe will fail in the test environment)
+		assert!(!body.contains("<h1>RC</h1>"));
+	})
+	.await;
+}
