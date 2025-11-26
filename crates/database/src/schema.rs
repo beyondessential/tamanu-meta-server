@@ -67,7 +67,7 @@ diesel::table! {
 }
 
 diesel::table! {
-	statuses (id) {
+	statuses (id, created_at) {
 		id -> Uuid,
 		created_at -> Timestamptz,
 		server_id -> Uuid,
