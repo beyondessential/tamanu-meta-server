@@ -62,7 +62,7 @@ jobs:
           mkdir -p artifacts/${{ matrix.arch }}
           cp target/${{ matrix.target }}/release/{public-server,private-server,migrate,ownstatus,pingtask} artifacts/${{ matrix.arch }}/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: binaries-${{ matrix.arch }}
           path: artifacts/${{ matrix.arch }}/
@@ -96,7 +96,7 @@ jobs:
       - name: Build frontend
         run: just build-frontend-release
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: frontend
           path: |
