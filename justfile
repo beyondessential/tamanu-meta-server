@@ -88,12 +88,32 @@ identity:
 clean:
     cargo clean
 
+# Build server binaries for a specific target (release mode)
+build-servers-release target:
+	cargo build --locked --target {{target}} --release --bins
+
+# Detect and cache wasm-bindgen version
+_bindgen-version:
+	#!/usr/bin/env bash
+	set -euo pipefail
+	mkdir -p target
+	if [ ! -f target/wasm-bindgen-version ]; then
+		cargo metadata --format-version 1 --locked | jq -r 'first(.packages[] | select(.name=="wasm-bindgen") | .version)' > target/wasm-bindgen-version
+	fi
+
 # Build the frontend only (private server)
-build-frontend:
+build-frontend: _bindgen-version
 	#!/usr/bin/env bash
 	set -x
-	export LEPTOS_WASM_BINDGEN_VERSION=$(cargo metadata --format-version 1 --locked | jq -r 'first(.packages[] | select(.name=="wasm-bindgen") | .version)')
+	export LEPTOS_WASM_BINDGEN_VERSION=$(cat target/wasm-bindgen-version)
 	cargo leptos build --frontend-only
+
+# Build the frontend for production (with compression)
+build-frontend-release: _bindgen-version
+	#!/usr/bin/env bash
+	set -x
+	export LEPTOS_WASM_BINDGEN_VERSION=$(cat target/wasm-bindgen-version)
+	cargo leptos build --release --frontend-only --precompress
 
 # Install development dependencies
 install-deps:
