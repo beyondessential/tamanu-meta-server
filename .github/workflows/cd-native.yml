@@ -1,0 +1,169 @@
+name: CD Native
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write # to update the release
+  packages: write # to pull and push images
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
+  LEPTOS_OUTPUT_NAME: private-server
+  SERVER_FN_MOD_PATH: "true"
+  DISABLE_SERVER_FN_HASH: "true"
+
+jobs:
+  build-binaries:
+    name: Build ${{ matrix.arch }} binaries
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+    steps:
+      - name: Free up space
+        run: sudo rm -rf /opt/hostedtoolcache /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup || true
+      - uses: actions/checkout@v6
+
+      - name: Configure toolchain
+        run: |
+          rustup toolchain install --profile minimal --no-self-update stable
+          rustup default stable
+          rustup target add ${{ matrix.target }}
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.arch }}-release
+
+      - name: Build binaries
+        run: just build-servers-release ${{ matrix.target }}
+        env:
+          RUSTFLAGS: "-C target-feature=+crt-static"
+
+      - name: Prepare artifacts
+        run: |
+          mkdir -p artifacts/${{ matrix.arch }}
+          cp target/${{ matrix.target }}/release/{public-server,private-server,migrate,ownstatus,pingtask} artifacts/${{ matrix.arch }}/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.arch }}
+          path: artifacts/${{ matrix.arch }}/
+          retention-days: 1
+
+  build-frontend:
+    name: Build Leptos frontend
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Free up space
+        run: sudo rm -rf /opt/hostedtoolcache /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup || true
+      - uses: actions/checkout@v6
+
+      - name: Configure toolchain
+        run: |
+          rustup toolchain install --profile minimal --no-self-update stable
+          rustup default stable
+          rustup target add wasm32-unknown-unknown
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just,cargo-leptos
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: frontend-release
+
+      - name: Build frontend
+        run: just build-frontend-release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend
+          path: |
+            target/site/
+            static/
+          retention-days: 1
+
+  build-images:
+    name: Build container images
+    runs-on: ubuntu-24.04
+    needs: [build-binaries, build-frontend]
+    steps:
+      - name: Free up space
+        run: sudo rm -rf /opt/hostedtoolcache /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup || true
+
+      - name: Login to ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u $ --password-stdin
+
+      - uses: actions/checkout@v6
+
+      - name: Extract version
+        id: version
+        run: echo "version=$(cargo pkgid -p public-server | cut -d# -f2)" >> "$GITHUB_OUTPUT"
+
+      - name: Download AMD64 binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: binaries-amd64
+          path: .github/build-context/amd64/
+
+      - name: Download ARM64 binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: binaries-arm64
+          path: .github/build-context/arm64/
+
+      - name: Download frontend
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend
+          path: .github/build-context/frontend/
+
+      - name: Setup buildkit
+        uses: docker/setup-buildx-action@v3
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/beyondessential/tamanu-meta
+          tags: |
+            type=semver,value=v${{ steps.version.outputs.version }},pattern={{version}}
+            type=semver,value=v${{ steps.version.outputs.version }},pattern={{major}}.{{minor}}
+            type=semver,value=v${{ steps.version.outputs.version }},pattern={{major}}
+          labels: |
+            org.opencontainers.image.vendor=BES
+            org.opencontainers.image.title=Tamanu Meta Server
+            org.opencontainers.image.url=https://www.bes.au/products/tamanu/
+            org.opencontainers.image.source=https://github.com/beyondessential/tamanu-meta-server/
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.licenses=GPL-3.0-or-later
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .github/build-context
+          file: .github/Dockerfile.native
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta.outputs.tags }}

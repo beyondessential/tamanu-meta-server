@@ -1,0 +1,28 @@
+FROM busybox:glibc
+
+ARG TARGETPLATFORM
+
+# Create user and group
+RUN addgroup -g 1000 tamanu && adduser -D -u 1000 -G tamanu tamanu
+
+# Copy binaries - the build context will be structured with amd64/ and arm64/ directories
+# We use a shell to select the right directory based on TARGETPLATFORM
+COPY --chmod=0755 amd64/ arm64/ /tmp/bins/
+RUN if [ "$TARGETPLATFORM" = "linux/amd64" ]; then \
+        cp /tmp/bins/amd64/* /usr/bin/; \
+    elif [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
+        cp /tmp/bins/arm64/* /usr/bin/; \
+    else \
+        echo "Unknown platform: $TARGETPLATFORM"; exit 1; \
+    fi && \
+    rm -rf /tmp/bins
+
+# Copy frontend assets (same for all platforms)
+COPY --chown=tamanu:tamanu frontend/target/site /home/tamanu/target/site
+COPY --chown=tamanu:tamanu frontend/static /home/tamanu/static
+
+USER tamanu
+ENV HOME=/home/tamanu
+WORKDIR /home/tamanu
+ENV BIND_ADDRESS=[::]:8000
+CMD ["public-server"]
