@@ -5,9 +5,28 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [5.7.1](https://github.com/beyondessential/tamanu-meta-server/compare/v5.7.0..5.7.1) - 2025-11-26
+## [5.7.2](https://github.com/beyondessential/tamanu-meta-server/compare/v5.7.1..5.7.2) - 2025-11-26
 
 
+- **Deps:** Upgrade all - ([b51602b](https://github.com/beyondessential/tamanu-meta-server/commit/b51602be7e004afac80b1bd11299d41889344146))
+
+### Ci
+
+- **Refactor:** Optimise CD workflow - ([a7937dd](https://github.com/beyondessential/tamanu-meta-server/commit/a7937dd5dda21cd0446fb9c21363a4dd6b961aa5))
+
+### Db
+
+- **Refactor:** Switch to native diesel-async migrator instead of our hack - ([7660cf4](https://github.com/beyondessential/tamanu-meta-server/commit/7660cf4ee414daebd0bc387e8bd1d309025a41d5))
+
+### Public
+
+- **Feature:** Add RC server sections - ([62ea0c2](https://github.com/beyondessential/tamanu-meta-server/commit/62ea0c2f2bf01cca76cd888b3c2c82aa4b3ac48b))
+
+---
+## [5.7.1](https://github.com/beyondessential/tamanu-meta-server/compare/v5.7.0..v5.7.1) - 2025-11-26
+
+
+- **Repo:** Release - ([4cbe0a1](https://github.com/beyondessential/tamanu-meta-server/commit/4cbe0a1d054022c91718303b4ad874472f2ec6ee))
 
 ### Servers
 
