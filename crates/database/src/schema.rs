@@ -21,12 +21,12 @@ diesel::table! {
 }
 
 diesel::table! {
-	device_connections (id) {
+	device_connections (id, created_at) {
 		id -> Uuid,
 		created_at -> Timestamptz,
 		device_id -> Uuid,
 		ip -> Inet,
-		user_agent -> Nullable<Text>,
+		user_agent -> Text,
 	}
 }
 

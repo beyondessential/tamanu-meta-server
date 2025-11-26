@@ -1,0 +1,109 @@
+-- Partition device_connections table by week for improved query performance
+--
+-- This migration converts the device_connections table to use PostgreSQL native partitioning
+-- with weekly partitions. This provides significant query performance improvement for
+-- recent data queries which only need to scan relevant partitions.
+--
+-- Partitions are created dynamically based on the actual date range of existing data.
+
+-- Step 1: Rename existing table to _old
+ALTER TABLE device_connections RENAME TO device_connections_old;
+
+-- Step 2: Create new partitioned table
+CREATE TABLE device_connections (
+    id uuid NOT NULL DEFAULT gen_random_uuid(),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    device_id uuid NOT NULL,
+    ip inet NOT NULL,
+    user_agent text NOT NULL
+) PARTITION BY RANGE (created_at);
+
+-- Step 3: Create weekly partitions dynamically based on existing data
+DO $$
+DECLARE
+    v_min_date DATE;
+    v_max_date DATE;
+    v_week_start DATE;
+    v_week_end DATE;
+    v_partition_name TEXT;
+    v_year INT;
+    v_week_num INT;
+    v_current_week DATE;
+    v_future_weeks INT := 8; -- Create 8 weeks of future partitions as buffer
+BEGIN
+    -- Find the date range of existing data
+    SELECT
+        DATE_TRUNC('week', MIN(created_at))::DATE,
+        DATE_TRUNC('week', MAX(created_at))::DATE
+    INTO v_min_date, v_max_date
+    FROM device_connections_old;
+
+    -- If table is empty, start from current week
+    IF v_min_date IS NULL THEN
+        v_min_date := DATE_TRUNC('week', CURRENT_DATE)::DATE;
+        v_max_date := v_min_date;
+        RAISE NOTICE 'Table is empty, creating partitions starting from current week';
+    ELSE
+        RAISE NOTICE 'Creating partitions from % to % plus % weeks buffer',
+            v_min_date, v_max_date, v_future_weeks;
+    END IF;
+
+    -- Initialize loop variable
+    v_current_week := v_min_date;
+
+    -- Create partitions from min_date to max_date + future buffer
+    WHILE v_current_week <= v_max_date + (v_future_weeks * INTERVAL '1 week') LOOP
+        v_week_start := v_current_week;
+        v_week_end := v_current_week + INTERVAL '7 days';
+
+        -- Extract year and ISO week number
+        v_year := EXTRACT(ISOYEAR FROM v_week_start);
+        v_week_num := EXTRACT(WEEK FROM v_week_start);
+
+        -- Format partition name (e.g., device_connections_2025w47)
+        v_partition_name := FORMAT('device_connections_%sw%s', v_year, LPAD(v_week_num::TEXT, 2, '0'));
+
+        -- Create the partition
+        EXECUTE FORMAT(
+            'CREATE TABLE %I PARTITION OF device_connections FOR VALUES FROM (%L) TO (%L)',
+            v_partition_name,
+            v_week_start,
+            v_week_end
+        );
+
+        RAISE NOTICE 'Created partition % for period % to %',
+            v_partition_name, v_week_start, v_week_end;
+
+        -- Move to next week
+        v_current_week := v_current_week + INTERVAL '7 days';
+    END LOOP;
+
+    RAISE NOTICE 'Partition creation complete';
+END $$;
+
+-- Step 4: Copy data from old table to partitioned table
+-- This will be the slowest part of the migration
+INSERT INTO device_connections (id, created_at, device_id, ip, user_agent)
+SELECT id, created_at, device_id, ip, user_agent
+FROM device_connections_old;
+
+-- Step 5: Add primary key and constraints
+ALTER TABLE device_connections ADD PRIMARY KEY (id, created_at);
+
+ALTER TABLE device_connections ADD CONSTRAINT device_connections_device_id_fkey
+    FOREIGN KEY (device_id) REFERENCES devices(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+-- Step 6: Drop old table (which also drops its indexes)
+DROP TABLE device_connections_old;
+
+-- Step 7: Create indexes on the partitioned table
+-- These will be created on each partition automatically
+
+-- BRIN index on created_at (smaller, good for time-range queries)
+CREATE INDEX device_connections_date ON device_connections USING brin (created_at);
+
+-- B-tree index on device_id for device lookups
+CREATE INDEX device_connections_device ON device_connections USING btree (device_id);
+
+-- Step 8: Analyze the new partitioned table to update statistics
+ANALYZE device_connections;
