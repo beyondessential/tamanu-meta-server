@@ -4,6 +4,10 @@
 [print_schema]
 file = "crates/database/src/schema.rs"
 custom_type_derives = ["diesel::query_builder::QueryId"]
+filter.except_tables = [
+	"device_connections_\\d+w\\d+",
+	"statuses_\\d+w\\d+",
+]
 
 [migrations_directory]
 dir = "migrations"
