@@ -25,7 +25,7 @@ jobs:
     steps:
       - name: Free up space
         run: sudo rm -rf /opt/hostedtoolcache /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup || true
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Configure toolchain
         run: |
           rustup toolchain install --profile minimal --no-self-update stable
@@ -48,7 +48,7 @@ jobs:
     steps:
       - name: Free up space
         run: sudo rm -rf /opt/hostedtoolcache /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup || true
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Configure toolchain
         run: |
           rustup toolchain install --profile minimal --no-self-update stable
