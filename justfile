@@ -21,11 +21,11 @@ build-image:
     docker build -t tamanu-meta-server .
 
 # Run the public server and reload on change
-watch-public:
+watch-public: _copy-bulma
 	watchexec -w crates -E SERVER_VERSIONS_SECRET=test -- cargo run --bin public-server
 
 # Run the private server with live reload
-watch-private:
+watch-private: _copy-bulma
     cargo leptos watch
 
 # Run all tests
@@ -89,7 +89,7 @@ clean:
     cargo clean
 
 # Build server binaries for a specific target (release mode)
-build-servers-release target:
+build-servers-release target: _copy-bulma
 	cargo build --locked --target {{target}} --release --bins
 
 # Detect and cache wasm-bindgen version
@@ -102,14 +102,14 @@ _bindgen-version:
 	fi
 
 # Build the frontend only (private server)
-build-frontend: _bindgen-version
+build-frontend: _bindgen-version _copy-bulma
 	#!/usr/bin/env bash
 	set -x
 	export LEPTOS_WASM_BINDGEN_VERSION=$(cat target/wasm-bindgen-version)
 	cargo leptos build --frontend-only
 
 # Build the frontend for production (with compression)
-build-frontend-release: _bindgen-version
+build-frontend-release: _bindgen-version _copy-bulma
 	#!/usr/bin/env bash
 	set -x
 	export LEPTOS_WASM_BINDGEN_VERSION=$(cat target/wasm-bindgen-version)
@@ -133,3 +133,12 @@ dev: fmt lint test
 # Make a new release
 release level="minor":
 	cargo release --workspace --execute {{level}}
+
+# Update the bulma submodule
+update-bulma:
+	git submodule update --init --recursive
+	git submodule foreach git pull origin main
+
+# Copy bulma CSS files to static directory
+_copy-bulma:
+	cp -r --reflink=auto .sub/bulma/css static/bulma

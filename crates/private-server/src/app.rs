@@ -34,6 +34,7 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
 			// Putting the main stylesheet at the bottom works around this
 			// by ensuring that the dynamic stylesheets (from the page) are
 			// swapped, but the main stylesheet is not.
+			<Stylesheet id="css-main" href="/static/bulma/bulma.min.css" />
 			<Stylesheet id="css-main" href="/static/main.css" />
 		</html>
 	}
