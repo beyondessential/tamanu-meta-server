@@ -1,5 +1,3 @@
-use std::fmt::Display;
-
 #[cfg(feature = "ssr")]
 use diesel::{
 	backend::Backend,
@@ -22,14 +20,9 @@ pub enum DeviceRole {
 	Server,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, thiserror::Error)]
+#[error("invalid device role")]
 pub struct DeviceRoleFromStringError;
-impl std::error::Error for DeviceRoleFromStringError {}
-impl Display for DeviceRoleFromStringError {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "invalid device role")
-	}
-}
 
 impl std::str::FromStr for DeviceRole {
 	type Err = DeviceRoleFromStringError;

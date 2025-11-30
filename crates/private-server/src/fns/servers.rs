@@ -3,6 +3,7 @@ use std::sync::Arc;
 use commons_errors::Result;
 use commons_types::{
 	Uuid,
+	geo::GeoPoint,
 	server::{kind::ServerKind, rank::ServerRank},
 	status::ShortStatus,
 	version::VersionStr,
@@ -21,6 +22,8 @@ pub struct ServerDetailsData {
 	pub parent_server_id: Option<Uuid>,
 	pub parent_server_name: Option<String>,
 	pub listed: bool,
+	pub cloud: Option<bool>,
+	pub geolocation: Option<GeoPoint>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -98,6 +101,8 @@ pub async fn update_server(
 	device_id: Option<Uuid>,
 	parent_server_id: Option<Uuid>,
 	listed: Option<bool>,
+	cloud: Option<Option<bool>>,
+	geolocation: Option<Option<GeoPoint>>,
 ) -> Result<ServerDetailsData> {
 	ssr::update_server(
 		server_id,
@@ -107,6 +112,8 @@ pub async fn update_server(
 		device_id,
 		parent_server_id,
 		listed,
+		cloud,
+		geolocation,
 	)
 	.await
 }
@@ -131,7 +138,10 @@ mod ssr {
 	use axum::extract::State;
 	use commons_errors::{AppError, Result};
 
-	use commons_types::server::{kind::ServerKind, rank::ServerRank};
+	use commons_types::{
+		geo::GeoPoint,
+		server::{kind::ServerKind, rank::ServerRank},
+	};
 	use database::{
 		Db, Device, devices::DeviceConnection, servers::PartialServer, servers::Server,
 		statuses::Status, url_field::UrlField, versions::Version,
@@ -277,6 +287,8 @@ mod ssr {
 			parent_server_id: server.parent_server_id,
 			parent_server_name,
 			listed: server.listed,
+			cloud: server.cloud,
+			geolocation: server.geolocation,
 		};
 
 		let status = Status::latest_for_server(&mut conn, server.id).await?;
@@ -450,6 +462,8 @@ mod ssr {
 		device_id: Option<Uuid>,
 		parent_server_id: Option<Uuid>,
 		listed: Option<bool>,
+		cloud: Option<Option<bool>>,
+		geolocation: Option<Option<GeoPoint>>,
 	) -> Result<super::ServerDetailsData> {
 		let db = crate::fns::commons::admin_guard().await?;
 		let mut conn = db.get().await?;
@@ -471,6 +485,8 @@ mod ssr {
 			device_id: Some(device_id),
 			parent_server_id: Some(parent_server_id),
 			listed,
+			cloud,
+			geolocation,
 		};
 
 		let server = Server::update(&mut conn, server_id, update_data).await?;
@@ -491,6 +507,8 @@ mod ssr {
 			parent_server_id: server.parent_server_id,
 			parent_server_name,
 			listed: server.listed,
+			cloud: server.cloud,
+			geolocation: server.geolocation,
 		})
 	}
 
@@ -536,6 +554,8 @@ mod ssr {
 			device_id: None,
 			parent_server_id: Some(Some(parent_id)),
 			listed: None,
+			cloud: None,
+			geolocation: None,
 		};
 
 		let server = Server::update(&mut conn, id, update_data).await?;
@@ -556,6 +576,8 @@ mod ssr {
 			parent_server_id: server.parent_server_id,
 			parent_server_name,
 			listed: server.listed,
+			cloud: server.cloud,
+			geolocation: server.geolocation,
 		})
 	}
 

@@ -10,6 +10,8 @@ diesel::table! {
 		device_id -> Nullable<Uuid>,
 		parent_server_id -> Nullable<Uuid>,
 		listed -> Bool,
+		cloud -> Nullable<Bool>,
+		geolocation -> Nullable<Array<Double>>,
 	}
 }
 

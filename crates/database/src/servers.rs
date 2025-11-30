@@ -1,5 +1,8 @@
 use commons_errors::{AppError, Result};
-use commons_types::server::{kind::ServerKind, rank::ServerRank};
+use commons_types::{
+	geo::GeoPoint,
+	server::{kind::ServerKind, rank::ServerRank},
+};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use serde::{Deserialize, Serialize};
@@ -20,14 +23,11 @@ pub struct Server {
 	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub kind: ServerKind,
 	pub rank: Option<ServerRank>,
-
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub device_id: Option<Uuid>,
-
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub parent_server_id: Option<Uuid>,
-
 	pub listed: bool,
+	pub cloud: Option<bool>,
+	pub geolocation: Option<GeoPoint>,
 }
 
 impl Server {
@@ -159,6 +159,8 @@ fn test_server_serialization() {
 		device_id: Some(Uuid::nil()),
 		parent_server_id: None,
 		listed: true,
+		cloud: None,
+		geolocation: None,
 	};
 
 	let serialized = serde_json::to_string_pretty(&server).unwrap();
@@ -196,6 +198,8 @@ impl From<NewServer> for Server {
 			device_id: server.device_id,
 			parent_server_id: None,
 			listed: false,
+			cloud: None,
+			geolocation: None,
 		}
 	}
 }
@@ -214,4 +218,6 @@ pub struct PartialServer {
 	pub device_id: Option<Option<Uuid>>,
 	pub parent_server_id: Option<Option<Uuid>>,
 	pub listed: Option<bool>,
+	pub cloud: Option<Option<bool>>,
+	pub geolocation: Option<Option<GeoPoint>>,
 }

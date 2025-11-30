@@ -1,0 +1,2 @@
+ALTER TABLE servers ADD COLUMN cloud BOOLEAN;
+ALTER TABLE servers ADD COLUMN geolocation FLOAT8[];

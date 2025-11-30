@@ -63,6 +63,8 @@ diesel::table! {
 		kind -> Text,
 		parent_server_id -> Nullable<Uuid>,
 		listed -> Bool,
+		cloud -> Nullable<Bool>,
+		geolocation -> Nullable<Array<Nullable<Float8>>>,
 	}
 }
 

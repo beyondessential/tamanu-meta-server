@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use commons_types::{
 	Uuid,
+	geo::GeoPoint,
 	server::{kind::ServerKind, rank::ServerRank},
 };
 use leptos::prelude::*;
@@ -55,13 +56,15 @@ pub fn Detail() -> impl IntoView {
 	let is_admin = is_admin_resource();
 
 	let update_action = Action::new(
-		move |(name, host, rank, device_id, parent_id, listed): &(
+		move |(name, host, rank, device_id, parent_id, listed, cloud, geolocation): &(
 			Option<String>,
 			Option<String>,
 			Option<ServerRank>,
 			Option<Uuid>,
 			Option<Uuid>,
 			Option<bool>,
+			Option<Option<bool>>,
+			Option<Option<GeoPoint>>,
 		)| {
 			let name = name.clone();
 			let host = host.clone();
@@ -70,9 +73,21 @@ pub fn Detail() -> impl IntoView {
 			let device_id = *device_id;
 			let parent_id = *parent_id;
 			let listed = *listed;
+			let cloud = *cloud;
+			let geolocation = geolocation.clone();
 			async move {
-				let result =
-					update_server(id, name, host, rank, device_id, parent_id, listed).await;
+				let result = update_server(
+					id,
+					name,
+					host,
+					rank,
+					device_id,
+					parent_id,
+					listed,
+					cloud,
+					geolocation,
+				)
+				.await;
 				if result.is_ok() {
 					is_editing.set(false);
 					detail_resource.refetch();
@@ -144,6 +159,8 @@ fn ServerDetailView(
 			Option<Uuid>,
 			Option<Uuid>,
 			Option<bool>,
+			Option<Option<bool>>,
+			Option<Option<GeoPoint>>,
 		),
 		Result<crate::fns::servers::ServerDetailsData, commons_errors::AppError>,
 	>,
@@ -302,11 +319,29 @@ fn EditForm(
 			Option<Uuid>,
 			Option<Uuid>,
 			Option<bool>,
+			Option<Option<bool>>,
+			Option<Option<GeoPoint>>,
 		),
 		Result<crate::fns::servers::ServerDetailsData, commons_errors::AppError>,
 	>,
 	is_editing: RwSignal<bool>,
 ) -> impl IntoView {
+	let edit_cloud = RwSignal::new(None::<Option<bool>>);
+	let edit_lat = RwSignal::new(None::<f64>);
+	let edit_lon = RwSignal::new(None::<f64>);
+	let edit_aws_region = RwSignal::new(String::new());
+
+	Effect::new({
+		let data = data.clone();
+		move |_| {
+			edit_cloud.set(Some(data.server.cloud));
+			if let Some(geo) = &data.server.geolocation {
+				edit_lat.set(Some(geo.lat));
+				edit_lon.set(Some(geo.lon));
+			}
+		}
+	});
+
 	view! {
 		<section class="detail-section edit-form">
 			<h2>"Edit Server Details"</h2>
@@ -315,6 +350,14 @@ fn EditForm(
 				let device_id = edit_device_id.get();
 				let parent_id = edit_parent_id.get();
 				let listed = edit_listed.get();
+				let cloud = edit_cloud.get();
+				let lat = edit_lat.get();
+				let lon = edit_lon.get();
+				let geolocation = if let (Some(lat), Some(lon)) = (lat, lon) {
+					Some(Some(GeoPoint { lat, lon }))
+				} else {
+					Some(None)
+				};
 				update_action.dispatch((
 					Some(edit_name.get()),
 					Some(edit_host.get()),
@@ -322,6 +365,8 @@ fn EditForm(
 					device_id,
 					parent_id,
 					Some(listed),
+					cloud,
+					geolocation,
 				));
 			}>
 				<div class="form-group">
@@ -404,6 +449,118 @@ fn EditForm(
 						</div>
 					}.into_any()
 				}}
+
+				<div class="form-group">
+					<label for="edit-cloud">"Cloud Type"</label>
+					<select
+						id="edit-cloud"
+						prop:value=move || {
+							match edit_cloud.get() {
+								Some(Some(true)) => "cloud",
+								Some(Some(false)) => "on-premise",
+								_ => "unknown",
+							}.to_string()
+						}
+						on:change=move |ev| {
+							let value = event_target_value(&ev);
+							edit_cloud.set(Some(match value.as_str() {
+								"cloud" => Some(true),
+								"on-premise" => Some(false),
+								_ => None,
+							}));
+							edit_aws_region.set(String::new());
+						}
+					>
+						<option value="unknown">"Unknown"</option>
+						<option value="cloud">"Cloud"</option>
+						<option value="on-premise">"On premise"</option>
+					</select>
+				</div>
+
+				{move || {
+					if let Some(Some(true)) = edit_cloud.get() {
+						view! {
+							<div class="form-group">
+								<label for="edit-aws-region">"AWS Region"</label>
+								<select
+									id="edit-aws-region"
+									prop:value=move || edit_aws_region.get()
+									on:change=move |ev| {
+										let region = event_target_value(&ev);
+										edit_aws_region.set(region.clone());
+										match region.as_str() {
+											"sydney" => {
+												edit_lat.set(Some(-33.8688));
+												edit_lon.set(Some(151.2093));
+											}
+											"auckland" => {
+												edit_lat.set(Some(-37.0082));
+												edit_lon.set(Some(174.7850));
+											}
+											"singapore" => {
+												edit_lat.set(Some(1.3521));
+												edit_lon.set(Some(103.8198));
+											}
+											"tokyo" => {
+												edit_lat.set(Some(35.6762));
+												edit_lon.set(Some(139.6503));
+											}
+											"zurich" => {
+												edit_lat.set(Some(47.3769));
+												edit_lon.set(Some(8.5472));
+											}
+											"mumbai" => {
+												edit_lat.set(Some(19.0760));
+												edit_lon.set(Some(72.8777));
+											}
+											_ => {}
+										}
+									}
+								>
+									<option value="">"Select a region..."</option>
+									<option value="sydney">"AWS Sydney"</option>
+									<option value="auckland">"AWS Auckland"</option>
+									<option value="singapore">"AWS Singapore"</option>
+									<option value="tokyo">"AWS Tokyo"</option>
+									<option value="zurich">"AWS Zurich"</option>
+									<option value="mumbai">"AWS Mumbai"</option>
+								</select>
+								<small class="help-text">"Select an AWS region to auto-populate coordinates"</small>
+							</div>
+						}.into_any()
+					} else {
+						().into_any()
+					}
+				}}
+
+				<div class="form-group">
+					<label>"Geolocation Coordinates"</label>
+					<div style="display: flex; gap: 1rem;">
+						<div style="flex: 1;">
+							<label for="edit-lat" style="display: block; font-size: 0.9em; margin-bottom: 0.25rem;">"Latitude"</label>
+							<input
+								type="number"
+								id="edit-lat"
+								step="any"
+								prop:value=move || edit_lat.get().map(|v| v.to_string()).unwrap_or_default()
+								on:input=move |ev| edit_lat.set(event_target_value(&ev).parse().ok())
+								placeholder="e.g., -33.8688"
+							/>
+						</div>
+						<div style="flex: 1;">
+							<label for="edit-lon" style="display: block; font-size: 0.9em; margin-bottom: 0.25rem;">"Longitude"</label>
+							<input
+								type="number"
+								id="edit-lon"
+								step="any"
+								prop:value=move || edit_lon.get().map(|v| v.to_string()).unwrap_or_default()
+								on:input=move |ev| edit_lon.set(event_target_value(&ev).parse().ok())
+								placeholder="e.g., 151.2093"
+							/>
+						</div>
+					</div>
+					<small class="help-text">"Optional latitude and longitude coordinates"</small>
+				</div>
 
 				{move || {
 					update_action.value().get().and_then(|result| {

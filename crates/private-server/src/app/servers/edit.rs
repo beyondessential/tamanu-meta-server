@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use commons_types::{Uuid, server::rank::ServerRank};
+use commons_types::{Uuid, geo::GeoPoint, server::rank::ServerRank};
 use leptos::prelude::*;
 use leptos_meta::Stylesheet;
 use leptos_router::components::Redirect;
@@ -30,6 +30,10 @@ pub fn Edit() -> impl IntoView {
 	let edit_rank = RwSignal::new(None::<ServerRank>);
 	let edit_device_id = RwSignal::new(None::<Uuid>);
 	let edit_parent_id = RwSignal::new(None::<Uuid>);
+	let edit_cloud = RwSignal::new(None::<Option<bool>>);
+	let edit_lat = RwSignal::new(None::<f64>);
+	let edit_lon = RwSignal::new(None::<f64>);
+	let edit_aws_region = RwSignal::new(String::new());
 
 	let search_query = RwSignal::new(String::new());
 	let search_results = RwSignal::new(Vec::<ServerListItem>::new());
@@ -40,12 +44,14 @@ pub fn Edit() -> impl IntoView {
 	);
 
 	let update_action = Action::new(
-		move |(name, host, rank, device_id, parent_id): &(
+		move |(name, host, rank, device_id, parent_id, cloud, geolocation): &(
 			Option<String>,
 			Option<String>,
 			Option<ServerRank>,
 			Option<Uuid>,
 			Option<Uuid>,
+			Option<Option<bool>>,
+			Option<Option<GeoPoint>>,
 		)| {
 			let name = name.clone();
 			let host = host.clone();
@@ -53,9 +59,21 @@ pub fn Edit() -> impl IntoView {
 			let rank = *rank;
 			let device_id = *device_id;
 			let parent_id = *parent_id;
+			let cloud = *cloud;
+			let geolocation = geolocation.clone();
 			async move {
-				let result =
-					update_server(id.clone(), name, host, rank, device_id, parent_id, None).await;
+				let result = update_server(
+					id.clone(),
+					name,
+					host,
+					rank,
+					device_id,
+					parent_id,
+					None,
+					cloud,
+					geolocation,
+				)
+				.await;
 				if result.is_ok() {
 					leptos_router::hooks::use_navigate()(
 						&format!("/servers/{}", id),
@@ -112,22 +130,20 @@ pub fn Edit() -> impl IntoView {
 						detail_resource.get().map(|result| {
 							match result {
 								Ok(data) => {
-									let server = data.server.clone();
-									let server_name = server.name.clone();
-									let server_host = server.host.clone();
-									let server_rank = server.rank;
-									let device_id = data.device_info
-										.as_ref()
-										.map(|d| d.device.id);
-									let current_rank = server.rank;
-
-									Effect::new(move |_| {
-										edit_name.set(server_name.clone());
-										edit_host.set(server_host.clone());
-										edit_rank.set(server_rank);
-										edit_device_id.set(device_id);
-										edit_parent_id.set(server.parent_server_id);
-									});
+									Effect::new({ let data = data.clone(); move |_| {
+										edit_name.set(data.server.name.clone());
+										edit_host.set(data.server.host.clone());
+										edit_rank.set(data.server.rank);
+										edit_device_id.set(data.device_info
+											.as_ref()
+											.map(|d| d.device.id));
+										edit_parent_id.set(data.server.parent_server_id);
+										edit_cloud.set(Some(data.server.cloud));
+										if let Some(geo) = &data.server.geolocation {
+											edit_lat.set(Some(geo.lat));
+											edit_lon.set(Some(geo.lon));
+										}
+									}});
 
 									view! {
 										<EditView
@@ -137,12 +153,16 @@ pub fn Edit() -> impl IntoView {
 											edit_rank=edit_rank
 											edit_device_id=edit_device_id
 											edit_parent_id=edit_parent_id
+											edit_cloud=edit_cloud
+											edit_lat=edit_lat
+											edit_lon=edit_lon
+											edit_aws_region=edit_aws_region
 											update_action=update_action
 											search_query=search_query
 											search_results=search_results
 											search_action=search_action
 											assign_action=assign_action
-											current_rank=current_rank
+											current_rank=data.server.rank
 										/>
 									}.into_any()
 								}
@@ -170,6 +190,10 @@ fn EditView(
 	edit_rank: RwSignal<Option<ServerRank>>,
 	edit_device_id: RwSignal<Option<Uuid>>,
 	edit_parent_id: RwSignal<Option<Uuid>>,
+	edit_cloud: RwSignal<Option<Option<bool>>>,
+	edit_lat: RwSignal<Option<f64>>,
+	edit_lon: RwSignal<Option<f64>>,
+	edit_aws_region: RwSignal<String>,
 	update_action: Action<
 		(
 			Option<String>,
@@ -177,6 +201,8 @@ fn EditView(
 			Option<ServerRank>,
 			Option<Uuid>,
 			Option<Uuid>,
+			Option<Option<bool>>,
+			Option<Option<GeoPoint>>,
 		),
 		Result<crate::fns::servers::ServerDetailsData, commons_errors::AppError>,
 	>,
@@ -306,12 +332,22 @@ fn EditView(
 					ev.prevent_default();
 					let device_id = edit_device_id.get();
 					let parent_id = edit_parent_id.get();
+					let cloud = edit_cloud.get();
+					let lat = edit_lat.get();
+					let lon = edit_lon.get();
+					let geolocation = if let (Some(lat), Some(lon)) = (lat, lon) {
+						Some(Some(GeoPoint { lat, lon }))
+					} else {
+						Some(None)
+					};
 					update_action.dispatch((
 						Some(edit_name.get()),
 						Some(edit_host.get()),
 						edit_rank.get(),
 						device_id,
 						parent_id,
+						cloud,
+						geolocation,
 					));
 				}>
 					<div class="form-group">
@@ -362,6 +398,102 @@ fn EditView(
 							placeholder="Leave empty to unset"
 						/>
 						<small class="help-text">"Optional UUID of the device associated with this server"</small>
+					</div>
+
+					<div class="form-group">
+						<label for="edit-cloud">"Cloud Type"</label>
+						<select
+							id="edit-cloud"
+							prop:value=move || {
+								match edit_cloud.get() {
+									Some(Some(true)) => "cloud",
+									Some(Some(false)) => "on-premise",
+									_ => "unknown",
+								}.to_string()
+							}
+							on:change=move |ev| {
+								let value = event_target_value(&ev);
+								edit_cloud.set(Some(match value.as_str() {
+									"cloud" => Some(true),
+									"on-premise" => Some(false),
+									_ => None,
+								}));
+								edit_aws_region.set(String::new());
+							}
+						>
+							<option value="unknown">"Unknown"</option>
+							<option value="cloud">"Cloud"</option>
+							<option value="on-premise">"On premise"</option>
+						</select>
+					</div>
+
+					{move || {
+						if let Some(Some(true)) = edit_cloud.get() {
+							view! {
+								<div class="form-group">
+									<label for="edit-aws-region">"AWS Region"</label>
+									<select
+										id="edit-aws-region"
+										prop:value=move || edit_aws_region.get()
+										on:change=move |ev| {
+											let region = event_target_value(&ev);
+											edit_aws_region.set(region.clone());
+											let (lat, lon) = match region.as_str() {
+												"sydney" => (-33.8688, 151.2093),
+												"auckland" => (-37.0082, 174.7850),
+												"singapore" => (1.3521, 103.8198),
+												"tokyo" => (35.6762, 139.6503),
+												"zurich" => (47.3769, 8.5472),
+												"mumbai" => (19.0760, 72.8777),
+												_ => return,
+											};
+											edit_lat.set(Some(lat));
+											edit_lon.set(Some(lon));
+										}
+									>
+										<option value="">"Select a region..."</option>
+										<option value="sydney">"AWS Sydney"</option>
+										<option value="auckland">"AWS Auckland"</option>
+										<option value="singapore">"AWS Singapore"</option>
+										<option value="tokyo">"AWS Tokyo"</option>
+										<option value="zurich">"AWS Zurich"</option>
+										<option value="mumbai">"AWS Mumbai"</option>
+									</select>
+									<small class="help-text">"Select an AWS region to auto-populate coordinates"</small>
+								</div>
+							}.into_any()
+						} else {
+							().into_any()
+						}
+					}}
+
+					<div class="form-group">
+						<label>"Geolocation Coordinates"</label>
+						<div style="display: flex; gap: 1rem;">
+							<div style="flex: 1;">
+								<label for="edit-lat" style="display: block; font-size: 0.9em; margin-bottom: 0.25rem;">"Latitude"</label>
+								<input
+									type="number"
+									id="edit-lat"
+									step="any"
+									prop:value=move || edit_lat.get()
+									on:input=move |ev| edit_lat.set(event_target_value(&ev).parse().ok())
+									placeholder="e.g., -33.8688"
+								/>
+							</div>
+							<div style="flex: 1;">
+								<label for="edit-lon" style="display: block; font-size: 0.9em; margin-bottom: 0.25rem;">"Longitude"</label>
+								<input
+									type="number"
+									id="edit-lon"
+									step="any"
+									prop:value=move || edit_lon.get()
+									on:input=move |ev| edit_lon.set(event_target_value(&ev).parse().ok())
+									placeholder="e.g., 151.2093"
+								/>
+							</div>
+						</div>
+						<small class="help-text">"Optional latitude and longitude coordinates"</small>
 					</div>
 
 					{move || {
