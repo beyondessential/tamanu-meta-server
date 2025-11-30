@@ -451,7 +451,7 @@ fn EditForm(
 				}}
 
 				<div class="form-group">
-					<label for="edit-cloud">"Cloud Type"</label>
+					<label for="edit-cloud">"Server location"</label>
 					<select
 						id="edit-cloud"
 						prop:value=move || {

@@ -401,7 +401,7 @@ fn EditView(
 					</div>
 
 					<div class="form-group">
-						<label for="edit-cloud">"Cloud Type"</label>
+						<label for="edit-cloud">"Server location"</label>
 						<select
 							id="edit-cloud"
 							prop:value=move || {
@@ -428,7 +428,7 @@ fn EditView(
 					</div>
 
 					{move || {
-						if let Some(Some(true)) = edit_cloud.get() {
+						edit_cloud.get().flatten().and_then(|is_cloud| is_cloud.then(|| {
 							view! {
 								<div class="form-group">
 									<label for="edit-aws-region">"AWS Region"</label>
@@ -461,40 +461,44 @@ fn EditView(
 									</select>
 									<small class="help-text">"Select an AWS region to auto-populate coordinates"</small>
 								</div>
-							}.into_any()
-						} else {
-							().into_any()
-						}
+							}
+						}))
 					}}
 
-					<div class="form-group">
-						<label>"Geolocation Coordinates"</label>
-						<div style="display: flex; gap: 1rem;">
-							<div style="flex: 1;">
-								<label for="edit-lat" style="display: block; font-size: 0.9em; margin-bottom: 0.25rem;">"Latitude"</label>
-								<input
-									type="number"
-									id="edit-lat"
-									step="any"
-									prop:value=move || edit_lat.get()
-									on:input=move |ev| edit_lat.set(event_target_value(&ev).parse().ok())
-									placeholder="e.g., -33.8688"
-								/>
-							</div>
-							<div style="flex: 1;">
-								<label for="edit-lon" style="display: block; font-size: 0.9em; margin-bottom: 0.25rem;">"Longitude"</label>
-								<input
-									type="number"
-									id="edit-lon"
-									step="any"
-									prop:value=move || edit_lon.get()
-									on:input=move |ev| edit_lon.set(event_target_value(&ev).parse().ok())
-									placeholder="e.g., 151.2093"
-								/>
-							</div>
-						</div>
-						<small class="help-text">"Optional latitude and longitude coordinates"</small>
-					</div>
+					{move || {
+						edit_cloud.get().flatten().map(|_| {
+							view! {
+								<div class="form-group">
+									<label>"Geolocation Coordinates"</label>
+									<div style="display: flex; gap: 1rem;">
+										<div style="flex: 1;">
+											<label for="edit-lat" style="display: block; font-size: 0.9em; margin-bottom: 0.25rem;">"Latitude"</label>
+											<input
+												type="number"
+												id="edit-lat"
+												step="any"
+												prop:value=move || edit_lat.get()
+												on:input=move |ev| edit_lat.set(event_target_value(&ev).parse().ok())
+												placeholder="e.g., -33.8688"
+											/>
+										</div>
+										<div style="flex: 1;">
+											<label for="edit-lon" style="display: block; font-size: 0.9em; margin-bottom: 0.25rem;">"Longitude"</label>
+											<input
+												type="number"
+												id="edit-lon"
+												step="any"
+												prop:value=move || edit_lon.get()
+												on:input=move |ev| edit_lon.set(event_target_value(&ev).parse().ok())
+												placeholder="e.g., 151.2093"
+											/>
+										</div>
+									</div>
+									<small class="help-text">"Optional latitude and longitude coordinates"</small>
+								</div>
+							}
+						})
+					}}
 
 					{move || {
 						update_action.value().get().and_then(|result| {
