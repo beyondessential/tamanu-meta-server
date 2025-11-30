@@ -11,12 +11,12 @@ use leptos_router::components::A;
 use leptos_router::components::Redirect;
 use leptos_router::hooks::use_params_map;
 
-use crate::app::devices::DeviceListItem;
 use crate::components::{StatusLegend, TimeAgo, VersionIndicator, VersionLegend};
 use crate::fns::servers::{
 	ChildServerData, ServerDetailData, ServerLastStatusData, assign_parent_server,
 	search_central_servers, server_detail, update_server,
 };
+use crate::{app::devices::DeviceListItem, fns::servers::ServerDetailsData};
 
 fn is_admin_resource() -> Resource<bool> {
 	Resource::new(
@@ -198,7 +198,7 @@ fn ServerDetailView(
 							<ServerInfoSection data=data.clone() />
 							{data.last_status.as_ref().map(|status| {
 								view! {
-									<StatusSection status=status.clone() />
+									<StatusSection status=status.clone() server=data.server.clone() />
 								}
 							})}
 							{if data.server.kind == ServerKind::Central && !data.child_servers.is_empty() {
@@ -460,7 +460,10 @@ fn ServerInfoSection(data: Arc<ServerDetailData>) -> impl IntoView {
 }
 
 #[component]
-fn StatusSection(status: Arc<ServerLastStatusData>) -> impl IntoView {
+fn StatusSection(
+	status: Arc<ServerLastStatusData>,
+	server: Arc<ServerDetailsData>,
+) -> impl IntoView {
 	let min_chrome_version = status.min_chrome_version;
 	view! {
 		<section class:detail-section>
@@ -527,6 +530,10 @@ fn StatusSection(status: Arc<ServerLastStatusData>) -> impl IntoView {
 						</div>
 					}
 				})}
+				<div class="info-item">
+					<span class="info-label">"Mobile list"</span>
+					<span class="info-value">{if server.listed { "Public" } else { "No" }}</span>
+				</div>
 			</div>
 
 			{
