@@ -1,7 +1,8 @@
+use std::sync::Arc;
+
 use commons_types::{
 	Uuid,
 	server::{kind::ServerKind, rank::ServerRank},
-	status::ShortStatus,
 };
 use leptos::prelude::*;
 use leptos::serde_json;
@@ -12,7 +13,6 @@ use leptos_router::hooks::use_params_map;
 
 use crate::app::devices::DeviceListItem;
 use crate::components::{StatusLegend, TimeAgo, VersionIndicator, VersionLegend};
-use crate::fns::devices::DeviceInfo;
 use crate::fns::servers::{
 	ChildServerData, ServerDetailData, ServerLastStatusData, assign_parent_server,
 	search_central_servers, server_detail, update_server,
@@ -111,7 +111,6 @@ pub fn Detail() -> impl IntoView {
 										edit_parent_id
 										edit_listed
 										update_action
-										server_id=server_id()
 									/>
 								}.into_any()
 							}
@@ -148,49 +147,33 @@ fn ServerDetailView(
 		),
 		Result<crate::fns::servers::ServerDetailsData, commons_errors::AppError>,
 	>,
-	server_id: Uuid,
 ) -> impl IntoView {
-	let server = data.server.clone();
-	let device_info = data.device_info.clone();
-	let last_status = data.last_status.clone();
-	let up = data.up.clone();
-	let child_servers = data.child_servers.clone();
+	let data = Arc::new(data);
 
-	let server_name = server.name.clone();
-	let server_host = server.host.clone();
-	let server_rank = server.rank;
-	let server_kind = server.kind;
-	let device_id = device_info.as_ref().map(|d| d.device.id);
-
-	let server_name_for_effect = server_name.clone();
-	let server_host_for_effect = server_host.clone();
-
-	Effect::new(move |_| {
-		if !is_editing.get() {
-			edit_name.set(server_name_for_effect.clone());
-			edit_host.set(server_host_for_effect.clone());
-			edit_rank.set(server_rank);
-			edit_device_id.set(device_id);
-			edit_parent_id.set(server.parent_server_id);
-			edit_listed.set(server.listed);
+	Effect::new({
+		let data = data.clone();
+		move |_| {
+			if !is_editing.get() {
+				edit_name.set(data.server.name.clone());
+				edit_host.set(data.server.host.clone());
+				edit_rank.set(data.server.rank);
+				edit_device_id.set(data.device_info.as_ref().map(|d| d.device.id));
+				edit_parent_id.set(data.server.parent_server_id);
+				edit_listed.set(data.server.listed);
+			}
 		}
 	});
 
 	view! {
 		<div class="detail-container">
 			<PageHeader
-				server_name=server_name.clone()
-				server_host=server_host.clone()
-				server_rank=server.rank
-				server_kind=server_kind
-				up=up
-				device_id=device_id
-				child_servers=child_servers.clone()
-				is_editing=is_editing
-				edit_name=edit_name
-				edit_host=edit_host
-				edit_rank=edit_rank
-				edit_device_id=edit_device_id
+				data=data.clone()
+				is_admin
+				is_editing
+				edit_name
+				edit_host
+				edit_rank
+				edit_device_id
 				_edit_parent_id=edit_parent_id
 			/>
 
@@ -198,37 +181,33 @@ fn ServerDetailView(
 				if is_editing.get() {
 					view! {
 						<EditForm
-							edit_name=edit_name
-							edit_host=edit_host
-							edit_rank=edit_rank
-							edit_device_id=edit_device_id
-							edit_parent_id=edit_parent_id
-							edit_listed=edit_listed
-							update_action=update_action
-							is_editing=is_editing
-							server_kind=server_kind
+							data=data.clone()
+							edit_name
+							edit_host
+							edit_rank
+							edit_device_id
+							edit_parent_id
+							edit_listed
+							update_action
+							is_editing
 						/>
 					}.into_any()
 				} else {
 					view! {
 						<>
-							<ServerInfoSection
-								host=server.host.clone()
-								device_info=device_info.clone()
-								up=up.to_string()
-							/>
-							{last_status.as_ref().map(|status| {
+							<ServerInfoSection data=data.clone() />
+							{data.last_status.as_ref().map(|status| {
 								view! {
 									<StatusSection status=status.clone() />
 								}
 							})}
-							{if server.kind == ServerKind::Central && !data.child_servers.is_empty() {
+							{if data.server.kind == ServerKind::Central && !data.child_servers.is_empty() {
 								view! {
-									<ChildServersSection child_servers=data.child_servers.clone() is_admin />
+									<ChildServersSection data=data.clone() is_admin />
 								}.into_any()
-							} else if server.kind != ServerKind::Central && server.parent_server_id.is_none() {
+							} else if data.server.kind != ServerKind::Central && data.server.parent_server_id.is_none() {
 								view! {
-									<AssignParentSection server_id=server_id.clone() />
+									<AssignParentSection server_id=data.server.id.clone() />
 								}.into_any()
 							} else {
 								().into_any()
@@ -248,13 +227,8 @@ fn ServerDetailView(
 
 #[component]
 fn PageHeader(
-	server_name: String,
-	server_host: String,
-	server_rank: Option<ServerRank>,
-	server_kind: ServerKind,
-	up: ShortStatus,
-	device_id: Option<Uuid>,
-	child_servers: Vec<ChildServerData>,
+	data: Arc<ServerDetailData>,
+	is_admin: Resource<bool>,
 	is_editing: RwSignal<bool>,
 	edit_name: RwSignal<String>,
 	edit_host: RwSignal<String>,
@@ -262,29 +236,24 @@ fn PageHeader(
 	edit_device_id: RwSignal<Option<Uuid>>,
 	_edit_parent_id: RwSignal<Option<Uuid>>,
 ) -> impl IntoView {
-	let name_clone = server_name.clone();
-	let host_clone = server_host.clone();
-
-	let is_admin = is_admin_resource();
-
+	let suspense_data = data.clone();
 	view! {
 		<div class="page-header">
 			<Suspense>
-				{move || {
+				{ let data = suspense_data.clone(); move || {
 					if is_admin.get().unwrap_or(false) && !is_editing.get() {
-						let name = name_clone.clone();
-						let host = host_clone.clone();
+						let data = data.clone();
 						Some(view! {
 							<button
 								class="edit-button"
-								on:click=move |_| {
-									edit_name.set(name.clone());
-									edit_host.set(host.clone());
-									edit_rank.set(server_rank);
-									edit_device_id.set(device_id);
+								on:click={ let data = data.clone(); move |_| {
+									edit_name.set(data.server.name.clone());
+									edit_host.set(data.server.host.clone());
+									edit_rank.set(data.server.rank);
+									edit_device_id.set(data.device_info.as_ref().map(|d| d.device.id));
 									// edit_parent_id already set by Effect
 									is_editing.set(true);
-								}
+								}}
 							>
 								"Edit"
 							</button>
@@ -295,9 +264,10 @@ fn PageHeader(
 				}}
 			</Suspense>
 			<h1>
-				<span class={format!("status-dot {up}")} title={format!("{server_name}: {up}")}></span>
-				{if server_kind == ServerKind::Central {
-					child_servers.into_iter().map(|child| {
+				<span class={format!("status-dot {}", data.up)} title={format!("{}: {}", data.server.name, data.up)}></span>
+				{if data.server.kind == ServerKind::Central {
+					data.child_servers.iter().map(|child| {
+						let child = child.clone();
 						view! {
 							<span
 								class={format!("status-dot facility-dot {}", child.up)}
@@ -308,15 +278,16 @@ fn PageHeader(
 				} else {
 					().into_any()
 				}}
-				{server_name.clone()}
+				{data.server.name.clone()}
 			</h1>
-			<span class="server-rank">{server_rank.map(|r| r.to_string()).unwrap_or_default()}</span>
+			<span class="server-rank">{data.server.rank.map(|r| r.to_string()).unwrap_or_default()}</span>
 		</div>
 	}
 }
 
 #[component]
 fn EditForm(
+	data: Arc<ServerDetailData>,
 	edit_name: RwSignal<String>,
 	edit_host: RwSignal<String>,
 	edit_rank: RwSignal<Option<ServerRank>>,
@@ -335,7 +306,6 @@ fn EditForm(
 		Result<crate::fns::servers::ServerDetailsData, commons_errors::AppError>,
 	>,
 	is_editing: RwSignal<bool>,
-	server_kind: ServerKind,
 ) -> impl IntoView {
 	view! {
 		<section class="detail-section edit-form">
@@ -404,7 +374,7 @@ fn EditForm(
 					<small class="help-text">"Optional UUID of the device associated with this server"</small>
 				</div>
 
-				{if server_kind != ServerKind::Central {
+				{if data.server.kind != ServerKind::Central {
 					view! {
 						<div class="form-group">
 							<label for="edit-parent-id">"Parent Server ID"</label>
@@ -468,16 +438,15 @@ fn EditForm(
 }
 
 #[component]
-fn ServerInfoSection(host: String, device_info: Option<DeviceInfo>, up: String) -> impl IntoView {
-	let host_clone = host.clone();
+fn ServerInfoSection(data: Arc<ServerDetailData>) -> impl IntoView {
 	view! {
 		<section class="detail-section">
 			<h2>
-				<span class={format!("section-status-dot status-dot {up}")}></span>
+				<span class={format!("section-status-dot status-dot {}", data.up)}></span>
 				"Central server"
-				<a class="header-url" href={host} target="_blank">{host_clone}</a>
+				<a class="header-url" href={data.server.host.clone()} target="_blank">{data.server.host.clone()}</a>
 			</h2>
-			{device_info.as_ref().map(|device_info| {
+			{data.device_info.as_ref().map(|device_info| {
 				let device_info = device_info.clone();
 				view! {
 					<div class="device-list-container">
@@ -491,7 +460,7 @@ fn ServerInfoSection(host: String, device_info: Option<DeviceInfo>, up: String) 
 }
 
 #[component]
-fn StatusSection(status: ServerLastStatusData) -> impl IntoView {
+fn StatusSection(status: Arc<ServerLastStatusData>) -> impl IntoView {
 	let min_chrome_version = status.min_chrome_version;
 	view! {
 		<section class:detail-section>
@@ -578,17 +547,14 @@ fn StatusSection(status: ServerLastStatusData) -> impl IntoView {
 }
 
 #[component]
-fn ChildServersSection(
-	child_servers: Vec<ChildServerData>,
-	is_admin: Resource<bool>,
-) -> impl IntoView {
+fn ChildServersSection(data: Arc<ServerDetailData>, is_admin: Resource<bool>) -> impl IntoView {
 	view! {
 		<section class="detail-section">
-			<h2>"Facility servers (" {child_servers.len()} ")"</h2>
+			<h2>"Facility servers (" {data.child_servers.len()} ")"</h2>
 			<div class="child-servers-list">
-				{child_servers.into_iter().map(|child| {
+				{data.child_servers.iter().map(|child| {
 					view! {
-						<ChildServerCard child is_admin />
+						<ChildServerCard child=child.clone() is_admin />
 					}
 				}).collect::<Vec<_>>()}
 			</div>
@@ -597,7 +563,8 @@ fn ChildServersSection(
 }
 
 #[component]
-fn ChildServerCard(child: ChildServerData, is_admin: Resource<bool>) -> impl IntoView {
+fn ChildServerCard(child: Arc<ChildServerData>, is_admin: Resource<bool>) -> impl IntoView {
+	let child_id = child.id;
 	view! {
 		<div class="child-server-card">
 			<div class="child-server-header">
@@ -609,7 +576,7 @@ fn ChildServerCard(child: ChildServerData, is_admin: Resource<bool>) -> impl Int
 					{move || {
 						if is_admin.get().unwrap_or(false) {
 							Some(view! {
-								<A class:edit-button href={format!("/servers/{}/edit", child.id)}>
+								<A class:edit-button href={format!("/servers/{child_id}/edit")}>
 									"Edit"
 								</A>
 							})
@@ -629,7 +596,7 @@ fn ChildServerCard(child: ChildServerData, is_admin: Resource<bool>) -> impl Int
 					<div class="detail-device">
 						"Device: "
 						<A href=format!("/devices/{}", device_info.device.id)>{
-							device_info.latest_connection.map(|c| c.ip.to_string()).unwrap_or_else(|| device_info.device.role.to_string())
+							device_info.latest_connection.as_ref().map(|c| c.ip.to_string()).unwrap_or_else(|| device_info.device.role.to_string())
 						}</A>
 					</div>
 				}

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use commons_errors::Result;
 use commons_types::{
 	Uuid,
@@ -34,11 +36,11 @@ pub struct ServerListItem {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerDetailData {
-	pub server: ServerDetailsData,
-	pub device_info: Option<super::devices::DeviceInfo>,
-	pub last_status: Option<ServerLastStatusData>,
+	pub server: Arc<ServerDetailsData>,
+	pub device_info: Option<Arc<super::devices::DeviceInfo>>,
+	pub last_status: Option<Arc<ServerLastStatusData>>,
 	pub up: ShortStatus,
-	pub child_servers: Vec<ChildServerData>,
+	pub child_servers: Vec<Arc<ChildServerData>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,8 +51,8 @@ pub struct ChildServerData {
 	pub rank: Option<ServerRank>,
 	pub host: String,
 	pub up: ShortStatus,
-	pub last_status: Option<ServerLastStatusData>,
-	pub device_info: Option<super::devices::DeviceInfo>,
+	pub last_status: Option<Arc<ServerLastStatusData>>,
+	pub device_info: Option<Arc<super::devices::DeviceInfo>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -124,6 +126,8 @@ pub async fn assign_parent_server(
 
 #[cfg(feature = "ssr")]
 mod ssr {
+	use std::sync::Arc;
+
 	use axum::extract::State;
 	use commons_errors::{AppError, Result};
 
@@ -413,16 +417,16 @@ mod ssr {
 					None
 				};
 
-				child_data.push(super::ChildServerData {
+				child_data.push(Arc::new(super::ChildServerData {
 					id: child.id,
 					name: child.name.unwrap_or_default(),
 					kind: child.kind,
 					rank: child.rank,
 					host: child.host.0.to_string(),
 					up: child_up,
-					last_status: child_last_status,
-					device_info: child_device_info,
-				});
+					last_status: child_last_status.map(Arc::new),
+					device_info: child_device_info.map(Arc::new),
+				}));
 			}
 			child_data
 		} else {
@@ -430,9 +434,9 @@ mod ssr {
 		};
 
 		Ok(super::ServerDetailData {
-			server: server_details,
-			device_info,
-			last_status,
+			server: Arc::new(server_details),
+			device_info: device_info.map(Arc::new),
+			last_status: last_status.map(Arc::new),
 			up,
 			child_servers,
 		})

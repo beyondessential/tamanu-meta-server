@@ -145,9 +145,13 @@ pub fn GlobalNav() -> impl IntoView {
 								if let Ok(Some(url)) = result {
 									Some(
 										view! {
-											<a href=url target="_blank" style="font-size: 0.7em; text-align: center; padding: 0.25em 1em;">
+											<a
+												href=url
+												target="_blank"
+												style="font-size: 0.7em; text-align: center; padding: 0.25em 1em;"
+											>
 												"Server"
-												<br/>
+												<br />
 												"Versions"
 											</a>
 										},

@@ -2,7 +2,7 @@ use commons_types::{Uuid, device::DeviceRole};
 use leptos::prelude::*;
 use leptos_meta::{Stylesheet, provide_meta_context};
 use leptos_router::components::A;
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use crate::components::SubTabs;
 
@@ -136,18 +136,18 @@ pub fn Page() -> impl IntoView {
 }
 
 #[component]
-pub fn DeviceList(devices: Vec<crate::fns::devices::DeviceInfo>) -> impl IntoView {
+pub fn DeviceList(devices: Vec<Arc<crate::fns::devices::DeviceInfo>>) -> impl IntoView {
 	view! {
 		<div class="device-list">
-			<For each=move || devices.clone() key=|device| device.device.id.clone() let:device>
-				<DeviceListItem device=device />
+			<For each=move || devices.clone() key=|device| device.device.id let:device>
+				<DeviceListItem device />
 			</For>
 		</div>
 	}
 }
 
 #[component]
-pub fn DeviceListItem(device: crate::fns::devices::DeviceInfo) -> impl IntoView {
+pub fn DeviceListItem(device: Arc<crate::fns::devices::DeviceInfo>) -> impl IntoView {
 	let device_id = device.device.id.clone();
 	let role = device.device.role;
 	let latest_ip = device

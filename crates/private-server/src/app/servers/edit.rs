@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use commons_types::{Uuid, server::rank::ServerRank};
 use leptos::prelude::*;
 use leptos_meta::Stylesheet;
@@ -162,7 +164,7 @@ pub fn Edit() -> impl IntoView {
 
 #[component]
 fn EditView(
-	server: crate::fns::servers::ServerDetailsData,
+	server: Arc<crate::fns::servers::ServerDetailsData>,
 	edit_name: RwSignal<String>,
 	edit_host: RwSignal<String>,
 	edit_rank: RwSignal<Option<ServerRank>>,

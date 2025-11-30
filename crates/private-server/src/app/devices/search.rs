@@ -50,7 +50,7 @@ pub fn Search() -> impl IntoView {
 										view! {
 											<div class="search-results">
 												<h3>{format!("Search Results ({} found)", devices.len())}</h3>
-												<DeviceList devices=devices />
+												<DeviceList devices />
 											</div>
 										}.into_any()
 									}

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use commons_errors::Result;
 use commons_types::{
 	Uuid,
@@ -59,7 +61,10 @@ pub async fn get_device_by_id(device_id: Uuid) -> Result<DeviceInfo> {
 }
 
 #[server]
-pub async fn list_untrusted(limit: Option<i64>, offset: Option<i64>) -> Result<Vec<DeviceInfo>> {
+pub async fn list_untrusted(
+	limit: Option<i64>,
+	offset: Option<i64>,
+) -> Result<Vec<Arc<DeviceInfo>>> {
 	ssr::list_untrusted(limit, offset).await
 }
 
@@ -93,7 +98,7 @@ pub async fn trust(device_id: Uuid, role: DeviceRole) -> Result<()> {
 }
 
 #[server]
-pub async fn list_trusted(limit: Option<i64>, offset: Option<i64>) -> Result<Vec<DeviceInfo>> {
+pub async fn list_trusted(limit: Option<i64>, offset: Option<i64>) -> Result<Vec<Arc<DeviceInfo>>> {
 	ssr::list_trusted(limit, offset).await
 }
 
@@ -113,7 +118,7 @@ pub async fn update_role(device_id: Uuid, role: DeviceRole) -> Result<()> {
 }
 
 #[server]
-pub async fn search(query: String) -> Result<Vec<DeviceInfo>> {
+pub async fn search(query: String) -> Result<Vec<Arc<DeviceInfo>>> {
 	ssr::search(query).await
 }
 
@@ -247,7 +252,7 @@ mod ssr {
 	pub async fn list_untrusted(
 		limit: Option<i64>,
 		offset: Option<i64>,
-	) -> Result<Vec<DeviceInfo>> {
+	) -> Result<Vec<Arc<DeviceInfo>>> {
 		let db = crate::fns::commons::admin_guard().await?;
 		let mut conn = db.get().await?;
 
@@ -260,6 +265,7 @@ mod ssr {
 		Ok(devices_with_info
 			.into_iter()
 			.map(DeviceInfo::from)
+			.map(Arc::new)
 			.collect())
 	}
 
@@ -270,7 +276,10 @@ mod ssr {
 		Device::count_untrusted(&mut conn).await
 	}
 
-	pub async fn list_trusted(limit: Option<i64>, offset: Option<i64>) -> Result<Vec<DeviceInfo>> {
+	pub async fn list_trusted(
+		limit: Option<i64>,
+		offset: Option<i64>,
+	) -> Result<Vec<Arc<DeviceInfo>>> {
 		let db = crate::fns::commons::admin_guard().await?;
 		let mut conn = db.get().await?;
 
@@ -283,6 +292,7 @@ mod ssr {
 		Ok(devices_with_info
 			.into_iter()
 			.map(DeviceInfo::from)
+			.map(Arc::new)
 			.collect())
 	}
 
@@ -356,7 +366,7 @@ mod ssr {
 		Device::trust(&mut conn, device_id, role).await
 	}
 
-	pub async fn search(query: String) -> Result<Vec<DeviceInfo>> {
+	pub async fn search(query: String) -> Result<Vec<Arc<DeviceInfo>>> {
 		let db = crate::fns::commons::admin_guard().await?;
 		let mut conn = db.get().await?;
 
@@ -368,6 +378,7 @@ mod ssr {
 		Ok(devices_with_info
 			.into_iter()
 			.map(DeviceInfo::from)
+			.map(Arc::new)
 			.collect())
 	}
 
