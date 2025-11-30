@@ -64,7 +64,7 @@ diesel::table! {
 		parent_server_id -> Nullable<Uuid>,
 		listed -> Bool,
 		cloud -> Nullable<Bool>,
-		geolocation -> Nullable<Array<Nullable<Float8>>>,
+		geolocation -> Nullable<Array<Float8>>,
 	}
 }
 

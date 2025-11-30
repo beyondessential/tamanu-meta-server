@@ -11,7 +11,7 @@ use uuid::Uuid;
 use super::url_field::UrlField;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable, AsChangeset)]
-#[diesel(table_name = crate::views::ordered_servers)]
+#[diesel(table_name = crate::schema::servers)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Server {
 	pub id: Uuid,
@@ -32,8 +32,8 @@ pub struct Server {
 
 impl Server {
 	pub async fn get_all(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
-		use crate::views::ordered_servers::dsl::*;
-		ordered_servers
+		use crate::schema::servers::dsl::*;
+		servers
 			.select(Self::as_select())
 			.filter(id.ne(Uuid::nil()))
 			.load(db)
@@ -42,8 +42,8 @@ impl Server {
 	}
 
 	pub async fn own(db: &mut AsyncPgConnection) -> Result<Self> {
-		use crate::views::ordered_servers::dsl::*;
-		ordered_servers
+		use crate::schema::servers::dsl::*;
+		servers
 			.select(Self::as_select())
 			.filter(id.eq(Uuid::nil()))
 			.first(db)
@@ -52,8 +52,8 @@ impl Server {
 	}
 
 	pub async fn all_pingable(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
-		use crate::views::ordered_servers::dsl::*;
-		ordered_servers
+		use crate::schema::servers::dsl::*;
+		servers
 			.select(Self::as_select())
 			.filter(device_id.is_null().and(id.ne(Uuid::nil())))
 			.load(db)
@@ -62,26 +62,26 @@ impl Server {
 	}
 
 	pub async fn get_by_id(db: &mut AsyncPgConnection, id: Uuid) -> Result<Self> {
-		crate::views::ordered_servers::table
+		crate::schema::servers::table
 			.select(Self::as_select())
-			.filter(crate::views::ordered_servers::id.eq(id))
+			.filter(crate::schema::servers::id.eq(id))
 			.first(db)
 			.await
 			.map_err(AppError::from)
 	}
 
 	pub async fn get_by_host(db: &mut AsyncPgConnection, host: String) -> Result<Self> {
-		crate::views::ordered_servers::table
+		crate::schema::servers::table
 			.select(Self::as_select())
-			.filter(crate::views::ordered_servers::host.eq(host))
+			.filter(crate::schema::servers::host.eq(host))
 			.first(db)
 			.await
 			.map_err(AppError::from)
 	}
 
 	pub async fn get_by_device_id(db: &mut AsyncPgConnection, dev_id: Uuid) -> Result<Vec<Self>> {
-		use crate::views::ordered_servers::dsl::*;
-		ordered_servers
+		use crate::schema::servers::dsl::*;
+		servers
 			.select(Self::as_select())
 			.filter(device_id.eq(dev_id))
 			.load(db)
@@ -90,8 +90,8 @@ impl Server {
 	}
 
 	pub async fn get_children(&self, db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
-		use crate::views::ordered_servers::dsl::*;
-		ordered_servers
+		use crate::schema::servers::dsl::*;
+		servers
 			.select(Self::as_select())
 			.filter(parent_server_id.eq(self.id))
 			.load(db)
@@ -104,10 +104,10 @@ impl Server {
 		query: &str,
 		limit: i64,
 	) -> Result<Vec<Self>> {
-		use crate::views::ordered_servers::dsl::*;
+		use crate::schema::servers::dsl::*;
 		let search_pattern = format!("%{}%", query);
 
-		let mut query_builder = ordered_servers
+		let mut query_builder = servers
 			.select(Self::as_select())
 			.filter(kind.eq(ServerKind::Central.to_string()))
 			.filter(listed.eq(true))
@@ -136,9 +136,9 @@ impl Server {
 		server_id: Uuid,
 		updates: PartialServer,
 	) -> Result<Self> {
-		use crate::views::ordered_servers::dsl;
+		use crate::schema::servers::dsl;
 
-		diesel::update(dsl::ordered_servers.filter(dsl::id.eq(server_id)))
+		diesel::update(dsl::servers.filter(dsl::id.eq(server_id)))
 			.set(updates)
 			.execute(db)
 			.await
@@ -205,7 +205,7 @@ impl From<NewServer> for Server {
 }
 
 #[derive(Debug, Deserialize, AsChangeset)]
-#[diesel(table_name = crate::views::ordered_servers)]
+#[diesel(table_name = crate::schema::servers)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct PartialServer {
 	pub id: Uuid,

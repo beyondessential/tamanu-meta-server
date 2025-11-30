@@ -197,10 +197,10 @@ impl Status {
 	}
 
 	pub async fn production_versions(db: &mut AsyncPgConnection) -> Result<Vec<VersionStr>> {
+		use crate::schema::servers::dsl as servers_dsl;
 		use crate::schema::statuses::dsl as statuses_dsl;
-		use crate::views::ordered_servers::dsl as servers_dsl;
 
-		let production_server_ids: Vec<Uuid> = servers_dsl::ordered_servers
+		let production_server_ids: Vec<Uuid> = servers_dsl::servers
 			.select(servers_dsl::id)
 			.filter(servers_dsl::rank.eq(ServerRank::Production))
 			.load(db)
