@@ -31,9 +31,9 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
 			</body>
 			// There's a bug in leptos where the stylesheets are not being
 			// replaced correctly when client-side navigation occurs.
-			// Putting the main stylesheet at the bottom works around this
-			// by ensuring that the dynamic stylesheets (from the page) are
-			// swapped, but the main stylesheet is not.
+			// Putting the shared stylesheets at the bottom works around
+			// this by ensuring that the dynamic stylesheets (from the page)
+			// are swapped, but the main stylesheet is not.
 			<Stylesheet id="css-main" href="/static/bulma/bulma.min.css" />
 			<Stylesheet id="css-main" href="/static/main.css" />
 		</html>

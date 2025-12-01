@@ -1,10 +1,11 @@
+use std::{collections::HashMap, sync::Arc};
+
 use commons_types::{Uuid, device::DeviceRole};
 use leptos::prelude::*;
 use leptos_meta::{Stylesheet, provide_meta_context};
-use leptos_router::components::A;
-use std::{collections::HashMap, sync::Arc};
+use leptos_router::{components::A, hooks::use_params_map};
 
-use crate::components::SubTabs;
+use crate::components::{EndTabs, SubTabs};
 
 mod detail;
 mod search;
@@ -80,6 +81,9 @@ pub fn Page() -> impl IntoView {
 		|_| async { crate::fns::commons::is_current_user_admin().await },
 	);
 
+	let params = use_params_map();
+	let device_id = move || params.read().get("id");
+
 	view! {
 		<Stylesheet id="css-devices" href="/static/devices.css" />
 		<section class="section" id="devices-page">
@@ -93,6 +97,16 @@ pub fn Page() -> impl IntoView {
 									<A href="" exact=true>Search</A>
 									<A href="untrusted">Untrusted Devices</A>
 									<A href="trusted">Trusted Devices</A>
+
+									<EndTabs slot>
+									{move || {
+										device_id().map(|id| {
+											view! {
+												<A href=format!("/devices/{id}")>{id.to_string()}</A>
+											}
+										})
+									}}
+									</EndTabs>
 								</SubTabs>
 							}.into_any()
 						}
