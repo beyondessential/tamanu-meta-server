@@ -30,7 +30,7 @@ watch-public: _copy-bulma
 
 # Run the private server with live reload
 watch-private: _copy-bulma
-    cargo leptos watch
+	cargo leptos watch
 
 # Run all tests
 test:
@@ -96,27 +96,12 @@ clean:
 build-servers-release target: _copy-bulma
 	cargo build --locked --target {{target}} --release --bins
 
-# Detect and cache wasm-bindgen version
-_bindgen-version:
-	#!/usr/bin/env bash
-	set -euo pipefail
-	mkdir -p target
-	if [ ! -f target/wasm-bindgen-version ]; then
-		cargo metadata --format-version 1 --locked | jq -r 'first(.packages[] | select(.name=="wasm-bindgen") | .version)' > target/wasm-bindgen-version
-	fi
-
 # Build the frontend only (private server)
-build-frontend: _bindgen-version _copy-bulma
-	#!/usr/bin/env bash
-	set -x
-	export LEPTOS_WASM_BINDGEN_VERSION=$(cat target/wasm-bindgen-version)
+build-frontend: _copy-bulma
 	cargo leptos build --frontend-only
 
 # Build the frontend for production (with compression)
-build-frontend-release: _bindgen-version _copy-bulma
-	#!/usr/bin/env bash
-	set -x
-	export LEPTOS_WASM_BINDGEN_VERSION=$(cat target/wasm-bindgen-version)
+build-frontend-release: _copy-bulma
 	cargo leptos build --release --frontend-only --precompress
 
 # Install development dependencies

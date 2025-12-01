@@ -64,7 +64,7 @@ impl From<DeviceRole> for String {
 	}
 }
 
-crate::macros::render_as_string!(DeviceRole, minsize(5));
+commons_macros::render_as_string!(DeviceRole, minsize(5));
 
 #[cfg(feature = "ssr")]
 impl<DB> FromSql<Text, DB> for DeviceRole

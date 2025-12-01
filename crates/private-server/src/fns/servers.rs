@@ -610,17 +610,6 @@ mod ssr {
 			pem
 		}
 
-		fn format_key_as_hex(key_data: &[u8]) -> String {
-			hex::encode(key_data)
-				.chars()
-				.collect::<Vec<_>>()
-				.chunks(2)
-				.map(|chunk| chunk.iter().collect::<String>())
-				.collect::<Vec<_>>()
-				.join(":")
-				.to_uppercase()
-		}
-
 		crate::fns::devices::DeviceInfo {
 			device: Arc::new(crate::fns::devices::DeviceData {
 				id: device_with_info.device.id,

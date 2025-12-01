@@ -153,7 +153,7 @@ fn DeviceDetail(device_info: DeviceInfo, set_refresh_trigger: WriteSignal<i32>) 
 					<div class="device-id-section">
 						<h2>
 							{device_info.device.id.to_string()}
-							<span class="role-badge-header">{device_info.device.role.to_string()}</span>
+							<span class="role-badge-header">{device_info.device.role}</span>
 						</h2>
 						<button class="copy-id-btn" on:click=copy_device_id title="Copy device ID">
 							"📋"
@@ -490,13 +490,13 @@ fn AssociatedServers(device_id: Uuid, device_role: DeviceRole) -> impl IntoView 
 																	<a href={format!("/servers/{}", server.id)} class="server-name">
 																		{server.name.clone().unwrap_or_else(|| "Unnamed Server".to_string())}
 																	</a>
-																	<span class="server-kind">{server.kind.to_string()}</span>
+																	<span class="server-kind">{server.kind}</span>
 																</div>
 																<div class="server-details">
 																	<span class="server-host">{server.host.clone()}</span>
 																	{server.rank.as_ref().map(|rank| {
 																		view! {
-																			<span class="server-rank">{rank.to_string()}</span>
+																			<span class="server-rank">{*rank}</span>
 																		}
 																	})}
 																</div>

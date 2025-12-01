@@ -13,14 +13,12 @@ authors = [
 
 [dependencies]
 commons-errors = { path = "../commons-errors", default-features = false }
+commons-macros.path = "../commons-macros"
 diesel = { workspace = true, optional = true }
 node-semver.workspace = true
 serde = { workspace = true, features = ["derive"] }
-tachys = "0.2.11"
 thiserror = "2.0.17"
 uuid = { version = "1.18.1", features = ["serde"] }
-wasm-bindgen = { version = "0.2.100", default-features = false, features = [] }
-web-sys = { version = "0.3.83", default-features = false, features = [] }
 
 [features]
 default = ["ssr"]

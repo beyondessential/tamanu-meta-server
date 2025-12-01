@@ -32,7 +32,7 @@ impl Display for VersionStatus {
 	}
 }
 
-crate::macros::render_as_string!(VersionStatus, minsize(5));
+commons_macros::render_as_string!(VersionStatus, minsize(5));
 
 impl Default for VersionStatus {
 	fn default() -> Self {
@@ -95,6 +95,8 @@ impl Display for VersionStr {
 		write!(f, "{}", self.0)
 	}
 }
+
+commons_macros::render_as_string!(VersionStr, minsize(5));
 
 impl Default for VersionStr {
 	fn default() -> Self {

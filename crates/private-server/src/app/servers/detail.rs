@@ -299,7 +299,7 @@ fn PageHeader(
 				}}
 				{data.server.name.clone()}
 			</h1>
-			<span class="server-rank">{data.server.rank.map(|r| r.to_string()).unwrap_or_default()}</span>
+			<span class="server-rank">{data.server.rank.unwrap_or_default()}</span>
 		</div>
 	}
 }
@@ -397,15 +397,15 @@ fn EditForm(
 					<label for="edit-rank">"Server Rank"</label>
 					<select
 						id="edit-rank"
-						prop:value=move || edit_rank.get().map(|r| r.to_string()).unwrap_or_default()
+						prop:value=move || edit_rank.get().unwrap_or_default()
 						on:change=move |ev| edit_rank.set(event_target_value(&ev).parse().ok())
 						required
 					>
-						<option value={ServerRank::Production.to_string()} selected=move || edit_rank.get() == Some(ServerRank::Production)>"Production"</option>
-						<option value={ServerRank::Clone.to_string()} selected=move || edit_rank.get() == Some(ServerRank::Clone)>"Clone"</option>
-						<option value={ServerRank::Demo.to_string()} selected=move || edit_rank.get() == Some(ServerRank::Demo)>"Demo"</option>
-						<option value={ServerRank::Test.to_string()} selected=move || edit_rank.get() == Some(ServerRank::Test)>"Test"</option>
-						<option value={ServerRank::Dev.to_string()} selected=move || edit_rank.get() == Some(ServerRank::Dev)>"Dev"</option>
+						<option value={ServerRank::Production} selected=move || edit_rank.get() == Some(ServerRank::Production)>{ServerRank::Production}</option>
+						<option value={ServerRank::Clone} selected=move || edit_rank.get() == Some(ServerRank::Clone)>{ServerRank::Clone}</option>
+						<option value={ServerRank::Demo} selected=move || edit_rank.get() == Some(ServerRank::Demo)>{ServerRank::Demo}</option>
+						<option value={ServerRank::Test} selected=move || edit_rank.get() == Some(ServerRank::Test)>{ServerRank::Test}</option>
+						<option value={ServerRank::Dev} selected=move || edit_rank.get() == Some(ServerRank::Dev)>{ServerRank::Dev}</option>
 					</select>
 				</div>
 
@@ -774,7 +774,7 @@ fn ChildServerCard(child: Arc<ChildServerData>, is_admin: Resource<bool>) -> imp
 						<div class:child-server-info>
 							<div class:info-item>
 								<span class="info-label">"Rank"</span>
-								<span class:info-value>{child.rank.map(|r| r.to_string()).unwrap_or_default()}</span>
+								<span class:info-value>{child.rank.unwrap_or_default()}</span>
 							</div>
 							<div class:info-item>
 								<span class="info-label">"Reported At"</span>
@@ -796,7 +796,7 @@ fn ChildServerCard(child: Arc<ChildServerData>, is_admin: Resource<bool>) -> imp
 								view! {
 									<div class:info-item class:version>
 										<span class="info-label">"Tamanu"</span>
-										<span class:info-value>{v.to_string()}</span>
+										<span class="info-value">{v}</span>
 									</div>
 								}
 							})}
@@ -924,9 +924,9 @@ fn AssignParentSection(server_id: Uuid) -> impl IntoView {
 																	<div class="search-result-info">
 																		<strong>{server.name.unwrap_or_else(|| "(unnamed)".to_string())}</strong>
 																		<span class="search-result-host">{server.host}</span>
-																		{server.rank.as_ref().map(|rank| {
+																		{server.rank.map(|rank| {
 																			view! {
-																				<span class="search-result-rank">{rank.to_string()}</span>
+																				<span class="search-result-rank">{rank}</span>
 																			}
 																		})}
 																	</div>

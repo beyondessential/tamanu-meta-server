@@ -1,0 +1,16 @@
+[package]
+publish = false
+name = "commons-macros"
+version = "5.7.4"
+edition = "2024"
+resolver = "3"
+license = "GPL-3.0-or-later"
+authors = [
+	"Félix Saparelli <felix@passcod.name>",
+	"BES Developers <contact@bes.au>",
+]
+
+[dependencies]
+tachys = "0.2.11"
+wasm-bindgen = { version = "0.2.106", default-features = false, features = [] }
+web-sys = { version = "0.3.83", default-features = false, features = [] }

@@ -194,6 +194,8 @@ impl AppError {
 	}
 }
 
+commons_macros::render_as_string!(AppError);
+
 impl Serialize for AppError {
 	fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
 	where

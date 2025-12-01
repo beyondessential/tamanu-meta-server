@@ -102,9 +102,7 @@ fn VersionInfo(detail: VersionDetail, is_admin: bool) -> impl IntoView {
 					view! {
 						<div class="info-item">
 							<span class="info-label">"Status"</span>
-							<span class="info-value">
-								{detail.status.to_string()}
-							</span>
+							<span class="info-value">{detail.status}</span>
 						</div>
 					}
 				})}
@@ -152,7 +150,7 @@ fn StatusSelection(detail: VersionDetail) -> impl IntoView {
 		<form class="status-form" on:submit=on_submit>
 			<select
 				class="status-select"
-				prop:value=move || selected_status.get().to_string()
+				prop:value=move || selected_status.get()
 				on:change=move |ev| {
 					let value = event_target_value(&ev);
 					let status = VersionStatus::from(value);

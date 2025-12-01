@@ -45,7 +45,7 @@ pub fn DeviceListItem(device: Arc<crate::fns::devices::DeviceInfo>) -> impl Into
 		<A href={format!("/devices/{device_id}")} {..} class="device-list-item">
 			<div class="device-list-id">
 				<span class="id-text">{device_id.to_string()}</span>
-				<span class="role-badge">{role.to_string()}</span>
+				<span class="role-badge">{role}</span>
 			</div>
 			<div class="device-list-ip">{latest_ip}</div>
 			<div class="device-list-ua">{latest_user_agent}</div>

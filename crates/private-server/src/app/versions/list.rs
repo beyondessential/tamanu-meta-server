@@ -89,7 +89,7 @@ pub fn MinorVersionGroupComponent(group: MinorVersionGroup) -> impl IntoView {
 							</div>
 							{(v.status != VersionStatus::Published).then(|| {
 								view! {
-									<div class="version-status">{v.status.to_string()}</div>
+									<div class="version-status">{v.status}</div>
 								}
 							})}
 							<div class="version-date">{v.created_at.clone()}</div>

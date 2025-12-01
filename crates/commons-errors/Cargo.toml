@@ -12,6 +12,7 @@ authors = [
 
 [dependencies]
 axum = { workspace = true, optional = true, features = ["json", "macros"] }
+commons-macros.path = "../commons-macros"
 diesel = { workspace = true, optional = true }
 diesel-async = { workspace = true, optional = true }
 http.workspace = true

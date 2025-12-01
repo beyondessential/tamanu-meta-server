@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
 	"crates/commons-errors",
+	"crates/commons-macros",
 	"crates/commons-servers",
 	"crates/commons-tests",
 	"crates/commons-types",

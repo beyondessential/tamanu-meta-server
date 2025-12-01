@@ -123,7 +123,7 @@ pub fn ServerCards() -> impl IntoView {
 							}.into_any()
 						}
 						Err(err) => {
-							view! { {err.to_string()} }.into_any()
+							view! { {err} }.into_any()
 						}
 					})
 				}}
@@ -144,7 +144,7 @@ pub fn RankSection(
 
 	view! {
 		<section>
-			<h2>{rank.to_string()}</h2>
+			<h2>{rank}</h2>
 			<div class="grid is-col-min-12 is-gap-2">
 				<For
 					each=move || server_ids.clone()
@@ -178,7 +178,7 @@ pub fn ServerCardLoader(server_id: Uuid, trigger: ReadSignal<i32>) -> impl IntoV
 						view! { <ServerCard server /> }.into_any()
 					}
 					Err(err) => {
-						view! { <div>{err.to_string()}</div> }.into_any()
+						view! { <div>{err}</div> }.into_any()
 					}
 				})
 			}
@@ -209,7 +209,7 @@ pub fn ServerCard(server: commons_types::server::cards::CentralServerCard) -> im
 		</div>
 		<div class="status-dots">
 			<span
-				class:status-dot class={server.up.to_string()}
+				class:status-dot class={server.up}
 				title={format!("{}: {}", server.name.clone(), server.up)}
 			></span>
 			<For
@@ -221,7 +221,7 @@ pub fn ServerCard(server: commons_types::server::cards::CentralServerCard) -> im
 				let:facility
 			>
 				<span
-					class:status-dot class:facility-dot class={facility.up.to_string()}
+					class:status-dot class:facility-dot class={facility.up}
 					title={format!("{}: {}", facility.name, facility.up)}
 				></span>
 			</For>

@@ -37,7 +37,7 @@ impl Display for ServerRank {
 	}
 }
 
-crate::macros::render_as_string!(ServerRank, minsize(3));
+commons_macros::render_as_string!(ServerRank, minsize(3));
 
 #[derive(Debug, Clone, Copy)]
 pub struct ServerRankFromStringError;
