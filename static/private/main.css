@@ -72,6 +72,8 @@
 
 :root {
 	--bulma-body-background-color: oklch(0.97 0.01 240);
+	--bulma-shadow: 0 0 1px 0; /* essentially just a border */
+	--bulma-radius-large: 0.3rem;
 }
 
 #global-nav {
@@ -86,7 +88,9 @@
 	}
 }
 
-.monospace {
+.monospace,
+.version,
+.version-text {
 	font-family:
 		"Fira Code", "SF Mono", Monaco, "Cascadia Code", "Roboto Mono",
 		Consolas, "Courier New", monospace;
@@ -110,139 +114,47 @@
 	}
 }
 
-.device-list-item {
-	display: flex;
-	gap: 1.5em;
-	padding: 1em 1.5em;
-	background: var(--color-bg-white);
-	border: 1px solid var(--color-border-light);
-	border-radius: 6px;
-	text-decoration: none;
-	color: inherit;
-	transition: all 0.2s;
-	align-items: center;
-
-	&:hover {
-		border-color: var(--color-primary);
-		box-shadow: 0 2px 6px var(--color-shadow);
-		transform: translateY(-1px);
-	}
-
-	&.vertical {
-		flex-direction: column;
-		align-items: flex-start;
-	}
-
-	&.hide-id {
-		.device-list-id {
-			display: none !important;
-		}
-	}
-
-	.device-list-times {
-		display: flex;
-		flex-direction: column;
-		gap: 0.25em;
-		font-size: 0.85em;
-		color: var(--color-text-muted);
-		flex: 0 0 auto;
-	}
-
-	.device-list-id {
-		display: flex;
-		align-items: center;
-		gap: 0.75em;
-		flex: 2;
-
-		.id-text {
-			font-family: monospace;
-			font-size: 0.95em;
-			color: var(--color-text-dark);
-			font-weight: 500;
-		}
-
-		.role-badge {
-			background: var(--color-primary-light);
-			color: var(--color-text-primary);
-			padding: 0.2em 0.6em;
-			border-radius: 10px;
-			font-size: 0.75em;
-			font-weight: 500;
-			text-transform: capitalize;
-		}
-	}
-
-	.device-list-ip {
-		font-family: monospace;
-		color: var(--color-text-muted);
-		font-size: 0.9em;
-		flex: 1;
-	}
-
-	.device-list-ua {
-		color: var(--color-text-light);
-		font-size: 0.85em;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-		flex: 2;
-	}
+.time-ago {
+	white-space: pre;
+	text-decoration: underline dotted;
 }
 
-.pagination {
-	display: flex;
-	justify-content: center;
-	align-items: center;
-	gap: 1.5em;
-	margin-top: 2em;
-	padding: 1em 0;
+.status-dot {
+	width: 1em;
+	height: 1em;
+	border-radius: 50%;
+	display: inline-block;
 
-	.pagination-btn {
-		padding: 0.6em 1.2em;
+	&.up {
+		background: var(--color-success-status);
+	}
+
+	&.down {
+		background: var(--color-error);
+	}
+
+	&.gone {
+		background: var(--color-status-gone);
+	}
+
+	&.away {
+		background: var(--color-warning);
+	}
+
+	&.blip {
 		background: var(--color-primary);
-		color: var(--color-bg-white);
-		border: none;
-		border-radius: 4px;
-		font-size: 0.9em;
-		font-weight: 500;
-		cursor: pointer;
-		transition: background-color 0.2s;
-
-		&:hover:not(:disabled) {
-			background: var(--color-primary-hover);
-		}
-
-		&:disabled {
-			background: var(--color-disabled);
-			cursor: not-allowed;
-			opacity: 0.5;
-		}
 	}
 
-	.pagination-info {
-		font-size: 0.9em;
-		color: var(--color-text-muted);
-		font-weight: 500;
-		min-width: 120px;
-		text-align: center;
-	}
-}
-
-.version-display {
-	display: flex;
-	align-items: center;
-	gap: 0.5em;
-
-	.version-text {
-		font-family: monospace, monospace;
+	&.facility-dot {
+		opacity: 0.5;
 	}
 }
 
 .version-indicator {
-	width: 0.6em;
-	height: 0.6em;
+	width: 1em;
+	height: 1em;
+	border-radius: 0.15rem;
 	display: inline-block;
-	flex-shrink: 0;
 
 	&.version-up-to-date {
 		background: var(--color-success-status);
@@ -265,77 +177,33 @@
 	}
 }
 
-.time-ago {
-	white-space: pre;
-	text-decoration: underline dotted;
-}
+.version-display {
+	display: flex;
+	align-items: end;
+	gap: 0.3em;
 
-@media (max-width: 768px) {
-	main {
-		padding: 1em;
-		margin: 0 1em 1em;
-	}
-
-	.device-list-item {
-		grid-template-columns: 1fr;
-		gap: 0.75em;
-		padding: 1em;
-
-		.device-list-id {
-			flex-wrap: wrap;
-		}
-
-		.device-list-ua {
-			white-space: normal;
-			word-break: break-word;
-		}
-
-		.device-list-times {
-			font-size: 0.8em;
-		}
-	}
-
-	.pagination {
-		flex-direction: column;
-		gap: 1em;
-
-		.pagination-btn {
-			width: 100%;
-		}
+	.version-text {
+		line-height: 0.9;
 	}
 }
 
-@media (max-width: 500px) {
-	main {
-		padding: 0.75em;
-		margin: 0 0.5em 1em;
+aside.legend {
+	margin-top: 2.5em;
+
+	p:not(:last-child) {
+		margin-bottom: 0.5em;
 	}
 
-	.device-list-item {
-		padding: 0.75em;
-		gap: 0.5em;
+	.legend-item {
+		white-space: pre;
 
-		.device-list-id {
-			.id-text {
-				font-size: 0.85em;
-				word-break: break-all;
-			}
-
-			.role-badge {
-				font-size: 0.7em;
-			}
+		&:not(:last-child) {
+			margin-right: 1em;
 		}
+	}
 
-		.device-list-ip {
-			font-size: 0.85em;
-		}
-
-		.device-list-ua {
-			font-size: 0.8em;
-		}
-
-		.device-list-times {
-			font-size: 0.75em;
-		}
+	.legend-label {
+		font-size: 0.85em;
+		vertical-align: top;
 	}
 }

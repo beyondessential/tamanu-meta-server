@@ -11,13 +11,13 @@ mod admins;
 mod devices;
 mod servers;
 mod status;
-mod statuses;
 mod versions;
 
 pub fn shell(options: LeptosOptions) -> impl IntoView {
+	// TODO: dark mode
 	view! {
 		<!DOCTYPE html>
-		<html lang="en" class="has-navbar-fixed-bottom">
+		<html lang="en" class="has-navbar-fixed-bottom" data-theme="light">
 			<head>
 				<meta charset="utf-8" />
 				<meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -51,7 +51,7 @@ pub fn App() -> impl IntoView {
 					<main class="container">
 						<Routes fallback=|| view! { <Redirect path="/status" /> }>
 							<Route path=path!("") view=|| view! { <Redirect path="/status" /> } />
-							<Route path=path!("status") view=statuses::Page />
+							<Route path=path!("status") view=status::Page />
 							<ParentRoute path=path!("servers") view=servers::Page>
 								<Route path=path!("") view=servers::Centrals />
 								<Route path=path!("facilities") view=servers::Facilities />

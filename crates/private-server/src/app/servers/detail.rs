@@ -234,10 +234,10 @@ fn ServerDetailView(
 				}
 			}}
 
-			<div class="legends-container">
+			<aside class="legend">
 				<VersionLegend />
 				<StatusLegend />
-			</div>
+			</aside>
 		</div>
 	}
 }

@@ -1,9 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use commons_errors::Result;
-use commons_types::{server::cards::CentralServerCard, version::VersionStr};
+use commons_types::{
+	server::{cards::CentralServerCard, rank::ServerRank},
+	version::VersionStr,
+};
 use leptos::server;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub struct LiveVersionsBracket {
@@ -43,23 +47,24 @@ pub async fn summary() -> Result<SummaryData> {
 	ssr::summary().await
 }
 
+pub type ServerGroupedIdsOutput = Result<BTreeMap<ServerRank, Vec<Uuid>>>;
 #[server]
-pub async fn server_grouped_ids() -> Result<BTreeMap<String, Vec<String>>> {
+pub async fn server_grouped_ids() -> ServerGroupedIdsOutput {
 	ssr::server_grouped_ids().await
 }
 
 #[server]
-pub async fn server_details(server_id: String) -> Result<CentralServerCard> {
+pub async fn server_details(server_id: Uuid) -> Result<CentralServerCard> {
 	ssr::server_details(server_id).await
 }
 
 #[cfg(feature = "ssr")]
 mod ssr {
 	use super::*;
-	use std::collections::{BTreeMap, BTreeSet, HashMap};
+	use std::collections::{BTreeSet, HashMap};
 
 	use axum::extract::State;
-	use commons_errors::{AppError, Result};
+	use commons_errors::Result;
 	use commons_types::{
 		server::{cards::FacilityServerStatus, kind::ServerKind},
 		version::VersionStr,
@@ -98,7 +103,7 @@ mod ssr {
 		})
 	}
 
-	pub async fn server_grouped_ids() -> Result<BTreeMap<String, Vec<String>>> {
+	pub async fn server_grouped_ids() -> ServerGroupedIdsOutput {
 		let state = expect_context::<AppState>();
 		let State(db): State<Db> = extract_with_state(&state).await?;
 		let mut conn = db.get().await?;
@@ -114,23 +119,21 @@ mod ssr {
 			.into_iter()
 			.map(|(rank, group)| {
 				(
-					rank.to_string(),
+					rank,
 					group
 						.sorted_by_key(|s| s.name.clone().unwrap())
-						.map(|s| s.id.to_string())
+						.map(|s| s.id)
 						.collect(),
 				)
 			})
 			.collect())
 	}
 
-	pub async fn server_details(server_id: String) -> Result<super::CentralServerCard> {
+	pub async fn server_details(id: Uuid) -> Result<super::CentralServerCard> {
 		let state = expect_context::<AppState>();
 		let State(db): State<Db> = extract_with_state(&state).await?;
 		let mut conn = db.get().await?;
-		let id = server_id
-			.parse::<Uuid>()
-			.map_err(|e| AppError::custom(format!("Invalid server ID: {}", e)))?;
+
 		let central = Server::get_by_id(&mut conn, id).await?;
 
 		let latest_version = Version::get_latest_matching(&mut conn, "*".parse()?)
