@@ -32,6 +32,8 @@ impl Display for VersionStatus {
 	}
 }
 
+crate::macros::render_as_string!(VersionStatus, minsize(5));
+
 impl Default for VersionStatus {
 	fn default() -> Self {
 		Self::Draft

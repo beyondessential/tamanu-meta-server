@@ -622,40 +622,36 @@ mod ssr {
 		}
 
 		crate::fns::devices::DeviceInfo {
-			device: crate::fns::devices::DeviceData {
+			device: Arc::new(crate::fns::devices::DeviceData {
 				id: device_with_info.device.id,
 				created_at: device_with_info.device.created_at.to_rfc3339(),
 				created_at_relative: format_relative_time(device_with_info.device.created_at),
 				updated_at: device_with_info.device.updated_at.to_rfc3339(),
 				updated_at_relative: format_relative_time(device_with_info.device.updated_at),
 				role: device_with_info.device.role,
-			},
+			}),
 			keys: device_with_info
 				.keys
 				.into_iter()
 				.map(|key| {
-					let pem_data = format_key_as_pem(&key.key_data);
-					let hex_data = format_key_as_hex(&key.key_data);
-
-					crate::fns::devices::DeviceKeyInfo {
+					Arc::new(crate::fns::devices::DeviceKeyInfo {
 						id: key.id,
 						device_id: key.device_id,
 						name: key.name,
-						pem_data,
-						hex_data,
+						pem_data: format_key_as_pem(&key.key_data),
 						created_at: key.created_at.to_rfc3339(),
-					}
+					})
 				})
 				.collect(),
 			latest_connection: device_with_info.latest_connection.map(|conn| {
-				crate::fns::devices::DeviceConnectionData {
+				Arc::new(crate::fns::devices::DeviceConnectionData {
 					id: conn.id,
 					created_at: conn.created_at.to_rfc3339(),
 					created_at_relative: format_relative_time(conn.created_at),
 					device_id: conn.device_id,
 					ip: conn.ip.addr().to_string(),
 					user_agent: conn.user_agent,
-				}
+				})
 			}),
 		}
 	}

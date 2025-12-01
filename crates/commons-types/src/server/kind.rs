@@ -31,6 +31,8 @@ impl Display for ServerKind {
 	}
 }
 
+crate::macros::render_as_string!(ServerKind, minsize(4));
+
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("invalid server kind: {0}")]
 pub struct ServerKindFromStringError(String);

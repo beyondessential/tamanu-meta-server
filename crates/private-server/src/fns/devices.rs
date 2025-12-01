@@ -20,9 +20,9 @@ pub struct ServerInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceInfo {
-	pub device: DeviceData,
-	pub keys: Vec<DeviceKeyInfo>,
-	pub latest_connection: Option<DeviceConnectionData>,
+	pub device: Arc<DeviceData>,
+	pub keys: Vec<Arc<DeviceKeyInfo>>,
+	pub latest_connection: Option<Arc<DeviceConnectionData>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,7 +41,6 @@ pub struct DeviceKeyInfo {
 	pub device_id: Uuid,
 	pub name: Option<String>,
 	pub pem_data: String,
-	pub hex_data: String,
 	pub created_at: String,
 }
 
@@ -146,37 +145,35 @@ mod ssr {
 	impl From<DeviceWithInfo> for DeviceInfo {
 		fn from(device_with_info: DeviceWithInfo) -> Self {
 			Self {
-				device: DeviceData {
+				device: Arc::new(DeviceData {
 					id: device_with_info.device.id,
 					created_at: device_with_info.device.created_at.to_rfc3339(),
 					created_at_relative: format_relative_time(device_with_info.device.created_at),
 					updated_at: device_with_info.device.updated_at.to_rfc3339(),
 					updated_at_relative: format_relative_time(device_with_info.device.updated_at),
 					role: device_with_info.device.role,
-				},
+				}),
 				keys: device_with_info
 					.keys
 					.into_iter()
 					.map(DeviceKeyInfo::from)
+					.map(Arc::new)
 					.collect(),
 				latest_connection: device_with_info
 					.latest_connection
-					.map(DeviceConnectionData::from),
+					.map(DeviceConnectionData::from)
+					.map(Arc::new),
 			}
 		}
 	}
 
 	impl From<DeviceKey> for DeviceKeyInfo {
 		fn from(key: DeviceKey) -> Self {
-			let pem_data = format_key_as_pem(&key.key_data);
-			let hex_data = format_key_as_hex(&key.key_data);
-
 			Self {
 				id: key.id,
 				device_id: key.device_id,
 				name: key.name,
-				pem_data,
-				hex_data,
+				pem_data: format_key_as_pem(&key.key_data),
 				created_at: key.created_at.to_rfc3339(),
 			}
 		}
@@ -211,17 +208,6 @@ mod ssr {
 
 		pem.push_str("-----END PUBLIC KEY-----");
 		pem
-	}
-
-	fn format_key_as_hex(key_data: &[u8]) -> String {
-		hex::encode(key_data)
-			.chars()
-			.collect::<Vec<_>>()
-			.chunks(2)
-			.map(|chunk| chunk.iter().collect::<String>())
-			.collect::<Vec<_>>()
-			.join(":")
-			.to_uppercase()
 	}
 
 	pub async fn get_device_by_id(device_id: Uuid) -> Result<DeviceInfo> {

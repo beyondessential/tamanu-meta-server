@@ -24,3 +24,5 @@ impl Display for ShortStatus {
 		}
 	}
 }
+
+crate::macros::render_as_string!(ShortStatus, minsize(2));
