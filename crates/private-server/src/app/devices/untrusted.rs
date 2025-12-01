@@ -1,6 +1,6 @@
 use leptos::prelude::*;
 
-use super::DeviceList;
+use super::list::DeviceList;
 use crate::components::PaginatedList;
 
 #[component]

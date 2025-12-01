@@ -4,131 +4,8 @@ use leptos_meta::Title;
 use leptos_router::hooks::use_params_map;
 use web_sys::window;
 
+use super::history::DeviceConnectionHistory;
 use crate::components::ToastCtx;
-
-#[component]
-fn KeyItem(
-	key_id: Uuid,
-	_device_id: Uuid,
-	name: Option<String>,
-	pem_data: String,
-	hex_data: String,
-	#[prop(into)] key_format: Signal<String>,
-	on_update: impl Fn() + 'static + Copy,
-) -> impl IntoView {
-	let ToastCtx(set_message) = use_context().unwrap();
-	let (editing, set_editing) = signal(false);
-	let (new_name, set_new_name) = signal(name.clone().unwrap_or_default());
-
-	let update_key_name_action = Action::new(move |(key_id, name): &(Uuid, Option<String>)| {
-		let key_id = *key_id;
-		let name = name.clone();
-		async move { crate::fns::devices::update_key_name(key_id, name).await }
-	});
-
-	Effect::new(move |_| {
-		if let Some(result) = update_key_name_action.value().get() {
-			match result {
-				Ok(_) => {
-					set_message.set(Some("Key name updated successfully".to_string()));
-					set_editing.set(false);
-					on_update();
-					set_timeout(
-						move || set_message.set(None),
-						std::time::Duration::from_millis(3000),
-					);
-				}
-				Err(e) => {
-					set_message.set(Some(format!("Error updating key name: {}", e)));
-				}
-			}
-		}
-	});
-
-	let original_name = name.clone();
-
-	view! {
-		<div class="key-item">
-			{move || {
-				let editing_val = editing.get();
-				let name_display = name.clone();
-				let original_name_for_cancel = original_name.clone();
-
-				if editing_val {
-					view! {
-						<div class="key-name-edit">
-							<input
-								type="text"
-								class="key-name-input"
-								prop:value=move || new_name.get()
-								on:input=move |ev| set_new_name.set(event_target_value(&ev))
-								placeholder="Key name (optional)"
-							/>
-							<button
-								class="key-name-save-btn"
-								on:click=move |_| {
-									let name_value = new_name.get().trim().to_string();
-									let name_to_save = if name_value.is_empty() {
-										None
-									} else {
-										Some(name_value)
-									};
-									update_key_name_action.dispatch((key_id, name_to_save));
-								}
-								disabled=move || update_key_name_action.pending().get()
-							>
-								{move || if update_key_name_action.pending().get() { "Saving..." } else { "Save" }}
-							</button>
-							<button
-								class="key-name-cancel-btn"
-								on:click=move |_| {
-									set_new_name.set(original_name_for_cancel.clone().unwrap_or_default());
-									set_editing.set(false);
-								}
-							>
-								"Cancel"
-							</button>
-						</div>
-					}.into_any()
-				} else {
-					view! {
-						<div class="key-name-display">
-							{name_display.as_ref().map(|n| {
-								view! {
-									<div class="key-name">{n.clone()}</div>
-								}.into_any()
-							}).unwrap_or_else(|| {
-								view! {
-									<div class="key-name key-name-empty">"Unnamed key"</div>
-								}.into_any()
-							})}
-							<button
-								class="key-name-edit-btn"
-								on:click=move |_| set_editing.set(true)
-								title="Edit key name"
-							>
-								"✏️"
-							</button>
-						</div>
-					}.into_any()
-				}
-			}}
-			<div class="key-data">
-				{move || {
-					if key_format.get() == "pem" {
-						view! {
-							<pre class="key-pem">{pem_data.clone()}</pre>
-						}.into_any()
-					} else {
-						view! {
-							<code class="key-hex">{hex_data.clone()}</code>
-						}.into_any()
-					}
-				}}
-			</div>
-		</div>
-	}
-}
 
 #[component]
 pub fn Detail() -> impl IntoView {
@@ -464,7 +341,7 @@ pub fn Detail() -> impl IntoView {
 										{move || {
 											if show_history.get() {
 												view! {
-													<super::DeviceConnectionHistory device_id />
+													<DeviceConnectionHistory device_id />
 												}.into_any()
 											} else {
 												().into_any()
@@ -472,7 +349,7 @@ pub fn Detail() -> impl IntoView {
 										}}
 									</div>
 
-									<super::AssociatedServers device_id device_role />
+									<AssociatedServers device_id device_role />
 								}.into_any()
 							}
 							Err(e) => {
@@ -489,5 +366,203 @@ pub fn Detail() -> impl IntoView {
 				}}
 			</Suspense>
 		</div>
+	}
+}
+
+#[component]
+fn KeyItem(
+	key_id: Uuid,
+	_device_id: Uuid,
+	name: Option<String>,
+	pem_data: String,
+	hex_data: String,
+	#[prop(into)] key_format: Signal<String>,
+	on_update: impl Fn() + 'static + Copy,
+) -> impl IntoView {
+	let ToastCtx(set_message) = use_context().unwrap();
+	let (editing, set_editing) = signal(false);
+	let (new_name, set_new_name) = signal(name.clone().unwrap_or_default());
+
+	let update_key_name_action = Action::new(move |(key_id, name): &(Uuid, Option<String>)| {
+		let key_id = *key_id;
+		let name = name.clone();
+		async move { crate::fns::devices::update_key_name(key_id, name).await }
+	});
+
+	Effect::new(move |_| {
+		if let Some(result) = update_key_name_action.value().get() {
+			match result {
+				Ok(_) => {
+					set_message.set(Some("Key name updated successfully".to_string()));
+					set_editing.set(false);
+					on_update();
+					set_timeout(
+						move || set_message.set(None),
+						std::time::Duration::from_millis(3000),
+					);
+				}
+				Err(e) => {
+					set_message.set(Some(format!("Error updating key name: {}", e)));
+				}
+			}
+		}
+	});
+
+	let original_name = name.clone();
+
+	view! {
+		<div class="key-item">
+			{move || {
+				let editing_val = editing.get();
+				let name_display = name.clone();
+				let original_name_for_cancel = original_name.clone();
+
+				if editing_val {
+					view! {
+						<div class="key-name-edit">
+							<input
+								type="text"
+								class="key-name-input"
+								prop:value=move || new_name.get()
+								on:input=move |ev| set_new_name.set(event_target_value(&ev))
+								placeholder="Key name (optional)"
+							/>
+							<button
+								class="key-name-save-btn"
+								on:click=move |_| {
+									let name_value = new_name.get().trim().to_string();
+									let name_to_save = if name_value.is_empty() {
+										None
+									} else {
+										Some(name_value)
+									};
+									update_key_name_action.dispatch((key_id, name_to_save));
+								}
+								disabled=move || update_key_name_action.pending().get()
+							>
+								{move || if update_key_name_action.pending().get() { "Saving..." } else { "Save" }}
+							</button>
+							<button
+								class="key-name-cancel-btn"
+								on:click=move |_| {
+									set_new_name.set(original_name_for_cancel.clone().unwrap_or_default());
+									set_editing.set(false);
+								}
+							>
+								"Cancel"
+							</button>
+						</div>
+					}.into_any()
+				} else {
+					view! {
+						<div class="key-name-display">
+							{name_display.as_ref().map(|n| {
+								view! {
+									<div class="key-name">{n.clone()}</div>
+								}.into_any()
+							}).unwrap_or_else(|| {
+								view! {
+									<div class="key-name key-name-empty">"Unnamed key"</div>
+								}.into_any()
+							})}
+							<button
+								class="key-name-edit-btn"
+								on:click=move |_| set_editing.set(true)
+								title="Edit key name"
+							>
+								"✏️"
+							</button>
+						</div>
+					}.into_any()
+				}
+			}}
+			<div class="key-data">
+				{move || {
+					if key_format.get() == "pem" {
+						view! {
+							<pre class="key-pem">{pem_data.clone()}</pre>
+						}.into_any()
+					} else {
+						view! {
+							<code class="key-hex">{hex_data.clone()}</code>
+						}.into_any()
+					}
+				}}
+			</div>
+		</div>
+	}
+}
+
+#[component]
+fn AssociatedServers(device_id: Uuid, device_role: DeviceRole) -> impl IntoView {
+	let servers_resource = Resource::new(
+		move || device_id,
+		async |id| crate::fns::devices::get_servers_for_device(id).await,
+	);
+
+	view! {
+		{move || {
+			if device_role != DeviceRole::Untrusted {
+				view! {
+					<div class="device-servers">
+						<div class="servers-header">
+							<h3>"Associated Servers"</h3>
+							<button
+								class="refresh-servers-btn"
+								on:click=move |_| servers_resource.refetch()
+								title="Refresh servers list"
+							>
+								"Refresh"
+							</button>
+						</div>
+						<Suspense fallback=|| view! { <div class="loading">"Loading servers..."</div> }>
+							{move || {
+								servers_resource.get().map(|result| {
+									match result {
+										Ok(servers) => {
+											if servers.is_empty() {
+												view! {
+													<div class="no-servers">"No servers are associated with this device"</div>
+												}.into_any()
+											} else {
+												view! {
+													<div class="servers-list">
+														<For each=move || servers.clone() key=|server| server.id.clone() let:server>
+															<div class="server-item">
+																<div class="server-header">
+																	<a href={format!("/servers/{}", server.id)} class="server-name">
+																		{server.name.clone().unwrap_or_else(|| "Unnamed Server".to_string())}
+																	</a>
+																	<span class="server-kind">{server.kind.to_string()}</span>
+																</div>
+																<div class="server-details">
+																	<span class="server-host">{server.host.clone()}</span>
+																	{server.rank.as_ref().map(|rank| {
+																		view! {
+																			<span class="server-rank">{rank.to_string()}</span>
+																		}
+																	})}
+																</div>
+															</div>
+														</For>
+													</div>
+												}.into_any()
+											}
+										}
+										Err(e) => {
+											view! {
+												<div class="error">{format!("Error loading servers: {}", e)}</div>
+											}.into_any()
+										}
+									}
+								})
+							}}
+						</Suspense>
+					</div>
+				}.into_any()
+			} else {
+				().into_any()
+			}
+		}}
 	}
 }

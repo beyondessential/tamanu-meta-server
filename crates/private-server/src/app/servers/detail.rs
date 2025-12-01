@@ -5,19 +5,21 @@ use commons_types::{
 	geo::GeoPoint,
 	server::{kind::ServerKind, rank::ServerRank},
 };
-use leptos::prelude::*;
-use leptos::serde_json;
+use leptos::{prelude::*, serde_json};
 use leptos_meta::Stylesheet;
-use leptos_router::components::A;
-use leptos_router::components::Redirect;
-use leptos_router::hooks::use_params_map;
-
-use crate::components::{StatusLegend, TimeAgo, VersionIndicator, VersionLegend};
-use crate::fns::servers::{
-	ChildServerData, ServerDetailData, ServerLastStatusData, assign_parent_server,
-	search_central_servers, server_detail, update_server,
+use leptos_router::{
+	components::{A, Redirect},
+	hooks::use_params_map,
 };
-use crate::{app::devices::DeviceListItem, fns::servers::ServerDetailsData};
+
+use crate::{
+	app::devices::list::DeviceListItem,
+	components::{StatusLegend, TimeAgo, VersionIndicator, VersionLegend},
+	fns::servers::{
+		ChildServerData, ServerDetailData, ServerDetailsData, ServerLastStatusData,
+		assign_parent_server, search_central_servers, server_detail, update_server,
+	},
+};
 
 fn is_admin_resource() -> Resource<bool> {
 	Resource::new(
