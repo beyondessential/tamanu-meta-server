@@ -82,49 +82,38 @@ pub fn Page() -> impl IntoView {
 
 	view! {
 		<Stylesheet id="css-devices" href="/static/devices.css" />
+		<section class="section" id="devices-page">
 		<Suspense fallback=|| view! { <div class="loading">"Checking permissions..."</div> }>
 			{move || {
 				is_admin.get().map(|result| {
 					match result {
 						Ok(true) => {
 							view! {
-								<div id="devices-page">
-									<div class="page-header">
-										<h1>"Device Management"</h1>
-										<p class="page-description">
-											"Manage device approvals and trust levels."
-										</p>
-									</div>
-									<SubTabs>
-										<A href="" exact=true>Search</A>
-										<A href="untrusted">Untrusted Devices</A>
-										<A href="trusted">Trusted Devices</A>
-									</SubTabs>
-								</div>
+								<SubTabs>
+									<A href="" exact=true>Search</A>
+									<A href="untrusted">Untrusted Devices</A>
+									<A href="trusted">Trusted Devices</A>
+								</SubTabs>
 							}.into_any()
 						}
 						Ok(false) => {
 							view! {
-								<div id="devices-page">
-									<div class="page-header">
-										<h1>"Access Denied"</h1>
-									</div>
-									<div class="error">
-										<p>"You do not have permission to access device management."</p>
-										<a href="/" class="back-link">"← Return to Home"</a>
-									</div>
+								<div class="page-header">
+									<h1>"Access Denied"</h1>
+								</div>
+								<div class="error">
+									<p>"You do not have permission to access device management."</p>
+									<a href="/" class="back-link">"← Return to Home"</a>
 								</div>
 							}.into_any()
 						}
 						Err(e) => {
 							view! {
-								<div id="devices-page">
-									<div class="page-header">
-										<h1>"Error"</h1>
-									</div>
-									<div class="error">
-										{format!("Error checking permissions: {}", e)}
-									</div>
+								<div class="page-header">
+									<h1>"Error"</h1>
+								</div>
+								<div class="error">
+									{format!("Error checking permissions: {}", e)}
 								</div>
 							}.into_any()
 						}
@@ -132,6 +121,7 @@ pub fn Page() -> impl IntoView {
 				})
 			}}
 		</Suspense>
+		</section>
 	}
 }
 

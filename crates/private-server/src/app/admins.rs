@@ -11,39 +11,34 @@ pub fn Page() -> impl IntoView {
 
 	view! {
 		<Stylesheet id="css-admin" href="/static/admin.css" />
+		<section class="section" id="admin-page">
 		<Suspense fallback=|| view! { <div class="loading">"Checking permissions..."</div> }>
 			{move || {
 				is_admin.get().map(|result| {
 					match result {
 						Ok(true) => {
 							view! {
-								<div id="admin-page">
-									<AdminManagement />
-								</div>
+								<AdminManagement />
 							}.into_any()
 						}
 						Ok(false) => {
 							view! {
-								<div id="admin-page">
-									<div class="page-header">
-										<h1>"Access Denied"</h1>
-									</div>
-									<div class="error">
-										<p>"You do not have permission to access the admin panel."</p>
-										<a href="/" class="back-link">"← Return to Home"</a>
-									</div>
+								<div class="page-header">
+									<h1>"Access Denied"</h1>
+								</div>
+								<div class="error">
+									<p>"You do not have permission to access the admin panel."</p>
+									<a href="/" class="back-link">"← Return to Home"</a>
 								</div>
 							}.into_any()
 						}
 						Err(e) => {
 							view! {
-								<div id="admin-page">
-									<div class="page-header">
-										<h1>"Error"</h1>
-									</div>
-									<div class="error">
-										{format!("Error checking permissions: {}", e)}
-									</div>
+								<div class="page-header">
+									<h1>"Error"</h1>
+								</div>
+								<div class="error">
+									{format!("Error checking permissions: {}", e)}
 								</div>
 							}.into_any()
 						}
@@ -51,6 +46,7 @@ pub fn Page() -> impl IntoView {
 				})
 			}}
 		</Suspense>
+		</section>
 	}
 }
 

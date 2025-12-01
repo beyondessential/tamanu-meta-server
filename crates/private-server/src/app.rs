@@ -17,7 +17,7 @@ mod versions;
 pub fn shell(options: LeptosOptions) -> impl IntoView {
 	view! {
 		<!DOCTYPE html>
-		<html lang="en">
+		<html lang="en" class="has-navbar-fixed-bottom">
 			<head>
 				<meta charset="utf-8" />
 				<meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -48,7 +48,7 @@ pub fn App() -> impl IntoView {
 			<Router>
 				<GlobalNav />
 				<Toast>
-					<main>
+					<main class="container">
 						<Routes fallback=|| view! { <Redirect path="/status" /> }>
 							<Route path=path!("") view=|| view! { <Redirect path="/status" /> } />
 							<Route path=path!("status") view=statuses::Page />
@@ -91,78 +91,89 @@ pub fn GlobalNav() -> impl IntoView {
 	);
 
 	view! {
-		<nav id="global-nav">
-			<div class="nav-brand">
-				<A href="/status">
+		<nav id="global-nav" class="navbar" role="navigation" aria-label="main navigation">
+			<div class="navbar-brand">
+				<A href="/status" {..} class="navbar-item">
 					<img src="/static/images/tamanu_logo.svg" alt="Tamanu Logo" class="logo" />
 				</A>
+				<a class="navbar-burger" role="button" aria-label="menu" aria-expanded="false">
+				  <span aria-hidden="true"></span>
+				  <span aria-hidden="true"></span>
+				  <span aria-hidden="true"></span>
+				  <span aria-hidden="true"></span>
+				</a>
 			</div>
-			<div class="nav-links">
-				<A href="/status">"Status"</A>
-				<A href="/servers">"Servers"</A>
-				<A href="/versions">"Versions"</A>
-				<Suspense>
-					{move || {
-						is_admin
-							.get()
-							.and_then(|result| {
-								if result.unwrap_or(false) {
-									Some(
-										view! {
-											<A href="/admins">"Admins"</A>
-											<A href="/devices">"Devices"</A>
-										},
-									)
-								} else {
-									None
-								}
-							})
-					}}
-				</Suspense>
-				<Suspense>
-					{move || {
-						public_url
-							.get()
-							.and_then(|result| {
-								if let Ok(Some(url)) = result {
-									Some(
-										view! {
-											<a href=url target="_blank">
-												"Public"
-											</a>
-										},
-									)
-								} else {
-									None
-								}
-							})
-					}}
-				</Suspense>
-				<Suspense>
-					{move || {
-						server_versions_url
-							.get()
-							.and_then(|result| {
-								if let Ok(Some(url)) = result {
-									Some(
-										view! {
-											<a
-												href=url
-												target="_blank"
-												style="font-size: 0.7em; text-align: center; padding: 0.25em 1em;"
-											>
-												"Server"
-												<br />
-												"Versions"
-											</a>
-										},
-									)
-								} else {
-									None
-								}
-							})
-					}}
-				</Suspense>
+			<div class="navbar-menu">
+				<div class="navbar-start">
+					<A href="/status" {..} class="navbar-item">"Status"</A>
+					<A href="/servers" {..} class="navbar-item">"Servers"</A>
+					<A href="/versions" {..} class="navbar-item">"Versions"</A>
+					<Suspense>
+						{move || {
+							is_admin
+								.get()
+								.and_then(|result| {
+									if result.unwrap_or(false) {
+										Some(
+											view! {
+												<A href="/admins" {..} class="navbar-item">"Admins"</A>
+												<A href="/devices" {..} class="navbar-item">"Devices"</A>
+											},
+										)
+									} else {
+										None
+									}
+								})
+						}}
+					</Suspense>
+				</div>
+				<div class="navbar-end">
+					<Suspense>
+						{move || {
+							public_url
+								.get()
+								.and_then(|result| {
+									if let Ok(Some(url)) = result {
+										Some(
+											view! {
+												<a class="navbar-item" href=url target="_blank">
+													"Public"
+												</a>
+											},
+										)
+									} else {
+										None
+									}
+								})
+						}}
+					</Suspense>
+					<Suspense>
+						{move || {
+							server_versions_url
+								.get()
+								.and_then(|result| {
+									if let Ok(Some(url)) = result {
+										Some(
+											view! {
+												<a
+													class="navbar-item"
+													href=url
+													target="_blank"
+													style="font-size: 0.7em; text-align: center; padding: 0.25em 1em;"
+												>
+													"Server"
+													<br />
+													"Versions"
+												</a>
+											},
+										)
+									} else {
+										None
+									}
+								})
+						}}
+					</Suspense>
+				</div>
 			</div>
 		</nav>
 	}

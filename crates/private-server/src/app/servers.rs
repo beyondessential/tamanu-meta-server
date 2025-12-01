@@ -20,17 +20,11 @@ pub fn Page() -> impl IntoView {
 
 	view! {
 		<Stylesheet id="css-servers" href="/static/servers.css" />
-		<div id="servers-page">
-			<div class="page-header">
-				<h1>"Servers"</h1>
-				<p class="page-description">
-					"Manage central and facility servers."
-				</p>
-			</div>
+		<section class="section" id="servers-page">
 			<SubTabs>
 				<A href="" exact=true>Central Servers</A>
 				<A href="facilities">Facility Servers</A>
 			</SubTabs>
-		</div>
+		</section>
 	}
 }

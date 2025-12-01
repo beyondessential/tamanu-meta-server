@@ -8,6 +8,10 @@ export LEPTOS_OUTPUT_NAME := "private-server"
 export SERVER_FN_MOD_PATH := "true"
 export DISABLE_SERVER_FN_HASH := "true"
 
+# ...for development
+export SERVER_VERSIONS_SECRET := "test"
+export PUBLIC_URL := "http://localhost:8081"
+
 # Show available commands
 default:
     @just --list
@@ -22,7 +26,7 @@ build-image:
 
 # Run the public server and reload on change
 watch-public: _copy-bulma
-	watchexec -w crates -E SERVER_VERSIONS_SECRET=test -- cargo run --bin public-server
+	watchexec -w crates -- cargo run --bin public-server
 
 # Run the private server with live reload
 watch-private: _copy-bulma

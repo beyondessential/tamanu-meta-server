@@ -11,7 +11,7 @@ use crate::{
 pub fn Page() -> impl IntoView {
 	view! {
 		<Stylesheet id="css-status" href="/static/status.css" />
-		<div id="status-page">
+		<section class="section" id="status-page">
 			<div class="page-header">
 				<div class="header-info">
 					<Status/>
@@ -22,7 +22,7 @@ pub fn Page() -> impl IntoView {
 				<VersionLegend />
 				<StatusLegend />
 			</div>
-		</div>
+		</section>
 	}
 }
 

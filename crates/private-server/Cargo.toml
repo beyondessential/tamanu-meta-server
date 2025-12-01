@@ -36,7 +36,7 @@ leptos_meta = "0.8.0"
 leptos_router = { version = "0.8.8", features = ["tracing"] }
 lloggs = { workspace = true, optional = true, features = ["miette-7"] }
 pulldown-cmark.workspace = true
-miette = { workspace = true, optional = true }
+miette = { workspace = true, optional = true, features = ["fancy"] }
 public-server = { path = "../public-server", optional = true, default-features = false }
 reqwest = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"] }
