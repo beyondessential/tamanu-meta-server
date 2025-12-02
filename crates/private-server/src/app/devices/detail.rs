@@ -31,7 +31,6 @@ pub fn Detail() -> impl IntoView {
 	);
 
 	view! {
-		<Title text=move || format!("Tamanu Meta Device {}", device_id().map(|id| id.to_string()).unwrap_or_default()) />
 		<div class="section device-detail">
 			<Suspense fallback=|| view! { <div class="loading">"Loading device..."</div> }>
 				{move || {

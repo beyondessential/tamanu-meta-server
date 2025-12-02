@@ -26,6 +26,26 @@ pub struct DeviceInfo {
 	pub latest_connection: Option<Arc<DeviceConnectionData>>,
 }
 
+impl DeviceInfo {
+	pub fn name(&self) -> String {
+		self.keys
+			.iter()
+			.filter_map(|key| {
+				key.name
+					.as_ref()
+					.filter(|name| *name != "Initial Key")
+					.cloned()
+			})
+			.last()
+			.or_else(|| {
+				self.latest_connection
+					.as_ref()
+					.map(|conn| conn.ip.to_string())
+			})
+			.unwrap_or_else(|| self.device.id.to_string())
+	}
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceData {
 	pub id: Uuid,
@@ -55,6 +75,11 @@ pub struct DeviceConnectionData {
 #[server]
 pub async fn get_device_by_id(device_id: Uuid) -> Result<DeviceInfo> {
 	ssr::get_device_by_id(device_id).await
+}
+
+#[server]
+pub async fn get_device_name_by_id(device_id: Uuid) -> Result<String> {
+	ssr::get_device_by_id(device_id).await.map(|d| d.name())
 }
 
 #[server]
