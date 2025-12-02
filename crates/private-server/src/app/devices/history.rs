@@ -155,10 +155,8 @@ pub struct ConnectionGroup {
 	ip: String,
 	user_agent: Option<String>,
 	count: usize,
-	earliest_time: String,
-	latest_time: String,
-	earliest_relative: String,
-	latest_relative: String,
+	earliest_time: jiff::Timestamp,
+	latest_time: jiff::Timestamp,
 }
 
 fn group_consecutive_connections(connections: Vec<DeviceConnectionData>) -> Vec<ConnectionGroup> {
@@ -190,17 +188,15 @@ fn group_consecutive_connections(connections: Vec<DeviceConnectionData>) -> Vec<
 
 fn create_group(connections: Vec<DeviceConnectionData>) -> ConnectionGroup {
 	let count = connections.len();
-	let first = &connections[0];
+	let first = connections.first().unwrap();
 	let last = connections.last().unwrap();
 
 	ConnectionGroup {
 		ip: first.ip.clone(),
 		user_agent: first.user_agent.clone(),
 		count,
-		earliest_time: last.created_at.clone(),
-		latest_time: first.created_at.clone(),
-		earliest_relative: last.created_at_relative.clone(),
-		latest_relative: first.created_at_relative.clone(),
+		earliest_time: last.created_at,
+		latest_time: first.created_at,
 	}
 }
 
@@ -212,12 +208,10 @@ mod tests {
 		ip: &str,
 		user_agent: Option<&str>,
 		time: &str,
-		relative: &str,
 	) -> crate::fns::devices::DeviceConnectionData {
 		crate::fns::devices::DeviceConnectionData {
 			id: uuid::Uuid::new_v4(),
-			created_at: time.to_string(),
-			created_at_relative: relative.to_string(),
+			created_at: time.parse().unwrap(),
 			device_id: uuid::Uuid::new_v4(),
 			ip: ip.to_string(),
 			user_agent: user_agent.map(|s| s.to_string()),
@@ -227,24 +221,9 @@ mod tests {
 	#[test]
 	fn test_group_consecutive_connections() {
 		let connections = vec![
-			create_test_connection(
-				"192.168.1.1",
-				Some("Agent1"),
-				"2024-01-01T12:00:00Z",
-				"1h ago",
-			),
-			create_test_connection(
-				"192.168.1.1",
-				Some("Agent1"),
-				"2024-01-01T11:00:00Z",
-				"2h ago",
-			),
-			create_test_connection(
-				"192.168.1.2",
-				Some("Agent2"),
-				"2024-01-01T10:00:00Z",
-				"3h ago",
-			),
+			create_test_connection("192.168.1.1", Some("Agent1"), "2024-01-01T12:00:00Z"),
+			create_test_connection("192.168.1.1", Some("Agent1"), "2024-01-01T11:00:00Z"),
+			create_test_connection("192.168.1.2", Some("Agent2"), "2024-01-01T10:00:00Z"),
 		];
 
 		let groups = group_consecutive_connections(connections);
@@ -259,18 +238,8 @@ mod tests {
 	#[test]
 	fn test_group_different_user_agents() {
 		let connections = vec![
-			create_test_connection(
-				"192.168.1.1",
-				Some("Agent1"),
-				"2024-01-01T12:00:00Z",
-				"1h ago",
-			),
-			create_test_connection(
-				"192.168.1.1",
-				Some("Agent2"),
-				"2024-01-01T11:00:00Z",
-				"2h ago",
-			),
+			create_test_connection("192.168.1.1", Some("Agent1"), "2024-01-01T12:00:00Z"),
+			create_test_connection("192.168.1.1", Some("Agent2"), "2024-01-01T11:00:00Z"),
 		];
 
 		let groups = group_consecutive_connections(connections);
@@ -286,18 +255,8 @@ mod tests {
 	#[test]
 	fn test_hashmap_deduplication() {
 		let mut map = HashMap::new();
-		let conn1 = create_test_connection(
-			"192.168.1.1",
-			Some("Agent1"),
-			"2024-01-01T12:00:00Z",
-			"1h ago",
-		);
-		let conn2 = create_test_connection(
-			"192.168.1.1",
-			Some("Agent1"),
-			"2024-01-01T11:00:00Z",
-			"2h ago",
-		);
+		let conn1 = create_test_connection("192.168.1.1", Some("Agent1"), "2024-01-01T12:00:00Z");
+		let conn2 = create_test_connection("192.168.1.1", Some("Agent1"), "2024-01-01T11:00:00Z");
 
 		let id1 = conn1.id.clone();
 		let id2 = conn2.id.clone();
@@ -307,12 +266,8 @@ mod tests {
 
 		assert_eq!(map.len(), 2);
 
-		let duplicate = create_test_connection(
-			"192.168.1.1",
-			Some("Agent1"),
-			"2024-01-01T12:00:00Z",
-			"1h ago",
-		);
+		let duplicate =
+			create_test_connection("192.168.1.1", Some("Agent1"), "2024-01-01T12:00:00Z");
 		map.insert(id1.clone(), duplicate);
 
 		assert_eq!(map.len(), 2);
