@@ -69,7 +69,7 @@ where
 						Ok(devices) => {
 							if devices.is_empty() {
 								view! {
-									<div class="box has-text-info">"No trusted devices found"</div>
+									<div class="box has-text-info">"No devices found"</div>
 								}.into_any()
 							} else {
 								view! {
@@ -99,10 +99,8 @@ where
 #[component]
 pub fn DeviceList(devices: Vec<Arc<crate::fns::devices::DeviceInfo>>) -> impl IntoView {
 	view! {
-		<div class="device-list">
-			<For each=move || devices.clone() key=|device| device.device.id let:device>
-				<DeviceShorty device=device.clone() {..} class="level box" />
-			</For>
-		</div>
+		<For each=move || devices.clone() key=|device| device.device.id let:device>
+			<DeviceShorty device=device.clone() {..} class="level box" />
+		</For>
 	}
 }

@@ -107,11 +107,11 @@ mod ssr {
 		let state = expect_context::<AppState>();
 		let State(db): State<Db> = extract_with_state(&state).await?;
 		let mut conn = db.get().await?;
-		let servers = Server::get_all(&mut conn).await?;
+		let servers = Server::list_by_kind(&mut conn, ServerKind::Central, 0, None).await?;
 
 		let groups = servers
 			.into_iter()
-			.filter(|s| s.name.is_some() && s.kind == ServerKind::Central && s.rank.is_some())
+			.filter(|s| s.name.is_some() && s.rank.is_some())
 			.sorted_by_key(|s| s.rank)
 			.chunk_by(|s| s.rank.unwrap());
 

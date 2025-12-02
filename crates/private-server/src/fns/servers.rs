@@ -28,7 +28,7 @@ pub struct ServerDetailsData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServerListItem {
+pub struct ServerInfo {
 	pub id: Uuid,
 	pub name: Option<String>,
 	pub kind: ServerKind,
@@ -74,18 +74,34 @@ pub struct ServerLastStatusData {
 }
 
 #[server]
-pub async fn list_all_servers() -> Result<Vec<ServerListItem>> {
-	ssr::list_all_servers().await
+pub async fn count_servers(kind: Option<ServerKind>) -> Result<u64> {
+	ssr::count_servers(kind).await
 }
 
 #[server]
-pub async fn list_central_servers() -> Result<Vec<ServerListItem>> {
-	ssr::list_central_servers().await
+pub async fn list_servers(
+	kind: Option<ServerKind>,
+	offset: u64,
+	limit: Option<u64>,
+) -> Result<Vec<Arc<ServerInfo>>> {
+	ssr::list_servers(kind, offset, limit)
+		.await
+		.map(|v| v.into_iter().map(Arc::new).collect())
 }
 
 #[server]
-pub async fn list_facility_servers() -> Result<Vec<ServerListItem>> {
-	ssr::list_facility_servers().await
+pub async fn list_all_servers() -> Result<Vec<ServerInfo>> {
+	ssr::list_servers(None, 0, None).await
+}
+
+#[server]
+pub async fn list_central_servers() -> Result<Vec<ServerInfo>> {
+	ssr::list_servers(Some(ServerKind::Central), 0, None).await
+}
+
+#[server]
+pub async fn list_facility_servers() -> Result<Vec<ServerInfo>> {
+	ssr::list_servers(Some(ServerKind::Facility), 0, None).await
 }
 
 #[server]
@@ -120,7 +136,7 @@ pub async fn update_server(
 }
 
 #[server]
-pub async fn search_central_servers(query: String) -> Result<Vec<ServerListItem>> {
+pub async fn search_central_servers(query: String) -> Result<Vec<ServerInfo>> {
 	ssr::search_central_servers(query).await
 }
 
@@ -153,16 +169,36 @@ mod ssr {
 
 	use crate::state::AppState;
 
-	pub async fn list_all_servers() -> Result<Vec<super::ServerListItem>> {
+	pub async fn count_servers(kind: Option<ServerKind>) -> Result<u64> {
 		let state = expect_context::<AppState>();
 		let State(db): State<Db> = extract_with_state(&state).await?;
 		let mut conn = db.get().await?;
 
-		let servers = Server::get_all(&mut conn).await?;
+		if let Some(kind) = kind {
+			Server::count_by_kind(&mut conn, kind).await
+		} else {
+			Server::count_all(&mut conn).await
+		}
+	}
+
+	pub async fn list_servers(
+		kind: Option<ServerKind>,
+		offset: u64,
+		limit: Option<u64>,
+	) -> Result<Vec<super::ServerInfo>> {
+		let state = expect_context::<AppState>();
+		let State(db): State<Db> = extract_with_state(&state).await?;
+		let mut conn = db.get().await?;
+
+		let servers = if let Some(kind) = kind {
+			Server::list_by_kind(&mut conn, kind, offset, limit).await?
+		} else {
+			Server::get_all(&mut conn, offset, limit).await?
+		};
 
 		Ok(servers
 			.into_iter()
-			.map(|s| super::ServerListItem {
+			.map(|s| super::ServerInfo {
 				id: s.id,
 				name: s.name,
 				kind: s.kind,
@@ -172,96 +208,6 @@ mod ssr {
 				parent_server_name: None,
 			})
 			.collect())
-	}
-
-	pub async fn list_central_servers() -> Result<Vec<super::ServerListItem>> {
-		let state = expect_context::<AppState>();
-		let State(db): State<Db> = extract_with_state(&state).await?;
-		let mut conn = db.get().await?;
-
-		let servers = Server::get_all(&mut conn).await?;
-
-		let mut centrals: Vec<_> = servers
-			.into_iter()
-			.filter(|s| s.kind.to_string() == "central")
-			.collect();
-
-		// Sort: unnamed first, then by name
-		centrals.sort_by(|a, b| match (&a.name, &b.name) {
-			(None, None) => std::cmp::Ordering::Equal,
-			(None, Some(_)) => std::cmp::Ordering::Less,
-			(Some(_), None) => std::cmp::Ordering::Greater,
-			(Some(a_name), Some(b_name)) => a_name.cmp(b_name),
-		});
-
-		Ok(centrals
-			.into_iter()
-			.map(|s| super::ServerListItem {
-				id: s.id,
-				name: s.name,
-				kind: s.kind,
-				rank: s.rank,
-				host: s.host.0.to_string(),
-				parent_server_id: s.parent_server_id,
-				parent_server_name: None,
-			})
-			.collect())
-	}
-
-	pub async fn list_facility_servers() -> Result<Vec<super::ServerListItem>> {
-		let state = expect_context::<AppState>();
-		let State(db): State<Db> = extract_with_state(&state).await?;
-		let mut conn = db.get().await?;
-
-		let servers = Server::get_all(&mut conn).await?;
-
-		let mut facilities: Vec<_> = servers
-			.into_iter()
-			.filter(|s| s.kind.to_string() != "central")
-			.collect();
-
-		// Sort: unaffiliated first, then unnamed, then by name
-		facilities.sort_by(|a, b| match (&a.parent_server_id, &b.parent_server_id) {
-			(None, None) => match (&a.name, &b.name) {
-				(None, None) => std::cmp::Ordering::Equal,
-				(None, Some(_)) => std::cmp::Ordering::Less,
-				(Some(_), None) => std::cmp::Ordering::Greater,
-				(Some(a_name), Some(b_name)) => a_name.cmp(b_name),
-			},
-			(None, Some(_)) => std::cmp::Ordering::Less,
-			(Some(_), None) => std::cmp::Ordering::Greater,
-			(Some(_), Some(_)) => match (&a.name, &b.name) {
-				(None, None) => std::cmp::Ordering::Equal,
-				(None, Some(_)) => std::cmp::Ordering::Less,
-				(Some(_), None) => std::cmp::Ordering::Greater,
-				(Some(a_name), Some(b_name)) => a_name.cmp(b_name),
-			},
-		});
-
-		// Get parent server names for facilities
-		let mut result = Vec::new();
-		for s in facilities {
-			let parent_name = if let Some(parent_id) = s.parent_server_id {
-				Server::get_by_id(&mut conn, parent_id)
-					.await
-					.ok()
-					.and_then(|parent| parent.name)
-			} else {
-				None
-			};
-
-			result.push(super::ServerListItem {
-				id: s.id,
-				name: s.name,
-				kind: s.kind,
-				rank: s.rank,
-				host: s.host.0.to_string(),
-				parent_server_id: s.parent_server_id,
-				parent_server_name: parent_name,
-			});
-		}
-
-		Ok(result)
 	}
 
 	pub async fn server_detail(server_id: Uuid) -> Result<super::ServerDetailData> {
@@ -513,7 +459,7 @@ mod ssr {
 		})
 	}
 
-	pub async fn search_central_servers(query: String) -> Result<Vec<super::ServerListItem>> {
+	pub async fn search_central_servers(query: String) -> Result<Vec<super::ServerInfo>> {
 		let db = crate::fns::commons::admin_guard().await?;
 		let mut conn = db.get().await?;
 
@@ -521,7 +467,7 @@ mod ssr {
 
 		Ok(servers
 			.into_iter()
-			.map(|s| super::ServerListItem {
+			.map(|s| super::ServerInfo {
 				id: s.id,
 				name: s.name,
 				kind: s.kind,

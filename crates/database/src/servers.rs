@@ -31,14 +31,72 @@ pub struct Server {
 }
 
 impl Server {
-	pub async fn get_all(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
+	pub async fn get_all(
+		db: &mut AsyncPgConnection,
+		offset: u64,
+		limit: Option<u64>,
+	) -> Result<Vec<Self>> {
 		use crate::schema::servers::dsl::*;
-		servers
+		let q = servers
 			.select(Self::as_select())
 			.filter(id.ne(Uuid::nil()))
-			.load(db)
+			.order_by((
+				name.is_not_null(),
+				kind.asc(),
+				name.asc(),
+				created_at.desc(),
+			))
+			.offset(offset.try_into().unwrap_or(i64::MAX));
+
+		if let Some(limit) = limit {
+			q.limit(limit.try_into().unwrap_or(i64::MAX)).load(db).await
+		} else {
+			q.load(db).await
+		}
+		.map_err(AppError::from)
+	}
+
+	pub async fn list_by_kind(
+		db: &mut AsyncPgConnection,
+		k: ServerKind,
+		offset: u64,
+		limit: Option<u64>,
+	) -> Result<Vec<Self>> {
+		use crate::schema::servers::dsl::*;
+		let q = servers
+			.select(Self::as_select())
+			.filter(id.ne(Uuid::nil()).and(kind.eq(k)))
+			.order_by((name.is_not_null(), name.asc(), created_at.desc()))
+			.offset(offset.try_into().unwrap_or(i64::MAX));
+
+		if let Some(limit) = limit {
+			q.limit(limit.try_into().unwrap_or(i64::MAX)).load(db).await
+		} else {
+			q.load(db).await
+		}
+		.map_err(AppError::from)
+	}
+
+	pub async fn count_all(db: &mut AsyncPgConnection) -> Result<u64> {
+		use crate::schema::servers::dsl::*;
+		servers
+			.count()
+			.filter(id.ne(Uuid::nil()))
+			.get_result(db)
 			.await
 			.map_err(AppError::from)
+			.map(|n: i64| n.try_into().unwrap_or_default())
+	}
+
+	pub async fn count_by_kind(db: &mut AsyncPgConnection, k: ServerKind) -> Result<u64> {
+		use crate::schema::servers::dsl::*;
+		servers
+			.count()
+			.filter(id.ne(Uuid::nil()).and(kind.eq(k)))
+			.get_result(db)
+			.await
+			.map_err(AppError::from)
+			.map(|n: i64| n.try_into().unwrap_or_default())
 	}
 
 	pub async fn own(db: &mut AsyncPgConnection) -> Result<Self> {

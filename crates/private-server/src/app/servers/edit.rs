@@ -7,7 +7,7 @@ use leptos_router::components::Redirect;
 use leptos_router::hooks::use_params_map;
 
 use crate::fns::servers::{
-	ServerListItem, assign_parent_server, search_central_servers, server_detail, update_server,
+	ServerInfo, assign_parent_server, search_central_servers, server_detail, update_server,
 };
 
 #[component]
@@ -36,7 +36,7 @@ pub fn Edit() -> impl IntoView {
 	let edit_aws_region = RwSignal::new(String::new());
 
 	let search_query = RwSignal::new(String::new());
-	let search_results = RwSignal::new(Vec::<ServerListItem>::new());
+	let search_results = RwSignal::new(Vec::<ServerInfo>::new());
 
 	let is_admin = Resource::new(
 		|| (),
@@ -207,7 +207,7 @@ fn EditView(
 		Result<crate::fns::servers::ServerDetailsData, commons_errors::AppError>,
 	>,
 	search_query: RwSignal<String>,
-	search_results: RwSignal<Vec<ServerListItem>>,
+	search_results: RwSignal<Vec<ServerInfo>>,
 	search_action: Action<String, Result<(), commons_errors::AppError>>,
 	assign_action: Action<
 		Uuid,

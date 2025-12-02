@@ -45,11 +45,11 @@ fn rank_order(rank: &Option<ServerRank>) -> u32 {
 
 pub async fn list(State(db): State<Db>) -> Result<Json<Vec<PublicServer>>> {
 	let mut db = db.get().await?;
-	let mut servers = Server::get_all(&mut db)
+	let mut servers = Server::list_by_kind(&mut db, ServerKind::Central, 0, None)
 		.await?
 		.into_iter()
 		.filter_map(|s| {
-			(s.kind == ServerKind::Central && s.listed)
+			s.listed
 				.then(|| s.name.map(|name| (name, s.host, s.rank)))
 				.flatten()
 		})

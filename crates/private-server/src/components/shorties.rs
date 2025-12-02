@@ -7,7 +7,7 @@ use commons_types::{
 use leptos::prelude::*;
 use leptos_router::components::A;
 
-use crate::fns::devices::{DeviceInfo, ServerInfo};
+use crate::fns::{devices::DeviceInfo, servers::ServerInfo};
 
 #[component]
 pub fn DeviceShorty(device: Arc<DeviceInfo>) -> impl IntoView {

@@ -1,23 +1,12 @@
 use std::sync::Arc;
 
 use commons_errors::Result;
-use commons_types::{
-	Uuid,
-	device::DeviceRole,
-	server::{kind::ServerKind, rank::ServerRank},
-};
+use commons_types::{Uuid, device::DeviceRole};
 use jiff::Timestamp;
 use leptos::server;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServerInfo {
-	pub id: Uuid,
-	pub name: Option<String>,
-	pub host: String,
-	pub kind: ServerKind,
-	pub rank: Option<ServerRank>,
-}
+use crate::fns::servers::ServerInfo;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceInfo {
@@ -243,6 +232,8 @@ mod ssr {
 				host: s.host.into(),
 				kind: s.kind,
 				rank: s.rank,
+				parent_server_id: s.parent_server_id,
+				parent_server_name: None, // TODO
 			})
 			.collect())
 	}
