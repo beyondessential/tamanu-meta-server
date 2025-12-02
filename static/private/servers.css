@@ -281,12 +281,6 @@
 			margin-top: 0.5em;
 		}
 
-		.info-grid {
-			display: grid;
-			grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-			gap: 1.25em;
-		}
-
 		.device-list-container {
 			margin-top: 1em;
 			border-top: 1px solid var(--color-border-light);
@@ -690,45 +684,5 @@
 			margin-top: 1em;
 			font-size: 0.9em;
 		}
-	}
-
-	.info-item {
-		display: flex;
-		flex-direction: column;
-		gap: 0.25em;
-		margin-top: 0.75em;
-
-		.info-label {
-			font-size: 0.85em;
-			color: var(--color-text-light);
-			font-weight: 500;
-			text-transform: uppercase;
-			letter-spacing: 0.5px;
-		}
-
-		.info-value {
-			color: var(--color-text-primary);
-			font-size: 1em;
-			word-break: break-all;
-
-			a {
-				color: var(--color-primary);
-				text-decoration: none;
-
-				&:hover {
-					text-decoration: underline;
-				}
-			}
-
-			&.monospace {
-				font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
-				font-size: 0.9em;
-			}
-		}
-	}
-
-	.version .info-value {
-		font-family: monospace, monospace;
-		font-size: 0.9em !important;
 	}
 }

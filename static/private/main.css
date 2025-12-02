@@ -90,7 +90,9 @@
 
 .monospace,
 .version,
-.version-text {
+.version-text,
+pre,
+code {
 	font-family:
 		"Fira Code", "SF Mono", Monaco, "Cascadia Code", "Roboto Mono",
 		Consolas, "Courier New", monospace;
@@ -205,5 +207,41 @@ aside.legend {
 	.legend-label {
 		font-size: 0.85em;
 		vertical-align: top;
+	}
+}
+
+.info-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+	gap: 1.25em;
+
+	.info-item {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25em;
+		margin-top: 0.75em;
+
+		.info-label {
+			font-size: 0.85em;
+			color: var(--color-text-light);
+			font-weight: 500;
+			text-transform: uppercase;
+			letter-spacing: 0.5px;
+		}
+
+		.info-value {
+			color: var(--color-text-primary);
+			font-size: 1em;
+			word-break: break-all;
+
+			a {
+				color: var(--color-primary);
+				text-decoration: none;
+
+				&:hover {
+					text-decoration: underline;
+				}
+			}
+		}
 	}
 }
