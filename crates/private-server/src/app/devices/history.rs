@@ -1,24 +1,62 @@
 use std::collections::HashMap;
 
 use commons_types::Uuid;
+use jiff::{RoundMode, SignedDurationRound, Unit};
 use leptos::prelude::*;
 
-use crate::fns::devices::DeviceConnectionData;
+use crate::{components::TimeAgo, fns::devices::DeviceConnectionData};
+
+pub fn connection_count(device_id: Uuid) -> LocalResource<u64> {
+	LocalResource::new(move || async move {
+		crate::fns::devices::connection_count(device_id)
+			.await
+			.unwrap_or_default()
+	})
+}
 
 #[component]
-pub fn DeviceConnectionHistory(device_id: Uuid) -> impl IntoView {
+pub fn ConnectionHistory(device_id: Uuid) -> impl IntoView {
+	let (show_history, set_show_history) = signal(false);
+
+	let count = connection_count(device_id);
+
+	view! {
+		<div class="level">
+			<button
+				class="level-item button"
+				on:click=move |_| set_show_history.update(|show| *show = !*show)
+			>
+				{move || {
+					if show_history.get() {
+						"Hide connection history"
+					} else {
+						"Show connection history"
+					}
+				}}
+				" "
+				<Transition>
+					{move || count.get().map(|n| format!("({n})"))}
+				</Transition>
+			</button>
+		</div>
+		{move || {
+			show_history.get().then(|| {
+				view! {
+					<DeviceConnectionHistory device_id />
+				}
+			})
+		}}
+	}
+}
+
+const BATCH: usize = 1000;
+
+#[component]
+fn DeviceConnectionHistory(device_id: Uuid) -> impl IntoView {
 	let (history_offset, set_history_offset) = signal(0i64);
 	let (all_connections, set_all_connections) =
 		signal(HashMap::<Uuid, DeviceConnectionData>::new());
 	let (has_more, set_has_more) = signal(false);
-
-	let connection_count = {
-		let device_id = device_id.clone();
-		Resource::new(
-			move || device_id.clone(),
-			async |id| crate::fns::devices::connection_count(id).await,
-		)
-	};
 
 	let load_more_action = {
 		let device_id = device_id.clone();
@@ -26,7 +64,8 @@ pub fn DeviceConnectionHistory(device_id: Uuid) -> impl IntoView {
 			let device_id = device_id.clone();
 			let offset = *offset;
 			async move {
-				crate::fns::devices::connection_history(device_id, Some(100), Some(offset)).await
+				crate::fns::devices::connection_history(device_id, Some(BATCH as _), Some(offset))
+					.await
 			}
 		})
 	};
@@ -35,7 +74,7 @@ pub fn DeviceConnectionHistory(device_id: Uuid) -> impl IntoView {
 		if let Some(result) = load_more_action.value().get() {
 			match result {
 				Ok(new_connections) => {
-					let has_more_data = new_connections.len() == 100;
+					let has_more_data = new_connections.len() == BATCH;
 					set_has_more.set(has_more_data);
 
 					set_all_connections.update(|existing| {
@@ -58,94 +97,87 @@ pub fn DeviceConnectionHistory(device_id: Uuid) -> impl IntoView {
 	});
 
 	view! {
-		<div class="connection-history">
-			<h3>
-				"Connection History"
-				{move || {
-					connection_count.get()
-						.and_then(|result| result.ok())
-						.map(|count| format!(" ({})", count))
-						.unwrap_or_default()
-				}}
-			</h3>
-			<Suspense fallback=|| view! { <div class="loading">"Loading history..."</div> }>
-				{move || {
-					let connections_map = all_connections.get();
-					if connections_map.is_empty() && !load_more_action.pending().get() {
-						view! {
-							<div class="no-history">"No connection history found"</div>
-						}.into_any()
-					} else {
-						let mut connections_vec: Vec<_> = connections_map.values().cloned().collect();
-						connections_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+		<Transition fallback=|| view! { <div class="box"><progress class="progress is-small is-primary" max="100">"Loading..."</progress></div> }>
+			{move || {
+				let connections_map = all_connections.get();
+				if connections_map.is_empty() && !load_more_action.pending().get() {
+					return view! {
+						<p>"No connection history found"</p>
+					}.into_any();
+				}
 
-						view! {
-							<div class="history-content">
-								<div class="history-list">
-									<For each=move || group_consecutive_connections(connections_vec.clone()) key=|group| format!("{}_{}_{}", group.ip, group.earliest_time, group.latest_time) let:group>
-										<ConnectionGroupRow group=group />
-									</For>
+				let mut connections_vec: Vec<_> = connections_map.values().cloned().collect();
+				connections_vec.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+				view! {
+					<div class="box">
+						<For
+							each=move || group_consecutive_connections(connections_vec.clone())
+							key=|group| (group.ip.clone(), group.earliest_time.clone(), group.latest_time.clone())
+							let:group
+						>
+							<ConnectionGroupRow group />
+						</For>
+					</div>
+					{move || {
+						has_more.get().then(|| {
+							view! {
+								<div class="level">
+									<button
+										class="level-item button"
+										on:click=move |_| {
+											let current_count = all_connections.get().len() as i64;
+											set_history_offset.set(current_count);
+											load_more_action.dispatch(current_count);
+										}
+										disabled=move || load_more_action.pending().get()
+									>
+										{move || if load_more_action.pending().get() { "Loading...".into() } else { format!("Load More ({BATCH})") }}
+									</button>
 								</div>
-								{move || {
-									if has_more.get() {
-										view! {
-											<div class="load-more-section">
-												<button
-													class="load-more-btn"
-													on:click=move |_| {
-														let current_count = all_connections.get().len() as i64;
-														set_history_offset.set(current_count);
-														load_more_action.dispatch(current_count);
-													}
-													disabled=move || load_more_action.pending().get()
-												>
-													{move || if load_more_action.pending().get() { "Loading..." } else { "Load More (100)" }}
-												</button>
-											</div>
-										}.into_any()
-									} else {
-										().into_any()
-									}
-								}}
-							</div>
-						}.into_any()
-					}
-				}}
-			</Suspense>
-		</div>
+							}
+						})
+					}}
+				}.into_any()
+			}}
+		</Transition>
 	}
 }
 
 #[component]
 pub fn ConnectionGroupRow(group: ConnectionGroup) -> impl IntoView {
-	let time_display = if group.count == 1 {
-		group.latest_relative.clone()
-	} else {
-		format!("{} to {}", group.earliest_relative, group.latest_relative)
-	};
-
-	let time_tooltip = if group.count == 1 {
-		group.latest_time.clone()
-	} else {
-		format!("{} to {}", group.earliest_time, group.latest_time)
-	};
-
-	let count_display = if group.count > 1 {
-		format!("{}×", group.count)
-	} else {
-		String::new()
-	};
-
+	let span = group.latest_time.duration_since(group.earliest_time);
+	let span = span
+		.round(
+			SignedDurationRound::new()
+				.smallest(Unit::Second)
+				.increment(30)
+				.mode(RoundMode::Ceil),
+		)
+		.unwrap_or(span);
 	view! {
-		<div class="history-item">
-			<div class="history-count">{count_display}</div>
-			<div class="history-time timestamp-hover" title={time_tooltip}>{time_display}</div>
-			<div class="history-ip">{group.ip}</div>
-			{group.user_agent.as_ref().map(|ua| {
-				view! {
-					<div class="history-ua">{ua.clone()}</div>
-				}
-			})}
+		<div class="level">
+			<div class="level-left">
+				<div class="level-item history-times">
+					<TimeAgo timestamp={group.earliest_time} />
+					<span>" to "</span>
+					<TimeAgo timestamp={group.latest_time} />
+				</div>
+				<div class="level-item">
+					{format!("{:#}", span)}
+				</div>
+				<div class="level-item monospace">{group.ip}</div>
+				{(group.count > 1).then(|| view! {
+					<div class="level-item history-count">{group.count}"×"</div>
+				})}
+			</div>
+			<div class="level-right">
+				{group.user_agent.as_ref().map(|ua| {
+					view! {
+						<div class="level-item">{ua.clone()}</div>
+					}
+				})}
+			</div>
 		</div>
 	}
 }

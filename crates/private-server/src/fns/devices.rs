@@ -110,7 +110,7 @@ pub async fn connection_history(
 }
 
 #[server]
-pub async fn connection_count(device_id: Uuid) -> Result<i64> {
+pub async fn connection_count(device_id: Uuid) -> Result<u64> {
 	ssr::connection_count(device_id).await
 }
 
@@ -322,11 +322,16 @@ mod ssr {
 			.collect())
 	}
 
-	pub async fn connection_count(device_id: Uuid) -> Result<i64> {
+	pub async fn connection_count(device_id: Uuid) -> Result<u64> {
 		let db = crate::fns::commons::admin_guard().await?;
 		let mut conn = db.get().await?;
 
-		DeviceConnection::get_connection_count_for_device(&mut conn, device_id).await
+		Ok(
+			DeviceConnection::get_connection_count_for_device(&mut conn, device_id)
+				.await?
+				.try_into()
+				.unwrap_or_default(),
+		)
 	}
 
 	pub async fn trust(device_id: Uuid, role: DeviceRole) -> Result<()> {

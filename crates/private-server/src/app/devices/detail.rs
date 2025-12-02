@@ -1,11 +1,17 @@
-use commons_types::{Uuid, device::DeviceRole};
+use commons_types::{
+	Uuid,
+	device::DeviceRole,
+	server::{kind::ServerKind, rank::ServerRank},
+};
 use leptos::prelude::*;
 use leptos_meta::Title;
 use leptos_router::hooks::use_params_map;
-use web_sys::window;
 
-use super::history::DeviceConnectionHistory;
-use crate::{components::ToastCtx, fns::devices::DeviceInfo};
+use super::history::ConnectionHistory;
+use crate::{
+	components::{TimeAgo, ToastCtx},
+	fns::devices::DeviceInfo,
+};
 
 #[component]
 pub fn Detail() -> impl IntoView {
@@ -63,8 +69,6 @@ fn DeviceDetail(device_info: DeviceInfo, set_refresh_trigger: WriteSignal<i32>) 
 	let device_id = device_info.device.id;
 	let device_role = device_info.device.role;
 	let ToastCtx(set_message) = use_context().unwrap();
-
-	let (show_history, set_show_history) = signal(false);
 
 	let update_role_action = Action::new(move |(device_id, role): &(Uuid, DeviceRole)| {
 		let device_id = *device_id;
@@ -137,139 +141,140 @@ fn DeviceDetail(device_info: DeviceInfo, set_refresh_trigger: WriteSignal<i32>) 
 		}
 	});
 
-	let copy_device_id = move |_| {
-		if let Some(window) = window() {
-			let navigator = window.navigator();
-			let clipboard = navigator.clipboard();
-			let _ = clipboard.write_text(&device_id.to_string());
-		}
-	};
-
 	view! {
-		<div class="device-detail-content">
-			<div class="device-header">
-				<div class="device-info">
-					<div class="device-id-section">
-						<h2>
-							{device_info.device.id.to_string()}
-							<span class="role-badge-header">{device_info.device.role}</span>
-						</h2>
-						<button class="copy-id-btn" on:click=copy_device_id title="Copy device ID">
-							"📋"
-						</button>
+		<Title text={ let name = device_info.name(); move || format!("Tamanu Meta Device {name}") } />
+		<h1 class="is-size-3">"Device "{device_info.name()}</h1>
+		<div class="box">
+			<div class="info-grid">
+				{device_info.latest_connection.as_ref().map(|conn| {
+					view! {
+						<div class="info-item">
+							<span class="info-label">"Address"</span>
+							<span class="info-value monospace">{conn.ip.clone()}</span>
+						</div>
+					}
+				})}
+				<div class="info-item">
+					<span class="info-label">"First seen"</span>
+					<TimeAgo timestamp={device_info.device.created_at} {..} class:info-value />
+				</div>
+				{device_info.latest_connection.as_ref().map(|conn| {
+					view! {
+						<div class="info-item">
+							<span class="info-label">"Last seen"</span>
+							<TimeAgo timestamp={conn.created_at} {..} class:info-value />
+						</div>
+					}
+				})}
+				<div class="info-item">
+					<span class="info-label">"Last updated"</span>
+					<TimeAgo timestamp={device_info.device.updated_at} {..} class:info-value />
+				</div>
+				{device_info.latest_connection.as_ref().and_then(|conn| conn.user_agent.as_ref()).map(|ua| {
+					view! {
+						<div class="info-item">
+							<span class="info-label">"User-agent"</span>
+							<span class="info-value">{ua.clone()}</span>
+						</div>
+					}
+				})}
+			</div>
+		</div>
+
+		<div class="box">
+			<h3 class="is-size-4 mb-3">"Public Keys " <span class="amount is-size-5">{format!("({})", device_info.keys.len())}</span></h3>
+			<For each=move || device_info.keys.clone() key=|key| key.id let:key>
+				<KeyItem
+					key_id=key.id
+					name=key.name.clone()
+					pem_data=key.pem_data.clone()
+					on_update=move || set_refresh_trigger.update(|n| *n += 1)
+				/>
+			</For>
+		</div>
+
+		<div class="box level">
+			{if device_role != DeviceRole::Untrusted {
+				view! {
+					<div class="level-left">
+						<div class="level-item">
+							<label class="label" for="role">"Change role:"</label>
+						</div>
+						<div class="level-item">
+							<RoleChange
+								role=device_role
+								action=move |role| drop(trust_action.dispatch((device_id, role)))
+								pending=trust_action.pending() />
+						</div>
 					</div>
-					{device_info.latest_connection.as_ref().map(|conn| {
-						view! {
-							<div class="latest-connection-inline">
-								<span class="connection-ip">{conn.ip.clone()}</span>
-								{conn.user_agent.as_ref().map(|ua| {
-									view! {
-										<span class="connection-ua">{ua.clone()}</span>
-									}
-								})}
-							</div>
-						}
-					})}
-				</div>
-
-				<div class="device-times">
-					<span class="device-first-seen timestamp-hover" title={device_info.device.created_at.clone()}>
-						{format!("First seen: {}", device_info.device.created_at_relative)}
-					</span>
-					{device_info.latest_connection.as_ref().map(|conn| {
-						view! {
-							<span class="device-last-seen timestamp-hover" title={conn.created_at.clone()}>
-								{format!("Last seen: {}", conn.created_at_relative)}
-							</span>
-						}
-					})}
-					<span class="device-last-updated timestamp-hover" title={device_info.device.updated_at.clone()}>
-						{format!("Last updated: {}", device_info.device.updated_at_relative)}
-					</span>
-				</div>
-			</div>
-
-			<div class="device-keys">
-				<h3>"Public Keys " <span class="amount">{format!("({})", device_info.keys.len())}</span></h3>
-				<For each=move || device_info.keys.clone() key=|key| key.id let:key>
-					<KeyItem
-						key_id=key.id
-						name=key.name.clone()
-						pem_data=key.pem_data.clone()
-						on_update=move || set_refresh_trigger.update(|n| *n += 1)
-					/>
-				</For>
-			</div>
-
-			<div class="device-actions">
-				{if device_role != DeviceRole::Untrusted {
-					view! {
-						<div class="trusted-device-actions">
-							<div class="actions-row">
-								<RoleChange role=device_role action=move |role| drop(trust_action.dispatch((device_id, role))) />
-							</div>
-
-							<div class="actions-row">
-								<RoleUntrust action=move || drop(untrust_action.dispatch(device_id)) pending=untrust_action.pending() />
-							</div>
+					<div class="level-right">
+						<div class="level-item">
+							<RoleUntrust
+								action=move || drop(untrust_action.dispatch(device_id))
+								pending=untrust_action.pending() />
 						</div>
-					}.into_any()
-				} else {
-					view! {
-						<div class="trusted-device-actions">
-							<div class="actions-row">
-								<RoleTrust action=move |role| drop(trust_action.dispatch((device_id, role))) pending=trust_action.pending() />
-							</div>
+					</div>
+				}.into_any()
+			} else {
+				view! {
+					<div class="level-left">
+						<div class="level-item">
+							<label class="label" for="role">"Trust this device as:"</label>
 						</div>
-					}.into_any()
-				}}
-
-				<button
-					class="history-toggle"
-					on:click=move |_| set_show_history.update(|show| *show = !*show)
-				>
-					{move || {
-						if show_history.get() {
-							"Hide Connection History"
-						} else {
-							"Show Connection History"
-						}
-					}}
-				</button>
-			</div>
-
-			{move || {
-				if show_history.get() {
-					view! {
-						<DeviceConnectionHistory device_id />
-					}.into_any()
-				} else {
-					().into_any()
-				}
+						<div class="level-item">
+							<RoleTrust
+								action=move |role| drop(trust_action.dispatch((device_id, role)))
+								pending=trust_action.pending() />
+							</div>
+					</div>
+				}.into_any()
 			}}
 		</div>
 
-		<AssociatedServers device_id device_role />
+		{move || {
+			(device_role != DeviceRole::Untrusted).then(|| view! {
+				<AssociatedServers device_id />
+			})
+		}}
+
+		<ConnectionHistory device_id />
 	}
 }
 
 #[component]
-fn RoleChange(role: DeviceRole, action: impl Fn(DeviceRole) + 'static) -> impl IntoView {
+fn RoleChange(
+	role: DeviceRole,
+	action: impl Fn(DeviceRole) + Copy + Send + 'static,
+	pending: Memo<bool>,
+) -> impl IntoView {
 	let (selected_role, set_selected_role) = signal(role);
 
 	view! {
-		<label>"Change Role:"</label>
-		<select
-			prop:value=move || selected_role.get()
-			on:change=move |ev| {
-				set_selected_role.set(event_target_value(&ev).parse().unwrap_or_default());
-				action(selected_role.get());
-			}
-		>
-			<option value={DeviceRole::Server}>{DeviceRole::Server}</option>
-			<option value={DeviceRole::Releaser}>{DeviceRole::Releaser}</option>
-			<option value={DeviceRole::Admin}>{DeviceRole::Admin}</option>
-		</select>
+		<div class="field has-addons">
+			<div class="control">
+				<div class="select">
+					<select
+						name="role"
+						disabled=move || pending.get()
+						prop:value=move || selected_role.get()
+						on:change=move |ev| set_selected_role.set(event_target_value(&ev).parse().unwrap_or_default())
+					>
+						<option value={DeviceRole::Server}>{DeviceRole::Server}</option>
+						<option value={DeviceRole::Releaser}>{DeviceRole::Releaser}</option>
+						<option value={DeviceRole::Admin}>{DeviceRole::Admin}</option>
+					</select>
+				</div>
+			</div>
+			<div class="control">
+				<button
+					class="button is-primary"
+					disabled=move || pending.get()
+					on:click=move |_| action(selected_role.get())
+				>
+					{move || if pending.get() { "Saving..." } else { "Save" }}
+				</button>
+			</div>
+		</div>
 	}
 }
 
@@ -278,65 +283,78 @@ fn RoleTrust(action: impl Fn(DeviceRole) + 'static, pending: Memo<bool>) -> impl
 	let (selected_role, set_selected_role) = signal(DeviceRole::Server);
 
 	view! {
-		<div class="trust-device">
-			<label>"Trust this device as:"</label>
-			<select
-				prop:value=move || selected_role.get()
-				on:change=move |ev| set_selected_role.set(event_target_value(&ev).parse().unwrap_or_default())
-			>
-				<option value={DeviceRole::Server}>{DeviceRole::Server}</option>
-				<option value={DeviceRole::Releaser}>{DeviceRole::Releaser}</option>
-				<option value={DeviceRole::Admin}>{DeviceRole::Admin}</option>
-			</select>
-			<button
-				class="trust-btn"
-				on:click=move |_| action(selected_role.get())
-				disabled=move || pending.get()
-			>
-				"Trust"
-				{move || if pending.get() { "Trusting..." } else { "Trust Device" }}
-			</button>
+		<div class="field has-addons">
+			<div class="control">
+				<div class="select">
+					<select
+						disabled=move || pending.get()
+						prop:value=move || selected_role.get()
+						on:change=move |ev| set_selected_role.set(event_target_value(&ev).parse().unwrap_or_default())
+					>
+						<option value={DeviceRole::Server}>{DeviceRole::Server}</option>
+						<option value={DeviceRole::Releaser}>{DeviceRole::Releaser}</option>
+						<option value={DeviceRole::Admin}>{DeviceRole::Admin}</option>
+					</select>
+				</div>
+			</div>
+			<div class="control">
+				<button
+					class="button is-primary"
+					on:click=move |_| action(selected_role.get())
+					disabled=move || pending.get()
+				>
+					{move || if pending.get() { "Trusting..." } else { "Trust" }}
+				</button>
+			</div>
 		</div>
 	}
 }
 
 #[component]
-fn RoleUntrust(action: impl Fn() + 'static, pending: Memo<bool>) -> impl IntoView {
+fn RoleUntrust(action: impl Fn() + Send + Copy + 'static, pending: Memo<bool>) -> impl IntoView {
 	let (show_untrust_confirm, set_show_untrust_confirm) = signal(false);
 
-	if show_untrust_confirm.get() {
-		view! {
-			<div class="untrust-confirm-inline">
-				<span class="confirm-text">"Are you sure?"</span>
-				<button
-					class="untrust-confirm-btn"
-					on:click=move |_| {
-						action();
-						set_show_untrust_confirm.set(false);
-					}
-					disabled=move || pending.get()
-				>"Yes, untrust"
-					{move || if pending.get() { "Untrusting..." } else { "Yes, Untrust" }}
-				</button>
-				<button
-					class="untrust-cancel-btn"
-					on:click=move |_| set_show_untrust_confirm.set(false)
-				>
-					"Cancel"
-				</button>
-			</div>
-		}
-		.into_any()
-	} else {
-		view! {
-			<button
-				class="untrust-btn"
-				on:click=move |_| set_show_untrust_confirm.set(true)
-			>
-				"Untrust"
-			</button>
-		}
-		.into_any()
+	view! {
+		<div class="field is-grouped">
+		{move || if show_untrust_confirm.get() {
+			view! {
+				<p class="control">
+					<button
+						class="button is-danger"
+						disabled=move || pending.get()
+						on:click=move |_| {
+							action();
+							set_show_untrust_confirm.set(false);
+						}
+					>
+						{move || if pending.get() { "Untrusting..." } else { "Confirm" }}
+					</button>
+				</p>
+				<p class="control">
+					<button
+						class="button"
+						disabled=move || pending.get()
+						on:click=move |_| set_show_untrust_confirm.set(false)
+					>
+						"Cancel"
+					</button>
+				</p>
+			}
+			.into_any()
+		} else {
+			view! {
+				<p class="control">
+					<button
+						class="button is-danger"
+						on:click=move |_| set_show_untrust_confirm.set(true)
+					>
+						"Untrust"
+					</button>
+				</p>
+			}
+			.into_any()
+		}}
+		</div>
 	}
 }
 
@@ -379,7 +397,7 @@ fn KeyItem(
 	let original_name = name.clone();
 
 	view! {
-		<div class="key-item">
+		<div class="mt-3">
 			{move || {
 				let editing_val = editing.get();
 				let name_display = name.clone();
@@ -387,59 +405,61 @@ fn KeyItem(
 
 				if editing_val {
 					view! {
-						<div class="key-name-edit">
-							<input
-								type="text"
-								class="key-name-input"
-								prop:value=move || new_name.get()
-								on:input=move |ev| set_new_name.set(event_target_value(&ev))
-								placeholder="Key name (optional)"
-							/>
-							<button
-								class="key-name-save-btn"
-								on:click=move |_| {
-									let name_value = new_name.get().trim().to_string();
-									let name_to_save = if name_value.is_empty() {
-										None
-									} else {
-										Some(name_value)
-									};
-									update_key_name_action.dispatch((key_id, name_to_save));
-								}
-								disabled=move || update_key_name_action.pending().get()
-							>
-								{move || if update_key_name_action.pending().get() { "Saving..." } else { "Save" }}
-							</button>
-							<button
-								class="key-name-cancel-btn"
-								on:click=move |_| {
-									set_new_name.set(original_name_for_cancel.clone().unwrap_or_default());
-									set_editing.set(false);
-								}
-							>
-								"Cancel"
-							</button>
+						<div class="field is-grouped">
+							<p class="control is-expanded">
+								<input
+									type="text"
+									class="input"
+									prop:value=move || new_name.get()
+									on:input=move |ev| set_new_name.set(event_target_value(&ev))
+									placeholder="Key name (optional)"
+								/>
+							</p>
+							<p class="control">
+								<button
+									class="button is-primary"
+									on:click=move |_| {
+										let name_value = new_name.get().trim().to_string();
+										let name_to_save = if name_value.is_empty() {
+											None
+										} else {
+											Some(name_value)
+										};
+										update_key_name_action.dispatch((key_id, name_to_save));
+									}
+									disabled=move || update_key_name_action.pending().get()
+								>
+									{move || if update_key_name_action.pending().get() { "Saving..." } else { "Save" }}
+								</button>
+							</p>
+							<p class="control">
+								<button
+									class="button is-danger"
+									on:click=move |_| {
+										set_new_name.set(original_name_for_cancel.clone().unwrap_or_default());
+										set_editing.set(false);
+									}
+								>
+									"Cancel"
+								</button>
+							</p>
 						</div>
 					}.into_any()
 				} else {
 					view! {
-						<div class="key-name-display">
-							{name_display.as_ref().map(|n| {
-								view! {
-									<div class="key-name">{n.clone()}</div>
-								}.into_any()
-							}).unwrap_or_else(|| {
-								view! {
-									<div class="key-name key-name-empty">"Unnamed key"</div>
-								}.into_any()
-							})}
-							<button
-								class="key-name-edit-btn"
-								on:click=move |_| set_editing.set(true)
-								title="Edit key name"
-							>
-								"✏️"
-							</button>
+						<div class="level mb-2">
+							<div class="level-left">
+								<h4 class="level-item is-size-5">{name_display.as_deref().unwrap_or("Unnamed key")}</h4>
+							</div>
+							<div class="level-right">
+								<button
+									class="level-item button"
+									on:click=move |_| set_editing.set(true)
+									title="Edit key name"
+								>
+									"✏️"
+								</button>
+							</div>
 						</div>
 					}.into_any()
 				}
@@ -450,75 +470,80 @@ fn KeyItem(
 }
 
 #[component]
-fn AssociatedServers(device_id: Uuid, device_role: DeviceRole) -> impl IntoView {
+fn AssociatedServers(device_id: Uuid) -> impl IntoView {
 	let servers_resource = Resource::new(
 		move || device_id,
 		async |id| crate::fns::devices::get_servers_for_device(id).await,
 	);
 
 	view! {
-		{move || {
-			if device_role != DeviceRole::Untrusted {
-				view! {
-					<div class="device-servers">
-						<div class="servers-header">
-							<h3>"Associated Servers"</h3>
-							<button
-								class="refresh-servers-btn"
-								on:click=move |_| servers_resource.refetch()
-								title="Refresh servers list"
-							>
-								"Refresh"
-							</button>
-						</div>
-						<Suspense fallback=|| view! { <div class="loading">"Loading servers..."</div> }>
-							{move || {
-								servers_resource.get().map(|result| {
-									match result {
-										Ok(servers) => {
-											if servers.is_empty() {
-												view! {
-													<div class="no-servers">"No servers are associated with this device"</div>
-												}.into_any()
-											} else {
-												view! {
-													<div class="servers-list">
-														<For each=move || servers.clone() key=|server| server.id.clone() let:server>
-															<div class="server-item">
-																<div class="server-header">
-																	<a href={format!("/servers/{}", server.id)} class="server-name">
-																		{server.name.clone().unwrap_or_else(|| "Unnamed Server".to_string())}
-																	</a>
-																	<span class="server-kind">{server.kind}</span>
-																</div>
-																<div class="server-details">
-																	<span class="server-host">{server.host.clone()}</span>
-																	{server.rank.as_ref().map(|rank| {
-																		view! {
-																			<span class="server-rank">{*rank}</span>
-																		}
-																	})}
-																</div>
-															</div>
-														</For>
-													</div>
-												}.into_any()
-											}
-										}
-										Err(e) => {
-											view! {
-												<div class="error">{format!("Error loading servers: {}", e)}</div>
-											}.into_any()
-										}
-									}
-								})
-							}}
-						</Suspense>
-					</div>
-				}.into_any()
-			} else {
-				().into_any()
-			}
-		}}
+		<div class="box">
+			<div class="level">
+				<div class="level-left">
+					<h3 class="is-size-5 level-item">"Associated Servers"</h3>
+				</div>
+				<div class="level-right">
+					<button class="button level-item" on:click=move |_| servers_resource.refetch()>
+						"Refresh"
+					</button>
+				</div>
+			</div>
+			<Transition fallback=|| view! { <progress class="progress is-small is-primary" max="100">"Loading..."</progress> }>
+				{move || {
+					servers_resource.get().map(|result| {
+						match result {
+							Ok(servers) if servers.is_empty() => {
+								view! {
+									<div class="block has-text-info">"No servers are associated with this device"</div>
+								}.into_any()
+							}
+							Ok(servers) => {
+								view! {
+									<For each=move || servers.clone() key=|server| server.id.clone() let:server>
+										<div class="level">
+											<div class="level-left">
+												<a href={format!("/servers/{}", server.id)} class="level-item">
+													{server.name.clone().unwrap_or_else(|| "Unnamed Server".to_string())}
+												</a>
+												{server.rank.map(|rank| {
+													view! {
+														<span class={format!("level-item tag is-capitalized {}", match rank {
+															ServerRank::Production => "is-danger",
+															ServerRank::Clone => "is-warning",
+															ServerRank::Demo => "is-link",
+															ServerRank::Test => "is-info",
+															ServerRank::Dev => "is-success",
+														})}>{rank}</span>
+													}
+												})}
+												<span class={format!("level-item tag is-capitalized {}", match server.kind {
+													ServerKind::Central => "is-link",
+													ServerKind::Facility => "is-info",
+													ServerKind::Meta => ""
+												})}>{server.kind}</span>
+
+											</div>
+											<div class="server-details">
+												<span class="server-host">{server.host.clone()}</span>
+												{server.rank.as_ref().map(|rank| {
+													view! {
+														<span class="server-rank">{*rank}</span>
+													}
+												})}
+											</div>
+										</div>
+									</For>
+								}.into_any()
+							}
+							Err(err) => {
+								view! {
+									<div class="block has-text-danger">{format!("Error loading servers: {err}")}</div>
+								}.into_any()
+							}
+						}
+					})
+				}}
+			</Transition>
+		</div>
 	}
 }

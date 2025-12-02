@@ -1,4 +1,4 @@
-#devices-page {
+#old-devices-page {
 	.page-header {
 		margin-bottom: 2em;
 
@@ -932,4 +932,8 @@
 			gap: 0.5em;
 		}
 	}
+}
+
+.history-times {
+	white-space: preserve-spaces;
 }

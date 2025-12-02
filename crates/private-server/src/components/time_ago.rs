@@ -8,7 +8,9 @@ pub fn TimeAgo(timestamp: jiff::Timestamp) -> impl IntoView {
 	{
 		let parsed_timestamp_ms = {
 			if let Some(_window) = web_sys::window() {
-				let js_date = web_sys::js_sys::Date::new(&timestamp.as_millisecond().into());
+				// TODO: use Temporal when that lands, to avoid precision loss when using f64
+				let js_date =
+					web_sys::js_sys::Date::new(&(timestamp.as_millisecond() as f64).into());
 				let time_value = js_date.get_time();
 				if !time_value.is_nan() {
 					Some(time_value)
