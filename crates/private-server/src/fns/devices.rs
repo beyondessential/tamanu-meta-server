@@ -84,8 +84,8 @@ pub async fn get_device_name_by_id(device_id: Uuid) -> Result<String> {
 
 #[server]
 pub async fn list_untrusted(
-	limit: Option<i64>,
-	offset: Option<i64>,
+	limit: Option<u64>,
+	offset: Option<u64>,
 ) -> Result<Vec<Arc<DeviceInfo>>> {
 	ssr::list_untrusted(limit, offset).await
 }
@@ -96,15 +96,15 @@ pub async fn get_servers_for_device(device_id: Uuid) -> Result<Vec<ServerInfo>> 
 }
 
 #[server]
-pub async fn count_untrusted() -> Result<i64> {
+pub async fn count_untrusted() -> Result<u64> {
 	ssr::count_untrusted().await
 }
 
 #[server]
 pub async fn connection_history(
 	device_id: Uuid,
-	limit: Option<i64>,
-	offset: Option<i64>,
+	limit: Option<u64>,
+	offset: Option<u64>,
 ) -> Result<Vec<DeviceConnectionData>> {
 	ssr::connection_history(device_id, limit, offset).await
 }
@@ -120,12 +120,12 @@ pub async fn trust(device_id: Uuid, role: DeviceRole) -> Result<()> {
 }
 
 #[server]
-pub async fn list_trusted(limit: Option<i64>, offset: Option<i64>) -> Result<Vec<Arc<DeviceInfo>>> {
+pub async fn list_trusted(limit: Option<u64>, offset: Option<u64>) -> Result<Vec<Arc<DeviceInfo>>> {
 	ssr::list_trusted(limit, offset).await
 }
 
 #[server]
-pub async fn count_trusted() -> Result<i64> {
+pub async fn count_trusted() -> Result<u64> {
 	ssr::count_trusted().await
 }
 
@@ -248,16 +248,16 @@ mod ssr {
 	}
 
 	pub async fn list_untrusted(
-		limit: Option<i64>,
-		offset: Option<i64>,
+		limit: Option<u64>,
+		offset: Option<u64>,
 	) -> Result<Vec<Arc<DeviceInfo>>> {
 		let db = crate::fns::commons::admin_guard().await?;
 		let mut conn = db.get().await?;
 
 		let devices_with_info = Device::list_untrusted_with_info_paginated(
 			&mut conn,
-			limit.unwrap_or(10),
-			offset.unwrap_or(0),
+			limit.unwrap_or(10).try_into().unwrap_or(10),
+			offset.unwrap_or(0).try_into().unwrap_or(0),
 		)
 		.await?;
 		Ok(devices_with_info
@@ -267,24 +267,27 @@ mod ssr {
 			.collect())
 	}
 
-	pub async fn count_untrusted() -> Result<i64> {
+	pub async fn count_untrusted() -> Result<u64> {
 		let db = crate::fns::commons::admin_guard().await?;
 		let mut conn = db.get().await?;
 
-		Device::count_untrusted(&mut conn).await
+		Ok(Device::count_untrusted(&mut conn)
+			.await?
+			.try_into()
+			.unwrap_or_default())
 	}
 
 	pub async fn list_trusted(
-		limit: Option<i64>,
-		offset: Option<i64>,
+		limit: Option<u64>,
+		offset: Option<u64>,
 	) -> Result<Vec<Arc<DeviceInfo>>> {
 		let db = crate::fns::commons::admin_guard().await?;
 		let mut conn = db.get().await?;
 
 		let devices_with_info = Device::list_trusted_with_info_paginated(
 			&mut conn,
-			limit.unwrap_or(10),
-			offset.unwrap_or(0),
+			limit.unwrap_or(10).try_into().unwrap_or(10),
+			offset.unwrap_or(0).try_into().unwrap_or(0),
 		)
 		.await?;
 		Ok(devices_with_info
@@ -294,17 +297,20 @@ mod ssr {
 			.collect())
 	}
 
-	pub async fn count_trusted() -> Result<i64> {
+	pub async fn count_trusted() -> Result<u64> {
 		let db = crate::fns::commons::admin_guard().await?;
 		let mut conn = db.get().await?;
 
-		Device::count_trusted(&mut conn).await
+		Ok(Device::count_trusted(&mut conn)
+			.await?
+			.try_into()
+			.unwrap_or_default())
 	}
 
 	pub async fn connection_history(
 		device_id: Uuid,
-		limit: Option<i64>,
-		offset: Option<i64>,
+		limit: Option<u64>,
+		offset: Option<u64>,
 	) -> Result<Vec<DeviceConnectionData>> {
 		let db = crate::fns::commons::admin_guard().await?;
 		let mut conn = db.get().await?;
@@ -312,8 +318,8 @@ mod ssr {
 		let connections = DeviceConnection::get_history_for_device_paginated(
 			&mut conn,
 			device_id,
-			limit.unwrap_or(100),
-			offset.unwrap_or(0),
+			limit.unwrap_or(100).try_into().unwrap_or(100),
+			offset.unwrap_or(0).try_into().unwrap_or(0),
 		)
 		.await?;
 		Ok(connections

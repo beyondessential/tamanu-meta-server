@@ -1,15 +1,11 @@
-use commons_types::{
-	Uuid,
-	device::DeviceRole,
-	server::{kind::ServerKind, rank::ServerRank},
-};
+use commons_types::{Uuid, device::DeviceRole};
 use leptos::prelude::*;
 use leptos_meta::Title;
 use leptos_router::hooks::use_params_map;
 
 use super::history::ConnectionHistory;
 use crate::{
-	components::{TimeAgo, ToastCtx},
+	components::{ServerShorty, TimeAgo, ToastCtx},
 	fns::devices::DeviceInfo,
 };
 
@@ -499,39 +495,8 @@ fn AssociatedServers(device_id: Uuid) -> impl IntoView {
 							}
 							Ok(servers) => {
 								view! {
-									<For each=move || servers.clone() key=|server| server.id.clone() let:server>
-										<div class="level">
-											<div class="level-left">
-												<a href={format!("/servers/{}", server.id)} class="level-item">
-													{server.name.clone().unwrap_or_else(|| "Unnamed Server".to_string())}
-												</a>
-												{server.rank.map(|rank| {
-													view! {
-														<span class={format!("level-item tag is-capitalized {}", match rank {
-															ServerRank::Production => "is-danger",
-															ServerRank::Clone => "is-warning",
-															ServerRank::Demo => "is-link",
-															ServerRank::Test => "is-info",
-															ServerRank::Dev => "is-success",
-														})}>{rank}</span>
-													}
-												})}
-												<span class={format!("level-item tag is-capitalized {}", match server.kind {
-													ServerKind::Central => "is-link",
-													ServerKind::Facility => "is-info",
-													ServerKind::Meta => ""
-												})}>{server.kind}</span>
-
-											</div>
-											<div class="server-details">
-												<span class="server-host">{server.host.clone()}</span>
-												{server.rank.as_ref().map(|rank| {
-													view! {
-														<span class="server-rank">{*rank}</span>
-													}
-												})}
-											</div>
-										</div>
+									<For each=move || servers.clone() key=|server| server.id let:server>
+										<ServerShorty server=server.into() />
 									</For>
 								}.into_any()
 							}

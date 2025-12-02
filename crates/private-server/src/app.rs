@@ -64,8 +64,8 @@ pub fn App() -> impl IntoView {
 
 							<ParentRoute path=path!("devices") view=devices::Page>
 								<Route path=path!("") view=devices::Search />
-								<Route path=path!("untrusted") view=devices::Untrusted />
-								<Route path=path!("trusted") view=devices::Trusted />
+								<Route path=path!("untrusted") view=devices::list::Untrusted />
+								<Route path=path!("trusted") view=devices::list::Trusted />
 								<Route path=path!(":id") view=devices::Detail />
 							</ParentRoute>
 						</Routes>

@@ -14,13 +14,9 @@ mod detail;
 mod history;
 pub mod list;
 mod search;
-mod trusted;
-mod untrusted;
 
 pub use detail::Detail;
 pub use search::Search;
-pub use trusted::Trusted;
-pub use untrusted::Untrusted;
 
 #[component]
 pub fn Page() -> impl IntoView {

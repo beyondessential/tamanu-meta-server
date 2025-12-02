@@ -53,14 +53,14 @@ const BATCH: usize = 1000;
 
 #[component]
 fn DeviceConnectionHistory(device_id: Uuid) -> impl IntoView {
-	let (history_offset, set_history_offset) = signal(0i64);
+	let (history_offset, set_history_offset) = signal(0u64);
 	let (all_connections, set_all_connections) =
 		signal(HashMap::<Uuid, DeviceConnectionData>::new());
 	let (has_more, set_has_more) = signal(false);
 
 	let load_more_action = {
 		let device_id = device_id.clone();
-		Action::new(move |offset: &i64| {
+		Action::new(move |offset: &u64| {
 			let device_id = device_id.clone();
 			let offset = *offset;
 			async move {
@@ -126,7 +126,7 @@ fn DeviceConnectionHistory(device_id: Uuid) -> impl IntoView {
 									<button
 										class="level-item button"
 										on:click=move |_| {
-											let current_count = all_connections.get().len() as i64;
+											let current_count = all_connections.get().len() as u64;
 											set_history_offset.set(current_count);
 											load_more_action.dispatch(current_count);
 										}

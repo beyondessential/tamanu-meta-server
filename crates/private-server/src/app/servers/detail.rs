@@ -13,8 +13,7 @@ use leptos_router::{
 };
 
 use crate::{
-	app::devices::list::DeviceListItem,
-	components::{StatusLegend, TimeAgo, VersionIndicator, VersionLegend},
+	components::{DeviceShorty, StatusLegend, TimeAgo, VersionIndicator, VersionLegend},
 	fns::servers::{
 		ChildServerData, ServerDetailData, ServerDetailsData, ServerLastStatusData,
 		assign_parent_server, search_central_servers, server_detail, update_server,
@@ -605,12 +604,11 @@ fn ServerInfoSection(data: Arc<ServerDetailData>) -> impl IntoView {
 				"Central server"
 				<a class="header-url" href={data.server.host.clone()} target="_blank">{data.server.host.clone()}</a>
 			</h2>
-			{data.device_info.as_ref().map(|device_info| {
-				let device_info = device_info.clone();
+			{data.device_info.as_ref().map(|device| {
 				view! {
 					<div class="device-list-container">
 						<h3>"Device"</h3>
-						<DeviceListItem device=device_info />
+						<DeviceShorty device=device.clone() />
 					</div>
 				}
 			})}

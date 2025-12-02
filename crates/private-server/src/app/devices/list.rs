@@ -1,58 +1,108 @@
 use std::sync::Arc;
 
+use commons_errors::AppError;
 use leptos::prelude::*;
-use leptos_router::components::A;
 
-use crate::components::TimeAgo;
+use crate::{
+	components::{DeviceShorty, PaginatedList},
+	fns::devices::DeviceInfo,
+};
+
+const PAGE_SIZE: u64 = 10;
+
+#[component]
+pub fn Trusted() -> impl IntoView {
+	let count = Resource::new(
+		|| (),
+		async |_| {
+			crate::fns::devices::count_trusted()
+				.await
+				.unwrap_or_default()
+		},
+	);
+
+	let fetcher = |p| async move {
+		let offset = p * PAGE_SIZE;
+		crate::fns::devices::list_trusted(Some(PAGE_SIZE), Some(offset)).await
+	};
+
+	view! {
+		<List count fetcher />
+	}
+}
+
+#[component]
+pub fn Untrusted() -> impl IntoView {
+	let count = Resource::new(
+		|| (),
+		async |_| {
+			crate::fns::devices::count_untrusted()
+				.await
+				.unwrap_or_default()
+		},
+	);
+
+	let fetcher = |p| async move {
+		let offset = p * PAGE_SIZE;
+		crate::fns::devices::list_untrusted(Some(PAGE_SIZE), Some(offset)).await
+	};
+
+	view! {
+		<List count fetcher />
+	}
+}
+
+#[component]
+fn List<F, T>(count: Resource<u64>, fetcher: F) -> impl IntoView
+where
+	F: Fn(u64) -> T + Send + Sync + 'static,
+	T: Future<Output = Result<Vec<Arc<DeviceInfo>>, AppError>> + Send + 'static,
+{
+	let (page, set_page) = signal(0u64);
+	let devices = Resource::new(move || page.get(), fetcher);
+
+	view! {
+		<section class="section">
+			<Transition fallback=|| view! { <progress class="progress is-small is-primary" max="100">"Loading..."</progress> }>
+				{move || devices.get().map(|result| {
+					match result {
+						Ok(devices) => {
+							if devices.is_empty() {
+								view! {
+									<div class="box has-text-info">"No trusted devices found"</div>
+								}.into_any()
+							} else {
+								view! {
+									<PaginatedList
+										page=page
+										set_page=set_page
+										total_count=Signal::derive(move || count.get().unwrap_or(0))
+										page_size=PAGE_SIZE
+									>
+										<DeviceList devices=devices.clone() />
+									</PaginatedList>
+								}.into_any()
+							}
+						}
+						Err(e) => {
+							view! {
+								<div class="has-text-danger">{format!("Error loading devices: {}", e)}</div>
+							}.into_any()
+						}
+					}
+				})}
+			</Transition>
+		</section>
+	}
+}
 
 #[component]
 pub fn DeviceList(devices: Vec<Arc<crate::fns::devices::DeviceInfo>>) -> impl IntoView {
 	view! {
 		<div class="device-list">
 			<For each=move || devices.clone() key=|device| device.device.id let:device>
-				<DeviceListItem device />
+				<DeviceShorty device=device.clone() {..} class="level box" />
 			</For>
 		</div>
-	}
-}
-
-#[component]
-pub fn DeviceListItem(device: Arc<crate::fns::devices::DeviceInfo>) -> impl IntoView {
-	let device_id = device.device.id.clone();
-	let role = device.device.role;
-	let latest_ip = device
-		.latest_connection
-		.as_ref()
-		.map(|c| c.ip.clone())
-		.unwrap_or_else(|| "—".to_string());
-	let latest_user_agent = device
-		.latest_connection
-		.as_ref()
-		.and_then(|c| c.user_agent.clone())
-		.unwrap_or_else(|| "—".to_string());
-	let first_seen = device.device.created_at;
-	let last_seen = device
-		.latest_connection
-		.as_ref()
-		.map(|c| c.created_at)
-		.unwrap_or_default();
-
-	view! {
-		<A href={format!("/devices/{device_id}")} {..} class="device-list-item">
-			<div class="device-list-id">
-				<span class="id-text">{device_id.to_string()}</span>
-				<span class="role-badge">{role}</span>
-			</div>
-			<div class="device-list-ip">{latest_ip}</div>
-			<div class="device-list-ua">{latest_user_agent}</div>
-			<div class="info-item">
-				<span class="info-label">"First seen"</span>
-				<TimeAgo timestamp={first_seen} {..} class:info-value />
-			</div>
-			<div class="info-item">
-				<span class="info-label">"Last seen"</span>
-				<TimeAgo timestamp={last_seen} {..} class:info-value />
-			</div>
-		</A>
 	}
 }
