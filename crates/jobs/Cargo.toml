@@ -15,7 +15,7 @@ clap = { workspace = true, features = ["derive", "env"] }
 commons-errors = { path = "../commons-errors" }
 database = { path = "../database" }
 diesel-async = { workspace = true, features = ["mobc", "postgres"] }
-hostname = "0.4.1"
+hostname = "0.4.2"
 lloggs = { workspace = true, features = ["miette-7"] }
 miette = { workspace = true, features = ["fancy"] }
 serde_json = "1.0.143"

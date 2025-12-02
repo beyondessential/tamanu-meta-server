@@ -19,7 +19,7 @@ commons-servers = { path = "../commons-servers" }
 database = { path = "../database" }
 diesel.workspace = true
 diesel-async.workspace = true
-diesel_migrations = "2.2.0"
+diesel_migrations = "2.3.1"
 miette.workspace = true
 percent-encoding = "2.3.2"
 private-server = { path = "../private-server", features = ["ssr"] }
@@ -28,7 +28,7 @@ rcgen = "0.14.3"
 time = "0.3.43"
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread"] }
 tracing.workspace = true
-tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 url = { version = "2.5.7", features = ["serde"] }
-uuid = { version = "1.18.1", features = ["serde", "v4"] }
+uuid = { version = "1.19.0", features = ["serde", "v4"] }
 x509-parser = "0.18.0"
