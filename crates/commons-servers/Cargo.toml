@@ -18,12 +18,10 @@ commons-errors = { path = "../commons-errors" }
 commons-types = { path = "../commons-types" }
 database = { path = "../database" }
 diesel = { workspace = true, features = [
-	"chrono",
 	"ipnet-address",
 	"serde_json",
 	"uuid",
 	"postgres_backend",
-	"i-implement-a-third-party-backend-and-opt-into-breaking-changes",
 ] }
 diesel-async.workspace = true
 http.workspace = true

@@ -3,12 +3,12 @@ use std::{
 	time::{Duration, Instant},
 };
 
-use chrono::{DateTime, TimeDelta, Utc};
 use commons_errors::{AppError, Result};
 use commons_types::{server::rank::ServerRank, status::ShortStatus, version::VersionStr};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use futures::stream::{FuturesOrdered, StreamExt};
+use jiff::{SignedDuration, Timestamp};
 use node_semver::Version;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
@@ -32,11 +32,11 @@ use crate::servers::Server;
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Status {
 	pub id: Uuid,
-	pub created_at: DateTime<Utc>,
+	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
+	pub created_at: Timestamp,
 	pub server_id: Uuid,
 	pub device_id: Option<Uuid>,
 	pub version: Option<VersionStr>,
-
 	pub extra: serde_json::Value,
 }
 
@@ -48,7 +48,6 @@ pub struct NewStatus {
 	pub server_id: Uuid,
 	pub device_id: Option<Uuid>,
 	pub version: Option<VersionStr>,
-
 	pub extra: serde_json::Value,
 }
 
@@ -96,7 +95,7 @@ impl Status {
 					id: Uuid::new_v4(),
 					server_id: server.id,
 					device_id: None,
-					created_at: Utc::now(),
+					created_at: Timestamp::now(),
 					version,
 
 					extra: Default::default(),
@@ -141,7 +140,7 @@ impl Status {
 		let servers = Self::ping_servers(db).await?;
 		diesel::insert_into(statuses)
 			.values(
-				&servers
+				servers
 					.iter()
 					.map(|(status, _)| status.clone())
 					.collect::<Vec<_>>(),
@@ -207,11 +206,7 @@ impl Status {
 			.await?;
 
 		statuses_dsl::statuses
-			.select((
-				statuses_dsl::server_id,
-				statuses_dsl::created_at,
-				statuses_dsl::version,
-			))
+			.select((statuses_dsl::version,))
 			.filter(
 				statuses_dsl::server_id
 					.eq_any(&production_server_ids)
@@ -220,12 +215,12 @@ impl Status {
 			)
 			.order((statuses_dsl::server_id, statuses_dsl::created_at.desc()))
 			.distinct_on(statuses_dsl::server_id)
-			.load::<(Uuid, chrono::DateTime<Utc>, Option<VersionStr>)>(db)
+			.load::<(Option<VersionStr>,)>(db)
 			.await
 			.map(|results| {
 				results
 					.into_iter()
-					.filter_map(|(_, _, version)| version)
+					.filter_map(|(version,)| version)
 					.collect()
 			})
 			.map_err(AppError::from)
@@ -252,12 +247,12 @@ impl Status {
 	}
 
 	pub fn short_status(&self) -> ShortStatus {
-		let since = self.created_at.signed_duration_since(Utc::now()).abs();
-		if since > TimeDelta::minutes(30) {
+		let since = self.created_at.duration_since(Timestamp::now()).abs();
+		if since > SignedDuration::from_mins(30) {
 			ShortStatus::Down
-		} else if since > TimeDelta::minutes(10) {
+		} else if since > SignedDuration::from_mins(10) {
 			ShortStatus::Away
-		} else if since > TimeDelta::minutes(2) {
+		} else if since > SignedDuration::from_mins(2) {
 			ShortStatus::Blip
 		} else {
 			ShortStatus::Up

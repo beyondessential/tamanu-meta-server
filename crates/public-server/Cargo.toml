@@ -21,7 +21,6 @@ commons-errors = { path = "../commons-errors" }
 commons-servers = { path = "../commons-servers" }
 commons-types = { path = "../commons-types" }
 diesel = { workspace = true, features = [
-	"chrono",
 	"ipnet-address",
 	"serde_json",
 	"uuid",
@@ -30,6 +29,7 @@ diesel = { workspace = true, features = [
 diesel-async.workspace = true
 database = { path = "../database" }
 futures.workspace = true
+jiff.workspace = true
 lloggs = { workspace = true, optional = true, features = ["miette-7"] }
 miette = { workspace = true, optional = true, features = ["fancy"] }
 node-semver.workspace = true

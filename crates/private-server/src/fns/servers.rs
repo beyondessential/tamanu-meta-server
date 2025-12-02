@@ -8,6 +8,7 @@ use commons_types::{
 	status::ShortStatus,
 	version::VersionStr,
 };
+use jiff::Timestamp;
 use leptos::serde_json::Value as JsonValue;
 use leptos::server;
 use serde::{Deserialize, Serialize};
@@ -61,7 +62,7 @@ pub struct ChildServerData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerLastStatusData {
 	pub id: Uuid,
-	pub created_at: String,
+	pub created_at: Timestamp,
 	pub version: Option<VersionStr>,
 	pub version_distance: Option<u64>,
 	pub min_chrome_version: Option<u32>,
@@ -325,7 +326,7 @@ mod ssr {
 
 			Some(super::ServerLastStatusData {
 				id: st.id,
-				created_at: st.created_at.to_rfc3339(),
+				created_at: st.created_at,
 				version: st.version.clone(),
 				version_distance,
 				min_chrome_version,
@@ -413,7 +414,7 @@ mod ssr {
 
 					Some(super::ServerLastStatusData {
 						id: st.id,
-						created_at: st.created_at.to_rfc3339(),
+						created_at: st.created_at,
 						version: st.version.clone(),
 						version_distance,
 						min_chrome_version,
@@ -584,15 +585,6 @@ mod ssr {
 	fn convert_device_with_info_to_device_info(
 		device_with_info: database::DeviceWithInfo,
 	) -> crate::fns::devices::DeviceInfo {
-		use folktime::duration::Style;
-
-		fn format_relative_time(datetime: chrono::DateTime<chrono::Utc>) -> String {
-			let now = chrono::Utc::now();
-			let duration = (now - datetime).to_std().unwrap_or_default();
-			let relative = folktime::duration::Duration(duration, Style::OneUnitWhole);
-			format!("{} ago", relative)
-		}
-
 		fn format_key_as_pem(key_data: &[u8]) -> String {
 			use base64::prelude::*;
 
@@ -613,10 +605,8 @@ mod ssr {
 		crate::fns::devices::DeviceInfo {
 			device: Arc::new(crate::fns::devices::DeviceData {
 				id: device_with_info.device.id,
-				created_at: device_with_info.device.created_at.to_rfc3339(),
-				created_at_relative: format_relative_time(device_with_info.device.created_at),
-				updated_at: device_with_info.device.updated_at.to_rfc3339(),
-				updated_at_relative: format_relative_time(device_with_info.device.updated_at),
+				created_at: device_with_info.device.created_at,
+				updated_at: device_with_info.device.updated_at,
 				role: device_with_info.device.role,
 			}),
 			keys: device_with_info
@@ -628,15 +618,14 @@ mod ssr {
 						device_id: key.device_id,
 						name: key.name,
 						pem_data: format_key_as_pem(&key.key_data),
-						created_at: key.created_at.to_rfc3339(),
+						created_at: key.created_at,
 					})
 				})
 				.collect(),
 			latest_connection: device_with_info.latest_connection.map(|conn| {
 				Arc::new(crate::fns::devices::DeviceConnectionData {
 					id: conn.id,
-					created_at: conn.created_at.to_rfc3339(),
-					created_at_relative: format_relative_time(conn.created_at),
+					created_at: conn.created_at,
 					device_id: conn.device_id,
 					ip: conn.ip.addr().to_string(),
 					user_agent: conn.user_agent,

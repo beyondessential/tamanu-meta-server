@@ -60,7 +60,7 @@ async fn index(
 		minor: i32,
 		patch: i32,
 		status: String,
-		created_at: String,
+		created_at: jiff::Timestamp,
 	}
 
 	#[derive(Debug, Clone, Serialize)]
@@ -69,7 +69,7 @@ async fn index(
 		minor: i32,
 		count: usize,
 		latest_patch: i32,
-		first_created_at: String,
+		first_created_at: jiff::Timestamp,
 		versions: Vec<VersionData>,
 	}
 
@@ -113,7 +113,7 @@ async fn index(
 					minor: v.minor,
 					patch: v.patch,
 					status: v.status.to_string().to_lowercase(),
-					created_at: v.created_at.format("%Y-%m-%d").to_string(),
+					created_at: v.created_at,
 				})
 				.collect();
 
@@ -122,7 +122,7 @@ async fn index(
 				minor,
 				count,
 				latest_patch,
-				first_created_at: first_created_at.format("%Y-%m-%d").to_string(),
+				first_created_at,
 				versions: version_data,
 			})
 		})

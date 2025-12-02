@@ -64,7 +64,7 @@ pub fn MinorVersionGroupComponent(group: MinorVersionGroup) -> impl IntoView {
 	let minor = group.minor;
 	let count = group.count;
 	let latest_patch = group.latest_patch;
-	let first_created_at = group.first_created_at.clone();
+	let first_created_at = group.first_created_at;
 	let versions = group.versions.clone();
 
 	view! {
@@ -76,7 +76,7 @@ pub fn MinorVersionGroupComponent(group: MinorVersionGroup) -> impl IntoView {
 				</div>
 				<div class="details">
 					<div>{format!("{} version{}", count, if count == 1 { "" } else { "s" })}</div>
-					<div>{first_created_at.clone()}</div>
+					<div>{first_created_at.strftime("%Y-%m-%d").to_string()}</div>
 				</div>
 			</div>
 			<div class="group-content" class:expanded=move || expanded.get()>
@@ -92,7 +92,7 @@ pub fn MinorVersionGroupComponent(group: MinorVersionGroup) -> impl IntoView {
 									<div class="version-status">{v.status}</div>
 								}
 							})}
-							<div class="version-date">{v.created_at.clone()}</div>
+							<div class="version-date">{v.created_at.strftime("%Y-%m-%d").to_string()}</div>
 						</A>
 					</For>
 				</div>

@@ -1,8 +1,8 @@
-use chrono::{DateTime, Utc};
 use commons_errors::{AppError, Result};
 use commons_types::version::{VersionStatus, VersionStr};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -31,8 +31,10 @@ pub use predicate_version;
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Version {
 	pub id: Uuid,
-	pub created_at: DateTime<Utc>,
-	pub updated_at: DateTime<Utc>,
+	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
+	pub created_at: Timestamp,
+	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
+	pub updated_at: Timestamp,
 	pub major: i32,
 	pub minor: i32,
 	pub patch: i32,
@@ -175,7 +177,7 @@ impl Version {
 	pub async fn get_head_release_date(
 		db: &mut AsyncPgConnection,
 		version: VersionStr,
-	) -> Result<DateTime<Utc>> {
+	) -> Result<Timestamp> {
 		use crate::schema::versions::*;
 
 		let node_semver::Version {

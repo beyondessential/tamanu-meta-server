@@ -1,14 +1,14 @@
 use leptos::prelude::*;
 
 #[component]
-pub fn TimeAgo(timestamp: String) -> impl IntoView {
+pub fn TimeAgo(timestamp: jiff::Timestamp) -> impl IntoView {
 	let (ago_text, set_ago_text) = signal(String::new());
 
 	#[cfg(not(feature = "ssr"))]
 	{
 		let parsed_timestamp_ms = {
 			if let Some(_window) = web_sys::window() {
-				let js_date = web_sys::js_sys::Date::new(&timestamp.clone().into());
+				let js_date = web_sys::js_sys::Date::new(&timestamp.as_millisecond().into());
 				let time_value = js_date.get_time();
 				if !time_value.is_nan() {
 					Some(time_value)
@@ -50,22 +50,14 @@ pub fn TimeAgo(timestamp: String) -> impl IntoView {
 
 	#[cfg(feature = "ssr")]
 	{
-		use std::str::FromStr as _;
-		match jiff::Timestamp::from_str(&timestamp) {
-			Ok(parsed) => {
-				let now = jiff::Timestamp::now();
-				let diff = now.duration_since(parsed);
-				let secs = diff.as_secs().abs() as u64;
-				set_ago_text.set(format_secs(secs));
-			}
-			Err(err) => {
-				set_ago_text.set(err.to_string());
-			}
-		}
+		let now = jiff::Timestamp::now();
+		let diff = now.duration_since(timestamp);
+		let secs = diff.as_secs().abs() as u64;
+		set_ago_text.set(format_secs(secs));
 	}
 
 	view! {
-		<span class="time-ago" title={timestamp.clone()}>
+		<span class="time-ago" title={timestamp.to_string()}>
 		{move || ago_text.get()} " ago"
 		</span>
 	}

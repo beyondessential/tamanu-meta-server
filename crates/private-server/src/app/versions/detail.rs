@@ -82,11 +82,11 @@ fn VersionInfo(detail: VersionDetail, is_admin: bool) -> impl IntoView {
 			<div class="info-grid">
 				<div class="info-item">
 					<span class="info-label">"Created"</span>
-					<span class="info-value">{detail.created_at.clone()}</span>
+					<span class="info-value">{detail.created_at.strftime("%Y-%m-%d %H:%M:%S UTC").to_string()}</span>
 				</div>
 				<div class="info-item">
 					<span class="info-label">"Last updated"</span>
-					<span class="info-value">{detail.updated_at.clone()}</span>
+					<span class="info-value">{detail.updated_at.strftime("%Y-%m-%d %H:%M:%S UTC").to_string()}</span>
 				</div>
 				{detail.min_chrome_version.map(|chrome_ver| {
 					view! {

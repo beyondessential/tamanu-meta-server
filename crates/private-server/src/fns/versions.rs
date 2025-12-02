@@ -1,5 +1,6 @@
 use commons_errors::Result;
 use commons_types::version::VersionStatus;
+use jiff::Timestamp;
 use leptos::server;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -10,7 +11,7 @@ pub struct VersionData {
 	pub minor: i32,
 	pub patch: i32,
 	pub status: VersionStatus,
-	pub created_at: String,
+	pub created_at: Timestamp,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,8 +20,8 @@ pub struct MinorVersionGroup {
 	pub minor: i32,
 	pub count: usize,
 	pub latest_patch: i32,
-	pub first_created_at: String,
-	pub last_created_at: String,
+	pub first_created_at: Timestamp,
+	pub last_created_at: Timestamp,
 	pub versions: Vec<VersionData>,
 }
 
@@ -31,8 +32,8 @@ pub struct VersionDetail {
 	pub minor: i32,
 	pub patch: i32,
 	pub status: VersionStatus,
-	pub created_at: String,
-	pub updated_at: String,
+	pub created_at: Timestamp,
+	pub updated_at: Timestamp,
 	pub changelog: String,
 	pub min_chrome_version: Option<u32>,
 	pub is_latest_in_minor: bool,
@@ -111,6 +112,7 @@ mod ssr {
 	use commons_errors::Result;
 	use commons_types::version::{VersionStatus, VersionStr};
 	use database::{Db, artifacts::Artifact, versions::Version};
+	use jiff::Timestamp;
 	use leptos::prelude::expect_context;
 	use leptos_axum::extract_with_state;
 
@@ -154,13 +156,13 @@ mod ssr {
 						published_versions
 							.last()
 							.map(|v| v.created_at)
-							.unwrap_or_else(|| chrono::Utc::now())
+							.unwrap_or_else(|| Timestamp::now())
 					});
 
 				let last_created_at = published_versions
 					.first()
 					.map(|v| v.created_at)
-					.unwrap_or_else(|| chrono::Utc::now());
+					.unwrap_or_else(|| Timestamp::now());
 
 				let version_data: Vec<VersionData> = versions
 					.into_iter()
@@ -169,7 +171,7 @@ mod ssr {
 						minor: v.minor,
 						patch: v.patch,
 						status: v.status,
-						created_at: v.created_at.format("%Y-%m-%d").to_string(),
+						created_at: v.created_at,
 					})
 					.collect();
 
@@ -178,8 +180,8 @@ mod ssr {
 					minor,
 					count,
 					latest_patch,
-					first_created_at: first_created_at.format("%Y-%m-%d").to_string(),
-					last_created_at: last_created_at.format("%Y-%m-%d").to_string(),
+					first_created_at: first_created_at,
+					last_created_at: last_created_at,
 					versions: version_data,
 				}
 			})
@@ -233,14 +235,8 @@ mod ssr {
 			minor: version_record.minor,
 			patch: version_record.patch,
 			status: version_record.status,
-			created_at: version_record
-				.created_at
-				.format("%Y-%m-%d %H:%M:%S UTC")
-				.to_string(),
-			updated_at: version_record
-				.updated_at
-				.format("%Y-%m-%d %H:%M:%S UTC")
-				.to_string(),
+			created_at: version_record.created_at,
+			updated_at: version_record.updated_at,
 			changelog: version_record.changelog,
 			min_chrome_version,
 			is_latest_in_minor,

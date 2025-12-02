@@ -629,8 +629,8 @@ fn StatusSection(
 			<h2>"Latest status"</h2>
 			<div class:info-grid>
 				<div class:info-item>
-				<span class="info-label">"Reported At"</span>
-				<TimeAgo timestamp={status.created_at.clone()} {..} class:info-value />
+					<span class="info-label">"Reported At"</span>
+					<TimeAgo timestamp={status.created_at} {..} class:info-value />
 				</div>
 				{status.platform.as_ref().map(|p| {
 					let p = p.clone();

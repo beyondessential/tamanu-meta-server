@@ -1,6 +1,7 @@
 use commons_errors::{AppError, Result};
 use diesel::{dsl::count, prelude::*};
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable, AsChangeset)]
@@ -8,7 +9,8 @@ use serde::{Deserialize, Serialize};
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Admin {
 	pub email: String,
-	pub created_at: chrono::DateTime<chrono::Utc>,
+	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
+	pub created_at: Timestamp,
 }
 
 impl Admin {

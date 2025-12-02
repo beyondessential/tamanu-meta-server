@@ -3,6 +3,8 @@ use std::sync::Arc;
 use leptos::prelude::*;
 use leptos_router::components::A;
 
+use crate::components::TimeAgo;
+
 #[component]
 pub fn DeviceList(devices: Vec<Arc<crate::fns::devices::DeviceInfo>>) -> impl IntoView {
 	view! {
@@ -28,17 +30,11 @@ pub fn DeviceListItem(device: Arc<crate::fns::devices::DeviceInfo>) -> impl Into
 		.as_ref()
 		.and_then(|c| c.user_agent.clone())
 		.unwrap_or_else(|| "—".to_string());
-	let first_seen = device.device.created_at_relative.clone();
-	let first_seen_full = device.device.created_at.clone();
+	let first_seen = device.device.created_at;
 	let last_seen = device
 		.latest_connection
 		.as_ref()
-		.map(|c| c.created_at_relative.clone())
-		.unwrap_or_else(|| "Never".to_string());
-	let last_seen_full = device
-		.latest_connection
-		.as_ref()
-		.map(|c| c.created_at.clone())
+		.map(|c| c.created_at)
 		.unwrap_or_default();
 
 	view! {
@@ -49,13 +45,13 @@ pub fn DeviceListItem(device: Arc<crate::fns::devices::DeviceInfo>) -> impl Into
 			</div>
 			<div class="device-list-ip">{latest_ip}</div>
 			<div class="device-list-ua">{latest_user_agent}</div>
-			<div class="device-list-times">
-				<span class="timestamp-hover" title={first_seen_full}>
-					{format!("First seen: {}", first_seen)}
-				</span>
-				<span class="timestamp-hover" title={last_seen_full}>
-					{format!("Last seen: {}", last_seen)}
-				</span>
+			<div class="info-item">
+				<span class="info-label">"First seen"</span>
+				<TimeAgo timestamp={first_seen} {..} class:info-value />
+			</div>
+			<div class="info-item">
+				<span class="info-label">"Last seen"</span>
+				<TimeAgo timestamp={last_seen} {..} class:info-value />
 			</div>
 		</A>
 	}

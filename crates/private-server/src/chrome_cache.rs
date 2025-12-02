@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
 
@@ -53,7 +53,7 @@ impl ChromeVersionCache {
 	}
 	pub async fn get_supported_versions_at_date(
 		&self,
-		date: DateTime<Utc>,
+		date: Timestamp,
 	) -> Result<Vec<u32>, Box<dyn std::error::Error + Send + Sync>> {
 		// Clone Arc with minimal read lock duration
 		let releases = {
@@ -61,7 +61,7 @@ impl ChromeVersionCache {
 			cache.as_ref().ok_or("Cache not initialized")?.clone()
 		};
 
-		let date_str = date.format("%Y-%m-%d").to_string();
+		let date_str = date.strftime("%Y-%m-%d").to_string();
 
 		let supported: Vec<u32> = releases
 			.iter()

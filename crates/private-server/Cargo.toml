@@ -18,17 +18,15 @@ axum = { workspace = true, optional = true, features = ["json", "macros"] }
 axum-client-ip = { version = "1.1.3", optional = true, features = ["forwarded-header"] }
 axum-server-timing = { version = "3.0.0", optional = true }
 base64 = "0.22.1"
-chrono = { workspace = true, optional = true, features = ["serde"] }
 clap = { workspace = true, optional = true, features = ["derive", "env"] }
 commons-errors = { path = "../commons-errors", default-features = false }
 commons-servers = { path = "../commons-servers", optional = true }
 commons-types = { path = "../commons-types", default-features = false }
 console_error_panic_hook = { version = "0.1.0", optional = true }
 database = { path = "../database", optional = true }
-folktime = { version = "0.2.1", optional = true }
 hex = "0.4.3"
 itertools = "0.14.0"
-jiff = { version = "0.2.15", optional = true }
+jiff = { version = "0.2.15", features = ["serde"] }
 js-sys = { version = "0.3.81", optional = true }
 leptos.workspace = true
 leptos_axum = { version = "0.8.0", optional = true }
@@ -64,12 +62,9 @@ ssr = [
 	"dep:axum",
 	"dep:axum-client-ip",
 	"dep:axum-server-timing",
-	"dep:chrono",
 	"dep:clap",
 	"dep:commons-servers",
 	"dep:database",
-	"dep:folktime",
-	"dep:jiff",
 	"dep:leptos_axum",
 	"dep:lloggs",
 	"dep:miette",

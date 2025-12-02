@@ -6,6 +6,7 @@ use commons_types::{
 	device::DeviceRole,
 	server::{kind::ServerKind, rank::ServerRank},
 };
+use jiff::Timestamp;
 use leptos::server;
 use serde::{Deserialize, Serialize};
 
@@ -28,10 +29,8 @@ pub struct DeviceInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceData {
 	pub id: Uuid,
-	pub created_at: String,
-	pub created_at_relative: String,
-	pub updated_at: String,
-	pub updated_at_relative: String,
+	pub created_at: Timestamp,
+	pub updated_at: Timestamp,
 	pub role: DeviceRole,
 }
 
@@ -41,14 +40,13 @@ pub struct DeviceKeyInfo {
 	pub device_id: Uuid,
 	pub name: Option<String>,
 	pub pem_data: String,
-	pub created_at: String,
+	pub created_at: Timestamp,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceConnectionData {
 	pub id: Uuid,
-	pub created_at: String,
-	pub created_at_relative: String,
+	pub created_at: Timestamp,
 	pub device_id: Uuid,
 	pub ip: String,
 	pub user_agent: Option<String>,
@@ -132,25 +130,15 @@ mod ssr {
 	use commons_types::device::DeviceRole;
 	use database::servers::Server;
 	use database::{Device, DeviceConnection, DeviceKey, DeviceWithInfo};
-	use folktime::duration::Style;
 	use uuid::Uuid;
-
-	fn format_relative_time(datetime: chrono::DateTime<chrono::Utc>) -> String {
-		let now = chrono::Utc::now();
-		let duration = (now - datetime).to_std().unwrap_or_default();
-		let relative = folktime::duration::Duration(duration, Style::OneUnitWhole);
-		format!("{} ago", relative)
-	}
 
 	impl From<DeviceWithInfo> for DeviceInfo {
 		fn from(device_with_info: DeviceWithInfo) -> Self {
 			Self {
 				device: Arc::new(DeviceData {
 					id: device_with_info.device.id,
-					created_at: device_with_info.device.created_at.to_rfc3339(),
-					created_at_relative: format_relative_time(device_with_info.device.created_at),
-					updated_at: device_with_info.device.updated_at.to_rfc3339(),
-					updated_at_relative: format_relative_time(device_with_info.device.updated_at),
+					created_at: device_with_info.device.created_at,
+					updated_at: device_with_info.device.updated_at,
 					role: device_with_info.device.role,
 				}),
 				keys: device_with_info
@@ -174,7 +162,7 @@ mod ssr {
 				device_id: key.device_id,
 				name: key.name,
 				pem_data: format_key_as_pem(&key.key_data),
-				created_at: key.created_at.to_rfc3339(),
+				created_at: key.created_at,
 			}
 		}
 	}
@@ -183,8 +171,7 @@ mod ssr {
 		fn from(conn: DeviceConnection) -> Self {
 			Self {
 				id: conn.id,
-				created_at: conn.created_at.to_rfc3339(),
-				created_at_relative: format_relative_time(conn.created_at),
+				created_at: conn.created_at,
 				device_id: conn.device_id,
 				ip: conn.ip.addr().to_string(),
 				user_agent: conn.user_agent,
