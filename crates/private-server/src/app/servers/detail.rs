@@ -7,8 +7,8 @@ use leptos_router::{components::A, hooks::use_params_map};
 
 use crate::{
 	components::{
-		DeviceShorty, ServerKindBadge, ServerRankBadge, ServerShorty, StatusDot, StatusLegend,
-		TimeAgo, VersionIndicator, VersionLegend,
+		DeviceShorty, LoadingBar, ServerKindBadge, ServerRankBadge, ServerShorty, StatusDot,
+		StatusLegend, TimeAgo, VersionIndicator, VersionLegend,
 	},
 	fns::servers::{ServerDetailData, ServerInfo, ServerLastStatusData, server_detail},
 };
@@ -44,7 +44,7 @@ pub fn Detail() -> impl IntoView {
 	view! {
 		<Stylesheet id="css-servers" href="/static/servers.css" />
 		<div id="status-detail-page">
-			<Suspense fallback=|| view! { <progress class="progress is-small is-primary" max="100">"Loading..."</progress> }>
+			<Suspense fallback=|| view! { <LoadingBar /> }>
 				{move || {
 					detail_resource.get().map(|result| {
 						match result {
@@ -189,7 +189,7 @@ fn StatusInfo(status: Arc<ServerLastStatusData>) -> impl IntoView {
 	let min_chrome_version = status.min_chrome_version;
 	view! {
 		<div class:info-item>
-			<span class="info-label">"Reported At"</span>
+			<span class="info-label">"Last seen"</span>
 			<TimeAgo timestamp={status.created_at} {..} class:info-value />
 		</div>
 		{status.platform.as_ref().map(|p| {
@@ -257,9 +257,9 @@ fn ExtraData(status: Arc<ServerLastStatusData>) -> impl IntoView {
 	let extra = status.extra.clone();
 	if !extra.as_object().map(|o| o.is_empty()).unwrap_or(true) {
 		view! {
-			<details class="extra-data">
+			<details class="mt-5">
 				<summary>"Extra Data"</summary>
-				<pre class="json-display">{serde_json::to_string_pretty(&extra).unwrap_or_default()}</pre>
+				<pre>{serde_json::to_string_pretty(&extra).unwrap_or_default()}</pre>
 			</details>
 		}
 		.into_any()

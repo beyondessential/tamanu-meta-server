@@ -4,7 +4,7 @@ use leptos_meta::Stylesheet;
 use uuid::Uuid;
 
 use crate::{
-	components::{ReleaseSummary, StatusLegend, VersionIndicator, VersionLegend},
+	components::{LoadingBar, ReleaseSummary, StatusLegend, VersionIndicator, VersionLegend},
 	fns::statuses::{server_details, server_grouped_ids},
 };
 
@@ -110,9 +110,7 @@ pub fn ServerCards() -> impl IntoView {
 
 	view! {
 		<article>
-			<Transition fallback=|| view! {
-				<progress class="progress is-small is-primary" max="100">"Loading servers..."</progress>
-			}>
+			<Transition fallback=|| view! { <LoadingBar /> }>
 				{move || {
 					grouped_ids_resource.get().map(|res| match res {
 						Ok(groups) => {

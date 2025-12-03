@@ -56,7 +56,6 @@
 			grid-area: status;
 			font-size: 1.2em;
 			display: flex;
-			gap: 0.5em;
 		}
 	}
 }
