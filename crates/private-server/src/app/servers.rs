@@ -5,11 +5,11 @@ use leptos_router::{components::A, hooks::use_params_map};
 use crate::components::{EndTabs, SubTabs};
 
 mod detail;
-mod edit;
+// mod edit;
 pub mod list;
 
 pub use detail::Detail;
-pub use edit::Edit;
+// pub use edit::Edit;
 
 #[component]
 pub fn Page() -> impl IntoView {

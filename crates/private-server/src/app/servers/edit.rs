@@ -1,13 +1,18 @@
 use std::sync::Arc;
 
-use commons_types::{Uuid, geo::GeoPoint, server::rank::ServerRank};
+use commons_types::{
+	Uuid,
+	geo::GeoPoint,
+	server::{kind::ServerKind, rank::ServerRank},
+};
 use leptos::prelude::*;
 use leptos_meta::Stylesheet;
 use leptos_router::components::Redirect;
 use leptos_router::hooks::use_params_map;
 
 use crate::fns::servers::{
-	ServerInfo, assign_parent_server, search_central_servers, server_detail, update_server,
+	ServerDetailData, ServerInfo, assign_parent_server, search_central_servers, server_detail,
+	update_server,
 };
 
 #[component]
@@ -522,5 +527,432 @@ fn EditView(
 				</form>
 			</section>
 		</div>
+	}
+}
+
+#[component]
+fn EditForm(
+	data: Arc<ServerDetailData>,
+	edit_name: RwSignal<String>,
+	edit_host: RwSignal<String>,
+	edit_rank: RwSignal<Option<ServerRank>>,
+	edit_device_id: RwSignal<Option<Uuid>>,
+	edit_parent_id: RwSignal<Option<Uuid>>,
+	edit_listed: RwSignal<bool>,
+	update_action: Action<
+		(
+			Option<String>,
+			Option<String>,
+			Option<ServerRank>,
+			Option<Uuid>,
+			Option<Uuid>,
+			Option<bool>,
+			Option<Option<bool>>,
+			Option<Option<GeoPoint>>,
+		),
+		Result<crate::fns::servers::ServerDetailsData, commons_errors::AppError>,
+	>,
+	is_editing: RwSignal<bool>,
+) -> impl IntoView {
+	let edit_cloud = RwSignal::new(None::<Option<bool>>);
+	let edit_lat = RwSignal::new(None::<f64>);
+	let edit_lon = RwSignal::new(None::<f64>);
+	let edit_aws_region = RwSignal::new(String::new());
+
+	Effect::new({
+		let data = data.clone();
+		move |_| {
+			edit_cloud.set(Some(data.server.cloud));
+			if let Some(geo) = &data.server.geolocation {
+				edit_lat.set(Some(geo.lat));
+				edit_lon.set(Some(geo.lon));
+			}
+		}
+	});
+
+	view! {
+		<section class="detail-section edit-form">
+			<h2>"Edit Server Details"</h2>
+			<form on:submit=move |ev| {
+				ev.prevent_default();
+				let device_id = edit_device_id.get();
+				let parent_id = edit_parent_id.get();
+				let listed = edit_listed.get();
+				let cloud = edit_cloud.get();
+				let lat = edit_lat.get();
+				let lon = edit_lon.get();
+				let geolocation = if let (Some(lat), Some(lon)) = (lat, lon) {
+					Some(Some(GeoPoint { lat, lon }))
+				} else {
+					Some(None)
+				};
+				update_action.dispatch((
+					Some(edit_name.get()),
+					Some(edit_host.get()),
+					edit_rank.get(),
+					device_id,
+					parent_id,
+					Some(listed),
+					cloud,
+					geolocation,
+				));
+			}>
+				<div class="form-group">
+					<label for="edit-name">"Server Name"</label>
+					<input
+						type="text"
+						id="edit-name"
+						prop:value=move || edit_name.get()
+						on:input=move |ev| edit_name.set(event_target_value(&ev))
+						required
+					/>
+				</div>
+
+				<div class="form-group">
+					<label for="edit-host">"Host URL"</label>
+					<input
+						type="url"
+						id="edit-host"
+						prop:value=move || edit_host.get()
+						on:input=move |ev| edit_host.set(event_target_value(&ev))
+						required
+					/>
+				</div>
+
+				<div class="form-group">
+					<label for="edit-rank">"Server Rank"</label>
+					<select
+						id="edit-rank"
+						prop:value=move || edit_rank.get().unwrap_or_default()
+						on:change=move |ev| edit_rank.set(event_target_value(&ev).parse().ok())
+						required
+					>
+						<option value={ServerRank::Production} selected=move || edit_rank.get() == Some(ServerRank::Production)>{ServerRank::Production}</option>
+						<option value={ServerRank::Clone} selected=move || edit_rank.get() == Some(ServerRank::Clone)>{ServerRank::Clone}</option>
+						<option value={ServerRank::Demo} selected=move || edit_rank.get() == Some(ServerRank::Demo)>{ServerRank::Demo}</option>
+						<option value={ServerRank::Test} selected=move || edit_rank.get() == Some(ServerRank::Test)>{ServerRank::Test}</option>
+						<option value={ServerRank::Dev} selected=move || edit_rank.get() == Some(ServerRank::Dev)>{ServerRank::Dev}</option>
+					</select>
+				</div>
+
+				<div class="form-group">
+					<label for="edit-device-id">"Device ID"</label>
+					<input
+						type="text"
+						id="edit-device-id"
+						prop:value=move || edit_device_id.get().map(|id| id.to_string()).unwrap_or_default()
+						on:input=move |ev| edit_device_id.set(event_target_value(&ev).parse().ok())
+						placeholder="Leave empty to unset"
+					/>
+					<small class="help-text">"Optional UUID of the device associated with this server"</small>
+				</div>
+
+				{if data.server.kind != ServerKind::Central {
+					view! {
+						<div class="form-group">
+							<label for="edit-parent-id">"Parent Server ID"</label>
+							<input
+								type="text"
+								id="edit-parent-id"
+								prop:value=move || edit_parent_id.get().map(|id| id.to_string()).unwrap_or_default()
+								on:input=move |ev| edit_parent_id.set(event_target_value(&ev).parse().ok())
+								placeholder="Leave empty to unset parent"
+							/>
+							<small class="help-text">"Optional UUID of the parent central server"</small>
+						</div>
+					}.into_any()
+				} else {
+					view! {
+						<div class="form-group">
+							<label for="edit-listed">
+								<input
+									type="checkbox"
+									id="edit-listed"
+									prop:checked=move || edit_listed.get()
+									on:change=move |ev| edit_listed.set(event_target_checked(&ev))
+								/>
+								" Listed in Tamanu mobile"
+							</label>
+							<small class="help-text">"When checked, this server will appear in the public Tamanu mobile server list"</small>
+						</div>
+					}.into_any()
+				}}
+
+				<div class="form-group">
+					<label for="edit-cloud">"Server location"</label>
+					<select
+						id="edit-cloud"
+						prop:value=move || {
+							match edit_cloud.get() {
+								Some(Some(true)) => "cloud",
+								Some(Some(false)) => "on-premise",
+								_ => "unknown",
+							}.to_string()
+						}
+						on:change=move |ev| {
+							let value = event_target_value(&ev);
+							edit_cloud.set(Some(match value.as_str() {
+								"cloud" => Some(true),
+								"on-premise" => Some(false),
+								_ => None,
+							}));
+							edit_aws_region.set(String::new());
+						}
+					>
+						<option value="unknown">"Unknown"</option>
+						<option value="cloud">"Cloud"</option>
+						<option value="on-premise">"On premise"</option>
+					</select>
+				</div>
+
+				{move || {
+					if let Some(Some(true)) = edit_cloud.get() {
+						view! {
+							<div class="form-group">
+								<label for="edit-aws-region">"AWS Region"</label>
+								<select
+									id="edit-aws-region"
+									prop:value=move || edit_aws_region.get()
+									on:change=move |ev| {
+										let region = event_target_value(&ev);
+										edit_aws_region.set(region.clone());
+										match region.as_str() {
+											"sydney" => {
+												edit_lat.set(Some(-33.8688));
+												edit_lon.set(Some(151.2093));
+											}
+											"auckland" => {
+												edit_lat.set(Some(-37.0082));
+												edit_lon.set(Some(174.7850));
+											}
+											"singapore" => {
+												edit_lat.set(Some(1.3521));
+												edit_lon.set(Some(103.8198));
+											}
+											"tokyo" => {
+												edit_lat.set(Some(35.6762));
+												edit_lon.set(Some(139.6503));
+											}
+											"zurich" => {
+												edit_lat.set(Some(47.3769));
+												edit_lon.set(Some(8.5472));
+											}
+											"mumbai" => {
+												edit_lat.set(Some(19.0760));
+												edit_lon.set(Some(72.8777));
+											}
+											_ => {}
+										}
+									}
+								>
+									<option value="">"Select a region..."</option>
+									<option value="sydney">"AWS Sydney"</option>
+									<option value="auckland">"AWS Auckland"</option>
+									<option value="singapore">"AWS Singapore"</option>
+									<option value="tokyo">"AWS Tokyo"</option>
+									<option value="zurich">"AWS Zurich"</option>
+									<option value="mumbai">"AWS Mumbai"</option>
+								</select>
+								<small class="help-text">"Select an AWS region to auto-populate coordinates"</small>
+							</div>
+						}.into_any()
+					} else {
+						().into_any()
+					}
+				}}
+
+				<div class="form-group">
+					<label>"Geolocation Coordinates"</label>
+					<div style="display: flex; gap: 1rem;">
+						<div style="flex: 1;">
+							<label for="edit-lat" style="display: block; font-size: 0.9em; margin-bottom: 0.25rem;">"Latitude"</label>
+							<input
+								type="number"
+								id="edit-lat"
+								step="any"
+								prop:value=move || edit_lat.get().map(|v| v.to_string()).unwrap_or_default()
+								on:input=move |ev| edit_lat.set(event_target_value(&ev).parse().ok())
+								placeholder="e.g., -33.8688"
+							/>
+						</div>
+						<div style="flex: 1;">
+							<label for="edit-lon" style="display: block; font-size: 0.9em; margin-bottom: 0.25rem;">"Longitude"</label>
+							<input
+								type="number"
+								id="edit-lon"
+								step="any"
+								prop:value=move || edit_lon.get().map(|v| v.to_string()).unwrap_or_default()
+								on:input=move |ev| edit_lon.set(event_target_value(&ev).parse().ok())
+								placeholder="e.g., 151.2093"
+							/>
+						</div>
+					</div>
+					<small class="help-text">"Optional latitude and longitude coordinates"</small>
+				</div>
+
+				{move || {
+					update_action.value().get().and_then(|result| {
+						if let Err(e) = result {
+							Some(view! {
+								<div class="error-message">
+									{format!("Error updating server: {}", e)}
+								</div>
+							})
+						} else {
+							None
+						}
+					})
+				}}
+
+				<div class="form-actions">
+					<button type="submit" class="save-button" disabled=move || update_action.pending().get()>
+						{move || if update_action.pending().get() { "Saving..." } else { "Save" }}
+					</button>
+					<button
+						type="button"
+						class="cancel-button"
+						on:click=move |_| is_editing.set(false)
+						disabled=move || update_action.pending().get()
+					>
+						"Cancel"
+					</button>
+				</div>
+			</form>
+		</section>
+	}
+}
+
+#[component]
+fn AssignParentSection(server_id: Uuid) -> impl IntoView {
+	let search_query = RwSignal::new(String::new());
+	let search_results = RwSignal::new(Vec::new());
+
+	let current_rank = RwSignal::new(None::<ServerRank>);
+
+	let detail_resource = Resource::new(move || server_id, async move |id| server_detail(id).await);
+
+	Effect::new(move |_| {
+		if let Some(Ok(data)) = detail_resource.get() {
+			current_rank.set(data.server.rank);
+		}
+	});
+
+	let assign_action = Action::new(move |parent_id: &Uuid| {
+		let parent_id = *parent_id;
+		async move {
+			let result = assign_parent_server(server_id, parent_id).await;
+			if result.is_ok() {
+				leptos_router::hooks::use_navigate()(
+					&format!("/servers/{}", parent_id),
+					Default::default(),
+				);
+			}
+			result
+		}
+	});
+
+	let search_action = Action::new(move |query: &String| {
+		let query = query.clone();
+		async move {
+			if query.is_empty() {
+				search_results.set(Vec::new());
+				Ok(())
+			} else {
+				match search_central_servers(query).await {
+					Ok(results) => {
+						search_results.set(results);
+						Ok(())
+					}
+					Err(e) => Err(e),
+				}
+			}
+		}
+	});
+
+	view! {
+		<section class="detail-section">
+			<h2>"Assign Parent Server"</h2>
+			<p class="help-text">"This server does not have a parent server. Search and select a central server to assign as parent."</p>
+			<div class="parent-search">
+				<input
+					type="text"
+					placeholder="Search for central server..."
+					prop:value=move || search_query.get()
+					on:input=move |ev| {
+						let query = event_target_value(&ev);
+						search_query.set(query.clone());
+						search_action.dispatch(query);
+					}
+				/>
+				{move || {
+					if search_action.pending().get() {
+						view! { <div class="search-status">"Searching..."</div> }.into_any()
+					} else if !search_results.get().is_empty() {
+						let rank = current_rank.get();
+						let mut results = search_results.get();
+
+						// Sort: matching rank first, then others
+						results.sort_by(|a, b| {
+							let a_matches = a.rank == rank;
+							let b_matches = b.rank == rank;
+							match (a_matches, b_matches) {
+								(true, false) => std::cmp::Ordering::Less,
+								(false, true) => std::cmp::Ordering::Greater,
+								_ => std::cmp::Ordering::Equal,
+							}
+						});
+
+						view! {
+							<div class="search-results">
+								{results.into_iter().map(|server| {
+									let server_id = server.id.clone();
+									let rank_matches = server.rank == rank;
+									let opacity_class = if rank_matches { "" } else { "faded" };
+									view! {
+										<div class={format!("search-result-item {}", opacity_class)}>
+											<div class="search-result-info">
+												<strong>{server.name.unwrap_or_else(|| "(unnamed)".to_string())}</strong>
+												<span class="search-result-host">{server.host}</span>
+												{server.rank.map(|rank| {
+													view! {
+														<span class="search-result-rank">{rank}</span>
+													}
+												})}
+											</div>
+											<button
+												class="assign-button"
+												on:click=move |_| {
+													assign_action.dispatch(server_id.clone());
+												}
+												disabled=move || assign_action.pending().get()
+											>
+												"Assign"
+											</button>
+										</div>
+									}
+								}).collect::<Vec<_>>()}
+							</div>
+						}.into_any()
+					} else if !search_query.get().is_empty() {
+						view! { <div class="search-status">"No central servers found"</div> }.into_any()
+					} else {
+						().into_any()
+					}
+				}}
+				{move || {
+					assign_action.value().get().and_then(|result| {
+						if let Err(e) = result {
+							Some(view! {
+								<div class="error-message">
+									{format!("Error assigning parent: {}", e)}
+								</div>
+							})
+						} else {
+							None
+						}
+					})
+				}}
+			</div>
+		</section>
 	}
 }

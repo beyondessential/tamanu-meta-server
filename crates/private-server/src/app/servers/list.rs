@@ -5,7 +5,7 @@ use commons_types::server::kind::ServerKind;
 use leptos::prelude::*;
 
 use crate::{
-	components::{PaginatedList, ServerShorty},
+	components::{Error, LoadingBar, Nothing, PaginatedList, ServerShorty},
 	fns::servers::{ServerInfo, count_servers, list_servers},
 };
 
@@ -53,13 +53,13 @@ where
 
 	view! {
 		<section class="section">
-			<Transition fallback=|| view! { <progress class="progress is-small is-primary" max="100">"Loading..."</progress> }>
+			<Transition fallback=|| view! { <LoadingBar /> }>
 				{move || servers.get().map(|result| {
 					match result {
 						Ok(servers) => {
 							if servers.is_empty() {
 								view! {
-									<div class="box has-text-info">"No servers found"</div>
+									<Nothing thing="servers" />
 								}.into_any()
 							} else {
 								view! {
@@ -74,9 +74,9 @@ where
 								}.into_any()
 							}
 						}
-						Err(e) => {
+						Err(error) => {
 							view! {
-								<div class="has-text-danger">{format!("Error loading servers: {}", e)}</div>
+								<Error context="Error loading servers" error />
 							}.into_any()
 						}
 					}

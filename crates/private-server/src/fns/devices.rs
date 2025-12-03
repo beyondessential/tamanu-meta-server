@@ -232,8 +232,12 @@ mod ssr {
 				host: s.host.into(),
 				kind: s.kind,
 				rank: s.rank,
+				device_id: s.device_id,
 				parent_server_id: s.parent_server_id,
 				parent_server_name: None, // TODO
+				listed: s.listed,
+				cloud: s.cloud,
+				geolocation: s.geolocation,
 			})
 			.collect())
 	}

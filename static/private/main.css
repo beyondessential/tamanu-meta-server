@@ -121,6 +121,12 @@ code {
 	text-decoration: underline dotted;
 }
 
+.status-dot,
+.version-indicator,
+.tag {
+	margin-right: 0.5em;
+}
+
 .status-dot {
 	width: 1em;
 	height: 1em;
@@ -150,6 +156,11 @@ code {
 	&.facility-dot {
 		opacity: 0.5;
 	}
+}
+
+.status-dot-small .status-dot,
+.version-indicator-small .version-indicator {
+	font-size: 0.75em;
 }
 
 .version-indicator {
@@ -219,7 +230,6 @@ aside.legend {
 		display: flex;
 		flex-direction: column;
 		gap: 0.25em;
-		margin-top: 0.75em;
 
 		.info-label {
 			font-size: 0.85em;
