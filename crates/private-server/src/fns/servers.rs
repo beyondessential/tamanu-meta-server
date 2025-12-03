@@ -96,6 +96,11 @@ pub async fn list_facility_servers() -> Result<Vec<ServerInfo>> {
 }
 
 #[server]
+pub async fn get_name(server_id: Uuid) -> Result<String> {
+	ssr::get_name(server_id).await
+}
+
+#[server]
 pub async fn server_detail(server_id: Uuid) -> Result<ServerDetailData> {
 	ssr::server_detail(server_id).await
 }
@@ -166,6 +171,14 @@ mod ssr {
 				geolocation: s.geolocation,
 			})
 			.collect())
+	}
+
+	pub async fn get_name(server_id: Uuid) -> Result<String> {
+		let state = expect_context::<AppState>();
+		let State(db): State<Db> = extract_with_state(&state).await?;
+		let mut conn = db.get().await?;
+		let server = Server::get_by_id(&mut conn, server_id).await?;
+		Ok(server.name.unwrap_or_else(|| server.host.0.to_string()))
 	}
 
 	pub async fn server_detail(server_id: Uuid) -> Result<super::ServerDetailData> {

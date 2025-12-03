@@ -1,8 +1,14 @@
+use std::str::FromStr as _;
+
 use leptos::prelude::*;
 use leptos_meta::{Stylesheet, provide_meta_context};
 use leptos_router::{components::A, hooks::use_params_map};
+use uuid::Uuid;
 
-use crate::components::{EndTabs, SubTabs};
+use crate::{
+	components::{EndTabs, SubTabs},
+	fns::servers::get_name,
+};
 
 mod detail;
 // mod edit;
@@ -16,7 +22,22 @@ pub fn Page() -> impl IntoView {
 	provide_meta_context();
 
 	let params = use_params_map();
-	let server_id = move || params.read().get("id");
+	let server_id = move || {
+		params
+			.read()
+			.get("id")
+			.and_then(|id| Uuid::from_str(&id).ok())
+	};
+	let server_name = Resource::new(
+		move || server_id(),
+		async move |id| {
+			if let Some(id) = id {
+				get_name(id).await.ok().and_then(|name| Some((id, name)))
+			} else {
+				None
+			}
+		},
+	);
 
 	view! {
 		<Stylesheet id="css-servers" href="/static/servers.css" />
@@ -26,13 +47,13 @@ pub fn Page() -> impl IntoView {
 				<A href="facilities">Facility Servers</A>
 
 				<EndTabs slot>
-				{move || {
-					server_id().map(|id| {
-						view! {
-							<A href=format!("/servers/{id}")>{id.to_string()}</A>
-						}
-					})
-				}}
+					<Transition>{move || {
+						server_name.get().flatten().map(|(id, name)| {
+							view! {
+								<A href=format!("/servers/{id}")>{name}</A>
+							}
+						})
+					}}</Transition>
 				</EndTabs>
 			</SubTabs>
 		</section>
