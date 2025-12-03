@@ -5,8 +5,8 @@ use commons_types::server::kind::ServerKind;
 use leptos::prelude::*;
 
 use crate::{
-	components::{Error, LoadingBar, Nothing, PaginatedList, ServerShorty},
-	fns::servers::{ServerInfo, count_servers, list_servers},
+	components::{ErrorHandler, LoadingBar, Nothing, PaginatedList, ServerShorty},
+	fns::servers::{ServerInfo, count_some, list_some},
 };
 
 const PAGE_SIZE: u64 = 10;
@@ -29,12 +29,12 @@ pub fn Facilities() -> impl IntoView {
 fn ListServers(kind: ServerKind) -> impl IntoView {
 	let count = Resource::new(
 		|| (),
-		move |_| async move { count_servers(Some(kind)).await.unwrap_or_default() },
+		move |_| async move { count_some(Some(kind)).await.unwrap_or_default() },
 	);
 
 	let fetcher = move |p| async move {
 		let offset = p * PAGE_SIZE;
-		list_servers(Some(kind), offset, Some(PAGE_SIZE)).await
+		list_some(Some(kind), offset, Some(PAGE_SIZE)).await
 	};
 
 	view! {
@@ -54,33 +54,27 @@ where
 	view! {
 		<section class="section">
 			<Transition fallback=|| view! { <LoadingBar /> }>
-				{move || servers.get().map(|result| {
-					match result {
-						Ok(servers) => {
-							if servers.is_empty() {
-								view! {
-									<Nothing thing="servers" />
-								}.into_any()
-							} else {
-								view! {
-									<PaginatedList
-										page=page
-										set_page=set_page
-										total_count=Signal::derive(move || count.get().unwrap_or(0))
-										page_size=PAGE_SIZE
-									>
-										<ServerList servers=servers.clone() />
-									</PaginatedList>
-								}.into_any()
-							}
+				<ErrorHandler>
+					{move || servers.and_then(|servers| {
+						if servers.is_empty() {
+							return view! {
+								<Nothing thing="servers" />
+							}.into_any();
 						}
-						Err(error) => {
-							view! {
-								<Error context="Error loading servers" error />
-							}.into_any()
-						}
-					}
-				})}
+
+						let servers = servers.clone();
+						view! {
+							<PaginatedList
+								page=page
+								set_page=set_page
+								total_count=Signal::derive(move || count.get().unwrap_or(0))
+								page_size=PAGE_SIZE
+							>
+								<ServerList servers />
+							</PaginatedList>
+						}.into_any()
+					})}
+				</ErrorHandler>
 			</Transition>
 		</section>
 	}

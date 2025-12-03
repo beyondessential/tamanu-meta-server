@@ -15,13 +15,32 @@ pub fn LoadingBar() -> impl IntoView {
 }
 
 #[component]
-pub fn Error(
-	#[prop(optional)] context: Option<impl Display>,
-	error: impl Display,
-) -> impl IntoView {
-	let sep = context.as_ref().map(|_| ": ");
+pub fn Error(error: impl Display) -> impl IntoView {
 	view! {
-		<div class="has-text-danger">{context.map(|c| c.to_string())}{sep}{error.to_string()}</div>
+		<div class="has-text-danger">{error.to_string()}</div>
+	}
+}
+
+#[component]
+pub fn ErrorHandler<Chil>(children: TypedChildren<Chil>) -> impl IntoView
+where
+	Chil: IntoView + Send + 'static,
+{
+	view! {
+		<ErrorBoundary fallback=move |errors| { view! {
+			<Transition fallback=|| view! { <Error error="Unknown error" /> }>
+				{move || {
+					let errors = errors.get();
+					view! {
+						<For each=move || errors.clone() key=|(id, _)| id.clone() let:((_, error))>
+							<Error error={error} {..} class:box />
+						</For>
+					}
+				}}
+			</Transition>
+		} }>
+			{children.into_inner()()}
+		</ErrorBoundary>
 	}
 }
 

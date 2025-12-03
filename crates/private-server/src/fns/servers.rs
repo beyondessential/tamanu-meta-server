@@ -51,7 +51,7 @@ pub struct ServerLastStatusData {
 	pub extra: JsonValue,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ServerDataUpdate {
 	pub name: Option<String>,
 	pub kind: Option<ServerKind>,
@@ -65,34 +65,34 @@ pub struct ServerDataUpdate {
 }
 
 #[server]
-pub async fn count_servers(kind: Option<ServerKind>) -> Result<u64> {
-	ssr::count_servers(kind).await
+pub async fn count_some(kind: Option<ServerKind>) -> Result<u64> {
+	ssr::count_some(kind).await
 }
 
 #[server]
-pub async fn list_servers(
+pub async fn list_some(
 	kind: Option<ServerKind>,
 	offset: u64,
 	limit: Option<u64>,
 ) -> Result<Vec<Arc<ServerInfo>>> {
-	ssr::list_servers(kind, offset, limit)
+	ssr::list_some(kind, offset, limit)
 		.await
 		.map(|v| v.into_iter().map(Arc::new).collect())
 }
 
 #[server]
-pub async fn list_all_servers() -> Result<Vec<ServerInfo>> {
-	ssr::list_servers(None, 0, None).await
+pub async fn list_all() -> Result<Vec<ServerInfo>> {
+	ssr::list_some(None, 0, None).await
 }
 
 #[server]
-pub async fn list_central_servers() -> Result<Vec<ServerInfo>> {
-	ssr::list_servers(Some(ServerKind::Central), 0, None).await
+pub async fn list_centrals() -> Result<Vec<ServerInfo>> {
+	ssr::list_some(Some(ServerKind::Central), 0, None).await
 }
 
 #[server]
-pub async fn list_facility_servers() -> Result<Vec<ServerInfo>> {
-	ssr::list_servers(Some(ServerKind::Facility), 0, None).await
+pub async fn list_facilities() -> Result<Vec<ServerInfo>> {
+	ssr::list_some(Some(ServerKind::Facility), 0, None).await
 }
 
 #[server]
@@ -101,13 +101,18 @@ pub async fn get_name(server_id: Uuid) -> Result<String> {
 }
 
 #[server]
-pub async fn server_detail(server_id: Uuid) -> Result<ServerDetailData> {
-	ssr::server_detail(server_id).await
+pub async fn get_info(server_id: Uuid) -> Result<ServerInfo> {
+	ssr::get_info(server_id).await
 }
 
 #[server]
-pub async fn update_server(server_id: Uuid, data: ServerDataUpdate) -> Result<()> {
-	ssr::update_server(server_id, data).await
+pub async fn get_detail(server_id: Uuid) -> Result<ServerDetailData> {
+	ssr::get_detail(server_id).await
+}
+
+#[server]
+pub async fn update(server_id: Uuid, data: ServerDataUpdate) -> Result<()> {
+	ssr::update(server_id, data).await
 }
 
 #[cfg(feature = "ssr")]
@@ -128,7 +133,7 @@ mod ssr {
 
 	use crate::{fns::servers::ServerDataUpdate, state::AppState};
 
-	pub async fn count_servers(kind: Option<ServerKind>) -> Result<u64> {
+	pub async fn count_some(kind: Option<ServerKind>) -> Result<u64> {
 		let state = expect_context::<AppState>();
 		let State(db): State<Db> = extract_with_state(&state).await?;
 		let mut conn = db.get().await?;
@@ -140,7 +145,7 @@ mod ssr {
 		}
 	}
 
-	pub async fn list_servers(
+	pub async fn list_some(
 		kind: Option<ServerKind>,
 		offset: u64,
 		limit: Option<u64>,
@@ -181,7 +186,37 @@ mod ssr {
 		Ok(server.name.unwrap_or_else(|| server.host.0.to_string()))
 	}
 
-	pub async fn server_detail(server_id: Uuid) -> Result<super::ServerDetailData> {
+	pub async fn get_info(server_id: Uuid) -> Result<super::ServerInfo> {
+		let state = expect_context::<AppState>();
+		let State(db): State<Db> = extract_with_state(&state).await?;
+		let mut conn = db.get().await?;
+
+		let server = Server::get_by_id(&mut conn, server_id).await?;
+		let device_id = server.device_id;
+
+		let parent_server_name = if let Some(parent_id) = server.parent_server_id {
+			let parent = Server::get_by_id(&mut conn, parent_id).await?;
+			parent.name
+		} else {
+			None
+		};
+
+		Ok(super::ServerInfo {
+			id: server.id,
+			name: server.name.clone(),
+			kind: server.kind,
+			rank: server.rank,
+			host: server.host.0.to_string(),
+			device_id,
+			parent_server_id: server.parent_server_id,
+			parent_server_name,
+			listed: server.listed,
+			cloud: server.cloud,
+			geolocation: server.geolocation,
+		})
+	}
+
+	pub async fn get_detail(server_id: Uuid) -> Result<super::ServerDetailData> {
 		let state = expect_context::<AppState>();
 		let State(db): State<Db> = extract_with_state(&state).await?;
 		let mut conn = db.get().await?;
@@ -306,7 +341,7 @@ mod ssr {
 		})
 	}
 
-	pub async fn update_server(server_id: Uuid, data: ServerDataUpdate) -> Result<()> {
+	pub async fn update(server_id: Uuid, data: ServerDataUpdate) -> Result<()> {
 		let db = crate::fns::commons::admin_guard().await?;
 		let mut conn = db.get().await?;
 

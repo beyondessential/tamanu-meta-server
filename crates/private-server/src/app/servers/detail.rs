@@ -10,7 +10,7 @@ use crate::{
 		DeviceShorty, LoadingBar, ServerKindBadge, ServerRankBadge, ServerShorty, StatusDot,
 		StatusLegend, TimeAgo, VersionIndicator, VersionLegend,
 	},
-	fns::servers::{ServerDetailData, ServerInfo, ServerLastStatusData, server_detail},
+	fns::servers::{ServerDetailData, ServerInfo, ServerLastStatusData, get_detail},
 };
 
 fn is_admin_resource() -> Resource<bool> {
@@ -36,8 +36,7 @@ pub fn Detail() -> impl IntoView {
 			.unwrap_or_default()
 	};
 
-	let detail_resource =
-		Resource::new(move || server_id(), async move |id| server_detail(id).await);
+	let detail_resource = Resource::new(move || server_id(), async move |id| get_detail(id).await);
 
 	let is_admin = is_admin_resource();
 

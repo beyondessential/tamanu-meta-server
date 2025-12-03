@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{fmt::Display, str::FromStr};
 
 #[cfg(feature = "ssr")]
 use diesel::{
@@ -31,16 +31,22 @@ impl Display for ServerKind {
 	}
 }
 
+impl From<ServerKind> for String {
+	fn from(rank: ServerKind) -> Self {
+		format!("{rank}")
+	}
+}
+
 commons_macros::render_as_string!(ServerKind, minsize(4));
 
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("invalid server kind: {0}")]
 pub struct ServerKindFromStringError(String);
 
-impl TryFrom<String> for ServerKind {
-	type Error = ServerKindFromStringError;
+impl FromStr for ServerKind {
+	type Err = ServerKindFromStringError;
 
-	fn try_from(value: String) -> Result<Self, Self::Error> {
+	fn from_str(value: &str) -> Result<Self, Self::Err> {
 		match value.to_ascii_lowercase().as_ref() {
 			"tamanu sync server" | "central" => Ok(Self::Central),
 			"tamanu lan server" | "facility" => Ok(Self::Facility),
@@ -50,14 +56,10 @@ impl TryFrom<String> for ServerKind {
 	}
 }
 
-impl From<ServerKind> for String {
-	fn from(rank: ServerKind) -> Self {
-		match rank {
-			ServerKind::Central => "central",
-			ServerKind::Facility => "facility",
-			ServerKind::Meta => "meta",
-		}
-		.into()
+impl TryFrom<String> for ServerKind {
+	type Error = ServerKindFromStringError;
+	fn try_from(value: String) -> Result<Self, Self::Error> {
+		value.parse()
 	}
 }
 
