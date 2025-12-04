@@ -113,3 +113,13 @@ pub fn VersionStatusBadge(status: VersionStatus) -> impl IntoView {
 		})}>{status}</span>
 	}
 }
+
+pub trait ToggleSignal {
+	fn toggle(&self);
+}
+
+impl ToggleSignal for WriteSignal<bool> {
+	fn toggle(&self) {
+		self.update(|it| *it = !*it);
+	}
+}

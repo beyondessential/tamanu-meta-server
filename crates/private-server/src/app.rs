@@ -5,7 +5,7 @@ use leptos_router::{
 	path,
 };
 
-use crate::components::Toast;
+use crate::components::{Toast, ToggleSignal as _};
 
 mod admins;
 mod devices;
@@ -91,20 +91,29 @@ pub fn GlobalNav() -> impl IntoView {
 		|_| async { crate::fns::commons::server_versions_url().await },
 	);
 
+	let (burgered, set_burgered) = signal(false);
+
 	view! {
 		<nav id="global-nav" class="navbar" role="navigation" aria-label="main navigation">
 			<div class="navbar-brand">
 				<A href="/status" {..} class="navbar-item" title=format!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))>
 					<img src="/static/images/tamanu_logo.svg" alt="Tamanu Logo" class="logo" />
 				</A>
-				<a class="navbar-burger" role="button" aria-label="menu" aria-expanded="false">
+				<a
+					class="navbar-burger"
+					role="button"
+					aria-label="menu"
+					aria-expanded=move || burgered.get().to_string()
+					class:is-active=move || burgered.get()
+					on:click=move |_| set_burgered.toggle()
+				>
 					<span aria-hidden="true"></span>
 					<span aria-hidden="true"></span>
 					<span aria-hidden="true"></span>
 					<span aria-hidden="true"></span>
 				</a>
 			</div>
-			<div class="navbar-menu">
+			<div class="navbar-menu" class:is-active={move || burgered.get()}>
 				<div class="navbar-start">
 					<A href="/status" {..} class="navbar-item">
 						"Status"
@@ -167,12 +176,11 @@ pub fn GlobalNav() -> impl IntoView {
 										Some(
 											view! {
 												<a
-													class="navbar-item"
+													class="navbar-item server-versions"
 													href=url
 													target="_blank"
-													style="font-size: 0.7em; text-align: center; padding: 0.25em 1em;"
 												>
-													"Server"
+													"Server "
 													<br />
 													"Versions"
 												</a>

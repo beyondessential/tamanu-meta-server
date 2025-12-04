@@ -86,6 +86,16 @@
 	.logo {
 		width: 7em;
 	}
+
+	/* .is-active is only present on mobile when the menu is opened */
+	.navbar-menu.is-active .server-versions br {
+		display: none;
+	}
+	.navbar-menu:not(.is-active) .server-versions {
+		font-size: 0.7em;
+		text-align: center;
+		padding: 0.25em 1em;
+	}
 }
 
 .monospace,
@@ -113,6 +123,12 @@ code {
 			margin-bottom: 1.5em;
 			font-size: 1em;
 		}
+	}
+
+	.navbar-burger {
+		/* position on the left instead as visual contrast to the top nav */
+		margin-inline-start: 0.375rem;
+		margin-inline-end: auto;
 	}
 }
 

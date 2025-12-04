@@ -1,6 +1,8 @@
 use leptos::{prelude::*, tachys::view::fragment::IntoFragment as _};
 use leptos_router::components::Outlet;
 
+use crate::components::ToggleSignal as _;
+
 #[derive(Default)]
 #[slot]
 pub struct EndTabs {
@@ -32,10 +34,12 @@ pub fn SubTabs(
 			.collect::<Vec<_>>()
 	});
 
+	let (burgered, set_burgered) = signal(false);
+
 	view! {
 		<div id="sub-tabs">
 			<nav class="navbar is-fixed-bottom" role="navigation" aria-label="navigation">
-				<div class="navbar-menu">
+				<div class="navbar-menu" class:is-active={move || burgered.get()}>
 					<div class="navbar-start is-active">
 						{start_children}
 					</div>
@@ -44,6 +48,21 @@ pub fn SubTabs(
 							{children}
 						</div>
 					})}
+				</div>
+				<div class="navbar-brand">
+					<a
+						class="navbar-burger"
+						role="button"
+						aria-label="menu"
+						aria-expanded=move || burgered.get().to_string()
+						class:is-active=move || burgered.get()
+						on:click=move |_| set_burgered.toggle()
+					>
+						<span aria-hidden="true"></span>
+						<span aria-hidden="true"></span>
+						<span aria-hidden="true"></span>
+						<span aria-hidden="true"></span>
+					</a>
 				</div>
 			</nav>
 			<section><Outlet /></section>

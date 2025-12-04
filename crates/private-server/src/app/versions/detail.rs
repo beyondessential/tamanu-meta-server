@@ -5,7 +5,7 @@ use leptos_router::hooks::use_params_map;
 use uuid::Uuid;
 
 use crate::{
-	components::{ErrorHandler, LoadingBar, TimeAgo},
+	components::{ErrorHandler, LoadingBar, TimeAgo, ToggleSignal as _},
 	fns::versions::{
 		ArtifactData, RelatedVersionData, VersionDetail, create_artifact, delete_artifact,
 		get_artifacts_by_version_id, get_version_detail, update_artifact, update_version_changelog,
@@ -208,7 +208,7 @@ fn ArtifactsSection(version_id: Uuid, is_admin: bool) -> impl IntoView {
 							view! {
 								<button
 									class="level-item button"
-									on:click=move |_| set_show_create.set(!show_create.get())
+									on:click=move |_| set_show_create.toggle()
 									class:is-warning=move || show_create.get()
 									class:is-primary=move || {!show_create.get()}
 								>
@@ -216,7 +216,7 @@ fn ArtifactsSection(version_id: Uuid, is_admin: bool) -> impl IntoView {
 								</button>
 							}
 						})}
-						<button class="level-item button" on:click=move |_| set_is_unlocked.set(!is_unlocked.get())>
+						<button class="level-item button" on:click=move |_| set_is_unlocked.toggle()>
 							{move || if is_unlocked.get() { "Lock" } else { "Unlock" }}
 						</button>
 					</div>
