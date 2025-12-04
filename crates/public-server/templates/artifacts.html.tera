@@ -3,6 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+		<link rel="icon" type="image/svg+xml" href="/static/images/favicon.svg" />
     <title>Tamanu {{ version.major }}.{{ version.minor }}.{{ version.patch }} — Artifacts</title>
     <style>
         :root {
