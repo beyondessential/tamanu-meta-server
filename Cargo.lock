@@ -670,7 +670,7 @@ checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
 
 [[package]]
 name = "commons-errors"
-version = "5.8.6"
+version = "5.8.7"
 dependencies = [
  "axum",
  "commons-macros",
@@ -690,7 +690,7 @@ dependencies = [
 
 [[package]]
 name = "commons-macros"
-version = "5.8.6"
+version = "5.8.7"
 dependencies = [
  "tachys",
  "wasm-bindgen",
@@ -699,7 +699,7 @@ dependencies = [
 
 [[package]]
 name = "commons-servers"
-version = "5.8.6"
+version = "5.8.7"
 dependencies = [
  "axum",
  "axum-client-ip",
@@ -724,7 +724,7 @@ dependencies = [
 
 [[package]]
 name = "commons-tests"
-version = "5.8.6"
+version = "5.8.7"
 dependencies = [
  "axum",
  "axum-client-ip",
@@ -751,7 +751,7 @@ dependencies = [
 
 [[package]]
 name = "commons-types"
-version = "5.8.6"
+version = "5.8.7"
 dependencies = [
  "commons-errors",
  "commons-macros",
@@ -999,7 +999,7 @@ checksum = "2a2330da5de22e8a3cb63252ce2abb30116bf5265e89c0e01bc17015ce30a476"
 
 [[package]]
 name = "database"
-version = "5.8.6"
+version = "5.8.7"
 dependencies = [
  "base64",
  "clap",
@@ -2088,7 +2088,7 @@ dependencies = [
 
 [[package]]
 name = "jobs"
-version = "5.8.6"
+version = "5.8.7"
 dependencies = [
  "clap",
  "commons-errors",
@@ -3123,7 +3123,7 @@ dependencies = [
 
 [[package]]
 name = "private-server"
-version = "5.8.6"
+version = "5.8.7"
 dependencies = [
  "axum",
  "axum-client-ip",
@@ -3240,7 +3240,7 @@ dependencies = [
 
 [[package]]
 name = "public-server"
-version = "5.8.6"
+version = "5.8.7"
 dependencies = [
  "axum",
  "axum-client-ip",
