@@ -5,10 +5,27 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [5.8.4](https://github.com/beyondessential/tamanu-meta-server/compare/v5.8.3..5.8.4) - 2025-12-04
+## [5.8.5](https://github.com/beyondessential/tamanu-meta-server/compare/v5.8.4..5.8.5) - 2025-12-04
+
+
+- **Bugfix:** Fix build - ([bfe9cc2](https://github.com/beyondessential/tamanu-meta-server/commit/bfe9cc2e6750a2b649d3e9f5f1185dcaff814996))
+- **Feature:** Show full changelog for the entire release series - ([412f223](https://github.com/beyondessential/tamanu-meta-server/commit/412f22370cc9afb31e0a7fca2e1f252f1e2521d3))
+
+### Public
+
+- **Feature:** Add link to mobile install page - ([26d00ca](https://github.com/beyondessential/tamanu-meta-server/commit/26d00cabb408a748ccad55dcd1ee6a096d36cfa0))
+- **Feature:** Add chrome version info to the public server - ([9314cb6](https://github.com/beyondessential/tamanu-meta-server/commit/9314cb63d3cd75292db3db4dff5b374ad953d6d3))
+- **Feature:** Display required chrome version - ([be325fa](https://github.com/beyondessential/tamanu-meta-server/commit/be325fa27b7ea48bb790414b8743d93ca49cea3a))
+- **Refactor:** Update style for versions - ([61d83e5](https://github.com/beyondessential/tamanu-meta-server/commit/61d83e577b687448e11ce7300911583315400fd8))
+- **Refactor:** Restyle the mobile install page - ([112790a](https://github.com/beyondessential/tamanu-meta-server/commit/112790a62d623536d9a847ecb1e12f25a0920c11))
+- **Refactor:** Restyle password generator - ([5cc4950](https://github.com/beyondessential/tamanu-meta-server/commit/5cc49504ec53325c65186cc90dca50459b65f285))
+
+---
+## [5.8.4](https://github.com/beyondessential/tamanu-meta-server/compare/v5.8.3..v5.8.4) - 2025-12-04
 
 
 - **Bugfix:** Don't clear device_id when saving server - ([749655c](https://github.com/beyondessential/tamanu-meta-server/commit/749655c748b50fce65ae1cece875eab984acbdf3))
+- **Repo:** Release - ([caed6c5](https://github.com/beyondessential/tamanu-meta-server/commit/caed6c5b30694f76363b60609fc7b03306a3c6ad))
 
 ---
 ## [5.8.3](https://github.com/beyondessential/tamanu-meta-server/compare/v5.8.2..v5.8.3) - 2025-12-04
