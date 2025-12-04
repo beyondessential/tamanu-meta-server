@@ -507,6 +507,160 @@ impl Device {
 
 		Ok(result)
 	}
+
+	/// Search devices by key name.
+	pub async fn search_by_key_name(
+		db: &mut AsyncPgConnection,
+		query: &str,
+	) -> Result<Vec<DeviceWithInfo>> {
+		use crate::schema::{device_connections, device_keys, devices};
+
+		let device_ids: Vec<Uuid> = device_keys::table
+			.select(device_keys::device_id)
+			.filter(
+				device_keys::name
+					.is_not_null()
+					.and(device_keys::name.ilike(format!("%{}%", query))),
+			)
+			.distinct()
+			.load::<Uuid>(db)
+			.await?;
+
+		if device_ids.is_empty() {
+			return Ok(Vec::new());
+		}
+
+		// Get devices, keys, and connections
+		let devices_result: Vec<Device> = devices::table
+			.select(Device::as_select())
+			.filter(devices::id.eq_any(&device_ids))
+			.load(db)
+			.await?;
+
+		let all_keys: Vec<DeviceKey> = device_keys::table
+			.select(DeviceKey::as_select())
+			.filter(device_keys::device_id.eq_any(&device_ids))
+			.filter(device_keys::is_active.eq(true))
+			.load(db)
+			.await?;
+
+		let all_connections: Vec<DeviceConnection> = device_connections::table
+			.select(DeviceConnection::as_select())
+			.filter(device_connections::device_id.eq_any(&device_ids))
+			.order((
+				device_connections::device_id,
+				device_connections::created_at.desc(),
+			))
+			.distinct_on(device_connections::device_id)
+			.load(db)
+			.await?;
+
+		use std::collections::HashMap;
+
+		let mut keys_by_device: HashMap<Uuid, Vec<DeviceKey>> = HashMap::new();
+		for key in all_keys {
+			keys_by_device
+				.entry(key.device_id)
+				.or_insert_with(Vec::new)
+				.push(key);
+		}
+
+		let mut connections_by_device: HashMap<Uuid, DeviceConnection> = HashMap::new();
+		for conn in all_connections {
+			connections_by_device.insert(conn.device_id, conn);
+		}
+
+		let result = devices_result
+			.into_iter()
+			.map(|device| DeviceWithInfo {
+				keys: keys_by_device.remove(&device.id).unwrap_or_default(),
+				latest_connection: connections_by_device.remove(&device.id),
+				device,
+			})
+			.collect();
+
+		Ok(result)
+	}
+
+	/// Search devices by connection IP.
+	pub async fn search_by_connection_ip(
+		db: &mut AsyncPgConnection,
+		query: &str,
+	) -> Result<Vec<DeviceWithInfo>> {
+		use crate::schema::{device_connections, device_keys, devices};
+		use diesel::sql_query;
+		use diesel::sql_types::Uuid as SqlUuid;
+
+		#[derive(QueryableByName)]
+		struct DeviceIdResult {
+			#[diesel(sql_type = SqlUuid)]
+			device_id: Uuid,
+		}
+
+		let device_ids: Vec<Uuid> =
+			sql_query("SELECT DISTINCT device_id FROM device_connections WHERE ip::text LIKE $1")
+				.bind::<diesel::sql_types::Text, _>(format!("%{}%", query))
+				.load::<DeviceIdResult>(db)
+				.await?
+				.into_iter()
+				.map(|r| r.device_id)
+				.collect();
+
+		if device_ids.is_empty() {
+			return Ok(Vec::new());
+		}
+
+		// Get devices, keys, and connections
+		let devices_result: Vec<Device> = devices::table
+			.select(Device::as_select())
+			.filter(devices::id.eq_any(&device_ids))
+			.load(db)
+			.await?;
+
+		let all_keys: Vec<DeviceKey> = device_keys::table
+			.select(DeviceKey::as_select())
+			.filter(device_keys::device_id.eq_any(&device_ids))
+			.filter(device_keys::is_active.eq(true))
+			.load(db)
+			.await?;
+
+		let all_connections: Vec<DeviceConnection> = device_connections::table
+			.select(DeviceConnection::as_select())
+			.filter(device_connections::device_id.eq_any(&device_ids))
+			.order((
+				device_connections::device_id,
+				device_connections::created_at.desc(),
+			))
+			.distinct_on(device_connections::device_id)
+			.load(db)
+			.await?;
+
+		use std::collections::HashMap;
+
+		let mut keys_by_device: HashMap<Uuid, Vec<DeviceKey>> = HashMap::new();
+		for key in all_keys {
+			keys_by_device
+				.entry(key.device_id)
+				.or_insert_with(Vec::new)
+				.push(key);
+		}
+
+		let mut connections_by_device: HashMap<Uuid, DeviceConnection> = HashMap::new();
+		for conn in all_connections {
+			connections_by_device.insert(conn.device_id, conn);
+		}
+
+		let result = devices_result
+			.into_iter()
+			.map(|device| DeviceWithInfo {
+				keys: keys_by_device.remove(&device.id).unwrap_or_default(),
+				latest_connection: connections_by_device.remove(&device.id),
+				device,
+			})
+			.collect();
+
+		Ok(result)
+	}
 }
 
 impl DeviceKey {

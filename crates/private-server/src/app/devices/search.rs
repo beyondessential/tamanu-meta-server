@@ -19,12 +19,12 @@ pub fn Search() -> impl IntoView {
 
 	view! {
 		<div class="box mt-3">
-			<h2 class="is-size-3">"Search by public key"</h2>
+			<h2 class="is-size-3">"Search devices"</h2>
 			<div class="field">
 				<div class="control">
 					<input
 						type="search"
-						placeholder="Paste PEM key fragment…"
+						placeholder="Search by public key, key name, or connection IP…"
 						prop:value=move || search_query.get()
 						on:input=move |ev| set_search_query.set(event_target_value(&ev))
 						class="input"

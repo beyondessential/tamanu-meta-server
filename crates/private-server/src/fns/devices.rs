@@ -428,7 +428,30 @@ mod ssr {
 			return Ok(vec![]);
 		}
 
-		let devices_with_info = Device::search_by_key(&mut conn, &query).await?;
+		// Search by key data
+		let devices_by_key = Device::search_by_key(&mut conn, &query).await?;
+
+		// Search by key name
+		let devices_by_key_name = Device::search_by_key_name(&mut conn, &query).await?;
+
+		// Search by connection IP
+		let devices_by_ip = Device::search_by_connection_ip(&mut conn, &query).await?;
+
+		// Combine results and deduplicate by device ID
+		use std::collections::HashMap;
+		let mut seen_devices: HashMap<Uuid, DeviceWithInfo> = HashMap::new();
+
+		for device_info in devices_by_key {
+			seen_devices.insert(device_info.device.id, device_info);
+		}
+		for device_info in devices_by_key_name {
+			seen_devices.insert(device_info.device.id, device_info);
+		}
+		for device_info in devices_by_ip {
+			seen_devices.insert(device_info.device.id, device_info);
+		}
+
+		let devices_with_info: Vec<DeviceWithInfo> = seen_devices.into_values().collect();
 		Ok(devices_with_info
 			.into_iter()
 			.map(DeviceInfo::from)
