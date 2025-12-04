@@ -204,22 +204,23 @@ mod ssr {
 		let min_chrome_version = if let Ok(head_release_date) =
 			Version::get_head_release_date(&mut conn, version.clone()).await
 		{
-			state
-				.chrome_cache
-				.get_supported_versions_at_date(head_release_date)
-				.await
-				.ok()
-				.and_then(|supported_versions| {
-					if supported_versions.is_empty() {
-						None
-					} else {
-						supported_versions
-							.iter()
-							.min()
-							.copied()
-							.map(|min| min.saturating_sub(1))
-					}
-				})
+			database::chrome_releases::ChromeRelease::get_supported_versions_at_date(
+				&mut conn,
+				head_release_date,
+			)
+			.await
+			.ok()
+			.and_then(|supported_versions| {
+				if supported_versions.is_empty() {
+					None
+				} else {
+					supported_versions
+						.iter()
+						.min()
+						.copied()
+						.map(|min| min.saturating_sub(1))
+				}
+			})
 		} else {
 			None
 		};

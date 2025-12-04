@@ -5,6 +5,7 @@ use diesel_async::{
 
 pub mod admins;
 pub mod artifacts;
+pub mod chrome_releases;
 pub mod devices;
 pub mod pg_duration;
 pub mod schema;

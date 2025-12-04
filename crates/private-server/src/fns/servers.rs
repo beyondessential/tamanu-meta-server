@@ -331,7 +331,7 @@ mod ssr {
 			let version_distance = st.distance_from_version(&latest_version);
 
 			let min_chrome_version = if let Some(ref version) = st.version {
-				compute_min_chrome_version(&state, &mut conn, version).await
+				compute_min_chrome_version(&mut conn, version).await
 			} else {
 				None
 			};
@@ -531,7 +531,6 @@ mod ssr {
 	}
 
 	async fn compute_min_chrome_version(
-		state: &AppState,
 		conn: &mut database::diesel_async::AsyncPgConnection,
 		version: &commons_types::version::VersionStr,
 	) -> Option<u32> {
@@ -539,9 +538,11 @@ mod ssr {
 			.await
 			.ok()?;
 
-		let supported_versions = state
-			.chrome_cache
-			.get_supported_versions_at_date(head_release_date)
+		let supported_versions =
+			database::chrome_releases::ChromeRelease::get_supported_versions_at_date(
+				conn,
+				head_release_date,
+			)
 			.await
 			.ok()?;
 

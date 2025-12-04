@@ -4,7 +4,7 @@ use diesel::{
 	deserialize::{self, FromSql},
 	expression::AsExpression,
 	serialize::{self, Output, ToSql},
-	sql_types::{Array, Float8},
+	sql_types::{Array, Float8, Nullable},
 };
 use serde::{Deserialize, Serialize};
 
