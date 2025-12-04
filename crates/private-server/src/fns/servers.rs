@@ -53,18 +53,39 @@ pub struct ServerLastStatusData {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ServerDataUpdate {
+	#[serde(skip_serializing_if = "Option::is_none")]
 	pub name: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
 	pub kind: Option<ServerKind>,
+	#[serde(skip_serializing_if = "Option::is_none")]
 	pub rank: Option<ServerRank>,
+	#[serde(skip_serializing_if = "Option::is_none")]
 	pub host: Option<String>,
-	#[serde(default, deserialize_with = "deserialize_some")]
+	#[serde(
+		default,
+		deserialize_with = "deserialize_some",
+		skip_serializing_if = "Option::is_none"
+	)]
 	pub device_id: Option<Option<Uuid>>,
-	#[serde(default, deserialize_with = "deserialize_some")]
+	#[serde(
+		default,
+		deserialize_with = "deserialize_some",
+		skip_serializing_if = "Option::is_none"
+	)]
 	pub parent_server_id: Option<Option<Uuid>>,
+	#[serde(skip_serializing_if = "Option::is_none")]
 	pub listed: Option<bool>,
-	#[serde(default, deserialize_with = "deserialize_some")]
+	#[serde(
+		default,
+		deserialize_with = "deserialize_some",
+		skip_serializing_if = "Option::is_none"
+	)]
 	pub cloud: Option<Option<bool>>,
-	#[serde(default, deserialize_with = "deserialize_some")]
+	#[serde(
+		default,
+		deserialize_with = "deserialize_some",
+		skip_serializing_if = "Option::is_none"
+	)]
 	pub geolocation: Option<Option<GeoPoint>>,
 }
 

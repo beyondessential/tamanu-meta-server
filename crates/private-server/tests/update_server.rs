@@ -382,3 +382,147 @@ async fn search_parent_excludes_current_server() {
 	})
 	.await
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn update_server_preserves_device_id_when_not_provided() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		// Create a device and a server with that device_id
+		conn.batch_execute(
+			"INSERT INTO devices (id, role) VALUES
+			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'server')"
+		)
+		.await
+		.unwrap();
+
+		conn.batch_execute(
+			"INSERT INTO servers (id, name, host, rank, kind, device_id) VALUES
+			('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'Device Server', 'https://device.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')"
+		)
+		.await
+		.unwrap();
+
+		conn.batch_execute("INSERT INTO admins (email) VALUES ('admin@example.com')")
+			.await
+			.unwrap();
+
+		// Update server without providing device_id in the update data
+		let response = private
+			.post("/api/private_server/fns/servers/update")
+			.json(&json!({
+				"server_id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+				"data": {
+					"name": "Updated Name",
+					"host": "https://updated.example.com"
+				}
+			}))
+			.await;
+		response.assert_status_ok();
+
+		// Verify the server still has the device_id
+		let server_info = Server::get_by_id(&mut conn, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb".parse().unwrap())
+			.await
+			.unwrap();
+
+		assert_eq!(server_info.name, Some("Updated Name".to_string()));
+		assert_eq!(server_info.host.0.to_string(), "https://updated.example.com/");
+		assert_eq!(server_info.device_id, Some("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa".parse().unwrap()),
+			"Device ID should still be present when not provided in update");
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn update_server_clears_device_id_with_null() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		// Create a device and a server with that device_id
+		conn.batch_execute(
+			"INSERT INTO devices (id, role) VALUES
+			('cccccccc-cccc-cccc-cccc-cccccccccccc', 'server')"
+		)
+		.await
+		.unwrap();
+
+		conn.batch_execute(
+			"INSERT INTO servers (id, name, host, rank, kind, device_id) VALUES
+			('dddddddd-dddd-dddd-dddd-dddddddddddd', 'Server With Device', 'https://withdevice.example.com', 'production', 'central', 'cccccccc-cccc-cccc-cccc-cccccccccccc')"
+		)
+		.await
+		.unwrap();
+
+		conn.batch_execute("INSERT INTO admins (email) VALUES ('admin@example.com')")
+			.await
+			.unwrap();
+
+		// Update server with device_id explicitly set to null
+		let response = private
+			.post("/api/private_server/fns/servers/update")
+			.json(&json!({
+				"server_id": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+				"data": {
+					"name": "Server Without Device",
+					"device_id": null
+				}
+			}))
+			.await;
+		response.assert_status_ok();
+
+		// Verify the server no longer has the device_id
+		let server_info = Server::get_by_id(&mut conn, "dddddddd-dddd-dddd-dddd-dddddddddddd".parse().unwrap())
+			.await
+			.unwrap();
+
+		assert_eq!(server_info.name, Some("Server Without Device".to_string()));
+		assert_eq!(server_info.device_id, None,
+			"Device ID should be cleared when explicitly set to null in update");
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn update_server_sets_new_device_id() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		// Create two devices
+		conn.batch_execute(
+			"INSERT INTO devices (id, role) VALUES
+			('eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', 'server'),
+			('ffffffff-ffff-ffff-ffff-ffffffffffff', 'server')"
+		)
+		.await
+		.unwrap();
+
+		// Create a server with the first device
+		conn.batch_execute(
+			"INSERT INTO servers (id, name, host, rank, kind, device_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Original Server', 'https://original.example.com', 'production', 'central', 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee')"
+		)
+		.await
+		.unwrap();
+
+		conn.batch_execute("INSERT INTO admins (email) VALUES ('admin@example.com')")
+			.await
+			.unwrap();
+
+		// Update server with a new device_id
+		let response = private
+			.post("/api/private_server/fns/servers/update")
+			.json(&json!({
+				"server_id": "11111111-1111-1111-1111-111111111111",
+				"data": {
+					"name": "Updated Server",
+					"device_id": "ffffffff-ffff-ffff-ffff-ffffffffffff"
+				}
+			}))
+			.await;
+		response.assert_status_ok();
+
+		// Verify the server now has the new device_id
+		let server_info = Server::get_by_id(&mut conn, "11111111-1111-1111-1111-111111111111".parse().unwrap())
+			.await
+			.unwrap();
+
+		assert_eq!(server_info.name, Some("Updated Server".to_string()));
+		assert_eq!(server_info.device_id, Some("ffffffff-ffff-ffff-ffff-ffffffffffff".parse().unwrap()),
+			"Device ID should be updated to new value when provided in update");
+	})
+	.await
+}
