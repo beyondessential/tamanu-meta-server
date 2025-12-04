@@ -227,6 +227,8 @@ fn DeviceDetail(device_info: DeviceInfo, set_refresh_trigger: WriteSignal<i32>) 
 			})
 		}}
 
+		<PastServerAssociations device_id />
+
 		<ConnectionHistory device_id />
 	}
 }
@@ -497,6 +499,54 @@ fn AssociatedServers(device_id: Uuid) -> impl IntoView {
 							Err(err) => {
 								view! {
 									<div class="block has-text-danger">{format!("Error loading servers: {err}")}</div>
+								}.into_any()
+							}
+						}
+					})
+				}}
+			</Transition>
+		</div>
+	}
+}
+
+#[component]
+fn PastServerAssociations(device_id: Uuid) -> impl IntoView {
+	let past_servers_resource = Resource::new(
+		move || device_id,
+		async |id| crate::fns::devices::get_past_server_associations(id).await,
+	);
+
+	view! {
+		<div class="box">
+			<div class="level">
+				<div class="level-left">
+					<h3 class="is-size-5 level-item">"Past Server Associations"</h3>
+				</div>
+				<div class="level-right">
+					<button class="button level-item" on:click=move |_| past_servers_resource.refetch()>
+						"Refresh"
+					</button>
+				</div>
+			</div>
+			<Transition fallback=|| view! { <progress class="progress is-small is-primary" max="100">"Loading..."</progress> }>
+				{move || {
+					past_servers_resource.get().map(|result| {
+						match result {
+							Ok(servers) if servers.is_empty() => {
+								view! {
+									<div class="block has-text-info">"No past server associations found"</div>
+								}.into_any()
+							}
+							Ok(servers) => {
+								view! {
+									<For each=move || servers.clone() key=|server| server.id let:server>
+										<ServerShorty server=server.into() />
+									</For>
+								}.into_any()
+							}
+							Err(err) => {
+								view! {
+									<div class="block has-text-danger">{format!("Error loading past associations: {err}")}</div>
 								}.into_any()
 							}
 						}

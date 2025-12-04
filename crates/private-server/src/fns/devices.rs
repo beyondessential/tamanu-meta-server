@@ -85,6 +85,11 @@ pub async fn get_servers_for_device(device_id: Uuid) -> Result<Vec<ServerInfo>> 
 }
 
 #[server]
+pub async fn get_past_server_associations(device_id: Uuid) -> Result<Vec<ServerInfo>> {
+	ssr::get_past_server_associations(device_id).await
+}
+
+#[server]
 pub async fn count_untrusted() -> Result<u64> {
 	ssr::count_untrusted().await
 }
@@ -224,6 +229,51 @@ mod ssr {
 		let mut conn = db.get().await?;
 
 		let servers = Server::get_by_device_id(&mut conn, device_id).await?;
+		Ok(servers
+			.into_iter()
+			.map(|s| ServerInfo {
+				id: s.id,
+				name: s.name,
+				host: s.host.into(),
+				kind: s.kind,
+				rank: s.rank,
+				device_id: s.device_id,
+				parent_server_id: s.parent_server_id,
+				parent_server_name: None, // TODO
+				listed: s.listed,
+				cloud: s.cloud,
+				geolocation: s.geolocation,
+			})
+			.collect())
+	}
+
+	pub async fn get_past_server_associations(device_id: Uuid) -> Result<Vec<ServerInfo>> {
+		use database::statuses::Status;
+
+		let db = crate::fns::commons::admin_guard().await?;
+		let mut conn = db.get().await?;
+
+		// Get current server associations
+		let current_servers = Server::get_by_device_id(&mut conn, device_id).await?;
+		let current_server_ids: std::collections::HashSet<Uuid> =
+			current_servers.iter().map(|s| s.id).collect();
+
+		// Get all distinct server_ids from statuses table for this device
+		let all_past_server_ids = Status::get_past_server_ids(&mut conn, device_id).await?;
+
+		// Filter out currently associated servers
+		let past_only_ids: Vec<Uuid> = all_past_server_ids
+			.into_iter()
+			.filter(|id| !current_server_ids.contains(id))
+			.collect();
+
+		if past_only_ids.is_empty() {
+			return Ok(Vec::new());
+		}
+
+		// Get the Server objects
+		let servers = Server::get_by_ids(&mut conn, &past_only_ids).await?;
+
 		Ok(servers
 			.into_iter()
 			.map(|s| ServerInfo {

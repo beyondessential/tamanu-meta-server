@@ -153,6 +153,16 @@ impl Server {
 			.map_err(AppError::from)
 	}
 
+	pub async fn get_by_ids(db: &mut AsyncPgConnection, ids: &[Uuid]) -> Result<Vec<Self>> {
+		use crate::schema::servers::dsl::*;
+		servers
+			.select(Self::as_select())
+			.filter(id.eq_any(ids))
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	pub async fn get_children(&self, db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
 		use crate::schema::servers::dsl::*;
 		servers

@@ -268,4 +268,19 @@ impl Status {
 		let major_distance = version.major.saturating_sub(current.major);
 		Some(major_distance * 1000 + minor_distance)
 	}
+
+	pub async fn get_past_server_ids(
+		db: &mut AsyncPgConnection,
+		dev_id: Uuid,
+	) -> Result<Vec<Uuid>> {
+		use crate::schema::statuses::dsl::*;
+
+		statuses
+			.select(server_id)
+			.distinct()
+			.filter(device_id.eq(dev_id))
+			.load::<Uuid>(db)
+			.await
+			.map_err(AppError::from)
+	}
 }
