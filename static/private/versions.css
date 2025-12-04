@@ -1,4 +1,6 @@
 .group-version {
+	font-size: 1.2em;
+	font-weight: bold;
 	color: var(--color-text-primary);
 	.version-patch {
 		color: var(--color-text-light);
@@ -6,8 +8,23 @@
 }
 
 .grouped-version {
+	font-size: 1.1em;
+	font-weight: bold;
 	color: var(--color-text-light);
 	.version-patch {
 		color: var(--color-text-primary);
+	}
+}
+
+details.minor-version-group {
+	cursor: pointer;
+
+	&:hover,
+	&[open] {
+		background-color: var(--color-bg-medium);
+	}
+
+	&:not([open]) summary {
+		margin-bottom: 0;
 	}
 }

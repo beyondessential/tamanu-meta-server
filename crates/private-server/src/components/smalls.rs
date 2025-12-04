@@ -4,6 +4,7 @@ use commons_types::{
 	device::DeviceRole,
 	server::{kind::ServerKind, rank::ServerRank},
 	status::ShortStatus,
+	version::VersionStatus,
 };
 use leptos::prelude::*;
 
@@ -99,5 +100,16 @@ pub fn StatusDot(
 			class:facility-dot={kind != ServerKind::Central}
 			title={name.map(|name| format!("{}: {}", name, up))}
 		></span>
+	}
+}
+
+#[component]
+pub fn VersionStatusBadge(status: VersionStatus) -> impl IntoView {
+	view! {
+		<span class={format!("level-item tag is-capitalized {}", match status {
+			VersionStatus::Draft => "is-warning",
+			VersionStatus::Published => "is-success",
+			VersionStatus::Yanked => "is-danger",
+		})}>{status}</span>
 	}
 }

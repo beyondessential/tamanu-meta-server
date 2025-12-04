@@ -17,9 +17,7 @@ use commons_types::version::VersionStatus;
 pub fn Detail() -> impl IntoView {
 	view! {
 		<Stylesheet id="css-versions" href="/static/versions.css" />
-		<div id="versions-page">
-			<VersionDetailView />
-		</div>
+		<VersionDetailView />
 	}
 }
 
@@ -240,7 +238,8 @@ fn ArtifactsList(
 	is_unlocked: ReadSignal<bool>,
 ) -> impl IntoView {
 	view! {
-		<Transition fallback=|| view! { <LoadingBar /> }>{move || resource.and_then(|artifacts| {
+		<Transition fallback=|| view! { <LoadingBar /> }>
+			{move || resource.and_then(|artifacts| {
 				if artifacts.is_empty() {
 					view! {
 						<div class="no-artifacts">"No artifacts found for this version"</div>
