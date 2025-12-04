@@ -1,11 +1,15 @@
+use commons_errors::AppError;
 use leptos::prelude::*;
 use leptos_meta::Stylesheet;
 use leptos_router::hooks::use_params_map;
 use uuid::Uuid;
 
-use crate::fns::versions::{
-	ArtifactData, VersionDetail, create_artifact, delete_artifact, get_artifacts_by_version_id,
-	get_version_detail, update_artifact, update_version_changelog, update_version_status,
+use crate::{
+	components::{ErrorHandler, LoadingBar, TimeAgo},
+	fns::versions::{
+		ArtifactData, VersionDetail, create_artifact, delete_artifact, get_artifacts_by_version_id,
+		get_version_detail, update_artifact, update_version_changelog, update_version_status,
+	},
 };
 use commons_types::version::VersionStatus;
 
@@ -35,58 +39,41 @@ fn VersionDetailView() -> impl IntoView {
 	);
 
 	view! {
-		<Suspense fallback=|| view! { <div class="loading">"Loading version details..."</div> }>
-			{move || {
-				version_detail
-					.get()
-					.map(|data| match data {
-						Ok(detail) => {
-							let is_admin_result = is_admin.get().and_then(|r| r.ok()).unwrap_or(false);
-							view! {
-								<div class="version-detail">
-									<VersionHeader detail=detail.clone() />
-									<VersionInfo detail=detail.clone() is_admin=is_admin_result />
-									<ArtifactsSection id=detail.id is_admin=is_admin_result />
-									<ChangelogSection detail=detail.clone() is_admin=is_admin_result />
-								</div>
-							}
-								.into_any()
-						}
-						Err(e) => {
-							view! {
-								<div class="error">{format!("Error loading version: {}", e)}</div>
-							}
-								.into_any()
-						}
-					})
-			}}
-		</Suspense>
+		<Transition fallback=|| view! { <LoadingBar /> }>
+			<ErrorHandler>
+				{move || version_detail.and_then(|detail| {
+					let is_admin = is_admin.get().and_then(|r| r.ok()).unwrap_or(false);
+					view! {
+						<header class="level mt-4">
+							<div class="level-left">
+								<h1 class="level-item is-size-3">{detail.major} "." {detail.minor} "." {detail.patch}</h1>
+							</div>
+							<div class="level-right">
+								<StatusSelection detail=detail.clone() is_admin {..} class:level-item />
+							</div>
+						</header>
+						<VersionInfo detail=detail.clone() />
+						<ArtifactsSection version_id=detail.id is_admin />
+						<ChangelogSection detail=detail.clone() is_admin />
+					}
+				})}
+			</ErrorHandler>
+		</Transition>
 	}
 }
 
 #[component]
-fn VersionHeader(detail: VersionDetail) -> impl IntoView {
+fn VersionInfo(detail: VersionDetail) -> impl IntoView {
 	view! {
-		<div class="page-header">
-			<h1>
-				{detail.major} "." {detail.minor} "." {detail.patch}
-			</h1>
-		</div>
-	}
-}
-
-#[component]
-fn VersionInfo(detail: VersionDetail, is_admin: bool) -> impl IntoView {
-	view! {
-		<section class="detail-section">
+		<section class="box">
 			<div class="info-grid">
 				<div class="info-item">
 					<span class="info-label">"Created"</span>
-					<span class="info-value">{detail.created_at.strftime("%Y-%m-%d %H:%M:%S UTC").to_string()}</span>
+					<span class="info-value">{detail.created_at.strftime("%Y-%m-%d").to_string()}</span>
 				</div>
 				<div class="info-item">
 					<span class="info-label">"Last updated"</span>
-					<span class="info-value">{detail.updated_at.strftime("%Y-%m-%d %H:%M:%S UTC").to_string()}</span>
+					<TimeAgo timestamp={detail.updated_at} {..} class:info-value />
 				</div>
 				{detail.min_chrome_version.map(|chrome_ver| {
 					view! {
@@ -98,26 +85,13 @@ fn VersionInfo(detail: VersionDetail, is_admin: bool) -> impl IntoView {
 						</div>
 					}
 				})}
-				{(!is_admin).then(|| {
-					view! {
-						<div class="info-item">
-							<span class="info-label">"Status"</span>
-							<span class="info-value">{detail.status}</span>
-						</div>
-					}
-				})}
 			</div>
-			{is_admin.then(|| {
-				view! {
-					<StatusSelection detail />
-				}
-			})}
 		</section>
 	}
 }
 
 #[component]
-fn StatusSelection(detail: VersionDetail) -> impl IntoView {
+fn StatusSelection(detail: VersionDetail, is_admin: bool) -> impl IntoView {
 	let (selected_status, set_selected_status) = signal(detail.status);
 	let (is_changing, set_is_changing) = signal(false);
 	let version_str = format!("{}.{}.{}", detail.major, detail.minor, detail.patch);
@@ -147,47 +121,55 @@ fn StatusSelection(detail: VersionDetail) -> impl IntoView {
 	});
 
 	view! {
-		<form class="status-form" on:submit=on_submit>
-			<select
-				class="status-select"
-				prop:value=move || selected_status.get()
-				on:change=move |ev| {
-					let value = event_target_value(&ev);
-					let status = VersionStatus::from(value);
-					set_selected_status.set(status);
-					on_change(ev);
-				}
-			>
-				<option
-					value="draft"
-					selected=move || selected_status.get() == VersionStatus::Draft
-					disabled=!can_switch_to_draft
-				>
-					"Draft"
-				</option>
-				<option
-					value="published"
-					selected=move || selected_status.get() == VersionStatus::Published
-				>
-					"Published"
-				</option>
-				<option value="yanked" selected=move || selected_status.get() == VersionStatus::Yanked>
-					"Yanked"
-				</option>
-			</select>
-			<button
-				type="submit"
-				class="change-button"
-				disabled=move || !is_changing.get() || update_status.pending().get()
-			>
-				{move || {
-					if update_status.pending().get() {
-						"Changing..."
-					} else {
-						"Change"
-					}
-				}}
-			</button>
+		<form class="field" class:has-addons=is_admin on:submit=on_submit>
+			<div class="control">
+				<div class="select">
+					<select
+						disabled={!is_admin}
+						prop:value=move || selected_status.get()
+						on:change=move |ev| {
+							let value = event_target_value(&ev);
+							let status = VersionStatus::from(value);
+							set_selected_status.set(status);
+							on_change(ev);
+						}
+					>
+						<option
+							value="draft"
+							selected=move || selected_status.get() == VersionStatus::Draft
+							disabled=!can_switch_to_draft
+						>
+							"Draft"
+						</option>
+						<option
+							value="published"
+							selected=move || selected_status.get() == VersionStatus::Published
+						>
+							"Published"
+						</option>
+						<option value="yanked" selected=move || selected_status.get() == VersionStatus::Yanked>
+							"Yanked"
+						</option>
+					</select>
+				</div>
+			</div>
+			{is_admin.then(|| view! {
+				<div class="control">
+					<button
+						type="submit"
+						class="button is-primary"
+						disabled=move || { !is_changing.get() || update_status.pending().get() }
+					>
+						{move || {
+							if update_status.pending().get() {
+								"Changing..."
+							} else {
+								"Change"
+							}
+						}}
+					</button>
+				</div>
+			})}
 		</form>
 		{move || {
 			update_status
@@ -205,373 +187,301 @@ fn StatusSelection(detail: VersionDetail) -> impl IntoView {
 }
 
 #[component]
-fn ArtifactsSection(id: Uuid, is_admin: bool) -> impl IntoView {
+fn ArtifactsSection(version_id: Uuid, is_admin: bool) -> impl IntoView {
 	let (is_unlocked, set_is_unlocked) = signal(false);
+	let (show_create, set_show_create) = signal(false);
 
-	view! {
-		<section class="detail-section">
-			<header>
-				<h2>"Artifacts"</h2>
-				{is_admin.then(|| {
-					view! {
-						<button class="edit-button" on:click=move |_| set_is_unlocked.set(!is_unlocked.get())>
-							{move || if is_unlocked.get() { "Lock" } else { "Unlock" }}
-						</button>
-					}
-				})}
-			</header>
-			<ArtifactsContent version_id=id is_admin=is_admin is_unlocked=is_unlocked />
-		</section>
-	}
-}
-
-#[component]
-fn ArtifactsContent(
-	version_id: Uuid,
-	is_admin: bool,
-	is_unlocked: ReadSignal<bool>,
-) -> impl IntoView {
-	let (show_create_form, set_show_create_form) = signal(false);
-
-	view! {
-		<div>
-			<ArtifactsList version_id is_admin is_unlocked />
-
-			{move || {
-				show_create_form.get().then(|| {
-					view! { <CreateArtifactForm version_id /> }.into_any()
-				})
-			}}
-
-			{move || { (is_admin && is_unlocked.get()).then(|| {
-				view! {
-					<button
-						class="add-artifact-button"
-						on:click=move |_| set_show_create_form.set(!show_create_form.get())
-					>
-						{move || if show_create_form.get() { "Cancel" } else { "+ Add Artifact" }}
-					</button>
-				}
-			}) }}
-		</div>
-	}
-}
-
-#[component]
-fn ArtifactsList(version_id: Uuid, is_admin: bool, is_unlocked: ReadSignal<bool>) -> impl IntoView {
-	let artifacts = Resource::new(
+	let resource = Resource::new(
 		move || version_id,
 		|id| async move { get_artifacts_by_version_id(id).await },
 	);
+	let refresh = move || resource.refetch();
 
 	view! {
-		<div class="artifacts-list">
-		<Suspense fallback=|| view! { <div class="loading">"Loading artifacts..."</div> }>
-			{move || {
-				artifacts
-					.get()
-					.map(|data| {
-						let artifacts = data.unwrap_or_default();
-						if artifacts.is_empty() {
+		<header class="level">
+			<div class="level-left">
+				<h2 class="level-item is-size-4">"Artifacts"</h2>
+			</div>
+			{is_admin.then(|| {
+				view! {
+					<div class="level-right">
+						{move || is_unlocked.get().then(|| {
 							view! {
-								<div class="no-artifacts">"No artifacts found for this version"</div>
+								<button
+									class="level-item button"
+									on:click=move |_| set_show_create.set(!show_create.get())
+									class:is-warning=move || show_create.get()
+									class:is-primary=move || {!show_create.get()}
+								>
+									{move || if show_create.get() { "Cancel create" } else { "Create" }}
+								</button>
 							}
-								.into_any()
-						} else {
-							view! {
-								<For each=move || artifacts.clone() key=|a| a.id let:artifact>
-									<ArtifactItem artifact=artifact is_admin=is_admin is_unlocked=is_unlocked />
-								</For>
-							}
-								.into_any()
-						}
-					})
-			}}
-		</Suspense>
-		</div>
+						})}
+						<button class="level-item button" on:click=move |_| set_is_unlocked.set(!is_unlocked.get())>
+							{move || if is_unlocked.get() { "Lock" } else { "Unlock" }}
+						</button>
+					</div>
+				}
+			})}
+		</header>
+		{move || show_create.get().then(|| {
+			view! { <CreateArtifactForm version_id refresh=move || {
+				refresh();
+				set_show_create.set(false);
+			} /> }
+		})}
+		<ArtifactsList resource is_unlocked />
 	}
 }
 
 #[component]
-fn CreateArtifactForm(version_id: Uuid) -> impl IntoView {
+fn ArtifactsList(
+	resource: Resource<Result<Vec<ArtifactData>, AppError>>,
+	is_unlocked: ReadSignal<bool>,
+) -> impl IntoView {
+	view! {
+		<Transition fallback=|| view! { <LoadingBar /> }>{move || resource.and_then(|artifacts| {
+				if artifacts.is_empty() {
+					view! {
+						<div class="no-artifacts">"No artifacts found for this version"</div>
+					}.into_any()
+				} else {
+					let artifacts = artifacts.clone();
+					view! {
+						<For each=move || artifacts.clone() key=|a| a.id let:artifact>
+							<ArtifactItem artifact is_unlocked refresh={move || resource.refetch()} />
+						</For>
+					}.into_any()
+				}
+			})
+		}</Transition>
+	}
+}
+
+#[component]
+fn CreateArtifactForm(
+	version_id: Uuid,
+	refresh: impl Fn() + Send + Sync + Copy + 'static,
+) -> impl IntoView {
 	let (artifact_type, set_artifact_type) = signal(String::new());
 	let (platform, set_platform) = signal(String::new());
 	let (download_url, set_download_url) = signal(String::new());
 
-	let create_action = Action::new(
-		move |(id, art_type, plat, url): &(Uuid, String, String, String)| {
-			let id = *id;
-			let art_type = art_type.clone();
-			let plat = plat.clone();
-			let url = url.clone();
-			async move { create_artifact(id, art_type, plat, url).await }
-		},
-	);
-
-	Effect::new(move || {
-		if let Some(Ok(_)) = create_action.value().get() {
-			window().location().reload().expect("Failed to reload page");
-		}
+	let create_action = Action::new(move |_: &()| async move {
+		let _ = create_artifact(
+			version_id,
+			artifact_type.get(),
+			platform.get(),
+			download_url.get(),
+		)
+		.await;
+		refresh();
 	});
 
 	view! {
-		<div class="create-artifact-form">
-			<input
-				type="text"
-				class="artifact-input"
-				placeholder="Type (e.g., mobile, server)"
-				prop:value=move || artifact_type.get()
-				on:input=move |ev| {
-					set_artifact_type.set(event_target_value(&ev));
-				}
-			/>
-			<input
-				type="text"
-				class="artifact-input"
-				placeholder="Platform (e.g., android, ios)"
-				prop:value=move || platform.get()
-				on:input=move |ev| {
-					set_platform.set(event_target_value(&ev));
-				}
-			/>
-			<input
-				type="text"
-				class="artifact-input artifact-url-input"
-				placeholder="URL"
-				prop:value=move || download_url.get()
-				on:input=move |ev| {
-					set_download_url.set(event_target_value(&ev));
-				}
-			/>
-			<button
-				class="save-button"
-				on:click=move |_| {
-					create_action
-						.dispatch((
-							version_id,
-							artifact_type.get(),
-							platform.get(),
-							download_url.get(),
-						));
-				}
-
-				disabled=move || create_action.pending().get()
-			>
-				{move || if create_action.pending().get() { "Creating..." } else { "Create" }}
-			</button>
-			{move || {
-				create_action
-					.value()
-					.get()
-					.and_then(|result| {
-						result
-							.err()
-							.map(|e| {
-								view! {
-									<div class="error-message">{format!("Error: {}", e)}</div>
-								}
-							})
-					})
-			}}
-		</div>
+		<form class="field is-grouped" on:submit=move |ev| {
+			ev.prevent_default();
+			create_action.dispatch(());
+		}>
+			<p class="control">
+				<input
+					class="input"
+					type="text"
+					required
+					placeholder="Type"
+					disabled=move || create_action.pending().get()
+					prop:value=move || artifact_type.get()
+					on:input=move |ev| set_artifact_type.set(event_target_value(&ev)) />
+			</p>
+			<p class="control">
+				<input
+					class="input"
+					type="text"
+					required
+					placeholder="Platform"
+					disabled=move || create_action.pending().get()
+					prop:value=move || platform.get()
+					on:input=move |ev| set_platform.set(event_target_value(&ev)) />
+			</p>
+			<p class="control is-expanded">
+				<input
+					class="input"
+					type="text"
+					required
+					placeholder="Download URL"
+					disabled=move || create_action.pending().get()
+					prop:value=move || download_url.get()
+					on:input=move |ev| set_download_url.set(event_target_value(&ev)) />
+			</p>
+			<p class="control">
+				<button
+					type="submit"
+					class="button is-primary"
+					disabled=move || create_action.pending().get()
+					class:is-loading=move || create_action.pending().get()
+				>"Create"</button>
+			</p>
+		</form>
 	}
 }
 
 #[component]
 fn ArtifactItem(
 	artifact: ArtifactData,
-	is_admin: bool,
 	is_unlocked: ReadSignal<bool>,
+	refresh: impl Fn() + Send + Sync + Copy + 'static,
 ) -> impl IntoView {
-	let artifact_id = StoredValue::new(artifact.id);
-	let original_type = StoredValue::new(artifact.artifact_type.clone());
-	let original_platform = StoredValue::new(artifact.platform.clone());
-	let original_url = StoredValue::new(artifact.download_url.clone());
-
 	let (is_editing, set_is_editing) = signal(false);
-	let (show_delete_confirm, set_show_delete_confirm) = signal(false);
-	let (artifact_type, set_artifact_type) = signal(artifact.artifact_type.clone());
-	let (platform, set_platform) = signal(artifact.platform.clone());
-	let (download_url, set_download_url) = signal(artifact.download_url.clone());
 
-	let update_artifact_action = Action::new(
-		move |(id, art_type, plat, url): &(Uuid, String, String, String)| {
-			let id = *id;
-			let art_type = art_type.clone();
-			let plat = plat.clone();
-			let url = url.clone();
-			async move { update_artifact(id, art_type, plat, url).await }
-		},
-	);
-
-	let delete_artifact_action = Action::new(move |id: &Uuid| {
+	let delete_action = Action::new(move |id: &Uuid| {
 		let id = *id;
-		async move { delete_artifact(id).await }
-	});
-
-	Effect::new(move || {
-		if let Some(Ok(())) = update_artifact_action.value().get() {
-			window().location().reload().expect("Failed to reload page");
-		}
-	});
-
-	Effect::new(move || {
-		if let Some(Ok(())) = delete_artifact_action.value().get() {
-			window().location().reload().expect("Failed to reload page");
+		async move {
+			let _ = delete_artifact(id).await;
+			refresh();
 		}
 	});
 
 	view! {
-		<div class="artifact-item">
-			{move || {
-				if is_editing.get() {
-					view! {
-						<div class="artifact-edit-form">
-							<input
-								type="text"
-								class="artifact-input"
-								placeholder="Type"
-								prop:value=move || artifact_type.get()
-								on:input=move |ev| {
-									set_artifact_type.set(event_target_value(&ev));
-								}
-							/>
-							<input
-								type="text"
-								class="artifact-input"
-								placeholder="Platform"
-								prop:value=move || platform.get()
-								on:input=move |ev| {
-									set_platform.set(event_target_value(&ev));
-								}
-							/>
-							<input
-								type="text"
-								class="artifact-input artifact-url-input"
-								placeholder="URL"
-								prop:value=move || download_url.get()
-								on:input=move |ev| {
-									set_download_url.set(event_target_value(&ev));
-								}
-							/>
-							<div class="artifact-edit-actions">
+		{move || if is_editing.get() {
+			let artifact = artifact.clone();
+			view! { <ArtifactItemEdit artifact set_is_editing /> }.into_any()
+		} else {
+			let artifact = artifact.clone();
+			view! { <ArtifactItemView artifact is_unlocked delete_action set_is_editing /> }.into_any()
+		}}
+	}
+}
+
+#[component]
+fn ArtifactItemView(
+	artifact: ArtifactData,
+	is_unlocked: ReadSignal<bool>,
+	delete_action: Action<Uuid, ()>,
+	set_is_editing: WriteSignal<bool>,
+) -> impl IntoView {
+	let (show_delete_confirm, set_show_delete_confirm) = signal(false);
+
+	view! {
+		<div class="box mb-3">
+			<div class="columns">
+				<div class="column">{artifact.artifact_type.clone()}</div>
+				<div class="column">{artifact.platform.clone()}</div>
+				<a
+					class="column is-half"
+					href={artifact.download_url.starts_with("https://").then(|| artifact.download_url.clone())}
+					class:has-text-primary-dark={!artifact.download_url.starts_with("https://")}
+				>{artifact.download_url.clone()}</a>
+				<div class="column">
+					<div class="field is-grouped buttons are-small is-justify-content-end" class:is-invisible={move || !is_unlocked.get()}>
+					{move || if show_delete_confirm.get() {
+						view! {
+							<p class="control">
 								<button
-									class="save-button"
-									on:click=move |_| {
-										update_artifact_action
-											.dispatch((
-												artifact_id.get_value(),
-												artifact_type.get(),
-												platform.get(),
-												download_url.get(),
-											));
-										set_is_editing.set(false);
-									}
-
-									disabled=move || update_artifact_action.pending().get()
-								>
-									{move || {
-										if update_artifact_action.pending().get() {
-											"Saving..."
-										} else {
-											"Save"
-										}
-									}}
-
-								</button>
+									class="button is-danger"
+									on:click=move |_| drop(delete_action.dispatch(artifact.id))
+									disabled=move || delete_action.pending().get()
+									class:is-loading=move || delete_action.pending().get()
+								>"Really delete"</button>
+							</p>
+							<p class="control">
 								<button
-									class="cancel-button"
-									on:click=move |_| {
-										set_artifact_type.set(original_type.get_value());
-										set_platform.set(original_platform.get_value());
-										set_download_url.set(original_url.get_value());
-										set_is_editing.set(false);
-									}
+									class="button is-light"
+									on:click=move |_| set_show_delete_confirm.set(false)
+									disabled=move || delete_action.pending().get()
+								>"Cancel"</button>
+							</p>
+						}.into_any()
+					} else {
+						view! {
+							<p class="control">
+								<button
+									class="button is-info"
+									on:click=move |_| set_is_editing.set(true)
+								>"Edit"</button>
+							</p>
+							<p class="control">
+								<button
+									class="button is-danger"
+									on:click=move |_| set_show_delete_confirm.set(true)
+								>"Delete"</button>
+							</p>
+						}.into_any()
+					}}
+					</div>
+				</div>
+			</div>
+		</div>
+	}
+}
 
-									disabled=move || update_artifact_action.pending().get()
-								>
-									"Cancel"
-								</button>
-							</div>
-							{move || {
-								update_artifact_action
-									.value()
-									.get()
-									.and_then(|result| {
-										result
-											.err()
-											.map(|e| {
-												view! {
-													<div class="error-message">{format!("Error: {}", e)}</div>
-												}
-											})
-									})
-							}}
+#[component]
+fn ArtifactItemEdit(artifact: ArtifactData, set_is_editing: WriteSignal<bool>) -> impl IntoView {
+	let (artifact_type, set_artifact_type) = signal(artifact.artifact_type.clone());
+	let (platform, set_platform) = signal(artifact.platform.clone());
+	let (download_url, set_download_url) = signal(artifact.download_url.clone());
 
-						</div>
-					}
-						.into_any()
-				} else {
-					view! {
-						<div class="artifact-type">{original_type.get_value()}</div>
-						<div class="artifact-platform">{original_platform.get_value()}</div>
-						<div class="artifact-url">{original_url.get_value()}</div>
-						{if is_admin && is_unlocked.get() {
-							view! {
-								<div class="artifact-actions">
-									{if show_delete_confirm.get() {
-										view! {
-											<span class="delete-confirm">
-												<button
-													class="delete-confirm-button"
-													on:click=move |_| {
-														delete_artifact_action.dispatch(artifact_id.get_value());
-													}
+	let update_action = Action::new(move |_: &()| async move {
+		let _ = update_artifact(
+			artifact.id,
+			artifact_type.get(),
+			platform.get(),
+			download_url.get(),
+		)
+		.await;
+		set_is_editing.set(false);
+	});
 
-													disabled=move || delete_artifact_action.pending().get()
-												>
-													{move || {
-														if delete_artifact_action.pending().get() {
-															"Deleting..."
-														} else {
-															"Confirm"
-														}
-													}}
-												</button>
-												<button
-													class="delete-cancel-button"
-													on:click=move |_| set_show_delete_confirm.set(false)
-												>
-													"Cancel"
-												</button>
-											</span>
-										}
-											.into_any()
-									} else {
-										view! {
-											<button class="edit-button" on:click=move |_| set_is_editing.set(true)>
-												"Edit"
-											</button>
-											<button
-												class="edit-button delete-button"
-												on:click=move |_| set_show_delete_confirm.set(true)
-												title="Delete artifact"
-											>
-												"Delete"
-											</button>
-										}
-											.into_any()
-									}}
-								</div>
-							}.into_any()
-						} else {
-							view! { <span></span> }.into_any()
-						}}
-					}
-						.into_any()
-				}
-			}}
-
+	view! {
+		<div class="box">
+			<form class="field is-grouped" on:submit=move |ev| {
+				ev.prevent_default();
+				update_action.dispatch(());
+			}>
+				<p class="control">
+					<input
+						class="input"
+						type="text"
+						required
+						placeholder="Type"
+						disabled=move || update_action.pending().get()
+						prop:value=move || artifact_type.get()
+						on:input=move |ev| set_artifact_type.set(event_target_value(&ev)) />
+				</p>
+				<p class="control">
+					<input
+						class="input"
+						type="text"
+						required
+						placeholder="Platform"
+						disabled=move || update_action.pending().get()
+						prop:value=move || platform.get()
+						on:input=move |ev| set_platform.set(event_target_value(&ev)) />
+				</p>
+				<p class="control is-expanded">
+					<input
+						class="input"
+						type="text"
+						required
+						placeholder="Download URL"
+						disabled=move || update_action.pending().get()
+						prop:value=move || download_url.get()
+						on:input=move |ev| set_download_url.set(event_target_value(&ev)) />
+				</p>
+				<p class="control">
+					<button
+						type="submit"
+						class="button is-primary"
+						class:is-loading=move || update_action.pending().get()
+					>"Save"</button>
+				</p>
+				<p class="control">
+					<button
+						class="button is-danger is-light"
+						disabled=move || update_action.pending().get()
+						on:click=move |_| set_is_editing.set(false)
+					>"Cancel"</button>
+				</p>
+			</form>
 		</div>
 	}
 }
@@ -596,81 +506,59 @@ fn ChangelogSection(detail: VersionDetail, is_admin: bool) -> impl IntoView {
 	});
 
 	view! {
-		<section class="detail-section">
-			{move || {
-				if is_editing.get() {
-					view! {
-						<header>
-							<h2>"Changelog"</h2>
-						</header>
-						<div class="changelog-editor">
-							<textarea
-								class="changelog-textarea"
-								prop:value=move || changelog_text.get()
-								on:input=move |ev| {
-									set_changelog_text.set(event_target_value(&ev));
-								}
-							></textarea>
-							<div class="changelog-actions">
+		<header class="level mt-4">
+			<div class="level-left">
+				<h2 class="level-item is-size-4">"Changelog"</h2>
+			</div>
+			{is_admin.then(|| {
+				view! {
+					<div class="level-right">
+						{move || if is_editing.get() {
+							view! {
 								<button
-									class="save-button"
+									class="level-item button is-success mr-2"
 									on:click=move |_| {
 										update_changelog.dispatch(changelog_text.get());
 										set_is_editing.set(false);
 									}
-									disabled=move || update_changelog.pending().get()
-								>
-									{move || {
-										if update_changelog.pending().get() {
-											"Saving..."
-										} else {
-											"Save"
-										}
-									}}
-								</button>
+								>"Save"</button>
 								<button
-									class="cancel-button"
+									class="level-item button is-danger is-light"
 									on:click=move |_| {
 										set_changelog_text.set(original_changelog.get_value());
 										set_is_editing.set(false);
 									}
-									disabled=move || update_changelog.pending().get()
-								>
-									"Cancel"
-								</button>
-							</div>
-							{move || {
-								update_changelog
-									.value()
-									.get()
-									.and_then(|result| {
-										result
-											.err()
-											.map(|e| {
-												view! {
-													<div class="error-message">{format!("Error: {}", e)}</div>
-												}
-											})
-									})
-							}}
-						</div>
-					}
-						.into_any()
+								>"Cancel"</button>
+							}.into_any()
+						} else {
+							view! {
+								<button
+									class="level-item button is-info"
+									on:click=move |_| {
+										set_is_editing.set(true);
+									}
+								>"Edit"</button>
+							}.into_any()
+						}}
+					</div>
+				}
+			})}
+		</header>
+		<section class="box">
+			{move || {
+				if is_editing.get() {
+					view! {
+						<textarea
+							class="textarea monospace"
+							rows="20"
+							prop:value=move || changelog_text.get()
+							on:input=move |ev| set_changelog_text.set(event_target_value(&ev))
+						></textarea>
+					}.into_any()
 				} else {
 					view! {
-						<header>
-							<h2>Changelog</h2>
-							{is_admin.then(|| {
-								view! {
-									<button class="edit-button" on:click=move |_| set_is_editing.set(true)>
-										"Edit"
-									</button>
-								}
-							})}
-						</header>
-						<div class="markdown-content" inner_html=parse_markdown(&detail.changelog)></div>
-					}
-						.into_any()
+						<div class="content" inner_html=parse_markdown(&detail.changelog)></div>
+					}.into_any()
 				}
 			}}
 		</section>
