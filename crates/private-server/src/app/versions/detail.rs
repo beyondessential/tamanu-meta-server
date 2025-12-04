@@ -31,10 +31,7 @@ fn VersionDetailView() -> impl IntoView {
 		|_| async { crate::fns::commons::is_current_user_admin().await },
 	);
 
-	let version_detail = Resource::new(
-		version,
-		|v| async move { get_version_detail(v).await },
-	);
+	let version_detail = Resource::new(version, |v| async move { get_version_detail(v).await });
 
 	view! {
 		<Transition fallback=|| view! { <LoadingBar /> }>

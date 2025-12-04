@@ -29,18 +29,13 @@ pub fn Page() -> impl IntoView {
 			.get("id")
 			.and_then(|id| Uuid::from_str(&id).ok())
 	};
-	let device_name = Resource::new(
-		device_id,
-		async move |id| {
-			if let Some(id) = id {
-				get_device_name_by_id(id)
-					.await
-					.ok().map(|name| (id, name))
-			} else {
-				None
-			}
-		},
-	);
+	let device_name = Resource::new(device_id, async move |id| {
+		if let Some(id) = id {
+			get_device_name_by_id(id).await.ok().map(|name| (id, name))
+		} else {
+			None
+		}
+	});
 
 	view! {
 		<Stylesheet id="css-devices" href="/static/devices.css" />

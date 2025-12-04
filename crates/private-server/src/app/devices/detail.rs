@@ -12,12 +12,7 @@ use crate::{
 #[component]
 pub fn Detail() -> impl IntoView {
 	let params = use_params_map();
-	let device_id = move || {
-		params
-			.read()
-			.get("id")
-			.and_then(|s| s.parse::<Uuid>().ok())
-	};
+	let device_id = move || params.read().get("id").and_then(|s| s.parse::<Uuid>().ok());
 
 	let (refresh_trigger, set_refresh_trigger) = signal(0);
 	let device_resource = Resource::new(

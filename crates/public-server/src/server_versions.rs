@@ -105,14 +105,16 @@ impl RcEnvironment {
 		}
 
 		if let Some(ref url) = self.facility_1
-			&& !Self::probe_url(url).await {
-				self.facility_1 = None;
-			}
+			&& !Self::probe_url(url).await
+		{
+			self.facility_1 = None;
+		}
 
 		if let Some(ref url) = self.facility_2
-			&& !Self::probe_url(url).await {
-				self.facility_2 = None;
-			}
+			&& !Self::probe_url(url).await
+		{
+			self.facility_2 = None;
+		}
 
 		Some(self)
 	}

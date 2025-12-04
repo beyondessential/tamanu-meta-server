@@ -29,16 +29,13 @@ pub fn Page() -> impl IntoView {
 			.get("id")
 			.and_then(|id| Uuid::from_str(&id).ok())
 	};
-	let server_name = Resource::new(
-		server_id,
-		async move |id| {
-			if let Some(id) = id {
-				get_name(id).await.ok().map(|name| (id, name))
-			} else {
-				None
-			}
-		},
-	);
+	let server_name = Resource::new(server_id, async move |id| {
+		if let Some(id) = id {
+			get_name(id).await.ok().map(|name| (id, name))
+		} else {
+			None
+		}
+	});
 
 	view! {
 		<Stylesheet id="css-servers" href="/static/servers.css" />

@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Default)]
 pub enum VersionStatus {
 	#[default]
- Draft,
+	Draft,
 	Published,
 	Yanked,
 }
@@ -35,7 +35,6 @@ impl Display for VersionStatus {
 }
 
 commons_macros::render_as_string!(VersionStatus, minsize(5));
-
 
 impl From<String> for VersionStatus {
 	fn from(value: String) -> Self {

@@ -176,9 +176,10 @@ impl Server {
 
 		if let Ok(query_uuid) = query.parse::<Uuid>()
 			&& query_uuid != current_server_id
-				&& let Ok(server) = Self::get_by_id(db, query_uuid).await {
-					all_servers.push(server);
-				}
+			&& let Ok(server) = Self::get_by_id(db, query_uuid).await
+		{
+			all_servers.push(server);
+		}
 
 		if all_servers.is_empty() {
 			all_servers = servers

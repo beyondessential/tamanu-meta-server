@@ -98,17 +98,23 @@ pub fn GlobalNav() -> impl IntoView {
 					<img src="/static/images/tamanu_logo.svg" alt="Tamanu Logo" class="logo" />
 				</A>
 				<a class="navbar-burger" role="button" aria-label="menu" aria-expanded="false">
-				  <span aria-hidden="true"></span>
-				  <span aria-hidden="true"></span>
-				  <span aria-hidden="true"></span>
-				  <span aria-hidden="true"></span>
+					<span aria-hidden="true"></span>
+					<span aria-hidden="true"></span>
+					<span aria-hidden="true"></span>
+					<span aria-hidden="true"></span>
 				</a>
 			</div>
 			<div class="navbar-menu">
 				<div class="navbar-start">
-					<A href="/status" {..} class="navbar-item">"Status"</A>
-					<A href="/servers" {..} class="navbar-item">"Servers"</A>
-					<A href="/versions" {..} class="navbar-item">"Versions"</A>
+					<A href="/status" {..} class="navbar-item">
+						"Status"
+					</A>
+					<A href="/servers" {..} class="navbar-item">
+						"Servers"
+					</A>
+					<A href="/versions" {..} class="navbar-item">
+						"Versions"
+					</A>
 					<Suspense>
 						{move || {
 							is_admin
@@ -117,8 +123,12 @@ pub fn GlobalNav() -> impl IntoView {
 									if result.unwrap_or(false) {
 										Some(
 											view! {
-												<A href="/admins" {..} class="navbar-item">"Admins"</A>
-												<A href="/devices" {..} class="navbar-item">"Devices"</A>
+												<A href="/admins" {..} class="navbar-item">
+													"Admins"
+												</A>
+												<A href="/devices" {..} class="navbar-item">
+													"Devices"
+												</A>
 											},
 										)
 									} else {
