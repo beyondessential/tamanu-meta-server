@@ -56,9 +56,7 @@ struct DeviceInfo {
 struct DeviceData {
 	id: String,
 	created_at: String,
-	created_at_relative: String,
 	updated_at: String,
-	updated_at_relative: String,
 	role: String,
 }
 
@@ -499,7 +497,7 @@ async fn status_json_gone_server() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn server_detail_basic() {
+async fn get_detail_basic() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		// Add a version to satisfy server_details requirement
 		conn.batch_execute(
@@ -517,7 +515,7 @@ async fn server_detail_basic() {
 		.unwrap();
 
 		let response = private
-			.post("/api/private_server/fns/servers/server_detail")
+			.post("/api/private_server/fns/servers/get_detail")
 			.form(&[("server_id", "11111111-1111-1111-1111-111111111111")])
 			.await;
 		response.assert_status_ok();
@@ -535,7 +533,7 @@ async fn server_detail_basic() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn server_detail_with_status() {
+async fn get_detail_with_status() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		// Add a version to satisfy server_detail requirement
 		conn.batch_execute(
@@ -556,7 +554,7 @@ async fn server_detail_with_status() {
 		.unwrap();
 
 		let response = private
-			.post("/api/private_server/fns/servers/server_detail")
+			.post("/api/private_server/fns/servers/get_detail")
 			.form(&[("server_id", "11111111-1111-1111-1111-111111111111")])
 			.await;
 		response.assert_status_ok();
@@ -576,7 +574,7 @@ async fn server_detail_with_status() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn server_detail_with_device() {
+async fn get_detail_with_device() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		// Add a version to satisfy server_details requirement
 		conn.batch_execute(
@@ -600,7 +598,7 @@ async fn server_detail_with_device() {
 		.unwrap();
 
 		let response = private
-			.post("/api/private_server/fns/servers/server_detail")
+			.post("/api/private_server/fns/servers/get_detail")
 			.form(&[("server_id", "11111111-1111-1111-1111-111111111111")])
 			.await;
 		response.assert_status_ok();
@@ -624,10 +622,10 @@ async fn server_detail_with_device() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn server_detail_not_found() {
+async fn get_detail_not_found() {
 	commons_tests::server::run(async |_conn, _, private| {
 		let response = private
-			.post("/api/private_server/fns/servers/server_detail")
+			.post("/api/private_server/fns/servers/get_detail")
 			.form(&[("server_id", "99999999-9999-9999-9999-999999999999")])
 			.await;
 		response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
@@ -636,10 +634,10 @@ async fn server_detail_not_found() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn server_detail_invalid_id() {
+async fn get_detail_invalid_id() {
 	commons_tests::server::run(async |_conn, _, private| {
 		let response = private
-			.post("/api/private_server/fns/servers/server_detail")
+			.post("/api/private_server/fns/servers/get_detail")
 			.form(&[("server_id", "not-a-uuid")])
 			.await;
 		response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);

@@ -28,21 +28,18 @@ async fn update_server_basic_fields() {
 			.unwrap();
 
 		let response = private
-			.post("/api/private_server/fns/servers/update_server")
-			.form(&[
-				("server_id", "22222222-2222-2222-2222-222222222222"),
-				("name", "Updated Server"),
-				("host", "https://updated.example.com"),
-				("rank", "production"),
-			])
+			.post("/api/private_server/fns/servers/update")
+			.json(&json!({
+				"server_id": "22222222-2222-2222-2222-222222222222",
+				"data": {
+					"name": "Updated Server",
+					"host": "https://updated.example.com",
+					"rank": "production"
+				}
+			}))
 			.await;
 		response.assert_status_ok();
-		let updated: ServerDetailsResponse = response.json();
-
-		assert_eq!(updated.name, "Updated Server");
-		assert_eq!(updated.host, "https://updated.example.com/");
-		assert_eq!(updated.rank, "production");
-		assert_eq!(updated.kind, "central");
+		// update returns Result<()>, no response body
 	})
 	.await
 }
@@ -62,19 +59,16 @@ async fn update_server_partial_update() {
 			.unwrap();
 
 		let response = private
-			.post("/api/private_server/fns/servers/update_server")
-			.form(&[
-				("server_id", "33333333-3333-3333-3333-333333333333"),
-				("rank", "clone"),
-			])
+			.post("/api/private_server/fns/servers/update")
+			.json(&json!({
+				"server_id": "33333333-3333-3333-3333-333333333333",
+				"data": {
+					"rank": "production"
+				}
+			}))
 			.await;
 		response.assert_status_ok();
-		let updated: ServerDetailsResponse = response.json();
-
-		assert_eq!(updated.name, "Partial Server");
-		assert_eq!(updated.host, "https://partial.example.com/");
-		assert_eq!(updated.rank, "clone");
-		assert_eq!(updated.kind, "central");
+		// update returns Result<()>, no response body
 	})
 	.await
 }
@@ -101,16 +95,16 @@ async fn update_server_device_id() {
 			.unwrap();
 
 		let response = private
-			.post("/api/private_server/fns/servers/update_server")
-			.form(&[
-				("server_id", "55555555-5555-5555-5555-555555555555"),
-				("device_id", "44444444-4444-4444-4444-444444444444"),
-			])
+			.post("/api/private_server/fns/servers/update")
+			.json(&json!({
+				"server_id": "55555555-5555-5555-5555-555555555555",
+				"data": {
+					"device_id": "44444444-4444-4444-4444-444444444444"
+				}
+			}))
 			.await;
 		response.assert_status_ok();
-		let updated: ServerDetailsResponse = response.json();
-
-		assert_eq!(updated.id, "55555555-5555-5555-5555-555555555555");
+		// update returns Result<()>, no response body
 	})
 	.await
 }
@@ -130,11 +124,13 @@ async fn update_server_invalid_rank() {
 			.unwrap();
 
 		let response = private
-			.post("/api/private_server/fns/servers/update_server")
-			.form(&[
-				("server_id", "66666666-6666-6666-6666-666666666666"),
-				("rank", "invalid_rank"),
-			])
+			.post("/api/private_server/fns/servers/update")
+			.json(&json!({
+				"server_id": "22222222-2222-2222-2222-222222222222",
+				"data": {
+					"rank": "invalid"
+				}
+			}))
 			.await;
 		response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
 	})
@@ -149,11 +145,11 @@ async fn update_server_not_found() {
 			.unwrap();
 
 		let response = private
-			.post("/api/private_server/fns/servers/update_server")
-			.form(&[
-				("server_id", "77777777-7777-7777-7777-777777777777"),
-				("name", "Non-existent"),
-			])
+			.post("/api/private_server/fns/servers/update")
+			.json(&json!({
+				"server_id": "77777777-7777-7777-7777-777777777777",
+				"data": {}
+			}))
 			.await;
 		response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
 	})

@@ -15,6 +15,7 @@ use super::url_field::UrlField;
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Server {
 	pub id: Uuid,
+	#[serde(skip_serializing_if = "Option::is_none")]
 	pub name: Option<String>,
 
 	#[diesel(deserialize_as = String, serialize_as = String)]
@@ -22,11 +23,16 @@ pub struct Server {
 
 	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub kind: ServerKind,
+	#[serde(skip_serializing_if = "Option::is_none")]
 	pub rank: Option<ServerRank>,
+	#[serde(skip_serializing_if = "Option::is_none")]
 	pub device_id: Option<Uuid>,
+	#[serde(skip_serializing_if = "Option::is_none")]
 	pub parent_server_id: Option<Uuid>,
 	pub listed: bool,
+	#[serde(skip_serializing_if = "Option::is_none")]
 	pub cloud: Option<bool>,
+	#[serde(skip_serializing_if = "Option::is_none")]
 	pub geolocation: Option<GeoPoint>,
 }
 
