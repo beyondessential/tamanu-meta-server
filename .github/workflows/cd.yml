@@ -62,7 +62,7 @@ jobs:
       - name: Prepare artifacts
         run: |
           mkdir -p artifacts/${{ matrix.arch }}
-          cp target/${{ matrix.target }}/release/{public-server,private-server,migrate,ownstatus,pingtask} artifacts/${{ matrix.arch }}/
+          cp target/${{ matrix.target }}/release/{public-server,private-server,migrate,ownstatus,pingtask,chrome_versions} artifacts/${{ matrix.arch }}/
 
       - uses: actions/upload-artifact@v5
         with:
