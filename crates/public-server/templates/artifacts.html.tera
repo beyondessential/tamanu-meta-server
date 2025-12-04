@@ -168,6 +168,9 @@
                     <span class="artifact-platform">{{ artifact.platform }}</span>
                     <span class="artifact-url">{{ artifact.download_url }}</span>
                     <div class="artifact-actions">
+                        {% if artifact.artifact_type == "mobile" %}
+                        <a href="/versions/{{ version.major }}.{{ version.minor }}.{{ version.patch }}/mobile" class="button is-info">Install</a>
+                        {% endif %}
                         {% if artifact.download_url is starting_with("https://") %}
                         <a href="{{ artifact.download_url }}" class="button is-primary" target="_blank">Download</a>
                         {% endif %}
