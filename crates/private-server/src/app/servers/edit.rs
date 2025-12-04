@@ -46,8 +46,11 @@ pub fn EditForm(info: ServerInfo) -> impl IntoView {
 	let (host, set_host) = signal(info.host.clone());
 	let (kind, set_kind) = signal(info.kind);
 	let (rank, set_rank) = signal(info.rank);
+
 	let (listed, set_listed) = signal(info.listed);
+
 	let (parent_id, set_parent_id) = signal(info.parent_server_id);
+	let (device_id, set_device_id) = signal(info.device_id);
 
 	let (cloud, set_cloud) = signal(info.cloud);
 	let (lat, set_lat) = signal(info.geolocation.map(|geo| geo.lat));
@@ -60,6 +63,7 @@ pub fn EditForm(info: ServerInfo) -> impl IntoView {
 		rank: rank.get(),
 		listed: Some(listed.get()),
 		parent_server_id: Some(parent_id.get()),
+		device_id: Some(device_id.get()),
 		cloud: Some(cloud.get()),
 		geolocation: Some(match (lat.get(), lon.get()) {
 			(Some(lat), Some(lon)) => Some(GeoPoint { lat, lon }),
@@ -166,6 +170,27 @@ pub fn EditForm(info: ServerInfo) -> impl IntoView {
 									<option value={ServerRank::Dev}>{ServerRank::Dev}</option>
 								</select>
 							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+			<div class="field is-horizontal">
+				<div class="field-label is-normal">
+					<label class="label" for="field-device-id">"Device ID"</label>
+				</div>
+				<div class="field-body">
+					<div class="field">
+						<div class="control">
+							<input
+								id="field-device-id"
+								name="device_id"
+								class="input"
+								type="text"
+								placeholder="UUID"
+								disabled=move || submit.pending().get()
+								prop:value=move || device_id.get().map(|id| id.to_string())
+								on:change=move |ev| set_device_id.set(none_if_empty(event_target_value(&ev)).and_then(|id| id.parse().ok()))
+							/>
 						</div>
 					</div>
 				</div>
