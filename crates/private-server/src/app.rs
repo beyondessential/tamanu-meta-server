@@ -94,7 +94,7 @@ pub fn GlobalNav() -> impl IntoView {
 	view! {
 		<nav id="global-nav" class="navbar" role="navigation" aria-label="main navigation">
 			<div class="navbar-brand">
-				<A href="/status" {..} class="navbar-item">
+				<A href="/status" {..} class="navbar-item" title=format!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))>
 					<img src="/static/images/tamanu_logo.svg" alt="Tamanu Logo" class="logo" />
 				</A>
 				<a class="navbar-burger" role="button" aria-label="menu" aria-expanded="false">
