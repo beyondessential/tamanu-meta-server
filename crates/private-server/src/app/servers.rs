@@ -12,6 +12,7 @@ use crate::{
 
 mod detail;
 mod edit;
+mod geo;
 pub mod list;
 
 pub use detail::Detail;

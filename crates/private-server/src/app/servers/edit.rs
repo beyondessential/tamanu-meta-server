@@ -1,6 +1,7 @@
 use commons_errors::AppError;
 use commons_types::{
 	Uuid,
+	geo::GeoPoint,
 	server::{kind::ServerKind, rank::ServerRank},
 };
 use leptos::leptos_dom::helpers::request_animation_frame;
@@ -8,6 +9,7 @@ use leptos::prelude::*;
 use leptos_router::{components::A, hooks::use_params_map};
 
 use crate::{
+	app::servers::geo::CloudRegion,
 	components::{ErrorHandler, LoadingBar},
 	fns::servers::{ServerDataUpdate, ServerInfo, get_info, search_parent, update},
 };
@@ -48,6 +50,10 @@ pub fn EditForm(info: ServerInfo) -> impl IntoView {
 	let (listed, set_listed) = signal(info.listed);
 	let (parent_id, set_parent_id) = signal(info.parent_server_id);
 
+	let (cloud, set_cloud) = signal(info.cloud);
+	let (lat, set_lat) = signal(info.geolocation.map(|geo| geo.lat));
+	let (lon, set_lon) = signal(info.geolocation.map(|geo| geo.lon));
+
 	let save_data = Signal::derive(move || ServerDataUpdate {
 		name: name.get(),
 		host: Some(host.get()),
@@ -55,6 +61,11 @@ pub fn EditForm(info: ServerInfo) -> impl IntoView {
 		rank: rank.get(),
 		listed: Some(listed.get()),
 		parent_server_id: Some(parent_id.get()),
+		cloud: Some(cloud.get()),
+		geolocation: Some(match (lat.get(), lon.get()) {
+			(Some(lat), Some(lon)) => Some(GeoPoint { lat, lon }),
+			_ => None,
+		}),
 		..Default::default()
 	});
 
@@ -170,6 +181,7 @@ pub fn EditForm(info: ServerInfo) -> impl IntoView {
 					</div>
 				</div>
 			</div>
+			<GeolocationControl cloud set_cloud lat set_lat lon set_lon pending=submit.pending() />
 			<div class="field is-horizontal">
 				<div class="field-label"></div>
 				<div class="field-body">
@@ -211,6 +223,119 @@ pub fn EditForm(info: ServerInfo) -> impl IntoView {
 				</div>
 			</div>
 		</form>
+	}
+}
+
+#[component]
+pub fn GeolocationControl(
+	cloud: ReadSignal<Option<bool>>,
+	set_cloud: WriteSignal<Option<bool>>,
+	lat: ReadSignal<Option<f64>>,
+	set_lat: WriteSignal<Option<f64>>,
+	lon: ReadSignal<Option<f64>>,
+	set_lon: WriteSignal<Option<f64>>,
+	pending: Memo<bool>,
+) -> impl IntoView {
+	view! {
+		<div class="field is-horizontal">
+			<div class="field-label is-normal">
+				<label class="label" for="field-cloud">"Location"</label>
+			</div>
+			<div class="field-body">
+				<div class="field is-narrow">
+					<div class="control is-expanded">
+						<div class="select is-fullwidth">
+							<select
+								id="field-cloud"
+								disabled=move || pending.get()
+								prop:value=move || cloud.get().map_or("unknown", |cloud| if cloud { "true" } else { "false" })
+								on:change=move |ev| set_cloud.set(match event_target_value(&ev).as_str() {
+									"true" => Some(true),
+									"false" => Some(false),
+									_ => None,
+								})
+							>
+								<option value="unknown">"unknown"</option>
+								<option value="true">"cloud"</option>
+								<option value="false">"on premise"</option>
+							</select>
+						</div>
+					</div>
+				</div>
+				{move || (cloud.get() == Some(true)).then(|| view! { <RegionSelection lat set_lat lon set_lon pending /> })}
+				<div class="field">
+					<div class="control is-expanded">
+						<input
+							class="input"
+							type="text"
+							placeholder="Latitude"
+							disabled=move || pending.get()
+							prop:value=move || lat.get().map_or(String::new(), |n| n.to_string())
+							on:change=move |ev| set_lat.set(event_target_value(&ev).parse().ok()) />
+					</div>
+				</div>
+				<div class="field">
+					<div class="control is-expanded">
+						<input
+							class="input"
+							type="text"
+							placeholder="Longitude"
+							disabled=move || pending.get()
+							prop:value=move || lon.get().map_or(String::new(), |n| n.to_string())
+							on:change=move |ev| set_lon.set(event_target_value(&ev).parse().ok()) />
+					</div>
+				</div>
+			</div>
+		</div>
+	}
+}
+
+#[component]
+pub fn RegionSelection(
+	lat: ReadSignal<Option<f64>>,
+	set_lat: WriteSignal<Option<f64>>,
+	lon: ReadSignal<Option<f64>>,
+	set_lon: WriteSignal<Option<f64>>,
+	pending: Memo<bool>,
+) -> impl IntoView {
+	let (region, set_region) = signal(None::<CloudRegion>);
+
+	Effect::new(move || {
+		if let (Some(lat), Some(lon)) = (lat.get(), lon.get()) {
+			set_region.set(CloudRegion::from_lat_lon(lat, lon));
+		}
+	});
+
+	view! {
+		<div class="field is-narrow">
+			<div class="control is-expanded">
+				<div class="select is-fullwidth">
+					<select
+						disabled=move || pending.get()
+						prop:value=move || region.get().map_or("", |reg| reg.as_str())
+						on:change=move |ev| {
+							let region = event_target_value(&ev).parse().ok();
+							set_region.set(region);
+							match region.map(|reg| reg.to_lat_lon()) {
+								Some((lat, lon)) => {
+									set_lat.set(Some(lat));
+									set_lon.set(Some(lon));
+								}
+								None => {
+									set_lat.set(None);
+									set_lon.set(None);
+								}
+							}
+						}
+					>
+						<option disabled value="">"Other region"</option>
+						<For each=move || CloudRegion::ALL key=|r| *r let:region>
+							<option value={region.as_str()}>{region.as_str()}</option>
+						</For>
+					</select>
+				</div>
+			</div>
+		</div>
 	}
 }
 
