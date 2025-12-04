@@ -164,6 +164,7 @@ mod ssr {
 
 	use axum::extract::State;
 	use commons_errors::{AppError, Result};
+	use futures::future::join;
 
 	use commons_types::server::{kind::ServerKind, rank::ServerRank};
 	use database::{
@@ -267,11 +268,31 @@ mod ssr {
 		let server = Server::get_by_id(&mut conn, server_id).await?;
 		let device_id = server.device_id;
 
-		let parent_server_name = if let Some(parent_id) = server.parent_server_id {
-			let parent = Server::get_by_id(&mut conn, parent_id).await?;
-			parent.name
-		} else {
-			None
+		// Parallelised independent lookups: parent server, status, and latest version
+		let (parent_server_name, status, latest_version) = {
+			let mut conn_parent = db.get().await?;
+			let mut conn_status = db.get().await?;
+
+			let parent_lookup = async {
+				if let Some(parent_id) = server.parent_server_id {
+					let parent = Server::get_by_id(&mut conn_parent, parent_id).await?;
+					Ok::<_, commons_errors::AppError>(parent.name)
+				} else {
+					Ok(None)
+				}
+			};
+
+			let status_lookup = Status::latest_for_server(&mut conn_status, server.id);
+
+			let latest_version_lookup = async {
+				Version::get_latest_matching(&mut conn, "*".parse()?)
+					.await
+					.map(|v| v.as_semver())
+			};
+
+			let (parent_result, status_result) = join(parent_lookup, status_lookup).await;
+
+			(parent_result?, status_result?, latest_version_lookup.await?)
 		};
 
 		let server_details = super::ServerInfo {
@@ -288,15 +309,10 @@ mod ssr {
 			geolocation: server.geolocation,
 		};
 
-		let status = Status::latest_for_server(&mut conn, server.id).await?;
 		let up = status
 			.as_ref()
 			.map(|s| s.short_status())
 			.unwrap_or_default();
-
-		let latest_version = Version::get_latest_matching(&mut conn, "*".parse()?)
-			.await?
-			.as_semver();
 
 		let last_status = if let Some(st) = status.as_ref() {
 			let device = if let Some(device_id) = st.device_id {
@@ -345,35 +361,49 @@ mod ssr {
 			None
 		};
 
-		// TODO: parallelise
-		let mut child_servers = Vec::new();
-		if server.kind.to_string() == "central" {
+		let child_servers = if server.kind.to_string() == "central" {
 			let children = server.get_children(&mut conn).await?;
-			for child in children {
-				let child_status = Status::latest_for_server(&mut conn, child.id).await?;
-				let child_up = child_status
-					.as_ref()
-					.map(|s| s.short_status())
-					.unwrap_or_default();
 
-				child_servers.push((
-					child_up,
-					Arc::new(super::ServerInfo {
-						id: child.id,
-						name: child.name,
-						kind: child.kind,
-						rank: child.rank,
-						host: child.host.0.to_string(),
-						listed: child.listed,
-						cloud: child.cloud,
-						geolocation: child.geolocation,
-						device_id: child.device_id,
-						parent_server_id: Some(server.id),
-						parent_server_name: server.name.clone(),
-					}),
-				));
+			if children.is_empty() {
+				Vec::new()
+			} else {
+				// Fetch child statuses in a single optimised query
+				let child_ids: Vec<Uuid> = children.iter().map(|c| c.id).collect();
+				let statuses = Status::latest_for_servers(&mut conn, &child_ids).await?;
+
+				// Create a map of server_id -> status for O(1) lookup
+				let status_map: std::collections::HashMap<Uuid, &Status> =
+					statuses.iter().map(|s| (s.server_id, s)).collect();
+
+				// Build result by combining children with their statuses
+				children
+					.into_iter()
+					.map(|child| {
+						let child_status = status_map.get(&child.id).copied();
+						let child_up = child_status.map(|s| s.short_status()).unwrap_or_default();
+
+						(
+							child_up,
+							Arc::new(super::ServerInfo {
+								id: child.id,
+								name: child.name,
+								kind: child.kind,
+								rank: child.rank,
+								host: child.host.0.to_string(),
+								listed: child.listed,
+								cloud: child.cloud,
+								geolocation: child.geolocation,
+								device_id: child.device_id,
+								parent_server_id: Some(server.id),
+								parent_server_name: server.name.clone(),
+							}),
+						)
+					})
+					.collect()
 			}
-		}
+		} else {
+			Vec::new()
+		};
 
 		Ok(super::ServerDetailData {
 			server: Arc::new(server_details),

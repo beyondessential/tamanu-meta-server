@@ -3133,6 +3133,7 @@ dependencies = [
  "commons-types",
  "console_error_panic_hook",
  "database",
+ "futures",
  "hex",
  "itertools",
  "jiff",

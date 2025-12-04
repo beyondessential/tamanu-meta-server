@@ -24,6 +24,7 @@ commons-servers = { path = "../commons-servers", optional = true }
 commons-types = { path = "../commons-types", default-features = false }
 console_error_panic_hook = { version = "0.1.0", optional = true }
 database = { path = "../database", optional = true }
+futures.workspace = true
 hex = "0.4.3"
 itertools = "0.14.0"
 jiff = { version = "0.2.15", features = ["serde"] }
