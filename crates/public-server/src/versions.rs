@@ -191,7 +191,7 @@ async fn view_artifacts(
 		#[serde(flatten)]
 		version: Version,
 		created_at_date: String,
-		supported_chrome_versions: Vec<u32>,
+		min_chrome_version: Option<u32>,
 	}
 
 	let mut db = db.get().await?;
@@ -224,15 +224,22 @@ async fn view_artifacts(
 
 	let created_at_date = version.created_at.strftime("%Y-%m-%d").to_string();
 
-	let supported_chrome_versions =
-		ChromeRelease::get_supported_versions_at_date(&mut db, version.created_at)
+	// Compute min chrome version based on head release date (X.Y.0)
+	let min_chrome_version = if let Ok(head_release_date) =
+		Version::get_head_release_date(&mut db, VersionStr(version.as_semver())).await
+	{
+		ChromeRelease::get_min_version_at_date(&mut db, head_release_date)
 			.await
-			.unwrap_or_default();
+			.ok()
+			.flatten()
+	} else {
+		None
+	};
 
 	let version_for_template = VersionForTemplate {
 		version,
 		created_at_date,
-		supported_chrome_versions,
+		min_chrome_version,
 	};
 
 	let mut context = Context::new();

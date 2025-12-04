@@ -39,35 +39,28 @@ impl NewChromeRelease {
 }
 
 impl ChromeRelease {
-	pub async fn get_supported_versions_at_date(
+	pub async fn get_min_version_at_date(
 		db: &mut AsyncPgConnection,
 		date: Timestamp,
-	) -> Result<Vec<u32>> {
+	) -> Result<Option<u32>> {
 		use crate::schema::chrome_releases::*;
 
 		let date_str = date.strftime("%Y-%m-%d").to_string();
 
-		let releases: Vec<ChromeRelease> = table.load(db).await?;
+		// Find minimum version that is released by date and not EOL at that date
+		let min_version: Option<String> = table
+			.select(version)
+			.filter(release_date.le(&date_str))
+			.filter(is_eol.eq(false).or(eol_from.gt(&date_str)))
+			.order_by(version.asc())
+			.limit(1)
+			.first(db)
+			.await
+			.optional()?;
 
-		let supported: Vec<u32> = releases
-			.iter()
-			.filter_map(|release| {
-				let rel_date = &release.release_date;
-
-				if rel_date <= &date_str {
-					let eol_date = release.eol_from.as_ref();
-					if eol_date.is_none() || eol_date.unwrap() > &date_str {
-						release.version.parse::<u32>().ok()
-					} else {
-						None
-					}
-				} else {
-					None
-				}
-			})
-			.collect();
-
-		Ok(supported)
+		Ok(min_version
+			.and_then(|v| v.parse::<u32>().ok())
+			.map(|v| v.saturating_sub(1)))
 	}
 
 	pub async fn delete_all(db: &mut AsyncPgConnection) -> Result<()> {

@@ -538,19 +538,8 @@ mod ssr {
 			.await
 			.ok()?;
 
-		let supported_versions =
-			database::chrome_releases::ChromeRelease::get_supported_versions_at_date(
-				conn,
-				head_release_date,
-			)
+		database::chrome_releases::ChromeRelease::get_min_version_at_date(conn, head_release_date)
 			.await
-			.ok()?;
-
-		if supported_versions.is_empty() {
-			return None;
-		}
-
-		let min = supported_versions.iter().min().copied()?;
-		Some(min.saturating_sub(1))
+			.ok()?
 	}
 }
