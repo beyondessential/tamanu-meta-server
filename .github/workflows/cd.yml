@@ -37,6 +37,8 @@ jobs:
       - name: Free up space
         run: sudo rm -rf /opt/hostedtoolcache /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup || true
       - uses: actions/checkout@v6
+        with:
+          submodules: recursive
 
       - name: Configure toolchain
         run: |
@@ -75,6 +77,8 @@ jobs:
       - name: Free up space
         run: sudo rm -rf /opt/hostedtoolcache /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup || true
       - uses: actions/checkout@v6
+        with:
+          submodules: recursive
 
       - name: Configure toolchain
         run: |
@@ -113,6 +117,8 @@ jobs:
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u $ --password-stdin
 
       - uses: actions/checkout@v6
+        with:
+          submodules: recursive
 
       - name: Extract version
         id: version
