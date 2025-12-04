@@ -28,6 +28,3 @@ impl AppState {
 		})
 	}
 }
-```
-
-Now let me remove the chrome_cache module from the private-server lib.rs:

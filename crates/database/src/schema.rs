@@ -91,94 +91,6 @@ diesel::table! {
 }
 
 diesel::table! {
-	test_metrics (id) {
-		id -> Int4,
-		name -> Text,
-		value -> Float4,
-		error_count -> Int4,
-		created_at -> Nullable<Timestamp>,
-		updated_at -> Nullable<Timestamp>,
-	}
-}
-
-diesel::table! {
-	test_metrics_changed_except (id) {
-		id -> Int4,
-		name -> Text,
-		value -> Float4,
-		error_count -> Int4,
-		created_at -> Nullable<Timestamp>,
-		updated_at -> Nullable<Timestamp>,
-	}
-}
-
-diesel::table! {
-	test_metrics_changed_only (id) {
-		id -> Int4,
-		name -> Text,
-		value -> Float4,
-		error_count -> Int4,
-		created_at -> Nullable<Timestamp>,
-		updated_at -> Nullable<Timestamp>,
-	}
-}
-
-diesel::table! {
-	test_metrics_changed_simple (id) {
-		id -> Int4,
-		name -> Text,
-		value -> Float4,
-		error_count -> Int4,
-		created_at -> Nullable<Timestamp>,
-		updated_at -> Nullable<Timestamp>,
-	}
-}
-
-diesel::table! {
-	test_metrics_combo (id) {
-		id -> Int4,
-		name -> Text,
-		value -> Float4,
-		error_count -> Int4,
-		created_at -> Nullable<Timestamp>,
-		updated_at -> Nullable<Timestamp>,
-	}
-}
-
-diesel::table! {
-	test_metrics_inverted (id) {
-		id -> Int4,
-		name -> Text,
-		value -> Float4,
-		error_count -> Int4,
-		created_at -> Nullable<Timestamp>,
-		updated_at -> Nullable<Timestamp>,
-	}
-}
-
-diesel::table! {
-	test_metrics_multi (id) {
-		id -> Int4,
-		name -> Text,
-		value -> Float4,
-		error_count -> Int4,
-		created_at -> Nullable<Timestamp>,
-		updated_at -> Nullable<Timestamp>,
-	}
-}
-
-diesel::table! {
-	test_metrics_normal (id) {
-		id -> Int4,
-		name -> Text,
-		value -> Float4,
-		error_count -> Int4,
-		created_at -> Nullable<Timestamp>,
-		updated_at -> Nullable<Timestamp>,
-	}
-}
-
-diesel::table! {
 	versions (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
@@ -210,13 +122,5 @@ diesel::allow_tables_to_appear_in_same_query!(
 	devices,
 	servers,
 	statuses,
-	test_metrics,
-	test_metrics_changed_except,
-	test_metrics_changed_only,
-	test_metrics_changed_simple,
-	test_metrics_combo,
-	test_metrics_inverted,
-	test_metrics_multi,
-	test_metrics_normal,
 	versions,
 );

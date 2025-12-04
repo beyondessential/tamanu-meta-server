@@ -189,7 +189,7 @@
                 <h3 class="title is-5">Supported Chrome Versions</h3>
                 <div class="content">
                     <p>This version of Tamanu was released on <strong>{{ version.created_at_date }}</strong> and supports the following Chrome versions:</p>
-                    <p><strong>Chrome {{ supported_chrome_versions | join(", ") }}</strong></p>
+                    <p><strong>Chrome {{ supported_chrome_versions | join(separator=", ") }}</strong></p>
                 </div>
             </div>
             {% endif %}

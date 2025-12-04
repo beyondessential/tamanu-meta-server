@@ -1,14 +1,11 @@
 use clap::Parser;
-use commons_errors::Result;
+use commons_errors::{AppError, Result};
 use database::{
 	Db,
 	chrome_releases::{ChromeRelease, NewChromeRelease},
 };
-use jiff::civil::Date;
 use lloggs::{LoggingArgs, PreArgs};
-use miette::IntoDiagnostic;
 use serde::{Deserialize, Serialize};
-use tokio::task;
 use tracing::{debug, error, info};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,20 +29,19 @@ struct ApiChromeRelease {
 	eol_from: Option<String>,
 }
 
-async fn fetch_chrome_versions()
--> Result<Vec<ApiChromeRelease>, Box<dyn std::error::Error + Send + Sync>> {
+async fn fetch_chrome_versions() -> Result<Vec<ApiChromeRelease>> {
 	let url = "https://endoflife.date/api/v1/products/chrome/";
-	let response = reqwest::get(url).await?;
-	let data: ChromeApiResponse = response.json().await?;
+	let response = reqwest::get(url)
+		.await
+		.map_err(|e| AppError::Custom(e.to_string()))?;
+	let data: ChromeApiResponse = response
+		.json()
+		.await
+		.map_err(|e| AppError::Custom(e.to_string()))?;
 	Ok(data.result.releases)
 }
 
-fn parse_date(date_str: &str) -> Result<Date, Box<dyn std::error::Error + Send + Sync>> {
-	Date::parse(date_str, "%Y-%m-%d")
-		.map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
-}
-
-async fn update_chrome_versions(pool: Db) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+async fn update_chrome_versions(pool: Db) -> Result<()> {
 	let mut db = pool.get().await?;
 
 	// Fetch from API
@@ -61,13 +57,9 @@ async fn update_chrome_versions(pool: Db) -> Result<(), Box<dyn std::error::Erro
 	for release in releases {
 		let new_release = NewChromeRelease {
 			version: release.name.clone(),
-			release_date: parse_date(&release.release_date)?,
+			release_date: release.release_date.clone(),
 			is_eol: release.is_eol,
-			eol_from: release
-				.eol_from
-				.as_ref()
-				.map(|d| parse_date(d))
-				.transpose()?,
+			eol_from: release.eol_from.clone(),
 		};
 
 		new_release.save(&mut db).await?;
@@ -98,10 +90,10 @@ async fn main() -> miette::Result<()> {
 
 	let pool = database::init();
 
-	if let Err(err) = update_chrome_versions(pool).await {
+	update_chrome_versions(pool).await.map_err(|err| {
 		error!("Failed to update Chrome versions: {}", err);
-		return Err(err).into_diagnostic();
-	}
+		miette::miette!("{}", err)
+	})?;
 
 	Ok(())
 }
