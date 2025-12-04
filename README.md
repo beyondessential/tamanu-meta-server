@@ -13,7 +13,7 @@ The Meta service provides:
 We have a container image for linux/amd64 and linux/arm64:
 
 ```
-ghcr.io/beyondessential/tamanu-meta:5.8.3
+ghcr.io/beyondessential/tamanu-meta:5.8.4
 ```
 
 ## Develop

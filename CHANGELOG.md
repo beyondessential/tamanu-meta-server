@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
+## [5.8.4](https://github.com/beyondessential/tamanu-meta-server/compare/v5.8.3..5.8.4) - 2025-12-04
+
+
+- **Bugfix:** Don't clear device_id when saving server - ([749655c](https://github.com/beyondessential/tamanu-meta-server/commit/749655c748b50fce65ae1cece875eab984acbdf3))
+
+---
+## [5.8.3](https://github.com/beyondessential/tamanu-meta-server/compare/v5.8.2..v5.8.3) - 2025-12-04
+
+
+- **Repo:** Release - ([5e303dd](https://github.com/beyondessential/tamanu-meta-server/commit/5e303dde45d97d0b5857d3b1c7956335e7fe5363))
+
+---
 ## [5.8.2](https://github.com/beyondessential/tamanu-meta-server/compare/v5.8.1..v5.8.2) - 2025-12-04
 
 
