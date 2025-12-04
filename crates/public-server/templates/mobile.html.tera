@@ -1,295 +1,221 @@
 <!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-		<link rel="icon" type="image/svg+xml" href="/static/images/favicon.svg" />
-    <title>Tamanu Mobile Download</title>
+<html data-theme="light">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" type="image/svg+xml" href="/static/images/favicon.svg" />
+    <link rel="stylesheet" href="/static/bulma/bulma.min.css">
+    <link rel="stylesheet" href="/static/private/main.css">
+    <title>Tamanu {{ version.major }}.{{ version.minor }}.{{ version.patch }} — Mobile Install</title>
     <style>
-      * {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-        font-family: "Roboto", "Helvetica", "Arial", sans-serif;
-      }
-
-      body {
-        display: flex;
-        min-height: 100vh;
-        color: #333;
-      }
-
-      .content-container {
-        width: 50%;
-        padding: 40px;
-        display: flex;
-        flex-direction: column;
-      }
-
-      .brand {
-        margin-bottom: 80px;
-      }
-
-      .brand img {
-        height: 48px;
-        display: block;
-      }
-
-      .download-container {
-        max-width: 500px;
-        width: 100%;
-        margin: 0 auto;
-        flex-grow: 1;
-      }
-
-      .download-title {
-        font-size: 38px;
-        font-weight: 500;
-        color: rgb(68, 68, 68);
-        margin-bottom: 12px;
-        line-height: 32px;
-      }
-
-      .download-subtitle {
-        font-size: 14px;
-        color: rgb(136, 136, 136);
-        margin-bottom: 40px;
-        line-height: 18px;
-        font-weight: 400;
-      }
-
-      .version-info {
-        display: inline-block;
-        background-color: #edf2f7;
-        padding: 8px 16px;
-        border-radius: 20px;
-        margin-bottom: 30px;
-        font-size: 13px;
-        color: rgb(102, 102, 102);
-        font-weight: 400;
-      }
-
-      .version-number {
-        font-weight: 500;
-        color: #3d6894;
-      }
-
-      .platform-card {
-        border: 1px solid #e2e8f0;
-        border-radius: 8px;
-        padding: 24px;
-        display: flex;
-        align-items: center;
-        transition: all 0.2s ease;
-        margin-bottom: 20px;
-      }
-
-      .platform-card:hover {
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-        transform: translateY(-2px);
-      }
-
-      .platform-icon {
-        width: 48px;
-        height: 48px;
-        margin-right: 20px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-
-      .platform-info {
-        flex: 1;
-      }
-
-      .platform-name {
-        font-size: 16px;
-        font-weight: 500;
-        margin-bottom: 4px;
-        color: rgb(68, 68, 68);
-        line-height: 20px;
-      }
-
-      .platform-description {
-        font-size: 13px;
-        color: rgb(136, 136, 136);
-        line-height: 16px;
-        font-weight: 400;
-      }
-
-      .download-btn {
-        background-color: #3d6894;
-        color: white;
-        border: none;
-        border-radius: 4px;
-        padding: 10px 20px;
-        font-size: 14px;
-        font-weight: 500;
-        cursor: pointer;
-        transition: background-color 0.2s ease;
-      }
-
-      .download-btn:hover {
-        background-color: #34597d;
-      }
-
-      .notes {
-        margin-top: 20px;
-        font-size: 13px;
-        color: rgb(136, 136, 136);
-        line-height: 16px;
-        font-weight: 400;
-      }
-
-      .download-action-container {
-        display: flex;
-        align-items: center;
-        gap: 1rem;
-      }
-
-      @media (max-width: 768px) {
-        .content-container {
-          width: 100%;
+        body {
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
         }
-      }
 
-      /* Installation instructions section */
-      .installation-instructions {
-        display: none;
-        margin-top: 20px;
-        margin-bottom: 30px;
-        border: 1px solid #e2e8f0;
-        border-radius: 8px;
-        padding: 20px;
-        background-color: #f8fafc;
-      }
+        .container {
+            flex: 1;
+            max-width: 1200px;
+            margin: 0 auto;
+            width: 100%;
+        }
 
-      .installation-instructions.visible {
-        display: block;
-      }
+        .version-badge {
+            display: inline-block;
+            margin-bottom: 2rem;
+        }
 
-      .installation-instructions h3 {
-        font-size: 15px;
-        font-weight: 500;
-        margin-bottom: 16px;
-        color: rgb(68, 68, 68);
-        line-height: 20px;
-      }
+        .platform-card {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+        }
 
-      .installation-instructions ol {
-        margin-left: 20px;
-        margin-bottom: 16px;
-      }
+        .platform-icon {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 48px;
+        }
 
-      .installation-instructions li {
-        margin-bottom: 10px;
-        line-height: 18px;
-        font-size: 13px;
-        color: rgb(102, 102, 102);
-      }
+        .platform-icon svg {
+            width: 48px;
+            height: 48px;
+        }
 
-      .installation-instructions .note {
-        font-size: 12px;
-        color: rgb(136, 136, 136);
-        font-style: italic;
-        margin-top: 16px;
-        line-height: 16px;
-      }
+        .platform-info {
+            flex: 1;
+        }
+
+        .platform-name {
+            font-weight: 600;
+            font-size: 1.1em;
+            margin-bottom: 0.25rem;
+        }
+
+        .platform-description {
+            font-size: 0.9em;
+            color: #7a7a7a;
+        }
+
+        .download-actions {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .qr-code {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .installation-instructions {
+            display: none;
+            margin-top: 2rem;
+            padding: 1.5rem;
+        }
+
+        .installation-instructions.visible {
+            display: block;
+        }
+
+        .installation-instructions h3 {
+            font-weight: 600;
+            margin-bottom: 1rem;
+            font-size: 1.1em;
+        }
+
+        .installation-instructions ol {
+            margin-left: 2rem;
+            margin-bottom: 1rem;
+        }
+
+        .installation-instructions li {
+            margin-bottom: 0.5rem;
+            line-height: 1.5;
+        }
+
+        .installation-instructions .note {
+            font-size: 0.9em;
+            color: #7a7a7a;
+            font-style: italic;
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid #dbdbdb;
+        }
+
+        @media (max-width: 768px) {
+            .platform-card {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .download-actions {
+                width: 100%;
+                justify-content: space-between;
+            }
+
+            .download-actions .button {
+                flex: 1;
+            }
+
+            .qr-code {
+                width: 100%;
+                justify-content: center;
+            }
+        }
     </style>
-  </head>
-  <body>
-    <div class="content-container">
-      <div class="brand">
-        <img
-          src="/static/images/tamanu_logo.svg"
-          alt="Tamanu Logo"
-          style="height: 70px"
-        />
-      </div>
-
-      <div class="download-container">
-        <h1 class="download-title">Tamanu Mobile</h1>
-        <p class="download-subtitle">
-          Download the Tamanu Mobile application to access patient information,
-          capture data, and provide care even when offline.
-        </p>
-
-        <div class="version-info">
-          Current version:
-          <span class="version-number" id="version-display">
-            {{ version.major }}.{{ version.minor }}.{{ version.patch }}
-          </span>
+</head>
+<body>
+    <section class="hero is-light">
+        <div class="hero-body">
+            <div class="container">
+                <img src="/static/images/tamanu_logo.svg" alt="Tamanu Logo" style="height: 60px; margin-bottom: 2rem;" />
+                <h1 class="title">Tamanu Mobile</h1>
+                <p class="subtitle">Version {{ version.major }}.{{ version.minor }}.{{ version.patch }}</p>
+            </div>
         </div>
+    </section>
 
-        {% for artifact in artifacts %}
-        <div class="platform-card">
-          <div class="platform-icon">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="32"
-              height="32"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="#3d6894"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
-              <line x1="12" y1="18" x2="12" y2="18" />
-            </svg>
-          </div>
-          <div class="platform-info">
-            {% if artifact.platform == "android" %}
-            <h3 class="platform-name">Android</h3>
-            <p class="platform-description">For Android phones and tablets</p>
+    <section class="section">
+        <div class="container">
+            <div class="content mb-5">
+                <p>Download the Tamanu Mobile application to access patient information, capture data, and provide care even when offline.</p>
+            </div>
+
+            {% if artifacts %}
+                {% for artifact in artifacts %}
+                <div class="box">
+                    <div class="platform-card">
+                        <div class="platform-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
+                                <line x1="12" y1="18" x2="12" y2="18" />
+                            </svg>
+                        </div>
+                        <div class="platform-info">
+                            {% if artifact.platform == "android" %}
+                            <div class="platform-name">Android</div>
+                            <div class="platform-description">For Android phones and tablets</div>
+                            {% else %}
+                            <div class="platform-name">{{ artifact.platform | capitalize }}</div>
+                            <div class="platform-description">Mobile application</div>
+                            {% endif %}
+                        </div>
+                        <div class="download-actions">
+                            <a href="{{ artifact.download_url }}" class="button is-primary">Download</a>
+                            <div class="qr-code">
+                                {{ artifact.qr_code_svg | safe }}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+
+                <div class="box installation-instructions" id="installation-instructions">
+                    <h3>Installation Instructions</h3>
+                    <ol>
+                        <li>Open your <strong>Downloads</strong> folder</li>
+                        <li>Tap the downloaded <strong>app-release.apk</strong> file</li>
+                        <li>Tap <strong>"Install"</strong> when prompted</li>
+                        <li>After installation completes, tap <strong>"Open"</strong></li>
+                    </ol>
+                    <p class="note">
+                        If you encounter any issues, please contact your administrator for assistance.
+                    </p>
+                </div>
+
+                <div class="box has-background-info-light">
+                    <p><strong>Note:</strong> After downloading, you'll need to install the application manually on your device.</p>
+                </div>
+            {% else %}
+                <div class="box">
+                    <p class="has-text-centered has-text-grey-light">No mobile artifacts available for this version.</p>
+                </div>
             {% endif %}
-          </div>
-          <div class="download-action-container">
-            <a href="{{ artifact.download_url }}" class="download-btn">Download</a>
-            {{ artifact.qr_code_svg | safe }}
-          </div>
-        </div>
-        {% endfor %}
 
-        <!-- Installation instructions (hidden until the download button is hit) -->
-        <div class="installation-instructions" id="installation-instructions">
-          <h3>Installation Instructions</h3>
-          <ol>
-            <li>Open your <strong>Downloads</strong> folder</li>
-            <li>Tap the downloaded <strong>app-release.apk</strong> file</li>
-            <li>Tap <strong>"Install"</strong> when prompted</li>
-            <li>After installation completes, tap <strong>"Open"</strong></li>
-          </ol>
-          <p class="note">
-            If you encounter any issues, please contact your administrator for
-            assistance.
-          </p>
+            <div class="mt-5">
+                <a href="/" class="button is-light">← All versions</a>
+            </div>
         </div>
-
-        <div class="notes">
-          <p>
-            <strong>Note:</strong> After downloading, you'll need to install the
-            application manually.
-          </p>
-        </div>
-      </div>
-    </div>
+    </section>
 
     <script>
-      // Show installation instructions when download button is clicked
-      for (const el of document.querySelectorAll(".download-btn"))
-        el.addEventListener("click", function (e) {
-          // Start the download
-          // No need to prevent default - let the link work normally
-
-          // Show installation instructions after a short delay
-          setTimeout(() => {
-            document
-              .getElementById("installation-instructions")
-              .classList.add("visible");
-          }, 500);
-        });
+        // Show installation instructions when download button is clicked
+        for (const el of document.querySelectorAll('.button.is-primary')) {
+            el.addEventListener('click', function (e) {
+                setTimeout(() => {
+                    document
+                        .getElementById('installation-instructions')
+                        .classList.add('visible');
+                }, 500);
+            });
+        }
     </script>
-  </body>
+</body>
 </html>

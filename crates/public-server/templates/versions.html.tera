@@ -49,7 +49,7 @@
             <div class="container">
                 <div class="header-section">
                     <h1 class="title">Tamanu Versions</h1>
-                    <a href="{{ env.STATUS_PAGE_URL | default(value="/status") }}" class="button is-primary">
+                    <a href="{{ env.STATUS_PAGE_URL | default(value="/status") }}" class="button">
                         Server statuses
                     </a>
                 </div>
