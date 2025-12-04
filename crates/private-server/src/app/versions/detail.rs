@@ -7,8 +7,9 @@ use uuid::Uuid;
 use crate::{
 	components::{ErrorHandler, LoadingBar, TimeAgo},
 	fns::versions::{
-		ArtifactData, VersionDetail, create_artifact, delete_artifact, get_artifacts_by_version_id,
-		get_version_detail, update_artifact, update_version_changelog, update_version_status,
+		ArtifactData, RelatedVersionData, VersionDetail, create_artifact, delete_artifact,
+		get_artifacts_by_version_id, get_version_detail, update_artifact, update_version_changelog,
+		update_version_status,
 	},
 };
 use commons_types::version::VersionStatus;
@@ -50,6 +51,9 @@ fn VersionDetailView() -> impl IntoView {
 						<VersionInfo detail=detail.clone() />
 						<ArtifactsSection version_id=detail.id is_admin />
 						<ChangelogSection detail=detail.clone() is_admin />
+						{(!detail.related_versions.is_empty()).then(|| {
+							view! { <RelatedVersionsSection related_versions=detail.related_versions.clone() /> }
+						})}
 					}
 				})}
 			</ErrorHandler>
@@ -558,6 +562,27 @@ fn ChangelogSection(detail: VersionDetail, is_admin: bool) -> impl IntoView {
 				}
 			}}
 		</section>
+	}
+}
+
+#[component]
+fn RelatedVersionsSection(related_versions: Vec<RelatedVersionData>) -> impl IntoView {
+	view! {
+		{related_versions
+			.into_iter()
+			.map(|related| {
+				view! {
+					<h4 class="is-size-5">
+						{related.major}
+						"."
+						{related.minor}
+						"."
+						{related.patch}
+					</h4>
+					<div class="box content" inner_html=parse_markdown(&related.changelog) />
+				}
+			})
+			.collect_view()}
 	}
 }
 

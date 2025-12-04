@@ -16,7 +16,6 @@ use commons_types::version::{VersionRange, VersionStr};
 use database::{
 	Db,
 	artifacts::Artifact,
-	chrome_releases::ChromeRelease,
 	versions::{NewVersion, Version, ViewVersion},
 };
 use diesel::{ExpressionMethods as _, SelectableHelper as _};
@@ -192,6 +191,15 @@ async fn view_artifacts(
 		version: Version,
 		created_at_date: String,
 		min_chrome_version: Option<u32>,
+		related_versions: Vec<RelatedVersion>,
+	}
+
+	#[derive(Debug, Clone, Serialize)]
+	struct RelatedVersion {
+		major: i32,
+		minor: i32,
+		patch: i32,
+		changelog: String,
 	}
 
 	let mut db = db.get().await?;
@@ -228,18 +236,38 @@ async fn view_artifacts(
 	let min_chrome_version = if let Ok(head_release_date) =
 		Version::get_head_release_date(&mut db, VersionStr(version.as_semver())).await
 	{
-		ChromeRelease::get_min_version_at_date(&mut db, head_release_date)
-			.await
-			.ok()
-			.flatten()
+		database::chrome_releases::ChromeRelease::get_min_version_at_date(
+			&mut db,
+			head_release_date,
+		)
+		.await
+		.ok()
+		.flatten()
 	} else {
 		None
 	};
+
+	// Get all lower patch versions in this minor release
+	let related_versions = Version::get_all_in_minor(&mut db, VersionStr(version.as_semver()))
+		.await
+		.unwrap_or_default()
+		.into_iter()
+		.map(|mut v| {
+			v.changelog = parse_markdown(&v.changelog);
+			RelatedVersion {
+				major: v.major,
+				minor: v.minor,
+				patch: v.patch,
+				changelog: v.changelog,
+			}
+		})
+		.collect();
 
 	let version_for_template = VersionForTemplate {
 		version,
 		created_at_date,
 		min_chrome_version,
+		related_versions,
 	};
 
 	let mut context = Context::new();

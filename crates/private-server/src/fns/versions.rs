@@ -37,6 +37,15 @@ pub struct VersionDetail {
 	pub changelog: String,
 	pub min_chrome_version: Option<u32>,
 	pub is_latest_in_minor: bool,
+	pub related_versions: Vec<RelatedVersionData>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RelatedVersionData {
+	pub major: i32,
+	pub minor: i32,
+	pub patch: i32,
+	pub changelog: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -220,6 +229,19 @@ mod ssr {
 			.await
 			.unwrap_or(true);
 
+		// Get all lower patch versions in this minor release
+		let related_versions = Version::get_all_in_minor(&mut conn, version.clone())
+			.await
+			.unwrap_or_default()
+			.into_iter()
+			.map(|v| super::RelatedVersionData {
+				major: v.major,
+				minor: v.minor,
+				patch: v.patch,
+				changelog: v.changelog,
+			})
+			.collect();
+
 		Ok(super::VersionDetail {
 			id: version_record.id,
 			major: version_record.major,
@@ -231,6 +253,7 @@ mod ssr {
 			changelog: version_record.changelog,
 			min_chrome_version,
 			is_latest_in_minor,
+			related_versions,
 		})
 	}
 

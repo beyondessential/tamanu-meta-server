@@ -271,4 +271,29 @@ impl Version {
 			.map(|v| v.patch == version_record.patch)
 			.unwrap_or(true))
 	}
+
+	pub async fn get_all_in_minor(
+		db: &mut AsyncPgConnection,
+		version: VersionStr,
+	) -> Result<Vec<Self>> {
+		use crate::schema::versions::dsl::*;
+
+		let node_semver::Version {
+			major: target_major,
+			minor: target_minor,
+			patch: target_patch,
+			..
+		} = version.0;
+
+		versions
+			.filter(major.eq(target_major as i32))
+			.filter(minor.eq(target_minor as i32))
+			.filter(patch.lt(target_patch as i32))
+			.filter(status.ne(VersionStatus::Draft))
+			.order_by(patch.desc())
+			.select(Version::as_select())
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
 }

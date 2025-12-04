@@ -190,12 +190,22 @@
                 <div class="no-artifacts">No artifacts available for this version.</div>
             {% endif %}
 
+            <h2 class="title is-4">Changelog</h2>
             <div class="box" id="changelog">
-                <h2 class="title is-4">Changelog</h2>
                 <div class="content">
                     {{ version.changelog | safe }}
                 </div>
             </div>
+
+            {% if version.related_versions | length > 0 %}
+              <h2 class="title is-4">Older releases in series</h2>
+              {% for related in version.related_versions %}
+              <h3 class="is-size-5">{{ related.major }}.{{ related.minor }}.{{ related.patch }}</h3>
+              <div class="box content">
+                  {{ related.changelog | safe }}
+              </div>
+              {% endfor %}
+            {% endif %}
         </div>
     </section>
 
