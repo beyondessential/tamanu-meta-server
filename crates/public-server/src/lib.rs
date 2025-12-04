@@ -61,6 +61,8 @@ async fn index(
 		patch: i32,
 		status: String,
 		created_at: jiff::Timestamp,
+		#[serde(rename = "created_at")]
+		formatted_created_at: String,
 	}
 
 	#[derive(Debug, Clone, Serialize)]
@@ -70,6 +72,8 @@ async fn index(
 		count: usize,
 		latest_patch: i32,
 		first_created_at: jiff::Timestamp,
+		#[serde(rename = "first_created_at")]
+		formatted_first_created_at: String,
 		versions: Vec<VersionData>,
 	}
 
@@ -106,6 +110,8 @@ async fn index(
 				.map(|v| v.created_at)
 				.unwrap_or_else(|| versions.last().map(|v| v.created_at).unwrap());
 
+			let formatted_first_created_at = first_created_at.strftime("%Y-%m-%d").to_string();
+
 			let version_data: Vec<VersionData> = versions
 				.into_iter()
 				.map(|v| VersionData {
@@ -114,6 +120,7 @@ async fn index(
 					patch: v.patch,
 					status: v.status.to_string().to_lowercase(),
 					created_at: v.created_at,
+					formatted_created_at: v.created_at.strftime("%Y-%m-%d").to_string(),
 				})
 				.collect();
 
@@ -123,6 +130,7 @@ async fn index(
 				count,
 				latest_patch,
 				first_created_at,
+				formatted_first_created_at,
 				versions: version_data,
 			})
 		})

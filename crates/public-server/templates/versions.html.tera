@@ -1,356 +1,111 @@
 <!DOCTYPE html>
-<html>
+<html data-theme="light">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-		<link rel="icon" type="image/svg+xml" href="/static/images/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" href="/static/images/favicon.svg" />
     <title>Tamanu Versions</title>
+    <link rel="stylesheet" href="/static/bulma/bulma.min.css">
+    <link rel="stylesheet" href="/static/private/main.css">
+    <link rel="stylesheet" href="/static/private/versions.css">
     <style>
-        :root {
-            --color-primary: oklch(0.7 0.15 240);
-            --color-bg-body: oklch(0.97 0.01 240);
-            --color-bg-white: oklch(1 0 0);
-            --color-bg-light: oklch(0.99 0.005 240);
-            --color-bg-medium: oklch(0.95 0.005 240);
-            --color-text-primary: oklch(0.3 0.1 240);
-            --color-text-secondary: oklch(0.4 0.08 240);
-            --color-text-tertiary: oklch(0.45 0.05 240);
-            --color-text-light: oklch(0.55 0.02 240);
-            --color-text-dark: oklch(0.35 0.08 240);
-            --color-border-light: oklch(0.9 0.01 240);
-
-            --color-shadow: oklch(0 0 0 / 0.05);
-        }
-
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            margin: 0;
-            padding: 20px;
-            line-height: 1.6;
-            background-color: var(--color-bg-body);
-            color: var(--color-text-primary);
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
         }
 
         .container {
+            flex: 1;
             max-width: 1200px;
             margin: 0 auto;
+            width: 100%;
         }
 
-        .header {
+        .header-section {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 2em;
-        }
-
-        h1 {
-            font-size: 2em;
-            color: var(--color-text-primary);
-            margin: 0;
-            font-weight: 500;
+            margin-bottom: 2rem;
+            flex-wrap: wrap;
+            gap: 1rem;
         }
 
         .header-link {
-            color: var(--color-primary);
             text-decoration: none;
-            padding: 0.5em 1em;
-            border-radius: 4px;
-            transition: background-color 0.2s;
         }
 
-        .header-link:hover {
-            background-color: var(--color-bg-medium);
-        }
-
-        .version-groups {
-            display: flex;
-            flex-direction: column;
-            gap: 0.75em;
-        }
-
-        .version-group {
-            background: var(--color-bg-white);
-            border: 1px solid var(--color-border-light);
-            border-radius: 8px;
-            overflow: hidden;
-            box-shadow: 0 1px 3px var(--color-shadow);
-            transition: box-shadow 0.2s;
-        }
-
-        .version-group:hover {
-            box-shadow: 0 2px 6px var(--color-shadow);
-        }
-
-        .group-header {
-            display: flex;
-            gap: 0.75em;
-            align-items: center;
-            justify-content: space-between;
-            padding: 1em 1.5em;
-            cursor: pointer;
-            user-select: none;
-            background: var(--color-bg-light);
-            transition: background-color 0.2s;
-        }
-
-        .group-header:hover {
-            background: var(--color-bg-medium);
-        }
-
-        .version-number {
-            font-size: 1.5em;
-            font-weight: 600;
-            font-family: monospace;
-            color: var(--color-text-primary);
-        }
-
-        .version-patch {
-            color: var(--color-text-light);
-        }
-
-        .details {
-            display: flex;
-            flex-direction: column;
-            gap: 0.25em;
-        }
-
-        .details > div {
-            color: var(--color-text-secondary);
-            font-family: monospace;
-            font-weight: 500;
-            text-align: right;
-        }
-
-        .group-content {
-            max-height: 2000px;
-            overflow: hidden;
-            transition: max-height 0.3s ease-out;
-        }
-
-        .group-content.collapsed {
-            max-height: 0;
-            transition: max-height 0.3s ease-out;
-        }
-
-        .versions {
-            padding: 0.5em 1.5em 1.5em 1.5em;
-            display: flex;
-            flex-direction: column;
-            gap: 0.5em;
-        }
-
-        .version-item {
-            display: flex;
-            align-items: center;
-            gap: 1em;
-            padding: 0.75em 1em;
-            background: var(--color-bg-light);
-            border-radius: 4px;
-            border: 1px solid var(--color-border-light);
-            cursor: pointer;
-            transition: background-color 0.2s;
-            text-decoration: none;
-            color: inherit;
-
-            &:hover {
-                background: var(--color-bg-medium);
-            }
-
-            .version-number {
-                font-size: 1.1em;
-                color: var(--color-text-light);
-            }
-
-            .version-patch {
-                color: var(--color-text-primary);
-            }
-
-        }
-
-
-        .version-date {
-            margin-left: auto;
-            font-size: 0.9em;
-            color: var(--color-text-tertiary);
-            font-family: monospace;
-        }
-
-        .markdown-body {
-            line-height: 1.6;
-        }
-
-        .markdown-body h1,
-        .markdown-body h2,
-        .markdown-body h3 {
-            margin-top: 24px;
-            margin-bottom: 16px;
-            font-weight: 600;
-            line-height: 1.25;
-        }
-
-        .markdown-body h1:first-child,
-        .markdown-body h2:first-child,
-        .markdown-body h3:first-child {
-            margin-top: 0;
-        }
-
-        .markdown-body p {
-            margin-bottom: 16px;
-        }
-
-        .markdown-body code {
-            padding: 0.2em 0.4em;
-            margin: 0;
-            font-size: 85%;
-            background-color: rgba(27,31,35,0.05);
-            border-radius: 3px;
-            font-family: "SFMono-Regular",Consolas,"Liberation Mono",Menlo,Courier,monospace;
-        }
-
-        .markdown-body pre {
-            padding: 16px;
-            overflow: auto;
-            font-size: 85%;
-            line-height: 1.45;
-            background-color: #f6f8fa;
-            border-radius: 3px;
-        }
-
-        .markdown-body ul,
-        .markdown-body ol {
-            padding-left: 2em;
-            margin-bottom: 16px;
-        }
-
-        .markdown-body li {
-            margin: 0.25em 0;
-        }
-
-        .markdown-body blockquote {
-            padding: 0 1em;
-            color: #6a737d;
-            border-left: 0.25em solid #dfe2e5;
-            margin: 0 0 16px 0;
-        }
-
-        @media (max-width: 768px) {
-            body {
-                padding: 10px;
-            }
-
-            .container {
-                padding: 0;
-            }
-
-            .header {
-                flex-direction: column;
-                align-items: flex-start;
-                gap: 0.5em;
-                margin-bottom: 1em;
-            }
-
-            h1 {
-                font-size: 1.5em;
-            }
-
-            .header-link {
-                align-self: flex-end;
-                padding: 0.25em 0.5em;
-            }
-
-            .version-group {
-                border-radius: 4px;
-            }
-
-            .group-header {
-                flex-direction: column;
-                align-items: flex-start;
-                gap: 0.5em;
-                padding: 1em;
-            }
-
-            .version-number {
-                font-size: 1.5em;
-            }
-
-            .details {
-                align-self: stretch;
-                text-align: left;
-
-                & > div {
-                    text-align: left;
-                    font-size: 0.9em;
-                }
-            }
-
-            .versions {
-                padding: 0.5em 1em 1em 1em;
-            }
-
-            .version-item {
-                flex-direction: column;
-                align-items: flex-start;
-                gap: 0.5em;
-                padding: 0.75em;
-            }
-
-            .version-date {
-                margin-left: 0;
-                align-self: flex-end;
-            }
+        .no-versions {
+            padding: 2rem;
+            text-align: center;
+            color: #7a7a7a;
+            font-style: italic;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>Tamanu Versions</h1>
-            <a href="{{ env.STATUS_PAGE_URL | default(value="/status") }}" class="header-link">
-                Server statuses
-            </a>
-        </div>
-
-        <div class="version-groups">
-            {% for group in groups %}
-            <div class="version-group">
-                <div class="group-header" onclick="toggleGroup(this)">
-                    <div class="version-number">
-                        {{ group.major }}.{{ group.minor }}.<span class="version-patch">{{ group.latest_patch }}</span>
-                    </div>
-                    <div class="details">
-                        <div>{{ group.count }} version{% if group.count != 1 %}s{% endif %}</div>
-                        <div>{{ group.first_created_at }}</div>
-                    </div>
+    <section class="hero is-light">
+        <div class="hero-body">
+            <div class="container">
+                <div class="header-section">
+                    <h1 class="title">Tamanu Versions</h1>
+                    <a href="{{ env.STATUS_PAGE_URL | default(value="/status") }}" class="button is-primary">
+                        Server statuses
+                    </a>
                 </div>
-                <div class="group-content">
-                    <div class="versions">
-                        {% for version in group.versions %}
-                        <a href="/versions/{{ version.major }}.{{ version.minor }}.{{ version.patch }}" class="version-item">
-                            <div class="version-number">
-                                {{ version.major }}.{{ version.minor }}.<span class="version-patch">{{ version.patch }}</span>
+            </div>
+        </div>
+    </section>
+
+    <section class="section">
+        <div class="container">
+            {% if groups %}
+                {% for group in groups %}
+                <details class="box minor-version-group monospace">
+                    <summary class="level">
+                        <div class="level-left">
+                            <div class="group-version">
+                                {{ group.major }}.<span class="version-minor">{{ group.minor }}</span>.<span class="version-patch">{{ group.latest_patch }}</span>
                             </div>
-                            <div class="version-date">{{ version.created_at }}</div>
+                        </div>
+                        <div class="level-right">
+                            <div class="group-details">
+                                <p>{{ group.count }} version{% if group.count != 1 %}s{% endif %}</p>
+                                <p>{{ group.first_created_at }}</p>
+                            </div>
+                        </div>
+                    </summary>
+                    <div class="minor-versions">
+                        {% for version in group.versions %}
+                        <a href="/versions/{{ version.major }}.{{ version.minor }}.{{ version.patch }}" class="level box minor-version">
+                            <div class="level-left">
+                                <div class="level-item grouped-version">
+                                    {{ version.major }}.<span class="version-minor">{{ version.minor }}</span>.<span class="version-patch">{{ version.patch }}</span>
+                                </div>
+                            </div>
+                            <div class="level-right">
+                                <div class="level-item">{{ version.created_at }}</div>
+                            </div>
                         </a>
                         {% endfor %}
                     </div>
+                </details>
+                {% endfor %}
+            {% else %}
+                <div class="no-versions">
+                    No versions available
                 </div>
-            </div>
-            {% endfor %}
+            {% endif %}
         </div>
-    </div>
+    </section>
 
     <script>
         // Collapse all groups on page load (progressive enhancement)
         document.addEventListener('DOMContentLoaded', function() {
-            document.querySelectorAll('.group-content').forEach(function(content) {
-                content.classList.add('collapsed');
+            document.querySelectorAll('.minor-version-group').forEach(function(group) {
+                group.open = false;
             });
         });
-
-        function toggleGroup(header) {
-            const content = header.nextElementSibling;
-            content.classList.toggle('collapsed');
-        }
     </script>
 </body>
 </html>

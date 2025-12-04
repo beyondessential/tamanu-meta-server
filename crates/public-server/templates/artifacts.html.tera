@@ -1,202 +1,66 @@
 <!DOCTYPE html>
-<html>
+<html data-theme="light">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-		<link rel="icon" type="image/svg+xml" href="/static/images/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" href="/static/images/favicon.svg" />
+    <link rel="stylesheet" href="/static/bulma/bulma.min.css">
+    <link rel="stylesheet" href="/static/private/main.css">
     <title>Tamanu {{ version.major }}.{{ version.minor }}.{{ version.patch }} — Artifacts</title>
     <style>
-        :root {
-            --color-primary: oklch(0.7 0.15 240);
-            --color-bg-body: oklch(0.97 0.01 240);
-            --color-bg-white: oklch(1 0 0);
-            --color-bg-light: oklch(0.99 0.005 240);
-            --color-bg-medium: oklch(0.95 0.005 240);
-            --color-text-primary: oklch(0.3 0.1 240);
-            --color-text-secondary: oklch(0.4 0.08 240);
-            --color-text-tertiary: oklch(0.45 0.05 240);
-            --color-text-light: oklch(0.55 0.02 240);
-            --color-border-light: oklch(0.9 0.01 240);
-            --color-warning-bg: oklch(0.85 0.15 90);
-            --color-warning-text: oklch(0.2 0.1 240);
-            --color-warning: oklch(0.7 0.35 90);
-            --color-shadow: oklch(0 0 0 / 0.05);
-        }
-
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            margin: 0;
-            padding: 20px;
-            line-height: 1.6;
-            background-color: var(--color-bg-body);
-            color: var(--color-text-primary);
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
         }
 
         .container {
+            flex: 1;
             max-width: 1200px;
             margin: 0 auto;
-        }
-
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 2em;
-        }
-
-        h1 {
-            font-size: 2em;
-            color: var(--color-text-primary);
-            margin: 0;
-            font-weight: 500;
-            font-family: monospace;
-        }
-
-        .back-link {
-            color: var(--color-primary);
-            text-decoration: none;
-            padding: 0.5em 1em;
-            border-radius: 4px;
-            transition: background-color 0.2s;
-        }
-
-        .back-link:hover {
-            background-color: var(--color-bg-medium);
+            width: 100%;
         }
 
         .outdated-banner {
-            background: var(--color-warning-bg);
-            color: var(--color-warning-text);
-            padding: 1em 1.5em;
-            border-radius: 8px;
-            margin-bottom: 2em;
-            border: 1px solid var(--color-warning);
-            display: flex;
-            align-items: center;
-            gap: 1em;
-        }
-
-        .outdated-banner-icon {
-            font-size: 1.5em;
-        }
-
-        .outdated-banner-content {
-            flex: 1;
-        }
-
-        .outdated-banner-link {
-            color: var(--color-primary);
-            text-decoration: none;
-            font-weight: 600;
-            padding: 0.5em 1em;
-            background: var(--color-bg-white);
-            border-radius: 4px;
-            transition: background-color 0.2s;
-        }
-
-        .outdated-banner-link:hover {
-            background-color: var(--color-bg-medium);
-        }
-
-        .section {
-            background: var(--color-bg-white);
-            border: 1px solid var(--color-border-light);
-            border-radius: 8px;
-            padding: 2em;
-            margin-bottom: 2em;
-            box-shadow: 0 1px 3px var(--color-shadow);
-        }
-
-        h2 {
-            margin-top: 0;
-            margin-bottom: 1.5em;
-            color: var(--color-text-secondary);
-            font-weight: 500;
-            font-size: 1.5em;
-        }
-
-        .artifacts-list {
-            display: flex;
-            flex-direction: column;
-            gap: 1em;
-        }
-
-        .artifact-item {
-            display: flex;
-            align-items: center;
-            gap: 1em;
-            padding: 1em;
-            background: var(--color-bg-light);
-            border: 1px solid var(--color-border-light);
-            border-radius: 4px;
+            margin-bottom: 2rem;
         }
 
         .artifact-type {
             font-weight: 600;
-            color: var(--color-text-primary);
-            width: 120px;
             min-width: 120px;
         }
 
         .artifact-platform {
             font-family: monospace;
-            color: var(--color-text-secondary);
             min-width: 100px;
         }
 
         .artifact-url {
-            flex: 1;
             font-family: monospace;
             font-size: 0.9em;
-            color: var(--color-text-tertiary);
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+            flex: 1;
+        }
+
+        .artifact-item {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1rem;
         }
 
         .artifact-actions {
             display: flex;
-            gap: 0.5em;
-        }
-
-        .btn {
-            padding: 0.5em 1em;
-            border-radius: 4px;
-            text-decoration: none;
-            font-weight: 500;
-            transition: background-color 0.2s;
-            border: none;
-            cursor: pointer;
-            font-size: 0.9em;
-        }
-
-        .btn-primary {
-            background: var(--color-primary);
-            color: white;
-        }
-
-        .btn-primary:hover {
-            background: oklch(0.6 0.15 240);
-        }
-
-        .btn-secondary {
-            background: var(--color-bg-medium);
-            color: var(--color-text-primary);
-        }
-
-        .btn-secondary:hover {
-            background: oklch(0.92 0.005 240);
+            gap: 0.5rem;
+            margin-left: auto;
         }
 
         .copy-feedback {
             position: fixed;
             bottom: 20px;
             right: 20px;
-            background: var(--color-primary);
-            color: white;
-            padding: 1em 1.5em;
-            border-radius: 4px;
-            box-shadow: 0 4px 12px var(--color-shadow);
             opacity: 0;
             transform: translateY(20px);
             transition: opacity 0.3s, transform 0.3s;
@@ -209,106 +73,25 @@
         }
 
         .no-artifacts {
-            padding: 2em;
+            padding: 2rem;
             text-align: center;
-            color: var(--color-text-light);
+            color: #7a7a7a;
             font-style: italic;
         }
 
-        .markdown-body {
-            line-height: 1.6;
-        }
-
-        .markdown-body h1,
-        .markdown-body h2,
-        .markdown-body h3 {
-            margin-top: 24px;
-            margin-bottom: 16px;
-            font-weight: 600;
-            line-height: 1.25;
-        }
-
-        .markdown-body h1:first-child,
-        .markdown-body h2:first-child,
-        .markdown-body h3:first-child {
-            margin-top: 0;
-        }
-
-        .markdown-body p {
-            margin-bottom: 16px;
-        }
-
-        .markdown-body code {
-            padding: 0.2em 0.4em;
-            margin: 0;
-            font-size: 85%;
-            background-color: rgba(27,31,35,0.05);
-            border-radius: 3px;
-            font-family: "SFMono-Regular",Consolas,"Liberation Mono",Menlo,Courier,monospace;
-        }
-
-        .markdown-body pre {
-            padding: 16px;
-            overflow: auto;
-            font-size: 85%;
-            line-height: 1.45;
-            background-color: #f6f8fa;
-            border-radius: 3px;
-        }
-
-        .markdown-body ul,
-        .markdown-body ol {
-            padding-left: 2em;
-            margin-bottom: 16px;
-        }
-
-        .markdown-body li {
-            margin: 0.25em 0;
-        }
-
-        .markdown-body blockquote {
-            padding: 0 1em;
-            color: #6a737d;
-            border-left: 0.25em solid #dfe2e5;
-            margin: 0 0 16px 0;
+        .jump-link {
+            margin-bottom: 1rem;
         }
 
         @media (max-width: 768px) {
-            body {
-                padding: 10px;
-            }
-
-            .header {
-                flex-direction: column;
-                align-items: flex-start;
-                gap: 1em;
-            }
-
-            h1 {
-                font-size: 1.5em;
-            }
-
-            .back-link {
-                align-self: flex-end;
-            }
-
-            .section {
-                padding: 1em;
-            }
-
-            h2 {
-                font-size: 1.2em;
-            }
-
             .artifact-item {
                 flex-direction: column;
                 align-items: stretch;
-                gap: 0.75em;
+                gap: 0.75rem;
             }
 
             .artifact-type,
             .artifact-platform {
-                width: auto;
                 min-width: auto;
             }
 
@@ -319,82 +102,95 @@
 
             .artifact-actions {
                 flex-direction: column;
+                margin-left: 0;
             }
 
-            .btn {
+            .artifact-actions .button {
                 width: 100%;
-                text-align: center;
-            }
-
-            .outdated-banner {
-                flex-direction: column;
-                align-items: stretch;
-            }
-
-            .outdated-banner-link {
-                text-align: center;
             }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>{{ version.major }}.{{ version.minor }}.{{ version.patch }}</h1>
-            <a href="/" class="back-link">← All versions</a>
-        </div>
-
-        {% if is_latest == false and latest_version %}
-        <div class="outdated-banner">
-            <div class="outdated-banner-icon">⚠️</div>
-            <div class="outdated-banner-content">
-                <strong>This is not the latest version.</strong>
-                A newer version {{ latest_version }} is available.
+    <section class="hero is-light">
+        <div class="hero-body">
+            <div class="container">
+                <div class="level">
+                    <div class="level-left">
+                        <div class="level-item">
+                            <div>
+                                <h1 class="title mb-2">{{ version.major }}.{{ version.minor }}.{{ version.patch }}</h1>
+                                <p class="is-size-7 has-text-grey">{{ version.created_at_date }}</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="level-right">
+                        <a href="/" class="level-item button is-primary">← All versions</a>
+                    </div>
+                </div>
             </div>
-            <a href="/versions/{{ latest_version }}" class="outdated-banner-link">
-                View {{ latest_version }}
-            </a>
         </div>
-        {% endif %}
+    </section>
 
-        <p style="margin-bottom: 1em;">
-            <a href="#changelog" style="color: var(--color-primary); text-decoration: none;">
-                ↓ Jump to changelog
-            </a>
-        </p>
+    <section class="section">
+        <div class="container">
+            {% if is_latest == false and latest_version %}
+            <div class="box outdated-banner has-background-warning-light">
+                <div class="level">
+                    <div class="level-left">
+                        <div class="level-item">
+                            <div>
+                                <p class="has-text-weight-bold">⚠️ This is not the latest version.</p>
+                                <p>A newer version {{ latest_version }} is available.</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="level-right">
+                        <a href="/versions/{{ latest_version }}" class="level-item button is-primary">
+                            View {{ latest_version }}
+                        </a>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
 
-        <div class="section">
-            <h2>Artifacts</h2>
+            <div class="jump-link">
+                <a href="#changelog" style="text-decoration: none;">
+                    ↓ Jump to changelog
+                </a>
+            </div>
+
+            <h2 class="title is-4">Artifacts</h2>
             {% if artifacts %}
-            <div class="artifacts-list">
                 {% for artifact in artifacts %}
-                <div class="artifact-item">
-                    <div class="artifact-type">{{ artifact.artifact_type }}</div>
-                    <div class="artifact-platform">{{ artifact.platform }}</div>
-                    <div class="artifact-url">{{ artifact.download_url }}</div>
+                <div class="box artifact-item">
+                    <span class="artifact-type">{{ artifact.artifact_type }}</span>
+                    <span class="artifact-platform">{{ artifact.platform }}</span>
+                    <span class="artifact-url">{{ artifact.download_url }}</span>
                     <div class="artifact-actions">
                         {% if artifact.download_url is starting_with("https://") %}
-                        <a href="{{ artifact.download_url }}" class="btn btn-primary">Download</a>
+                        <a href="{{ artifact.download_url }}" class="button is-primary" target="_blank">Download</a>
                         {% endif %}
-                        <button class="btn btn-secondary" onclick="copyToClipboard('{{ artifact.download_url }}')">
+                        <button class="button" onclick="copyToClipboard('{{ artifact.download_url }}')">
                             Copy URL
                         </button>
                     </div>
                 </div>
                 {% endfor %}
-            </div>
             {% else %}
-            <div class="no-artifacts">No artifacts available for this version.</div>
+                <div class="no-artifacts">No artifacts available for this version.</div>
             {% endif %}
-        </div>
 
-        <div class="section" id="changelog">
-            <h2>Changelog</h2>
-            <div class="markdown-body">{{ version.changelog | safe }}</div>
+            <div class="box" id="changelog">
+                <h2 class="title is-4">Changelog</h2>
+                <div class="content">
+                    {{ version.changelog | safe }}
+                </div>
+            </div>
         </div>
-    </div>
+    </section>
 
-    <div class="copy-feedback" id="copyFeedback">
+    <div class="notification is-success copy-feedback" id="copyFeedback">
         Copied to clipboard!
     </div>
 

@@ -183,6 +183,14 @@ async fn view_artifacts(
 ) -> Result<Html<String>> {
 	use commons_types::version::VersionStatus;
 	use diesel::QueryDsl;
+	use serde::Serialize;
+
+	#[derive(Debug, Clone, Serialize)]
+	struct VersionForTemplate {
+		#[serde(flatten)]
+		version: Version,
+		created_at_date: String,
+	}
 
 	let mut db = db.get().await?;
 	let version = VersionRange::from_str(&version)?;
@@ -212,8 +220,14 @@ async fn view_artifacts(
 	let latest_version_str =
 		latest_in_minor.map(|v| format!("{}.{}.{}", v.major, v.minor, v.patch));
 
+	let created_at_date = version.created_at.strftime("%Y-%m-%d").to_string();
+	let version_for_template = VersionForTemplate {
+		version,
+		created_at_date,
+	};
+
 	let mut context = Context::new();
-	context.insert("version", &version);
+	context.insert("version", &version_for_template);
 	context.insert("artifacts", &artifacts);
 	context.insert("is_latest", &is_latest);
 	context.insert("latest_version", &latest_version_str);
