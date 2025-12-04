@@ -181,24 +181,26 @@ pub fn EditForm(info: ServerInfo) -> impl IntoView {
 				</div>
 			</div>
 			<GeolocationControl cloud set_cloud lat set_lat lon set_lon pending=submit.pending() />
-			<div class="field is-horizontal">
-				<div class="field-label"></div>
-				<div class="field-body">
-					<div class="field">
-						<div class="control">
-							<label class="checkbox">
-								<input
-									class="mr-2"
-									type="checkbox"
-									disabled=move || submit.pending().get()
-									prop:checked=move || listed.get()
-									on:change=move |ev| set_listed.set(event_target_checked(&ev)) />
-								"Available in Tamanu Mobile app"
-							</label>
+			{move || (kind.get() == ServerKind::Central).then(|| view! {
+				<div class="field is-horizontal">
+					<div class="field-label"></div>
+					<div class="field-body">
+						<div class="field">
+							<div class="control">
+								<label class="checkbox">
+									<input
+										class="mr-2"
+										type="checkbox"
+										disabled=move || submit.pending().get()
+										prop:checked=move || listed.get()
+										on:change=move |ev| set_listed.set(event_target_checked(&ev)) />
+									"Available in Tamanu Mobile app"
+								</label>
+							</div>
 						</div>
 					</div>
 				</div>
-			</div>
+			})}
 			<div class="field is-horizontal">
 				<div class="field-label"></div>
 				<div class="field-body">
