@@ -183,7 +183,7 @@ fn InfoSection(
 							{server.geolocation.map_or_else(|| view! {
 								<span class="info-value">{ if is_cloud { "Cloud" } else { "On premise" }}</span>
 							}.into_any(), |GeoPoint { lat, lon }| view! {
-								<a href=format!("https://www.google.com/maps/place//@{lat},{lon},500000m") class="info-value" target="_blank">
+								<a href=format!("https://www.google.com/maps/search/?api=1&query={lat},{lon}") class="info-value" target="_blank">
 									{if is_cloud {
 										if let Some(region) = CloudRegion::from_lat_lon(lat, lon) {
 											region.as_str()
