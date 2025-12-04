@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
+## [5.8.0](https://github.com/beyondessential/tamanu-meta-server/compare/v5.7.4..5.8.0) - 2025-12-04
+
+
+- **Feature:** Add favicon - ([6eaa092](https://github.com/beyondessential/tamanu-meta-server/commit/6eaa092ac8cfdf0902f9bc81f873609d608bac10))
+- **Refactor:** Remove ordered_servers view and rank_order function - ([246c690](https://github.com/beyondessential/tamanu-meta-server/commit/246c6900491b9a331e9ed2bced9900a04def6be6))
+- **Refactor:** Excise chrono and folktime in favour of jiff - ([0c4a8ca](https://github.com/beyondessential/tamanu-meta-server/commit/0c4a8caece4ef7a6ffe391176def32c49e7eaae3))
+- **Tweak:** Restyle the server lists - ([dbda28b](https://github.com/beyondessential/tamanu-meta-server/commit/dbda28b0ed661142db7440b4cb362132ee8eec98))
+
+---
+## [5.7.4](https://github.com/beyondessential/tamanu-meta-server/compare/v5.7.3..v5.7.4) - 2025-11-26
+
+
+- **Repo:** Release - ([c7873af](https://github.com/beyondessential/tamanu-meta-server/commit/c7873af24b379bfc9c60a37db596ffaec141582d))
+
+---
 ## [5.7.3](https://github.com/beyondessential/tamanu-meta-server/compare/v5.7.2..v5.7.3) - 2025-11-26
 
 
