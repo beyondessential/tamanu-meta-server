@@ -1,11 +1,12 @@
 use std::sync::Arc;
 
-use commons_types::{Uuid, server::kind::ServerKind};
+use commons_types::{Uuid, geo::GeoPoint, server::kind::ServerKind};
 use leptos::{prelude::*, serde_json};
 use leptos_meta::Stylesheet;
 use leptos_router::{components::A, hooks::use_params_map};
 
 use crate::{
+	app::servers::geo::CloudRegion,
 	components::{
 		DeviceShorty, LoadingBar, ServerKindBadge, ServerRankBadge, ServerShorty, StatusDot,
 		StatusLegend, TimeAgo, VersionIndicator, VersionLegend,
@@ -166,13 +167,35 @@ fn InfoSection(
 						<span class="info-value">{if listed { "Public" } else { "No" }}</span>
 					</div>
 				})}
-				{server.parent_server_id.map(|id| {
+				{server.parent_server_id.map({ let server = server.clone(); |id| {
 					view! {
 						<div class="info-item">
 							<span class="info-label">"Parent"</span>
 							<A href=format!("/servers/{id}") {..} class="info-value">
 								{server.parent_server_name.clone().unwrap_or_else(|| id.to_string())}
 							</A>
+						</div>
+					}
+				}})}
+				{server.cloud.map(|is_cloud| {
+					view! {
+						<div class="info-item">
+							<span class="info-label">"Location"</span>
+							{server.geolocation.map_or_else(|| view! {
+								<span class="info-value">{ if is_cloud { "Cloud" } else { "On premise" }}</span>
+							}.into_any(), |GeoPoint { lat, lon }| view! {
+								<a href=format!("https://www.google.com/maps/place//@{lat},{lon},500000m") class="info-value" target="_blank">
+									{if is_cloud {
+										if let Some(region) = CloudRegion::from_lat_lon(lat, lon) {
+											region.as_str()
+										} else {
+											"Cloud"
+										}
+									} else {
+										"On premise"
+									}}
+								</a>
+							}.into_any())}
 						</div>
 					}
 				})}
@@ -182,6 +205,8 @@ fn InfoSection(
 		</section>
 	}
 }
+
+// TODO: display a map with the locations of this and child servers
 
 #[component]
 fn StatusInfo(status: Arc<ServerLastStatusData>) -> impl IntoView {
