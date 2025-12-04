@@ -184,6 +184,16 @@
                 <div class="no-artifacts">No artifacts available for this version.</div>
             {% endif %}
 
+            {% if supported_chrome_versions %}
+            <div class="box">
+                <h3 class="title is-5">Supported Chrome Versions</h3>
+                <div class="content">
+                    <p>This version of Tamanu was released on <strong>{{ version.created_at_date }}</strong> and supports the following Chrome versions:</p>
+                    <p><strong>Chrome {{ supported_chrome_versions | join(", ") }}</strong></p>
+                </div>
+            </div>
+            {% endif %}
+
             <div class="box" id="changelog">
                 <h2 class="title is-4">Changelog</h2>
                 <div class="content">

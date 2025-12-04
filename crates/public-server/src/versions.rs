@@ -16,6 +16,7 @@ use commons_types::version::{VersionRange, VersionStr};
 use database::{
 	Db,
 	artifacts::Artifact,
+	chrome_releases::ChromeRelease,
 	versions::{NewVersion, Version, ViewVersion},
 };
 use diesel::{ExpressionMethods as _, SelectableHelper as _};
@@ -190,6 +191,7 @@ async fn view_artifacts(
 		#[serde(flatten)]
 		version: Version,
 		created_at_date: String,
+		supported_chrome_versions: Vec<u32>,
 	}
 
 	let mut db = db.get().await?;
@@ -221,9 +223,16 @@ async fn view_artifacts(
 		latest_in_minor.map(|v| format!("{}.{}.{}", v.major, v.minor, v.patch));
 
 	let created_at_date = version.created_at.strftime("%Y-%m-%d").to_string();
+
+	let supported_chrome_versions =
+		ChromeRelease::get_supported_versions_at_date(&mut db, version.created_at)
+			.await
+			.unwrap_or_default();
+
 	let version_for_template = VersionForTemplate {
 		version,
 		created_at_date,
+		supported_chrome_versions,
 	};
 
 	let mut context = Context::new();
