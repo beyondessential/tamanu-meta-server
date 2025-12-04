@@ -19,7 +19,7 @@ pub fn PaginatedList(
 	children: Children,
 ) -> impl IntoView {
 	let last_page = Signal::derive({
-		let count = total_count.clone();
+		let count = total_count;
 		move || count.get().saturating_div(page_size)
 	});
 

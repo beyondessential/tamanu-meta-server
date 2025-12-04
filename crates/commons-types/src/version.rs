@@ -16,8 +16,10 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "ssr", derive(AsExpression))]
 #[cfg_attr(feature = "ssr", diesel(sql_type = Text))]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum VersionStatus {
-	Draft,
+	#[default]
+ Draft,
 	Published,
 	Yanked,
 }
@@ -34,11 +36,6 @@ impl Display for VersionStatus {
 
 commons_macros::render_as_string!(VersionStatus, minsize(5));
 
-impl Default for VersionStatus {
-	fn default() -> Self {
-		Self::Draft
-	}
-}
 
 impl From<String> for VersionStatus {
 	fn from(value: String) -> Self {

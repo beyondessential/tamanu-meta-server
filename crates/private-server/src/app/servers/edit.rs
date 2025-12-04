@@ -21,12 +21,11 @@ pub fn Edit() -> impl IntoView {
 		params
 			.read()
 			.get("id")
-			.map(|id| id.parse().ok())
-			.flatten()
+			.and_then(|id| id.parse().ok())
 			.unwrap_or_default()
 	};
 
-	let data = Resource::new(move || server_id(), async move |id| get_info(id).await);
+	let data = Resource::new(server_id, async move |id| get_info(id).await);
 
 	view! {
 		<Transition fallback=|| { view!{ <LoadingBar /> } }>
@@ -408,7 +407,7 @@ pub fn ParentServerControl(
 				}
 			/>
 			{move || {
-				if parent_id.get().is_some() {
+				parent_id.get().map(|_| {
 					view! {
 						<div class="mt-2" style="display: flex; align-items: center; gap: 1rem;">
 							<Suspense fallback=move || view! { <span class="tag">"Loading..."</span> }>
@@ -437,15 +436,13 @@ pub fn ParentServerControl(
 								"Clear parent"
 							</button>
 						</div>
-					}.into_any()
-				} else {
-					view! {}.into_any()
-				}
+					}
+				})
 			}}
 		</div>
 		<Transition>
 			{move || {
-				if show_parent_results.get() && !parent_search_query.get().is_empty() {
+				(show_parent_results.get() && !parent_search_query.get().is_empty()).then(|| {
 					view! {
 						<div class="dropdown is-active" style="width: 100%; position: relative;">
 							<div class="dropdown-menu" style="width: 100%; position: absolute; top: 0; left: 0;">
@@ -537,10 +534,8 @@ pub fn ParentServerControl(
 								</div>
 							</div>
 						</div>
-					}.into_any()
-				} else {
-					view! {}.into_any()
-				}
+					}
+				})
 			}}
 		</Transition>
 	}

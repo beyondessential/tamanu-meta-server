@@ -25,7 +25,7 @@ impl DeviceInfo {
 					.filter(|name| *name != "Initial Key")
 					.cloned()
 			})
-			.last()
+			.next_back()
 			.or_else(|| {
 				self.latest_connection
 					.as_ref()

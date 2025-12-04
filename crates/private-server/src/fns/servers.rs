@@ -289,7 +289,7 @@ mod ssr {
 
 			let platform = st.platform();
 			let postgres = st.postgres_version();
-			let nodejs = device.map(|d| d.nodejs_version()).flatten();
+			let nodejs = device.and_then(|d| d.nodejs_version());
 
 			let version_distance = st.distance_from_version(&latest_version);
 

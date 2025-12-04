@@ -1,17 +1,7 @@
 use axum::http::StatusCode;
 use commons_tests::diesel_async::SimpleAsyncConnection;
 use database::servers::Server;
-use serde::Deserialize;
 use serde_json::json;
-
-#[derive(Debug, Deserialize)]
-struct ServerDetailsResponse {
-	id: String,
-	name: String,
-	kind: String,
-	rank: String,
-	host: String,
-}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn update_server_basic_fields() {

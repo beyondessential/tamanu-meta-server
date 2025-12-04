@@ -750,8 +750,8 @@ async fn server_grouped_ids_with_data() {
 		);
 
 		// Other ranks should not exist
-		assert!(data.get("test").is_none());
-		assert!(data.get("dev").is_none());
+		assert!(!data.contains_key("test"));
+		assert!(!data.contains_key("dev"));
 	})
 	.await
 }

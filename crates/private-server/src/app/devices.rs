@@ -30,13 +30,12 @@ pub fn Page() -> impl IntoView {
 			.and_then(|id| Uuid::from_str(&id).ok())
 	};
 	let device_name = Resource::new(
-		move || device_id(),
+		device_id,
 		async move |id| {
 			if let Some(id) = id {
 				get_device_name_by_id(id)
 					.await
-					.ok()
-					.and_then(|name| Some((id, name)))
+					.ok().map(|name| (id, name))
 			} else {
 				None
 			}

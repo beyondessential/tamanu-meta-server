@@ -16,8 +16,7 @@ pub fn Detail() -> impl IntoView {
 		params
 			.read()
 			.get("id")
-			.map(|s| s.parse::<Uuid>().ok())
-			.flatten()
+			.and_then(|s| s.parse::<Uuid>().ok())
 	};
 
 	let (refresh_trigger, set_refresh_trigger) = signal(0);

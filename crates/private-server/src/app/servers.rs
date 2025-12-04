@@ -30,10 +30,10 @@ pub fn Page() -> impl IntoView {
 			.and_then(|id| Uuid::from_str(&id).ok())
 	};
 	let server_name = Resource::new(
-		move || server_id(),
+		server_id,
 		async move |id| {
 			if let Some(id) = id {
-				get_name(id).await.ok().and_then(|name| Some((id, name)))
+				get_name(id).await.ok().map(|name| (id, name))
 			} else {
 				None
 			}

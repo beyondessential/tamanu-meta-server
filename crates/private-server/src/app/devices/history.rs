@@ -59,9 +59,8 @@ fn DeviceConnectionHistory(device_id: Uuid) -> impl IntoView {
 	let (has_more, set_has_more) = signal(false);
 
 	let load_more_action = {
-		let device_id = device_id.clone();
 		Action::new(move |offset: &u64| {
-			let device_id = device_id.clone();
+			let device_id = device_id;
 			let offset = *offset;
 			async move {
 				crate::fns::devices::connection_history(device_id, Some(BATCH as _), Some(offset))
@@ -113,7 +112,7 @@ fn DeviceConnectionHistory(device_id: Uuid) -> impl IntoView {
 					<div class="box">
 						<For
 							each=move || group_consecutive_connections(connections_vec.clone())
-							key=|group| (group.ip.clone(), group.earliest_time.clone(), group.latest_time.clone())
+							key=|group| (group.ip.clone(), group.earliest_time, group.latest_time)
 							let:group
 						>
 							<ConnectionGroupRow group />
@@ -290,17 +289,17 @@ mod tests {
 		let conn1 = create_test_connection("192.168.1.1", Some("Agent1"), "2024-01-01T12:00:00Z");
 		let conn2 = create_test_connection("192.168.1.1", Some("Agent1"), "2024-01-01T11:00:00Z");
 
-		let id1 = conn1.id.clone();
-		let id2 = conn2.id.clone();
+		let id1 = conn1.id;
+		let id2 = conn2.id;
 
-		map.insert(id1.clone(), conn1);
-		map.insert(id2.clone(), conn2);
+		map.insert(id1, conn1);
+		map.insert(id2, conn2);
 
 		assert_eq!(map.len(), 2);
 
 		let duplicate =
 			create_test_connection("192.168.1.1", Some("Agent1"), "2024-01-01T12:00:00Z");
-		map.insert(id1.clone(), duplicate);
+		map.insert(id1, duplicate);
 
 		assert_eq!(map.len(), 2);
 	}

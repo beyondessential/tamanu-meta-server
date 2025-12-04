@@ -33,7 +33,7 @@ pub fn ServerCards() -> impl IntoView {
 	let grouped_ids_resource = LocalResource::new(async || server_grouped_ids().await);
 
 	Effect::new({
-		let resource = grouped_ids_resource.clone();
+		let resource = grouped_ids_resource;
 		move |_| {
 			trigger.get();
 			resource.refetch();
@@ -146,7 +146,7 @@ pub fn RankSection(
 			<div class="grid is-col-min-12 is-gap-2">
 				<For
 					each=move || server_ids.clone()
-					key=|id| id.clone()
+					key=|id| *id
 					let:server_id
 				>
 					<ServerCardLoader server_id trigger {..} class="server-card cell box" />

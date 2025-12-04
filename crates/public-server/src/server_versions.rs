@@ -104,17 +104,15 @@ impl RcEnvironment {
 			self.patient = None;
 		}
 
-		if let Some(ref url) = self.facility_1 {
-			if !Self::probe_url(url).await {
+		if let Some(ref url) = self.facility_1
+			&& !Self::probe_url(url).await {
 				self.facility_1 = None;
 			}
-		}
 
-		if let Some(ref url) = self.facility_2 {
-			if !Self::probe_url(url).await {
+		if let Some(ref url) = self.facility_2
+			&& !Self::probe_url(url).await {
 				self.facility_2 = None;
 			}
-		}
 
 		Some(self)
 	}
@@ -191,7 +189,7 @@ async fn server_versions_page(
 		let up = status.map(|s| s.short_status()).unwrap_or_default();
 
 		let version_distance = if let (Some(_), Some(latest)) = (&version, &latest_version) {
-			status.and_then(|s| s.distance_from_version(&latest))
+			status.and_then(|s| s.distance_from_version(latest))
 		} else {
 			None
 		};
@@ -218,7 +216,7 @@ async fn server_versions_page(
 		let futures = candidates.into_iter().map(|env| env.probe_and_update());
 		let results = join_all(futures).await;
 
-		results.into_iter().filter_map(|env| env).collect()
+		results.into_iter().flatten().collect()
 	} else {
 		Vec::new()
 	};

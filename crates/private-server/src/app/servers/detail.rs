@@ -32,12 +32,11 @@ pub fn Detail() -> impl IntoView {
 		params
 			.read()
 			.get("id")
-			.map(|id| id.parse::<Uuid>().ok())
-			.flatten()
+			.and_then(|id| id.parse::<Uuid>().ok())
 			.unwrap_or_default()
 	};
 
-	let detail_resource = Resource::new(move || server_id(), async move |id| get_detail(id).await);
+	let detail_resource = Resource::new(server_id, async move |id| get_detail(id).await);
 
 	let is_admin = is_admin_resource();
 

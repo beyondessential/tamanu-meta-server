@@ -129,7 +129,7 @@ mod ssr {
 		for version in versions {
 			grouped
 				.entry((version.major, version.minor))
-				.or_insert_with(Vec::new)
+				.or_default()
 				.push(version);
 		}
 
@@ -156,13 +156,13 @@ mod ssr {
 						published_versions
 							.last()
 							.map(|v| v.created_at)
-							.unwrap_or_else(|| Timestamp::now())
+							.unwrap_or_else(Timestamp::now)
 					});
 
 				let last_created_at = published_versions
 					.first()
 					.map(|v| v.created_at)
-					.unwrap_or_else(|| Timestamp::now());
+					.unwrap_or_else(Timestamp::now);
 
 				let version_data: Vec<VersionData> = versions
 					.into_iter()
@@ -180,8 +180,8 @@ mod ssr {
 					minor,
 					count,
 					latest_patch,
-					first_created_at: first_created_at,
-					last_created_at: last_created_at,
+					first_created_at,
+					last_created_at,
 					versions: version_data,
 				}
 			})
