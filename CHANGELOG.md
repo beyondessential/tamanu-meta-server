@@ -5,11 +5,12 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [5.8.5](https://github.com/beyondessential/tamanu-meta-server/compare/v5.8.4..5.8.5) - 2025-12-04
+## [5.8.5](https://github.com/beyondessential/tamanu-meta-server/compare/v5.8.4..v5.8.5) - 2025-12-04
 
 
 - **Bugfix:** Fix build - ([bfe9cc2](https://github.com/beyondessential/tamanu-meta-server/commit/bfe9cc2e6750a2b649d3e9f5f1185dcaff814996))
 - **Feature:** Show full changelog for the entire release series - ([412f223](https://github.com/beyondessential/tamanu-meta-server/commit/412f22370cc9afb31e0a7fca2e1f252f1e2521d3))
+- **Repo:** Release - ([ba27255](https://github.com/beyondessential/tamanu-meta-server/commit/ba27255eab544e3282fc2c6a7cf7cf0b6affc55c))
 
 ### Public
 
