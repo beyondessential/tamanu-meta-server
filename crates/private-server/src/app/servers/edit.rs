@@ -1,11 +1,15 @@
 use commons_errors::AppError;
-use commons_types::server::{kind::ServerKind, rank::ServerRank};
+use commons_types::{
+	Uuid,
+	server::{kind::ServerKind, rank::ServerRank},
+};
+use leptos::leptos_dom::helpers::request_animation_frame;
 use leptos::prelude::*;
 use leptos_router::{components::A, hooks::use_params_map};
 
 use crate::{
 	components::{ErrorHandler, LoadingBar},
-	fns::servers::{ServerDataUpdate, ServerInfo, get_info, update},
+	fns::servers::{ServerDataUpdate, ServerInfo, get_info, search_parent, update},
 };
 
 #[component]
@@ -42,6 +46,7 @@ pub fn EditForm(info: ServerInfo) -> impl IntoView {
 	let (kind, set_kind) = signal(info.kind);
 	let (rank, set_rank) = signal(info.rank);
 	let (listed, set_listed) = signal(info.listed);
+	let (parent_id, set_parent_id) = signal(info.parent_server_id);
 
 	let save_data = Signal::derive(move || ServerDataUpdate {
 		name: name.get(),
@@ -49,6 +54,7 @@ pub fn EditForm(info: ServerInfo) -> impl IntoView {
 		kind: Some(kind.get()),
 		rank: rank.get(),
 		listed: Some(listed.get()),
+		parent_server_id: Some(parent_id.get()),
 		..Default::default()
 	});
 
@@ -70,7 +76,7 @@ pub fn EditForm(info: ServerInfo) -> impl IntoView {
 		}>
 			<div class="field is-horizontal">
 				<div class="field-label is-normal">
-					<label class="label" for="field-name">Name</label>
+					<label class="label" for="field-name">"Name"</label>
 				</div>
 				<div class="field-body">
 					<div class="field">
@@ -108,7 +114,7 @@ pub fn EditForm(info: ServerInfo) -> impl IntoView {
 			</div>
 			<div class="field is-horizontal">
 				<div class="field-label is-normal">
-					<label class="label" for="field-kind">Kind</label>
+					<label class="label" for="field-kind">"Kind"</label>
 				</div>
 				<div class="field-body">
 					<div class="field">
@@ -130,7 +136,7 @@ pub fn EditForm(info: ServerInfo) -> impl IntoView {
 			</div>
 			<div class="field is-horizontal">
 				<div class="field-label is-normal">
-					<label class="label" for="field-rank">Rank</label>
+					<label class="label" for="field-rank">"Rank"</label>
 				</div>
 				<div class="field-body">
 					<div class="field">
@@ -151,6 +157,16 @@ pub fn EditForm(info: ServerInfo) -> impl IntoView {
 								</select>
 							</div>
 						</div>
+					</div>
+				</div>
+			</div>
+			<div class="field is-horizontal">
+				<div class="field-label is-normal">
+					<label class="label" for="field-parent-id">"Parent Server"</label>
+				</div>
+				<div class="field-body">
+					<div class="field">
+						<ParentServerControl server_id kind rank parent_id set_parent_id pending=submit.pending() />
 					</div>
 				</div>
 			</div>
@@ -181,7 +197,7 @@ pub fn EditForm(info: ServerInfo) -> impl IntoView {
 								type="submit"
 								class="button is-primary"
 								disabled=move || submit.pending().get()
-							>Save</button>
+							>"Save"</button>
 						</div>
 						<div class="control">
 							<A
@@ -189,12 +205,219 @@ pub fn EditForm(info: ServerInfo) -> impl IntoView {
 								{..}
 								class="button is-danger is-light"
 								class:is-disabled=move || submit.pending().get()
-							>Cancel</A>
+							>"Cancel"</A>
 						</div>
 					</div>
 				</div>
 			</div>
 		</form>
+	}
+}
+
+#[component]
+pub fn ParentServerControl(
+	server_id: Uuid,
+	kind: ReadSignal<ServerKind>,
+	rank: ReadSignal<Option<ServerRank>>,
+	parent_id: ReadSignal<Option<Uuid>>,
+	set_parent_id: WriteSignal<Option<Uuid>>,
+	pending: Memo<bool>,
+) -> impl IntoView {
+	let (parent_search_query, set_parent_search_query) = signal(String::new());
+	let (show_parent_results, set_show_parent_results) = signal(false);
+
+	let current_parent_info = Resource::new(
+		move || parent_id.get(),
+		move |id| async move {
+			if let Some(parent_id) = id {
+				get_info(parent_id).await.ok()
+			} else {
+				None
+			}
+		},
+	);
+
+	let parent_search_results = Resource::new(
+		move || (parent_search_query.get(), kind.get(), rank.get()),
+		move |(query, current_kind, current_rank)| async move {
+			if query.is_empty() {
+				return Ok::<Vec<ServerInfo>, AppError>(Vec::new());
+			}
+			search_parent(query, server_id, current_rank, current_kind).await
+		},
+	);
+
+	view! {
+		<div class="control">
+			<input
+				id="field-parent-id"
+				name="parent-id"
+				class="input"
+				type="text"
+				placeholder="Enter UUID or search by name/host"
+				disabled=move || pending.get()
+				prop:value=move || {
+					parent_id.get()
+						.map(|id| id.to_string())
+						.unwrap_or_else(|| parent_search_query.get())
+				}
+				on:input=move |ev| {
+					let value = event_target_value(&ev);
+					if let Ok(uuid) = value.parse::<Uuid>() {
+						set_parent_id.set(Some(uuid));
+						set_show_parent_results.set(false);
+					} else {
+						set_parent_search_query.set(value);
+						set_show_parent_results.set(true);
+					}
+				}
+				on:focus=move |_| {
+					if !parent_search_query.get().is_empty() {
+						set_show_parent_results.set(true);
+					}
+				}
+				on:blur=move |_| {
+					request_animation_frame(move || {
+						set_show_parent_results.set(false);
+					});
+				}
+			/>
+			{move || {
+				if parent_id.get().is_some() {
+					view! {
+						<div class="mt-2" style="display: flex; align-items: center; gap: 1rem;">
+							<Suspense fallback=move || view! { <span class="tag">"Loading..."</span> }>
+								{move || {
+									current_parent_info.get().flatten().map(|current| {
+										let display_name = current.name.clone()
+											.unwrap_or_else(|| current.host.clone());
+										let rank_text = current.rank.map(|r| r.to_string()).unwrap_or_else(|| "unranked".to_string());
+										let kind_text = current.kind.to_string();
+										view! {
+											<span class="tag is-info is-light">
+												"Current: " {display_name} " (" {kind_text} ", " {rank_text} ")"
+											</span>
+										}
+									})
+								}}
+							</Suspense>
+							<button
+								type="button"
+								class="button is-small"
+								on:click=move |_| {
+									set_parent_id.set(None);
+									set_parent_search_query.set(String::new());
+								}
+							>
+								"Clear parent"
+							</button>
+						</div>
+					}.into_any()
+				} else {
+					view! {}.into_any()
+				}
+			}}
+		</div>
+		<Transition>
+			{move || {
+				if show_parent_results.get() && !parent_search_query.get().is_empty() {
+					view! {
+						<div class="dropdown is-active" style="width: 100%; position: relative;">
+							<div class="dropdown-menu" style="width: 100%; position: absolute; top: 0; left: 0;">
+								<div class="dropdown-content">
+									<Suspense fallback=move || view! { <div class="dropdown-item">"Loading..."</div> }>
+										{move || {
+											let current_parent = current_parent_info.get().flatten();
+											let current_parent_id = parent_id.get();
+
+											parent_search_results.and_then(|results| {
+												let mut items = vec![];
+
+												if let Some(ref current) = current_parent {
+													let server_id_val = current.id;
+													let display_name = current.name.clone()
+														.unwrap_or_else(|| current.host.clone());
+													let rank_text = current.rank.map(|r| r.to_string()).unwrap_or_else(|| "unranked".to_string());
+													let kind_text = current.kind.to_string();
+
+													items.push(view! {
+														<a
+															class="dropdown-item"
+															style="cursor: pointer;"
+															on:mousedown=move |ev| {
+																ev.prevent_default();
+																set_parent_id.set(Some(server_id_val));
+																set_parent_search_query.set(String::new());
+																set_show_parent_results.set(false);
+															}
+														>
+															<div>
+																<strong>
+																	"✓ "
+																	{display_name}
+																</strong>
+																<br/>
+																<small>{current.host.clone()} " • " {kind_text} " • " {rank_text}</small>
+															</div>
+														</a>
+													}.into_any());
+
+													if !results.is_empty() {
+														items.push(view! {
+															<hr class="dropdown-divider" />
+														}.into_any());
+													}
+												}
+
+												if results.is_empty() && current_parent.is_none() {
+													items.push(view! {
+														<div class="dropdown-item">"No results found"</div>
+													}.into_any());
+												} else {
+													for server in results.iter() {
+														if Some(server.id) == current_parent_id {
+															continue;
+														}
+
+														let server_id_val = server.id;
+														let display_name = server.name.clone()
+															.unwrap_or_else(|| server.host.clone());
+														let rank_text = server.rank.map(|r| r.to_string()).unwrap_or_else(|| "unranked".to_string());
+														let kind_text = server.kind.to_string();
+														items.push(view! {
+															<a
+																class="dropdown-item"
+																style="cursor: pointer;"
+																on:mousedown=move |ev| {
+																	ev.prevent_default();
+																	set_parent_id.set(Some(server_id_val));
+																	set_parent_search_query.set(String::new());
+																	set_show_parent_results.set(false);
+																}
+															>
+																<div>
+																	<strong>{display_name}</strong>
+																	<br/>
+																	<small>{server.host.clone()} " • " {kind_text} " • " {rank_text}</small>
+																</div>
+															</a>
+														}.into_any());
+													}
+												}
+
+												items.into_any()
+											})
+										}}
+									</Suspense>
+								</div>
+							</div>
+						</div>
+					}.into_any()
+				} else {
+					view! {}.into_any()
+				}
+			}}
+		</Transition>
 	}
 }
 

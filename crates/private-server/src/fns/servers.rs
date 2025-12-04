@@ -57,11 +57,23 @@ pub struct ServerDataUpdate {
 	pub kind: Option<ServerKind>,
 	pub rank: Option<ServerRank>,
 	pub host: Option<String>,
+	#[serde(default, deserialize_with = "deserialize_some")]
 	pub device_id: Option<Option<Uuid>>,
+	#[serde(default, deserialize_with = "deserialize_some")]
 	pub parent_server_id: Option<Option<Uuid>>,
 	pub listed: Option<bool>,
+	#[serde(default, deserialize_with = "deserialize_some")]
 	pub cloud: Option<Option<bool>>,
+	#[serde(default, deserialize_with = "deserialize_some")]
 	pub geolocation: Option<Option<GeoPoint>>,
+}
+
+fn deserialize_some<'de, T, D>(deserializer: D) -> std::result::Result<Option<T>, D::Error>
+where
+	T: Deserialize<'de>,
+	D: serde::Deserializer<'de>,
+{
+	Deserialize::deserialize(deserializer).map(Some)
 }
 
 #[server]
@@ -110,9 +122,19 @@ pub async fn get_detail(server_id: Uuid) -> Result<ServerDetailData> {
 	ssr::get_detail(server_id).await
 }
 
-#[server]
+#[server(input = leptos::server_fn::codec::Json)]
 pub async fn update(server_id: Uuid, data: ServerDataUpdate) -> Result<()> {
 	ssr::update(server_id, data).await
+}
+
+#[server(input = leptos::server_fn::codec::Json)]
+pub async fn search_parent(
+	query: String,
+	current_server_id: Uuid,
+	current_rank: Option<ServerRank>,
+	current_kind: ServerKind,
+) -> Result<Vec<ServerInfo>> {
+	ssr::search_parent(query, current_server_id, current_rank, current_kind).await
 }
 
 #[cfg(feature = "ssr")]
@@ -122,7 +144,7 @@ mod ssr {
 	use axum::extract::State;
 	use commons_errors::{AppError, Result};
 
-	use commons_types::server::kind::ServerKind;
+	use commons_types::server::{kind::ServerKind, rank::ServerRank};
 	use database::{
 		Db, Device, devices::DeviceConnection, servers::PartialServer, servers::Server,
 		statuses::Status, url_field::UrlField, versions::Version,
@@ -366,6 +388,43 @@ mod ssr {
 
 		Server::update(&mut conn, server_id, update_data).await?;
 		Ok(())
+	}
+
+	pub async fn search_parent(
+		query: String,
+		current_server_id: Uuid,
+		current_rank: Option<ServerRank>,
+		current_kind: ServerKind,
+	) -> Result<Vec<super::ServerInfo>> {
+		let state = expect_context::<AppState>();
+		let State(db): State<Db> = extract_with_state(&state).await?;
+		let mut conn = db.get().await?;
+
+		let all_servers = Server::search_for_parent(
+			&mut conn,
+			&query,
+			current_server_id,
+			current_rank,
+			current_kind,
+		)
+		.await?;
+
+		Ok(all_servers
+			.into_iter()
+			.map(|s| super::ServerInfo {
+				id: s.id,
+				name: s.name,
+				kind: s.kind,
+				rank: s.rank,
+				host: s.host.0.to_string(),
+				device_id: s.device_id,
+				parent_server_id: s.parent_server_id,
+				parent_server_name: None,
+				listed: s.listed,
+				cloud: s.cloud,
+				geolocation: s.geolocation,
+			})
+			.collect())
 	}
 
 	fn convert_device_with_info_to_device_info(

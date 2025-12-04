@@ -157,6 +157,51 @@ impl Server {
 			.map_err(AppError::from)
 	}
 
+	pub async fn search_for_parent(
+		db: &mut AsyncPgConnection,
+		query: &str,
+		current_server_id: Uuid,
+		current_rank: Option<ServerRank>,
+		current_kind: ServerKind,
+	) -> Result<Vec<Self>> {
+		use crate::schema::servers::dsl::*;
+		let search_pattern = format!("%{}%", query);
+		let mut all_servers = Vec::new();
+
+		if let Ok(query_uuid) = query.parse::<Uuid>() {
+			if query_uuid != current_server_id {
+				if let Ok(server) = Self::get_by_id(db, query_uuid).await {
+					all_servers.push(server);
+				}
+			}
+		}
+
+		if all_servers.is_empty() {
+			all_servers = servers
+				.select(Self::as_select())
+				.filter(
+					id.ne(current_server_id)
+						.and(name.ilike(&search_pattern).or(host.ilike(&search_pattern))),
+				)
+				.limit(50)
+				.load(db)
+				.await?;
+		}
+
+		all_servers.sort_by_key(|server| {
+			let rank_matches = server.rank == current_rank;
+			let kind_matches = server.kind == current_kind;
+
+			match (rank_matches, kind_matches) {
+				(true, _) => 0,
+				(false, false) => 1,
+				(false, true) => 2,
+			}
+		});
+
+		Ok(all_servers)
+	}
+
 	pub async fn search_central(
 		db: &mut AsyncPgConnection,
 		query: &str,
