@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
+## [5.8.9](https://github.com/beyondessential/tamanu-meta-server/compare/v5.8.8..5.8.9) - 2025-12-05
+
+
+
+### Public
+
+- **Feature:** Add mobile link for RCs - ([914ae87](https://github.com/beyondessential/tamanu-meta-server/commit/914ae87cbe433b5b3b051d6e4cd5064aecd89eba))
+
+---
+## [5.8.8](https://github.com/beyondessential/tamanu-meta-server/compare/v5.8.7..v5.8.8) - 2025-12-04
+
+
+- **Repo:** Release - ([61492be](https://github.com/beyondessential/tamanu-meta-server/commit/61492beaa4df451fdc01d76929a7905fd7ef84b8))
+
+---
 ## [5.8.7](https://github.com/beyondessential/tamanu-meta-server/compare/v5.8.6..v5.8.7) - 2025-12-04
 
 
