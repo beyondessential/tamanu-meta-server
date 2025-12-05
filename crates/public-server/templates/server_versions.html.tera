@@ -289,6 +289,7 @@
 				{% if env.facility_2 %}
 				<a href="{{ env.facility_2 }}" class="rc-card" target="_blank" title="{{ env.facility_2 }}">Facility 2</a>
 				{% endif %}
+				<a href="/versions/{{ env.major }}.{{ env.minor }}/mobile" class="rc-card">Mobile</a>
 			</div>
 			{% endfor %}
 		</div>
