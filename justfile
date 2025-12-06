@@ -2,6 +2,7 @@
 
 # Default database URL (can be overridden)
 DATABASE_URL := env_var_or_default('DATABASE_URL', 'postgres://localhost/tamanu_meta')
+RO_DATABASE_URL := env_var_or_default('RO_DATABASE_URL', 'postgres://localhost/tamanu_meta')
 
 # Environment variables for Leptos tests
 export LEPTOS_OUTPUT_NAME := "private-server"

@@ -10,8 +10,35 @@ use crate::components::{Toast, ToggleSignal as _};
 mod admins;
 mod devices;
 mod servers;
+mod sql;
 mod status;
 mod versions;
+
+#[component]
+fn SqlNavItem() -> impl IntoView {
+	let sql_available = Resource::new(
+		|| (),
+		|_| async { crate::fns::sql::is_sql_available().await },
+	);
+
+	view! {
+		<Suspense>
+			{move || sql_available.get().and_then(|result| {
+				if result.unwrap_or(false) {
+					Some(
+						view! {
+							<A href="/sql" {..} class="navbar-item">
+								"SQL"
+							</A>
+						}
+					)
+				} else {
+					None
+				}
+			})}
+		</Suspense>
+	}
+}
 
 pub fn shell(options: LeptosOptions) -> impl IntoView {
 	// TODO: dark mode
@@ -60,6 +87,7 @@ pub fn App() -> impl IntoView {
 								<Route path=path!(":id") view=servers::Detail />
 							</ParentRoute>
 							<Route path=path!("admins") view=admins::Page />
+							<Route path=path!("sql") view=sql::Page />
 							<Route path=path!("versions") view=versions::Page />
 							<Route path=path!("versions/:version") view=versions::Detail />
 
@@ -146,6 +174,7 @@ pub fn GlobalNav() -> impl IntoView {
 								})
 						}}
 					</Suspense>
+					<SqlNavItem />
 				</div>
 				<div class="navbar-end">
 					<Suspense>

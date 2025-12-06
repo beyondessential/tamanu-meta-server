@@ -45,7 +45,7 @@ async fn main() -> miette::Result<()> {
 		}
 		res = serve(
 			router(
-				private_server::routes(AppState::init()?)?,
+				private_server::routes(AppState::init().await?)?,
 				args.client_ip_source,
 			),
 			addr,

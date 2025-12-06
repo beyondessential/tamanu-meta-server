@@ -1,0 +1,142 @@
+/* SQL Query Page Styles */
+
+#sql-page {
+	max-width: 1200px;
+	margin: 0 auto;
+}
+
+.sql-query-container {
+	background-color: var(--bulma-scheme-main);
+	border-radius: var(--bulma-radius);
+	padding: 1.5rem;
+	box-shadow:
+		0 0.5em 1em -0.125em rgba(10, 10, 10, 0.1),
+		0 0px 0 1px rgba(10, 10, 10, 0.02);
+}
+
+.sql-query-container .textarea {
+	font-family: var(--bulma-family-monospace);
+	font-size: 0.875rem;
+	line-height: 1.5;
+	tab-size: 4;
+}
+
+.sql-query-container .textarea:focus {
+	border-color: var(--bulma-primary);
+	box-shadow: 0 0 0 0.125em rgba(72, 95, 199, 0.25);
+}
+
+.sql-query-container .field.is-grouped {
+	margin-top: 1.5rem;
+}
+
+.sql-query-container .button .icon {
+	margin-right: 0.5rem;
+}
+
+.sql-result-container {
+	margin-top: 2rem;
+}
+
+.sql-result-container .notification {
+	margin-bottom: 1.5rem;
+}
+
+.sql-result-container .table {
+	font-family: var(--bulma-family-monospace);
+	font-size: 0.875rem;
+}
+
+.sql-result-container .table th {
+	background-color: var(--bulma-primary-light);
+	color: var(--bulma-primary-dark);
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+	font-size: 0.75rem;
+	padding: 0.75rem 1rem;
+	border: 1px solid var(--bulma-border);
+}
+
+.sql-result-container .table td {
+	padding: 0.75rem 1rem;
+	border: 1px solid var(--bulma-border);
+	vertical-align: top;
+	word-break: break-word;
+	max-width: 300px;
+	overflow-wrap: break-word;
+}
+
+.sql-result-container .table tr:nth-child(even) {
+	background-color: var(--bulma-scheme-main-bis);
+}
+
+.sql-result-container .table tr:hover {
+	background-color: var(--bulma-primary-lightest);
+}
+
+/* JSON value display styles */
+.has-text-grey {
+	color: var(--bulma-grey) !important;
+}
+
+.has-text-info {
+	color: var(--bulma-info) !important;
+}
+
+.has-text-primary {
+	color: var(--bulma-primary) !important;
+}
+
+.has-text-success {
+	color: var(--bulma-success) !important;
+}
+
+.has-text-warning {
+	color: var(--bulma-warning) !important;
+}
+
+/* Responsive design */
+@media screen and (max-width: 768px) {
+	.sql-query-container {
+		padding: 1rem;
+	}
+
+	.sql-result-container .table-container {
+		overflow-x: auto;
+	}
+
+	.sql-result-container .table {
+		font-size: 0.75rem;
+	}
+
+	.sql-result-container .table th,
+	.sql-result-container .table td {
+		padding: 0.5rem;
+	}
+}
+
+/* Loading state */
+.button[disabled] {
+	opacity: 0.7;
+	cursor: not-allowed;
+}
+
+.textarea[disabled] {
+	background-color: var(--bulma-scheme-main-bis);
+	opacity: 0.7;
+	cursor: not-allowed;
+}
+
+/* Error display */
+.notification.is-danger {
+	border-left: 4px solid var(--bulma-danger);
+}
+
+.notification.is-warning {
+	border-left: 4px solid var(--bulma-warning);
+}
+
+.notification.is-info {
+	border-left: 4px solid var(--bulma-info);
+}
