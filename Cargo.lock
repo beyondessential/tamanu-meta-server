@@ -3185,6 +3185,7 @@ dependencies = [
  "postgres-protocol",
  "serde_core",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -3258,7 +3259,6 @@ dependencies = [
  "leptos_router",
  "lloggs",
  "miette",
- "mobc",
  "public-server",
  "pulldown-cmark",
  "reqwest",

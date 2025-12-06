@@ -16,7 +16,7 @@ impl AppState {
 		let conf = get_configuration(None).unwrap();
 
 		let ro_pool = if let Ok(url) = std::env::var("RO_DATABASE_URL") {
-			match bestool_postgres::pool::create_pool(&url, "tamanu-meta-sql").await {
+			match bestool_postgres::pool::create_pool(&url, "tamanu-meta-playground").await {
 				Ok(pool) => Some(pool),
 				Err(_) => None,
 			}

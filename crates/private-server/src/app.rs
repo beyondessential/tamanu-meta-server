@@ -23,19 +23,11 @@ fn SqlNavItem() -> impl IntoView {
 
 	view! {
 		<Suspense>
-			{move || sql_available.get().and_then(|result| {
-				if result.unwrap_or(false) {
-					Some(
-						view! {
-							<A href="/sql" {..} class="navbar-item">
-								"SQL"
-							</A>
-						}
-					)
-				} else {
-					None
-				}
-			})}
+			{move || sql_available.and_then(|available| available.then(|| view! {
+				<A href="/sql" {..} class="navbar-item">
+					"SQL"
+				</A>
+			}))}
 		</Suspense>
 	}
 }

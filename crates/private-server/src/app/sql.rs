@@ -3,38 +3,17 @@ use leptos_meta::Stylesheet;
 use serde_json::Value;
 
 use crate::components::ErrorHandler;
-use crate::fns::sql::{SqlQuery, SqlResult, execute_query, is_sql_available};
+use crate::fns::sql::{SqlQuery, SqlResult, execute_query};
 
 #[component]
 pub fn Page() -> impl IntoView {
-	let sql_available = Resource::new(|| (), |_| async { is_sql_available().await });
-
 	view! {
 		<Stylesheet id="css-sql" href="/static/private/sql.css" />
 		<section class="section" id="sql-page">
-			<h1 class="title">"SQL Query"</h1>
+			<h1 class="title">"SQL Playground"</h1>
 			<Suspense>
 				<ErrorHandler>
-					{move || sql_available.and_then(|available| {
-						if *available {
-							view! {
-								<p class="subtitle">
-									"Execute custom SQL queries on the database."
-								</p>
-								<SqlQueryForm />
-							}.into_any()
-						} else {
-							view! {
-								<div class="notification is-warning">
-									<p>
-										<strong>"SQL functionality is disabled"</strong>
-										<br />
-										"To enable SQL query execution, set the RO_DATABASE_URL environment variable."
-									</p>
-								</div>
-							}.into_any()
-						}
-					})}
+					<SqlQueryForm />
 				</ErrorHandler>
 			</Suspense>
 		</section>
@@ -89,15 +68,21 @@ pub fn SqlQueryForm() -> impl IntoView {
 		<div class="sql-query-container">
 			<form on:submit=handle_submit>
 				<div class="field">
-					<label class="label">"SQL Query"</label>
 					<div class="control">
 						<textarea
-							class="textarea is-family-monospace"
-							placeholder="SELECT * FROM servers LIMIT 10;"
+							class="textarea monospace"
+							placeholder="SELECT * FROM statuses ORDER BY created_at DESC LIMIT 10;"
 							rows=10
 							prop:value=query
-							on:input=move |ev| set_query.set(event_target_value(&ev))
 							disabled=move || is_executing.get()
+							on:input=move |ev| set_query.set(event_target_value(&ev))
+							on:keyup=move |ev| {
+								if ev.key() == "Enter" && ev.ctrl_key() {
+									if !query.get().trim().is_empty() {
+										execute_action.dispatch(query.get());
+									}
+								}
+							}
 						/>
 					</div>
 				</div>
