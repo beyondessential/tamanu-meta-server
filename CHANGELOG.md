@@ -5,9 +5,16 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [5.8.9](https://github.com/beyondessential/tamanu-meta-server/compare/v5.8.8..5.8.9) - 2025-12-05
+## [5.9.0](https://github.com/beyondessential/tamanu-meta-server/compare/v5.8.9..5.9.0) - 2025-12-06
 
 
+- **Tweak:** Support META_LOG for logging instead of RUST_LOG - ([5c0ce09](https://github.com/beyondessential/tamanu-meta-server/commit/5c0ce09f039e2d7fef907d26652dbce1c9d2e221))
+
+---
+## [5.8.9](https://github.com/beyondessential/tamanu-meta-server/compare/v5.8.8..v5.8.9) - 2025-12-05
+
+
+- **Repo:** Release - ([f61c70c](https://github.com/beyondessential/tamanu-meta-server/commit/f61c70cfcf5218a043edba952c642ae8ff3e4ddb))
 
 ### Public
 
