@@ -2,7 +2,7 @@ use leptos::prelude::*;
 use leptos_meta::Stylesheet;
 use serde_json::Value;
 
-use crate::components::{ErrorHandler, LoadingBar, PaginatedList, TimeAgo};
+use crate::components::{ErrorHandler, LoadingBar, PaginatedList, TimeAgo, ToggleSignal};
 use crate::fns::sql::{
 	SqlHistoryEntry, SqlQuery, SqlResult, execute_query, get_last_user_query, get_query_history,
 	get_query_history_count,
@@ -61,7 +61,9 @@ pub fn SqlQueryForm() -> impl IntoView {
 	});
 
 	let toggle_history = move |_| {
-		set_show_history.update(|v| *v = !*v);
+		if set_show_history.toggle_and_return() {
+			history_resource.refetch();
+		}
 	};
 
 	let execute_action = Action::new(move |query_text: &String| {
@@ -85,6 +87,10 @@ pub fn SqlQueryForm() -> impl IntoView {
 			}
 
 			set_is_executing.set(false);
+
+			if show_history.get() {
+				history_resource.refetch();
+			}
 		}
 	});
 

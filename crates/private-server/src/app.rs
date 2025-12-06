@@ -23,11 +23,19 @@ fn SqlNavItem() -> impl IntoView {
 
 	view! {
 		<Suspense>
-			{move || sql_available.and_then(|available| available.then(|| view! {
-				<A href="/sql" {..} class="navbar-item">
-					"SQL"
-				</A>
-			}))}
+			{move || {
+				sql_available
+					.and_then(|available| {
+						available
+							.then(|| {
+								view! {
+									<A href="/sql" {..} class="navbar-item">
+										"SQL"
+									</A>
+								}
+							})
+					})
+			}}
 		</Suspense>
 	}
 }
@@ -116,7 +124,12 @@ pub fn GlobalNav() -> impl IntoView {
 	view! {
 		<nav id="global-nav" class="navbar" role="navigation" aria-label="main navigation">
 			<div class="navbar-brand">
-				<A href="/status" {..} class="navbar-item" title=format!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))>
+				<A
+					href="/status"
+					{..}
+					class="navbar-item"
+					title=format!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))
+				>
 					<img src="/static/images/tamanu_logo.svg" alt="Tamanu Logo" class="logo" />
 				</A>
 				<a
@@ -133,7 +146,7 @@ pub fn GlobalNav() -> impl IntoView {
 					<span aria-hidden="true"></span>
 				</a>
 			</div>
-			<div class="navbar-menu" class:is-active={move || burgered.get()}>
+			<div class="navbar-menu" class:is-active=move || burgered.get()>
 				<div class="navbar-start">
 					<A href="/status" {..} class="navbar-item">
 						"Status"

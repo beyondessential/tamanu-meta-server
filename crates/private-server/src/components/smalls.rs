@@ -115,11 +115,20 @@ pub fn VersionStatusBadge(status: VersionStatus) -> impl IntoView {
 }
 
 pub trait ToggleSignal {
-	fn toggle(&self);
+	// Toggles the signal, and returns the value it is after toggling
+	fn toggle_and_return(&self) -> bool;
+
+	fn toggle(&self) {
+		self.toggle_and_return();
+	}
 }
 
 impl ToggleSignal for WriteSignal<bool> {
-	fn toggle(&self) {
-		self.update(|it| *it = !*it);
+	fn toggle_and_return(&self) -> bool {
+		self.try_update(|it| {
+			*it = !*it;
+			*it
+		})
+		.unwrap_or(false)
 	}
 }
