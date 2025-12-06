@@ -23,7 +23,7 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> miette::Result<()> {
-	let mut _guard = PreArgs::parse().setup()?;
+	let mut _guard = PreArgs::parse_with_env("META_LOG").setup()?;
 	let args = Args::parse();
 	if _guard.is_none() {
 		_guard = Some(args.logging.setup(|v| match v {
