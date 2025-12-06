@@ -54,13 +54,50 @@ mod ssr {
 				let start_time = Instant::now();
 
 				// Get connection from pool
-				let client = pool.get().await.map_err(|e| {
+				let mut client = pool.get().await.map_err(|e| {
 					commons_errors::AppError::custom(format!("Failed to get connection: {}", e))
 				})?;
 
-				// Execute the query
-				let rows = client.query(&query.query, &[]).await.map_err(|e| {
+				// Start a transaction with timeout and read-only settings
+				let transaction = client
+					.build_transaction()
+					.read_only(true)
+					.start()
+					.await
+					.map_err(|e| {
+						commons_errors::AppError::custom(format!(
+							"Failed to start transaction: {}",
+							e
+						))
+					})?;
+
+				// Set session as read-only
+				transaction
+					.execute("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY", &[])
+					.await
+					.map_err(|e| {
+						commons_errors::AppError::custom(format!("Failed to set read-only: {}", e))
+					})?;
+
+				// Execute the query with timeout
+				let rows = tokio::time::timeout(
+					std::time::Duration::from_secs(60),
+					transaction.query(&query.query, &[]),
+				)
+				.await
+				.map_err(|_| {
+					commons_errors::AppError::custom("Query execution timed out after 60 seconds")
+				})?
+				.map_err(|e| {
 					commons_errors::AppError::custom(format!("Query execution failed: {}", e))
+				})?;
+
+				// Rollback the transaction (cancel it)
+				transaction.rollback().await.map_err(|e| {
+					commons_errors::AppError::custom(format!(
+						"Failed to rollback transaction: {}",
+						e
+					))
 				})?;
 
 				let execution_time = start_time.elapsed();
