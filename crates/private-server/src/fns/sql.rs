@@ -32,6 +32,7 @@ mod ssr {
 	use axum::extract::State;
 	use bestool_postgres::pool;
 	use bestool_postgres::stringify::postgres_to_json_value;
+	use bestool_postgres::text_cast::{CellRef, TextCaster};
 	use commons_errors::Result;
 	use leptos::prelude::expect_context;
 	use leptos_axum::extract_with_state;
@@ -120,20 +121,51 @@ mod ssr {
 					.collect();
 
 				// Convert rows to JSON values using bestool-postgres
-				let mut result_rows = Vec::with_capacity(rows.len());
-				for row in &rows {
+				// First pass: convert all values and collect null cells for text casting
+				let mut null_cells = Vec::new();
+				let mut all_values = Vec::new();
+
+				for (row_idx, row) in rows.iter().enumerate() {
 					let mut row_values = Vec::with_capacity(columns.len());
-					for i in 0..columns.len() {
+					for col_idx in 0..columns.len() {
 						// Use bestool-postgres to convert PostgreSQL values to JSON
-						let value = postgres_to_json_value(&row, i);
+						let value = postgres_to_json_value(&row, col_idx);
+
+						// Store the value
 						row_values.push(value);
+
+						// If value is Null, mark it for text casting
+						if let serde_json::Value::Null = &row_values[col_idx] {
+							null_cells.push(CellRef { row_idx, col_idx });
+						}
 					}
-					result_rows.push(row_values);
+					all_values.push(row_values);
+				}
+
+				// If we have null cells, try to cast them to text using TextCaster
+				if !null_cells.is_empty() {
+					let text_caster = TextCaster::new(pool.clone());
+					let text_results = text_caster.cast_batch(&rows, &null_cells).await;
+
+					// Update the null values with text representations
+					for (cell_ref, text_result) in null_cells.iter().zip(text_results) {
+						match text_result {
+							Ok(text) => {
+								all_values[cell_ref.row_idx][cell_ref.col_idx] =
+									serde_json::Value::String(text);
+							}
+							Err(_) => {
+								// Keep as Null if text casting fails
+								all_values[cell_ref.row_idx][cell_ref.col_idx] =
+									serde_json::Value::Null;
+							}
+						}
+					}
 				}
 
 				Ok(SqlResult {
 					columns,
-					rows: result_rows,
+					rows: all_values,
 					row_count: rows.len(),
 					execution_time_ms: execution_time.as_millis() as u64,
 				})
