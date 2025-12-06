@@ -10,6 +10,7 @@ pub mod devices;
 pub mod pg_duration;
 pub mod schema;
 pub mod servers;
+pub mod sql_playground_history;
 pub mod statuses;
 pub mod url_field;
 pub mod versions;

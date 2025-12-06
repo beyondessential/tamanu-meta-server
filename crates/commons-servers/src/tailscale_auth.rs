@@ -8,7 +8,7 @@ const TAILSCALE_USER_LOGIN: &str = "Tailscale-User-Login";
 const TAILSCALE_USER_NAME: &str = "Tailscale-User-Name";
 const TAILSCALE_USER_PROFILE_PIC: &str = "Tailscale-User-Profile-Pic";
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct TailscaleUser {
 	pub login: String,
 	pub name: String,

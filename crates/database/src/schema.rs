@@ -80,6 +80,15 @@ diesel::table! {
 }
 
 diesel::table! {
+	sql_playground_history (id) {
+		id -> Uuid,
+		query -> Text,
+		tailscale_user -> Text,
+		created_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
 	statuses (id, created_at) {
 		id -> Uuid,
 		created_at -> Timestamptz,
@@ -121,6 +130,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 	device_keys,
 	devices,
 	servers,
+	sql_playground_history,
 	statuses,
 	versions,
 );
