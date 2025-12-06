@@ -211,11 +211,9 @@ pub fn JsonValueDisplay(value: Value) -> impl IntoView {
 			</span>
 		}
 		.into_any(),
-		Value::Object(obj) => view! {
+		obj @ Value::Object(_) => view! {
 			<span class="has-text-warning">
-				"{"
-				{format!("{} fields", obj.len())}
-				"}"
+				{serde_json::to_string(&obj)}
 			</span>
 		}
 		.into_any(),
