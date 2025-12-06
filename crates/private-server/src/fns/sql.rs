@@ -30,6 +30,7 @@ pub async fn execute_query(query: SqlQuery) -> Result<SqlResult> {
 mod ssr {
 	use super::*;
 	use axum::extract::State;
+	use bestool_postgres::error::format_db_error;
 	use bestool_postgres::pool;
 	use bestool_postgres::stringify::postgres_to_json_value;
 	use bestool_postgres::text_cast::{CellRef, TextCaster};
@@ -65,19 +66,17 @@ mod ssr {
 					.read_only(true)
 					.start()
 					.await
-					.map_err(|e| {
-						commons_errors::AppError::custom(format!(
-							"Failed to start transaction: {}",
-							e
-						))
-					})?;
+					.map_err(|e| commons_errors::AppError::custom(format_db_error(&e, None)))?;
 
 				// Set session as read-only
 				transaction
 					.execute("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY", &[])
 					.await
 					.map_err(|e| {
-						commons_errors::AppError::custom(format!("Failed to set read-only: {}", e))
+						commons_errors::AppError::custom(format_db_error(
+							&e,
+							Some("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY"),
+						))
 					})?;
 
 				// Execute the query with timeout
@@ -90,16 +89,14 @@ mod ssr {
 					commons_errors::AppError::custom("Query execution timed out after 60 seconds")
 				})?
 				.map_err(|e| {
-					commons_errors::AppError::custom(format!("Query execution failed: {}", e))
+					commons_errors::AppError::custom(format_db_error(&e, Some(&query.query)))
 				})?;
 
 				// Rollback the transaction (cancel it)
-				transaction.rollback().await.map_err(|e| {
-					commons_errors::AppError::custom(format!(
-						"Failed to rollback transaction: {}",
-						e
-					))
-				})?;
+				transaction
+					.rollback()
+					.await
+					.map_err(|e| commons_errors::AppError::custom(format_db_error(&e, None)))?;
 
 				let execution_time = start_time.elapsed();
 
