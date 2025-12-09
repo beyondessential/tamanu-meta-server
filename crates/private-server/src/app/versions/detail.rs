@@ -364,7 +364,17 @@ fn ArtifactItemView(
 	view! {
 		<div class="box mb-3">
 			<div class="columns">
-				<div class="column">{artifact.artifact_type.clone()}</div>
+				<div class="column">
+					{artifact.artifact_type.clone()}
+					{move || artifact.version_range_pattern.clone().map(|pattern| view! {
+						<p class="is-size-7 has-text-grey-light">
+							{move || (!artifact.is_used_in_public_api).then(|| view! {
+								<span class="has-text-danger">"[Hidden]"</span>
+							})}
+							" Applies to: " {pattern}
+						</p>
+					})}
+				</div>
 				<div class="column">{artifact.platform.clone()}</div>
 				<a
 					class="column is-half"
@@ -372,6 +382,9 @@ fn ArtifactItemView(
 					class:has-text-primary-dark={!artifact.download_url.starts_with("https://")}
 				>{artifact.download_url.clone()}</a>
 				<div class="column">
+					{move || artifact.has_range_override.then(|| view! {
+						<p class="is-size-7 has-text-warning">"[Overrides range]"</p>
+					})}
 					<div class="field is-grouped buttons are-small is-justify-content-end" class:is-invisible={move || !is_unlocked.get()}>
 					{move || if show_delete_confirm.get() {
 						view! {

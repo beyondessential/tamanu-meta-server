@@ -529,6 +529,41 @@ async fn artifact_range_specificity_conflict_resolution() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn artifact_multiple_ranges_no_exact_match() {
+	commons_tests::server::run(async |mut conn, public, _| {
+		let version_id_245 = "44444444-4444-4444-4444-444444444444";
+		let broader_range_id = "55555555-5555-5555-5555-555555555555";
+		let narrower_range_id = "66666666-6666-6666-6666-666666666666";
+
+		conn.batch_execute(&format!(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status) VALUES 
+			('{version_id_245}', 2, 44, 5, 'v2.44.5', 'published');
+			
+			INSERT INTO artifacts (id, version_id, platform, artifact_type, download_url, version_range_pattern) VALUES
+			('{broader_range_id}', NULL, 'windows', 'installer', 'https://example.com/2.44.x.exe', '2.44.x'),
+			('{narrower_range_id}', NULL, 'windows', 'installer', 'https://example.com/caret.exe', '^2.44.2')",
+		))
+		.await
+		.unwrap();
+
+	// 2.44.5 has two range artifacts for same platform+type
+		// Both match: 2.44.x matches and ^2.44.2 matches (since 2.44.5 >= 2.44.2)
+		// These ranges are incomparable (neither allows_all the other):
+		// - 2.44.x = >=2.44.0 <2.45.0
+		// - ^2.44.2 = >=2.44.2 <3.0.0
+		// When ranges are incomparable, pattern specificity is used:
+		// - ^2.44.2 (caret) is ranked as more specific than 2.44.x (wildcard)
+		let response = public.get("/versions/2.44.5/artifacts").await;
+		response.assert_status_ok();
+		let artifacts: Vec<Artifact> = response.json();
+		assert_eq!(artifacts.len(), 1, "Should have exactly 1 artifact");
+		// Caret ranges rank higher specificity than wildcard ranges
+		assert_eq!(artifacts[0].id.to_string(), narrower_range_id.to_lowercase(), "Should be the caret range (^2.44.2) due to pattern specificity");
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn artifact_create_range_authenticated() {
 	commons_tests::server::run_with_device_auth(
 		"releaser",

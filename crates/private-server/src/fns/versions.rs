@@ -54,6 +54,14 @@ pub struct ArtifactData {
 	pub artifact_type: String,
 	pub platform: String,
 	pub download_url: String,
+	/// Whether this artifact is for the exact version (true) or via a range pattern (false)
+	pub is_exact: bool,
+	/// The version range pattern if this is a ranged artifact, None if exact
+	pub version_range_pattern: Option<String>,
+	/// If true, this ranged artifact has an exact-version override (only when is_exact=true)
+	pub has_range_override: bool,
+	/// If true, this is the artifact that will be served to public API clients
+	pub is_used_in_public_api: bool,
 }
 
 #[server]
@@ -264,15 +272,20 @@ mod ssr {
 
 		let version = VersionStr::from_str(&version_str)?;
 		let version_record = Version::get_by_version(&mut conn, version).await?;
-		let artifacts = Artifact::get_for_version(&mut conn, version_record.id).await?;
+		let artifacts_with_metadata =
+			Artifact::get_for_version_with_metadata(&mut conn, version_record.id).await?;
 
-		Ok(artifacts
+		Ok(artifacts_with_metadata
 			.into_iter()
-			.map(|a| super::ArtifactData {
+			.map(|(a, is_exact, has_range_override, is_used_in_public_api)| super::ArtifactData {
 				id: a.id,
 				artifact_type: a.artifact_type,
 				platform: a.platform,
 				download_url: a.download_url,
+				is_exact,
+				version_range_pattern: a.version_range_pattern,
+				has_range_override,
+				is_used_in_public_api,
 			})
 			.collect())
 	}
@@ -282,15 +295,21 @@ mod ssr {
 		let State(db): State<Db> = extract_with_state(&state).await?;
 		let mut conn = db.get().await?;
 
-		let artifacts = Artifact::get_for_version(&mut conn, version_id).await?;
+		// Use the all_matches version for admin view - show all configured artifacts
+		let artifacts_with_metadata =
+			Artifact::get_for_version_all_matches_with_metadata(&mut conn, version_id).await?;
 
-		Ok(artifacts
+		Ok(artifacts_with_metadata
 			.into_iter()
-			.map(|a| super::ArtifactData {
+			.map(|(a, is_exact, has_range_override, is_used_in_public_api)| super::ArtifactData {
 				id: a.id,
 				artifact_type: a.artifact_type,
 				platform: a.platform,
 				download_url: a.download_url,
+				is_exact,
+				version_range_pattern: a.version_range_pattern,
+				has_range_override,
+				is_used_in_public_api,
 			})
 			.collect())
 	}
@@ -377,6 +396,10 @@ mod ssr {
 			artifact_type: artifact.artifact_type,
 			platform: artifact.platform,
 			download_url: artifact.download_url,
+			is_exact: true,
+			version_range_pattern: None,
+			has_range_override: false,
+			is_used_in_public_api: true,
 		})
 	}
 
