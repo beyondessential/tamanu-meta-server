@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
+## [5.10.0](https://github.com/beyondessential/tamanu-meta-server/compare/v5.9.1..5.10.0) - 2025-12-09
+
+
+
+### Artifacts
+
+- **Feature:** Allow creating artifacts that apply to version ranges - ([f624534](https://github.com/beyondessential/tamanu-meta-server/commit/f624534386d5aade6f1f6b57b0ffce097491ce95))
+- **Feature:** Show hidden artifacts in the admin ui - ([698f6da](https://github.com/beyondessential/tamanu-meta-server/commit/698f6dab0c986f60469c69f6f441334eabf0f0ea))
+
+### Public
+
+- **Feature:** Add /download route that we can download artifacts through - ([cf08e68](https://github.com/beyondessential/tamanu-meta-server/commit/cf08e68b5a3ad94177a5281ddb77833005db7f31))
+
+---
+## [5.9.1](https://github.com/beyondessential/tamanu-meta-server/compare/v5.9.0..v5.9.1) - 2025-12-06
+
+
+- **Repo:** Release - ([621195b](https://github.com/beyondessential/tamanu-meta-server/commit/621195b9232a3e8cb6a88ea86468bbe58f6a6be3))
+
+---
 ## [5.9.0](https://github.com/beyondessential/tamanu-meta-server/compare/v5.8.9..v5.9.0) - 2025-12-06
 
 
