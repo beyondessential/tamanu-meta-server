@@ -335,3 +335,85 @@ async fn version_range_latest_matching() {
 	})
 	.await
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn artifact_download_proxy() {
+	commons_tests::server::run(async |mut conn, public, _| {
+		let version_id = "22222222-2222-2222-2222-222222222222";
+		let artifact_id = "33333333-3333-3333-3333-333333333333";
+
+		conn.batch_execute(&format!(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status) VALUES ('{version_id}', 1, 2, 3, 'Test version', 'published');
+			INSERT INTO artifacts (id, version_id, platform, artifact_type, download_url) VALUES
+			('{artifact_id}', '{version_id}', 'windows', 'installer', 'https://example.com/installer.exe')",
+		))
+		.await
+		.unwrap();
+
+		// Invalid artifact ID format
+		let response = public
+			.get("/versions/1.2.3/artifacts/not-a-uuid/download")
+			.await;
+		response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+
+		// Nonexistent artifact
+		let response = public
+			.get("/versions/1.2.3/artifacts/44444444-4444-4444-4444-444444444444/download")
+			.await;
+		response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+
+		// Nonexistent version
+		let response = public
+			.get("/versions/9.9.9/artifacts/44444444-4444-4444-4444-444444444444/download")
+			.await;
+		response.assert_status(StatusCode::NOT_FOUND);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn artifact_download_proxy_with_mock_server() {
+	commons_tests::server::run(async |mut conn, public, _| {
+		let version_id = "55555555-5555-5555-5555-555555555555";
+		let artifact_id = "66666666-6666-6666-6666-666666666666";
+		let test_content = b"test artifact content";
+
+		// Start a simple HTTP server to serve test content
+		let server = axum::Router::new()
+			.route("/test", axum::routing::get(|| async { test_content.to_vec() }))
+			.into_make_service();
+
+		let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+			.await
+			.unwrap();
+		let addr = listener.local_addr().unwrap();
+		let server_url = format!("http://{}/test", addr);
+
+		// Spawn the test server in background
+		tokio::spawn(async move {
+			axum::serve(listener, server).await.ok();
+		});
+
+		// Give the server a moment to start
+		tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+
+		conn.batch_execute(&format!(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status) VALUES ('{version_id}', 2, 3, 4, 'Test version', 'published');
+			INSERT INTO artifacts (id, version_id, platform, artifact_type, download_url) VALUES
+			('{artifact_id}', '{version_id}', 'windows', 'installer', '{server_url}')",
+		))
+		.await
+		.unwrap();
+
+		// Test downloading the artifact
+		let response = public
+			.get(&format!("/versions/2.3.4/artifacts/{artifact_id}/download"))
+			.await;
+		response.assert_status_ok();
+
+		// Verify we got the content
+		let text = response.text();
+		assert_eq!(text.as_bytes(), test_content);
+	})
+	.await
+}

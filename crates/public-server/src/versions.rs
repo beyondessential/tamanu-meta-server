@@ -6,11 +6,13 @@ use std::sync::Arc;
 use axum::response::Html;
 use axum::{
 	Json,
-	body::Bytes,
+	body::{Body, Bytes},
 	extract::{Path, State},
+	http::header,
+	response::IntoResponse,
 	routing::{Router, delete, get, post},
 };
-use commons_errors::Result;
+use commons_errors::{AppError, Result};
 use commons_servers::device_auth::{AdminDevice, ReleaserDevice};
 use commons_types::version::{VersionRange, VersionStr};
 use database::{
@@ -39,7 +41,11 @@ pub fn routes() -> Router<AppState> {
 		.route("/update-for/{version}", get(update_for))
 		.route("/{version}", post(create))
 		.route("/{version}", delete(remove))
-		.route("/{version}/artifacts", get(list_artifacts));
+		.route("/{version}/artifacts", get(list_artifacts))
+		.route(
+			"/{version}/artifacts/{artifact_id}/download",
+			get(download_artifact),
+		);
 
 	#[cfg(feature = "ui")]
 	{
@@ -320,4 +326,43 @@ async fn update_for(
 	let version = VersionStr::from_str(&version)?;
 	let updates = Version::get_updates_for_version(&mut db, version).await?;
 	Ok(Json(updates))
+}
+
+async fn download_artifact(
+	State(db): State<Db>,
+	Path((version, artifact_id)): Path<(String, String)>,
+) -> Result<impl IntoResponse> {
+	use uuid::Uuid;
+
+	let mut db = db.get().await?;
+	let version = VersionRange::from_str(&version)?;
+	let version = Version::get_latest_matching(&mut db, version.0).await?;
+
+	let artifact_uuid =
+		Uuid::parse_str(&artifact_id).map_err(|_| AppError::custom("Invalid artifact ID"))?;
+
+	let artifacts = Artifact::get_for_version(&mut db, version.id).await?;
+	let artifact = artifacts
+		.into_iter()
+		.find(|a| a.id == artifact_uuid)
+		.ok_or_else(|| AppError::custom("Artifact not found for this version"))?;
+
+	let client = reqwest::Client::new();
+	let response = client
+		.get(&artifact.download_url)
+		.send()
+		.await
+		.map_err(|err| AppError::custom(format!("Failed to download artifact: {err}")))?;
+
+	let status = response.status();
+	let content_type = response
+		.headers()
+		.get(header::CONTENT_TYPE)
+		.and_then(|v| v.to_str().ok())
+		.unwrap_or("application/octet-stream")
+		.to_string();
+
+	let body = Body::from_stream(response.bytes_stream());
+
+	Ok((status, [(header::CONTENT_TYPE, content_type)], body).into_response())
 }
