@@ -112,6 +112,17 @@ impl Version {
 			.map_err(AppError::from)
 	}
 
+	pub async fn get_by_id(db: &mut AsyncPgConnection, version_id: Uuid) -> Result<Self> {
+		use crate::schema::versions::dsl::*;
+
+		versions
+			.filter(id.eq(version_id))
+			.select(Version::as_select())
+			.first(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	pub async fn get_updates_for_version(
 		db: &mut AsyncPgConnection,
 		version: VersionStr,

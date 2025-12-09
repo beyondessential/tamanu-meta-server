@@ -1,5 +1,3 @@
-use std::str::FromStr as _;
-
 use axum::{
 	Json,
 	extract::{Path, State},
@@ -29,47 +27,76 @@ async fn create(
 	Path((version, artifact_type, platform)): Path<(String, String, String)>,
 	url: String,
 ) -> Result<Json<Artifact>> {
+	use node_semver::{Range, Version as SemverVersion};
+
 	let mut db = db.get().await?;
-	let version_str = VersionStr::from_str(&version)?;
 	let device_id = device.0.0.id;
 
-	// Try to get the version, or create it as a draft if it doesn't exist
-	let version_id = match Version::get_by_version(&mut db, version_str.clone()).await {
-		Ok(version) => version.id,
-		Err(_) => {
-			// Version doesn't exist, create it as a draft
-			let new_version = NewVersion {
-				major: version_str.0.major as _,
-				minor: version_str.0.minor as _,
-				patch: version_str.0.patch as _,
-				changelog: String::new(),
-				status: VersionStatus::Draft,
-				device_id: Some(device_id),
-			};
+	// Try to parse as a specific version first
+	if let Ok(semver) = SemverVersion::parse(&version) {
+		// It's a specific version (e.g., "1.0.5")
+		let version_str = VersionStr(semver);
 
-			let version = diesel::insert_into(database::schema::versions::table)
-				.values(new_version)
-				.returning(Version::as_select())
-				.get_result(&mut db)
-				.await?;
+		// Try to get the version, or create it as a draft if it doesn't exist
+		let version_id = match Version::get_by_version(&mut db, version_str.clone()).await {
+			Ok(version) => version.id,
+			Err(_) => {
+				// Version doesn't exist, create it as a draft
+				let new_version = NewVersion {
+					major: version_str.0.major as _,
+					minor: version_str.0.minor as _,
+					patch: version_str.0.patch as _,
+					changelog: String::new(),
+					status: VersionStatus::Draft,
+					device_id: Some(device_id),
+				};
 
-			version.id
-		}
-	};
+				let version = diesel::insert_into(database::schema::versions::table)
+					.values(new_version)
+					.returning(Version::as_select())
+					.get_result(&mut db)
+					.await?;
 
-	let input = NewArtifact {
-		version_id,
-		platform,
-		artifact_type,
-		download_url: url,
-		device_id: Some(device_id),
-	};
+				version.id
+			}
+		};
 
-	let artifact = diesel::insert_into(database::schema::artifacts::table)
-		.values(input)
-		.returning(Artifact::as_select())
-		.get_result(&mut db)
-		.await?;
+		let input = NewArtifact {
+			version_id: Some(version_id),
+			platform,
+			artifact_type,
+			download_url: url,
+			device_id: Some(device_id),
+			version_range_pattern: None,
+		};
 
-	Ok(Json(artifact))
+		let artifact = diesel::insert_into(database::schema::artifacts::table)
+			.values(input)
+			.returning(Artifact::as_select())
+			.get_result(&mut db)
+			.await?;
+
+		Ok(Json(artifact))
+	} else {
+		// Try to parse as a range (e.g., "1.0.x", "^1.0.0")
+		Range::parse(&version)
+			.map_err(|_| commons_errors::AppError::custom("Invalid version or version range"))?;
+
+		let input = NewArtifact {
+			version_id: None,
+			platform,
+			artifact_type,
+			download_url: url,
+			device_id: Some(device_id),
+			version_range_pattern: Some(version),
+		};
+
+		let artifact = diesel::insert_into(database::schema::artifacts::table)
+			.values(input)
+			.returning(Artifact::as_select())
+			.get_result(&mut db)
+			.await?;
+
+		Ok(Json(artifact))
+	}
 }

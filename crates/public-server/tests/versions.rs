@@ -18,11 +18,12 @@ pub struct Version {
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct Artifact {
 	pub id: Uuid,
-	pub version_id: Uuid,
+	pub version_id: Option<Uuid>,
 	pub platform: String,
 	pub artifact_type: String,
 	pub download_url: String,
 	pub device_id: Option<Uuid>,
+	pub version_range_pattern: Option<String>,
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -414,6 +415,172 @@ async fn artifact_download_proxy_with_mock_server() {
 		// Verify we got the content
 		let text = response.text();
 		assert_eq!(text.as_bytes(), test_content);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn artifact_range_matching() {
+	commons_tests::server::run(async |mut conn, public, _| {
+		let version_id_100 = "77777777-7777-7777-7777-777777777777";
+		let version_id_101 = "88888888-8888-8888-8888-888888888888";
+		let version_id_110 = "99999999-9999-9999-9999-999999999999";
+		let range_artifact_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+		let exact_artifact_id = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+
+		conn.batch_execute(&format!(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status) VALUES 
+			('{version_id_100}', 1, 0, 0, 'v1.0.0', 'published'),
+			('{version_id_101}', 1, 0, 1, 'v1.0.1', 'published'),
+			('{version_id_110}', 1, 1, 0, 'v1.1.0', 'published');
+			
+			INSERT INTO artifacts (id, version_id, platform, artifact_type, download_url, version_range_pattern) VALUES
+			('{range_artifact_id}', NULL, 'windows', 'installer', 'https://example.com/range.exe', '1.0.x'),
+			('{exact_artifact_id}', '{version_id_101}', 'linux', 'tarball', 'https://example.com/exact.tar.gz', NULL)",
+		))
+		.await
+		.unwrap();
+
+		// 1.0.0 should have the range artifact
+		let response = public.get("/versions/1.0.0/artifacts").await;
+		response.assert_status_ok();
+		let artifacts: Vec<Artifact> = response.json();
+		assert_eq!(artifacts.len(), 1);
+		assert_eq!(artifacts[0].id.to_string(), range_artifact_id.to_lowercase());
+
+		// 1.0.1 should have both range and exact artifacts
+		let response = public.get("/versions/1.0.1/artifacts").await;
+		response.assert_status_ok();
+		let artifacts: Vec<Artifact> = response.json();
+		assert_eq!(artifacts.len(), 2);
+		// Should be ordered: installer first, then tarball (both within their artifact types)
+		let installer = artifacts.iter().find(|a| a.artifact_type == "installer").unwrap();
+		let tarball = artifacts.iter().find(|a| a.artifact_type == "tarball").unwrap();
+		assert_eq!(installer.id.to_string(), range_artifact_id.to_lowercase());
+		assert_eq!(tarball.id.to_string(), exact_artifact_id.to_lowercase());
+
+		// 1.1.0 should have no artifacts (range is 1.0.x)
+		let response = public.get("/versions/1.1.0/artifacts").await;
+		response.assert_status_ok();
+		let artifacts: Vec<Artifact> = response.json();
+		assert_eq!(artifacts.len(), 0);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn artifact_specificity_conflict_resolution() {
+	commons_tests::server::run(async |mut conn, public, _| {
+		let version_id_101 = "cccccccc-cccc-cccc-cccc-cccccccccccc";
+		let exact_artifact_id = "dddddddd-dddd-dddd-dddd-dddddddddddd";
+		let broad_range_id = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee";
+		let narrow_range_id = "ffffffff-ffff-ffff-ffff-ffffffffffff";
+
+		conn.batch_execute(&format!(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status) VALUES 
+			('{version_id_101}', 1, 0, 1, 'v1.0.1', 'published');
+			
+			INSERT INTO artifacts (id, version_id, platform, artifact_type, download_url, version_range_pattern) VALUES
+			('{exact_artifact_id}', '{version_id_101}', 'windows', 'installer', 'https://example.com/exact.exe', NULL),
+			('{broad_range_id}', NULL, 'windows', 'installer', 'https://example.com/1x.exe', '1.x'),
+			('{narrow_range_id}', NULL, 'windows', 'installer', 'https://example.com/10x.exe', '1.0.x')",
+		))
+		.await
+		.unwrap();
+
+		// 1.0.1 has three artifacts for same platform+type
+		// Should return only the exact match
+		let response = public.get("/versions/1.0.1/artifacts").await;
+		response.assert_status_ok();
+		let artifacts: Vec<Artifact> = response.json();
+		assert_eq!(artifacts.len(), 1);
+		assert_eq!(artifacts[0].id.to_string(), exact_artifact_id.to_lowercase());
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn artifact_range_specificity_conflict_resolution() {
+	commons_tests::server::run(async |mut conn, public, _| {
+		let version_id_100 = "11111111-1111-1111-1111-111111111111";
+		let broad_range_id = "22222222-2222-2222-2222-222222222222";
+		let narrow_range_id = "33333333-3333-3333-3333-333333333333";
+
+		conn.batch_execute(&format!(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status) VALUES 
+			('{version_id_100}', 1, 0, 0, 'v1.0.0', 'published');
+			
+			INSERT INTO artifacts (id, version_id, platform, artifact_type, download_url, version_range_pattern) VALUES
+			('{broad_range_id}', NULL, 'windows', 'installer', 'https://example.com/1x.exe', '1.x'),
+			('{narrow_range_id}', NULL, 'windows', 'installer', 'https://example.com/10x.exe', '1.0.x')",
+		))
+		.await
+		.unwrap();
+
+		// 1.0.0 has two range artifacts for same platform+type
+		// Should return only the more specific one (1.0.x)
+		let response = public.get("/versions/1.0.0/artifacts").await;
+		response.assert_status_ok();
+		let artifacts: Vec<Artifact> = response.json();
+		assert_eq!(artifacts.len(), 1);
+		assert_eq!(artifacts[0].id.to_string(), narrow_range_id.to_lowercase());
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn artifact_create_range_authenticated() {
+	commons_tests::server::run_with_device_auth(
+		"releaser",
+		async |_conn, cert, _device_id, public, _| {
+			let response = public
+				.post("/artifacts/1.0.x/installer/windows")
+				.add_header("mtls-certificate", &cert)
+				.text("https://example.com/installer-1.0.x.exe")
+				.await;
+
+			response.assert_status_ok();
+
+			let artifact: Artifact = response.json();
+			assert_eq!(artifact.artifact_type, "installer");
+			assert_eq!(artifact.platform, "windows");
+			assert_eq!(artifact.version_id, None);
+			assert_eq!(artifact.version_range_pattern, Some("1.0.x".to_string()));
+			assert_eq!(
+				artifact.download_url,
+				"https://example.com/installer-1.0.x.exe"
+			);
+		},
+	)
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn artifact_create_range_invalid_pattern() {
+	commons_tests::server::run_with_device_auth(
+		"releaser",
+		async |_conn, cert, _device_id, public, _| {
+			let response = public
+				.post("/artifacts/invalid@@range/installer/windows")
+				.add_header("mtls-certificate", &cert)
+				.text("https://example.com/installer.exe")
+				.await;
+
+			response.assert_status_not_ok();
+		},
+	)
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn artifact_create_range_no_auth() {
+	commons_tests::server::run(async |_conn, public, _| {
+		let response = public
+			.post("/artifacts/1.0.x/installer/windows")
+			.text("https://example.com/installer.exe")
+			.await;
+
+		response.assert_status_not_ok();
 	})
 	.await
 }

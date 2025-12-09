@@ -12,11 +12,12 @@ diesel::table! {
 		id -> Uuid,
 		created_at -> Timestamptz,
 		updated_at -> Timestamptz,
-		version_id -> Uuid,
+		version_id -> Nullable<Uuid>,
 		artifact_type -> Text,
 		platform -> Text,
 		download_url -> Text,
 		device_id -> Nullable<Uuid>,
+		version_range_pattern -> Nullable<Text>,
 	}
 }
 
