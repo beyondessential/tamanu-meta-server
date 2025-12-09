@@ -321,10 +321,10 @@ impl Artifact {
 		// Get all matching artifacts (no deduplication) and version details
 		let version = crate::versions::Version::get_by_id(db, target_version_id).await?;
 		let matching_artifacts = Self::get_for_version_all_matches(db, target_version_id).await?;
-		
+
 		// Get the public API version (deduplicated) to know which ones are actually used
 		let public_api_artifacts = Self::get_for_version(db, target_version_id).await?;
-		let public_api_ids: std::collections::HashSet<Uuid> = 
+		let public_api_ids: std::collections::HashSet<Uuid> =
 			public_api_artifacts.iter().map(|a| a.id).collect();
 
 		// Get all artifacts in DB to check for overrides
@@ -357,7 +357,7 @@ impl Artifact {
 				} else {
 					false
 				};
-				
+
 				// Check if this artifact is actually used in the public API
 				let is_used_in_public_api = public_api_ids.contains(&a.id);
 

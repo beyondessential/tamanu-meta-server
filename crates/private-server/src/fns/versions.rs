@@ -277,16 +277,18 @@ mod ssr {
 
 		Ok(artifacts_with_metadata
 			.into_iter()
-			.map(|(a, is_exact, has_range_override, is_used_in_public_api)| super::ArtifactData {
-				id: a.id,
-				artifact_type: a.artifact_type,
-				platform: a.platform,
-				download_url: a.download_url,
-				is_exact,
-				version_range_pattern: a.version_range_pattern,
-				has_range_override,
-				is_used_in_public_api,
-			})
+			.map(
+				|(a, is_exact, has_range_override, is_used_in_public_api)| super::ArtifactData {
+					id: a.id,
+					artifact_type: a.artifact_type,
+					platform: a.platform,
+					download_url: a.download_url,
+					is_exact,
+					version_range_pattern: a.version_range_pattern,
+					has_range_override,
+					is_used_in_public_api,
+				},
+			)
 			.collect())
 	}
 
@@ -301,16 +303,18 @@ mod ssr {
 
 		Ok(artifacts_with_metadata
 			.into_iter()
-			.map(|(a, is_exact, has_range_override, is_used_in_public_api)| super::ArtifactData {
-				id: a.id,
-				artifact_type: a.artifact_type,
-				platform: a.platform,
-				download_url: a.download_url,
-				is_exact,
-				version_range_pattern: a.version_range_pattern,
-				has_range_override,
-				is_used_in_public_api,
-			})
+			.map(
+				|(a, is_exact, has_range_override, is_used_in_public_api)| super::ArtifactData {
+					id: a.id,
+					artifact_type: a.artifact_type,
+					platform: a.platform,
+					download_url: a.download_url,
+					is_exact,
+					version_range_pattern: a.version_range_pattern,
+					has_range_override,
+					is_used_in_public_api,
+				},
+			)
 			.collect())
 	}
 

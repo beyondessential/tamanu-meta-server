@@ -366,6 +366,9 @@ fn ArtifactItemView(
 			<div class="columns">
 				<div class="column">
 					{artifact.artifact_type.clone()}
+					{move || artifact.has_range_override.then(|| view! {
+						<p class="is-size-7 has-text-warning">"Overrides other artifact"</p>
+					})}
 					{move || artifact.version_range_pattern.clone().map(|pattern| view! {
 						<p class="is-size-7 has-text-grey-light">
 							{move || (!artifact.is_used_in_public_api).then(|| view! {
@@ -382,9 +385,6 @@ fn ArtifactItemView(
 					class:has-text-primary-dark={!artifact.download_url.starts_with("https://")}
 				>{artifact.download_url.clone()}</a>
 				<div class="column">
-					{move || artifact.has_range_override.then(|| view! {
-						<p class="is-size-7 has-text-warning">"[Overrides range]"</p>
-					})}
 					<div class="field is-grouped buttons are-small is-justify-content-end" class:is-invisible={move || !is_unlocked.get()}>
 					{move || if show_delete_confirm.get() {
 						view! {
