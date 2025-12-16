@@ -40,7 +40,7 @@ serde = { workspace = true, features = ["derive"] }
 tera = { workspace = true, optional = true }
 tokio.workspace = true
 timesimp = { version = "1.0.0", optional = true }
-tower-http = { version = "0.6.6", optional = true, features = [
+tower-http = { version = "0.6.8", optional = true, features = [
 	"compression-full",
 	"fs",
 	"trace",
