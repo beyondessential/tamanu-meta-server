@@ -7,6 +7,8 @@ use crate::{
 	fns::bestool::{count_snippets, list_snippets, create_snippet},
 };
 
+pub mod detail;
+
 const PAGE_SIZE: u64 = 10;
 
 #[component]

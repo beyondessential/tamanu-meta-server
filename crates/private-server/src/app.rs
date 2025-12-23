@@ -89,7 +89,7 @@ pub fn App() -> impl IntoView {
 							</ParentRoute>
 							<ParentRoute path=path!("bestool") view=bestool::Page>
 								<Route path=path!("") view=bestool::snippets::List />
-								<Route path=path!("snippets/:id") view=|| view! { <div>"Snippet detail page coming soon"</div> } />
+								<Route path=path!("snippets/:id") view=bestool::snippets::detail::Detail />
 							</ParentRoute>
 							<Route path=path!("admins") view=admins::Page />
 							<Route path=path!("sql") view=sql::Page />
