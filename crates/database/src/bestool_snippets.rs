@@ -154,10 +154,7 @@ impl BestoolSnippet {
 	/// Get the edit history of this entry (all versions that led to this entry).
 	///
 	/// Does not include the current entry.
-	pub async fn get_edit_history(
-		&self,
-		db: &mut AsyncPgConnection,
-	) -> Result<Vec<Self>> {
+	pub async fn get_edit_history(&self, db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
 		let mut history = Vec::new();
 		let mut current_id = self.supersedes_id;
 
@@ -171,5 +168,38 @@ impl BestoolSnippet {
 		}
 
 		Ok(history)
+	}
+
+	/// Count active snippets (where supersedes_id and deleted_at are NULL).
+	pub async fn count_active(db: &mut AsyncPgConnection) -> Result<i64> {
+		use crate::schema::bestool_snippets::dsl;
+		use diesel::dsl::count_star;
+
+		dsl::bestool_snippets
+			.filter(dsl::supersedes_id.is_null())
+			.filter(dsl::deleted_at.is_null())
+			.select(count_star())
+			.first(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// Get paginated active snippets ordered by created_at descending.
+	pub async fn list_active(
+		db: &mut AsyncPgConnection,
+		offset: i64,
+		limit: i64,
+	) -> Result<Vec<Self>> {
+		use crate::schema::bestool_snippets::dsl;
+
+		dsl::bestool_snippets
+			.filter(dsl::supersedes_id.is_null())
+			.filter(dsl::deleted_at.is_null())
+			.order(dsl::created_at.desc())
+			.offset(offset)
+			.limit(limit)
+			.load(db)
+			.await
+			.map_err(AppError::from)
 	}
 }

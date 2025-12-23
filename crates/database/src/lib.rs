@@ -17,6 +17,9 @@ pub mod url_field;
 pub mod versions;
 pub mod views;
 
+pub use bestool_snippets::{BestoolSnippet, NewBestoolSnippet};
+pub use devices::{Device, DeviceConnection, DeviceKey, DeviceWithInfo};
+
 pub type Db = Pool<AsyncPgConnection>;
 
 // Re-export for use in other crates

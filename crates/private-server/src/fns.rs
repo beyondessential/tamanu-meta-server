@@ -1,4 +1,5 @@
 pub mod admins;
+pub mod bestool;
 pub mod commons;
 pub mod devices;
 pub mod servers;

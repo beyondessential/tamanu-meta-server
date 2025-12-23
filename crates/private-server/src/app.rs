@@ -8,6 +8,7 @@ use leptos_router::{
 use crate::components::{Toast, ToggleSignal as _};
 
 mod admins;
+mod bestool;
 mod devices;
 mod servers;
 mod sql;
@@ -86,6 +87,10 @@ pub fn App() -> impl IntoView {
 								<Route path=path!(":id/edit") view=servers::Edit />
 								<Route path=path!(":id") view=servers::Detail />
 							</ParentRoute>
+							<ParentRoute path=path!("bestool") view=bestool::Page>
+								<Route path=path!("") view=bestool::snippets::List />
+								<Route path=path!("snippets/:id") view=|| view! { <div>"Snippet detail page coming soon"</div> } />
+							</ParentRoute>
 							<Route path=path!("admins") view=admins::Page />
 							<Route path=path!("sql") view=sql::Page />
 							<Route path=path!("versions") view=versions::Page />
@@ -156,6 +161,9 @@ pub fn GlobalNav() -> impl IntoView {
 					</A>
 					<A href="/versions" {..} class="navbar-item">
 						"Versions"
+					</A>
+					<A href="/bestool" {..} class="navbar-item">
+						"Bestool"
 					</A>
 					<Suspense>
 						{move || {
