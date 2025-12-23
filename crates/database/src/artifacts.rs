@@ -153,31 +153,28 @@ impl Artifact {
 			}
 
 			// Both exact or both range: compare range specificity
-			if !a_is_exact {
-				if let (Some(pattern_a), Some(pattern_b)) =
+			if !a_is_exact
+				&& let (Some(pattern_a), Some(pattern_b)) =
 					(&a.version_range_pattern, &b.version_range_pattern)
-				{
-					if let (Ok(range_a), Ok(range_b)) = (
-						node_semver::Range::parse(pattern_a),
-						node_semver::Range::parse(pattern_b),
-					) {
-						// If range_a allows_all of range_b, then range_b is more specific
-						if range_a.allows_all(&range_b) && !range_b.allows_all(&range_a) {
-							return std::cmp::Ordering::Greater; // b is more specific
-						}
-						// If range_b allows_all of range_a, then range_a is more specific
-						if range_b.allows_all(&range_a) && !range_a.allows_all(&range_b) {
-							return std::cmp::Ordering::Less; // a is more specific
-						}
-						// Ranges are equal or incomparable - use pattern specificity as tiebreaker
-						if range_a.allows_all(&range_b) && range_b.allows_all(&range_a) {
-							// Ranges are equivalent, check pattern specificity
-							return Self::compare_pattern_specificity(pattern_a, pattern_b);
-						}
-						// Ranges are incomparable - use pattern specificity as tiebreaker
-						return Self::compare_pattern_specificity(pattern_a, pattern_b);
-					}
+				&& let (Ok(range_a), Ok(range_b)) = (
+					node_semver::Range::parse(pattern_a),
+					node_semver::Range::parse(pattern_b),
+				) {
+				// If range_a allows_all of range_b, then range_b is more specific
+				if range_a.allows_all(&range_b) && !range_b.allows_all(&range_a) {
+					return std::cmp::Ordering::Greater; // b is more specific
 				}
+				// If range_b allows_all of range_a, then range_a is more specific
+				if range_b.allows_all(&range_a) && !range_a.allows_all(&range_b) {
+					return std::cmp::Ordering::Less; // a is more specific
+				}
+				// Ranges are equal or incomparable - use pattern specificity as tiebreaker
+				if range_a.allows_all(&range_b) && range_b.allows_all(&range_a) {
+					// Ranges are equivalent, check pattern specificity
+					return Self::compare_pattern_specificity(pattern_a, pattern_b);
+				}
+				// Ranges are incomparable - use pattern specificity as tiebreaker
+				return Self::compare_pattern_specificity(pattern_a, pattern_b);
 			}
 
 			// Can't determine specificity, maintain order

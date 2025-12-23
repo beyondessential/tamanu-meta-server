@@ -160,7 +160,7 @@ mod ssr {
 		for (row_idx, row) in rows.iter().enumerate() {
 			let mut row_values = Vec::with_capacity(columns.len());
 			for col_idx in 0..columns.len() {
-				let value = postgres_to_json_value(&row, col_idx);
+				let value = postgres_to_json_value(row, col_idx);
 
 				row_values.push(value);
 

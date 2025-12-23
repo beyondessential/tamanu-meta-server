@@ -53,10 +53,10 @@ pub fn SqlQueryForm() -> impl IntoView {
 	};
 
 	Effect::new(move |_| {
-		if let Some(last_query) = last_query_action.value().get() {
-			if !last_query.is_empty() {
-				set_query.set(last_query);
-			}
+		if let Some(last_query) = last_query_action.value().get()
+			&& !last_query.is_empty()
+		{
+			set_query.set(last_query);
 		}
 	});
 
@@ -114,11 +114,10 @@ pub fn SqlQueryForm() -> impl IntoView {
 							disabled=move || is_executing.get()
 							on:input=move |ev| set_query.set(event_target_value(&ev))
 							on:keyup=move |ev| {
-								if ev.key() == "Enter" && ev.ctrl_key() {
-									if !query.get().trim().is_empty() {
+								if ev.key() == "Enter" && ev.ctrl_key()
+									&& !query.get().trim().is_empty() {
 										execute_action.dispatch(query.get());
 									}
-								}
 							}
 						/>
 					</div>

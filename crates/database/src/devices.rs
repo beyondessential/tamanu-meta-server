@@ -559,10 +559,7 @@ impl Device {
 
 		let mut keys_by_device: HashMap<Uuid, Vec<DeviceKey>> = HashMap::new();
 		for key in all_keys {
-			keys_by_device
-				.entry(key.device_id)
-				.or_insert_with(Vec::new)
-				.push(key);
+			keys_by_device.entry(key.device_id).or_default().push(key);
 		}
 
 		let mut connections_by_device: HashMap<Uuid, DeviceConnection> = HashMap::new();
@@ -639,10 +636,7 @@ impl Device {
 
 		let mut keys_by_device: HashMap<Uuid, Vec<DeviceKey>> = HashMap::new();
 		for key in all_keys {
-			keys_by_device
-				.entry(key.device_id)
-				.or_insert_with(Vec::new)
-				.push(key);
+			keys_by_device.entry(key.device_id).or_default().push(key);
 		}
 
 		let mut connections_by_device: HashMap<Uuid, DeviceConnection> = HashMap::new();

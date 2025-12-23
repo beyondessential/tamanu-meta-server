@@ -5,7 +5,9 @@ use uuid::Uuid;
 
 use crate::{
 	components::{ErrorHandler, LoadingBar},
-	fns::bestool::{BestoolSnippetDetail, get_latest_snippet_id, get_snippet, update_snippet, delete_snippet},
+	fns::bestool::{
+		BestoolSnippetDetail, delete_snippet, get_latest_snippet_id, get_snippet, update_snippet,
+	},
 };
 
 #[component]
@@ -33,12 +35,12 @@ pub fn Detail() -> impl IntoView {
 		async move {
 			if let Some(Some(detail)) = snippet.get() {
 				let current_id = detail.id;
-				if let Ok(latest_id) = get_latest_snippet_id(current_id).await {
-					if latest_id != current_id {
-						let mut opts = NavigateOptions::default();
-						opts.replace = true;
-						navigate(&format!("/bestool/snippets/{}", latest_id), opts);
-					}
+				if let Ok(latest_id) = get_latest_snippet_id(current_id).await
+					&& latest_id != current_id
+				{
+					let mut opts = NavigateOptions::default();
+					opts.replace = true;
+					navigate(&format!("/bestool/snippets/{}", latest_id), opts);
 				}
 			}
 		}
@@ -259,7 +261,8 @@ fn SnippetDetailView(detail: BestoolSnippetDetail) -> impl IntoView {
 									</div>
 								}.into_any()
 							} else {
-								view! { }.into_any()
+								let _: () = view! { };
+		().into_any()
 							}
 						}}
 					}.into_any()

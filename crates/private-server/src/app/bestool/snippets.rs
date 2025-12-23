@@ -77,7 +77,10 @@ pub fn List() -> impl IntoView {
 								}.into_any()
 							}
 						}
-						_ => view! {}.into_any(),
+						_ => {
+		  let _: () = view! {};
+		  ().into_any()
+	  },
 					}
 				}}
 			</ErrorHandler>
