@@ -183,7 +183,6 @@ impl BestoolSnippet {
 		dsl::bestool_snippets
 			.filter(dsl::deleted_at.is_null())
 			.filter(dsl::id.nullable().ne_all(superseded_subquery))
-			.order(dsl::created_at.desc())
 			.select(count_star())
 			.first(db)
 			.await
@@ -205,7 +204,7 @@ impl BestoolSnippet {
 		dsl::bestool_snippets
 			.filter(dsl::deleted_at.is_null())
 			.filter(dsl::id.nullable().ne_all(superseded_subquery))
-			.order(dsl::created_at.desc())
+			.order(dsl::name.desc())
 			.offset(offset)
 			.limit(limit)
 			.load(db)
