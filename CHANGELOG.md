@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
+## [5.11.0](https://github.com/beyondessential/tamanu-meta-server/compare/v5.10.1..5.11.0) - 2025-12-23
+
+
+
+### Snippets
+
+- **Feature:** Add public endpoint - ([5d71763](https://github.com/beyondessential/tamanu-meta-server/commit/5d71763d2ce44ad8a28d2389608d852cbf0125f7))
+- **Tweak:** Ensure version history is linear - ([0b0c2b7](https://github.com/beyondessential/tamanu-meta-server/commit/0b0c2b705952d01a8e273d1cba66363a83782382))
+
+---
+## [5.10.1](https://github.com/beyondessential/tamanu-meta-server/compare/v5.10.0..v5.10.1) - 2025-12-09
+
+
+- **Repo:** Release - ([b6e2535](https://github.com/beyondessential/tamanu-meta-server/commit/b6e2535fa108f733d20c7979982118d208c9b946))
+
+---
 ## [5.10.0](https://github.com/beyondessential/tamanu-meta-server/compare/v5.9.1..v5.10.0) - 2025-12-09
 
 
