@@ -59,6 +59,11 @@ pub async fn update_snippet(
 	ssr::update_snippet(id, name, description, sql).await
 }
 
+#[server]
+pub async fn delete_snippet(id: Uuid) -> Result<()> {
+	ssr::delete_snippet(id).await
+}
+
 #[cfg(feature = "ssr")]
 mod ssr {
 	use super::*;
@@ -177,5 +182,14 @@ mod ssr {
 			sql: new_snippet.sql,
 			editor: new_snippet.editor,
 		})
+	}
+
+	pub async fn delete_snippet(id: Uuid) -> Result<()> {
+		let state = expect_context::<crate::state::AppState>();
+		let State(db): State<Db> = extract_with_state(&state).await?;
+		let mut conn = db.get().await?;
+
+		let _ = database::BestoolSnippet::delete(&mut conn, id).await?;
+		Ok(())
 	}
 }

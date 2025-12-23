@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::{
 	components::{ErrorHandler, LoadingBar},
-	fns::bestool::{BestoolSnippetDetail, get_latest_snippet_id, get_snippet, update_snippet},
+	fns::bestool::{BestoolSnippetDetail, get_latest_snippet_id, get_snippet, update_snippet, delete_snippet},
 };
 
 #[component]
@@ -60,11 +60,13 @@ pub fn Detail() -> impl IntoView {
 #[component]
 fn SnippetDetailView(detail: BestoolSnippetDetail) -> impl IntoView {
 	let (is_editing, set_is_editing) = signal(false);
+	let (show_delete_confirm, set_show_delete_confirm) = signal(false);
 	let (name, set_name) = signal(detail.name.clone());
 	let (description, set_description) = signal(detail.description.clone().unwrap_or_default());
 	let (sql, set_sql) = signal(detail.sql.clone());
 
 	let navigate = use_navigate();
+	let navigate_update = navigate.clone();
 
 	let update_action = Action::new(move |_: &()| {
 		let id = detail.id;
@@ -75,7 +77,7 @@ fn SnippetDetailView(detail: BestoolSnippetDetail) -> impl IntoView {
 			Some(description.get())
 		};
 		let sql_val = sql.get();
-		let nav_fn = navigate.clone();
+		let nav_fn = navigate_update.clone();
 		async move {
 			match update_snippet(id, name_val, desc_val, sql_val).await {
 				Ok(new_detail) => {
@@ -84,6 +86,21 @@ fn SnippetDetailView(detail: BestoolSnippetDetail) -> impl IntoView {
 					let mut opts = NavigateOptions::default();
 					opts.replace = true;
 					nav_fn(&format!("/bestool/snippets/{}", new_detail.id), opts);
+					Ok(())
+				}
+				Err(e) => Err(e),
+			}
+		}
+	});
+
+	let delete_action = Action::new(move |_: &()| {
+		let id = detail.id;
+		let nav_fn = navigate.clone();
+		async move {
+			match delete_snippet(id).await {
+				Ok(_) => {
+					// Navigate back to list
+					nav_fn("/bestool/snippets", NavigateOptions::default());
 					Ok(())
 				}
 				Err(e) => Err(e),
@@ -189,6 +206,14 @@ fn SnippetDetailView(detail: BestoolSnippetDetail) -> impl IntoView {
 										"Edit"
 									</button>
 								</div>
+								<div class="level-item">
+									<button
+										class="button is-danger is-light"
+										on:click=move |_| set_show_delete_confirm.set(true)
+									>
+										"Delete"
+									</button>
+								</div>
 							</div>
 						</div>
 						<div class="box">
@@ -199,6 +224,44 @@ fn SnippetDetailView(detail: BestoolSnippetDetail) -> impl IntoView {
 								<code>{detail.sql.clone()}</code>
 							</pre>
 						</div>
+						{move || {
+							if show_delete_confirm.get() {
+								view! {
+									<div class="modal is-active">
+										<div class="modal-background" on:click=move |_| set_show_delete_confirm.set(false)></div>
+										<div class="modal-card">
+											<header class="modal-card-head">
+												<p class="modal-card-title">"Delete Snippet"</p>
+												<button class="delete" on:click=move |_| set_show_delete_confirm.set(false)></button>
+											</header>
+											<section class="modal-card-body">
+												<p>"Are you sure you want to delete this snippet? This action cannot be undone."</p>
+											</section>
+											<footer class="modal-card-foot">
+												<div class="buttons">
+													<button
+														class="button"
+														on:click=move |_| set_show_delete_confirm.set(false)
+													>
+														"Cancel"
+													</button>
+													<button
+														class="button is-danger"
+														disabled=move || delete_action.pending().get()
+														class:is-loading=move || delete_action.pending().get()
+														on:click=move |_| { delete_action.dispatch(()); }
+													>
+														"Delete"
+													</button>
+												</div>
+											</footer>
+										</div>
+									</div>
+								}.into_any()
+							} else {
+								view! { }.into_any()
+							}
+						}}
 					}.into_any()
 				}
 			}}
