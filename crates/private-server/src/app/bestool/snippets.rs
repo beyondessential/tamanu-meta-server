@@ -147,7 +147,7 @@ where
 					<div class="control">
 						<textarea
 							class="textarea"
-							placeholder="Details about what it does, variables required, etc. Currently not displayed in bestool but that may change."
+							placeholder="Sentence about what it does and ${variables} required"
 							disabled=move || create_action.pending().get()
 							prop:value=move || description.get()
 							on:input=move |ev| set_description.set(event_target_value(&ev))
