@@ -5,6 +5,7 @@ use axum::routing::Router;
 use crate::state::AppState;
 
 pub mod artifacts;
+pub mod bestool;
 #[cfg(feature = "ui")]
 pub mod password;
 #[cfg(feature = "ui")]
@@ -20,6 +21,7 @@ pub fn routes() -> Router<AppState> {
 	#[cfg_attr(not(feature = "ui"), expect(unused_mut))]
 	let mut router = Router::new()
 		.nest("/artifacts", artifacts::routes())
+		.nest("/bestool", bestool::routes())
 		.nest("/servers", servers::routes())
 		.nest("/status", statuses::routes())
 		.nest("/versions", versions::routes());

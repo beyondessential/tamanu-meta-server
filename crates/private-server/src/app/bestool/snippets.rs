@@ -153,7 +153,7 @@ where
 				</div>
 
 				<div class="field">
-					<label class="label">"SQL"</label>
+					<label class="label">"SQL (no sensitive info! everything here may be read by anyone with bestool)"</label>
 					<div class="control">
 						<textarea
 							class="textarea monospace"

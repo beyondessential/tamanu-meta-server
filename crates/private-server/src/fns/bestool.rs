@@ -76,7 +76,7 @@ mod ssr {
 		let State(db): State<Db> = extract_with_state(&state).await?;
 		let mut conn = db.get().await?;
 
-		database::BestoolSnippet::count_active(&mut conn)
+		database::BestoolSnippet::count_current(&mut conn)
 			.await
 			.map(|c| c as u64)
 	}
@@ -89,7 +89,7 @@ mod ssr {
 		let State(db): State<Db> = extract_with_state(&state).await?;
 		let mut conn = db.get().await?;
 
-		let snippets = database::BestoolSnippet::list_active(
+		let snippets = database::BestoolSnippet::list_current(
 			&mut conn,
 			offset as i64,
 			limit.unwrap_or(50) as i64,
