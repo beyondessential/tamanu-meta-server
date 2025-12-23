@@ -202,4 +202,25 @@ impl BestoolSnippet {
 			.await
 			.map_err(AppError::from)
 	}
+
+	/// Get the latest version of a snippet (following the supersedes chain forward).
+	/// Returns the same snippet ID if it's already the latest.
+	pub async fn get_latest_id(db: &mut AsyncPgConnection, mut id: Uuid) -> Result<Uuid> {
+		use crate::schema::bestool_snippets::dsl;
+
+		// Keep finding snippets that supersede this one until we reach the latest
+		loop {
+			let next_version: Option<Uuid> = dsl::bestool_snippets
+				.filter(dsl::supersedes_id.eq(id))
+				.select(dsl::id)
+				.first(db)
+				.await
+				.optional()?;
+
+			match next_version {
+				Some(new_id) => id = new_id,
+				None => return Ok(id),
+			}
+		}
+	}
 }

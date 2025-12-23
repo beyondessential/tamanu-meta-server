@@ -49,6 +49,11 @@ pub async fn get_snippet(id: Uuid) -> Result<BestoolSnippetDetail> {
 }
 
 #[server]
+pub async fn get_latest_snippet_id(id: Uuid) -> Result<Uuid> {
+	ssr::get_latest_snippet_id(id).await
+}
+
+#[server]
 pub async fn update_snippet(
 	id: Uuid,
 	name: String,
@@ -142,6 +147,14 @@ mod ssr {
 			sql: snippet.sql,
 			editor: snippet.editor,
 		})
+	}
+
+	pub async fn get_latest_snippet_id(id: Uuid) -> Result<Uuid> {
+		let state = expect_context::<crate::state::AppState>();
+		let State(db): State<Db> = extract_with_state(&state).await?;
+		let mut conn = db.get().await?;
+
+		database::BestoolSnippet::get_latest_id(&mut conn, id).await
 	}
 
 	pub async fn update_snippet(
