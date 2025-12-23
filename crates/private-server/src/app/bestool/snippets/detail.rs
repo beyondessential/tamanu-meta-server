@@ -1,11 +1,11 @@
 use leptos::prelude::*;
-use leptos_router::hooks::{use_navigate, use_params_map};
 use leptos_router::NavigateOptions;
+use leptos_router::hooks::{use_navigate, use_params_map};
 use uuid::Uuid;
 
 use crate::{
 	components::{ErrorHandler, LoadingBar},
-	fns::bestool::{get_snippet, update_snippet, get_latest_snippet_id, BestoolSnippetDetail},
+	fns::bestool::{BestoolSnippetDetail, get_latest_snippet_id, get_snippet, update_snippet},
 };
 
 #[component]

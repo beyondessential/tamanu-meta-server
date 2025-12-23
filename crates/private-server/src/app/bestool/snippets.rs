@@ -4,7 +4,7 @@ use leptos::prelude::*;
 
 use crate::{
 	components::{ErrorHandler, LoadingBar, Nothing, PaginatedList},
-	fns::bestool::{count_snippets, list_snippets, create_snippet},
+	fns::bestool::{count_snippets, create_snippet, list_snippets},
 };
 
 pub mod detail;

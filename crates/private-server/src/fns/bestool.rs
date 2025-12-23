@@ -35,11 +35,7 @@ pub async fn list_snippets(
 }
 
 #[server]
-pub async fn create_snippet(
-	name: String,
-	description: Option<String>,
-	sql: String,
-) -> Result<()> {
+pub async fn create_snippet(name: String, description: Option<String>, sql: String) -> Result<()> {
 	ssr::create_snippet(name, description, sql).await
 }
 
@@ -114,19 +110,13 @@ mod ssr {
 		sql: String,
 	) -> Result<()> {
 		let state = expect_context::<crate::state::AppState>();
-		let user: commons_servers::tailscale_auth::TailscaleUser = extract_with_state(&state).await.unwrap_or_default();
+		let user: commons_servers::tailscale_auth::TailscaleUser =
+			extract_with_state(&state).await.unwrap_or_default();
 		let State(db): State<Db> = extract_with_state(&state).await?;
 		let mut conn = db.get().await?;
 
-		database::BestoolSnippet::create(
-			&mut conn,
-			user.login,
-			name,
-			description,
-			sql,
-			None,
-		)
-		.await?;
+		database::BestoolSnippet::create(&mut conn, user.login, name, description, sql, None)
+			.await?;
 
 		Ok(())
 	}
@@ -164,7 +154,8 @@ mod ssr {
 		sql: String,
 	) -> Result<super::BestoolSnippetDetail> {
 		let state = expect_context::<crate::state::AppState>();
-		let user: commons_servers::tailscale_auth::TailscaleUser = extract_with_state(&state).await.unwrap_or_default();
+		let user: commons_servers::tailscale_auth::TailscaleUser =
+			extract_with_state(&state).await.unwrap_or_default();
 		let State(db): State<Db> = extract_with_state(&state).await?;
 		let mut conn = db.get().await?;
 

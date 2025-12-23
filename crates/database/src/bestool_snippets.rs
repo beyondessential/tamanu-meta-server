@@ -172,23 +172,22 @@ impl BestoolSnippet {
 
 	/// Count active snippets (where supersedes_id and deleted_at are NULL).
 	pub async fn count_current(db: &mut AsyncPgConnection) -> Result<i64> {
+		use crate::schema::bestool_snippets::dsl;
 		use diesel::dsl::count_star;
-use crate::schema::bestool_snippets::dsl;
 
 		let superseded_subquery = dsl::bestool_snippets
-		   .filter(dsl::supersedes_id.is_not_null())
-		   .select(dsl::supersedes_id)
-		   .into_boxed();
+			.filter(dsl::supersedes_id.is_not_null())
+			.select(dsl::supersedes_id)
+			.into_boxed();
 
-	   dsl::bestool_snippets
-		   .filter(dsl::deleted_at.is_null())
-		   .filter(dsl::id.nullable().ne_all(superseded_subquery))
-		   .order(dsl::created_at.desc())
+		dsl::bestool_snippets
+			.filter(dsl::deleted_at.is_null())
+			.filter(dsl::id.nullable().ne_all(superseded_subquery))
+			.order(dsl::created_at.desc())
 			.select(count_star())
 			.first(db)
 			.await
 			.map_err(AppError::from)
-
 	}
 
 	pub async fn list_current(
@@ -199,19 +198,19 @@ use crate::schema::bestool_snippets::dsl;
 		use crate::schema::bestool_snippets::dsl;
 
 		let superseded_subquery = dsl::bestool_snippets
-		   .filter(dsl::supersedes_id.is_not_null())
-		   .select(dsl::supersedes_id)
-		   .into_boxed();
+			.filter(dsl::supersedes_id.is_not_null())
+			.select(dsl::supersedes_id)
+			.into_boxed();
 
-	   dsl::bestool_snippets
-		   .filter(dsl::deleted_at.is_null())
-		   .filter(dsl::id.nullable().ne_all(superseded_subquery))
-		   .order(dsl::created_at.desc())
-		   .offset(offset)
-		   .limit(limit)
-		   .load(db)
-		   .await
-		   .map_err(AppError::from)
+		dsl::bestool_snippets
+			.filter(dsl::deleted_at.is_null())
+			.filter(dsl::id.nullable().ne_all(superseded_subquery))
+			.order(dsl::created_at.desc())
+			.offset(offset)
+			.limit(limit)
+			.load(db)
+			.await
+			.map_err(AppError::from)
 	}
 
 	/// Get the latest version of a snippet (following the supersedes chain forward).

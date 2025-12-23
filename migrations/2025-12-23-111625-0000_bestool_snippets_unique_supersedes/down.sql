@@ -1,0 +1,1 @@
+DROP INDEX bestool_snippets_unique_supersedes_id_idx;
