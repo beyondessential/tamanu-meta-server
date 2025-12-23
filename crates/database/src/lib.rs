@@ -5,6 +5,7 @@ use diesel_async::{
 
 pub mod admins;
 pub mod artifacts;
+pub mod bestool_snippets;
 pub mod chrome_releases;
 pub mod devices;
 pub mod pg_duration;
@@ -15,9 +16,6 @@ pub mod statuses;
 pub mod url_field;
 pub mod versions;
 pub mod views;
-
-// Re-export commonly used types
-pub use devices::{Device, DeviceConnection, DeviceKey, DeviceWithInfo};
 
 pub type Db = Pool<AsyncPgConnection>;
 

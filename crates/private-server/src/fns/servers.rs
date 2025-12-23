@@ -168,8 +168,12 @@ mod ssr {
 
 	use commons_types::server::{kind::ServerKind, rank::ServerRank};
 	use database::{
-		Db, Device, devices::DeviceConnection, servers::PartialServer, servers::Server,
-		statuses::Status, url_field::UrlField, versions::Version,
+		Db,
+		devices::{Device, DeviceConnection},
+		servers::{PartialServer, Server},
+		statuses::Status,
+		url_field::UrlField,
+		versions::Version,
 	};
 	use leptos::prelude::expect_context;
 	use leptos_axum::extract_with_state;
@@ -479,7 +483,7 @@ mod ssr {
 	}
 
 	fn convert_device_with_info_to_device_info(
-		device_with_info: database::DeviceWithInfo,
+		device_with_info: database::devices::DeviceWithInfo,
 	) -> crate::fns::devices::DeviceInfo {
 		fn format_key_as_pem(key_data: &[u8]) -> String {
 			use base64::prelude::*;

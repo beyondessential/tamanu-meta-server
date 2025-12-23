@@ -22,6 +22,19 @@ diesel::table! {
 }
 
 diesel::table! {
+	bestool_snippets (id) {
+		id -> Uuid,
+		created_at -> Timestamptz,
+		deleted_at -> Nullable<Timestamptz>,
+		supersedes_id -> Nullable<Uuid>,
+		editor -> Text,
+		name -> Text,
+		description -> Nullable<Text>,
+		sql -> Text,
+	}
+}
+
+diesel::table! {
 	chrome_releases (version) {
 		version -> Text,
 		release_date -> Text,
@@ -126,6 +139,7 @@ diesel::joinable!(versions -> devices (device_id));
 diesel::allow_tables_to_appear_in_same_query!(
 	admins,
 	artifacts,
+	bestool_snippets,
 	chrome_releases,
 	device_connections,
 	device_keys,

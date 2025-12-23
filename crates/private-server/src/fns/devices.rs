@@ -147,8 +147,8 @@ pub async fn update_key_name(key_id: Uuid, name: Option<String>) -> Result<()> {
 mod ssr {
 	use super::*;
 	use commons_types::device::DeviceRole;
+	use database::devices::{Device, DeviceConnection, DeviceKey, DeviceWithInfo};
 	use database::servers::Server;
-	use database::{Device, DeviceConnection, DeviceKey, DeviceWithInfo};
 	use uuid::Uuid;
 
 	impl From<DeviceWithInfo> for DeviceInfo {
