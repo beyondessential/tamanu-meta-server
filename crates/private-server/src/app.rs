@@ -225,13 +225,11 @@ pub fn GlobalNav() -> impl IntoView {
 										Some(
 											view! {
 												<a
-													class="navbar-item server-versions"
+													class="navbar-item"
 													href=url
 													target="_blank"
 												>
-													"Server "
-													<br />
-													"Versions"
+													"Server Versions"
 												</a>
 											},
 										)
