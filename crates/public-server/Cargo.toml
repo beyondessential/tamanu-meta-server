@@ -40,13 +40,13 @@ serde = { workspace = true, features = ["derive"] }
 tera = { workspace = true, optional = true }
 tokio.workspace = true
 timesimp = { version = "1.0.0", optional = true }
-tower-http = { version = "0.6.6", optional = true, features = [
+tower-http = { version = "0.6.8", optional = true, features = [
 	"compression-full",
 	"fs",
 	"trace",
 ] }
 uuid = { version = "1.18.1", features = ["serde", "v4"] }
-serde_json = "1.0.145"
+serde_json = "1.0.147"
 axum-client-ip = { version = "1.1.3", optional = true }
 subtle = { version = "2.6", optional = true }
 
@@ -55,7 +55,7 @@ axum-test.workspace = true
 commons-tests = { path = "../commons-tests" }
 http.workspace = true
 percent-encoding = "2.3.2"
-serde_json = "1.0.145"
+serde_json = "1.0.147"
 
 [features]
 default = ["cli", "ui"]
