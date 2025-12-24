@@ -204,7 +204,7 @@ impl BestoolSnippet {
 		dsl::bestool_snippets
 			.filter(dsl::deleted_at.is_null())
 			.filter(dsl::id.nullable().ne_all(superseded_subquery))
-			.order(dsl::name.desc())
+			.order(dsl::name)
 			.offset(offset)
 			.limit(limit)
 			.load(db)
