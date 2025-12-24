@@ -27,12 +27,12 @@ diesel-async.workspace = true
 http.workspace = true
 node-semver.workspace = true
 percent-encoding = "2.3.2"
-rcgen = "0.14.3"
+rcgen = "0.14.6"
 rfc2047-decoder = "1.0.6"
 serde = { workspace = true, features = ["derive"] }
 time = "0.3.43"
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread"] }
-tower-http = { version = "0.6.6", features = [
+tower-http = { version = "0.6.8", features = [
 	"compression-full",
 	"fs",
 	"trace",
