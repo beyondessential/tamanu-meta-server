@@ -65,7 +65,7 @@ pub fn SubTabs(
 					</a>
 				</div>
 			</nav>
-			<section><Outlet /></section>
+			<section class="mb-4"><Outlet /></section>
 		</div>
 	}
 }
