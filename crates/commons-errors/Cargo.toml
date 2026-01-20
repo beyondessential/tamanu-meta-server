@@ -23,7 +23,7 @@ node-semver.workspace = true
 problem_details = { workspace = true, features = ["serde"] }
 serde = { workspace = true, features = ["derive"] }
 tera = { workspace = true, optional = true }
-thiserror = "2.0.16"
+thiserror = "2.0.18"
 timesimp = { workspace = true, optional = true }
 
 [features]

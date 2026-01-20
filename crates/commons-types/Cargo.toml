@@ -17,7 +17,7 @@ commons-macros.path = "../commons-macros"
 diesel = { workspace = true, optional = true }
 node-semver.workspace = true
 serde = { workspace = true, features = ["derive"] }
-thiserror = "2.0.17"
+thiserror = "2.0.18"
 uuid = { version = "1.18.1", features = ["serde"] }
 
 [features]
