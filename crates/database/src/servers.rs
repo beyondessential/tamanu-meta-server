@@ -36,6 +36,9 @@ pub struct MetaTicket {
 	pub kind: Option<ServerKind>,
 	/// Server rank hint, if provided by the ticket.
 	pub rank: Option<ServerRank>,
+	/// The public key of the parent (central) server, in SubjectPublicKeyInfo PEM format.
+	#[serde(rename = "centralPublicKey")]
+	pub central_public_key: Option<String>,
 }
 
 impl MetaTicket {
@@ -58,8 +61,13 @@ impl MetaTicket {
 
 	/// Extract the raw SubjectPublicKeyInfo DER bytes from the PEM public key.
 	pub fn public_key_der(&self) -> Result<Vec<u8>> {
-		let pem = self.public_key.trim();
+		Self::pem_to_der(&self.public_key)
+	}
+
+	/// Decode a SubjectPublicKeyInfo PEM string to raw DER bytes.
+	pub fn pem_to_der(pem: &str) -> Result<Vec<u8>> {
 		let body = pem
+			.trim()
 			.lines()
 			.filter(|l| !l.starts_with("-----"))
 			.collect::<Vec<_>>()
@@ -220,6 +228,24 @@ impl Server {
 		let rank = ticket.rank.or(rank);
 		use crate::schema::servers;
 
+		// Look up parent server by its public key if provided.
+		let parent_server_id = if let Some(ref pem) = ticket.central_public_key {
+			let central_key_der = MetaTicket::pem_to_der(pem)?;
+			if let Some(central_device) =
+				crate::devices::Device::from_key(db, &central_key_der).await?
+			{
+				Server::get_by_device_id(db, central_device.id)
+					.await?
+					.into_iter()
+					.find(|s| s.kind == ServerKind::Central)
+					.map(|s| s.id)
+			} else {
+				None
+			}
+		} else {
+			None
+		};
+
 		// Parse the public key bytes we'll use to find/create the device.
 		let key_der = ticket.public_key_der()?;
 
@@ -264,7 +290,7 @@ impl Server {
 			kind,
 			rank,
 			device_id: Some(device.id),
-			parent_server_id: None,
+			parent_server_id,
 			listed: false,
 			cloud,
 			geolocation: None,
