@@ -242,6 +242,13 @@ impl Server {
 				.map_err(|e| AppError::custom(format!("Invalid canonical URL: {e}")))?,
 		);
 
+		let cloud = ticket.hosting.as_deref().map(|h| {
+			matches!(
+				h,
+				"ec2" | "azure" | "gce" | "gcp" | "digitalocean" | "oracle" | "cloudstack"
+			)
+		});
+
 		let server_value = Server {
 			id: ticket.server_id,
 			name: Some(ticket.hostname.clone()),
@@ -251,7 +258,7 @@ impl Server {
 			device_id: Some(device.id),
 			parent_server_id: None,
 			listed: false,
-			cloud: None,
+			cloud,
 			geolocation: None,
 		};
 
