@@ -175,11 +175,12 @@ mod ssr {
 	use commons_errors::{AppError, Result};
 	use futures::future::join;
 
+	use commons_types::server::MetaTicket;
 	use commons_types::server::{kind::ServerKind, rank::ServerRank};
 	use database::{
 		Db,
 		devices::{Device, DeviceConnection},
-		servers::{MetaTicket, PartialServer, Server},
+		servers::{PartialServer, Server},
 		statuses::Status,
 		url_field::UrlField,
 		versions::Version,

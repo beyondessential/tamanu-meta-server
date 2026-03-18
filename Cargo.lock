@@ -818,11 +818,13 @@ dependencies = [
 name = "commons-types"
 version = "5.11.3"
 dependencies = [
+ "base64",
  "commons-errors",
  "commons-macros",
  "diesel",
  "node-semver",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
  "uuid",
 ]
