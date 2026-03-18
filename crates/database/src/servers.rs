@@ -32,6 +32,10 @@ pub struct MetaTicket {
 	pub canonical_url: String,
 	/// Hosting type (e.g. "kvm", "cloud").
 	pub hosting: Option<String>,
+	/// Server kind hint, if provided by the ticket.
+	pub kind: Option<ServerKind>,
+	/// Server rank hint, if provided by the ticket.
+	pub rank: Option<ServerRank>,
 }
 
 impl MetaTicket {
@@ -212,6 +216,8 @@ impl Server {
 		kind: ServerKind,
 		rank: Option<ServerRank>,
 	) -> Result<Self> {
+		let kind = ticket.kind.unwrap_or(kind);
+		let rank = ticket.rank.or(rank);
 		use crate::schema::servers;
 
 		// Parse the public key bytes we'll use to find/create the device.
