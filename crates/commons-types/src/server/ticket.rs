@@ -35,8 +35,12 @@ impl MetaTicket {
 	/// Decode a base64-encoded ticket string.
 	pub fn from_base64(input: &str) -> Result<Self> {
 		use base64::Engine as _;
+		let trimmed = input.trim();
 		let json = base64::prelude::BASE64_STANDARD
-			.decode(input.trim())
+			.decode(trimmed)
+			.or_else(|_| base64::prelude::BASE64_STANDARD_NO_PAD.decode(trimmed))
+			.or_else(|_| base64::prelude::BASE64_URL_SAFE.decode(trimmed))
+			.or_else(|_| base64::prelude::BASE64_URL_SAFE_NO_PAD.decode(trimmed))
 			.map_err(|e| AppError::custom(format!("Invalid base64 in ticket: {e}")))?;
 		let ticket: Self = serde_json::from_slice(&json)
 			.map_err(|e| AppError::custom(format!("Invalid ticket JSON: {e}")))?;

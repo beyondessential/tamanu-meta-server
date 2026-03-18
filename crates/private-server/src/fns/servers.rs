@@ -148,7 +148,7 @@ pub async fn update(server_id: Uuid, data: ServerDataUpdate) -> Result<()> {
 	ssr::update(server_id, data).await
 }
 
-#[server]
+#[server(input = leptos::server_fn::codec::Json)]
 pub async fn import_ticket(
 	ticket_b64: String,
 	kind: ServerKind,
