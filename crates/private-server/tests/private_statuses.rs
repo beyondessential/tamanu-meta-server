@@ -91,9 +91,18 @@ struct DeviceConnectionData {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn status_page() {
+async fn status_page_redirect() {
 	commons_tests::server::run(async |_conn, _, private| {
 		let response = private.get("/").await;
+		response.assert_status(StatusCode::PERMANENT_REDIRECT);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn status_page() {
+	commons_tests::server::run(async |_conn, _, private| {
+		let response = private.get("/status").await;
 		response.assert_status_ok();
 		response.assert_header("content-type", "text/html; charset=utf-8");
 	})
