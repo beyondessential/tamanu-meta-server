@@ -1,4 +1,4 @@
-use commons_types::server::{kind::ServerKind, rank::ServerRank};
+use commons_types::server::{MetaTicket, kind::ServerKind, rank::ServerRank};
 use leptos::prelude::*;
 use leptos_router::hooks::use_navigate;
 
@@ -83,6 +83,23 @@ fn ImportTicketForm() -> impl IntoView {
 	let (ticket, set_ticket) = signal(String::new());
 	let (kind, set_kind) = signal(ServerKind::Facility);
 	let (rank, set_rank) = signal(Option::<ServerRank>::None);
+
+	// Parse the ticket client-side to extract any kind/rank hints baked into it.
+	let parsed_ticket = Memo::new(move |_| MetaTicket::from_base64(&ticket.get()).ok());
+
+	let kind_from_ticket = Memo::new(move |_| parsed_ticket.get()?.kind);
+
+	let rank_from_ticket = Memo::new(move |_| parsed_ticket.get()?.rank);
+
+	// When the ticket supplies kind/rank, override the user's selection.
+	Effect::new(move |_| {
+		if let Some(k) = kind_from_ticket.get() {
+			set_kind.set(k);
+		}
+		if let Some(r) = rank_from_ticket.get() {
+			set_rank.set(Some(r));
+		}
+	});
 	let (open, set_open) = signal(false);
 	let (error, set_error) = signal(Option::<String>::None);
 
@@ -159,6 +176,36 @@ fn ImportTicketForm() -> impl IntoView {
 								/>
 							</div>
 						</div>
+						{move || parsed_ticket.get().map(|t| view! {
+							<table class="table is-fullwidth is-narrow mb-4">
+								<tbody>
+									<tr>
+										<th>"Server ID"</th>
+										<td class="is-family-monospace">{t.server_id.to_string()}</td>
+									</tr>
+									<tr>
+										<th>"Host"</th>
+										<td class="is-family-monospace">{t.canonical_url.clone()}</td>
+									</tr>
+									<tr>
+										<th>"Hostname"</th>
+										<td>{t.hostname.clone()}</td>
+									</tr>
+									{t.tailscale_ip.map(|ip| view! {
+										<tr>
+											<th>"Tailscale IP"</th>
+											<td class="is-family-monospace">{ip}</td>
+										</tr>
+									})}
+									{t.hosting.map(|h| view! {
+										<tr>
+											<th>"Hosting"</th>
+											<td>{h}</td>
+										</tr>
+									})}
+								</tbody>
+							</table>
+						})}
 						<div class="field is-grouped">
 							<div class="field mr-4">
 								<label class="label">"Kind"</label>
@@ -166,6 +213,7 @@ fn ImportTicketForm() -> impl IntoView {
 									<div class="select">
 										<select
 											prop:value=move || kind.get().to_string()
+											disabled=move || kind_from_ticket.get().is_some()
 											on:change=move |ev| set_kind.set(
 												event_target_value(&ev).parse().unwrap_or_default()
 											)
@@ -182,6 +230,7 @@ fn ImportTicketForm() -> impl IntoView {
 									<div class="select">
 										<select
 											prop:value=move || rank.get().map_or_else(String::new, |r| r.to_string())
+											disabled=move || rank_from_ticket.get().is_some()
 											on:change=move |ev| set_rank.set(event_target_value(&ev).parse().ok())
 										>
 											<option value="">"unranked"</option>
