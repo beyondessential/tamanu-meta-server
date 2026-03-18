@@ -30,7 +30,20 @@ pub fn Search() -> impl IntoView {
 
 	view! {
 		<div class="box mt-3">
-			<h2 class="is-size-3">"Search devices"</h2>
+			<header class="level">
+				<div class="level-left">
+					<h2 class="level-item is-size-4">"Search devices"</h2>
+				</div>
+				<Transition>
+					{move || {
+						is_admin.get().unwrap_or(false).then(|| view! {
+							<div class="level-right">
+								<ImportTicketForm />
+							</div>
+						})
+					}}
+				</Transition>
+			</header>
 			<div class="field">
 				<div class="control">
 					<input
@@ -69,12 +82,6 @@ pub fn Search() -> impl IntoView {
 				})
 			}}
 		</Suspense>
-
-		<Transition>
-			{move || {
-				is_admin.get().unwrap_or(false).then(|| view! { <ImportTicketForm /> })
-			}}
-		</Transition>
 	}
 }
 
@@ -142,14 +149,12 @@ fn ImportTicketForm() -> impl IntoView {
 	};
 
 	view! {
-		<section class="section pb-0">
-			<button
-				class="button is-primary"
-				on:click=move |_| set_open.set(true)
-			>
-				"Import Ticket"
-			</button>
-		</section>
+		<button
+			class="button is-primary"
+			on:click=move |_| set_open.set(true)
+		>
+			"Import Ticket"
+		</button>
 
 		<div class="modal" class:is-active=move || open.get()>
 			<div class="modal-background" on:click=move |_| set_open.set(false) />
