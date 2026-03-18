@@ -1,7 +1,7 @@
 use commons_errors::{AppError, Result};
 use commons_types::{
 	geo::GeoPoint,
-	server::{kind::ServerKind, rank::ServerRank},
+	server::{kind::ServerKind, rank::ServerRank, ticket::MetaTicket},
 };
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -139,6 +139,114 @@ impl Server {
 			.select(Self::as_select())
 			.filter(crate::schema::servers::host.eq(host))
 			.first(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// Find or create the device for a ticket, then upsert the server record.
+	///
+	/// Errors if a server already exists with `ticket.canonical_url` as its host
+	/// but a different ID than `ticket.server_id`.
+	pub async fn upsert_from_ticket(
+		db: &mut AsyncPgConnection,
+		ticket: &MetaTicket,
+		kind: ServerKind,
+		rank: Option<ServerRank>,
+	) -> Result<Self> {
+		let kind = ticket.kind.unwrap_or(kind);
+		let rank = ticket.rank.or(rank);
+		use crate::schema::servers;
+
+		// Look up parent server by its public key if provided.
+		let parent_server_id = if let Some(ref pem) = ticket.central_public_key {
+			let central_key_der = MetaTicket::pem_to_der(pem)?;
+			if let Some(central_device) =
+				crate::devices::Device::from_key(db, &central_key_der).await?
+			{
+				Server::get_by_device_id(db, central_device.id)
+					.await?
+					.into_iter()
+					.find(|s| s.kind == ServerKind::Central)
+					.map(|s| s.id)
+			} else {
+				None
+			}
+		} else {
+			None
+		};
+
+		// Parse the public key bytes we'll use to find/create the device.
+		let key_der = ticket.public_key_der()?;
+
+		// Conflict check: is there already a server with this host but a different ID?
+		let existing_by_host = Self::get_by_host(db, ticket.canonical_url.clone()).await;
+		match existing_by_host {
+			Ok(existing) if existing.id != ticket.server_id => {
+				return Err(AppError::custom(format!(
+					"A server with host '{}' already exists with a different ID ({})",
+					ticket.canonical_url, existing.id,
+				)));
+			}
+			_ => {}
+		}
+
+		// Find or create the device that owns this key.
+		let device = if let Some(device) = crate::devices::Device::from_key(db, &key_der).await? {
+			device
+		} else {
+			crate::devices::Device::create(db, key_der).await?
+		};
+
+		// Build the server value, preserving any existing fields where applicable.
+		let host = UrlField(
+			ticket
+				.canonical_url
+				.parse()
+				.map_err(|e| AppError::custom(format!("Invalid canonical URL: {e}")))?,
+		);
+
+		let cloud = ticket.hosting.as_deref().map(|h| {
+			matches!(
+				h,
+				"ec2" | "azure" | "gce" | "gcp" | "digitalocean" | "oracle" | "cloudstack"
+			)
+		});
+
+		let server_value = Server {
+			id: ticket.server_id,
+			name: Some(ticket.hostname.clone()),
+			host,
+			kind,
+			rank,
+			device_id: Some(device.id),
+			parent_server_id,
+			listed: false,
+			cloud,
+			geolocation: None,
+		};
+
+		let host_str = server_value.host.0.to_string();
+		let kind_str = server_value.kind.to_string();
+
+		// Upsert: insert or update on conflict.
+		diesel::insert_into(servers::table)
+			.values((
+				servers::id.eq(server_value.id),
+				servers::name.eq(&server_value.name),
+				servers::host.eq(&host_str),
+				servers::kind.eq(&kind_str),
+				servers::device_id.eq(server_value.device_id),
+				servers::listed.eq(server_value.listed),
+			))
+			.on_conflict(servers::id)
+			.do_update()
+			.set((
+				servers::name.eq(&server_value.name),
+				servers::host.eq(&host_str),
+				servers::device_id.eq(server_value.device_id),
+			))
+			.returning(Self::as_select())
+			.get_result(db)
 			.await
 			.map_err(AppError::from)
 	}

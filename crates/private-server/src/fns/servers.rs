@@ -149,6 +149,15 @@ pub async fn update(server_id: Uuid, data: ServerDataUpdate) -> Result<()> {
 }
 
 #[server(input = leptos::server_fn::codec::Json)]
+pub async fn import_ticket(
+	ticket_b64: String,
+	kind: ServerKind,
+	rank: Option<ServerRank>,
+) -> Result<Uuid> {
+	ssr::import_ticket(ticket_b64, kind, rank).await
+}
+
+#[server(input = leptos::server_fn::codec::Json)]
 pub async fn search_parent(
 	query: String,
 	current_server_id: Uuid,
@@ -166,6 +175,7 @@ mod ssr {
 	use commons_errors::{AppError, Result};
 	use futures::future::join;
 
+	use commons_types::server::MetaTicket;
 	use commons_types::server::{kind::ServerKind, rank::ServerRank};
 	use database::{
 		Db,
@@ -180,6 +190,19 @@ mod ssr {
 	use uuid::Uuid;
 
 	use crate::{fns::servers::ServerDataUpdate, state::AppState};
+
+	pub async fn import_ticket(
+		ticket_b64: String,
+		kind: ServerKind,
+		rank: Option<ServerRank>,
+	) -> Result<Uuid> {
+		let db = crate::fns::commons::admin_guard().await?;
+		let mut conn = db.get().await?;
+
+		let ticket = MetaTicket::from_base64(&ticket_b64)?;
+		let server = Server::upsert_from_ticket(&mut conn, &ticket, kind, rank).await?;
+		Ok(server.id)
+	}
 
 	pub async fn count_some(kind: Option<ServerKind>) -> Result<u64> {
 		let state = expect_context::<AppState>();
