@@ -1,3 +1,4 @@
+use commons_types::server::{kind::ServerKind, rank::ServerRank};
 use leptos::prelude::*;
 use leptos_router::hooks::use_navigate;
 
@@ -80,27 +81,33 @@ pub fn Search() -> impl IntoView {
 #[component]
 fn ImportTicketForm() -> impl IntoView {
 	let (ticket, set_ticket) = signal(String::new());
+	let (kind, set_kind) = signal(ServerKind::Facility);
+	let (rank, set_rank) = signal(Option::<ServerRank>::None);
 	let (open, set_open) = signal(false);
 	let (error, set_error) = signal(Option::<String>::None);
 
 	let navigate = use_navigate();
 
-	let do_import = Action::new(move |ticket_b64: &String| {
-		let ticket_b64 = ticket_b64.clone();
-		let navigate = navigate.clone();
-		async move {
-			let result = crate::fns::servers::import_ticket(ticket_b64).await;
+	let do_import = Action::new(
+		move |(ticket_b64, kind, rank): &(String, ServerKind, Option<ServerRank>)| {
+			let ticket_b64 = ticket_b64.clone();
+			let kind = *kind;
+			let rank = *rank;
+			async move { crate::fns::servers::import_ticket(ticket_b64, kind, rank).await }
+		},
+	);
+
+	Effect::new(move |_| {
+		if let Some(result) = do_import.value().get() {
 			match result {
 				Ok(server_id) => {
 					set_open.set(false);
 					set_ticket.set(String::new());
 					set_error.set(None);
 					navigate(&format!("/servers/{server_id}"), Default::default());
-					Ok(server_id)
 				}
 				Err(e) => {
 					set_error.set(Some(e.to_string()));
-					Err(e)
 				}
 			}
 		}
@@ -114,7 +121,7 @@ fn ImportTicketForm() -> impl IntoView {
 			return;
 		}
 		set_error.set(None);
-		do_import.dispatch(value);
+		do_import.dispatch((value, kind.get(), rank.get()));
 	};
 
 	view! {
@@ -150,6 +157,42 @@ fn ImportTicketForm() -> impl IntoView {
 									prop:value=move || ticket.get()
 									on:input=move |ev| set_ticket.set(event_target_value(&ev))
 								/>
+							</div>
+						</div>
+						<div class="field is-grouped">
+							<div class="field mr-4">
+								<label class="label">"Kind"</label>
+								<div class="control">
+									<div class="select">
+										<select
+											prop:value=move || kind.get().to_string()
+											on:change=move |ev| set_kind.set(
+												event_target_value(&ev).parse().unwrap_or_default()
+											)
+										>
+											<option value={ServerKind::Facility}>{ServerKind::Facility}</option>
+											<option value={ServerKind::Central}>{ServerKind::Central}</option>
+										</select>
+									</div>
+								</div>
+							</div>
+							<div class="field">
+								<label class="label">"Rank"</label>
+								<div class="control">
+									<div class="select">
+										<select
+											prop:value=move || rank.get().map_or_else(String::new, |r| r.to_string())
+											on:change=move |ev| set_rank.set(event_target_value(&ev).parse().ok())
+										>
+											<option value="">"unranked"</option>
+											<option value={ServerRank::Production}>{ServerRank::Production}</option>
+											<option value={ServerRank::Clone}>{ServerRank::Clone}</option>
+											<option value={ServerRank::Demo}>{ServerRank::Demo}</option>
+											<option value={ServerRank::Test}>{ServerRank::Test}</option>
+											<option value={ServerRank::Dev}>{ServerRank::Dev}</option>
+										</select>
+									</div>
+								</div>
 							</div>
 						</div>
 						{move || error.get().map(|e| view! {

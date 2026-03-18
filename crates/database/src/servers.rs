@@ -209,6 +209,8 @@ impl Server {
 	pub async fn upsert_from_ticket(
 		db: &mut AsyncPgConnection,
 		ticket: &MetaTicket,
+		kind: ServerKind,
+		rank: Option<ServerRank>,
 	) -> Result<Self> {
 		use crate::schema::servers;
 
@@ -253,8 +255,8 @@ impl Server {
 			id: ticket.server_id,
 			name: Some(ticket.hostname.clone()),
 			host,
-			kind: ServerKind::Facility,
-			rank: None,
+			kind,
+			rank,
 			device_id: Some(device.id),
 			parent_server_id: None,
 			listed: false,

@@ -149,8 +149,12 @@ pub async fn update(server_id: Uuid, data: ServerDataUpdate) -> Result<()> {
 }
 
 #[server]
-pub async fn import_ticket(ticket_b64: String) -> Result<Uuid> {
-	ssr::import_ticket(ticket_b64).await
+pub async fn import_ticket(
+	ticket_b64: String,
+	kind: ServerKind,
+	rank: Option<ServerRank>,
+) -> Result<Uuid> {
+	ssr::import_ticket(ticket_b64, kind, rank).await
 }
 
 #[server(input = leptos::server_fn::codec::Json)]
@@ -186,12 +190,16 @@ mod ssr {
 
 	use crate::{fns::servers::ServerDataUpdate, state::AppState};
 
-	pub async fn import_ticket(ticket_b64: String) -> Result<Uuid> {
+	pub async fn import_ticket(
+		ticket_b64: String,
+		kind: ServerKind,
+		rank: Option<ServerRank>,
+	) -> Result<Uuid> {
 		let db = crate::fns::commons::admin_guard().await?;
 		let mut conn = db.get().await?;
 
 		let ticket = MetaTicket::from_base64(&ticket_b64)?;
-		let server = Server::upsert_from_ticket(&mut conn, &ticket).await?;
+		let server = Server::upsert_from_ticket(&mut conn, &ticket, kind, rank).await?;
 		Ok(server.id)
 	}
 
