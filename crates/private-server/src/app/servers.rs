@@ -19,9 +19,7 @@ pub use detail::Detail;
 pub use edit::Edit;
 
 #[component]
-pub fn Page() -> impl IntoView {
-	provide_meta_context();
-
+fn ServerBreadcrumb() -> impl IntoView {
 	let params = use_params_map();
 	let server_id = move || {
 		params
@@ -38,6 +36,21 @@ pub fn Page() -> impl IntoView {
 	});
 
 	view! {
+		<Transition>{move || {
+			server_name.get().flatten().map(|(id, name)| {
+				view! {
+					<A href=format!("/servers/{id}")>{name}</A>
+				}
+			})
+		}}</Transition>
+	}
+}
+
+#[component]
+pub fn Page() -> impl IntoView {
+	provide_meta_context();
+
+	view! {
 		<Stylesheet id="css-servers" href="/static/servers.css" />
 		<section class="section" id="servers-page">
 			<SubTabs>
@@ -45,13 +58,7 @@ pub fn Page() -> impl IntoView {
 				<A href="facilities">Facility Servers</A>
 
 				<EndTabs slot>
-					<Transition>{move || {
-						server_name.get().flatten().map(|(id, name)| {
-							view! {
-								<A href=format!("/servers/{id}")>{name}</A>
-							}
-						})
-					}}</Transition>
+					<ServerBreadcrumb />
 				</EndTabs>
 			</SubTabs>
 		</section>

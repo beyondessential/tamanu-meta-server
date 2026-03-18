@@ -1,7 +1,7 @@
 use leptos::prelude::*;
 use leptos_meta::{MetaTags, Stylesheet, Title, provide_meta_context};
 use leptos_router::{
-	components::{A, ParentRoute, Redirect, Route, Router, Routes},
+	components::{A, ParentRoute, Route, Router, Routes},
 	path,
 };
 
@@ -78,8 +78,7 @@ pub fn App() -> impl IntoView {
 				<GlobalNav />
 				<Toast>
 					<main class="container">
-						<Routes fallback=|| view! { <Redirect path="/status" /> }>
-							<Route path=path!("") view=|| view! { <Redirect path="/status" /> } />
+						<Routes fallback=|| view! { <></> }>
 							<Route path=path!("status") view=status::Page />
 							<ParentRoute path=path!("servers") view=servers::Page>
 								<Route path=path!("") view=servers::list::Centrals />
@@ -88,10 +87,6 @@ pub fn App() -> impl IntoView {
 								<Route path=path!(":id") view=servers::Detail />
 							</ParentRoute>
 							<ParentRoute path=path!("bestool") view=bestool::Page>
-								<Route
-									path=path!("")
-									view=|| view! { <Redirect path="/bestool/snippets" /> }
-								/>
 								<Route path=path!("snippets") view=bestool::snippets::List />
 								<Route
 									path=path!("snippets/:id")

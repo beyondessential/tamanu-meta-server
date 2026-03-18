@@ -19,9 +19,7 @@ pub use detail::Detail;
 pub use search::Search;
 
 #[component]
-pub fn Page() -> impl IntoView {
-	provide_meta_context();
-
+fn DeviceBreadcrumb() -> impl IntoView {
 	let params = use_params_map();
 	let device_id = move || {
 		params
@@ -38,6 +36,21 @@ pub fn Page() -> impl IntoView {
 	});
 
 	view! {
+		<Transition>{move || {
+			device_name.get().flatten().map(|(id, name)| {
+				view! {
+					<A href=format!("/devices/{id}")>{name}</A>
+				}
+			})
+		}}</Transition>
+	}
+}
+
+#[component]
+pub fn Page() -> impl IntoView {
+	provide_meta_context();
+
+	view! {
 		<Stylesheet id="css-devices" href="/static/devices.css" />
 		<SubTabs>
 			<A href="" exact=true>Search</A>
@@ -45,13 +58,7 @@ pub fn Page() -> impl IntoView {
 			<A href="trusted">Trusted Devices</A>
 
 			<EndTabs slot>
-				<Transition>{move || {
-					device_name.get().flatten().map(|(id, name)| {
-						view! {
-							<A href=format!("/devices/{id}")>{name}</A>
-						}
-					})
-				}}</Transition>
+				<DeviceBreadcrumb />
 			</EndTabs>
 		</SubTabs>
 	}

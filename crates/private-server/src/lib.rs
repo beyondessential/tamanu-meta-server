@@ -9,17 +9,19 @@ pub mod state;
 #[cfg(feature = "ssr")]
 pub fn routes(state: crate::state::AppState) -> commons_errors::Result<axum::routing::Router<()>> {
 	use axum::{
-		extract::ConnectInfo,
-		http::Request,
-		middleware::{self, Next},
-		routing::Router,
+		response::Redirect,
+		routing::{Router, get},
 	};
 	use leptos::prelude::provide_context;
 	use leptos_axum::{LeptosRoutes as _, generate_route_list};
-	use std::net::SocketAddr;
 	use tower_http::services::ServeDir;
 
 	Ok(Router::new()
+		.route("/", get(|| async { Redirect::permanent("/status") }))
+		.route(
+			"/bestool",
+			get(|| async { Redirect::permanent("/bestool/snippets") }),
+		)
 		.nest(
 			"/public",
 			public_server::routes()

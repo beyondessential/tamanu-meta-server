@@ -10,9 +10,7 @@ use crate::fns::bestool::get_snippet;
 pub mod snippets;
 
 #[component]
-pub fn Page() -> impl IntoView {
-	leptos_meta::provide_meta_context();
-
+fn SnippetBreadcrumb() -> impl IntoView {
 	let params = use_params_map();
 	let snippet_id = move || {
 		params
@@ -30,19 +28,28 @@ pub fn Page() -> impl IntoView {
 	});
 
 	view! {
+		<Transition>{move || {
+			snippet_name.get().flatten().map(|(id, name)| {
+				view! {
+					<A href=format!("/bestool/snippets/{id}")>{name}</A>
+				}
+			})
+		}}</Transition>
+	}
+}
+
+#[component]
+pub fn Page() -> impl IntoView {
+	leptos_meta::provide_meta_context();
+
+	view! {
 		<Stylesheet id="css-bestool" href="/static/bestool.css" />
 		<SubTabs>
 			<A href="/bestool/snippets" exact=true>Snippets</A>
 			<span>""</span>
 
 			<EndTabs slot>
-				<Transition>{move || {
-					snippet_name.get().flatten().map(|(id, name)| {
-						view! {
-							<A href=format!("/bestool/snippets/{id}")>{name}</A>
-						}
-					})
-				}}</Transition>
+				<SnippetBreadcrumb />
 			</EndTabs>
 		</SubTabs>
 	}
