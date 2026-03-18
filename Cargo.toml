@@ -70,7 +70,6 @@ site-root = "target/site"
 assets-dir = "static"
 site-addr = "[::1]:8081"
 reload-port = 8082
-env = "DEV"
 bin-package = "private-server"
 bin-features = ["ssr"]
 lib-package = "private-server"
