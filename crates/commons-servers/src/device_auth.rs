@@ -62,21 +62,47 @@ where
 		let mut db = Db::from_ref(state).get().await?;
 
 		let key = {
-			let pem = parts
+			// Prefer x-forwarded-client-cert (Envoy XFCC format) when present,
+			// falling back to mtls-certificate and ssl-client-cert headers.
+			let xfcc_cert = parts
 				.headers
-				.get("mtls-certificate")
-				.or_else(|| parts.headers.get("ssl-client-cert"))
-				.ok_or(AppError::AuthMissingCertificate)
-				.and_then(|s| {
-					percent_encoding::percent_decode(s.as_bytes())
-						.decode_utf8()
-						.map_err(|e| {
-							AppError::AuthInvalidCertificate(format!(
-								"Invalid UTF-8 in certificate: {}",
-								e
-							))
-						})
-				})?;
+				.get("x-forwarded-client-cert")
+				.and_then(|v| v.to_str().ok())
+				.and_then(|v| {
+					// XFCC format: comma-separated elements, each with semicolon-separated fields
+					v.split(',')
+						.next()
+						.unwrap_or("")
+						.split(';')
+						.find_map(|field| field.strip_prefix("Cert="))
+				});
+
+			let pem = if let Some(cert_value) = xfcc_cert {
+				percent_encoding::percent_decode(cert_value.as_bytes())
+					.decode_utf8()
+					.map_err(|e| {
+						AppError::AuthInvalidCertificate(format!(
+							"Invalid UTF-8 in certificate: {}",
+							e
+						))
+					})?
+			} else {
+				parts
+					.headers
+					.get("mtls-certificate")
+					.or_else(|| parts.headers.get("ssl-client-cert"))
+					.ok_or(AppError::AuthMissingCertificate)
+					.and_then(|s| {
+						percent_encoding::percent_decode(s.as_bytes())
+							.decode_utf8()
+							.map_err(|e| {
+								AppError::AuthInvalidCertificate(format!(
+									"Invalid UTF-8 in certificate: {}",
+									e
+								))
+							})
+					})?
+			};
 
 			let (_, der) = parse_x509_pem(pem.as_bytes()).map_err(|e| {
 				AppError::AuthInvalidCertificate(format!("Invalid PEM format: {}", e))
