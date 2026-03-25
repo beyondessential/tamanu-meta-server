@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
+## [5.12.1](https://github.com/beyondessential/tamanu-meta-server/compare/v5.12.0..5.12.1) - 2026-03-25
+
+
+- **Feature:** Prefer x-forwarded-client-cert (Envoy XFCC) header for client cert auth (#105) - ([b60e913](https://github.com/beyondessential/tamanu-meta-server/commit/b60e9132ec4397a85c7a3841a2cc9352dc265ce6))
+
+---
+## [5.12.0](https://github.com/beyondessential/tamanu-meta-server/compare/v5.11.3..v5.12.0) - 2026-03-18
+
+
+- **Repo:** Release - ([fcd64bd](https://github.com/beyondessential/tamanu-meta-server/commit/fcd64bd104a2483c582d5311e64d00d106f2827c))
+
+---
 ## [5.11.3](https://github.com/beyondessential/tamanu-meta-server/compare/v5.11.2..v5.11.3) - 2025-12-24
 
 
