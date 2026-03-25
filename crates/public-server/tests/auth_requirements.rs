@@ -172,6 +172,39 @@ async fn auth_with_ssl_client_cert_header() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn auth_with_xfcc_header_invalid_cert() {
+	commons_tests::server::run(async |_conn, public, _| {
+		// XFCC header present but Cert= field contains invalid certificate data
+		let response = public
+			.post("/artifacts/1.0.0/mobile/android")
+			.add_header(
+				"x-forwarded-client-cert",
+				"Hash=abc123;Cert=invalid-cert-data",
+			)
+			.text("https://example.com/download.apk")
+			.await;
+
+		response.assert_status_not_ok();
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn auth_xfcc_header_missing_cert_field_falls_back() {
+	commons_tests::server::run(async |_conn, public, _| {
+		// XFCC header present but no Cert= field — should fall back and fail with missing cert
+		let response = public
+			.post("/artifacts/1.0.0/mobile/android")
+			.add_header("x-forwarded-client-cert", "Hash=abc123;By=spiffe://example.com")
+			.text("https://example.com/download.apk")
+			.await;
+
+		response.assert_status_not_ok();
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn status_unauthorized_server_device_mismatch() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		// Create server without device association

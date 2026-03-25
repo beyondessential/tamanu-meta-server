@@ -3,6 +3,28 @@ use commons_tests::{diesel_async::SimpleAsyncConnection, server::make_certificat
 // Tests to verify that device key authentication works with the new split schema
 
 #[tokio::test(flavor = "multi_thread")]
+async fn device_key_authentication_works_with_xfcc_header() {
+	commons_tests::server::run_with_device_auth("releaser", async |mut conn, cert, _device_id, public, _| {
+		conn.batch_execute(
+			"INSERT INTO versions (major, minor, patch, changelog, status) VALUES (1, 0, 0, 'Test version', 'published')",
+		)
+		.await
+		.unwrap();
+
+		// cert is already percent-encoded PEM; wrap it in Envoy XFCC format
+		let xfcc = format!("Hash=abc123;Cert={}", cert);
+		let response = public
+			.post("/versions/1.0.1")
+			.add_header("x-forwarded-client-cert", &xfcc)
+			.text("changelog for 1.0.1")
+			.await;
+
+		response.assert_status_ok();
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn device_key_authentication_works() {
 	commons_tests::server::run_with_device_auth("releaser", async |mut conn, cert, _device_id, public, _| {
 		// Create a version first so we can test authenticated endpoint
