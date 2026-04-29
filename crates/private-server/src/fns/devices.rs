@@ -4,6 +4,7 @@ use commons_errors::Result;
 use commons_types::{Uuid, device::DeviceRole};
 use jiff::Timestamp;
 use leptos::server;
+use leptos::server_fn::codec::Json;
 use serde::{Deserialize, Serialize};
 
 use crate::fns::servers::ServerInfo;
@@ -61,17 +62,17 @@ pub struct DeviceConnectionData {
 	pub user_agent: Option<String>,
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn get_device_by_id(device_id: Uuid) -> Result<DeviceInfo> {
 	ssr::get_device_by_id(device_id).await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn get_device_name_by_id(device_id: Uuid) -> Result<String> {
 	ssr::get_device_by_id(device_id).await.map(|d| d.name())
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn list_untrusted(
 	limit: Option<u64>,
 	offset: Option<u64>,
@@ -79,22 +80,22 @@ pub async fn list_untrusted(
 	ssr::list_untrusted(limit, offset).await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn get_servers_for_device(device_id: Uuid) -> Result<Vec<ServerInfo>> {
 	ssr::get_servers_for_device(device_id).await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn get_past_server_associations(device_id: Uuid) -> Result<Vec<ServerInfo>> {
 	ssr::get_past_server_associations(device_id).await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn count_untrusted() -> Result<u64> {
 	ssr::count_untrusted().await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn connection_history(
 	device_id: Uuid,
 	limit: Option<u64>,
@@ -103,42 +104,42 @@ pub async fn connection_history(
 	ssr::connection_history(device_id, limit, offset).await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn connection_count(device_id: Uuid) -> Result<u64> {
 	ssr::connection_count(device_id).await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn trust(device_id: Uuid, role: DeviceRole) -> Result<()> {
 	ssr::trust(device_id, role).await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn list_trusted(limit: Option<u64>, offset: Option<u64>) -> Result<Vec<Arc<DeviceInfo>>> {
 	ssr::list_trusted(limit, offset).await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn count_trusted() -> Result<u64> {
 	ssr::count_trusted().await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn untrust(device_id: Uuid) -> Result<()> {
 	ssr::untrust(device_id).await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn update_role(device_id: Uuid, role: DeviceRole) -> Result<()> {
 	ssr::update_role(device_id, role).await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn search(query: String) -> Result<Vec<Arc<DeviceInfo>>> {
 	ssr::search(query).await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn update_key_name(key_id: Uuid, name: Option<String>) -> Result<()> {
 	ssr::update_key_name(key_id, name).await
 }
