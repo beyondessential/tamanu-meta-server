@@ -37,8 +37,8 @@ This unblocks the React client and is a tractable mechanical change. Audit the 5
 Create the new frontend project at `/private-web/` (repo root). Tooling:
 - Vite + `@vitejs/plugin-react`
 - TypeScript
-- React 18+
-- MUI v9 + emotion (matches seedling's stack)
+- **React 19** (stable since late 2024, no reason to start on 18)
+- MUI v9 — **without writing emotion in our own code**. MUI internally uses emotion, so it's a transitive dep regardless, but we don't import `@emotion/styled` or `@emotion/react` ourselves; we stick to MUI's prebuilt components and the `sx` prop. If we end up wanting our own components we revisit (Pigment CSS or plain CSS modules).
 - `react-router-dom` v7
 - A neutral data-fetching hook (`useApi` or `useRequest` — exact name TBD, **not** `useOi`)
 - Theme provider with light/dark detection
