@@ -1,6 +1,7 @@
 use commons_errors::Result;
 use jiff::Timestamp;
 use leptos::server;
+use leptos::server_fn::codec::Json;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
@@ -18,12 +19,12 @@ pub struct SqlResult {
 	pub execution_time_ms: u64,
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn is_sql_available() -> Result<bool> {
 	ssr::is_sql_available().await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn execute_query(query: SqlQuery) -> Result<SqlResult> {
 	ssr::execute_query(query).await
 }
@@ -36,17 +37,17 @@ pub struct SqlHistoryEntry {
 	pub created_at: Timestamp,
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn get_last_user_query() -> Result<Option<String>> {
 	ssr::get_last_user_query().await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn get_query_history_count() -> Result<u64> {
 	ssr::get_query_history_count().await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn get_query_history(offset: u64, limit: Option<u64>) -> Result<Vec<SqlHistoryEntry>> {
 	ssr::get_query_history(offset, limit).await
 }
