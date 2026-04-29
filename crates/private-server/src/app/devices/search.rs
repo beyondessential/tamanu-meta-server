@@ -1,4 +1,4 @@
-use commons_types::server::{MetaTicket, kind::ServerKind, rank::ServerRank};
+use commons_types::server::{CanopyTicket, kind::ServerKind, rank::ServerRank};
 use leptos::prelude::*;
 use leptos_router::hooks::use_navigate;
 
@@ -92,7 +92,7 @@ fn ImportTicketForm() -> impl IntoView {
 	let (rank, set_rank) = signal(Option::<ServerRank>::None);
 
 	// Parse the ticket client-side to extract any kind/rank hints baked into it.
-	let parsed_ticket = Memo::new(move |_| MetaTicket::from_base64(&ticket.get()).ok());
+	let parsed_ticket = Memo::new(move |_| CanopyTicket::from_base64(&ticket.get()).ok());
 
 	let kind_from_ticket = Memo::new(move |_| parsed_ticket.get()?.kind);
 
@@ -160,7 +160,7 @@ fn ImportTicketForm() -> impl IntoView {
 			<div class="modal-background" on:click=move |_| set_open.set(false) />
 			<div class="modal-card">
 				<header class="modal-card-head">
-					<p class="modal-card-title">"Import Meta Ticket"</p>
+					<p class="modal-card-title">"Import Canopy Ticket"</p>
 					<button
 						class="delete"
 						aria-label="close"
@@ -175,7 +175,7 @@ fn ImportTicketForm() -> impl IntoView {
 								<textarea
 									class="textarea is-family-monospace"
 									rows="5"
-									placeholder="Paste the base64-encoded Meta Ticket here..."
+									placeholder="Paste the base64-encoded Canopy Ticket here..."
 									prop:value=move || ticket.get()
 									on:input=move |ev| set_ticket.set(event_target_value(&ev))
 								/>

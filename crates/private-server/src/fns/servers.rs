@@ -175,7 +175,7 @@ mod ssr {
 	use commons_errors::{AppError, Result};
 	use futures::future::join;
 
-	use commons_types::server::MetaTicket;
+	use commons_types::server::CanopyTicket;
 	use commons_types::server::{kind::ServerKind, rank::ServerRank};
 	use database::{
 		Db,
@@ -199,7 +199,7 @@ mod ssr {
 		let db = crate::fns::commons::admin_guard().await?;
 		let mut conn = db.get().await?;
 
-		let ticket = MetaTicket::from_base64(&ticket_b64)?;
+		let ticket = CanopyTicket::from_base64(&ticket_b64)?;
 		let server = Server::upsert_from_ticket(&mut conn, &ticket, kind, rank).await?;
 		Ok(server.id)
 	}

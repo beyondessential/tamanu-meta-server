@@ -70,7 +70,7 @@ pub fn ServerKindBadge(kind: ServerKind) -> impl IntoView {
 		<span class={format!("level-item tag is-capitalized {}", match kind {
 			ServerKind::Central => "is-link",
 			ServerKind::Facility => "is-info",
-			ServerKind::Meta => ""
+			ServerKind::Canopy => ""
 		})}>{kind}</span>
 	}
 }

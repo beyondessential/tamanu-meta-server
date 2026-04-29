@@ -18,7 +18,7 @@ pub enum ServerKind {
 	#[default]
 	Central,
 	Facility,
-	Meta,
+	Canopy,
 }
 
 impl Display for ServerKind {
@@ -26,7 +26,7 @@ impl Display for ServerKind {
 		match self {
 			ServerKind::Central => write!(f, "central"),
 			ServerKind::Facility => write!(f, "facility"),
-			ServerKind::Meta => write!(f, "meta"),
+			ServerKind::Canopy => write!(f, "canopy"),
 		}
 	}
 }
@@ -50,7 +50,7 @@ impl FromStr for ServerKind {
 		match value.to_ascii_lowercase().as_ref() {
 			"tamanu sync server" | "central" => Ok(Self::Central),
 			"tamanu lan server" | "facility" => Ok(Self::Facility),
-			"meta" => Ok(Self::Meta),
+			"canopy" => Ok(Self::Canopy),
 			s => Err(ServerKindFromStringError(s.into())),
 		}
 	}
