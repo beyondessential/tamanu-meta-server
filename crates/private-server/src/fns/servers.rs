@@ -11,6 +11,7 @@ use commons_types::{
 use jiff::Timestamp;
 use leptos::serde_json::Value as JsonValue;
 use leptos::server;
+use leptos::server_fn::codec::Json;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -97,12 +98,12 @@ where
 	Deserialize::deserialize(deserializer).map(Some)
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn count_some(kind: Option<ServerKind>) -> Result<u64> {
 	ssr::count_some(kind).await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn list_some(
 	kind: Option<ServerKind>,
 	offset: u64,
@@ -113,42 +114,42 @@ pub async fn list_some(
 		.map(|v| v.into_iter().map(Arc::new).collect())
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn list_all() -> Result<Vec<ServerInfo>> {
 	ssr::list_some(None, 0, None).await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn list_centrals() -> Result<Vec<ServerInfo>> {
 	ssr::list_some(Some(ServerKind::Central), 0, None).await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn list_facilities() -> Result<Vec<ServerInfo>> {
 	ssr::list_some(Some(ServerKind::Facility), 0, None).await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn get_name(server_id: Uuid) -> Result<String> {
 	ssr::get_name(server_id).await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn get_info(server_id: Uuid) -> Result<ServerInfo> {
 	ssr::get_info(server_id).await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn get_detail(server_id: Uuid) -> Result<ServerDetailData> {
 	ssr::get_detail(server_id).await
 }
 
-#[server(input = leptos::server_fn::codec::Json)]
+#[server(input = Json)]
 pub async fn update(server_id: Uuid, data: ServerDataUpdate) -> Result<()> {
 	ssr::update(server_id, data).await
 }
 
-#[server(input = leptos::server_fn::codec::Json)]
+#[server(input = Json)]
 pub async fn import_ticket(
 	ticket_b64: String,
 	kind: ServerKind,
@@ -157,7 +158,7 @@ pub async fn import_ticket(
 	ssr::import_ticket(ticket_b64, kind, rank).await
 }
 
-#[server(input = leptos::server_fn::codec::Json)]
+#[server(input = Json)]
 pub async fn search_parent(
 	query: String,
 	current_server_id: Uuid,
