@@ -132,7 +132,7 @@ fn DeviceDetail(device_info: DeviceInfo, set_refresh_trigger: WriteSignal<i32>) 
 	});
 
 	view! {
-		<Title text={ let name = device_info.name(); move || format!("Tamanu Meta Device {name}") } />
+		<Title text={ let name = device_info.name(); move || format!("Canopy Device {name}") } />
 		<h1 class="is-size-3">"Device "{device_info.name()}</h1>
 		<div class="box">
 			<div class="info-grid">

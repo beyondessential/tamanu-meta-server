@@ -53,7 +53,7 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
 				<AutoReload options=options.clone() />
 				<HydrationScripts options />
 				<MetaTags />
-				<Title text="Tamanu Meta" />
+				<Title text="Canopy" />
 			</head>
 			<body>
 				<App />

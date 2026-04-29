@@ -16,7 +16,7 @@ impl AppState {
 		let conf = get_configuration(None).unwrap();
 
 		let ro_pool = if let Ok(url) = std::env::var("RO_DATABASE_URL") {
-			(bestool_postgres::pool::create_pool(&url, "tamanu-meta-playground").await).ok()
+			(bestool_postgres::pool::create_pool(&url, "canopy-playground").await).ok()
 		} else {
 			None
 		};
