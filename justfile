@@ -1,8 +1,8 @@
-# Tamanu Meta Server Development Commands
+# Canopy Development Commands
 # Default database URL (can be overridden)
 
-export DATABASE_URL := env('DATABASE_URL', 'postgres://localhost/tamanu_meta')
-export RO_DATABASE_URL := env('RO_DATABASE_URL', 'postgres://localhost/tamanu_meta')
+export DATABASE_URL := env('DATABASE_URL', 'postgres://localhost/canopy')
+export RO_DATABASE_URL := env('RO_DATABASE_URL', 'postgres://localhost/canopy')
 
 # Environment variables for Leptos tests
 
@@ -25,7 +25,7 @@ check:
 
 # Build the project Docker image
 build-image:
-    docker build -t tamanu-meta-server .
+    docker build -t canopy .
 
 # Run the public server and reload on change
 watch-public: _copy-bulma
@@ -113,7 +113,7 @@ install-deps:
     cargo binstall -y cargo-nextest cargo-leptos leptosfmt cargo-release git-cliff watchexec-cli diesel_cli
 
 # Download database from Kubernetes
-download-db dbname namespace="tamanu-meta-dev" pod="meta-db-1" output="app.dump":
+download-db dbname namespace="canopy-dev" pod="meta-db-1" output="app.dump":
     dropdb {{ dbname }} || true
     createdb {{ dbname }} || true
     kubectl exec -n {{ namespace }} {{ pod }} -c postgres -- pg_dump -Fc -d app > {{ output }}

@@ -159,16 +159,16 @@ jobs:
       - uses: docker/metadata-action@v5
         id: meta
         with:
-          images: ghcr.io/beyondessential/tamanu-meta
+          images: ghcr.io/beyondessential/canopy
           tags: |
             type=semver,value=v${{ steps.version.outputs.version }},pattern={{version}}
             type=semver,value=v${{ steps.version.outputs.version }},pattern={{major}}.{{minor}}
             type=semver,value=v${{ steps.version.outputs.version }},pattern={{major}}
           labels: |
             org.opencontainers.image.vendor=BES
-            org.opencontainers.image.title=Tamanu Meta Server
+            org.opencontainers.image.title=Canopy
             org.opencontainers.image.url=https://www.bes.au/products/tamanu/
-            org.opencontainers.image.source=https://github.com/beyondessential/tamanu-meta-server/
+            org.opencontainers.image.source=https://github.com/beyondessential/canopy/
             org.opencontainers.image.version=${{ steps.version.outputs.version }}
             org.opencontainers.image.licenses=GPL-3.0-or-later
 

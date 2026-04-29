@@ -1,4 +1,4 @@
-# Agent Rules for tamanu-meta-server
+# Agent Rules for canopy
 
 Avoid writing large summaries of actions taken when done.
 
