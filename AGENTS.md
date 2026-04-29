@@ -83,6 +83,10 @@ mod ssr {
 - Run specific tests: `just test-name <test_name>`
 - Verify no compilation warnings in tests and main code
 
+## Version Control
+- If the working copy is a jujutsu repo (a `.jj` directory exists at the repo root), prefer `jj` commands over `git` for VCS operations (status, diff, log, commit/describe, etc.). The repo may be colocated with git, but `jj` is the source of truth for local work.
+- If there is no `.jj` directory, use `git` as normal.
+
 ## Troubleshooting and common mistakes
 - Always use just for tests, never use `cargo test`.
 - Unless you've done wide-ranging changes, prefer to test specific packages with `just test-package <package_name>` instead of the full test suite.
