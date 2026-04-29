@@ -37,12 +37,12 @@ jobs:
           tool: cargo-nextest
       - run: |
           sudo systemctl start postgresql.service
-          sudo -u postgres psql --command="CREATE ROLE meta SUPERUSER LOGIN PASSWORD 'meta'"
-          sudo -u postgres createdb --owner=meta meta
+          sudo -u postgres psql --command="CREATE ROLE canopy SUPERUSER LOGIN PASSWORD 'canopy'"
+          sudo -u postgres createdb --owner=canopy canopy
       - uses: Swatinem/rust-cache@v2
       - run: cargo nextest run
         env:
-          DATABASE_URL: postgresql://meta:meta@localhost:5432/meta
+          DATABASE_URL: postgresql://canopy:canopy@localhost:5432/canopy
 
   clippy:
     name: Clippy
