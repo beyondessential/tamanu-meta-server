@@ -1,14 +1,15 @@
 use commons_errors::Result;
 use leptos::server;
+use leptos::server_fn::codec::Json;
 
-#[server]
+#[server(input = Json)]
 pub async fn public_url() -> Result<Option<String>> {
 	use std::env;
 
 	Ok(env::var("PUBLIC_URL").ok())
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn server_versions_url() -> Result<Option<String>> {
 	use std::env;
 
@@ -19,7 +20,7 @@ pub async fn server_versions_url() -> Result<Option<String>> {
 	})())
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn is_current_user_admin() -> Result<bool> {
 	use crate::state::AppState;
 	use commons_servers::tailscale_auth::TailscaleAdmin;
