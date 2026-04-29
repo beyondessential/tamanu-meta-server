@@ -18,9 +18,9 @@ The reference for patterns (build pipeline, SPA fallback, `--dev-no-auth`) is `~
 
 ### Phase 1 — backend prep (no React yet)
 
-**1a. `--dev-no-auth` flag for private-server.**
+**1a. Dev auth bypass — already in place.**
 
-Add a CLI flag (or env var) to private-server that, when set and the bind is a loopback address, makes `admin_guard()` and `is_current_user_admin()` return a synthetic admin without requiring Tailscale headers. Refuse non-loopback binds when the flag is set. Land before the JSON sweep so local dev with Vite proxy works without Tailscale.
+`commons-servers::tailscale_auth::TailscaleAdmin` already short-circuits to a synthetic `admin@localhost` user under `cfg!(debug_assertions)` (i.e. `cargo run` / `cargo test`). The existing tests rely on this. No new flag is needed for the React dev workflow because `cargo run` of private-server already accepts unauthenticated requests. If a release-build bypass becomes necessary later (e.g. staging), revisit then.
 
 **1b. JSON-everywhere for server functions.**
 
