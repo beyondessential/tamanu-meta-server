@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use commons_errors::Result;
 use leptos::server;
+use leptos::server_fn::codec::Json;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -21,12 +22,12 @@ pub struct BestoolSnippetDetail {
 	pub editor: String,
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn count_snippets() -> Result<u64> {
 	ssr::count_snippets().await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn list_snippets(
 	offset: u64,
 	limit: Option<u64>,
@@ -34,22 +35,22 @@ pub async fn list_snippets(
 	ssr::list_snippets(offset, limit).await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn create_snippet(name: String, description: Option<String>, sql: String) -> Result<()> {
 	ssr::create_snippet(name, description, sql).await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn get_snippet(id: Uuid) -> Result<BestoolSnippetDetail> {
 	ssr::get_snippet(id).await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn get_latest_snippet_id(id: Uuid) -> Result<Uuid> {
 	ssr::get_latest_snippet_id(id).await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn update_snippet(
 	id: Uuid,
 	name: String,
@@ -59,7 +60,7 @@ pub async fn update_snippet(
 	ssr::update_snippet(id, name, description, sql).await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn delete_snippet(id: Uuid) -> Result<()> {
 	ssr::delete_snippet(id).await
 }
