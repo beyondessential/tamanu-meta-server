@@ -6,6 +6,7 @@ use commons_types::{
 	version::VersionStr,
 };
 use leptos::server;
+use leptos::server_fn::codec::Json;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -42,18 +43,18 @@ pub struct ServerStatusData {
 	pub timezone: Option<String>,
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn summary() -> Result<SummaryData> {
 	ssr::summary().await
 }
 
 pub type ServerGroupedIdsOutput = Result<BTreeMap<ServerRank, Vec<Uuid>>>;
-#[server]
+#[server(input = Json)]
 pub async fn server_grouped_ids() -> ServerGroupedIdsOutput {
 	ssr::server_grouped_ids().await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn server_details(server_id: Uuid) -> Result<CentralServerCard> {
 	ssr::server_details(server_id).await
 }
