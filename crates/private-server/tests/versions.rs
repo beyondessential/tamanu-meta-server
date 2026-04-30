@@ -22,6 +22,7 @@ async fn test_get_grouped_versions() {
 		// Test the server function endpoint
 		let response = private
 			.post("/api/private_server/fns/versions/get_grouped_versions")
+			.json(&serde_json::json!({}))
 			.await;
 
 		assert_eq!(response.status_code(), 200);

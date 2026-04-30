@@ -2,6 +2,7 @@ use commons_errors::Result;
 use commons_types::version::VersionStatus;
 use jiff::Timestamp;
 use leptos::server;
+use leptos::server_fn::codec::Json;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -64,37 +65,37 @@ pub struct ArtifactData {
 	pub is_used_in_public_api: bool,
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn get_grouped_versions() -> Result<Vec<MinorVersionGroup>> {
 	ssr::get_grouped_versions().await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn get_version_detail(version: String) -> Result<VersionDetail> {
 	ssr::get_version_detail(version).await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn get_version_artifacts(version: String) -> Result<Vec<ArtifactData>> {
 	ssr::get_version_artifacts(version).await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn get_artifacts_by_version_id(version_id: Uuid) -> Result<Vec<ArtifactData>> {
 	ssr::get_artifacts_by_version_id(version_id).await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn update_version_status(version: String, status: String) -> Result<()> {
 	ssr::update_version_status(version, status).await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn update_version_changelog(version: String, changelog: String) -> Result<()> {
 	ssr::update_version_changelog(version, changelog).await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn update_artifact(
 	artifact_id: Uuid,
 	artifact_type: String,
@@ -104,7 +105,7 @@ pub async fn update_artifact(
 	ssr::update_artifact(artifact_id, artifact_type, platform, download_url).await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn create_artifact(
 	version_id: Uuid,
 	artifact_type: String,
@@ -114,7 +115,7 @@ pub async fn create_artifact(
 	ssr::create_artifact(version_id, artifact_type, platform, download_url).await
 }
 
-#[server]
+#[server(input = Json)]
 pub async fn delete_artifact(artifact_id: Uuid) -> Result<()> {
 	ssr::delete_artifact(artifact_id).await
 }
