@@ -69,7 +69,7 @@ Components in `crates/private-server/src/components/` translate roughly 1:1 in c
 Rather than batching e2e coverage at the end, add Playwright tests as each page lands so the test suite grows with the migrated UI.
 
 - Add `@playwright/test` and a `playwright.config.ts` to `/private-web/` when the first migrated page is ready.
-- Tests live in `/private-web/e2e/` and run against `pnpm dev` plus the running `private-server` API. Use Playwright's `webServer` config to start Vite for the test run; the API is the operator's responsibility to start (same as dev).
+- Tests live in `/private-web/e2e/` and run against `npm run dev` plus the running `private-server` API. Use Playwright's `webServer` config to start Vite for the test run; the API is the operator's responsibility to start (same as dev).
 - Each migrated page gets at least:
   - one happy-path test that loads the page and asserts a real backend response renders;
   - one interactive test where applicable (form submission, role change, dialog flow).

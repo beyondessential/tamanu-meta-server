@@ -17,7 +17,7 @@ export default function App() {
 		<Box>
 			<AppBar position="static" color="default" elevation={1}>
 				<Toolbar variant="dense" sx={{ gap: 2 }}>
-					<Typography variant="h6" component="div" sx={{ mr: 2 }}>
+					<Typography variant="h6" component="h1" sx={{ mr: 2 }}>
 						Canopy
 					</Typography>
 					{NAV_ITEMS.map(({ label, to }) => (

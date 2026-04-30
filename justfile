@@ -41,7 +41,7 @@ watch-private-api:
 
 # Run the private-web React frontend dev server (Vite proxy expects watch-private-api)
 watch-private-web:
-    cd private-web && pnpm dev
+    cd private-web && npm run dev
 
 # Run all tests
 test:

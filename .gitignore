@@ -8,3 +8,5 @@ identity.*.pem
 TODO.txt
 /private-web/node_modules
 /private-web/dist
+/private-web/test-results
+/private-web/playwright-report

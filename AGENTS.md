@@ -85,6 +85,8 @@ Local dev workflow (two terminals):
 
 Open `http://localhost:8090/`. The Vite proxy makes the React app same-origin with the API, so no CORS plumbing is needed.
 
+End-to-end tests use Playwright. Run with `npm run test:e2e` from `/private-web/`. Tests start Vite themselves but assume the operator already has `just watch-private-api` running for the backend. The first run on a fresh checkout needs `npx playwright install chromium`.
+
 ## Development Workflow
 - Always check: `just check` for basic compilation
 - Always check: `just build-frontend` for frontend compatibility
