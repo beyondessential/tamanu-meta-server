@@ -18,6 +18,7 @@ import ServerShorty, {
 } from "../components/ServerShorty";
 import { type ApiState, callApi, useApi, useApiAction } from "../api";
 import { deviceDisplayName } from "../components/DeviceShorty";
+import TimeAgo from "../components/TimeAgo";
 import type {
 	DeviceConnectionData,
 	DeviceInfoData,
@@ -73,20 +74,20 @@ function DeviceView({
 
 function DeviceInfoBox({ device }: { device: DeviceInfoData }) {
 	const conn = device.latest_connection;
-	const items: Array<{ label: string; value: string }> = [];
-	if (conn) items.push({ label: "Address", value: conn.ip });
+	const items: Array<{ label: string; value: React.ReactNode; mono?: boolean }> = [];
+	if (conn) items.push({ label: "Address", value: conn.ip, mono: true });
 	items.push({
 		label: "First seen",
-		value: formatTimestamp(device.device.created_at),
+		value: <TimeAgo timestamp={device.device.created_at} />,
 	});
 	if (conn)
 		items.push({
 			label: "Last seen",
-			value: formatTimestamp(conn.created_at),
+			value: <TimeAgo timestamp={conn.created_at} />,
 		});
 	items.push({
 		label: "Last updated",
-		value: formatTimestamp(device.device.updated_at),
+		value: <TimeAgo timestamp={device.device.updated_at} />,
 	});
 	if (conn?.user_agent)
 		items.push({ label: "User-agent", value: conn.user_agent });
@@ -99,16 +100,15 @@ function DeviceInfoBox({ device }: { device: DeviceInfoData }) {
 				useFlexGap
 				sx={{ flexWrap: "wrap" }}
 			>
-				{items.map(({ label, value }) => (
+				{items.map(({ label, value, mono }) => (
 					<Stack key={label} spacing={0.25}>
 						<Typography variant="caption" color="text.secondary">
 							{label}
 						</Typography>
 						<Typography
 							variant="body2"
-							sx={
-								label === "Address" ? { fontFamily: "monospace" } : undefined
-							}
+							component="div"
+							sx={mono ? { fontFamily: "monospace" } : undefined}
 						>
 							{value}
 						</Typography>
@@ -556,8 +556,9 @@ function ConnectionGroupRow({ group }: { group: ConnectionGroup }) {
 				sx={{ alignItems: "center", flexWrap: "wrap" }}
 				useFlexGap
 			>
-				<Typography variant="body2">
-					{formatTimestamp(group.earliest)} to {formatTimestamp(group.latest)}
+				<Typography variant="body2" component="div">
+					<TimeAgo timestamp={group.earliest} /> to{" "}
+					<TimeAgo timestamp={group.latest} />
 				</Typography>
 				<Typography variant="body2" color="text.secondary">
 					{span}
@@ -624,10 +625,3 @@ function humanDuration(earliestIso: string, latestIso: string): string {
 	return `${day}d`;
 }
 
-function formatTimestamp(iso: string): string {
-	try {
-		return new Date(iso).toLocaleString();
-	} catch {
-		return iso;
-	}
-}

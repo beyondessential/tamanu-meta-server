@@ -11,6 +11,7 @@ import {
 import EditIcon from "@mui/icons-material/Edit";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import StatusDot from "../components/StatusDot";
+import TimeAgo from "../components/TimeAgo";
 import VersionIndicator from "../components/VersionIndicator";
 import { StatusLegend, VersionLegend } from "../components/Legends";
 import ServerKindChip from "../components/ServerKindChip";
@@ -231,7 +232,14 @@ function InfoSection({
 function StatusInfoFields({ status }: { status: ServerLastStatusData }) {
 	return (
 		<>
-			<InfoItem label="Last seen" value={formatTimestamp(status.created_at)} />
+			<Stack spacing={0.25}>
+				<Typography variant="caption" color="text.secondary">
+					Last seen
+				</Typography>
+				<Typography variant="body2" component="div">
+					<TimeAgo timestamp={status.created_at} />
+				</Typography>
+			</Stack>
 			{status.platform && (
 				<InfoItem label="Platform" value={status.platform} />
 			)}
@@ -297,14 +305,6 @@ function InfoItem({
 function renderLocation(server: ServerInfoFull): string {
 	if (!server.cloud) return "On premise";
 	return "Cloud";
-}
-
-function formatTimestamp(iso: string): string {
-	try {
-		return new Date(iso).toLocaleString();
-	} catch {
-		return iso;
-	}
 }
 
 function ChildServers({
