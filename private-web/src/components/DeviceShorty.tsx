@@ -24,35 +24,43 @@ export function deviceDisplayName(info: DeviceInfoData): string {
 export default function DeviceShorty({ device }: { device: DeviceInfoData }) {
 	const name = deviceDisplayName(device);
 	return (
-		<Stack
-			direction="row"
-			spacing={2}
-			sx={{
-				p: 1.5,
-				border: 1,
-				borderColor: "divider",
-				borderRadius: 1,
-				alignItems: "center",
-			}}
+		<MuiLink
+			component={RouterLink}
+			to={`/devices/${device.device.id}`}
+			underline="none"
+			color="inherit"
+			sx={{ display: "block" }}
 		>
-			<MuiLink
-				component={RouterLink}
-				to={`/devices/${device.device.id}`}
-				underline="hover"
-				color="text.primary"
-				sx={{ fontWeight: 500 }}
+			<Stack
+				direction="row"
+				spacing={2}
+				sx={(theme) => ({
+					p: 1.5,
+					border: 1,
+					borderColor: "divider",
+					borderRadius: 1,
+					alignItems: "center",
+					transition: theme.transitions.create([
+						"background-color",
+						"box-shadow",
+					]),
+					"&:hover": {
+						bgcolor: "action.hover",
+						boxShadow: 1,
+					},
+				})}
 			>
-				{name}
-			</MuiLink>
-			<Box sx={{ ml: "auto" }}>
-				<Chip
-					size="small"
-					variant="outlined"
-					color={ROLE_COLORS[device.device.role]}
-					label={device.device.role}
-					sx={{ textTransform: "capitalize" }}
-				/>
-			</Box>
-		</Stack>
+				<Box sx={{ fontWeight: 500 }}>{name}</Box>
+				<Box sx={{ ml: "auto" }}>
+					<Chip
+						size="small"
+						variant="outlined"
+						color={ROLE_COLORS[device.device.role]}
+						label={device.device.role}
+						sx={{ textTransform: "capitalize" }}
+					/>
+				</Box>
+			</Stack>
+		</MuiLink>
 	);
 }
