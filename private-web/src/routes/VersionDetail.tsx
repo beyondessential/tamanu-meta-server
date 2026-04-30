@@ -1,8 +1,11 @@
 import {
 	Alert,
 	Box,
+	Button,
 	LinearProgress,
+	MenuItem,
 	Paper,
+	Select,
 	Stack,
 	Table,
 	TableBody,
@@ -10,16 +13,20 @@ import {
 	TableContainer,
 	TableHead,
 	TableRow,
+	TextField,
 	Typography,
 } from "@mui/material";
+import EditIcon from "@mui/icons-material/Edit";
+import { useState } from "react";
 import { useParams } from "react-router-dom";
 import Markdown from "../components/Markdown";
 import VersionStatusChip from "../components/VersionStatusChip";
-import { useApi } from "../api";
+import { useApi, useApiAction } from "../api";
 import type {
 	ArtifactData,
 	RelatedVersionData,
 	VersionDetail as VersionDetailData,
+	VersionStatus,
 } from "../types";
 
 export default function VersionDetail() {
@@ -30,6 +37,7 @@ export default function VersionDetail() {
 		{ version },
 		[version],
 	);
+	const isAdmin = useApi<boolean>("commons", "is_current_user_admin");
 
 	if (detail.status === "loading" || detail.status === "idle") {
 		return <LinearProgress />;
@@ -40,6 +48,7 @@ export default function VersionDetail() {
 
 	const v = detail.data;
 	const versionStr = `${v.major}.${v.minor}.${v.patch}`;
+	const admin = isAdmin.status === "ok" && isAdmin.data;
 
 	return (
 		<Stack spacing={3}>
@@ -51,32 +60,190 @@ export default function VersionDetail() {
 				<Typography variant="h4" component="h1" sx={{ fontFamily: "monospace" }}>
 					{versionStr}
 				</Typography>
-				<VersionStatusChip status={v.status} />
+				<StatusControl
+					detail={v}
+					versionStr={versionStr}
+					isAdmin={admin}
+					onChanged={() => detail.reload()}
+				/>
 			</Stack>
 
 			<VersionInfo detail={v} />
 
 			<ArtifactsSection versionId={v.id} />
 
-			<Box>
-				<Typography variant="h5" component="h2" gutterBottom>
-					Changelog
-				</Typography>
-				<Paper variant="outlined" sx={{ p: 2 }}>
-					{v.changelog ? (
-						<Markdown>{v.changelog}</Markdown>
-					) : (
-						<Typography variant="body2" color="text.secondary">
-							No changelog
-						</Typography>
-					)}
-				</Paper>
-			</Box>
+			<ChangelogSection
+				detail={v}
+				versionStr={versionStr}
+				isAdmin={admin}
+				onChanged={() => detail.reload()}
+			/>
 
 			{v.related_versions.length > 0 && (
 				<RelatedVersionsSection related={v.related_versions} />
 			)}
 		</Stack>
+	);
+}
+
+function StatusControl({
+	detail,
+	versionStr,
+	isAdmin,
+	onChanged,
+}: {
+	detail: VersionDetailData;
+	versionStr: string;
+	isAdmin: boolean;
+	onChanged: () => void;
+}) {
+	const [selected, setSelected] = useState<VersionStatus>(detail.status);
+	const action = useApiAction("versions", "update_version_status");
+
+	if (!isAdmin) {
+		return <VersionStatusChip status={detail.status} />;
+	}
+
+	const canSwitchToDraft =
+		detail.status !== "published" || detail.is_latest_in_minor;
+	const dirty = selected !== detail.status;
+
+	return (
+		<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+			<Select
+				size="small"
+				value={selected}
+				onChange={(e) => setSelected(e.target.value as VersionStatus)}
+				disabled={action.pending}
+			>
+				<MenuItem value="draft" disabled={!canSwitchToDraft}>
+					Draft
+				</MenuItem>
+				<MenuItem value="published">Published</MenuItem>
+				<MenuItem value="yanked">Yanked</MenuItem>
+			</Select>
+			<Button
+				variant="contained"
+				disabled={!dirty || action.pending}
+				onClick={async () => {
+					try {
+						await action.call({ version: versionStr, status: selected });
+						onChanged();
+					} catch {
+						/* surfaced via action.error */
+					}
+				}}
+			>
+				{action.pending ? "Changing…" : "Change"}
+			</Button>
+			{action.error && (
+				<Typography variant="caption" color="error">
+					{action.error.message}
+				</Typography>
+			)}
+		</Stack>
+	);
+}
+
+function ChangelogSection({
+	detail,
+	versionStr,
+	isAdmin,
+	onChanged,
+}: {
+	detail: VersionDetailData;
+	versionStr: string;
+	isAdmin: boolean;
+	onChanged: () => void;
+}) {
+	const [editing, setEditing] = useState(false);
+	const [draft, setDraft] = useState(detail.changelog);
+	const action = useApiAction("versions", "update_version_changelog");
+
+	const start = () => {
+		setDraft(detail.changelog);
+		setEditing(true);
+	};
+	const cancel = () => {
+		setDraft(detail.changelog);
+		setEditing(false);
+	};
+	const save = async () => {
+		try {
+			await action.call({ version: versionStr, changelog: draft });
+			setEditing(false);
+			onChanged();
+		} catch {
+			/* surfaced via action.error */
+		}
+	};
+
+	return (
+		<Box>
+			<Stack
+				direction="row"
+				spacing={1}
+				sx={{ mb: 1, alignItems: "center", justifyContent: "space-between" }}
+			>
+				<Typography variant="h5" component="h2">
+					Changelog
+				</Typography>
+				{isAdmin &&
+					(editing ? (
+						<Stack direction="row" spacing={1}>
+							<Button
+								variant="contained"
+								color="success"
+								onClick={save}
+								disabled={action.pending}
+							>
+								{action.pending ? "Saving…" : "Save"}
+							</Button>
+							<Button
+								variant="outlined"
+								color="error"
+								onClick={cancel}
+								disabled={action.pending}
+							>
+								Cancel
+							</Button>
+						</Stack>
+					) : (
+						<Button
+							variant="outlined"
+							startIcon={<EditIcon />}
+							onClick={start}
+						>
+							Edit
+						</Button>
+					))}
+			</Stack>
+			<Paper variant="outlined" sx={{ p: 2 }}>
+				{editing ? (
+					<TextField
+						multiline
+						fullWidth
+						minRows={20}
+						value={draft}
+						onChange={(e) => setDraft(e.target.value)}
+						slotProps={{
+							input: { sx: { fontFamily: "monospace" } },
+						}}
+					/>
+				) : detail.changelog ? (
+					<Markdown>{detail.changelog}</Markdown>
+				) : (
+					<Typography variant="body2" color="text.secondary">
+						No changelog
+					</Typography>
+				)}
+			</Paper>
+			{action.error && (
+				<Alert severity="error" sx={{ mt: 1 }}>
+					{action.error.message}
+				</Alert>
+			)}
+		</Box>
 	);
 }
 

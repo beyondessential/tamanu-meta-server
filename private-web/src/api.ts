@@ -81,3 +81,43 @@ export function useApi<T>(
 
 	return { ...state, reload: run };
 }
+
+/**
+ * Hook for write/mutation server fns. Returns a `call` function that
+ * performs the request and a `pending` / `error` state for the UI.
+ * The caller decides what to do with the result (e.g. refetch a
+ * `useApi` resource).
+ */
+export function useApiAction<T = void>(
+	module: string,
+	fn: string,
+): {
+	call: (params?: Record<string, unknown>) => Promise<T>;
+	pending: boolean;
+	error: Error | null;
+	reset: () => void;
+} {
+	const [pending, setPending] = useState(false);
+	const [error, setError] = useState<Error | null>(null);
+
+	const call = useCallback(
+		async (params: Record<string, unknown> = {}): Promise<T> => {
+			setPending(true);
+			setError(null);
+			try {
+				return await callApi<T>(module, fn, params);
+			} catch (err) {
+				const e = err instanceof Error ? err : new Error(String(err));
+				setError(e);
+				throw e;
+			} finally {
+				setPending(false);
+			}
+		},
+		[module, fn],
+	);
+
+	const reset = useCallback(() => setError(null), []);
+
+	return { call, pending, error, reset };
+}
