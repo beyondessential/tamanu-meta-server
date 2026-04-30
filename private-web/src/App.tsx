@@ -6,10 +6,12 @@ import {
 	Typography,
 } from "@mui/material";
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
+import Admins from "./routes/Admins";
 import Status from "./routes/Status";
 
 const NAV_ITEMS: Array<{ label: string; to: string }> = [
 	{ label: "Status", to: "/status" },
+	{ label: "Admins", to: "/admins" },
 ];
 
 export default function App() {
@@ -41,6 +43,7 @@ export default function App() {
 				<Routes>
 					<Route path="/" element={<Navigate to="/status" replace />} />
 					<Route path="/status" element={<Status />} />
+					<Route path="/admins" element={<Admins />} />
 				</Routes>
 			</Container>
 		</Box>
