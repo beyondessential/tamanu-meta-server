@@ -11,6 +11,7 @@ use database::servers::Server;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
+use crate::fns::Page;
 use crate::fns::servers::ServerInfo;
 use crate::state::AppState;
 
@@ -141,12 +142,10 @@ pub fn routes() -> Router<AppState> {
 		.route("/list_untrusted", post(list_untrusted))
 		.route("/get_servers_for_device", post(get_servers_for_device))
 		.route("/get_past_server_associations", post(get_past_server_associations))
-		.route("/count_untrusted", post(count_untrusted))
 		.route("/connection_history", post(connection_history))
 		.route("/connection_count", post(connection_count))
 		.route("/trust", post(trust))
 		.route("/list_trusted", post(list_trusted))
-		.route("/count_trusted", post(count_trusted))
 		.route("/untrust", post(untrust))
 		.route("/update_role", post(update_role))
 		.route("/search", post(search))
@@ -178,21 +177,17 @@ pub async fn list_untrusted(
 	State(state): State<AppState>,
 	TailscaleAdmin(_): TailscaleAdmin,
 	Json(args): Json<PaginationArgs>,
-) -> Result<Json<Vec<DeviceInfo>>> {
+) -> Result<Json<Page<DeviceInfo>>> {
 	let mut conn = state.db.get().await?;
+	let total = Device::count_untrusted(&mut conn).await?.try_into().unwrap_or(0);
 	let devices_with_info = Device::list_untrusted_with_info_paginated(
 		&mut conn,
 		args.limit.unwrap_or(10).try_into().unwrap_or(10),
 		args.offset.try_into().unwrap_or(0),
 	)
 	.await?;
-	Ok(Json(
-		devices_with_info
-			.into_iter()
-			.map(DeviceInfo::from)
-			
-			.collect(),
-	))
+	let items = devices_with_info.into_iter().map(DeviceInfo::from).collect();
+	Ok(Json(Page { items, total }))
 }
 
 pub async fn get_servers_for_device(
@@ -228,19 +223,6 @@ pub async fn get_past_server_associations(
 
 	let servers = Server::get_by_ids(&mut conn, &past_only_ids).await?;
 	Ok(Json(servers.into_iter().map(server_to_info).collect()))
-}
-
-pub async fn count_untrusted(
-	State(state): State<AppState>,
-	TailscaleAdmin(_): TailscaleAdmin,
-) -> Result<Json<u64>> {
-	let mut conn = state.db.get().await?;
-	Ok(Json(
-		Device::count_untrusted(&mut conn)
-			.await?
-			.try_into()
-			.unwrap_or_default(),
-	))
 }
 
 #[derive(Deserialize)]
@@ -308,34 +290,17 @@ pub async fn list_trusted(
 	State(state): State<AppState>,
 	TailscaleAdmin(_): TailscaleAdmin,
 	Json(args): Json<PaginationArgs>,
-) -> Result<Json<Vec<DeviceInfo>>> {
+) -> Result<Json<Page<DeviceInfo>>> {
 	let mut conn = state.db.get().await?;
+	let total = Device::count_trusted(&mut conn).await?.try_into().unwrap_or(0);
 	let devices_with_info = Device::list_trusted_with_info_paginated(
 		&mut conn,
 		args.limit.unwrap_or(10).try_into().unwrap_or(10),
 		args.offset.try_into().unwrap_or(0),
 	)
 	.await?;
-	Ok(Json(
-		devices_with_info
-			.into_iter()
-			.map(DeviceInfo::from)
-			
-			.collect(),
-	))
-}
-
-pub async fn count_trusted(
-	State(state): State<AppState>,
-	TailscaleAdmin(_): TailscaleAdmin,
-) -> Result<Json<u64>> {
-	let mut conn = state.db.get().await?;
-	Ok(Json(
-		Device::count_trusted(&mut conn)
-			.await?
-			.try_into()
-			.unwrap_or_default(),
-	))
+	let items = devices_with_info.into_iter().map(DeviceInfo::from).collect();
+	Ok(Json(Page { items, total }))
 }
 
 pub async fn untrust(

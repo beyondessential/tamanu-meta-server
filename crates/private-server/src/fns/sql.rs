@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
+use crate::fns::Page;
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,7 +43,6 @@ pub fn routes() -> Router<AppState> {
 		.route("/is_sql_available", post(is_sql_available))
 		.route("/execute_query", post(execute_query))
 		.route("/get_last_user_query", post(get_last_user_query))
-		.route("/get_query_history_count", post(get_query_history_count))
 		.route("/get_query_history", post(get_query_history))
 }
 
@@ -177,15 +177,6 @@ pub async fn get_last_user_query(
 	Ok(Json(last))
 }
 
-pub async fn get_query_history_count(State(state): State<AppState>) -> Result<Json<u64>> {
-	let mut conn = state.db.get().await?;
-	let count = SqlPlaygroundHistory::count_all(&mut conn)
-		.await?
-		.try_into()
-		.unwrap_or(0);
-	Ok(Json(count))
-}
-
 #[derive(Deserialize)]
 pub struct HistoryArgs {
 	pub offset: u64,
@@ -195,11 +186,15 @@ pub struct HistoryArgs {
 pub async fn get_query_history(
 	State(state): State<AppState>,
 	Json(args): Json<HistoryArgs>,
-) -> Result<Json<Vec<SqlHistoryEntry>>> {
+) -> Result<Json<Page<SqlHistoryEntry>>> {
 	let limit = args.limit.unwrap_or(10) as i64;
 	let offset = args.offset as i64;
 	let mut conn = state.db.get().await?;
-	let entries = SqlPlaygroundHistory::get_paginated(&mut conn, offset, limit)
+	let total = SqlPlaygroundHistory::count_all(&mut conn)
+		.await?
+		.try_into()
+		.unwrap_or(0);
+	let items = SqlPlaygroundHistory::get_paginated(&mut conn, offset, limit)
 		.await?
 		.into_iter()
 		.map(|entry| SqlHistoryEntry {
@@ -209,5 +204,5 @@ pub async fn get_query_history(
 			created_at: entry.created_at,
 		})
 		.collect();
-	Ok(Json(entries))
+	Ok(Json(Page { items, total }))
 }

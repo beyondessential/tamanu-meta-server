@@ -6,6 +6,7 @@ use commons_servers::tailscale_auth::TailscaleUser;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::fns::Page;
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,18 +27,11 @@ pub struct BestoolSnippetDetail {
 
 pub fn routes() -> Router<AppState> {
 	Router::new()
-		.route("/count_snippets", post(count_snippets))
 		.route("/list_snippets", post(list_snippets))
 		.route("/save_snippet", post(save_snippet))
 		.route("/get_snippet", post(get_snippet))
 		.route("/get_latest_snippet_id", post(get_latest_snippet_id))
 		.route("/delete_snippet", post(delete_snippet))
-}
-
-pub async fn count_snippets(State(state): State<AppState>) -> Result<Json<u64>> {
-	let mut conn = state.db.get().await?;
-	let count = database::BestoolSnippet::count_current(&mut conn).await? as u64;
-	Ok(Json(count))
 }
 
 #[derive(Deserialize)]
@@ -49,24 +43,24 @@ pub struct ListArgs {
 pub async fn list_snippets(
 	State(state): State<AppState>,
 	Json(args): Json<ListArgs>,
-) -> Result<Json<Vec<BestoolSnippetInfo>>> {
+) -> Result<Json<Page<BestoolSnippetInfo>>> {
 	let mut conn = state.db.get().await?;
+	let total = database::BestoolSnippet::count_current(&mut conn).await? as u64;
 	let snippets = database::BestoolSnippet::list_current(
 		&mut conn,
 		args.offset as i64,
 		args.limit.unwrap_or(50) as i64,
 	)
 	.await?;
-	Ok(Json(
-		snippets
-			.into_iter()
-			.map(|s| BestoolSnippetInfo {
-				id: s.id,
-				name: s.name,
-				description: s.description,
-			})
-			.collect(),
-	))
+	let items = snippets
+		.into_iter()
+		.map(|s| BestoolSnippetInfo {
+			id: s.id,
+			name: s.name,
+			description: s.description,
+		})
+		.collect();
+	Ok(Json(Page { items, total }))
 }
 
 #[derive(Deserialize)]

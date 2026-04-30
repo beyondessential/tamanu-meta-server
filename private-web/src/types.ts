@@ -1,6 +1,12 @@
 // JSON wire types matching the Rust serde shapes in commons-types.
 // Hand-written for now; codegen is a possible future cleanup.
 
+/** Standard wrapper for paginated list responses. */
+export interface Page<T> {
+	items: T[];
+	total: number;
+}
+
 export type ShortStatus = "up" | "down" | "away" | "blip" | "gone";
 
 export type ServerKind = "central" | "facility" | "canopy";

@@ -21,7 +21,7 @@ import { useState } from "react";
 import { useApi, useApiAction } from "../api";
 import SqlEditor from "../components/SqlEditor";
 import { usePageTitle } from "../hooks/usePageTitle";
-import type { SqlHistoryEntry, SqlResult } from "../types";
+import type { Page, SqlHistoryEntry, SqlResult } from "../types";
 
 const HISTORY_PAGE_SIZE = 10;
 
@@ -39,13 +39,7 @@ export default function Sql() {
 		"get_last_user_query",
 	);
 
-	const historyCount = useApi<number>(
-		"sql",
-		"get_query_history_count",
-		{},
-		[result],
-	);
-	const history = useApi<SqlHistoryEntry[]>(
+	const history = useApi<Page<SqlHistoryEntry>>(
 		"sql",
 		"get_query_history",
 		{ offset: historyPage * HISTORY_PAGE_SIZE, limit: HISTORY_PAGE_SIZE },
@@ -76,7 +70,7 @@ export default function Sql() {
 
 	const recall = (q: string) => setQuery(q);
 
-	const totalHistory = historyCount.status === "ok" ? historyCount.data : 0;
+	const totalHistory = history.status === "ok" ? history.data.total : 0;
 	const historyPageCount = Math.max(
 		1,
 		Math.ceil(totalHistory / HISTORY_PAGE_SIZE),
@@ -144,7 +138,7 @@ export default function Sql() {
 						<LinearProgress />
 					) : history.status === "error" ? (
 						<Alert severity="error">{history.error.message}</Alert>
-					) : history.data.length === 0 ? (
+					) : history.data.items.length === 0 ? (
 						<Alert severity="info">No history available.</Alert>
 					) : (
 						<TableContainer>
@@ -158,7 +152,7 @@ export default function Sql() {
 									</TableRow>
 								</TableHead>
 								<TableBody>
-									{history.data.map((entry) => (
+									{history.data.items.map((entry) => (
 										<TableRow key={entry.id}>
 											<TableCell>
 												{new Date(entry.created_at).toLocaleString()}

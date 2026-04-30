@@ -15,7 +15,7 @@ import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import SqlEditor from "../components/SqlEditor";
 import { usePageTitle } from "../hooks/usePageTitle";
-import type { BestoolSnippetInfo } from "../types";
+import type { BestoolSnippetInfo, Page } from "../types";
 
 const PAGE_SIZE = 10;
 
@@ -24,20 +24,16 @@ export default function BestoolSnippets() {
 	const [page, setPage] = useState(0);
 	const [showCreate, setShowCreate] = useState(false);
 
-	const count = useApi<number>("bestool", "count_snippets");
-	const list = useApi<BestoolSnippetInfo[]>(
+	const list = useApi<Page<BestoolSnippetInfo>>(
 		"bestool",
 		"list_snippets",
 		{ offset: page * PAGE_SIZE, limit: PAGE_SIZE },
 		[page],
 	);
 
-	const refresh = () => {
-		count.reload();
-		list.reload();
-	};
+	const refresh = () => list.reload();
 
-	const total = count.status === "ok" ? count.data : 0;
+	const total = list.status === "ok" ? list.data.total : 0;
 	const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
 	return (
@@ -72,11 +68,11 @@ export default function BestoolSnippets() {
 				<LinearProgress />
 			) : list.status === "error" ? (
 				<Alert severity="error">{list.error.message}</Alert>
-			) : list.data.length === 0 ? (
+			) : list.data.items.length === 0 ? (
 				<Alert severity="info">No snippets found.</Alert>
 			) : (
 				<Stack spacing={1}>
-					{list.data.map((s) => (
+					{list.data.items.map((s) => (
 						<MuiLink
 							key={s.id}
 							component={RouterLink}

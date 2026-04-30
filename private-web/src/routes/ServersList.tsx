@@ -11,7 +11,7 @@ import ServerShorty, {
 } from "../components/ServerShorty";
 import { useApi } from "../api";
 import { usePageTitle } from "../hooks/usePageTitle";
-import type { ServerKind } from "../types";
+import type { Page, ServerKind } from "../types";
 
 const PAGE_SIZE = 10;
 
@@ -19,28 +19,27 @@ export default function ServersList({ kind }: { kind: ServerKind }) {
 	usePageTitle(kind === "central" ? "Central servers" : "Facility servers");
 	const [page, setPage] = useState(0);
 
-	const count = useApi<number>("servers", "count_some", { kind }, [kind]);
-	const servers = useApi<ServerInfo[]>(
+	const result = useApi<Page<ServerInfo>>(
 		"servers",
 		"list_some",
 		{ kind, offset: page * PAGE_SIZE, limit: PAGE_SIZE },
 		[kind, page],
 	);
 
-	const total = count.status === "ok" ? count.data : 0;
+	const total = result.status === "ok" ? result.data.total : 0;
 	const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
 	return (
 		<Stack spacing={2}>
-			{servers.status === "loading" || servers.status === "idle" ? (
+			{result.status === "loading" || result.status === "idle" ? (
 				<LinearProgress />
-			) : servers.status === "error" ? (
-				<Alert severity="error">{servers.error.message}</Alert>
-			) : servers.data.length === 0 ? (
+			) : result.status === "error" ? (
+				<Alert severity="error">{result.error.message}</Alert>
+			) : result.data.items.length === 0 ? (
 				<Alert severity="info">No servers found.</Alert>
 			) : (
 				<Stack spacing={1}>
-					{servers.data.map((s) => (
+					{result.data.items.map((s) => (
 						<ServerShorty key={s.id} server={s} />
 					))}
 				</Stack>

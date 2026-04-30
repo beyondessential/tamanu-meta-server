@@ -23,6 +23,7 @@ use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
+use crate::fns::Page;
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -127,7 +128,6 @@ fn server_to_info(s: Server) -> ServerInfo {
 
 pub fn routes() -> Router<AppState> {
 	Router::new()
-		.route("/count_some", post(count_some))
 		.route("/list_some", post(list_some))
 		.route("/get_name", post(get_name))
 		.route("/get_info", post(get_info))
@@ -135,24 +135,6 @@ pub fn routes() -> Router<AppState> {
 		.route("/update", post(update))
 		.route("/import_ticket", post(import_ticket))
 		.route("/search_parent", post(search_parent))
-}
-
-#[derive(Deserialize)]
-pub struct CountArgs {
-	pub kind: Option<ServerKind>,
-}
-
-pub async fn count_some(
-	State(state): State<AppState>,
-	Json(args): Json<CountArgs>,
-) -> Result<Json<u64>> {
-	let mut conn = state.db.get().await?;
-	let count = if let Some(kind) = args.kind {
-		Server::count_by_kind(&mut conn, kind).await?
-	} else {
-		Server::count_all(&mut conn).await?
-	};
-	Ok(Json(count))
 }
 
 #[derive(Deserialize)]
@@ -165,14 +147,20 @@ pub struct ListArgs {
 pub async fn list_some(
 	State(state): State<AppState>,
 	Json(args): Json<ListArgs>,
-) -> Result<Json<Vec<ServerInfo>>> {
+) -> Result<Json<Page<ServerInfo>>> {
 	let mut conn = state.db.get().await?;
+	let total = if let Some(kind) = args.kind {
+		Server::count_by_kind(&mut conn, kind).await?
+	} else {
+		Server::count_all(&mut conn).await?
+	};
 	let servers = if let Some(kind) = args.kind {
 		Server::list_by_kind(&mut conn, kind, args.offset, args.limit).await?
 	} else {
 		Server::get_all(&mut conn, args.offset, args.limit).await?
 	};
-	Ok(Json(servers.into_iter().map(server_to_info).collect()))
+	let items = servers.into_iter().map(server_to_info).collect();
+	Ok(Json(Page { items, total }))
 }
 
 #[derive(Deserialize)]
