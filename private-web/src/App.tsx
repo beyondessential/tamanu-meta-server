@@ -51,13 +51,29 @@ export default function App() {
 		<Box>
 			<AppBar position="static" color="default" elevation={1}>
 				<Toolbar variant="dense" sx={{ gap: 2 }}>
-					<Typography
-						variant="h6"
-						component="h1"
-						sx={{ mr: 2, color: "primary.main" }}
+					<Box
+						component={NavLink}
+						to="/"
+						sx={{
+							display: "flex",
+							alignItems: "center",
+							gap: 1,
+							mr: 2,
+							color: "primary.main",
+							textDecoration: "none",
+						}}
 					>
-						Canopy
-					</Typography>
+						<Box
+							component="img"
+							src="/favicon.svg"
+							alt=""
+							aria-hidden
+							sx={{ height: 24, width: 24 }}
+						/>
+						<Typography variant="h6" component="h1">
+							Canopy
+						</Typography>
+					</Box>
 					{navItems.map(({ label, to }) => (
 						<Typography
 							key={to}
