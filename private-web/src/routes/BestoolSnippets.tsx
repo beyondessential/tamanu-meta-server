@@ -13,6 +13,7 @@ import {
 import { useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
+import SqlEditor from "../components/SqlEditor";
 import type { BestoolSnippetInfo } from "../types";
 
 const PAGE_SIZE = 10;
@@ -154,19 +155,28 @@ function CreateSnippetForm({ onCreated }: { onCreated: () => void }) {
 					multiline
 					minRows={2}
 				/>
-				<TextField
-					label="SQL (no sensitive info! everything here may be read by anyone with bestool)"
-					placeholder="SELECT ..."
-					value={sql}
-					onChange={(e) => setSql(e.target.value)}
-					disabled={action.pending}
-					required
-					multiline
-					minRows={6}
-					slotProps={{
-						input: { sx: { fontFamily: "monospace" } },
-					}}
-				/>
+				<Box>
+					<Typography variant="caption" color="text.secondary">
+						SQL (no sensitive info! everything here may be read by anyone with bestool)
+					</Typography>
+					<Box
+						sx={{
+							mt: 0.5,
+							border: 1,
+							borderColor: "divider",
+							borderRadius: 1,
+							overflow: "hidden",
+						}}
+					>
+						<SqlEditor
+							value={sql}
+							onChange={setSql}
+							placeholder="SELECT ..."
+							readOnly={action.pending}
+							minHeight="8em"
+						/>
+					</Box>
+				</Box>
 				{action.error && (
 					<Alert severity="error">{action.error.message}</Alert>
 				)}

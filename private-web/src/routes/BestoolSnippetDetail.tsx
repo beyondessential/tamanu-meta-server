@@ -15,6 +15,7 @@ import {
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { callApi, useApi, useApiAction } from "../api";
+import SqlEditor from "../components/SqlEditor";
 import type { BestoolSnippetDetail as Detail } from "../types";
 
 export default function BestoolSnippetDetail() {
@@ -118,19 +119,28 @@ function View({ detail }: { detail: Detail }) {
 							multiline
 							minRows={2}
 						/>
-						<TextField
-							label="SQL"
-							placeholder="SELECT ..."
-							value={sql}
-							onChange={(e) => setSql(e.target.value)}
-							disabled={updateAction.pending}
-							required
-							multiline
-							minRows={10}
-							slotProps={{
-								input: { sx: { fontFamily: "monospace" } },
-							}}
-						/>
+						<Box>
+							<Typography variant="caption" color="text.secondary">
+								SQL
+							</Typography>
+							<Box
+								sx={{
+									mt: 0.5,
+									border: 1,
+									borderColor: "divider",
+									borderRadius: 1,
+									overflow: "hidden",
+								}}
+							>
+								<SqlEditor
+									value={sql}
+									onChange={setSql}
+									placeholder="SELECT ..."
+									readOnly={updateAction.pending}
+									minHeight="14em"
+								/>
+							</Box>
+						</Box>
 						{updateAction.error && (
 							<Alert severity="error">{updateAction.error.message}</Alert>
 						)}
@@ -201,17 +211,14 @@ function View({ detail }: { detail: Detail }) {
 					</Typography>
 				)}
 				<Box
-					component="pre"
 					sx={{
-						p: 1.5,
+						border: 1,
+						borderColor: "divider",
 						borderRadius: 1,
-						bgcolor: "action.hover",
-						fontFamily: "monospace",
-						whiteSpace: "break-spaces",
-						overflow: "auto",
+						overflow: "hidden",
 					}}
 				>
-					{detail.sql}
+					<SqlEditor value={detail.sql} onChange={() => {}} readOnly />
 				</Box>
 			</Paper>
 			<Dialog

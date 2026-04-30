@@ -14,12 +14,12 @@ import {
 	TableContainer,
 	TableHead,
 	TableRow,
-	TextField,
 	Typography,
 } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
 import { useState } from "react";
 import { useApi, useApiAction } from "../api";
+import SqlEditor from "../components/SqlEditor";
 import type { SqlHistoryEntry, SqlResult } from "../types";
 
 const HISTORY_PAGE_SIZE = 10;
@@ -86,22 +86,25 @@ export default function Sql() {
 				SQL Playground
 			</Typography>
 
-			<TextField
-				label="Query"
-				placeholder="SELECT * FROM statuses ORDER BY created_at DESC LIMIT 10;"
-				multiline
-				minRows={10}
-				fullWidth
-				value={query}
-				onChange={(e) => setQuery(e.target.value)}
-				disabled={executeAction.pending}
+			<Box
 				onKeyUp={(e) => {
 					if (e.key === "Enter" && e.ctrlKey) void run();
 				}}
-				slotProps={{
-					input: { sx: { fontFamily: "monospace" } },
+				sx={{
+					border: 1,
+					borderColor: "divider",
+					borderRadius: 1,
+					overflow: "hidden",
 				}}
-			/>
+			>
+				<SqlEditor
+					value={query}
+					onChange={setQuery}
+					readOnly={executeAction.pending}
+					placeholder="SELECT * FROM statuses ORDER BY created_at DESC LIMIT 10;"
+					minHeight="14em"
+				/>
+			</Box>
 
 			<Stack
 				direction="row"
