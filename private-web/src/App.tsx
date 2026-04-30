@@ -7,6 +7,7 @@ import {
 } from "@mui/material";
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
 import Admins from "./routes/Admins";
+import DeviceDetail from "./routes/DeviceDetail";
 import Devices from "./routes/Devices";
 import DevicesList from "./routes/DevicesList";
 import DevicesSearch from "./routes/DevicesSearch";
@@ -78,6 +79,7 @@ export default function App() {
 							element={<DevicesList scope="trusted" />}
 						/>
 					</Route>
+					<Route path="/devices/:id" element={<DeviceDetail />} />
 				</Routes>
 			</Container>
 		</Box>

@@ -39,3 +39,19 @@ test.describe("devices page", () => {
 		).toBeVisible();
 	});
 });
+
+test.describe("device detail page", () => {
+	test("loads with an id param", async ({ page }) => {
+		await page.goto("/devices/00000000-0000-0000-0000-000000000000");
+		await expect(
+			page
+				.locator(
+					[
+						'h1[class*="MuiTypography"]',
+						'[role="alert"]',
+					].join(", "),
+				)
+				.first(),
+		).toBeVisible();
+	});
+});
