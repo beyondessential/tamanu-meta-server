@@ -16,6 +16,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { callApi, useApi, useApiAction } from "../api";
 import SqlEditor from "../components/SqlEditor";
+import { usePageTitle } from "../hooks/usePageTitle";
 import type { BestoolSnippetDetail as Detail } from "../types";
 
 export default function BestoolSnippetDetail() {
@@ -27,6 +28,7 @@ export default function BestoolSnippetDetail() {
 		{ id },
 		[id],
 	);
+	usePageTitle(detail.status === "ok" ? detail.data.name : "Snippet");
 
 	// If this snippet has been superseded, redirect to the latest version.
 	useEffect(() => {

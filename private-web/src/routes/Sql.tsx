@@ -20,11 +20,13 @@ import CloseIcon from "@mui/icons-material/Close";
 import { useState } from "react";
 import { useApi, useApiAction } from "../api";
 import SqlEditor from "../components/SqlEditor";
+import { usePageTitle } from "../hooks/usePageTitle";
 import type { SqlHistoryEntry, SqlResult } from "../types";
 
 const HISTORY_PAGE_SIZE = 10;
 
 export default function Sql() {
+	usePageTitle("SQL Playground");
 	const [query, setQuery] = useState("");
 	const [result, setResult] = useState<SqlResult | null>(null);
 	const [error, setError] = useState<string | null>(null);

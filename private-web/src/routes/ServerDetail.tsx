@@ -17,6 +17,7 @@ import { StatusLegend, VersionLegend } from "../components/Legends";
 import ServerKindChip from "../components/ServerKindChip";
 import ServerRankChip from "../components/ServerRankChip";
 import { useApi } from "../api";
+import { usePageTitle } from "../hooks/usePageTitle";
 import type {
 	DeviceShortInfo,
 	ServerDetailData,
@@ -33,6 +34,11 @@ export default function ServerDetail() {
 		[id],
 	);
 	const isAdmin = useApi<boolean>("commons", "is_current_user_admin");
+	usePageTitle(
+		detail.status === "ok"
+			? (detail.data.server.name ?? "Unnamed server")
+			: "Server",
+	);
 
 	if (detail.status === "loading" || detail.status === "idle") {
 		return <LinearProgress />;

@@ -14,11 +14,13 @@ import { useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import SqlEditor from "../components/SqlEditor";
+import { usePageTitle } from "../hooks/usePageTitle";
 import type { BestoolSnippetInfo } from "../types";
 
 const PAGE_SIZE = 10;
 
 export default function BestoolSnippets() {
+	usePageTitle("PSQL Snippets");
 	const [page, setPage] = useState(0);
 	const [showCreate, setShowCreate] = useState(false);
 

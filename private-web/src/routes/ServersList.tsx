@@ -10,11 +10,13 @@ import ServerShorty, {
 	type ServerInfo,
 } from "../components/ServerShorty";
 import { useApi } from "../api";
+import { usePageTitle } from "../hooks/usePageTitle";
 import type { ServerKind } from "../types";
 
 const PAGE_SIZE = 10;
 
 export default function ServersList({ kind }: { kind: ServerKind }) {
+	usePageTitle(kind === "central" ? "Central servers" : "Facility servers");
 	const [page, setPage] = useState(0);
 
 	const count = useApi<number>("servers", "count_some", { kind }, [kind]);

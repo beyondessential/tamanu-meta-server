@@ -13,9 +13,11 @@ import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { Link as RouterLink } from "react-router-dom";
 import VersionStatusChip from "../components/VersionStatusChip";
 import { useApi } from "../api";
+import { usePageTitle } from "../hooks/usePageTitle";
 import type { MinorVersionGroup } from "../types";
 
 export default function Versions() {
+	usePageTitle("Versions");
 	const result = useApi<MinorVersionGroup[]>("versions", "get_grouped_versions");
 
 	return (

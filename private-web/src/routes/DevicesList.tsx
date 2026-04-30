@@ -8,6 +8,7 @@ import {
 import { useState } from "react";
 import DeviceShorty from "../components/DeviceShorty";
 import { useApi } from "../api";
+import { usePageTitle } from "../hooks/usePageTitle";
 import type { DeviceInfoData } from "../types";
 
 const PAGE_SIZE = 10;
@@ -17,6 +18,7 @@ export default function DevicesList({
 }: {
 	scope: "trusted" | "untrusted";
 }) {
+	usePageTitle(scope === "trusted" ? "Trusted devices" : "Untrusted devices");
 	const [page, setPage] = useState(0);
 
 	const countFn = scope === "trusted" ? "count_trusted" : "count_untrusted";

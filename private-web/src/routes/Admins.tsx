@@ -16,8 +16,10 @@ import {
 import DeleteIcon from "@mui/icons-material/Delete";
 import { type FormEvent, useState } from "react";
 import { ApiError, callApi, useApi } from "../api";
+import { usePageTitle } from "../hooks/usePageTitle";
 
 export default function Admins() {
+	usePageTitle("Admins");
 	const list = useApi<string[]>("admins", "list");
 	const [email, setEmail] = useState("");
 	const [pending, setPending] = useState(false);

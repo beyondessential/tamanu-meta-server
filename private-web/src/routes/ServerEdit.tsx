@@ -14,6 +14,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { callApi, useApi, useApiAction } from "../api";
+import { usePageTitle } from "../hooks/usePageTitle";
 import type { ServerInfoFull, ServerKind, ServerRank } from "../types";
 
 const RANK_OPTIONS: Array<{ value: ServerRank | ""; label: string }> = [
@@ -27,6 +28,7 @@ const RANK_OPTIONS: Array<{ value: ServerRank | ""; label: string }> = [
 
 export default function ServerEdit() {
 	const { id = "" } = useParams<{ id: string }>();
+	usePageTitle("Edit server");
 	const info = useApi<ServerInfoFull>(
 		"servers",
 		"get_info",

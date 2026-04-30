@@ -20,6 +20,7 @@ import ServerShorty, {
 import { type ApiState, callApi, useApi, useApiAction } from "../api";
 import { deviceDisplayName } from "../components/DeviceShorty";
 import TimeAgo from "../components/TimeAgo";
+import { usePageTitle } from "../hooks/usePageTitle";
 import type {
 	DeviceConnectionData,
 	DeviceInfoData,
@@ -39,6 +40,11 @@ export default function DeviceDetail() {
 		[id, tick],
 	);
 	const refresh = () => setTick((t) => t + 1);
+	usePageTitle(
+		detail.status === "ok"
+			? `Device ${deviceDisplayName(detail.data)}`
+			: "Device",
+	);
 
 	if (detail.status === "loading" || detail.status === "idle") return <LinearProgress />;
 	if (detail.status === "error")

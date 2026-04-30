@@ -22,6 +22,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import DeviceShorty from "../components/DeviceShorty";
 import { callApi, useApi, useApiAction } from "../api";
+import { usePageTitle } from "../hooks/usePageTitle";
 import { parseCanopyTicket, type CanopyTicket } from "../lib/canopyTicket";
 import type {
 	DeviceInfoData,
@@ -30,6 +31,7 @@ import type {
 } from "../types";
 
 export default function DevicesSearch() {
+	usePageTitle("Search devices");
 	const isAdmin = useApi<boolean>("commons", "is_current_user_admin");
 	const [query, setQuery] = useState("");
 	const [results, setResults] = useState<DeviceInfoData[] | null>(null);

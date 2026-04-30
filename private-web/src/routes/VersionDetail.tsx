@@ -26,6 +26,7 @@ import { useParams } from "react-router-dom";
 import Markdown from "../components/Markdown";
 import VersionStatusChip from "../components/VersionStatusChip";
 import { useApi, useApiAction } from "../api";
+import { usePageTitle } from "../hooks/usePageTitle";
 import type {
 	ArtifactData,
 	RelatedVersionData,
@@ -35,6 +36,7 @@ import type {
 
 export default function VersionDetail() {
 	const { version = "" } = useParams<{ version: string }>();
+	usePageTitle(version || "Version");
 	const detail = useApi<VersionDetailData>(
 		"versions",
 		"get_version_detail",

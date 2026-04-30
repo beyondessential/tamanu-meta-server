@@ -13,6 +13,7 @@ import StatusDot from "../components/StatusDot";
 import VersionIndicator from "../components/VersionIndicator";
 import { StatusLegend, VersionLegend } from "../components/Legends";
 import { useApi } from "../api";
+import { usePageTitle } from "../hooks/usePageTitle";
 import { useReloadInterval } from "../hooks/useReloadInterval";
 import {
 	type CentralServerCard,
@@ -22,6 +23,7 @@ import {
 } from "../types";
 
 export default function Status() {
+	usePageTitle("Status");
 	const tick = useReloadInterval(60_000, "canopy-reload-status");
 	return (
 		<Stack spacing={3}>
