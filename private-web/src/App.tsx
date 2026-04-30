@@ -9,6 +9,7 @@ import { NavLink, Navigate, Route, Routes } from "react-router-dom";
 import Admins from "./routes/Admins";
 import Status from "./routes/Status";
 import ServerDetail from "./routes/ServerDetail";
+import ServerEdit from "./routes/ServerEdit";
 import Servers from "./routes/Servers";
 import ServersList from "./routes/ServersList";
 import VersionDetail from "./routes/VersionDetail";
@@ -61,6 +62,7 @@ export default function App() {
 						/>
 					</Route>
 					<Route path="/servers/:id" element={<ServerDetail />} />
+					<Route path="/servers/:id/edit" element={<ServerEdit />} />
 				</Routes>
 			</Container>
 		</Box>

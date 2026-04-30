@@ -53,3 +53,19 @@ test.describe("server detail page", () => {
 		).toBeVisible();
 	});
 });
+
+test.describe("server edit page", () => {
+	test("loads with an id param", async ({ page }) => {
+		await page.goto("/servers/00000000-0000-0000-0000-000000000000/edit");
+		await expect(
+			page
+				.locator(
+					[
+						"form", // edit form mounts on success
+						'[role="alert"]',
+					].join(", "),
+				)
+				.first(),
+		).toBeVisible();
+	});
+});
