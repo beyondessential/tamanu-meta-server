@@ -51,7 +51,11 @@ export default function App() {
 		<Box>
 			<AppBar position="static" color="default" elevation={1}>
 				<Toolbar variant="dense" sx={{ gap: 2 }}>
-					<Typography variant="h6" component="h1" sx={{ mr: 2 }}>
+					<Typography
+						variant="h6"
+						component="h1"
+						sx={{ mr: 2, color: "primary.main" }}
+					>
 						Canopy
 					</Typography>
 					{navItems.map(({ label, to }) => (
@@ -63,7 +67,7 @@ export default function App() {
 								textDecoration: "none",
 								color: palette.text.secondary,
 								fontWeight: 500,
-								"&.active": { color: palette.text.primary },
+								"&.active": { color: palette.secondary.main },
 							})}
 						>
 							{label}
