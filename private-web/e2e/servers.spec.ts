@@ -1,0 +1,37 @@
+import { expect, test } from "@playwright/test";
+
+test.describe("servers list page", () => {
+	test("loads and shows the central/facility tabs", async ({ page }) => {
+		await page.goto("/servers");
+		await expect(page.getByRole("tab", { name: "Central servers" })).toHaveAttribute(
+			"aria-selected",
+			"true",
+		);
+		await expect(
+			page.getByRole("tab", { name: "Facility servers" }),
+		).toBeVisible();
+	});
+
+	test("switches to facilities tab on click", async ({ page }) => {
+		await page.goto("/servers");
+		await page.getByRole("tab", { name: "Facility servers" }).click();
+		await expect(page).toHaveURL(/\/servers\/facilities$/);
+		await expect(
+			page.getByRole("tab", { name: "Facility servers" }),
+		).toHaveAttribute("aria-selected", "true");
+	});
+
+	test("hits the backend and renders rows or an error", async ({ page }) => {
+		await page.goto("/servers");
+		await expect(
+			page
+				.locator(
+					[
+						'a[href^="/servers/"][href*="-"]', // server row link with UUID
+						'[role="alert"]',
+					].join(", "),
+				)
+				.first(),
+		).toBeVisible();
+	});
+});

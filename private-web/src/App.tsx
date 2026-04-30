@@ -8,11 +8,14 @@ import {
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
 import Admins from "./routes/Admins";
 import Status from "./routes/Status";
+import Servers from "./routes/Servers";
+import ServersList from "./routes/ServersList";
 import VersionDetail from "./routes/VersionDetail";
 import Versions from "./routes/Versions";
 
 const NAV_ITEMS: Array<{ label: string; to: string }> = [
 	{ label: "Status", to: "/status" },
+	{ label: "Servers", to: "/servers" },
 	{ label: "Versions", to: "/versions" },
 	{ label: "Admins", to: "/admins" },
 ];
@@ -49,6 +52,13 @@ export default function App() {
 					<Route path="/admins" element={<Admins />} />
 					<Route path="/versions" element={<Versions />} />
 					<Route path="/versions/:version" element={<VersionDetail />} />
+					<Route path="/servers" element={<Servers />}>
+						<Route index element={<ServersList kind="central" />} />
+						<Route
+							path="facilities"
+							element={<ServersList kind="facility" />}
+						/>
+					</Route>
 				</Routes>
 			</Container>
 		</Box>
