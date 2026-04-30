@@ -356,7 +356,6 @@ function ArtifactsSection({
 								<TableCell>Type</TableCell>
 								<TableCell>Platform</TableCell>
 								<TableCell>Download URL</TableCell>
-								<TableCell>Range</TableCell>
 								{unlocked && <TableCell />}
 							</TableRow>
 						</TableHead>
@@ -424,6 +423,20 @@ function ArtifactRow({
 						Overrides other artifact
 					</Typography>
 				)}
+				{artifact.version_range_pattern && (
+					<Typography
+						variant="caption"
+						color="text.secondary"
+						sx={{ display: "block" }}
+					>
+						{!artifact.is_used_in_public_api && (
+							<Box component="span" sx={{ color: "error.main", mr: 0.5 }}>
+								[Hidden]
+							</Box>
+						)}
+						Applies to: {artifact.version_range_pattern}
+					</Typography>
+				)}
 			</TableCell>
 			<TableCell sx={{ fontFamily: "monospace" }}>
 				{artifact.platform}
@@ -439,18 +452,6 @@ function ArtifactRow({
 					</a>
 				) : (
 					artifact.download_url
-				)}
-			</TableCell>
-			<TableCell sx={{ fontFamily: "monospace" }}>
-				{artifact.version_range_pattern ?? "exact"}
-				{artifact.version_range_pattern && !artifact.is_used_in_public_api && (
-					<Typography
-						variant="caption"
-						color="error"
-						sx={{ display: "block" }}
-					>
-						Hidden
-					</Typography>
 				)}
 			</TableCell>
 			{unlocked && (
@@ -546,7 +547,7 @@ function EditArtifactRow({
 					required
 				/>
 			</TableCell>
-			<TableCell colSpan={2}>
+			<TableCell>
 				<TextField
 					size="small"
 					fullWidth
