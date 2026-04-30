@@ -22,7 +22,7 @@ diesel-async.workspace = true
 diesel_migrations = "2.2.0"
 miette.workspace = true
 percent-encoding = "2.3.2"
-private-server = { path = "../private-server", features = ["ssr"] }
+private-server = { path = "../private-server" }
 public-server = { path = "../public-server" }
 rcgen = "0.14.3"
 time = "0.3.43"

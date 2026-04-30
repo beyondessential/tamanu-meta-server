@@ -18,7 +18,7 @@ async fn update_server_basic_fields() {
 			.unwrap();
 
 		let response = private
-			.post("/api/private_server/fns/servers/update")
+			.post("/api/servers/update")
 			.json(&json!({
 				"server_id": "22222222-2222-2222-2222-222222222222",
 				"data": {
@@ -49,7 +49,7 @@ async fn update_server_partial_update() {
 			.unwrap();
 
 		let response = private
-			.post("/api/private_server/fns/servers/update")
+			.post("/api/servers/update")
 			.json(&json!({
 				"server_id": "33333333-3333-3333-3333-333333333333",
 				"data": {
@@ -85,7 +85,7 @@ async fn update_server_device_id() {
 			.unwrap();
 
 		let response = private
-			.post("/api/private_server/fns/servers/update")
+			.post("/api/servers/update")
 			.json(&json!({
 				"server_id": "55555555-5555-5555-5555-555555555555",
 				"data": {
@@ -114,7 +114,7 @@ async fn update_server_invalid_rank() {
 			.unwrap();
 
 		let response = private
-			.post("/api/private_server/fns/servers/update")
+			.post("/api/servers/update")
 			.json(&json!({
 				"server_id": "22222222-2222-2222-2222-222222222222",
 				"data": {
@@ -122,7 +122,8 @@ async fn update_server_invalid_rank() {
 				}
 			}))
 			.await;
-		response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+		// axum's Json extractor rejects unknown enum variants with 422
+		response.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
 	})
 	.await
 }
@@ -135,7 +136,7 @@ async fn update_server_not_found() {
 			.unwrap();
 
 		let response = private
-			.post("/api/private_server/fns/servers/update")
+			.post("/api/servers/update")
 			.json(&json!({
 				"server_id": "77777777-7777-7777-7777-777777777777",
 				"data": {}
@@ -162,7 +163,7 @@ async fn update_server_parent_id() {
 			.unwrap();
 
 		let response = private
-			.post("/api/private_server/fns/servers/update")
+			.post("/api/servers/update")
 			.json(&json!({
 				"server_id": "99999999-9999-9999-9999-999999999999",
 				"data": {
@@ -197,7 +198,7 @@ async fn update_server_clear_parent_id() {
 			.unwrap();
 
 		let response = private
-			.post("/api/private_server/fns/servers/update")
+			.post("/api/servers/update")
 			.json(&json!({
 				"server_id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
 				"data": {
@@ -232,7 +233,7 @@ async fn search_parent_by_uuid() {
 			.unwrap();
 
 		let response = private
-			.post("/api/private_server/fns/servers/search_parent")
+			.post("/api/servers/search_parent")
 			.json(&json!({
 				"query": "cccccccc-cccc-cccc-cccc-cccccccccccc",
 				"current_server_id": "dddddddd-dddd-dddd-dddd-dddddddddddd",
@@ -266,7 +267,7 @@ async fn search_parent_by_name() {
 			.unwrap();
 
 		let response = private
-			.post("/api/private_server/fns/servers/search_parent")
+			.post("/api/servers/search_parent")
 			.json(&json!({
 				"query": "Searchable",
 				"current_server_id": "ffffffff-ffff-ffff-ffff-ffffffffffff",
@@ -300,7 +301,7 @@ async fn search_parent_ordering_same_rank_first() {
 			.unwrap();
 
 		let response = private
-			.post("/api/private_server/fns/servers/search_parent")
+			.post("/api/servers/search_parent")
 			.json(&json!({
 				"query": "Server",
 				"current_server_id": "33333333-3333-3333-3333-333333333333",
@@ -334,7 +335,7 @@ async fn search_parent_ordering_same_kind_last() {
 			.unwrap();
 
 		let response = private
-			.post("/api/private_server/fns/servers/search_parent")
+			.post("/api/servers/search_parent")
 			.json(&json!({
 				"query": "Server",
 				"current_server_id": "66666666-6666-6666-6666-666666666666",
@@ -367,7 +368,7 @@ async fn search_parent_excludes_current_server() {
 			.unwrap();
 
 		let response = private
-			.post("/api/private_server/fns/servers/search_parent")
+			.post("/api/servers/search_parent")
 			.json(&json!({
 				"query": "Current",
 				"current_server_id": "77777777-7777-7777-7777-777777777777",
@@ -407,7 +408,7 @@ async fn update_server_preserves_device_id_when_not_provided() {
 
 		// Update server without providing device_id in the update data
 		let response = private
-			.post("/api/private_server/fns/servers/update")
+			.post("/api/servers/update")
 			.json(&json!({
 				"server_id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
 				"data": {
@@ -455,7 +456,7 @@ async fn update_server_clears_device_id_with_null() {
 
 		// Update server with device_id explicitly set to null
 		let response = private
-			.post("/api/private_server/fns/servers/update")
+			.post("/api/servers/update")
 			.json(&json!({
 				"server_id": "dddddddd-dddd-dddd-dddd-dddddddddddd",
 				"data": {
@@ -504,7 +505,7 @@ async fn update_server_sets_new_device_id() {
 
 		// Update server with a new device_id
 		let response = private
-			.post("/api/private_server/fns/servers/update")
+			.post("/api/servers/update")
 			.json(&json!({
 				"server_id": "11111111-1111-1111-1111-111111111111",
 				"data": {

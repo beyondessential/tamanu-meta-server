@@ -6,7 +6,7 @@ async function callApi(
 	fn: string,
 	params: Record<string, unknown> = {},
 ) {
-	await request.post(`/api/private_server/fns/${module}/${fn}`, {
+	await request.post(`/api/${module}/${fn}`, {
 		data: params,
 	});
 }

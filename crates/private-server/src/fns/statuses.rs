@@ -1,14 +1,23 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+use axum::Json;
+use axum::extract::State;
+use axum::routing::{Router, post};
 use commons_errors::Result;
 use commons_types::{
-	server::{cards::CentralServerCard, rank::ServerRank},
+	server::{
+		cards::{CentralServerCard, FacilityServerStatus},
+		kind::ServerKind,
+		rank::ServerRank,
+	},
 	version::VersionStr,
 };
-use leptos::server;
-use leptos::server_fn::codec::Json;
+use database::{servers::Server, statuses::Status, versions::Version};
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+use crate::state::AppState;
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub struct LiveVersionsBracket {
@@ -43,143 +52,119 @@ pub struct ServerStatusData {
 	pub timezone: Option<String>,
 }
 
-#[server(input = Json)]
-pub async fn summary() -> Result<SummaryData> {
-	ssr::summary().await
+pub fn routes() -> Router<AppState> {
+	Router::new()
+		.route("/summary", post(summary))
+		.route("/server_grouped_ids", post(server_grouped_ids))
+		.route("/server_details", post(server_details))
 }
 
-pub type ServerGroupedIdsOutput = Result<BTreeMap<ServerRank, Vec<Uuid>>>;
-#[server(input = Json)]
-pub async fn server_grouped_ids() -> ServerGroupedIdsOutput {
-	ssr::server_grouped_ids().await
-}
+pub async fn summary(State(state): State<AppState>) -> Result<Json<SummaryData>> {
+	let mut conn = state.db.get().await?;
 
-#[server(input = Json)]
-pub async fn server_details(server_id: Uuid) -> Result<CentralServerCard> {
-	ssr::server_details(server_id).await
-}
+	let versions: BTreeSet<VersionStr> = Status::production_versions(&mut conn)
+		.await?
+		.into_iter()
+		.collect();
 
-#[cfg(feature = "ssr")]
-mod ssr {
-	use super::*;
-	use std::collections::{BTreeSet, HashMap};
-
-	use axum::extract::State;
-	use commons_errors::Result;
-	use commons_types::{
-		server::{cards::FacilityServerStatus, kind::ServerKind},
-		version::VersionStr,
+	let bracket = LiveVersionsBracket {
+		min: versions.first().cloned().unwrap_or_default(),
+		max: versions.last().cloned().unwrap_or_default(),
 	};
-	use database::{Db, servers::Server, statuses::Status, versions::Version};
-	use itertools::Itertools;
-	use leptos::prelude::expect_context;
-	use leptos_axum::extract_with_state;
-	use uuid::Uuid;
+	let releases = versions
+		.iter()
+		.map(|v| (v.0.major, v.0.minor))
+		.collect::<BTreeSet<_>>();
 
-	use crate::state::AppState;
+	Ok(Json(SummaryData {
+		bracket,
+		releases,
+		versions,
+	}))
+}
 
-	pub async fn summary() -> Result<SummaryData> {
-		let state = expect_context::<AppState>();
-		let State(db): State<Db> = extract_with_state(&state).await?;
-		let mut conn = db.get().await?;
+pub async fn server_grouped_ids(
+	State(state): State<AppState>,
+) -> Result<Json<BTreeMap<ServerRank, Vec<Uuid>>>> {
+	let mut conn = state.db.get().await?;
+	let servers = Server::list_by_kind(&mut conn, ServerKind::Central, 0, None).await?;
 
-		let versions: BTreeSet<VersionStr> = Status::production_versions(&mut conn)
-			.await?
-			.into_iter()
-			.collect();
+	let groups = servers
+		.into_iter()
+		.filter(|s| s.name.is_some() && s.rank.is_some())
+		.sorted_by_key(|s| s.rank)
+		.chunk_by(|s| s.rank.unwrap());
 
-		let bracket = LiveVersionsBracket {
-			min: versions.first().cloned().unwrap_or_default(),
-			max: versions.last().cloned().unwrap_or_default(),
-		};
-		let releases = versions
-			.iter()
-			.map(|v| (v.0.major, v.0.minor))
-			.collect::<BTreeSet<_>>();
-
-		Ok(SummaryData {
-			bracket,
-			releases,
-			versions,
+	let map: BTreeMap<ServerRank, Vec<Uuid>> = groups
+		.into_iter()
+		.map(|(rank, group)| {
+			(
+				rank,
+				group
+					.sorted_by_key(|s| s.name.clone().unwrap())
+					.map(|s| s.id)
+					.collect(),
+			)
 		})
-	}
+		.collect();
+	Ok(Json(map))
+}
 
-	pub async fn server_grouped_ids() -> ServerGroupedIdsOutput {
-		let state = expect_context::<AppState>();
-		let State(db): State<Db> = extract_with_state(&state).await?;
-		let mut conn = db.get().await?;
-		let servers = Server::list_by_kind(&mut conn, ServerKind::Central, 0, None).await?;
+#[derive(Deserialize)]
+pub struct ServerDetailsArgs {
+	pub server_id: Uuid,
+}
 
-		let groups = servers
-			.into_iter()
-			.filter(|s| s.name.is_some() && s.rank.is_some())
-			.sorted_by_key(|s| s.rank)
-			.chunk_by(|s| s.rank.unwrap());
+pub async fn server_details(
+	State(state): State<AppState>,
+	Json(args): Json<ServerDetailsArgs>,
+) -> Result<Json<CentralServerCard>> {
+	let mut conn = state.db.get().await?;
 
-		Ok(groups
-			.into_iter()
-			.map(|(rank, group)| {
-				(
-					rank,
-					group
-						.sorted_by_key(|s| s.name.clone().unwrap())
-						.map(|s| s.id)
-						.collect(),
-				)
-			})
-			.collect())
-	}
+	let central = Server::get_by_id(&mut conn, args.server_id).await?;
 
-	pub async fn server_details(id: Uuid) -> Result<super::CentralServerCard> {
-		let state = expect_context::<AppState>();
-		let State(db): State<Db> = extract_with_state(&state).await?;
-		let mut conn = db.get().await?;
+	let latest_version = Version::get_latest_matching(&mut conn, "*".parse()?)
+		.await?
+		.as_semver();
 
-		let central = Server::get_by_id(&mut conn, id).await?;
+	let central_status = Status::latest_for_server(&mut conn, args.server_id).await?;
+	let central_up = central_status
+		.as_ref()
+		.map(|s| s.short_status())
+		.unwrap_or_default();
+	let version_distance = central_status
+		.as_ref()
+		.and_then(|s| s.distance_from_version(&latest_version));
 
-		let latest_version = Version::get_latest_matching(&mut conn, "*".parse()?)
-			.await?
-			.as_semver();
-
-		let central_status = Status::latest_for_server(&mut conn, id).await?;
-		let central_up = central_status
-			.as_ref()
-			.map(|s| s.short_status())
-			.unwrap_or_default();
-		let version_distance = central_status
-			.as_ref()
-			.and_then(|s| s.distance_from_version(&latest_version));
-
-		let facilities = central.get_children(&mut conn).await?;
-		let facility_ids = facilities.iter().map(|f| f.id).collect::<Vec<_>>();
-		let facility_statuses = Status::latest_for_servers(&mut conn, &facility_ids)
-			.await?
-			.into_iter()
-			.map(|s| (s.server_id, s))
-			.collect::<HashMap<_, _>>();
-		let facility_servers = facilities
-			.into_iter()
-			.map(|f| {
-				let facility_status = facility_statuses.get(&f.id);
-				FacilityServerStatus {
-					id: f.id,
-					name: f.name.clone().unwrap_or_default(),
-					up: facility_status
-						.map(|s| s.short_status())
-						.unwrap_or_default(),
-				}
-			})
-			.collect();
-
-		Ok(CentralServerCard {
-			id: central.id,
-			name: central.name.unwrap_or_default(),
-			rank: central.rank,
-			host: central.host.0.to_string(),
-			up: central_up,
-			version: central_status.and_then(|s| s.version),
-			version_distance,
-			facility_servers,
+	let facilities = central.get_children(&mut conn).await?;
+	let facility_ids = facilities.iter().map(|f| f.id).collect::<Vec<_>>();
+	let facility_statuses = Status::latest_for_servers(&mut conn, &facility_ids)
+		.await?
+		.into_iter()
+		.map(|s| (s.server_id, s))
+		.collect::<HashMap<_, _>>();
+	let facility_servers = facilities
+		.into_iter()
+		.map(|f| {
+			let facility_status = facility_statuses.get(&f.id);
+			FacilityServerStatus {
+				id: f.id,
+				name: f.name.clone().unwrap_or_default(),
+				up: facility_status
+					.map(|s| s.short_status())
+					.unwrap_or_default(),
+			}
 		})
-	}
+		.collect();
+
+	Ok(Json(CentralServerCard {
+		id: central.id,
+		name: central.name.unwrap_or_default(),
+		rank: central.rank,
+		host: central.host.0.to_string(),
+		up: central_up,
+		version: central_status.and_then(|s| s.version),
+		version_distance,
+		facility_servers,
+	}))
 }

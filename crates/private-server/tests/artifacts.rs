@@ -35,7 +35,7 @@ async fn artifact_multiple_ranges_pattern_specificity_private_endpoint() {
 		// Call the private server endpoint for getting artifacts by version ID
 		// The private server should show ALL matching artifacts, not just the deduplicated public view
 		let response = private
-			.post("/api/private_server/fns/versions/get_artifacts_by_version_id")
+			.post("/api/versions/get_artifacts_by_version_id")
 			.json(&serde_json::json!({"version_id": version_id_245}))
 			.await;
 

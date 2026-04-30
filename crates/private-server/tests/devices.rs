@@ -1052,7 +1052,7 @@ async fn test_update_key_name() {
 
 		// Update the key name via server function
 		let response = private
-			.post("/api/private_server/fns/devices/update_key_name")
+			.post("/api/devices/update_key_name")
 			.json(&serde_json::json!({
 				"key_id": key_id.to_string(),
 				"name": "My Test Key",
@@ -1069,7 +1069,7 @@ async fn test_update_key_name() {
 
 		// Update to a different name
 		let response = private
-			.post("/api/private_server/fns/devices/update_key_name")
+			.post("/api/devices/update_key_name")
 			.json(&serde_json::json!({
 				"key_id": key_id.to_string(),
 				"name": "Renamed Key",
@@ -1084,7 +1084,7 @@ async fn test_update_key_name() {
 
 		// Update to None (clear the name)
 		let response = private
-			.post("/api/private_server/fns/devices/update_key_name")
+			.post("/api/devices/update_key_name")
 			.json(&serde_json::json!({
 				"key_id": key_id.to_string(),
 				"name": null,

@@ -18,7 +18,7 @@ export async function callApi<T>(
 	params: Record<string, unknown> = {},
 	signal?: AbortSignal,
 ): Promise<T> {
-	const response = await fetch(`/api/private_server/fns/${module}/${fn}`, {
+	const response = await fetch(`/api/${module}/${fn}`, {
 		method: "POST",
 		headers: { "content-type": "application/json" },
 		body: JSON.stringify(params),

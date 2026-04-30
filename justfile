@@ -4,16 +4,15 @@
 export DATABASE_URL := env('DATABASE_URL', 'postgres://localhost/canopy')
 export RO_DATABASE_URL := env('RO_DATABASE_URL', 'postgres://localhost/canopy')
 
-# Environment variables for Leptos tests
-
-export LEPTOS_OUTPUT_NAME := "private-server"
-export SERVER_FN_MOD_PATH := "true"
-export DISABLE_SERVER_FN_HASH := "true"
-
 # ...for development
 
 export SERVER_VERSIONS_SECRET := "test"
 export PUBLIC_URL := "http://localhost:8080"
+
+# Skip the npm install + npm run build that private-server's build.rs runs by default.
+# Set this in dev recipes — Vite serves the frontend directly there, and we don't
+# need the binary to embed dist/ for cargo check / cargo run / cargo test.
+export SKIP_FRONTEND_BUILD := "1"
 
 # Show available commands
 default:
@@ -31,11 +30,7 @@ build-image:
 watch-public: _copy-bulma
     watchexec -w crates -- cargo run --bin public-server
 
-# Run the private server with live reload
-watch-private: _copy-bulma
-    cargo leptos watch
-
-# Run the private server's HTTP API only, bound to 127.0.0.1:8081, for the private-web Vite frontend
+# Run the private server's HTTP API, bound to 127.0.0.1:8081, for the private-web Vite frontend
 watch-private-api:
     BIND_ADDRESS=127.0.0.1:8081 watchexec -w crates -- cargo run --bin private-server
 
@@ -81,7 +76,6 @@ migrate-revert:
 # Format code
 fmt:
     cargo fmt
-    leptosfmt crates/private-server/**/*.rs
 
 # Check formatting without making changes
 fmt-check:
@@ -103,22 +97,14 @@ identity:
 clean:
     cargo clean
 
-# Build server binaries for a specific target (release mode)
+# Build server binaries for a specific target (release mode), with embedded private-web frontend
 build-servers-release target: _copy-bulma
-    cargo build --locked --target {{ target }} --release --bins
-
-# Build the frontend only (private server)
-build-frontend: _copy-bulma
-    cargo leptos build --frontend-only
-
-# Build the frontend for production (with compression)
-build-frontend-release: _copy-bulma
-    cargo leptos build --release --frontend-only --precompress
+    SKIP_FRONTEND_BUILD= cargo build --locked --target {{ target }} --release --bins
 
 # Install development dependencies
 install-deps:
     cargo binstall -y cargo-binstall || cargo install cargo-binstall
-    cargo binstall -y cargo-nextest cargo-leptos leptosfmt cargo-release git-cliff watchexec-cli diesel_cli
+    cargo binstall -y cargo-nextest cargo-release git-cliff watchexec-cli diesel_cli
 
 # Download database from Kubernetes
 download-db dbname namespace="canopy-dev" pod="meta-db-1" output="app.dump":
@@ -139,6 +125,6 @@ update-bulma:
     git submodule update --init --recursive
     git submodule foreach git pull origin main
 
-# Copy bulma CSS files to static directory
+# Copy bulma CSS files to static directory (used by the public-server templates)
 _copy-bulma:
     cp -r --reflink=auto .sub/bulma/css static/bulma

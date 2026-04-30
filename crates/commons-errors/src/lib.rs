@@ -5,10 +5,6 @@ use axum::response::{IntoResponse, Response};
 #[cfg(feature = "ssr")]
 use diesel_async::pooled_connection::PoolError;
 use http::{StatusCode, Uri};
-use leptos::{
-	prelude::{FromServerFnError, ServerFnErrorErr},
-	server_fn::codec::JsonEncoding,
-};
 use problem_details::ProblemDetails;
 use serde::{Deserialize, Serialize};
 
@@ -76,9 +72,6 @@ pub enum AppError {
 
 	#[error("authentication failed: {reason}")]
 	AuthFailed { reason: String },
-
-	#[error("server error: {0}")]
-	ServerFn(#[from] ServerFnErrorErr),
 }
 
 impl AppError {
@@ -102,13 +95,6 @@ impl From<ProblemDetails> for AppError {
 impl From<node_semver::SemverError> for AppError {
 	fn from(err: node_semver::SemverError) -> Self {
 		Self::VersionParse(Box::new(err))
-	}
-}
-
-impl FromServerFnError for AppError {
-	type Encoder = JsonEncoding;
-	fn from_server_fn_error(value: ServerFnErrorErr) -> Self {
-		AppError::ServerFn(value)
 	}
 }
 
@@ -185,7 +171,6 @@ impl AppError {
 						Self::AuthCertificateNotFound => "auth-certificate-not-found",
 						Self::AuthInsufficientPermissions { .. } => "auth-insufficient-permissions",
 						Self::AuthFailed { .. } => "auth-failed",
-						Self::ServerFn(_) => "server-fn",
 						Self::Problem(_) => unreachable!(),
 					}
 				))

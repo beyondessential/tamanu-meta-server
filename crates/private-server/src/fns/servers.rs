@@ -1,6 +1,11 @@
 use std::sync::Arc;
 
-use commons_errors::Result;
+use axum::Json;
+use axum::extract::State;
+use axum::routing::{Router, post};
+use commons_errors::{AppError, Result};
+use commons_servers::tailscale_auth::TailscaleAdmin;
+use commons_types::server::CanopyTicket;
 use commons_types::{
 	Uuid,
 	geo::GeoPoint,
@@ -8,11 +13,19 @@ use commons_types::{
 	status::ShortStatus,
 	version::VersionStr,
 };
+use database::{
+	devices::{Device, DeviceConnection, DeviceWithInfo},
+	servers::{PartialServer, Server},
+	statuses::Status,
+	url_field::UrlField,
+	versions::Version,
+};
+use futures::future::join;
 use jiff::Timestamp;
-use leptos::serde_json::Value as JsonValue;
-use leptos::server;
-use leptos::server_fn::codec::Json;
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
+
+use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerDetailData {
@@ -98,476 +111,410 @@ where
 	Deserialize::deserialize(deserializer).map(Some)
 }
 
-#[server(input = Json)]
-pub async fn count_some(kind: Option<ServerKind>) -> Result<u64> {
-	ssr::count_some(kind).await
+fn server_to_info(s: Server) -> ServerInfo {
+	ServerInfo {
+		id: s.id,
+		name: s.name,
+		kind: s.kind,
+		rank: s.rank,
+		host: s.host.0.to_string(),
+		device_id: s.device_id,
+		parent_server_id: s.parent_server_id,
+		parent_server_name: None,
+		listed: s.listed,
+		cloud: s.cloud,
+		geolocation: s.geolocation,
+	}
 }
 
-#[server(input = Json)]
-pub async fn list_some(
-	kind: Option<ServerKind>,
-	offset: u64,
-	limit: Option<u64>,
-) -> Result<Vec<Arc<ServerInfo>>> {
-	ssr::list_some(kind, offset, limit)
-		.await
-		.map(|v| v.into_iter().map(Arc::new).collect())
+pub fn routes() -> Router<AppState> {
+	Router::new()
+		.route("/count_some", post(count_some))
+		.route("/list_some", post(list_some))
+		.route("/list_all", post(list_all))
+		.route("/list_centrals", post(list_centrals))
+		.route("/list_facilities", post(list_facilities))
+		.route("/get_name", post(get_name))
+		.route("/get_info", post(get_info))
+		.route("/get_detail", post(get_detail))
+		.route("/update", post(update))
+		.route("/import_ticket", post(import_ticket))
+		.route("/search_parent", post(search_parent))
 }
 
-#[server(input = Json)]
-pub async fn list_all() -> Result<Vec<ServerInfo>> {
-	ssr::list_some(None, 0, None).await
+#[derive(Deserialize)]
+pub struct CountArgs {
+	pub kind: Option<ServerKind>,
 }
 
-#[server(input = Json)]
-pub async fn list_centrals() -> Result<Vec<ServerInfo>> {
-	ssr::list_some(Some(ServerKind::Central), 0, None).await
-}
-
-#[server(input = Json)]
-pub async fn list_facilities() -> Result<Vec<ServerInfo>> {
-	ssr::list_some(Some(ServerKind::Facility), 0, None).await
-}
-
-#[server(input = Json)]
-pub async fn get_name(server_id: Uuid) -> Result<String> {
-	ssr::get_name(server_id).await
-}
-
-#[server(input = Json)]
-pub async fn get_info(server_id: Uuid) -> Result<ServerInfo> {
-	ssr::get_info(server_id).await
-}
-
-#[server(input = Json)]
-pub async fn get_detail(server_id: Uuid) -> Result<ServerDetailData> {
-	ssr::get_detail(server_id).await
-}
-
-#[server(input = Json)]
-pub async fn update(server_id: Uuid, data: ServerDataUpdate) -> Result<()> {
-	ssr::update(server_id, data).await
-}
-
-#[server(input = Json)]
-pub async fn import_ticket(
-	ticket_b64: String,
-	kind: ServerKind,
-	rank: Option<ServerRank>,
-) -> Result<Uuid> {
-	ssr::import_ticket(ticket_b64, kind, rank).await
-}
-
-#[server(input = Json)]
-pub async fn search_parent(
-	query: String,
-	current_server_id: Uuid,
-	current_rank: Option<ServerRank>,
-	current_kind: ServerKind,
-) -> Result<Vec<ServerInfo>> {
-	ssr::search_parent(query, current_server_id, current_rank, current_kind).await
-}
-
-#[cfg(feature = "ssr")]
-mod ssr {
-	use std::sync::Arc;
-
-	use axum::extract::State;
-	use commons_errors::{AppError, Result};
-	use futures::future::join;
-
-	use commons_types::server::CanopyTicket;
-	use commons_types::server::{kind::ServerKind, rank::ServerRank};
-	use database::{
-		Db,
-		devices::{Device, DeviceConnection},
-		servers::{PartialServer, Server},
-		statuses::Status,
-		url_field::UrlField,
-		versions::Version,
+pub async fn count_some(
+	State(state): State<AppState>,
+	Json(args): Json<CountArgs>,
+) -> Result<Json<u64>> {
+	let mut conn = state.db.get().await?;
+	let count = if let Some(kind) = args.kind {
+		Server::count_by_kind(&mut conn, kind).await?
+	} else {
+		Server::count_all(&mut conn).await?
 	};
-	use leptos::prelude::expect_context;
-	use leptos_axum::extract_with_state;
-	use uuid::Uuid;
+	Ok(Json(count))
+}
 
-	use crate::{fns::servers::ServerDataUpdate, state::AppState};
+#[derive(Deserialize)]
+pub struct ListArgs {
+	pub kind: Option<ServerKind>,
+	pub offset: u64,
+	pub limit: Option<u64>,
+}
 
-	pub async fn import_ticket(
-		ticket_b64: String,
-		kind: ServerKind,
-		rank: Option<ServerRank>,
-	) -> Result<Uuid> {
-		let db = crate::fns::commons::admin_guard().await?;
-		let mut conn = db.get().await?;
+pub async fn list_some(
+	State(state): State<AppState>,
+	Json(args): Json<ListArgs>,
+) -> Result<Json<Vec<Arc<ServerInfo>>>> {
+	let mut conn = state.db.get().await?;
+	let servers = if let Some(kind) = args.kind {
+		Server::list_by_kind(&mut conn, kind, args.offset, args.limit).await?
+	} else {
+		Server::get_all(&mut conn, args.offset, args.limit).await?
+	};
+	Ok(Json(
+		servers.into_iter().map(server_to_info).map(Arc::new).collect(),
+	))
+}
 
-		let ticket = CanopyTicket::from_base64(&ticket_b64)?;
-		let server = Server::upsert_from_ticket(&mut conn, &ticket, kind, rank).await?;
-		Ok(server.id)
-	}
+pub async fn list_all(State(state): State<AppState>) -> Result<Json<Vec<ServerInfo>>> {
+	let mut conn = state.db.get().await?;
+	let servers = Server::get_all(&mut conn, 0, None).await?;
+	Ok(Json(servers.into_iter().map(server_to_info).collect()))
+}
 
-	pub async fn count_some(kind: Option<ServerKind>) -> Result<u64> {
-		let state = expect_context::<AppState>();
-		let State(db): State<Db> = extract_with_state(&state).await?;
-		let mut conn = db.get().await?;
+pub async fn list_centrals(State(state): State<AppState>) -> Result<Json<Vec<ServerInfo>>> {
+	let mut conn = state.db.get().await?;
+	let servers = Server::list_by_kind(&mut conn, ServerKind::Central, 0, None).await?;
+	Ok(Json(servers.into_iter().map(server_to_info).collect()))
+}
 
-		if let Some(kind) = kind {
-			Server::count_by_kind(&mut conn, kind).await
-		} else {
-			Server::count_all(&mut conn).await
-		}
-	}
+pub async fn list_facilities(State(state): State<AppState>) -> Result<Json<Vec<ServerInfo>>> {
+	let mut conn = state.db.get().await?;
+	let servers = Server::list_by_kind(&mut conn, ServerKind::Facility, 0, None).await?;
+	Ok(Json(servers.into_iter().map(server_to_info).collect()))
+}
 
-	pub async fn list_some(
-		kind: Option<ServerKind>,
-		offset: u64,
-		limit: Option<u64>,
-	) -> Result<Vec<super::ServerInfo>> {
-		let state = expect_context::<AppState>();
-		let State(db): State<Db> = extract_with_state(&state).await?;
-		let mut conn = db.get().await?;
+#[derive(Deserialize)]
+pub struct ServerIdArgs {
+	pub server_id: Uuid,
+}
 
-		let servers = if let Some(kind) = kind {
-			Server::list_by_kind(&mut conn, kind, offset, limit).await?
-		} else {
-			Server::get_all(&mut conn, offset, limit).await?
-		};
+pub async fn get_name(
+	State(state): State<AppState>,
+	Json(args): Json<ServerIdArgs>,
+) -> Result<Json<String>> {
+	let mut conn = state.db.get().await?;
+	let server = Server::get_by_id(&mut conn, args.server_id).await?;
+	Ok(Json(server.name.unwrap_or_else(|| server.host.0.to_string())))
+}
 
-		Ok(servers
-			.into_iter()
-			.map(|s| super::ServerInfo {
-				id: s.id,
-				name: s.name,
-				kind: s.kind,
-				rank: s.rank,
-				host: s.host.0.to_string(),
-				device_id: s.device_id,
-				parent_server_id: s.parent_server_id,
-				parent_server_name: None,
-				listed: s.listed,
-				cloud: s.cloud,
-				geolocation: s.geolocation,
-			})
-			.collect())
-	}
+pub async fn get_info(
+	State(state): State<AppState>,
+	Json(args): Json<ServerIdArgs>,
+) -> Result<Json<ServerInfo>> {
+	let db = state.db;
+	let mut conn = db.get().await?;
+	let server = Server::get_by_id(&mut conn, args.server_id).await?;
+	let parent_server_name = if let Some(parent_id) = server.parent_server_id {
+		Server::get_by_id(&mut conn, parent_id).await?.name
+	} else {
+		None
+	};
+	Ok(Json(ServerInfo {
+		id: server.id,
+		name: server.name.clone(),
+		kind: server.kind,
+		rank: server.rank,
+		host: server.host.0.to_string(),
+		device_id: server.device_id,
+		parent_server_id: server.parent_server_id,
+		parent_server_name,
+		listed: server.listed,
+		cloud: server.cloud,
+		geolocation: server.geolocation,
+	}))
+}
 
-	pub async fn get_name(server_id: Uuid) -> Result<String> {
-		let state = expect_context::<AppState>();
-		let State(db): State<Db> = extract_with_state(&state).await?;
-		let mut conn = db.get().await?;
-		let server = Server::get_by_id(&mut conn, server_id).await?;
-		Ok(server.name.unwrap_or_else(|| server.host.0.to_string()))
-	}
+pub async fn get_detail(
+	State(state): State<AppState>,
+	Json(args): Json<ServerIdArgs>,
+) -> Result<Json<ServerDetailData>> {
+	let db = state.db.clone();
+	let mut conn = db.get().await?;
+	let server = Server::get_by_id(&mut conn, args.server_id).await?;
+	let device_id = server.device_id;
 
-	pub async fn get_info(server_id: Uuid) -> Result<super::ServerInfo> {
-		let state = expect_context::<AppState>();
-		let State(db): State<Db> = extract_with_state(&state).await?;
-		let mut conn = db.get().await?;
+	let (parent_server_name, status, latest_version) = {
+		let mut conn_parent = db.get().await?;
+		let mut conn_status = db.get().await?;
 
-		let server = Server::get_by_id(&mut conn, server_id).await?;
-		let device_id = server.device_id;
-
-		let parent_server_name = if let Some(parent_id) = server.parent_server_id {
-			let parent = Server::get_by_id(&mut conn, parent_id).await?;
-			parent.name
-		} else {
-			None
-		};
-
-		Ok(super::ServerInfo {
-			id: server.id,
-			name: server.name.clone(),
-			kind: server.kind,
-			rank: server.rank,
-			host: server.host.0.to_string(),
-			device_id,
-			parent_server_id: server.parent_server_id,
-			parent_server_name,
-			listed: server.listed,
-			cloud: server.cloud,
-			geolocation: server.geolocation,
-		})
-	}
-
-	pub async fn get_detail(server_id: Uuid) -> Result<super::ServerDetailData> {
-		let state = expect_context::<AppState>();
-		let State(db): State<Db> = extract_with_state(&state).await?;
-		let mut conn = db.get().await?;
-
-		let server = Server::get_by_id(&mut conn, server_id).await?;
-		let device_id = server.device_id;
-
-		// Parallelised independent lookups: parent server, status, and latest version
-		let (parent_server_name, status, latest_version) = {
-			let mut conn_parent = db.get().await?;
-			let mut conn_status = db.get().await?;
-
-			let parent_lookup = async {
-				if let Some(parent_id) = server.parent_server_id {
-					let parent = Server::get_by_id(&mut conn_parent, parent_id).await?;
-					Ok::<_, commons_errors::AppError>(parent.name)
-				} else {
-					Ok(None)
-				}
-			};
-
-			let status_lookup = Status::latest_for_server(&mut conn_status, server.id);
-
-			let latest_version_lookup = async {
-				Version::get_latest_matching(&mut conn, "*".parse()?)
-					.await
-					.map(|v| v.as_semver())
-			};
-
-			let (parent_result, status_result) = join(parent_lookup, status_lookup).await;
-
-			(parent_result?, status_result?, latest_version_lookup.await?)
-		};
-
-		let server_details = super::ServerInfo {
-			id: server.id,
-			name: server.name.clone(),
-			kind: server.kind,
-			rank: server.rank,
-			host: server.host.0.to_string(),
-			device_id,
-			parent_server_id: server.parent_server_id,
-			parent_server_name,
-			listed: server.listed,
-			cloud: server.cloud,
-			geolocation: server.geolocation,
-		};
-
-		let up = status
-			.as_ref()
-			.map(|s| s.short_status())
-			.unwrap_or_default();
-
-		let last_status = if let Some(st) = status.as_ref() {
-			let device = if let Some(device_id) = st.device_id {
-				DeviceConnection::get_latest_from_device_ids(&mut conn, [device_id].into_iter())
-					.await?
-					.into_iter()
-					.next()
+		let parent_lookup = async {
+			if let Some(parent_id) = server.parent_server_id {
+				let parent = Server::get_by_id(&mut conn_parent, parent_id).await?;
+				Ok::<_, AppError>(parent.name)
 			} else {
-				None
-			};
-
-			let platform = st.platform();
-			let postgres = st.postgres_version();
-			let nodejs = device.and_then(|d| d.nodejs_version());
-
-			let version_distance = st.distance_from_version(&latest_version);
-
-			let min_chrome_version = if let Some(ref version) = st.version {
-				compute_min_chrome_version(&mut conn, version).await
-			} else {
-				None
-			};
-
-			Some(super::ServerLastStatusData {
-				id: st.id,
-				created_at: st.created_at,
-				version: st.version.clone(),
-				version_distance,
-				min_chrome_version,
-				platform,
-				postgres,
-				nodejs,
-				timezone: st
-					.extra("timezone")
-					.and_then(|s| s.as_str().map(|s| s.to_string())),
-				extra: st.extra.clone(),
-			})
-		} else {
-			None
-		};
-
-		let device_info = if let Some(device_id) = device_id {
-			let device_with_info = Device::get_with_info(&mut conn, device_id).await?;
-			Some(convert_device_with_info_to_device_info(device_with_info))
-		} else {
-			None
-		};
-
-		let child_servers = if server.kind.to_string() == "central" {
-			let children = server.get_children(&mut conn).await?;
-
-			if children.is_empty() {
-				Vec::new()
-			} else {
-				// Fetch child statuses in a single optimised query
-				let child_ids: Vec<Uuid> = children.iter().map(|c| c.id).collect();
-				let statuses = Status::latest_for_servers(&mut conn, &child_ids).await?;
-
-				// Create a map of server_id -> status for O(1) lookup
-				let status_map: std::collections::HashMap<Uuid, &Status> =
-					statuses.iter().map(|s| (s.server_id, s)).collect();
-
-				// Build result by combining children with their statuses
-				children
-					.into_iter()
-					.map(|child| {
-						let child_status = status_map.get(&child.id).copied();
-						let child_up = child_status.map(|s| s.short_status()).unwrap_or_default();
-
-						(
-							child_up,
-							Arc::new(super::ServerInfo {
-								id: child.id,
-								name: child.name,
-								kind: child.kind,
-								rank: child.rank,
-								host: child.host.0.to_string(),
-								listed: child.listed,
-								cloud: child.cloud,
-								geolocation: child.geolocation,
-								device_id: child.device_id,
-								parent_server_id: Some(server.id),
-								parent_server_name: server.name.clone(),
-							}),
-						)
-					})
-					.collect()
+				Ok(None)
 			}
-		} else {
-			Vec::new()
 		};
 
-		Ok(super::ServerDetailData {
-			server: Arc::new(server_details),
-			device_info: device_info.map(Arc::new),
-			last_status: last_status.map(Arc::new),
-			up,
-			child_servers,
-		})
-	}
+		let status_lookup = Status::latest_for_server(&mut conn_status, server.id);
 
-	pub async fn update(server_id: Uuid, data: ServerDataUpdate) -> Result<()> {
-		let db = crate::fns::commons::admin_guard().await?;
-		let mut conn = db.get().await?;
-
-		let update_data = PartialServer {
-			id: server_id,
-			name: data.name,
-			kind: data.kind,
-			rank: data.rank,
-			host: if let Some(host_str) = data.host {
-				Some(UrlField(host_str.parse().map_err(|e| {
-					AppError::custom(format!("Invalid URL: {}", e))
-				})?))
-			} else {
-				None
-			},
-			device_id: data.device_id,
-			parent_server_id: data.parent_server_id,
-			listed: data.listed,
-			cloud: data.cloud,
-			geolocation: data.geolocation,
+		let latest_version_lookup = async {
+			Version::get_latest_matching(&mut conn, "*".parse()?)
+				.await
+				.map(|v| v.as_semver())
 		};
 
-		Server::update(&mut conn, server_id, update_data).await?;
-		Ok(())
-	}
+		let (parent_result, status_result) = join(parent_lookup, status_lookup).await;
+		(parent_result?, status_result?, latest_version_lookup.await?)
+	};
 
-	pub async fn search_parent(
-		query: String,
-		current_server_id: Uuid,
-		current_rank: Option<ServerRank>,
-		current_kind: ServerKind,
-	) -> Result<Vec<super::ServerInfo>> {
-		let state = expect_context::<AppState>();
-		let State(db): State<Db> = extract_with_state(&state).await?;
-		let mut conn = db.get().await?;
+	let server_details = ServerInfo {
+		id: server.id,
+		name: server.name.clone(),
+		kind: server.kind,
+		rank: server.rank,
+		host: server.host.0.to_string(),
+		device_id,
+		parent_server_id: server.parent_server_id,
+		parent_server_name,
+		listed: server.listed,
+		cloud: server.cloud,
+		geolocation: server.geolocation,
+	};
 
-		let all_servers = Server::search_for_parent(
-			&mut conn,
-			&query,
-			current_server_id,
-			current_rank,
-			current_kind,
-		)
-		.await?;
+	let up = status.as_ref().map(|s| s.short_status()).unwrap_or_default();
 
-		Ok(all_servers
-			.into_iter()
-			.map(|s| super::ServerInfo {
-				id: s.id,
-				name: s.name,
-				kind: s.kind,
-				rank: s.rank,
-				host: s.host.0.to_string(),
-				device_id: s.device_id,
-				parent_server_id: s.parent_server_id,
-				parent_server_name: None,
-				listed: s.listed,
-				cloud: s.cloud,
-				geolocation: s.geolocation,
-			})
-			.collect())
-	}
-
-	fn convert_device_with_info_to_device_info(
-		device_with_info: database::devices::DeviceWithInfo,
-	) -> crate::fns::devices::DeviceInfo {
-		fn format_key_as_pem(key_data: &[u8]) -> String {
-			use base64::prelude::*;
-
-			let base64_data = BASE64_STANDARD.encode(key_data);
-			let mut pem = String::with_capacity(base64_data.len() + 100);
-
-			pem.push_str("-----BEGIN PUBLIC KEY-----\n");
-
-			for chunk in base64_data.as_bytes().chunks(64) {
-				pem.push_str(&String::from_utf8_lossy(chunk));
-				pem.push('\n');
-			}
-
-			pem.push_str("-----END PUBLIC KEY-----");
-			pem
-		}
-
-		crate::fns::devices::DeviceInfo {
-			device: Arc::new(crate::fns::devices::DeviceData {
-				id: device_with_info.device.id,
-				created_at: device_with_info.device.created_at,
-				updated_at: device_with_info.device.updated_at,
-				role: device_with_info.device.role,
-			}),
-			keys: device_with_info
-				.keys
+	let last_status = if let Some(st) = status.as_ref() {
+		let device = if let Some(device_id) = st.device_id {
+			DeviceConnection::get_latest_from_device_ids(&mut conn, [device_id].into_iter())
+				.await?
 				.into_iter()
-				.map(|key| {
-					Arc::new(crate::fns::devices::DeviceKeyInfo {
-						id: key.id,
-						device_id: key.device_id,
-						name: key.name,
-						pem_data: format_key_as_pem(&key.key_data),
-						created_at: key.created_at,
-					})
+				.next()
+		} else {
+			None
+		};
+
+		let platform = st.platform();
+		let postgres = st.postgres_version();
+		let nodejs = device.and_then(|d| d.nodejs_version());
+		let version_distance = st.distance_from_version(&latest_version);
+		let min_chrome_version = if let Some(ref version) = st.version {
+			compute_min_chrome_version(&mut conn, version).await
+		} else {
+			None
+		};
+
+		Some(ServerLastStatusData {
+			id: st.id,
+			created_at: st.created_at,
+			version: st.version.clone(),
+			version_distance,
+			min_chrome_version,
+			platform,
+			postgres,
+			nodejs,
+			timezone: st
+				.extra("timezone")
+				.and_then(|s| s.as_str().map(|s| s.to_string())),
+			extra: st.extra.clone(),
+		})
+	} else {
+		None
+	};
+
+	let device_info = if let Some(device_id) = device_id {
+		let device_with_info = Device::get_with_info(&mut conn, device_id).await?;
+		Some(convert_device_with_info(device_with_info))
+	} else {
+		None
+	};
+
+	let child_servers = if server.kind == ServerKind::Central {
+		let children = server.get_children(&mut conn).await?;
+		if children.is_empty() {
+			Vec::new()
+		} else {
+			let child_ids: Vec<Uuid> = children.iter().map(|c| c.id).collect();
+			let statuses = Status::latest_for_servers(&mut conn, &child_ids).await?;
+			let status_map: std::collections::HashMap<Uuid, &Status> =
+				statuses.iter().map(|s| (s.server_id, s)).collect();
+
+			children
+				.into_iter()
+				.map(|child| {
+					let child_status = status_map.get(&child.id).copied();
+					let child_up = child_status.map(|s| s.short_status()).unwrap_or_default();
+					(
+						child_up,
+						Arc::new(ServerInfo {
+							id: child.id,
+							name: child.name,
+							kind: child.kind,
+							rank: child.rank,
+							host: child.host.0.to_string(),
+							listed: child.listed,
+							cloud: child.cloud,
+							geolocation: child.geolocation,
+							device_id: child.device_id,
+							parent_server_id: Some(server.id),
+							parent_server_name: server.name.clone(),
+						}),
+					)
 				})
-				.collect(),
-			latest_connection: device_with_info.latest_connection.map(|conn| {
-				Arc::new(crate::fns::devices::DeviceConnectionData {
-					id: conn.id,
-					created_at: conn.created_at,
-					device_id: conn.device_id,
-					ip: conn.ip.addr().to_string(),
-					user_agent: conn.user_agent,
-				})
-			}),
+				.collect()
 		}
+	} else {
+		Vec::new()
+	};
+
+	Ok(Json(ServerDetailData {
+		server: Arc::new(server_details),
+		device_info: device_info.map(Arc::new),
+		last_status: last_status.map(Arc::new),
+		up,
+		child_servers,
+	}))
+}
+
+#[derive(Deserialize)]
+pub struct UpdateArgs {
+	pub server_id: Uuid,
+	pub data: ServerDataUpdate,
+}
+
+pub async fn update(
+	State(state): State<AppState>,
+	TailscaleAdmin(_): TailscaleAdmin,
+	Json(args): Json<UpdateArgs>,
+) -> Result<Json<()>> {
+	let mut conn = state.db.get().await?;
+	let update_data = PartialServer {
+		id: args.server_id,
+		name: args.data.name,
+		kind: args.data.kind,
+		rank: args.data.rank,
+		host: if let Some(host_str) = args.data.host {
+			Some(UrlField(
+				host_str
+					.parse()
+					.map_err(|e| AppError::custom(format!("Invalid URL: {}", e)))?,
+			))
+		} else {
+			None
+		},
+		device_id: args.data.device_id,
+		parent_server_id: args.data.parent_server_id,
+		listed: args.data.listed,
+		cloud: args.data.cloud,
+		geolocation: args.data.geolocation,
+	};
+	Server::update(&mut conn, args.server_id, update_data).await?;
+	Ok(Json(()))
+}
+
+#[derive(Deserialize)]
+pub struct ImportTicketArgs {
+	pub ticket_b64: String,
+	pub kind: ServerKind,
+	pub rank: Option<ServerRank>,
+}
+
+pub async fn import_ticket(
+	State(state): State<AppState>,
+	TailscaleAdmin(_): TailscaleAdmin,
+	Json(args): Json<ImportTicketArgs>,
+) -> Result<Json<Uuid>> {
+	let mut conn = state.db.get().await?;
+	let ticket = CanopyTicket::from_base64(&args.ticket_b64)?;
+	let server = Server::upsert_from_ticket(&mut conn, &ticket, args.kind, args.rank).await?;
+	Ok(Json(server.id))
+}
+
+#[derive(Deserialize)]
+pub struct SearchParentArgs {
+	pub query: String,
+	pub current_server_id: Uuid,
+	pub current_rank: Option<ServerRank>,
+	pub current_kind: ServerKind,
+}
+
+pub async fn search_parent(
+	State(state): State<AppState>,
+	Json(args): Json<SearchParentArgs>,
+) -> Result<Json<Vec<ServerInfo>>> {
+	let mut conn = state.db.get().await?;
+	let all_servers = Server::search_for_parent(
+		&mut conn,
+		&args.query,
+		args.current_server_id,
+		args.current_rank,
+		args.current_kind,
+	)
+	.await?;
+	Ok(Json(all_servers.into_iter().map(server_to_info).collect()))
+}
+
+fn convert_device_with_info(d: DeviceWithInfo) -> super::devices::DeviceInfo {
+	fn format_key_as_pem(key_data: &[u8]) -> String {
+		use base64::prelude::*;
+		let base64_data = BASE64_STANDARD.encode(key_data);
+		let mut pem = String::with_capacity(base64_data.len() + 100);
+		pem.push_str("-----BEGIN PUBLIC KEY-----\n");
+		for chunk in base64_data.as_bytes().chunks(64) {
+			pem.push_str(&String::from_utf8_lossy(chunk));
+			pem.push('\n');
+		}
+		pem.push_str("-----END PUBLIC KEY-----");
+		pem
 	}
 
-	async fn compute_min_chrome_version(
-		conn: &mut database::diesel_async::AsyncPgConnection,
-		version: &commons_types::version::VersionStr,
-	) -> Option<u32> {
-		let head_release_date = Version::get_head_release_date(conn, version.clone())
-			.await
-			.ok()?;
-
-		database::chrome_releases::ChromeRelease::get_min_version_at_date(conn, head_release_date)
-			.await
-			.ok()?
+	super::devices::DeviceInfo {
+		device: Arc::new(super::devices::DeviceData {
+			id: d.device.id,
+			created_at: d.device.created_at,
+			updated_at: d.device.updated_at,
+			role: d.device.role,
+		}),
+		keys: d
+			.keys
+			.into_iter()
+			.map(|key| {
+				Arc::new(super::devices::DeviceKeyInfo {
+					id: key.id,
+					device_id: key.device_id,
+					name: key.name,
+					pem_data: format_key_as_pem(&key.key_data),
+					created_at: key.created_at,
+				})
+			})
+			.collect(),
+		latest_connection: d.latest_connection.map(|conn| {
+			Arc::new(super::devices::DeviceConnectionData {
+				id: conn.id,
+				created_at: conn.created_at,
+				device_id: conn.device_id,
+				ip: conn.ip.addr().to_string(),
+				user_agent: conn.user_agent,
+			})
+		}),
 	}
+}
+
+async fn compute_min_chrome_version(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	version: &VersionStr,
+) -> Option<u32> {
+	let head_release_date = Version::get_head_release_date(conn, version.clone())
+		.await
+		.ok()?;
+	database::chrome_releases::ChromeRelease::get_min_version_at_date(conn, head_release_date)
+		.await
+		.ok()?
 }

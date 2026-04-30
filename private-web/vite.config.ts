@@ -14,7 +14,7 @@ export default defineConfig({
 		port: 8090,
 		strictPort: true,
 		proxy: {
-			"/api/private_server": PRIVATE_SERVER,
+			"/api": PRIVATE_SERVER,
 		},
 	},
 	test: {

@@ -91,17 +91,20 @@ struct DeviceConnectionData {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn status_page_redirect() {
+async fn spa_root() {
 	commons_tests::server::run(async |_conn, _, private| {
 		let response = private.get("/").await;
-		response.assert_status(StatusCode::PERMANENT_REDIRECT);
+		response.assert_status_ok();
+		response.assert_header("content-type", "text/html; charset=utf-8");
 	})
 	.await
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn status_page() {
+async fn spa_client_route() {
 	commons_tests::server::run(async |_conn, _, private| {
+		// Any unmatched path falls back to the SPA index, letting the
+		// React router handle it client-side.
 		let response = private.get("/status").await;
 		response.assert_status_ok();
 		response.assert_header("content-type", "text/html; charset=utf-8");
@@ -114,7 +117,7 @@ async fn status_json_empty_database() {
 	commons_tests::server::run(async |_conn, _, private| {
 		// Get server IDs
 		let server_ids_response = private
-			.post("/api/private_server/fns/statuses/server_grouped_ids")
+			.post("/api/statuses/server_grouped_ids")
 			.json(&serde_json::json!({}))
 			.await;
 		server_ids_response.assert_status_ok();
@@ -146,7 +149,7 @@ async fn status_json_basic_server() {
 		.unwrap();
 
 		// Get server IDs
-		let server_ids_response = private.post("/api/private_server/fns/statuses/server_grouped_ids").json(&serde_json::json!({})).await;
+		let server_ids_response = private.post("/api/statuses/server_grouped_ids").json(&serde_json::json!({})).await;
 		server_ids_response.assert_status_ok();
 		let grouped_ids: std::collections::BTreeMap<String, Vec<String>> = server_ids_response.json();
 		let server_ids: Vec<String> = grouped_ids.into_values().flatten().collect();
@@ -156,7 +159,7 @@ async fn status_json_basic_server() {
 
 		// Get server details
 		let details_response = private
-			.post("/api/private_server/fns/statuses/server_details")
+			.post("/api/statuses/server_details")
 			.json(&serde_json::json!({"server_id": server_id}))
 			.await;
 		details_response.assert_status_ok();
@@ -192,7 +195,7 @@ async fn status_json_server_with_recent_status() {
 		.unwrap();
 
 		// Get server IDs
-		let server_ids_response = private.post("/api/private_server/fns/statuses/server_grouped_ids").json(&serde_json::json!({})).await;
+		let server_ids_response = private.post("/api/statuses/server_grouped_ids").json(&serde_json::json!({})).await;
 		server_ids_response.assert_status_ok();
 		let grouped_ids: std::collections::BTreeMap<String, Vec<String>> = server_ids_response.json();
 		let server_ids: Vec<String> = grouped_ids.into_values().flatten().collect();
@@ -202,7 +205,7 @@ async fn status_json_server_with_recent_status() {
 
 		// Get server details
 		let details_response = private
-			.post("/api/private_server/fns/statuses/server_details")
+			.post("/api/statuses/server_details")
 			.json(&serde_json::json!({"server_id": server_id}))
 			.await;
 		details_response.assert_status_ok();
@@ -239,7 +242,7 @@ async fn status_json_server_status_ages() {
 		.unwrap();
 
 		// Get server IDs
-		let server_ids_response = private.post("/api/private_server/fns/statuses/server_grouped_ids").json(&serde_json::json!({})).await;
+		let server_ids_response = private.post("/api/statuses/server_grouped_ids").json(&serde_json::json!({})).await;
 		server_ids_response.assert_status_ok();
 		let grouped_ids: std::collections::BTreeMap<String, Vec<String>> = server_ids_response.json();
 		let server_ids: Vec<String> = grouped_ids.into_values().flatten().collect();
@@ -251,7 +254,7 @@ async fn status_json_server_status_ages() {
 
 		for server_id in &server_ids {
 			let details_response = private
-				.post("/api/private_server/fns/statuses/server_details")
+				.post("/api/statuses/server_details")
 				.json(&serde_json::json!({"server_id": server_id.as_str()}))
 				.await;
 			details_response.assert_status_ok();
@@ -297,7 +300,7 @@ async fn status_json_platform_detection() {
 		.unwrap();
 
 		// Get server IDs
-		let server_ids_response = private.post("/api/private_server/fns/statuses/server_grouped_ids").json(&serde_json::json!({})).await;
+		let server_ids_response = private.post("/api/statuses/server_grouped_ids").json(&serde_json::json!({})).await;
 		server_ids_response.assert_status_ok();
 		let grouped_ids: std::collections::BTreeMap<String, Vec<String>> = server_ids_response.json();
 		let server_ids: Vec<String> = grouped_ids.into_values().flatten().collect();
@@ -310,7 +313,7 @@ async fn status_json_platform_detection() {
 
 		for server_id in &server_ids {
 			let details_response = private
-				.post("/api/private_server/fns/statuses/server_details")
+				.post("/api/statuses/server_details")
 				.json(&serde_json::json!({"server_id": server_id.as_str()}))
 				.await;
 			details_response.assert_status_ok();
@@ -355,7 +358,7 @@ async fn status_json_mixed_server_ranks() {
 		.unwrap();
 
 		// Get server IDs
-		let server_ids_response = private.post("/api/private_server/fns/statuses/server_grouped_ids").json(&serde_json::json!({})).await;
+		let server_ids_response = private.post("/api/statuses/server_grouped_ids").json(&serde_json::json!({})).await;
 		server_ids_response.assert_status_ok();
 		let grouped_ids: std::collections::BTreeMap<String, Vec<String>> = server_ids_response.json();
 
@@ -368,7 +371,7 @@ async fn status_json_mixed_server_ranks() {
 		// Get production server details
 		let production_id = &grouped_ids.get("production").unwrap()[0];
 		let details_response = private
-			.post("/api/private_server/fns/statuses/server_details")
+			.post("/api/statuses/server_details")
 			.json(&serde_json::json!({"server_id": production_id}))
 			.await;
 		details_response.assert_status_ok();
@@ -401,7 +404,7 @@ async fn status_json_unnamed_servers_excluded() {
 		.unwrap();
 
 		// Get server IDs
-		let server_ids_response = private.post("/api/private_server/fns/statuses/server_grouped_ids").json(&serde_json::json!({})).await;
+		let server_ids_response = private.post("/api/statuses/server_grouped_ids").json(&serde_json::json!({})).await;
 		server_ids_response.assert_status_ok();
 		let grouped_ids: std::collections::BTreeMap<String, Vec<String>> = server_ids_response.json();
 		let server_ids: Vec<String> = grouped_ids.into_values().flatten().collect();
@@ -409,7 +412,7 @@ async fn status_json_unnamed_servers_excluded() {
 
 		// Get server details
 		let details_response = private
-			.post("/api/private_server/fns/statuses/server_details")
+			.post("/api/statuses/server_details")
 			.json(&serde_json::json!({"server_id": &server_ids[0]}))
 			.await;
 		details_response.assert_status_ok();
@@ -442,7 +445,7 @@ async fn status_json_blip_status() {
 		.unwrap();
 
 		// Get server IDs
-		let server_ids_response = private.post("/api/private_server/fns/statuses/server_grouped_ids").json(&serde_json::json!({})).await;
+		let server_ids_response = private.post("/api/statuses/server_grouped_ids").json(&serde_json::json!({})).await;
 		server_ids_response.assert_status_ok();
 		let grouped_ids: std::collections::BTreeMap<String, Vec<String>> = server_ids_response.json();
 		let server_ids: Vec<String> = grouped_ids.into_values().flatten().collect();
@@ -452,7 +455,7 @@ async fn status_json_blip_status() {
 
 		// Get server details
 		let details_response = private
-			.post("/api/private_server/fns/statuses/server_details")
+			.post("/api/statuses/server_details")
 			.json(&serde_json::json!({"server_id": server_id}))
 			.await;
 		details_response.assert_status_ok();
@@ -484,7 +487,7 @@ async fn status_json_gone_server() {
 		.unwrap();
 
 		// Get server IDs
-		let server_ids_response = private.post("/api/private_server/fns/statuses/server_grouped_ids").json(&serde_json::json!({})).await;
+		let server_ids_response = private.post("/api/statuses/server_grouped_ids").json(&serde_json::json!({})).await;
 		server_ids_response.assert_status_ok();
 		let grouped_ids: std::collections::BTreeMap<String, Vec<String>> = server_ids_response.json();
 		let server_ids: Vec<String> = grouped_ids.into_values().flatten().collect();
@@ -494,7 +497,7 @@ async fn status_json_gone_server() {
 
 		// Get server details
 		let details_response = private
-			.post("/api/private_server/fns/statuses/server_details")
+			.post("/api/statuses/server_details")
 			.json(&serde_json::json!({"server_id": server_id}))
 			.await;
 		details_response.assert_status_ok();
@@ -525,7 +528,7 @@ async fn get_detail_basic() {
 		.unwrap();
 
 		let response = private
-			.post("/api/private_server/fns/servers/get_detail")
+			.post("/api/servers/get_detail")
 			.json(&serde_json::json!({"server_id": "11111111-1111-1111-1111-111111111111"}))
 			.await;
 		response.assert_status_ok();
@@ -564,7 +567,7 @@ async fn get_detail_with_status() {
 		.unwrap();
 
 		let response = private
-			.post("/api/private_server/fns/servers/get_detail")
+			.post("/api/servers/get_detail")
 			.json(&serde_json::json!({"server_id": "11111111-1111-1111-1111-111111111111"}))
 			.await;
 		response.assert_status_ok();
@@ -608,7 +611,7 @@ async fn get_detail_with_device() {
 		.unwrap();
 
 		let response = private
-			.post("/api/private_server/fns/servers/get_detail")
+			.post("/api/servers/get_detail")
 			.json(&serde_json::json!({"server_id": "11111111-1111-1111-1111-111111111111"}))
 			.await;
 		response.assert_status_ok();
@@ -635,10 +638,11 @@ async fn get_detail_with_device() {
 async fn get_detail_not_found() {
 	commons_tests::server::run(async |_conn, _, private| {
 		let response = private
-			.post("/api/private_server/fns/servers/get_detail")
+			.post("/api/servers/get_detail")
 			.json(&serde_json::json!({"server_id": "99999999-9999-9999-9999-999999999999"}))
 			.await;
-		response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+		// AppError maps DatabaseQuery::NotFound to 404
+		response.assert_status(StatusCode::NOT_FOUND);
 	})
 	.await
 }
@@ -647,10 +651,11 @@ async fn get_detail_not_found() {
 async fn get_detail_invalid_id() {
 	commons_tests::server::run(async |_conn, _, private| {
 		let response = private
-			.post("/api/private_server/fns/servers/get_detail")
+			.post("/api/servers/get_detail")
 			.json(&serde_json::json!({"server_id": "not-a-uuid"}))
 			.await;
-		response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+		// axum's Json extractor rejects malformed bodies with 422
+		response.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
 	})
 	.await
 }
@@ -678,7 +683,7 @@ struct FacilityServerCardResponse {
 async fn server_grouped_ids_empty() {
 	commons_tests::server::run(async |_conn, _, private| {
 		let response = private
-			.post("/api/private_server/fns/statuses/server_grouped_ids")
+			.post("/api/statuses/server_grouped_ids")
 			.json(&serde_json::json!({}))
 			.await;
 		response.assert_status_ok();
@@ -720,7 +725,7 @@ async fn server_grouped_ids_with_data() {
 		.unwrap();
 
 		let response = private
-			.post("/api/private_server/fns/statuses/server_grouped_ids")
+			.post("/api/statuses/server_grouped_ids")
 			.json(&serde_json::json!({}))
 			.await;
 		response.assert_status_ok();
@@ -736,7 +741,7 @@ async fn server_grouped_ids_with_data() {
 
 		// Verify server_details returns correct data for production server
 		let details_response = private
-			.post("/api/private_server/fns/statuses/server_details")
+			.post("/api/statuses/server_details")
 			.json(&serde_json::json!({"server_id": "11111111-1111-1111-1111-111111111111"}))
 			.await;
 		details_response.assert_status_ok();
@@ -781,7 +786,7 @@ async fn server_grouped_ids_excludes_unnamed() {
 		.unwrap();
 
 		let response = private
-			.post("/api/private_server/fns/statuses/server_grouped_ids")
+			.post("/api/statuses/server_grouped_ids")
 			.json(&serde_json::json!({}))
 			.await;
 		response.assert_status_ok();

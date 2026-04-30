@@ -1,31 +1,58 @@
+use axum::Json;
+use axum::extract::State;
+use axum::routing::{Router, post};
 use commons_errors::Result;
-use leptos::server;
-use leptos::server_fn::codec::Json;
+use commons_servers::tailscale_auth::TailscaleAdmin;
+use serde::Deserialize;
 
-#[server(input = Json)]
-pub async fn list() -> Result<Vec<String>> {
-	let db = crate::fns::commons::admin_guard().await?;
-	let mut conn = db.get().await?;
+use crate::state::AppState;
 
-	database::admins::Admin::list(&mut conn)
-		.await
-		.map(|admins| admins.into_iter().map(|admin| admin.email).collect())
+pub fn routes() -> Router<AppState> {
+	Router::new()
+		.route("/list", post(list))
+		.route("/add", post(add))
+		.route("/delete", post(delete))
 }
 
-#[server(input = Json)]
-pub async fn add(email: String) -> Result<()> {
-	let db = crate::fns::commons::admin_guard().await?;
-	let mut conn = db.get().await?;
-
-	database::admins::Admin::add(&mut conn, &email).await?;
-	Ok(())
+pub async fn list(
+	State(state): State<AppState>,
+	TailscaleAdmin(_): TailscaleAdmin,
+) -> Result<Json<Vec<String>>> {
+	let mut conn = state.db.get().await?;
+	let admins = database::admins::Admin::list(&mut conn)
+		.await?
+		.into_iter()
+		.map(|a| a.email)
+		.collect();
+	Ok(Json(admins))
 }
 
-#[server(input = Json)]
-pub async fn delete(email: String) -> Result<()> {
-	let db = crate::fns::commons::admin_guard().await?;
-	let mut conn = db.get().await?;
+#[derive(Deserialize)]
+pub struct AddArgs {
+	pub email: String,
+}
 
-	database::admins::Admin::delete(&mut conn, &email).await?;
-	Ok(())
+pub async fn add(
+	State(state): State<AppState>,
+	TailscaleAdmin(_): TailscaleAdmin,
+	Json(args): Json<AddArgs>,
+) -> Result<Json<()>> {
+	let mut conn = state.db.get().await?;
+	database::admins::Admin::add(&mut conn, &args.email).await?;
+	Ok(Json(()))
+}
+
+#[derive(Deserialize)]
+pub struct DeleteArgs {
+	pub email: String,
+}
+
+pub async fn delete(
+	State(state): State<AppState>,
+	TailscaleAdmin(_): TailscaleAdmin,
+	Json(args): Json<DeleteArgs>,
+) -> Result<Json<()>> {
+	let mut conn = state.db.get().await?;
+	database::admins::Admin::delete(&mut conn, &args.email).await?;
+	Ok(Json(()))
 }

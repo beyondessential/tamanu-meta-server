@@ -5,7 +5,7 @@ Avoid writing large summaries of actions taken when done.
 ## Project Structure Overview
 - **Database crate**: Models, migrations, and database logic
 - **Public server**: Internet-exposed API endpoints for device registration and updates
-- **Private server**: Admin web interface using Leptos (SSR + hydration)
+- **Private server**: Admin HTTP/JSON API in axum, plus an embedded React SPA (in `private-web/`) served at the root in production
 - **Commons**: Shared utilities, authentication, error handling
 
 ## Database Connection
@@ -23,31 +23,27 @@ Avoid writing large summaries of actions taken when done.
 - Use `commons_tests::db::TestDb::run()` for database-only tests
 - Use `commons_tests::server::run()` for HTTP endpoint tests
 - Use `commons_tests::server::run_with_device_auth()` for authenticated device tests in the public server
-- Admin pages: Restrict frontend with `is_current_user_admin()` resource and use `admin_guard()` in server functions
+- Admin endpoints take a `TailscaleAdmin` axum extractor; the React UI gates with `commons.is_current_user_admin`
 
-## Leptos Private Server Architecture
-- **Frontend/Backend Separation**: Code must build in both SSR and hydrate modes
-- **SSR Pattern**: Put database/backend imports in `#[cfg(feature = "ssr")]` sections, following `fns/statuses.rs` structure
-- **Server Functions**: Use `#[server]` functions that delegate to `ssr::` module functions
-- **Data Structures**: Create separate serializable structs for frontend (no direct database types)
-- **Admin Guard**: Use `crate::fns::commons::admin_guard()` for admin authentication
-- **Page Structure**: Follow pattern in `app/statuses.rs` and `app/admins.rs`
+## Private server architecture (post-Leptos)
+- **Server fns** under `crates/private-server/src/fns/<module>.rs` are bare axum handlers with `(State, [auth extractor], Json<Args>) -> Result<Json<T>>` signatures.
+- Each module exposes `pub fn routes() -> Router<AppState>` and is mounted under `/api/<module>` by `crate::fns::routes()`.
+- The SPA fallback (`crate::spa::handler`) serves the embedded React bundle from `private-web/dist/` for any path the API doesn't claim.
+- `build.rs` runs `npm install --frozen-lockfile && npm run build` in `private-web/` before embedding. Set `SKIP_FRONTEND_BUILD=1` to skip (`just`'s recipes already do this for dev workflows).
 
-Example Leptos server function pattern:
+Example axum handler pattern:
 ```rust
-#[server]
-pub async fn my_function() -> Result<MyData> {
-    ssr::my_function().await
-}
+#[derive(Deserialize)]
+pub struct AddArgs { pub email: String }
 
-#[cfg(feature = "ssr")]
-mod ssr {
-    use database::MyModel; // SSR-only imports here
-
-    pub async fn my_function() -> Result<MyData> {
-        let db = crate::fns::commons::admin_guard().await?;
-        // Implementation here
-    }
+pub async fn add(
+    State(state): State<AppState>,
+    TailscaleAdmin(_): TailscaleAdmin,
+    Json(args): Json<AddArgs>,
+) -> Result<Json<()>> {
+    let mut conn = state.db.get().await?;
+    database::admins::Admin::add(&mut conn, &args.email).await?;
+    Ok(Json(()))
 }
 ```
 
@@ -62,26 +58,17 @@ mod ssr {
 - For database tests, use direct model functions instead of HTTP endpoints
 - Always include `use database::ModelName;` imports in test files
 - Do not include `_test` suffix or prefix in test filenames in `tests/` directory
-- Calling Leptos Server Functions in private-server tests:
-  - Server functions are exposed at `/api/private_server/fns/<module>/<function>` (e.g., `/api/private_server/fns/statuses/server_ids`)
-  - All server fns use `#[server(input = Json)]`. Pass parameters via `.json(&serde_json::json!({"param_name": value}))` (not `.form()`).
-  - For functions with no parameters, still send an empty body: `.json(&serde_json::json!({}))`. The macro deserialises the request body into a unit struct and rejects an empty request.
+- Calling private-server endpoints in tests:
+  - Endpoints are at `/api/<module>/<function>` (e.g. `/api/statuses/server_grouped_ids`)
+  - Pass parameters via `.json(&serde_json::json!({"param_name": value}))`
+  - For functions with no parameters, still send an empty body: `.json(&serde_json::json!({}))`
 
-## Frontend Development
-- Pages go in `crates/private-server/src/app/`
-- Server functions go in `crates/private-server/src/fns/`
-- Common components go in `crates/private-server/src/components/`
-- CSS files go in `static/private/`
-- Add routes in `crates/private-server/src/app.rs`
-- Use Leptos signals for state management
-- Handle async operations with `Resource` and `Action`
-
-### React frontend (in-progress migration)
-The new React + MUI + Vite frontend lives at `/private-web/`. It is dev-only for now and is not built into the container image. See `docs/plans/private-web.md` for the migration plan.
+## React frontend (`private-web/`)
+The React + MUI + Vite frontend lives at `/private-web/` and is embedded into the private-server binary at build time via `rust-embed`.
 
 Local dev workflow (two terminals):
-- `just watch-private-api` runs the Leptos `private-server` binary in plain HTTP-API mode, bound to `127.0.0.1:8081`. (We bind to IPv4 because Node's vite-proxy can't resolve `[::1]` literals.)
-- `just watch-private-web` runs Vite at `:8090`, proxying `/api/private_server/*` to the API.
+- `just watch-private-api` runs the private-server binary on `127.0.0.1:8081`. (We bind to IPv4 because Node's vite-proxy can't resolve `[::1]` literals.) `SKIP_FRONTEND_BUILD=1` is set so `cargo run` doesn't reinvoke `npm run build` on every iteration.
+- `just watch-private-web` runs Vite at `:8090`, proxying `/api` to the API.
 
 Open `http://localhost:8090/`. The Vite proxy makes the React app same-origin with the API, so no CORS plumbing is needed.
 
@@ -89,7 +76,6 @@ End-to-end tests use Playwright. Run with `npm run test:e2e` from `/private-web/
 
 ## Development Workflow
 - Always check: `just check` for basic compilation
-- Always check: `just build-frontend` for frontend compatibility
 - Run full test suite: `just test`
 - Run specific tests: `just test-name <test_name>`
 - Verify no compilation warnings in tests and main code
