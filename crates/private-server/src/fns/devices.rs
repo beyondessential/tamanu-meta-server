@@ -170,8 +170,8 @@ pub async fn get_device_by_id(
 
 #[derive(Deserialize)]
 pub struct PaginationArgs {
+	pub offset: u64,
 	pub limit: Option<u64>,
-	pub offset: Option<u64>,
 }
 
 pub async fn list_untrusted(
@@ -183,7 +183,7 @@ pub async fn list_untrusted(
 	let devices_with_info = Device::list_untrusted_with_info_paginated(
 		&mut conn,
 		args.limit.unwrap_or(10).try_into().unwrap_or(10),
-		args.offset.unwrap_or(0).try_into().unwrap_or(0),
+		args.offset.try_into().unwrap_or(0),
 	)
 	.await?;
 	Ok(Json(
@@ -246,8 +246,8 @@ pub async fn count_untrusted(
 #[derive(Deserialize)]
 pub struct ConnectionHistoryArgs {
 	pub device_id: Uuid,
+	pub offset: u64,
 	pub limit: Option<u64>,
-	pub offset: Option<u64>,
 }
 
 pub async fn connection_history(
@@ -260,7 +260,7 @@ pub async fn connection_history(
 		&mut conn,
 		args.device_id,
 		args.limit.unwrap_or(100).try_into().unwrap_or(100),
-		args.offset.unwrap_or(0).try_into().unwrap_or(0),
+		args.offset.try_into().unwrap_or(0),
 	)
 	.await?;
 	Ok(Json(
@@ -313,7 +313,7 @@ pub async fn list_trusted(
 	let devices_with_info = Device::list_trusted_with_info_paginated(
 		&mut conn,
 		args.limit.unwrap_or(10).try_into().unwrap_or(10),
-		args.offset.unwrap_or(0).try_into().unwrap_or(0),
+		args.offset.try_into().unwrap_or(0),
 	)
 	.await?;
 	Ok(Json(
