@@ -27,6 +27,7 @@ import Markdown from "../components/Markdown";
 import VersionStatusChip from "../components/VersionStatusChip";
 import { useApi, useApiAction } from "../api";
 import { usePageTitle } from "../hooks/usePageTitle";
+import { prettifyVersionRange } from "../lib/versionRange";
 import type {
 	ArtifactData,
 	RelatedVersionData,
@@ -442,7 +443,7 @@ function ArtifactRow({
 								[Hidden]
 							</Box>
 						)}
-						Applies to: {artifact.version_range_pattern}
+						Applies to: {prettifyVersionRange(artifact.version_range_pattern)}
 					</Typography>
 				)}
 			</TableCell>
