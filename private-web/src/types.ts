@@ -127,6 +127,37 @@ export interface ServerLastStatusData {
 	extra: Record<string, unknown>;
 }
 
+export type DeviceRole = "untrusted" | "server" | "releaser" | "admin";
+
+export interface DeviceData {
+	id: string;
+	created_at: string;
+	updated_at: string;
+	role: DeviceRole;
+}
+
+export interface DeviceKeyInfo {
+	id: string;
+	device_id: string;
+	name: string | null;
+	pem_data: string;
+	created_at: string;
+}
+
+export interface DeviceConnectionData {
+	id: string;
+	created_at: string;
+	device_id: string;
+	ip: string;
+	user_agent: string | null;
+}
+
+export interface DeviceInfoData {
+	device: DeviceData;
+	keys: DeviceKeyInfo[];
+	latest_connection: DeviceConnectionData | null;
+}
+
 export interface DeviceShortInfo {
 	device: { id: string; role: string };
 	keys: Array<{ id: string; name: string | null }>;

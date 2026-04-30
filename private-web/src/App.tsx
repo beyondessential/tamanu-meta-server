@@ -7,6 +7,9 @@ import {
 } from "@mui/material";
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
 import Admins from "./routes/Admins";
+import Devices from "./routes/Devices";
+import DevicesList from "./routes/DevicesList";
+import DevicesSearch from "./routes/DevicesSearch";
 import Status from "./routes/Status";
 import ServerDetail from "./routes/ServerDetail";
 import ServerEdit from "./routes/ServerEdit";
@@ -19,6 +22,7 @@ const NAV_ITEMS: Array<{ label: string; to: string }> = [
 	{ label: "Status", to: "/status" },
 	{ label: "Servers", to: "/servers" },
 	{ label: "Versions", to: "/versions" },
+	{ label: "Devices", to: "/devices" },
 	{ label: "Admins", to: "/admins" },
 ];
 
@@ -63,6 +67,17 @@ export default function App() {
 					</Route>
 					<Route path="/servers/:id" element={<ServerDetail />} />
 					<Route path="/servers/:id/edit" element={<ServerEdit />} />
+					<Route path="/devices" element={<Devices />}>
+						<Route index element={<DevicesSearch />} />
+						<Route
+							path="untrusted"
+							element={<DevicesList scope="untrusted" />}
+						/>
+						<Route
+							path="trusted"
+							element={<DevicesList scope="trusted" />}
+						/>
+					</Route>
 				</Routes>
 			</Container>
 		</Box>
