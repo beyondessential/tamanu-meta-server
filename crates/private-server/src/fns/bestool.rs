@@ -28,10 +28,9 @@ pub fn routes() -> Router<AppState> {
 	Router::new()
 		.route("/count_snippets", post(count_snippets))
 		.route("/list_snippets", post(list_snippets))
-		.route("/create_snippet", post(create_snippet))
+		.route("/save_snippet", post(save_snippet))
 		.route("/get_snippet", post(get_snippet))
 		.route("/get_latest_snippet_id", post(get_latest_snippet_id))
-		.route("/update_snippet", post(update_snippet))
 		.route("/delete_snippet", post(delete_snippet))
 }
 
@@ -71,29 +70,38 @@ pub async fn list_snippets(
 }
 
 #[derive(Deserialize)]
-pub struct CreateArgs {
+pub struct SaveArgs {
+	/// When set, the saved snippet supersedes the snippet with this id (i.e.
+	/// it's an edit). When absent, a fresh snippet is created.
+	pub supersedes: Option<Uuid>,
 	pub name: String,
 	pub description: Option<String>,
 	pub sql: String,
 }
 
-pub async fn create_snippet(
+pub async fn save_snippet(
 	State(state): State<AppState>,
 	user: std::result::Result<TailscaleUser, AppError>,
-	Json(args): Json<CreateArgs>,
-) -> Result<Json<()>> {
+	Json(args): Json<SaveArgs>,
+) -> Result<Json<BestoolSnippetDetail>> {
 	let user = user.unwrap_or_default();
 	let mut conn = state.db.get().await?;
-	database::BestoolSnippet::create(
+	let snippet = database::BestoolSnippet::create(
 		&mut conn,
 		user.login,
 		args.name,
 		args.description,
 		args.sql,
-		None,
+		args.supersedes,
 	)
 	.await?;
-	Ok(Json(()))
+	Ok(Json(BestoolSnippetDetail {
+		id: snippet.id,
+		name: snippet.name,
+		description: snippet.description,
+		sql: snippet.sql,
+		editor: snippet.editor,
+	}))
 }
 
 #[derive(Deserialize)]
@@ -125,39 +133,6 @@ pub async fn get_latest_snippet_id(
 	let mut conn = state.db.get().await?;
 	let id = database::BestoolSnippet::get_latest_id(&mut conn, args.id).await?;
 	Ok(Json(id))
-}
-
-#[derive(Deserialize)]
-pub struct UpdateArgs {
-	pub id: Uuid,
-	pub name: String,
-	pub description: Option<String>,
-	pub sql: String,
-}
-
-pub async fn update_snippet(
-	State(state): State<AppState>,
-	user: std::result::Result<TailscaleUser, AppError>,
-	Json(args): Json<UpdateArgs>,
-) -> Result<Json<BestoolSnippetDetail>> {
-	let user = user.unwrap_or_default();
-	let mut conn = state.db.get().await?;
-	let new_snippet = database::BestoolSnippet::create(
-		&mut conn,
-		user.login,
-		args.name,
-		args.description,
-		args.sql,
-		Some(args.id),
-	)
-	.await?;
-	Ok(Json(BestoolSnippetDetail {
-		id: new_snippet.id,
-		name: new_snippet.name,
-		description: new_snippet.description,
-		sql: new_snippet.sql,
-		editor: new_snippet.editor,
-	}))
 }
 
 pub async fn delete_snippet(

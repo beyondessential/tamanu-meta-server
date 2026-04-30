@@ -59,7 +59,7 @@ function View({ detail }: { detail: Detail }) {
 	const [editing, setEditing] = useState(false);
 	const [confirmDelete, setConfirmDelete] = useState(false);
 	const navigate = useNavigate();
-	const updateAction = useApiAction<Detail>("bestool", "update_snippet");
+	const updateAction = useApiAction<Detail>("bestool", "save_snippet");
 	const deleteAction = useApiAction("bestool", "delete_snippet");
 
 	const [name, setName] = useState(detail.name);
@@ -70,7 +70,7 @@ function View({ detail }: { detail: Detail }) {
 		e.preventDefault();
 		try {
 			const updated = await updateAction.call({
-				id: detail.id,
+				supersedes: detail.id,
 				name,
 				description: description.trim() === "" ? null : description,
 				sql,

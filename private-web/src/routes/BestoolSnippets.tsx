@@ -122,12 +122,13 @@ function CreateSnippetForm({ onCreated }: { onCreated: () => void }) {
 	const [name, setName] = useState("");
 	const [description, setDescription] = useState("");
 	const [sql, setSql] = useState("");
-	const action = useApiAction("bestool", "create_snippet");
+	const action = useApiAction("bestool", "save_snippet");
 
 	const submit = async (e: React.FormEvent) => {
 		e.preventDefault();
 		try {
 			await action.call({
+				supersedes: null,
 				name,
 				description: description.trim() === "" ? null : description,
 				sql,
