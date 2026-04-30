@@ -2,7 +2,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-const PRIVATE_SERVER = "http://[::1]:8081";
+const PRIVATE_SERVER = "http://127.0.0.1:8081";
 
 export default defineConfig({
 	plugins: [react()],

@@ -76,6 +76,15 @@ mod ssr {
 - Use Leptos signals for state management
 - Handle async operations with `Resource` and `Action`
 
+### React frontend (in-progress migration)
+The new React + MUI + Vite frontend lives at `/private-web/`. It is dev-only for now and is not built into the container image. See `docs/plans/private-web.md` for the migration plan.
+
+Local dev workflow (two terminals):
+- `just watch-private-api` runs the Leptos `private-server` binary in plain HTTP-API mode, bound to `127.0.0.1:8081`. (We bind to IPv4 because Node's vite-proxy can't resolve `[::1]` literals.)
+- `just watch-private-web` runs Vite at `:8090`, proxying `/api/private_server/*` to the API.
+
+Open `http://localhost:8090/`. The Vite proxy makes the React app same-origin with the API, so no CORS plumbing is needed.
+
 ## Development Workflow
 - Always check: `just check` for basic compilation
 - Always check: `just build-frontend` for frontend compatibility

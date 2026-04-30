@@ -35,6 +35,14 @@ watch-public: _copy-bulma
 watch-private: _copy-bulma
     cargo leptos watch
 
+# Run the private server's HTTP API only, bound to 127.0.0.1:8081, for the private-web Vite frontend
+watch-private-api:
+    BIND_ADDRESS=127.0.0.1:8081 watchexec -w crates -- cargo run --bin private-server
+
+# Run the private-web React frontend dev server (Vite proxy expects watch-private-api)
+watch-private-web:
+    cd private-web && pnpm dev
+
 # Run all tests
 test:
     DATABASE_URL={{ DATABASE_URL }} cargo nextest run
