@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use axum::Json;
 use axum::extract::State;
 use axum::routing::{Router, post};
@@ -52,7 +50,7 @@ pub struct ListArgs {
 pub async fn list_snippets(
 	State(state): State<AppState>,
 	Json(args): Json<ListArgs>,
-) -> Result<Json<Vec<Arc<BestoolSnippetInfo>>>> {
+) -> Result<Json<Vec<BestoolSnippetInfo>>> {
 	let mut conn = state.db.get().await?;
 	let snippets = database::BestoolSnippet::list_current(
 		&mut conn,
@@ -63,12 +61,10 @@ pub async fn list_snippets(
 	Ok(Json(
 		snippets
 			.into_iter()
-			.map(|s| {
-				Arc::new(BestoolSnippetInfo {
-					id: s.id,
-					name: s.name,
-					description: s.description,
-				})
+			.map(|s| BestoolSnippetInfo {
+				id: s.id,
+				name: s.name,
+				description: s.description,
 			})
 			.collect(),
 	))

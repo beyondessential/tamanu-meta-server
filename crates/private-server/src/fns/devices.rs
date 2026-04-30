@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::State;
@@ -17,9 +16,9 @@ use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceInfo {
-	pub device: Arc<DeviceData>,
-	pub keys: Vec<Arc<DeviceKeyInfo>>,
-	pub latest_connection: Option<Arc<DeviceConnectionData>>,
+	pub device: DeviceData,
+	pub keys: Vec<DeviceKeyInfo>,
+	pub latest_connection: Option<DeviceConnectionData>,
 }
 
 impl DeviceInfo {
@@ -71,17 +70,14 @@ pub struct DeviceConnectionData {
 impl From<DeviceWithInfo> for DeviceInfo {
 	fn from(d: DeviceWithInfo) -> Self {
 		Self {
-			device: Arc::new(DeviceData {
+			device: DeviceData {
 				id: d.device.id,
 				created_at: d.device.created_at,
 				updated_at: d.device.updated_at,
 				role: d.device.role,
-			}),
-			keys: d.keys.into_iter().map(DeviceKeyInfo::from).map(Arc::new).collect(),
-			latest_connection: d
-				.latest_connection
-				.map(DeviceConnectionData::from)
-				.map(Arc::new),
+			},
+			keys: d.keys.into_iter().map(DeviceKeyInfo::from).collect(),
+			latest_connection: d.latest_connection.map(DeviceConnectionData::from),
 		}
 	}
 }
@@ -182,7 +178,7 @@ pub async fn list_untrusted(
 	State(state): State<AppState>,
 	TailscaleAdmin(_): TailscaleAdmin,
 	Json(args): Json<PaginationArgs>,
-) -> Result<Json<Vec<Arc<DeviceInfo>>>> {
+) -> Result<Json<Vec<DeviceInfo>>> {
 	let mut conn = state.db.get().await?;
 	let devices_with_info = Device::list_untrusted_with_info_paginated(
 		&mut conn,
@@ -194,7 +190,7 @@ pub async fn list_untrusted(
 		devices_with_info
 			.into_iter()
 			.map(DeviceInfo::from)
-			.map(Arc::new)
+			
 			.collect(),
 	))
 }
@@ -312,7 +308,7 @@ pub async fn list_trusted(
 	State(state): State<AppState>,
 	TailscaleAdmin(_): TailscaleAdmin,
 	Json(args): Json<PaginationArgs>,
-) -> Result<Json<Vec<Arc<DeviceInfo>>>> {
+) -> Result<Json<Vec<DeviceInfo>>> {
 	let mut conn = state.db.get().await?;
 	let devices_with_info = Device::list_trusted_with_info_paginated(
 		&mut conn,
@@ -324,7 +320,7 @@ pub async fn list_trusted(
 		devices_with_info
 			.into_iter()
 			.map(DeviceInfo::from)
-			.map(Arc::new)
+			
 			.collect(),
 	))
 }
@@ -376,7 +372,7 @@ pub async fn search(
 	State(state): State<AppState>,
 	TailscaleAdmin(_): TailscaleAdmin,
 	Json(args): Json<SearchArgs>,
-) -> Result<Json<Vec<Arc<DeviceInfo>>>> {
+) -> Result<Json<Vec<DeviceInfo>>> {
 	if args.query.trim().is_empty() {
 		return Ok(Json(vec![]));
 	}
@@ -398,7 +394,7 @@ pub async fn search(
 	Ok(Json(
 		seen.into_values()
 			.map(DeviceInfo::from)
-			.map(Arc::new)
+			
 			.collect(),
 	))
 }

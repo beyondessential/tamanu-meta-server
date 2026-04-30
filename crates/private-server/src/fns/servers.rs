@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use axum::Json;
 use axum::extract::State;
 use axum::routing::{Router, post};
@@ -29,11 +27,11 @@ use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerDetailData {
-	pub server: Arc<ServerInfo>,
-	pub device_info: Option<Arc<super::devices::DeviceInfo>>,
-	pub last_status: Option<Arc<ServerLastStatusData>>,
+	pub server: ServerInfo,
+	pub device_info: Option<super::devices::DeviceInfo>,
+	pub last_status: Option<ServerLastStatusData>,
 	pub up: ShortStatus,
-	pub child_servers: Vec<(ShortStatus, Arc<ServerInfo>)>,
+	pub child_servers: Vec<(ShortStatus, ServerInfo)>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -167,16 +165,14 @@ pub struct ListArgs {
 pub async fn list_some(
 	State(state): State<AppState>,
 	Json(args): Json<ListArgs>,
-) -> Result<Json<Vec<Arc<ServerInfo>>>> {
+) -> Result<Json<Vec<ServerInfo>>> {
 	let mut conn = state.db.get().await?;
 	let servers = if let Some(kind) = args.kind {
 		Server::list_by_kind(&mut conn, kind, args.offset, args.limit).await?
 	} else {
 		Server::get_all(&mut conn, args.offset, args.limit).await?
 	};
-	Ok(Json(
-		servers.into_iter().map(server_to_info).map(Arc::new).collect(),
-	))
+	Ok(Json(servers.into_iter().map(server_to_info).collect()))
 }
 
 #[derive(Deserialize)]
@@ -332,7 +328,7 @@ pub async fn get_detail(
 					let child_up = child_status.map(|s| s.short_status()).unwrap_or_default();
 					(
 						child_up,
-						Arc::new(ServerInfo {
+						ServerInfo {
 							id: child.id,
 							name: child.name,
 							kind: child.kind,
@@ -344,7 +340,7 @@ pub async fn get_detail(
 							device_id: child.device_id,
 							parent_server_id: Some(server.id),
 							parent_server_name: server.name.clone(),
-						}),
+						},
 					)
 				})
 				.collect()
@@ -354,9 +350,9 @@ pub async fn get_detail(
 	};
 
 	Ok(Json(ServerDetailData {
-		server: Arc::new(server_details),
-		device_info: device_info.map(Arc::new),
-		last_status: last_status.map(Arc::new),
+		server: server_details,
+		device_info,
+		last_status,
 		up,
 		child_servers,
 	}))
@@ -455,33 +451,31 @@ fn convert_device_with_info(d: DeviceWithInfo) -> super::devices::DeviceInfo {
 	}
 
 	super::devices::DeviceInfo {
-		device: Arc::new(super::devices::DeviceData {
+		device: super::devices::DeviceData {
 			id: d.device.id,
 			created_at: d.device.created_at,
 			updated_at: d.device.updated_at,
 			role: d.device.role,
-		}),
+		},
 		keys: d
 			.keys
 			.into_iter()
-			.map(|key| {
-				Arc::new(super::devices::DeviceKeyInfo {
-					id: key.id,
-					device_id: key.device_id,
-					name: key.name,
-					pem_data: format_key_as_pem(&key.key_data),
-					created_at: key.created_at,
-				})
+			.map(|key| super::devices::DeviceKeyInfo {
+				id: key.id,
+				device_id: key.device_id,
+				name: key.name,
+				pem_data: format_key_as_pem(&key.key_data),
+				created_at: key.created_at,
 			})
 			.collect(),
 		latest_connection: d.latest_connection.map(|conn| {
-			Arc::new(super::devices::DeviceConnectionData {
+			super::devices::DeviceConnectionData {
 				id: conn.id,
 				created_at: conn.created_at,
 				device_id: conn.device_id,
 				ip: conn.ip.addr().to_string(),
 				user_agent: conn.user_agent,
-			})
+			}
 		}),
 	}
 }
