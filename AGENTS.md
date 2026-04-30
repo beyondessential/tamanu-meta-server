@@ -64,8 +64,8 @@ mod ssr {
 - Do not include `_test` suffix or prefix in test filenames in `tests/` directory
 - Calling Leptos Server Functions in private-server tests:
   - Server functions are exposed at `/api/private_server/fns/<module>/<function>` (e.g., `/api/private_server/fns/statuses/server_ids`)
-  - Use `.form(&[("param_name", "param_value")])` for parameters (not `.json()`)
-  - Use `.post()` without body for functions with no parameters
+  - All server fns use `#[server(input = Json)]`. Pass parameters via `.json(&serde_json::json!({"param_name": value}))` (not `.form()`).
+  - For functions with no parameters, still send an empty body: `.json(&serde_json::json!({}))`. The macro deserialises the request body into a unit struct and rejects an empty request.
 
 ## Frontend Development
 - Pages go in `crates/private-server/src/app/`
