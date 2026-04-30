@@ -11,6 +11,7 @@ import {
 	Typography,
 } from "@mui/material";
 import EditIcon from "@mui/icons-material/Edit";
+import RefreshIcon from "@mui/icons-material/Refresh";
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import ServerShorty, {
@@ -419,9 +420,13 @@ function ServersListSection({
 				<Typography variant="h6" component="h3">
 					{title}
 				</Typography>
-				<Button size="small" variant="outlined" onClick={result.reload}>
-					Refresh
-				</Button>
+				<IconButton
+					aria-label="Refresh"
+					size="small"
+					onClick={result.reload}
+				>
+					<RefreshIcon fontSize="small" />
+				</IconButton>
 			</Stack>
 			{result.status === "loading" || result.status === "idle" ? (
 				<LinearProgress />
