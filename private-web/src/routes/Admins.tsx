@@ -75,6 +75,7 @@ export default function Admins() {
 							type="submit"
 							variant="contained"
 							disabled={pending}
+							sx={{ whiteSpace: "nowrap", flexShrink: 0 }}
 						>
 							{pending ? "Adding…" : "Add admin"}
 						</Button>
