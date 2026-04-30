@@ -174,3 +174,17 @@ export interface ServerDetailData {
 	up: ShortStatus;
 	child_servers: Array<[ShortStatus, ServerInfoFull]>;
 }
+
+export interface BestoolSnippetInfo {
+	id: string;
+	name: string;
+	description: string | null;
+}
+
+export interface BestoolSnippetDetail {
+	id: string;
+	name: string;
+	description: string | null;
+	sql: string;
+	editor: string;
+}

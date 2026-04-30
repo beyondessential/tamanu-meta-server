@@ -7,6 +7,9 @@ import {
 } from "@mui/material";
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
 import Admins from "./routes/Admins";
+import Bestool from "./routes/Bestool";
+import BestoolSnippetDetail from "./routes/BestoolSnippetDetail";
+import BestoolSnippets from "./routes/BestoolSnippets";
 import DeviceDetail from "./routes/DeviceDetail";
 import Devices from "./routes/Devices";
 import DevicesList from "./routes/DevicesList";
@@ -24,6 +27,7 @@ const NAV_ITEMS: Array<{ label: string; to: string }> = [
 	{ label: "Servers", to: "/servers" },
 	{ label: "Versions", to: "/versions" },
 	{ label: "Devices", to: "/devices" },
+	{ label: "Bestool", to: "/bestool" },
 	{ label: "Admins", to: "/admins" },
 ];
 
@@ -80,6 +84,17 @@ export default function App() {
 						/>
 					</Route>
 					<Route path="/devices/:id" element={<DeviceDetail />} />
+					<Route path="/bestool" element={<Bestool />}>
+						<Route
+							index
+							element={<Navigate to="/bestool/snippets" replace />}
+						/>
+						<Route path="snippets" element={<BestoolSnippets />} />
+						<Route
+							path="snippets/:id"
+							element={<BestoolSnippetDetail />}
+						/>
+					</Route>
 				</Routes>
 			</Container>
 		</Box>
