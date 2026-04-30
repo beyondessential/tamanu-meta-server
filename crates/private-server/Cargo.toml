@@ -22,15 +22,12 @@ commons-servers = { path = "../commons-servers" }
 commons-types = { path = "../commons-types", features = ["ssr"] }
 database = { path = "../database" }
 futures.workspace = true
-hex = "0.4.3"
 itertools = "0.14.0"
 jiff = { version = "0.2.15", features = ["serde"] }
 lloggs = { workspace = true, features = ["miette-7"] }
 mime_guess = "2.0.5"
 miette = { workspace = true, features = ["fancy"] }
 public-server = { path = "../public-server", default-features = false }
-pulldown-cmark.workspace = true
-reqwest = { workspace = true }
 rust-embed = { version = "8.5", features = ["mime-guess", "interpolate-folder-path"] }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = "1.0.145"
@@ -42,3 +39,4 @@ uuid = { version = "1.18.1", features = ["serde", "v4"] }
 
 [dev-dependencies]
 commons-tests = { path = "../commons-tests" }
+hex = "0.4.3"
