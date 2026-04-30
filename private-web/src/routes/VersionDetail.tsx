@@ -2,6 +2,7 @@ import {
 	Alert,
 	Box,
 	Button,
+	IconButton,
 	LinearProgress,
 	MenuItem,
 	Paper,
@@ -16,7 +17,10 @@ import {
 	TextField,
 	Typography,
 } from "@mui/material";
+import DeleteIcon from "@mui/icons-material/Delete";
 import EditIcon from "@mui/icons-material/Edit";
+import LockIcon from "@mui/icons-material/Lock";
+import LockOpenIcon from "@mui/icons-material/LockOpen";
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 import Markdown from "../components/Markdown";
@@ -70,7 +74,7 @@ export default function VersionDetail() {
 
 			<VersionInfo detail={v} />
 
-			<ArtifactsSection versionId={v.id} />
+			<ArtifactsSection versionId={v.id} isAdmin={admin} />
 
 			<ChangelogSection
 				detail={v}
@@ -278,19 +282,66 @@ function VersionInfo({ detail }: { detail: VersionDetailData }) {
 	);
 }
 
-function ArtifactsSection({ versionId }: { versionId: string }) {
+function ArtifactsSection({
+	versionId,
+	isAdmin,
+}: {
+	versionId: string;
+	isAdmin: boolean;
+}) {
 	const result = useApi<ArtifactData[]>(
 		"versions",
 		"get_artifacts_by_version_id",
 		{ version_id: versionId },
 		[versionId],
 	);
+	const [unlocked, setUnlocked] = useState(false);
+	const [showCreate, setShowCreate] = useState(false);
+
+	const reload = () => result.reload();
 
 	return (
 		<Box>
-			<Typography variant="h5" component="h2" gutterBottom>
-				Artifacts
-			</Typography>
+			<Stack
+				direction="row"
+				spacing={1}
+				sx={{ mb: 1, alignItems: "center", justifyContent: "space-between" }}
+			>
+				<Typography variant="h5" component="h2">
+					Artifacts
+				</Typography>
+				{isAdmin && (
+					<Stack direction="row" spacing={1}>
+						{unlocked && (
+							<Button
+								variant={showCreate ? "outlined" : "contained"}
+								color={showCreate ? "warning" : "primary"}
+								onClick={() => setShowCreate((s) => !s)}
+							>
+								{showCreate ? "Cancel create" : "Create"}
+							</Button>
+						)}
+						<Button
+							variant="outlined"
+							startIcon={unlocked ? <LockOpenIcon /> : <LockIcon />}
+							onClick={() => setUnlocked((u) => !u)}
+						>
+							{unlocked ? "Lock" : "Unlock"}
+						</Button>
+					</Stack>
+				)}
+			</Stack>
+			{showCreate && (
+				<Box sx={{ mb: 2 }}>
+					<CreateArtifactForm
+						versionId={versionId}
+						onCreated={() => {
+							setShowCreate(false);
+							reload();
+						}}
+					/>
+				</Box>
+			)}
 			{result.status === "loading" || result.status === "idle" ? (
 				<LinearProgress />
 			) : result.status === "error" ? (
@@ -306,58 +357,307 @@ function ArtifactsSection({ versionId }: { versionId: string }) {
 								<TableCell>Platform</TableCell>
 								<TableCell>Download URL</TableCell>
 								<TableCell>Range</TableCell>
+								{unlocked && <TableCell />}
 							</TableRow>
 						</TableHead>
 						<TableBody>
 							{result.data.map((a) => (
-								<TableRow key={a.id}>
-									<TableCell sx={{ fontFamily: "monospace" }}>
-										{a.artifact_type}
-										{a.has_range_override && (
-											<Typography
-												variant="caption"
-												color="warning.main"
-												sx={{ display: "block" }}
-											>
-												Overrides other artifact
-											</Typography>
-										)}
-									</TableCell>
-									<TableCell sx={{ fontFamily: "monospace" }}>
-										{a.platform}
-									</TableCell>
-									<TableCell sx={{ wordBreak: "break-all" }}>
-										{a.download_url.startsWith("https://") ? (
-											<a
-												href={a.download_url}
-												target="_blank"
-												rel="noopener noreferrer"
-											>
-												{a.download_url}
-											</a>
-										) : (
-											a.download_url
-										)}
-									</TableCell>
-									<TableCell sx={{ fontFamily: "monospace" }}>
-										{a.version_range_pattern ?? "exact"}
-										{a.version_range_pattern && !a.is_used_in_public_api && (
-											<Typography
-												variant="caption"
-												color="error"
-												sx={{ display: "block" }}
-											>
-												Hidden
-											</Typography>
-										)}
-									</TableCell>
-								</TableRow>
+								<ArtifactRow
+									key={a.id}
+									artifact={a}
+									unlocked={unlocked}
+									onChanged={reload}
+								/>
 							))}
 						</TableBody>
 					</Table>
 				</TableContainer>
 			)}
 		</Box>
+	);
+}
+
+function ArtifactRow({
+	artifact,
+	unlocked,
+	onChanged,
+}: {
+	artifact: ArtifactData;
+	unlocked: boolean;
+	onChanged: () => void;
+}) {
+	const [editing, setEditing] = useState(false);
+	const [confirmDelete, setConfirmDelete] = useState(false);
+	const deleteAction = useApiAction("versions", "delete_artifact");
+
+	if (editing) {
+		return (
+			<EditArtifactRow
+				artifact={artifact}
+				onClose={(changed) => {
+					setEditing(false);
+					if (changed) onChanged();
+				}}
+			/>
+		);
+	}
+
+	const onDelete = async () => {
+		try {
+			await deleteAction.call({ artifact_id: artifact.id });
+			onChanged();
+		} catch {
+			/* surfaced via deleteAction.error */
+		}
+	};
+
+	return (
+		<TableRow>
+			<TableCell sx={{ fontFamily: "monospace" }}>
+				{artifact.artifact_type}
+				{artifact.has_range_override && (
+					<Typography
+						variant="caption"
+						color="warning.main"
+						sx={{ display: "block" }}
+					>
+						Overrides other artifact
+					</Typography>
+				)}
+			</TableCell>
+			<TableCell sx={{ fontFamily: "monospace" }}>
+				{artifact.platform}
+			</TableCell>
+			<TableCell sx={{ wordBreak: "break-all" }}>
+				{artifact.download_url.startsWith("https://") ? (
+					<a
+						href={artifact.download_url}
+						target="_blank"
+						rel="noopener noreferrer"
+					>
+						{artifact.download_url}
+					</a>
+				) : (
+					artifact.download_url
+				)}
+			</TableCell>
+			<TableCell sx={{ fontFamily: "monospace" }}>
+				{artifact.version_range_pattern ?? "exact"}
+				{artifact.version_range_pattern && !artifact.is_used_in_public_api && (
+					<Typography
+						variant="caption"
+						color="error"
+						sx={{ display: "block" }}
+					>
+						Hidden
+					</Typography>
+				)}
+			</TableCell>
+			{unlocked && (
+				<TableCell align="right">
+					{confirmDelete ? (
+						<Stack direction="row" spacing={0.5} sx={{ justifyContent: "flex-end" }}>
+							<Button
+								size="small"
+								variant="contained"
+								color="error"
+								onClick={onDelete}
+								disabled={deleteAction.pending}
+							>
+								Really delete
+							</Button>
+							<Button
+								size="small"
+								variant="outlined"
+								onClick={() => setConfirmDelete(false)}
+								disabled={deleteAction.pending}
+							>
+								Cancel
+							</Button>
+						</Stack>
+					) : (
+						<Stack direction="row" spacing={0.5} sx={{ justifyContent: "flex-end" }}>
+							<IconButton
+								aria-label={`edit ${artifact.artifact_type}`}
+								size="small"
+								onClick={() => setEditing(true)}
+							>
+								<EditIcon fontSize="small" />
+							</IconButton>
+							<IconButton
+								aria-label={`delete ${artifact.artifact_type}`}
+								size="small"
+								color="error"
+								onClick={() => setConfirmDelete(true)}
+							>
+								<DeleteIcon fontSize="small" />
+							</IconButton>
+						</Stack>
+					)}
+				</TableCell>
+			)}
+		</TableRow>
+	);
+}
+
+function EditArtifactRow({
+	artifact,
+	onClose,
+}: {
+	artifact: ArtifactData;
+	onClose: (changed: boolean) => void;
+}) {
+	const [type, setType] = useState(artifact.artifact_type);
+	const [platform, setPlatform] = useState(artifact.platform);
+	const [url, setUrl] = useState(artifact.download_url);
+	const action = useApiAction("versions", "update_artifact");
+
+	const save = async () => {
+		try {
+			await action.call({
+				artifact_id: artifact.id,
+				artifact_type: type,
+				platform,
+				download_url: url,
+			});
+			onClose(true);
+		} catch {
+			/* surfaced via action.error */
+		}
+	};
+
+	return (
+		<TableRow>
+			<TableCell>
+				<TextField
+					size="small"
+					value={type}
+					onChange={(e) => setType(e.target.value)}
+					disabled={action.pending}
+					required
+				/>
+			</TableCell>
+			<TableCell>
+				<TextField
+					size="small"
+					value={platform}
+					onChange={(e) => setPlatform(e.target.value)}
+					disabled={action.pending}
+					required
+				/>
+			</TableCell>
+			<TableCell colSpan={2}>
+				<TextField
+					size="small"
+					fullWidth
+					value={url}
+					onChange={(e) => setUrl(e.target.value)}
+					disabled={action.pending}
+					required
+				/>
+			</TableCell>
+			<TableCell align="right">
+				<Stack direction="row" spacing={0.5} sx={{ justifyContent: "flex-end" }}>
+					<Button
+						size="small"
+						variant="contained"
+						onClick={save}
+						disabled={action.pending}
+					>
+						{action.pending ? "Saving…" : "Save"}
+					</Button>
+					<Button
+						size="small"
+						variant="outlined"
+						onClick={() => onClose(false)}
+						disabled={action.pending}
+					>
+						Cancel
+					</Button>
+				</Stack>
+			</TableCell>
+		</TableRow>
+	);
+}
+
+function CreateArtifactForm({
+	versionId,
+	onCreated,
+}: {
+	versionId: string;
+	onCreated: () => void;
+}) {
+	const [type, setType] = useState("");
+	const [platform, setPlatform] = useState("");
+	const [url, setUrl] = useState("");
+	const action = useApiAction("versions", "create_artifact");
+
+	const submit = async (e: React.FormEvent) => {
+		e.preventDefault();
+		try {
+			await action.call({
+				version_id: versionId,
+				artifact_type: type,
+				platform,
+				download_url: url,
+			});
+			setType("");
+			setPlatform("");
+			setUrl("");
+			onCreated();
+		} catch {
+			/* surfaced via action.error */
+		}
+	};
+
+	return (
+		<Paper variant="outlined" sx={{ p: 2 }}>
+			<Box component="form" onSubmit={submit}>
+				<Stack
+					direction="row"
+					spacing={1}
+					sx={{ alignItems: "flex-start" }}
+				>
+					<TextField
+						size="small"
+						label="Type"
+						value={type}
+						onChange={(e) => setType(e.target.value)}
+						disabled={action.pending}
+						required
+					/>
+					<TextField
+						size="small"
+						label="Platform"
+						value={platform}
+						onChange={(e) => setPlatform(e.target.value)}
+						disabled={action.pending}
+						required
+					/>
+					<TextField
+						size="small"
+						label="Download URL"
+						value={url}
+						onChange={(e) => setUrl(e.target.value)}
+						disabled={action.pending}
+						fullWidth
+						required
+					/>
+					<Button
+						type="submit"
+						variant="contained"
+						disabled={action.pending}
+					>
+						{action.pending ? "Creating…" : "Create"}
+					</Button>
+				</Stack>
+				{action.error && (
+					<Alert severity="error" sx={{ mt: 1 }}>
+						{action.error.message}
+					</Alert>
+				)}
+			</Box>
+		</Paper>
 	);
 }
 
