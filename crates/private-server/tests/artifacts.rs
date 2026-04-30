@@ -32,52 +32,30 @@ async fn artifact_multiple_ranges_pattern_specificity_private_endpoint() {
 		.await
 		.unwrap();
 
-		// Call the private server endpoint for getting artifacts by version ID
-		// The private server should show ALL matching artifacts, not just the deduplicated public view
+		// The private detail page calls the same deduplicated view that the
+		// public API serves: among multiple ranges that match a version, only
+		// the most specific one wins.
 		let response = private
-			.post("/api/versions/get_artifacts_by_version_id")
-			.json(&serde_json::json!({"version_id": version_id_245}))
+			.post("/api/versions/get_version_artifacts")
+			.json(&serde_json::json!({"version": "2.44.5"}))
 			.await;
 
 		response.assert_status_ok();
 		let artifacts: Vec<ArtifactData> = response.json();
 
-		// Should have 2 artifacts - both ranges apply to 2.44.5
-		assert_eq!(artifacts.len(), 2, "Should have 2 matching artifacts in private view");
-
-		// Find each artifact
-		let broader = artifacts.iter().find(|a| a.id.to_string() == broader_range_id.to_lowercase());
-		let narrower = artifacts.iter().find(|a| a.id.to_string() == narrower_range_id.to_lowercase());
-
-		assert!(broader.is_some(), "Should have the 2.44.x range artifact");
-		assert!(narrower.is_some(), "Should have the ^2.44.2 range artifact");
-
-		// Verify both are range artifacts (not exact)
-		assert!(!broader.unwrap().is_exact, "2.44.x should be a ranged artifact");
-		assert!(!narrower.unwrap().is_exact, "^2.44.2 should be a ranged artifact");
-
-		// Verify they have the correct patterns
 		assert_eq!(
-			broader.unwrap().version_range_pattern,
-			Some("2.44.x".to_string()),
-			"Should have 2.44.x pattern"
+			artifacts.len(),
+			1,
+			"deduplicated view should keep only the more specific range"
 		);
+		let chosen = &artifacts[0];
+		assert_eq!(chosen.id.to_string(), narrower_range_id.to_lowercase());
 		assert_eq!(
-			narrower.unwrap().version_range_pattern,
+			chosen.version_range_pattern,
 			Some("^2.44.2".to_string()),
-			"Should have ^2.44.2 pattern"
+			"the more specific range should be the one returned"
 		);
-
-		// Verify which one is used in the public API
-		// The more specific range (^2.44.2) should be used in the public API
-		assert!(
-			narrower.unwrap().is_used_in_public_api,
-			"The more specific range (^2.44.2) should be used in the public API"
-		);
-		assert!(
-			!broader.unwrap().is_used_in_public_api,
-			"The less specific range (2.44.x) should NOT be used in the public API"
-		);
+		assert!(chosen.is_used_in_public_api);
 	})
 	.await
 }

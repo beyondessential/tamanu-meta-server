@@ -131,9 +131,6 @@ pub fn routes() -> Router<AppState> {
 	Router::new()
 		.route("/count_some", post(count_some))
 		.route("/list_some", post(list_some))
-		.route("/list_all", post(list_all))
-		.route("/list_centrals", post(list_centrals))
-		.route("/list_facilities", post(list_facilities))
 		.route("/get_name", post(get_name))
 		.route("/get_info", post(get_info))
 		.route("/get_detail", post(get_detail))
@@ -180,24 +177,6 @@ pub async fn list_some(
 	Ok(Json(
 		servers.into_iter().map(server_to_info).map(Arc::new).collect(),
 	))
-}
-
-pub async fn list_all(State(state): State<AppState>) -> Result<Json<Vec<ServerInfo>>> {
-	let mut conn = state.db.get().await?;
-	let servers = Server::get_all(&mut conn, 0, None).await?;
-	Ok(Json(servers.into_iter().map(server_to_info).collect()))
-}
-
-pub async fn list_centrals(State(state): State<AppState>) -> Result<Json<Vec<ServerInfo>>> {
-	let mut conn = state.db.get().await?;
-	let servers = Server::list_by_kind(&mut conn, ServerKind::Central, 0, None).await?;
-	Ok(Json(servers.into_iter().map(server_to_info).collect()))
-}
-
-pub async fn list_facilities(State(state): State<AppState>) -> Result<Json<Vec<ServerInfo>>> {
-	let mut conn = state.db.get().await?;
-	let servers = Server::list_by_kind(&mut conn, ServerKind::Facility, 0, None).await?;
-	Ok(Json(servers.into_iter().map(server_to_info).collect()))
 }
 
 #[derive(Deserialize)]

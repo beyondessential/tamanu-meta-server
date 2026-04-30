@@ -78,7 +78,6 @@ pub fn routes() -> Router<AppState> {
 		.route("/get_grouped_versions", post(get_grouped_versions))
 		.route("/get_version_detail", post(get_version_detail))
 		.route("/get_version_artifacts", post(get_version_artifacts))
-		.route("/get_artifacts_by_version_id", post(get_artifacts_by_version_id))
 		.route("/update_version_status", post(update_version_status))
 		.route("/update_version_changelog", post(update_version_changelog))
 		.route("/update_artifact", post(update_artifact))
@@ -223,37 +222,6 @@ pub async fn get_version_artifacts(
 	let version_record = Version::get_by_version(&mut conn, version).await?;
 	let artifacts_with_metadata =
 		Artifact::get_for_version_with_metadata(&mut conn, version_record.id).await?;
-	Ok(Json(
-		artifacts_with_metadata
-			.into_iter()
-			.map(
-				|(a, is_exact, has_range_override, is_used_in_public_api)| ArtifactData {
-					id: a.id,
-					artifact_type: a.artifact_type,
-					platform: a.platform,
-					download_url: a.download_url,
-					is_exact,
-					version_range_pattern: a.version_range_pattern,
-					has_range_override,
-					is_used_in_public_api,
-				},
-			)
-			.collect(),
-	))
-}
-
-#[derive(Deserialize)]
-pub struct VersionIdArgs {
-	pub version_id: Uuid,
-}
-
-pub async fn get_artifacts_by_version_id(
-	State(state): State<AppState>,
-	Json(args): Json<VersionIdArgs>,
-) -> Result<Json<Vec<ArtifactData>>> {
-	let mut conn = state.db.get().await?;
-	let artifacts_with_metadata =
-		Artifact::get_for_version_all_matches_with_metadata(&mut conn, args.version_id).await?;
 	Ok(Json(
 		artifacts_with_metadata
 			.into_iter()

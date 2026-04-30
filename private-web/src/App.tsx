@@ -2,9 +2,11 @@ import {
 	AppBar,
 	Box,
 	Container,
+	Link as MuiLink,
 	Toolbar,
 	Typography,
 } from "@mui/material";
+import OpenInNewIcon from "@mui/icons-material/OpenInNew";
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
 import { useApi } from "./api";
 import Admins from "./routes/Admins";
@@ -40,10 +42,21 @@ const BASE_NAV: NavItem[] = [
 
 export default function App() {
 	const sqlAvailable = useApi<boolean>("sql", "is_sql_available");
+	const publicUrl = useApi<string | null>("commons", "public_url");
+	const serverVersionsUrl = useApi<string | null>("commons", "server_versions_url");
 	const navItems: NavItem[] = [
 		...BASE_NAV,
 		...(sqlAvailable.status === "ok" && sqlAvailable.data
 			? [{ label: "SQL", to: "/sql" }]
+			: []),
+	];
+
+	const externalLinks: Array<{ label: string; href: string }> = [
+		...(publicUrl.status === "ok" && publicUrl.data
+			? [{ label: "Public", href: publicUrl.data }]
+			: []),
+		...(serverVersionsUrl.status === "ok" && serverVersionsUrl.data
+			? [{ label: "Server Versions", href: serverVersionsUrl.data }]
 			: []),
 	];
 
@@ -87,6 +100,27 @@ export default function App() {
 							})}
 						>
 							{label}
+						</Typography>
+					))}
+					<Box sx={{ flex: 1 }} />
+					{externalLinks.map(({ label, href }) => (
+						<Typography
+							key={label}
+							component={MuiLink}
+							href={href}
+							target="_blank"
+							rel="noopener"
+							sx={({ palette }) => ({
+								textDecoration: "none",
+								color: palette.text.secondary,
+								fontWeight: 500,
+								display: "inline-flex",
+								alignItems: "center",
+								gap: 0.5,
+							})}
+						>
+							{label}
+							<OpenInNewIcon sx={{ fontSize: "1em" }} />
 						</Typography>
 					))}
 				</Toolbar>

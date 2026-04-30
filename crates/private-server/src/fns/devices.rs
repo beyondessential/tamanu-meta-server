@@ -142,7 +142,6 @@ fn server_to_info(s: database::servers::Server) -> ServerInfo {
 pub fn routes() -> Router<AppState> {
 	Router::new()
 		.route("/get_device_by_id", post(get_device_by_id))
-		.route("/get_device_name_by_id", post(get_device_name_by_id))
 		.route("/list_untrusted", post(list_untrusted))
 		.route("/get_servers_for_device", post(get_servers_for_device))
 		.route("/get_past_server_associations", post(get_past_server_associations))
@@ -171,16 +170,6 @@ pub async fn get_device_by_id(
 	let mut conn = state.db.get().await?;
 	let device_with_info = Device::get_with_info(&mut conn, args.device_id).await?;
 	Ok(Json(DeviceInfo::from(device_with_info)))
-}
-
-pub async fn get_device_name_by_id(
-	State(state): State<AppState>,
-	TailscaleAdmin(_): TailscaleAdmin,
-	Json(args): Json<DeviceIdArgs>,
-) -> Result<Json<String>> {
-	let mut conn = state.db.get().await?;
-	let device_with_info = Device::get_with_info(&mut conn, args.device_id).await?;
-	Ok(Json(DeviceInfo::from(device_with_info).name()))
 }
 
 #[derive(Deserialize)]

@@ -76,7 +76,11 @@ export default function VersionDetail() {
 
 			<VersionInfo detail={v} />
 
-			<ArtifactsSection versionId={v.id} isAdmin={admin} />
+			<ArtifactsSection
+				version={versionStr}
+				versionId={v.id}
+				isAdmin={admin}
+			/>
 
 			<ChangelogSection
 				detail={v}
@@ -285,17 +289,19 @@ function VersionInfo({ detail }: { detail: VersionDetailData }) {
 }
 
 function ArtifactsSection({
+	version,
 	versionId,
 	isAdmin,
 }: {
+	version: string;
 	versionId: string;
 	isAdmin: boolean;
 }) {
 	const result = useApi<ArtifactData[]>(
 		"versions",
-		"get_artifacts_by_version_id",
-		{ version_id: versionId },
-		[versionId],
+		"get_version_artifacts",
+		{ version },
+		[version],
 	);
 	const [unlocked, setUnlocked] = useState(false);
 	const [showCreate, setShowCreate] = useState(false);
