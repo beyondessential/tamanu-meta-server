@@ -42,3 +42,55 @@ export interface SummaryData {
 }
 
 export type ServerGroupedIds = Partial<Record<ServerRank, string[]>>;
+
+export type VersionStatus = "draft" | "published" | "yanked";
+
+export interface VersionData {
+	major: number;
+	minor: number;
+	patch: number;
+	status: VersionStatus;
+	created_at: string; // RFC 3339 timestamp
+}
+
+export interface MinorVersionGroup {
+	major: number;
+	minor: number;
+	count: number;
+	latest_patch: number;
+	first_created_at: string;
+	last_created_at: string;
+	versions: VersionData[];
+}
+
+export interface RelatedVersionData {
+	major: number;
+	minor: number;
+	patch: number;
+	changelog: string;
+}
+
+export interface VersionDetail {
+	id: string;
+	major: number;
+	minor: number;
+	patch: number;
+	status: VersionStatus;
+	created_at: string;
+	updated_at: string;
+	changelog: string;
+	min_chrome_version: number | null;
+	is_latest_in_minor: boolean;
+	related_versions: RelatedVersionData[];
+}
+
+export interface ArtifactData {
+	id: string;
+	artifact_type: string;
+	platform: string;
+	download_url: string;
+	is_exact: boolean;
+	version_range_pattern: string | null;
+	has_range_override: boolean;
+	is_used_in_public_api: boolean;
+}

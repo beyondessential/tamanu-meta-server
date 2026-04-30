@@ -8,9 +8,11 @@ import {
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
 import Admins from "./routes/Admins";
 import Status from "./routes/Status";
+import Versions from "./routes/Versions";
 
 const NAV_ITEMS: Array<{ label: string; to: string }> = [
 	{ label: "Status", to: "/status" },
+	{ label: "Versions", to: "/versions" },
 	{ label: "Admins", to: "/admins" },
 ];
 
@@ -44,6 +46,7 @@ export default function App() {
 					<Route path="/" element={<Navigate to="/status" replace />} />
 					<Route path="/status" element={<Status />} />
 					<Route path="/admins" element={<Admins />} />
+					<Route path="/versions" element={<Versions />} />
 				</Routes>
 			</Container>
 		</Box>
