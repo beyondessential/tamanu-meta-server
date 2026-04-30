@@ -6,6 +6,7 @@ import {
 	Typography,
 } from "@mui/material";
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
+import { useApi } from "./api";
 import Admins from "./routes/Admins";
 import Bestool from "./routes/Bestool";
 import BestoolSnippetDetail from "./routes/BestoolSnippetDetail";
@@ -19,10 +20,16 @@ import ServerDetail from "./routes/ServerDetail";
 import ServerEdit from "./routes/ServerEdit";
 import Servers from "./routes/Servers";
 import ServersList from "./routes/ServersList";
+import Sql from "./routes/Sql";
 import VersionDetail from "./routes/VersionDetail";
 import Versions from "./routes/Versions";
 
-const NAV_ITEMS: Array<{ label: string; to: string }> = [
+interface NavItem {
+	label: string;
+	to: string;
+}
+
+const BASE_NAV: NavItem[] = [
 	{ label: "Status", to: "/status" },
 	{ label: "Servers", to: "/servers" },
 	{ label: "Versions", to: "/versions" },
@@ -32,6 +39,14 @@ const NAV_ITEMS: Array<{ label: string; to: string }> = [
 ];
 
 export default function App() {
+	const sqlAvailable = useApi<boolean>("sql", "is_sql_available");
+	const navItems: NavItem[] = [
+		...BASE_NAV,
+		...(sqlAvailable.status === "ok" && sqlAvailable.data
+			? [{ label: "SQL", to: "/sql" }]
+			: []),
+	];
+
 	return (
 		<Box>
 			<AppBar position="static" color="default" elevation={1}>
@@ -39,7 +54,7 @@ export default function App() {
 					<Typography variant="h6" component="h1" sx={{ mr: 2 }}>
 						Canopy
 					</Typography>
-					{NAV_ITEMS.map(({ label, to }) => (
+					{navItems.map(({ label, to }) => (
 						<Typography
 							key={to}
 							component={NavLink}
@@ -95,6 +110,7 @@ export default function App() {
 							element={<BestoolSnippetDetail />}
 						/>
 					</Route>
+					<Route path="/sql" element={<Sql />} />
 				</Routes>
 			</Container>
 		</Box>

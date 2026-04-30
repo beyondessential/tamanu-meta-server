@@ -188,3 +188,17 @@ export interface BestoolSnippetDetail {
 	sql: string;
 	editor: string;
 }
+
+export interface SqlResult {
+	columns: string[];
+	rows: unknown[][];
+	row_count: number;
+	execution_time_ms: number;
+}
+
+export interface SqlHistoryEntry {
+	id: string;
+	query: string;
+	tailscale_user: string;
+	created_at: string;
+}
