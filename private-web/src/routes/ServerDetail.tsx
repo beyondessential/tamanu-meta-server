@@ -96,13 +96,18 @@ function Header({
 				{data.server.rank && <ServerRankChip rank={data.server.rank} />}
 				<ServerKindChip kind={data.server.kind} />
 				<Typography variant="h4" component="h1" sx={{ ml: 1 }}>
-					<StatusDot up={data.up} title={data.server.name ?? ""} />
+					<StatusDot
+						up={data.up}
+						title={data.server.name ?? ""}
+						size="0.8em"
+					/>
 					{data.child_servers.map(([up, child]) => (
 						<StatusDot
 							key={child.id}
 							up={up}
 							title={child.name ?? ""}
 							dim
+							size="0.8em"
 						/>
 					))}
 					{data.server.name ?? "Unnamed"}

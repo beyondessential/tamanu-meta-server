@@ -13,16 +13,23 @@ interface StatusDotProps {
 	up: ShortStatus;
 	title?: string;
 	dim?: boolean;
+	/** Size relative to the surrounding font size. Defaults to "1em". */
+	size?: string;
 }
 
-export default function StatusDot({ up, title, dim }: StatusDotProps) {
+export default function StatusDot({
+	up,
+	title,
+	dim,
+	size = "1em",
+}: StatusDotProps) {
 	const dot = (
 		<Box
 			component="span"
 			sx={{
 				display: "inline-block",
-				width: "1em",
-				height: "1em",
+				width: size,
+				height: size,
 				borderRadius: "50%",
 				bgcolor: STATUS_COLOR[up],
 				opacity: dim ? 0.5 : 1,
