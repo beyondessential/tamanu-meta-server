@@ -20,10 +20,12 @@ fn main() {
 	// even when we skip the build below.
 	fs::create_dir_all(&dist).expect("failed to create private-web/dist");
 
-	if env::var("SKIP_FRONTEND_BUILD").is_ok() {
+	if env::var("SKIP_FRONTEND_BUILD").is_ok_and(|v| !v.is_empty()) {
 		// Dev path: trust whatever is on disk. The vite dev server is the
 		// real source of UI; the rust binary's embedded assets are only
-		// hit in prod.
+		// hit in prod. An empty value (e.g. `SKIP_FRONTEND_BUILD=`)
+		// re-enables the build, which is how the release recipe opts back
+		// in.
 		return;
 	}
 

@@ -16,9 +16,6 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
-  LEPTOS_OUTPUT_NAME: private-server
-  SERVER_FN_MOD_PATH: "true"
-  DISABLE_SERVER_FN_HASH: "true"
 
 jobs:
   build-binaries:
@@ -54,6 +51,8 @@ jobs:
         with:
           key: ${{ matrix.arch }}-release
 
+      # The runner image ships with Node + npm; private-server's build.rs
+      # uses them to produce the embedded private-web/dist/ bundle.
       - name: Build binaries
         run: just build-servers-release ${{ matrix.target }}
         env:
@@ -70,48 +69,10 @@ jobs:
           path: artifacts/${{ matrix.arch }}/
           retention-days: 1
 
-  build-frontend:
-    name: Build Leptos frontend
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Free up space
-        run: sudo rm -rf /opt/hostedtoolcache /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup || true
-      - uses: actions/checkout@v6
-        with:
-          submodules: recursive
-
-      - name: Configure toolchain
-        run: |
-          rustup toolchain install --profile minimal --no-self-update stable
-          rustup default stable
-          rustup target add wasm32-unknown-unknown
-
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
-
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just,cargo-leptos
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: frontend-release
-
-      - name: Build frontend
-        run: just build-frontend-release
-
-      - uses: actions/upload-artifact@v5
-        with:
-          name: frontend
-          path: |
-            target/site/
-            static/
-          retention-days: 1
-
   build-images:
     name: Build container images
     runs-on: ubuntu-24.04
-    needs: [build-binaries, build-frontend]
+    needs: [build-binaries]
     steps:
       - name: Login to ghcr.io
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u $ --password-stdin
@@ -136,22 +97,19 @@ jobs:
           name: binaries-arm64
           path: .github/build-context/arm64/
 
-      - name: Download frontend
-        uses: actions/download-artifact@v6
+      # Stage the public-server's static assets into the build context.
+      # _copy-bulma writes static/bulma/, the rest of static/ is in the repo.
+      - uses: taiki-e/install-action@v2
         with:
-          name: frontend
-          path: .github/build-context/frontend/
+          tool: just
+      - name: Stage static assets
+        run: |
+          just _copy-bulma
+          cp -r static .github/build-context/static
 
       - name: Debug build context structure
         run: |
-          echo "=== Build context structure ==="
           ls -laR .github/build-context/
-          echo "=== AMD64 binaries ==="
-          ls -lh .github/build-context/amd64/
-          echo "=== ARM64 binaries ==="
-          ls -lh .github/build-context/arm64/
-          echo "=== Frontend assets ==="
-          ls -lh .github/build-context/frontend/
 
       - name: Setup buildkit
         uses: docker/setup-buildx-action@v3
