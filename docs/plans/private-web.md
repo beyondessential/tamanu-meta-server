@@ -64,6 +64,18 @@ Each page replicates the existing Leptos behaviour. Bulma styling is **not** por
 
 Components in `crates/private-server/src/components/` translate roughly 1:1 in concept (paginated_list, legend, smalls, shorties, sub_tabs, release_summary, time_ago, version_indicator, toast). Rebuild as React + MUI; do not attempt to share types with Rust beyond what serde produces over the wire.
 
+### Phase 3.5 — Playwright tests, page-by-page
+
+Rather than batching e2e coverage at the end, add Playwright tests as each page lands so the test suite grows with the migrated UI.
+
+- Add `@playwright/test` and a `playwright.config.ts` to `/private-web/` when the first migrated page is ready.
+- Tests live in `/private-web/e2e/` and run against `pnpm dev` plus the running `private-server` API. Use Playwright's `webServer` config to start Vite for the test run; the API is the operator's responsibility to start (same as dev).
+- Each migrated page gets at least:
+  - one happy-path test that loads the page and asserts a real backend response renders;
+  - one interactive test where applicable (form submission, role change, dialog flow).
+- Don't seed via the React UI — set up state via direct DB writes or by calling the API directly from the test, then exercise the UI path.
+- CI integration is deferred until cutover, since the React app isn't in the container yet.
+
 ### Phase 4 — cutover
 
 When all pages have parity in `/private-web/`:

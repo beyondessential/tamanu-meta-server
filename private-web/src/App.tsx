@@ -1,16 +1,48 @@
-import { Container, Typography } from "@mui/material";
-import { Route, Routes } from "react-router-dom";
-import Hello from "./routes/Hello";
+import {
+	AppBar,
+	Box,
+	Container,
+	Toolbar,
+	Typography,
+} from "@mui/material";
+import { NavLink, Navigate, Route, Routes } from "react-router-dom";
+import Status from "./routes/Status";
+
+const NAV_ITEMS: Array<{ label: string; to: string }> = [
+	{ label: "Status", to: "/status" },
+];
 
 export default function App() {
 	return (
-		<Container maxWidth="md" sx={{ py: 4 }}>
-			<Typography variant="h4" component="h1" gutterBottom>
-				Canopy
-			</Typography>
-			<Routes>
-				<Route path="/" element={<Hello />} />
-			</Routes>
-		</Container>
+		<Box>
+			<AppBar position="static" color="default" elevation={1}>
+				<Toolbar variant="dense" sx={{ gap: 2 }}>
+					<Typography variant="h6" component="div" sx={{ mr: 2 }}>
+						Canopy
+					</Typography>
+					{NAV_ITEMS.map(({ label, to }) => (
+						<Typography
+							key={to}
+							component={NavLink}
+							to={to}
+							sx={({ palette }) => ({
+								textDecoration: "none",
+								color: palette.text.secondary,
+								fontWeight: 500,
+								"&.active": { color: palette.text.primary },
+							})}
+						>
+							{label}
+						</Typography>
+					))}
+				</Toolbar>
+			</AppBar>
+			<Container maxWidth="lg" sx={{ py: 3 }}>
+				<Routes>
+					<Route path="/" element={<Navigate to="/status" replace />} />
+					<Route path="/status" element={<Status />} />
+				</Routes>
+			</Container>
+		</Box>
 	);
 }
