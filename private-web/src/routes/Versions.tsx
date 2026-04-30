@@ -42,7 +42,16 @@ export default function Versions() {
 
 function MinorGroup({ group }: { group: MinorVersionGroup }) {
 	return (
-		<Accordion disableGutters>
+		<Accordion
+			disableGutters
+			sx={{
+				my: 1,
+				"&:before": { display: "none" },
+				borderRadius: 1,
+				border: 1,
+				borderColor: "divider",
+			}}
+		>
 			<AccordionSummary expandIcon={<ExpandMoreIcon />}>
 				<Stack
 					direction="row"
