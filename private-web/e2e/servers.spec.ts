@@ -35,3 +35,21 @@ test.describe("servers list page", () => {
 		).toBeVisible();
 	});
 });
+
+test.describe("server detail page", () => {
+	test("loads with an id param", async ({ page }) => {
+		// Use an arbitrary UUID. The API likely 404s; we just want to know
+		// the page mounts and surfaces a deterministic state.
+		await page.goto("/servers/00000000-0000-0000-0000-000000000000");
+		await expect(
+			page
+				.locator(
+					[
+						'h1[class*="MuiTypography"]', // server name heading on success
+						'[role="alert"]',
+					].join(", "),
+				)
+				.first(),
+		).toBeVisible();
+	});
+});

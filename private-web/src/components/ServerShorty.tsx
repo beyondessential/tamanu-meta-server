@@ -1,26 +1,8 @@
-import { Box, Chip, Link as MuiLink, Stack, Typography } from "@mui/material";
+import { Box, Link as MuiLink, Stack, Typography } from "@mui/material";
 import { Link as RouterLink } from "react-router-dom";
 import type { ServerKind, ServerRank } from "../types";
-
-const RANK_COLORS: Record<
-	ServerRank,
-	"error" | "warning" | "info" | "success" | "primary"
-> = {
-	production: "error",
-	clone: "warning",
-	demo: "info",
-	test: "info",
-	dev: "success",
-};
-
-const KIND_COLORS: Record<
-	ServerKind,
-	"primary" | "info" | "default"
-> = {
-	central: "primary",
-	facility: "info",
-	canopy: "default",
-};
+import ServerKindChip from "./ServerKindChip";
+import ServerRankChip from "./ServerRankChip";
 
 export interface ServerInfo {
 	id: string;
@@ -53,20 +35,8 @@ export default function ServerShorty({ server }: { server: ServerInfo }) {
 			>
 				{name}
 			</MuiLink>
-			{server.rank && (
-				<Chip
-					size="small"
-					variant="outlined"
-					color={RANK_COLORS[server.rank]}
-					label={server.rank}
-				/>
-			)}
-			<Chip
-				size="small"
-				variant="outlined"
-				color={KIND_COLORS[server.kind]}
-				label={server.kind}
-			/>
+			{server.rank && <ServerRankChip rank={server.rank} />}
+			<ServerKindChip kind={server.kind} />
 			<Box sx={{ ml: "auto" }}>
 				<Typography variant="body2" color="text.secondary">
 					{server.host}

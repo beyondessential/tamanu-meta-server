@@ -8,6 +8,7 @@ import {
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
 import Admins from "./routes/Admins";
 import Status from "./routes/Status";
+import ServerDetail from "./routes/ServerDetail";
 import Servers from "./routes/Servers";
 import ServersList from "./routes/ServersList";
 import VersionDetail from "./routes/VersionDetail";
@@ -59,6 +60,7 @@ export default function App() {
 							element={<ServersList kind="facility" />}
 						/>
 					</Route>
+					<Route path="/servers/:id" element={<ServerDetail />} />
 				</Routes>
 			</Container>
 		</Box>

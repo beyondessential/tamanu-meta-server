@@ -94,3 +94,52 @@ export interface ArtifactData {
 	has_range_override: boolean;
 	is_used_in_public_api: boolean;
 }
+
+export interface GeoPoint {
+	lat: number;
+	lon: number;
+}
+
+export interface ServerInfoFull {
+	id: string;
+	name: string | null;
+	kind: ServerKind;
+	rank: ServerRank | null;
+	host: string;
+	device_id: string | null;
+	parent_server_id: string | null;
+	parent_server_name: string | null;
+	listed: boolean;
+	cloud: boolean | null;
+	geolocation: GeoPoint | null;
+}
+
+export interface ServerLastStatusData {
+	id: string;
+	created_at: string;
+	version: VersionStr | null;
+	version_distance: number | null;
+	min_chrome_version: number | null;
+	platform: string | null;
+	postgres: string | null;
+	nodejs: string | null;
+	timezone: string | null;
+	extra: Record<string, unknown>;
+}
+
+export interface DeviceShortInfo {
+	device: { id: string; role: string };
+	keys: Array<{ id: string; name: string | null }>;
+	latest_connection: {
+		ip: string;
+		user_agent: string | null;
+	} | null;
+}
+
+export interface ServerDetailData {
+	server: ServerInfoFull;
+	device_info: DeviceShortInfo | null;
+	last_status: ServerLastStatusData | null;
+	up: ShortStatus;
+	child_servers: Array<[ShortStatus, ServerInfoFull]>;
+}
