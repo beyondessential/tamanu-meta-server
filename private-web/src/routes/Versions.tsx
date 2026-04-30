@@ -53,9 +53,17 @@ function MinorGroup({ group }: { group: MinorVersionGroup }) {
 				borderRadius: 1,
 				border: 1,
 				borderColor: "divider",
+				boxShadow: "none",
+				"&.Mui-expanded": { boxShadow: "none" },
 			}}
 		>
-			<AccordionSummary expandIcon={<ExpandMoreIcon />}>
+			<AccordionSummary
+				expandIcon={<ExpandMoreIcon />}
+				sx={{
+					transition: "background-color 150ms",
+					"&:hover": { bgcolor: "action.hover" },
+				}}
+			>
 				<Stack
 					direction="row"
 					spacing={2}
