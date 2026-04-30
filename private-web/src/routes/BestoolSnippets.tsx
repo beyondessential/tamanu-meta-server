@@ -84,7 +84,11 @@ export default function BestoolSnippets() {
 						>
 							<Paper
 								variant="outlined"
-								sx={{ p: 1.5, "&:hover": { boxShadow: 1 } }}
+								sx={{
+									p: 1.5,
+									transition: "background-color 150ms",
+									"&:hover": { bgcolor: "action.hover" },
+								}}
 							>
 								<Typography variant="body1" sx={{ fontFamily: "monospace" }}>
 									{s.name}

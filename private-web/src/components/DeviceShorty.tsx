@@ -40,14 +40,8 @@ export default function DeviceShorty({ device }: { device: DeviceInfoData }) {
 					borderColor: "divider",
 					borderRadius: 1,
 					alignItems: "center",
-					transition: theme.transitions.create([
-						"background-color",
-						"box-shadow",
-					]),
-					"&:hover": {
-						bgcolor: "action.hover",
-						boxShadow: 1,
-					},
+					transition: theme.transitions.create("background-color"),
+					"&:hover": { bgcolor: "action.hover" },
 				})}
 			>
 				<Box sx={{ fontWeight: 500 }}>{name}</Box>

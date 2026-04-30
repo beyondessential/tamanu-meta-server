@@ -44,6 +44,7 @@ function MinorGroup({ group }: { group: MinorVersionGroup }) {
 	return (
 		<Accordion
 			disableGutters
+			elevation={0}
 			sx={{
 				my: 1,
 				"&:before": { display: "none" },
@@ -93,7 +94,8 @@ function MinorGroup({ group }: { group: MinorVersionGroup }) {
 											: v.status === "yanked"
 												? theme.palette.error.light + "22"
 												: undefined,
-									"&:hover": { boxShadow: 1 },
+									transition: "background-color 150ms",
+									"&:hover": { bgcolor: theme.palette.action.hover },
 								})}
 							>
 								<Stack

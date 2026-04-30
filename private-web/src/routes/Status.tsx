@@ -139,7 +139,13 @@ function ServerCardLoader({
 			underline="none"
 			color="inherit"
 		>
-			<Card variant="outlined" sx={{ "&:hover": { boxShadow: 2 } }}>
+			<Card
+				variant="outlined"
+				sx={{
+					transition: "background-color 150ms",
+					"&:hover": { bgcolor: "action.hover" },
+				}}
+			>
 				<CardContent sx={{ p: 1.5, "&:last-child": { pb: 1.5 } }}>
 					{result.status === "loading" || result.status === "idle" ? (
 						<Typography variant="body2" color="text.secondary">
