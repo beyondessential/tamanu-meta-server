@@ -7,17 +7,19 @@
 	<title>Production Server Versions - Tamanu</title>
 	<style>
 		:root {
-			--color-text-primary: #1a1a1a;
-			--color-text-secondary: #4a4a4a;
-			--color-text-light: #6a6a6a;
+			/* Mirrors private-web's MUI theme. */
+			--color-text-primary: rgba(0, 0, 0, 0.87);
+			--color-text-secondary: rgba(0, 0, 0, 0.6);
+			--color-text-light: rgba(0, 0, 0, 0.45);
 			--color-bg-white: #ffffff;
-			--color-bg-light: #f5f5f5;
-			--color-border-light: #e0e0e0;
-			--color-primary: #0066cc;
-			--color-success-status: #28a745;
-			--color-error: #dc3545;
-			--color-warning: #ffc107;
-			--color-status-gone: #6c757d;
+			--color-bg-light: #fafafa;
+			--color-border-light: rgba(0, 0, 0, 0.12);
+			--color-primary: #388e3c;
+			--color-success-status: #2e7d32;
+			--color-okay: #32669a;
+			--color-error: #d32f2f;
+			--color-warning: #ed6c02;
+			--color-status-gone: rgba(0, 0, 0, 0.38);
 		}
 
 		* {
@@ -170,7 +172,7 @@
 		}
 
 		.version-okay {
-			background: #17a2b8;
+			background: var(--color-okay);
 		}
 
 		.version-outdated {
