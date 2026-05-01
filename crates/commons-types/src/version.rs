@@ -1,7 +1,6 @@
 use std::{fmt::Display, str::FromStr};
 
 use commons_errors::AppError;
-#[cfg(feature = "ssr")]
 use diesel::{
 	backend::Backend,
 	deserialize::{self, FromSql},
@@ -12,11 +11,9 @@ use diesel::{
 use node_semver::SemverError;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "ssr", derive(AsExpression))]
-#[cfg_attr(feature = "ssr", diesel(sql_type = Text))]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize, Default, AsExpression)]
+#[diesel(sql_type = Text)]
 #[serde(rename_all = "lowercase")]
-#[derive(Default)]
 pub enum VersionStatus {
 	#[default]
 	Draft,
@@ -56,7 +53,6 @@ impl From<VersionStatus> for String {
 	}
 }
 
-#[cfg(feature = "ssr")]
 impl<DB> FromSql<Text, DB> for VersionStatus
 where
 	DB: Backend,
@@ -68,7 +64,6 @@ where
 	}
 }
 
-#[cfg(feature = "ssr")]
 impl ToSql<Text, diesel::pg::Pg> for VersionStatus
 where
 	String: ToSql<Text, diesel::pg::Pg>,
@@ -79,9 +74,8 @@ where
 	}
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "ssr", derive(AsExpression))]
-#[cfg_attr(feature = "ssr", diesel(sql_type = Text))]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, AsExpression)]
+#[diesel(sql_type = Text)]
 pub struct VersionStr(pub node_semver::Version);
 
 impl Display for VersionStr {
@@ -107,7 +101,6 @@ impl FromStr for VersionStr {
 	}
 }
 
-#[cfg(feature = "ssr")]
 impl<DB> deserialize::FromSql<Text, DB> for VersionStr
 where
 	DB: Backend,
@@ -122,7 +115,6 @@ where
 	}
 }
 
-#[cfg(feature = "ssr")]
 impl serialize::ToSql<Text, diesel::pg::Pg> for VersionStr
 where
 	String: serialize::ToSql<Text, diesel::pg::Pg>,

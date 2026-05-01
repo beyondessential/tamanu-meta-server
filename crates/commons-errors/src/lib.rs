@@ -1,8 +1,6 @@
 use std::{env::VarError, str::FromStr as _};
 
-#[cfg(feature = "ssr")]
 use axum::response::{IntoResponse, Response};
-#[cfg(feature = "ssr")]
 use diesel_async::pooled_connection::PoolError;
 use http::{StatusCode, Uri};
 use problem_details::ProblemDetails;
@@ -30,15 +28,12 @@ pub enum AppError {
 	#[error("version parse error: {0}")]
 	VersionParse(Box<node_semver::SemverError>),
 
-	#[cfg(feature = "ssr")]
 	#[error("database: {0}")]
 	DatabasePool(#[from] mobc::Error<PoolError>),
 
-	#[cfg(feature = "ssr")]
 	#[error("database: {0}")]
 	DatabaseQuery(#[from] diesel::result::Error),
 
-	#[cfg(feature = "ssr")]
 	#[error("render: {0}")]
 	Tera(#[from] tera::Error),
 
@@ -51,7 +46,6 @@ pub enum AppError {
 	#[error("version range is not usable")]
 	UnusableRange,
 
-	#[cfg(feature = "ssr")]
 	#[error("timesync: {0}")]
 	Timesync(#[from] timesimp::ParseError),
 
@@ -98,7 +92,6 @@ impl From<node_semver::SemverError> for AppError {
 	}
 }
 
-#[cfg(feature = "ssr")]
 impl IntoResponse for AppError {
 	fn into_response(self) -> Response {
 		let status = self.to_http_status();
@@ -121,7 +114,6 @@ impl AppError {
 			Self::NotImplemented => StatusCode::NOT_IMPLEMENTED,
 			Self::NoMatchingVersions => StatusCode::NOT_FOUND,
 			Self::UnusableRange => StatusCode::BAD_REQUEST,
-			#[cfg(feature = "ssr")]
 			Self::DatabaseQuery(diesel::result::Error::NotFound) => StatusCode::NOT_FOUND,
 			Self::AuthMissingHeader(_) => StatusCode::UNAUTHORIZED,
 			Self::AuthMissingCertificate => StatusCode::UNAUTHORIZED,
@@ -152,18 +144,13 @@ impl AppError {
 						Self::Environment(_) => "environment",
 						Self::Header(_) => "header",
 						Self::VersionParse(_) => "version-parse",
-						#[cfg(feature = "ssr")]
 						Self::DatabasePool(_) => "database",
-						#[cfg(feature = "ssr")]
 						Self::DatabaseQuery(diesel::result::Error::NotFound) => "resource-not-found",
-						#[cfg(feature = "ssr")]
 						Self::DatabaseQuery(_) => "database",
-						#[cfg(feature = "ssr")]
 						Self::Tera(_) => "render",
 						Self::Io(_) => "io",
 						Self::NoMatchingVersions => "no-matching-versions",
 						Self::UnusableRange => "unusable-range",
-						#[cfg(feature = "ssr")]
 						Self::Timesync(_) => "timesync",
 						Self::AuthMissingHeader(_) => "auth-missing-header",
 						Self::AuthMissingCertificate => "auth-missing-certificate",

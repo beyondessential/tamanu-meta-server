@@ -1,4 +1,3 @@
-#[cfg(feature = "ssr")]
 use diesel::{
 	backend::Backend,
 	deserialize::{self, FromSql},
@@ -8,9 +7,8 @@ use diesel::{
 };
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ssr", derive(AsExpression))]
-#[cfg_attr(feature = "ssr", diesel(sql_type = Array<Nullable<Float8>>))]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, AsExpression)]
+#[diesel(sql_type = Array<Nullable<Float8>>)]
 pub struct GeoPoint {
 	pub lat: f64,
 	pub lon: f64,
@@ -20,7 +18,6 @@ pub struct GeoPoint {
 #[error("invalid geo point database type (must be an array of two floats)")]
 pub struct InvalidGeoPointDatabaseTypeError;
 
-#[cfg(feature = "ssr")]
 impl<DB> FromSql<Array<Nullable<Float8>>, DB> for GeoPoint
 where
 	DB: Backend,
@@ -39,7 +36,6 @@ where
 	}
 }
 
-#[cfg(feature = "ssr")]
 impl ToSql<Array<Nullable<Float8>>, diesel::pg::Pg> for GeoPoint
 where
 	Vec<Option<f64>>: ToSql<Array<Nullable<Float8>>, diesel::pg::Pg>,

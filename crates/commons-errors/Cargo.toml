@@ -11,27 +11,15 @@ authors = [
 ]
 
 [dependencies]
-axum = { workspace = true, optional = true, features = ["json", "macros"] }
-diesel = { workspace = true, optional = true }
-diesel-async = { workspace = true, optional = true }
+axum = { workspace = true, features = ["json", "macros"] }
+diesel.workspace = true
+diesel-async.workspace = true
 http.workspace = true
 miette.workspace = true
-mobc = { workspace = true, optional = true }
+mobc.workspace = true
 node-semver.workspace = true
-problem_details = { workspace = true, features = ["serde"] }
+problem_details = { workspace = true, features = ["serde", "axum"] }
 serde = { workspace = true, features = ["derive"] }
-tera = { workspace = true, optional = true }
+tera.workspace = true
 thiserror = "2.0.16"
-timesimp = { workspace = true, optional = true }
-
-[features]
-default = ["ssr"]
-ssr = [
-	"dep:axum",
-	"dep:diesel",
-	"dep:diesel-async",
-	"dep:mobc",
-	"dep:tera",
-	"dep:timesimp",
-	"problem_details/axum",
-]
+timesimp.workspace = true

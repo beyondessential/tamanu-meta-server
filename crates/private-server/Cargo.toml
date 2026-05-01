@@ -17,9 +17,9 @@ axum-server-timing = "3.0.0"
 base64 = "0.22.1"
 bestool-postgres = "1.0.3"
 clap = { workspace = true, features = ["derive", "env"] }
-commons-errors = { path = "../commons-errors", features = ["ssr"] }
+commons-errors = { path = "../commons-errors" }
 commons-servers = { path = "../commons-servers" }
-commons-types = { path = "../commons-types", features = ["ssr"] }
+commons-types = { path = "../commons-types" }
 database = { path = "../database" }
 futures.workspace = true
 itertools = "0.14.0"
