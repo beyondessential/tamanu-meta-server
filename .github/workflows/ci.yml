@@ -56,3 +56,66 @@ jobs:
           tool: just
       - uses: Swatinem/rust-cache@v2
       - run: just lint
+
+  e2e:
+    name: Playwright
+    runs-on: ubuntu-latest
+    # The fixture (private-web/e2e/fixture.ts) spawns the private-server
+    # binary plus a Vite dev server itself, so this job builds the rust
+    # binaries the fixture expects, installs the frontend deps + chromium,
+    # and runs `npm run test:e2e`.
+    steps:
+      - name: Free up space
+        run: sudo rm -rf /opt/hostedtoolcache /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup || true
+      - uses: actions/checkout@v6
+      - name: Configure toolchain
+        run: |
+          rustup toolchain install --profile minimal --no-self-update stable
+          rustup default stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: private-web/package-lock.json
+      - name: Start Postgres
+        # Mirrors the canopy/canopy role + admin DB used by the rust test job.
+        run: |
+          sudo systemctl start postgresql.service
+          sudo -u postgres psql --command="CREATE ROLE canopy SUPERUSER LOGIN PASSWORD 'canopy'"
+          sudo -u postgres createdb --owner=canopy canopy
+      - name: Build private-server + migrate
+        # SKIP_FRONTEND_BUILD avoids private-server/build.rs running an npm
+        # install + vite build to embed dist/ — the e2e fixture uses Vite
+        # at runtime so the embedded bundle isn't needed here.
+        env:
+          SKIP_FRONTEND_BUILD: "1"
+        run: cargo build --bin private-server --bin migrate --locked
+      - name: npm ci
+        run: npm ci
+        working-directory: private-web
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('private-web/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+        working-directory: private-web
+      - name: Playwright tests
+        run: npm run test:e2e
+        working-directory: private-web
+        env:
+          CANOPY_E2E_ADMIN_DATABASE_URL: postgresql://canopy:canopy@localhost:5432/postgres
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            private-web/playwright-report
+            private-web/test-results
+          retention-days: 7
+          if-no-files-found: ignore
