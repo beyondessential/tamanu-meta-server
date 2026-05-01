@@ -257,17 +257,15 @@ function StatusInfoFields({ status }: { status: ServerLastStatusData }) {
 			{status.timezone && (
 				<InfoItem label="Timezone" value={status.timezone} />
 			)}
-			{status.version && (
-				<Stack spacing={0.25}>
-					<Typography variant="caption" color="text.secondary">
-						Tamanu
-					</Typography>
-					<VersionIndicator
-						version={status.version}
-						distance={status.version_distance}
-					/>
-				</Stack>
-			)}
+			<Stack spacing={0.25}>
+				<Typography variant="caption" color="text.secondary">
+					Tamanu
+				</Typography>
+				<VersionIndicator
+					version={status.version}
+					distance={status.version_distance}
+				/>
+			</Stack>
 			{status.postgres && (
 				<InfoItem
 					label="PostgreSQL"

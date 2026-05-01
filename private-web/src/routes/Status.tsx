@@ -175,7 +175,7 @@ function ServerCard({ server }: { server: CentralServerCard }) {
 				<Stack
 					direction="row"
 					spacing={1}
-					sx={{ alignItems: "baseline" }}
+					sx={{ alignItems: "baseline", minWidth: 0 }}
 				>
 					<MuiLink
 						href={server.host}
@@ -184,7 +184,7 @@ function ServerCard({ server }: { server: CentralServerCard }) {
 						color="text.secondary"
 						title={server.host}
 						onClick={(e) => e.stopPropagation()}
-						sx={{ textDecoration: "none" }}
+						sx={{ textDecoration: "none", flexShrink: 0 }}
 					>
 						🌐
 					</MuiLink>
@@ -195,18 +195,19 @@ function ServerCard({ server }: { server: CentralServerCard }) {
 							overflow: "hidden",
 							textOverflow: "ellipsis",
 							whiteSpace: "nowrap",
+							minWidth: 0,
 						}}
 					>
 						{server.name}
 					</Typography>
 				</Stack>
-				{server.version && (
+				<Box sx={{ flexShrink: 0 }}>
 					<VersionIndicator
 						version={server.version}
 						distance={server.version_distance}
 						addLink={false}
 					/>
-				)}
+				</Box>
 			</Stack>
 			<Stack direction="row" spacing={0} sx={{ flexWrap: "wrap" }}>
 				<StatusDot up={server.up} title={`${server.name}: ${server.up}`} />

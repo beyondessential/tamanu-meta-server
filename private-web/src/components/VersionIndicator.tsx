@@ -4,7 +4,7 @@ import type { VersionStr } from "../types";
 import VersionSquare from "./VersionSquare";
 
 interface VersionIndicatorProps {
-	version: VersionStr;
+	version: VersionStr | null;
 	distance?: number | null;
 	addLink?: boolean;
 }
@@ -16,12 +16,12 @@ export default function VersionIndicator({
 }: VersionIndicatorProps) {
 	const inner = (
 		<Stack direction="row" spacing={0.5} component="span" sx={{ alignItems: "center" }}>
-			<span>{version}</span>
+			<span>{version ?? "unknown"}</span>
 			<VersionSquare distance={distance} />
 		</Stack>
 	);
 
-	if (!addLink) {
+	if (!addLink || !version) {
 		return inner;
 	}
 	return (
