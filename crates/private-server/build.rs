@@ -39,11 +39,11 @@ fn main() {
 	};
 
 	let status = Command::new(&npm)
-		.args(["install", "--frozen-lockfile"])
+		.arg("ci")
 		.current_dir(&frontend)
 		.status()
-		.expect("failed to run npm install");
-	assert!(status.success(), "npm install failed");
+		.expect("failed to run npm ci");
+	assert!(status.success(), "npm ci failed");
 
 	let status = Command::new(&npm)
 		.args(["run", "build"])
