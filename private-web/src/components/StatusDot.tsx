@@ -5,7 +5,7 @@ const STATUS_COLOR: Record<ShortStatus, string> = {
 	up: "success.main",
 	down: "error.main",
 	away: "warning.main",
-	blip: "primary.main",
+	blip: "secondary.main",
 	gone: "text.disabled",
 };
 

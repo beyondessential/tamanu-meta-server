@@ -6,6 +6,7 @@ import {
 	LinearProgress,
 	Link as MuiLink,
 	Stack,
+	Tooltip,
 	Typography,
 } from "@mui/material";
 import { Link as RouterLink } from "react-router-dom";
@@ -177,17 +178,18 @@ function ServerCard({ server }: { server: CentralServerCard }) {
 					spacing={1}
 					sx={{ alignItems: "baseline", minWidth: 0 }}
 				>
-					<MuiLink
-						href={server.host}
-						target="_blank"
-						rel="noopener"
-						color="text.secondary"
-						title={server.host}
-						onClick={(e) => e.stopPropagation()}
-						sx={{ textDecoration: "none", flexShrink: 0 }}
-					>
-						🌐
-					</MuiLink>
+					<Tooltip title={server.host} placement="top">
+						<MuiLink
+							href={server.host}
+							target="_blank"
+							rel="noopener"
+							color="text.secondary"
+							onClick={(e) => e.stopPropagation()}
+							sx={{ textDecoration: "none", flexShrink: 0 }}
+						>
+							🌐
+						</MuiLink>
+					</Tooltip>
 					<Typography
 						variant="subtitle1"
 						component="h3"

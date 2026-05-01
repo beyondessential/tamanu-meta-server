@@ -9,7 +9,7 @@ function distanceColor(distance: number | null): string {
 	if (distance < 2) return "success.main";
 	if (distance >= 10) return "error.main";
 	if (distance >= 5) return "warning.main";
-	return "primary.main";
+	return "secondary.main";
 }
 
 export default function VersionSquare({ distance }: VersionSquareProps) {
