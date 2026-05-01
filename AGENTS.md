@@ -25,7 +25,7 @@ Avoid writing large summaries of actions taken when done.
 - Use `commons_tests::server::run_with_device_auth()` for authenticated device tests in the public server
 - Admin endpoints take a `TailscaleAdmin` axum extractor; the React UI gates with `commons.is_current_user_admin`
 
-## Private server architecture (post-Leptos)
+## Private server architecture
 - **Server fns** under `crates/private-server/src/fns/<module>.rs` are bare axum handlers with `(State, [auth extractor], Json<Args>) -> Result<Json<T>>` signatures.
 - Each module exposes `pub fn routes() -> Router<AppState>` and is mounted under `/api/<module>` by `crate::fns::routes()`.
 - The SPA fallback (`crate::spa::handler`) serves the embedded React bundle from `private-web/dist/` for any path the API doesn't claim.
