@@ -25,23 +25,24 @@
         }
 
         .artifact-type {
-            font-weight: 600;
-            min-width: 120px;
+            font-weight: 500;
+            min-width: 140px;
         }
 
         .artifact-platform {
             font-family: monospace;
-            font-size: 0.85em;
-            min-width: 160px;
+            font-size: 0.8em;
+            min-width: 120px;
         }
 
         .artifact-url {
             font-family: monospace;
-            font-size: 0.9em;
+            font-size: 0.7em;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
             flex: 1;
+            color: #666;
         }
 
         .artifact-item {

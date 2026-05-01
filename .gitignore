@@ -4,7 +4,6 @@ Rocket.toml
 *.crt
 *.key
 identity.*.pem
-/static/bulma
 TODO.txt
 /private-web/node_modules
 /private-web/dist

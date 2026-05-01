@@ -19,7 +19,7 @@ RUN if [ "$TARGETPLATFORM" = "linux/amd64" ]; then \
     fi && \
     rm -rf /tmp/bins
 
-# Public-server's Tera templates link to /static/{bulma,private}/...
+# Public-server's Tera templates link to /static/public.css and /static/images/...
 # (private-server has its React bundle embedded in the binary).
 COPY --chown=tamanu:tamanu static /home/tamanu/static
 

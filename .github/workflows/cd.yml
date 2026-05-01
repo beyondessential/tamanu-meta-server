@@ -34,8 +34,6 @@ jobs:
       - name: Free up space
         run: sudo rm -rf /opt/hostedtoolcache /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup || true
       - uses: actions/checkout@v6
-        with:
-          submodules: recursive
 
       - name: Configure toolchain
         run: |
@@ -78,8 +76,6 @@ jobs:
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u $ --password-stdin
 
       - uses: actions/checkout@v6
-        with:
-          submodules: recursive
 
       - name: Extract version
         id: version
@@ -98,14 +94,8 @@ jobs:
           path: .github/build-context/arm64/
 
       # Stage the public-server's static assets into the build context.
-      # _copy-bulma writes static/bulma/, the rest of static/ is in the repo.
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just
       - name: Stage static assets
-        run: |
-          just _copy-bulma
-          cp -r static .github/build-context/static
+        run: cp -r static .github/build-context/static
 
       - name: Debug build context structure
         run: |

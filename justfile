@@ -27,8 +27,8 @@ build-image:
     docker build -t canopy .
 
 # Run the public server and reload on change
-watch-public: _copy-bulma
-    watchexec -w crates -- cargo run --bin public-server
+watch-public:
+    watchexec -I -w crates -- cargo run --bin public-server
 
 # Rebuild the private-server binary on source change (pair with watch-private-api)
 watch-private-build:
@@ -103,7 +103,7 @@ clean:
     cargo clean
 
 # Build server binaries for a specific target (release mode), with embedded private-web frontend
-build-servers-release target: _copy-bulma
+build-servers-release target:
     SKIP_FRONTEND_BUILD= cargo build --locked --target {{ target }} --release --bins
 
 # Install development dependencies
@@ -124,12 +124,3 @@ dev: fmt lint test
 # Make a new release
 release level="minor":
     cargo release --workspace --execute {{ level }}
-
-# Update the bulma submodule
-update-bulma:
-    git submodule update --init --recursive
-    git submodule foreach git pull origin main
-
-# Copy bulma CSS files to static directory (used by the public-server templates)
-_copy-bulma:
-    cp -r --reflink=auto .sub/bulma/css static/bulma
