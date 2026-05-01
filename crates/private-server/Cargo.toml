@@ -23,7 +23,7 @@ commons-types = { path = "../commons-types", features = ["ssr"] }
 database = { path = "../database" }
 futures.workspace = true
 itertools = "0.14.0"
-jiff = { version = "0.2.15", features = ["serde"] }
+jiff = { version = "0.2.24", features = ["serde"] }
 lloggs = { workspace = true, features = ["miette-7"] }
 mime_guess = "2.0.5"
 miette = { workspace = true, features = ["fancy"] }
@@ -32,10 +32,10 @@ rust-embed = { version = "8.5", features = ["mime-guess", "interpolate-folder-pa
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = "1.0.145"
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "signal", "time"] }
-tokio-postgres = { version = "0.7.15", features = ["with-jiff-0_2", "with-serde_json-1", "with-uuid-1"] }
+tokio-postgres = { version = "0.7.17", features = ["with-jiff-0_2", "with-serde_json-1", "with-uuid-1"] }
 tower-http = { version = "0.6.6", features = ["fs"] }
 tracing.workspace = true
-uuid = { version = "1.18.1", features = ["serde", "v4"] }
+uuid = { version = "1.23.1", features = ["serde", "v4"] }
 
 [dev-dependencies]
 commons-tests = { path = "../commons-tests" }

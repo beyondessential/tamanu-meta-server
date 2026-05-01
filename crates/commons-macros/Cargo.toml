@@ -11,6 +11,6 @@ authors = [
 ]
 
 [dependencies]
-tachys = "0.2.11"
+tachys = "0.2.15"
 wasm-bindgen = { version = "0.2.106", default-features = false, features = [] }
 web-sys = { version = "0.3.83", default-features = false, features = [] }
