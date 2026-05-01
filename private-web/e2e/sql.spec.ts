@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./test-fixtures";
 
 test.describe("sql page", () => {
 	test("loads with the page chrome and a query box", async ({ page }) => {

@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./test-fixtures";
 
 test.describe("bestool snippets list", () => {
 	test("/bestool redirects to /bestool/snippets and renders the page", async ({

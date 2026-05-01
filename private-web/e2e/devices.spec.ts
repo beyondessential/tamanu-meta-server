@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./test-fixtures";
 
 test.describe("devices page", () => {
 	test("loads with the search/untrusted/trusted tabs", async ({ page }) => {

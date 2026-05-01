@@ -72,7 +72,7 @@ Local dev workflow (two terminals):
 
 Open `http://localhost:8090/`. The Vite proxy makes the React app same-origin with the API, so no CORS plumbing is needed.
 
-End-to-end tests use Playwright. Run with `npm run test:e2e` from `/private-web/`. Tests start Vite themselves but assume the operator already has `just watch-private-api` running for the backend. The first run on a fresh checkout needs `npx playwright install chromium`.
+End-to-end tests use Playwright. Run with `npm run test:e2e` from `/private-web/`. The fixture (`e2e/fixture.ts`) spawns its own private-server + Vite pair against a freshly-migrated `canopy_e2e_<random>` Postgres database per worker, so the operator does not need to keep `just watch-private-api` running. Build the binaries first with `cargo build --bin private-server --bin migrate`. Override the admin connection used to create/drop the throwaway DB with `CANOPY_E2E_ADMIN_DATABASE_URL` (default `postgres://localhost/postgres`); set `CANOPY_E2E_VERBOSE=1` to stream backend/frontend logs. The first run on a fresh checkout needs `npx playwright install chromium`.
 
 ## Development Workflow
 - Always check: `just check` for basic compilation
