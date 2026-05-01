@@ -30,9 +30,14 @@ build-image:
 watch-public: _copy-bulma
     watchexec -w crates -- cargo run --bin public-server
 
-# Run the private server's HTTP API, bound to 127.0.0.1:8081, for the private-web Vite frontend
+# Rebuild the private-server binary on source change (pair with watch-private-api)
+watch-private-build:
+    watchexec -I -w crates -- cargo build --bin private-server
+
+# Run the private server's HTTP API, bound to 127.0.0.1:8081, for the private-web Vite frontend.
+# Watches the built binary so it restarts when watch-private-build produces a fresh artefact.
 watch-private-api:
-    BIND_ADDRESS=127.0.0.1:8081 watchexec -w crates -- cargo run --bin private-server
+    BIND_ADDRESS=127.0.0.1:8081 watchexec -I -W target/debug -f private-server -- target/debug/private-server
 
 # Run the private-web React frontend dev server (Vite proxy expects watch-private-api)
 watch-private-web:
