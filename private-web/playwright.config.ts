@@ -1,8 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
-// Tests assume the operator has run `just watch-private-api` (Leptos
-// API on 127.0.0.1:8081) before invoking `npm run test:e2e`. Vite is
-// started automatically by Playwright via the webServer block below.
+// Tests assume the operator has run `just watch-private-api` (the
+// private-server API on 127.0.0.1:8081) before invoking `npm run test:e2e`.
+// Vite is started automatically by Playwright via the webServer block below.
 
 export default defineConfig({
 	testDir: "./e2e",

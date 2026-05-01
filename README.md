@@ -32,7 +32,7 @@ $ git clone git@github.com:beyondessential/canopy.git
 $ just install-deps
 ```
 
-This will install [cargo-nextest](https://nextest.rs), [cargo-leptos](https://leptos.dev),
+This will install [cargo-nextest](https://nextest.rs),
 [diesel CLI](https://diesel.rs/guides/getting-started.html#installing-diesel-cli),
 [cargo-release](https://github.com/crate-ci/cargo-release), [git-cliff](https://git-cliff.org),
 and [watchexec](https://github.com/watchexec/watchexec).
