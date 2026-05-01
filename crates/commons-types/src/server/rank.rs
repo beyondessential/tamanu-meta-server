@@ -37,8 +37,6 @@ impl Display for ServerRank {
 	}
 }
 
-commons_macros::render_as_string!(ServerRank, minsize(3));
-
 #[derive(Debug, Clone, Copy)]
 pub struct ServerRankFromStringError;
 impl std::error::Error for ServerRankFromStringError {}

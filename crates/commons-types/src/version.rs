@@ -34,8 +34,6 @@ impl Display for VersionStatus {
 	}
 }
 
-commons_macros::render_as_string!(VersionStatus, minsize(5));
-
 impl From<String> for VersionStatus {
 	fn from(value: String) -> Self {
 		match value.to_ascii_lowercase().as_ref() {
@@ -91,8 +89,6 @@ impl Display for VersionStr {
 		write!(f, "{}", self.0)
 	}
 }
-
-commons_macros::render_as_string!(VersionStr, minsize(5));
 
 impl Default for VersionStr {
 	fn default() -> Self {
