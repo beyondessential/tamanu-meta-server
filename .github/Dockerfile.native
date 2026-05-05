@@ -1,9 +1,15 @@
+FROM debian:bookworm-slim AS certs
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+
 FROM busybox:glibc
 
 ARG TARGETPLATFORM
 
 # Create user and group
 RUN addgroup -g 1000 tamanu && adduser -D -u 1000 -G tamanu tamanu
+
+# rustls-platform-verifier reads the system trust store; busybox:glibc has none.
+COPY --from=certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 
 # Copy all binaries from both architectures
 COPY --chmod=0755 amd64/ /tmp/bins/amd64/
