@@ -65,21 +65,16 @@ impl RcEnvironment {
 		}
 	}
 
-	async fn probe_url(url: &str) -> bool {
-		let client = reqwest::ClientBuilder::new()
-			.timeout(std::time::Duration::from_secs(5))
-			.build()
-			.unwrap();
-
+	async fn probe_url(client: &reqwest::Client, url: &str) -> bool {
 		match client.head(url).send().await {
 			Ok(response) => response.status().is_success(),
 			Err(_) => false,
 		}
 	}
 
-	async fn probe_and_update(mut self) -> Option<Self> {
+	async fn probe_and_update(mut self, client: &reqwest::Client) -> Option<Self> {
 		// If central doesn't resolve, omit the entire RC
-		if !Self::probe_url(&self.central).await {
+		if !Self::probe_url(client, &self.central).await {
 			return None;
 		}
 
@@ -93,8 +88,10 @@ impl RcEnvironment {
 			self.major, self.minor
 		);
 
-		let (portal_available, patient_available) =
-			futures::join!(Self::probe_url(&portal_url), Self::probe_url(&patient_url));
+		let (portal_available, patient_available) = futures::join!(
+			Self::probe_url(client, &portal_url),
+			Self::probe_url(client, &patient_url)
+		);
 
 		if portal_available {
 			self.patient = Some(portal_url);
@@ -105,13 +102,13 @@ impl RcEnvironment {
 		}
 
 		if let Some(ref url) = self.facility_1
-			&& !Self::probe_url(url).await
+			&& !Self::probe_url(client, url).await
 		{
 			self.facility_1 = None;
 		}
 
 		if let Some(ref url) = self.facility_2
-			&& !Self::probe_url(url).await
+			&& !Self::probe_url(client, url).await
 		{
 			self.facility_2 = None;
 		}
@@ -207,6 +204,11 @@ async fn server_versions_page(
 	}
 
 	let rc_environments = if let Some(ref latest) = latest_version {
+		let client = reqwest::ClientBuilder::new()
+			.timeout(std::time::Duration::from_secs(5))
+			.build()
+			.map_err(|err| AppError::custom(format!("failed to build HTTP client: {err}")))?;
+
 		let current_major = latest.major as i32;
 		let current_minor = latest.minor as i32;
 		let candidates = vec![
@@ -215,7 +217,9 @@ async fn server_versions_page(
 			RcEnvironment::new(current_major, current_minor + 2),
 		];
 
-		let futures = candidates.into_iter().map(|env| env.probe_and_update());
+		let futures = candidates
+			.into_iter()
+			.map(|env| env.probe_and_update(&client));
 		let results = join_all(futures).await;
 
 		results.into_iter().flatten().collect()

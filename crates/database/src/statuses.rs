@@ -112,7 +112,7 @@ impl Status {
 		let client = reqwest::ClientBuilder::new()
 			.timeout(Duration::from_secs(10))
 			.build()
-			.unwrap();
+			.map_err(|err| AppError::custom(format!("failed to build HTTP client: {err}")))?;
 		let statuses =
 			FuturesOrdered::from_iter(Server::all_pingable(db).await?.into_iter().map({
 				let client = client.clone();

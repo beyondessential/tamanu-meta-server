@@ -347,7 +347,9 @@ async fn download_artifact(
 		.find(|a| a.id == artifact_uuid)
 		.ok_or_else(|| AppError::custom("Artifact not found for this version"))?;
 
-	let client = reqwest::Client::new();
+	let client = reqwest::Client::builder()
+		.build()
+		.map_err(|err| AppError::custom(format!("failed to build HTTP client: {err}")))?;
 	let response = client
 		.get(&artifact.download_url)
 		.send()
