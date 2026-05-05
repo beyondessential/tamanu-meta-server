@@ -1,18 +1,25 @@
-use std::sync::Arc;
+use std::collections::HashMap;
 
-use commons_errors::Result;
+use axum::Json;
+use axum::extract::State;
+use axum::routing::{Router, post};
+use commons_errors::{AppError, Result};
+use commons_servers::tailscale_auth::TailscaleAdmin;
 use commons_types::{Uuid, device::DeviceRole};
+use database::devices::{Device, DeviceConnection, DeviceKey, DeviceWithInfo};
+use database::servers::Server;
 use jiff::Timestamp;
-use leptos::server;
 use serde::{Deserialize, Serialize};
 
+use crate::fns::Page;
 use crate::fns::servers::ServerInfo;
+use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceInfo {
-	pub device: Arc<DeviceData>,
-	pub keys: Vec<Arc<DeviceKeyInfo>>,
-	pub latest_connection: Option<Arc<DeviceConnectionData>>,
+	pub device: DeviceData,
+	pub keys: Vec<DeviceKeyInfo>,
+	pub latest_connection: Option<DeviceConnectionData>,
 }
 
 impl DeviceInfo {
@@ -61,408 +68,314 @@ pub struct DeviceConnectionData {
 	pub user_agent: Option<String>,
 }
 
-#[server]
-pub async fn get_device_by_id(device_id: Uuid) -> Result<DeviceInfo> {
-	ssr::get_device_by_id(device_id).await
+impl From<DeviceWithInfo> for DeviceInfo {
+	fn from(d: DeviceWithInfo) -> Self {
+		Self {
+			device: DeviceData {
+				id: d.device.id,
+				created_at: d.device.created_at,
+				updated_at: d.device.updated_at,
+				role: d.device.role,
+			},
+			keys: d.keys.into_iter().map(DeviceKeyInfo::from).collect(),
+			latest_connection: d.latest_connection.map(DeviceConnectionData::from),
+		}
+	}
 }
 
-#[server]
-pub async fn get_device_name_by_id(device_id: Uuid) -> Result<String> {
-	ssr::get_device_by_id(device_id).await.map(|d| d.name())
+impl From<DeviceKey> for DeviceKeyInfo {
+	fn from(key: DeviceKey) -> Self {
+		Self {
+			id: key.id,
+			device_id: key.device_id,
+			name: key.name,
+			pem_data: format_key_as_pem(&key.key_data),
+			created_at: key.created_at,
+		}
+	}
 }
 
-#[server]
+impl From<DeviceConnection> for DeviceConnectionData {
+	fn from(conn: DeviceConnection) -> Self {
+		Self {
+			id: conn.id,
+			created_at: conn.created_at,
+			device_id: conn.device_id,
+			ip: conn.ip.addr().to_string(),
+			user_agent: conn.user_agent,
+		}
+	}
+}
+
+fn format_key_as_pem(key_data: &[u8]) -> String {
+	use base64::prelude::*;
+	let base64_data = BASE64_STANDARD.encode(key_data);
+	let mut pem = String::with_capacity(base64_data.len() + 100);
+	pem.push_str("-----BEGIN PUBLIC KEY-----\n");
+	for chunk in base64_data.as_bytes().chunks(64) {
+		pem.push_str(&String::from_utf8_lossy(chunk));
+		pem.push('\n');
+	}
+	pem.push_str("-----END PUBLIC KEY-----");
+	pem
+}
+
+fn server_to_info(s: database::servers::Server) -> ServerInfo {
+	ServerInfo {
+		id: s.id,
+		name: s.name,
+		host: s.host.into(),
+		kind: s.kind,
+		rank: s.rank,
+		device_id: s.device_id,
+		parent_server_id: s.parent_server_id,
+		parent_server_name: None,
+		listed: s.listed,
+		cloud: s.cloud,
+		geolocation: s.geolocation,
+	}
+}
+
+pub fn routes() -> Router<AppState> {
+	Router::new()
+		.route("/get_device_by_id", post(get_device_by_id))
+		.route("/list_untrusted", post(list_untrusted))
+		.route("/get_servers_for_device", post(get_servers_for_device))
+		.route("/get_past_server_associations", post(get_past_server_associations))
+		.route("/connection_history", post(connection_history))
+		.route("/connection_count", post(connection_count))
+		.route("/trust", post(trust))
+		.route("/list_trusted", post(list_trusted))
+		.route("/untrust", post(untrust))
+		.route("/update_role", post(update_role))
+		.route("/search", post(search))
+		.route("/update_key_name", post(update_key_name))
+}
+
+#[derive(Deserialize)]
+pub struct DeviceIdArgs {
+	pub device_id: Uuid,
+}
+
+pub async fn get_device_by_id(
+	State(state): State<AppState>,
+	TailscaleAdmin(_): TailscaleAdmin,
+	Json(args): Json<DeviceIdArgs>,
+) -> Result<Json<DeviceInfo>> {
+	let mut conn = state.db.get().await?;
+	let device_with_info = Device::get_with_info(&mut conn, args.device_id).await?;
+	Ok(Json(DeviceInfo::from(device_with_info)))
+}
+
+#[derive(Deserialize)]
+pub struct PaginationArgs {
+	pub offset: u64,
+	pub limit: Option<u64>,
+}
+
 pub async fn list_untrusted(
-	limit: Option<u64>,
-	offset: Option<u64>,
-) -> Result<Vec<Arc<DeviceInfo>>> {
-	ssr::list_untrusted(limit, offset).await
+	State(state): State<AppState>,
+	TailscaleAdmin(_): TailscaleAdmin,
+	Json(args): Json<PaginationArgs>,
+) -> Result<Json<Page<DeviceInfo>>> {
+	let mut conn = state.db.get().await?;
+	let total = Device::count_untrusted(&mut conn).await?.try_into().unwrap_or(0);
+	let devices_with_info = Device::list_untrusted_with_info_paginated(
+		&mut conn,
+		args.limit.unwrap_or(10).try_into().unwrap_or(10),
+		args.offset.try_into().unwrap_or(0),
+	)
+	.await?;
+	let items = devices_with_info.into_iter().map(DeviceInfo::from).collect();
+	Ok(Json(Page { items, total }))
 }
 
-#[server]
-pub async fn get_servers_for_device(device_id: Uuid) -> Result<Vec<ServerInfo>> {
-	ssr::get_servers_for_device(device_id).await
+pub async fn get_servers_for_device(
+	State(state): State<AppState>,
+	TailscaleAdmin(_): TailscaleAdmin,
+	Json(args): Json<DeviceIdArgs>,
+) -> Result<Json<Vec<ServerInfo>>> {
+	let mut conn = state.db.get().await?;
+	let servers = Server::get_by_device_id(&mut conn, args.device_id).await?;
+	Ok(Json(servers.into_iter().map(server_to_info).collect()))
 }
 
-#[server]
-pub async fn get_past_server_associations(device_id: Uuid) -> Result<Vec<ServerInfo>> {
-	ssr::get_past_server_associations(device_id).await
+pub async fn get_past_server_associations(
+	State(state): State<AppState>,
+	TailscaleAdmin(_): TailscaleAdmin,
+	Json(args): Json<DeviceIdArgs>,
+) -> Result<Json<Vec<ServerInfo>>> {
+	use database::statuses::Status;
+
+	let mut conn = state.db.get().await?;
+	let current_servers = Server::get_by_device_id(&mut conn, args.device_id).await?;
+	let current_server_ids: std::collections::HashSet<Uuid> =
+		current_servers.iter().map(|s| s.id).collect();
+
+	let all_past_server_ids = Status::get_past_server_ids(&mut conn, args.device_id).await?;
+	let past_only_ids: Vec<Uuid> = all_past_server_ids
+		.into_iter()
+		.filter(|id| !current_server_ids.contains(id))
+		.collect();
+	if past_only_ids.is_empty() {
+		return Ok(Json(Vec::new()));
+	}
+
+	let servers = Server::get_by_ids(&mut conn, &past_only_ids).await?;
+	Ok(Json(servers.into_iter().map(server_to_info).collect()))
 }
 
-#[server]
-pub async fn count_untrusted() -> Result<u64> {
-	ssr::count_untrusted().await
+#[derive(Deserialize)]
+pub struct ConnectionHistoryArgs {
+	pub device_id: Uuid,
+	pub offset: u64,
+	pub limit: Option<u64>,
 }
 
-#[server]
 pub async fn connection_history(
-	device_id: Uuid,
-	limit: Option<u64>,
-	offset: Option<u64>,
-) -> Result<Vec<DeviceConnectionData>> {
-	ssr::connection_history(device_id, limit, offset).await
-}
-
-#[server]
-pub async fn connection_count(device_id: Uuid) -> Result<u64> {
-	ssr::connection_count(device_id).await
-}
-
-#[server]
-pub async fn trust(device_id: Uuid, role: DeviceRole) -> Result<()> {
-	ssr::trust(device_id, role).await
-}
-
-#[server]
-pub async fn list_trusted(limit: Option<u64>, offset: Option<u64>) -> Result<Vec<Arc<DeviceInfo>>> {
-	ssr::list_trusted(limit, offset).await
-}
-
-#[server]
-pub async fn count_trusted() -> Result<u64> {
-	ssr::count_trusted().await
-}
-
-#[server]
-pub async fn untrust(device_id: Uuid) -> Result<()> {
-	ssr::untrust(device_id).await
-}
-
-#[server]
-pub async fn update_role(device_id: Uuid, role: DeviceRole) -> Result<()> {
-	ssr::update_role(device_id, role).await
-}
-
-#[server]
-pub async fn search(query: String) -> Result<Vec<Arc<DeviceInfo>>> {
-	ssr::search(query).await
-}
-
-#[server]
-pub async fn update_key_name(key_id: Uuid, name: Option<String>) -> Result<()> {
-	ssr::update_key_name(key_id, name).await
-}
-
-#[cfg(feature = "ssr")]
-mod ssr {
-	use super::*;
-	use commons_types::device::DeviceRole;
-	use database::devices::{Device, DeviceConnection, DeviceKey, DeviceWithInfo};
-	use database::servers::Server;
-	use uuid::Uuid;
-
-	impl From<DeviceWithInfo> for DeviceInfo {
-		fn from(device_with_info: DeviceWithInfo) -> Self {
-			Self {
-				device: Arc::new(DeviceData {
-					id: device_with_info.device.id,
-					created_at: device_with_info.device.created_at,
-					updated_at: device_with_info.device.updated_at,
-					role: device_with_info.device.role,
-				}),
-				keys: device_with_info
-					.keys
-					.into_iter()
-					.map(DeviceKeyInfo::from)
-					.map(Arc::new)
-					.collect(),
-				latest_connection: device_with_info
-					.latest_connection
-					.map(DeviceConnectionData::from)
-					.map(Arc::new),
-			}
-		}
-	}
-
-	impl From<DeviceKey> for DeviceKeyInfo {
-		fn from(key: DeviceKey) -> Self {
-			Self {
-				id: key.id,
-				device_id: key.device_id,
-				name: key.name,
-				pem_data: format_key_as_pem(&key.key_data),
-				created_at: key.created_at,
-			}
-		}
-	}
-
-	impl From<DeviceConnection> for DeviceConnectionData {
-		fn from(conn: DeviceConnection) -> Self {
-			Self {
-				id: conn.id,
-				created_at: conn.created_at,
-				device_id: conn.device_id,
-				ip: conn.ip.addr().to_string(),
-				user_agent: conn.user_agent,
-			}
-		}
-	}
-
-	fn format_key_as_pem(key_data: &[u8]) -> String {
-		use base64::prelude::*;
-
-		let base64_data = BASE64_STANDARD.encode(key_data);
-		let mut pem = String::with_capacity(base64_data.len() + 100);
-
-		pem.push_str("-----BEGIN PUBLIC KEY-----\n");
-
-		// Split into 64-character lines
-		for chunk in base64_data.as_bytes().chunks(64) {
-			pem.push_str(&String::from_utf8_lossy(chunk));
-			pem.push('\n');
-		}
-
-		pem.push_str("-----END PUBLIC KEY-----");
-		pem
-	}
-
-	pub async fn get_device_by_id(device_id: Uuid) -> Result<DeviceInfo> {
-		let db = crate::fns::commons::admin_guard().await?;
-		let mut conn = db.get().await?;
-
-		let device_with_info = Device::get_with_info(&mut conn, device_id).await?;
-		Ok(DeviceInfo::from(device_with_info))
-	}
-
-	pub async fn get_servers_for_device(device_id: Uuid) -> Result<Vec<ServerInfo>> {
-		let db = crate::fns::commons::admin_guard().await?;
-		let mut conn = db.get().await?;
-
-		let servers = Server::get_by_device_id(&mut conn, device_id).await?;
-		Ok(servers
-			.into_iter()
-			.map(|s| ServerInfo {
-				id: s.id,
-				name: s.name,
-				host: s.host.into(),
-				kind: s.kind,
-				rank: s.rank,
-				device_id: s.device_id,
-				parent_server_id: s.parent_server_id,
-				parent_server_name: None, // TODO
-				listed: s.listed,
-				cloud: s.cloud,
-				geolocation: s.geolocation,
-			})
-			.collect())
-	}
-
-	pub async fn get_past_server_associations(device_id: Uuid) -> Result<Vec<ServerInfo>> {
-		use database::statuses::Status;
-
-		let db = crate::fns::commons::admin_guard().await?;
-		let mut conn = db.get().await?;
-
-		// Get current server associations
-		let current_servers = Server::get_by_device_id(&mut conn, device_id).await?;
-		let current_server_ids: std::collections::HashSet<Uuid> =
-			current_servers.iter().map(|s| s.id).collect();
-
-		// Get all distinct server_ids from statuses table for this device
-		let all_past_server_ids = Status::get_past_server_ids(&mut conn, device_id).await?;
-
-		// Filter out currently associated servers
-		let past_only_ids: Vec<Uuid> = all_past_server_ids
-			.into_iter()
-			.filter(|id| !current_server_ids.contains(id))
-			.collect();
-
-		if past_only_ids.is_empty() {
-			return Ok(Vec::new());
-		}
-
-		// Get the Server objects
-		let servers = Server::get_by_ids(&mut conn, &past_only_ids).await?;
-
-		Ok(servers
-			.into_iter()
-			.map(|s| ServerInfo {
-				id: s.id,
-				name: s.name,
-				host: s.host.into(),
-				kind: s.kind,
-				rank: s.rank,
-				device_id: s.device_id,
-				parent_server_id: s.parent_server_id,
-				parent_server_name: None, // TODO
-				listed: s.listed,
-				cloud: s.cloud,
-				geolocation: s.geolocation,
-			})
-			.collect())
-	}
-
-	pub async fn list_untrusted(
-		limit: Option<u64>,
-		offset: Option<u64>,
-	) -> Result<Vec<Arc<DeviceInfo>>> {
-		let db = crate::fns::commons::admin_guard().await?;
-		let mut conn = db.get().await?;
-
-		let devices_with_info = Device::list_untrusted_with_info_paginated(
-			&mut conn,
-			limit.unwrap_or(10).try_into().unwrap_or(10),
-			offset.unwrap_or(0).try_into().unwrap_or(0),
-		)
-		.await?;
-		Ok(devices_with_info
-			.into_iter()
-			.map(DeviceInfo::from)
-			.map(Arc::new)
-			.collect())
-	}
-
-	pub async fn count_untrusted() -> Result<u64> {
-		let db = crate::fns::commons::admin_guard().await?;
-		let mut conn = db.get().await?;
-
-		Ok(Device::count_untrusted(&mut conn)
-			.await?
-			.try_into()
-			.unwrap_or_default())
-	}
-
-	pub async fn list_trusted(
-		limit: Option<u64>,
-		offset: Option<u64>,
-	) -> Result<Vec<Arc<DeviceInfo>>> {
-		let db = crate::fns::commons::admin_guard().await?;
-		let mut conn = db.get().await?;
-
-		let devices_with_info = Device::list_trusted_with_info_paginated(
-			&mut conn,
-			limit.unwrap_or(10).try_into().unwrap_or(10),
-			offset.unwrap_or(0).try_into().unwrap_or(0),
-		)
-		.await?;
-		Ok(devices_with_info
-			.into_iter()
-			.map(DeviceInfo::from)
-			.map(Arc::new)
-			.collect())
-	}
-
-	pub async fn count_trusted() -> Result<u64> {
-		let db = crate::fns::commons::admin_guard().await?;
-		let mut conn = db.get().await?;
-
-		Ok(Device::count_trusted(&mut conn)
-			.await?
-			.try_into()
-			.unwrap_or_default())
-	}
-
-	pub async fn connection_history(
-		device_id: Uuid,
-		limit: Option<u64>,
-		offset: Option<u64>,
-	) -> Result<Vec<DeviceConnectionData>> {
-		let db = crate::fns::commons::admin_guard().await?;
-		let mut conn = db.get().await?;
-
-		let connections = DeviceConnection::get_history_for_device_paginated(
-			&mut conn,
-			device_id,
-			limit.unwrap_or(100).try_into().unwrap_or(100),
-			offset.unwrap_or(0).try_into().unwrap_or(0),
-		)
-		.await?;
-		Ok(connections
+	State(state): State<AppState>,
+	TailscaleAdmin(_): TailscaleAdmin,
+	Json(args): Json<ConnectionHistoryArgs>,
+) -> Result<Json<Vec<DeviceConnectionData>>> {
+	let mut conn = state.db.get().await?;
+	let connections = DeviceConnection::get_history_for_device_paginated(
+		&mut conn,
+		args.device_id,
+		args.limit.unwrap_or(100).try_into().unwrap_or(100),
+		args.offset.try_into().unwrap_or(0),
+	)
+	.await?;
+	Ok(Json(
+		connections
 			.into_iter()
 			.map(DeviceConnectionData::from)
-			.collect())
+			.collect(),
+	))
+}
+
+pub async fn connection_count(
+	State(state): State<AppState>,
+	TailscaleAdmin(_): TailscaleAdmin,
+	Json(args): Json<DeviceIdArgs>,
+) -> Result<Json<u64>> {
+	let mut conn = state.db.get().await?;
+	Ok(Json(
+		DeviceConnection::get_connection_count_for_device(&mut conn, args.device_id)
+			.await?
+			.try_into()
+			.unwrap_or_default(),
+	))
+}
+
+#[derive(Deserialize)]
+pub struct TrustArgs {
+	pub device_id: Uuid,
+	pub role: DeviceRole,
+}
+
+pub async fn trust(
+	State(state): State<AppState>,
+	TailscaleAdmin(_): TailscaleAdmin,
+	Json(args): Json<TrustArgs>,
+) -> Result<Json<()>> {
+	if args.role == DeviceRole::Untrusted {
+		return Err(AppError::custom("Cannot set device role to untrusted"));
 	}
+	let mut conn = state.db.get().await?;
+	Device::trust(&mut conn, args.device_id, args.role).await?;
+	Ok(Json(()))
+}
 
-	pub async fn connection_count(device_id: Uuid) -> Result<u64> {
-		let db = crate::fns::commons::admin_guard().await?;
-		let mut conn = db.get().await?;
+pub async fn list_trusted(
+	State(state): State<AppState>,
+	TailscaleAdmin(_): TailscaleAdmin,
+	Json(args): Json<PaginationArgs>,
+) -> Result<Json<Page<DeviceInfo>>> {
+	let mut conn = state.db.get().await?;
+	let total = Device::count_trusted(&mut conn).await?.try_into().unwrap_or(0);
+	let devices_with_info = Device::list_trusted_with_info_paginated(
+		&mut conn,
+		args.limit.unwrap_or(10).try_into().unwrap_or(10),
+		args.offset.try_into().unwrap_or(0),
+	)
+	.await?;
+	let items = devices_with_info.into_iter().map(DeviceInfo::from).collect();
+	Ok(Json(Page { items, total }))
+}
 
-		Ok(
-			DeviceConnection::get_connection_count_for_device(&mut conn, device_id)
-				.await?
-				.try_into()
-				.unwrap_or_default(),
-		)
+pub async fn untrust(
+	State(state): State<AppState>,
+	TailscaleAdmin(_): TailscaleAdmin,
+	Json(args): Json<DeviceIdArgs>,
+) -> Result<Json<()>> {
+	let mut conn = state.db.get().await?;
+	Device::untrust(&mut conn, args.device_id).await?;
+	Ok(Json(()))
+}
+
+pub async fn update_role(
+	State(state): State<AppState>,
+	TailscaleAdmin(_): TailscaleAdmin,
+	Json(args): Json<TrustArgs>,
+) -> Result<Json<()>> {
+	if args.role == DeviceRole::Untrusted {
+		return Err(AppError::custom(
+			"Use untrust function to set device role to untrusted",
+		));
 	}
+	let mut conn = state.db.get().await?;
+	Device::trust(&mut conn, args.device_id, args.role).await?;
+	Ok(Json(()))
+}
 
-	pub async fn trust(device_id: Uuid, role: DeviceRole) -> Result<()> {
-		let db = crate::fns::commons::admin_guard().await?;
-		let mut conn = db.get().await?;
+#[derive(Deserialize)]
+pub struct SearchArgs {
+	pub query: String,
+}
 
-		// Prevent setting role to untrusted (that's the default for new devices)
-		if role == DeviceRole::Untrusted {
-			return Err(commons_errors::AppError::custom(
-				"Cannot set device role to untrusted",
-			));
-		}
-
-		Device::trust(&mut conn, device_id, role).await
+pub async fn search(
+	State(state): State<AppState>,
+	TailscaleAdmin(_): TailscaleAdmin,
+	Json(args): Json<SearchArgs>,
+) -> Result<Json<Vec<DeviceInfo>>> {
+	if args.query.trim().is_empty() {
+		return Ok(Json(vec![]));
 	}
+	let mut conn = state.db.get().await?;
+	let devices_by_key = Device::search_by_key(&mut conn, &args.query).await?;
+	let devices_by_key_name = Device::search_by_key_name(&mut conn, &args.query).await?;
+	let devices_by_ip = Device::search_by_connection_ip(&mut conn, &args.query).await?;
 
-	pub async fn untrust(device_id: Uuid) -> Result<()> {
-		let db = crate::fns::commons::admin_guard().await?;
-		let mut conn = db.get().await?;
-
-		Device::untrust(&mut conn, device_id).await
+	let mut seen: HashMap<Uuid, DeviceWithInfo> = HashMap::new();
+	for d in devices_by_key {
+		seen.insert(d.device.id, d);
 	}
-
-	pub async fn update_role(device_id: Uuid, role: DeviceRole) -> Result<()> {
-		let db = crate::fns::commons::admin_guard().await?;
-		let mut conn = db.get().await?;
-
-		// Prevent setting role to untrusted (use untrust function instead)
-		if role == DeviceRole::Untrusted {
-			return Err(commons_errors::AppError::custom(
-				"Use untrust function to set device role to untrusted",
-			));
-		}
-
-		Device::trust(&mut conn, device_id, role).await
+	for d in devices_by_key_name {
+		seen.insert(d.device.id, d);
 	}
-
-	pub async fn search(query: String) -> Result<Vec<Arc<DeviceInfo>>> {
-		let db = crate::fns::commons::admin_guard().await?;
-		let mut conn = db.get().await?;
-
-		if query.trim().is_empty() {
-			return Ok(vec![]);
-		}
-
-		// Search by key data
-		let devices_by_key = Device::search_by_key(&mut conn, &query).await?;
-
-		// Search by key name
-		let devices_by_key_name = Device::search_by_key_name(&mut conn, &query).await?;
-
-		// Search by connection IP
-		let devices_by_ip = Device::search_by_connection_ip(&mut conn, &query).await?;
-
-		// Combine results and deduplicate by device ID
-		use std::collections::HashMap;
-		let mut seen_devices: HashMap<Uuid, DeviceWithInfo> = HashMap::new();
-
-		for device_info in devices_by_key {
-			seen_devices.insert(device_info.device.id, device_info);
-		}
-		for device_info in devices_by_key_name {
-			seen_devices.insert(device_info.device.id, device_info);
-		}
-		for device_info in devices_by_ip {
-			seen_devices.insert(device_info.device.id, device_info);
-		}
-
-		let devices_with_info: Vec<DeviceWithInfo> = seen_devices.into_values().collect();
-		Ok(devices_with_info
-			.into_iter()
+	for d in devices_by_ip {
+		seen.insert(d.device.id, d);
+	}
+	Ok(Json(
+		seen.into_values()
 			.map(DeviceInfo::from)
-			.map(Arc::new)
-			.collect())
-	}
+			
+			.collect(),
+	))
+}
 
-	pub async fn update_key_name(key_id: Uuid, name: Option<String>) -> Result<()> {
-		let db = crate::fns::commons::admin_guard().await?;
-		let mut conn = db.get().await?;
+#[derive(Deserialize)]
+pub struct UpdateKeyNameArgs {
+	pub key_id: Uuid,
+	pub name: Option<String>,
+}
 
-		DeviceKey::update_name(&mut conn, key_id, name).await
-	}
+pub async fn update_key_name(
+	State(state): State<AppState>,
+	TailscaleAdmin(_): TailscaleAdmin,
+	Json(args): Json<UpdateKeyNameArgs>,
+) -> Result<Json<()>> {
+	let mut conn = state.db.get().await?;
+	DeviceKey::update_name(&mut conn, args.key_id, args.name).await?;
+	Ok(Json(()))
 }

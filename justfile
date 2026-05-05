@@ -1,19 +1,18 @@
-# Tamanu Meta Server Development Commands
+# Canopy Development Commands
 # Default database URL (can be overridden)
 
-export DATABASE_URL := env('DATABASE_URL', 'postgres://localhost/tamanu_meta')
-export RO_DATABASE_URL := env('RO_DATABASE_URL', 'postgres://localhost/tamanu_meta')
-
-# Environment variables for Leptos tests
-
-export LEPTOS_OUTPUT_NAME := "private-server"
-export SERVER_FN_MOD_PATH := "true"
-export DISABLE_SERVER_FN_HASH := "true"
+export DATABASE_URL := env('DATABASE_URL', 'postgres://localhost/canopy')
+export RO_DATABASE_URL := env('RO_DATABASE_URL', 'postgres://localhost/canopy')
 
 # ...for development
 
 export SERVER_VERSIONS_SECRET := "test"
 export PUBLIC_URL := "http://localhost:8080"
+
+# Skip the npm install + npm run build that private-server's build.rs runs by default.
+# Set this in dev recipes — Vite serves the frontend directly there, and we don't
+# need the binary to embed dist/ for cargo check / cargo run / cargo test.
+export SKIP_FRONTEND_BUILD := "1"
 
 # Show available commands
 default:
@@ -25,15 +24,24 @@ check:
 
 # Build the project Docker image
 build-image:
-    docker build -t tamanu-meta-server .
+    docker build -t canopy .
 
 # Run the public server and reload on change
-watch-public: _copy-bulma
-    watchexec -w crates -- cargo run --bin public-server
+watch-public:
+    watchexec -I -w crates -- cargo run --bin public-server
 
-# Run the private server with live reload
-watch-private: _copy-bulma
-    cargo leptos watch
+# Rebuild the private-server binary on source change (pair with watch-private-api)
+watch-private-build:
+    watchexec -I -w crates -- cargo build --bin private-server
+
+# Run the private server's HTTP API, bound to 127.0.0.1:8081, for the private-web Vite frontend.
+# Watches the built binary so it restarts when watch-private-build produces a fresh artefact.
+watch-private-api:
+    BIND_ADDRESS=127.0.0.1:8081 watchexec -I -W target/debug -f private-server -- target/debug/private-server
+
+# Run the private-web React frontend dev server (Vite proxy expects watch-private-api)
+watch-private-web:
+    cd private-web && npm run dev
 
 # Run all tests
 test:
@@ -73,7 +81,6 @@ migrate-revert:
 # Format code
 fmt:
     cargo fmt
-    leptosfmt crates/private-server/**/*.rs
 
 # Check formatting without making changes
 fmt-check:
@@ -95,25 +102,17 @@ identity:
 clean:
     cargo clean
 
-# Build server binaries for a specific target (release mode)
-build-servers-release target: _copy-bulma
-    cargo build --locked --target {{ target }} --release --bins
-
-# Build the frontend only (private server)
-build-frontend: _copy-bulma
-    cargo leptos build --frontend-only
-
-# Build the frontend for production (with compression)
-build-frontend-release: _copy-bulma
-    cargo leptos build --release --frontend-only --precompress
+# Build server binaries for a specific target (release mode), with embedded private-web frontend
+build-servers-release target:
+    SKIP_FRONTEND_BUILD= cargo build --locked --target {{ target }} --release --bins
 
 # Install development dependencies
 install-deps:
     cargo binstall -y cargo-binstall || cargo install cargo-binstall
-    cargo binstall -y cargo-nextest cargo-leptos leptosfmt cargo-release git-cliff watchexec-cli diesel_cli
+    cargo binstall -y cargo-nextest cargo-release git-cliff watchexec-cli diesel_cli
 
 # Download database from Kubernetes
-download-db dbname namespace="tamanu-meta-dev" pod="meta-db-1" output="app.dump":
+download-db dbname namespace="canopy-dev" pod="meta-db-1" output="app.dump":
     dropdb {{ dbname }} || true
     createdb {{ dbname }} || true
     kubectl exec -n {{ namespace }} {{ pod }} -c postgres -- pg_dump -Fc -d app > {{ output }}
@@ -125,12 +124,3 @@ dev: fmt lint test
 # Make a new release
 release level="minor":
     cargo release --workspace --execute {{ level }}
-
-# Update the bulma submodule
-update-bulma:
-    git submodule update --init --recursive
-    git submodule foreach git pull origin main
-
-# Copy bulma CSS files to static directory
-_copy-bulma:
-    cp -r --reflink=auto .sub/bulma/css static/bulma

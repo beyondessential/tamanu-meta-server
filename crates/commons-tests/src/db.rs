@@ -32,7 +32,7 @@ impl TestDb {
 		let mut admin_url = base.clone();
 		admin_url.set_path("postgres");
 
-		let name = format!("tamanu_meta_test_{}", Uuid::new_v4().simple());
+		let name = format!("canopy_test_{}", Uuid::new_v4().simple());
 		tracing::info!("in temporary database {name}");
 
 		let mut url = base.clone();

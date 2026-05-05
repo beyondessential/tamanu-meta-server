@@ -1,6 +1,5 @@
 use std::{fmt::Display, str::FromStr};
 
-#[cfg(feature = "ssr")]
 use diesel::{
 	backend::Backend,
 	deserialize::{self, FromSql},
@@ -11,10 +10,20 @@ use diesel::{
 use serde::{Deserialize, Serialize};
 
 #[derive(
-	Debug, Clone, Copy, Default, PartialOrd, Ord, PartialEq, Eq, Hash, Serialize, Deserialize,
+	Debug,
+	Clone,
+	Copy,
+	Default,
+	PartialOrd,
+	Ord,
+	PartialEq,
+	Eq,
+	Hash,
+	Serialize,
+	Deserialize,
+	AsExpression,
 )]
-#[cfg_attr(feature = "ssr", derive(AsExpression))]
-#[cfg_attr(feature = "ssr", diesel(sql_type = Text))]
+#[diesel(sql_type = Text)]
 #[serde(rename_all = "lowercase")]
 pub enum ServerRank {
 	Production,
@@ -36,8 +45,6 @@ impl Display for ServerRank {
 		}
 	}
 }
-
-commons_macros::render_as_string!(ServerRank, minsize(3));
 
 #[derive(Debug, Clone, Copy)]
 pub struct ServerRankFromStringError;
@@ -77,7 +84,6 @@ impl FromStr for ServerRank {
 	}
 }
 
-#[cfg(feature = "ssr")]
 impl<DB> FromSql<Text, DB> for ServerRank
 where
 	DB: Backend,
@@ -89,7 +95,6 @@ where
 	}
 }
 
-#[cfg(feature = "ssr")]
 impl ToSql<Text, diesel::pg::Pg> for ServerRank
 where
 	String: ToSql<Text, diesel::pg::Pg>,

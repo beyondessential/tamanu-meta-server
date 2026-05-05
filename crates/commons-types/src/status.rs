@@ -24,5 +24,3 @@ impl Display for ShortStatus {
 		}
 	}
 }
-
-commons_macros::render_as_string!(ShortStatus, minsize(2));

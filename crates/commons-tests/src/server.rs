@@ -66,10 +66,10 @@ where
 			ClientIpSource::RightmostForwarded,
 		);
 
-		let mut public_server = TestServer::new(public_router).unwrap();
+		let mut public_server = TestServer::new(public_router);
 		public_server.add_header("Forwarded", "for=192.0.1.60");
 
-		let mut private_server = TestServer::new(private_router).unwrap();
+		let mut private_server = TestServer::new(private_router);
 		private_server.add_header("Forwarded", "for=192.0.2.60");
 
 		test(conn, public_server, private_server).await

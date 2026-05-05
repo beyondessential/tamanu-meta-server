@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 pub mod admins;
 pub mod bestool;
 pub mod commons;
@@ -7,7 +9,27 @@ pub mod sql;
 pub mod statuses;
 pub mod versions;
 
-#[cfg(feature = "ssr")]
+/// Standard wrapper for paginated list responses. The total reflects the full
+/// row count (not just the current page) so the frontend can render page
+/// counts without a separate count fetch.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Page<T> {
+	pub items: Vec<T>,
+	pub total: u64,
+}
+
 pub fn routes() -> axum::Router<crate::state::AppState> {
-	axum::Router::new()
+	use axum::Router;
+	Router::new().nest(
+		"/api",
+		Router::new()
+			.nest("/admins", admins::routes())
+			.nest("/bestool", bestool::routes())
+			.nest("/commons", commons::routes())
+			.nest("/devices", devices::routes())
+			.nest("/servers", servers::routes())
+			.nest("/sql", sql::routes())
+			.nest("/statuses", statuses::routes())
+			.nest("/versions", versions::routes()),
+	)
 }

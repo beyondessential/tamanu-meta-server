@@ -4,8 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="icon" type="image/svg+xml" href="/static/images/favicon.svg" />
-    <link rel="stylesheet" href="/static/bulma/bulma.min.css">
-    <link rel="stylesheet" href="/static/private/main.css">
+    <link rel="stylesheet" href="/static/public.css">
     <title>Tamanu {{ version.major }}.{{ version.minor }}.{{ version.patch }} — Artifacts</title>
     <style>
         body {
@@ -26,22 +25,24 @@
         }
 
         .artifact-type {
-            font-weight: 600;
-            min-width: 120px;
+            font-weight: 500;
+            min-width: 140px;
         }
 
         .artifact-platform {
             font-family: monospace;
-            min-width: 100px;
+            font-size: 0.8em;
+            min-width: 120px;
         }
 
         .artifact-url {
             font-family: monospace;
-            font-size: 0.9em;
+            font-size: 0.7em;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
             flex: 1;
+            color: #666;
         }
 
         .artifact-item {
@@ -180,8 +181,8 @@
                         {% if artifact.download_url is starting_with("https://") %}
                         <a href="{{ artifact.download_url }}" class="button is-primary" target="_blank">Download</a>
                         {% endif %}
-                        <button class="button" onclick="copyToClipboard('{{ artifact.download_url }}')">
-                            Copy URL
+                        <button class="button" onclick="copyToClipboard('{{ artifact.download_url }}')" title="Copy URL" aria-label="Copy URL">
+                            ⧉
                         </button>
                     </div>
                 </div>

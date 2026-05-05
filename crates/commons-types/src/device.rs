@@ -1,4 +1,3 @@
-#[cfg(feature = "ssr")]
 use diesel::{
 	backend::Backend,
 	deserialize::{self, FromSql},
@@ -8,9 +7,8 @@ use diesel::{
 };
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ssr", derive(AsExpression))]
-#[cfg_attr(feature = "ssr", diesel(sql_type = Text))]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, AsExpression)]
+#[diesel(sql_type = Text)]
 #[serde(rename_all = "lowercase")]
 pub enum DeviceRole {
 	#[default]
@@ -64,9 +62,6 @@ impl From<DeviceRole> for String {
 	}
 }
 
-commons_macros::render_as_string!(DeviceRole, minsize(5));
-
-#[cfg(feature = "ssr")]
 impl<DB> FromSql<Text, DB> for DeviceRole
 where
 	DB: Backend,
@@ -78,7 +73,6 @@ where
 	}
 }
 
-#[cfg(feature = "ssr")]
 impl ToSql<Text, diesel::pg::Pg> for DeviceRole
 where
 	String: ToSql<Text, diesel::pg::Pg>,

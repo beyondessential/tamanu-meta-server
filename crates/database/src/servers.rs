@@ -1,7 +1,7 @@
 use commons_errors::{AppError, Result};
 use commons_types::{
 	geo::GeoPoint,
-	server::{kind::ServerKind, rank::ServerRank, ticket::MetaTicket},
+	server::{kind::ServerKind, rank::ServerRank, ticket::CanopyTicket},
 };
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -149,7 +149,7 @@ impl Server {
 	/// but a different ID than `ticket.server_id`.
 	pub async fn upsert_from_ticket(
 		db: &mut AsyncPgConnection,
-		ticket: &MetaTicket,
+		ticket: &CanopyTicket,
 		kind: ServerKind,
 		rank: Option<ServerRank>,
 	) -> Result<Self> {
@@ -159,7 +159,7 @@ impl Server {
 
 		// Look up parent server by its public key if provided.
 		let parent_server_id = if let Some(ref pem) = ticket.central_public_key {
-			let central_key_der = MetaTicket::pem_to_der(pem)?;
+			let central_key_der = CanopyTicket::pem_to_der(pem)?;
 			if let Some(central_device) =
 				crate::devices::Device::from_key(db, &central_key_der).await?
 			{

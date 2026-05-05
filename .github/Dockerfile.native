@@ -19,9 +19,9 @@ RUN if [ "$TARGETPLATFORM" = "linux/amd64" ]; then \
     fi && \
     rm -rf /tmp/bins
 
-# Copy frontend assets (same for all platforms)
-COPY --chown=tamanu:tamanu frontend/target/site /home/tamanu/target/site
-COPY --chown=tamanu:tamanu frontend/static /home/tamanu/static
+# Public-server's Tera templates link to /static/public.css and /static/images/...
+# (private-server has its React bundle embedded in the binary).
+COPY --chown=tamanu:tamanu static /home/tamanu/static
 
 USER tamanu
 ENV HOME=/home/tamanu

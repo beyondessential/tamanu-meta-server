@@ -17,3 +17,12 @@ updates:
       deps:
         patterns:
           - "*"
+  - package-ecosystem: npm
+    directory: /private-web
+    schedule:
+      interval: weekly
+      day: tuesday
+    groups:
+      deps:
+        patterns:
+          - "*"

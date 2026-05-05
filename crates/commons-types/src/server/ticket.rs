@@ -6,7 +6,7 @@ use super::{kind::ServerKind, rank::ServerRank};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct MetaTicket {
+pub struct CanopyTicket {
 	/// Ticket format version, must be "ticket-1".
 	pub v: String,
 	/// The server's own UUID.
@@ -31,7 +31,7 @@ pub struct MetaTicket {
 	pub central_public_key: Option<String>,
 }
 
-impl MetaTicket {
+impl CanopyTicket {
 	/// Decode a base64-encoded ticket string.
 	pub fn from_base64(input: &str) -> Result<Self> {
 		use base64::Engine as _;

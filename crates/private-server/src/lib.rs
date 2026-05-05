@@ -1,27 +1,11 @@
-#![recursion_limit = "256"]
-
-pub mod app;
-pub mod components;
 pub mod fns;
-#[cfg(feature = "ssr")]
+pub mod spa;
 pub mod state;
 
-#[cfg(feature = "ssr")]
 pub fn routes(state: crate::state::AppState) -> commons_errors::Result<axum::routing::Router<()>> {
-	use axum::{
-		response::Redirect,
-		routing::{Router, get},
-	};
-	use leptos::prelude::provide_context;
-	use leptos_axum::{LeptosRoutes as _, generate_route_list};
-	use tower_http::services::ServeDir;
+	use axum::routing::Router;
 
 	Ok(Router::new()
-		.route("/", get(|| async { Redirect::permanent("/status") }))
-		.route(
-			"/bestool",
-			get(|| async { Redirect::permanent("/bestool/snippets") }),
-		)
 		.nest(
 			"/public",
 			public_server::routes()
@@ -29,47 +13,6 @@ pub fn routes(state: crate::state::AppState) -> commons_errors::Result<axum::rou
 		)
 		.merge(commons_servers::health::routes())
 		.merge(fns::routes())
-		.nest_service(
-			"/static",
-			ServeDir::new("target/site/private")
-				.precompressed_br()
-				.precompressed_gzip()
-				.fallback(
-					ServeDir::new("target/site")
-						.precompressed_br()
-						.precompressed_gzip(),
-				),
-		)
-		.nest_service(
-			"/pkg",
-			ServeDir::new("target/site/pkg")
-				.precompressed_br()
-				.precompressed_gzip(),
-		)
-		// .fallback(leptos_axum::file_and_error_handler(crate::app::shell))
-		.leptos_routes_with_context(
-			&state,
-			generate_route_list(crate::app::App),
-			{
-				let state = state.clone();
-				move || provide_context(state.clone())
-			},
-			{
-				let state = state.clone();
-				move || {
-					crate::app::shell({
-						let state = state.clone();
-						state.leptos_options
-					})
-				}
-			},
-		)
+		.fallback(spa::handler)
 		.with_state(state))
-}
-
-#[cfg(feature = "hydrate")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn hydrate() {
-	console_error_panic_hook::set_once();
-	leptos::mount::hydrate_body(app::App);
 }

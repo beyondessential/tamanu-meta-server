@@ -1,14 +1,8 @@
 use std::{env::VarError, str::FromStr as _};
 
-#[cfg(feature = "ssr")]
 use axum::response::{IntoResponse, Response};
-#[cfg(feature = "ssr")]
 use diesel_async::pooled_connection::PoolError;
 use http::{StatusCode, Uri};
-use leptos::{
-	prelude::{FromServerFnError, ServerFnErrorErr},
-	server_fn::codec::JsonEncoding,
-};
 use problem_details::ProblemDetails;
 use serde::{Deserialize, Serialize};
 
@@ -34,15 +28,12 @@ pub enum AppError {
 	#[error("version parse error: {0}")]
 	VersionParse(Box<node_semver::SemverError>),
 
-	#[cfg(feature = "ssr")]
 	#[error("database: {0}")]
 	DatabasePool(#[from] mobc::Error<PoolError>),
 
-	#[cfg(feature = "ssr")]
 	#[error("database: {0}")]
 	DatabaseQuery(#[from] diesel::result::Error),
 
-	#[cfg(feature = "ssr")]
 	#[error("render: {0}")]
 	Tera(#[from] tera::Error),
 
@@ -55,7 +46,6 @@ pub enum AppError {
 	#[error("version range is not usable")]
 	UnusableRange,
 
-	#[cfg(feature = "ssr")]
 	#[error("timesync: {0}")]
 	Timesync(#[from] timesimp::ParseError),
 
@@ -76,9 +66,6 @@ pub enum AppError {
 
 	#[error("authentication failed: {reason}")]
 	AuthFailed { reason: String },
-
-	#[error("server error: {0}")]
-	ServerFn(#[from] ServerFnErrorErr),
 }
 
 impl AppError {
@@ -105,14 +92,6 @@ impl From<node_semver::SemverError> for AppError {
 	}
 }
 
-impl FromServerFnError for AppError {
-	type Encoder = JsonEncoding;
-	fn from_server_fn_error(value: ServerFnErrorErr) -> Self {
-		AppError::ServerFn(value)
-	}
-}
-
-#[cfg(feature = "ssr")]
 impl IntoResponse for AppError {
 	fn into_response(self) -> Response {
 		let status = self.to_http_status();
@@ -135,7 +114,6 @@ impl AppError {
 			Self::NotImplemented => StatusCode::NOT_IMPLEMENTED,
 			Self::NoMatchingVersions => StatusCode::NOT_FOUND,
 			Self::UnusableRange => StatusCode::BAD_REQUEST,
-			#[cfg(feature = "ssr")]
 			Self::DatabaseQuery(diesel::result::Error::NotFound) => StatusCode::NOT_FOUND,
 			Self::AuthMissingHeader(_) => StatusCode::UNAUTHORIZED,
 			Self::AuthMissingCertificate => StatusCode::UNAUTHORIZED,
@@ -166,18 +144,13 @@ impl AppError {
 						Self::Environment(_) => "environment",
 						Self::Header(_) => "header",
 						Self::VersionParse(_) => "version-parse",
-						#[cfg(feature = "ssr")]
 						Self::DatabasePool(_) => "database",
-						#[cfg(feature = "ssr")]
 						Self::DatabaseQuery(diesel::result::Error::NotFound) => "resource-not-found",
-						#[cfg(feature = "ssr")]
 						Self::DatabaseQuery(_) => "database",
-						#[cfg(feature = "ssr")]
 						Self::Tera(_) => "render",
 						Self::Io(_) => "io",
 						Self::NoMatchingVersions => "no-matching-versions",
 						Self::UnusableRange => "unusable-range",
-						#[cfg(feature = "ssr")]
 						Self::Timesync(_) => "timesync",
 						Self::AuthMissingHeader(_) => "auth-missing-header",
 						Self::AuthMissingCertificate => "auth-missing-certificate",
@@ -185,7 +158,6 @@ impl AppError {
 						Self::AuthCertificateNotFound => "auth-certificate-not-found",
 						Self::AuthInsufficientPermissions { .. } => "auth-insufficient-permissions",
 						Self::AuthFailed { .. } => "auth-failed",
-						Self::ServerFn(_) => "server-fn",
 						Self::Problem(_) => unreachable!(),
 					}
 				))
@@ -193,8 +165,6 @@ impl AppError {
 			)
 	}
 }
-
-commons_macros::render_as_string!(AppError);
 
 impl Serialize for AppError {
 	fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>

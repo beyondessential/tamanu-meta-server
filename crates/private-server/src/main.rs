@@ -1,4 +1,3 @@
-#[cfg(feature = "ssr")]
 #[derive(Debug, clap::Parser)]
 struct Args {
 	#[command(flatten)]
@@ -14,7 +13,6 @@ struct Args {
 	client_ip_source: axum_client_ip::ClientIpSource,
 }
 
-#[cfg(feature = "ssr")]
 #[tokio::main]
 async fn main() -> miette::Result<()> {
 	use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
@@ -55,9 +53,4 @@ async fn main() -> miette::Result<()> {
 		}
 	}
 	Ok(())
-}
-
-#[cfg(not(feature = "ssr"))]
-pub fn main() {
-	// no client-side main function
 }

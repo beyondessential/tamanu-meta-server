@@ -1,8 +1,8 @@
-# Tamanu Meta Server
+# Canopy
 
 [Tamanu](https://www.bes.au/products/tamanu/) is an open-source patient-level electronic health records system for mobile and desktop.
 
-The Meta service provides:
+Canopy provides:
 - a server discovery service for the Tamanu mobile app
 - a server list and health check page
 - a range of active versions
@@ -13,7 +13,7 @@ The Meta service provides:
 We have a container image for linux/amd64 and linux/arm64:
 
 ```
-ghcr.io/beyondessential/tamanu-meta:5.12.1
+ghcr.io/beyondessential/canopy:5.12.1
 ```
 
 ## Develop
@@ -23,7 +23,7 @@ ghcr.io/beyondessential/tamanu-meta:5.12.1
 - Clone the repo via git:
 
 ```console
-$ git clone git@github.com:beyondessential/tamanu-meta-server.git
+$ git clone git@github.com:beyondessential/canopy.git
 ```
 
 - Install development dependencies:
@@ -32,7 +32,7 @@ $ git clone git@github.com:beyondessential/tamanu-meta-server.git
 $ just install-deps
 ```
 
-This will install [cargo-nextest](https://nextest.rs), [cargo-leptos](https://leptos.dev),
+This will install [cargo-nextest](https://nextest.rs),
 [diesel CLI](https://diesel.rs/guides/getting-started.html#installing-diesel-cli),
 [cargo-release](https://github.com/crate-ci/cargo-release), [git-cliff](https://git-cliff.org),
 and [watchexec](https://github.com/watchexec/watchexec).
@@ -40,10 +40,10 @@ and [watchexec](https://github.com/watchexec/watchexec).
 ### Quick Start
 
 - Create a new blank postgres database.
-- Optionally set the `DATABASE_URL` environment variable (if your database isn't named the default `tamanu_meta`):
+- Optionally set the `DATABASE_URL` environment variable (if your database isn't named the default `canopy`):
 
 ```console
-$ export DATABASE_URL=postgres://localhost/tamanu_meta_dev
+$ export DATABASE_URL=postgres://localhost/canopy_dev
 ```
 
 - Run migrations:
@@ -129,7 +129,7 @@ You'll need to have `kubectl` installed and authorised.
 
 ```console
 # just download-db {database name} {kubernetes namespace} [dump file]
-$ just download-db tamanu_meta tamanu-meta-prod
+$ just download-db canopy canopy-prod
 ```
 
 ### Releasing
