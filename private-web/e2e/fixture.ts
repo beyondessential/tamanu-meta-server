@@ -184,7 +184,7 @@ export async function startStack(opts: StartOptions = {}): Promise<StackHandle> 
 				...process.env,
 				DATABASE_URL: databaseUrl,
 				BIND_ADDRESS: `127.0.0.1:${apiPort}`,
-				META_LOG: process.env.META_LOG ?? "private_server=info,warn",
+				CANOPY_LOG: process.env.CANOPY_LOG ?? "private_server=info,warn",
 			},
 		});
 		pipeOutput(api, "api", silent);
