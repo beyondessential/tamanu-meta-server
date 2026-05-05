@@ -16,11 +16,18 @@ required-features = ["cli"]
 
 [dependencies]
 clap = { workspace = true, optional = true, features = ["derive", "env"] }
+ed25519-dalek = { version = "2.2.0", features = ["pkcs8", "rand_core"] }
 lloggs = { workspace = true, optional = true, features = ["miette-7"] }
-miette = { workspace = true, optional = true, features = ["fancy"] }
+miette = { workspace = true, features = ["fancy"] }
+quinn = "0.11.9"
+rand_core = { version = "0.6", features = ["getrandom"] }
+rustls = { version = "0.23.40", default-features = false, features = ["ring", "std"] }
+rustls-pki-types = "1.14.1"
+sha2 = "0.11.0"
+subtle = "2.6.1"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
 tracing.workspace = true
 
 [features]
 default = ["cli"]
-cli = ["dep:clap", "dep:lloggs", "dep:miette"]
+cli = ["dep:clap", "dep:lloggs"]

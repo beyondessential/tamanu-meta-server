@@ -2,6 +2,7 @@ use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 
 use clap::Parser;
 use lloggs::{LoggingArgs, PreArgs};
+use miette::IntoDiagnostic;
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -27,10 +28,18 @@ async fn main() -> miette::Result<()> {
 		})?);
 	}
 
+	rustls::crypto::ring::default_provider()
+		.install_default()
+		.expect("ring crypto provider already installed");
+
 	let addr = args
 		.bind
 		.unwrap_or_else(|| SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, args.port, 0, 0)));
 
-	tracing::info!(%addr, "frond-server scaffold; QUIC listener wiring lands in Phase 2");
+	let endpoint = frond_server::bind(addr)?;
+	let local = endpoint.local_addr().into_diagnostic()?;
+	tracing::info!(%local, "frond-server listening");
+
+	frond_server::accept_loop(endpoint).await;
 	Ok(())
 }
