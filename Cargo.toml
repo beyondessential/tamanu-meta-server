@@ -6,6 +6,7 @@ members = [
 	"crates/commons-tests",
 	"crates/commons-types",
 	"crates/database",
+	"crates/frond-server",
 	"crates/jobs",
 	"crates/private-server",
 	"crates/public-server",

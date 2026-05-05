@@ -1,0 +1,26 @@
+[package]
+publish = false
+name = "frond-server"
+version = "0.1.0"
+edition = "2024"
+resolver = "3"
+license = "GPL-3.0-or-later"
+authors = [
+	"Félix Saparelli <felix@passcod.name>",
+	"BES Developers <contact@bes.au>",
+]
+
+[[bin]]
+name = "frond-server"
+required-features = ["cli"]
+
+[dependencies]
+clap = { workspace = true, optional = true, features = ["derive", "env"] }
+lloggs = { workspace = true, optional = true, features = ["miette-7"] }
+miette = { workspace = true, optional = true, features = ["fancy"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
+tracing.workspace = true
+
+[features]
+default = ["cli"]
+cli = ["dep:clap", "dep:lloggs", "dep:miette"]

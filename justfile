@@ -30,6 +30,10 @@ build-image:
 watch-public:
     watchexec -I -w crates -- cargo run --bin public-server
 
+# Run the frond (QUIC) server and reload on change
+watch-frond:
+    watchexec -I -w crates -- cargo run --bin frond-server
+
 # Rebuild the private-server binary on source change (pair with watch-private-api)
 watch-private-build:
     watchexec -I -w crates -- cargo build --bin private-server
