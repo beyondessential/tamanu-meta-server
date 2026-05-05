@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
+## [6.0.1](https://github.com/beyondessential/canopy/compare/v6.0.0..6.0.1) - 2026-05-05
+
+
+
+### Public-server
+
+- **Bugfix:** Don't panic when reqwest client build fails - ([4aaf443](https://github.com/beyondessential/canopy/commit/4aaf4431217a4266f4148231a5df01fb7097dd9e))
+
+---
+## [6.0.0](https://github.com/beyondessential/canopy/compare/v5.12.1..v6.0.0) - 2026-05-05
+
+
+- **Repo:** Release - ([7f77161](https://github.com/beyondessential/canopy/commit/7f7716167e83f21351ba5780c27b2a1bbb81cd39))
+
+---
 ## [5.12.1](https://github.com/beyondessential/canopy/compare/v5.12.0..v5.12.1) - 2026-03-25
 
 
