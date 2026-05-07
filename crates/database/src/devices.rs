@@ -513,7 +513,7 @@ impl Device {
 		db: &mut AsyncPgConnection,
 		query: &str,
 	) -> Result<Vec<DeviceWithInfo>> {
-		use crate::schema::{device_connections, device_keys, devices};
+		use crate::schema::{device_keys, devices};
 
 		let device_ids: Vec<Uuid> = device_keys::table
 			.select(device_keys::device_id)
@@ -544,16 +544,8 @@ impl Device {
 			.load(db)
 			.await?;
 
-		let all_connections: Vec<DeviceConnection> = device_connections::table
-			.select(DeviceConnection::as_select())
-			.filter(device_connections::device_id.eq_any(&device_ids))
-			.order((
-				device_connections::device_id,
-				device_connections::created_at.desc(),
-			))
-			.distinct_on(device_connections::device_id)
-			.load(db)
-			.await?;
+		let all_connections =
+			DeviceConnection::get_latest_from_device_ids(db, device_ids.iter().copied()).await?;
 
 		use std::collections::HashMap;
 
@@ -584,7 +576,7 @@ impl Device {
 		db: &mut AsyncPgConnection,
 		query: &str,
 	) -> Result<Vec<DeviceWithInfo>> {
-		use crate::schema::{device_connections, device_keys, devices};
+		use crate::schema::{device_keys, devices};
 		use diesel::sql_query;
 		use diesel::sql_types::Uuid as SqlUuid;
 
@@ -621,16 +613,8 @@ impl Device {
 			.load(db)
 			.await?;
 
-		let all_connections: Vec<DeviceConnection> = device_connections::table
-			.select(DeviceConnection::as_select())
-			.filter(device_connections::device_id.eq_any(&device_ids))
-			.order((
-				device_connections::device_id,
-				device_connections::created_at.desc(),
-			))
-			.distinct_on(device_connections::device_id)
-			.load(db)
-			.await?;
+		let all_connections =
+			DeviceConnection::get_latest_from_device_ids(db, device_ids.iter().copied()).await?;
 
 		use std::collections::HashMap;
 
