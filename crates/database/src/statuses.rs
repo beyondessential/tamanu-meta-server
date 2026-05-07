@@ -269,24 +269,4 @@ impl Status {
 		Some(major_distance * 1000 + minor_distance)
 	}
 
-	pub async fn get_past_server_ids(
-		db: &mut AsyncPgConnection,
-		dev_id: Uuid,
-	) -> Result<Vec<Uuid>> {
-		use crate::schema::statuses::dsl::*;
-
-		// Bounded by created_at so partition pruning can engage; without this,
-		// every weekly partition is scanned for old devices (>2 minutes in prod).
-		statuses
-			.select(server_id)
-			.distinct()
-			.filter(
-				device_id
-					.eq(dev_id)
-					.and(created_at.ge(diesel::dsl::sql("NOW() - INTERVAL '90 days'"))),
-			)
-			.load::<Uuid>(db)
-			.await
-			.map_err(AppError::from)
-	}
 }

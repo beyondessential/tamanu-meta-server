@@ -205,23 +205,8 @@ pub async fn get_past_server_associations(
 	TailscaleAdmin(_): TailscaleAdmin,
 	Json(args): Json<DeviceIdArgs>,
 ) -> Result<Json<Vec<ServerInfo>>> {
-	use database::statuses::Status;
-
 	let mut conn = state.db.get().await?;
-	let current_servers = Server::get_by_device_id(&mut conn, args.device_id).await?;
-	let current_server_ids: std::collections::HashSet<Uuid> =
-		current_servers.iter().map(|s| s.id).collect();
-
-	let all_past_server_ids = Status::get_past_server_ids(&mut conn, args.device_id).await?;
-	let past_only_ids: Vec<Uuid> = all_past_server_ids
-		.into_iter()
-		.filter(|id| !current_server_ids.contains(id))
-		.collect();
-	if past_only_ids.is_empty() {
-		return Ok(Json(Vec::new()));
-	}
-
-	let servers = Server::get_by_ids(&mut conn, &past_only_ids).await?;
+	let servers = Server::get_past_associations_for_device(&mut conn, args.device_id).await?;
 	Ok(Json(servers.into_iter().map(server_to_info).collect()))
 }
 

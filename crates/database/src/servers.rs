@@ -271,6 +271,25 @@ impl Server {
 			.map_err(AppError::from)
 	}
 
+	/// Servers this device has reported a status for in the past, excluding any
+	/// it is currently linked to. Reads from the denormalised
+	/// `device_server_associations` table maintained by a trigger on `statuses`.
+	pub async fn get_past_associations_for_device(
+		db: &mut AsyncPgConnection,
+		dev_id: Uuid,
+	) -> Result<Vec<Self>> {
+		use crate::schema::{device_server_associations as a, servers::dsl::*};
+
+		servers
+			.inner_join(a::table.on(a::server_id.eq(id)))
+			.select(Self::as_select())
+			.filter(a::device_id.eq(dev_id))
+			.filter(device_id.is_distinct_from(dev_id))
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	pub async fn get_children(&self, db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
 		use crate::schema::servers::dsl::*;
 		servers
