@@ -488,14 +488,16 @@ function ConnectionHistoryDetail({ deviceId }: { deviceId: string }) {
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
-	const loadBatch = async (offset: number) => {
+	const loadBatch = async (
+		before: { created_at: string; id: string } | null,
+	) => {
 		setLoading(true);
 		setError(null);
 		try {
 			const batch = await callApi<DeviceConnectionData[]>(
 				"devices",
 				"connection_history",
-				{ device_id: deviceId, limit: HISTORY_BATCH, offset },
+				{ device_id: deviceId, limit: HISTORY_BATCH, before },
 			);
 			setHasMore(batch.length === HISTORY_BATCH);
 			setConnections((prev) => {
@@ -512,7 +514,7 @@ function ConnectionHistoryDetail({ deviceId }: { deviceId: string }) {
 	};
 
 	useEffect(() => {
-		void loadBatch(0);
+		void loadBatch(null);
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [deviceId]);
 
@@ -541,7 +543,14 @@ function ConnectionHistoryDetail({ deviceId }: { deviceId: string }) {
 				<Box sx={{ mt: 1 }}>
 					<Button
 						variant="outlined"
-						onClick={() => loadBatch(connections.length)}
+						onClick={() => {
+							const earliest = sorted[sorted.length - 1];
+							if (earliest)
+								void loadBatch({
+									created_at: earliest.created_at,
+									id: earliest.id,
+								});
+						}}
 						disabled={loading}
 					>
 						{loading ? "Loading…" : `Load more (${HISTORY_BATCH})`}

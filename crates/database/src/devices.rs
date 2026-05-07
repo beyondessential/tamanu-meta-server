@@ -770,39 +770,36 @@ impl DeviceConnection {
 			.map_err(AppError::from)
 	}
 
-	/// Get connection history for a specific device.
+	/// Get connection history for a device, newest first, optionally starting
+	/// strictly before a `(created_at, id)` cursor (the last row of the
+	/// previous page). The cursor pair makes pagination correct under ties on
+	/// `created_at`. Backed by the `(device_id, created_at DESC)` composite
+	/// index, so the `LIMIT` stops the scan early instead of fetching every
+	/// matching row across all partitions.
 	pub async fn get_history_for_device(
 		db: &mut AsyncPgConnection,
 		device_id: Uuid,
+		before: Option<(Timestamp, Uuid)>,
 		limit: i64,
 	) -> Result<Vec<Self>> {
 		use crate::schema::device_connections::dsl as dc;
+		use diesel::BoolExpressionMethods;
 
-		dc::device_connections
+		let mut q = dc::device_connections
 			.select(Self::as_select())
 			.filter(dc::device_id.eq(device_id))
-			.order(dc::created_at.desc())
-			.limit(limit)
-			.load(db)
-			.await
-			.map_err(AppError::from)
-	}
+			.into_boxed();
 
-	/// Get paginated connection history for a specific device.
-	pub async fn get_history_for_device_paginated(
-		db: &mut AsyncPgConnection,
-		device_id: Uuid,
-		limit: i64,
-		offset: i64,
-	) -> Result<Vec<Self>> {
-		use crate::schema::device_connections::dsl as dc;
+		if let Some((before_ts, before_id)) = before {
+			q = q.filter(
+				dc::created_at.lt(jiff_diesel::Timestamp::from(before_ts)).or(dc::created_at
+					.eq(jiff_diesel::Timestamp::from(before_ts))
+					.and(dc::id.lt(before_id))),
+			);
+		}
 
-		dc::device_connections
-			.select(Self::as_select())
-			.filter(dc::device_id.eq(device_id))
-			.order(dc::created_at.desc())
+		q.order((dc::created_at.desc(), dc::id.desc()))
 			.limit(limit)
-			.offset(offset)
 			.load(db)
 			.await
 			.map_err(AppError::from)

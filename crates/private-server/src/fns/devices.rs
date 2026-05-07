@@ -211,9 +211,15 @@ pub async fn get_past_server_associations(
 }
 
 #[derive(Deserialize)]
+pub struct HistoryCursor {
+	pub created_at: Timestamp,
+	pub id: Uuid,
+}
+
+#[derive(Deserialize)]
 pub struct ConnectionHistoryArgs {
 	pub device_id: Uuid,
-	pub offset: u64,
+	pub before: Option<HistoryCursor>,
 	pub limit: Option<u64>,
 }
 
@@ -223,11 +229,12 @@ pub async fn connection_history(
 	Json(args): Json<ConnectionHistoryArgs>,
 ) -> Result<Json<Vec<DeviceConnectionData>>> {
 	let mut conn = state.db.get().await?;
-	let connections = DeviceConnection::get_history_for_device_paginated(
+	let before = args.before.map(|c| (c.created_at, c.id));
+	let connections = DeviceConnection::get_history_for_device(
 		&mut conn,
 		args.device_id,
+		before,
 		args.limit.unwrap_or(100).try_into().unwrap_or(100),
-		args.offset.try_into().unwrap_or(0),
 	)
 	.await?;
 	Ok(Json(
