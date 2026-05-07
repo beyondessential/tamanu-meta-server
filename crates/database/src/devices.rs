@@ -586,14 +586,21 @@ impl Device {
 			device_id: Uuid,
 		}
 
-		let device_ids: Vec<Uuid> =
-			sql_query("SELECT DISTINCT device_id FROM device_connections WHERE ip::text LIKE $1")
-				.bind::<diesel::sql_types::Text, _>(format!("%{}%", query))
-				.load::<DeviceIdResult>(db)
-				.await?
-				.into_iter()
-				.map(|r| r.device_id)
-				.collect();
+		// Bounded by created_at so partition pruning engages; without this the
+		// LIKE is applied to every weekly partition's full contents. Even with
+		// the bound this remains a seq scan within the recent partitions —
+		// LIKE on ip::text can't use any index — but the search space shrinks
+		// from "all history" to "last 90 days".
+		let device_ids: Vec<Uuid> = sql_query(
+			"SELECT DISTINCT device_id FROM device_connections \
+			 WHERE created_at >= NOW() - INTERVAL '90 days' AND ip::text LIKE $1",
+		)
+		.bind::<diesel::sql_types::Text, _>(format!("%{}%", query))
+		.load::<DeviceIdResult>(db)
+		.await?
+		.into_iter()
+		.map(|r| r.device_id)
+		.collect();
 
 		if device_ids.is_empty() {
 			return Ok(Vec::new());
