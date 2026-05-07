@@ -68,6 +68,15 @@ diesel::table! {
 }
 
 diesel::table! {
+	device_server_associations (device_id, server_id) {
+		device_id -> Uuid,
+		server_id -> Uuid,
+		first_seen -> Timestamptz,
+		last_seen -> Timestamptz,
+	}
+}
+
+diesel::table! {
 	devices (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
@@ -131,6 +140,8 @@ diesel::joinable!(artifacts -> devices (device_id));
 diesel::joinable!(artifacts -> versions (version_id));
 diesel::joinable!(device_connections -> devices (device_id));
 diesel::joinable!(device_keys -> devices (device_id));
+diesel::joinable!(device_server_associations -> devices (device_id));
+diesel::joinable!(device_server_associations -> servers (server_id));
 diesel::joinable!(servers -> devices (device_id));
 diesel::joinable!(statuses -> devices (device_id));
 diesel::joinable!(statuses -> servers (server_id));
@@ -143,6 +154,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 	chrome_releases,
 	device_connections,
 	device_keys,
+	device_server_associations,
 	devices,
 	servers,
 	sql_playground_history,

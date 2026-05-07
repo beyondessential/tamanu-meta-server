@@ -513,7 +513,7 @@ impl Device {
 		db: &mut AsyncPgConnection,
 		query: &str,
 	) -> Result<Vec<DeviceWithInfo>> {
-		use crate::schema::{device_connections, device_keys, devices};
+		use crate::schema::{device_keys, devices};
 
 		let device_ids: Vec<Uuid> = device_keys::table
 			.select(device_keys::device_id)
@@ -544,16 +544,8 @@ impl Device {
 			.load(db)
 			.await?;
 
-		let all_connections: Vec<DeviceConnection> = device_connections::table
-			.select(DeviceConnection::as_select())
-			.filter(device_connections::device_id.eq_any(&device_ids))
-			.order((
-				device_connections::device_id,
-				device_connections::created_at.desc(),
-			))
-			.distinct_on(device_connections::device_id)
-			.load(db)
-			.await?;
+		let all_connections =
+			DeviceConnection::get_latest_from_device_ids(db, device_ids.iter().copied()).await?;
 
 		use std::collections::HashMap;
 
@@ -584,7 +576,7 @@ impl Device {
 		db: &mut AsyncPgConnection,
 		query: &str,
 	) -> Result<Vec<DeviceWithInfo>> {
-		use crate::schema::{device_connections, device_keys, devices};
+		use crate::schema::{device_keys, devices};
 		use diesel::sql_query;
 		use diesel::sql_types::Uuid as SqlUuid;
 
@@ -594,14 +586,21 @@ impl Device {
 			device_id: Uuid,
 		}
 
-		let device_ids: Vec<Uuid> =
-			sql_query("SELECT DISTINCT device_id FROM device_connections WHERE ip::text LIKE $1")
-				.bind::<diesel::sql_types::Text, _>(format!("%{}%", query))
-				.load::<DeviceIdResult>(db)
-				.await?
-				.into_iter()
-				.map(|r| r.device_id)
-				.collect();
+		// Bounded by created_at so partition pruning engages; without this the
+		// LIKE is applied to every weekly partition's full contents. Even with
+		// the bound this remains a seq scan within the recent partitions —
+		// LIKE on ip::text can't use any index — but the search space shrinks
+		// from "all history" to "last 90 days".
+		let device_ids: Vec<Uuid> = sql_query(
+			"SELECT DISTINCT device_id FROM device_connections \
+			 WHERE created_at >= NOW() - INTERVAL '90 days' AND ip::text LIKE $1",
+		)
+		.bind::<diesel::sql_types::Text, _>(format!("%{}%", query))
+		.load::<DeviceIdResult>(db)
+		.await?
+		.into_iter()
+		.map(|r| r.device_id)
+		.collect();
 
 		if device_ids.is_empty() {
 			return Ok(Vec::new());
@@ -621,16 +620,8 @@ impl Device {
 			.load(db)
 			.await?;
 
-		let all_connections: Vec<DeviceConnection> = device_connections::table
-			.select(DeviceConnection::as_select())
-			.filter(device_connections::device_id.eq_any(&device_ids))
-			.order((
-				device_connections::device_id,
-				device_connections::created_at.desc(),
-			))
-			.distinct_on(device_connections::device_id)
-			.load(db)
-			.await?;
+		let all_connections =
+			DeviceConnection::get_latest_from_device_ids(db, device_ids.iter().copied()).await?;
 
 		use std::collections::HashMap;
 
@@ -763,49 +754,52 @@ impl DeviceConnection {
 		use crate::schema::device_connections::dsl as dc;
 
 		let ids: Vec<Uuid> = device_ids.collect();
+		// Bounded by created_at so partition pruning can engage; otherwise every
+		// weekly partition is scanned and sorted to find one row per device.
 		dc::device_connections
 			.select(Self::as_select())
 			.distinct_on(dc::device_id)
-			.filter(dc::device_id.eq_any(ids))
+			.filter(
+				dc::device_id
+					.eq_any(ids)
+					.and(dc::created_at.ge(diesel::dsl::sql("NOW() - INTERVAL '90 days'"))),
+			)
 			.order((dc::device_id, dc::created_at.desc()))
 			.load(db)
 			.await
 			.map_err(AppError::from)
 	}
 
-	/// Get connection history for a specific device.
+	/// Get connection history for a device, newest first, optionally starting
+	/// strictly before a `(created_at, id)` cursor (the last row of the
+	/// previous page). The cursor pair makes pagination correct under ties on
+	/// `created_at`. Backed by the `(device_id, created_at DESC)` composite
+	/// index, so the `LIMIT` stops the scan early instead of fetching every
+	/// matching row across all partitions.
 	pub async fn get_history_for_device(
 		db: &mut AsyncPgConnection,
 		device_id: Uuid,
+		before: Option<(Timestamp, Uuid)>,
 		limit: i64,
 	) -> Result<Vec<Self>> {
 		use crate::schema::device_connections::dsl as dc;
+		use diesel::BoolExpressionMethods;
 
-		dc::device_connections
+		let mut q = dc::device_connections
 			.select(Self::as_select())
 			.filter(dc::device_id.eq(device_id))
-			.order(dc::created_at.desc())
-			.limit(limit)
-			.load(db)
-			.await
-			.map_err(AppError::from)
-	}
+			.into_boxed();
 
-	/// Get paginated connection history for a specific device.
-	pub async fn get_history_for_device_paginated(
-		db: &mut AsyncPgConnection,
-		device_id: Uuid,
-		limit: i64,
-		offset: i64,
-	) -> Result<Vec<Self>> {
-		use crate::schema::device_connections::dsl as dc;
+		if let Some((before_ts, before_id)) = before {
+			q = q.filter(
+				dc::created_at.lt(jiff_diesel::Timestamp::from(before_ts)).or(dc::created_at
+					.eq(jiff_diesel::Timestamp::from(before_ts))
+					.and(dc::id.lt(before_id))),
+			);
+		}
 
-		dc::device_connections
-			.select(Self::as_select())
-			.filter(dc::device_id.eq(device_id))
-			.order(dc::created_at.desc())
+		q.order((dc::created_at.desc(), dc::id.desc()))
 			.limit(limit)
-			.offset(offset)
 			.load(db)
 			.await
 			.map_err(AppError::from)

@@ -397,7 +397,7 @@ async fn test_device_connection_history() {
 		connection2.create(&mut conn).await.unwrap();
 
 		// Get connection history
-		let history = DeviceConnection::get_history_for_device(&mut conn, device.id, 10)
+		let history = DeviceConnection::get_history_for_device(&mut conn, device.id, None, 10)
 			.await
 			.unwrap();
 

@@ -205,30 +205,21 @@ pub async fn get_past_server_associations(
 	TailscaleAdmin(_): TailscaleAdmin,
 	Json(args): Json<DeviceIdArgs>,
 ) -> Result<Json<Vec<ServerInfo>>> {
-	use database::statuses::Status;
-
 	let mut conn = state.db.get().await?;
-	let current_servers = Server::get_by_device_id(&mut conn, args.device_id).await?;
-	let current_server_ids: std::collections::HashSet<Uuid> =
-		current_servers.iter().map(|s| s.id).collect();
-
-	let all_past_server_ids = Status::get_past_server_ids(&mut conn, args.device_id).await?;
-	let past_only_ids: Vec<Uuid> = all_past_server_ids
-		.into_iter()
-		.filter(|id| !current_server_ids.contains(id))
-		.collect();
-	if past_only_ids.is_empty() {
-		return Ok(Json(Vec::new()));
-	}
-
-	let servers = Server::get_by_ids(&mut conn, &past_only_ids).await?;
+	let servers = Server::get_past_associations_for_device(&mut conn, args.device_id).await?;
 	Ok(Json(servers.into_iter().map(server_to_info).collect()))
+}
+
+#[derive(Deserialize)]
+pub struct HistoryCursor {
+	pub created_at: Timestamp,
+	pub id: Uuid,
 }
 
 #[derive(Deserialize)]
 pub struct ConnectionHistoryArgs {
 	pub device_id: Uuid,
-	pub offset: u64,
+	pub before: Option<HistoryCursor>,
 	pub limit: Option<u64>,
 }
 
@@ -238,11 +229,12 @@ pub async fn connection_history(
 	Json(args): Json<ConnectionHistoryArgs>,
 ) -> Result<Json<Vec<DeviceConnectionData>>> {
 	let mut conn = state.db.get().await?;
-	let connections = DeviceConnection::get_history_for_device_paginated(
+	let before = args.before.map(|c| (c.created_at, c.id));
+	let connections = DeviceConnection::get_history_for_device(
 		&mut conn,
 		args.device_id,
+		before,
 		args.limit.unwrap_or(100).try_into().unwrap_or(100),
-		args.offset.try_into().unwrap_or(0),
 	)
 	.await?;
 	Ok(Json(
