@@ -111,7 +111,7 @@ jobs:
           CANOPY_E2E_ADMIN_DATABASE_URL: postgresql://canopy:canopy@localhost:5432/postgres
       - name: Upload Playwright report
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: |
