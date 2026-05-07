@@ -763,10 +763,16 @@ impl DeviceConnection {
 		use crate::schema::device_connections::dsl as dc;
 
 		let ids: Vec<Uuid> = device_ids.collect();
+		// Bounded by created_at so partition pruning can engage; otherwise every
+		// weekly partition is scanned and sorted to find one row per device.
 		dc::device_connections
 			.select(Self::as_select())
 			.distinct_on(dc::device_id)
-			.filter(dc::device_id.eq_any(ids))
+			.filter(
+				dc::device_id
+					.eq_any(ids)
+					.and(dc::created_at.ge(diesel::dsl::sql("NOW() - INTERVAL '90 days'"))),
+			)
 			.order((dc::device_id, dc::created_at.desc()))
 			.load(db)
 			.await
