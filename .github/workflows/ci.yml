@@ -27,7 +27,7 @@ jobs:
         run: |
           rustup toolchain install --profile minimal --no-self-update stable
           rustup default stable
-      - uses: taiki-e/install-action@v2.75.19
+      - uses: taiki-e/install-action@v2.75.22
         with:
           tool: cargo-nextest
       - run: |
@@ -51,7 +51,7 @@ jobs:
           rustup toolchain install --profile minimal --no-self-update stable
           rustup default stable
           rustup component add clippy
-      - uses: taiki-e/install-action@v2.75.19
+      - uses: taiki-e/install-action@v2.75.22
         with:
           tool: just
       - uses: Swatinem/rust-cache@v2
