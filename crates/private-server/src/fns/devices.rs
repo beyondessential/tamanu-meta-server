@@ -141,7 +141,10 @@ pub fn routes() -> Router<AppState> {
 		.route("/get_device_by_id", post(get_device_by_id))
 		.route("/list_untrusted", post(list_untrusted))
 		.route("/get_servers_for_device", post(get_servers_for_device))
-		.route("/get_past_server_associations", post(get_past_server_associations))
+		.route(
+			"/get_past_server_associations",
+			post(get_past_server_associations),
+		)
 		.route("/connection_history", post(connection_history))
 		.route("/connection_count", post(connection_count))
 		.route("/trust", post(trust))
@@ -179,14 +182,20 @@ pub async fn list_untrusted(
 	Json(args): Json<PaginationArgs>,
 ) -> Result<Json<Page<DeviceInfo>>> {
 	let mut conn = state.db.get().await?;
-	let total = Device::count_untrusted(&mut conn).await?.try_into().unwrap_or(0);
+	let total = Device::count_untrusted(&mut conn)
+		.await?
+		.try_into()
+		.unwrap_or(0);
 	let devices_with_info = Device::list_untrusted_with_info_paginated(
 		&mut conn,
 		args.limit.unwrap_or(10).try_into().unwrap_or(10),
 		args.offset.try_into().unwrap_or(0),
 	)
 	.await?;
-	let items = devices_with_info.into_iter().map(DeviceInfo::from).collect();
+	let items = devices_with_info
+		.into_iter()
+		.map(DeviceInfo::from)
+		.collect();
 	Ok(Json(Page { items, total }))
 }
 
@@ -284,14 +293,20 @@ pub async fn list_trusted(
 	Json(args): Json<PaginationArgs>,
 ) -> Result<Json<Page<DeviceInfo>>> {
 	let mut conn = state.db.get().await?;
-	let total = Device::count_trusted(&mut conn).await?.try_into().unwrap_or(0);
+	let total = Device::count_trusted(&mut conn)
+		.await?
+		.try_into()
+		.unwrap_or(0);
 	let devices_with_info = Device::list_trusted_with_info_paginated(
 		&mut conn,
 		args.limit.unwrap_or(10).try_into().unwrap_or(10),
 		args.offset.try_into().unwrap_or(0),
 	)
 	.await?;
-	let items = devices_with_info.into_iter().map(DeviceInfo::from).collect();
+	let items = devices_with_info
+		.into_iter()
+		.map(DeviceInfo::from)
+		.collect();
 	Ok(Json(Page { items, total }))
 }
 
@@ -348,12 +363,7 @@ pub async fn search(
 	for d in devices_by_ip {
 		seen.insert(d.device.id, d);
 	}
-	Ok(Json(
-		seen.into_values()
-			.map(DeviceInfo::from)
-			
-			.collect(),
-	))
+	Ok(Json(seen.into_values().map(DeviceInfo::from).collect()))
 }
 
 #[derive(Deserialize)]

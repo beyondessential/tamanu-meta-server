@@ -145,7 +145,8 @@ impl AppError {
 						Self::Header(_) => "header",
 						Self::VersionParse(_) => "version-parse",
 						Self::DatabasePool(_) => "database",
-						Self::DatabaseQuery(diesel::result::Error::NotFound) => "resource-not-found",
+						Self::DatabaseQuery(diesel::result::Error::NotFound) =>
+							"resource-not-found",
 						Self::DatabaseQuery(_) => "database",
 						Self::Tera(_) => "render",
 						Self::Io(_) => "io",

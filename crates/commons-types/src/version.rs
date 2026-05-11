@@ -11,7 +11,9 @@ use diesel::{
 use node_semver::SemverError;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize, Default, AsExpression)]
+#[derive(
+	Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize, Default, AsExpression,
+)]
 #[diesel(sql_type = Text)]
 #[serde(rename_all = "lowercase")]
 pub enum VersionStatus {
@@ -74,7 +76,9 @@ where
 	}
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, AsExpression)]
+#[derive(
+	Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, AsExpression,
+)]
 #[diesel(sql_type = Text)]
 pub struct VersionStr(pub node_semver::Version);
 
