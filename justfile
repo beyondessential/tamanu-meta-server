@@ -98,6 +98,13 @@ lint-fix:
 identity:
     cargo run --bin identity
 
+# Regenerate private-web/openapi.json and private-web/src/api-types.ts from
+# the rust handler annotations. Run this after any change to a handler's
+# request/response shape, security scheme, or tag/description.
+gen-openapi:
+    cargo run --quiet --bin openapi-dump > private-web/openapi.json
+    cd private-web && npm run gen:api-types
+
 # Clean build artifacts
 clean:
     cargo clean
