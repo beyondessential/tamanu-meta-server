@@ -723,6 +723,107 @@ impl Issue {
 	}
 }
 
+/// Aggregate counts displayed against an incident in the UI.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct IncidentStats {
+	pub issue_count: i64,
+	pub event_count: i64,
+	/// `incident_notes` for this incident + `issue_notes` across all linked issues.
+	pub note_count: i64,
+}
+
+impl Incident {
+	/// Bulk-fetch stats for a set of incidents in four grouped queries —
+	/// issues, events, incident-notes, issue-notes — run concurrently on
+	/// four pool connections. Missing incident_ids get `Default` (zero).
+	///
+	/// Takes the pool (`&Db`) rather than a single connection so the four
+	/// futures don't fight over one mutable handle.
+	pub async fn stats_for(
+		pool: &crate::Db,
+		incident_ids: &[Uuid],
+	) -> Result<std::collections::HashMap<Uuid, IncidentStats>> {
+		use crate::schema::{events, incident_issues, incident_notes, issue_notes};
+		use diesel::dsl::count_star;
+		use std::collections::HashMap;
+
+		let mut out: HashMap<Uuid, IncidentStats> = incident_ids
+			.iter()
+			.map(|id| (*id, IncidentStats::default()))
+			.collect();
+		if incident_ids.is_empty() {
+			return Ok(out);
+		}
+
+		// Each future grabs its own pool connection so the four queries
+		// run in parallel rather than serialised on one mutable conn.
+		let ids = incident_ids.to_vec();
+		let f_issues = async {
+			let mut c = pool.get().await?;
+			incident_issues::table
+				.group_by(incident_issues::incident_id)
+				.select((incident_issues::incident_id, count_star()))
+				.filter(incident_issues::incident_id.eq_any(&ids))
+				.load::<(Uuid, i64)>(&mut c)
+				.await
+				.map_err(AppError::from)
+		};
+		let f_events = async {
+			let mut c = pool.get().await?;
+			events::table
+				.inner_join(
+					incident_issues::table.on(events::issue_id.eq(incident_issues::issue_id)),
+				)
+				.group_by(incident_issues::incident_id)
+				.select((incident_issues::incident_id, count_star()))
+				.filter(incident_issues::incident_id.eq_any(&ids))
+				.load::<(Uuid, i64)>(&mut c)
+				.await
+				.map_err(AppError::from)
+		};
+		let f_inotes = async {
+			let mut c = pool.get().await?;
+			incident_notes::table
+				.group_by(incident_notes::incident_id)
+				.select((incident_notes::incident_id, count_star()))
+				.filter(incident_notes::incident_id.eq_any(&ids))
+				.load::<(Uuid, i64)>(&mut c)
+				.await
+				.map_err(AppError::from)
+		};
+		let f_jnotes = async {
+			let mut c = pool.get().await?;
+			issue_notes::table
+				.inner_join(
+					incident_issues::table.on(issue_notes::issue_id.eq(incident_issues::issue_id)),
+				)
+				.group_by(incident_issues::incident_id)
+				.select((incident_issues::incident_id, count_star()))
+				.filter(incident_issues::incident_id.eq_any(&ids))
+				.load::<(Uuid, i64)>(&mut c)
+				.await
+				.map_err(AppError::from)
+		};
+		let (issue_rows, event_rows, inote_rows, jnote_rows) =
+			futures::try_join!(f_issues, f_events, f_inotes, f_jnotes)?;
+
+		for (id, n) in issue_rows {
+			out.entry(id).or_default().issue_count = n;
+		}
+		for (id, n) in event_rows {
+			out.entry(id).or_default().event_count = n;
+		}
+		for (id, n) in inote_rows {
+			out.entry(id).or_default().note_count += n;
+		}
+		for (id, n) in jnote_rows {
+			out.entry(id).or_default().note_count += n;
+		}
+
+		Ok(out)
+	}
+}
+
 impl Event {
 	pub async fn list_for_issue(
 		db: &mut AsyncPgConnection,

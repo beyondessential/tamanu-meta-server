@@ -1,4 +1,7 @@
-import { Box, Stack, Typography } from "@mui/material";
+import { Box, Stack, Tooltip, Typography } from "@mui/material";
+import BugReportIcon from "@mui/icons-material/BugReport";
+import NotesIcon from "@mui/icons-material/StickyNote2";
+import TimelineIcon from "@mui/icons-material/Timeline";
 import { Link as RouterLink } from "react-router-dom";
 import TimeAgo from "./TimeAgo";
 import UserAvatar from "./UserAvatar";
@@ -10,10 +13,10 @@ function serverLabel(name: string | null, host: string): string {
 	return "(unknown)";
 }
 
-/** Compact, non-interactive view of an open incident. Used on the global
- * Incidents page as a grid cell. Operators have to click through to the
- * server page to take action — keeps "I just saw this and resolved it"
- * one-clicks from being a thing. No expand, no resolve button. */
+/** Compact, non-interactive view of an open incident. Operators have to
+ * click through to the server page to take action. Header carries the
+ * acker's avatar (top-right) and the body has a stats row (bottom-right)
+ * with issue / event / note counts. */
 export default function IncidentCard({ incident }: { incident: IncidentData }) {
 	return (
 		<Box
@@ -30,32 +33,71 @@ export default function IncidentCard({ incident }: { incident: IncidentData }) {
 				"&:hover": { bgcolor: "action.hover" },
 			}}
 		>
-			<Stack spacing={0.5}>
-				<Typography variant="subtitle1" sx={{ fontWeight: 500 }}>
-					{serverLabel(incident.server_name, incident.server_host)}
-				</Typography>
-				<Typography variant="body2" color="text.secondary">
-					opened <TimeAgo timestamp={incident.opened_at} />
-				</Typography>
-				<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-					{incident.acknowledged_at && (
-						<UserAvatar
-							login={incident.acknowledged_by}
-							name={incident.acknowledged_by_name}
-							profilePic={incident.acknowledged_by_pic}
-						/>
-					)}
-					{incident.resolved_at && (
-						<Typography
-							variant="caption"
-							color="success.main"
-							title={`(${incident.resolved_reason ?? "?"}) by ${incident.resolved_by ?? "?"}`}
-						>
-							resolved
-						</Typography>
-					)}
-				</Stack>
+			<Stack
+				direction="row"
+				spacing={1}
+				sx={{ alignItems: "flex-start", justifyContent: "space-between" }}
+			>
+				<Box sx={{ minWidth: 0, flex: 1 }}>
+					<Typography variant="subtitle1" sx={{ fontWeight: 500 }} noWrap>
+						{serverLabel(incident.server_name, incident.server_host)}
+					</Typography>
+					<Typography variant="body2" color="text.secondary">
+						opened <TimeAgo timestamp={incident.opened_at} />
+					</Typography>
+				</Box>
+				{incident.acknowledged_at && (
+					<UserAvatar
+						login={incident.acknowledged_by}
+						name={incident.acknowledged_by_name}
+						profilePic={incident.acknowledged_by_pic}
+					/>
+				)}
+			</Stack>
+			<Stack
+				direction="row"
+				spacing={1.5}
+				sx={{ mt: 1, justifyContent: "flex-end", alignItems: "center" }}
+			>
+				<Stat
+					icon={<BugReportIcon fontSize="inherit" />}
+					value={incident.issue_count}
+					title={`${incident.issue_count} issue${incident.issue_count === 1 ? "" : "s"}`}
+				/>
+				<Stat
+					icon={<TimelineIcon fontSize="inherit" />}
+					value={incident.event_count}
+					title={`${incident.event_count} event${incident.event_count === 1 ? "" : "s"}`}
+				/>
+				<Stat
+					icon={<NotesIcon fontSize="inherit" />}
+					value={incident.note_count}
+					title={`${incident.note_count} note${incident.note_count === 1 ? "" : "s"}`}
+				/>
 			</Stack>
 		</Box>
+	);
+}
+
+function Stat({
+	icon,
+	value,
+	title,
+}: {
+	icon: React.ReactNode;
+	value: number;
+	title: string;
+}) {
+	return (
+		<Tooltip title={title}>
+			<Stack
+				direction="row"
+				spacing={0.5}
+				sx={{ alignItems: "center", color: "text.secondary", fontSize: "0.875rem" }}
+			>
+				{icon}
+				<Box component="span">{value}</Box>
+			</Stack>
+		</Tooltip>
 	);
 }

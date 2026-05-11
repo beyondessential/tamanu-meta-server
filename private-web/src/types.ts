@@ -290,6 +290,10 @@ export interface IncidentData {
 	resolved_by_name: string | null;
 	resolved_by_pic: string | null;
 	resolved_reason: string | null;
+	issue_count: number;
+	event_count: number;
+	/** Combined: incident notes + notes on all contributing issues. */
+	note_count: number;
 	created_at: string;
 	updated_at: string;
 }
