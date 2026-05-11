@@ -61,18 +61,18 @@ export default function IncidentCard({ incident }: { incident: IncidentData }) {
 			>
 				<Stat
 					icon={<BugReportIcon fontSize="inherit" />}
-					value={incident.issue_count}
-					title={`${incident.issue_count} issue${incident.issue_count === 1 ? "" : "s"}`}
+					value={incident.issue_count ?? 0}
+					noun="issue"
 				/>
 				<Stat
 					icon={<TimelineIcon fontSize="inherit" />}
-					value={incident.event_count}
-					title={`${incident.event_count} event${incident.event_count === 1 ? "" : "s"}`}
+					value={incident.event_count ?? 0}
+					noun="event"
 				/>
 				<Stat
 					icon={<NotesIcon fontSize="inherit" />}
-					value={incident.note_count}
-					title={`${incident.note_count} note${incident.note_count === 1 ? "" : "s"}`}
+					value={incident.note_count ?? 0}
+					noun="note"
 				/>
 			</Stack>
 		</Box>
@@ -82,12 +82,13 @@ export default function IncidentCard({ incident }: { incident: IncidentData }) {
 function Stat({
 	icon,
 	value,
-	title,
+	noun,
 }: {
 	icon: React.ReactNode;
 	value: number;
-	title: string;
+	noun: string;
 }) {
+	const title = `${value} ${noun}${value === 1 ? "" : "s"}`;
 	return (
 		<Tooltip title={title}>
 			<Stack
