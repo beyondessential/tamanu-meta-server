@@ -27,6 +27,7 @@ import { useApi } from "../api";
 import { usePageTitle } from "../hooks/usePageTitle";
 import type {
 	DeviceShortInfo,
+	IncidentData,
 	ServerDetailData,
 	ServerInfoFull,
 	ServerLastStatusData,
@@ -48,6 +49,18 @@ export default function ServerDetail() {
 	// incident) leaves a stale incidents list.
 	const [refreshTick, setRefreshTick] = useState(0);
 	const bumpRefresh = () => setRefreshTick((t) => t + 1);
+	// Single source of truth for the group's open-incident state. Used to
+	// label every ManualEventButton on the page identically — a child
+	// server's own incidents list is empty (incidents live at the root),
+	// so per-button local queries would mislabel.
+	const openIncidents = useApi<IncidentData[]>(
+		"incidents",
+		"list_for_server",
+		{ server_id: id, include_closed: false },
+		[id, refreshTick],
+	);
+	const hasOpenIncident =
+		openIncidents.status === "ok" && openIncidents.data.length > 0;
 	usePageTitle(
 		detail.status === "ok"
 			? (detail.data.server.name ?? "Unnamed server")
@@ -66,7 +79,12 @@ export default function ServerDetail() {
 
 	return (
 		<Stack spacing={3}>
-			<Header data={data} isAdmin={admin} onEventSubmitted={bumpRefresh} />
+			<Header
+				data={data}
+				isAdmin={admin}
+				hasOpenIncident={hasOpenIncident}
+				onEventSubmitted={bumpRefresh}
+			/>
 			<UrlAndDevice
 				host={data.server.host}
 				deviceInfo={data.device_info}
@@ -92,6 +110,7 @@ export default function ServerDetail() {
 				<ChildServers
 					children={data.child_servers}
 					isAdmin={admin}
+					hasOpenIncident={hasOpenIncident}
 					onEventSubmitted={bumpRefresh}
 				/>
 			)}
@@ -108,10 +127,12 @@ export default function ServerDetail() {
 function Header({
 	data,
 	isAdmin,
+	hasOpenIncident,
 	onEventSubmitted,
 }: {
 	data: ServerDetailData;
 	isAdmin: boolean;
+	hasOpenIncident: boolean;
 	onEventSubmitted: () => void;
 }) {
 	return (
@@ -150,6 +171,7 @@ function Header({
 				<Stack direction="row" spacing={1}>
 					<ManualEventButton
 						serverId={data.server.id}
+						hasOpenIncident={hasOpenIncident}
 						onSubmitted={onEventSubmitted}
 					/>
 					<Button
@@ -358,10 +380,12 @@ function renderLocation(server: ServerInfoFull): string {
 function ChildServers({
 	children,
 	isAdmin,
+	hasOpenIncident,
 	onEventSubmitted,
 }: {
 	children: ServerDetailData["child_servers"];
 	isAdmin: boolean;
+	hasOpenIncident: boolean;
 	onEventSubmitted: () => void;
 }) {
 	return (
@@ -411,6 +435,7 @@ function ChildServers({
 						{isAdmin && (
 							<ManualEventButton
 								serverId={child.id}
+								hasOpenIncident={hasOpenIncident}
 								onSubmitted={onEventSubmitted}
 							/>
 						)}
