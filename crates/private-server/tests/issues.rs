@@ -102,7 +102,7 @@ async fn incident_groups_at_root_server() {
 			.await;
 		resp.assert_status_ok();
 
-		// Root should have one open incident.
+		// The root has one open incident.
 		let resp = private
 			.post("/api/incidents/list_for_server")
 			.json(&serde_json::json!({ "server_id": root_id }))
@@ -111,15 +111,21 @@ async fn incident_groups_at_root_server() {
 		let items: Vec<serde_json::Value> = resp.json();
 		assert_eq!(items.len(), 1, "incident lives on the root server");
 		assert!(items[0].get("closed_at").map_or(true, |v| v.is_null()));
+		let root_incident_id = items[0].get("id").and_then(|v| v.as_str()).unwrap().to_string();
 
-		// Child has no incident of its own.
+		// Asking via the child's id resolves to the same group, so it returns
+		// the same incident — the endpoint walks parent_server_id to the root.
 		let resp = private
 			.post("/api/incidents/list_for_server")
 			.json(&serde_json::json!({ "server_id": child_id }))
 			.await;
 		resp.assert_status_ok();
 		let items: Vec<serde_json::Value> = resp.json();
-		assert!(items.is_empty(), "child server doesn't host the incident");
+		assert_eq!(items.len(), 1, "child resolves to the same group");
+		assert_eq!(
+			items[0].get("id").and_then(|v| v.as_str()),
+			Some(root_incident_id.as_str()),
+		);
 	})
 	.await;
 }

@@ -670,6 +670,11 @@ impl Event {
 }
 
 impl Incident {
+	/// Incidents are owned by the *root* of the server group, so a caller
+	/// asking for a child's incidents really wants the root's. Walk up the
+	/// `parent_server_id` chain (same helper used at incident-open time) so
+	/// the API returns the group's incidents regardless of which server in
+	/// the group the caller named.
 	pub async fn list_for_server(
 		db: &mut AsyncPgConnection,
 		server_id: Uuid,
@@ -678,9 +683,10 @@ impl Incident {
 	) -> Result<Vec<Self>> {
 		use crate::schema::incidents::dsl;
 
+		let root = root_server_id(db, server_id).await?;
 		let mut q = dsl::incidents
 			.select(Self::as_select())
-			.filter(dsl::server_id.eq(server_id))
+			.filter(dsl::server_id.eq(root))
 			.into_boxed();
 		if !include_closed {
 			q = q.filter(dsl::closed_at.is_null());
