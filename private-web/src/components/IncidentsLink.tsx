@@ -5,22 +5,23 @@ import { Link as RouterLink } from "react-router-dom";
 import { useApi } from "../api";
 import type { IncidentData, IssueData } from "../types";
 
-/** Server-detail header button into the incidents view. Three states:
+/** Server-detail header button into the incidents view. Any server id in
+ * a group works — the backend resolves to the group root. Three states:
  * - open incident exists → direct link to /incidents/:id (error-coloured)
  * - no open incident, but active issues → /incidents filtered to this group
  * - nothing active → same, with `showAll=1` so closed/inactive surface */
 export default function IncidentsLink({
-	rootServerId,
+	serverId,
 	refreshKey = 0,
 }: {
-	rootServerId: string;
+	serverId: string;
 	refreshKey?: number;
 }) {
 	const incidents = useApi<IncidentData[]>(
 		"incidents",
 		"list_for_server",
-		{ server_id: rootServerId, include_closed: false },
-		[rootServerId, refreshKey],
+		{ server_id: serverId, include_closed: false },
+		[serverId, refreshKey],
 	);
 	const openIncident =
 		incidents.status === "ok" && incidents.data.length > 0
@@ -30,8 +31,8 @@ export default function IncidentsLink({
 	const issues = useApi<IssueData[]>(
 		"issues",
 		"list",
-		{ activeOnly: true, serverGroupId: rootServerId, limit: 1 },
-		[rootServerId, refreshKey],
+		{ activeOnly: true, serverGroupId: serverId, limit: 1 },
+		[serverId, refreshKey],
 	);
 	const hasActive = issues.status === "ok" && issues.data.length > 0;
 
@@ -42,7 +43,6 @@ export default function IncidentsLink({
 				to={`/incidents/${openIncident.id}`}
 				variant="outlined"
 				color="error"
-				size="small"
 				startIcon={<WarningAmberIcon />}
 			>
 				Open incident
@@ -53,9 +53,8 @@ export default function IncidentsLink({
 		return (
 			<Button
 				component={RouterLink}
-				to={`/incidents?group=${rootServerId}`}
+				to={`/incidents?group=${serverId}`}
 				variant="outlined"
-				size="small"
 				startIcon={<OpenInNewIcon />}
 			>
 				Active issues
@@ -65,9 +64,8 @@ export default function IncidentsLink({
 	return (
 		<Button
 			component={RouterLink}
-			to={`/incidents?group=${rootServerId}&showAll=1`}
+			to={`/incidents?group=${serverId}&showAll=1`}
 			variant="outlined"
-			size="small"
 			startIcon={<OpenInNewIcon />}
 		>
 			Past issues

@@ -15,7 +15,6 @@ import LanguageIcon from "@mui/icons-material/Language";
 import { useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import IncidentsLink from "../components/IncidentsLink";
-import IssuesSection from "../components/IssuesSection";
 import ManualEventButton from "../components/ManualEventButton";
 import StatusDot from "../components/StatusDot";
 import TimeAgo from "../components/TimeAgo";
@@ -94,12 +93,6 @@ export default function ServerDetail() {
 				server={data.server}
 				status={data.last_status}
 			/>
-			<IssuesSection
-				scope="server"
-				id={data.server.id}
-				refreshKey={refreshTick}
-				onChanged={bumpRefresh}
-			/>
 			{data.child_servers.length > 0 && (
 				<ChildServers
 					children={data.child_servers}
@@ -131,7 +124,6 @@ function Header({
 	refreshTick: number;
 	onEventSubmitted: () => void;
 }) {
-	const isRoot = data.server.parent_server_id == null;
 	return (
 		<Stack
 			direction="row"
@@ -165,12 +157,10 @@ function Header({
 				</Typography>
 			</Stack>
 			<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-				{isRoot && (
-					<IncidentsLink
-						rootServerId={data.server.id}
-						refreshKey={refreshTick}
-					/>
-				)}
+				<IncidentsLink
+					serverId={data.server.id}
+					refreshKey={refreshTick}
+				/>
 				{isAdmin && (
 					<>
 						<ManualEventButton
