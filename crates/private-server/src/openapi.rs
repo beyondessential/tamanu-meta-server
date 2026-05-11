@@ -9,7 +9,7 @@ use utoipa::{
 #[openapi(
 	info(
 		title = "canopy private-server",
-		description = "Admin/operator API for the canopy fleet manager. Requests are gated behind Tailscale auth — every request must carry the `Tailscale-User-Login` header injected by the Tailscale sidecar; admin-only endpoints additionally check the caller is on the admin list.",
+		description = "Admin/operator API for the canopy fleet manager. Requests are gated behind Tailscale auth; admin-only endpoints additionally check the caller is on the admin list.",
 		license(name = "GPL-3.0-or-later"),
 	),
 	modifiers(&SecuritySchemes),
