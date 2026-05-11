@@ -18,6 +18,7 @@ import DeviceDetail from "./routes/DeviceDetail";
 import Devices from "./routes/Devices";
 import DevicesList from "./routes/DevicesList";
 import DevicesSearch from "./routes/DevicesSearch";
+import IncidentDetail from "./routes/IncidentDetail";
 import Incidents from "./routes/Incidents";
 import Status from "./routes/Status";
 import type { IncidentData } from "./types";
@@ -153,6 +154,7 @@ export default function App() {
 					<Route path="/" element={<Navigate to="/status" replace />} />
 					<Route path="/status" element={<Status />} />
 					<Route path="/incidents" element={<Incidents />} />
+					<Route path="/incidents/:id" element={<IncidentDetail />} />
 					<Route path="/admins" element={<Admins />} />
 					<Route path="/versions" element={<Versions />} />
 					<Route path="/versions/:version" element={<VersionDetail />} />

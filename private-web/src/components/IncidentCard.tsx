@@ -13,15 +13,14 @@ function serverLabel(name: string | null, host: string): string {
 	return "(unknown)";
 }
 
-/** Compact, non-interactive view of an open incident. Operators have to
- * click through to the server page to take action. Header carries the
- * acker's avatar (top-right) and the body has a stats row (bottom-right)
- * with issue / event / note counts. */
+/** Compact view of an open incident; click-through goes to the incident
+ * detail page. Header carries the acker's avatar (top-right) and the body
+ * has a stats row (bottom-right) with issue / event / note counts. */
 export default function IncidentCard({ incident }: { incident: IncidentData }) {
 	return (
 		<Box
 			component={RouterLink}
-			to={`/servers/${incident.server_id}`}
+			to={`/incidents/${incident.id}`}
 			sx={{
 				p: 1.5,
 				border: 1,
