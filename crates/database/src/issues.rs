@@ -322,13 +322,17 @@ async fn re_evaluate_incident_membership(
 	let snoozed = issue
 		.snoozed_until
 		.map_or(false, |t| t > Timestamp::now());
-	let should_be_in = issue.active
-		&& issue.severity.opens_incident()
-		&& issue.resolved_at.is_none()
-		&& !snoozed;
 
-	match (was_in, should_be_in) {
-		(false, true) => {
+	// Leave gates: active=false, human-resolved, or snoozed. Severity downgrade
+	// alone is *not* a leave gate — once contributing, an issue stays until
+	// it's actually gone or explicitly suppressed.
+	let should_leave = !issue.active || issue.resolved_at.is_some() || snoozed;
+	// Join gates: all leave gates inverted, *plus* the severity floor.
+	let should_join =
+		issue.active && !issue.resolved_at.is_some() && !snoozed && issue.severity.opens_incident();
+
+	match (was_in, should_join, should_leave) {
+		(false, true, _) => {
 			let incident_id =
 				find_or_open_incident(conn, root_server_id, transition_time).await?;
 			diesel::insert_into(incident_issues::table)
@@ -341,7 +345,7 @@ async fn re_evaluate_incident_membership(
 				.execute(conn)
 				.await?;
 		}
-		(true, false) => {
+		(true, _, true) => {
 			let open_link: IncidentIssue = incident_issues::table
 				.select(IncidentIssue::as_select())
 				.filter(
