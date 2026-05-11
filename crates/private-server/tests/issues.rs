@@ -146,7 +146,13 @@ async fn issue_reopen_keeps_identity_and_joins_new_incident() {
 			}))
 			.await;
 		r1.assert_status_ok();
-		let issue_id_1 = r1.json::<serde_json::Value>().get("id").unwrap().as_str().unwrap().to_string();
+		let issue_id_1 = r1
+			.json::<serde_json::Value>()
+			.get("id")
+			.unwrap()
+			.as_str()
+			.unwrap()
+			.to_string();
 
 		// 2. Resolve.
 		let r2 = private
@@ -160,7 +166,13 @@ async fn issue_reopen_keeps_identity_and_joins_new_incident() {
 			}))
 			.await;
 		r2.assert_status_ok();
-		let issue_id_2 = r2.json::<serde_json::Value>().get("id").unwrap().as_str().unwrap().to_string();
+		let issue_id_2 = r2
+			.json::<serde_json::Value>()
+			.get("id")
+			.unwrap()
+			.as_str()
+			.unwrap()
+			.to_string();
 		assert_eq!(issue_id_1, issue_id_2, "same identity through inactive");
 
 		// 3. Reopen — same identity, severity ≥ error.
@@ -174,7 +186,13 @@ async fn issue_reopen_keeps_identity_and_joins_new_incident() {
 			}))
 			.await;
 		r3.assert_status_ok();
-		let issue_id_3 = r3.json::<serde_json::Value>().get("id").unwrap().as_str().unwrap().to_string();
+		let issue_id_3 = r3
+			.json::<serde_json::Value>()
+			.get("id")
+			.unwrap()
+			.as_str()
+			.unwrap()
+			.to_string();
 		assert_eq!(issue_id_1, issue_id_3, "reopen keeps identity");
 
 		// Two incidents on the server (first closed, second open).
@@ -255,11 +273,7 @@ async fn list_events_returns_event_log() {
 		.expect("seed");
 
 		// Three distinct events.
-		for (sev, msg) in [
-			("error", "a"),
-			("error", "b"),
-			("warning", "b"),
-		] {
+		for (sev, msg) in [("error", "a"), ("error", "b"), ("warning", "b")] {
 			private
 				.post("/api/issues/submit_manual_event")
 				.json(&serde_json::json!({
@@ -316,7 +330,14 @@ async fn open_issue(
 		}))
 		.await;
 	r.assert_status_ok();
-	Uuid::parse_str(r.json::<serde_json::Value>().get("id").unwrap().as_str().unwrap()).unwrap()
+	Uuid::parse_str(
+		r.json::<serde_json::Value>()
+			.get("id")
+			.unwrap()
+			.as_str()
+			.unwrap(),
+	)
+	.unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -360,7 +381,10 @@ async fn resolve_closes_incident_and_records_reason() {
 			.await;
 		r.assert_status_ok();
 		let body: serde_json::Value = r.json();
-		assert_eq!(body.get("resolved_reason").and_then(|v| v.as_str()), Some("fixed"));
+		assert_eq!(
+			body.get("resolved_reason").and_then(|v| v.as_str()),
+			Some("fixed")
+		);
 		// Issue.active stays true — device hasn't said otherwise.
 		assert_eq!(body.get("active").and_then(|v| v.as_bool()), Some(true));
 
@@ -371,7 +395,10 @@ async fn resolve_closes_incident_and_records_reason() {
 			.await;
 		let items: Vec<serde_json::Value> = resp.json();
 		assert_eq!(items.len(), 1);
-		assert!(items[0].get("closed_at").is_some_and(|v| !v.is_null()), "incident should be closed");
+		assert!(
+			items[0].get("closed_at").is_some_and(|v| !v.is_null()),
+			"incident should be closed"
+		);
 	})
 	.await;
 }
@@ -400,7 +427,11 @@ async fn unresolve_reopens_incident_if_still_active() {
 			.json(&serde_json::json!({ "server_id": server_id, "include_closed": true }))
 			.await;
 		let items: Vec<serde_json::Value> = resp.json();
-		assert_eq!(items.len(), 2, "one closed (from resolve), one open (from unresolve)");
+		assert_eq!(
+			items.len(),
+			2,
+			"one closed (from resolve), one open (from unresolve)"
+		);
 		// list returns newest first; the open one is items[0].
 		assert!(items[0].get("closed_at").map_or(false, |v| v.is_null()));
 	})
@@ -432,7 +463,13 @@ async fn reopen_via_device_clears_resolved_fields() {
 				}))
 				.await;
 			opened.assert_status_ok();
-			let issue_id = opened.json::<serde_json::Value>().get("id").unwrap().as_str().unwrap().to_string();
+			let issue_id = opened
+				.json::<serde_json::Value>()
+				.get("id")
+				.unwrap()
+				.as_str()
+				.unwrap()
+				.to_string();
 
 			// Human resolves.
 			private
@@ -454,7 +491,10 @@ async fn reopen_via_device_clears_resolved_fields() {
 				.await;
 			reopened.assert_status_ok();
 			let body: serde_json::Value = reopened.json();
-			assert!(body.get("resolved_at").map_or(true, |v| v.is_null()), "reopen should clear resolved_at");
+			assert!(
+				body.get("resolved_at").map_or(true, |v| v.is_null()),
+				"reopen should clear resolved_at"
+			);
 			assert!(body.get("resolved_by").map_or(true, |v| v.is_null()));
 			assert!(body.get("resolved_reason").map_or(true, |v| v.is_null()));
 		},
@@ -485,7 +525,10 @@ async fn snooze_leaves_incident_and_blocks_rejoin() {
 			.await;
 		let items: Vec<serde_json::Value> = resp.json();
 		assert_eq!(items.len(), 1);
-		assert!(items[0].get("closed_at").is_some_and(|v| !v.is_null()), "incident should be closed");
+		assert!(
+			items[0].get("closed_at").is_some_and(|v| !v.is_null()),
+			"incident should be closed"
+		);
 
 		// A new error event during snooze should *not* open a new incident.
 		private
@@ -519,7 +562,11 @@ async fn snooze_leaves_incident_and_blocks_rejoin() {
 			.json(&serde_json::json!({ "server_id": server_id, "include_closed": true }))
 			.await;
 		let items: Vec<serde_json::Value> = resp.json();
-		assert_eq!(items.len(), 2, "unsnooze should reopen incident if still eligible");
+		assert_eq!(
+			items.len(),
+			2,
+			"unsnooze should reopen incident if still eligible"
+		);
 		assert!(items[0].get("closed_at").map_or(false, |v| v.is_null()));
 	})
 	.await;
@@ -553,8 +600,14 @@ async fn incident_ack_resolve_metadata() {
 			.await;
 		resolved.assert_status_ok();
 		let body: serde_json::Value = resolved.json();
-		assert_eq!(body.get("resolved_reason").and_then(|v| v.as_str()), Some("expected"));
-		assert!(body.get("closed_at").map_or(true, |v| v.is_null()), "resolve doesn't force-close");
+		assert_eq!(
+			body.get("resolved_reason").and_then(|v| v.as_str()),
+			Some("expected")
+		);
+		assert!(
+			body.get("closed_at").map_or(true, |v| v.is_null()),
+			"resolve doesn't force-close"
+		);
 	})
 	.await;
 }

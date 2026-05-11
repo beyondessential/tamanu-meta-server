@@ -102,7 +102,9 @@ pub async fn list_for_server(
 		args.limit.unwrap_or(DEFAULT_LIMIT),
 	)
 	.await?;
-	Ok(Json(incidents.into_iter().map(IncidentData::from).collect()))
+	Ok(Json(
+		incidents.into_iter().map(IncidentData::from).collect(),
+	))
 }
 
 #[derive(Deserialize)]
@@ -118,7 +120,9 @@ pub async fn list_active(
 ) -> Result<Json<Vec<IncidentData>>> {
 	let mut conn = state.db.get().await?;
 	let incidents = Incident::list_active(&mut conn, args.limit.unwrap_or(DEFAULT_LIMIT)).await?;
-	Ok(Json(incidents.into_iter().map(IncidentData::from).collect()))
+	Ok(Json(
+		incidents.into_iter().map(IncidentData::from).collect(),
+	))
 }
 
 #[derive(Deserialize)]

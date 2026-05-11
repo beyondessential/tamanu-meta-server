@@ -21,10 +21,7 @@ struct IssueRow {
 	active: bool,
 }
 
-async fn provision_server(
-	conn: &mut diesel_async::AsyncPgConnection,
-	device_id: Uuid,
-) -> Uuid {
+async fn provision_server(conn: &mut diesel_async::AsyncPgConnection, device_id: Uuid) -> Uuid {
 	let server_id = Uuid::new_v4();
 	sql_query(
 		"INSERT INTO servers (id, host, kind, device_id) \
@@ -108,7 +105,13 @@ async fn submit_event_dedups_by_ref() {
 				}))
 				.await;
 			first.assert_status_ok();
-			let first_id = first.json::<serde_json::Value>().get("id").unwrap().as_str().unwrap().to_string();
+			let first_id = first
+				.json::<serde_json::Value>()
+				.get("id")
+				.unwrap()
+				.as_str()
+				.unwrap()
+				.to_string();
 
 			let second = public
 				.post("/events")
@@ -121,9 +124,18 @@ async fn submit_event_dedups_by_ref() {
 				}))
 				.await;
 			second.assert_status_ok();
-			let second_id = second.json::<serde_json::Value>().get("id").unwrap().as_str().unwrap().to_string();
+			let second_id = second
+				.json::<serde_json::Value>()
+				.get("id")
+				.unwrap()
+				.as_str()
+				.unwrap()
+				.to_string();
 
-			assert_eq!(first_id, second_id, "same (server, source, ref) should be one issue");
+			assert_eq!(
+				first_id, second_id,
+				"same (server, source, ref) should be one issue"
+			);
 
 			let row = issue_by_id(&mut conn, Uuid::parse_str(&first_id).unwrap()).await;
 			assert_eq!(row.server_id, server_id);
@@ -135,11 +147,12 @@ async fn submit_event_dedups_by_ref() {
 				#[diesel(sql_type = sql_types::BigInt)]
 				event_count: i64,
 			}
-			let counts: Counts = sql_query("SELECT COUNT(*) AS event_count FROM events WHERE issue_id = $1")
-				.bind::<sql_types::Uuid, _>(Uuid::parse_str(&first_id).unwrap())
-				.get_result(&mut conn)
-				.await
-				.expect("count events");
+			let counts: Counts =
+				sql_query("SELECT COUNT(*) AS event_count FROM events WHERE issue_id = $1")
+					.bind::<sql_types::Uuid, _>(Uuid::parse_str(&first_id).unwrap())
+					.get_result(&mut conn)
+					.await
+					.expect("count events");
 			assert_eq!(counts.event_count, 2, "different content → two event rows");
 		},
 	)
@@ -209,7 +222,13 @@ async fn submit_event_active_false_resolves_issue() {
 				}))
 				.await;
 			opened.assert_status_ok();
-			let issue_id = opened.json::<serde_json::Value>().get("id").unwrap().as_str().unwrap().to_string();
+			let issue_id = opened
+				.json::<serde_json::Value>()
+				.get("id")
+				.unwrap()
+				.as_str()
+				.unwrap()
+				.to_string();
 
 			let resolved = public
 				.post("/events")
@@ -223,7 +242,12 @@ async fn submit_event_active_false_resolves_issue() {
 				.await;
 			resolved.assert_status_ok();
 			assert_eq!(
-				resolved.json::<serde_json::Value>().get("id").unwrap().as_str().unwrap(),
+				resolved
+					.json::<serde_json::Value>()
+					.get("id")
+					.unwrap()
+					.as_str()
+					.unwrap(),
 				issue_id
 			);
 
@@ -337,7 +361,10 @@ async fn submit_event_opens_incident_at_error() {
 			.get_result(&mut conn)
 			.await
 			.expect("one incident");
-			assert_eq!(inc.server_id, server_id, "incident should be on this server (no parent)");
+			assert_eq!(
+				inc.server_id, server_id,
+				"incident should be on this server (no parent)"
+			);
 			assert!(inc.is_open, "incident should still be open");
 
 			#[derive(QueryableByName)]
@@ -382,11 +409,12 @@ async fn submit_event_at_warning_does_not_open_incident() {
 				#[diesel(sql_type = sql_types::BigInt)]
 				count: i64,
 			}
-			let counts: Counts = sql_query("SELECT COUNT(*) AS count FROM incidents WHERE server_id = $1")
-				.bind::<sql_types::Uuid, _>(server_id)
-				.get_result(&mut conn)
-				.await
-				.expect("count");
+			let counts: Counts =
+				sql_query("SELECT COUNT(*) AS count FROM incidents WHERE server_id = $1")
+					.bind::<sql_types::Uuid, _>(server_id)
+					.get_result(&mut conn)
+					.await
+					.expect("count");
 			assert_eq!(counts.count, 0, "warning shouldn't open an incident");
 		},
 	)

@@ -141,7 +141,12 @@ pub enum IssueFilter {
 	All,
 }
 
-fn hash_event(severity: Severity, active: bool, message: &str, description: Option<&str>) -> Vec<u8> {
+fn hash_event(
+	severity: Severity,
+	active: bool,
+	message: &str,
+	description: Option<&str>,
+) -> Vec<u8> {
 	let mut h = Sha256::new();
 	h.update(severity.to_string().as_bytes());
 	h.update([0]);
@@ -216,15 +221,27 @@ impl NewEvent {
 						issues::message.eq(&self.message),
 						issues::active.eq(active),
 						issues::last_seen.eq(jiff_diesel::Timestamp::from(new_last_seen)),
-						issues::resolved_at.eq(diesel::dsl::sql::<diesel::sql_types::Nullable<diesel::sql_types::Timestamptz>>(
-							if clear_resolved { "NULL" } else { "issues.resolved_at" },
-						)),
-						issues::resolved_by.eq(diesel::dsl::sql::<diesel::sql_types::Nullable<diesel::sql_types::Text>>(
-							if clear_resolved { "NULL" } else { "issues.resolved_by" },
-						)),
-						issues::resolved_reason.eq(diesel::dsl::sql::<diesel::sql_types::Nullable<diesel::sql_types::Text>>(
-							if clear_resolved { "NULL" } else { "issues.resolved_reason" },
-						)),
+						issues::resolved_at.eq(diesel::dsl::sql::<
+							diesel::sql_types::Nullable<diesel::sql_types::Timestamptz>,
+						>(if clear_resolved {
+							"NULL"
+						} else {
+							"issues.resolved_at"
+						})),
+						issues::resolved_by.eq(diesel::dsl::sql::<
+							diesel::sql_types::Nullable<diesel::sql_types::Text>,
+						>(if clear_resolved {
+							"NULL"
+						} else {
+							"issues.resolved_by"
+						})),
+						issues::resolved_reason.eq(diesel::dsl::sql::<
+							diesel::sql_types::Nullable<diesel::sql_types::Text>,
+						>(if clear_resolved {
+							"NULL"
+						} else {
+							"issues.resolved_reason"
+						})),
 					))
 					.returning(Issue::as_select())
 					.get_result(conn)
@@ -276,8 +293,7 @@ impl NewEvent {
 				diesel::insert_into(events::table)
 					.values((
 						events::issue_id.eq(issue.id),
-						events::occurred_at
-							.eq(self.occurred_at.map(jiff_diesel::Timestamp::from)),
+						events::occurred_at.eq(self.occurred_at.map(jiff_diesel::Timestamp::from)),
 						events::severity.eq(severity),
 						events::description.eq(description),
 						events::message.eq(&self.message),
@@ -319,9 +335,7 @@ async fn re_evaluate_incident_membership(
 	use crate::schema::{incident_issues, incidents};
 
 	let was_in = is_issue_in_open_incident(conn, issue.id).await?;
-	let snoozed = issue
-		.snoozed_until
-		.map_or(false, |t| t > Timestamp::now());
+	let snoozed = issue.snoozed_until.map_or(false, |t| t > Timestamp::now());
 
 	// Leave gates: active=false, human-resolved, or snoozed. Severity downgrade
 	// alone is *not* a leave gate — once contributing, an issue stays until
@@ -333,14 +347,12 @@ async fn re_evaluate_incident_membership(
 
 	match (was_in, should_join, should_leave) {
 		(false, true, _) => {
-			let incident_id =
-				find_or_open_incident(conn, root_server_id, transition_time).await?;
+			let incident_id = find_or_open_incident(conn, root_server_id, transition_time).await?;
 			diesel::insert_into(incident_issues::table)
 				.values((
 					incident_issues::incident_id.eq(incident_id),
 					incident_issues::issue_id.eq(issue.id),
-					incident_issues::joined_at
-						.eq(jiff_diesel::Timestamp::from(transition_time)),
+					incident_issues::joined_at.eq(jiff_diesel::Timestamp::from(transition_time)),
 				))
 				.execute(conn)
 				.await?;
@@ -381,12 +393,10 @@ async fn re_evaluate_incident_membership(
 				.get_result(conn)
 				.await?;
 			if remaining_open == 0 {
-				diesel::update(
-					incidents::table.filter(incidents::id.eq(open_link.incident_id)),
-				)
-				.set(incidents::closed_at.eq(jiff_diesel::Timestamp::from(transition_time)))
-				.execute(conn)
-				.await?;
+				diesel::update(incidents::table.filter(incidents::id.eq(open_link.incident_id)))
+					.set(incidents::closed_at.eq(jiff_diesel::Timestamp::from(transition_time)))
+					.execute(conn)
+					.await?;
 			}
 		}
 		_ => {}
@@ -417,10 +427,7 @@ async fn root_server_id(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<U
 	Ok(row.id)
 }
 
-async fn is_issue_in_open_incident(
-	db: &mut AsyncPgConnection,
-	issue_id: Uuid,
-) -> Result<bool> {
+async fn is_issue_in_open_incident(db: &mut AsyncPgConnection, issue_id: Uuid) -> Result<bool> {
 	use crate::schema::incident_issues;
 
 	let count: i64 = incident_issues::table
@@ -526,11 +533,7 @@ impl Issue {
 
 	/// Mark an issue as acknowledged (or update the acker). Doesn't touch
 	/// incident membership — ack is purely informational.
-	pub async fn ack(
-		db: &mut AsyncPgConnection,
-		issue_id: Uuid,
-		by: &str,
-	) -> Result<Self> {
+	pub async fn ack(db: &mut AsyncPgConnection, issue_id: Uuid, by: &str) -> Result<Self> {
 		use crate::schema::issues;
 
 		diesel::update(issues::table.filter(issues::id.eq(issue_id)))
@@ -548,8 +551,7 @@ impl Issue {
 		use crate::schema::issues;
 		diesel::update(issues::table.filter(issues::id.eq(issue_id)))
 			.set((
-				issues::acknowledged_at
-					.eq(None::<jiff_diesel::Timestamp>),
+				issues::acknowledged_at.eq(None::<jiff_diesel::Timestamp>),
 				issues::acknowledged_by.eq(None::<String>),
 			))
 			.returning(Self::as_select())
@@ -725,11 +727,7 @@ impl Incident {
 		Ok((incident, rows))
 	}
 
-	pub async fn ack(
-		db: &mut AsyncPgConnection,
-		incident_id: Uuid,
-		by: &str,
-	) -> Result<Self> {
+	pub async fn ack(db: &mut AsyncPgConnection, incident_id: Uuid, by: &str) -> Result<Self> {
 		use crate::schema::incidents;
 
 		diesel::update(incidents::table.filter(incidents::id.eq(incident_id)))
@@ -747,8 +745,7 @@ impl Incident {
 		use crate::schema::incidents;
 		diesel::update(incidents::table.filter(incidents::id.eq(incident_id)))
 			.set((
-				incidents::acknowledged_at
-					.eq(None::<jiff_diesel::Timestamp>),
+				incidents::acknowledged_at.eq(None::<jiff_diesel::Timestamp>),
 				incidents::acknowledged_by.eq(None::<String>),
 			))
 			.returning(Self::as_select())

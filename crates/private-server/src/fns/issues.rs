@@ -182,9 +182,12 @@ pub async fn list_events(
 	Json(args): Json<ListEventsArgs>,
 ) -> Result<Json<Vec<EventData>>> {
 	let mut conn = state.db.get().await?;
-	let events =
-		Event::list_for_issue(&mut conn, args.issue_id, args.limit.unwrap_or(DEFAULT_LIMIT))
-			.await?;
+	let events = Event::list_for_issue(
+		&mut conn,
+		args.issue_id,
+		args.limit.unwrap_or(DEFAULT_LIMIT),
+	)
+	.await?;
 	Ok(Json(events.into_iter().map(EventData::from).collect()))
 }
 
