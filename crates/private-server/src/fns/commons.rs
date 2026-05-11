@@ -1,21 +1,39 @@
 use axum::Json;
-use axum::routing::{Router, post};
-use commons_errors::{AppError, Result};
+use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
+use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::state::AppState;
 
-pub fn routes() -> Router<AppState> {
-	Router::new()
-		.route("/public_url", post(public_url))
-		.route("/server_versions_url", post(server_versions_url))
-		.route("/is_current_user_admin", post(is_current_user_admin))
+pub fn routes() -> OpenApiRouter<AppState> {
+	OpenApiRouter::new()
+		.routes(routes!(public_url))
+		.routes(routes!(server_versions_url))
+		.routes(routes!(is_current_user_admin))
 }
 
+#[utoipa::path(
+	post,
+	path = "/public_url",
+	tag = "commons",
+	responses(
+		(status = 200, description = "Public-server URL, if configured.", body = Option<String>),
+		(status = 500, body = ProblemDetailsSchema),
+	),
+)]
 pub async fn public_url() -> Result<Json<Option<String>>> {
 	Ok(Json(std::env::var("PUBLIC_URL").ok()))
 }
 
+#[utoipa::path(
+	post,
+	path = "/server_versions_url",
+	tag = "commons",
+	responses(
+		(status = 200, description = "Server-versions URL with embedded auth secret, if configured.", body = Option<String>),
+		(status = 500, body = ProblemDetailsSchema),
+	),
+)]
 pub async fn server_versions_url() -> Result<Json<Option<String>>> {
 	let url = (|| {
 		let public_url = std::env::var("PUBLIC_URL").ok()?;
@@ -25,6 +43,15 @@ pub async fn server_versions_url() -> Result<Json<Option<String>>> {
 	Ok(Json(url))
 }
 
+#[utoipa::path(
+	post,
+	path = "/is_current_user_admin",
+	tag = "commons",
+	security(("tailscale-user" = [])),
+	responses(
+		(status = 200, description = "Whether the calling Tailscale user is on the admin allow-list.", body = bool),
+	),
+)]
 pub async fn is_current_user_admin(
 	admin: std::result::Result<TailscaleAdmin, AppError>,
 ) -> Json<bool> {
