@@ -10,8 +10,10 @@ import {
 	Tooltip,
 	Typography,
 } from "@mui/material";
+import CheckCircleOutlinedIcon from "@mui/icons-material/CheckCircleOutlined";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import SnoozeIcon from "@mui/icons-material/Snooze";
 import { useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
@@ -241,7 +243,12 @@ function HeaderActor({
 		);
 	}
 	return (
-		<Button size="small" onClick={doAck} disabled={ack.pending}>
+		<Button
+			size="small"
+			variant="outlined"
+			onClick={doAck}
+			disabled={ack.pending}
+		>
 			Ack
 		</Button>
 	);
@@ -339,7 +346,9 @@ function IssueActions({
 				{issue.resolved_at ? (
 					<Button
 						size="small"
+						variant="outlined"
 						color="warning"
+						startIcon={<CheckCircleOutlinedIcon />}
 						onClick={() => wrap(() => unresolve.call({ issue_id: issue.id }))}
 					>
 						Unresolve
@@ -352,7 +361,9 @@ function IssueActions({
 						<span>
 							<Button
 								size="small"
+								variant="outlined"
 								color="success"
+								startIcon={<CheckCircleOutlinedIcon />}
 								disabled={!issue.acknowledged_at}
 								onClick={() => setResolveOpen((v) => !v)}
 							>
@@ -364,13 +375,20 @@ function IssueActions({
 				{snoozeActive ? (
 					<Button
 						size="small"
+						variant="outlined"
 						color="warning"
+						startIcon={<SnoozeIcon />}
 						onClick={() => wrap(() => unsnooze.call({ issue_id: issue.id }))}
 					>
 						Unsnooze
 					</Button>
 				) : (
-					<Button size="small" onClick={() => setSnoozeOpen((v) => !v)}>
+					<Button
+						size="small"
+						variant="outlined"
+						startIcon={<SnoozeIcon />}
+						onClick={() => setSnoozeOpen((v) => !v)}
+					>
 						Snooze…
 					</Button>
 				)}
@@ -379,6 +397,7 @@ function IssueActions({
 					parentKey="issue_id"
 					parentId={issue.id}
 					onAdded={onNoteAdded}
+					variant="outlined"
 				/>
 			</Stack>
 			{resolveOpen && (
@@ -398,8 +417,10 @@ function IssueActions({
 						))}
 					</TextField>
 					<Button
-						variant="contained"
+						variant="outlined"
 						size="small"
+						color="success"
+						startIcon={<CheckCircleOutlinedIcon />}
 						onClick={() =>
 							wrap(() => resolve.call({ issue_id: issue.id, reason })).then(
 								() => setResolveOpen(false),
@@ -408,7 +429,11 @@ function IssueActions({
 					>
 						Resolve
 					</Button>
-					<Button size="small" onClick={() => setResolveOpen(false)}>
+					<Button
+						variant="outlined"
+						size="small"
+						onClick={() => setResolveOpen(false)}
+					>
 						Cancel
 					</Button>
 				</Stack>
@@ -425,8 +450,9 @@ function IssueActions({
 						slotProps={{ htmlInput: { min: 1, max: 24 * 30 } }}
 					/>
 					<Button
-						variant="contained"
+						variant="outlined"
 						size="small"
+						startIcon={<SnoozeIcon />}
 						onClick={() => {
 							const until = new Date(
 								Date.now() + snoozeHours * 3_600_000,
@@ -438,7 +464,11 @@ function IssueActions({
 					>
 						Snooze
 					</Button>
-					<Button size="small" onClick={() => setSnoozeOpen(false)}>
+					<Button
+						variant="outlined"
+						size="small"
+						onClick={() => setSnoozeOpen(false)}
+					>
 						Cancel
 					</Button>
 				</Stack>

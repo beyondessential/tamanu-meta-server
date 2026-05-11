@@ -14,6 +14,7 @@ import {
 	Typography,
 } from "@mui/material";
 import BugReportIcon from "@mui/icons-material/BugReport";
+import CheckCircleOutlinedIcon from "@mui/icons-material/CheckCircleOutlined";
 import NotesIcon from "@mui/icons-material/StickyNote2";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import TimelineIcon from "@mui/icons-material/Timeline";
@@ -229,6 +230,7 @@ function Header({
 						size="small"
 						variant="outlined"
 						color="warning"
+						startIcon={<CheckCircleOutlinedIcon />}
 						onClick={() =>
 							wrap(() => unresolve.call({ incident_id: incident.id }))
 						}
@@ -245,6 +247,7 @@ function Header({
 								size="small"
 								variant="outlined"
 								color="success"
+								startIcon={<CheckCircleOutlinedIcon />}
 								disabled={!incident.acknowledged_at}
 								onClick={() => setResolveOpen((v) => !v)}
 							>
@@ -305,6 +308,8 @@ function Header({
 					<Button
 						variant="outlined"
 						size="small"
+						color="success"
+						startIcon={<CheckCircleOutlinedIcon />}
 						onClick={() =>
 							wrap(() =>
 								resolve.call({ incident_id: incident.id, reason }),
