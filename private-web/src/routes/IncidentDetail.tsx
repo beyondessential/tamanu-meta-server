@@ -360,6 +360,7 @@ function Timeline({
 					<IssueRow
 						key={`issue-${e.issue.issue.id}`}
 						issue={e.issue.issue}
+						defaultExpanded
 						onChanged={onChanged}
 					/>
 				) : (

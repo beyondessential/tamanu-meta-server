@@ -55,13 +55,17 @@ function headline(issue: IssueData): string {
 export default function IssueRow({
 	issue,
 	showServer = false,
+	defaultExpanded = false,
 	onChanged,
 }: {
 	issue: IssueData;
 	showServer?: boolean;
+	/** Initial expanded state. Default `false` (collapsed) — fits list views;
+	 * incident-detail timelines pass `true`. */
+	defaultExpanded?: boolean;
 	onChanged: () => void;
 }) {
-	const [expanded, setExpanded] = useState(true);
+	const [expanded, setExpanded] = useState(defaultExpanded);
 	const [notesRefresh, setNotesRefresh] = useState(0);
 	const snoozeActive = isSnoozeActive(issue.snoozed_until);
 	const struckThrough = !issue.active || !!issue.resolved_at;
