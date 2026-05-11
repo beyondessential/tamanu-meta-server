@@ -17,6 +17,7 @@ import DeviceDetail from "./routes/DeviceDetail";
 import Devices from "./routes/Devices";
 import DevicesList from "./routes/DevicesList";
 import DevicesSearch from "./routes/DevicesSearch";
+import Incidents from "./routes/Incidents";
 import Status from "./routes/Status";
 import ServerDetail from "./routes/ServerDetail";
 import ServerEdit from "./routes/ServerEdit";
@@ -33,6 +34,7 @@ interface NavItem {
 
 const BASE_NAV: NavItem[] = [
 	{ label: "Status", to: "/status" },
+	{ label: "Incidents", to: "/incidents" },
 	{ label: "Servers", to: "/servers" },
 	{ label: "Versions", to: "/versions" },
 	{ label: "Devices", to: "/devices" },
@@ -129,6 +131,7 @@ export default function App() {
 				<Routes>
 					<Route path="/" element={<Navigate to="/status" replace />} />
 					<Route path="/status" element={<Status />} />
+					<Route path="/incidents" element={<Incidents />} />
 					<Route path="/admins" element={<Admins />} />
 					<Route path="/versions" element={<Versions />} />
 					<Route path="/versions/:version" element={<VersionDetail />} />
