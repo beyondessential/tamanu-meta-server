@@ -2,27 +2,28 @@ use std::time::{Duration, Instant};
 
 use axum::Json;
 use axum::extract::State;
-use axum::routing::{Router, post};
 use bestool_postgres::error::format_db_error;
 use bestool_postgres::stringify::postgres_to_json_value;
 use bestool_postgres::text_cast::{CellRef, TextCaster};
-use commons_errors::{AppError, Result};
+use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleUser;
 use database::sql_playground_history::SqlPlaygroundHistory;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use utoipa::ToSchema;
+use utoipa_axum::{router::OpenApiRouter, routes};
 use uuid::Uuid;
 
 use crate::fns::Page;
 use crate::state::AppState;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SqlQuery {
 	pub query: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SqlResult {
 	pub columns: Vec<String>,
 	pub rows: Vec<Vec<Value>>,
@@ -30,7 +31,7 @@ pub struct SqlResult {
 	pub execution_time_ms: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SqlHistoryEntry {
 	pub id: Uuid,
 	pub query: String,
@@ -38,23 +39,42 @@ pub struct SqlHistoryEntry {
 	pub created_at: Timestamp,
 }
 
-pub fn routes() -> Router<AppState> {
-	Router::new()
-		.route("/is_sql_available", post(is_sql_available))
-		.route("/execute_query", post(execute_query))
-		.route("/get_last_user_query", post(get_last_user_query))
-		.route("/get_query_history", post(get_query_history))
+pub fn routes() -> OpenApiRouter<AppState> {
+	OpenApiRouter::new()
+		.routes(routes!(is_sql_available))
+		.routes(routes!(execute_query))
+		.routes(routes!(get_last_user_query))
+		.routes(routes!(get_query_history))
 }
 
+#[utoipa::path(
+	post,
+	path = "/is_sql_available",
+	tag = "sql",
+	responses(
+		(status = 200, description = "Whether the read-only SQL playground is configured.", body = bool),
+	),
+)]
 pub async fn is_sql_available(State(state): State<AppState>) -> Json<bool> {
 	Json(state.ro_pool.is_some())
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct ExecuteArgs {
 	pub query: SqlQuery,
 }
 
+#[utoipa::path(
+	post,
+	path = "/execute_query",
+	tag = "sql",
+	security(("tailscale-user" = [])),
+	request_body = ExecuteArgs,
+	responses(
+		(status = 200, body = SqlResult),
+		(status = 500, body = ProblemDetailsSchema),
+	),
+)]
 pub async fn execute_query(
 	State(state): State<AppState>,
 	user: std::result::Result<TailscaleUser, AppError>,
@@ -165,6 +185,16 @@ pub async fn execute_query(
 	}))
 }
 
+#[utoipa::path(
+	post,
+	path = "/get_last_user_query",
+	tag = "sql",
+	security(("tailscale-user" = [])),
+	responses(
+		(status = 200, description = "The caller's most recent SQL playground query, if any.", body = Option<String>),
+		(status = 500, body = ProblemDetailsSchema),
+	),
+)]
 pub async fn get_last_user_query(
 	State(state): State<AppState>,
 	user: std::result::Result<TailscaleUser, AppError>,
@@ -177,12 +207,22 @@ pub async fn get_last_user_query(
 	Ok(Json(last))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct HistoryArgs {
 	pub offset: u64,
 	pub limit: Option<u64>,
 }
 
+#[utoipa::path(
+	post,
+	path = "/get_query_history",
+	tag = "sql",
+	request_body = HistoryArgs,
+	responses(
+		(status = 200, body = Page<SqlHistoryEntry>),
+		(status = 500, body = ProblemDetailsSchema),
+	),
+)]
 pub async fn get_query_history(
 	State(state): State<AppState>,
 	Json(args): Json<HistoryArgs>,
