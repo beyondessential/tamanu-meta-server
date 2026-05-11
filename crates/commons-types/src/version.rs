@@ -12,7 +12,17 @@ use node_semver::SemverError;
 use serde::{Deserialize, Serialize};
 
 #[derive(
-	Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize, Default, AsExpression,
+	Debug,
+	Clone,
+	Copy,
+	Eq,
+	PartialEq,
+	Hash,
+	Serialize,
+	Deserialize,
+	Default,
+	AsExpression,
+	utoipa::ToSchema,
 )]
 #[diesel(sql_type = Text)]
 #[serde(rename_all = "lowercase")]
@@ -77,9 +87,20 @@ where
 }
 
 #[derive(
-	Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, AsExpression,
+	Debug,
+	Clone,
+	Eq,
+	PartialEq,
+	Ord,
+	PartialOrd,
+	Hash,
+	Serialize,
+	Deserialize,
+	AsExpression,
+	utoipa::ToSchema,
 )]
 #[diesel(sql_type = Text)]
+#[schema(value_type = String, example = "2.10.5")]
 pub struct VersionStr(pub node_semver::Version);
 
 impl Display for VersionStr {

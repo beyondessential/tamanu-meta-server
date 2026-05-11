@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 	Serialize,
 	Deserialize,
 	AsExpression,
+	utoipa::ToSchema,
 )]
 #[diesel(sql_type = Text)]
 #[serde(rename_all = "lowercase")]

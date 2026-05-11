@@ -7,7 +7,10 @@ use diesel::{
 };
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, AsExpression)]
+#[derive(
+	Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, AsExpression,
+	utoipa::ToSchema,
+)]
 #[diesel(sql_type = Text)]
 #[serde(rename_all = "lowercase")]
 pub enum DeviceRole {

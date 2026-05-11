@@ -13,7 +13,10 @@ use serde::{Deserialize, Serialize};
 /// Default is `Error` (incidents only open at severity ≥ Error, so the
 /// default is intentionally above the floor — most devices that bother
 /// pushing an event mean it).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, AsExpression)]
+#[derive(
+	Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, AsExpression,
+	utoipa::ToSchema,
+)]
 #[diesel(sql_type = Text)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
@@ -124,7 +127,10 @@ where
 /// - `Duplicate` — a duplicate of another issue.
 /// - `Flapping` — too noisy; suppressed rather than fixed (often paired with
 ///   a snooze).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, AsExpression)]
+#[derive(
+	Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, AsExpression,
+	utoipa::ToSchema,
+)]
 #[diesel(sql_type = Text)]
 #[serde(rename_all = "snake_case")]
 pub enum ResolvedReason {

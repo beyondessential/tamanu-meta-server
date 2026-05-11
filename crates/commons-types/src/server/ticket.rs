@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use super::{kind::ServerKind, rank::ServerRank};
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CanopyTicket {
 	/// Ticket format version, must be "ticket-1".
