@@ -10,6 +10,7 @@ use utoipa::{
 	info(
 		title = "canopy private-server",
 		description = "Admin/operator API for the canopy fleet manager. Requests are gated behind Tailscale auth; admin-only endpoints additionally check the caller is on the admin list.",
+		contact(name = "BES Developers", email = "contact@bes.au"),
 		license(name = "GPL-3.0-or-later"),
 	),
 	modifiers(&SecuritySchemes),
