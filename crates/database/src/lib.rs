@@ -8,6 +8,7 @@ pub mod artifacts;
 pub mod bestool_snippets;
 pub mod chrome_releases;
 pub mod devices;
+pub mod issues;
 pub mod pg_duration;
 pub mod schema;
 pub mod servers;
