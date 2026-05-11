@@ -491,7 +491,9 @@ impl Issue {
 			.filter(dsl::device_id.eq(device_id))
 			.into_boxed();
 		if filter == IssueFilter::ActiveOnly {
-			q = q.filter(dsl::active.eq(true));
+			q = q
+				.filter(dsl::active.eq(true))
+				.filter(dsl::resolved_at.is_null());
 		}
 		q.order(dsl::last_seen.desc())
 			.limit(limit)
@@ -513,7 +515,9 @@ impl Issue {
 			.filter(dsl::server_id.eq(server_id))
 			.into_boxed();
 		if filter == IssueFilter::ActiveOnly {
-			q = q.filter(dsl::active.eq(true));
+			q = q
+				.filter(dsl::active.eq(true))
+				.filter(dsl::resolved_at.is_null());
 		}
 		q.order(dsl::last_seen.desc())
 			.limit(limit)
@@ -524,7 +528,9 @@ impl Issue {
 
 	/// Filtered cross-server issues list. Used by the global Incidents page.
 	///
-	/// - `active_only`: when true, only `active = true` issues.
+	/// - `active_only`: when true, only `active = true` *and* unresolved
+	///   issues — operator-resolved items don't count even if the source
+	///   keeps pushing them.
 	/// - `severities`: when `Some` and non-empty, restrict to those.
 	/// - `server_group_id`: when `Some`, restrict to issues whose server is
 	///   in the descendant tree of that root (uses a recursive CTE via
@@ -551,7 +557,9 @@ impl Issue {
 
 		let mut q = dsl::issues.select(Self::as_select()).into_boxed();
 		if filters.active_only {
-			q = q.filter(dsl::active.eq(true));
+			q = q
+				.filter(dsl::active.eq(true))
+				.filter(dsl::resolved_at.is_null());
 		}
 		if let Some(sevs) = filters.severities.as_ref().filter(|v| !v.is_empty()) {
 			let strs: Vec<String> = sevs.iter().map(|s| s.to_string()).collect();
