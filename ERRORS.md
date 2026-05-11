@@ -62,6 +62,17 @@ Issued when the authenticated device is valid but lacks the necessary role.
 
 Issued when authentication fails for unspecified reasons.
 
+## Device has no server
+
+Issued when a device tries to submit an event but is not registered against
+any server. Devices must be linked to a server (`servers.device_id`) before
+they can report issues.
+
+## Source manual forbidden
+
+Issued when an event submission to the public API uses `source = "manual"`.
+That source is reserved for operator-submitted events via the private API.
+
 ## Other
 
 An unclassified error.
