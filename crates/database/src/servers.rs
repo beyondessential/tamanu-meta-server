@@ -337,10 +337,7 @@ impl Server {
 
 	/// All server ids reachable from `root_id` via `parent_server_id` links,
 	/// inclusive of the root itself. A single recursive CTE.
-	pub async fn descendant_ids(
-		db: &mut AsyncPgConnection,
-		root_id: Uuid,
-	) -> Result<Vec<Uuid>> {
+	pub async fn descendant_ids(db: &mut AsyncPgConnection, root_id: Uuid) -> Result<Vec<Uuid>> {
 		use diesel::sql_types::Uuid as SqlUuid;
 
 		#[derive(QueryableByName)]

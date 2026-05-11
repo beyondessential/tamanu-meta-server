@@ -455,10 +455,7 @@ async fn is_issue_in_open_incident(db: &mut AsyncPgConnection, issue_id: Uuid) -
 	Ok(count > 0)
 }
 
-async fn group_has_open_incident(
-	db: &mut AsyncPgConnection,
-	root_server_id: Uuid,
-) -> Result<bool> {
+async fn group_has_open_incident(db: &mut AsyncPgConnection, root_server_id: Uuid) -> Result<bool> {
 	use crate::schema::incidents::dsl;
 
 	let count: i64 = dsl::incidents

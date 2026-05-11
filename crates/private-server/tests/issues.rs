@@ -111,7 +111,11 @@ async fn incident_groups_at_root_server() {
 		let items: Vec<serde_json::Value> = resp.json();
 		assert_eq!(items.len(), 1, "incident lives on the root server");
 		assert!(items[0].get("closed_at").map_or(true, |v| v.is_null()));
-		let root_incident_id = items[0].get("id").and_then(|v| v.as_str()).unwrap().to_string();
+		let root_incident_id = items[0]
+			.get("id")
+			.and_then(|v| v.as_str())
+			.unwrap()
+			.to_string();
 
 		// Asking via the child's id resolves to the same group, so it returns
 		// the same incident — the endpoint walks parent_server_id to the root.
@@ -303,7 +307,10 @@ async fn low_severity_alone_does_not_open_incident() {
 			.json(&serde_json::json!({ "server_id": server_id }))
 			.await;
 		let items: Vec<serde_json::Value> = resp.json();
-		assert!(items.is_empty(), "low-severity alone must not open incident");
+		assert!(
+			items.is_empty(),
+			"low-severity alone must not open incident"
+		);
 	})
 	.await;
 }

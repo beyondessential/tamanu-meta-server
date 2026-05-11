@@ -245,8 +245,12 @@ export interface IssueData {
 	last_seen: string;
 	acknowledged_at: string | null;
 	acknowledged_by: string | null;
+	acknowledged_by_name: string | null;
+	acknowledged_by_pic: string | null;
 	resolved_at: string | null;
 	resolved_by: string | null;
+	resolved_by_name: string | null;
+	resolved_by_pic: string | null;
 	/** Raw stored value; matches a `ResolvedReason` when set by the API. */
 	resolved_reason: string | null;
 	snoozed_until: string | null;
@@ -279,8 +283,12 @@ export interface IncidentData {
 	closed_at: string | null;
 	acknowledged_at: string | null;
 	acknowledged_by: string | null;
+	acknowledged_by_name: string | null;
+	acknowledged_by_pic: string | null;
 	resolved_at: string | null;
 	resolved_by: string | null;
+	resolved_by_name: string | null;
+	resolved_by_pic: string | null;
 	resolved_reason: string | null;
 	created_at: string;
 	updated_at: string;

@@ -1,6 +1,7 @@
 import { Box, Stack, Typography } from "@mui/material";
 import { Link as RouterLink } from "react-router-dom";
 import TimeAgo from "./TimeAgo";
+import UserAvatar from "./UserAvatar";
 import type { IncidentData } from "../types";
 
 function serverLabel(name: string | null, host: string): string {
@@ -36,15 +37,13 @@ export default function IncidentCard({ incident }: { incident: IncidentData }) {
 				<Typography variant="body2" color="text.secondary">
 					opened <TimeAgo timestamp={incident.opened_at} />
 				</Typography>
-				<Stack direction="row" spacing={1}>
+				<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
 					{incident.acknowledged_at && (
-						<Typography
-							variant="caption"
-							color="info.main"
-							title={`by ${incident.acknowledged_by ?? "?"}`}
-						>
-							acked
-						</Typography>
+						<UserAvatar
+							login={incident.acknowledged_by}
+							name={incident.acknowledged_by_name}
+							profilePic={incident.acknowledged_by_pic}
+						/>
 					)}
 					{incident.resolved_at && (
 						<Typography

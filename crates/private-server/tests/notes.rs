@@ -23,9 +23,14 @@ async fn seed_issue_and_incident(
 		}))
 		.await;
 	r.assert_status_ok();
-	let issue_id =
-		Uuid::parse_str(r.json::<serde_json::Value>().get("id").unwrap().as_str().unwrap())
-			.unwrap();
+	let issue_id = Uuid::parse_str(
+		r.json::<serde_json::Value>()
+			.get("id")
+			.unwrap()
+			.as_str()
+			.unwrap(),
+	)
+	.unwrap();
 
 	let resp = private
 		.post("/api/incidents/list_for_server")
@@ -46,11 +51,18 @@ async fn issue_notes_lifecycle() {
 			.json(&serde_json::json!({ "issue_id": issue_id, "body": "first note" }))
 			.await;
 		add.assert_status_ok();
-		let first_id =
-			Uuid::parse_str(add.json::<serde_json::Value>().get("id").unwrap().as_str().unwrap())
-				.unwrap();
+		let first_id = Uuid::parse_str(
+			add.json::<serde_json::Value>()
+				.get("id")
+				.unwrap()
+				.as_str()
+				.unwrap(),
+		)
+		.unwrap();
 		assert_eq!(
-			add.json::<serde_json::Value>().get("author").and_then(|v| v.as_str()),
+			add.json::<serde_json::Value>()
+				.get("author")
+				.and_then(|v| v.as_str()),
 			Some("admin@localhost")
 		);
 
@@ -86,7 +98,10 @@ async fn issue_notes_lifecycle() {
 			.await;
 		let items: Vec<serde_json::Value> = listed.json();
 		assert_eq!(items.len(), 1);
-		assert_eq!(items[0].get("body").and_then(|v| v.as_str()), Some("second note"));
+		assert_eq!(
+			items[0].get("body").and_then(|v| v.as_str()),
+			Some("second note")
+		);
 
 		// Reject empty body.
 		let bad = private
@@ -115,7 +130,10 @@ async fn incident_notes_lifecycle() {
 			.await;
 		let items: Vec<serde_json::Value> = listed.json();
 		assert_eq!(items.len(), 1);
-		assert_eq!(items[0].get("body").and_then(|v| v.as_str()), Some("investigating"));
+		assert_eq!(
+			items[0].get("body").and_then(|v| v.as_str()),
+			Some("investigating")
+		);
 	})
 	.await;
 }

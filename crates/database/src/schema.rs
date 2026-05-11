@@ -209,6 +209,16 @@ diesel::table! {
 }
 
 diesel::table! {
+	tailscale_users (login) {
+		login -> Text,
+		name -> Text,
+		profile_pic -> Nullable<Text>,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
 	versions (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
@@ -259,5 +269,6 @@ diesel::allow_tables_to_appear_in_same_query!(
 	servers,
 	sql_playground_history,
 	statuses,
+	tailscale_users,
 	versions,
 );

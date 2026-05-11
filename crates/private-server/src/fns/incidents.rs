@@ -7,10 +7,11 @@ use commons_types::{Uuid, issue::ResolvedReason};
 use database::issues::{Incident, IncidentIssue};
 use database::notes::IncidentNote;
 use database::servers::Server;
+use database::tailscale_users::TailscaleUser as CachedTailscaleUser;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
-use crate::fns::issues::{IssueData, enrich_issues};
+use crate::fns::issues::{IssueData, enrich_issues, lookup_user};
 use crate::state::AppState;
 
 const DEFAULT_LIMIT: i64 = 100;
@@ -26,15 +27,26 @@ pub struct IncidentData {
 	pub closed_at: Option<Timestamp>,
 	pub acknowledged_at: Option<Timestamp>,
 	pub acknowledged_by: Option<String>,
+	pub acknowledged_by_name: Option<String>,
+	pub acknowledged_by_pic: Option<String>,
 	pub resolved_at: Option<Timestamp>,
 	pub resolved_by: Option<String>,
+	pub resolved_by_name: Option<String>,
+	pub resolved_by_pic: Option<String>,
 	pub resolved_reason: Option<String>,
 	pub created_at: Timestamp,
 	pub updated_at: Timestamp,
 }
 
 impl IncidentData {
-	fn from_with(i: Incident, server_name: Option<String>, server_host: String) -> Self {
+	fn from_with(
+		i: Incident,
+		server_name: Option<String>,
+		server_host: String,
+		users: &std::collections::HashMap<String, CachedTailscaleUser>,
+	) -> Self {
+		let (ack_name, ack_pic) = lookup_user(users, i.acknowledged_by.as_deref());
+		let (res_name, res_pic) = lookup_user(users, i.resolved_by.as_deref());
 		Self {
 			id: i.id,
 			server_id: i.server_id,
@@ -44,13 +56,30 @@ impl IncidentData {
 			closed_at: i.closed_at,
 			acknowledged_at: i.acknowledged_at,
 			acknowledged_by: i.acknowledged_by,
+			acknowledged_by_name: ack_name,
+			acknowledged_by_pic: ack_pic,
 			resolved_at: i.resolved_at,
 			resolved_by: i.resolved_by,
+			resolved_by_name: res_name,
+			resolved_by_pic: res_pic,
 			resolved_reason: i.resolved_reason,
 			created_at: i.created_at,
 			updated_at: i.updated_at,
 		}
 	}
+}
+
+fn collect_incident_user_logins(incidents: &[Incident]) -> Vec<&str> {
+	let mut s: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+	for i in incidents {
+		if let Some(l) = i.acknowledged_by.as_deref() {
+			s.insert(l);
+		}
+		if let Some(l) = i.resolved_by.as_deref() {
+			s.insert(l);
+		}
+	}
+	s.into_iter().collect()
 }
 
 async fn enrich_incidents(
@@ -59,6 +88,8 @@ async fn enrich_incidents(
 ) -> Result<Vec<IncidentData>> {
 	let ids: Vec<Uuid> = incidents.iter().map(|i| i.server_id).collect();
 	let names = Server::names_by_ids(conn, &ids).await?;
+	let user_logins = collect_incident_user_logins(&incidents);
+	let users = CachedTailscaleUser::by_logins(conn, &user_logins).await?;
 	Ok(incidents
 		.into_iter()
 		.map(|i| {
@@ -66,7 +97,7 @@ async fn enrich_incidents(
 				.get(&i.server_id)
 				.cloned()
 				.unwrap_or((None, String::new()));
-			IncidentData::from_with(i, name, host)
+			IncidentData::from_with(i, name, host, &users)
 		})
 		.collect())
 }
@@ -79,7 +110,9 @@ async fn enrich_incident(
 	let (name, host) = names
 		.remove(&incident.server_id)
 		.unwrap_or((None, String::new()));
-	Ok(IncidentData::from_with(incident, name, host))
+	let user_logins = collect_incident_user_logins(std::slice::from_ref(&incident));
+	let users = CachedTailscaleUser::by_logins(conn, &user_logins).await?;
+	Ok(IncidentData::from_with(incident, name, host, &users))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -194,6 +227,7 @@ pub async fn ack(
 	Json(args): Json<IncidentIdArgs>,
 ) -> Result<Json<IncidentData>> {
 	let mut conn = state.db.get().await?;
+	CachedTailscaleUser::upsert(&mut conn, &user.login, &user.name, user.profile_pic.as_deref()).await?;
 	let incident = Incident::ack(&mut conn, args.incident_id, &user.login).await?;
 	Ok(Json(enrich_incident(&mut conn, incident).await?))
 }
@@ -220,6 +254,7 @@ pub async fn resolve(
 	Json(args): Json<ResolveIncidentArgs>,
 ) -> Result<Json<IncidentData>> {
 	let mut conn = state.db.get().await?;
+	CachedTailscaleUser::upsert(&mut conn, &user.login, &user.name, user.profile_pic.as_deref()).await?;
 	let incident = Incident::resolve(&mut conn, args.incident_id, &user.login, args.reason).await?;
 	Ok(Json(enrich_incident(&mut conn, incident).await?))
 }
@@ -293,7 +328,9 @@ pub async fn list_notes(
 		args.limit.unwrap_or(DEFAULT_LIMIT),
 	)
 	.await?;
-	Ok(Json(notes.into_iter().map(IncidentNoteData::from).collect()))
+	Ok(Json(
+		notes.into_iter().map(IncidentNoteData::from).collect(),
+	))
 }
 
 #[derive(Deserialize)]
