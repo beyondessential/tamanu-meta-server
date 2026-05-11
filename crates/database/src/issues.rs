@@ -925,24 +925,82 @@ impl Incident {
 	/// *not* force `closed_at` (that's still driven by auto rules). An
 	/// open incident can be resolved (acknowledging the cause) and a closed
 	/// incident can be resolved retroactively.
+	/// Resolve the incident. Cascades to every currently-contributing issue
+	/// (active link), marking them with the same reason and timestamp; each
+	/// one triggers `re_evaluate_incident_membership`, so the normal
+	/// auto-close path sets `closed_at` once the last issue leaves. As a
+	/// belt-and-suspenders, force-closes the incident if the cascade left
+	/// it open (e.g. an incident with no live links — shouldn't happen, but
+	/// we'd rather not leave the UI in a 'resolved but still open' state).
 	pub async fn resolve(
 		db: &mut AsyncPgConnection,
 		incident_id: Uuid,
 		by: &str,
 		reason: commons_types::issue::ResolvedReason,
 	) -> Result<Self> {
-		use crate::schema::incidents;
+		use crate::schema::{incident_issues, incidents, issues};
+		let now = Timestamp::now();
 
-		diesel::update(incidents::table.filter(incidents::id.eq(incident_id)))
+		db.transaction::<_, AppError, _>(async |conn| {
+			let open_issue_ids: Vec<Uuid> = incident_issues::table
+				.select(incident_issues::issue_id)
+				.filter(
+					incident_issues::incident_id
+						.eq(incident_id)
+						.and(incident_issues::left_at.is_null()),
+				)
+				.load(conn)
+				.await?;
+
+			for issue_id in open_issue_ids {
+				let existing: Issue = issues::table
+					.select(Issue::as_select())
+					.filter(issues::id.eq(issue_id))
+					.first(conn)
+					.await?;
+				if existing.resolved_at.is_some() {
+					// Already resolved by the operator earlier; leave the
+					// reason/by intact so the audit trail tells the truth.
+					continue;
+				}
+				let issue = diesel::update(issues::table.filter(issues::id.eq(issue_id)))
+					.set((
+						issues::resolved_at.eq(jiff_diesel::Timestamp::from(now)),
+						issues::resolved_by.eq(Some(by)),
+						issues::resolved_reason.eq(Some(reason.to_string())),
+					))
+					.returning(Issue::as_select())
+					.get_result(conn)
+					.await?;
+				let root = Server::root_id(conn, issue.server_id).await?;
+				re_evaluate_incident_membership(conn, &issue, root, now).await?;
+			}
+
+			let incident: Incident = diesel::update(
+				incidents::table.filter(incidents::id.eq(incident_id)),
+			)
 			.set((
-				incidents::resolved_at.eq(jiff_diesel::Timestamp::from(Timestamp::now())),
+				incidents::resolved_at.eq(jiff_diesel::Timestamp::from(now)),
 				incidents::resolved_by.eq(Some(by)),
 				incidents::resolved_reason.eq(Some(reason.to_string())),
 			))
-			.returning(Self::as_select())
-			.get_result(db)
-			.await
-			.map_err(AppError::from)
+			.returning(Incident::as_select())
+			.get_result(conn)
+			.await?;
+
+			if incident.closed_at.is_some() {
+				return Ok(incident);
+			}
+			let incident: Incident = diesel::update(
+				incidents::table.filter(incidents::id.eq(incident_id)),
+			)
+			.set(incidents::closed_at.eq(jiff_diesel::Timestamp::from(now)))
+			.returning(Incident::as_select())
+			.get_result(conn)
+			.await?;
+			Ok(incident)
+		})
+		.await
 	}
 
 	pub async fn unresolve(db: &mut AsyncPgConnection, incident_id: Uuid) -> Result<Self> {

@@ -695,7 +695,9 @@ async fn incident_ack_resolve_metadata() {
 		let body: serde_json::Value = acked.json();
 		assert!(body.get("acknowledged_at").is_some_and(|v| !v.is_null()));
 
-		// Incident resolve is metadata only — doesn't force closed_at.
+		// Incident resolve cascades to the issues inside, which auto-closes
+		// the incident — operators shouldn't see a 'resolved but still open'
+		// state.
 		let resolved = private
 			.post("/api/incidents/resolve")
 			.json(&serde_json::json!({ "incident_id": incident_id, "reason": "expected" }))
@@ -707,8 +709,8 @@ async fn incident_ack_resolve_metadata() {
 			Some("expected")
 		);
 		assert!(
-			body.get("closed_at").map_or(true, |v| v.is_null()),
-			"resolve doesn't force-close"
+			body.get("closed_at").is_some_and(|v| !v.is_null()),
+			"resolve closes the incident"
 		);
 	})
 	.await;
