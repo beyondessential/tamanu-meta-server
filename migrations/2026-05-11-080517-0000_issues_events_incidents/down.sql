@@ -1,0 +1,4 @@
+DROP TABLE IF EXISTS incident_issues;
+DROP TABLE IF EXISTS events;
+DROP TABLE IF EXISTS issues;
+DROP TABLE IF EXISTS incidents;
