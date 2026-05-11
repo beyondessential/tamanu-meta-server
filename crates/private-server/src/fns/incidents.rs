@@ -227,7 +227,6 @@ pub async fn ack(
 	Json(args): Json<IncidentIdArgs>,
 ) -> Result<Json<IncidentData>> {
 	let mut conn = state.db.get().await?;
-	CachedTailscaleUser::upsert(&mut conn, &user.login, &user.name, user.profile_pic.as_deref()).await?;
 	let incident = Incident::ack(&mut conn, args.incident_id, &user.login).await?;
 	Ok(Json(enrich_incident(&mut conn, incident).await?))
 }
@@ -254,7 +253,6 @@ pub async fn resolve(
 	Json(args): Json<ResolveIncidentArgs>,
 ) -> Result<Json<IncidentData>> {
 	let mut conn = state.db.get().await?;
-	CachedTailscaleUser::upsert(&mut conn, &user.login, &user.name, user.profile_pic.as_deref()).await?;
 	let incident = Incident::resolve(&mut conn, args.incident_id, &user.login, args.reason).await?;
 	Ok(Json(enrich_incident(&mut conn, incident).await?))
 }

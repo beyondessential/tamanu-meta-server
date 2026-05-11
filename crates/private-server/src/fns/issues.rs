@@ -383,7 +383,6 @@ pub async fn ack(
 	Json(args): Json<IssueIdArgs>,
 ) -> Result<Json<IssueData>> {
 	let mut conn = state.db.get().await?;
-	CachedTailscaleUser::upsert(&mut conn, &user.login, &user.name, user.profile_pic.as_deref()).await?;
 	let issue = Issue::ack(&mut conn, args.issue_id, &user.login).await?;
 	Ok(Json(enrich_issue(&mut conn, issue).await?))
 }
@@ -410,7 +409,6 @@ pub async fn resolve(
 	Json(args): Json<ResolveArgs>,
 ) -> Result<Json<IssueData>> {
 	let mut conn = state.db.get().await?;
-	CachedTailscaleUser::upsert(&mut conn, &user.login, &user.name, user.profile_pic.as_deref()).await?;
 	let issue = Issue::resolve(&mut conn, args.issue_id, &user.login, args.reason).await?;
 	Ok(Json(enrich_issue(&mut conn, issue).await?))
 }
