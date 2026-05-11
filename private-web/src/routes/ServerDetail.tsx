@@ -14,7 +14,7 @@ import EditIcon from "@mui/icons-material/Edit";
 import LanguageIcon from "@mui/icons-material/Language";
 import { useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
-import IncidentsSection from "../components/IncidentsSection";
+import IncidentsLink from "../components/IncidentsLink";
 import IssuesSection from "../components/IssuesSection";
 import ManualEventButton from "../components/ManualEventButton";
 import StatusDot from "../components/StatusDot";
@@ -83,6 +83,7 @@ export default function ServerDetail() {
 				data={data}
 				isAdmin={admin}
 				hasOpenIncident={hasOpenIncident}
+				refreshTick={refreshTick}
 				onEventSubmitted={bumpRefresh}
 			/>
 			<UrlAndDevice
@@ -99,13 +100,6 @@ export default function ServerDetail() {
 				refreshKey={refreshTick}
 				onChanged={bumpRefresh}
 			/>
-			{data.server.parent_server_id == null && (
-				<IncidentsSection
-					serverId={data.server.id}
-					refreshKey={refreshTick}
-					onChanged={bumpRefresh}
-				/>
-			)}
 			{data.child_servers.length > 0 && (
 				<ChildServers
 					children={data.child_servers}
@@ -128,13 +122,16 @@ function Header({
 	data,
 	isAdmin,
 	hasOpenIncident,
+	refreshTick,
 	onEventSubmitted,
 }: {
 	data: ServerDetailData;
 	isAdmin: boolean;
 	hasOpenIncident: boolean;
+	refreshTick: number;
 	onEventSubmitted: () => void;
 }) {
+	const isRoot = data.server.parent_server_id == null;
 	return (
 		<Stack
 			direction="row"
@@ -167,23 +164,31 @@ function Header({
 					{data.server.name ?? "Unnamed"}
 				</Typography>
 			</Stack>
-			{isAdmin && (
-				<Stack direction="row" spacing={1}>
-					<ManualEventButton
-						serverId={data.server.id}
-						hasOpenIncident={hasOpenIncident}
-						onSubmitted={onEventSubmitted}
+			<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+				{isRoot && (
+					<IncidentsLink
+						rootServerId={data.server.id}
+						refreshKey={refreshTick}
 					/>
-					<Button
-						component={RouterLink}
-						to={`/servers/${data.server.id}/edit`}
-						variant="contained"
-						startIcon={<EditIcon />}
-					>
-						Edit
-					</Button>
-				</Stack>
-			)}
+				)}
+				{isAdmin && (
+					<>
+						<ManualEventButton
+							serverId={data.server.id}
+							hasOpenIncident={hasOpenIncident}
+							onSubmitted={onEventSubmitted}
+						/>
+						<Button
+							component={RouterLink}
+							to={`/servers/${data.server.id}/edit`}
+							variant="contained"
+							startIcon={<EditIcon />}
+						>
+							Edit
+						</Button>
+					</>
+				)}
+			</Stack>
 		</Stack>
 	);
 }
