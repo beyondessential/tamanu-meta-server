@@ -1,10 +1,14 @@
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 
+use axum::Router;
 use axum_client_ip::ClientIpSource;
 use clap::Parser;
 use commons_servers::{router, serve};
 use lloggs::{LoggingArgs, PreArgs};
 use public_server::state::AppState;
+use utoipa::OpenApi as _;
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_swagger_ui::SwaggerUi;
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -37,13 +41,14 @@ async fn main() -> miette::Result<()> {
 		.bind
 		.unwrap_or_else(|| SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, args.port, 0, 0)));
 
-	serve(
-		router(
-			public_server::routes().with_state(AppState::init()?),
-			args.client_ip_source,
-		),
-		addr,
-	)
-	.await?;
+	let (api_router, api_spec) =
+		OpenApiRouter::with_openapi(public_server::openapi::ApiDoc::openapi())
+			.merge(public_server::routes())
+			.split_for_parts();
+	let app: Router<()> = api_router
+		.with_state(AppState::init()?)
+		.merge(SwaggerUi::new("/api/docs").url("/api/openapi.json", api_spec));
+
+	serve(router(app, args.client_ip_source), addr).await?;
 	Ok(())
 }

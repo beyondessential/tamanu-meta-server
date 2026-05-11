@@ -16,8 +16,10 @@ pub fn routes(state: crate::state::AppState) -> commons_errors::Result<axum::rou
 	Ok(Router::new()
 		.nest(
 			"/public",
-			public_server::routes()
-				.with_state(public_server::state::AppState::from_db(state.db.clone())?),
+			Router::from(
+				public_server::routes()
+					.with_state(public_server::state::AppState::from_db(state.db.clone())?),
+			),
 		)
 		.merge(commons_servers::health::routes())
 		.merge(api_router)

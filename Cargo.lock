@@ -2916,6 +2916,9 @@ dependencies = [
  "timesimp",
  "tokio",
  "tower-http",
+ "utoipa",
+ "utoipa-axum",
+ "utoipa-swagger-ui",
  "uuid",
 ]
 

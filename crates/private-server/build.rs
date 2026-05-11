@@ -38,8 +38,11 @@ fn main() {
 		return;
 	};
 
+	// `openapi-typescript` peer-pins TypeScript ^5 but we use TS 6 — the tool
+	// is a CLI binary so the peer-dep noise doesn't bite at runtime. Allow
+	// the install to proceed.
 	let status = Command::new(&npm)
-		.arg("ci")
+		.args(["ci", "--legacy-peer-deps"])
 		.current_dir(&frontend)
 		.status()
 		.expect("failed to run npm ci");
