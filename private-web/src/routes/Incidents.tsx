@@ -17,7 +17,7 @@ import {
 import RefreshIcon from "@mui/icons-material/Refresh";
 import { useState } from "react";
 import { useApi } from "../api";
-import IncidentRow from "../components/IncidentRow";
+import IncidentCard from "../components/IncidentCard";
 import IssueRow from "../components/IssueRow";
 import { usePageTitle } from "../hooks/usePageTitle";
 import {
@@ -71,41 +71,30 @@ export default function Incidents() {
 				Incidents
 			</Typography>
 
-			<Paper variant="outlined" sx={{ p: 2 }}>
-				<Stack
-					direction="row"
-					spacing={1}
-					sx={{ alignItems: "center", justifyContent: "space-between", mb: 1 }}
+			{incidents.status === "loading" || incidents.status === "idle" ? (
+				<LinearProgress />
+			) : incidents.status === "error" ? (
+				<MuiAlert severity="error">{incidents.error.message}</MuiAlert>
+			) : incidents.data.length === 0 ? (
+				<MuiAlert severity="success">No open incidents.</MuiAlert>
+			) : (
+				<Box
+					sx={{
+						display: "grid",
+						gridTemplateColumns: {
+							xs: "1fr",
+							sm: "repeat(2, 1fr)",
+							md: "repeat(3, 1fr)",
+							lg: "repeat(4, 1fr)",
+						},
+						gap: 2,
+					}}
 				>
-					<Typography variant="h5" component="h2">
-						Open incidents
-						{incidents.status === "ok" && incidents.data.length > 0
-							? ` (${incidents.data.length})`
-							: ""}
-					</Typography>
-					<IconButton aria-label="Refresh" size="small" onClick={bumpRefresh}>
-						<RefreshIcon fontSize="small" />
-					</IconButton>
-				</Stack>
-				{incidents.status === "loading" || incidents.status === "idle" ? (
-					<LinearProgress />
-				) : incidents.status === "error" ? (
-					<MuiAlert severity="error">{incidents.error.message}</MuiAlert>
-				) : incidents.data.length === 0 ? (
-					<MuiAlert severity="success">No open incidents.</MuiAlert>
-				) : (
-					<Stack spacing={1}>
-						{incidents.data.map((inc) => (
-							<IncidentRow
-								key={inc.id}
-								incident={inc}
-								showServer
-								onChanged={bumpRefresh}
-							/>
-						))}
-					</Stack>
-				)}
-			</Paper>
+					{incidents.data.map((inc) => (
+						<IncidentCard key={inc.id} incident={inc} />
+					))}
+				</Box>
+			)}
 
 			<FilterBar
 				activeOnly={activeOnly}

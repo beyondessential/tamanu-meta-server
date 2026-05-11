@@ -77,15 +77,6 @@ export default function IncidentRow({
 				sx={{ alignItems: "center", flexWrap: "wrap" }}
 				useFlexGap
 			>
-				<Box
-					sx={{
-						width: 10,
-						height: 10,
-						borderRadius: "50%",
-						bgcolor: open ? "error.main" : "text.disabled",
-						flexShrink: 0,
-					}}
-				/>
 				{showServer && (
 					<MuiLink
 						component={RouterLink}
@@ -98,7 +89,7 @@ export default function IncidentRow({
 					</MuiLink>
 				)}
 				<Typography variant="body2">
-					{open ? "Open" : "Closed"} — opened <TimeAgo timestamp={incident.opened_at} />
+					{!open && "Closed — "}opened <TimeAgo timestamp={incident.opened_at} />
 					{!open && incident.closed_at && (
 						<>
 							, closed <TimeAgo timestamp={incident.closed_at} />
