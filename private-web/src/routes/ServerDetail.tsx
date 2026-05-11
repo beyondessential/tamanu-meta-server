@@ -9,7 +9,11 @@ import {
 	Typography,
 } from "@mui/material";
 import EditIcon from "@mui/icons-material/Edit";
+import { useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
+import IncidentsSection from "../components/IncidentsSection";
+import IssuesSection from "../components/IssuesSection";
+import ManualEventButton from "../components/ManualEventButton";
 import StatusDot from "../components/StatusDot";
 import TimeAgo from "../components/TimeAgo";
 import VersionIndicator from "../components/VersionIndicator";
@@ -34,6 +38,13 @@ export default function ServerDetail() {
 		[id],
 	);
 	const isAdmin = useApi<boolean>("commons", "is_current_user_admin");
+	// Single refresh signal for everything on the page that talks to the
+	// issues/incidents APIs. Any mutation (manual-event submit, ack/resolve/
+	// snooze on a row, etc.) bumps this so all sibling panels refetch in
+	// lockstep — otherwise resolving an issue (which can auto-close an
+	// incident) leaves a stale incidents list.
+	const [refreshTick, setRefreshTick] = useState(0);
+	const bumpRefresh = () => setRefreshTick((t) => t + 1);
 	usePageTitle(
 		detail.status === "ok"
 			? (detail.data.server.name ?? "Unnamed server")
@@ -52,7 +63,7 @@ export default function ServerDetail() {
 
 	return (
 		<Stack spacing={3}>
-			<Header data={data} isAdmin={admin} />
+			<Header data={data} isAdmin={admin} onEventSubmitted={bumpRefresh} />
 			<UrlAndDevice
 				host={data.server.host}
 				deviceInfo={data.device_info}
@@ -61,8 +72,25 @@ export default function ServerDetail() {
 				server={data.server}
 				status={data.last_status}
 			/>
+			<IssuesSection
+				scope="server"
+				id={data.server.id}
+				refreshKey={refreshTick}
+				onChanged={bumpRefresh}
+			/>
+			{data.server.parent_server_id == null && (
+				<IncidentsSection
+					serverId={data.server.id}
+					refreshKey={refreshTick}
+					onChanged={bumpRefresh}
+				/>
+			)}
 			{data.child_servers.length > 0 && (
-				<ChildServers children={data.child_servers} />
+				<ChildServers
+					children={data.child_servers}
+					isAdmin={admin}
+					onEventSubmitted={bumpRefresh}
+				/>
 			)}
 			<Box>
 				<VersionLegend />
@@ -77,9 +105,11 @@ export default function ServerDetail() {
 function Header({
 	data,
 	isAdmin,
+	onEventSubmitted,
 }: {
 	data: ServerDetailData;
 	isAdmin: boolean;
+	onEventSubmitted: () => void;
 }) {
 	return (
 		<Stack
@@ -114,14 +144,20 @@ function Header({
 				</Typography>
 			</Stack>
 			{isAdmin && (
-				<Button
-					component={RouterLink}
-					to={`/servers/${data.server.id}/edit`}
-					variant="contained"
-					startIcon={<EditIcon />}
-				>
-					Edit
-				</Button>
+				<Stack direction="row" spacing={1}>
+					<ManualEventButton
+						serverId={data.server.id}
+						onSubmitted={onEventSubmitted}
+					/>
+					<Button
+						component={RouterLink}
+						to={`/servers/${data.server.id}/edit`}
+						variant="contained"
+						startIcon={<EditIcon />}
+					>
+						Edit
+					</Button>
+				</Stack>
 			)}
 		</Stack>
 	);
@@ -318,8 +354,12 @@ function renderLocation(server: ServerInfoFull): string {
 
 function ChildServers({
 	children,
+	isAdmin,
+	onEventSubmitted,
 }: {
 	children: ServerDetailData["child_servers"];
+	isAdmin: boolean;
+	onEventSubmitted: () => void;
 }) {
 	return (
 		<Box>
@@ -357,6 +397,12 @@ function ChildServers({
 								{child.host}
 							</Typography>
 						</Box>
+						{isAdmin && (
+							<ManualEventButton
+								serverId={child.id}
+								onSubmitted={onEventSubmitted}
+							/>
+						)}
 					</Stack>
 				))}
 			</Stack>

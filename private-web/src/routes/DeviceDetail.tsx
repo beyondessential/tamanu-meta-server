@@ -14,6 +14,7 @@ import EditIcon from "@mui/icons-material/Edit";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
+import IssuesSection from "../components/IssuesSection";
 import ServerShorty, {
 	type ServerInfo as ServerShortyInfo,
 } from "../components/ServerShorty";
@@ -71,7 +72,10 @@ function DeviceView({
 			<KeysBox device={device} refresh={refresh} />
 			<RoleControls device={device} refresh={refresh} />
 			{role !== "untrusted" && (
-				<AssociatedServersSection deviceId={device.device.id} />
+				<>
+					<IssuesSection scope="device" id={device.device.id} />
+					<AssociatedServersSection deviceId={device.device.id} />
+				</>
 			)}
 			<PastServersSection deviceId={device.device.id} />
 			<ConnectionHistory deviceId={device.device.id} />
