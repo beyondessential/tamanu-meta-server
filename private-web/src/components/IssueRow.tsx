@@ -2,7 +2,6 @@ import {
 	Alert as MuiAlert,
 	Box,
 	Button,
-	Collapse,
 	IconButton,
 	LinearProgress,
 	Link as MuiLink,
@@ -20,6 +19,7 @@ import { useApi, useApiAction } from "../api";
 import NotesPanel from "./NotesPanel";
 import SeverityChip from "./SeverityChip";
 import TimeAgo from "./TimeAgo";
+import UserAvatar from "./UserAvatar";
 import {
 	RESOLVED_REASONS,
 	RESOLVED_REASON_LABEL,
@@ -39,11 +39,18 @@ function serverLabel(name: string | null, host: string): string {
 	return "(unknown)";
 }
 
-/** One issue, with its full controls: Ack/Resolve/Snooze, expandable event log
- * and notes panel. Used by `IssuesSection` on detail pages and by the global
- * Incidents page. `showServer` toggles a "go to server" link at the start of
- * the row — useful on the global page where rows mix servers, redundant on a
- * single-server detail page where the server is already in context. */
+function headline(issue: IssueData): string {
+	if (issue.description && issue.description.trim() !== "") {
+		return issue.description;
+	}
+	return issue.message.split("\n")[0] ?? "";
+}
+
+/** One issue. Expanded by default: shows message body, action buttons and
+ * a two-column Events / Notes panel. When collapsed, only the header row
+ * is visible — even the action buttons are hidden. Header layout:
+ * `[toggle] [server?] [description] [severity] [time] [acker avatar | Ack]`.
+ */
 export default function IssueRow({
 	issue,
 	showServer = false,
@@ -53,7 +60,7 @@ export default function IssueRow({
 	showServer?: boolean;
 	onChanged: () => void;
 }) {
-	const [expanded, setExpanded] = useState(false);
+	const [expanded, setExpanded] = useState(true);
 	const snoozeActive = isSnoozeActive(issue.snoozed_until);
 	return (
 		<Box
@@ -65,94 +72,183 @@ export default function IssueRow({
 				bgcolor: issue.active && !snoozeActive ? undefined : "action.hover",
 			}}
 		>
-			<Stack
-				direction="row"
-				spacing={1}
-				sx={{ alignItems: "center", flexWrap: "wrap" }}
-				useFlexGap
+			<Header
+				issue={issue}
+				expanded={expanded}
+				setExpanded={setExpanded}
+				snoozeActive={snoozeActive}
+				showServer={showServer}
+				onChanged={onChanged}
+			/>
+			{expanded && (
+				<Body
+					issue={issue}
+					snoozeActive={snoozeActive}
+					onChanged={onChanged}
+				/>
+			)}
+		</Box>
+	);
+}
+
+function Header({
+	issue,
+	expanded,
+	setExpanded,
+	snoozeActive,
+	showServer,
+	onChanged,
+}: {
+	issue: IssueData;
+	expanded: boolean;
+	setExpanded: (v: (p: boolean) => boolean) => void;
+	snoozeActive: boolean;
+	showServer: boolean;
+	onChanged: () => void;
+}) {
+	return (
+		<Stack
+			direction="row"
+			spacing={1}
+			sx={{ alignItems: "center", minWidth: 0 }}
+		>
+			<IconButton
+				aria-label={expanded ? "Collapse" : "Expand"}
+				size="small"
+				onClick={() => setExpanded((v) => !v)}
 			>
-				<SeverityChip severity={issue.severity} />
-				{showServer && (
-					<MuiLink
-						component={RouterLink}
-						to={`/servers/${issue.server_id}`}
-						underline="hover"
-						color="text.primary"
-						sx={{ fontWeight: 500 }}
-					>
-						{serverLabel(issue.server_name, issue.server_host)}
-					</MuiLink>
+				{expanded ? (
+					<ExpandLessIcon fontSize="small" />
+				) : (
+					<ExpandMoreIcon fontSize="small" />
 				)}
-				{!issue.active && (
-					<Typography variant="caption" color="text.secondary">
-						(inactive)
-					</Typography>
-				)}
-				{issue.acknowledged_at && (
-					<Typography
-						variant="caption"
-						color="info.main"
-						title={`acked by ${issue.acknowledged_by ?? "?"}`}
-					>
-						acked
-					</Typography>
-				)}
-				{issue.resolved_at && (
-					<Typography
-						variant="caption"
-						color="success.main"
-						title={`resolved (${issue.resolved_reason ?? "?"}) by ${issue.resolved_by ?? "?"}`}
-					>
-						resolved
-					</Typography>
-				)}
-				{snoozeActive && (
-					<Typography
-						variant="caption"
-						color="warning.main"
-						title={`until ${issue.snoozed_until}`}
-					>
-						snoozed
-					</Typography>
-				)}
+			</IconButton>
+			{showServer && (
+				<MuiLink
+					component={RouterLink}
+					to={`/servers/${issue.server_id}`}
+					underline="hover"
+					color="text.primary"
+					sx={{ fontWeight: 500, flexShrink: 0 }}
+				>
+					{serverLabel(issue.server_name, issue.server_host)}
+				</MuiLink>
+			)}
+			<Typography
+				variant="body2"
+				sx={{
+					flex: 1,
+					minWidth: 0,
+					overflow: "hidden",
+					textOverflow: "ellipsis",
+					whiteSpace: "nowrap",
+				}}
+				title={headline(issue)}
+			>
+				{headline(issue)}
+			</Typography>
+			{snoozeActive && (
 				<Typography
-					variant="body2"
-					sx={{ fontFamily: "monospace" }}
-					color="text.secondary"
+					variant="caption"
+					color="warning.main"
+					sx={{ flexShrink: 0 }}
+					title={`snoozed until ${issue.snoozed_until}`}
 				>
-					{issue.source}/{issue.ref}
+					snoozed
 				</Typography>
-				{issue.description && (
-					<Typography variant="subtitle2">{issue.description}</Typography>
-				)}
-				<Box sx={{ ml: "auto" }}>
-					<Typography variant="body2" color="text.secondary">
-						<TimeAgo timestamp={issue.last_seen} />
-						{issue.first_seen !== issue.last_seen && (
-							<>
-								{" (first "}
-								<TimeAgo timestamp={issue.first_seen} />)
-							</>
-						)}
-					</Typography>
-				</Box>
-				<IconButton
-					aria-label={expanded ? "Collapse" : "Show event log"}
-					size="small"
-					onClick={() => setExpanded((v) => !v)}
-				>
-					{expanded ? (
-						<ExpandLessIcon fontSize="small" />
-					) : (
-						<ExpandMoreIcon fontSize="small" />
-					)}
-				</IconButton>
-			</Stack>
+			)}
+			<Box sx={{ flexShrink: 0 }}>
+				<SeverityChip severity={issue.severity} />
+			</Box>
+			<Typography
+				variant="body2"
+				color="text.secondary"
+				sx={{ flexShrink: 0 }}
+			>
+				<TimeAgo timestamp={issue.last_seen} />
+			</Typography>
+			<HeaderActor issue={issue} onChanged={onChanged} />
+		</Stack>
+	);
+}
+
+/** Rightmost header slot: avatar of the resolver (if resolved) or acker
+ * (if acked); otherwise an Ack button. Mutually exclusive — there is no
+ * Unack action in the UI. */
+function HeaderActor({
+	issue,
+	onChanged,
+}: {
+	issue: IssueData;
+	onChanged: () => void;
+}) {
+	const ack = useApiAction("issues", "ack");
+	const doAck = async () => {
+		try {
+			await ack.call({ issue_id: issue.id });
+			onChanged();
+		} catch {
+			/* surfaced via ack.error inside Body */
+		}
+	};
+	if (issue.resolved_at) {
+		return (
+			<Tooltip
+				title={`resolved (${issue.resolved_reason ?? "?"}) by ${
+					issue.resolved_by_name ?? issue.resolved_by ?? "?"
+				}`}
+			>
+				<span>
+					<UserAvatar
+						login={issue.resolved_by}
+						name={issue.resolved_by_name}
+						profilePic={issue.resolved_by_pic}
+					/>
+				</span>
+			</Tooltip>
+		);
+	}
+	if (issue.acknowledged_at) {
+		return (
+			<Tooltip
+				title={`acked by ${issue.acknowledged_by_name ?? issue.acknowledged_by ?? "?"}`}
+			>
+				<span>
+					<UserAvatar
+						login={issue.acknowledged_by}
+						name={issue.acknowledged_by_name}
+						profilePic={issue.acknowledged_by_pic}
+					/>
+				</span>
+			</Tooltip>
+		);
+	}
+	return (
+		<Button size="small" onClick={doAck} disabled={ack.pending}>
+			Ack
+		</Button>
+	);
+}
+
+function Body({
+	issue,
+	snoozeActive,
+	onChanged,
+}: {
+	issue: IssueData;
+	snoozeActive: boolean;
+	onChanged: () => void;
+}) {
+	return (
+		<Box sx={{ mt: 1 }}>
+			<Typography variant="caption" color="text.secondary">
+				{issue.source}/{issue.ref}
+			</Typography>
 			<Typography
 				variant="body2"
 				component="pre"
 				sx={{
-					mt: 1,
+					mt: 0.5,
 					mb: 0,
 					whiteSpace: "pre-wrap",
 					fontFamily: "monospace",
@@ -161,9 +257,20 @@ export default function IssueRow({
 			>
 				{issue.message}
 			</Typography>
-			<IssueActions issue={issue} snoozeActive={snoozeActive} onChanged={onChanged} />
-			<Collapse in={expanded} unmountOnExit>
-				<Box sx={{ mt: 1 }}>
+			<IssueActions
+				issue={issue}
+				snoozeActive={snoozeActive}
+				onChanged={onChanged}
+			/>
+			<Box
+				sx={{
+					mt: 1.5,
+					display: "grid",
+					gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" },
+					gap: 2,
+				}}
+			>
+				<Box>
 					<Typography
 						variant="caption"
 						color="text.secondary"
@@ -172,16 +279,22 @@ export default function IssueRow({
 						Events
 					</Typography>
 					<EventLog issueId={issue.id} />
+				</Box>
+				<Box>
 					<Typography
 						variant="caption"
 						color="text.secondary"
-						sx={{ display: "block", mt: 1.5, mb: 0.5 }}
+						sx={{ display: "block", mb: 0.5 }}
 					>
 						Notes
 					</Typography>
-					<NotesPanel apiModule="issues" parentKey="issue_id" parentId={issue.id} />
+					<NotesPanel
+						apiModule="issues"
+						parentKey="issue_id"
+						parentId={issue.id}
+					/>
 				</Box>
-			</Collapse>
+			</Box>
 		</Box>
 	);
 }
@@ -195,8 +308,6 @@ function IssueActions({
 	snoozeActive: boolean;
 	onChanged: () => void;
 }) {
-	const ack = useApiAction("issues", "ack");
-	const unack = useApiAction("issues", "unack");
 	const resolve = useApiAction("issues", "resolve");
 	const unresolve = useApiAction("issues", "unresolve");
 	const snooze = useApiAction("issues", "snooze");
@@ -217,26 +328,11 @@ function IssueActions({
 	};
 
 	const error =
-		ack.error ?? unack.error ?? resolve.error ?? unresolve.error ?? snooze.error ?? unsnooze.error;
+		resolve.error ?? unresolve.error ?? snooze.error ?? unsnooze.error;
 
 	return (
 		<Box sx={{ mt: 1 }}>
 			<Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }} useFlexGap>
-				{issue.acknowledged_at ? (
-					<Button
-						size="small"
-						onClick={() => wrap(() => unack.call({ issue_id: issue.id }))}
-					>
-						Unack
-					</Button>
-				) : (
-					<Button
-						size="small"
-						onClick={() => wrap(() => ack.call({ issue_id: issue.id }))}
-					>
-						Ack
-					</Button>
-				)}
 				{issue.resolved_at ? (
 					<Button
 						size="small"
@@ -247,12 +343,9 @@ function IssueActions({
 					</Button>
 				) : (
 					<Tooltip
-						title={
-							issue.acknowledged_at ? "" : "Ack the issue first"
-						}
+						title={issue.acknowledged_at ? "" : "Ack the issue first"}
 						disableHoverListener={!!issue.acknowledged_at}
 					>
-						{/* span so Tooltip can wrap a disabled Button */}
 						<span>
 							<Button
 								size="small"
@@ -299,8 +392,8 @@ function IssueActions({
 						variant="contained"
 						size="small"
 						onClick={() =>
-							wrap(() => resolve.call({ issue_id: issue.id, reason })).then(() =>
-								setResolveOpen(false),
+							wrap(() => resolve.call({ issue_id: issue.id, reason })).then(
+								() => setResolveOpen(false),
 							)
 						}
 					>
@@ -326,7 +419,9 @@ function IssueActions({
 						variant="contained"
 						size="small"
 						onClick={() => {
-							const until = new Date(Date.now() + snoozeHours * 3_600_000).toISOString();
+							const until = new Date(
+								Date.now() + snoozeHours * 3_600_000,
+							).toISOString();
 							wrap(() => snooze.call({ issue_id: issue.id, until })).then(() =>
 								setSnoozeOpen(false),
 							);
@@ -356,11 +451,16 @@ function EventLog({ issueId }: { issueId: string }) {
 		[issueId],
 	);
 
-	if (result.status === "loading" || result.status === "idle") return <LinearProgress />;
+	if (result.status === "loading" || result.status === "idle")
+		return <LinearProgress />;
 	if (result.status === "error")
 		return <MuiAlert severity="error">{result.error.message}</MuiAlert>;
 	if (result.data.length === 0)
-		return <MuiAlert severity="info">No events recorded.</MuiAlert>;
+		return (
+			<Typography variant="caption" color="text.secondary">
+				No events recorded.
+			</Typography>
+		);
 
 	return (
 		<Stack spacing={0.5}>
