@@ -274,32 +274,44 @@ it once on `AppError` (or a wrapper) and reference that.
   time via a small `xtask`-style binary or skip and let CI generate it on
   demand. Decision: skip the committed file — let the build emit on request.
 
-## Phase 5 — public-server (deferred to a separate stack)
+## Phase 5 — public-server
 
-Same approach, with the following twists:
+**Status: done.**
 
-- `password.rs`, `server_versions.rs`, and the HTML/redirect/binary routes in
-  `versions.rs` (`view_artifacts`, `view_mobile_install`, `download_artifact`,
-  the SVG/QR/HTML responses) are excluded from the spec. They keep their
-  existing `Router::new().route(...)` wiring and are merged in as a normal
-  `axum::Router` after the `OpenApiRouter` is split.
-- `timesync.rs` (raw bytes, Timesimp protocol) is excluded.
-- Security schemes: declare `device-mtls` (XFCC / mtls-certificate header)
-  with sub-roles `server-device`, `admin-device`, `releaser-device`. mTLS in
-  OpenAPI is awkward — represent as an apiKey on the cert header and note in
-  the description that it's mTLS in practice.
-- Swagger UI at `/api/docs`, spec at `/api/openapi.json`. Same as private.
+Shipped:
+- Database types now derive `ToSchema`: `Server`, `NewServer`, `PartialServer`,
+  `Issue`, `NewEvent`, `Version`, `ViewVersion`, `Artifact`, `Status` — plus
+  `UrlField` with a manual `value_type = String, format = "uri"` schema.
+- `crates/public-server/src/openapi.rs` declares `ApiDoc` with three apiKey
+  security schemes (`server-device`, `releaser-device`, `admin-device`) on
+  the `x-forwarded-client-cert` header. The description notes that the real
+  transport is mTLS terminated at the edge proxy.
+- 12 handlers across 6 modules annotated. 9 unique paths (some share paths
+  across HTTP methods, e.g. `/servers` has GET/POST/PATCH/DELETE).
+- The HTML/redirect/binary endpoints are deliberately excluded:
+  - `password.rs`, `server_versions.rs`, `timesync.rs` (UI / Timesimp).
+  - `versions.rs` `view_artifacts`, `view_mobile_install` (HTML, ui-only).
+  - `versions.rs` `download_artifact` — streamed bytes proxied from the
+    artifact's upstream URL; mounted via a plain `axum::Router` merged into
+    the `OpenApiRouter` so it stays runtime-accessible but doesn't appear
+    in the spec.
+- `cargo run -p public-server --bin openapi-dump` writes the spec to stdout;
+  `just gen-openapi` covers both servers in one go.
+- `crates/public-server/openapi.json` is checked in (parallel to the
+  private-server one), for external API consumers and as a useful PR diff.
+- Swagger UI and the spec endpoint live in `main.rs` only — when public-
+  server is embedded inside private-server (under `/public`), the docs are
+  not exposed there. Operators with private-server access can hit the
+  standalone public-server's docs directly.
 
-Handler counts (JSON only — others stay un-annotated):
-- `artifacts.rs` — 1
-- `bestool.rs` — 1
-- `events.rs` — 1
-- `servers.rs` — 4
-- `statuses.rs` — 1
-- `versions.rs` — 4 (list, create, remove, list_artifacts, update_for)
-
-Total: ~12 handler annotations + the ToSchema work is mostly reused from
-Phase 1.
+Choices worth noting:
+- `openapi-typescript` (private-web's codegen) pins TS ^5 but the project
+  uses TS 6. The `build.rs` for private-server now passes `--legacy-peer-
+  deps` to `npm ci` to make the production build path work. The CLI is a
+  binary so the peer-dep noise doesn't bite at runtime.
+- Conflict avoidance between issues/incidents `operation_id`s (`ack`,
+  `resolve`, etc.) carried over from the private-server pass — no
+  collisions across public-server alone.
 
 ## Phase 6 — TS codegen for `private-web`
 
