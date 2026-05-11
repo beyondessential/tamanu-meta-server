@@ -330,15 +330,16 @@ impl NewEvent {
 /// Compute whether the issue *should* currently be contributing to an
 /// open incident, and apply join/leave accordingly. The rules:
 ///
-/// - **Should contribute** iff `active && severity >= floor && !resolved &&
-///   !snoozed`.
-/// - **Join**: insert a fresh `incident_issues` row (creating an incident if
-///   the group has no open one).
-/// - **Leave**: set `left_at` on the open link row; if it was the last open
-///   contributor for that incident, set incident `closed_at`.
-///
-/// Once an issue is contributing, severity downgrades do *not* remove it —
-/// only one of (active flips off, human resolve, snooze) closes the link.
+/// - **Leave**: `!active || resolved || snoozed`. Severity downgrade alone
+///   does *not* remove an issue — once contributing, it stays until it's
+///   actually gone or explicitly suppressed.
+/// - **Join**: not leaving, AND one of:
+///   - severity ≥ floor (`error`), so this issue is high-priority enough to
+///     create a new incident on its own; or
+///   - the group already has an open incident — then any active issue,
+///     even low-severity ones, joins it. The threshold only governs
+///     incident *creation*; once an incident is in progress everything else
+///     piles in for context.
 async fn re_evaluate_incident_membership(
 	conn: &mut AsyncPgConnection,
 	issue: &Issue,
@@ -349,14 +350,13 @@ async fn re_evaluate_incident_membership(
 
 	let was_in = is_issue_in_open_incident(conn, issue.id).await?;
 	let snoozed = issue.snoozed_until.map_or(false, |t| t > Timestamp::now());
+	let group_open = group_has_open_incident(conn, root_server_id).await?;
 
-	// Leave gates: active=false, human-resolved, or snoozed. Severity downgrade
-	// alone is *not* a leave gate — once contributing, an issue stays until
-	// it's actually gone or explicitly suppressed.
 	let should_leave = !issue.active || issue.resolved_at.is_some() || snoozed;
-	// Join gates: all leave gates inverted, *plus* the severity floor.
-	let should_join =
-		issue.active && !issue.resolved_at.is_some() && !snoozed && issue.severity.opens_incident();
+	let should_join = issue.active
+		&& issue.resolved_at.is_none()
+		&& !snoozed
+		&& (issue.severity.opens_incident() || group_open);
 
 	match (was_in, should_join, should_leave) {
 		(false, true, _) => {
@@ -449,6 +449,21 @@ async fn is_issue_in_open_incident(db: &mut AsyncPgConnection, issue_id: Uuid) -
 				.eq(issue_id)
 				.and(incident_issues::left_at.is_null()),
 		)
+		.count()
+		.get_result(db)
+		.await?;
+	Ok(count > 0)
+}
+
+async fn group_has_open_incident(
+	db: &mut AsyncPgConnection,
+	root_server_id: Uuid,
+) -> Result<bool> {
+	use crate::schema::incidents::dsl;
+
+	let count: i64 = dsl::incidents
+		.filter(dsl::server_id.eq(root_server_id))
+		.filter(dsl::closed_at.is_null())
 		.count()
 		.get_result(db)
 		.await?;

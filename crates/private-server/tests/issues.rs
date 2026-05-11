@@ -220,6 +220,95 @@ async fn issue_reopen_keeps_identity_and_joins_new_incident() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn low_severity_issue_joins_existing_open_incident() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let server_id = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO servers (id, host, kind) VALUES \
+				('{server_id}', 'https://example.com', 'central');"
+		))
+		.await
+		.expect("seed");
+
+		// 1. Open an incident at severity = error.
+		private
+			.post("/api/issues/submit_manual_event")
+			.json(&serde_json::json!({
+				"serverId": server_id,
+				"ref": "a",
+				"severity": "error",
+				"message": "primary trouble",
+			}))
+			.await
+			.assert_status_ok();
+
+		// 2. A warning event would normally not open an incident on its own,
+		//    but because one is already open it should join in.
+		private
+			.post("/api/issues/submit_manual_event")
+			.json(&serde_json::json!({
+				"serverId": server_id,
+				"ref": "b",
+				"severity": "warning",
+				"message": "ride-along",
+			}))
+			.await
+			.assert_status_ok();
+
+		// Still one incident, with two contributing issues.
+		let resp = private
+			.post("/api/incidents/list_for_server")
+			.json(&serde_json::json!({ "server_id": server_id }))
+			.await;
+		let items: Vec<serde_json::Value> = resp.json();
+		assert_eq!(items.len(), 1);
+		let incident_id = items[0].get("id").and_then(|v| v.as_str()).unwrap();
+
+		let resp = private
+			.post("/api/incidents/get")
+			.json(&serde_json::json!({ "incident_id": incident_id }))
+			.await;
+		let body: serde_json::Value = resp.json();
+		let issues = body.get("issues").and_then(|v| v.as_array()).unwrap();
+		assert_eq!(issues.len(), 2, "warning piggybacks on the open incident");
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn low_severity_alone_does_not_open_incident() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let server_id = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO servers (id, host, kind) VALUES \
+				('{server_id}', 'https://example.com', 'central');"
+		))
+		.await
+		.expect("seed");
+
+		// Warning event with no open incident: must not create one.
+		private
+			.post("/api/issues/submit_manual_event")
+			.json(&serde_json::json!({
+				"serverId": server_id,
+				"ref": "b",
+				"severity": "warning",
+				"message": "minor",
+			}))
+			.await
+			.assert_status_ok();
+
+		let resp = private
+			.post("/api/incidents/list_for_server")
+			.json(&serde_json::json!({ "server_id": server_id }))
+			.await;
+		let items: Vec<serde_json::Value> = resp.json();
+		assert!(items.is_empty(), "low-severity alone must not open incident");
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn severity_downgrade_keeps_issue_in_incident() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let server_id = Uuid::new_v4();
