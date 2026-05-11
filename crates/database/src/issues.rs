@@ -147,8 +147,8 @@ pub enum IssueFilter {
 pub struct IssueListFilters {
 	pub active_only: bool,
 	pub severities: Option<Vec<Severity>>,
-	/// Root server id; restricts to issues whose server is in that group's
-	/// descendant tree.
+	/// Any server id in the group; the query walks to the root and then
+	/// restricts to issues on servers in the root's descendant tree.
 	pub server_group_id: Option<Uuid>,
 	/// `Some(true)` = acknowledged; `Some(false)` = un-acknowledged; `None` = either.
 	pub acked: Option<bool>,
@@ -197,7 +197,7 @@ impl NewEvent {
 
 		// Find the root server for the group up-front; needed if we end up
 		// opening an incident. A single recursive CTE walks parent_server_id.
-		let root_server_id = root_server_id(db, server_id).await?;
+		let root_server_id = Server::root_id(db, server_id).await?;
 
 		db.transaction::<_, AppError, _>(async |conn| {
 			// 1. find-or-create issue (FOR UPDATE so concurrent pushes on
@@ -417,29 +417,6 @@ async fn re_evaluate_incident_membership(
 	Ok(())
 }
 
-async fn root_server_id(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<Uuid> {
-	use diesel::sql_types::Uuid as SqlUuid;
-
-	#[derive(QueryableByName)]
-	struct RootId {
-		#[diesel(sql_type = SqlUuid)]
-		id: Uuid,
-	}
-
-	let row: RootId = diesel::sql_query(
-		"WITH RECURSIVE chain AS (\
-			SELECT id, parent_server_id FROM servers WHERE id = $1 \
-			UNION ALL \
-			SELECT s.id, s.parent_server_id FROM servers s \
-				JOIN chain c ON s.id = c.parent_server_id \
-		) SELECT id FROM chain WHERE parent_server_id IS NULL LIMIT 1",
-	)
-	.bind::<SqlUuid, _>(server_id)
-	.get_result(db)
-	.await?;
-	Ok(row.id)
-}
-
 async fn is_issue_in_open_incident(db: &mut AsyncPgConnection, issue_id: Uuid) -> Result<bool> {
 	use crate::schema::incident_issues;
 
@@ -561,10 +538,12 @@ impl Issue {
 	) -> Result<Vec<Self>> {
 		use crate::schema::issues::dsl;
 
-		// Resolve the group descendants up-front (separate query); cheaper
-		// than embedding the recursive CTE into the main query and lets the
-		// later filter be a plain `IN`.
-		let group_ids = if let Some(root) = filters.server_group_id {
+		// Resolve to the group root then enumerate descendants up-front
+		// (two recursive CTEs); cheaper than embedding both into the main
+		// query, and lets the later filter be a plain `IN`. Callers can
+		// pass any server id in the group — the root walk handles it.
+		let group_ids = if let Some(any_in_group) = filters.server_group_id {
+			let root = Server::root_id(db, any_in_group).await?;
 			Some(Server::descendant_ids(db, root).await?)
 		} else {
 			None
@@ -654,7 +633,7 @@ impl Issue {
 				.returning(Self::as_select())
 				.get_result(conn)
 				.await?;
-			let root = root_server_id(conn, issue.server_id).await?;
+			let root = Server::root_id(conn, issue.server_id).await?;
 			re_evaluate_incident_membership(conn, &issue, root, now).await?;
 			Ok(issue)
 		})
@@ -675,7 +654,7 @@ impl Issue {
 				.returning(Self::as_select())
 				.get_result(conn)
 				.await?;
-			let root = root_server_id(conn, issue.server_id).await?;
+			let root = Server::root_id(conn, issue.server_id).await?;
 			re_evaluate_incident_membership(conn, &issue, root, now).await?;
 			Ok(issue)
 		})
@@ -698,7 +677,7 @@ impl Issue {
 				.returning(Self::as_select())
 				.get_result(conn)
 				.await?;
-			let root = root_server_id(conn, issue.server_id).await?;
+			let root = Server::root_id(conn, issue.server_id).await?;
 			re_evaluate_incident_membership(conn, &issue, root, now).await?;
 			Ok(issue)
 		})
@@ -715,7 +694,7 @@ impl Issue {
 				.returning(Self::as_select())
 				.get_result(conn)
 				.await?;
-			let root = root_server_id(conn, issue.server_id).await?;
+			let root = Server::root_id(conn, issue.server_id).await?;
 			re_evaluate_incident_membership(conn, &issue, root, now).await?;
 			Ok(issue)
 		})
@@ -857,7 +836,7 @@ impl Incident {
 	) -> Result<Vec<Self>> {
 		use crate::schema::incidents::dsl;
 
-		let root = root_server_id(db, server_id).await?;
+		let root = Server::root_id(db, server_id).await?;
 		let mut q = dsl::incidents
 			.select(Self::as_select())
 			.filter(dsl::server_id.eq(root))

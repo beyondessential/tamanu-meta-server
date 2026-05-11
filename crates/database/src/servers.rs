@@ -335,6 +335,32 @@ impl Server {
 		Ok(rows.into_iter().map(|(i, n, h)| (i, (n, h))).collect())
 	}
 
+	/// Walks `parent_server_id` upwards from `server_id` and returns the
+	/// root of the server group (the server with no parent). When `server_id`
+	/// is already a root, returns it unchanged.
+	pub async fn root_id(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<Uuid> {
+		use diesel::sql_types::Uuid as SqlUuid;
+
+		#[derive(QueryableByName)]
+		struct RootId {
+			#[diesel(sql_type = SqlUuid)]
+			id: Uuid,
+		}
+
+		let row: RootId = diesel::sql_query(
+			"WITH RECURSIVE chain AS (\
+				SELECT id, parent_server_id FROM servers WHERE id = $1 \
+				UNION ALL \
+				SELECT s.id, s.parent_server_id FROM servers s \
+					JOIN chain c ON s.id = c.parent_server_id \
+			) SELECT id FROM chain WHERE parent_server_id IS NULL LIMIT 1",
+		)
+		.bind::<SqlUuid, _>(server_id)
+		.get_result(db)
+		.await?;
+		Ok(row.id)
+	}
+
 	/// All server ids reachable from `root_id` via `parent_server_id` links,
 	/// inclusive of the root itself. A single recursive CTE.
 	pub async fn descendant_ids(db: &mut AsyncPgConnection, root_id: Uuid) -> Result<Vec<Uuid>> {
