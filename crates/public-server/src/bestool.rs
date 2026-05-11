@@ -1,21 +1,32 @@
-use axum::{Json, extract::State, routing::Router, routing::get};
-use commons_errors::Result;
+use axum::{Json, extract::State};
+use commons_errors::{ProblemDetailsSchema, Result};
 use database::Db;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use utoipa::ToSchema;
+use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::state::AppState;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SnippetResponse {
 	pub description: Option<String>,
 	pub sql: String,
 }
 
-pub fn routes() -> Router<AppState> {
-	Router::new().route("/snippets", get(list_snippets))
+pub fn routes() -> OpenApiRouter<AppState> {
+	OpenApiRouter::new().routes(routes!(list_snippets))
 }
 
+#[utoipa::path(
+	get,
+	path = "/snippets",
+	tag = "bestool",
+	responses(
+		(status = 200, description = "Current bestool snippets, keyed by name.", body = BTreeMap<String, SnippetResponse>),
+		(status = 500, body = ProblemDetailsSchema),
+	),
+)]
 #[axum::debug_handler]
 async fn list_snippets(State(db): State<Db>) -> Result<Json<BTreeMap<String, SnippetResponse>>> {
 	let mut conn = db.get().await?;

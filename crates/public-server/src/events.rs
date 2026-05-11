@@ -1,22 +1,33 @@
-use axum::{
-	Json,
-	extract::State,
-	routing::{Router, post},
-};
-use commons_errors::{AppError, Result};
+use axum::{Json, extract::State};
+use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::device_auth::ServerDevice;
 use database::{
 	Db,
 	issues::{Issue, NewEvent},
 	servers::Server,
 };
+use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::state::AppState;
 
-pub fn routes() -> Router<AppState> {
-	Router::new().route("/events", post(create))
+pub fn routes() -> OpenApiRouter<AppState> {
+	OpenApiRouter::new().routes(routes!(create))
 }
 
+#[utoipa::path(
+	post,
+	path = "/events",
+	tag = "events",
+	security(("server-device" = [])),
+	request_body = NewEvent,
+	responses(
+		(status = 200, body = Issue),
+		(status = 400, body = ProblemDetailsSchema),
+		(status = 401, body = ProblemDetailsSchema),
+		(status = 403, body = ProblemDetailsSchema),
+		(status = 412, description = "Device is not registered against any server.", body = ProblemDetailsSchema),
+	),
+)]
 async fn create(
 	State(db): State<Db>,
 	device: ServerDevice,

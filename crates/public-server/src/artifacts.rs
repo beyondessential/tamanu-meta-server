@@ -1,9 +1,8 @@
 use axum::{
 	Json,
 	extract::{Path, State},
-	routing::{Router, post},
 };
-use commons_errors::Result;
+use commons_errors::{ProblemDetailsSchema, Result};
 use commons_servers::device_auth::ReleaserDevice;
 use commons_types::version::{VersionStatus, VersionStr};
 use database::{
@@ -13,13 +12,32 @@ use database::{
 };
 use diesel::SelectableHelper as _;
 use diesel_async::RunQueryDsl as _;
+use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::state::AppState;
 
-pub fn routes() -> Router<AppState> {
-	Router::new().route("/{version}/{artifact_type}/{platform}", post(create))
+pub fn routes() -> OpenApiRouter<AppState> {
+	OpenApiRouter::new().routes(routes!(create))
 }
 
+#[utoipa::path(
+	post,
+	path = "/{version}/{artifact_type}/{platform}",
+	tag = "artifacts",
+	security(("releaser-device" = [])),
+	params(
+		("version" = String, Path, description = "Exact semver (e.g. `2.10.5`) or range pattern (e.g. `2.10.x`, `^2.10.0`)."),
+		("artifact_type" = String, Path),
+		("platform" = String, Path),
+	),
+	request_body(content = String, description = "Download URL for the artifact, as a plain-text body."),
+	responses(
+		(status = 200, body = Artifact),
+		(status = 400, body = ProblemDetailsSchema),
+		(status = 401, body = ProblemDetailsSchema),
+		(status = 403, body = ProblemDetailsSchema),
+	),
+)]
 #[axum::debug_handler]
 async fn create(
 	device: ReleaserDevice,

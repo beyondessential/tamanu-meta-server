@@ -26,6 +26,7 @@ use crate::servers::Server;
 	Insertable,
 	Associations,
 	QueryableByName,
+	utoipa::ToSchema,
 )]
 #[diesel(belongs_to(Server))]
 #[diesel(table_name = crate::schema::statuses)]

@@ -20,15 +20,14 @@ pub mod timesync;
 pub mod versions;
 
 pub fn routes() -> OpenApiRouter<AppState> {
-	type Api = OpenApiRouter<AppState>;
 	#[cfg_attr(not(feature = "ui"), expect(unused_mut))]
 	let mut router = OpenApiRouter::new()
-		.merge(Api::from(events::routes()))
-		.nest("/artifacts", Api::from(artifacts::routes()))
-		.nest("/bestool", Api::from(bestool::routes()))
-		.nest("/servers", Api::from(servers::routes()))
-		.nest("/status", Api::from(statuses::routes()))
-		.nest("/versions", Api::from(versions::routes()));
+		.merge(events::routes())
+		.nest("/artifacts", artifacts::routes())
+		.nest("/bestool", bestool::routes())
+		.nest("/servers", servers::routes())
+		.nest("/status", statuses::routes())
+		.nest("/versions", versions::routes());
 
 	#[cfg(feature = "ui")]
 	{
