@@ -8,6 +8,7 @@ import {
 	MenuItem,
 	Stack,
 	TextField,
+	Tooltip,
 	Typography,
 } from "@mui/material";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
@@ -152,9 +153,23 @@ export default function IncidentRow({
 						Unresolve
 					</Button>
 				) : (
-					<Button size="small" color="success" onClick={() => setResolveOpen((v) => !v)}>
-						Resolve…
-					</Button>
+					<Tooltip
+						title={
+							incident.acknowledged_at ? "" : "Ack the incident first"
+						}
+						disableHoverListener={!!incident.acknowledged_at}
+					>
+						<span>
+							<Button
+								size="small"
+								color="success"
+								disabled={!incident.acknowledged_at}
+								onClick={() => setResolveOpen((v) => !v)}
+							>
+								Resolve…
+							</Button>
+						</span>
+					</Tooltip>
 				)}
 			</Stack>
 			{resolveOpen && (

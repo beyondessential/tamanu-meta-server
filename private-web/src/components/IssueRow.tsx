@@ -9,6 +9,7 @@ import {
 	MenuItem,
 	Stack,
 	TextField,
+	Tooltip,
 	Typography,
 } from "@mui/material";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
@@ -245,9 +246,24 @@ function IssueActions({
 						Unresolve
 					</Button>
 				) : (
-					<Button size="small" color="success" onClick={() => setResolveOpen((v) => !v)}>
-						Resolve…
-					</Button>
+					<Tooltip
+						title={
+							issue.acknowledged_at ? "" : "Ack the issue first"
+						}
+						disableHoverListener={!!issue.acknowledged_at}
+					>
+						{/* span so Tooltip can wrap a disabled Button */}
+						<span>
+							<Button
+								size="small"
+								color="success"
+								disabled={!issue.acknowledged_at}
+								onClick={() => setResolveOpen((v) => !v)}
+							>
+								Resolve…
+							</Button>
+						</span>
+					</Tooltip>
 				)}
 				{snoozeActive ? (
 					<Button
