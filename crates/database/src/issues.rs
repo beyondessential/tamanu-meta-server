@@ -141,6 +141,19 @@ pub enum IssueFilter {
 	All,
 }
 
+/// Multi-field filter for the cross-server issues list (global view).
+/// Each field is opt-in: `Default` matches everything currently active.
+#[derive(Debug, Clone, Default)]
+pub struct IssueListFilters {
+	pub active_only: bool,
+	pub severities: Option<Vec<Severity>>,
+	/// Root server id; restricts to issues whose server is in that group's
+	/// descendant tree.
+	pub server_group_id: Option<Uuid>,
+	/// `Some(true)` = acknowledged; `Some(false)` = un-acknowledged; `None` = either.
+	pub acked: Option<bool>,
+}
+
 fn hash_event(
 	severity: Severity,
 	active: bool,
@@ -512,6 +525,54 @@ impl Issue {
 			.into_boxed();
 		if filter == IssueFilter::ActiveOnly {
 			q = q.filter(dsl::active.eq(true));
+		}
+		q.order(dsl::last_seen.desc())
+			.limit(limit)
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// Filtered cross-server issues list. Used by the global Incidents page.
+	///
+	/// - `active_only`: when true, only `active = true` issues.
+	/// - `severities`: when `Some` and non-empty, restrict to those.
+	/// - `server_group_id`: when `Some`, restrict to issues whose server is
+	///   in the descendant tree of that root (uses a recursive CTE via
+	///   `Server::descendant_ids`).
+	/// - `acked`: when `Some(true)`, only acknowledged; `Some(false)`, only
+	///   un-acknowledged; `None`, either.
+	pub async fn list(
+		db: &mut AsyncPgConnection,
+		filters: IssueListFilters,
+		limit: i64,
+	) -> Result<Vec<Self>> {
+		use crate::schema::issues::dsl;
+
+		// Resolve the group descendants up-front (separate query); cheaper
+		// than embedding the recursive CTE into the main query and lets the
+		// later filter be a plain `IN`.
+		let group_ids = if let Some(root) = filters.server_group_id {
+			Some(Server::descendant_ids(db, root).await?)
+		} else {
+			None
+		};
+
+		let mut q = dsl::issues.select(Self::as_select()).into_boxed();
+		if filters.active_only {
+			q = q.filter(dsl::active.eq(true));
+		}
+		if let Some(sevs) = filters.severities.as_ref().filter(|v| !v.is_empty()) {
+			let strs: Vec<String> = sevs.iter().map(|s| s.to_string()).collect();
+			q = q.filter(dsl::severity.eq_any(strs));
+		}
+		if let Some(ids) = group_ids {
+			q = q.filter(dsl::server_id.eq_any(ids));
+		}
+		match filters.acked {
+			Some(true) => q = q.filter(dsl::acknowledged_at.is_not_null()),
+			Some(false) => q = q.filter(dsl::acknowledged_at.is_null()),
+			None => {}
 		}
 		q.order(dsl::last_seen.desc())
 			.limit(limit)
