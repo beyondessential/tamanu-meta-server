@@ -3,7 +3,6 @@ import {
 	Box,
 	Button,
 	IconButton,
-	LinearProgress,
 	Link as MuiLink,
 	MenuItem,
 	Stack,
@@ -16,8 +15,9 @@ import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
-import NotesPanel from "./NotesPanel";
+import NotesList, { AddNoteButton } from "./NotesList";
 import SeverityChip from "./SeverityChip";
+import SourceChip from "./SourceChip";
 import TimeAgo from "./TimeAgo";
 import UserAvatar from "./UserAvatar";
 import {
@@ -49,7 +49,8 @@ function headline(issue: IssueData): string {
 /** One issue. Expanded by default: shows message body, action buttons and
  * a two-column Events / Notes panel. When collapsed, only the header row
  * is visible — even the action buttons are hidden. Header layout:
- * `[toggle] [server?] [description] [severity] [time] [acker avatar | Ack]`.
+ * `[toggle] [server?] [headline] [ack/avatar] [source] [severity] [time]`.
+ * The headline is struck through when the issue is inactive or resolved.
  */
 export default function IssueRow({
 	issue,
@@ -61,7 +62,9 @@ export default function IssueRow({
 	onChanged: () => void;
 }) {
 	const [expanded, setExpanded] = useState(true);
+	const [notesRefresh, setNotesRefresh] = useState(0);
 	const snoozeActive = isSnoozeActive(issue.snoozed_until);
+	const struckThrough = !issue.active || !!issue.resolved_at;
 	return (
 		<Box
 			sx={{
@@ -77,6 +80,7 @@ export default function IssueRow({
 				expanded={expanded}
 				setExpanded={setExpanded}
 				snoozeActive={snoozeActive}
+				struckThrough={struckThrough}
 				showServer={showServer}
 				onChanged={onChanged}
 			/>
@@ -84,6 +88,8 @@ export default function IssueRow({
 				<Body
 					issue={issue}
 					snoozeActive={snoozeActive}
+					notesRefresh={notesRefresh}
+					onNoteAdded={() => setNotesRefresh((t) => t + 1)}
 					onChanged={onChanged}
 				/>
 			)}
@@ -96,6 +102,7 @@ function Header({
 	expanded,
 	setExpanded,
 	snoozeActive,
+	struckThrough,
 	showServer,
 	onChanged,
 }: {
@@ -103,6 +110,7 @@ function Header({
 	expanded: boolean;
 	setExpanded: (v: (p: boolean) => boolean) => void;
 	snoozeActive: boolean;
+	struckThrough: boolean;
 	showServer: boolean;
 	onChanged: () => void;
 }) {
@@ -142,6 +150,8 @@ function Header({
 					overflow: "hidden",
 					textOverflow: "ellipsis",
 					whiteSpace: "nowrap",
+					textDecoration: struckThrough ? "line-through" : undefined,
+					color: struckThrough ? "text.secondary" : undefined,
 				}}
 				title={headline(issue)}
 			>
@@ -157,6 +167,10 @@ function Header({
 					snoozed
 				</Typography>
 			)}
+			<HeaderActor issue={issue} onChanged={onChanged} />
+			<Box sx={{ flexShrink: 0 }}>
+				<SourceChip source={issue.source} refValue={issue.ref} />
+			</Box>
 			<Box sx={{ flexShrink: 0 }}>
 				<SeverityChip severity={issue.severity} />
 			</Box>
@@ -167,14 +181,13 @@ function Header({
 			>
 				<TimeAgo timestamp={issue.last_seen} />
 			</Typography>
-			<HeaderActor issue={issue} onChanged={onChanged} />
 		</Stack>
 	);
 }
 
-/** Rightmost header slot: avatar of the resolver (if resolved) or acker
- * (if acked); otherwise an Ack button. Mutually exclusive — there is no
- * Unack action in the UI. */
+/** Leftmost slot of the right-side header cluster. Avatar (resolver or
+ * acker) when applicable; an Ack button otherwise. There is no Unack in
+ * the UI — the backend still supports it. */
 function HeaderActor({
 	issue,
 	onChanged,
@@ -233,23 +246,23 @@ function HeaderActor({
 function Body({
 	issue,
 	snoozeActive,
+	notesRefresh,
+	onNoteAdded,
 	onChanged,
 }: {
 	issue: IssueData;
 	snoozeActive: boolean;
+	notesRefresh: number;
+	onNoteAdded: () => void;
 	onChanged: () => void;
 }) {
 	return (
 		<Box sx={{ mt: 1 }}>
-			<Typography variant="caption" color="text.secondary">
-				{issue.source}/{issue.ref}
-			</Typography>
 			<Typography
 				variant="body2"
 				component="pre"
 				sx={{
-					mt: 0.5,
-					mb: 0,
+					m: 0,
 					whiteSpace: "pre-wrap",
 					fontFamily: "monospace",
 					fontSize: "0.85em",
@@ -260,6 +273,7 @@ function Body({
 			<IssueActions
 				issue={issue}
 				snoozeActive={snoozeActive}
+				onNoteAdded={onNoteAdded}
 				onChanged={onChanged}
 			/>
 			<Box
@@ -270,30 +284,13 @@ function Body({
 					gap: 2,
 				}}
 			>
-				<Box>
-					<Typography
-						variant="caption"
-						color="text.secondary"
-						sx={{ display: "block", mb: 0.5 }}
-					>
-						Events
-					</Typography>
-					<EventLog issueId={issue.id} />
-				</Box>
-				<Box>
-					<Typography
-						variant="caption"
-						color="text.secondary"
-						sx={{ display: "block", mb: 0.5 }}
-					>
-						Notes
-					</Typography>
-					<NotesPanel
-						apiModule="issues"
-						parentKey="issue_id"
-						parentId={issue.id}
-					/>
-				</Box>
+				<EventLog issueId={issue.id} />
+				<NotesList
+					apiModule="issues"
+					parentKey="issue_id"
+					parentId={issue.id}
+					refreshKey={notesRefresh}
+				/>
 			</Box>
 		</Box>
 	);
@@ -302,10 +299,12 @@ function Body({
 function IssueActions({
 	issue,
 	snoozeActive,
+	onNoteAdded,
 	onChanged,
 }: {
 	issue: IssueData;
 	snoozeActive: boolean;
+	onNoteAdded: () => void;
 	onChanged: () => void;
 }) {
 	const resolve = useApiAction("issues", "resolve");
@@ -371,6 +370,12 @@ function IssueActions({
 						Snooze…
 					</Button>
 				)}
+				<AddNoteButton
+					apiModule="issues"
+					parentKey="issue_id"
+					parentId={issue.id}
+					onAdded={onNoteAdded}
+				/>
 			</Stack>
 			{resolveOpen && (
 				<Stack direction="row" spacing={1} sx={{ mt: 1, alignItems: "center" }}>
@@ -452,7 +457,11 @@ function EventLog({ issueId }: { issueId: string }) {
 	);
 
 	if (result.status === "loading" || result.status === "idle")
-		return <LinearProgress />;
+		return (
+			<Typography variant="caption" color="text.secondary">
+				Loading…
+			</Typography>
+		);
 	if (result.status === "error")
 		return <MuiAlert severity="error">{result.error.message}</MuiAlert>;
 	if (result.data.length === 0)
@@ -465,35 +474,57 @@ function EventLog({ issueId }: { issueId: string }) {
 	return (
 		<Stack spacing={0.5}>
 			{result.data.map((e) => (
-				<Stack
+				<Box
 					key={e.id}
-					direction="row"
-					spacing={1}
-					sx={{ alignItems: "center", flexWrap: "wrap", fontSize: "0.85em" }}
-					useFlexGap
+					sx={{
+						p: 1,
+						border: 1,
+						borderColor: "divider",
+						borderRadius: 1,
+					}}
 				>
-					<SeverityChip severity={e.severity} />
-					<Typography variant="caption" color="text.secondary">
-						{e.active ? "active" : "resolved"}
-					</Typography>
-					<Typography
-						variant="body2"
-						component="span"
-						sx={{ fontFamily: "monospace" }}
+					<Stack
+						direction="row"
+						spacing={1}
+						sx={{ alignItems: "center", minWidth: 0 }}
 					>
-						{e.message}
-					</Typography>
-					{e.occurrences > 1 && (
-						<Typography variant="caption" color="text.secondary">
-							×{e.occurrences}
+						<Typography
+							variant="body2"
+							component="span"
+							sx={{
+								fontFamily: "monospace",
+								fontSize: "0.85em",
+								flex: 1,
+								minWidth: 0,
+								overflow: "hidden",
+								textOverflow: "ellipsis",
+								whiteSpace: "nowrap",
+							}}
+							title={e.message}
+						>
+							{e.message}
 						</Typography>
-					)}
-					<Box sx={{ ml: "auto" }}>
-						<Typography variant="caption" color="text.secondary">
+						{e.occurrences > 1 && (
+							<Typography
+								variant="caption"
+								color="text.secondary"
+								sx={{ flexShrink: 0 }}
+							>
+								×{e.occurrences}
+							</Typography>
+						)}
+						<Box sx={{ flexShrink: 0 }}>
+							<SeverityChip severity={e.severity} />
+						</Box>
+						<Typography
+							variant="caption"
+							color="text.secondary"
+							sx={{ flexShrink: 0 }}
+						>
 							<TimeAgo timestamp={e.occurred_at ?? e.created_at} />
 						</Typography>
-					</Box>
-				</Stack>
+					</Stack>
+				</Box>
 			))}
 		</Stack>
 	);

@@ -21,10 +21,12 @@ import { useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import IssueRow from "../components/IssueRow";
-import NotesPanel from "../components/NotesPanel";
+import ManualEventButton from "../components/ManualEventButton";
+import { AddNoteButton } from "../components/NotesList";
 import TimeAgo from "../components/TimeAgo";
 import UserAvatar from "../components/UserAvatar";
 import { usePageTitle } from "../hooks/usePageTitle";
+import { humanDuration } from "../lib/humanDuration";
 import {
 	RESOLVED_REASONS,
 	RESOLVED_REASON_LABEL,
@@ -118,17 +120,6 @@ export default function IncidentDetail() {
 				notes={filter === "issues" ? [] : noteList}
 				onChanged={bumpRefresh}
 			/>
-
-			<Paper variant="outlined" sx={{ p: 2 }}>
-				<Typography variant="h6" component="h2" gutterBottom>
-					Incident notes
-				</Typography>
-				<NotesPanel
-					apiModule="incidents"
-					parentKey="incident_id"
-					parentId={incident.id}
-				/>
-			</Paper>
 		</Stack>
 	);
 }
@@ -142,7 +133,6 @@ function Header({
 }) {
 	const open = incident.closed_at == null;
 	const ack = useApiAction("incidents", "ack");
-	const unack = useApiAction("incidents", "unack");
 	const resolve = useApiAction("incidents", "resolve");
 	const unresolve = useApiAction("incidents", "unresolve");
 
@@ -157,7 +147,25 @@ function Header({
 			/* surfaced via *.error */
 		}
 	};
-	const error = ack.error ?? unack.error ?? resolve.error ?? unresolve.error;
+	const error = ack.error ?? resolve.error ?? unresolve.error;
+
+	const timeText = (() => {
+		if (open) {
+			return (
+				<>
+					opened <TimeAgo timestamp={incident.opened_at} />
+				</>
+			);
+		}
+		const closedAt = incident.closed_at;
+		if (!closedAt) return null;
+		const lasted = humanDuration(incident.opened_at, closedAt);
+		return (
+			<>
+				closed <TimeAgo timestamp={closedAt} />, lasted {lasted}
+			</>
+		);
+	})();
 
 	return (
 		<Paper
@@ -186,70 +194,28 @@ function Header({
 						</MuiLink>
 					</Typography>
 					<Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-						{open ? "Open — " : "Closed — "}
-						opened <TimeAgo timestamp={incident.opened_at} />
-						{!open && incident.closed_at && (
-							<>
-								, closed <TimeAgo timestamp={incident.closed_at} />
-							</>
-						)}
+						{timeText}
 					</Typography>
-					<Stack direction="row" spacing={1} sx={{ mt: 1, alignItems: "center" }}>
-						{incident.acknowledged_at && (
-							<Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
-								<UserAvatar
-									login={incident.acknowledged_by}
-									name={incident.acknowledged_by_name}
-									profilePic={incident.acknowledged_by_pic}
-								/>
-								<Typography variant="caption" color="info.main">
-									acked <TimeAgo timestamp={incident.acknowledged_at} />
-								</Typography>
-							</Stack>
-						)}
-						{incident.resolved_at && (
-							<Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
-								<UserAvatar
-									login={incident.resolved_by}
-									name={incident.resolved_by_name}
-									profilePic={incident.resolved_by_pic}
-								/>
-								<Typography variant="caption" color="success.main">
-									resolved ({incident.resolved_reason ?? "?"}){" "}
-									<TimeAgo timestamp={incident.resolved_at} />
-								</Typography>
-							</Stack>
-						)}
-					</Stack>
 				</Box>
-				<Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
-					<Stat
-						icon={<BugReportIcon fontSize="inherit" />}
-						value={incident.issue_count ?? 0}
-						noun="issue"
-					/>
-					<Stat
-						icon={<TimelineIcon fontSize="inherit" />}
-						value={incident.event_count ?? 0}
-						noun="event"
-					/>
-					<Stat
-						icon={<NotesIcon fontSize="inherit" />}
-						value={incident.note_count ?? 0}
-						noun="note"
-					/>
-				</Stack>
+				{incident.acknowledged_at && (
+					<Box sx={{ flexShrink: 0 }}>
+						<UserAvatar
+							login={incident.acknowledged_by}
+							name={incident.acknowledged_by_name}
+							profilePic={incident.acknowledged_by_pic}
+							size={36}
+						/>
+					</Box>
+				)}
 			</Stack>
 
-			<Stack direction="row" spacing={1} sx={{ mt: 2, flexWrap: "wrap" }} useFlexGap>
-				{incident.acknowledged_at ? (
-					<Button
-						size="small"
-						onClick={() => wrap(() => unack.call({ incident_id: incident.id }))}
-					>
-						Unack
-					</Button>
-				) : (
+			<Stack
+				direction="row"
+				spacing={1}
+				sx={{ mt: 2, alignItems: "center", flexWrap: "wrap" }}
+				useFlexGap
+			>
+				{!incident.acknowledged_at && (
 					<Button
 						size="small"
 						onClick={() => wrap(() => ack.call({ incident_id: incident.id }))}
@@ -261,7 +227,9 @@ function Header({
 					<Button
 						size="small"
 						color="warning"
-						onClick={() => wrap(() => unresolve.call({ incident_id: incident.id }))}
+						onClick={() =>
+							wrap(() => unresolve.call({ incident_id: incident.id }))
+						}
 					>
 						Unresolve
 					</Button>
@@ -282,6 +250,36 @@ function Header({
 						</span>
 					</Tooltip>
 				)}
+				<ManualEventButton
+					serverId={incident.server_id}
+					hasOpenIncident={open}
+					onSubmitted={onChanged}
+				/>
+				<AddNoteButton
+					apiModule="incidents"
+					parentKey="incident_id"
+					parentId={incident.id}
+					onAdded={onChanged}
+				/>
+				<Box sx={{ ml: "auto" }}>
+					<Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
+						<Stat
+							icon={<BugReportIcon fontSize="inherit" />}
+							value={incident.issue_count ?? 0}
+							noun="issue"
+						/>
+						<Stat
+							icon={<TimelineIcon fontSize="inherit" />}
+							value={incident.event_count ?? 0}
+							noun="event"
+						/>
+						<Stat
+							icon={<NotesIcon fontSize="inherit" />}
+							value={incident.note_count ?? 0}
+							noun="note"
+						/>
+					</Stack>
+				</Box>
 			</Stack>
 			{resolveOpen && (
 				<Stack direction="row" spacing={1} sx={{ mt: 1, alignItems: "center" }}>
@@ -391,9 +389,12 @@ function NoteEntry({ note }: { note: IncidentNoteData }) {
 				<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
 					<NotesIcon fontSize="small" color="action" />
 					<Typography variant="caption" color="text.secondary">
-						{note.author} · <TimeAgo timestamp={note.created_at} />
+						{note.author}
 					</Typography>
 				</Stack>
+				<Typography variant="caption" color="text.secondary">
+					<TimeAgo timestamp={note.created_at} />
+				</Typography>
 			</Stack>
 			<Typography
 				variant="body2"
@@ -421,7 +422,11 @@ function Stat({
 			<Stack
 				direction="row"
 				spacing={0.5}
-				sx={{ alignItems: "center", color: "text.secondary", fontSize: "0.875rem" }}
+				sx={{
+					alignItems: "center",
+					color: "text.secondary",
+					fontSize: "0.875rem",
+				}}
 			>
 				{icon}
 				<Box component="span">{value}</Box>

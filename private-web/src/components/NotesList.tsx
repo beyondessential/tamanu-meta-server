@@ -29,59 +29,52 @@ interface NoteLike {
 type ApiModule = "issues" | "incidents";
 type ParentKey = "issue_id" | "incident_id";
 
-/** List of notes plus a button that opens a dialog to add one.
- *
- * Notes are immutable once written (delete + re-add to "edit"). The caller
- * picks the API module (`"issues"` or `"incidents"`) and the key/id used
- * to scope notes.
+/** Read-only list of notes scoped by `(apiModule, parentKey, parentId)`.
+ * Pair with `AddNoteButton` for write access; bump `refreshKey` after a
+ * successful add to refetch.
  */
-export default function NotesPanel({
+export default function NotesList({
 	apiModule,
 	parentKey,
 	parentId,
+	refreshKey = 0,
 }: {
 	apiModule: ApiModule;
 	parentKey: ParentKey;
 	parentId: string;
+	refreshKey?: number;
 }) {
 	const list = useApi<NoteLike[]>(
 		apiModule,
 		"list_notes",
 		{ [parentKey]: parentId },
-		[apiModule, parentId],
+		[apiModule, parentId, refreshKey],
 	);
 
+	if (list.status === "loading" || list.status === "idle") {
+		return <LinearProgress />;
+	}
+	if (list.status === "error") {
+		return <MuiAlert severity="error">{list.error.message}</MuiAlert>;
+	}
+	if (list.data.length === 0) {
+		return (
+			<Typography variant="caption" color="text.secondary">
+				No notes yet.
+			</Typography>
+		);
+	}
 	return (
-		<Box>
-			<Stack direction="row" sx={{ justifyContent: "flex-end", mb: 1 }}>
-				<AddNoteButton
+		<Stack spacing={1}>
+			{list.data.map((n) => (
+				<NoteRow
+					key={n.id}
+					note={n}
 					apiModule={apiModule}
-					parentKey={parentKey}
-					parentId={parentId}
-					onAdded={list.reload}
+					onChanged={list.reload}
 				/>
-			</Stack>
-			{list.status === "loading" || list.status === "idle" ? (
-				<LinearProgress />
-			) : list.status === "error" ? (
-				<MuiAlert severity="error">{list.error.message}</MuiAlert>
-			) : list.data.length === 0 ? (
-				<Typography variant="caption" color="text.secondary">
-					No notes yet.
-				</Typography>
-			) : (
-				<Stack spacing={1}>
-					{list.data.map((n) => (
-						<NoteRow
-							key={n.id}
-							note={n}
-							apiModule={apiModule}
-							onChanged={list.reload}
-						/>
-					))}
-				</Stack>
-			)}
-		</Box>
+			))}
+		</Stack>
 	);
 }
 
@@ -201,17 +194,22 @@ function NoteRow({
 				sx={{ alignItems: "center", justifyContent: "space-between" }}
 			>
 				<Typography variant="caption" color="text.secondary">
-					{note.author} · <TimeAgo timestamp={note.created_at} />
+					{note.author}
 				</Typography>
-				<IconButton
-					size="small"
-					color="error"
-					aria-label="Delete"
-					onClick={remove}
-					disabled={del.pending}
-				>
-					<DeleteIcon fontSize="inherit" />
-				</IconButton>
+				<Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
+					<Typography variant="caption" color="text.secondary">
+						<TimeAgo timestamp={note.created_at} />
+					</Typography>
+					<IconButton
+						size="small"
+						color="error"
+						aria-label="Delete"
+						onClick={remove}
+						disabled={del.pending}
+					>
+						<DeleteIcon fontSize="inherit" />
+					</IconButton>
+				</Stack>
 			</Stack>
 			<Typography
 				variant="body2"
