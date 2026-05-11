@@ -181,6 +181,116 @@ export interface ServerDetailData {
 	child_servers: Array<[ShortStatus, ServerInfoFull]>;
 }
 
+/** RFC 5424 syslog severities; enforced server-side. */
+export type Severity =
+	| "emergency"
+	| "alert"
+	| "critical"
+	| "error"
+	| "warning"
+	| "notice"
+	| "info"
+	| "debug";
+
+export const SEVERITIES: Severity[] = [
+	"emergency",
+	"alert",
+	"critical",
+	"error",
+	"warning",
+	"notice",
+	"info",
+	"debug",
+];
+
+/** Reason a human gave when resolving an issue/incident. */
+export type ResolvedReason =
+	| "fixed"
+	| "wont_fix"
+	| "expected"
+	| "duplicate"
+	| "flapping";
+
+export const RESOLVED_REASONS: ResolvedReason[] = [
+	"fixed",
+	"wont_fix",
+	"expected",
+	"duplicate",
+	"flapping",
+];
+
+export const RESOLVED_REASON_LABEL: Record<ResolvedReason, string> = {
+	fixed: "Fixed",
+	wont_fix: "Won't fix",
+	expected: "Expected",
+	duplicate: "Duplicate",
+	flapping: "Flapping",
+};
+
+/** Issue: deduplicated long-lived state of a (server, source, ref) triple. */
+export interface IssueData {
+	id: string;
+	server_id: string;
+	device_id: string | null;
+	source: string;
+	ref: string;
+	severity: Severity;
+	description: string | null;
+	message: string;
+	active: boolean;
+	first_seen: string;
+	last_seen: string;
+	acknowledged_at: string | null;
+	acknowledged_by: string | null;
+	resolved_at: string | null;
+	resolved_by: string | null;
+	/** Raw stored value; matches a `ResolvedReason` when set by the API. */
+	resolved_reason: string | null;
+	snoozed_until: string | null;
+	created_at: string;
+	updated_at: string;
+}
+
+/** Event: a single push, with hybrid coalescing on identical content. */
+export interface EventData {
+	id: string;
+	issue_id: string;
+	created_at: string;
+	occurred_at: string | null;
+	severity: Severity;
+	description: string | null;
+	message: string;
+	active: boolean;
+	occurrences: number;
+	last_seen: string;
+}
+
+/** Incident: server-group rollup; closes when no issue is still active. */
+export interface IncidentData {
+	id: string;
+	server_id: string;
+	opened_at: string;
+	closed_at: string | null;
+	acknowledged_at: string | null;
+	acknowledged_by: string | null;
+	resolved_at: string | null;
+	resolved_by: string | null;
+	resolved_reason: string | null;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface IncidentIssueData {
+	joined_at: string;
+	left_at: string | null;
+	issue: IssueData;
+}
+
+export interface IncidentWithIssues {
+	incident: IncidentData;
+	issues: IncidentIssueData[];
+}
+
 export interface BestoolSnippetInfo {
 	id: string;
 	name: string;
