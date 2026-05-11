@@ -1,10 +1,11 @@
 use axum::Json;
 use axum::extract::State;
 use axum::routing::{Router, post};
-use commons_errors::Result;
+use commons_errors::{AppError, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
 use commons_types::{Uuid, issue::ResolvedReason};
 use database::issues::{Incident, IncidentIssue};
+use database::notes::IncidentNote;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
@@ -78,6 +79,9 @@ pub fn routes() -> Router<AppState> {
 		.route("/unack", post(unack))
 		.route("/resolve", post(resolve))
 		.route("/unresolve", post(unresolve))
+		.route("/add_note", post(add_note))
+		.route("/list_notes", post(list_notes))
+		.route("/delete_note", post(delete_note))
 }
 
 #[derive(Deserialize)]
@@ -196,4 +200,81 @@ pub async fn unresolve(
 	let mut conn = state.db.get().await?;
 	let incident = Incident::unresolve(&mut conn, args.incident_id).await?;
 	Ok(Json(IncidentData::from(incident)))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IncidentNoteData {
+	pub id: Uuid,
+	pub incident_id: Uuid,
+	pub author: String,
+	pub body: String,
+	pub created_at: Timestamp,
+}
+
+impl From<IncidentNote> for IncidentNoteData {
+	fn from(n: IncidentNote) -> Self {
+		Self {
+			id: n.id,
+			incident_id: n.incident_id,
+			author: n.author,
+			body: n.body,
+			created_at: n.created_at,
+		}
+	}
+}
+
+#[derive(Deserialize)]
+pub struct AddNoteArgs {
+	pub incident_id: Uuid,
+	pub body: String,
+}
+
+pub async fn add_note(
+	State(state): State<AppState>,
+	TailscaleAdmin(user): TailscaleAdmin,
+	Json(args): Json<AddNoteArgs>,
+) -> Result<Json<IncidentNoteData>> {
+	if args.body.trim().is_empty() {
+		return Err(AppError::custom("note body is required"));
+	}
+	let mut conn = state.db.get().await?;
+	let note = IncidentNote::add(&mut conn, args.incident_id, &user.login, &args.body).await?;
+	Ok(Json(IncidentNoteData::from(note)))
+}
+
+#[derive(Deserialize)]
+pub struct ListNotesArgs {
+	pub incident_id: Uuid,
+	#[serde(default)]
+	pub limit: Option<i64>,
+}
+
+pub async fn list_notes(
+	State(state): State<AppState>,
+	TailscaleAdmin(_): TailscaleAdmin,
+	Json(args): Json<ListNotesArgs>,
+) -> Result<Json<Vec<IncidentNoteData>>> {
+	let mut conn = state.db.get().await?;
+	let notes = IncidentNote::list_for_incident(
+		&mut conn,
+		args.incident_id,
+		args.limit.unwrap_or(DEFAULT_LIMIT),
+	)
+	.await?;
+	Ok(Json(notes.into_iter().map(IncidentNoteData::from).collect()))
+}
+
+#[derive(Deserialize)]
+pub struct DeleteNoteArgs {
+	pub note_id: Uuid,
+}
+
+pub async fn delete_note(
+	State(state): State<AppState>,
+	TailscaleAdmin(_): TailscaleAdmin,
+	Json(args): Json<DeleteNoteArgs>,
+) -> Result<Json<()>> {
+	let mut conn = state.db.get().await?;
+	IncidentNote::delete(&mut conn, args.note_id).await?;
+	Ok(Json(()))
 }

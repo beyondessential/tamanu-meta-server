@@ -8,6 +8,7 @@ use commons_types::{
 	issue::{ResolvedReason, Severity},
 };
 use database::issues::{Event, Issue, IssueFilter, NewEvent};
+use database::notes::IssueNote;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
@@ -110,6 +111,9 @@ pub fn routes() -> Router<AppState> {
 		.route("/unresolve", post(unresolve))
 		.route("/snooze", post(snooze))
 		.route("/unsnooze", post(unsnooze))
+		.route("/add_note", post(add_note))
+		.route("/list_notes", post(list_notes))
+		.route("/delete_note", post(delete_note))
 }
 
 fn filter_from(active_only: Option<bool>) -> IssueFilter {
@@ -306,4 +310,78 @@ pub async fn unsnooze(
 	let mut conn = state.db.get().await?;
 	let issue = Issue::unsnooze(&mut conn, args.issue_id).await?;
 	Ok(Json(IssueData::from(issue)))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IssueNoteData {
+	pub id: Uuid,
+	pub issue_id: Uuid,
+	pub author: String,
+	pub body: String,
+	pub created_at: Timestamp,
+}
+
+impl From<IssueNote> for IssueNoteData {
+	fn from(n: IssueNote) -> Self {
+		Self {
+			id: n.id,
+			issue_id: n.issue_id,
+			author: n.author,
+			body: n.body,
+			created_at: n.created_at,
+		}
+	}
+}
+
+#[derive(Deserialize)]
+pub struct AddNoteArgs {
+	pub issue_id: Uuid,
+	pub body: String,
+}
+
+pub async fn add_note(
+	State(state): State<AppState>,
+	TailscaleAdmin(user): TailscaleAdmin,
+	Json(args): Json<AddNoteArgs>,
+) -> Result<Json<IssueNoteData>> {
+	if args.body.trim().is_empty() {
+		return Err(AppError::custom("note body is required"));
+	}
+	let mut conn = state.db.get().await?;
+	let note = IssueNote::add(&mut conn, args.issue_id, &user.login, &args.body).await?;
+	Ok(Json(IssueNoteData::from(note)))
+}
+
+#[derive(Deserialize)]
+pub struct ListNotesArgs {
+	pub issue_id: Uuid,
+	#[serde(default)]
+	pub limit: Option<i64>,
+}
+
+pub async fn list_notes(
+	State(state): State<AppState>,
+	TailscaleAdmin(_): TailscaleAdmin,
+	Json(args): Json<ListNotesArgs>,
+) -> Result<Json<Vec<IssueNoteData>>> {
+	let mut conn = state.db.get().await?;
+	let notes =
+		IssueNote::list_for_issue(&mut conn, args.issue_id, args.limit.unwrap_or(DEFAULT_LIMIT))
+			.await?;
+	Ok(Json(notes.into_iter().map(IssueNoteData::from).collect()))
+}
+
+#[derive(Deserialize)]
+pub struct DeleteNoteArgs {
+	pub note_id: Uuid,
+}
+
+pub async fn delete_note(
+	State(state): State<AppState>,
+	TailscaleAdmin(_): TailscaleAdmin,
+	Json(args): Json<DeleteNoteArgs>,
+) -> Result<Json<()>> {
+	let mut conn = state.db.get().await?;
+	IssueNote::delete(&mut conn, args.note_id).await?;
+	Ok(Json(()))
 }
