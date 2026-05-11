@@ -2,12 +2,17 @@ import {
 	Alert as MuiAlert,
 	Box,
 	Button,
+	Dialog,
+	DialogActions,
+	DialogContent,
+	DialogTitle,
 	IconButton,
 	LinearProgress,
 	Stack,
 	TextField,
 	Typography,
 } from "@mui/material";
+import AddCommentIcon from "@mui/icons-material/AddComment";
 import DeleteIcon from "@mui/icons-material/Delete";
 import { useState } from "react";
 import { useApi, useApiAction } from "../api";
@@ -21,19 +26,22 @@ interface NoteLike {
 	created_at: string;
 }
 
-/** Generic notes panel — works for both issues and incidents.
+type ApiModule = "issues" | "incidents";
+type ParentKey = "issue_id" | "incident_id";
+
+/** List of notes plus a button that opens a dialog to add one.
  *
- * The caller picks the API module (`"issues"` or `"incidents"`) and the
- * key/id used to scope notes. Notes are immutable once written; "edit"
- * = delete + add a new one.
+ * Notes are immutable once written (delete + re-add to "edit"). The caller
+ * picks the API module (`"issues"` or `"incidents"`) and the key/id used
+ * to scope notes.
  */
 export default function NotesPanel({
 	apiModule,
 	parentKey,
 	parentId,
 }: {
-	apiModule: "issues" | "incidents";
-	parentKey: "issue_id" | "incident_id";
+	apiModule: ApiModule;
+	parentKey: ParentKey;
 	parentId: string;
 }) {
 	const list = useApi<NoteLike[]>(
@@ -42,44 +50,16 @@ export default function NotesPanel({
 		{ [parentKey]: parentId },
 		[apiModule, parentId],
 	);
-	const add = useApiAction(apiModule, "add_note");
-	const [draft, setDraft] = useState("");
-
-	const submit = async () => {
-		const body = draft.trim();
-		if (body === "") return;
-		try {
-			await add.call({ [parentKey]: parentId, body });
-			setDraft("");
-			list.reload();
-		} catch {
-			/* surfaced via add.error */
-		}
-	};
 
 	return (
 		<Box>
-			<Stack spacing={1} sx={{ mb: 1 }}>
-				<TextField
-					label="Add a note"
-					size="small"
-					multiline
-					minRows={2}
-					value={draft}
-					onChange={(e) => setDraft(e.target.value)}
-					disabled={add.pending}
+			<Stack direction="row" sx={{ justifyContent: "flex-end", mb: 1 }}>
+				<AddNoteButton
+					apiModule={apiModule}
+					parentKey={parentKey}
+					parentId={parentId}
+					onAdded={list.reload}
 				/>
-				<Box>
-					<Button
-						variant="contained"
-						size="small"
-						onClick={submit}
-						disabled={add.pending || draft.trim() === ""}
-					>
-						{add.pending ? "Adding…" : "Add note"}
-					</Button>
-				</Box>
-				{add.error && <MuiAlert severity="error">{add.error.message}</MuiAlert>}
 			</Stack>
 			{list.status === "loading" || list.status === "idle" ? (
 				<LinearProgress />
@@ -105,13 +85,93 @@ export default function NotesPanel({
 	);
 }
 
+/** Button that opens a modal dialog containing the add-note form. */
+export function AddNoteButton({
+	apiModule,
+	parentKey,
+	parentId,
+	onAdded,
+	label = "Add note",
+}: {
+	apiModule: ApiModule;
+	parentKey: ParentKey;
+	parentId: string;
+	onAdded?: () => void;
+	label?: string;
+}) {
+	const [open, setOpen] = useState(false);
+	const [draft, setDraft] = useState("");
+	const add = useApiAction(apiModule, "add_note");
+
+	const close = () => {
+		setOpen(false);
+		setDraft("");
+	};
+	const submit = async () => {
+		const body = draft.trim();
+		if (body === "") return;
+		try {
+			await add.call({ [parentKey]: parentId, body });
+			setDraft("");
+			setOpen(false);
+			onAdded?.();
+		} catch {
+			/* surfaced via add.error */
+		}
+	};
+
+	return (
+		<>
+			<Button
+				size="small"
+				startIcon={<AddCommentIcon />}
+				onClick={() => setOpen(true)}
+			>
+				{label}
+			</Button>
+			<Dialog open={open} onClose={close} fullWidth maxWidth="sm">
+				<DialogTitle>{label}</DialogTitle>
+				<DialogContent>
+					<TextField
+						autoFocus
+						fullWidth
+						multiline
+						minRows={3}
+						value={draft}
+						onChange={(e) => setDraft(e.target.value)}
+						disabled={add.pending}
+						sx={{ mt: 1 }}
+					/>
+					{add.error && (
+						<MuiAlert severity="error" sx={{ mt: 1 }}>
+							{add.error.message}
+						</MuiAlert>
+					)}
+				</DialogContent>
+				<DialogActions>
+					<Button onClick={close} disabled={add.pending}>
+						Cancel
+					</Button>
+					<Button
+						variant="contained"
+						onClick={submit}
+						disabled={add.pending || draft.trim() === ""}
+					>
+						{add.pending ? "Adding…" : "Add"}
+					</Button>
+				</DialogActions>
+			</Dialog>
+		</>
+	);
+}
+
 function NoteRow({
 	note,
 	apiModule,
 	onChanged,
 }: {
 	note: NoteLike;
-	apiModule: "issues" | "incidents";
+	apiModule: ApiModule;
 	onChanged: () => void;
 }) {
 	const del = useApiAction(apiModule, "delete_note");
