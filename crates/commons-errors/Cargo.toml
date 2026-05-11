@@ -23,3 +23,4 @@ serde = { workspace = true, features = ["derive"] }
 tera.workspace = true
 thiserror = "2.0.18"
 timesimp.workspace = true
+utoipa.workspace = true

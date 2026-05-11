@@ -19,4 +19,5 @@ node-semver.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json = "1.0.149"
 thiserror = "2.0.18"
+utoipa.workspace = true
 uuid = { version = "1.23.1", features = ["serde"] }
