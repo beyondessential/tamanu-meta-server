@@ -22,7 +22,6 @@ pub struct Page<T> {
 }
 
 pub fn routes() -> OpenApiRouter<crate::state::AppState> {
-	type Api = OpenApiRouter<crate::state::AppState>;
 	OpenApiRouter::new().nest(
 		"/api",
 		OpenApiRouter::new()
@@ -30,7 +29,7 @@ pub fn routes() -> OpenApiRouter<crate::state::AppState> {
 			.nest("/bestool", bestool::routes())
 			.nest("/commons", commons::routes())
 			.nest("/devices", devices::routes())
-			.nest("/incidents", Api::from(incidents::routes()))
+			.nest("/incidents", incidents::routes())
 			.nest("/issues", issues::routes())
 			.nest("/servers", servers::routes())
 			.nest("/sql", sql::routes())

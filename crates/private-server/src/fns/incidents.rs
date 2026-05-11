@@ -1,7 +1,6 @@
 use axum::Json;
 use axum::extract::State;
-use axum::routing::{Router, post};
-use commons_errors::{AppError, Result};
+use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
 use commons_types::{Uuid, issue::ResolvedReason};
 use database::issues::{Incident, IncidentIssue, IncidentStats};
@@ -10,13 +9,15 @@ use database::servers::Server;
 use database::tailscale_users::TailscaleUser as CachedTailscaleUser;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
+use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::fns::issues::{IssueData, enrich_issues, lookup_user};
 use crate::state::AppState;
 
 const DEFAULT_LIMIT: i64 = 100;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct IncidentData {
 	pub id: Uuid,
 	pub server_id: Uuid,
@@ -130,7 +131,7 @@ async fn enrich_incident(
 	Ok(IncidentData::from_with(incident, name, host, &users, s))
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct IncidentIssueData {
 	pub joined_at: Timestamp,
 	pub left_at: Option<Timestamp>,
@@ -147,27 +148,27 @@ impl From<(IncidentIssue, IssueData)> for IncidentIssueData {
 	}
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct IncidentWithIssues {
 	pub incident: IncidentData,
 	pub issues: Vec<IncidentIssueData>,
 }
 
-pub fn routes() -> Router<AppState> {
-	Router::new()
-		.route("/list_for_server", post(list_for_server))
-		.route("/list_active", post(list_active))
-		.route("/get", post(get_incident))
-		.route("/ack", post(ack))
-		.route("/unack", post(unack))
-		.route("/resolve", post(resolve))
-		.route("/unresolve", post(unresolve))
-		.route("/add_note", post(add_note))
-		.route("/list_notes", post(list_notes))
-		.route("/delete_note", post(delete_note))
+pub fn routes() -> OpenApiRouter<AppState> {
+	OpenApiRouter::new()
+		.routes(routes!(list_for_server))
+		.routes(routes!(list_active))
+		.routes(routes!(get_incident))
+		.routes(routes!(ack))
+		.routes(routes!(unack))
+		.routes(routes!(resolve))
+		.routes(routes!(unresolve))
+		.routes(routes!(add_note))
+		.routes(routes!(list_notes))
+		.routes(routes!(delete_note))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct ListForServerArgs {
 	pub server_id: Uuid,
 	#[serde(default)]
@@ -176,9 +177,19 @@ pub struct ListForServerArgs {
 	pub limit: Option<i64>,
 }
 
+#[utoipa::path(
+	post,
+	path = "/list_for_server",
+	tag = "incidents",
+	security(("tailscale-admin" = [])),
+	request_body = ListForServerArgs,
+	responses(
+		(status = 200, body = Vec<IncidentData>),
+	),
+)]
 pub async fn list_for_server(
 	State(state): State<AppState>,
-	TailscaleAdmin(_): TailscaleAdmin,
+	_admin: TailscaleAdmin,
 	Json(args): Json<ListForServerArgs>,
 ) -> Result<Json<Vec<IncidentData>>> {
 	let mut conn = state.db.get().await?;
@@ -192,15 +203,25 @@ pub async fn list_for_server(
 	Ok(Json(enrich_incidents(&mut conn, &state.db, incidents).await?))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct ListActiveArgs {
 	#[serde(default)]
 	pub limit: Option<i64>,
 }
 
+#[utoipa::path(
+	post,
+	path = "/list_active",
+	tag = "incidents",
+	security(("tailscale-admin" = [])),
+	request_body = ListActiveArgs,
+	responses(
+		(status = 200, body = Vec<IncidentData>),
+	),
+)]
 pub async fn list_active(
 	State(state): State<AppState>,
-	TailscaleAdmin(_): TailscaleAdmin,
+	_admin: TailscaleAdmin,
 	Json(args): Json<ListActiveArgs>,
 ) -> Result<Json<Vec<IncidentData>>> {
 	let mut conn = state.db.get().await?;
@@ -208,14 +229,25 @@ pub async fn list_active(
 	Ok(Json(enrich_incidents(&mut conn, &state.db, incidents).await?))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct GetIncidentArgs {
 	pub incident_id: Uuid,
 }
 
+#[utoipa::path(
+	post,
+	path = "/get",
+	tag = "incidents",
+	security(("tailscale-admin" = [])),
+	request_body = GetIncidentArgs,
+	responses(
+		(status = 200, body = IncidentWithIssues),
+		(status = 404, body = ProblemDetailsSchema),
+	),
+)]
 pub async fn get_incident(
 	State(state): State<AppState>,
-	TailscaleAdmin(_): TailscaleAdmin,
+	_admin: TailscaleAdmin,
 	Json(args): Json<GetIncidentArgs>,
 ) -> Result<Json<IncidentWithIssues>> {
 	let mut conn = state.db.get().await?;
@@ -231,24 +263,44 @@ pub async fn get_incident(
 	Ok(Json(IncidentWithIssues { incident, issues }))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct IncidentIdArgs {
 	pub incident_id: Uuid,
 }
 
+#[utoipa::path(
+	post,
+	path = "/ack",
+	tag = "incidents",
+	security(("tailscale-admin" = [])),
+	request_body = IncidentIdArgs,
+	responses(
+		(status = 200, body = IncidentData),
+	),
+)]
 pub async fn ack(
 	State(state): State<AppState>,
-	TailscaleAdmin(user): TailscaleAdmin,
+	admin: TailscaleAdmin,
 	Json(args): Json<IncidentIdArgs>,
 ) -> Result<Json<IncidentData>> {
 	let mut conn = state.db.get().await?;
-	let incident = Incident::ack(&mut conn, args.incident_id, &user.login).await?;
+	let incident = Incident::ack(&mut conn, args.incident_id, &admin.0.login).await?;
 	Ok(Json(enrich_incident(&mut conn, &state.db, incident).await?))
 }
 
+#[utoipa::path(
+	post,
+	path = "/unack",
+	tag = "incidents",
+	security(("tailscale-admin" = [])),
+	request_body = IncidentIdArgs,
+	responses(
+		(status = 200, body = IncidentData),
+	),
+)]
 pub async fn unack(
 	State(state): State<AppState>,
-	TailscaleAdmin(_): TailscaleAdmin,
+	_admin: TailscaleAdmin,
 	Json(args): Json<IncidentIdArgs>,
 ) -> Result<Json<IncidentData>> {
 	let mut conn = state.db.get().await?;
@@ -256,25 +308,45 @@ pub async fn unack(
 	Ok(Json(enrich_incident(&mut conn, &state.db, incident).await?))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct ResolveIncidentArgs {
 	pub incident_id: Uuid,
 	pub reason: ResolvedReason,
 }
 
+#[utoipa::path(
+	post,
+	path = "/resolve",
+	tag = "incidents",
+	security(("tailscale-admin" = [])),
+	request_body = ResolveIncidentArgs,
+	responses(
+		(status = 200, body = IncidentData),
+	),
+)]
 pub async fn resolve(
 	State(state): State<AppState>,
-	TailscaleAdmin(user): TailscaleAdmin,
+	admin: TailscaleAdmin,
 	Json(args): Json<ResolveIncidentArgs>,
 ) -> Result<Json<IncidentData>> {
 	let mut conn = state.db.get().await?;
-	let incident = Incident::resolve(&mut conn, args.incident_id, &user.login, args.reason).await?;
+	let incident = Incident::resolve(&mut conn, args.incident_id, &admin.0.login, args.reason).await?;
 	Ok(Json(enrich_incident(&mut conn, &state.db, incident).await?))
 }
 
+#[utoipa::path(
+	post,
+	path = "/unresolve",
+	tag = "incidents",
+	security(("tailscale-admin" = [])),
+	request_body = IncidentIdArgs,
+	responses(
+		(status = 200, body = IncidentData),
+	),
+)]
 pub async fn unresolve(
 	State(state): State<AppState>,
-	TailscaleAdmin(_): TailscaleAdmin,
+	_admin: TailscaleAdmin,
 	Json(args): Json<IncidentIdArgs>,
 ) -> Result<Json<IncidentData>> {
 	let mut conn = state.db.get().await?;
@@ -282,7 +354,7 @@ pub async fn unresolve(
 	Ok(Json(enrich_incident(&mut conn, &state.db, incident).await?))
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct IncidentNoteData {
 	pub id: Uuid,
 	pub incident_id: Uuid,
@@ -303,35 +375,56 @@ impl From<IncidentNote> for IncidentNoteData {
 	}
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct AddNoteArgs {
 	pub incident_id: Uuid,
 	pub body: String,
 }
 
+#[utoipa::path(
+	post,
+	path = "/add_note",
+	tag = "incidents",
+	security(("tailscale-admin" = [])),
+	request_body = AddNoteArgs,
+	responses(
+		(status = 200, body = IncidentNoteData),
+		(status = 400, body = ProblemDetailsSchema),
+	),
+)]
 pub async fn add_note(
 	State(state): State<AppState>,
-	TailscaleAdmin(user): TailscaleAdmin,
+	admin: TailscaleAdmin,
 	Json(args): Json<AddNoteArgs>,
 ) -> Result<Json<IncidentNoteData>> {
 	if args.body.trim().is_empty() {
 		return Err(AppError::custom("note body is required"));
 	}
 	let mut conn = state.db.get().await?;
-	let note = IncidentNote::add(&mut conn, args.incident_id, &user.login, &args.body).await?;
+	let note = IncidentNote::add(&mut conn, args.incident_id, &admin.0.login, &args.body).await?;
 	Ok(Json(IncidentNoteData::from(note)))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct ListNotesArgs {
 	pub incident_id: Uuid,
 	#[serde(default)]
 	pub limit: Option<i64>,
 }
 
+#[utoipa::path(
+	post,
+	path = "/list_notes",
+	tag = "incidents",
+	security(("tailscale-admin" = [])),
+	request_body = ListNotesArgs,
+	responses(
+		(status = 200, body = Vec<IncidentNoteData>),
+	),
+)]
 pub async fn list_notes(
 	State(state): State<AppState>,
-	TailscaleAdmin(_): TailscaleAdmin,
+	_admin: TailscaleAdmin,
 	Json(args): Json<ListNotesArgs>,
 ) -> Result<Json<Vec<IncidentNoteData>>> {
 	let mut conn = state.db.get().await?;
@@ -346,14 +439,24 @@ pub async fn list_notes(
 	))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct DeleteNoteArgs {
 	pub note_id: Uuid,
 }
 
+#[utoipa::path(
+	post,
+	path = "/delete_note",
+	tag = "incidents",
+	security(("tailscale-admin" = [])),
+	request_body = DeleteNoteArgs,
+	responses(
+		(status = 200),
+	),
+)]
 pub async fn delete_note(
 	State(state): State<AppState>,
-	TailscaleAdmin(_): TailscaleAdmin,
+	_admin: TailscaleAdmin,
 	Json(args): Json<DeleteNoteArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;

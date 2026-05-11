@@ -26,13 +26,39 @@ fn spec_has_problem_details_schema() {
 	assert!(schema.is_object(), "ProblemDetailsSchema is registered");
 }
 
-/// Each module is checked by asserting at least one of its routes appears in
-/// the generated paths. As modules are annotated they're added here.
+/// Each module gets a representative path checked.
 #[test]
-fn spec_has_admin_paths() {
+fn spec_has_paths_for_every_module() {
 	let spec = build_spec();
 	let paths = &spec["paths"];
-	for p in ["/api/admins/list", "/api/admins/add", "/api/admins/delete"] {
+	for p in [
+		"/api/admins/list",
+		"/api/bestool/list_snippets",
+		"/api/commons/public_url",
+		"/api/devices/list_trusted",
+		"/api/incidents/list_active",
+		"/api/issues/list",
+		"/api/servers/list_roots",
+		"/api/sql/is_sql_available",
+		"/api/statuses/summary",
+		"/api/versions/get_grouped_versions",
+	] {
 		assert!(paths[p].is_object(), "{p} present in spec");
 	}
+}
+
+#[test]
+fn spec_path_count() {
+	let spec = build_spec();
+	let paths = spec["paths"]
+		.as_object()
+		.expect("paths is an object");
+	// Sanity bound: every handler in private-server is annotated. If this drops
+	// far below ~70, someone removed annotations; if it climbs much higher,
+	// new endpoints exist that should be reviewed.
+	assert!(
+		paths.len() >= 60,
+		"expected >=60 paths in spec, got {}",
+		paths.len()
+	);
 }
