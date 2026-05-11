@@ -257,6 +257,7 @@ function Header({
 					serverId={incident.server_id}
 					hasOpenIncident={open}
 					onSubmitted={onChanged}
+					size="small"
 				/>
 				<AddNoteButton
 					apiModule="incidents"

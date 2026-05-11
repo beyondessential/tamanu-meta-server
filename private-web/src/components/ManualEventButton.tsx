@@ -12,6 +12,7 @@ export default function ManualEventButton({
 	serverId,
 	hasOpenIncident,
 	onSubmitted,
+	size = "medium",
 }: {
 	serverId: string;
 	/** Whether the server group currently has an open incident. The parent
@@ -22,6 +23,7 @@ export default function ManualEventButton({
 	/** Called after a successful submission so the parent can refresh sibling
 	 * panels (issues, incidents) that are now stale. */
 	onSubmitted?: () => void;
+	size?: "small" | "medium" | "large";
 }) {
 	const [open, setOpen] = useState(false);
 	const label = hasOpenIncident ? "Add issue" : "New incident";
@@ -30,6 +32,7 @@ export default function ManualEventButton({
 		<>
 			<Button
 				variant="outlined"
+				size={size}
 				startIcon={<AddAlertIcon />}
 				onClick={() => setOpen(true)}
 			>
