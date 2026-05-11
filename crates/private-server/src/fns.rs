@@ -26,7 +26,7 @@ pub fn routes() -> OpenApiRouter<crate::state::AppState> {
 	OpenApiRouter::new().nest(
 		"/api",
 		OpenApiRouter::new()
-			.nest("/admins", Api::from(admins::routes()))
+			.nest("/admins", admins::routes())
 			.nest("/bestool", Api::from(bestool::routes()))
 			.nest("/commons", Api::from(commons::routes()))
 			.nest("/devices", Api::from(devices::routes()))
