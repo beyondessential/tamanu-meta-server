@@ -129,12 +129,25 @@ fn server_to_info(s: Server) -> ServerInfo {
 pub fn routes() -> Router<AppState> {
 	Router::new()
 		.route("/list_some", post(list_some))
+		.route("/list_roots", post(list_roots))
 		.route("/get_name", post(get_name))
 		.route("/get_info", post(get_info))
 		.route("/get_detail", post(get_detail))
 		.route("/update", post(update))
 		.route("/import_ticket", post(import_ticket))
 		.route("/search_parent", post(search_parent))
+}
+
+/// Root servers — those without a parent. Each one heads a server-group
+/// (the unit incidents roll up to). Used by the Incidents page filter.
+pub async fn list_roots(
+	State(state): State<AppState>,
+	TailscaleAdmin(_): TailscaleAdmin,
+	Json(_): Json<serde_json::Value>,
+) -> Result<Json<Vec<ServerInfo>>> {
+	let mut conn = state.db.get().await?;
+	let servers = Server::list_roots(&mut conn).await?;
+	Ok(Json(servers.into_iter().map(server_to_info).collect()))
 }
 
 #[derive(Deserialize)]

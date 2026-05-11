@@ -7,7 +7,7 @@ use commons_types::{
 	Uuid,
 	issue::{ResolvedReason, Severity},
 };
-use database::issues::{Event, Issue, IssueFilter, NewEvent};
+use database::issues::{Event, Issue, IssueFilter, IssueListFilters, NewEvent};
 use database::notes::IssueNote;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -101,6 +101,7 @@ impl From<Event> for EventData {
 
 pub fn routes() -> Router<AppState> {
 	Router::new()
+		.route("/list", post(list))
 		.route("/list_for_device", post(list_for_device))
 		.route("/list_for_server", post(list_for_server))
 		.route("/list_events", post(list_events))
@@ -121,6 +122,42 @@ fn filter_from(active_only: Option<bool>) -> IssueFilter {
 		Some(false) => IssueFilter::All,
 		_ => IssueFilter::ActiveOnly,
 	}
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListArgs {
+	#[serde(default)]
+	pub active_only: Option<bool>,
+	#[serde(default)]
+	pub severities: Option<Vec<Severity>>,
+	#[serde(default)]
+	pub server_group_id: Option<Uuid>,
+	#[serde(default)]
+	pub acked: Option<bool>,
+	#[serde(default)]
+	pub limit: Option<i64>,
+}
+
+/// Cross-server filtered issues list (used by the global Incidents page).
+pub async fn list(
+	State(state): State<AppState>,
+	TailscaleAdmin(_): TailscaleAdmin,
+	Json(args): Json<ListArgs>,
+) -> Result<Json<Vec<IssueData>>> {
+	let mut conn = state.db.get().await?;
+	let issues = Issue::list(
+		&mut conn,
+		IssueListFilters {
+			active_only: args.active_only.unwrap_or(true),
+			severities: args.severities,
+			server_group_id: args.server_group_id,
+			acked: args.acked,
+		},
+		args.limit.unwrap_or(DEFAULT_LIMIT),
+	)
+	.await?;
+	Ok(Json(issues.into_iter().map(IssueData::from).collect()))
 }
 
 #[derive(Deserialize)]
