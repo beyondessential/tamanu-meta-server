@@ -392,7 +392,7 @@ function ChildServers({
 						</MuiLink>
 						{child.rank && <ServerRankChip rank={child.rank} />}
 						<ServerKindChip kind={child.kind} />
-						<Box sx={{ ml: "auto" }}>
+						<Box sx={{ flex: 1, textAlign: "right" }}>
 							<Typography variant="body2" color="text.secondary">
 								{child.host}
 							</Typography>
