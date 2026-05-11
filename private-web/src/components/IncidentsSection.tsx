@@ -2,6 +2,7 @@ import {
 	Alert as MuiAlert,
 	Box,
 	Button,
+	Collapse,
 	FormControlLabel,
 	IconButton,
 	LinearProgress,
@@ -12,9 +13,12 @@ import {
 	TextField,
 	Typography,
 } from "@mui/material";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import { useState } from "react";
 import { useApi, useApiAction } from "../api";
+import NotesPanel from "./NotesPanel";
 import TimeAgo from "./TimeAgo";
 import {
 	RESOLVED_REASONS,
@@ -109,6 +113,7 @@ function IncidentRow({
 	const resolve = useApiAction("incidents", "resolve");
 	const unresolve = useApiAction("incidents", "unresolve");
 
+	const [expanded, setExpanded] = useState(false);
 	const [resolveOpen, setResolveOpen] = useState(false);
 	const [reason, setReason] = useState<ResolvedReason>("fixed");
 
@@ -171,6 +176,17 @@ function IncidentRow({
 				>
 					{incident.id}
 				</Typography>
+				<IconButton
+					aria-label={expanded ? "Hide notes" : "Show notes"}
+					size="small"
+					onClick={() => setExpanded((v) => !v)}
+				>
+					{expanded ? (
+						<ExpandLessIcon fontSize="small" />
+					) : (
+						<ExpandMoreIcon fontSize="small" />
+					)}
+				</IconButton>
 			</Stack>
 			<Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: "wrap" }} useFlexGap>
 				{incident.acknowledged_at ? (
@@ -239,6 +255,14 @@ function IncidentRow({
 					{error.message}
 				</MuiAlert>
 			)}
+			<Collapse in={expanded} unmountOnExit>
+				<Box sx={{ mt: 1 }}>
+					<Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5 }}>
+						Notes
+					</Typography>
+					<NotesPanel apiModule="incidents" parentKey="incident_id" parentId={incident.id} />
+				</Box>
+			</Collapse>
 		</Box>
 	);
 }

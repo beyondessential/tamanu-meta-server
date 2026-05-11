@@ -18,6 +18,7 @@ import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import { useState } from "react";
 import { useApi, useApiAction } from "../api";
+import NotesPanel from "./NotesPanel";
 import SeverityChip from "./SeverityChip";
 import TimeAgo from "./TimeAgo";
 import {
@@ -197,7 +198,14 @@ function IssueRow({ issue, onChanged }: { issue: IssueData; onChanged: () => voi
 			<IssueActions issue={issue} snoozeActive={snoozeActive} onChanged={onChanged} />
 			<Collapse in={expanded} unmountOnExit>
 				<Box sx={{ mt: 1 }}>
+					<Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5 }}>
+						Events
+					</Typography>
 					<EventLog issueId={issue.id} />
+					<Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.5, mb: 0.5 }}>
+						Notes
+					</Typography>
+					<NotesPanel apiModule="issues" parentKey="issue_id" parentId={issue.id} />
 				</Box>
 			</Collapse>
 		</Box>

@@ -291,6 +291,24 @@ export interface IncidentWithIssues {
 	issues: IncidentIssueData[];
 }
 
+/** Free-text operator note attached to an issue. Immutable once written. */
+export interface IssueNoteData {
+	id: string;
+	issue_id: string;
+	author: string;
+	body: string;
+	created_at: string;
+}
+
+/** Free-text operator note attached to an incident. Immutable once written. */
+export interface IncidentNoteData {
+	id: string;
+	incident_id: string;
+	author: string;
+	body: string;
+	created_at: string;
+}
+
 export interface BestoolSnippetInfo {
 	id: string;
 	name: string;
