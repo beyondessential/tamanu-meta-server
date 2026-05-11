@@ -29,10 +29,10 @@ pub fn routes() -> OpenApiRouter<crate::state::AppState> {
 			.nest("/admins", admins::routes())
 			.nest("/bestool", bestool::routes())
 			.nest("/commons", commons::routes())
-			.nest("/devices", Api::from(devices::routes()))
+			.nest("/devices", devices::routes())
 			.nest("/incidents", Api::from(incidents::routes()))
 			.nest("/issues", Api::from(issues::routes()))
-			.nest("/servers", Api::from(servers::routes()))
+			.nest("/servers", servers::routes())
 			.nest("/sql", sql::routes())
 			.nest("/statuses", statuses::routes())
 			.nest("/versions", Api::from(versions::routes())),

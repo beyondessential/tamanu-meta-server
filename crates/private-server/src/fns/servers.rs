@@ -1,7 +1,6 @@
 use axum::Json;
 use axum::extract::State;
-use axum::routing::{Router, post};
-use commons_errors::{AppError, Result};
+use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
 use commons_types::server::CanopyTicket;
 use commons_types::{
@@ -22,11 +21,13 @@ use futures::future::join;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+use utoipa::ToSchema;
+use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::fns::Page;
 use crate::state::AppState;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ServerDetailData {
 	pub server: ServerInfo,
 	pub device_info: Option<super::devices::DeviceInfo>,
@@ -35,7 +36,7 @@ pub struct ServerDetailData {
 	pub child_servers: Vec<(ShortStatus, ServerInfo)>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ServerInfo {
 	pub id: Uuid,
 	pub name: Option<String>,
@@ -50,7 +51,7 @@ pub struct ServerInfo {
 	pub geolocation: Option<GeoPoint>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ServerLastStatusData {
 	pub id: Uuid,
 	pub created_at: Timestamp,
@@ -64,7 +65,7 @@ pub struct ServerLastStatusData {
 	pub extra: JsonValue,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
 pub struct ServerDataUpdate {
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub name: Option<String>,
@@ -126,37 +127,55 @@ fn server_to_info(s: Server) -> ServerInfo {
 	}
 }
 
-pub fn routes() -> Router<AppState> {
-	Router::new()
-		.route("/list_some", post(list_some))
-		.route("/list_roots", post(list_roots))
-		.route("/get_name", post(get_name))
-		.route("/get_info", post(get_info))
-		.route("/get_detail", post(get_detail))
-		.route("/update", post(update))
-		.route("/import_ticket", post(import_ticket))
-		.route("/search_parent", post(search_parent))
+pub fn routes() -> OpenApiRouter<AppState> {
+	OpenApiRouter::new()
+		.routes(routes!(list_some))
+		.routes(routes!(list_roots))
+		.routes(routes!(get_name))
+		.routes(routes!(get_info))
+		.routes(routes!(get_detail))
+		.routes(routes!(update))
+		.routes(routes!(import_ticket))
+		.routes(routes!(search_parent))
 }
 
 /// Root servers — those without a parent. Each one heads a server-group
 /// (the unit incidents roll up to). Used by the Incidents page filter.
+#[utoipa::path(
+	post,
+	path = "/list_roots",
+	tag = "servers",
+	security(("tailscale-admin" = [])),
+	responses(
+		(status = 200, body = Vec<ServerInfo>),
+	),
+)]
 pub async fn list_roots(
 	State(state): State<AppState>,
-	TailscaleAdmin(_): TailscaleAdmin,
-	Json(_): Json<serde_json::Value>,
+	_admin: TailscaleAdmin,
+	_body: Json<serde_json::Value>,
 ) -> Result<Json<Vec<ServerInfo>>> {
 	let mut conn = state.db.get().await?;
 	let servers = Server::list_roots(&mut conn).await?;
 	Ok(Json(servers.into_iter().map(server_to_info).collect()))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct ListArgs {
 	pub kind: Option<ServerKind>,
 	pub offset: u64,
 	pub limit: Option<u64>,
 }
 
+#[utoipa::path(
+	post,
+	path = "/list_some",
+	tag = "servers",
+	request_body = ListArgs,
+	responses(
+		(status = 200, body = Page<ServerInfo>),
+	),
+)]
 pub async fn list_some(
 	State(state): State<AppState>,
 	Json(args): Json<ListArgs>,
@@ -176,11 +195,21 @@ pub async fn list_some(
 	Ok(Json(Page { items, total }))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct ServerIdArgs {
 	pub server_id: Uuid,
 }
 
+#[utoipa::path(
+	post,
+	path = "/get_name",
+	tag = "servers",
+	request_body = ServerIdArgs,
+	responses(
+		(status = 200, body = String),
+		(status = 404, body = ProblemDetailsSchema),
+	),
+)]
 pub async fn get_name(
 	State(state): State<AppState>,
 	Json(args): Json<ServerIdArgs>,
@@ -192,6 +221,16 @@ pub async fn get_name(
 	))
 }
 
+#[utoipa::path(
+	post,
+	path = "/get_info",
+	tag = "servers",
+	request_body = ServerIdArgs,
+	responses(
+		(status = 200, body = ServerInfo),
+		(status = 404, body = ProblemDetailsSchema),
+	),
+)]
 pub async fn get_info(
 	State(state): State<AppState>,
 	Json(args): Json<ServerIdArgs>,
@@ -219,6 +258,16 @@ pub async fn get_info(
 	}))
 }
 
+#[utoipa::path(
+	post,
+	path = "/get_detail",
+	tag = "servers",
+	request_body = ServerIdArgs,
+	responses(
+		(status = 200, body = ServerDetailData),
+		(status = 404, body = ProblemDetailsSchema),
+	),
+)]
 pub async fn get_detail(
 	State(state): State<AppState>,
 	Json(args): Json<ServerIdArgs>,
@@ -364,15 +413,26 @@ pub async fn get_detail(
 	}))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct UpdateArgs {
 	pub server_id: Uuid,
 	pub data: ServerDataUpdate,
 }
 
+#[utoipa::path(
+	post,
+	path = "/update",
+	tag = "servers",
+	security(("tailscale-admin" = [])),
+	request_body = UpdateArgs,
+	responses(
+		(status = 200),
+		(status = 400, body = ProblemDetailsSchema),
+	),
+)]
 pub async fn update(
 	State(state): State<AppState>,
-	TailscaleAdmin(_): TailscaleAdmin,
+	_admin: TailscaleAdmin,
 	Json(args): Json<UpdateArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
@@ -398,16 +458,27 @@ pub async fn update(
 	Ok(Json(()))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct ImportTicketArgs {
 	pub ticket_b64: String,
 	pub kind: ServerKind,
 	pub rank: Option<ServerRank>,
 }
 
+#[utoipa::path(
+	post,
+	path = "/import_ticket",
+	tag = "servers",
+	security(("tailscale-admin" = [])),
+	request_body = ImportTicketArgs,
+	responses(
+		(status = 200, description = "New server id.", body = Uuid),
+		(status = 400, body = ProblemDetailsSchema),
+	),
+)]
 pub async fn import_ticket(
 	State(state): State<AppState>,
-	TailscaleAdmin(_): TailscaleAdmin,
+	_admin: TailscaleAdmin,
 	Json(args): Json<ImportTicketArgs>,
 ) -> Result<Json<Uuid>> {
 	let mut conn = state.db.get().await?;
@@ -416,7 +487,7 @@ pub async fn import_ticket(
 	Ok(Json(server.id))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct SearchParentArgs {
 	pub query: String,
 	pub current_server_id: Uuid,
@@ -424,6 +495,15 @@ pub struct SearchParentArgs {
 	pub current_kind: ServerKind,
 }
 
+#[utoipa::path(
+	post,
+	path = "/search_parent",
+	tag = "servers",
+	request_body = SearchParentArgs,
+	responses(
+		(status = 200, body = Vec<ServerInfo>),
+	),
+)]
 pub async fn search_parent(
 	State(state): State<AppState>,
 	Json(args): Json<SearchParentArgs>,
