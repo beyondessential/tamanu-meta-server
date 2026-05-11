@@ -180,6 +180,7 @@ pub struct ListForServerArgs {
 #[utoipa::path(
 	post,
 	path = "/list_for_server",
+	operation_id = "incident_list_for_server",
 	tag = "incidents",
 	security(("tailscale-admin" = [])),
 	request_body = ListForServerArgs,
@@ -271,6 +272,7 @@ pub struct IncidentIdArgs {
 #[utoipa::path(
 	post,
 	path = "/ack",
+	operation_id = "incident_ack",
 	tag = "incidents",
 	security(("tailscale-admin" = [])),
 	request_body = IncidentIdArgs,
@@ -291,6 +293,7 @@ pub async fn ack(
 #[utoipa::path(
 	post,
 	path = "/unack",
+	operation_id = "incident_unack",
 	tag = "incidents",
 	security(("tailscale-admin" = [])),
 	request_body = IncidentIdArgs,
@@ -317,6 +320,7 @@ pub struct ResolveIncidentArgs {
 #[utoipa::path(
 	post,
 	path = "/resolve",
+	operation_id = "incident_resolve",
 	tag = "incidents",
 	security(("tailscale-admin" = [])),
 	request_body = ResolveIncidentArgs,
@@ -337,6 +341,7 @@ pub async fn resolve(
 #[utoipa::path(
 	post,
 	path = "/unresolve",
+	operation_id = "incident_unresolve",
 	tag = "incidents",
 	security(("tailscale-admin" = [])),
 	request_body = IncidentIdArgs,
@@ -384,6 +389,7 @@ pub struct AddNoteArgs {
 #[utoipa::path(
 	post,
 	path = "/add_note",
+	operation_id = "incident_add_note",
 	tag = "incidents",
 	security(("tailscale-admin" = [])),
 	request_body = AddNoteArgs,
@@ -415,6 +421,7 @@ pub struct ListNotesArgs {
 #[utoipa::path(
 	post,
 	path = "/list_notes",
+	operation_id = "incident_list_notes",
 	tag = "incidents",
 	security(("tailscale-admin" = [])),
 	request_body = ListNotesArgs,
@@ -447,6 +454,7 @@ pub struct DeleteNoteArgs {
 #[utoipa::path(
 	post,
 	path = "/delete_note",
+	operation_id = "incident_delete_note",
 	tag = "incidents",
 	security(("tailscale-admin" = [])),
 	request_body = DeleteNoteArgs,

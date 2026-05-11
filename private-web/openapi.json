@@ -898,7 +898,7 @@
         "tags": [
           "incidents"
         ],
-        "operationId": "ack",
+        "operationId": "incident_ack",
         "requestBody": {
           "content": {
             "application/json": {
@@ -933,7 +933,7 @@
         "tags": [
           "incidents"
         ],
-        "operationId": "add_note",
+        "operationId": "incident_add_note",
         "requestBody": {
           "content": {
             "application/json": {
@@ -978,7 +978,7 @@
         "tags": [
           "incidents"
         ],
-        "operationId": "delete_note",
+        "operationId": "incident_delete_note",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1089,7 +1089,7 @@
         "tags": [
           "incidents"
         ],
-        "operationId": "list_for_server",
+        "operationId": "incident_list_for_server",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1127,7 +1127,7 @@
         "tags": [
           "incidents"
         ],
-        "operationId": "list_notes",
+        "operationId": "incident_list_notes",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1165,7 +1165,7 @@
         "tags": [
           "incidents"
         ],
-        "operationId": "resolve",
+        "operationId": "incident_resolve",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1200,7 +1200,7 @@
         "tags": [
           "incidents"
         ],
-        "operationId": "unack",
+        "operationId": "incident_unack",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1235,7 +1235,7 @@
         "tags": [
           "incidents"
         ],
-        "operationId": "unresolve",
+        "operationId": "incident_unresolve",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1270,7 +1270,7 @@
         "tags": [
           "issues"
         ],
-        "operationId": "ack",
+        "operationId": "issue_ack",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1305,7 +1305,7 @@
         "tags": [
           "issues"
         ],
-        "operationId": "add_note",
+        "operationId": "issue_add_note",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1350,7 +1350,7 @@
         "tags": [
           "issues"
         ],
-        "operationId": "delete_note",
+        "operationId": "issue_delete_note",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1379,7 +1379,7 @@
           "issues"
         ],
         "summary": "Cross-server filtered issues list (used by the global Incidents page).",
-        "operationId": "list",
+        "operationId": "issue_list",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1493,7 +1493,7 @@
         "tags": [
           "issues"
         ],
-        "operationId": "list_for_server",
+        "operationId": "issue_list_for_server",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1531,7 +1531,7 @@
         "tags": [
           "issues"
         ],
-        "operationId": "list_notes",
+        "operationId": "issue_list_notes",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1569,7 +1569,7 @@
         "tags": [
           "issues"
         ],
-        "operationId": "resolve",
+        "operationId": "issue_resolve",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1684,7 +1684,7 @@
         "tags": [
           "issues"
         ],
-        "operationId": "unack",
+        "operationId": "issue_unack",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1719,7 +1719,7 @@
         "tags": [
           "issues"
         ],
-        "operationId": "unresolve",
+        "operationId": "issue_unresolve",
         "requestBody": {
           "content": {
             "application/json": {
