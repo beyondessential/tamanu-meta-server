@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use utoipa_axum::router::OpenApiRouter;
 
 pub mod admins;
 pub mod bestool;
@@ -14,26 +15,26 @@ pub mod versions;
 /// Standard wrapper for paginated list responses. The total reflects the full
 /// row count (not just the current page) so the frontend can render page
 /// counts without a separate count fetch.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Page<T> {
 	pub items: Vec<T>,
 	pub total: u64,
 }
 
-pub fn routes() -> axum::Router<crate::state::AppState> {
-	use axum::Router;
-	Router::new().nest(
+pub fn routes() -> OpenApiRouter<crate::state::AppState> {
+	type Api = OpenApiRouter<crate::state::AppState>;
+	OpenApiRouter::new().nest(
 		"/api",
-		Router::new()
-			.nest("/admins", admins::routes())
-			.nest("/bestool", bestool::routes())
-			.nest("/commons", commons::routes())
-			.nest("/devices", devices::routes())
-			.nest("/incidents", incidents::routes())
-			.nest("/issues", issues::routes())
-			.nest("/servers", servers::routes())
-			.nest("/sql", sql::routes())
-			.nest("/statuses", statuses::routes())
-			.nest("/versions", versions::routes()),
+		OpenApiRouter::new()
+			.nest("/admins", Api::from(admins::routes()))
+			.nest("/bestool", Api::from(bestool::routes()))
+			.nest("/commons", Api::from(commons::routes()))
+			.nest("/devices", Api::from(devices::routes()))
+			.nest("/incidents", Api::from(incidents::routes()))
+			.nest("/issues", Api::from(issues::routes()))
+			.nest("/servers", Api::from(servers::routes()))
+			.nest("/sql", Api::from(sql::routes()))
+			.nest("/statuses", Api::from(statuses::routes()))
+			.nest("/versions", Api::from(versions::routes())),
 	)
 }
