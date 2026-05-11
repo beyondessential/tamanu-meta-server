@@ -85,12 +85,14 @@ export function AddNoteButton({
 	parentId,
 	onAdded,
 	label = "Add note",
+	variant = "text",
 }: {
 	apiModule: ApiModule;
 	parentKey: ParentKey;
 	parentId: string;
 	onAdded?: () => void;
 	label?: string;
+	variant?: "text" | "outlined" | "contained";
 }) {
 	const [open, setOpen] = useState(false);
 	const [draft, setDraft] = useState("");
@@ -117,6 +119,7 @@ export function AddNoteButton({
 		<>
 			<Button
 				size="small"
+				variant={variant}
 				startIcon={<AddCommentIcon />}
 				onClick={() => setOpen(true)}
 			>

@@ -218,6 +218,7 @@ function Header({
 				{!incident.acknowledged_at && (
 					<Button
 						size="small"
+						variant="outlined"
 						onClick={() => wrap(() => ack.call({ incident_id: incident.id }))}
 					>
 						Ack
@@ -226,6 +227,7 @@ function Header({
 				{incident.resolved_at ? (
 					<Button
 						size="small"
+						variant="outlined"
 						color="warning"
 						onClick={() =>
 							wrap(() => unresolve.call({ incident_id: incident.id }))
@@ -241,6 +243,7 @@ function Header({
 						<span>
 							<Button
 								size="small"
+								variant="outlined"
 								color="success"
 								disabled={!incident.acknowledged_at}
 								onClick={() => setResolveOpen((v) => !v)}
@@ -260,6 +263,7 @@ function Header({
 					parentKey="incident_id"
 					parentId={incident.id}
 					onAdded={onChanged}
+					variant="outlined"
 				/>
 				<Box sx={{ ml: "auto" }}>
 					<Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
@@ -298,7 +302,7 @@ function Header({
 						))}
 					</TextField>
 					<Button
-						variant="contained"
+						variant="outlined"
 						size="small"
 						onClick={() =>
 							wrap(() =>
@@ -308,7 +312,11 @@ function Header({
 					>
 						Resolve
 					</Button>
-					<Button size="small" onClick={() => setResolveOpen(false)}>
+					<Button
+						variant="outlined"
+						size="small"
+						onClick={() => setResolveOpen(false)}
+					>
 						Cancel
 					</Button>
 				</Stack>
