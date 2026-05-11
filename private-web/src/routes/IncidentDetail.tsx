@@ -198,16 +198,47 @@ function Header({
 						{timeText}
 					</Typography>
 				</Box>
-				{incident.acknowledged_at && (
-					<Box sx={{ flexShrink: 0 }}>
-						<UserAvatar
-							login={incident.acknowledged_by}
-							name={incident.acknowledged_by_name}
-							profilePic={incident.acknowledged_by_pic}
-							size={36}
-						/>
-					</Box>
-				)}
+				<Box sx={{ flexShrink: 0 }}>
+					{incident.resolved_at ? (
+						<Tooltip
+							title={`resolved (${incident.resolved_reason ?? "?"}) by ${
+								incident.resolved_by_name ?? incident.resolved_by ?? "?"
+							}`}
+						>
+							<span>
+								<UserAvatar
+									login={incident.resolved_by}
+									name={incident.resolved_by_name}
+									profilePic={incident.resolved_by_pic}
+									size={36}
+								/>
+							</span>
+						</Tooltip>
+					) : incident.acknowledged_at ? (
+						<Tooltip
+							title={`acked by ${incident.acknowledged_by_name ?? incident.acknowledged_by ?? "?"}`}
+						>
+							<span>
+								<UserAvatar
+									login={incident.acknowledged_by}
+									name={incident.acknowledged_by_name}
+									profilePic={incident.acknowledged_by_pic}
+									size={36}
+								/>
+							</span>
+						</Tooltip>
+					) : (
+						<Button
+							size="small"
+							variant="outlined"
+							onClick={() =>
+								wrap(() => ack.call({ incident_id: incident.id }))
+							}
+						>
+							Ack
+						</Button>
+					)}
+				</Box>
 			</Stack>
 
 			<Stack
@@ -216,15 +247,6 @@ function Header({
 				sx={{ mt: 2, alignItems: "center", flexWrap: "wrap" }}
 				useFlexGap
 			>
-				{!incident.acknowledged_at && (
-					<Button
-						size="small"
-						variant="outlined"
-						onClick={() => wrap(() => ack.call({ incident_id: incident.id }))}
-					>
-						Ack
-					</Button>
-				)}
 				{incident.resolved_at ? (
 					<Button
 						size="small"
