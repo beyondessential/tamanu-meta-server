@@ -314,6 +314,27 @@ impl Server {
 			.map_err(AppError::from)
 	}
 
+	/// Bulk-fetch `(name, host)` for a set of server ids — used by the
+	/// issues/incidents APIs to embed display info into each row so the UI
+	/// doesn't have to fetch every server independently.
+	pub async fn names_by_ids(
+		db: &mut AsyncPgConnection,
+		ids: &[Uuid],
+	) -> Result<std::collections::HashMap<Uuid, (Option<String>, String)>> {
+		use crate::schema::servers::dsl;
+
+		if ids.is_empty() {
+			return Ok(std::collections::HashMap::new());
+		}
+		let rows: Vec<(Uuid, Option<String>, String)> = dsl::servers
+			.select((dsl::id, dsl::name, dsl::host))
+			.filter(dsl::id.eq_any(ids))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(rows.into_iter().map(|(i, n, h)| (i, (n, h))).collect())
+	}
+
 	/// All server ids reachable from `root_id` via `parent_server_id` links,
 	/// inclusive of the root itself. A single recursive CTE.
 	pub async fn descendant_ids(

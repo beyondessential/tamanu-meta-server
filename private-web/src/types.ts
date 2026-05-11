@@ -231,6 +231,9 @@ export const RESOLVED_REASON_LABEL: Record<ResolvedReason, string> = {
 export interface IssueData {
 	id: string;
 	server_id: string;
+	/** Display name of the issue's server (may be null — use `server_host`). */
+	server_name: string | null;
+	server_host: string;
 	device_id: string | null;
 	source: string;
 	ref: string;
@@ -269,6 +272,9 @@ export interface EventData {
 export interface IncidentData {
 	id: string;
 	server_id: string;
+	/** Display name of the root server (may be null — use `server_host`). */
+	server_name: string | null;
+	server_host: string;
 	opened_at: string;
 	closed_at: string | null;
 	acknowledged_at: string | null;

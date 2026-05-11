@@ -9,6 +9,7 @@ use commons_types::{
 };
 use database::issues::{Event, Issue, IssueFilter, IssueListFilters, NewEvent};
 use database::notes::IssueNote;
+use database::servers::Server;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
@@ -20,6 +21,9 @@ const DEFAULT_LIMIT: i64 = 100;
 pub struct IssueData {
 	pub id: Uuid,
 	pub server_id: Uuid,
+	/// The issue's server name (may be null — fall back to `server_host`).
+	pub server_name: Option<String>,
+	pub server_host: String,
 	pub device_id: Option<Uuid>,
 	pub source: String,
 	#[serde(rename = "ref")]
@@ -42,11 +46,13 @@ pub struct IssueData {
 	pub updated_at: Timestamp,
 }
 
-impl From<Issue> for IssueData {
-	fn from(i: Issue) -> Self {
+impl IssueData {
+	fn from_with(i: Issue, server_name: Option<String>, server_host: String) -> Self {
 		Self {
 			id: i.id,
 			server_id: i.server_id,
+			server_name,
+			server_host,
 			device_id: i.device_id,
 			source: i.source,
 			r#ref: i.r#ref,
@@ -66,6 +72,37 @@ impl From<Issue> for IssueData {
 			updated_at: i.updated_at,
 		}
 	}
+}
+
+/// Enrich a list of issues with their server names/hosts in one extra query.
+pub(crate) async fn enrich_issues(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	issues: Vec<Issue>,
+) -> Result<Vec<IssueData>> {
+	let ids: Vec<Uuid> = issues.iter().map(|i| i.server_id).collect();
+	let names = Server::names_by_ids(conn, &ids).await?;
+	Ok(issues
+		.into_iter()
+		.map(|i| {
+			let (name, host) = names
+				.get(&i.server_id)
+				.cloned()
+				.unwrap_or((None, String::new()));
+			IssueData::from_with(i, name, host)
+		})
+		.collect())
+}
+
+/// Same as `enrich_issues` but for a single issue.
+pub(crate) async fn enrich_issue(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	issue: Issue,
+) -> Result<IssueData> {
+	let mut names = Server::names_by_ids(conn, &[issue.server_id]).await?;
+	let (name, host) = names
+		.remove(&issue.server_id)
+		.unwrap_or((None, String::new()));
+	Ok(IssueData::from_with(issue, name, host))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -157,7 +194,7 @@ pub async fn list(
 		args.limit.unwrap_or(DEFAULT_LIMIT),
 	)
 	.await?;
-	Ok(Json(issues.into_iter().map(IssueData::from).collect()))
+	Ok(Json(enrich_issues(&mut conn, issues).await?))
 }
 
 #[derive(Deserialize)]
@@ -182,7 +219,7 @@ pub async fn list_for_device(
 		args.limit.unwrap_or(DEFAULT_LIMIT),
 	)
 	.await?;
-	Ok(Json(issues.into_iter().map(IssueData::from).collect()))
+	Ok(Json(enrich_issues(&mut conn, issues).await?))
 }
 
 #[derive(Deserialize)]
@@ -207,7 +244,7 @@ pub async fn list_for_server(
 		args.limit.unwrap_or(DEFAULT_LIMIT),
 	)
 	.await?;
-	Ok(Json(issues.into_iter().map(IssueData::from).collect()))
+	Ok(Json(enrich_issues(&mut conn, issues).await?))
 }
 
 #[derive(Deserialize)]
@@ -269,7 +306,7 @@ pub async fn submit_manual_event(
 	};
 	let mut conn = state.db.get().await?;
 	let issue = event.save(&mut conn, args.server_id, None).await?;
-	Ok(Json(IssueData::from(issue)))
+	Ok(Json(enrich_issue(&mut conn, issue).await?))
 }
 
 #[derive(Deserialize)]
@@ -284,7 +321,7 @@ pub async fn ack(
 ) -> Result<Json<IssueData>> {
 	let mut conn = state.db.get().await?;
 	let issue = Issue::ack(&mut conn, args.issue_id, &user.login).await?;
-	Ok(Json(IssueData::from(issue)))
+	Ok(Json(enrich_issue(&mut conn, issue).await?))
 }
 
 pub async fn unack(
@@ -294,7 +331,7 @@ pub async fn unack(
 ) -> Result<Json<IssueData>> {
 	let mut conn = state.db.get().await?;
 	let issue = Issue::unack(&mut conn, args.issue_id).await?;
-	Ok(Json(IssueData::from(issue)))
+	Ok(Json(enrich_issue(&mut conn, issue).await?))
 }
 
 #[derive(Deserialize)]
@@ -310,7 +347,7 @@ pub async fn resolve(
 ) -> Result<Json<IssueData>> {
 	let mut conn = state.db.get().await?;
 	let issue = Issue::resolve(&mut conn, args.issue_id, &user.login, args.reason).await?;
-	Ok(Json(IssueData::from(issue)))
+	Ok(Json(enrich_issue(&mut conn, issue).await?))
 }
 
 pub async fn unresolve(
@@ -320,7 +357,7 @@ pub async fn unresolve(
 ) -> Result<Json<IssueData>> {
 	let mut conn = state.db.get().await?;
 	let issue = Issue::unresolve(&mut conn, args.issue_id).await?;
-	Ok(Json(IssueData::from(issue)))
+	Ok(Json(enrich_issue(&mut conn, issue).await?))
 }
 
 #[derive(Deserialize)]
@@ -336,7 +373,7 @@ pub async fn snooze(
 ) -> Result<Json<IssueData>> {
 	let mut conn = state.db.get().await?;
 	let issue = Issue::snooze(&mut conn, args.issue_id, args.until).await?;
-	Ok(Json(IssueData::from(issue)))
+	Ok(Json(enrich_issue(&mut conn, issue).await?))
 }
 
 pub async fn unsnooze(
@@ -346,7 +383,7 @@ pub async fn unsnooze(
 ) -> Result<Json<IssueData>> {
 	let mut conn = state.db.get().await?;
 	let issue = Issue::unsnooze(&mut conn, args.issue_id).await?;
-	Ok(Json(IssueData::from(issue)))
+	Ok(Json(enrich_issue(&mut conn, issue).await?))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

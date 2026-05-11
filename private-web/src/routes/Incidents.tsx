@@ -75,7 +75,7 @@ export default function Incidents() {
 			<Typography variant="h4" component="h1">
 				Incidents
 			</Typography>
-			<OpenIncidents result={incidents} onChanged={bumpRefresh} roots={roots} />
+			<OpenIncidents result={incidents} onChanged={bumpRefresh} />
 			<FilterBar
 				activeOnly={activeOnly}
 				setActiveOnly={setActiveOnly}
@@ -88,28 +88,25 @@ export default function Incidents() {
 				roots={roots}
 				onRefresh={bumpRefresh}
 			/>
-			<IssuesList result={issues} onChanged={bumpRefresh} roots={roots} />
+			<IssuesList result={issues} onChanged={bumpRefresh} />
 		</Stack>
 	);
 }
 
-function rootName(
-	roots: ReturnType<typeof useApi<ServerInfoFull[]>>,
-	serverId: string,
-): string {
-	if (roots.status !== "ok") return serverId;
-	const r = roots.data.find((s) => s.id === serverId);
-	return r?.name ?? serverId;
+/** Issues and incidents already ship `server_name` + `server_host` on the
+ * wire (the API joins servers). This helper is the rendering preference. */
+function serverLabel(name: string | null, host: string): string {
+	if (name && name.trim() !== "") return name;
+	if (host && host.trim() !== "") return host;
+	return "(unknown)";
 }
 
 function OpenIncidents({
 	result,
 	onChanged,
-	roots,
 }: {
 	result: ReturnType<typeof useApi<IncidentData[]>>;
 	onChanged: () => void;
-	roots: ReturnType<typeof useApi<ServerInfoFull[]>>;
 }) {
 	return (
 		<Paper variant="outlined" sx={{ p: 2 }}>
@@ -140,7 +137,7 @@ function OpenIncidents({
 						<IncidentRow
 							key={inc.id}
 							incident={inc}
-							groupName={rootName(roots, inc.server_id)}
+							groupName={serverLabel(inc.server_name, inc.server_host)}
 							onChanged={onChanged}
 						/>
 					))}
@@ -399,11 +396,9 @@ function FilterBar({
 function IssuesList({
 	result,
 	onChanged,
-	roots,
 }: {
 	result: ReturnType<typeof useApi<IssueData[]>>;
 	onChanged: () => void;
-	roots: ReturnType<typeof useApi<ServerInfoFull[]>>;
 }) {
 	if (result.status === "loading" || result.status === "idle") {
 		return <LinearProgress />;
@@ -420,7 +415,7 @@ function IssuesList({
 				<IssueRow
 					key={issue.id}
 					issue={issue}
-					serverName={rootName(roots, issue.server_id)}
+					serverName={serverLabel(issue.server_name, issue.server_host)}
 					onChanged={onChanged}
 				/>
 			))}
