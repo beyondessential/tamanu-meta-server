@@ -86,6 +86,72 @@ diesel::table! {
 }
 
 diesel::table! {
+	events (id) {
+		id -> Uuid,
+		created_at -> Timestamptz,
+		occurred_at -> Nullable<Timestamptz>,
+		issue_id -> Uuid,
+		severity -> Text,
+		description -> Nullable<Text>,
+		message -> Text,
+		active -> Bool,
+		hash -> Bytea,
+		occurrences -> Int4,
+		last_seen -> Timestamptz,
+	}
+}
+
+diesel::table! {
+	incident_issues (incident_id, issue_id, joined_at) {
+		incident_id -> Uuid,
+		issue_id -> Uuid,
+		joined_at -> Timestamptz,
+		left_at -> Nullable<Timestamptz>,
+	}
+}
+
+diesel::table! {
+	incidents (id) {
+		id -> Uuid,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
+		server_id -> Uuid,
+		opened_at -> Timestamptz,
+		closed_at -> Nullable<Timestamptz>,
+		acknowledged_at -> Nullable<Timestamptz>,
+		acknowledged_by -> Nullable<Text>,
+		resolved_at -> Nullable<Timestamptz>,
+		resolved_by -> Nullable<Text>,
+		resolved_reason -> Nullable<Text>,
+	}
+}
+
+diesel::table! {
+	issues (id) {
+		id -> Uuid,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
+		server_id -> Uuid,
+		device_id -> Nullable<Uuid>,
+		source -> Text,
+		#[sql_name = "ref"]
+		ref_ -> Text,
+		severity -> Text,
+		description -> Nullable<Text>,
+		message -> Text,
+		active -> Bool,
+		first_seen -> Timestamptz,
+		last_seen -> Timestamptz,
+		acknowledged_at -> Nullable<Timestamptz>,
+		acknowledged_by -> Nullable<Text>,
+		resolved_at -> Nullable<Timestamptz>,
+		resolved_by -> Nullable<Text>,
+		resolved_reason -> Nullable<Text>,
+		snoozed_until -> Nullable<Timestamptz>,
+	}
+}
+
+diesel::table! {
 	servers (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
@@ -142,6 +208,12 @@ diesel::joinable!(device_connections -> devices (device_id));
 diesel::joinable!(device_keys -> devices (device_id));
 diesel::joinable!(device_server_associations -> devices (device_id));
 diesel::joinable!(device_server_associations -> servers (server_id));
+diesel::joinable!(events -> issues (issue_id));
+diesel::joinable!(incident_issues -> incidents (incident_id));
+diesel::joinable!(incident_issues -> issues (issue_id));
+diesel::joinable!(incidents -> servers (server_id));
+diesel::joinable!(issues -> devices (device_id));
+diesel::joinable!(issues -> servers (server_id));
 diesel::joinable!(servers -> devices (device_id));
 diesel::joinable!(statuses -> devices (device_id));
 diesel::joinable!(statuses -> servers (server_id));
@@ -156,6 +228,10 @@ diesel::allow_tables_to_appear_in_same_query!(
 	device_keys,
 	device_server_associations,
 	devices,
+	events,
+	incident_issues,
+	incidents,
+	issues,
 	servers,
 	sql_playground_history,
 	statuses,

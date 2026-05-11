@@ -792,9 +792,11 @@ impl DeviceConnection {
 
 		if let Some((before_ts, before_id)) = before {
 			q = q.filter(
-				dc::created_at.lt(jiff_diesel::Timestamp::from(before_ts)).or(dc::created_at
-					.eq(jiff_diesel::Timestamp::from(before_ts))
-					.and(dc::id.lt(before_id))),
+				dc::created_at
+					.lt(jiff_diesel::Timestamp::from(before_ts))
+					.or(dc::created_at
+						.eq(jiff_diesel::Timestamp::from(before_ts))
+						.and(dc::id.lt(before_id))),
 			);
 		}
 

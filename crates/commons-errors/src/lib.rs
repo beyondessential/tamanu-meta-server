@@ -66,6 +66,12 @@ pub enum AppError {
 
 	#[error("authentication failed: {reason}")]
 	AuthFailed { reason: String },
+
+	#[error("device is not registered against any server")]
+	DeviceHasNoServer,
+
+	#[error("source 'manual' is reserved for operator submissions")]
+	SourceManualForbidden,
 }
 
 impl AppError {
@@ -121,6 +127,8 @@ impl AppError {
 			Self::AuthCertificateNotFound => StatusCode::UNAUTHORIZED,
 			Self::AuthInsufficientPermissions { .. } => StatusCode::FORBIDDEN,
 			Self::AuthFailed { .. } => StatusCode::UNAUTHORIZED,
+			Self::DeviceHasNoServer => StatusCode::PRECONDITION_FAILED,
+			Self::SourceManualForbidden => StatusCode::BAD_REQUEST,
 			_ => StatusCode::INTERNAL_SERVER_ERROR,
 		}
 	}
@@ -145,7 +153,8 @@ impl AppError {
 						Self::Header(_) => "header",
 						Self::VersionParse(_) => "version-parse",
 						Self::DatabasePool(_) => "database",
-						Self::DatabaseQuery(diesel::result::Error::NotFound) => "resource-not-found",
+						Self::DatabaseQuery(diesel::result::Error::NotFound) =>
+							"resource-not-found",
 						Self::DatabaseQuery(_) => "database",
 						Self::Tera(_) => "render",
 						Self::Io(_) => "io",
@@ -158,6 +167,8 @@ impl AppError {
 						Self::AuthCertificateNotFound => "auth-certificate-not-found",
 						Self::AuthInsufficientPermissions { .. } => "auth-insufficient-permissions",
 						Self::AuthFailed { .. } => "auth-failed",
+						Self::DeviceHasNoServer => "device-has-no-server",
+						Self::SourceManualForbidden => "source-manual-forbidden",
 						Self::Problem(_) => unreachable!(),
 					}
 				))

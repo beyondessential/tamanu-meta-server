@@ -174,7 +174,9 @@ pub async fn get_name(
 ) -> Result<Json<String>> {
 	let mut conn = state.db.get().await?;
 	let server = Server::get_by_id(&mut conn, args.server_id).await?;
-	Ok(Json(server.name.unwrap_or_else(|| server.host.0.to_string())))
+	Ok(Json(
+		server.name.unwrap_or_else(|| server.host.0.to_string()),
+	))
 }
 
 pub async fn get_info(
@@ -252,7 +254,10 @@ pub async fn get_detail(
 		geolocation: server.geolocation,
 	};
 
-	let up = status.as_ref().map(|s| s.short_status()).unwrap_or_default();
+	let up = status
+		.as_ref()
+		.map(|s| s.short_status())
+		.unwrap_or_default();
 
 	let last_status = if let Some(st) = status.as_ref() {
 		let device = if let Some(device_id) = st.device_id {
@@ -364,11 +369,9 @@ pub async fn update(
 		kind: args.data.kind,
 		rank: args.data.rank,
 		host: if let Some(host_str) = args.data.host {
-			Some(UrlField(
-				host_str
-					.parse()
-					.map_err(|e| AppError::custom(format!("Invalid URL: {}", e)))?,
-			))
+			Some(UrlField(host_str.parse().map_err(|e| {
+				AppError::custom(format!("Invalid URL: {}", e))
+			})?))
 		} else {
 			None
 		},
@@ -456,15 +459,15 @@ fn convert_device_with_info(d: DeviceWithInfo) -> super::devices::DeviceInfo {
 				created_at: key.created_at,
 			})
 			.collect(),
-		latest_connection: d.latest_connection.map(|conn| {
-			super::devices::DeviceConnectionData {
+		latest_connection: d
+			.latest_connection
+			.map(|conn| super::devices::DeviceConnectionData {
 				id: conn.id,
 				created_at: conn.created_at,
 				device_id: conn.device_id,
 				ip: conn.ip.addr().to_string(),
 				user_agent: conn.user_agent,
-			}
-		}),
+			}),
 	}
 }
 

@@ -195,7 +195,10 @@ async fn auth_xfcc_header_missing_cert_field_falls_back() {
 		// XFCC header present but no Cert= field — should fall back and fail with missing cert
 		let response = public
 			.post("/artifacts/1.0.0/mobile/android")
-			.add_header("x-forwarded-client-cert", "Hash=abc123;By=spiffe://example.com")
+			.add_header(
+				"x-forwarded-client-cert",
+				"Hash=abc123;By=spiffe://example.com",
+			)
 			.text("https://example.com/download.apk")
 			.await;
 

@@ -6,6 +6,7 @@ use crate::state::AppState;
 
 pub mod artifacts;
 pub mod bestool;
+pub mod events;
 #[cfg(feature = "ui")]
 pub mod password;
 #[cfg(feature = "ui")]
@@ -20,6 +21,7 @@ pub mod versions;
 pub fn routes() -> Router<AppState> {
 	#[cfg_attr(not(feature = "ui"), expect(unused_mut))]
 	let mut router = Router::new()
+		.merge(events::routes())
 		.nest("/artifacts", artifacts::routes())
 		.nest("/bestool", bestool::routes())
 		.nest("/servers", servers::routes())

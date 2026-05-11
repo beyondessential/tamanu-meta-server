@@ -268,5 +268,4 @@ impl Status {
 		let major_distance = version.major.saturating_sub(current.major);
 		Some(major_distance * 1000 + minor_distance)
 	}
-
 }
