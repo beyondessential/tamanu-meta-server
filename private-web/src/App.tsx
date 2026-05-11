@@ -1,5 +1,6 @@
 import {
 	AppBar,
+	Badge,
 	Box,
 	Container,
 	Link as MuiLink,
@@ -19,6 +20,7 @@ import DevicesList from "./routes/DevicesList";
 import DevicesSearch from "./routes/DevicesSearch";
 import Incidents from "./routes/Incidents";
 import Status from "./routes/Status";
+import type { IncidentData } from "./types";
 import ServerDetail from "./routes/ServerDetail";
 import ServerEdit from "./routes/ServerEdit";
 import Servers from "./routes/Servers";
@@ -46,6 +48,9 @@ export default function App() {
 	const sqlAvailable = useApi<boolean>("sql", "is_sql_available");
 	const publicUrl = useApi<string | null>("commons", "public_url");
 	const serverVersionsUrl = useApi<string | null>("commons", "server_versions_url");
+	const openIncidents = useApi<IncidentData[]>("incidents", "list_active", {}, []);
+	const openIncidentsCount =
+		openIncidents.status === "ok" ? openIncidents.data.length : 0;
 	const navItems: NavItem[] = [
 		...BASE_NAV,
 		...(sqlAvailable.status === "ok" && sqlAvailable.data
@@ -89,21 +94,37 @@ export default function App() {
 							Canopy
 						</Typography>
 					</Box>
-					{navItems.map(({ label, to }) => (
-						<Typography
-							key={to}
-							component={NavLink}
-							to={to}
-							sx={({ palette }) => ({
-								textDecoration: "none",
-								color: palette.text.secondary,
-								fontWeight: 500,
-								"&.active": { color: palette.secondary.main },
-							})}
-						>
-							{label}
-						</Typography>
-					))}
+					{navItems.map(({ label, to }) => {
+						const showBadge = to === "/incidents" && openIncidentsCount > 0;
+						const inner = (
+							<Typography
+								key={to}
+								component={NavLink}
+								to={to}
+								sx={({ palette }) => ({
+									textDecoration: "none",
+									color: palette.text.secondary,
+									fontWeight: 500,
+									"&.active": { color: palette.secondary.main },
+								})}
+							>
+								{label}
+							</Typography>
+						);
+						if (showBadge) {
+							return (
+								<Badge
+									key={to}
+									badgeContent={openIncidentsCount}
+									color="error"
+									overlap="rectangular"
+								>
+									{inner}
+								</Badge>
+							);
+						}
+						return inner;
+					})}
 					<Box sx={{ flex: 1 }} />
 					{externalLinks.map(({ label, href }) => (
 						<Typography
