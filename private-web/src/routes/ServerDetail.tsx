@@ -272,7 +272,7 @@ function InfoSection({
 					/>
 				)}
 			</Stack>
-			{status && Object.keys(status.extra).length > 0 && (
+			{status && Object.keys(status.extra as Record<string, unknown>).length > 0 && (
 				<Box sx={{ mt: 2 }}>
 					<details>
 						<summary>Extra Data</summary>
