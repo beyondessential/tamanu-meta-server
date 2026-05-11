@@ -4,6 +4,8 @@ pub mod admins;
 pub mod bestool;
 pub mod commons;
 pub mod devices;
+pub mod incidents;
+pub mod issues;
 pub mod servers;
 pub mod sql;
 pub mod statuses;
@@ -27,6 +29,8 @@ pub fn routes() -> axum::Router<crate::state::AppState> {
 			.nest("/bestool", bestool::routes())
 			.nest("/commons", commons::routes())
 			.nest("/devices", devices::routes())
+			.nest("/incidents", incidents::routes())
+			.nest("/issues", issues::routes())
 			.nest("/servers", servers::routes())
 			.nest("/sql", sql::routes())
 			.nest("/statuses", statuses::routes())
