@@ -2,13 +2,16 @@ import {
 	Alert,
 	Box,
 	Button,
+	IconButton,
 	LinearProgress,
 	Link as MuiLink,
 	Paper,
 	Stack,
+	Tooltip,
 	Typography,
 } from "@mui/material";
 import EditIcon from "@mui/icons-material/Edit";
+import LanguageIcon from "@mui/icons-material/Language";
 import { useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import IncidentsSection from "../components/IncidentsSection";
@@ -380,6 +383,18 @@ function ChildServers({
 							alignItems: "center",
 						}}
 					>
+						<Tooltip title={child.host}>
+							<IconButton
+								component="a"
+								href={child.host}
+								target="_blank"
+								rel="noopener noreferrer"
+								size="small"
+								aria-label={`Open ${child.name ?? "server"} (${child.host})`}
+							>
+								<LanguageIcon fontSize="small" />
+							</IconButton>
+						</Tooltip>
 						<StatusDot up={up} />
 						<MuiLink
 							component={RouterLink}
@@ -392,11 +407,7 @@ function ChildServers({
 						</MuiLink>
 						{child.rank && <ServerRankChip rank={child.rank} />}
 						<ServerKindChip kind={child.kind} />
-						<Box sx={{ flex: 1, textAlign: "right" }}>
-							<Typography variant="body2" color="text.secondary">
-								{child.host}
-							</Typography>
-						</Box>
+						<Box sx={{ flex: 1 }} />
 						{isAdmin && (
 							<ManualEventButton
 								serverId={child.id}
