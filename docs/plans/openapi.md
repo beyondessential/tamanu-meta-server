@@ -301,24 +301,50 @@ Handler counts (JSON only — others stay un-annotated):
 Total: ~12 handler annotations + the ToSchema work is mostly reused from
 Phase 1.
 
-## Phase 6 — TS codegen for `private-web` (deferred to a separate stack)
+## Phase 6 — TS codegen for `private-web`
 
-- Add `openapi-typescript` as a dev-dep in `private-web/`.
-- Add an `npm run gen:api` script that fetches the spec from a built
-  private-server (or reads from a checked-in `private-web/openapi.json`)
-  and emits `private-web/src/api-types.ts`.
-- Replace the hand-written shapes in `private-web/src/types.ts` with imports
-  from the generated file. Keep the file (or a thin wrapper) for any UI-only
-  derived types.
-- Update `callApi<T>(...)` to optionally accept the generated path types so
-  consumers get strong typing on the `module`/`fn` string pair.
-- Wire `gen:api` into the build if practical; otherwise document as a
-  manual step run when the spec changes.
+**Status: done, with a couple of follow-ups deferred (see below).**
 
-Open question: do we ship `openapi.json` in the repo or always regenerate
-from a running server? Probably ship — easier for fresh checkouts, and the
-diff is a useful PR signal. The Rust-side spec-emit binary becomes the
-source-of-truth tool.
+Shipped:
+- `crates/private-server/src/bin/openapi-dump.rs` — standalone binary that
+  builds the `OpenApi` value and prints pretty JSON to stdout. No DB
+  required.
+- `just gen-openapi` — runs the dump binary, writes `private-web/openapi.json`,
+  then invokes `npm run gen:api-types` to refresh
+  `private-web/src/api-types.ts`.
+- `private-web/openapi.json` and `private-web/src/api-types.ts` are both
+  committed: fresh checkouts can `npm install && npm run dev` without
+  needing to build the rust side first.
+- `private-web/src/types.ts` is now a thin re-export layer over
+  `api-types.ts`. UI-only constants (`SEVERITIES`, `RESOLVED_REASONS`,
+  `RESOLVED_REASON_LABEL`, `SERVER_RANK_ORDER`, `ServerGroupedIds`) stay
+  hand-written; the hand-written `Page<T>` generic also stays since
+  utoipa emits one schema per concrete instantiation. Aliases
+  (`DeviceInfoData = DeviceInfo`, `ServerInfoFull = ServerInfo`,
+  `DeviceShortInfo = DeviceInfo`) keep existing call sites working.
+
+Implementation choices, with rationale for future me:
+- `openapi-typescript` is installed with `--legacy-peer-deps` because v7
+  pins TypeScript ^5 but the project uses TS ^6 (no real incompatibility —
+  it's a CLI tool, doesn't import the project's TS).
+- A `Solidify<T>` helper in `types.ts` strips the `field?: T | null`
+  emitted for every `Option<T>` Rust field. Serde always emits the field
+  (as `null`), so the `?` is wrong at runtime; utoipa's "not required"
+  marking is a known mismatch with serde's wire behaviour.
+- Conflicting `operationId`s (every `ack`/`unack`/`resolve`/etc. that
+  exists in both `issues` and `incidents`, and `list` in admins + issues)
+  are disambiguated by setting `operation_id = "issue_xxx"` /
+  `"incident_xxx"` on those handlers. Other handlers keep their
+  function-name default.
+
+Deferred follow-ups (file as issues, not blockers):
+- Update `callApi<T>(...)` to optionally accept generated path types from
+  `paths` so consumers get a strongly-typed `(module, fn)` pair instead of
+  free-form strings.
+- Wire `gen-openapi` into a pre-commit hook or CI drift-check.
+- Audit call sites for places that could now use the generated types
+  directly (e.g. references to `Schemas["DeviceInfo"]` instead of going
+  through the alias).
 
 ## Risks
 

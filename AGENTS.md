@@ -72,6 +72,24 @@ Local dev workflow (two terminals):
 
 Open `http://localhost:8090/`. The Vite proxy makes the React app same-origin with the API, so no CORS plumbing is needed.
 
+### Wire types are generated from the Rust spec
+
+`private-web/src/api-types.ts` is **generated** from `private-web/openapi.json`,
+which is in turn generated from the `#[utoipa::path]` annotations on the
+private-server handlers. Both files are checked in so fresh checkouts work
+without a Rust build.
+
+Run `just gen-openapi` after changing any private-server handler's request
+body, response body, security scheme, or tag. The recipe rebuilds the
+`openapi-dump` binary, writes `private-web/openapi.json`, then runs
+`openapi-typescript` (via `npm run gen:api-types`) to regenerate
+`private-web/src/api-types.ts`. Commit both files alongside the Rust change.
+
+`private-web/src/types.ts` is a hand-written thin re-export layer over
+`api-types.ts`. Most consumer code imports from `../types`; new code can do
+the same. The file also holds UI-only constants (severity ordering, label
+maps, etc.) that don't belong in the wire spec.
+
 End-to-end tests use Playwright. Run with `npm run test:e2e` from `/private-web/`. The fixture (`e2e/fixture.ts`) spawns its own private-server + Vite pair against a freshly-migrated `canopy_e2e_<random>` Postgres database per worker, so the operator does not need to keep `just watch-private-api` running. Build the binaries first with `cargo build --bin private-server --bin migrate`. Override the admin connection used to create/drop the throwaway DB with `CANOPY_E2E_ADMIN_DATABASE_URL` (default `postgres://localhost/postgres`); set `CANOPY_E2E_VERBOSE=1` to stream backend/frontend logs. The first run on a fresh checkout needs `npx playwright install chromium`.
 
 ## Development Workflow
