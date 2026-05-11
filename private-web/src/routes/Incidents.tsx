@@ -16,6 +16,7 @@ import {
 } from "@mui/material";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useApi } from "../api";
 import IncidentCard from "../components/IncidentCard";
 import IssueRow from "../components/IssueRow";
@@ -40,10 +41,39 @@ export default function Incidents() {
 	const [refreshTick, setRefreshTick] = useState(0);
 	const bumpRefresh = () => setRefreshTick((t) => t + 1);
 
-	const [activeOnly, setActiveOnly] = useState(true);
-	const [severities, setSeverities] = useState<Severity[]>([]);
-	const [groupId, setGroupId] = useState<string>(""); // "" = all
-	const [acked, setAcked] = useState<AckedFilter>("either");
+	// Filter state lives in the URL so links to a particular view round-trip.
+	// Defaults aren't written into the URL (clean address bar for the
+	// common case).
+	const [params, setParams] = useSearchParams();
+	const activeOnly = params.get("showAll") !== "1";
+	const severities = (params.get("severity") ?? "")
+		.split(",")
+		.filter((s) => s.length > 0) as Severity[];
+	const groupId = params.get("group") ?? "";
+	const acked: AckedFilter =
+		params.get("ack") === "acked"
+			? "acked"
+			: params.get("ack") === "unacked"
+				? "unacked"
+				: "either";
+
+	const updateParam = (key: string, value: string | null) => {
+		setParams(
+			(prev) => {
+				const next = new URLSearchParams(prev);
+				if (value === null || value === "") next.delete(key);
+				else next.set(key, value);
+				return next;
+			},
+			{ replace: true },
+		);
+	};
+	const setActiveOnly = (v: boolean) => updateParam("showAll", v ? null : "1");
+	const setSeverities = (v: Severity[]) =>
+		updateParam("severity", v.length === 0 ? null : v.join(","));
+	const setGroupId = (v: string) => updateParam("group", v === "" ? null : v);
+	const setAcked = (v: AckedFilter) =>
+		updateParam("ack", v === "either" ? null : v);
 
 	const incidents = useApi<IncidentData[]>(
 		"incidents",
