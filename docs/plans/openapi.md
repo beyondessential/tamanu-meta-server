@@ -128,25 +128,29 @@ Newtype with manual schema:
 
 ### database
 
+**Note (discovered during private-server impl):** private-server's `fns/<mod>`
+modules define their own wrapper response types (`DeviceInfo`, `IncidentData`,
+`ServerInfo`, etc.) — database structs are *not* serialized directly to the
+wire. So database `ToSchema` derives are needed only for the public-server
+phase. Listed here for completeness; deferred to Phase 5.
+
 Newtypes with manual schema:
 - `url_field::UrlField` → `String`, format `uri`.
-- `pg_duration::PgDuration` → match its serde wire shape (verify first).
+- `pg_duration::PgDuration` — used internally only (not on any handler),
+  skip until it shows up.
 
 Structs with trivial derives (just add `ToSchema`):
-- `admins::Admin`
-- `artifacts::{Artifact, NewArtifact}`
-- `versions::{Version, ViewVersion, NewVersion}`
-- `devices::{Device, DeviceKey, DeviceWithInfo}`
-- `issues::{Issue, Event, Incident, IncidentIssue, NewEvent}`
-- `notes::{IssueNote, IncidentNote}`
-- `servers::{Server, NewServer, PartialServer}`
-- `statuses::{Status, NewStatus}`
-- `tailscale_users::TailscaleUser`
-- `bestool_snippets::{BestoolSnippet, NewBestoolSnippet}`
-- `sql_playground_history::{SqlPlaygroundHistory, NewSqlPlaygroundHistory}`
-- `chrome_releases::{ChromeRelease, NewChromeRelease}`
+- `artifacts::{Artifact, NewArtifact}` (public-server direct returns)
+- `versions::{Version, ViewVersion, NewVersion}` (public-server)
+- `issues::{Issue}` (public-server `events::create` returns this)
+- `servers::{Server, NewServer, PartialServer}` (public-server)
+- `statuses::{Status, NewStatus}` (public-server)
+- The rest (`Admin`, `Device*`, `Incident*`, `IssueNote`/`IncidentNote`,
+  `TailscaleUser`, `BestoolSnippet`, `SqlPlaygroundHistory`,
+  `ChromeRelease`) are not directly serialized by any current handler —
+  add `ToSchema` only when/if they get exposed.
 
-Structs that need field-level overrides:
+Structs that need field-level overrides (when added):
 - `devices::{DeviceConnection, NewDeviceConnection}` — `ip` field gets
   `#[schema(value_type = String, format = "cidr")]`.
 
