@@ -10,6 +10,7 @@ import {
 import OpenInNewIcon from "@mui/icons-material/OpenInNew";
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
 import { useApi } from "./api";
+import { useReloadInterval } from "./hooks/useReloadInterval";
 import Admins from "./routes/Admins";
 import Bestool from "./routes/Bestool";
 import BestoolSnippetDetail from "./routes/BestoolSnippetDetail";
@@ -49,7 +50,16 @@ export default function App() {
 	const sqlAvailable = useApi<boolean>("sql", "is_sql_available");
 	const publicUrl = useApi<string | null>("commons", "public_url");
 	const serverVersionsUrl = useApi<string | null>("commons", "server_versions_url");
-	const openIncidents = useApi<IncidentData[]>("incidents", "list_active", {}, []);
+	// Polled at a slow cadence; mutations also fire `canopy-data-changed`
+	// (via useApiAction), so the badge updates immediately after the user
+	// acks / resolves / opens an incident on any page.
+	const reloadTick = useReloadInterval(60_000, "canopy-data-changed");
+	const openIncidents = useApi<IncidentData[]>(
+		"incidents",
+		"list_active",
+		{},
+		[reloadTick],
+	);
 	const openIncidentsCount =
 		openIncidents.status === "ok" ? openIncidents.data.length : 0;
 	const navItems: NavItem[] = [
