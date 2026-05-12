@@ -11,7 +11,7 @@ use commons_types::{
 	version::VersionStr,
 };
 use database::{
-	devices::{Device, DeviceConnection, DeviceWithInfo},
+	devices::{Device, DeviceConnection},
 	servers::{PartialServer, Server},
 	statuses::Status,
 	url_field::UrlField,
@@ -368,11 +368,7 @@ pub async fn get_detail(
 
 	let device_info = if let Some(device_id) = device_id {
 		let device_with_info = Device::get_with_info(&mut conn, device_id).await?;
-		Some(
-			convert_device_with_info(device_with_info)
-				.enrich_with_live(&state)
-				.await,
-		)
+		Some(super::devices::DeviceInfo::from_db(device_with_info, &state).await)
 	} else {
 		None
 	};
@@ -680,54 +676,6 @@ pub async fn attach_tailscale_device(
 	.await?;
 
 	Ok(Json(device.id))
-}
-
-fn convert_device_with_info(d: DeviceWithInfo) -> super::devices::DeviceInfo {
-	fn format_key_as_pem(key_data: &[u8]) -> String {
-		use base64::prelude::*;
-		let base64_data = BASE64_STANDARD.encode(key_data);
-		let mut pem = String::with_capacity(base64_data.len() + 100);
-		pem.push_str("-----BEGIN PUBLIC KEY-----\n");
-		for chunk in base64_data.as_bytes().chunks(64) {
-			pem.push_str(&String::from_utf8_lossy(chunk));
-			pem.push('\n');
-		}
-		pem.push_str("-----END PUBLIC KEY-----");
-		pem
-	}
-
-	super::devices::DeviceInfo {
-		device: super::devices::DeviceData {
-			id: d.device.id,
-			created_at: d.device.created_at,
-			updated_at: d.device.updated_at,
-			role: d.device.role,
-			tailscale_node_id: d.device.tailscale_node_id,
-			tailscale_node_name: d.device.tailscale_node_name,
-			tailscale_tailnet: d.device.tailscale_tailnet,
-		},
-		keys: d
-			.keys
-			.into_iter()
-			.map(|key| super::devices::DeviceKeyInfo {
-				id: key.id,
-				device_id: key.device_id,
-				name: key.name,
-				pem_data: format_key_as_pem(&key.key_data),
-				created_at: key.created_at,
-			})
-			.collect(),
-		latest_connection: d
-			.latest_connection
-			.map(|conn| super::devices::DeviceConnectionData {
-				id: conn.id,
-				created_at: conn.created_at,
-				device_id: conn.device_id,
-				ip: conn.ip.addr().to_string(),
-				user_agent: conn.user_agent,
-			}),
-		tailnet_live: None,
-	}
 }
 
 async fn compute_min_chrome_version(
