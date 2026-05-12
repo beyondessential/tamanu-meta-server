@@ -7,9 +7,49 @@
 // UI-only types and constants (display order, label maps, etc.) stay
 // hand-written below the re-exports.
 
-import type { components } from "./api-types";
+import type { components, paths } from "./api-types";
 
 type Schemas = components["schemas"];
+
+// ── Path-based typing for `callApi` ────────────────────────────────────────
+//
+// `openapi-typescript` emits a `paths` interface keyed by the OpenAPI path
+// strings (e.g. `/api/admins/list`). These helpers project that into the
+// `(module, fn)` pair the React hooks have always used, and pull the post
+// operation's request body and 200 response type so consumers can stop
+// hand-writing them.
+
+export type ApiPath = keyof paths & string;
+type ModuleOf<P extends string> = P extends `/api/${infer M}/${string}`
+	? M
+	: never;
+type FnOf<P extends string> = P extends `/api/${string}/${infer F}`
+	? F
+	: never;
+
+export type ApiModule = ModuleOf<ApiPath>;
+export type ApiFn<M extends ApiModule> = {
+	[P in ApiPath]: ModuleOf<P> extends M ? FnOf<P> : never;
+}[ApiPath];
+
+export type ApiPathFor<M extends ApiModule, F extends ApiFn<M>> =
+	`/api/${M}/${F}` extends ApiPath ? `/api/${M}/${F}` : never;
+
+type PostOp<P extends ApiPath> = paths[P]["post"];
+
+export type ApiResponse<M extends ApiModule, F extends ApiFn<M>> =
+	PostOp<ApiPathFor<M, F>> extends {
+		responses: { 200: { content: { "application/json": infer R } } };
+	}
+		? Solidify<R>
+		: void;
+
+export type ApiBody<M extends ApiModule, F extends ApiFn<M>> =
+	PostOp<ApiPathFor<M, F>> extends {
+		requestBody: { content: { "application/json": infer B } };
+	}
+		? Solidify<B>
+		: Record<string, unknown> | undefined;
 
 // utoipa marks `Option<T>` Rust fields as not-required AND nullable, so
 // `openapi-typescript` emits them as `field?: T | null`. But serde's default
@@ -21,7 +61,7 @@ type Schemas = components["schemas"];
 // Tuples need separate handling so `[ShortStatus, ServerInfo]` doesn't collapse
 // into `(ShortStatus | ServerInfo)[]`. `number extends T['length']` is true for
 // regular arrays and false for fixed-length tuples.
-type Solidify<T> = T extends readonly unknown[]
+export type Solidify<T> = T extends readonly unknown[]
 	? number extends T["length"]
 		? Solidify<T[number]>[]
 		: { [K in keyof T]: Solidify<Exclude<T[K], undefined>> }
