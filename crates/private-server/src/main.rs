@@ -9,7 +9,17 @@ struct Args {
 	#[arg(long, env = "BIND_ADDRESS", conflicts_with = "port")]
 	bind: Option<std::net::SocketAddr>,
 
-	#[arg(long, env = "CLIENT_IP_SOURCE", default_value = "ConnectInfo")]
+	/// Where to read the calling client's IP from. Defaults to
+	/// `RightmostXForwardedFor` because the private-server lives behind
+	/// the Tailscale K8s Operator's ingress proxy, which sets
+	/// `X-Forwarded-For` to the caller's tailnet CGNAT/ULA address.
+	/// `ConnectInfo` would give us the proxy pod's intra-cluster IP,
+	/// which breaks the tailnet auth path.
+	#[arg(
+		long,
+		env = "CLIENT_IP_SOURCE",
+		default_value = "RightmostXForwardedFor"
+	)]
 	client_ip_source: axum_client_ip::ClientIpSource,
 }
 

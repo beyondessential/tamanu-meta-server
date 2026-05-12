@@ -113,11 +113,13 @@ async fn unknown_tailnet_node_auto_creates_untrusted_then_403s_role_gate() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn non_tailnet_source_ip_falls_through_to_mtls() {
+async fn non_tailnet_source_ip_rejected() {
 	// Same setup (directory populated, device pre-attached), but the
 	// request comes in with a public-IP Forwarded header. The tailnet
-	// path's spoof-guard rejects on `!is_tailnet_ip`, no mTLS cert is
-	// supplied, so we expect 401 AuthMissingCertificate.
+	// path's spoof-guard rejects on `!is_tailnet_ip`, and the tunnel
+	// path doesn't fall back to mTLS (the Tailscale ingress proxy
+	// terminates client TLS, so attempting mTLS here would never
+	// succeed anyway). Expect 401 AuthMissingCertificate.
 	commons_tests::server::run_with_tailnet_device_auth(
 		"server",
 		async |mut conn, _tailnet_ip, _node_id, device_id, _public, private| {
@@ -136,7 +138,7 @@ async fn non_tailnet_source_ip_falls_through_to_mtls() {
 			let body: serde_json::Value = response.json();
 			assert_eq!(
 				body.get("type").and_then(|v| v.as_str()),
-				Some("/errors/auth-missing-certificate"),
+				Some("/errors/auth-tailnet-identity-missing"),
 			);
 		},
 	)

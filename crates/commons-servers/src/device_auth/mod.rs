@@ -1,24 +1,24 @@
 //! Device authentication for the public-server and private-server's
-//! `/public/...` mount.
+//! `/public/...` mount. The presence of an `Option<TailnetDirectory>`
+//! in axum state chooses the auth path:
 //!
-//! Two paths share the extractor:
+//! - **No directory** (internet-facing public-server binary): use the
+//!   [`mtls`] path. Devices present a client certificate; the public
+//!   key derived from it keys into `device_keys.key_data`. First-contact
+//!   auto-creates the `Device` row.
+//! - **Directory present** (private-server's `/public/...` mount,
+//!   reached via the Tailscale Operator's ingress proxy): use the
+//!   [`tailnet`] path. The Tailscale ingress terminates the client's
+//!   TLS at the proxy, so no client certificate survives — mTLS is
+//!   physically not available on this path and isn't even attempted.
+//!   The caller's tailnet CGNAT v4 or ULA v6 address is read from
+//!   `X-Forwarded-For` (via `axum-client-ip`'s `ClientIp`), resolved
+//!   to a node identity through the Tailscale control plane API, then
+//!   keyed into `devices.tailscale_node_id`. First-contact auto-creates
+//!   a `Device` row with role `Untrusted`.
 //!
-//! - **mTLS** ([`mtls`]): the existing cert-in-header flow. Devices
-//!   present a client certificate; the public key derived from it keys
-//!   into `device_keys.key_data`. First-contact auto-creates the
-//!   `Device` row.
-//! - **Tailnet** ([`tailnet`]): the new path. Available only on the
-//!   private-server (its `AppState` carries a populated
-//!   [`TailnetDirectory`]; public-server's yields `None` so this path is
-//!   short-circuited). Reads the calling node's CGNAT v4 or ULA v6
-//!   address from `X-Forwarded-For` (via `axum-client-ip`'s `ClientIp`),
-//!   resolves it to a node identity through the Tailscale control plane
-//!   API, then keys into `devices.tailscale_node_id`. First-contact
-//!   auto-creates a `Device` row with role `Untrusted`.
-//!
-//! Order: mTLS is tried first, biased to preserve the current behaviour
-//! for any device that happens to present both. The combined extractor
-//! emits `AuthMissingCertificate` only if both paths yielded `None`.
+//! Exactly one path runs per request. Failure surfaces as
+//! `AuthMissingCertificate`.
 
 use std::net::{IpAddr, Ipv6Addr};
 
@@ -96,20 +96,26 @@ where
 	) -> Result<Self, Self::Rejection> {
 		let mut db = Db::from_ref(state).get().await?;
 
-		// Bias to mTLS so any device presenting both falls into the
-		// existing path; the tailnet path picks up only the cert-less
-		// callers.
-		let resolved = if let Some(device) = mtls::resolve(parts, &mut db).await? {
-			Some((device, AuthMethod::Mtls))
-		} else if let Some(directory) = Option::<TailnetDirectory>::from_ref(state) {
+		// Directory presence is the toggle. On the private-server's
+		// `/public/...` mount it's `Some` and we go tailnet-only;
+		// on the public-server binary it's `None` and we go mTLS-only.
+		// mTLS is not attempted on the tunnel path because the Tailscale
+		// ingress proxy terminates client TLS — there is no cert to
+		// forward, and attempting to read one just adds confusion. Each
+		// path emits its own "auth failed" error so logs are unambiguous
+		// about which mechanism the caller hit.
+		let (device, method) = if let Some(directory) = Option::<TailnetDirectory>::from_ref(state)
+		{
 			tailnet::resolve(parts, &mut db, &directory)
 				.await?
 				.map(|(device, node_id)| (device, AuthMethod::Tailnet { node_id }))
+				.ok_or(AppError::AuthTailnetIdentityMissing)?
 		} else {
-			None
+			mtls::resolve(parts, &mut db)
+				.await?
+				.map(|device| (device, AuthMethod::Mtls))
+				.ok_or(AppError::AuthMissingCertificate)?
 		};
-
-		let (device, method) = resolved.ok_or(AppError::AuthMissingCertificate)?;
 
 		let user_agent = parts
 			.headers
