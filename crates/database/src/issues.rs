@@ -503,7 +503,7 @@ async fn enqueue_slack_open(
 		.filter(incidents::id.eq(incident_id))
 		.first(conn)
 		.await?;
-	let public_url = std::env::var("PUBLIC_URL").ok();
+	let private_url = std::env::var("PRIVATE_URL").ok();
 	let payload = crate::slack_outbox::vars::incident_open(
 		&incident,
 		&server,
@@ -511,7 +511,7 @@ async fn enqueue_slack_open(
 		&issue.source,
 		&issue.r#ref,
 		&issue.message,
-		public_url.as_deref(),
+		private_url.as_deref(),
 	);
 	crate::slack_outbox::SlackOutbox::enqueue(
 		conn,
@@ -549,12 +549,12 @@ async fn enqueue_slack_resolve_inner(
 	by: Option<&str>,
 ) -> Result<()> {
 	let server = Server::get_by_id(conn, incident.server_id).await?;
-	let public_url = std::env::var("PUBLIC_URL").ok();
+	let private_url = std::env::var("PRIVATE_URL").ok();
 	let payload = crate::slack_outbox::vars::incident_resolve(
 		incident,
 		&server,
 		by,
-		public_url.as_deref(),
+		private_url.as_deref(),
 	);
 	crate::slack_outbox::SlackOutbox::enqueue(
 		conn,

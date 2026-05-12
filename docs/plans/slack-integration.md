@@ -139,12 +139,15 @@ Resolve (`SLACK_WEBHOOK_RESOLVE_URL`):
 - `by` — operator name/email or `automation` for cascade-close
 - `link` — canopy incident URL
 
-The canopy incident link uses `PUBLIC_URL` (same env var the private
-server reads in `crates/private-server/src/fns/commons.rs`). If
-`PUBLIC_URL` is unset, `link` falls back to a localhost-rooted URL so
-the workflow's `<{{link}}|Open in canopy>` mrkdwn still renders as a
-clickable (broken) link rather than malformed text. Set `PUBLIC_URL`
-in any env that posts to a real Slack.
+The canopy incident link points at the private-server (admin UI,
+Tailscale-gated) at `<PRIVATE_URL>/incidents/<id>`. Operators receiving
+Slack notifications are on Tailscale, so `PRIVATE_URL` is the right
+base — `PUBLIC_URL` is the device-facing API origin and would render
+a 404 / unauthorised page for an operator who clicked through. If
+`PRIVATE_URL` is unset, `link` falls back to `http://localhost/...`
+so the workflow's `<{{link}}|Open in canopy>` mrkdwn still renders as
+a clickable (broken) link rather than malformed text. Set
+`PRIVATE_URL` in any env that posts to a real Slack.
 
 ### Configuration
 
@@ -153,7 +156,8 @@ in any env that posts to a real Slack.
   delivered, never posted).
 - `SLACK_WEBHOOK_RESOLVE_URL` — same, for the `incident_resolve`
   workflow.
-- `PUBLIC_URL` — already used elsewhere; gates the `link` field.
+- `PRIVATE_URL` — base URL of the private-server admin UI (e.g.
+  `https://canopy.example.ts.net`). Gates the `link` field.
 
 ### Out of scope for Phase A
 
