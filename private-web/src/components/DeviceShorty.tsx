@@ -23,6 +23,8 @@ export function deviceDisplayName(info: DeviceInfo): string {
 
 export default function DeviceShorty({ device }: { device: DeviceInfo }) {
 	const name = deviceDisplayName(device);
+	const hasTailnet = device.device.tailscale_node_id != null;
+	const hasMtls = device.keys.length > 0;
 	return (
 		<MuiLink
 			component={RouterLink}
@@ -45,7 +47,26 @@ export default function DeviceShorty({ device }: { device: DeviceInfo }) {
 				})}
 			>
 				<Box sx={{ fontWeight: 500 }}>{name}</Box>
-				<Box sx={{ ml: "auto" }}>
+				<Stack
+					direction="row"
+					spacing={0.5}
+					sx={{ ml: "auto", alignItems: "center" }}
+				>
+					{hasTailnet && (
+						<Chip
+							size="small"
+							variant="outlined"
+							color="success"
+							label="tailnet"
+						/>
+					)}
+					{hasMtls && (
+						<Chip
+							size="small"
+							variant="outlined"
+							label="mTLS"
+						/>
+					)}
 					<Chip
 						size="small"
 						variant="outlined"
@@ -53,7 +74,7 @@ export default function DeviceShorty({ device }: { device: DeviceInfo }) {
 						label={device.device.role}
 						sx={{ textTransform: "capitalize" }}
 					/>
-				</Box>
+				</Stack>
 			</Stack>
 		</MuiLink>
 	);

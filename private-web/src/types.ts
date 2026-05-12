@@ -100,6 +100,7 @@ export type DeviceData = Solidify<Schemas["DeviceData"]>;
 export type DeviceKeyInfo = Solidify<Schemas["DeviceKeyInfo"]>;
 export type DeviceConnectionData = Solidify<Schemas["DeviceConnectionData"]>;
 export type DeviceInfo = Solidify<Schemas["DeviceInfo"]>;
+export type TailnetLiveInfo = Solidify<Schemas["TailnetLiveInfo"]>;
 
 export type IssueData = Solidify<Schemas["IssueData"]>;
 export type EventData = Solidify<Schemas["EventData"]>;
