@@ -41,11 +41,11 @@ impl CanopyTicket {
 			.or_else(|_| base64::prelude::BASE64_STANDARD_NO_PAD.decode(trimmed))
 			.or_else(|_| base64::prelude::BASE64_URL_SAFE.decode(trimmed))
 			.or_else(|_| base64::prelude::BASE64_URL_SAFE_NO_PAD.decode(trimmed))
-			.map_err(|e| AppError::custom(format!("Invalid base64 in ticket: {e}")))?;
+			.map_err(|e| AppError::BadRequest(format!("Invalid base64 in ticket: {e}")))?;
 		let ticket: Self = serde_json::from_slice(&json)
-			.map_err(|e| AppError::custom(format!("Invalid ticket JSON: {e}")))?;
+			.map_err(|e| AppError::BadRequest(format!("Invalid ticket JSON: {e}")))?;
 		if ticket.v != "ticket-1" {
-			return Err(AppError::custom(format!(
+			return Err(AppError::BadRequest(format!(
 				"Unsupported ticket version: {}",
 				ticket.v
 			)));
@@ -69,6 +69,6 @@ impl CanopyTicket {
 			.join("");
 		base64::prelude::BASE64_STANDARD
 			.decode(&body)
-			.map_err(|e| AppError::custom(format!("Invalid base64 in public key: {e}")))
+			.map_err(|e| AppError::BadRequest(format!("Invalid base64 in public key: {e}")))
 	}
 }

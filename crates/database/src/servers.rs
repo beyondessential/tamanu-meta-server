@@ -198,13 +198,26 @@ impl Server {
 		// Parse the public key bytes we'll use to find/create the device.
 		let key_der = ticket.public_key_der()?;
 
+		// Build the server value, preserving any existing fields where applicable.
+		// Parse the canonical URL *first* so we can canonicalise both the
+		// stored host and the host we look up for conflict-detection — a
+		// difference in trailing slash, port, or case otherwise produces
+		// false "different id" errors.
+		let host = UrlField(
+			ticket
+				.canonical_url
+				.parse()
+				.map_err(|e| AppError::BadRequest(format!("Invalid canonical URL: {e}")))?,
+		);
+		let host_str = host.0.to_string();
+
 		// Conflict check: is there already a server with this host but a different ID?
-		let existing_by_host = Self::get_by_host(db, ticket.canonical_url.clone()).await;
+		let existing_by_host = Self::get_by_host(db, host_str.clone()).await;
 		match existing_by_host {
 			Ok(existing) if existing.id != ticket.server_id => {
-				return Err(AppError::custom(format!(
+				return Err(AppError::Conflict(format!(
 					"A server with host '{}' already exists with a different ID ({})",
-					ticket.canonical_url, existing.id,
+					host_str, existing.id,
 				)));
 			}
 			_ => {}
@@ -216,14 +229,6 @@ impl Server {
 		} else {
 			crate::devices::Device::create(db, key_der).await?
 		};
-
-		// Build the server value, preserving any existing fields where applicable.
-		let host = UrlField(
-			ticket
-				.canonical_url
-				.parse()
-				.map_err(|e| AppError::custom(format!("Invalid canonical URL: {e}")))?,
-		);
 
 		let cloud = ticket.hosting.as_deref().map(|h| {
 			matches!(
@@ -246,7 +251,6 @@ impl Server {
 			alert_when_down: true,
 		};
 
-		let host_str = server_value.host.0.to_string();
 		let kind_str = server_value.kind.to_string();
 
 		// Upsert: insert or update on conflict.

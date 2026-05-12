@@ -972,6 +972,7 @@ dependencies = [
  "lloggs",
  "miette",
  "node-semver",
+ "rcgen",
  "reqwest",
  "serde",
  "serde_json",
