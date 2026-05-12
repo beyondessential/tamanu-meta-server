@@ -349,14 +349,21 @@ Implementation choices, with rationale for future me:
   `"incident_xxx"` on those handlers. Other handlers keep their
   function-name default.
 
-Deferred follow-ups (file as issues, not blockers):
-- Update `callApi<T>(...)` to optionally accept generated path types from
-  `paths` so consumers get a strongly-typed `(module, fn)` pair instead of
-  free-form strings.
-- Wire `gen-openapi` into a pre-commit hook or CI drift-check.
+Follow-ups:
+- ~~Type-check `callApi`'s `(module, fn)` pair against the generated
+  `paths` interface so unknown endpoints fail at compile time.~~ **Done.**
+  Response types stay caller-provided for now (`T` as the first generic);
+  auto-inferring `T` from the path requires reordering generics, which would
+  ripple through every existing `useApi<...>` call site.
+- ~~Wire `gen-openapi` into a CI drift-check.~~ **Done** as a test per
+  server (`committed_spec_matches_generated`) that compares the in-repo
+  `openapi.json` against the value the rust handlers produce. Failure
+  message is `run \`just gen-openapi\``.
 - Audit call sites for places that could now use the generated types
   directly (e.g. references to `Schemas["DeviceInfo"]` instead of going
-  through the alias).
+  through the `DeviceInfoData` alias), and consider reordering `callApi`'s
+  generics to enable response-type auto-inference. **Tracked on the
+  `feat/openapi-cleanup` bookmark.**
 
 ## Risks
 
