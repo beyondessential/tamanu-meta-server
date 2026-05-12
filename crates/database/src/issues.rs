@@ -362,7 +362,8 @@ async fn re_evaluate_incident_membership(
 
 	match (was_in, should_join, should_leave) {
 		(false, true, _) => {
-			let incident_id = find_or_open_incident(conn, root_server_id, transition_time).await?;
+			let (incident_id, newly_opened) =
+				find_or_open_incident(conn, root_server_id, transition_time).await?;
 			diesel::insert_into(incident_issues::table)
 				.values((
 					incident_issues::incident_id.eq(incident_id),
@@ -371,6 +372,9 @@ async fn re_evaluate_incident_membership(
 				))
 				.execute(conn)
 				.await?;
+			if newly_opened {
+				enqueue_slack_open(conn, incident_id, root_server_id, issue).await?;
+			}
 		}
 		(true, _, true) => {
 			let open_link: IncidentIssue = incident_issues::table
@@ -408,10 +412,13 @@ async fn re_evaluate_incident_membership(
 				.get_result(conn)
 				.await?;
 			if remaining_open == 0 {
-				diesel::update(incidents::table.filter(incidents::id.eq(open_link.incident_id)))
-					.set(incidents::closed_at.eq(jiff_diesel::Timestamp::from(transition_time)))
-					.execute(conn)
-					.await?;
+				let closed: Incident =
+					diesel::update(incidents::table.filter(incidents::id.eq(open_link.incident_id)))
+						.set(incidents::closed_at.eq(jiff_diesel::Timestamp::from(transition_time)))
+						.returning(Incident::as_select())
+						.get_result(conn)
+						.await?;
+				enqueue_slack_cascade_close(conn, &closed).await?;
 			}
 		}
 		_ => {}
@@ -446,11 +453,15 @@ async fn group_has_open_incident(db: &mut AsyncPgConnection, root_server_id: Uui
 	Ok(count > 0)
 }
 
+/// Returns the open incident's id and whether this call newly opened it.
+/// The boolean is consumed by `re_evaluate_incident_membership` to decide
+/// whether a Slack `incident_open` outbox row should be enqueued (re-joining
+/// an existing incident shouldn't re-notify).
 async fn find_or_open_incident(
 	db: &mut AsyncPgConnection,
 	root_server_id: Uuid,
 	opened_at: Timestamp,
-) -> Result<Uuid> {
+) -> Result<(Uuid, bool)> {
 	use crate::schema::incidents;
 
 	let open: Option<Incident> = incidents::table
@@ -465,7 +476,7 @@ async fn find_or_open_incident(
 		.await
 		.optional()?;
 	if let Some(inc) = open {
-		return Ok(inc.id);
+		return Ok((inc.id, false));
 	}
 
 	let new_incident: Incident = diesel::insert_into(incidents::table)
@@ -476,7 +487,85 @@ async fn find_or_open_incident(
 		.returning(Incident::as_select())
 		.get_result(db)
 		.await?;
-	Ok(new_incident.id)
+	Ok((new_incident.id, true))
+}
+
+async fn enqueue_slack_open(
+	conn: &mut AsyncPgConnection,
+	incident_id: Uuid,
+	root_server_id: Uuid,
+	issue: &Issue,
+) -> Result<()> {
+	use crate::schema::incidents;
+	let server = Server::get_by_id(conn, root_server_id).await?;
+	let incident: Incident = incidents::table
+		.select(Incident::as_select())
+		.filter(incidents::id.eq(incident_id))
+		.first(conn)
+		.await?;
+	let public_url = std::env::var("PUBLIC_URL").ok();
+	let payload = crate::slack_outbox::blocks::incident_open(
+		&incident,
+		&server,
+		issue.severity,
+		&issue.source,
+		&issue.r#ref,
+		&issue.message,
+		public_url.as_deref(),
+	);
+	crate::slack_outbox::SlackOutbox::enqueue(
+		conn,
+		crate::slack_outbox::KIND_INCIDENT_OPEN,
+		incident_id,
+		Some(issue.id),
+		None,
+		payload,
+	)
+	.await?;
+	Ok(())
+}
+
+async fn enqueue_slack_resolve(
+	conn: &mut AsyncPgConnection,
+	incident: &Incident,
+	by: &str,
+) -> Result<()> {
+	enqueue_slack_resolve_inner(conn, incident, Some(by)).await
+}
+
+/// Cascade close: every issue left the incident, so we close it without an
+/// operator. Posts a "resolved by automation" Slack notification so the
+/// channel doesn't lose the close event.
+async fn enqueue_slack_cascade_close(
+	conn: &mut AsyncPgConnection,
+	incident: &Incident,
+) -> Result<()> {
+	enqueue_slack_resolve_inner(conn, incident, None).await
+}
+
+async fn enqueue_slack_resolve_inner(
+	conn: &mut AsyncPgConnection,
+	incident: &Incident,
+	by: Option<&str>,
+) -> Result<()> {
+	let server = Server::get_by_id(conn, incident.server_id).await?;
+	let public_url = std::env::var("PUBLIC_URL").ok();
+	let payload = crate::slack_outbox::blocks::incident_resolve(
+		incident,
+		&server,
+		by,
+		public_url.as_deref(),
+	);
+	crate::slack_outbox::SlackOutbox::enqueue(
+		conn,
+		crate::slack_outbox::KIND_INCIDENT_RESOLVE,
+		incident.id,
+		None,
+		None,
+		payload,
+	)
+	.await?;
+	Ok(())
 }
 
 impl Issue {
@@ -1024,6 +1113,7 @@ impl Incident {
 					.returning(Incident::as_select())
 					.get_result(conn)
 					.await?;
+			enqueue_slack_resolve(conn, &incident, by).await?;
 			Ok(incident)
 		})
 		.await
