@@ -27,21 +27,42 @@ const BATCH: i64 = 10;
 const TICK: Duration = Duration::from_secs(5);
 const MAX_ATTEMPTS: i32 = 10;
 
-/// One webhook URL per outbox kind. Each Slack workflow binds to a single
-/// variable set declared in its trigger, so `incident_open` and
-/// `incident_resolve` need separate workflows and therefore separate URLs.
-#[derive(Clone, Default)]
-struct Webhooks {
+/// Drainer configuration. One webhook URL per outbox kind (each Slack
+/// workflow binds to a single variable set declared in its trigger, so
+/// `incident_open` and `incident_resolve` need separate workflows), plus
+/// the `PRIVATE_URL` base that the `link` variable points at.
+///
+/// `PRIVATE_URL` is required whenever any webhook URL is set. The link is
+/// injected here at delivery time rather than at enqueue time so the
+/// operator only has to configure one process. Localhost fallback would
+/// produce a Slack message with a link that nobody can click — better to
+/// refuse to start than to ship broken messages.
+#[derive(Clone, Debug, Default)]
+struct Config {
 	open: Option<String>,
 	resolve: Option<String>,
+	private_url: Option<String>,
 }
 
-impl Webhooks {
-	fn from_env() -> Self {
-		Self {
+impl Config {
+	fn from_env() -> miette::Result<Self> {
+		let cfg = Self {
 			open: std::env::var("SLACK_WEBHOOK_OPEN_URL").ok(),
 			resolve: std::env::var("SLACK_WEBHOOK_RESOLVE_URL").ok(),
+			private_url: std::env::var("PRIVATE_URL").ok(),
+		};
+		if cfg.any_hook() && cfg.private_url.is_none() {
+			return Err(miette::miette!(
+				"PRIVATE_URL must be set when any SLACK_WEBHOOK_*_URL is set \
+				 — it's the base of the operator-facing admin UI that the \
+				 `link` variable in each Slack message points at",
+			));
 		}
+		Ok(cfg)
+	}
+
+	fn any_hook(&self) -> bool {
+		self.open.is_some() || self.resolve.is_some()
 	}
 
 	fn url_for(&self, kind: &str) -> Option<&str> {
@@ -51,12 +72,16 @@ impl Webhooks {
 			_ => None,
 		}
 	}
+
+	fn incident_link(&self, incident_id: uuid::Uuid) -> Option<String> {
+		let base = self.private_url.as_deref()?.trim_end_matches('/');
+		Some(format!("{base}/incidents/{incident_id}"))
+	}
 }
 
-pub fn spawn() -> JoinHandle<()> {
+fn spawn(cfg: Config) -> JoinHandle<()> {
 	let pool = database::init();
-	let hooks = Webhooks::from_env();
-	if hooks.open.is_none() && hooks.resolve.is_none() {
+	if !cfg.any_hook() {
 		info!("no SLACK_WEBHOOK_*_URL set; slack outbox drainer running in no-op mode");
 	}
 	let client = reqwest::Client::new();
@@ -81,7 +106,7 @@ pub fn spawn() -> JoinHandle<()> {
 							SlackOutbox::mark_failed(conn, row.id, "max attempts exceeded").await?;
 							continue;
 						}
-						match deliver(&client, &hooks, &row).await {
+						match deliver(&client, &cfg, &row).await {
 							Ok(()) => SlackOutbox::mark_delivered(conn, row.id).await?,
 							Err(err) => {
 								warn!(id = %row.id, %err, "slack delivery failed");
@@ -99,16 +124,18 @@ pub fn spawn() -> JoinHandle<()> {
 	})
 }
 
-/// Post the row's payload to the workflow webhook for this row's kind.
-/// Returns `Ok(())` for both real deliveries and silent no-ops (no webhook
-/// configured for this kind, or unknown kind logged as warn); the row gets
-/// marked delivered so the table doesn't grow unbounded in non-Slack envs.
+/// Post the row's payload — augmented with a `link` derived from the row's
+/// `incident_id` plus the configured `PRIVATE_URL` — to the workflow
+/// webhook for this row's kind. Returns `Ok(())` for both real deliveries
+/// and silent no-ops (no webhook configured for this kind, or unknown
+/// kind logged as warn); the row gets marked delivered so the table
+/// doesn't grow unbounded in non-Slack envs.
 async fn deliver(
 	client: &reqwest::Client,
-	hooks: &Webhooks,
+	cfg: &Config,
 	row: &SlackOutbox,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-	let Some(url) = hooks.url_for(&row.kind) else {
+	let Some(url) = cfg.url_for(&row.kind) else {
 		if !is_known_kind(&row.kind) {
 			warn!(id = %row.id, kind = %row.kind, "unknown slack outbox kind; dropping");
 		} else {
@@ -116,7 +143,13 @@ async fn deliver(
 		}
 		return Ok(());
 	};
-	let resp = client.post(url).json(&row.payload).send().await?;
+	let mut payload = row.payload.clone();
+	if let Some(obj) = payload.as_object_mut()
+		&& let Some(link) = cfg.incident_link(row.incident_id)
+	{
+		obj.insert("link".to_string(), serde_json::Value::String(link));
+	}
+	let resp = client.post(url).json(&payload).send().await?;
 	let status = resp.status();
 	if status.is_success() {
 		Ok(())
@@ -158,27 +191,21 @@ mod tests {
 		}
 	}
 
-	#[tokio::test(flavor = "multi_thread")]
-	async fn deliver_with_no_hooks_is_a_noop() {
-		let r = row(KIND_INCIDENT_OPEN, serde_json::json!({}));
-		deliver(&reqwest::Client::new(), &Webhooks::default(), &r)
-			.await
-			.expect("noop ok");
-	}
-
-	#[tokio::test(flavor = "multi_thread")]
-	async fn deliver_posts_flat_payload_verbatim() {
-		use std::sync::{Arc, Mutex};
-
-		let recorded: Arc<Mutex<Option<Value>>> = Arc::new(Mutex::new(None));
+	/// Spawns a tiny single-shot HTTP listener on a free port. The returned
+	/// `(url, join, recorded)` lets a test point the drainer at it, await
+	/// the request, and inspect the parsed JSON body. One std::net listener
+	/// per test is enough — we don't need wiremock for this.
+	fn one_shot_server() -> (
+		String,
+		std::thread::JoinHandle<()>,
+		std::sync::Arc<std::sync::Mutex<Option<Value>>>,
+	) {
+		let recorded: std::sync::Arc<std::sync::Mutex<Option<Value>>> =
+			std::sync::Arc::new(std::sync::Mutex::new(None));
 		let recorded_clone = recorded.clone();
-
-		// Hand-rolled single-shot HTTP listener; one test isn't worth a
-		// wiremock dep.
 		let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-		let addr = listener.local_addr().unwrap();
-		let url = format!("http://{addr}/hook");
-		let server = std::thread::spawn(move || {
+		let url = format!("http://{}/hook", listener.local_addr().unwrap());
+		let join = std::thread::spawn(move || {
 			let (mut stream, _) = listener.accept().unwrap();
 			use std::io::{Read, Write};
 			let mut buf = vec![0u8; 8192];
@@ -189,16 +216,13 @@ mod tests {
 					break;
 				}
 				total += n;
-				let header_end = buf[..total].windows(4).position(|w| w == b"\r\n\r\n");
-				if let Some(he) = header_end {
+				if let Some(he) = buf[..total].windows(4).position(|w| w == b"\r\n\r\n") {
 					let headers = std::str::from_utf8(&buf[..he]).unwrap();
 					let len = headers
 						.lines()
-						.find_map(|l| l.strip_prefix("content-length: "))
-						.or_else(|| {
-							headers
-								.lines()
-								.find_map(|l| l.strip_prefix("Content-Length: "))
+						.find_map(|l| {
+							l.strip_prefix("content-length: ")
+								.or_else(|| l.strip_prefix("Content-Length: "))
 						})
 						.unwrap_or("0")
 						.parse::<usize>()
@@ -215,35 +239,110 @@ mod tests {
 				}
 			}
 		});
+		(url, join, recorded)
+	}
 
-		let hooks = Webhooks {
-			open: Some(url.clone()),
+	#[test]
+	fn config_rejects_missing_private_url_when_any_hook_set() {
+		// SAFETY: this test mutates global env, but cargo-test isolates
+		// processes per binary so we won't collide with other tests in
+		// this file (none of which read these vars).
+		unsafe {
+			std::env::set_var("SLACK_WEBHOOK_OPEN_URL", "http://example/");
+			std::env::remove_var("SLACK_WEBHOOK_RESOLVE_URL");
+			std::env::remove_var("PRIVATE_URL");
+		}
+		let err = Config::from_env().expect_err("must require PRIVATE_URL");
+		assert!(err.to_string().contains("PRIVATE_URL"));
+		unsafe {
+			std::env::remove_var("SLACK_WEBHOOK_OPEN_URL");
+		}
+	}
+
+	#[test]
+	fn config_ok_when_no_hooks_set_even_without_private_url() {
+		unsafe {
+			std::env::remove_var("SLACK_WEBHOOK_OPEN_URL");
+			std::env::remove_var("SLACK_WEBHOOK_RESOLVE_URL");
+			std::env::remove_var("PRIVATE_URL");
+		}
+		let cfg = Config::from_env().expect("no-op mode is fine");
+		assert!(!cfg.any_hook());
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn deliver_with_no_hooks_is_a_noop() {
+		let r = row(KIND_INCIDENT_OPEN, serde_json::json!({}));
+		deliver(&reqwest::Client::new(), &Config::default(), &r)
+			.await
+			.expect("noop ok");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn deliver_injects_link_from_private_url() {
+		let (url, server, recorded) = one_shot_server();
+		let incident_id = Uuid::new_v4();
+		let cfg = Config {
+			open: Some(url),
 			resolve: None,
+			private_url: Some("https://canopy.example.ts.net".into()),
 		};
-		let r = row(
+		let mut r = row(
 			KIND_INCIDENT_OPEN,
 			serde_json::json!({
-				"server": "Prod (https://db.example.com/)",
+				"server": "Prod",
 				"severity": "Error",
 				"source_ref": "canopy/reachability",
 				"message": "boom",
-				"link": "https://canopy.example.com/incidents/abc",
 			}),
 		);
-		deliver(&reqwest::Client::new(), &hooks, &r)
+		r.incident_id = incident_id;
+		deliver(&reqwest::Client::new(), &cfg, &r)
 			.await
 			.expect("deliver ok");
 		server.join().unwrap();
 
 		let got = recorded.lock().unwrap().clone().expect("got a request");
-		// We POST the row's payload verbatim — no `text`/`blocks` wrapper.
-		assert_eq!(got["server"], "Prod (https://db.example.com/)");
+		assert_eq!(got["server"], "Prod");
 		assert_eq!(got["severity"], "Error");
 		assert_eq!(got["source_ref"], "canopy/reachability");
 		assert_eq!(got["message"], "boom");
-		assert_eq!(got["link"], "https://canopy.example.com/incidents/abc");
+		assert_eq!(
+			got["link"],
+			format!("https://canopy.example.ts.net/incidents/{incident_id}"),
+			"link injected at delivery time from PRIVATE_URL and row.incident_id",
+		);
 		assert!(got.get("blocks").is_none(), "no blocks wrapper");
 		assert!(got.get("text").is_none(), "no text wrapper");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn deliver_overrides_stale_link_in_payload() {
+		// A row with a `link` already in its payload (e.g. from an older
+		// drainer version) gets that link overwritten by the freshly
+		// computed one.
+		let (url, server, recorded) = one_shot_server();
+		let incident_id = Uuid::new_v4();
+		let cfg = Config {
+			open: Some(url),
+			resolve: None,
+			private_url: Some("https://new.example/".into()),
+		};
+		let mut r = row(
+			KIND_INCIDENT_OPEN,
+			serde_json::json!({ "link": "https://stale.example/old" }),
+		);
+		r.incident_id = incident_id;
+		deliver(&reqwest::Client::new(), &cfg, &r)
+			.await
+			.expect("deliver ok");
+		server.join().unwrap();
+
+		let got = recorded.lock().unwrap().clone().unwrap();
+		assert_eq!(
+			got["link"],
+			format!("https://new.example/incidents/{incident_id}")
+		);
 	}
 
 	#[tokio::test(flavor = "multi_thread")]
@@ -263,12 +362,13 @@ mod tests {
 				.unwrap();
 		});
 
-		let hooks = Webhooks {
+		let cfg = Config {
 			open: Some("http://127.0.0.1:1/open-should-not-be-hit".into()),
 			resolve: Some(resolve_url),
+			private_url: Some("https://canopy.test".into()),
 		};
-		let r = row(KIND_INCIDENT_RESOLVE, serde_json::json!({"server": "x", "by": "me", "link": "http://l/"}));
-		deliver(&reqwest::Client::new(), &hooks, &r)
+		let r = row(KIND_INCIDENT_RESOLVE, serde_json::json!({"server": "x", "by": "me"}));
+		deliver(&reqwest::Client::new(), &cfg, &r)
 			.await
 			.expect("deliver ok");
 		server.join().unwrap();
@@ -288,12 +388,13 @@ mod tests {
 				.unwrap();
 		});
 
-		let hooks = Webhooks {
+		let cfg = Config {
 			open: Some(url),
 			resolve: None,
+			private_url: Some("https://canopy.test".into()),
 		};
 		let r = row(KIND_INCIDENT_OPEN, serde_json::json!({}));
-		let err = deliver(&reqwest::Client::new(), &hooks, &r)
+		let err = deliver(&reqwest::Client::new(), &cfg, &r)
 			.await
 			.expect_err("should error");
 		server.join().unwrap();
@@ -302,12 +403,13 @@ mod tests {
 
 	#[tokio::test(flavor = "multi_thread")]
 	async fn deliver_drops_unknown_kind_as_noop() {
-		let hooks = Webhooks {
+		let cfg = Config {
 			open: Some("http://127.0.0.1:1/should-not-be-hit".into()),
 			resolve: None,
+			private_url: Some("https://canopy.test".into()),
 		};
 		let r = row("bogus_kind", serde_json::json!({}));
-		deliver(&reqwest::Client::new(), &hooks, &r)
+		deliver(&reqwest::Client::new(), &cfg, &r)
 			.await
 			.expect("noop ok");
 	}
@@ -325,6 +427,7 @@ async fn main() -> miette::Result<()> {
 		})?);
 	}
 
-	spawn().await.into_diagnostic()?;
+	let cfg = Config::from_env()?;
+	spawn(cfg).await.into_diagnostic()?;
 	Ok(())
 }

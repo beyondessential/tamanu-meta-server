@@ -9,23 +9,18 @@
 //! Two workflows, one per outbox kind:
 //! - `incident_open`: variables `server`, `severity`, `source_ref`, `message`, `link`
 //! - `incident_resolve`: variables `server`, `by`, `link`
+//!
+//! Note: `link` is **not** rendered here. It's pure config (incident_id is
+//! already on the row, and `PRIVATE_URL` is operator-set), so the drainer
+//! injects it at delivery time. That way only the drainer process needs to
+//! see `PRIVATE_URL` — every other process that enqueues outbox rows
+//! (public-server, private-server, reachability job) doesn't have to know
+//! the operator-facing URL.
 
 use commons_types::issue::Severity;
 use serde_json::{Value, json};
 
-use crate::{issues::Incident, servers::Server};
-
-/// `link` always returns a well-formed URL. If `PRIVATE_URL` is unset the
-/// caller can pass `None` and we fall back to a localhost placeholder — that
-/// way the `<{{link}}|Open in canopy>` mrkdwn in the workflow editor still
-/// renders as a clickable (broken) link in dev rather than as malformed text
-/// in prod. Set `PRIVATE_URL` in any environment that posts to a real Slack.
-fn incident_link(private_url: Option<&str>, incident_id: uuid::Uuid) -> String {
-	let base = private_url
-		.unwrap_or("http://localhost")
-		.trim_end_matches('/');
-	format!("{base}/incidents/{incident_id}")
-}
+use crate::servers::Server;
 
 fn server_label(server: &Server) -> String {
 	match &server.name {
@@ -43,32 +38,23 @@ fn title_case(s: &str) -> String {
 }
 
 pub fn incident_open(
-	incident: &Incident,
 	server: &Server,
 	severity: Severity,
 	source: &str,
 	issue_ref: &str,
 	message: &str,
-	private_url: Option<&str>,
 ) -> Value {
 	json!({
 		"server": server_label(server),
 		"severity": title_case(&severity.to_string()),
 		"source_ref": format!("{source}/{issue_ref}"),
 		"message": message,
-		"link": incident_link(private_url, incident.id),
 	})
 }
 
-pub fn incident_resolve(
-	incident: &Incident,
-	server: &Server,
-	by: Option<&str>,
-	private_url: Option<&str>,
-) -> Value {
+pub fn incident_resolve(server: &Server, by: Option<&str>) -> Value {
 	json!({
 		"server": server_label(server),
 		"by": by.unwrap_or("automation"),
-		"link": incident_link(private_url, incident.id),
 	})
 }

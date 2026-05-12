@@ -87,17 +87,16 @@ async fn opening_incident_enqueues_slack_open_row() {
 		assert!(open.delivered_at.is_none());
 		assert_eq!(open.attempts, 0);
 		// Payload is a flat object matching the workflow trigger's variables.
+		// `link` is intentionally absent here — the drainer injects it at
+		// delivery time from PRIVATE_URL + row.incident_id.
 		let payload = open.payload.as_object().expect("payload is a JSON object");
 		assert!(payload.contains_key("server"));
 		assert_eq!(payload["severity"].as_str(), Some("Error"));
 		assert_eq!(payload["source_ref"].as_str(), Some("test/ref-1"));
 		assert_eq!(payload["message"].as_str(), Some("boom"));
 		assert!(
-			payload["link"]
-				.as_str()
-				.expect("link is a string")
-				.contains("/incidents/"),
-			"link looks like a canopy incident URL"
+			!payload.contains_key("link"),
+			"link is injected by the drainer, not at enqueue"
 		);
 	})
 	.await
