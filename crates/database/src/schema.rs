@@ -82,6 +82,9 @@ diesel::table! {
 		created_at -> Timestamptz,
 		updated_at -> Timestamptz,
 		role -> Text,
+		tailscale_node_id -> Nullable<Text>,
+		tailscale_node_name -> Nullable<Text>,
+		tailscale_tailnet -> Nullable<Text>,
 	}
 }
 

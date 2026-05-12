@@ -3,7 +3,7 @@ use commons_errors::{AppError, Result};
 use commons_types::device::DeviceRole;
 use diesel::QueryableByName;
 use diesel::prelude::*;
-use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -29,6 +29,27 @@ pub struct Device {
 	/// This is used for permission checks.
 	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub role: DeviceRole,
+
+	/// Stable Tailscale node ID (e.g. `nodekey:abc...`). Populated for
+	/// devices that authenticate over the tailnet; null for mTLS-only.
+	pub tailscale_node_id: Option<String>,
+
+	/// Tailscale-side hostname (e.g. `device-01.tailnet.ts.net`). Mirrors
+	/// the control plane for display; not load-bearing for auth.
+	pub tailscale_node_name: Option<String>,
+
+	/// Tailnet the node belongs to. Same caveat as above.
+	pub tailscale_tailnet: Option<String>,
+}
+
+/// Captures the stable Tailscale identity associated with an incoming
+/// request, used to attach a device row to a tailnet node either on
+/// auto-discovery or via an admin pre-attach.
+#[derive(Clone, Debug)]
+pub struct TailscaleIdentity {
+	pub node_id: String,
+	pub node_name: Option<String>,
+	pub tailnet: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Queryable, Selectable, Insertable)]
@@ -103,6 +124,281 @@ impl Device {
 		DeviceKey::create(db, device.id, key, Some("Initial Key".to_string())).await?;
 
 		Ok(device)
+	}
+
+	pub async fn from_tailscale_node_id(
+		db: &mut AsyncPgConnection,
+		node_id: &str,
+	) -> Result<Option<Self>> {
+		use crate::schema::devices;
+
+		devices::table
+			.select(Self::as_select())
+			.filter(devices::tailscale_node_id.eq(node_id))
+			.first(db)
+			.await
+			.optional()
+			.map_err(AppError::from)
+	}
+
+	/// First-contact insert for a tailnet device that has no mTLS key yet.
+	/// Mirrors `create` but uses the Tailscale identity in place of an
+	/// initial key, and leaves `device_keys` empty for this row.
+	pub async fn create_with_tailscale(
+		db: &mut AsyncPgConnection,
+		identity: TailscaleIdentity,
+	) -> Result<Self> {
+		use crate::schema::devices;
+
+		diesel::insert_into(devices::table)
+			.values((
+				devices::tailscale_node_id.eq(identity.node_id),
+				devices::tailscale_node_name.eq(identity.node_name),
+				devices::tailscale_tailnet.eq(identity.tailnet),
+			))
+			.returning(Self::as_select())
+			.get_result(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// Pre-attach a tailnet identity to an existing device. Used by the
+	/// admin "attach Tailscale identity" workflow when the operator
+	/// knows a device is about to come online over the tailnet (or is
+	/// being moved off mTLS). Errors with
+	/// `DeviceTailscaleNodeAlreadyClaimed` if another device already
+	/// holds this `node_id` — the operator should use the merge flow
+	/// in that case.
+	pub async fn attach_tailscale(
+		db: &mut AsyncPgConnection,
+		device_id: Uuid,
+		identity: TailscaleIdentity,
+	) -> Result<()> {
+		use crate::schema::devices::dsl;
+
+		// Pre-check: another device already claiming this node id?
+		let conflict: Option<Uuid> = dsl::devices
+			.select(dsl::id)
+			.filter(dsl::tailscale_node_id.eq(&identity.node_id))
+			.filter(dsl::id.ne(device_id))
+			.first(db)
+			.await
+			.optional()
+			.map_err(AppError::from)?;
+		if conflict.is_some() {
+			return Err(AppError::DeviceTailscaleNodeAlreadyClaimed);
+		}
+
+		diesel::update(dsl::devices.filter(dsl::id.eq(device_id)))
+			.set((
+				dsl::tailscale_node_id.eq(identity.node_id),
+				dsl::tailscale_node_name.eq(identity.node_name),
+				dsl::tailscale_tailnet.eq(identity.tailnet),
+			))
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(())
+	}
+
+	/// Clear the tailnet identity from a device. The opposite of
+	/// `attach_tailscale`; leaves the device row otherwise untouched
+	/// (keys, role, server attachment all stay).
+	pub async fn detach_tailscale(db: &mut AsyncPgConnection, device_id: Uuid) -> Result<()> {
+		use crate::schema::devices::dsl;
+
+		diesel::update(dsl::devices.filter(dsl::id.eq(device_id)))
+			.set((
+				dsl::tailscale_node_id.eq(None::<String>),
+				dsl::tailscale_node_name.eq(None::<String>),
+				dsl::tailscale_tailnet.eq(None::<String>),
+			))
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(())
+	}
+
+	/// Merge `source_id` into `target_id`: every foreign-key reference
+	/// to `source_id` is re-parented to `target_id`, then `source_id`
+	/// is deleted. Runs in a single transaction.
+	///
+	/// Conflict cases (returns [`AppError::DeviceMergeConflict`]):
+	///
+	/// - Both source and target hold a tailscale identity. The
+	///   operator must `detach_tailscale` on one side first.
+	/// - Both source and target are attached to a server
+	///   (`servers.device_id`). The operator must clear one
+	///   `servers.device_id` first; otherwise the unique constraint
+	///   would fail during the rewrite.
+	///
+	/// Target wins for `role` and for `tailscale_*` (if it already
+	/// has them). If only the source has a tailscale identity, the
+	/// merge adopts it onto the target.
+	pub async fn merge_into(
+		db: &mut AsyncPgConnection,
+		source_id: Uuid,
+		target_id: Uuid,
+	) -> Result<()> {
+		use crate::schema::{
+			artifacts, device_connections, device_keys, device_server_associations, devices,
+			issues, servers, statuses, versions,
+		};
+
+		if source_id == target_id {
+			return Err(AppError::custom("merge_into: source and target are the same"));
+		}
+
+		db.transaction::<_, AppError, _>(async |conn| {
+			let source: Self = devices::table
+					.select(Self::as_select())
+					.filter(devices::id.eq(source_id))
+					.first(conn)
+					.await
+					.map_err(AppError::from)?;
+				let target: Self = devices::table
+					.select(Self::as_select())
+					.filter(devices::id.eq(target_id))
+					.first(conn)
+					.await
+					.map_err(AppError::from)?;
+
+				// Conflict: both have tailscale identity.
+				if source.tailscale_node_id.is_some() && target.tailscale_node_id.is_some() {
+					return Err(AppError::DeviceMergeConflict);
+				}
+
+				// Conflict: both attached to a (possibly different) server.
+				let source_server_count: i64 = servers::table
+					.filter(servers::device_id.eq(source_id))
+					.count()
+					.get_result(conn)
+					.await
+					.map_err(AppError::from)?;
+				let target_server_count: i64 = servers::table
+					.filter(servers::device_id.eq(target_id))
+					.count()
+					.get_result(conn)
+					.await
+					.map_err(AppError::from)?;
+				if source_server_count > 0 && target_server_count > 0 {
+					return Err(AppError::DeviceMergeConflict);
+				}
+
+				// Adopt source's tailscale identity onto target if target
+				// has none. (We don't need to clear source first; deleting
+				// source at the end is sufficient. But the partial unique
+				// index on tailscale_node_id would fire if both rows held
+				// the same value briefly — we already ruled that out via
+				// the conflict check above.)
+				if target.tailscale_node_id.is_none() && source.tailscale_node_id.is_some() {
+					// Clear source's identity *first* so we don't transiently
+					// hold the same `tailscale_node_id` on two rows (the
+					// `devices_tailscale_node_id_key` unique constraint would
+					// fire on the target update otherwise).
+					diesel::update(devices::table.filter(devices::id.eq(source_id)))
+						.set((
+							devices::tailscale_node_id.eq(None::<String>),
+							devices::tailscale_node_name.eq(None::<String>),
+							devices::tailscale_tailnet.eq(None::<String>),
+						))
+						.execute(conn)
+						.await
+						.map_err(AppError::from)?;
+					diesel::update(devices::table.filter(devices::id.eq(target_id)))
+						.set((
+							devices::tailscale_node_id.eq(source.tailscale_node_id.as_deref()),
+							devices::tailscale_node_name
+								.eq(source.tailscale_node_name.as_deref()),
+							devices::tailscale_tailnet.eq(source.tailscale_tailnet.as_deref()),
+						))
+						.execute(conn)
+						.await
+						.map_err(AppError::from)?;
+				}
+
+				// Re-parent simple foreign keys.
+				diesel::update(device_keys::table.filter(device_keys::device_id.eq(source_id)))
+					.set(device_keys::device_id.eq(target_id))
+					.execute(conn)
+					.await
+					.map_err(AppError::from)?;
+				diesel::update(
+					device_connections::table.filter(device_connections::device_id.eq(source_id)),
+				)
+				.set(device_connections::device_id.eq(target_id))
+				.execute(conn)
+				.await
+				.map_err(AppError::from)?;
+				diesel::update(artifacts::table.filter(artifacts::device_id.eq(source_id)))
+					.set(artifacts::device_id.eq(target_id))
+					.execute(conn)
+					.await
+					.map_err(AppError::from)?;
+				diesel::update(issues::table.filter(issues::device_id.eq(source_id)))
+					.set(issues::device_id.eq(target_id))
+					.execute(conn)
+					.await
+					.map_err(AppError::from)?;
+				diesel::update(statuses::table.filter(statuses::device_id.eq(source_id)))
+					.set(statuses::device_id.eq(target_id))
+					.execute(conn)
+					.await
+					.map_err(AppError::from)?;
+				diesel::update(versions::table.filter(versions::device_id.eq(source_id)))
+					.set(versions::device_id.eq(target_id))
+					.execute(conn)
+					.await
+					.map_err(AppError::from)?;
+
+				// servers.device_id is UNIQUE. We already ruled out the
+				// both-attached case above; here the only writers are
+				// source-attached (rewrite to target) or neither (no-op).
+				diesel::update(servers::table.filter(servers::device_id.eq(source_id)))
+					.set(servers::device_id.eq(target_id))
+					.execute(conn)
+					.await
+					.map_err(AppError::from)?;
+
+				// device_server_associations has composite PK (device_id, server_id).
+				// Two cases:
+				// 1. source has an association for a server that target doesn't —
+				//    rewrite source's device_id to target.
+				// 2. source has an association for a server that target also has —
+				//    collapse: keep target's row, drop source's. (Operator-facing
+				//    semantics: the timeline is now under the target id.)
+				diesel::sql_query(
+					"UPDATE device_server_associations \
+					 SET device_id = $1 \
+					 WHERE device_id = $2 \
+					   AND NOT EXISTS ( \
+					     SELECT 1 FROM device_server_associations target_dsa \
+					     WHERE target_dsa.device_id = $1 \
+					       AND target_dsa.server_id = device_server_associations.server_id \
+					   )",
+				)
+				.bind::<diesel::sql_types::Uuid, _>(target_id)
+				.bind::<diesel::sql_types::Uuid, _>(source_id)
+				.execute(conn)
+				.await
+				.map_err(AppError::from)?;
+				diesel::delete(
+					device_server_associations::table
+						.filter(device_server_associations::device_id.eq(source_id)),
+				)
+				.execute(conn)
+				.await
+				.map_err(AppError::from)?;
+
+			// Finally, delete the source device row.
+			diesel::delete(devices::table.filter(devices::id.eq(source_id)))
+				.execute(conn)
+				.await
+				.map_err(AppError::from)?;
+
+			Ok(())
+		})
+		.await
 	}
 
 	/// Get a single device by ID with its keys and latest connection info.
@@ -645,6 +941,82 @@ impl Device {
 			.collect();
 
 		Ok(result)
+	}
+
+	/// Search devices by stored Tailscale identifiers: `tailscale_node_id`
+	/// (substring match) or `tailscale_node_name` (case-insensitive
+	/// substring match). The directory's IP-and-name resolution is
+	/// handled at the endpoint layer — this method only consults the
+	/// DB columns.
+	pub async fn search_by_tailscale_fields(
+		db: &mut AsyncPgConnection,
+		query: &str,
+	) -> Result<Vec<DeviceWithInfo>> {
+		use crate::schema::{device_keys, devices};
+
+		let needle = format!("%{query}%");
+		let device_ids: Vec<Uuid> = devices::table
+			.select(devices::id)
+			.filter(
+				devices::tailscale_node_id
+					.ilike(needle.clone())
+					.or(devices::tailscale_node_name.ilike(needle.clone()))
+					.or(devices::tailscale_tailnet.ilike(needle)),
+			)
+			.load::<Uuid>(db)
+			.await?;
+
+		if device_ids.is_empty() {
+			return Ok(Vec::new());
+		}
+
+		let devices_result: Vec<Self> = devices::table
+			.select(Self::as_select())
+			.filter(devices::id.eq_any(&device_ids))
+			.load(db)
+			.await?;
+
+		let all_keys: Vec<DeviceKey> = device_keys::table
+			.select(DeviceKey::as_select())
+			.filter(device_keys::device_id.eq_any(&device_ids))
+			.filter(device_keys::is_active.eq(true))
+			.load(db)
+			.await?;
+
+		let all_connections =
+			DeviceConnection::get_latest_from_device_ids(db, device_ids.iter().copied()).await?;
+
+		let mut keys_by_device: HashMap<Uuid, Vec<DeviceKey>> = HashMap::new();
+		for key in all_keys {
+			keys_by_device.entry(key.device_id).or_default().push(key);
+		}
+		let mut connections_by_device: HashMap<Uuid, DeviceConnection> = HashMap::new();
+		for conn in all_connections {
+			connections_by_device.insert(conn.device_id, conn);
+		}
+
+		Ok(devices_result
+			.into_iter()
+			.map(|device| DeviceWithInfo {
+				keys: keys_by_device.remove(&device.id).unwrap_or_default(),
+				latest_connection: connections_by_device.remove(&device.id),
+				device,
+			})
+			.collect())
+	}
+
+	/// Look up a single device by its exact `tailscale_node_id`,
+	/// returning the full `DeviceWithInfo`. Used by the search
+	/// endpoint when the user pastes a Tailscale IP/name that the
+	/// directory resolves to a known node id.
+	pub async fn get_with_info_by_node_id(
+		db: &mut AsyncPgConnection,
+		node_id: &str,
+	) -> Result<Option<DeviceWithInfo>> {
+		let Some(device) = Self::from_tailscale_node_id(db, node_id).await? else {
+			return Ok(None);
+		};
+		Self::get_with_info(db, device.id).await.map(Some)
 	}
 }
 

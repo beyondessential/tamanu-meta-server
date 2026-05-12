@@ -548,6 +548,9 @@ fn convert_device_with_info(d: DeviceWithInfo) -> super::devices::DeviceInfo {
 			created_at: d.device.created_at,
 			updated_at: d.device.updated_at,
 			role: d.device.role,
+			tailscale_node_id: d.device.tailscale_node_id,
+			tailscale_node_name: d.device.tailscale_node_name,
+			tailscale_tailnet: d.device.tailscale_tailnet,
 		},
 		keys: d
 			.keys
@@ -569,6 +572,7 @@ fn convert_device_with_info(d: DeviceWithInfo) -> super::devices::DeviceInfo {
 				ip: conn.ip.addr().to_string(),
 				user_agent: conn.user_agent,
 			}),
+		tailnet_live: None,
 	}
 }
 

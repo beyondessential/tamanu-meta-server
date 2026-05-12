@@ -93,6 +93,21 @@ pub enum AppError {
 
 	#[error("source 'manual' is reserved for operator submissions")]
 	SourceManualForbidden,
+
+	#[error("tailnet directory is unavailable")]
+	AuthTailnetDirectoryUnavailable,
+
+	#[error("tailnet node lacks the required tag")]
+	AuthTailnetNodeNotPermitted,
+
+	#[error("tagged-device callers are only allowed on /public/... routes")]
+	TaggedDeviceNotAllowed,
+
+	#[error("another device already claims this tailscale node id")]
+	DeviceTailscaleNodeAlreadyClaimed,
+
+	#[error("cannot merge devices: conflict on tailscale identity or server attachment")]
+	DeviceMergeConflict,
 }
 
 impl AppError {
@@ -150,6 +165,11 @@ impl AppError {
 			Self::AuthFailed { .. } => StatusCode::UNAUTHORIZED,
 			Self::DeviceHasNoServer => StatusCode::PRECONDITION_FAILED,
 			Self::SourceManualForbidden => StatusCode::BAD_REQUEST,
+			Self::AuthTailnetDirectoryUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+			Self::AuthTailnetNodeNotPermitted => StatusCode::FORBIDDEN,
+			Self::TaggedDeviceNotAllowed => StatusCode::FORBIDDEN,
+			Self::DeviceTailscaleNodeAlreadyClaimed => StatusCode::CONFLICT,
+			Self::DeviceMergeConflict => StatusCode::CONFLICT,
 			_ => StatusCode::INTERNAL_SERVER_ERROR,
 		}
 	}
@@ -190,6 +210,12 @@ impl AppError {
 						Self::AuthFailed { .. } => "auth-failed",
 						Self::DeviceHasNoServer => "device-has-no-server",
 						Self::SourceManualForbidden => "source-manual-forbidden",
+						Self::AuthTailnetDirectoryUnavailable => "auth-tailnet-directory-unavailable",
+						Self::AuthTailnetNodeNotPermitted => "auth-tailnet-node-not-permitted",
+						Self::TaggedDeviceNotAllowed => "tagged-device-not-allowed",
+						Self::DeviceTailscaleNodeAlreadyClaimed =>
+							"device-tailscale-node-already-claimed",
+						Self::DeviceMergeConflict => "device-merge-conflict",
 						Self::Problem(_) => unreachable!(),
 					}
 				))

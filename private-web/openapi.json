@@ -452,6 +452,71 @@
         }
       }
     },
+    "/api/devices/attach_tailscale": {
+      "post": {
+        "tags": [
+          "devices"
+        ],
+        "operationId": "attach_tailscale",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttachTailscaleArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceInfo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Identifier does not resolve to a known tailnet node.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another device already claims this node id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Tailnet directory not configured or unreachable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/devices/connection_count": {
       "post": {
         "tags": [
@@ -515,6 +580,51 @@
                   "items": {
                     "$ref": "#/components/schemas/DeviceConnectionData"
                   }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/devices/detach_tailscale": {
+      "post": {
+        "tags": [
+          "devices"
+        ],
+        "operationId": "detach_tailscale",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceInfo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
                 }
               }
             }
@@ -706,6 +816,107 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Page_DeviceInfo"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/devices/merge_into": {
+      "post": {
+        "tags": [
+          "devices"
+        ],
+        "operationId": "merge_into",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MergeIntoArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceInfo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Both source and target hold tailscale identity or a server attachment.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/devices/resolve_tailnet_identifier": {
+      "post": {
+        "tags": [
+          "devices"
+        ],
+        "summary": "Look up a Tailscale IP / node id / DNS name in the directory and\nreturn the canonical identity if found. Used by the attach UI's\npreview pane so the operator can confirm the resolved node before\nhitting attach.",
+        "operationId": "resolve_tailnet_identifier",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveTailnetIdentifierArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolveTailnetIdentifierResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Tailnet directory not configured or unreachable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
                 }
               }
             }
@@ -2714,6 +2925,23 @@
           }
         }
       },
+      "AttachTailscaleArgs": {
+        "type": "object",
+        "required": [
+          "device_id",
+          "identifier"
+        ],
+        "properties": {
+          "device_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "identifier": {
+            "type": "string",
+            "description": "Any of: a Tailscale CGNAT/ULA IP, a node id, or a DNS name —\nthe operator pastes whichever is most convenient from the\nTailscale admin console. The server resolves it via the\ncached directory to the canonical `(node_id, name, tailnet)`\ntuple before persisting."
+          }
+        }
+      },
       "BestoolSnippetDetail": {
         "type": "object",
         "required": [
@@ -2954,6 +3182,25 @@
           "role": {
             "$ref": "#/components/schemas/DeviceRole"
           },
+          "tailscale_node_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The Tailscale node ID this device is attached to, if any. The\nlive IP / display name corresponding to this id is in\n[`DeviceInfo::tailnet_live`]."
+          },
+          "tailscale_node_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tailscale_tailnet": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "updated_at": {
             "type": "string",
             "format": "date-time"
@@ -2995,6 +3242,17 @@
               },
               {
                 "$ref": "#/components/schemas/DeviceConnectionData"
+              }
+            ]
+          },
+          "tailnet_live": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TailnetLiveInfo",
+                "description": "Live snapshot from the Tailscale control plane for a device\nthat's currently attached by `tailscale_node_id`. `None` if the\ndevice has no tailnet attachment, the directory isn't\nconfigured, or the node id isn't in the directory's cache."
               }
             ]
           }
@@ -3763,6 +4021,25 @@
           }
         }
       },
+      "MergeIntoArgs": {
+        "type": "object",
+        "required": [
+          "source_id",
+          "target_id"
+        ],
+        "properties": {
+          "source_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Device row to fold *into* the target — usually the\nauto-discovered tailnet-only row."
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Device row that keeps existing — usually the existing mTLS\nrow that owns the device's server attachment and history."
+          }
+        }
+      },
       "MinorVersionGroup": {
         "type": "object",
         "required": [
@@ -3880,6 +4157,17 @@
                     },
                     {
                       "$ref": "#/components/schemas/DeviceConnectionData"
+                    }
+                  ]
+                },
+                "tailnet_live": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TailnetLiveInfo",
+                      "description": "Live snapshot from the Tailscale control plane for a device\nthat's currently attached by `tailscale_node_id`. `None` if the\ndevice has no tailnet attachment, the directory isn't\nconfigured, or the node id isn't in the directory's cache."
                     }
                   ]
                 }
@@ -4145,6 +4433,32 @@
           },
           "reason": {
             "$ref": "#/components/schemas/ResolvedReason"
+          }
+        }
+      },
+      "ResolveTailnetIdentifierArgs": {
+        "type": "object",
+        "required": [
+          "identifier"
+        ],
+        "properties": {
+          "identifier": {
+            "type": "string"
+          }
+        }
+      },
+      "ResolveTailnetIdentifierResponse": {
+        "type": "object",
+        "properties": {
+          "matched": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TailnetLiveInfo"
+              }
+            ]
           }
         }
       },
@@ -4830,6 +5144,39 @@
             "items": {
               "$ref": "#/components/schemas/VersionStr"
             }
+          }
+        }
+      },
+      "TailnetLiveInfo": {
+        "type": "object",
+        "required": [
+          "node_id",
+          "display_name",
+          "tailnet",
+          "addresses",
+          "tags"
+        ],
+        "properties": {
+          "addresses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "node_id": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tailnet": {
+            "type": "string"
           }
         }
       },

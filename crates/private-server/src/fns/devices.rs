@@ -3,9 +3,10 @@ use std::collections::HashMap;
 use axum::Json;
 use axum::extract::State;
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
+use commons_servers::tailnet_directory::DirectoryEntry;
 use commons_servers::tailscale_auth::TailscaleAdmin;
 use commons_types::{Uuid, device::DeviceRole};
-use database::devices::{Device, DeviceConnection, DeviceKey, DeviceWithInfo};
+use database::devices::{Device, DeviceConnection, DeviceKey, DeviceWithInfo, TailscaleIdentity};
 use database::servers::Server;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -21,6 +22,33 @@ pub struct DeviceInfo {
 	pub device: DeviceData,
 	pub keys: Vec<DeviceKeyInfo>,
 	pub latest_connection: Option<DeviceConnectionData>,
+	/// Live snapshot from the Tailscale control plane for a device
+	/// that's currently attached by `tailscale_node_id`. `None` if the
+	/// device has no tailnet attachment, the directory isn't
+	/// configured, or the node id isn't in the directory's cache.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub tailnet_live: Option<TailnetLiveInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct TailnetLiveInfo {
+	pub node_id: String,
+	pub display_name: String,
+	pub tailnet: String,
+	pub addresses: Vec<String>,
+	pub tags: Vec<String>,
+}
+
+impl From<DirectoryEntry> for TailnetLiveInfo {
+	fn from(e: DirectoryEntry) -> Self {
+		Self {
+			node_id: e.node_id,
+			display_name: e.node_name,
+			tailnet: e.tailnet,
+			addresses: e.addresses.into_iter().map(|a| a.to_string()).collect(),
+			tags: e.tags,
+		}
+	}
 }
 
 impl DeviceInfo {
@@ -49,6 +77,15 @@ pub struct DeviceData {
 	pub created_at: Timestamp,
 	pub updated_at: Timestamp,
 	pub role: DeviceRole,
+	/// The Tailscale node ID this device is attached to, if any. The
+	/// live IP / display name corresponding to this id is in
+	/// [`DeviceInfo::tailnet_live`].
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub tailscale_node_id: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub tailscale_node_name: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub tailscale_tailnet: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -77,10 +114,28 @@ impl From<DeviceWithInfo> for DeviceInfo {
 				created_at: d.device.created_at,
 				updated_at: d.device.updated_at,
 				role: d.device.role,
+				tailscale_node_id: d.device.tailscale_node_id,
+				tailscale_node_name: d.device.tailscale_node_name,
+				tailscale_tailnet: d.device.tailscale_tailnet,
 			},
 			keys: d.keys.into_iter().map(DeviceKeyInfo::from).collect(),
 			latest_connection: d.latest_connection.map(DeviceConnectionData::from),
+			tailnet_live: None,
 		}
+	}
+}
+
+impl DeviceInfo {
+	/// Populate `tailnet_live` from the directory if this device has a
+	/// `tailscale_node_id` and the directory has it cached.
+	async fn enrich_with_live(mut self, state: &AppState) -> Self {
+		if let Some(node_id) = self.device.tailscale_node_id.clone()
+			&& let Some(directory) = &state.tailnet_directory
+			&& let Ok(Some(entry)) = directory.find_by_node_id(&node_id).await
+		{
+			self.tailnet_live = Some(entry.into());
+		}
+		self
 	}
 }
 
@@ -152,6 +207,10 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(update_role))
 		.routes(routes!(search))
 		.routes(routes!(update_key_name))
+		.routes(routes!(attach_tailscale))
+		.routes(routes!(detach_tailscale))
+		.routes(routes!(merge_into))
+		.routes(routes!(resolve_tailnet_identifier))
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -177,7 +236,8 @@ pub async fn get_device_by_id(
 ) -> Result<Json<DeviceInfo>> {
 	let mut conn = state.db.get().await?;
 	let device_with_info = Device::get_with_info(&mut conn, args.device_id).await?;
-	Ok(Json(DeviceInfo::from(device_with_info)))
+	let info = DeviceInfo::from(device_with_info).enrich_with_live(&state).await;
+	Ok(Json(info))
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -464,6 +524,24 @@ pub async fn search(
 	let devices_by_key = Device::search_by_key(&mut conn, &args.query).await?;
 	let devices_by_key_name = Device::search_by_key_name(&mut conn, &args.query).await?;
 	let devices_by_ip = Device::search_by_connection_ip(&mut conn, &args.query).await?;
+	let devices_by_tailscale =
+		Device::search_by_tailscale_fields(&mut conn, &args.query).await?;
+
+	// If the directory is configured, also resolve the query as a
+	// Tailscale IP / node id / DNS name and surface any device
+	// attached to the resolved node. This catches the case where the
+	// operator pastes an identifier the device hasn't connected with
+	// yet (so search_by_connection_ip would miss it).
+	let directory_match = if let Some(directory) = &state.tailnet_directory {
+		match directory.resolve_identifier(&args.query).await {
+			Ok(Some(entry)) => {
+				Device::get_with_info_by_node_id(&mut conn, &entry.node_id).await?
+			}
+			_ => None,
+		}
+	} else {
+		None
+	};
 
 	let mut seen: HashMap<Uuid, DeviceWithInfo> = HashMap::new();
 	for d in devices_by_key {
@@ -475,7 +553,19 @@ pub async fn search(
 	for d in devices_by_ip {
 		seen.insert(d.device.id, d);
 	}
-	Ok(Json(seen.into_values().map(DeviceInfo::from).collect()))
+	for d in devices_by_tailscale {
+		seen.insert(d.device.id, d);
+	}
+	if let Some(d) = directory_match {
+		seen.insert(d.device.id, d);
+	}
+
+	// Enrich each result with live tailnet info.
+	let mut out = Vec::with_capacity(seen.len());
+	for d in seen.into_values() {
+		out.push(DeviceInfo::from(d).enrich_with_live(&state).await);
+	}
+	Ok(Json(out))
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -502,4 +592,165 @@ pub async fn update_key_name(
 	let mut conn = state.db.get().await?;
 	DeviceKey::update_name(&mut conn, args.key_id, args.name).await?;
 	Ok(Json(()))
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct AttachTailscaleArgs {
+	pub device_id: Uuid,
+	/// Any of: a Tailscale CGNAT/ULA IP, a node id, or a DNS name —
+	/// the operator pastes whichever is most convenient from the
+	/// Tailscale admin console. The server resolves it via the
+	/// cached directory to the canonical `(node_id, name, tailnet)`
+	/// tuple before persisting.
+	pub identifier: String,
+}
+
+#[utoipa::path(
+	post,
+	path = "/attach_tailscale",
+	tag = "devices",
+	security(("tailscale-admin" = [])),
+	request_body = AttachTailscaleArgs,
+	responses(
+		(status = 200, body = DeviceInfo),
+		(status = 404, description = "Identifier does not resolve to a known tailnet node.", body = ProblemDetailsSchema),
+		(status = 409, description = "Another device already claims this node id.", body = ProblemDetailsSchema),
+		(status = 503, description = "Tailnet directory not configured or unreachable.", body = ProblemDetailsSchema),
+	),
+)]
+pub async fn attach_tailscale(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<AttachTailscaleArgs>,
+) -> Result<Json<DeviceInfo>> {
+	let directory = state
+		.tailnet_directory
+		.as_ref()
+		.ok_or(AppError::AuthTailnetDirectoryUnavailable)?;
+	let entry = directory
+		.resolve_identifier(&args.identifier)
+		.await
+		.map_err(|_| AppError::AuthTailnetDirectoryUnavailable)?
+		.ok_or_else(|| AppError::custom("no tailnet device matches that identifier"))?;
+
+	let mut conn = state.db.get().await?;
+	Device::attach_tailscale(
+		&mut conn,
+		args.device_id,
+		TailscaleIdentity {
+			node_id: entry.node_id.clone(),
+			node_name: Some(entry.node_name.clone()),
+			tailnet: Some(entry.tailnet.clone()),
+		},
+	)
+	.await?;
+
+	let device_with_info = Device::get_with_info(&mut conn, args.device_id).await?;
+	let info = DeviceInfo::from(device_with_info)
+		.enrich_with_live(&state)
+		.await;
+	Ok(Json(info))
+}
+
+#[utoipa::path(
+	post,
+	path = "/detach_tailscale",
+	tag = "devices",
+	security(("tailscale-admin" = [])),
+	request_body = DeviceIdArgs,
+	responses(
+		(status = 200, body = DeviceInfo),
+		(status = 404, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn detach_tailscale(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<DeviceIdArgs>,
+) -> Result<Json<DeviceInfo>> {
+	let mut conn = state.db.get().await?;
+	Device::detach_tailscale(&mut conn, args.device_id).await?;
+	let device_with_info = Device::get_with_info(&mut conn, args.device_id).await?;
+	let info = DeviceInfo::from(device_with_info)
+		.enrich_with_live(&state)
+		.await;
+	Ok(Json(info))
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct MergeIntoArgs {
+	/// Device row to fold *into* the target — usually the
+	/// auto-discovered tailnet-only row.
+	pub source_id: Uuid,
+	/// Device row that keeps existing — usually the existing mTLS
+	/// row that owns the device's server attachment and history.
+	pub target_id: Uuid,
+}
+
+#[utoipa::path(
+	post,
+	path = "/merge_into",
+	tag = "devices",
+	security(("tailscale-admin" = [])),
+	request_body = MergeIntoArgs,
+	responses(
+		(status = 200, body = DeviceInfo),
+		(status = 404, body = ProblemDetailsSchema),
+		(status = 409, description = "Both source and target hold tailscale identity or a server attachment.", body = ProblemDetailsSchema),
+	),
+)]
+pub async fn merge_into(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<MergeIntoArgs>,
+) -> Result<Json<DeviceInfo>> {
+	let mut conn = state.db.get().await?;
+	Device::merge_into(&mut conn, args.source_id, args.target_id).await?;
+	let device_with_info = Device::get_with_info(&mut conn, args.target_id).await?;
+	let info = DeviceInfo::from(device_with_info)
+		.enrich_with_live(&state)
+		.await;
+	Ok(Json(info))
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct ResolveTailnetIdentifierArgs {
+	pub identifier: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct ResolveTailnetIdentifierResponse {
+	pub matched: Option<TailnetLiveInfo>,
+}
+
+/// Look up a Tailscale IP / node id / DNS name in the directory and
+/// return the canonical identity if found. Used by the attach UI's
+/// preview pane so the operator can confirm the resolved node before
+/// hitting attach.
+#[utoipa::path(
+	post,
+	path = "/resolve_tailnet_identifier",
+	tag = "devices",
+	security(("tailscale-admin" = [])),
+	request_body = ResolveTailnetIdentifierArgs,
+	responses(
+		(status = 200, body = ResolveTailnetIdentifierResponse),
+		(status = 503, description = "Tailnet directory not configured or unreachable.", body = ProblemDetailsSchema),
+	),
+)]
+pub async fn resolve_tailnet_identifier(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<ResolveTailnetIdentifierArgs>,
+) -> Result<Json<ResolveTailnetIdentifierResponse>> {
+	let directory = state
+		.tailnet_directory
+		.as_ref()
+		.ok_or(AppError::AuthTailnetDirectoryUnavailable)?;
+	let matched = directory
+		.resolve_identifier(&args.identifier)
+		.await
+		.map_err(|_| AppError::AuthTailnetDirectoryUnavailable)?
+		.map(TailnetLiveInfo::from);
+	Ok(Json(ResolveTailnetIdentifierResponse { matched }))
 }

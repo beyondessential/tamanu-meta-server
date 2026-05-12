@@ -54,6 +54,7 @@ where
 					db: database::init_to(&url),
 					tera: public_server::state::AppState::init_tera().unwrap(),
 					server_versions_secret: Some("test-secret".to_string()),
+					tailnet_directory: None,
 				},
 			)),
 			ClientIpSource::RightmostForwarded,
@@ -115,6 +116,94 @@ where
 
 		public.add_header("X-Version", "3.4.5");
 		test(conn, cert, device_id, public, private).await
+	})
+	.await
+}
+
+/// Run a test against a private-server primed with a populated tailnet
+/// directory. The yielded device row is pre-attached to a known
+/// `tailscale_node_id`, and the directory resolves `100.64.0.42` to
+/// that node id with the `tag:canopy-server` tag. Tests typically
+/// drive requests through the private server with
+/// `.add_header("Forwarded", "for=100.64.0.42")` to look like a tagged
+/// device on the tailnet.
+///
+/// The public TestServer is also yielded, but its state has no tailnet
+/// directory (mirrors the production wiring on the internet edge), so
+/// the tailnet auth path cannot fire on it.
+#[allow(dead_code)]
+pub async fn run_with_tailnet_device_auth<F, T, Fut>(role: &'static str, test: F) -> T
+where
+	F: FnOnce(
+		AsyncPgConnection,
+		std::net::IpAddr,
+		String,
+		Uuid,
+		TestServer,
+		TestServer,
+	) -> Fut,
+	Fut: Future<Output = T>,
+{
+	use commons_servers::tailnet_directory::{DirectoryEntry, TailnetDirectory};
+
+	let tailnet_ip: std::net::IpAddr = "100.64.0.42".parse().expect("parse test ip");
+	let node_id = "nodekey:canopytest42".to_string();
+
+	TestDb::run(async |mut conn, url| {
+		let device_row: Device = sql_query(
+			r#"
+				INSERT INTO devices (role, tailscale_node_id, tailscale_node_name, tailscale_tailnet)
+				VALUES ($1, $2, 'canopy-test-server', 'test-tailnet')
+				RETURNING id
+			"#,
+		)
+		.bind::<sql_types::Text, _>(role)
+		.bind::<sql_types::Text, _>(&node_id)
+		.get_result(&mut conn)
+		.await
+		.expect("insert tailnet device");
+		let device_id = device_row.id;
+
+		let directory = TailnetDirectory::for_test([(
+			tailnet_ip,
+			DirectoryEntry {
+				node_id: node_id.clone(),
+				node_name: "canopy-test-server".to_string(),
+				tailnet: "test-tailnet".to_string(),
+				tags: vec!["tag:canopy-server".to_string()],
+				addresses: vec![tailnet_ip],
+			},
+		)]);
+
+		let public_router = router(
+			axum::Router::from(public_server::routes().with_state(
+				public_server::state::AppState {
+					db: database::init_to(&url),
+					tera: public_server::state::AppState::init_tera().unwrap(),
+					server_versions_secret: Some("test-secret".to_string()),
+					tailnet_directory: None,
+				},
+			)),
+			ClientIpSource::RightmostForwarded,
+		);
+		let private_router = router(
+			private_server::routes(private_server::state::AppState {
+				db: database::init_to(&url),
+				ro_pool: None,
+				tailnet_directory: Some(directory),
+			})
+			.unwrap(),
+			ClientIpSource::RightmostForwarded,
+		);
+
+		let mut public = TestServer::new(public_router);
+		public.add_header("Forwarded", "for=192.0.1.60");
+		public.add_header("X-Version", "3.4.5");
+		let private = TestServer::new(private_router);
+		// No default Forwarded — each test supplies its own to control
+		// whether the caller looks like a tailnet device or not.
+
+		test(conn, tailnet_ip, node_id, device_id, public, private).await
 	})
 	.await
 }

@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use axum::extract::FromRef;
 use commons_errors::Result;
+use commons_servers::tailnet_directory::TailnetDirectory;
 use database::Db;
 #[cfg(feature = "ui")]
 use tera::Tera;
@@ -14,6 +15,12 @@ pub struct AppState {
 	pub tera: Arc<Tera>,
 	#[cfg(feature = "ui")]
 	pub server_versions_secret: Option<String>,
+	/// Populated only when the public-server's router is nested into
+	/// the private-server's `/public/...` mount and the private-server
+	/// has a directory configured. The internet-facing public-server
+	/// binary's `init()` leaves this `None`, so the tailnet path of
+	/// the device-auth extractor can never fire on the open internet.
+	pub tailnet_directory: Option<TailnetDirectory>,
 }
 
 impl AppState {
@@ -45,12 +52,20 @@ impl AppState {
 	}
 
 	pub fn from_db(db: Db) -> Result<Self> {
+		Self::from_db_with_directory(db, None)
+	}
+
+	pub fn from_db_with_directory(
+		db: Db,
+		tailnet_directory: Option<TailnetDirectory>,
+	) -> Result<Self> {
 		Ok(Self {
 			db,
 			#[cfg(feature = "ui")]
 			tera: Self::init_tera()?,
 			#[cfg(feature = "ui")]
 			server_versions_secret: std::env::var("SERVER_VERSIONS_SECRET").ok(),
+			tailnet_directory,
 		})
 	}
 }
@@ -58,6 +73,12 @@ impl AppState {
 impl FromRef<AppState> for Db {
 	fn from_ref(state: &AppState) -> Self {
 		state.db.clone()
+	}
+}
+
+impl FromRef<AppState> for Option<TailnetDirectory> {
+	fn from_ref(state: &AppState) -> Self {
+		state.tailnet_directory.clone()
 	}
 }
 

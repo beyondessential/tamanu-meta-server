@@ -180,6 +180,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/devices/attach_tailscale": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["attach_tailscale"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/devices/connection_count": {
         parameters: {
             query?: never;
@@ -206,6 +222,22 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["connection_history"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/devices/detach_tailscale": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["detach_tailscale"];
         delete?: never;
         options?: never;
         head?: never;
@@ -286,6 +318,44 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["list_untrusted"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/devices/merge_into": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["merge_into"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/devices/resolve_tailnet_identifier": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Look up a Tailscale IP / node id / DNS name in the directory and
+         *     return the canonical identity if found. Used by the attach UI's
+         *     preview pane so the operator can confirm the resolved node before
+         *     hitting attach.
+         */
+        post: operations["resolve_tailnet_identifier"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1160,6 +1230,18 @@ export interface components {
             /** Format: uuid */
             artifact_id: string;
         };
+        AttachTailscaleArgs: {
+            /** Format: uuid */
+            device_id: string;
+            /**
+             * @description Any of: a Tailscale CGNAT/ULA IP, a node id, or a DNS name —
+             *     the operator pastes whichever is most convenient from the
+             *     Tailscale admin console. The server resolves it via the
+             *     cached directory to the canonical `(node_id, name, tailnet)`
+             *     tuple before persisting.
+             */
+            identifier: string;
+        };
         BestoolSnippetDetail: {
             description?: string | null;
             editor: string;
@@ -1223,6 +1305,14 @@ export interface components {
             /** Format: uuid */
             id: string;
             role: components["schemas"]["DeviceRole"];
+            /**
+             * @description The Tailscale node ID this device is attached to, if any. The
+             *     live IP / display name corresponding to this id is in
+             *     [`DeviceInfo::tailnet_live`].
+             */
+            tailscale_node_id?: string | null;
+            tailscale_node_name?: string | null;
+            tailscale_tailnet?: string | null;
             /** Format: date-time */
             updated_at: string;
         };
@@ -1234,6 +1324,7 @@ export interface components {
             device: components["schemas"]["DeviceData"];
             keys: components["schemas"]["DeviceKeyInfo"][];
             latest_connection?: null | components["schemas"]["DeviceConnectionData"];
+            tailnet_live?: null | components["schemas"]["TailnetLiveInfo"];
         };
         DeviceKeyInfo: {
             /** Format: date-time */
@@ -1465,6 +1556,20 @@ export interface components {
             max: components["schemas"]["VersionStr"];
             min: components["schemas"]["VersionStr"];
         };
+        MergeIntoArgs: {
+            /**
+             * Format: uuid
+             * @description Device row to fold *into* the target — usually the
+             *     auto-discovered tailnet-only row.
+             */
+            source_id: string;
+            /**
+             * Format: uuid
+             * @description Device row that keeps existing — usually the existing mTLS
+             *     row that owns the device's server attachment and history.
+             */
+            target_id: string;
+        };
         MinorVersionGroup: {
             count: number;
             /** Format: date-time */
@@ -1504,6 +1609,7 @@ export interface components {
                 device: components["schemas"]["DeviceData"];
                 keys: components["schemas"]["DeviceKeyInfo"][];
                 latest_connection?: null | components["schemas"]["DeviceConnectionData"];
+                tailnet_live?: null | components["schemas"]["TailnetLiveInfo"];
             }[];
             /** Format: int64 */
             total: number;
@@ -1601,6 +1707,12 @@ export interface components {
             /** Format: uuid */
             incident_id: string;
             reason: components["schemas"]["ResolvedReason"];
+        };
+        ResolveTailnetIdentifierArgs: {
+            identifier: string;
+        };
+        ResolveTailnetIdentifierResponse: {
+            matched?: null | components["schemas"]["TailnetLiveInfo"];
         };
         /**
          * @description Reason an issue or incident was resolved by a human.
@@ -1777,6 +1889,13 @@ export interface components {
                 number
             ][];
             versions: components["schemas"]["VersionStr"][];
+        };
+        TailnetLiveInfo: {
+            addresses: string[];
+            display_name: string;
+            node_id: string;
+            tags: string[];
+            tailnet: string;
         };
         TrustArgs: {
             /** Format: uuid */
@@ -2207,6 +2326,56 @@ export interface operations {
             };
         };
     };
+    attach_tailscale: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AttachTailscaleArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceInfo"];
+                };
+            };
+            /** @description Identifier does not resolve to a known tailnet node. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description Another device already claims this node id. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description Tailnet directory not configured or unreachable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
     connection_count: {
         parameters: {
             query?: never;
@@ -2249,6 +2418,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DeviceConnectionData"][];
+                };
+            };
+        };
+    };
+    detach_tailscale: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeviceIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceInfo"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
         };
@@ -2372,6 +2572,78 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Page_DeviceInfo"];
+                };
+            };
+        };
+    };
+    merge_into: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MergeIntoArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceInfo"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description Both source and target hold tailscale identity or a server attachment. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    resolve_tailnet_identifier: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolveTailnetIdentifierArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResolveTailnetIdentifierResponse"];
+                };
+            };
+            /** @description Tailnet directory not configured or unreachable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
         };
