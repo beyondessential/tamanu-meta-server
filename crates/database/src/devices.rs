@@ -942,6 +942,82 @@ impl Device {
 
 		Ok(result)
 	}
+
+	/// Search devices by stored Tailscale identifiers: `tailscale_node_id`
+	/// (substring match) or `tailscale_node_name` (case-insensitive
+	/// substring match). The directory's IP-and-name resolution is
+	/// handled at the endpoint layer — this method only consults the
+	/// DB columns.
+	pub async fn search_by_tailscale_fields(
+		db: &mut AsyncPgConnection,
+		query: &str,
+	) -> Result<Vec<DeviceWithInfo>> {
+		use crate::schema::{device_keys, devices};
+
+		let needle = format!("%{query}%");
+		let device_ids: Vec<Uuid> = devices::table
+			.select(devices::id)
+			.filter(
+				devices::tailscale_node_id
+					.ilike(needle.clone())
+					.or(devices::tailscale_node_name.ilike(needle.clone()))
+					.or(devices::tailscale_tailnet.ilike(needle)),
+			)
+			.load::<Uuid>(db)
+			.await?;
+
+		if device_ids.is_empty() {
+			return Ok(Vec::new());
+		}
+
+		let devices_result: Vec<Self> = devices::table
+			.select(Self::as_select())
+			.filter(devices::id.eq_any(&device_ids))
+			.load(db)
+			.await?;
+
+		let all_keys: Vec<DeviceKey> = device_keys::table
+			.select(DeviceKey::as_select())
+			.filter(device_keys::device_id.eq_any(&device_ids))
+			.filter(device_keys::is_active.eq(true))
+			.load(db)
+			.await?;
+
+		let all_connections =
+			DeviceConnection::get_latest_from_device_ids(db, device_ids.iter().copied()).await?;
+
+		let mut keys_by_device: HashMap<Uuid, Vec<DeviceKey>> = HashMap::new();
+		for key in all_keys {
+			keys_by_device.entry(key.device_id).or_default().push(key);
+		}
+		let mut connections_by_device: HashMap<Uuid, DeviceConnection> = HashMap::new();
+		for conn in all_connections {
+			connections_by_device.insert(conn.device_id, conn);
+		}
+
+		Ok(devices_result
+			.into_iter()
+			.map(|device| DeviceWithInfo {
+				keys: keys_by_device.remove(&device.id).unwrap_or_default(),
+				latest_connection: connections_by_device.remove(&device.id),
+				device,
+			})
+			.collect())
+	}
+
+	/// Look up a single device by its exact `tailscale_node_id`,
+	/// returning the full `DeviceWithInfo`. Used by the search
+	/// endpoint when the user pastes a Tailscale IP/name that the
+	/// directory resolves to a known node id.
+	pub async fn get_with_info_by_node_id(
+		db: &mut AsyncPgConnection,
+		node_id: &str,
+	) -> Result<Option<DeviceWithInfo>> {
+		let Some(device) = Self::from_tailscale_node_id(db, node_id).await? else {
+			return Ok(None);
+		};
+		Self::get_with_info(db, device.id).await.map(Some)
+	}
 }
 
 impl DeviceKey {

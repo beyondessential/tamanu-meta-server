@@ -2,6 +2,7 @@ import {
 	Alert,
 	Box,
 	Button,
+	Chip,
 	IconButton,
 	LinearProgress,
 	Link as MuiLink,
@@ -209,13 +210,35 @@ function UrlAndDevice({
 					<Typography variant="h6" component="h2" gutterBottom>
 						Device
 					</Typography>
-					<MuiLink
-						component={RouterLink}
-						to={`/devices/${deviceInfo.device.id}`}
-						underline="hover"
+					<Stack
+						direction="row"
+						spacing={1}
+						sx={{ alignItems: "center", flexWrap: "wrap" }}
+						useFlexGap
 					>
-						{deviceShortName(deviceInfo)}
-					</MuiLink>
+						<MuiLink
+							component={RouterLink}
+							to={`/devices/${deviceInfo.device.id}`}
+							underline="hover"
+						>
+							{deviceShortName(deviceInfo)}
+						</MuiLink>
+						{deviceInfo.device.tailscale_node_id != null && (
+							<Chip
+								size="small"
+								variant="outlined"
+								color="success"
+								label="tailnet"
+							/>
+						)}
+						{deviceInfo.keys.length > 0 && (
+							<Chip
+								size="small"
+								variant="outlined"
+								label="mTLS"
+							/>
+						)}
+					</Stack>
 				</Paper>
 			)}
 		</Stack>
@@ -271,7 +294,7 @@ function InfoSection({
 					/>
 				)}
 			</Stack>
-			{status && Object.keys(status.extra as Record<string, unknown>).length > 0 && (
+			{status && Object.keys((status.extra ?? {}) as Record<string, unknown>).length > 0 && (
 				<Box sx={{ mt: 2 }}>
 					<details>
 						<summary>Extra Data</summary>

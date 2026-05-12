@@ -524,6 +524,24 @@ pub async fn search(
 	let devices_by_key = Device::search_by_key(&mut conn, &args.query).await?;
 	let devices_by_key_name = Device::search_by_key_name(&mut conn, &args.query).await?;
 	let devices_by_ip = Device::search_by_connection_ip(&mut conn, &args.query).await?;
+	let devices_by_tailscale =
+		Device::search_by_tailscale_fields(&mut conn, &args.query).await?;
+
+	// If the directory is configured, also resolve the query as a
+	// Tailscale IP / node id / DNS name and surface any device
+	// attached to the resolved node. This catches the case where the
+	// operator pastes an identifier the device hasn't connected with
+	// yet (so search_by_connection_ip would miss it).
+	let directory_match = if let Some(directory) = &state.tailnet_directory {
+		match directory.resolve_identifier(&args.query).await {
+			Ok(Some(entry)) => {
+				Device::get_with_info_by_node_id(&mut conn, &entry.node_id).await?
+			}
+			_ => None,
+		}
+	} else {
+		None
+	};
 
 	let mut seen: HashMap<Uuid, DeviceWithInfo> = HashMap::new();
 	for d in devices_by_key {
@@ -535,7 +553,19 @@ pub async fn search(
 	for d in devices_by_ip {
 		seen.insert(d.device.id, d);
 	}
-	Ok(Json(seen.into_values().map(DeviceInfo::from).collect()))
+	for d in devices_by_tailscale {
+		seen.insert(d.device.id, d);
+	}
+	if let Some(d) = directory_match {
+		seen.insert(d.device.id, d);
+	}
+
+	// Enrich each result with live tailnet info.
+	let mut out = Vec::with_capacity(seen.len());
+	for d in seen.into_values() {
+		out.push(DeviceInfo::from(d).enrich_with_live(&state).await);
+	}
+	Ok(Json(out))
 }
 
 #[derive(Deserialize, ToSchema)]
