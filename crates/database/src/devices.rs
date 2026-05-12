@@ -29,6 +29,27 @@ pub struct Device {
 	/// This is used for permission checks.
 	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub role: DeviceRole,
+
+	/// Stable Tailscale node ID (e.g. `nodekey:abc...`). Populated for
+	/// devices that authenticate over the tailnet; null for mTLS-only.
+	pub tailscale_node_id: Option<String>,
+
+	/// Tailscale-side hostname (e.g. `device-01.tailnet.ts.net`). Mirrors
+	/// the control plane for display; not load-bearing for auth.
+	pub tailscale_node_name: Option<String>,
+
+	/// Tailnet the node belongs to. Same caveat as above.
+	pub tailscale_tailnet: Option<String>,
+}
+
+/// Captures the stable Tailscale identity associated with an incoming
+/// request, used to attach a device row to a tailnet node either on
+/// auto-discovery or via an admin pre-attach.
+#[derive(Clone, Debug)]
+pub struct TailscaleIdentity {
+	pub node_id: String,
+	pub node_name: Option<String>,
+	pub tailnet: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Queryable, Selectable, Insertable)]
@@ -103,6 +124,42 @@ impl Device {
 		DeviceKey::create(db, device.id, key, Some("Initial Key".to_string())).await?;
 
 		Ok(device)
+	}
+
+	pub async fn from_tailscale_node_id(
+		db: &mut AsyncPgConnection,
+		node_id: &str,
+	) -> Result<Option<Self>> {
+		use crate::schema::devices;
+
+		devices::table
+			.select(Self::as_select())
+			.filter(devices::tailscale_node_id.eq(node_id))
+			.first(db)
+			.await
+			.optional()
+			.map_err(AppError::from)
+	}
+
+	/// First-contact insert for a tailnet device that has no mTLS key yet.
+	/// Mirrors `create` but uses the Tailscale identity in place of an
+	/// initial key, and leaves `device_keys` empty for this row.
+	pub async fn create_with_tailscale(
+		db: &mut AsyncPgConnection,
+		identity: TailscaleIdentity,
+	) -> Result<Self> {
+		use crate::schema::devices;
+
+		diesel::insert_into(devices::table)
+			.values((
+				devices::tailscale_node_id.eq(identity.node_id),
+				devices::tailscale_node_name.eq(identity.node_name),
+				devices::tailscale_tailnet.eq(identity.tailnet),
+			))
+			.returning(Self::as_select())
+			.get_result(db)
+			.await
+			.map_err(AppError::from)
 	}
 
 	/// Get a single device by ID with its keys and latest connection info.
