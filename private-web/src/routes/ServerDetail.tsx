@@ -2,17 +2,19 @@ import {
 	Alert,
 	Box,
 	Button,
+	IconButton,
 	LinearProgress,
 	Link as MuiLink,
 	Paper,
 	Stack,
+	Tooltip,
 	Typography,
 } from "@mui/material";
 import EditIcon from "@mui/icons-material/Edit";
+import LanguageIcon from "@mui/icons-material/Language";
 import { useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
-import IncidentsSection from "../components/IncidentsSection";
-import IssuesSection from "../components/IssuesSection";
+import IncidentsLink from "../components/IncidentsLink";
 import ManualEventButton from "../components/ManualEventButton";
 import StatusDot from "../components/StatusDot";
 import TimeAgo from "../components/TimeAgo";
@@ -24,6 +26,7 @@ import { useApi } from "../api";
 import { usePageTitle } from "../hooks/usePageTitle";
 import type {
 	DeviceShortInfo,
+	IncidentData,
 	ServerDetailData,
 	ServerInfoFull,
 	ServerLastStatusData,
@@ -45,6 +48,18 @@ export default function ServerDetail() {
 	// incident) leaves a stale incidents list.
 	const [refreshTick, setRefreshTick] = useState(0);
 	const bumpRefresh = () => setRefreshTick((t) => t + 1);
+	// Single source of truth for the group's open-incident state. Used to
+	// label every ManualEventButton on the page identically — a child
+	// server's own incidents list is empty (incidents live at the root),
+	// so per-button local queries would mislabel.
+	const openIncidents = useApi<IncidentData[]>(
+		"incidents",
+		"list_for_server",
+		{ server_id: id, include_closed: false },
+		[id, refreshTick],
+	);
+	const hasOpenIncident =
+		openIncidents.status === "ok" && openIncidents.data.length > 0;
 	usePageTitle(
 		detail.status === "ok"
 			? (detail.data.server.name ?? "Unnamed server")
@@ -63,7 +78,13 @@ export default function ServerDetail() {
 
 	return (
 		<Stack spacing={3}>
-			<Header data={data} isAdmin={admin} onEventSubmitted={bumpRefresh} />
+			<Header
+				data={data}
+				isAdmin={admin}
+				hasOpenIncident={hasOpenIncident}
+				refreshTick={refreshTick}
+				onEventSubmitted={bumpRefresh}
+			/>
 			<UrlAndDevice
 				host={data.server.host}
 				deviceInfo={data.device_info}
@@ -72,23 +93,11 @@ export default function ServerDetail() {
 				server={data.server}
 				status={data.last_status}
 			/>
-			<IssuesSection
-				scope="server"
-				id={data.server.id}
-				refreshKey={refreshTick}
-				onChanged={bumpRefresh}
-			/>
-			{data.server.parent_server_id == null && (
-				<IncidentsSection
-					serverId={data.server.id}
-					refreshKey={refreshTick}
-					onChanged={bumpRefresh}
-				/>
-			)}
 			{data.child_servers.length > 0 && (
 				<ChildServers
 					children={data.child_servers}
 					isAdmin={admin}
+					hasOpenIncident={hasOpenIncident}
 					onEventSubmitted={bumpRefresh}
 				/>
 			)}
@@ -105,10 +114,14 @@ export default function ServerDetail() {
 function Header({
 	data,
 	isAdmin,
+	hasOpenIncident,
+	refreshTick,
 	onEventSubmitted,
 }: {
 	data: ServerDetailData;
 	isAdmin: boolean;
+	hasOpenIncident: boolean;
+	refreshTick: number;
 	onEventSubmitted: () => void;
 }) {
 	return (
@@ -143,22 +156,29 @@ function Header({
 					{data.server.name ?? "Unnamed"}
 				</Typography>
 			</Stack>
-			{isAdmin && (
-				<Stack direction="row" spacing={1}>
-					<ManualEventButton
-						serverId={data.server.id}
-						onSubmitted={onEventSubmitted}
-					/>
-					<Button
-						component={RouterLink}
-						to={`/servers/${data.server.id}/edit`}
-						variant="contained"
-						startIcon={<EditIcon />}
-					>
-						Edit
-					</Button>
-				</Stack>
-			)}
+			<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+				<IncidentsLink
+					serverId={data.server.id}
+					refreshKey={refreshTick}
+				/>
+				{isAdmin && (
+					<>
+						<ManualEventButton
+							serverId={data.server.id}
+							hasOpenIncident={hasOpenIncident}
+							onSubmitted={onEventSubmitted}
+						/>
+						<Button
+							component={RouterLink}
+							to={`/servers/${data.server.id}/edit`}
+							variant="contained"
+							startIcon={<EditIcon />}
+						>
+							Edit
+						</Button>
+					</>
+				)}
+			</Stack>
 		</Stack>
 	);
 }
@@ -355,10 +375,12 @@ function renderLocation(server: ServerInfoFull): string {
 function ChildServers({
 	children,
 	isAdmin,
+	hasOpenIncident,
 	onEventSubmitted,
 }: {
 	children: ServerDetailData["child_servers"];
 	isAdmin: boolean;
+	hasOpenIncident: boolean;
 	onEventSubmitted: () => void;
 }) {
 	return (
@@ -380,6 +402,18 @@ function ChildServers({
 							alignItems: "center",
 						}}
 					>
+						<Tooltip title={child.host}>
+							<IconButton
+								component="a"
+								href={child.host}
+								target="_blank"
+								rel="noopener noreferrer"
+								size="small"
+								aria-label={`Open ${child.name ?? "server"} (${child.host})`}
+							>
+								<LanguageIcon fontSize="small" />
+							</IconButton>
+						</Tooltip>
 						<StatusDot up={up} />
 						<MuiLink
 							component={RouterLink}
@@ -392,14 +426,11 @@ function ChildServers({
 						</MuiLink>
 						{child.rank && <ServerRankChip rank={child.rank} />}
 						<ServerKindChip kind={child.kind} />
-						<Box sx={{ ml: "auto" }}>
-							<Typography variant="body2" color="text.secondary">
-								{child.host}
-							</Typography>
-						</Box>
+						<Box sx={{ flex: 1 }} />
 						{isAdmin && (
 							<ManualEventButton
 								serverId={child.id}
+								hasOpenIncident={hasOpenIncident}
 								onSubmitted={onEventSubmitted}
 							/>
 						)}

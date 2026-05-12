@@ -111,6 +111,16 @@ diesel::table! {
 }
 
 diesel::table! {
+	incident_notes (id) {
+		id -> Uuid,
+		created_at -> Timestamptz,
+		incident_id -> Uuid,
+		author -> Text,
+		body -> Text,
+	}
+}
+
+diesel::table! {
 	incidents (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
@@ -123,6 +133,16 @@ diesel::table! {
 		resolved_at -> Nullable<Timestamptz>,
 		resolved_by -> Nullable<Text>,
 		resolved_reason -> Nullable<Text>,
+	}
+}
+
+diesel::table! {
+	issue_notes (id) {
+		id -> Uuid,
+		created_at -> Timestamptz,
+		issue_id -> Uuid,
+		author -> Text,
+		body -> Text,
 	}
 }
 
@@ -189,6 +209,16 @@ diesel::table! {
 }
 
 diesel::table! {
+	tailscale_users (login) {
+		login -> Text,
+		name -> Text,
+		profile_pic -> Nullable<Text>,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
 	versions (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
@@ -211,7 +241,9 @@ diesel::joinable!(device_server_associations -> servers (server_id));
 diesel::joinable!(events -> issues (issue_id));
 diesel::joinable!(incident_issues -> incidents (incident_id));
 diesel::joinable!(incident_issues -> issues (issue_id));
+diesel::joinable!(incident_notes -> incidents (incident_id));
 diesel::joinable!(incidents -> servers (server_id));
+diesel::joinable!(issue_notes -> issues (issue_id));
 diesel::joinable!(issues -> devices (device_id));
 diesel::joinable!(issues -> servers (server_id));
 diesel::joinable!(servers -> devices (device_id));
@@ -230,10 +262,13 @@ diesel::allow_tables_to_appear_in_same_query!(
 	devices,
 	events,
 	incident_issues,
+	incident_notes,
 	incidents,
+	issue_notes,
 	issues,
 	servers,
 	sql_playground_history,
 	statuses,
+	tailscale_users,
 	versions,
 );

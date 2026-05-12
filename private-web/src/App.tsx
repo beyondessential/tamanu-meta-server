@@ -1,5 +1,6 @@
 import {
 	AppBar,
+	Badge,
 	Box,
 	Container,
 	Link as MuiLink,
@@ -9,6 +10,7 @@ import {
 import OpenInNewIcon from "@mui/icons-material/OpenInNew";
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
 import { useApi } from "./api";
+import { useReloadInterval } from "./hooks/useReloadInterval";
 import Admins from "./routes/Admins";
 import Bestool from "./routes/Bestool";
 import BestoolSnippetDetail from "./routes/BestoolSnippetDetail";
@@ -17,7 +19,10 @@ import DeviceDetail from "./routes/DeviceDetail";
 import Devices from "./routes/Devices";
 import DevicesList from "./routes/DevicesList";
 import DevicesSearch from "./routes/DevicesSearch";
+import IncidentDetail from "./routes/IncidentDetail";
+import Incidents from "./routes/Incidents";
 import Status from "./routes/Status";
+import type { IncidentData } from "./types";
 import ServerDetail from "./routes/ServerDetail";
 import ServerEdit from "./routes/ServerEdit";
 import Servers from "./routes/Servers";
@@ -33,6 +38,7 @@ interface NavItem {
 
 const BASE_NAV: NavItem[] = [
 	{ label: "Status", to: "/status" },
+	{ label: "Incidents", to: "/incidents" },
 	{ label: "Servers", to: "/servers" },
 	{ label: "Versions", to: "/versions" },
 	{ label: "Devices", to: "/devices" },
@@ -44,6 +50,18 @@ export default function App() {
 	const sqlAvailable = useApi<boolean>("sql", "is_sql_available");
 	const publicUrl = useApi<string | null>("commons", "public_url");
 	const serverVersionsUrl = useApi<string | null>("commons", "server_versions_url");
+	// Polled at a slow cadence; mutations also fire `canopy-data-changed`
+	// (via useApiAction), so the badge updates immediately after the user
+	// acks / resolves / opens an incident on any page.
+	const reloadTick = useReloadInterval(60_000, "canopy-data-changed");
+	const openIncidents = useApi<IncidentData[]>(
+		"incidents",
+		"list_active",
+		{},
+		[reloadTick],
+	);
+	const openIncidentsCount =
+		openIncidents.status === "ok" ? openIncidents.data.length : 0;
 	const navItems: NavItem[] = [
 		...BASE_NAV,
 		...(sqlAvailable.status === "ok" && sqlAvailable.data
@@ -87,21 +105,37 @@ export default function App() {
 							Canopy
 						</Typography>
 					</Box>
-					{navItems.map(({ label, to }) => (
-						<Typography
-							key={to}
-							component={NavLink}
-							to={to}
-							sx={({ palette }) => ({
-								textDecoration: "none",
-								color: palette.text.secondary,
-								fontWeight: 500,
-								"&.active": { color: palette.secondary.main },
-							})}
-						>
-							{label}
-						</Typography>
-					))}
+					{navItems.map(({ label, to }) => {
+						const showBadge = to === "/incidents" && openIncidentsCount > 0;
+						const inner = (
+							<Typography
+								key={to}
+								component={NavLink}
+								to={to}
+								sx={({ palette }) => ({
+									textDecoration: "none",
+									color: palette.text.secondary,
+									fontWeight: 500,
+									"&.active": { color: palette.secondary.main },
+								})}
+							>
+								{label}
+							</Typography>
+						);
+						if (showBadge) {
+							return (
+								<Badge
+									key={to}
+									badgeContent={openIncidentsCount}
+									color="error"
+									overlap="rectangular"
+								>
+									{inner}
+								</Badge>
+							);
+						}
+						return inner;
+					})}
 					<Box sx={{ flex: 1 }} />
 					{externalLinks.map(({ label, href }) => (
 						<Typography
@@ -129,6 +163,8 @@ export default function App() {
 				<Routes>
 					<Route path="/" element={<Navigate to="/status" replace />} />
 					<Route path="/status" element={<Status />} />
+					<Route path="/incidents" element={<Incidents />} />
+					<Route path="/incidents/:id" element={<IncidentDetail />} />
 					<Route path="/admins" element={<Admins />} />
 					<Route path="/versions" element={<Versions />} />
 					<Route path="/versions/:version" element={<VersionDetail />} />

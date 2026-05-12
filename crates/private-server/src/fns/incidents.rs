@@ -1,14 +1,17 @@
 use axum::Json;
 use axum::extract::State;
 use axum::routing::{Router, post};
-use commons_errors::Result;
+use commons_errors::{AppError, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
 use commons_types::{Uuid, issue::ResolvedReason};
-use database::issues::{Incident, IncidentIssue};
+use database::issues::{Incident, IncidentIssue, IncidentStats};
+use database::notes::IncidentNote;
+use database::servers::Server;
+use database::tailscale_users::TailscaleUser as CachedTailscaleUser;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
-use crate::fns::issues::IssueData;
+use crate::fns::issues::{IssueData, enrich_issues, lookup_user};
 use crate::state::AppState;
 
 const DEFAULT_LIMIT: i64 = 100;
@@ -17,33 +20,114 @@ const DEFAULT_LIMIT: i64 = 100;
 pub struct IncidentData {
 	pub id: Uuid,
 	pub server_id: Uuid,
+	/// The root server's name (may be null — fall back to `server_host`).
+	pub server_name: Option<String>,
+	pub server_host: String,
 	pub opened_at: Timestamp,
 	pub closed_at: Option<Timestamp>,
 	pub acknowledged_at: Option<Timestamp>,
 	pub acknowledged_by: Option<String>,
+	pub acknowledged_by_name: Option<String>,
+	pub acknowledged_by_pic: Option<String>,
 	pub resolved_at: Option<Timestamp>,
 	pub resolved_by: Option<String>,
+	pub resolved_by_name: Option<String>,
+	pub resolved_by_pic: Option<String>,
 	pub resolved_reason: Option<String>,
+	pub issue_count: i64,
+	pub event_count: i64,
+	/// Combined: this incident's notes + notes on all contributing issues.
+	pub note_count: i64,
 	pub created_at: Timestamp,
 	pub updated_at: Timestamp,
 }
 
-impl From<Incident> for IncidentData {
-	fn from(i: Incident) -> Self {
+impl IncidentData {
+	fn from_with(
+		i: Incident,
+		server_name: Option<String>,
+		server_host: String,
+		users: &std::collections::HashMap<String, CachedTailscaleUser>,
+		stats: IncidentStats,
+	) -> Self {
+		let (ack_name, ack_pic) = lookup_user(users, i.acknowledged_by.as_deref());
+		let (res_name, res_pic) = lookup_user(users, i.resolved_by.as_deref());
 		Self {
 			id: i.id,
 			server_id: i.server_id,
+			server_name,
+			server_host,
 			opened_at: i.opened_at,
 			closed_at: i.closed_at,
 			acknowledged_at: i.acknowledged_at,
 			acknowledged_by: i.acknowledged_by,
+			acknowledged_by_name: ack_name,
+			acknowledged_by_pic: ack_pic,
 			resolved_at: i.resolved_at,
 			resolved_by: i.resolved_by,
+			resolved_by_name: res_name,
+			resolved_by_pic: res_pic,
 			resolved_reason: i.resolved_reason,
+			issue_count: stats.issue_count,
+			event_count: stats.event_count,
+			note_count: stats.note_count,
 			created_at: i.created_at,
 			updated_at: i.updated_at,
 		}
 	}
+}
+
+fn collect_incident_user_logins(incidents: &[Incident]) -> Vec<&str> {
+	let mut s: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+	for i in incidents {
+		if let Some(l) = i.acknowledged_by.as_deref() {
+			s.insert(l);
+		}
+		if let Some(l) = i.resolved_by.as_deref() {
+			s.insert(l);
+		}
+	}
+	s.into_iter().collect()
+}
+
+async fn enrich_incidents(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	pool: &database::Db,
+	incidents: Vec<Incident>,
+) -> Result<Vec<IncidentData>> {
+	let server_ids: Vec<Uuid> = incidents.iter().map(|i| i.server_id).collect();
+	let incident_ids: Vec<Uuid> = incidents.iter().map(|i| i.id).collect();
+	let names = Server::names_by_ids(conn, &server_ids).await?;
+	let user_logins = collect_incident_user_logins(&incidents);
+	let users = CachedTailscaleUser::by_logins(conn, &user_logins).await?;
+	let stats = Incident::stats_for(pool, &incident_ids).await?;
+	Ok(incidents
+		.into_iter()
+		.map(|i| {
+			let (name, host) = names
+				.get(&i.server_id)
+				.cloned()
+				.unwrap_or((None, String::new()));
+			let s = stats.get(&i.id).copied().unwrap_or_default();
+			IncidentData::from_with(i, name, host, &users, s)
+		})
+		.collect())
+}
+
+async fn enrich_incident(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	pool: &database::Db,
+	incident: Incident,
+) -> Result<IncidentData> {
+	let mut names = Server::names_by_ids(conn, &[incident.server_id]).await?;
+	let (name, host) = names
+		.remove(&incident.server_id)
+		.unwrap_or((None, String::new()));
+	let user_logins = collect_incident_user_logins(std::slice::from_ref(&incident));
+	let users = CachedTailscaleUser::by_logins(conn, &user_logins).await?;
+	let mut stats = Incident::stats_for(pool, &[incident.id]).await?;
+	let s = stats.remove(&incident.id).unwrap_or_default();
+	Ok(IncidentData::from_with(incident, name, host, &users, s))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -78,6 +162,9 @@ pub fn routes() -> Router<AppState> {
 		.route("/unack", post(unack))
 		.route("/resolve", post(resolve))
 		.route("/unresolve", post(unresolve))
+		.route("/add_note", post(add_note))
+		.route("/list_notes", post(list_notes))
+		.route("/delete_note", post(delete_note))
 }
 
 #[derive(Deserialize)]
@@ -102,7 +189,7 @@ pub async fn list_for_server(
 		args.limit.unwrap_or(DEFAULT_LIMIT),
 	)
 	.await?;
-	Ok(Json(incidents.into_iter().map(IncidentData::from).collect()))
+	Ok(Json(enrich_incidents(&mut conn, &state.db, incidents).await?))
 }
 
 #[derive(Deserialize)]
@@ -118,7 +205,7 @@ pub async fn list_active(
 ) -> Result<Json<Vec<IncidentData>>> {
 	let mut conn = state.db.get().await?;
 	let incidents = Incident::list_active(&mut conn, args.limit.unwrap_or(DEFAULT_LIMIT)).await?;
-	Ok(Json(incidents.into_iter().map(IncidentData::from).collect()))
+	Ok(Json(enrich_incidents(&mut conn, &state.db, incidents).await?))
 }
 
 #[derive(Deserialize)]
@@ -133,14 +220,15 @@ pub async fn get_incident(
 ) -> Result<Json<IncidentWithIssues>> {
 	let mut conn = state.db.get().await?;
 	let (incident, rows) = Incident::get_with_issues(&mut conn, args.incident_id).await?;
-	let issues = rows
+	let (links, raw_issues): (Vec<_>, Vec<_>) = rows.into_iter().unzip();
+	let issue_data = enrich_issues(&mut conn, raw_issues).await?;
+	let issues = links
 		.into_iter()
-		.map(|(link, issue)| IncidentIssueData::from((link, IssueData::from(issue))))
+		.zip(issue_data)
+		.map(|(link, issue)| IncidentIssueData::from((link, issue)))
 		.collect();
-	Ok(Json(IncidentWithIssues {
-		incident: IncidentData::from(incident),
-		issues,
-	}))
+	let incident = enrich_incident(&mut conn, &state.db, incident).await?;
+	Ok(Json(IncidentWithIssues { incident, issues }))
 }
 
 #[derive(Deserialize)]
@@ -155,7 +243,7 @@ pub async fn ack(
 ) -> Result<Json<IncidentData>> {
 	let mut conn = state.db.get().await?;
 	let incident = Incident::ack(&mut conn, args.incident_id, &user.login).await?;
-	Ok(Json(IncidentData::from(incident)))
+	Ok(Json(enrich_incident(&mut conn, &state.db, incident).await?))
 }
 
 pub async fn unack(
@@ -165,7 +253,7 @@ pub async fn unack(
 ) -> Result<Json<IncidentData>> {
 	let mut conn = state.db.get().await?;
 	let incident = Incident::unack(&mut conn, args.incident_id).await?;
-	Ok(Json(IncidentData::from(incident)))
+	Ok(Json(enrich_incident(&mut conn, &state.db, incident).await?))
 }
 
 #[derive(Deserialize)]
@@ -181,7 +269,7 @@ pub async fn resolve(
 ) -> Result<Json<IncidentData>> {
 	let mut conn = state.db.get().await?;
 	let incident = Incident::resolve(&mut conn, args.incident_id, &user.login, args.reason).await?;
-	Ok(Json(IncidentData::from(incident)))
+	Ok(Json(enrich_incident(&mut conn, &state.db, incident).await?))
 }
 
 pub async fn unresolve(
@@ -191,5 +279,84 @@ pub async fn unresolve(
 ) -> Result<Json<IncidentData>> {
 	let mut conn = state.db.get().await?;
 	let incident = Incident::unresolve(&mut conn, args.incident_id).await?;
-	Ok(Json(IncidentData::from(incident)))
+	Ok(Json(enrich_incident(&mut conn, &state.db, incident).await?))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IncidentNoteData {
+	pub id: Uuid,
+	pub incident_id: Uuid,
+	pub author: String,
+	pub body: String,
+	pub created_at: Timestamp,
+}
+
+impl From<IncidentNote> for IncidentNoteData {
+	fn from(n: IncidentNote) -> Self {
+		Self {
+			id: n.id,
+			incident_id: n.incident_id,
+			author: n.author,
+			body: n.body,
+			created_at: n.created_at,
+		}
+	}
+}
+
+#[derive(Deserialize)]
+pub struct AddNoteArgs {
+	pub incident_id: Uuid,
+	pub body: String,
+}
+
+pub async fn add_note(
+	State(state): State<AppState>,
+	TailscaleAdmin(user): TailscaleAdmin,
+	Json(args): Json<AddNoteArgs>,
+) -> Result<Json<IncidentNoteData>> {
+	if args.body.trim().is_empty() {
+		return Err(AppError::custom("note body is required"));
+	}
+	let mut conn = state.db.get().await?;
+	let note = IncidentNote::add(&mut conn, args.incident_id, &user.login, &args.body).await?;
+	Ok(Json(IncidentNoteData::from(note)))
+}
+
+#[derive(Deserialize)]
+pub struct ListNotesArgs {
+	pub incident_id: Uuid,
+	#[serde(default)]
+	pub limit: Option<i64>,
+}
+
+pub async fn list_notes(
+	State(state): State<AppState>,
+	TailscaleAdmin(_): TailscaleAdmin,
+	Json(args): Json<ListNotesArgs>,
+) -> Result<Json<Vec<IncidentNoteData>>> {
+	let mut conn = state.db.get().await?;
+	let notes = IncidentNote::list_for_incident(
+		&mut conn,
+		args.incident_id,
+		args.limit.unwrap_or(DEFAULT_LIMIT),
+	)
+	.await?;
+	Ok(Json(
+		notes.into_iter().map(IncidentNoteData::from).collect(),
+	))
+}
+
+#[derive(Deserialize)]
+pub struct DeleteNoteArgs {
+	pub note_id: Uuid,
+}
+
+pub async fn delete_note(
+	State(state): State<AppState>,
+	TailscaleAdmin(_): TailscaleAdmin,
+	Json(args): Json<DeleteNoteArgs>,
+) -> Result<Json<()>> {
+	let mut conn = state.db.get().await?;
+	IncidentNote::delete(&mut conn, args.note_id).await?;
+	Ok(Json(()))
 }

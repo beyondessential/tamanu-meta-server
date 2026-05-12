@@ -3,6 +3,7 @@ import {
 	Box,
 	Card,
 	CardContent,
+	Chip,
 	LinearProgress,
 	Link as MuiLink,
 	Stack,
@@ -18,6 +19,7 @@ import { usePageTitle } from "../hooks/usePageTitle";
 import { useReloadInterval } from "../hooks/useReloadInterval";
 import {
 	type CentralServerCard,
+	type IncidentData,
 	SERVER_RANK_ORDER,
 	type ServerGroupedIds,
 	type SummaryData,
@@ -26,10 +28,14 @@ import {
 export default function Status() {
 	usePageTitle("Status");
 	const tick = useReloadInterval(60_000, "canopy-reload-status");
+	const incidents = useApi<IncidentData[]>("incidents", "list_active", {}, [tick]);
+	const openIncidentServers = new Set<string>(
+		incidents.status === "ok" ? incidents.data.map((i) => i.server_id) : [],
+	);
 	return (
 		<Stack spacing={3}>
 			<ReleaseSummary tick={tick} />
-			<ServerCards tick={tick} />
+			<ServerCards tick={tick} openIncidentServers={openIncidentServers} />
 			<Box>
 				<VersionLegend />
 				<Box sx={{ mt: 1 }}>
@@ -64,7 +70,13 @@ function ReleaseSummary({ tick }: { tick: number }) {
 	);
 }
 
-function ServerCards({ tick }: { tick: number }) {
+function ServerCards({
+	tick,
+	openIncidentServers,
+}: {
+	tick: number;
+	openIncidentServers: Set<string>;
+}) {
 	const grouped = useApi<ServerGroupedIds>(
 		"statuses",
 		"server_grouped_ids",
@@ -112,7 +124,12 @@ function ServerCards({ tick }: { tick: number }) {
 						}}
 					>
 						{ids.map((id) => (
-							<ServerCardLoader key={id} serverId={id} tick={tick} />
+							<ServerCardLoader
+								key={id}
+								serverId={id}
+								tick={tick}
+								hasOpenIncident={openIncidentServers.has(id)}
+							/>
 						))}
 					</Box>
 				</Box>
@@ -124,9 +141,11 @@ function ServerCards({ tick }: { tick: number }) {
 function ServerCardLoader({
 	serverId,
 	tick,
+	hasOpenIncident,
 }: {
 	serverId: string;
 	tick: number;
+	hasOpenIncident: boolean;
 }) {
 	const result = useApi<CentralServerCard>(
 		"statuses",
@@ -147,6 +166,10 @@ function ServerCardLoader({
 				sx={{
 					transition: "background-color 150ms",
 					"&:hover": { bgcolor: "action.hover" },
+					...(hasOpenIncident && {
+						borderColor: "error.main",
+						borderWidth: 2,
+					}),
 				}}
 			>
 				<CardContent sx={{ p: 1.5, "&:last-child": { pb: 1.5 } }}>
@@ -157,7 +180,10 @@ function ServerCardLoader({
 					) : result.status === "error" ? (
 						<Alert severity="error">{result.error.message}</Alert>
 					) : (
-						<ServerCard server={result.data} />
+						<ServerCard
+							server={result.data}
+							hasOpenIncident={hasOpenIncident}
+						/>
 					)}
 				</CardContent>
 			</Card>
@@ -165,7 +191,13 @@ function ServerCardLoader({
 	);
 }
 
-function ServerCard({ server }: { server: CentralServerCard }) {
+function ServerCard({
+	server,
+	hasOpenIncident,
+}: {
+	server: CentralServerCard;
+	hasOpenIncident: boolean;
+}) {
 	return (
 		<Stack spacing={1}>
 			<Stack
@@ -211,16 +243,25 @@ function ServerCard({ server }: { server: CentralServerCard }) {
 					/>
 				</Box>
 			</Stack>
-			<Stack direction="row" spacing={0} sx={{ flexWrap: "wrap" }}>
-				<StatusDot up={server.up} title={`${server.name}: ${server.up}`} />
-				{server.facility_servers.map((facility) => (
-					<StatusDot
-						key={facility.id}
-						up={facility.up}
-						title={`${facility.name}: ${facility.up}`}
-						dim
-					/>
-				))}
+			<Stack
+				direction="row"
+				spacing={1}
+				sx={{ alignItems: "center", justifyContent: "space-between" }}
+			>
+				<Stack direction="row" spacing={0} sx={{ flexWrap: "wrap" }}>
+					<StatusDot up={server.up} title={`${server.name}: ${server.up}`} />
+					{server.facility_servers.map((facility) => (
+						<StatusDot
+							key={facility.id}
+							up={facility.up}
+							title={`${facility.name}: ${facility.up}`}
+							dim
+						/>
+					))}
+				</Stack>
+				{hasOpenIncident && (
+					<Chip label="incident" color="error" size="small" />
+				)}
 			</Stack>
 		</Stack>
 	);

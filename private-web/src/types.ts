@@ -231,6 +231,9 @@ export const RESOLVED_REASON_LABEL: Record<ResolvedReason, string> = {
 export interface IssueData {
 	id: string;
 	server_id: string;
+	/** Display name of the issue's server (may be null — use `server_host`). */
+	server_name: string | null;
+	server_host: string;
 	device_id: string | null;
 	source: string;
 	ref: string;
@@ -242,8 +245,12 @@ export interface IssueData {
 	last_seen: string;
 	acknowledged_at: string | null;
 	acknowledged_by: string | null;
+	acknowledged_by_name: string | null;
+	acknowledged_by_pic: string | null;
 	resolved_at: string | null;
 	resolved_by: string | null;
+	resolved_by_name: string | null;
+	resolved_by_pic: string | null;
 	/** Raw stored value; matches a `ResolvedReason` when set by the API. */
 	resolved_reason: string | null;
 	snoozed_until: string | null;
@@ -269,13 +276,25 @@ export interface EventData {
 export interface IncidentData {
 	id: string;
 	server_id: string;
+	/** Display name of the root server (may be null — use `server_host`). */
+	server_name: string | null;
+	server_host: string;
 	opened_at: string;
 	closed_at: string | null;
 	acknowledged_at: string | null;
 	acknowledged_by: string | null;
+	acknowledged_by_name: string | null;
+	acknowledged_by_pic: string | null;
 	resolved_at: string | null;
 	resolved_by: string | null;
+	resolved_by_name: string | null;
+	resolved_by_pic: string | null;
 	resolved_reason: string | null;
+	/** Backend-computed stats; may be missing if running against an older API. */
+	issue_count?: number;
+	event_count?: number;
+	/** Combined: incident notes + notes on all contributing issues. */
+	note_count?: number;
 	created_at: string;
 	updated_at: string;
 }
@@ -289,6 +308,24 @@ export interface IncidentIssueData {
 export interface IncidentWithIssues {
 	incident: IncidentData;
 	issues: IncidentIssueData[];
+}
+
+/** Free-text operator note attached to an issue. Immutable once written. */
+export interface IssueNoteData {
+	id: string;
+	issue_id: string;
+	author: string;
+	body: string;
+	created_at: string;
+}
+
+/** Free-text operator note attached to an incident. Immutable once written. */
+export interface IncidentNoteData {
+	id: string;
+	incident_id: string;
+	author: string;
+	body: string;
+	created_at: string;
 }
 
 export interface BestoolSnippetInfo {

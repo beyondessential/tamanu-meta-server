@@ -1,42 +1,38 @@
 import { Button, Dialog, DialogContent, DialogTitle } from "@mui/material";
 import AddAlertIcon from "@mui/icons-material/AddAlert";
 import { useState } from "react";
-import { useApi } from "../api";
 import ManualEventForm from "./ManualEventForm";
-import type { IncidentData } from "../types";
 
 /** Admin-only button on the ServerDetail header: opens a dialog with the
  * manual-event form. Label switches between "New incident" and "Add issue"
- * depending on whether the server already has an open incident.
- *
- * Note: incidents are grouped at the root of the server tree, so on child
- * servers this query returns nothing and the label will read "New incident"
- * even when the root's group has an open one. Operators usually manage
- * incidents from the root page where the Incidents section is shown. */
+ * depending on `hasOpenIncident` — which the parent computes once from a
+ * single group-level query and shares with all the buttons on the page
+ * (header + child rows), so they all read the same group state. */
 export default function ManualEventButton({
 	serverId,
+	hasOpenIncident,
 	onSubmitted,
+	size = "medium",
 }: {
 	serverId: string;
+	/** Whether the server group currently has an open incident. The parent
+	 * owns this state and threads it down so every button shows the same
+	 * answer (a child server's own incidents list is empty even when the
+	 * group's root has an open one). */
+	hasOpenIncident: boolean;
 	/** Called after a successful submission so the parent can refresh sibling
 	 * panels (issues, incidents) that are now stale. */
 	onSubmitted?: () => void;
+	size?: "small" | "medium" | "large";
 }) {
 	const [open, setOpen] = useState(false);
-	const incidents = useApi<IncidentData[]>(
-		"incidents",
-		"list_for_server",
-		{ server_id: serverId, include_closed: false },
-		[serverId],
-	);
-	const hasOpenIncident =
-		incidents.status === "ok" && incidents.data.length > 0;
 	const label = hasOpenIncident ? "Add issue" : "New incident";
 
 	return (
 		<>
 			<Button
 				variant="outlined"
+				size={size}
 				startIcon={<AddAlertIcon />}
 				onClick={() => setOpen(true)}
 			>
@@ -49,7 +45,6 @@ export default function ManualEventButton({
 						serverId={serverId}
 						onSubmitted={() => {
 							setOpen(false);
-							incidents.reload();
 							onSubmitted?.();
 						}}
 					/>

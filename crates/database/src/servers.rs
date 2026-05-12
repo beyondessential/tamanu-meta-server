@@ -300,6 +300,92 @@ impl Server {
 			.map_err(AppError::from)
 	}
 
+	/// Root servers — those without a parent. Each one heads a server group
+	/// (the unit used for incident rollup). Ordered by name.
+	pub async fn list_roots(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
+		use crate::schema::servers::dsl::*;
+		servers
+			.select(Self::as_select())
+			.filter(parent_server_id.is_null())
+			.filter(id.ne(Uuid::nil()))
+			.order(name.asc())
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// Bulk-fetch `(name, host)` for a set of server ids — used by the
+	/// issues/incidents APIs to embed display info into each row so the UI
+	/// doesn't have to fetch every server independently.
+	pub async fn names_by_ids(
+		db: &mut AsyncPgConnection,
+		ids: &[Uuid],
+	) -> Result<std::collections::HashMap<Uuid, (Option<String>, String)>> {
+		use crate::schema::servers::dsl;
+
+		if ids.is_empty() {
+			return Ok(std::collections::HashMap::new());
+		}
+		let rows: Vec<(Uuid, Option<String>, String)> = dsl::servers
+			.select((dsl::id, dsl::name, dsl::host))
+			.filter(dsl::id.eq_any(ids))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(rows.into_iter().map(|(i, n, h)| (i, (n, h))).collect())
+	}
+
+	/// Walks `parent_server_id` upwards from `server_id` and returns the
+	/// root of the server group (the server with no parent). When `server_id`
+	/// is already a root, returns it unchanged.
+	pub async fn root_id(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<Uuid> {
+		use diesel::sql_types::Uuid as SqlUuid;
+
+		#[derive(QueryableByName)]
+		struct RootId {
+			#[diesel(sql_type = SqlUuid)]
+			id: Uuid,
+		}
+
+		let row: RootId = diesel::sql_query(
+			"WITH RECURSIVE chain AS (\
+				SELECT id, parent_server_id FROM servers WHERE id = $1 \
+				UNION ALL \
+				SELECT s.id, s.parent_server_id FROM servers s \
+					JOIN chain c ON s.id = c.parent_server_id \
+			) SELECT id FROM chain WHERE parent_server_id IS NULL LIMIT 1",
+		)
+		.bind::<SqlUuid, _>(server_id)
+		.get_result(db)
+		.await?;
+		Ok(row.id)
+	}
+
+	/// All server ids reachable from `root_id` via `parent_server_id` links,
+	/// inclusive of the root itself. A single recursive CTE.
+	pub async fn descendant_ids(db: &mut AsyncPgConnection, root_id: Uuid) -> Result<Vec<Uuid>> {
+		use diesel::sql_types::Uuid as SqlUuid;
+
+		#[derive(QueryableByName)]
+		struct Row {
+			#[diesel(sql_type = SqlUuid)]
+			id: Uuid,
+		}
+
+		let rows: Vec<Row> = diesel::sql_query(
+			"WITH RECURSIVE descendants AS (\
+				SELECT id FROM servers WHERE id = $1 \
+				UNION ALL \
+				SELECT s.id FROM servers s \
+					JOIN descendants d ON s.parent_server_id = d.id \
+			) SELECT id FROM descendants",
+		)
+		.bind::<SqlUuid, _>(root_id)
+		.load(db)
+		.await?;
+		Ok(rows.into_iter().map(|r| r.id).collect())
+	}
+
 	pub async fn search_for_parent(
 		db: &mut AsyncPgConnection,
 		query: &str,

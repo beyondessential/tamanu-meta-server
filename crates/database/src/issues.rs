@@ -141,7 +141,25 @@ pub enum IssueFilter {
 	All,
 }
 
-fn hash_event(severity: Severity, active: bool, message: &str, description: Option<&str>) -> Vec<u8> {
+/// Multi-field filter for the cross-server issues list (global view).
+/// Each field is opt-in: `Default` matches everything currently active.
+#[derive(Debug, Clone, Default)]
+pub struct IssueListFilters {
+	pub active_only: bool,
+	pub severities: Option<Vec<Severity>>,
+	/// Any server id in the group; the query walks to the root and then
+	/// restricts to issues on servers in the root's descendant tree.
+	pub server_group_id: Option<Uuid>,
+	/// `Some(true)` = acknowledged; `Some(false)` = un-acknowledged; `None` = either.
+	pub acked: Option<bool>,
+}
+
+fn hash_event(
+	severity: Severity,
+	active: bool,
+	message: &str,
+	description: Option<&str>,
+) -> Vec<u8> {
 	let mut h = Sha256::new();
 	h.update(severity.to_string().as_bytes());
 	h.update([0]);
@@ -179,7 +197,7 @@ impl NewEvent {
 
 		// Find the root server for the group up-front; needed if we end up
 		// opening an incident. A single recursive CTE walks parent_server_id.
-		let root_server_id = root_server_id(db, server_id).await?;
+		let root_server_id = Server::root_id(db, server_id).await?;
 
 		db.transaction::<_, AppError, _>(async |conn| {
 			// 1. find-or-create issue (FOR UPDATE so concurrent pushes on
@@ -216,15 +234,27 @@ impl NewEvent {
 						issues::message.eq(&self.message),
 						issues::active.eq(active),
 						issues::last_seen.eq(jiff_diesel::Timestamp::from(new_last_seen)),
-						issues::resolved_at.eq(diesel::dsl::sql::<diesel::sql_types::Nullable<diesel::sql_types::Timestamptz>>(
-							if clear_resolved { "NULL" } else { "issues.resolved_at" },
-						)),
-						issues::resolved_by.eq(diesel::dsl::sql::<diesel::sql_types::Nullable<diesel::sql_types::Text>>(
-							if clear_resolved { "NULL" } else { "issues.resolved_by" },
-						)),
-						issues::resolved_reason.eq(diesel::dsl::sql::<diesel::sql_types::Nullable<diesel::sql_types::Text>>(
-							if clear_resolved { "NULL" } else { "issues.resolved_reason" },
-						)),
+						issues::resolved_at.eq(diesel::dsl::sql::<
+							diesel::sql_types::Nullable<diesel::sql_types::Timestamptz>,
+						>(if clear_resolved {
+							"NULL"
+						} else {
+							"issues.resolved_at"
+						})),
+						issues::resolved_by.eq(diesel::dsl::sql::<
+							diesel::sql_types::Nullable<diesel::sql_types::Text>,
+						>(if clear_resolved {
+							"NULL"
+						} else {
+							"issues.resolved_by"
+						})),
+						issues::resolved_reason.eq(diesel::dsl::sql::<
+							diesel::sql_types::Nullable<diesel::sql_types::Text>,
+						>(if clear_resolved {
+							"NULL"
+						} else {
+							"issues.resolved_reason"
+						})),
 					))
 					.returning(Issue::as_select())
 					.get_result(conn)
@@ -276,8 +306,7 @@ impl NewEvent {
 				diesel::insert_into(events::table)
 					.values((
 						events::issue_id.eq(issue.id),
-						events::occurred_at
-							.eq(self.occurred_at.map(jiff_diesel::Timestamp::from)),
+						events::occurred_at.eq(self.occurred_at.map(jiff_diesel::Timestamp::from)),
 						events::severity.eq(severity),
 						events::description.eq(description),
 						events::message.eq(&self.message),
@@ -301,15 +330,16 @@ impl NewEvent {
 /// Compute whether the issue *should* currently be contributing to an
 /// open incident, and apply join/leave accordingly. The rules:
 ///
-/// - **Should contribute** iff `active && severity >= floor && !resolved &&
-///   !snoozed`.
-/// - **Join**: insert a fresh `incident_issues` row (creating an incident if
-///   the group has no open one).
-/// - **Leave**: set `left_at` on the open link row; if it was the last open
-///   contributor for that incident, set incident `closed_at`.
-///
-/// Once an issue is contributing, severity downgrades do *not* remove it —
-/// only one of (active flips off, human resolve, snooze) closes the link.
+/// - **Leave**: `!active || resolved || snoozed`. Severity downgrade alone
+///   does *not* remove an issue — once contributing, it stays until it's
+///   actually gone or explicitly suppressed.
+/// - **Join**: not leaving, AND one of:
+///   - severity ≥ floor (`error`), so this issue is high-priority enough to
+///     create a new incident on its own; or
+///   - the group already has an open incident — then any active issue,
+///     even low-severity ones, joins it. The threshold only governs
+///     incident *creation*; once an incident is in progress everything else
+///     piles in for context.
 async fn re_evaluate_incident_membership(
 	conn: &mut AsyncPgConnection,
 	issue: &Issue,
@@ -319,28 +349,23 @@ async fn re_evaluate_incident_membership(
 	use crate::schema::{incident_issues, incidents};
 
 	let was_in = is_issue_in_open_incident(conn, issue.id).await?;
-	let snoozed = issue
-		.snoozed_until
-		.map_or(false, |t| t > Timestamp::now());
+	let snoozed = issue.snoozed_until.map_or(false, |t| t > Timestamp::now());
+	let group_open = group_has_open_incident(conn, root_server_id).await?;
 
-	// Leave gates: active=false, human-resolved, or snoozed. Severity downgrade
-	// alone is *not* a leave gate — once contributing, an issue stays until
-	// it's actually gone or explicitly suppressed.
 	let should_leave = !issue.active || issue.resolved_at.is_some() || snoozed;
-	// Join gates: all leave gates inverted, *plus* the severity floor.
-	let should_join =
-		issue.active && !issue.resolved_at.is_some() && !snoozed && issue.severity.opens_incident();
+	let should_join = issue.active
+		&& issue.resolved_at.is_none()
+		&& !snoozed
+		&& (issue.severity.opens_incident() || group_open);
 
 	match (was_in, should_join, should_leave) {
 		(false, true, _) => {
-			let incident_id =
-				find_or_open_incident(conn, root_server_id, transition_time).await?;
+			let incident_id = find_or_open_incident(conn, root_server_id, transition_time).await?;
 			diesel::insert_into(incident_issues::table)
 				.values((
 					incident_issues::incident_id.eq(incident_id),
 					incident_issues::issue_id.eq(issue.id),
-					incident_issues::joined_at
-						.eq(jiff_diesel::Timestamp::from(transition_time)),
+					incident_issues::joined_at.eq(jiff_diesel::Timestamp::from(transition_time)),
 				))
 				.execute(conn)
 				.await?;
@@ -381,12 +406,10 @@ async fn re_evaluate_incident_membership(
 				.get_result(conn)
 				.await?;
 			if remaining_open == 0 {
-				diesel::update(
-					incidents::table.filter(incidents::id.eq(open_link.incident_id)),
-				)
-				.set(incidents::closed_at.eq(jiff_diesel::Timestamp::from(transition_time)))
-				.execute(conn)
-				.await?;
+				diesel::update(incidents::table.filter(incidents::id.eq(open_link.incident_id)))
+					.set(incidents::closed_at.eq(jiff_diesel::Timestamp::from(transition_time)))
+					.execute(conn)
+					.await?;
 			}
 		}
 		_ => {}
@@ -394,33 +417,7 @@ async fn re_evaluate_incident_membership(
 	Ok(())
 }
 
-async fn root_server_id(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<Uuid> {
-	use diesel::sql_types::Uuid as SqlUuid;
-
-	#[derive(QueryableByName)]
-	struct RootId {
-		#[diesel(sql_type = SqlUuid)]
-		id: Uuid,
-	}
-
-	let row: RootId = diesel::sql_query(
-		"WITH RECURSIVE chain AS (\
-			SELECT id, parent_server_id FROM servers WHERE id = $1 \
-			UNION ALL \
-			SELECT s.id, s.parent_server_id FROM servers s \
-				JOIN chain c ON s.id = c.parent_server_id \
-		) SELECT id FROM chain WHERE parent_server_id IS NULL LIMIT 1",
-	)
-	.bind::<SqlUuid, _>(server_id)
-	.get_result(db)
-	.await?;
-	Ok(row.id)
-}
-
-async fn is_issue_in_open_incident(
-	db: &mut AsyncPgConnection,
-	issue_id: Uuid,
-) -> Result<bool> {
+async fn is_issue_in_open_incident(db: &mut AsyncPgConnection, issue_id: Uuid) -> Result<bool> {
 	use crate::schema::incident_issues;
 
 	let count: i64 = incident_issues::table
@@ -429,6 +426,18 @@ async fn is_issue_in_open_incident(
 				.eq(issue_id)
 				.and(incident_issues::left_at.is_null()),
 		)
+		.count()
+		.get_result(db)
+		.await?;
+	Ok(count > 0)
+}
+
+async fn group_has_open_incident(db: &mut AsyncPgConnection, root_server_id: Uuid) -> Result<bool> {
+	use crate::schema::incidents::dsl;
+
+	let count: i64 = dsl::incidents
+		.filter(dsl::server_id.eq(root_server_id))
+		.filter(dsl::closed_at.is_null())
 		.count()
 		.get_result(db)
 		.await?;
@@ -482,7 +491,9 @@ impl Issue {
 			.filter(dsl::device_id.eq(device_id))
 			.into_boxed();
 		if filter == IssueFilter::ActiveOnly {
-			q = q.filter(dsl::active.eq(true));
+			q = q
+				.filter(dsl::active.eq(true))
+				.filter(dsl::resolved_at.is_null());
 		}
 		q.order(dsl::last_seen.desc())
 			.limit(limit)
@@ -504,7 +515,63 @@ impl Issue {
 			.filter(dsl::server_id.eq(server_id))
 			.into_boxed();
 		if filter == IssueFilter::ActiveOnly {
-			q = q.filter(dsl::active.eq(true));
+			q = q
+				.filter(dsl::active.eq(true))
+				.filter(dsl::resolved_at.is_null());
+		}
+		q.order(dsl::last_seen.desc())
+			.limit(limit)
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// Filtered cross-server issues list. Used by the global Incidents page.
+	///
+	/// - `active_only`: when true, only `active = true` *and* unresolved
+	///   issues — operator-resolved items don't count even if the source
+	///   keeps pushing them.
+	/// - `severities`: when `Some` and non-empty, restrict to those.
+	/// - `server_group_id`: when `Some`, restrict to issues whose server is
+	///   in the descendant tree of that root (uses a recursive CTE via
+	///   `Server::descendant_ids`).
+	/// - `acked`: when `Some(true)`, only acknowledged; `Some(false)`, only
+	///   un-acknowledged; `None`, either.
+	pub async fn list(
+		db: &mut AsyncPgConnection,
+		filters: IssueListFilters,
+		limit: i64,
+	) -> Result<Vec<Self>> {
+		use crate::schema::issues::dsl;
+
+		// Resolve to the group root then enumerate descendants up-front
+		// (two recursive CTEs); cheaper than embedding both into the main
+		// query, and lets the later filter be a plain `IN`. Callers can
+		// pass any server id in the group — the root walk handles it.
+		let group_ids = if let Some(any_in_group) = filters.server_group_id {
+			let root = Server::root_id(db, any_in_group).await?;
+			Some(Server::descendant_ids(db, root).await?)
+		} else {
+			None
+		};
+
+		let mut q = dsl::issues.select(Self::as_select()).into_boxed();
+		if filters.active_only {
+			q = q
+				.filter(dsl::active.eq(true))
+				.filter(dsl::resolved_at.is_null());
+		}
+		if let Some(sevs) = filters.severities.as_ref().filter(|v| !v.is_empty()) {
+			let strs: Vec<String> = sevs.iter().map(|s| s.to_string()).collect();
+			q = q.filter(dsl::severity.eq_any(strs));
+		}
+		if let Some(ids) = group_ids {
+			q = q.filter(dsl::server_id.eq_any(ids));
+		}
+		match filters.acked {
+			Some(true) => q = q.filter(dsl::acknowledged_at.is_not_null()),
+			Some(false) => q = q.filter(dsl::acknowledged_at.is_null()),
+			None => {}
 		}
 		q.order(dsl::last_seen.desc())
 			.limit(limit)
@@ -526,11 +593,7 @@ impl Issue {
 
 	/// Mark an issue as acknowledged (or update the acker). Doesn't touch
 	/// incident membership — ack is purely informational.
-	pub async fn ack(
-		db: &mut AsyncPgConnection,
-		issue_id: Uuid,
-		by: &str,
-	) -> Result<Self> {
+	pub async fn ack(db: &mut AsyncPgConnection, issue_id: Uuid, by: &str) -> Result<Self> {
 		use crate::schema::issues;
 
 		diesel::update(issues::table.filter(issues::id.eq(issue_id)))
@@ -548,8 +611,7 @@ impl Issue {
 		use crate::schema::issues;
 		diesel::update(issues::table.filter(issues::id.eq(issue_id)))
 			.set((
-				issues::acknowledged_at
-					.eq(None::<jiff_diesel::Timestamp>),
+				issues::acknowledged_at.eq(None::<jiff_diesel::Timestamp>),
 				issues::acknowledged_by.eq(None::<String>),
 			))
 			.returning(Self::as_select())
@@ -579,7 +641,7 @@ impl Issue {
 				.returning(Self::as_select())
 				.get_result(conn)
 				.await?;
-			let root = root_server_id(conn, issue.server_id).await?;
+			let root = Server::root_id(conn, issue.server_id).await?;
 			re_evaluate_incident_membership(conn, &issue, root, now).await?;
 			Ok(issue)
 		})
@@ -600,7 +662,7 @@ impl Issue {
 				.returning(Self::as_select())
 				.get_result(conn)
 				.await?;
-			let root = root_server_id(conn, issue.server_id).await?;
+			let root = Server::root_id(conn, issue.server_id).await?;
 			re_evaluate_incident_membership(conn, &issue, root, now).await?;
 			Ok(issue)
 		})
@@ -623,7 +685,7 @@ impl Issue {
 				.returning(Self::as_select())
 				.get_result(conn)
 				.await?;
-			let root = root_server_id(conn, issue.server_id).await?;
+			let root = Server::root_id(conn, issue.server_id).await?;
 			re_evaluate_incident_membership(conn, &issue, root, now).await?;
 			Ok(issue)
 		})
@@ -640,11 +702,112 @@ impl Issue {
 				.returning(Self::as_select())
 				.get_result(conn)
 				.await?;
-			let root = root_server_id(conn, issue.server_id).await?;
+			let root = Server::root_id(conn, issue.server_id).await?;
 			re_evaluate_incident_membership(conn, &issue, root, now).await?;
 			Ok(issue)
 		})
 		.await
+	}
+}
+
+/// Aggregate counts displayed against an incident in the UI.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct IncidentStats {
+	pub issue_count: i64,
+	pub event_count: i64,
+	/// `incident_notes` for this incident + `issue_notes` across all linked issues.
+	pub note_count: i64,
+}
+
+impl Incident {
+	/// Bulk-fetch stats for a set of incidents in four grouped queries —
+	/// issues, events, incident-notes, issue-notes — run concurrently on
+	/// four pool connections. Missing incident_ids get `Default` (zero).
+	///
+	/// Takes the pool (`&Db`) rather than a single connection so the four
+	/// futures don't fight over one mutable handle.
+	pub async fn stats_for(
+		pool: &crate::Db,
+		incident_ids: &[Uuid],
+	) -> Result<std::collections::HashMap<Uuid, IncidentStats>> {
+		use crate::schema::{events, incident_issues, incident_notes, issue_notes};
+		use diesel::dsl::count_star;
+		use std::collections::HashMap;
+
+		let mut out: HashMap<Uuid, IncidentStats> = incident_ids
+			.iter()
+			.map(|id| (*id, IncidentStats::default()))
+			.collect();
+		if incident_ids.is_empty() {
+			return Ok(out);
+		}
+
+		// Each future grabs its own pool connection so the four queries
+		// run in parallel rather than serialised on one mutable conn.
+		let ids = incident_ids.to_vec();
+		let f_issues = async {
+			let mut c = pool.get().await?;
+			incident_issues::table
+				.group_by(incident_issues::incident_id)
+				.select((incident_issues::incident_id, count_star()))
+				.filter(incident_issues::incident_id.eq_any(&ids))
+				.load::<(Uuid, i64)>(&mut c)
+				.await
+				.map_err(AppError::from)
+		};
+		let f_events = async {
+			let mut c = pool.get().await?;
+			events::table
+				.inner_join(
+					incident_issues::table.on(events::issue_id.eq(incident_issues::issue_id)),
+				)
+				.group_by(incident_issues::incident_id)
+				.select((incident_issues::incident_id, count_star()))
+				.filter(incident_issues::incident_id.eq_any(&ids))
+				.load::<(Uuid, i64)>(&mut c)
+				.await
+				.map_err(AppError::from)
+		};
+		let f_inotes = async {
+			let mut c = pool.get().await?;
+			incident_notes::table
+				.group_by(incident_notes::incident_id)
+				.select((incident_notes::incident_id, count_star()))
+				.filter(incident_notes::incident_id.eq_any(&ids))
+				.load::<(Uuid, i64)>(&mut c)
+				.await
+				.map_err(AppError::from)
+		};
+		let f_jnotes = async {
+			let mut c = pool.get().await?;
+			issue_notes::table
+				.inner_join(
+					incident_issues::table.on(issue_notes::issue_id.eq(incident_issues::issue_id)),
+				)
+				.group_by(incident_issues::incident_id)
+				.select((incident_issues::incident_id, count_star()))
+				.filter(incident_issues::incident_id.eq_any(&ids))
+				.load::<(Uuid, i64)>(&mut c)
+				.await
+				.map_err(AppError::from)
+		};
+		let (issue_rows, event_rows, inote_rows, jnote_rows) =
+			futures::try_join!(f_issues, f_events, f_inotes, f_jnotes)?;
+
+		for (id, n) in issue_rows {
+			out.entry(id).or_default().issue_count = n;
+		}
+		for (id, n) in event_rows {
+			out.entry(id).or_default().event_count = n;
+		}
+		for (id, n) in inote_rows {
+			out.entry(id).or_default().note_count += n;
+		}
+		for (id, n) in jnote_rows {
+			out.entry(id).or_default().note_count += n;
+		}
+
+		Ok(out)
 	}
 }
 
@@ -668,6 +831,11 @@ impl Event {
 }
 
 impl Incident {
+	/// Incidents are owned by the *root* of the server group, so a caller
+	/// asking for a child's incidents really wants the root's. Walk up the
+	/// `parent_server_id` chain (same helper used at incident-open time) so
+	/// the API returns the group's incidents regardless of which server in
+	/// the group the caller named.
 	pub async fn list_for_server(
 		db: &mut AsyncPgConnection,
 		server_id: Uuid,
@@ -676,9 +844,10 @@ impl Incident {
 	) -> Result<Vec<Self>> {
 		use crate::schema::incidents::dsl;
 
+		let root = Server::root_id(db, server_id).await?;
 		let mut q = dsl::incidents
 			.select(Self::as_select())
-			.filter(dsl::server_id.eq(server_id))
+			.filter(dsl::server_id.eq(root))
 			.into_boxed();
 		if !include_closed {
 			q = q.filter(dsl::closed_at.is_null());
@@ -725,11 +894,7 @@ impl Incident {
 		Ok((incident, rows))
 	}
 
-	pub async fn ack(
-		db: &mut AsyncPgConnection,
-		incident_id: Uuid,
-		by: &str,
-	) -> Result<Self> {
+	pub async fn ack(db: &mut AsyncPgConnection, incident_id: Uuid, by: &str) -> Result<Self> {
 		use crate::schema::incidents;
 
 		diesel::update(incidents::table.filter(incidents::id.eq(incident_id)))
@@ -747,8 +912,7 @@ impl Incident {
 		use crate::schema::incidents;
 		diesel::update(incidents::table.filter(incidents::id.eq(incident_id)))
 			.set((
-				incidents::acknowledged_at
-					.eq(None::<jiff_diesel::Timestamp>),
+				incidents::acknowledged_at.eq(None::<jiff_diesel::Timestamp>),
 				incidents::acknowledged_by.eq(None::<String>),
 			))
 			.returning(Self::as_select())
@@ -761,24 +925,82 @@ impl Incident {
 	/// *not* force `closed_at` (that's still driven by auto rules). An
 	/// open incident can be resolved (acknowledging the cause) and a closed
 	/// incident can be resolved retroactively.
+	/// Resolve the incident. Cascades to every currently-contributing issue
+	/// (active link), marking them with the same reason and timestamp; each
+	/// one triggers `re_evaluate_incident_membership`, so the normal
+	/// auto-close path sets `closed_at` once the last issue leaves. As a
+	/// belt-and-suspenders, force-closes the incident if the cascade left
+	/// it open (e.g. an incident with no live links — shouldn't happen, but
+	/// we'd rather not leave the UI in a 'resolved but still open' state).
 	pub async fn resolve(
 		db: &mut AsyncPgConnection,
 		incident_id: Uuid,
 		by: &str,
 		reason: commons_types::issue::ResolvedReason,
 	) -> Result<Self> {
-		use crate::schema::incidents;
+		use crate::schema::{incident_issues, incidents, issues};
+		let now = Timestamp::now();
 
-		diesel::update(incidents::table.filter(incidents::id.eq(incident_id)))
+		db.transaction::<_, AppError, _>(async |conn| {
+			let open_issue_ids: Vec<Uuid> = incident_issues::table
+				.select(incident_issues::issue_id)
+				.filter(
+					incident_issues::incident_id
+						.eq(incident_id)
+						.and(incident_issues::left_at.is_null()),
+				)
+				.load(conn)
+				.await?;
+
+			for issue_id in open_issue_ids {
+				let existing: Issue = issues::table
+					.select(Issue::as_select())
+					.filter(issues::id.eq(issue_id))
+					.first(conn)
+					.await?;
+				if existing.resolved_at.is_some() {
+					// Already resolved by the operator earlier; leave the
+					// reason/by intact so the audit trail tells the truth.
+					continue;
+				}
+				let issue = diesel::update(issues::table.filter(issues::id.eq(issue_id)))
+					.set((
+						issues::resolved_at.eq(jiff_diesel::Timestamp::from(now)),
+						issues::resolved_by.eq(Some(by)),
+						issues::resolved_reason.eq(Some(reason.to_string())),
+					))
+					.returning(Issue::as_select())
+					.get_result(conn)
+					.await?;
+				let root = Server::root_id(conn, issue.server_id).await?;
+				re_evaluate_incident_membership(conn, &issue, root, now).await?;
+			}
+
+			let incident: Incident = diesel::update(
+				incidents::table.filter(incidents::id.eq(incident_id)),
+			)
 			.set((
-				incidents::resolved_at.eq(jiff_diesel::Timestamp::from(Timestamp::now())),
+				incidents::resolved_at.eq(jiff_diesel::Timestamp::from(now)),
 				incidents::resolved_by.eq(Some(by)),
 				incidents::resolved_reason.eq(Some(reason.to_string())),
 			))
-			.returning(Self::as_select())
-			.get_result(db)
-			.await
-			.map_err(AppError::from)
+			.returning(Incident::as_select())
+			.get_result(conn)
+			.await?;
+
+			if incident.closed_at.is_some() {
+				return Ok(incident);
+			}
+			let incident: Incident = diesel::update(
+				incidents::table.filter(incidents::id.eq(incident_id)),
+			)
+			.set(incidents::closed_at.eq(jiff_diesel::Timestamp::from(now)))
+			.returning(Incident::as_select())
+			.get_result(conn)
+			.await?;
+			Ok(incident)
+		})
+		.await
 	}
 
 	pub async fn unresolve(db: &mut AsyncPgConnection, incident_id: Uuid) -> Result<Self> {

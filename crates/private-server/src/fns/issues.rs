@@ -7,7 +7,10 @@ use commons_types::{
 	Uuid,
 	issue::{ResolvedReason, Severity},
 };
-use database::issues::{Event, Issue, IssueFilter, NewEvent};
+use database::issues::{Event, Issue, IssueFilter, IssueListFilters, NewEvent};
+use database::notes::IssueNote;
+use database::servers::Server;
+use database::tailscale_users::TailscaleUser as CachedTailscaleUser;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
@@ -19,6 +22,9 @@ const DEFAULT_LIMIT: i64 = 100;
 pub struct IssueData {
 	pub id: Uuid,
 	pub server_id: Uuid,
+	/// The issue's server name (may be null — fall back to `server_host`).
+	pub server_name: Option<String>,
+	pub server_host: String,
 	pub device_id: Option<Uuid>,
 	pub source: String,
 	#[serde(rename = "ref")]
@@ -31,8 +37,14 @@ pub struct IssueData {
 	pub last_seen: Timestamp,
 	pub acknowledged_at: Option<Timestamp>,
 	pub acknowledged_by: Option<String>,
+	/// Display name of the acker (from the cached Tailscale users table).
+	pub acknowledged_by_name: Option<String>,
+	/// Profile picture URL of the acker.
+	pub acknowledged_by_pic: Option<String>,
 	pub resolved_at: Option<Timestamp>,
 	pub resolved_by: Option<String>,
+	pub resolved_by_name: Option<String>,
+	pub resolved_by_pic: Option<String>,
 	/// The string stored in the DB; parses to `ResolvedReason` if valid.
 	/// Kept as String to round-trip any historical value.
 	pub resolved_reason: Option<String>,
@@ -41,11 +53,22 @@ pub struct IssueData {
 	pub updated_at: Timestamp,
 }
 
-impl From<Issue> for IssueData {
-	fn from(i: Issue) -> Self {
+/// All the non-Issue extras we tuck into an `IssueData`.
+struct IssueEnrichment<'a> {
+	server_name: Option<String>,
+	server_host: String,
+	users: &'a std::collections::HashMap<String, CachedTailscaleUser>,
+}
+
+impl IssueData {
+	fn from_with(i: Issue, e: IssueEnrichment<'_>) -> Self {
+		let (ack_name, ack_pic) = lookup_user(e.users, i.acknowledged_by.as_deref());
+		let (res_name, res_pic) = lookup_user(e.users, i.resolved_by.as_deref());
 		Self {
 			id: i.id,
 			server_id: i.server_id,
+			server_name: e.server_name,
+			server_host: e.server_host,
 			device_id: i.device_id,
 			source: i.source,
 			r#ref: i.r#ref,
@@ -57,14 +80,92 @@ impl From<Issue> for IssueData {
 			last_seen: i.last_seen,
 			acknowledged_at: i.acknowledged_at,
 			acknowledged_by: i.acknowledged_by,
+			acknowledged_by_name: ack_name,
+			acknowledged_by_pic: ack_pic,
 			resolved_at: i.resolved_at,
 			resolved_by: i.resolved_by,
+			resolved_by_name: res_name,
+			resolved_by_pic: res_pic,
 			resolved_reason: i.resolved_reason,
 			snoozed_until: i.snoozed_until,
 			created_at: i.created_at,
 			updated_at: i.updated_at,
 		}
 	}
+}
+
+pub(crate) fn lookup_user(
+	users: &std::collections::HashMap<String, CachedTailscaleUser>,
+	login: Option<&str>,
+) -> (Option<String>, Option<String>) {
+	let Some(login) = login else { return (None, None) };
+	match users.get(login) {
+		Some(u) => (Some(u.name.clone()), u.profile_pic.clone()),
+		None => (None, None),
+	}
+}
+
+fn collect_user_logins(issues: &[Issue]) -> Vec<&str> {
+	let mut s: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+	for i in issues {
+		if let Some(l) = i.acknowledged_by.as_deref() {
+			s.insert(l);
+		}
+		if let Some(l) = i.resolved_by.as_deref() {
+			s.insert(l);
+		}
+	}
+	s.into_iter().collect()
+}
+
+/// Enrich a list of issues with their server names/hosts and acker/resolver
+/// display info in two extra batch queries.
+pub(crate) async fn enrich_issues(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	issues: Vec<Issue>,
+) -> Result<Vec<IssueData>> {
+	let server_ids: Vec<Uuid> = issues.iter().map(|i| i.server_id).collect();
+	let names = Server::names_by_ids(conn, &server_ids).await?;
+	let user_logins = collect_user_logins(&issues);
+	let users = CachedTailscaleUser::by_logins(conn, &user_logins).await?;
+	Ok(issues
+		.into_iter()
+		.map(|i| {
+			let (name, host) = names
+				.get(&i.server_id)
+				.cloned()
+				.unwrap_or((None, String::new()));
+			IssueData::from_with(
+				i,
+				IssueEnrichment {
+					server_name: name,
+					server_host: host,
+					users: &users,
+				},
+			)
+		})
+		.collect())
+}
+
+/// Same as `enrich_issues` but for a single issue.
+pub(crate) async fn enrich_issue(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	issue: Issue,
+) -> Result<IssueData> {
+	let mut names = Server::names_by_ids(conn, &[issue.server_id]).await?;
+	let (name, host) = names
+		.remove(&issue.server_id)
+		.unwrap_or((None, String::new()));
+	let user_logins = collect_user_logins(std::slice::from_ref(&issue));
+	let users = CachedTailscaleUser::by_logins(conn, &user_logins).await?;
+	Ok(IssueData::from_with(
+		issue,
+		IssueEnrichment {
+			server_name: name,
+			server_host: host,
+			users: &users,
+		},
+	))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -100,6 +201,7 @@ impl From<Event> for EventData {
 
 pub fn routes() -> Router<AppState> {
 	Router::new()
+		.route("/list", post(list))
 		.route("/list_for_device", post(list_for_device))
 		.route("/list_for_server", post(list_for_server))
 		.route("/list_events", post(list_events))
@@ -110,6 +212,9 @@ pub fn routes() -> Router<AppState> {
 		.route("/unresolve", post(unresolve))
 		.route("/snooze", post(snooze))
 		.route("/unsnooze", post(unsnooze))
+		.route("/add_note", post(add_note))
+		.route("/list_notes", post(list_notes))
+		.route("/delete_note", post(delete_note))
 }
 
 fn filter_from(active_only: Option<bool>) -> IssueFilter {
@@ -117,6 +222,42 @@ fn filter_from(active_only: Option<bool>) -> IssueFilter {
 		Some(false) => IssueFilter::All,
 		_ => IssueFilter::ActiveOnly,
 	}
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListArgs {
+	#[serde(default)]
+	pub active_only: Option<bool>,
+	#[serde(default)]
+	pub severities: Option<Vec<Severity>>,
+	#[serde(default)]
+	pub server_group_id: Option<Uuid>,
+	#[serde(default)]
+	pub acked: Option<bool>,
+	#[serde(default)]
+	pub limit: Option<i64>,
+}
+
+/// Cross-server filtered issues list (used by the global Incidents page).
+pub async fn list(
+	State(state): State<AppState>,
+	TailscaleAdmin(_): TailscaleAdmin,
+	Json(args): Json<ListArgs>,
+) -> Result<Json<Vec<IssueData>>> {
+	let mut conn = state.db.get().await?;
+	let issues = Issue::list(
+		&mut conn,
+		IssueListFilters {
+			active_only: args.active_only.unwrap_or(true),
+			severities: args.severities,
+			server_group_id: args.server_group_id,
+			acked: args.acked,
+		},
+		args.limit.unwrap_or(DEFAULT_LIMIT),
+	)
+	.await?;
+	Ok(Json(enrich_issues(&mut conn, issues).await?))
 }
 
 #[derive(Deserialize)]
@@ -141,7 +282,7 @@ pub async fn list_for_device(
 		args.limit.unwrap_or(DEFAULT_LIMIT),
 	)
 	.await?;
-	Ok(Json(issues.into_iter().map(IssueData::from).collect()))
+	Ok(Json(enrich_issues(&mut conn, issues).await?))
 }
 
 #[derive(Deserialize)]
@@ -166,7 +307,7 @@ pub async fn list_for_server(
 		args.limit.unwrap_or(DEFAULT_LIMIT),
 	)
 	.await?;
-	Ok(Json(issues.into_iter().map(IssueData::from).collect()))
+	Ok(Json(enrich_issues(&mut conn, issues).await?))
 }
 
 #[derive(Deserialize)]
@@ -182,9 +323,12 @@ pub async fn list_events(
 	Json(args): Json<ListEventsArgs>,
 ) -> Result<Json<Vec<EventData>>> {
 	let mut conn = state.db.get().await?;
-	let events =
-		Event::list_for_issue(&mut conn, args.issue_id, args.limit.unwrap_or(DEFAULT_LIMIT))
-			.await?;
+	let events = Event::list_for_issue(
+		&mut conn,
+		args.issue_id,
+		args.limit.unwrap_or(DEFAULT_LIMIT),
+	)
+	.await?;
 	Ok(Json(events.into_iter().map(EventData::from).collect()))
 }
 
@@ -225,7 +369,7 @@ pub async fn submit_manual_event(
 	};
 	let mut conn = state.db.get().await?;
 	let issue = event.save(&mut conn, args.server_id, None).await?;
-	Ok(Json(IssueData::from(issue)))
+	Ok(Json(enrich_issue(&mut conn, issue).await?))
 }
 
 #[derive(Deserialize)]
@@ -240,7 +384,7 @@ pub async fn ack(
 ) -> Result<Json<IssueData>> {
 	let mut conn = state.db.get().await?;
 	let issue = Issue::ack(&mut conn, args.issue_id, &user.login).await?;
-	Ok(Json(IssueData::from(issue)))
+	Ok(Json(enrich_issue(&mut conn, issue).await?))
 }
 
 pub async fn unack(
@@ -250,7 +394,7 @@ pub async fn unack(
 ) -> Result<Json<IssueData>> {
 	let mut conn = state.db.get().await?;
 	let issue = Issue::unack(&mut conn, args.issue_id).await?;
-	Ok(Json(IssueData::from(issue)))
+	Ok(Json(enrich_issue(&mut conn, issue).await?))
 }
 
 #[derive(Deserialize)]
@@ -266,7 +410,7 @@ pub async fn resolve(
 ) -> Result<Json<IssueData>> {
 	let mut conn = state.db.get().await?;
 	let issue = Issue::resolve(&mut conn, args.issue_id, &user.login, args.reason).await?;
-	Ok(Json(IssueData::from(issue)))
+	Ok(Json(enrich_issue(&mut conn, issue).await?))
 }
 
 pub async fn unresolve(
@@ -276,7 +420,7 @@ pub async fn unresolve(
 ) -> Result<Json<IssueData>> {
 	let mut conn = state.db.get().await?;
 	let issue = Issue::unresolve(&mut conn, args.issue_id).await?;
-	Ok(Json(IssueData::from(issue)))
+	Ok(Json(enrich_issue(&mut conn, issue).await?))
 }
 
 #[derive(Deserialize)]
@@ -292,7 +436,7 @@ pub async fn snooze(
 ) -> Result<Json<IssueData>> {
 	let mut conn = state.db.get().await?;
 	let issue = Issue::snooze(&mut conn, args.issue_id, args.until).await?;
-	Ok(Json(IssueData::from(issue)))
+	Ok(Json(enrich_issue(&mut conn, issue).await?))
 }
 
 pub async fn unsnooze(
@@ -302,5 +446,82 @@ pub async fn unsnooze(
 ) -> Result<Json<IssueData>> {
 	let mut conn = state.db.get().await?;
 	let issue = Issue::unsnooze(&mut conn, args.issue_id).await?;
-	Ok(Json(IssueData::from(issue)))
+	Ok(Json(enrich_issue(&mut conn, issue).await?))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IssueNoteData {
+	pub id: Uuid,
+	pub issue_id: Uuid,
+	pub author: String,
+	pub body: String,
+	pub created_at: Timestamp,
+}
+
+impl From<IssueNote> for IssueNoteData {
+	fn from(n: IssueNote) -> Self {
+		Self {
+			id: n.id,
+			issue_id: n.issue_id,
+			author: n.author,
+			body: n.body,
+			created_at: n.created_at,
+		}
+	}
+}
+
+#[derive(Deserialize)]
+pub struct AddNoteArgs {
+	pub issue_id: Uuid,
+	pub body: String,
+}
+
+pub async fn add_note(
+	State(state): State<AppState>,
+	TailscaleAdmin(user): TailscaleAdmin,
+	Json(args): Json<AddNoteArgs>,
+) -> Result<Json<IssueNoteData>> {
+	if args.body.trim().is_empty() {
+		return Err(AppError::custom("note body is required"));
+	}
+	let mut conn = state.db.get().await?;
+	let note = IssueNote::add(&mut conn, args.issue_id, &user.login, &args.body).await?;
+	Ok(Json(IssueNoteData::from(note)))
+}
+
+#[derive(Deserialize)]
+pub struct ListNotesArgs {
+	pub issue_id: Uuid,
+	#[serde(default)]
+	pub limit: Option<i64>,
+}
+
+pub async fn list_notes(
+	State(state): State<AppState>,
+	TailscaleAdmin(_): TailscaleAdmin,
+	Json(args): Json<ListNotesArgs>,
+) -> Result<Json<Vec<IssueNoteData>>> {
+	let mut conn = state.db.get().await?;
+	let notes = IssueNote::list_for_issue(
+		&mut conn,
+		args.issue_id,
+		args.limit.unwrap_or(DEFAULT_LIMIT),
+	)
+	.await?;
+	Ok(Json(notes.into_iter().map(IssueNoteData::from).collect()))
+}
+
+#[derive(Deserialize)]
+pub struct DeleteNoteArgs {
+	pub note_id: Uuid,
+}
+
+pub async fn delete_note(
+	State(state): State<AppState>,
+	TailscaleAdmin(_): TailscaleAdmin,
+	Json(args): Json<DeleteNoteArgs>,
+) -> Result<Json<()>> {
+	let mut conn = state.db.get().await?;
+	IssueNote::delete(&mut conn, args.note_id).await?;
+	Ok(Json(()))
 }

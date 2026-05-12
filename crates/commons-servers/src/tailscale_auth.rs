@@ -1,6 +1,6 @@
 use axum::extract::{FromRef, FromRequestParts, OptionalFromRequestParts};
 use commons_errors::AppError;
-use database::{Db, admins::Admin};
+use database::{Db, admins::Admin, tailscale_users::TailscaleUser as CachedTailscaleUser};
 use diesel_async::AsyncPgConnection;
 use http::request::Parts;
 
@@ -107,22 +107,32 @@ where
 	type Rejection = AppError;
 
 	async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-		if cfg!(debug_assertions) {
-			return Ok(TailscaleAdmin(TailscaleUser {
+		let user = if cfg!(debug_assertions) {
+			TailscaleUser {
 				login: "admin@localhost".into(),
 				name: "You".into(),
 				profile_pic: None,
-			}));
-		}
-
-		let user = <TailscaleUser as FromRequestParts<S>>::from_request_parts(parts, state).await?;
-		let mut db = Db::from_ref(state).get().await?;
-		if user.is_admin(&mut db).await? {
-			Ok(TailscaleAdmin(user))
+			}
 		} else {
-			Err(AppError::AuthInsufficientPermissions {
-				required: "admin".into(),
-			})
-		}
+			let user =
+				<TailscaleUser as FromRequestParts<S>>::from_request_parts(parts, state).await?;
+			let mut db = Db::from_ref(state).get().await?;
+			if !user.is_admin(&mut db).await? {
+				return Err(AppError::AuthInsufficientPermissions {
+					required: "admin".into(),
+				});
+			}
+			user
+		};
+
+		// Cache the user's name + pic so endpoints that record human actions
+		// (issue/incident ack and resolve) can render avatars without
+		// round-tripping to Tailscale. Centralised here so every admin
+		// handler gets it for free.
+		let mut db = Db::from_ref(state).get().await?;
+		CachedTailscaleUser::upsert(&mut db, &user.login, &user.name, user.profile_pic.as_deref())
+			.await?;
+
+		Ok(TailscaleAdmin(user))
 	}
 }

@@ -137,9 +137,7 @@ pub enum ResolvedReason {
 }
 
 #[derive(Debug, Clone, Copy, thiserror::Error)]
-#[error(
-	"invalid resolved reason; expected one of: fixed, wont_fix, expected, duplicate, flapping"
-)]
+#[error("invalid resolved reason; expected one of: fixed, wont_fix, expected, duplicate, flapping")]
 pub struct ResolvedReasonFromStringError;
 
 impl std::str::FromStr for ResolvedReason {

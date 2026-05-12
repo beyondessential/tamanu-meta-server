@@ -105,7 +105,12 @@ export function useApiAction<T = void>(
 			setPending(true);
 			setError(null);
 			try {
-				return await callApi<T>(module, fn, params);
+				const result = await callApi<T>(module, fn, params);
+				// Broadcast so global, page-agnostic queries (e.g. the open-
+				// incidents nav badge) can refetch without the caller having
+				// to know they exist. Listeners hook via useReloadInterval.
+				document.dispatchEvent(new Event("canopy-data-changed"));
+				return result;
 			} catch (err) {
 				const e = err instanceof Error ? err : new Error(String(err));
 				setError(e);
