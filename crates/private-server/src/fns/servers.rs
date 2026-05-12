@@ -368,7 +368,11 @@ pub async fn get_detail(
 
 	let device_info = if let Some(device_id) = device_id {
 		let device_with_info = Device::get_with_info(&mut conn, device_id).await?;
-		Some(convert_device_with_info(device_with_info))
+		Some(
+			convert_device_with_info(device_with_info)
+				.enrich_with_live(&state)
+				.await,
+		)
 	} else {
 		None
 	};

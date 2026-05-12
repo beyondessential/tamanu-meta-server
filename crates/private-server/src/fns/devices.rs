@@ -128,7 +128,7 @@ impl From<DeviceWithInfo> for DeviceInfo {
 impl DeviceInfo {
 	/// Populate `tailnet_live` from the directory if this device has a
 	/// `tailscale_node_id` and the directory has it cached.
-	async fn enrich_with_live(mut self, state: &AppState) -> Self {
+	pub(super) async fn enrich_with_live(mut self, state: &AppState) -> Self {
 		if let Some(node_id) = self.device.tailscale_node_id.clone()
 			&& let Some(directory) = &state.tailnet_directory
 			&& let Ok(Some(entry)) = directory.find_by_node_id(&node_id).await
