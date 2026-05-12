@@ -292,23 +292,25 @@ impl Device {
 				// the same value briefly — we already ruled that out via
 				// the conflict check above.)
 				if target.tailscale_node_id.is_none() && source.tailscale_node_id.is_some() {
+					// Clear source's identity *first* so we don't transiently
+					// hold the same `tailscale_node_id` on two rows (the
+					// `devices_tailscale_node_id_key` unique constraint would
+					// fire on the target update otherwise).
+					diesel::update(devices::table.filter(devices::id.eq(source_id)))
+						.set((
+							devices::tailscale_node_id.eq(None::<String>),
+							devices::tailscale_node_name.eq(None::<String>),
+							devices::tailscale_tailnet.eq(None::<String>),
+						))
+						.execute(conn)
+						.await
+						.map_err(AppError::from)?;
 					diesel::update(devices::table.filter(devices::id.eq(target_id)))
 						.set((
 							devices::tailscale_node_id.eq(source.tailscale_node_id.as_deref()),
 							devices::tailscale_node_name
 								.eq(source.tailscale_node_name.as_deref()),
 							devices::tailscale_tailnet.eq(source.tailscale_tailnet.as_deref()),
-						))
-						.execute(conn)
-						.await
-						.map_err(AppError::from)?;
-					// Clear source's identity so the delete-source step
-					// below doesn't trip the partial unique index.
-					diesel::update(devices::table.filter(devices::id.eq(source_id)))
-						.set((
-							devices::tailscale_node_id.eq(None::<String>),
-							devices::tailscale_node_name.eq(None::<String>),
-							devices::tailscale_tailnet.eq(None::<String>),
 						))
 						.execute(conn)
 						.await
