@@ -1,12 +1,13 @@
 #[cfg(feature = "ui")]
 use axum::extract::State;
-use axum::routing::Router;
+use utoipa_axum::router::OpenApiRouter;
 
 use crate::state::AppState;
 
 pub mod artifacts;
 pub mod bestool;
 pub mod events;
+pub mod openapi;
 #[cfg(feature = "ui")]
 pub mod password;
 #[cfg(feature = "ui")]
@@ -18,9 +19,9 @@ pub mod statuses;
 pub mod timesync;
 pub mod versions;
 
-pub fn routes() -> Router<AppState> {
+pub fn routes() -> OpenApiRouter<AppState> {
 	#[cfg_attr(not(feature = "ui"), expect(unused_mut))]
-	let mut router = Router::new()
+	let mut router = OpenApiRouter::new()
 		.merge(events::routes())
 		.nest("/artifacts", artifacts::routes())
 		.nest("/bestool", bestool::routes())
@@ -30,18 +31,19 @@ pub fn routes() -> Router<AppState> {
 
 	#[cfg(feature = "ui")]
 	{
+		use axum::Router;
 		use axum::routing::get;
 		use tower_http::services::ServeDir;
-		router = router
+		let ui_router: Router<AppState> = Router::new()
 			.route("/", get(index))
 			.route("/errors/{slug}", get(error))
 			.merge(commons_servers::health::routes())
 			.merge(timesync::routes())
 			.merge(password::routes())
-			.nest_service("/static", ServeDir::new("static"));
-
-		// Mount server-versions route (secret is checked in the handler)
-		router = router.nest("/server-versions", server_versions::routes());
+			.nest_service("/static", ServeDir::new("static"))
+			// Mount server-versions route (secret is checked in the handler)
+			.nest("/server-versions", server_versions::routes());
+		router = router.merge(OpenApiRouter::from(ui_router));
 	}
 
 	router

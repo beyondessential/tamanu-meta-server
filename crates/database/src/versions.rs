@@ -26,7 +26,9 @@ macro_rules! predicate_version {
 }
 pub use predicate_version;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, QueryableByName)]
+#[derive(
+	Debug, Clone, Serialize, Deserialize, Queryable, Selectable, QueryableByName, utoipa::ToSchema,
+)]
 #[diesel(table_name = crate::schema::versions)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Version {
@@ -44,7 +46,9 @@ pub struct Version {
 	pub device_id: Option<Uuid>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, QueryableByName)]
+#[derive(
+	Debug, Clone, Serialize, Deserialize, Queryable, Selectable, QueryableByName, utoipa::ToSchema,
+)]
 #[diesel(table_name = crate::views::version_updates)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ViewVersion {

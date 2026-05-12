@@ -35,6 +35,9 @@ tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "sig
 tokio-postgres = { version = "0.7.17", features = ["with-jiff-0_2", "with-serde_json-1", "with-uuid-1"] }
 tower-http = { version = "0.6.8", features = ["fs"] }
 tracing.workspace = true
+utoipa.workspace = true
+utoipa-axum.workspace = true
+utoipa-swagger-ui.workspace = true
 uuid = { version = "1.23.1", features = ["serde", "v4"] }
 
 [dev-dependencies]

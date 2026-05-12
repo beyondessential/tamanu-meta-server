@@ -21,7 +21,7 @@ import { useState } from "react";
 import { useApi, useApiAction } from "../api";
 import SqlEditor from "../components/SqlEditor";
 import { usePageTitle } from "../hooks/usePageTitle";
-import type { Page, SqlHistoryEntry, SqlResult } from "../types";
+import type { SqlResult } from "../types";
 
 const HISTORY_PAGE_SIZE = 10;
 
@@ -33,13 +33,13 @@ export default function Sql() {
 	const [historyOpen, setHistoryOpen] = useState(false);
 	const [historyPage, setHistoryPage] = useState(0);
 
-	const executeAction = useApiAction<SqlResult>("sql", "execute_query");
-	const lastQueryAction = useApiAction<string | null>(
+	const executeAction = useApiAction("sql", "execute_query");
+	const lastQueryAction = useApiAction(
 		"sql",
 		"get_last_user_query",
 	);
 
-	const history = useApi<Page<SqlHistoryEntry>>(
+	const history = useApi(
 		"sql",
 		"get_query_history",
 		{ offset: historyPage * HISTORY_PAGE_SIZE, limit: HISTORY_PAGE_SIZE },

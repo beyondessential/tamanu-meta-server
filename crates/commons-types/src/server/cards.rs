@@ -3,14 +3,14 @@ use uuid::Uuid;
 
 use crate::{server::rank::ServerRank, status::ShortStatus, version::VersionStr};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct FacilityServerStatus {
 	pub id: Uuid,
 	pub name: String,
 	pub up: ShortStatus,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct CentralServerCard {
 	pub id: Uuid,
 	pub name: String,

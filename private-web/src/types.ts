@@ -1,17 +1,137 @@
-// JSON wire types matching the Rust serde shapes in commons-types.
-// Hand-written for now; codegen is a possible future cleanup.
+// Wire types for the private-server API.
+//
+// The schemas in this file are *generated* from the rust handler annotations
+// (utoipa) → `private-web/openapi.json` → `api-types.ts`. Regenerate with
+// `just gen-openapi` after changing any Rust handler's request or response.
+//
+// UI-only types and constants (display order, label maps, etc.) stay
+// hand-written below the re-exports.
 
-/** Standard wrapper for paginated list responses. */
+import type { components, paths } from "./api-types";
+
+type Schemas = components["schemas"];
+
+// ── Path-based typing for `callApi` ────────────────────────────────────────
+//
+// `openapi-typescript` emits a `paths` interface keyed by the OpenAPI path
+// strings (e.g. `/api/admins/list`). These helpers project that into the
+// `(module, fn)` pair the React hooks have always used, and pull the post
+// operation's request body and 200 response type so consumers can stop
+// hand-writing them.
+
+export type ApiPath = keyof paths & string;
+type ModuleOf<P extends string> = P extends `/api/${infer M}/${string}`
+	? M
+	: never;
+type FnOf<P extends string> = P extends `/api/${string}/${infer F}`
+	? F
+	: never;
+
+export type ApiModule = ModuleOf<ApiPath>;
+export type ApiFn<M extends ApiModule> = {
+	[P in ApiPath]: ModuleOf<P> extends M ? FnOf<P> : never;
+}[ApiPath];
+
+export type ApiPathFor<M extends ApiModule, F extends ApiFn<M>> =
+	`/api/${M}/${F}` extends ApiPath ? `/api/${M}/${F}` : never;
+
+type PostOp<P extends ApiPath> = paths[P]["post"];
+
+export type ApiResponse<M extends ApiModule, F extends ApiFn<M>> =
+	PostOp<ApiPathFor<M, F>> extends {
+		responses: { 200: { content: { "application/json": infer R } } };
+	}
+		? Solidify<R>
+		: void;
+
+export type ApiBody<M extends ApiModule, F extends ApiFn<M>> =
+	PostOp<ApiPathFor<M, F>> extends {
+		requestBody: { content: { "application/json": infer B } };
+	}
+		? Solidify<B>
+		: Record<string, unknown> | undefined;
+
+// utoipa marks `Option<T>` Rust fields as not-required AND nullable, so
+// `openapi-typescript` emits them as `field?: T | null`. But serde's default
+// for `Option<T>` is to always emit the field (as `null` for None), so the
+// optional `?` is wrong at runtime — every field is present. `Solidify` peels
+// that off, making `field: T | null`, which is what the wire shape actually
+// gives us.
+//
+// Tuples need separate handling so `[ShortStatus, ServerInfo]` doesn't collapse
+// into `(ShortStatus | ServerInfo)[]`. `number extends T['length']` is true for
+// regular arrays and false for fixed-length tuples.
+export type Solidify<T> = T extends readonly unknown[]
+	? number extends T["length"]
+		? Solidify<T[number]>[]
+		: { [K in keyof T]: Solidify<Exclude<T[K], undefined>> }
+	: T extends object
+		? { [K in keyof T]-?: Solidify<Exclude<T[K], undefined>> }
+		: T;
+
+// ── Wire types ─────────────────────────────────────────────────────────────
+
+export type ShortStatus = Solidify<Schemas["ShortStatus"]>;
+export type ServerKind = Solidify<Schemas["ServerKind"]>;
+export type ServerRank = Solidify<Schemas["ServerRank"]>;
+export type VersionStatus = Solidify<Schemas["VersionStatus"]>;
+export type DeviceRole = Solidify<Schemas["DeviceRole"]>;
+export type Severity = Solidify<Schemas["Severity"]>;
+export type ResolvedReason = Solidify<Schemas["ResolvedReason"]>;
+
+export type VersionStr = Solidify<Schemas["VersionStr"]>;
+
+export type GeoPoint = Solidify<Schemas["GeoPoint"]>;
+export type FacilityServerStatus = Solidify<Schemas["FacilityServerStatus"]>;
+export type CentralServerCard = Solidify<Schemas["CentralServerCard"]>;
+export type SummaryData = Solidify<Schemas["SummaryData"]>;
+
+export type VersionData = Solidify<Schemas["VersionData"]>;
+export type MinorVersionGroup = Solidify<Schemas["MinorVersionGroup"]>;
+export type RelatedVersionData = Solidify<Schemas["RelatedVersionData"]>;
+export type VersionDetail = Solidify<Schemas["VersionDetail"]>;
+export type ArtifactData = Solidify<Schemas["ArtifactData"]>;
+
+export type ServerInfo = Solidify<Schemas["ServerInfo"]>;
+export type ServerLastStatusData = Solidify<Schemas["ServerLastStatusData"]>;
+export type ServerDetailData = Solidify<Schemas["ServerDetailData"]>;
+
+export type DeviceData = Solidify<Schemas["DeviceData"]>;
+export type DeviceKeyInfo = Solidify<Schemas["DeviceKeyInfo"]>;
+export type DeviceConnectionData = Solidify<Schemas["DeviceConnectionData"]>;
+export type DeviceInfo = Solidify<Schemas["DeviceInfo"]>;
+
+export type IssueData = Solidify<Schemas["IssueData"]>;
+export type EventData = Solidify<Schemas["EventData"]>;
+export type IncidentData = Solidify<Schemas["IncidentData"]>;
+export type IncidentIssueData = Solidify<Schemas["IncidentIssueData"]>;
+export type IncidentWithIssues = Solidify<Schemas["IncidentWithIssues"]>;
+export type IssueNoteData = Solidify<Schemas["IssueNoteData"]>;
+export type IncidentNoteData = Solidify<Schemas["IncidentNoteData"]>;
+
+export type BestoolSnippetInfo = Solidify<Schemas["BestoolSnippetInfo"]>;
+export type BestoolSnippetDetail = Solidify<Schemas["BestoolSnippetDetail"]>;
+
+export type SqlResult = Solidify<Schemas["SqlResult"]>;
+export type SqlHistoryEntry = Solidify<Schemas["SqlHistoryEntry"]>;
+
+// ── Pagination wrapper ─────────────────────────────────────────────────────
+//
+// utoipa emits one schema per concrete `Page<T>` instantiation
+// (`Page_DeviceInfo`, `Page_ServerInfo`, …) — there's no parametric `Page<T>`
+// in the generated file. We keep a hand-written generic here so call sites
+// (mostly state shapes outside `useApi`) can still write `Page<DeviceInfo>`;
+// it's structurally identical to each emitted variant.
 export interface Page<T> {
 	items: T[];
 	total: number;
 }
 
-export type ShortStatus = "up" | "down" | "away" | "blip" | "gone";
+// ── UI-only types ──────────────────────────────────────────────────────────
 
-export type ServerKind = "central" | "facility" | "canopy";
+export type ServerGroupedIds = Partial<Record<ServerRank, string[]>>;
 
-export type ServerRank = "production" | "clone" | "demo" | "test" | "dev";
+// ── UI-only display order / labels ─────────────────────────────────────────
 
 export const SERVER_RANK_ORDER: ServerRank[] = [
 	"production",
@@ -20,177 +140,6 @@ export const SERVER_RANK_ORDER: ServerRank[] = [
 	"test",
 	"dev",
 ];
-
-/** A semver string like "2.10.5". */
-export type VersionStr = string;
-
-export interface FacilityServerStatus {
-	id: string;
-	name: string;
-	up: ShortStatus;
-}
-
-export interface CentralServerCard {
-	id: string;
-	name: string;
-	rank: ServerRank | null;
-	host: string;
-	up: ShortStatus;
-	version: VersionStr | null;
-	version_distance: number | null;
-	facility_servers: FacilityServerStatus[];
-}
-
-export interface SummaryData {
-	bracket: { min: VersionStr; max: VersionStr };
-	releases: Array<[number, number]>;
-	versions: VersionStr[];
-}
-
-export type ServerGroupedIds = Partial<Record<ServerRank, string[]>>;
-
-export type VersionStatus = "draft" | "published" | "yanked";
-
-export interface VersionData {
-	major: number;
-	minor: number;
-	patch: number;
-	status: VersionStatus;
-	created_at: string; // RFC 3339 timestamp
-}
-
-export interface MinorVersionGroup {
-	major: number;
-	minor: number;
-	count: number;
-	latest_patch: number;
-	first_created_at: string;
-	last_created_at: string;
-	versions: VersionData[];
-}
-
-export interface RelatedVersionData {
-	major: number;
-	minor: number;
-	patch: number;
-	changelog: string;
-}
-
-export interface VersionDetail {
-	id: string;
-	major: number;
-	minor: number;
-	patch: number;
-	status: VersionStatus;
-	created_at: string;
-	updated_at: string;
-	changelog: string;
-	min_chrome_version: number | null;
-	is_latest_in_minor: boolean;
-	related_versions: RelatedVersionData[];
-}
-
-export interface ArtifactData {
-	id: string;
-	artifact_type: string;
-	platform: string;
-	download_url: string;
-	is_exact: boolean;
-	version_range_pattern: string | null;
-	has_range_override: boolean;
-	is_used_in_public_api: boolean;
-}
-
-export interface GeoPoint {
-	lat: number;
-	lon: number;
-}
-
-export interface ServerInfoFull {
-	id: string;
-	name: string | null;
-	kind: ServerKind;
-	rank: ServerRank | null;
-	host: string;
-	device_id: string | null;
-	parent_server_id: string | null;
-	parent_server_name: string | null;
-	listed: boolean;
-	cloud: boolean | null;
-	geolocation: GeoPoint | null;
-}
-
-export interface ServerLastStatusData {
-	id: string;
-	created_at: string;
-	version: VersionStr | null;
-	version_distance: number | null;
-	min_chrome_version: number | null;
-	platform: string | null;
-	postgres: string | null;
-	nodejs: string | null;
-	timezone: string | null;
-	extra: Record<string, unknown>;
-}
-
-export type DeviceRole = "untrusted" | "server" | "releaser" | "admin";
-
-export interface DeviceData {
-	id: string;
-	created_at: string;
-	updated_at: string;
-	role: DeviceRole;
-}
-
-export interface DeviceKeyInfo {
-	id: string;
-	device_id: string;
-	name: string | null;
-	pem_data: string;
-	created_at: string;
-}
-
-export interface DeviceConnectionData {
-	id: string;
-	created_at: string;
-	device_id: string;
-	ip: string;
-	user_agent: string | null;
-}
-
-export interface DeviceInfoData {
-	device: DeviceData;
-	keys: DeviceKeyInfo[];
-	latest_connection: DeviceConnectionData | null;
-}
-
-export interface DeviceShortInfo {
-	device: { id: string; role: string };
-	keys: Array<{ id: string; name: string | null }>;
-	latest_connection: {
-		ip: string;
-		user_agent: string | null;
-	} | null;
-}
-
-export interface ServerDetailData {
-	server: ServerInfoFull;
-	device_info: DeviceShortInfo | null;
-	last_status: ServerLastStatusData | null;
-	up: ShortStatus;
-	child_servers: Array<[ShortStatus, ServerInfoFull]>;
-}
-
-/** RFC 5424 syslog severities; enforced server-side. */
-export type Severity =
-	| "emergency"
-	| "alert"
-	| "critical"
-	| "error"
-	| "warning"
-	| "notice"
-	| "info"
-	| "debug";
 
 export const SEVERITIES: Severity[] = [
 	"emergency",
@@ -202,14 +151,6 @@ export const SEVERITIES: Severity[] = [
 	"info",
 	"debug",
 ];
-
-/** Reason a human gave when resolving an issue/incident. */
-export type ResolvedReason =
-	| "fixed"
-	| "wont_fix"
-	| "expected"
-	| "duplicate"
-	| "flapping";
 
 export const RESOLVED_REASONS: ResolvedReason[] = [
 	"fixed",
@@ -226,132 +167,3 @@ export const RESOLVED_REASON_LABEL: Record<ResolvedReason, string> = {
 	duplicate: "Duplicate",
 	flapping: "Flapping",
 };
-
-/** Issue: deduplicated long-lived state of a (server, source, ref) triple. */
-export interface IssueData {
-	id: string;
-	server_id: string;
-	/** Display name of the issue's server (may be null — use `server_host`). */
-	server_name: string | null;
-	server_host: string;
-	device_id: string | null;
-	source: string;
-	ref: string;
-	severity: Severity;
-	description: string | null;
-	message: string;
-	active: boolean;
-	first_seen: string;
-	last_seen: string;
-	acknowledged_at: string | null;
-	acknowledged_by: string | null;
-	acknowledged_by_name: string | null;
-	acknowledged_by_pic: string | null;
-	resolved_at: string | null;
-	resolved_by: string | null;
-	resolved_by_name: string | null;
-	resolved_by_pic: string | null;
-	/** Raw stored value; matches a `ResolvedReason` when set by the API. */
-	resolved_reason: string | null;
-	snoozed_until: string | null;
-	created_at: string;
-	updated_at: string;
-}
-
-/** Event: a single push, with hybrid coalescing on identical content. */
-export interface EventData {
-	id: string;
-	issue_id: string;
-	created_at: string;
-	occurred_at: string | null;
-	severity: Severity;
-	description: string | null;
-	message: string;
-	active: boolean;
-	occurrences: number;
-	last_seen: string;
-}
-
-/** Incident: server-group rollup; closes when no issue is still active. */
-export interface IncidentData {
-	id: string;
-	server_id: string;
-	/** Display name of the root server (may be null — use `server_host`). */
-	server_name: string | null;
-	server_host: string;
-	opened_at: string;
-	closed_at: string | null;
-	acknowledged_at: string | null;
-	acknowledged_by: string | null;
-	acknowledged_by_name: string | null;
-	acknowledged_by_pic: string | null;
-	resolved_at: string | null;
-	resolved_by: string | null;
-	resolved_by_name: string | null;
-	resolved_by_pic: string | null;
-	resolved_reason: string | null;
-	/** Backend-computed stats; may be missing if running against an older API. */
-	issue_count?: number;
-	event_count?: number;
-	/** Combined: incident notes + notes on all contributing issues. */
-	note_count?: number;
-	created_at: string;
-	updated_at: string;
-}
-
-export interface IncidentIssueData {
-	joined_at: string;
-	left_at: string | null;
-	issue: IssueData;
-}
-
-export interface IncidentWithIssues {
-	incident: IncidentData;
-	issues: IncidentIssueData[];
-}
-
-/** Free-text operator note attached to an issue. Immutable once written. */
-export interface IssueNoteData {
-	id: string;
-	issue_id: string;
-	author: string;
-	body: string;
-	created_at: string;
-}
-
-/** Free-text operator note attached to an incident. Immutable once written. */
-export interface IncidentNoteData {
-	id: string;
-	incident_id: string;
-	author: string;
-	body: string;
-	created_at: string;
-}
-
-export interface BestoolSnippetInfo {
-	id: string;
-	name: string;
-	description: string | null;
-}
-
-export interface BestoolSnippetDetail {
-	id: string;
-	name: string;
-	description: string | null;
-	sql: string;
-	editor: string;
-}
-
-export interface SqlResult {
-	columns: string[];
-	rows: unknown[][];
-	row_count: number;
-	execution_time_ms: number;
-}
-
-export interface SqlHistoryEntry {
-	id: string;
-	query: string;
-	tailscale_user: string;
-	created_at: string;
-}

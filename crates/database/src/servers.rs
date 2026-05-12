@@ -10,7 +10,10 @@ use uuid::Uuid;
 
 use super::url_field::UrlField;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable, AsChangeset)]
+#[derive(
+	Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable, AsChangeset,
+	utoipa::ToSchema,
+)]
 #[diesel(table_name = crate::schema::servers)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Server {
@@ -509,7 +512,7 @@ fn test_server_serialization() {
 	);
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct NewServer {
 	pub name: Option<String>,
 	pub host: UrlField,
@@ -535,7 +538,7 @@ impl From<NewServer> for Server {
 	}
 }
 
-#[derive(Debug, Deserialize, AsChangeset)]
+#[derive(Debug, Deserialize, AsChangeset, utoipa::ToSchema)]
 #[diesel(table_name = crate::schema::servers)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct PartialServer {

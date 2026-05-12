@@ -35,7 +35,7 @@ export default function Servers() {
 }
 
 function ServerNameBreadcrumb({ serverId }: { serverId: string }) {
-	const result = useApi<string>(
+	const result = useApi(
 		"servers",
 		"get_name",
 		{ server_id: serverId },

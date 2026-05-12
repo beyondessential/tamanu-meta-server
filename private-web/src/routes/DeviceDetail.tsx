@@ -25,7 +25,7 @@ import { usePageTitle } from "../hooks/usePageTitle";
 import { humanDuration } from "../lib/humanDuration";
 import type {
 	DeviceConnectionData,
-	DeviceInfoData,
+	DeviceInfo,
 	DeviceKeyInfo,
 	DeviceRole,
 } from "../types";
@@ -35,7 +35,7 @@ const TRUSTABLE_ROLES: DeviceRole[] = ["server", "releaser", "admin"];
 export default function DeviceDetail() {
 	const { id = "" } = useParams<{ id: string }>();
 	const [tick, setTick] = useState(0);
-	const detail = useApi<DeviceInfoData>(
+	const detail = useApi(
 		"devices",
 		"get_device_by_id",
 		{ device_id: id },
@@ -59,7 +59,7 @@ function DeviceView({
 	device,
 	refresh,
 }: {
-	device: DeviceInfoData;
+	device: DeviceInfo;
 	refresh: () => void;
 }) {
 	const name = deviceDisplayName(device);
@@ -84,7 +84,7 @@ function DeviceView({
 	);
 }
 
-function DeviceInfoBox({ device }: { device: DeviceInfoData }) {
+function DeviceInfoBox({ device }: { device: DeviceInfo }) {
 	const conn = device.latest_connection;
 	const items: Array<{ label: string; value: React.ReactNode; mono?: boolean }> = [];
 	if (conn) items.push({ label: "Address", value: conn.ip, mono: true });
@@ -135,7 +135,7 @@ function KeysBox({
 	device,
 	refresh,
 }: {
-	device: DeviceInfoData;
+	device: DeviceInfo;
 	refresh: () => void;
 }) {
 	return (
@@ -253,7 +253,7 @@ function RoleControls({
 	device,
 	refresh,
 }: {
-	device: DeviceInfoData;
+	device: DeviceInfo;
 	refresh: () => void;
 }) {
 	const role = device.device.role;
@@ -381,7 +381,7 @@ function RoleControls({
 }
 
 function AssociatedServersSection({ deviceId }: { deviceId: string }) {
-	const result = useApi<ServerShortyInfo[]>(
+	const result = useApi(
 		"devices",
 		"get_servers_for_device",
 		{ device_id: deviceId },
@@ -397,7 +397,7 @@ function AssociatedServersSection({ deviceId }: { deviceId: string }) {
 }
 
 function PastServersSection({ deviceId }: { deviceId: string }) {
-	const result = useApi<ServerShortyInfo[]>(
+	const result = useApi(
 		"devices",
 		"get_past_server_associations",
 		{ device_id: deviceId },
@@ -468,7 +468,7 @@ interface ConnectionGroup {
 
 function ConnectionHistory({ deviceId }: { deviceId: string }) {
 	const [show, setShow] = useState(false);
-	const count = useApi<number>(
+	const count = useApi(
 		"devices",
 		"connection_count",
 		{ device_id: deviceId },
@@ -499,7 +499,7 @@ function ConnectionHistoryDetail({ deviceId }: { deviceId: string }) {
 		setLoading(true);
 		setError(null);
 		try {
-			const batch = await callApi<DeviceConnectionData[]>(
+			const batch = await callApi(
 				"devices",
 				"connection_history",
 				{ device_id: deviceId, limit: HISTORY_BATCH, before },

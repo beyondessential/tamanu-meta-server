@@ -25,7 +25,6 @@ import UserAvatar from "./UserAvatar";
 import {
 	RESOLVED_REASONS,
 	RESOLVED_REASON_LABEL,
-	type EventData,
 	type IssueData,
 	type ResolvedReason,
 } from "../types";
@@ -483,7 +482,7 @@ function IssueActions({
 }
 
 function EventLog({ issueId }: { issueId: string }) {
-	const result = useApi<EventData[]>(
+	const result = useApi(
 		"issues",
 		"list_events",
 		{ issue_id: issueId },

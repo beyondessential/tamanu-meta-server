@@ -1,9 +1,5 @@
-use axum::{
-	Json,
-	extract::State,
-	routing::{Router, delete, get, patch, post},
-};
-use commons_errors::Result;
+use axum::{Json, extract::State};
+use commons_errors::{ProblemDetailsSchema, Result};
 use commons_servers::device_auth::{AdminDevice, ServerDevice};
 use commons_types::server::{kind::ServerKind, rank::ServerRank};
 use database::{
@@ -14,18 +10,16 @@ use database::{
 use diesel::{ExpressionMethods as _, QueryDsl as _, SelectableHelper as _};
 use diesel_async::RunQueryDsl as _;
 use serde::Serialize;
+use utoipa::ToSchema;
+use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::state::AppState;
 
-pub fn routes() -> Router<AppState> {
-	Router::new()
-		.route("/", get(list))
-		.route("/", post(create))
-		.route("/", patch(edit))
-		.route("/", delete(remove))
+pub fn routes() -> OpenApiRouter<AppState> {
+	OpenApiRouter::new().routes(routes!(list, create, edit, remove))
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct PublicServer {
 	pub name: String,
 	pub host: UrlField,
@@ -43,6 +37,15 @@ fn rank_order(rank: &Option<ServerRank>) -> u32 {
 	}
 }
 
+#[utoipa::path(
+	get,
+	path = "/",
+	tag = "servers",
+	responses(
+		(status = 200, description = "Publicly-listed central servers, ordered by rank then name.", body = Vec<PublicServer>),
+		(status = 500, body = ProblemDetailsSchema),
+	),
+)]
 pub async fn list(State(db): State<Db>) -> Result<Json<Vec<PublicServer>>> {
 	let mut db = db.get().await?;
 	let mut servers = Server::list_by_kind(&mut db, ServerKind::Central, 0, None)
@@ -74,6 +77,18 @@ pub async fn list(State(db): State<Db>) -> Result<Json<Vec<PublicServer>>> {
 	Ok(Json(servers.into_iter().map(|(s, _)| s).collect()))
 }
 
+#[utoipa::path(
+	post,
+	path = "/",
+	tag = "servers",
+	security(("server-device" = [])),
+	request_body = NewServer,
+	responses(
+		(status = 200, body = Server),
+		(status = 401, body = ProblemDetailsSchema),
+		(status = 403, body = ProblemDetailsSchema),
+	),
+)]
 pub async fn create(
 	device: ServerDevice,
 	State(db): State<Db>,
@@ -92,6 +107,19 @@ pub async fn create(
 	Ok(Json(server))
 }
 
+#[utoipa::path(
+	patch,
+	path = "/",
+	tag = "servers",
+	security(("server-device" = [])),
+	request_body = PartialServer,
+	responses(
+		(status = 200, body = Server),
+		(status = 401, body = ProblemDetailsSchema),
+		(status = 403, body = ProblemDetailsSchema),
+		(status = 404, body = ProblemDetailsSchema),
+	),
+)]
 pub async fn edit(
 	_device: ServerDevice,
 	State(db): State<Db>,
@@ -117,6 +145,18 @@ pub async fn edit(
 	))
 }
 
+#[utoipa::path(
+	delete,
+	path = "/",
+	tag = "servers",
+	security(("admin-device" = [])),
+	request_body = PartialServer,
+	responses(
+		(status = 200),
+		(status = 401, body = ProblemDetailsSchema),
+		(status = 403, body = ProblemDetailsSchema),
+	),
+)]
 pub async fn remove(
 	_device: AdminDevice,
 	State(db): State<Db>,

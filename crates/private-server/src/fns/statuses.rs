@@ -2,8 +2,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use axum::Json;
 use axum::extract::State;
-use axum::routing::{Router, post};
-use commons_errors::Result;
+use commons_errors::{ProblemDetailsSchema, Result};
 use commons_types::{
 	server::{
 		cards::{CentralServerCard, FacilityServerStatus},
@@ -15,24 +14,28 @@ use commons_types::{
 use database::{servers::Server, statuses::Status, versions::Version};
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
+use utoipa_axum::{router::OpenApiRouter, routes};
 use uuid::Uuid;
 
 use crate::state::AppState;
 
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, ToSchema)]
 pub struct LiveVersionsBracket {
 	pub min: VersionStr,
 	pub max: VersionStr,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct SummaryData {
 	pub bracket: LiveVersionsBracket,
+	#[schema(value_type = Vec<(u64, u64)>)]
 	pub releases: BTreeSet<(u64, u64)>,
+	#[schema(value_type = Vec<VersionStr>)]
 	pub versions: BTreeSet<VersionStr>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ServerDetailsData {
 	pub id: String,
 	pub name: String,
@@ -41,7 +44,7 @@ pub struct ServerDetailsData {
 	pub host: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ServerStatusData {
 	pub up: String,
 	pub updated_at: Option<String>,
@@ -52,13 +55,22 @@ pub struct ServerStatusData {
 	pub timezone: Option<String>,
 }
 
-pub fn routes() -> Router<AppState> {
-	Router::new()
-		.route("/summary", post(summary))
-		.route("/server_grouped_ids", post(server_grouped_ids))
-		.route("/server_details", post(server_details))
+pub fn routes() -> OpenApiRouter<AppState> {
+	OpenApiRouter::new()
+		.routes(routes!(summary))
+		.routes(routes!(server_grouped_ids))
+		.routes(routes!(server_details))
 }
 
+#[utoipa::path(
+	post,
+	path = "/summary",
+	tag = "statuses",
+	responses(
+		(status = 200, body = SummaryData),
+		(status = 500, body = ProblemDetailsSchema),
+	),
+)]
 pub async fn summary(State(state): State<AppState>) -> Result<Json<SummaryData>> {
 	let mut conn = state.db.get().await?;
 
@@ -83,6 +95,15 @@ pub async fn summary(State(state): State<AppState>) -> Result<Json<SummaryData>>
 	}))
 }
 
+#[utoipa::path(
+	post,
+	path = "/server_grouped_ids",
+	tag = "statuses",
+	responses(
+		(status = 200, description = "Central server IDs grouped by rank.", body = BTreeMap<ServerRank, Vec<Uuid>>),
+		(status = 500, body = ProblemDetailsSchema),
+	),
+)]
 pub async fn server_grouped_ids(
 	State(state): State<AppState>,
 ) -> Result<Json<BTreeMap<ServerRank, Vec<Uuid>>>> {
@@ -110,11 +131,22 @@ pub async fn server_grouped_ids(
 	Ok(Json(map))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct ServerDetailsArgs {
 	pub server_id: Uuid,
 }
 
+#[utoipa::path(
+	post,
+	path = "/server_details",
+	tag = "statuses",
+	request_body = ServerDetailsArgs,
+	responses(
+		(status = 200, body = CentralServerCard),
+		(status = 404, body = ProblemDetailsSchema),
+		(status = 500, body = ProblemDetailsSchema),
+	),
+)]
 pub async fn server_details(
 	State(state): State<AppState>,
 	Json(args): Json<ServerDetailsArgs>,

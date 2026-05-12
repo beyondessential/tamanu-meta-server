@@ -6,7 +6,9 @@ use uuid::Uuid;
 
 use crate::versions::Version;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Associations)]
+#[derive(
+	Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Associations, utoipa::ToSchema,
+)]
 #[diesel(belongs_to(Version))]
 #[diesel(table_name = crate::schema::artifacts)]
 #[diesel(check_for_backend(diesel::pg::Pg))]

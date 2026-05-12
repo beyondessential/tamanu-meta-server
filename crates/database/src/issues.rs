@@ -13,7 +13,9 @@ use uuid::Uuid;
 
 use crate::{devices::Device, servers::Server};
 
-#[derive(Clone, Debug, Serialize, Deserialize, Queryable, Selectable, Associations)]
+#[derive(
+	Clone, Debug, Serialize, Deserialize, Queryable, Selectable, Associations, utoipa::ToSchema,
+)]
 #[diesel(belongs_to(Server))]
 #[diesel(belongs_to(Device))]
 #[diesel(table_name = crate::schema::issues)]
@@ -117,7 +119,7 @@ pub struct IncidentIssue {
 /// `ref` is required: clients that don't want dedup can mint a UUID.
 /// `occurred_at` is optional and is the client's "when the thing happened"
 /// timestamp; `created_at` is always server-set to NOW().
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct NewEvent {
 	pub source: String,

@@ -38,6 +38,7 @@ fn main() {
 		return;
 	};
 
+	// The peer-dep opt-in is centralised in private-web/.npmrc.
 	let status = Command::new(&npm)
 		.arg("ci")
 		.current_dir(&frontend)

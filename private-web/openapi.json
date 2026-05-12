@@ -1,0 +1,5099 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "canopy private-server",
+    "description": "Admin/operator API for the canopy fleet manager. Requests are gated behind Tailscale auth; admin-only endpoints additionally check the caller is on the admin list.",
+    "contact": {
+      "name": "BES Developers",
+      "email": "contact@bes.au"
+    },
+    "license": {
+      "name": "GPL-3.0-or-later"
+    },
+    "version": "6.0.2"
+  },
+  "paths": {
+    "/api/admins/add": {
+      "post": {
+        "tags": [
+          "admins"
+        ],
+        "operationId": "add",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Admin added (idempotent)."
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/admins/delete": {
+      "post": {
+        "tags": [
+          "admins"
+        ],
+        "operationId": "delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Admin removed (idempotent)."
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/admins/list": {
+      "post": {
+        "tags": [
+          "admins"
+        ],
+        "operationId": "list",
+        "responses": {
+          "200": {
+            "description": "Admin emails.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/bestool/delete_snippet": {
+      "post": {
+        "tags": [
+          "bestool"
+        ],
+        "operationId": "delete_snippet",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GetArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Snippet soft-deleted."
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/bestool/get_latest_snippet_id": {
+      "post": {
+        "tags": [
+          "bestool"
+        ],
+        "operationId": "get_latest_snippet_id",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GetArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The newest id in the supersedes chain rooted at the given id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/bestool/get_snippet": {
+      "post": {
+        "tags": [
+          "bestool"
+        ],
+        "operationId": "get_snippet",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GetArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BestoolSnippetDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/bestool/list_snippets": {
+      "post": {
+        "tags": [
+          "bestool"
+        ],
+        "operationId": "list_snippets",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_BestoolSnippetInfo"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/bestool/save_snippet": {
+      "post": {
+        "tags": [
+          "bestool"
+        ],
+        "operationId": "save_snippet",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BestoolSnippetDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/commons/is_current_user_admin": {
+      "post": {
+        "tags": [
+          "commons"
+        ],
+        "operationId": "is_current_user_admin",
+        "responses": {
+          "200": {
+            "description": "`true` if the caller's Tailscale identity is on the admin allow-list; `false` otherwise (including when no Tailscale identity is present).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/commons/public_url": {
+      "post": {
+        "tags": [
+          "commons"
+        ],
+        "operationId": "public_url",
+        "responses": {
+          "200": {
+            "description": "Public-server URL, if configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/commons/server_versions_url": {
+      "post": {
+        "tags": [
+          "commons"
+        ],
+        "operationId": "server_versions_url",
+        "responses": {
+          "200": {
+            "description": "Server-versions URL with embedded auth secret, if configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/devices/connection_count": {
+      "post": {
+        "tags": [
+          "devices"
+        ],
+        "operationId": "connection_count",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/devices/connection_history": {
+      "post": {
+        "tags": [
+          "devices"
+        ],
+        "operationId": "connection_history",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectionHistoryArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DeviceConnectionData"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/devices/get_device_by_id": {
+      "post": {
+        "tags": [
+          "devices"
+        ],
+        "operationId": "get_device_by_id",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceInfo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/devices/get_past_server_associations": {
+      "post": {
+        "tags": [
+          "devices"
+        ],
+        "operationId": "get_past_server_associations",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ServerInfo"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/devices/get_servers_for_device": {
+      "post": {
+        "tags": [
+          "devices"
+        ],
+        "operationId": "get_servers_for_device",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ServerInfo"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/devices/list_trusted": {
+      "post": {
+        "tags": [
+          "devices"
+        ],
+        "operationId": "list_trusted",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaginationArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_DeviceInfo"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/devices/list_untrusted": {
+      "post": {
+        "tags": [
+          "devices"
+        ],
+        "operationId": "list_untrusted",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaginationArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_DeviceInfo"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/devices/search": {
+      "post": {
+        "tags": [
+          "devices"
+        ],
+        "operationId": "search",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DeviceInfo"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/devices/trust": {
+      "post": {
+        "tags": [
+          "devices"
+        ],
+        "operationId": "trust",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrustArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/devices/untrust": {
+      "post": {
+        "tags": [
+          "devices"
+        ],
+        "operationId": "untrust",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/devices/update_key_name": {
+      "post": {
+        "tags": [
+          "devices"
+        ],
+        "operationId": "update_key_name",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateKeyNameArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/devices/update_role": {
+      "post": {
+        "tags": [
+          "devices"
+        ],
+        "operationId": "update_role",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrustArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/incidents/ack": {
+      "post": {
+        "tags": [
+          "incidents"
+        ],
+        "operationId": "incident_ack",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IncidentIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentData"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/incidents/add_note": {
+      "post": {
+        "tags": [
+          "incidents"
+        ],
+        "operationId": "incident_add_note",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddNoteArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentNoteData"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/incidents/delete_note": {
+      "post": {
+        "tags": [
+          "incidents"
+        ],
+        "operationId": "incident_delete_note",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteNoteArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/incidents/get": {
+      "post": {
+        "tags": [
+          "incidents"
+        ],
+        "operationId": "get_incident",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GetIncidentArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentWithIssues"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/incidents/list_active": {
+      "post": {
+        "tags": [
+          "incidents"
+        ],
+        "operationId": "list_active",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListActiveArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/IncidentData"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/incidents/list_for_server": {
+      "post": {
+        "tags": [
+          "incidents"
+        ],
+        "operationId": "incident_list_for_server",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListForServerArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/IncidentData"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/incidents/list_notes": {
+      "post": {
+        "tags": [
+          "incidents"
+        ],
+        "operationId": "incident_list_notes",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListNotesArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/IncidentNoteData"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/incidents/resolve": {
+      "post": {
+        "tags": [
+          "incidents"
+        ],
+        "operationId": "incident_resolve",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveIncidentArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentData"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/incidents/unack": {
+      "post": {
+        "tags": [
+          "incidents"
+        ],
+        "operationId": "incident_unack",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IncidentIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentData"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/incidents/unresolve": {
+      "post": {
+        "tags": [
+          "incidents"
+        ],
+        "operationId": "incident_unresolve",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IncidentIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentData"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/issues/ack": {
+      "post": {
+        "tags": [
+          "issues"
+        ],
+        "operationId": "issue_ack",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IssueIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssueData"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/issues/add_note": {
+      "post": {
+        "tags": [
+          "issues"
+        ],
+        "operationId": "issue_add_note",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddNoteArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssueNoteData"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/issues/delete_note": {
+      "post": {
+        "tags": [
+          "issues"
+        ],
+        "operationId": "issue_delete_note",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteNoteArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/issues/list": {
+      "post": {
+        "tags": [
+          "issues"
+        ],
+        "summary": "Cross-server filtered issues list (used by the global Incidents page).",
+        "operationId": "issue_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/IssueData"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/issues/list_events": {
+      "post": {
+        "tags": [
+          "issues"
+        ],
+        "operationId": "list_events",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListEventsArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EventData"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/issues/list_for_device": {
+      "post": {
+        "tags": [
+          "issues"
+        ],
+        "operationId": "list_for_device",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListForDeviceArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/IssueData"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/issues/list_for_server": {
+      "post": {
+        "tags": [
+          "issues"
+        ],
+        "operationId": "issue_list_for_server",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListForServerArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/IssueData"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/issues/list_notes": {
+      "post": {
+        "tags": [
+          "issues"
+        ],
+        "operationId": "issue_list_notes",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListNotesArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/IssueNoteData"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/issues/resolve": {
+      "post": {
+        "tags": [
+          "issues"
+        ],
+        "operationId": "issue_resolve",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssueData"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/issues/snooze": {
+      "post": {
+        "tags": [
+          "issues"
+        ],
+        "operationId": "snooze",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SnoozeArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssueData"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/issues/submit_manual_event": {
+      "post": {
+        "tags": [
+          "issues"
+        ],
+        "operationId": "submit_manual_event",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitManualEventArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssueData"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/issues/unack": {
+      "post": {
+        "tags": [
+          "issues"
+        ],
+        "operationId": "issue_unack",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IssueIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssueData"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/issues/unresolve": {
+      "post": {
+        "tags": [
+          "issues"
+        ],
+        "operationId": "issue_unresolve",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IssueIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssueData"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/issues/unsnooze": {
+      "post": {
+        "tags": [
+          "issues"
+        ],
+        "operationId": "unsnooze",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IssueIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssueData"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/servers/get_detail": {
+      "post": {
+        "tags": [
+          "servers"
+        ],
+        "operationId": "get_detail",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerDetailData"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/servers/get_info": {
+      "post": {
+        "tags": [
+          "servers"
+        ],
+        "operationId": "get_info",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerInfo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/servers/get_name": {
+      "post": {
+        "tags": [
+          "servers"
+        ],
+        "operationId": "get_name",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/servers/import_ticket": {
+      "post": {
+        "tags": [
+          "servers"
+        ],
+        "operationId": "import_ticket",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportTicketArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "New server id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/servers/list_roots": {
+      "post": {
+        "tags": [
+          "servers"
+        ],
+        "summary": "Root servers — those without a parent. Each one heads a server-group\n(the unit incidents roll up to). Used by the Incidents page filter.",
+        "operationId": "list_roots",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ServerInfo"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/servers/list_some": {
+      "post": {
+        "tags": [
+          "servers"
+        ],
+        "operationId": "list_some",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_ServerInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/servers/search_parent": {
+      "post": {
+        "tags": [
+          "servers"
+        ],
+        "operationId": "search_parent",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchParentArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ServerInfo"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/servers/update": {
+      "post": {
+        "tags": [
+          "servers"
+        ],
+        "operationId": "update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/sql/execute_query": {
+      "post": {
+        "tags": [
+          "sql"
+        ],
+        "operationId": "execute_query",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecuteArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SqlResult"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/sql/get_last_user_query": {
+      "post": {
+        "tags": [
+          "sql"
+        ],
+        "operationId": "get_last_user_query",
+        "responses": {
+          "200": {
+            "description": "The caller's most recent SQL playground query, if any.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/sql/get_query_history": {
+      "post": {
+        "tags": [
+          "sql"
+        ],
+        "operationId": "get_query_history",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HistoryArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_SqlHistoryEntry"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sql/is_sql_available": {
+      "post": {
+        "tags": [
+          "sql"
+        ],
+        "operationId": "is_sql_available",
+        "responses": {
+          "200": {
+            "description": "Whether the read-only SQL playground is configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/statuses/server_details": {
+      "post": {
+        "tags": [
+          "statuses"
+        ],
+        "operationId": "server_details",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerDetailsArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CentralServerCard"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/statuses/server_grouped_ids": {
+      "post": {
+        "tags": [
+          "statuses"
+        ],
+        "operationId": "server_grouped_ids",
+        "responses": {
+          "200": {
+            "description": "Central server IDs grouped by rank.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  },
+                  "propertyNames": {
+                    "type": "string",
+                    "enum": [
+                      "production",
+                      "clone",
+                      "demo",
+                      "test",
+                      "dev"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/statuses/summary": {
+      "post": {
+        "tags": [
+          "statuses"
+        ],
+        "operationId": "summary",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SummaryData"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/versions/create_artifact": {
+      "post": {
+        "tags": [
+          "versions"
+        ],
+        "operationId": "create_artifact",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateArtifactArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactData"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/versions/delete_artifact": {
+      "post": {
+        "tags": [
+          "versions"
+        ],
+        "operationId": "delete_artifact",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArtifactIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/versions/get_grouped_versions": {
+      "post": {
+        "tags": [
+          "versions"
+        ],
+        "operationId": "get_grouped_versions",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MinorVersionGroup"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/versions/get_version_artifacts": {
+      "post": {
+        "tags": [
+          "versions"
+        ],
+        "operationId": "get_version_artifacts",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VersionStringArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ArtifactData"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/versions/get_version_detail": {
+      "post": {
+        "tags": [
+          "versions"
+        ],
+        "operationId": "get_version_detail",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VersionStringArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/versions/update_artifact": {
+      "post": {
+        "tags": [
+          "versions"
+        ],
+        "operationId": "update_artifact",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateArtifactArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/versions/update_version_changelog": {
+      "post": {
+        "tags": [
+          "versions"
+        ],
+        "operationId": "update_version_changelog",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateChangelogArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/versions/update_version_status": {
+      "post": {
+        "tags": [
+          "versions"
+        ],
+        "operationId": "update_version_status",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateStatusArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AddArgs": {
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "properties": {
+          "email": {
+            "type": "string"
+          }
+        }
+      },
+      "AddNoteArgs": {
+        "type": "object",
+        "required": [
+          "incident_id",
+          "body"
+        ],
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "incident_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "ArtifactData": {
+        "type": "object",
+        "required": [
+          "id",
+          "artifact_type",
+          "platform",
+          "download_url",
+          "is_exact",
+          "has_range_override",
+          "is_used_in_public_api"
+        ],
+        "properties": {
+          "artifact_type": {
+            "type": "string"
+          },
+          "download_url": {
+            "type": "string"
+          },
+          "has_range_override": {
+            "type": "boolean",
+            "description": "If true, this ranged artifact has an exact-version override (only when is_exact=true)"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "is_exact": {
+            "type": "boolean",
+            "description": "Whether this artifact is for the exact version (true) or via a range pattern (false)"
+          },
+          "is_used_in_public_api": {
+            "type": "boolean",
+            "description": "If true, this is the artifact that will be served to public API clients"
+          },
+          "platform": {
+            "type": "string"
+          },
+          "version_range_pattern": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The version range pattern if this is a ranged artifact, None if exact"
+          }
+        }
+      },
+      "ArtifactIdArgs": {
+        "type": "object",
+        "required": [
+          "artifact_id"
+        ],
+        "properties": {
+          "artifact_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "BestoolSnippetDetail": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "sql",
+          "editor"
+        ],
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "editor": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "sql": {
+            "type": "string"
+          }
+        }
+      },
+      "BestoolSnippetInfo": {
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "CentralServerCard": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "host",
+          "up",
+          "facility_servers"
+        ],
+        "properties": {
+          "facility_servers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FacilityServerStatus"
+            }
+          },
+          "host": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank"
+              }
+            ]
+          },
+          "up": {
+            "$ref": "#/components/schemas/ShortStatus"
+          },
+          "version": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/VersionStr"
+              }
+            ]
+          },
+          "version_distance": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "ConnectionHistoryArgs": {
+        "type": "object",
+        "required": [
+          "device_id"
+        ],
+        "properties": {
+          "before": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/HistoryCursor"
+              }
+            ]
+          },
+          "device_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "CreateArtifactArgs": {
+        "type": "object",
+        "required": [
+          "version_id",
+          "artifact_type",
+          "platform",
+          "download_url"
+        ],
+        "properties": {
+          "artifact_type": {
+            "type": "string"
+          },
+          "download_url": {
+            "type": "string"
+          },
+          "platform": {
+            "type": "string"
+          },
+          "version_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "DeleteArgs": {
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "properties": {
+          "email": {
+            "type": "string"
+          }
+        }
+      },
+      "DeleteNoteArgs": {
+        "type": "object",
+        "required": [
+          "note_id"
+        ],
+        "properties": {
+          "note_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "DeviceConnectionData": {
+        "type": "object",
+        "required": [
+          "id",
+          "created_at",
+          "device_id",
+          "ip"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "device_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ip": {
+            "type": "string"
+          },
+          "user_agent": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "DeviceData": {
+        "type": "object",
+        "required": [
+          "id",
+          "created_at",
+          "updated_at",
+          "role"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "$ref": "#/components/schemas/DeviceRole"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "DeviceIdArgs": {
+        "type": "object",
+        "required": [
+          "device_id"
+        ],
+        "properties": {
+          "device_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "DeviceInfo": {
+        "type": "object",
+        "required": [
+          "device",
+          "keys"
+        ],
+        "properties": {
+          "device": {
+            "$ref": "#/components/schemas/DeviceData"
+          },
+          "keys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeviceKeyInfo"
+            }
+          },
+          "latest_connection": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DeviceConnectionData"
+              }
+            ]
+          }
+        }
+      },
+      "DeviceKeyInfo": {
+        "type": "object",
+        "required": [
+          "id",
+          "device_id",
+          "pem_data",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "device_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pem_data": {
+            "type": "string"
+          }
+        }
+      },
+      "DeviceRole": {
+        "type": "string",
+        "enum": [
+          "untrusted",
+          "admin",
+          "releaser",
+          "server"
+        ]
+      },
+      "EventData": {
+        "type": "object",
+        "required": [
+          "id",
+          "issue_id",
+          "created_at",
+          "severity",
+          "message",
+          "active",
+          "occurrences",
+          "last_seen"
+        ],
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "issue_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "last_seen": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "message": {
+            "type": "string"
+          },
+          "occurred_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "occurrences": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/Severity"
+          }
+        }
+      },
+      "ExecuteArgs": {
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "properties": {
+          "query": {
+            "$ref": "#/components/schemas/SqlQuery"
+          }
+        }
+      },
+      "FacilityServerStatus": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "up"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "up": {
+            "$ref": "#/components/schemas/ShortStatus"
+          }
+        }
+      },
+      "GeoPoint": {
+        "type": "object",
+        "required": [
+          "lat",
+          "lon"
+        ],
+        "properties": {
+          "lat": {
+            "type": "number",
+            "format": "double"
+          },
+          "lon": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "GetArgs": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "GetIncidentArgs": {
+        "type": "object",
+        "required": [
+          "incident_id"
+        ],
+        "properties": {
+          "incident_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "HistoryArgs": {
+        "type": "object",
+        "required": [
+          "offset"
+        ],
+        "properties": {
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "offset": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "HistoryCursor": {
+        "type": "object",
+        "required": [
+          "created_at",
+          "id"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "ImportTicketArgs": {
+        "type": "object",
+        "required": [
+          "ticket_b64",
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/ServerKind"
+          },
+          "rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank"
+              }
+            ]
+          },
+          "ticket_b64": {
+            "type": "string"
+          }
+        }
+      },
+      "IncidentData": {
+        "type": "object",
+        "required": [
+          "id",
+          "server_id",
+          "server_host",
+          "opened_at",
+          "issue_count",
+          "event_count",
+          "note_count",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "acknowledged_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "acknowledged_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "acknowledged_by_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "acknowledged_by_pic": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "closed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "event_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "issue_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "note_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Combined: this incident's notes + notes on all contributing issues."
+          },
+          "opened_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "resolved_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "resolved_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "resolved_by_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "resolved_by_pic": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "resolved_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "server_host": {
+            "type": "string"
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "server_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The root server's name (may be null — fall back to `server_host`)."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "IncidentIdArgs": {
+        "type": "object",
+        "required": [
+          "incident_id"
+        ],
+        "properties": {
+          "incident_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "IncidentIssueData": {
+        "type": "object",
+        "required": [
+          "joined_at",
+          "issue"
+        ],
+        "properties": {
+          "issue": {
+            "$ref": "#/components/schemas/IssueData"
+          },
+          "joined_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "left_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "IncidentNoteData": {
+        "type": "object",
+        "required": [
+          "id",
+          "incident_id",
+          "author",
+          "body",
+          "created_at"
+        ],
+        "properties": {
+          "author": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "incident_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "IncidentWithIssues": {
+        "type": "object",
+        "required": [
+          "incident",
+          "issues"
+        ],
+        "properties": {
+          "incident": {
+            "$ref": "#/components/schemas/IncidentData"
+          },
+          "issues": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IncidentIssueData"
+            }
+          }
+        }
+      },
+      "IssueData": {
+        "type": "object",
+        "required": [
+          "id",
+          "server_id",
+          "server_host",
+          "source",
+          "ref",
+          "severity",
+          "message",
+          "active",
+          "first_seen",
+          "last_seen",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "acknowledged_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "acknowledged_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "acknowledged_by_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Display name of the acker (from the cached Tailscale users table)."
+          },
+          "acknowledged_by_pic": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Profile picture URL of the acker."
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "device_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "first_seen": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "last_seen": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "message": {
+            "type": "string"
+          },
+          "ref": {
+            "type": "string"
+          },
+          "resolved_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "resolved_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "resolved_by_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "resolved_by_pic": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "resolved_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The string stored in the DB; parses to `ResolvedReason` if valid.\nKept as String to round-trip any historical value."
+          },
+          "server_host": {
+            "type": "string"
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "server_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The issue's server name (may be null — fall back to `server_host`)."
+          },
+          "severity": {
+            "$ref": "#/components/schemas/Severity"
+          },
+          "snoozed_until": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "source": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "IssueIdArgs": {
+        "type": "object",
+        "required": [
+          "issue_id"
+        ],
+        "properties": {
+          "issue_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "IssueNoteData": {
+        "type": "object",
+        "required": [
+          "id",
+          "issue_id",
+          "author",
+          "body",
+          "created_at"
+        ],
+        "properties": {
+          "author": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "issue_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "ListActiveArgs": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "ListArgs": {
+        "type": "object",
+        "required": [
+          "offset"
+        ],
+        "properties": {
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "offset": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "ListEventsArgs": {
+        "type": "object",
+        "required": [
+          "issue_id"
+        ],
+        "properties": {
+          "issue_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "ListForDeviceArgs": {
+        "type": "object",
+        "required": [
+          "device_id"
+        ],
+        "properties": {
+          "active_only": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "device_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "ListForServerArgs": {
+        "type": "object",
+        "required": [
+          "server_id"
+        ],
+        "properties": {
+          "include_closed": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "ListNotesArgs": {
+        "type": "object",
+        "required": [
+          "incident_id"
+        ],
+        "properties": {
+          "incident_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "LiveVersionsBracket": {
+        "type": "object",
+        "required": [
+          "min",
+          "max"
+        ],
+        "properties": {
+          "max": {
+            "$ref": "#/components/schemas/VersionStr"
+          },
+          "min": {
+            "$ref": "#/components/schemas/VersionStr"
+          }
+        }
+      },
+      "MinorVersionGroup": {
+        "type": "object",
+        "required": [
+          "major",
+          "minor",
+          "count",
+          "latest_patch",
+          "first_created_at",
+          "last_created_at",
+          "versions"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "first_created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "latest_patch": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "major": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "minor": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "versions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VersionData"
+            }
+          }
+        }
+      },
+      "Page_BestoolSnippetInfo": {
+        "type": "object",
+        "description": "Standard wrapper for paginated list responses. The total reflects the full\nrow count (not just the current page) so the frontend can render page\ncounts without a separate count fetch.",
+        "required": [
+          "items",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "name"
+              ],
+              "properties": {
+                "description": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "Page_DeviceInfo": {
+        "type": "object",
+        "description": "Standard wrapper for paginated list responses. The total reflects the full\nrow count (not just the current page) so the frontend can render page\ncounts without a separate count fetch.",
+        "required": [
+          "items",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "device",
+                "keys"
+              ],
+              "properties": {
+                "device": {
+                  "$ref": "#/components/schemas/DeviceData"
+                },
+                "keys": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DeviceKeyInfo"
+                  }
+                },
+                "latest_connection": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DeviceConnectionData"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "Page_ServerInfo": {
+        "type": "object",
+        "description": "Standard wrapper for paginated list responses. The total reflects the full\nrow count (not just the current page) so the frontend can render page\ncounts without a separate count fetch.",
+        "required": [
+          "items",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "kind",
+                "host",
+                "listed"
+              ],
+              "properties": {
+                "cloud": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "device_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid"
+                },
+                "geolocation": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/GeoPoint"
+                    }
+                  ]
+                },
+                "host": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "kind": {
+                  "$ref": "#/components/schemas/ServerKind"
+                },
+                "listed": {
+                  "type": "boolean"
+                },
+                "name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "parent_server_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid"
+                },
+                "parent_server_name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "rank": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ServerRank"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "Page_SqlHistoryEntry": {
+        "type": "object",
+        "description": "Standard wrapper for paginated list responses. The total reflects the full\nrow count (not just the current page) so the frontend can render page\ncounts without a separate count fetch.",
+        "required": [
+          "items",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "query",
+                "tailscale_user",
+                "created_at"
+              ],
+              "properties": {
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "query": {
+                  "type": "string"
+                },
+                "tailscale_user": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "PaginationArgs": {
+        "type": "object",
+        "required": [
+          "offset"
+        ],
+        "properties": {
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "offset": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "ProblemDetailsSchema": {
+        "type": "object",
+        "description": "Wire-shape mirror of [`problem_details::ProblemDetails`] for OpenAPI.\n\nEvery error response from the servers serializes to this RFC 7807 shape via\n[`AppError`]'s `IntoResponse`. This struct exists so OpenAPI specs can\nreference a concrete schema; nothing actually constructs values of this\ntype at runtime.",
+        "required": [
+          "type",
+          "title",
+          "status"
+        ],
+        "properties": {
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Human-readable explanation specific to this occurrence."
+          },
+          "status": {
+            "type": "integer",
+            "format": "int32",
+            "description": "HTTP status code generated by the origin server.",
+            "example": 404,
+            "minimum": 0
+          },
+          "title": {
+            "type": "string",
+            "description": "Short human-readable summary of the problem."
+          },
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "description": "A URI reference identifying the problem type.",
+            "example": "/errors/resource-not-found"
+          }
+        }
+      },
+      "RelatedVersionData": {
+        "type": "object",
+        "required": [
+          "major",
+          "minor",
+          "patch",
+          "changelog"
+        ],
+        "properties": {
+          "changelog": {
+            "type": "string"
+          },
+          "major": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "minor": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "patch": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "ResolveArgs": {
+        "type": "object",
+        "required": [
+          "issue_id",
+          "reason"
+        ],
+        "properties": {
+          "issue_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/ResolvedReason"
+          }
+        }
+      },
+      "ResolveIncidentArgs": {
+        "type": "object",
+        "required": [
+          "incident_id",
+          "reason"
+        ],
+        "properties": {
+          "incident_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/ResolvedReason"
+          }
+        }
+      },
+      "ResolvedReason": {
+        "type": "string",
+        "description": "Reason an issue or incident was resolved by a human.\n\nStored as text in Postgres, validated as this enum at the API layer.\nCategories follow common operational practice (PagerDuty/Sentry/Opsgenie):\n\n- `Fixed` — the underlying problem was addressed.\n- `WontFix` — won't fix; not worth doing, or not actually a problem.\n- `Expected` — known/expected behaviour (e.g. planned maintenance window).\n- `Duplicate` — a duplicate of another issue.\n- `Flapping` — too noisy; suppressed rather than fixed (often paired with\n  a snooze).",
+        "enum": [
+          "fixed",
+          "wont_fix",
+          "expected",
+          "duplicate",
+          "flapping"
+        ]
+      },
+      "SaveArgs": {
+        "type": "object",
+        "required": [
+          "name",
+          "sql"
+        ],
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "sql": {
+            "type": "string"
+          },
+          "supersedes": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "When set, the saved snippet supersedes the snippet with this id (i.e.\nit's an edit). When absent, a fresh snippet is created."
+          }
+        }
+      },
+      "SearchArgs": {
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "properties": {
+          "query": {
+            "type": "string"
+          }
+        }
+      },
+      "SearchParentArgs": {
+        "type": "object",
+        "required": [
+          "query",
+          "current_server_id",
+          "current_kind"
+        ],
+        "properties": {
+          "current_kind": {
+            "$ref": "#/components/schemas/ServerKind"
+          },
+          "current_rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank"
+              }
+            ]
+          },
+          "current_server_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "query": {
+            "type": "string"
+          }
+        }
+      },
+      "ServerDataUpdate": {
+        "type": "object",
+        "properties": {
+          "cloud": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "device_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "geolocation": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/GeoPoint"
+              }
+            ]
+          },
+          "host": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerKind"
+              }
+            ]
+          },
+          "listed": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "parent_server_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank"
+              }
+            ]
+          }
+        }
+      },
+      "ServerDetailData": {
+        "type": "object",
+        "required": [
+          "server",
+          "up",
+          "child_servers"
+        ],
+        "properties": {
+          "child_servers": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": false,
+              "prefixItems": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "up",
+                    "down",
+                    "away",
+                    "blip",
+                    "gone"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "kind",
+                    "host",
+                    "listed"
+                  ],
+                  "properties": {
+                    "cloud": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "device_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "uuid"
+                    },
+                    "geolocation": {
+                      "oneOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "$ref": "#/components/schemas/GeoPoint"
+                        }
+                      ]
+                    },
+                    "host": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "kind": {
+                      "$ref": "#/components/schemas/ServerKind"
+                    },
+                    "listed": {
+                      "type": "boolean"
+                    },
+                    "name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "parent_server_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "uuid"
+                    },
+                    "parent_server_name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "rank": {
+                      "oneOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "$ref": "#/components/schemas/ServerRank"
+                        }
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "device_info": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DeviceInfo"
+              }
+            ]
+          },
+          "last_status": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerLastStatusData"
+              }
+            ]
+          },
+          "server": {
+            "$ref": "#/components/schemas/ServerInfo"
+          },
+          "up": {
+            "$ref": "#/components/schemas/ShortStatus"
+          }
+        }
+      },
+      "ServerDetailsArgs": {
+        "type": "object",
+        "required": [
+          "server_id"
+        ],
+        "properties": {
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "ServerIdArgs": {
+        "type": "object",
+        "required": [
+          "server_id"
+        ],
+        "properties": {
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "ServerInfo": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "host",
+          "listed"
+        ],
+        "properties": {
+          "cloud": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "device_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "geolocation": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/GeoPoint"
+              }
+            ]
+          },
+          "host": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ServerKind"
+          },
+          "listed": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "parent_server_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "parent_server_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank"
+              }
+            ]
+          }
+        }
+      },
+      "ServerKind": {
+        "type": "string",
+        "enum": [
+          "central",
+          "facility",
+          "canopy"
+        ]
+      },
+      "ServerLastStatusData": {
+        "type": "object",
+        "required": [
+          "id",
+          "created_at",
+          "extra"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "extra": {
+            "$ref": "#/components/schemas/Value"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "min_chrome_version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "nodejs": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "platform": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "postgres": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "timezone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "version": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/VersionStr"
+              }
+            ]
+          },
+          "version_distance": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "ServerRank": {
+        "type": "string",
+        "enum": [
+          "production",
+          "clone",
+          "demo",
+          "test",
+          "dev"
+        ]
+      },
+      "Severity": {
+        "type": "string",
+        "description": "RFC 5424 syslog severities.\n\nStored as text in Postgres; validated as this enum at the API layer.\nDefault is `Error` (incidents only open at severity ≥ Error, so the\ndefault is intentionally above the floor — most devices that bother\npushing an event mean it).",
+        "enum": [
+          "emergency",
+          "alert",
+          "critical",
+          "error",
+          "warning",
+          "notice",
+          "info",
+          "debug"
+        ]
+      },
+      "ShortStatus": {
+        "type": "string",
+        "enum": [
+          "up",
+          "down",
+          "away",
+          "blip",
+          "gone"
+        ]
+      },
+      "SnoozeArgs": {
+        "type": "object",
+        "required": [
+          "issue_id",
+          "until"
+        ],
+        "properties": {
+          "issue_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "until": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SqlHistoryEntry": {
+        "type": "object",
+        "required": [
+          "id",
+          "query",
+          "tailscale_user",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "query": {
+            "type": "string"
+          },
+          "tailscale_user": {
+            "type": "string"
+          }
+        }
+      },
+      "SqlQuery": {
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "properties": {
+          "query": {
+            "type": "string"
+          }
+        }
+      },
+      "SqlResult": {
+        "type": "object",
+        "required": [
+          "columns",
+          "rows",
+          "row_count",
+          "execution_time_ms"
+        ],
+        "properties": {
+          "columns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "execution_time_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "row_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {}
+            }
+          }
+        }
+      },
+      "SubmitManualEventArgs": {
+        "type": "object",
+        "required": [
+          "serverId",
+          "ref",
+          "message"
+        ],
+        "properties": {
+          "active": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "occurredAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "ref": {
+            "type": "string"
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "severity": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Severity"
+              }
+            ]
+          }
+        }
+      },
+      "SummaryData": {
+        "type": "object",
+        "required": [
+          "bracket",
+          "releases",
+          "versions"
+        ],
+        "properties": {
+          "bracket": {
+            "$ref": "#/components/schemas/LiveVersionsBracket"
+          },
+          "releases": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": false,
+              "prefixItems": [
+                {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                }
+              ]
+            }
+          },
+          "versions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VersionStr"
+            }
+          }
+        }
+      },
+      "TrustArgs": {
+        "type": "object",
+        "required": [
+          "device_id",
+          "role"
+        ],
+        "properties": {
+          "device_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "$ref": "#/components/schemas/DeviceRole"
+          }
+        }
+      },
+      "UpdateArgs": {
+        "type": "object",
+        "required": [
+          "server_id",
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ServerDataUpdate"
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "UpdateArtifactArgs": {
+        "type": "object",
+        "required": [
+          "artifact_id",
+          "artifact_type",
+          "platform",
+          "download_url"
+        ],
+        "properties": {
+          "artifact_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "artifact_type": {
+            "type": "string"
+          },
+          "download_url": {
+            "type": "string"
+          },
+          "platform": {
+            "type": "string"
+          }
+        }
+      },
+      "UpdateChangelogArgs": {
+        "type": "object",
+        "required": [
+          "version",
+          "changelog"
+        ],
+        "properties": {
+          "changelog": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      },
+      "UpdateKeyNameArgs": {
+        "type": "object",
+        "required": [
+          "key_id"
+        ],
+        "properties": {
+          "key_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "UpdateStatusArgs": {
+        "type": "object",
+        "required": [
+          "version",
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      },
+      "Value": {},
+      "VersionData": {
+        "type": "object",
+        "required": [
+          "major",
+          "minor",
+          "patch",
+          "status",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "major": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "minor": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "patch": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "status": {
+            "$ref": "#/components/schemas/VersionStatus"
+          }
+        }
+      },
+      "VersionDetail": {
+        "type": "object",
+        "required": [
+          "id",
+          "major",
+          "minor",
+          "patch",
+          "status",
+          "created_at",
+          "updated_at",
+          "changelog",
+          "is_latest_in_minor",
+          "related_versions"
+        ],
+        "properties": {
+          "changelog": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "is_latest_in_minor": {
+            "type": "boolean"
+          },
+          "major": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "min_chrome_version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "minor": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "patch": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "related_versions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RelatedVersionData"
+            }
+          },
+          "status": {
+            "$ref": "#/components/schemas/VersionStatus"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "VersionStatus": {
+        "type": "string",
+        "enum": [
+          "draft",
+          "published",
+          "yanked"
+        ]
+      },
+      "VersionStr": {
+        "type": "string",
+        "example": "2.10.5"
+      },
+      "VersionStringArgs": {
+        "type": "object",
+        "required": [
+          "version"
+        ],
+        "properties": {
+          "version": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "tailscale-admin": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "Tailscale-User-Login",
+        "description": "Identity header injected by the Tailscale sidecar. The login value must also be present on the admins allow-list."
+      },
+      "tailscale-user": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "Tailscale-User-Login",
+        "description": "Identity header injected by the Tailscale sidecar. Required for any caller-identifying endpoint."
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "admins",
+      "description": "Admin email allow-list management."
+    },
+    {
+      "name": "bestool",
+      "description": "Bestool SQL snippet library."
+    },
+    {
+      "name": "commons",
+      "description": "Shared configuration and identity helpers."
+    },
+    {
+      "name": "devices",
+      "description": "Device registry, trust, and key management."
+    },
+    {
+      "name": "incidents",
+      "description": "Operational incidents (groups of issues against a server)."
+    },
+    {
+      "name": "issues",
+      "description": "Per-server issues raised from device events."
+    },
+    {
+      "name": "servers",
+      "description": "Server inventory, hierarchy, and metadata."
+    },
+    {
+      "name": "sql",
+      "description": "Read-only SQL playground."
+    },
+    {
+      "name": "statuses",
+      "description": "Live server status and version-distance summaries."
+    },
+    {
+      "name": "versions",
+      "description": "Canopy release versions and downloadable artifacts."
+    }
+  ]
+}

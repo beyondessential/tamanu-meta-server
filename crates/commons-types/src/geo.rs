@@ -7,7 +7,9 @@ use diesel::{
 };
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, AsExpression)]
+#[derive(
+	Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, AsExpression, utoipa::ToSchema,
+)]
 #[diesel(sql_type = Array<Nullable<Float8>>)]
 pub struct GeoPoint {
 	pub lat: f64,

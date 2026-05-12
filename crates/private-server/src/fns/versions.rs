@@ -3,18 +3,19 @@ use std::str::FromStr;
 
 use axum::Json;
 use axum::extract::State;
-use axum::routing::{Router, post};
-use commons_errors::{AppError, Result};
+use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
 use commons_types::version::{VersionStatus, VersionStr};
 use database::{artifacts::Artifact, versions::Version};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
+use utoipa_axum::{router::OpenApiRouter, routes};
 use uuid::Uuid;
 
 use crate::state::AppState;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct VersionData {
 	pub major: i32,
 	pub minor: i32,
@@ -23,7 +24,7 @@ pub struct VersionData {
 	pub created_at: Timestamp,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct MinorVersionGroup {
 	pub major: i32,
 	pub minor: i32,
@@ -34,7 +35,7 @@ pub struct MinorVersionGroup {
 	pub versions: Vec<VersionData>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct VersionDetail {
 	pub id: Uuid,
 	pub major: i32,
@@ -49,7 +50,7 @@ pub struct VersionDetail {
 	pub related_versions: Vec<RelatedVersionData>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct RelatedVersionData {
 	pub major: i32,
 	pub minor: i32,
@@ -57,7 +58,7 @@ pub struct RelatedVersionData {
 	pub changelog: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ArtifactData {
 	pub id: Uuid,
 	pub artifact_type: String,
@@ -73,18 +74,27 @@ pub struct ArtifactData {
 	pub is_used_in_public_api: bool,
 }
 
-pub fn routes() -> Router<AppState> {
-	Router::new()
-		.route("/get_grouped_versions", post(get_grouped_versions))
-		.route("/get_version_detail", post(get_version_detail))
-		.route("/get_version_artifacts", post(get_version_artifacts))
-		.route("/update_version_status", post(update_version_status))
-		.route("/update_version_changelog", post(update_version_changelog))
-		.route("/update_artifact", post(update_artifact))
-		.route("/create_artifact", post(create_artifact))
-		.route("/delete_artifact", post(delete_artifact))
+pub fn routes() -> OpenApiRouter<AppState> {
+	OpenApiRouter::new()
+		.routes(routes!(get_grouped_versions))
+		.routes(routes!(get_version_detail))
+		.routes(routes!(get_version_artifacts))
+		.routes(routes!(update_version_status))
+		.routes(routes!(update_version_changelog))
+		.routes(routes!(update_artifact))
+		.routes(routes!(create_artifact))
+		.routes(routes!(delete_artifact))
 }
 
+#[utoipa::path(
+	post,
+	path = "/get_grouped_versions",
+	tag = "versions",
+	responses(
+		(status = 200, body = Vec<MinorVersionGroup>),
+		(status = 500, body = ProblemDetailsSchema),
+	),
+)]
 pub async fn get_grouped_versions(
 	State(state): State<AppState>,
 ) -> Result<Json<Vec<MinorVersionGroup>>> {
@@ -155,11 +165,21 @@ pub async fn get_grouped_versions(
 	Ok(Json(result))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct VersionStringArgs {
 	pub version: String,
 }
 
+#[utoipa::path(
+	post,
+	path = "/get_version_detail",
+	tag = "versions",
+	request_body = VersionStringArgs,
+	responses(
+		(status = 200, body = VersionDetail),
+		(status = 404, body = ProblemDetailsSchema),
+	),
+)]
 pub async fn get_version_detail(
 	State(state): State<AppState>,
 	Json(args): Json<VersionStringArgs>,
@@ -213,6 +233,16 @@ pub async fn get_version_detail(
 	}))
 }
 
+#[utoipa::path(
+	post,
+	path = "/get_version_artifacts",
+	tag = "versions",
+	request_body = VersionStringArgs,
+	responses(
+		(status = 200, body = Vec<ArtifactData>),
+		(status = 404, body = ProblemDetailsSchema),
+	),
+)]
 pub async fn get_version_artifacts(
 	State(state): State<AppState>,
 	Json(args): Json<VersionStringArgs>,
@@ -241,15 +271,26 @@ pub async fn get_version_artifacts(
 	))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct UpdateStatusArgs {
 	pub version: String,
 	pub status: String,
 }
 
+#[utoipa::path(
+	post,
+	path = "/update_version_status",
+	tag = "versions",
+	security(("tailscale-admin" = [])),
+	request_body = UpdateStatusArgs,
+	responses(
+		(status = 200),
+		(status = 400, body = ProblemDetailsSchema),
+	),
+)]
 pub async fn update_version_status(
 	State(state): State<AppState>,
-	TailscaleAdmin(_): TailscaleAdmin,
+	_admin: TailscaleAdmin,
 	Json(args): Json<UpdateStatusArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
@@ -270,15 +311,25 @@ pub async fn update_version_status(
 	Ok(Json(()))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct UpdateChangelogArgs {
 	pub version: String,
 	pub changelog: String,
 }
 
+#[utoipa::path(
+	post,
+	path = "/update_version_changelog",
+	tag = "versions",
+	security(("tailscale-admin" = [])),
+	request_body = UpdateChangelogArgs,
+	responses(
+		(status = 200),
+	),
+)]
 pub async fn update_version_changelog(
 	State(state): State<AppState>,
-	TailscaleAdmin(_): TailscaleAdmin,
+	_admin: TailscaleAdmin,
 	Json(args): Json<UpdateChangelogArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
@@ -287,7 +338,7 @@ pub async fn update_version_changelog(
 	Ok(Json(()))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct UpdateArtifactArgs {
 	pub artifact_id: Uuid,
 	pub artifact_type: String,
@@ -295,9 +346,19 @@ pub struct UpdateArtifactArgs {
 	pub download_url: String,
 }
 
+#[utoipa::path(
+	post,
+	path = "/update_artifact",
+	tag = "versions",
+	security(("tailscale-admin" = [])),
+	request_body = UpdateArtifactArgs,
+	responses(
+		(status = 200),
+	),
+)]
 pub async fn update_artifact(
 	State(state): State<AppState>,
-	TailscaleAdmin(_): TailscaleAdmin,
+	_admin: TailscaleAdmin,
 	Json(args): Json<UpdateArtifactArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
@@ -312,7 +373,7 @@ pub async fn update_artifact(
 	Ok(Json(()))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct CreateArtifactArgs {
 	pub version_id: Uuid,
 	pub artifact_type: String,
@@ -320,9 +381,19 @@ pub struct CreateArtifactArgs {
 	pub download_url: String,
 }
 
+#[utoipa::path(
+	post,
+	path = "/create_artifact",
+	tag = "versions",
+	security(("tailscale-admin" = [])),
+	request_body = CreateArtifactArgs,
+	responses(
+		(status = 200, body = ArtifactData),
+	),
+)]
 pub async fn create_artifact(
 	State(state): State<AppState>,
-	TailscaleAdmin(_): TailscaleAdmin,
+	_admin: TailscaleAdmin,
 	Json(args): Json<CreateArtifactArgs>,
 ) -> Result<Json<ArtifactData>> {
 	let mut conn = state.db.get().await?;
@@ -346,14 +417,24 @@ pub async fn create_artifact(
 	}))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct ArtifactIdArgs {
 	pub artifact_id: Uuid,
 }
 
+#[utoipa::path(
+	post,
+	path = "/delete_artifact",
+	tag = "versions",
+	security(("tailscale-admin" = [])),
+	request_body = ArtifactIdArgs,
+	responses(
+		(status = 200),
+	),
+)]
 pub async fn delete_artifact(
 	State(state): State<AppState>,
-	TailscaleAdmin(_): TailscaleAdmin,
+	_admin: TailscaleAdmin,
 	Json(args): Json<ArtifactIdArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;

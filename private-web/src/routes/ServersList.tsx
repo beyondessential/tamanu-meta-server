@@ -6,12 +6,10 @@ import {
 	Stack,
 } from "@mui/material";
 import { useState } from "react";
-import ServerShorty, {
-	type ServerInfo,
-} from "../components/ServerShorty";
+import ServerShorty from "../components/ServerShorty";
 import { useApi } from "../api";
 import { usePageTitle } from "../hooks/usePageTitle";
-import type { Page, ServerKind } from "../types";
+import type { ServerKind } from "../types";
 
 const PAGE_SIZE = 10;
 
@@ -19,7 +17,7 @@ export default function ServersList({ kind }: { kind: ServerKind }) {
 	usePageTitle(kind === "central" ? "Central servers" : "Facility servers");
 	const [page, setPage] = useState(0);
 
-	const result = useApi<Page<ServerInfo>>(
+	const result = useApi(
 		"servers",
 		"list_some",
 		{ kind, offset: page * PAGE_SIZE, limit: PAGE_SIZE },

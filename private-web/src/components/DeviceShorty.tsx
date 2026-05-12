@@ -1,6 +1,6 @@
 import { Box, Chip, Link as MuiLink, Stack } from "@mui/material";
 import { Link as RouterLink } from "react-router-dom";
-import type { DeviceInfoData, DeviceRole } from "../types";
+import type { DeviceInfo, DeviceRole } from "../types";
 
 const ROLE_COLORS: Record<
 	DeviceRole,
@@ -12,7 +12,7 @@ const ROLE_COLORS: Record<
 	admin: "info",
 };
 
-export function deviceDisplayName(info: DeviceInfoData): string {
+export function deviceDisplayName(info: DeviceInfo): string {
 	const namedKey = info.keys.findLast(
 		(k) => k.name && k.name !== "Initial Key",
 	);
@@ -21,7 +21,7 @@ export function deviceDisplayName(info: DeviceInfoData): string {
 	return info.device.id;
 }
 
-export default function DeviceShorty({ device }: { device: DeviceInfoData }) {
+export default function DeviceShorty({ device }: { device: DeviceInfo }) {
 	const name = deviceDisplayName(device);
 	return (
 		<MuiLink

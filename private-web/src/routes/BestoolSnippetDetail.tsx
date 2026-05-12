@@ -22,7 +22,7 @@ import type { BestoolSnippetDetail as Detail } from "../types";
 export default function BestoolSnippetDetail() {
 	const { id = "" } = useParams<{ id: string }>();
 	const navigate = useNavigate();
-	const detail = useApi<Detail>(
+	const detail = useApi(
 		"bestool",
 		"get_snippet",
 		{ id },
@@ -36,7 +36,7 @@ export default function BestoolSnippetDetail() {
 		const currentId = detail.data.id;
 		(async () => {
 			try {
-				const latest = await callApi<string>("bestool", "get_latest_snippet_id", {
+				const latest = await callApi("bestool", "get_latest_snippet_id", {
 					id: currentId,
 				});
 				if (latest !== currentId) {
@@ -59,7 +59,7 @@ function View({ detail }: { detail: Detail }) {
 	const [editing, setEditing] = useState(false);
 	const [confirmDelete, setConfirmDelete] = useState(false);
 	const navigate = useNavigate();
-	const updateAction = useApiAction<Detail>("bestool", "save_snippet");
+	const updateAction = useApiAction("bestool", "save_snippet");
 	const deleteAction = useApiAction("bestool", "delete_snippet");
 
 	const [name, setName] = useState(detail.name);

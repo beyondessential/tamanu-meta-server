@@ -18,7 +18,7 @@ import type { MinorVersionGroup } from "../types";
 
 export default function Versions() {
 	usePageTitle("Versions");
-	const result = useApi<MinorVersionGroup[]>("versions", "get_grouped_versions");
+	const result = useApi("versions", "get_grouped_versions");
 
 	return (
 		<Stack spacing={3}>

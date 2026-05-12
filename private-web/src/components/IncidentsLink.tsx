@@ -3,7 +3,6 @@ import OpenInNewIcon from "@mui/icons-material/OpenInNew";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi } from "../api";
-import type { IncidentData, IssueData } from "../types";
 
 /** Server-detail header button into the incidents view. Any server id in
  * a group works — the backend resolves to the group root. Three states:
@@ -17,7 +16,7 @@ export default function IncidentsLink({
 	serverId: string;
 	refreshKey?: number;
 }) {
-	const incidents = useApi<IncidentData[]>(
+	const incidents = useApi(
 		"incidents",
 		"list_for_server",
 		{ server_id: serverId, include_closed: false },
@@ -28,7 +27,7 @@ export default function IncidentsLink({
 			? incidents.data[0]
 			: null;
 
-	const issues = useApi<IssueData[]>(
+	const issues = useApi(
 		"issues",
 		"list",
 		{ activeOnly: true, serverGroupId: serverId, limit: 1 },

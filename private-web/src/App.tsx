@@ -22,7 +22,6 @@ import DevicesSearch from "./routes/DevicesSearch";
 import IncidentDetail from "./routes/IncidentDetail";
 import Incidents from "./routes/Incidents";
 import Status from "./routes/Status";
-import type { IncidentData } from "./types";
 import ServerDetail from "./routes/ServerDetail";
 import ServerEdit from "./routes/ServerEdit";
 import Servers from "./routes/Servers";
@@ -47,14 +46,14 @@ const BASE_NAV: NavItem[] = [
 ];
 
 export default function App() {
-	const sqlAvailable = useApi<boolean>("sql", "is_sql_available");
-	const publicUrl = useApi<string | null>("commons", "public_url");
-	const serverVersionsUrl = useApi<string | null>("commons", "server_versions_url");
+	const sqlAvailable = useApi("sql", "is_sql_available");
+	const publicUrl = useApi("commons", "public_url");
+	const serverVersionsUrl = useApi("commons", "server_versions_url");
 	// Polled at a slow cadence; mutations also fire `canopy-data-changed`
 	// (via useApiAction), so the badge updates immediately after the user
 	// acks / resolves / opens an incident on any page.
 	const reloadTick = useReloadInterval(60_000, "canopy-data-changed");
-	const openIncidents = useApi<IncidentData[]>(
+	const openIncidents = useApi(
 		"incidents",
 		"list_active",
 		{},

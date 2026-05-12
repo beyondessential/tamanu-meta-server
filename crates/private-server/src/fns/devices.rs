@@ -2,20 +2,21 @@ use std::collections::HashMap;
 
 use axum::Json;
 use axum::extract::State;
-use axum::routing::{Router, post};
-use commons_errors::{AppError, Result};
+use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
 use commons_types::{Uuid, device::DeviceRole};
 use database::devices::{Device, DeviceConnection, DeviceKey, DeviceWithInfo};
 use database::servers::Server;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
+use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::fns::Page;
 use crate::fns::servers::ServerInfo;
 use crate::state::AppState;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct DeviceInfo {
 	pub device: DeviceData,
 	pub keys: Vec<DeviceKeyInfo>,
@@ -42,7 +43,7 @@ impl DeviceInfo {
 	}
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct DeviceData {
 	pub id: Uuid,
 	pub created_at: Timestamp,
@@ -50,7 +51,7 @@ pub struct DeviceData {
 	pub role: DeviceRole,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct DeviceKeyInfo {
 	pub id: Uuid,
 	pub device_id: Uuid,
@@ -59,7 +60,7 @@ pub struct DeviceKeyInfo {
 	pub created_at: Timestamp,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct DeviceConnectionData {
 	pub id: Uuid,
 	pub created_at: Timestamp,
@@ -136,33 +137,41 @@ fn server_to_info(s: database::servers::Server) -> ServerInfo {
 	}
 }
 
-pub fn routes() -> Router<AppState> {
-	Router::new()
-		.route("/get_device_by_id", post(get_device_by_id))
-		.route("/list_untrusted", post(list_untrusted))
-		.route("/get_servers_for_device", post(get_servers_for_device))
-		.route(
-			"/get_past_server_associations",
-			post(get_past_server_associations),
-		)
-		.route("/connection_history", post(connection_history))
-		.route("/connection_count", post(connection_count))
-		.route("/trust", post(trust))
-		.route("/list_trusted", post(list_trusted))
-		.route("/untrust", post(untrust))
-		.route("/update_role", post(update_role))
-		.route("/search", post(search))
-		.route("/update_key_name", post(update_key_name))
+pub fn routes() -> OpenApiRouter<AppState> {
+	OpenApiRouter::new()
+		.routes(routes!(get_device_by_id))
+		.routes(routes!(list_untrusted))
+		.routes(routes!(get_servers_for_device))
+		.routes(routes!(get_past_server_associations))
+		.routes(routes!(connection_history))
+		.routes(routes!(connection_count))
+		.routes(routes!(trust))
+		.routes(routes!(list_trusted))
+		.routes(routes!(untrust))
+		.routes(routes!(update_role))
+		.routes(routes!(search))
+		.routes(routes!(update_key_name))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct DeviceIdArgs {
 	pub device_id: Uuid,
 }
 
+#[utoipa::path(
+	post,
+	path = "/get_device_by_id",
+	tag = "devices",
+	security(("tailscale-admin" = [])),
+	request_body = DeviceIdArgs,
+	responses(
+		(status = 200, body = DeviceInfo),
+		(status = 404, body = ProblemDetailsSchema),
+	),
+)]
 pub async fn get_device_by_id(
 	State(state): State<AppState>,
-	TailscaleAdmin(_): TailscaleAdmin,
+	_admin: TailscaleAdmin,
 	Json(args): Json<DeviceIdArgs>,
 ) -> Result<Json<DeviceInfo>> {
 	let mut conn = state.db.get().await?;
@@ -170,15 +179,25 @@ pub async fn get_device_by_id(
 	Ok(Json(DeviceInfo::from(device_with_info)))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct PaginationArgs {
 	pub offset: u64,
 	pub limit: Option<u64>,
 }
 
+#[utoipa::path(
+	post,
+	path = "/list_untrusted",
+	tag = "devices",
+	security(("tailscale-admin" = [])),
+	request_body = PaginationArgs,
+	responses(
+		(status = 200, body = Page<DeviceInfo>),
+	),
+)]
 pub async fn list_untrusted(
 	State(state): State<AppState>,
-	TailscaleAdmin(_): TailscaleAdmin,
+	_admin: TailscaleAdmin,
 	Json(args): Json<PaginationArgs>,
 ) -> Result<Json<Page<DeviceInfo>>> {
 	let mut conn = state.db.get().await?;
@@ -199,9 +218,19 @@ pub async fn list_untrusted(
 	Ok(Json(Page { items, total }))
 }
 
+#[utoipa::path(
+	post,
+	path = "/get_servers_for_device",
+	tag = "devices",
+	security(("tailscale-admin" = [])),
+	request_body = DeviceIdArgs,
+	responses(
+		(status = 200, body = Vec<ServerInfo>),
+	),
+)]
 pub async fn get_servers_for_device(
 	State(state): State<AppState>,
-	TailscaleAdmin(_): TailscaleAdmin,
+	_admin: TailscaleAdmin,
 	Json(args): Json<DeviceIdArgs>,
 ) -> Result<Json<Vec<ServerInfo>>> {
 	let mut conn = state.db.get().await?;
@@ -209,9 +238,19 @@ pub async fn get_servers_for_device(
 	Ok(Json(servers.into_iter().map(server_to_info).collect()))
 }
 
+#[utoipa::path(
+	post,
+	path = "/get_past_server_associations",
+	tag = "devices",
+	security(("tailscale-admin" = [])),
+	request_body = DeviceIdArgs,
+	responses(
+		(status = 200, body = Vec<ServerInfo>),
+	),
+)]
 pub async fn get_past_server_associations(
 	State(state): State<AppState>,
-	TailscaleAdmin(_): TailscaleAdmin,
+	_admin: TailscaleAdmin,
 	Json(args): Json<DeviceIdArgs>,
 ) -> Result<Json<Vec<ServerInfo>>> {
 	let mut conn = state.db.get().await?;
@@ -219,22 +258,32 @@ pub async fn get_past_server_associations(
 	Ok(Json(servers.into_iter().map(server_to_info).collect()))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct HistoryCursor {
 	pub created_at: Timestamp,
 	pub id: Uuid,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct ConnectionHistoryArgs {
 	pub device_id: Uuid,
 	pub before: Option<HistoryCursor>,
 	pub limit: Option<u64>,
 }
 
+#[utoipa::path(
+	post,
+	path = "/connection_history",
+	tag = "devices",
+	security(("tailscale-admin" = [])),
+	request_body = ConnectionHistoryArgs,
+	responses(
+		(status = 200, body = Vec<DeviceConnectionData>),
+	),
+)]
 pub async fn connection_history(
 	State(state): State<AppState>,
-	TailscaleAdmin(_): TailscaleAdmin,
+	_admin: TailscaleAdmin,
 	Json(args): Json<ConnectionHistoryArgs>,
 ) -> Result<Json<Vec<DeviceConnectionData>>> {
 	let mut conn = state.db.get().await?;
@@ -254,9 +303,19 @@ pub async fn connection_history(
 	))
 }
 
+#[utoipa::path(
+	post,
+	path = "/connection_count",
+	tag = "devices",
+	security(("tailscale-admin" = [])),
+	request_body = DeviceIdArgs,
+	responses(
+		(status = 200, body = u64, content_type = "application/json"),
+	),
+)]
 pub async fn connection_count(
 	State(state): State<AppState>,
-	TailscaleAdmin(_): TailscaleAdmin,
+	_admin: TailscaleAdmin,
 	Json(args): Json<DeviceIdArgs>,
 ) -> Result<Json<u64>> {
 	let mut conn = state.db.get().await?;
@@ -268,15 +327,26 @@ pub async fn connection_count(
 	))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct TrustArgs {
 	pub device_id: Uuid,
 	pub role: DeviceRole,
 }
 
+#[utoipa::path(
+	post,
+	path = "/trust",
+	tag = "devices",
+	security(("tailscale-admin" = [])),
+	request_body = TrustArgs,
+	responses(
+		(status = 200),
+		(status = 400, body = ProblemDetailsSchema),
+	),
+)]
 pub async fn trust(
 	State(state): State<AppState>,
-	TailscaleAdmin(_): TailscaleAdmin,
+	_admin: TailscaleAdmin,
 	Json(args): Json<TrustArgs>,
 ) -> Result<Json<()>> {
 	if args.role == DeviceRole::Untrusted {
@@ -287,9 +357,19 @@ pub async fn trust(
 	Ok(Json(()))
 }
 
+#[utoipa::path(
+	post,
+	path = "/list_trusted",
+	tag = "devices",
+	security(("tailscale-admin" = [])),
+	request_body = PaginationArgs,
+	responses(
+		(status = 200, body = Page<DeviceInfo>),
+	),
+)]
 pub async fn list_trusted(
 	State(state): State<AppState>,
-	TailscaleAdmin(_): TailscaleAdmin,
+	_admin: TailscaleAdmin,
 	Json(args): Json<PaginationArgs>,
 ) -> Result<Json<Page<DeviceInfo>>> {
 	let mut conn = state.db.get().await?;
@@ -310,9 +390,19 @@ pub async fn list_trusted(
 	Ok(Json(Page { items, total }))
 }
 
+#[utoipa::path(
+	post,
+	path = "/untrust",
+	tag = "devices",
+	security(("tailscale-admin" = [])),
+	request_body = DeviceIdArgs,
+	responses(
+		(status = 200),
+	),
+)]
 pub async fn untrust(
 	State(state): State<AppState>,
-	TailscaleAdmin(_): TailscaleAdmin,
+	_admin: TailscaleAdmin,
 	Json(args): Json<DeviceIdArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
@@ -320,9 +410,20 @@ pub async fn untrust(
 	Ok(Json(()))
 }
 
+#[utoipa::path(
+	post,
+	path = "/update_role",
+	tag = "devices",
+	security(("tailscale-admin" = [])),
+	request_body = TrustArgs,
+	responses(
+		(status = 200),
+		(status = 400, body = ProblemDetailsSchema),
+	),
+)]
 pub async fn update_role(
 	State(state): State<AppState>,
-	TailscaleAdmin(_): TailscaleAdmin,
+	_admin: TailscaleAdmin,
 	Json(args): Json<TrustArgs>,
 ) -> Result<Json<()>> {
 	if args.role == DeviceRole::Untrusted {
@@ -335,14 +436,24 @@ pub async fn update_role(
 	Ok(Json(()))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct SearchArgs {
 	pub query: String,
 }
 
+#[utoipa::path(
+	post,
+	path = "/search",
+	tag = "devices",
+	security(("tailscale-admin" = [])),
+	request_body = SearchArgs,
+	responses(
+		(status = 200, body = Vec<DeviceInfo>),
+	),
+)]
 pub async fn search(
 	State(state): State<AppState>,
-	TailscaleAdmin(_): TailscaleAdmin,
+	_admin: TailscaleAdmin,
 	Json(args): Json<SearchArgs>,
 ) -> Result<Json<Vec<DeviceInfo>>> {
 	if args.query.trim().is_empty() {
@@ -366,15 +477,25 @@ pub async fn search(
 	Ok(Json(seen.into_values().map(DeviceInfo::from).collect()))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct UpdateKeyNameArgs {
 	pub key_id: Uuid,
 	pub name: Option<String>,
 }
 
+#[utoipa::path(
+	post,
+	path = "/update_key_name",
+	tag = "devices",
+	security(("tailscale-admin" = [])),
+	request_body = UpdateKeyNameArgs,
+	responses(
+		(status = 200),
+	),
+)]
 pub async fn update_key_name(
 	State(state): State<AppState>,
-	TailscaleAdmin(_): TailscaleAdmin,
+	_admin: TailscaleAdmin,
 	Json(args): Json<UpdateKeyNameArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;

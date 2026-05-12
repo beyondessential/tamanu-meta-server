@@ -21,13 +21,7 @@ import { useApi } from "../api";
 import IncidentCard from "../components/IncidentCard";
 import IssueRow from "../components/IssueRow";
 import { usePageTitle } from "../hooks/usePageTitle";
-import {
-	SEVERITIES,
-	type IncidentData,
-	type IssueData,
-	type ServerInfoFull,
-	type Severity,
-} from "../types";
+import { SEVERITIES, type Severity } from "../types";
 
 const DEFAULT_LIMIT = 200;
 
@@ -75,14 +69,14 @@ export default function Incidents() {
 	const setAcked = (v: AckedFilter) =>
 		updateParam("ack", v === "either" ? null : v);
 
-	const incidents = useApi<IncidentData[]>(
+	const incidents = useApi(
 		"incidents",
 		"list_active",
 		{},
 		[refreshTick],
 	);
-	const roots = useApi<ServerInfoFull[]>("servers", "list_roots", {}, []);
-	const issues = useApi<IssueData[]>(
+	const roots = useApi("servers", "list_roots", {}, []);
+	const issues = useApi(
 		"issues",
 		"list",
 		{
@@ -181,7 +175,7 @@ function FilterBar({
 	setGroupId: (v: string) => void;
 	acked: AckedFilter;
 	setAcked: (v: AckedFilter) => void;
-	roots: ReturnType<typeof useApi<ServerInfoFull[]>>;
+	roots: ReturnType<typeof useApi<"servers", "list_roots">>;
 	onRefresh: () => void;
 }) {
 	return (

@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
+#[schema(value_type = String, format = "uri")]
 pub struct UrlField(pub Url);
 
 impl Serialize for UrlField {

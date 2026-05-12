@@ -49,11 +49,13 @@ where
 {
 	TestDb::run(async |conn, url| {
 		let public_router = router(
-			public_server::routes().with_state(public_server::state::AppState {
-				db: database::init_to(&url),
-				tera: public_server::state::AppState::init_tera().unwrap(),
-				server_versions_secret: Some("test-secret".to_string()),
-			}),
+			axum::Router::from(public_server::routes().with_state(
+				public_server::state::AppState {
+					db: database::init_to(&url),
+					tera: public_server::state::AppState::init_tera().unwrap(),
+					server_versions_secret: Some("test-secret".to_string()),
+				},
+			)),
 			ClientIpSource::RightmostForwarded,
 		);
 		let private_router = router(

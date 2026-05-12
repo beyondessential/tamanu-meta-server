@@ -1,22 +1,23 @@
 use axum::Json;
 use axum::extract::State;
-use axum::routing::{Router, post};
-use commons_errors::{AppError, Result};
+use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleUser;
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
+use utoipa_axum::{router::OpenApiRouter, routes};
 use uuid::Uuid;
 
 use crate::fns::Page;
 use crate::state::AppState;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct BestoolSnippetInfo {
 	pub id: Uuid,
 	pub name: String,
 	pub description: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct BestoolSnippetDetail {
 	pub id: Uuid,
 	pub name: String,
@@ -25,21 +26,31 @@ pub struct BestoolSnippetDetail {
 	pub editor: String,
 }
 
-pub fn routes() -> Router<AppState> {
-	Router::new()
-		.route("/list_snippets", post(list_snippets))
-		.route("/save_snippet", post(save_snippet))
-		.route("/get_snippet", post(get_snippet))
-		.route("/get_latest_snippet_id", post(get_latest_snippet_id))
-		.route("/delete_snippet", post(delete_snippet))
+pub fn routes() -> OpenApiRouter<AppState> {
+	OpenApiRouter::new()
+		.routes(routes!(list_snippets))
+		.routes(routes!(save_snippet))
+		.routes(routes!(get_snippet))
+		.routes(routes!(get_latest_snippet_id))
+		.routes(routes!(delete_snippet))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct ListArgs {
 	pub offset: u64,
 	pub limit: Option<u64>,
 }
 
+#[utoipa::path(
+	post,
+	path = "/list_snippets",
+	tag = "bestool",
+	request_body = ListArgs,
+	responses(
+		(status = 200, body = Page<BestoolSnippetInfo>),
+		(status = 500, body = ProblemDetailsSchema),
+	),
+)]
 pub async fn list_snippets(
 	State(state): State<AppState>,
 	Json(args): Json<ListArgs>,
@@ -63,7 +74,7 @@ pub async fn list_snippets(
 	Ok(Json(Page { items, total }))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct SaveArgs {
 	/// When set, the saved snippet supersedes the snippet with this id (i.e.
 	/// it's an edit). When absent, a fresh snippet is created.
@@ -73,6 +84,17 @@ pub struct SaveArgs {
 	pub sql: String,
 }
 
+#[utoipa::path(
+	post,
+	path = "/save_snippet",
+	tag = "bestool",
+	security(("tailscale-user" = [])),
+	request_body = SaveArgs,
+	responses(
+		(status = 200, body = BestoolSnippetDetail),
+		(status = 500, body = ProblemDetailsSchema),
+	),
+)]
 pub async fn save_snippet(
 	State(state): State<AppState>,
 	user: std::result::Result<TailscaleUser, AppError>,
@@ -98,11 +120,22 @@ pub async fn save_snippet(
 	}))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct GetArgs {
 	pub id: Uuid,
 }
 
+#[utoipa::path(
+	post,
+	path = "/get_snippet",
+	tag = "bestool",
+	request_body = GetArgs,
+	responses(
+		(status = 200, body = BestoolSnippetDetail),
+		(status = 404, body = ProblemDetailsSchema),
+		(status = 500, body = ProblemDetailsSchema),
+	),
+)]
 pub async fn get_snippet(
 	State(state): State<AppState>,
 	Json(args): Json<GetArgs>,
@@ -120,6 +153,16 @@ pub async fn get_snippet(
 	}))
 }
 
+#[utoipa::path(
+	post,
+	path = "/get_latest_snippet_id",
+	tag = "bestool",
+	request_body = GetArgs,
+	responses(
+		(status = 200, description = "The newest id in the supersedes chain rooted at the given id.", body = Uuid, content_type = "application/json"),
+		(status = 500, body = ProblemDetailsSchema),
+	),
+)]
 pub async fn get_latest_snippet_id(
 	State(state): State<AppState>,
 	Json(args): Json<GetArgs>,
@@ -129,6 +172,16 @@ pub async fn get_latest_snippet_id(
 	Ok(Json(id))
 }
 
+#[utoipa::path(
+	post,
+	path = "/delete_snippet",
+	tag = "bestool",
+	request_body = GetArgs,
+	responses(
+		(status = 200, description = "Snippet soft-deleted."),
+		(status = 500, body = ProblemDetailsSchema),
+	),
+)]
 pub async fn delete_snippet(
 	State(state): State<AppState>,
 	Json(args): Json<GetArgs>,

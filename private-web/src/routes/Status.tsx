@@ -17,18 +17,12 @@ import { StatusLegend, VersionLegend } from "../components/Legends";
 import { useApi } from "../api";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { useReloadInterval } from "../hooks/useReloadInterval";
-import {
-	type CentralServerCard,
-	type IncidentData,
-	SERVER_RANK_ORDER,
-	type ServerGroupedIds,
-	type SummaryData,
-} from "../types";
+import { type CentralServerCard, SERVER_RANK_ORDER } from "../types";
 
 export default function Status() {
 	usePageTitle("Status");
 	const tick = useReloadInterval(60_000, "canopy-reload-status");
-	const incidents = useApi<IncidentData[]>("incidents", "list_active", {}, [tick]);
+	const incidents = useApi("incidents", "list_active", {}, [tick]);
 	const openIncidentServers = new Set<string>(
 		incidents.status === "ok" ? incidents.data.map((i) => i.server_id) : [],
 	);
@@ -47,7 +41,7 @@ export default function Status() {
 }
 
 function ReleaseSummary({ tick }: { tick: number }) {
-	const result = useApi<SummaryData>("statuses", "summary", {}, [tick]);
+	const result = useApi("statuses", "summary", {}, [tick]);
 	if (result.status === "loading" || result.status === "idle") {
 		return <LinearProgress />;
 	}
@@ -77,7 +71,7 @@ function ServerCards({
 	tick: number;
 	openIncidentServers: Set<string>;
 }) {
-	const grouped = useApi<ServerGroupedIds>(
+	const grouped = useApi(
 		"statuses",
 		"server_grouped_ids",
 		{},
@@ -147,7 +141,7 @@ function ServerCardLoader({
 	tick: number;
 	hasOpenIncident: boolean;
 }) {
-	const result = useApi<CentralServerCard>(
+	const result = useApi(
 		"statuses",
 		"server_details",
 		{ server_id: serverId },

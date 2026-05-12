@@ -10,10 +10,11 @@ use axum::{
 	extract::{Path, State},
 	http::header,
 	response::IntoResponse,
-	routing::{Router, delete, get, post},
+	routing::{Router, get},
 };
-use commons_errors::{AppError, Result};
+use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::device_auth::{AdminDevice, ReleaserDevice};
+use utoipa_axum::{router::OpenApiRouter, routes};
 use commons_types::version::{VersionRange, VersionStr};
 use database::{
 	Db,
@@ -34,27 +35,26 @@ use tera::{Context, Tera};
 
 use crate::state::AppState;
 
-pub fn routes() -> Router<AppState> {
-	#[cfg_attr(not(feature = "ui"), expect(unused_mut))]
-	let mut router = Router::new()
-		.route("/", get(list))
-		.route("/update-for/{version}", get(update_for))
-		.route("/{version}", post(create))
-		.route("/{version}", delete(remove))
-		.route("/{version}/artifacts", get(list_artifacts))
-		.route(
-			"/{version}/artifacts/{artifact_id}/download",
-			get(download_artifact),
-		);
+pub fn routes() -> OpenApiRouter<AppState> {
+	let api = OpenApiRouter::new()
+		.routes(routes!(list))
+		.routes(routes!(update_for))
+		.routes(routes!(create, remove))
+		.routes(routes!(list_artifacts));
+
+	// Streaming download proxy doesn't have a JSON wire shape; mount as a
+	// plain route so it stays out of the OpenAPI spec.
+	let extras: Router<AppState> = Router::new().route(
+		"/{version}/artifacts/{artifact_id}/download",
+		get(download_artifact),
+	);
 
 	#[cfg(feature = "ui")]
-	{
-		router = router
-			.route("/{version}", get(view_artifacts))
-			.route("/{version}/mobile", get(view_mobile_install));
-	}
+	let extras = extras
+		.route("/{version}", get(view_artifacts))
+		.route("/{version}/mobile", get(view_mobile_install));
 
-	router
+	api.merge(OpenApiRouter::from(extras))
 }
 
 #[cfg(feature = "ui")]
@@ -97,12 +97,34 @@ pub fn parse_markdown(text: &str) -> String {
 	html_output
 }
 
+#[utoipa::path(
+	get,
+	path = "/",
+	tag = "versions",
+	responses(
+		(status = 200, description = "All published versions.", body = Vec<Version>),
+	),
+)]
 async fn list(State(db): State<Db>) -> Result<Json<Vec<Version>>> {
 	let mut db = db.get().await?;
 	let versions = Version::get_all(&mut db).await?;
 	Ok(Json(versions))
 }
 
+#[utoipa::path(
+	post,
+	path = "/{version}",
+	tag = "versions",
+	security(("releaser-device" = [])),
+	params(("version" = String, Path)),
+	request_body(content = String, description = "Changelog markdown text, up to 1 MiB."),
+	responses(
+		(status = 200, body = Version),
+		(status = 400, body = ProblemDetailsSchema),
+		(status = 401, body = ProblemDetailsSchema),
+		(status = 403, body = ProblemDetailsSchema),
+	),
+)]
 async fn create(
 	device: ReleaserDevice,
 	Path(version): Path<String>,
@@ -162,6 +184,19 @@ async fn create(
 	Ok(Json(version))
 }
 
+#[utoipa::path(
+	delete,
+	path = "/{version}",
+	tag = "versions",
+	security(("admin-device" = [])),
+	params(("version" = String, Path)),
+	responses(
+		(status = 200, description = "Version marked yanked."),
+		(status = 400, body = ProblemDetailsSchema),
+		(status = 401, body = ProblemDetailsSchema),
+		(status = 403, body = ProblemDetailsSchema),
+	),
+)]
 async fn remove(
 	_device: AdminDevice,
 	Path(version): Path<String>,
@@ -284,6 +319,17 @@ async fn view_artifacts(
 	Ok(Html(tera.render("artifacts", &context)?))
 }
 
+#[utoipa::path(
+	get,
+	path = "/{version}/artifacts",
+	tag = "versions",
+	params(("version" = String, Path)),
+	responses(
+		(status = 200, description = "Artifacts that match the given exact version or range.", body = Vec<Artifact>),
+		(status = 400, body = ProblemDetailsSchema),
+		(status = 404, body = ProblemDetailsSchema),
+	),
+)]
 async fn list_artifacts(
 	Path(version): Path<String>,
 	State(db): State<Db>,
@@ -318,6 +364,16 @@ async fn view_mobile_install(
 	Ok(Html(tera.render("mobile", &context)?))
 }
 
+#[utoipa::path(
+	get,
+	path = "/update-for/{version}",
+	tag = "versions",
+	params(("version" = String, Path, description = "Currently-installed version (exact semver).")),
+	responses(
+		(status = 200, description = "Published versions above the given one, used by clients to discover updates.", body = Vec<ViewVersion>),
+		(status = 400, body = ProblemDetailsSchema),
+	),
+)]
 async fn update_for(
 	State(db): State<Db>,
 	Path(version): Path<String>,

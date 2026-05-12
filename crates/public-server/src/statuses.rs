@@ -1,9 +1,8 @@
 use axum::{
 	Json,
 	extract::{Path, State},
-	routing::{Router, post},
 };
-use commons_errors::{AppError, Result};
+use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::{device_auth::ServerDevice, headers::VersionHeader};
 use commons_types::device::DeviceRole;
 use database::{
@@ -12,14 +11,34 @@ use database::{
 	servers::Server,
 	statuses::{NewStatus, Status},
 };
+use utoipa_axum::{router::OpenApiRouter, routes};
 use uuid::Uuid;
 
 use crate::state::AppState;
 
-pub fn routes() -> Router<AppState> {
-	Router::new().route("/{server_id}", post(create))
+pub fn routes() -> OpenApiRouter<AppState> {
+	OpenApiRouter::new().routes(routes!(create))
 }
 
+#[utoipa::path(
+	post,
+	path = "/{server_id}",
+	tag = "statuses",
+	security(("server-device" = [])),
+	params(
+		("server_id" = Uuid, Path),
+	),
+	request_body(
+		content = serde_json::Value,
+		description = "Optional free-form `extra` payload. Empty body or JSON `null` are both treated as `{}`.",
+	),
+	responses(
+		(status = 200, body = Status),
+		(status = 400, body = ProblemDetailsSchema),
+		(status = 401, body = ProblemDetailsSchema),
+		(status = 403, body = ProblemDetailsSchema),
+	),
+)]
 async fn create(
 	Path(server_id): Path<Uuid>,
 	State(db): State<Db>,

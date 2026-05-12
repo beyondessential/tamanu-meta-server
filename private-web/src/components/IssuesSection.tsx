@@ -12,7 +12,6 @@ import RefreshIcon from "@mui/icons-material/Refresh";
 import { useState } from "react";
 import { useApi } from "../api";
 import IssueRow from "./IssueRow";
-import type { IssueData } from "../types";
 
 export default function IssuesSection({
 	scope,
@@ -29,7 +28,7 @@ export default function IssuesSection({
 	onChanged?: () => void;
 }) {
 	const [showAll, setShowAll] = useState(false);
-	const result = useApi<IssueData[]>(
+	const result = useApi(
 		"issues",
 		scope === "device" ? "list_for_device" : "list_for_server",
 		scope === "device"

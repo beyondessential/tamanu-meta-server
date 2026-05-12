@@ -98,6 +98,14 @@ lint-fix:
 identity:
     cargo run --bin identity
 
+# Regenerate the OpenAPI specs (private-server → private-web for TS codegen,
+# public-server → its crate directory for external visibility). Run this after
+# any change to a handler's request/response shape, security scheme, or tag.
+gen-openapi:
+    cargo run --quiet --bin private-openapi-dump > private-web/openapi.json
+    cargo run --quiet --bin public-openapi-dump > crates/public-server/openapi.json
+    cd private-web && npm run gen:api-types
+
 # Clean build artifacts
 clean:
     cargo clean

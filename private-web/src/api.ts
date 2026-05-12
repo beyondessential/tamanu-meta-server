@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import type { ApiBody, ApiFn, ApiModule, ApiResponse } from "./types";
+
 export class ApiError extends Error {
 	readonly status: number;
 	readonly detail: unknown;
@@ -12,10 +14,18 @@ export class ApiError extends Error {
 	}
 }
 
-export async function callApi<T>(
-	module: string,
-	fn: string,
-	params: Record<string, unknown> = {},
+// `M` and `F` are inferred from the positional args and constrain the
+// (module, fn) pair against the generated `paths` interface. `T` defaults to
+// the response type for that path, so most call sites don't need to spell it
+// out — they only need to override when narrowing or shaping locally.
+export async function callApi<
+	M extends ApiModule,
+	F extends ApiFn<M>,
+	T = ApiResponse<M, F>,
+>(
+	module: M,
+	fn: F,
+	params: ApiBody<M, F> | Record<string, unknown> = {},
 	signal?: AbortSignal,
 ): Promise<T> {
 	const response = await fetch(`/api/${module}/${fn}`, {
@@ -48,9 +58,13 @@ export type ApiState<T> =
 	| { status: "ok"; data: T }
 	| { status: "error"; error: Error };
 
-export function useApi<T>(
-	module: string,
-	fn: string,
+export function useApi<
+	M extends ApiModule,
+	F extends ApiFn<M>,
+	T = ApiResponse<M, F>,
+>(
+	module: M,
+	fn: F,
 	params: Record<string, unknown> = {},
 	deps: ReadonlyArray<unknown> = [],
 ): ApiState<T> & { reload: () => void } {
@@ -61,7 +75,7 @@ export function useApi<T>(
 		const myTick = ++tick.current;
 		const controller = new AbortController();
 		setState({ status: "loading" });
-		callApi<T>(module, fn, params, controller.signal)
+		callApi<M, F, T>(module, fn, params, controller.signal)
 			.then((data) => {
 				if (tick.current === myTick) setState({ status: "ok", data });
 			})
@@ -88,9 +102,13 @@ export function useApi<T>(
  * The caller decides what to do with the result (e.g. refetch a
  * `useApi` resource).
  */
-export function useApiAction<T = void>(
-	module: string,
-	fn: string,
+export function useApiAction<
+	M extends ApiModule,
+	F extends ApiFn<M>,
+	T = ApiResponse<M, F>,
+>(
+	module: M,
+	fn: F,
 ): {
 	call: (params?: Record<string, unknown>) => Promise<T>;
 	pending: boolean;
@@ -105,7 +123,7 @@ export function useApiAction<T = void>(
 			setPending(true);
 			setError(null);
 			try {
-				const result = await callApi<T>(module, fn, params);
+				const result = await callApi<M, F, T>(module, fn, params);
 				// Broadcast so global, page-agnostic queries (e.g. the open-
 				// incidents nav badge) can refetch without the caller having
 				// to know they exist. Listeners hook via useReloadInterval.

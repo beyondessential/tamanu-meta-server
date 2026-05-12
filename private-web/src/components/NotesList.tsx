@@ -44,7 +44,7 @@ export default function NotesList({
 	parentId: string;
 	refreshKey?: number;
 }) {
-	const list = useApi<NoteLike[]>(
+	const list = useApi(
 		apiModule,
 		"list_notes",
 		{ [parentKey]: parentId },

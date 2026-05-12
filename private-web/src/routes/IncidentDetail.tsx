@@ -51,13 +51,13 @@ export default function IncidentDetail() {
 	const bumpRefresh = () => setRefreshTick((t) => t + 1);
 	const [filter, setFilter] = useState<Filter>("all");
 
-	const detail = useApi<IncidentWithIssues>(
+	const detail = useApi(
 		"incidents",
 		"get",
 		{ incident_id: id },
 		[id, refreshTick],
 	);
-	const notes = useApi<IncidentNoteData[]>(
+	const notes = useApi(
 		"incidents",
 		"list_notes",
 		{ incident_id: id },
