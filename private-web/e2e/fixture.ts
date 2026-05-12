@@ -185,6 +185,12 @@ export async function startStack(opts: StartOptions = {}): Promise<StackHandle> 
 				DATABASE_URL: databaseUrl,
 				BIND_ADDRESS: `127.0.0.1:${apiPort}`,
 				META_LOG: process.env.META_LOG ?? "private_server=info,warn",
+				// The binary defaults to RightmostXForwardedFor for production
+				// (behind the Tailscale K8s Operator's ingress). In e2e there's
+				// no proxy in front, so the axum-client-ip middleware would
+				// reject every request for missing X-Forwarded-For. Fall back
+				// to the raw TCP peer.
+				CLIENT_IP_SOURCE: "ConnectInfo",
 			},
 		});
 		pipeOutput(api, "api", silent);
