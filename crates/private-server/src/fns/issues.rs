@@ -99,7 +99,9 @@ pub(crate) fn lookup_user(
 	users: &std::collections::HashMap<String, CachedTailscaleUser>,
 	login: Option<&str>,
 ) -> (Option<String>, Option<String>) {
-	let Some(login) = login else { return (None, None) };
+	let Some(login) = login else {
+		return (None, None);
+	};
 	match users.get(login) {
 		Some(u) => (Some(u.name.clone()), u.profile_pic.clone()),
 		None => (None, None),

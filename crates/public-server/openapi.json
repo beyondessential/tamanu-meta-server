@@ -10,7 +10,7 @@
     "license": {
       "name": "GPL-3.0-or-later"
     },
-    "version": "6.0.2"
+    "version": "6.1.0"
   },
   "paths": {
     "/artifacts/{version}/{artifact_type}/{platform}": {
@@ -1006,6 +1006,12 @@
           "id"
         ],
         "properties": {
+          "alert_when_down": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "cloud": {
             "type": [
               "boolean",
@@ -1150,9 +1156,14 @@
           "id",
           "host",
           "kind",
-          "listed"
+          "listed",
+          "alert_when_down"
         ],
         "properties": {
+          "alert_when_down": {
+            "type": "boolean",
+            "description": "When true (the default), the canopy reachability sweep observes this\nserver's status freshness and files an issue when it goes\nBlip/Away/Down/Gone. Set to false on servers whose downtime is\nexpected (test environments, ad-hoc demos) — the sweep simply\ndoesn't collect events for them."
+          },
           "cloud": {
             "type": [
               "boolean",

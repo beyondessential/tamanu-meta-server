@@ -134,6 +134,7 @@ fn server_to_info(s: database::servers::Server) -> ServerInfo {
 		listed: s.listed,
 		cloud: s.cloud,
 		geolocation: s.geolocation,
+		alert_when_down: s.alert_when_down,
 	}
 }
 

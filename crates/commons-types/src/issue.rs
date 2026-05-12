@@ -14,7 +14,15 @@ use serde::{Deserialize, Serialize};
 /// default is intentionally above the floor — most devices that bother
 /// pushing an event mean it).
 #[derive(
-	Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, AsExpression,
+	Debug,
+	Clone,
+	Copy,
+	Default,
+	PartialEq,
+	Eq,
+	Serialize,
+	Deserialize,
+	AsExpression,
 	utoipa::ToSchema,
 )]
 #[diesel(sql_type = Text)]
@@ -128,7 +136,15 @@ where
 /// - `Flapping` — too noisy; suppressed rather than fixed (often paired with
 ///   a snooze).
 #[derive(
-	Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, AsExpression,
+	Debug,
+	Clone,
+	Copy,
+	Default,
+	PartialEq,
+	Eq,
+	Serialize,
+	Deserialize,
+	AsExpression,
 	utoipa::ToSchema,
 )]
 #[diesel(sql_type = Text)]

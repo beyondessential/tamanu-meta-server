@@ -141,8 +141,13 @@ where
 		// round-tripping to Tailscale. Centralised here so every admin
 		// handler gets it for free.
 		let mut db = Db::from_ref(state).get().await?;
-		CachedTailscaleUser::upsert(&mut db, &user.login, &user.name, user.profile_pic.as_deref())
-			.await?;
+		CachedTailscaleUser::upsert(
+			&mut db,
+			&user.login,
+			&user.name,
+			user.profile_pic.as_deref(),
+		)
+		.await?;
 
 		Ok(TailscaleAdmin(user))
 	}

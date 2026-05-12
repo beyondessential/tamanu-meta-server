@@ -45,10 +45,7 @@ impl TailscaleUser {
 			))
 			.on_conflict(dsl::login)
 			.do_update()
-			.set((
-				dsl::name.eq(name),
-				dsl::profile_pic.eq(profile_pic),
-			))
+			.set((dsl::name.eq(name), dsl::profile_pic.eq(profile_pic)))
 			.execute(db)
 			.await
 			.map_err(AppError::from)?;

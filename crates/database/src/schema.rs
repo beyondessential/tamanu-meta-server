@@ -185,6 +185,7 @@ diesel::table! {
 		listed -> Bool,
 		cloud -> Nullable<Bool>,
 		geolocation -> Nullable<Array<Nullable<Float8>>>,
+		alert_when_down -> Bool,
 	}
 }
 

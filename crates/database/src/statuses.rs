@@ -4,7 +4,9 @@ use std::{
 };
 
 use commons_errors::{AppError, Result};
-use commons_types::{server::rank::ServerRank, status::ShortStatus, version::VersionStr};
+use commons_types::{
+	issue::Severity, server::rank::ServerRank, status::ShortStatus, version::VersionStr,
+};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use futures::stream::{FuturesOrdered, StreamExt};
@@ -14,7 +16,38 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
+use crate::issues::{Issue, NewEvent};
 use crate::servers::Server;
+
+/// Source value canopy uses when it files reachability issues on behalf of a
+/// server. Combined with [`REACHABILITY_REF`] to dedupe / find-or-create.
+pub const CANOPY_SOURCE: &str = "canopy";
+
+/// Ref value canopy uses for the one reachability issue per server. Stable so
+/// the find-or-create in [`NewEvent::save`] coalesces every cycle into the
+/// same issue row.
+pub const REACHABILITY_REF: &str = "reachability";
+
+/// Severity for canopy to file when a server's most recent status puts it in
+/// the given short state. `None` for `Up` — a healthy server doesn't open an
+/// issue.
+///
+/// The mapping escalates one step at a time below the incident floor
+/// (`Notice` → `Warning`), then jumps to `Error` (which opens an incident),
+/// then `Critical` for the long-gone state.
+pub fn reachability_severity(short: ShortStatus) -> Option<Severity> {
+	match short {
+		ShortStatus::Up => None,
+		ShortStatus::Blip => Some(Severity::Notice),
+		ShortStatus::Away => Some(Severity::Warning),
+		ShortStatus::Down => Some(Severity::Error),
+		ShortStatus::Gone => Some(Severity::Critical),
+	}
+}
+
+fn server_label(s: &Server) -> String {
+	s.name.clone().unwrap_or_else(|| s.host.0.to_string())
+}
 
 #[derive(
 	Debug,
@@ -151,6 +184,77 @@ impl Status {
 			.map_err(AppError::from)?;
 
 		Ok(())
+	}
+
+	/// Sweep every server's most recent status. For each non-silenced server
+	/// whose state has crossed (or just left) one of the reachability tiers
+	/// (`Blip`/`Away`/`Down`/`Gone`), file (or close) a canopy-sourced issue
+	/// keyed by [`REACHABILITY_REF`].
+	///
+	/// Most servers report by pushing their own status to the public-server
+	/// (so their `device_id` is non-null); the pingtask only handles legacy
+	/// foreign servers without a registered device. Both paths feed the same
+	/// `statuses` table, so this sweep doesn't care which one is in play.
+	///
+	/// Returns the number of events filed in this pass.
+	pub async fn sweep_reachability(db: &mut AsyncPgConnection) -> Result<usize> {
+		let servers = Server::get_all(db, 0, None).await?;
+		let monitored: Vec<&Server> = servers
+			.iter()
+			.filter(|s| s.alert_when_down && s.id != Uuid::nil())
+			.collect();
+		if monitored.is_empty() {
+			return Ok(0);
+		}
+
+		let server_ids: Vec<Uuid> = monitored.iter().map(|s| s.id).collect();
+		let statuses = Self::latest_for_servers(db, &server_ids).await?;
+		let status_map: std::collections::HashMap<Uuid, Status> =
+			statuses.into_iter().map(|s| (s.server_id, s)).collect();
+		let existing_issues =
+			Issue::list_by_source_ref(db, CANOPY_SOURCE, REACHABILITY_REF, &server_ids).await?;
+		let issue_map: std::collections::HashMap<Uuid, &Issue> =
+			existing_issues.iter().map(|i| (i.server_id, i)).collect();
+
+		let now = Timestamp::now();
+		let mut filed = 0usize;
+		for server in &monitored {
+			let short = status_map
+				.get(&server.id)
+				.map(Self::short_status)
+				.unwrap_or_default();
+			let severity = reachability_severity(short);
+			let existing = issue_map.get(&server.id).copied();
+
+			let event = match (severity, existing) {
+				(None, None) => continue,
+				(None, Some(issue)) if !issue.active => continue,
+				(None, Some(_)) => NewEvent {
+					source: CANOPY_SOURCE.into(),
+					r#ref: REACHABILITY_REF.into(),
+					severity: Some(Severity::Info),
+					description: None,
+					message: format!("Server {} is reachable again", server_label(server)),
+					active: Some(false),
+					occurred_at: Some(now),
+				},
+				(Some(sev), _) => NewEvent {
+					source: CANOPY_SOURCE.into(),
+					r#ref: REACHABILITY_REF.into(),
+					severity: Some(sev),
+					description: None,
+					message: format!(
+						"Server {} hasn't reported (state: {short})",
+						server_label(server),
+					),
+					active: Some(true),
+					occurred_at: Some(now),
+				},
+			};
+			event.save(db, server.id, None).await?;
+			filed += 1;
+		}
+		Ok(filed)
 	}
 
 	pub async fn latest_for_server(
