@@ -206,7 +206,7 @@ pub struct ServerIdArgs {
 	tag = "servers",
 	request_body = ServerIdArgs,
 	responses(
-		(status = 200, body = String),
+		(status = 200, body = String, content_type = "application/json"),
 		(status = 404, body = ProblemDetailsSchema),
 	),
 )]
@@ -472,7 +472,7 @@ pub struct ImportTicketArgs {
 	security(("tailscale-admin" = [])),
 	request_body = ImportTicketArgs,
 	responses(
-		(status = 200, description = "New server id.", body = Uuid),
+		(status = 200, description = "New server id.", body = Uuid, content_type = "application/json"),
 		(status = 400, body = ProblemDetailsSchema),
 	),
 )]

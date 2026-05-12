@@ -310,7 +310,7 @@ pub async fn connection_history(
 	security(("tailscale-admin" = [])),
 	request_body = DeviceIdArgs,
 	responses(
-		(status = 200, body = u64),
+		(status = 200, body = u64, content_type = "application/json"),
 	),
 )]
 pub async fn connection_count(

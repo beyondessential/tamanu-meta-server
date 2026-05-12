@@ -52,7 +52,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 	path = "/is_sql_available",
 	tag = "sql",
 	responses(
-		(status = 200, description = "Whether the read-only SQL playground is configured.", body = bool),
+		(status = 200, description = "Whether the read-only SQL playground is configured.", body = bool, content_type = "application/json"),
 	),
 )]
 pub async fn is_sql_available(State(state): State<AppState>) -> Json<bool> {

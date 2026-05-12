@@ -2013,7 +2013,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "text/plain": string;
+                    "application/json": string;
                 };
             };
             500: {
@@ -2142,7 +2142,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "text/plain": boolean;
+                    "application/json": boolean;
                 };
             };
         };
@@ -2221,7 +2221,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "text/plain": number;
+                    "application/json": number;
                 };
             };
         };
@@ -3155,7 +3155,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "text/plain": string;
+                    "application/json": string;
                 };
             };
             404: {
@@ -3187,7 +3187,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "text/plain": string;
+                    "application/json": string;
                 };
             };
             400: {
@@ -3403,7 +3403,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "text/plain": boolean;
+                    "application/json": boolean;
                 };
             };
         };

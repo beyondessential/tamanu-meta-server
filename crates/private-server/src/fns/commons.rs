@@ -49,7 +49,7 @@ pub async fn server_versions_url() -> Result<Json<Option<String>>> {
 	tag = "commons",
 	security(("tailscale-user" = [])),
 	responses(
-		(status = 200, description = "Whether the calling Tailscale user is on the admin allow-list.", body = bool),
+		(status = 200, description = "Whether the calling Tailscale user is on the admin allow-list.", body = bool, content_type = "application/json"),
 	),
 )]
 pub async fn is_current_user_admin(

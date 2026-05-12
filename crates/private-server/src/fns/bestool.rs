@@ -159,7 +159,7 @@ pub async fn get_snippet(
 	tag = "bestool",
 	request_body = GetArgs,
 	responses(
-		(status = 200, description = "The newest id in the supersedes chain rooted at the given id.", body = Uuid),
+		(status = 200, description = "The newest id in the supersedes chain rooted at the given id.", body = Uuid, content_type = "application/json"),
 		(status = 500, body = ProblemDetailsSchema),
 	),
 )]
