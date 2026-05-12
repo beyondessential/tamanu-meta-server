@@ -38,11 +38,15 @@ export default function NotesList({
 	parentKey,
 	parentId,
 	refreshKey = 0,
+	canEdit = false,
 }: {
 	apiModule: ApiModule;
 	parentKey: ParentKey;
 	parentId: string;
 	refreshKey?: number;
+	/** Show the per-note delete button. Admins only — the API enforces it
+	 * too, but hiding the button keeps the UI honest. */
+	canEdit?: boolean;
 }) {
 	const list = useApi(
 		apiModule,
@@ -71,6 +75,7 @@ export default function NotesList({
 					key={n.id}
 					note={n}
 					apiModule={apiModule}
+					canEdit={canEdit}
 					onChanged={list.reload}
 				/>
 			))}
@@ -164,10 +169,12 @@ export function AddNoteButton({
 function NoteRow({
 	note,
 	apiModule,
+	canEdit,
 	onChanged,
 }: {
 	note: NoteLike;
 	apiModule: ApiModule;
+	canEdit: boolean;
 	onChanged: () => void;
 }) {
 	const del = useApiAction(apiModule, "delete_note");
@@ -203,15 +210,17 @@ function NoteRow({
 					<Typography variant="caption" color="text.secondary">
 						<TimeAgo timestamp={note.created_at} />
 					</Typography>
-					<IconButton
-						size="small"
-						color="error"
-						aria-label="Delete"
-						onClick={remove}
-						disabled={del.pending}
-					>
-						<DeleteIcon fontSize="inherit" />
-					</IconButton>
+					{canEdit && (
+						<IconButton
+							size="small"
+							color="error"
+							aria-label="Delete"
+							onClick={remove}
+							disabled={del.pending}
+						>
+							<DeleteIcon fontSize="inherit" />
+						</IconButton>
+					)}
 				</Stack>
 			</Stack>
 			<Typography

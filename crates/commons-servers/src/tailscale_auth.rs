@@ -28,6 +28,17 @@ where
 	type Rejection = AppError;
 
 	async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
+		// Dev / test bypass: mirrors `TailscaleAdmin`. Without it, every
+		// integration test would need to set the three Tailscale headers on
+		// every authenticated request, even for endpoints that only need
+		// "any user".
+		if cfg!(debug_assertions) {
+			return Ok(TailscaleUser {
+				login: "admin@localhost".into(),
+				name: "You".into(),
+				profile_pic: None,
+			});
+		}
 		let login = parts
 			.headers
 			.get(TAILSCALE_USER_LOGIN)
