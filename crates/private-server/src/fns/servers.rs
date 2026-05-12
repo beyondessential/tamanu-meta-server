@@ -141,6 +141,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(update))
 		.routes(routes!(import_ticket))
 		.routes(routes!(search_parent))
+		.routes(routes!(attach_tailscale_device))
 }
 
 /// Root servers — those without a parent. Each one heads a server-group
@@ -490,8 +491,63 @@ pub async fn import_ticket(
 	Json(args): Json<ImportTicketArgs>,
 ) -> Result<Json<Uuid>> {
 	let mut conn = state.db.get().await?;
-	let ticket = CanopyTicket::from_base64(&args.ticket_b64)?;
-	let server = Server::upsert_from_ticket(&mut conn, &ticket, args.kind, args.rank).await?;
+	let ticket = CanopyTicket::from_base64(&args.ticket_b64).inspect_err(|e| {
+		tracing::warn!(error = %e, "import_ticket: bad ticket payload");
+	})?;
+	let server = Server::upsert_from_ticket(&mut conn, &ticket, args.kind, args.rank)
+		.await
+		.inspect_err(|e| {
+			tracing::warn!(error = %e, "import_ticket: upsert_from_ticket failed");
+		})?;
+
+	// If the ticket carries a Tailscale identity and we have a directory
+	// configured, try to attach it to the device on a best-effort basis.
+	// Failure here doesn't roll back the import — the operator can attach
+	// manually via the device admin UI.
+	if let Some(device_id) = server.device_id
+		&& let Some(directory) = state.tailnet_directory.as_ref()
+	{
+		let identifier = ticket
+			.tailscale_ip
+			.as_deref()
+			.or(ticket.tailscale_name.as_deref());
+		if let Some(id) = identifier {
+			match directory.resolve_identifier(id).await {
+				Ok(Some(entry)) => {
+					let identity = database::devices::TailscaleIdentity {
+						node_id: entry.node_id.clone(),
+						node_name: Some(entry.node_name),
+						tailnet: Some(entry.tailnet),
+					};
+					match database::devices::Device::attach_tailscale(
+						&mut conn, device_id, identity,
+					)
+					.await
+					{
+						Ok(()) => tracing::info!(
+							%device_id,
+							node_id = %entry.node_id,
+							"import_ticket: auto-attached tailscale identity from ticket"
+						),
+						Err(e) => tracing::warn!(
+							%device_id,
+							error = %e,
+							"import_ticket: could not auto-attach tailscale identity",
+						),
+					}
+				}
+				Ok(None) => tracing::info!(
+					ticket_id = %id,
+					"import_ticket: ticket's tailscale identifier not found in directory"
+				),
+				Err(e) => tracing::warn!(
+					error = %e,
+					"import_ticket: directory lookup failed"
+				),
+			}
+		}
+	}
+
 	Ok(Json(server.id))
 }
 
@@ -526,6 +582,100 @@ pub async fn search_parent(
 	)
 	.await?;
 	Ok(Json(all_servers.into_iter().map(server_to_info).collect()))
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct AttachTailscaleDeviceArgs {
+	pub server_id: Uuid,
+	/// Any of: a Tailscale CGNAT/ULA IP, a node id, or a DNS name.
+	pub identifier: String,
+}
+
+/// Find or create a `Device` row for a Tailscale node id resolved
+/// from the supplied identifier, and attach it to the server
+/// (`servers.device_id`). Used when a server has no device yet (e.g.
+/// an operator-imported server that hasn't reported in) and the
+/// operator wants to bind it to a tailnet node without going through
+/// the device admin page first.
+#[utoipa::path(
+	post,
+	path = "/attach_tailscale_device",
+	tag = "servers",
+	security(("tailscale-admin" = [])),
+	request_body = AttachTailscaleDeviceArgs,
+	responses(
+		(status = 200, description = "Device id newly attached to the server.", body = Uuid, content_type = "application/json"),
+		(status = 404, description = "Identifier does not resolve to a known tailnet node.", body = ProblemDetailsSchema),
+		(status = 409, description = "The resolved device is already attached to another server.", body = ProblemDetailsSchema),
+		(status = 503, description = "Tailnet directory not configured or unreachable.", body = ProblemDetailsSchema),
+	),
+)]
+pub async fn attach_tailscale_device(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<AttachTailscaleDeviceArgs>,
+) -> Result<Json<Uuid>> {
+	let directory = state
+		.tailnet_directory
+		.as_ref()
+		.ok_or(AppError::AuthTailnetDirectoryUnavailable)?;
+	let entry = directory
+		.resolve_identifier(&args.identifier)
+		.await
+		.map_err(|_| AppError::AuthTailnetDirectoryUnavailable)?
+		.ok_or_else(|| {
+			AppError::BadRequest("no tailnet device matches that identifier".into())
+		})?;
+
+	let mut conn = state.db.get().await?;
+
+	// Find existing device by node id, or create a new one.
+	let device = if let Some(existing) =
+		Device::from_tailscale_node_id(&mut conn, &entry.node_id).await?
+	{
+		existing
+	} else {
+		Device::create_with_tailscale(
+			&mut conn,
+			database::devices::TailscaleIdentity {
+				node_id: entry.node_id.clone(),
+				node_name: Some(entry.node_name.clone()),
+				tailnet: Some(entry.tailnet.clone()),
+			},
+		)
+		.await?
+	};
+
+	// Refuse if the device is already attached to a *different* server
+	// — the operator should clear that one first.
+	let other_servers = Server::get_by_device_id(&mut conn, device.id).await?;
+	if other_servers.iter().any(|s| s.id != args.server_id) {
+		return Err(AppError::Conflict(format!(
+			"device {} is already attached to another server",
+			device.id,
+		)));
+	}
+
+	Server::update(
+		&mut conn,
+		args.server_id,
+		PartialServer {
+			id: args.server_id,
+			name: None,
+			kind: None,
+			rank: None,
+			host: None,
+			device_id: Some(Some(device.id)),
+			parent_server_id: None,
+			listed: None,
+			cloud: None,
+			geolocation: None,
+			alert_when_down: None,
+		},
+	)
+	.await?;
+
+	Ok(Json(device.id))
 }
 
 fn convert_device_with_info(d: DeviceWithInfo) -> super::devices::DeviceInfo {

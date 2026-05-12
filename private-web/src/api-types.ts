@@ -827,6 +827,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/servers/attach_tailscale_device": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Find or create a `Device` row for a Tailscale node id resolved
+         *     from the supplied identifier, and attach it to the server
+         *     (`servers.device_id`). Used when a server has no device yet (e.g.
+         *     an operator-imported server that hasn't reported in) and the
+         *     operator wants to bind it to a tailnet node without going through
+         *     the device admin page first.
+         */
+        post: operations["attach_tailscale_device"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/servers/get_detail": {
         parameters: {
             query?: never;
@@ -1241,6 +1265,12 @@ export interface components {
              *     tuple before persisting.
              */
             identifier: string;
+        };
+        AttachTailscaleDeviceArgs: {
+            /** @description Any of: a Tailscale CGNAT/ULA IP, a node id, or a DNS name. */
+            identifier: string;
+            /** Format: uuid */
+            server_id: string;
         };
         BestoolSnippetDetail: {
             description?: string | null;
@@ -3347,6 +3377,57 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IssueData"];
+                };
+            };
+        };
+    };
+    attach_tailscale_device: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AttachTailscaleDeviceArgs"];
+            };
+        };
+        responses: {
+            /** @description Device id newly attached to the server. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": string;
+                };
+            };
+            /** @description Identifier does not resolve to a known tailnet node. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description The resolved device is already attached to another server. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description Tailnet directory not configured or unreachable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
         };

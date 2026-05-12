@@ -1990,6 +1990,73 @@
         ]
       }
     },
+    "/api/servers/attach_tailscale_device": {
+      "post": {
+        "tags": [
+          "servers"
+        ],
+        "summary": "Find or create a `Device` row for a Tailscale node id resolved\nfrom the supplied identifier, and attach it to the server\n(`servers.device_id`). Used when a server has no device yet (e.g.\nan operator-imported server that hasn't reported in) and the\noperator wants to bind it to a tailnet node without going through\nthe device admin page first.",
+        "operationId": "attach_tailscale_device",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttachTailscaleDeviceArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Device id newly attached to the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Identifier does not resolve to a known tailnet node.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The resolved device is already attached to another server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Tailnet directory not configured or unreachable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/servers/get_detail": {
       "post": {
         "tags": [
@@ -2939,6 +3006,23 @@
           "identifier": {
             "type": "string",
             "description": "Any of: a Tailscale CGNAT/ULA IP, a node id, or a DNS name —\nthe operator pastes whichever is most convenient from the\nTailscale admin console. The server resolves it via the\ncached directory to the canonical `(node_id, name, tailnet)`\ntuple before persisting."
+          }
+        }
+      },
+      "AttachTailscaleDeviceArgs": {
+        "type": "object",
+        "required": [
+          "server_id",
+          "identifier"
+        ],
+        "properties": {
+          "identifier": {
+            "type": "string",
+            "description": "Any of: a Tailscale CGNAT/ULA IP, a node id, or a DNS name."
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
