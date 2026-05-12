@@ -13,7 +13,7 @@ Canopy provides:
 We have a container image for linux/amd64 and linux/arm64:
 
 ```
-ghcr.io/beyondessential/canopy:6.1.0
+ghcr.io/beyondessential/canopy:6.1.1
 ```
 
 ## Develop

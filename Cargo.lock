@@ -675,7 +675,7 @@ dependencies = [
 
 [[package]]
 name = "commons-errors"
-version = "6.1.0"
+version = "6.1.1"
 dependencies = [
  "axum",
  "diesel",
@@ -694,7 +694,7 @@ dependencies = [
 
 [[package]]
 name = "commons-servers"
-version = "6.1.0"
+version = "6.1.1"
 dependencies = [
  "axum",
  "axum-client-ip",
@@ -719,7 +719,7 @@ dependencies = [
 
 [[package]]
 name = "commons-tests"
-version = "6.1.0"
+version = "6.1.1"
 dependencies = [
  "axum",
  "axum-client-ip",
@@ -746,7 +746,7 @@ dependencies = [
 
 [[package]]
 name = "commons-types"
-version = "6.1.0"
+version = "6.1.1"
 dependencies = [
  "base64",
  "commons-errors",
@@ -949,7 +949,7 @@ checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
 
 [[package]]
 name = "database"
-version = "6.1.0"
+version = "6.1.1"
 dependencies = [
  "base64",
  "bestool-postgres",
@@ -2080,7 +2080,7 @@ dependencies = [
 
 [[package]]
 name = "jobs"
-version = "6.1.0"
+version = "6.1.1"
 dependencies = [
  "clap",
  "commons-errors",
@@ -2818,7 +2818,7 @@ dependencies = [
 
 [[package]]
 name = "private-server"
-version = "6.1.0"
+version = "6.1.1"
 dependencies = [
  "axum",
  "axum-client-ip",
@@ -2886,7 +2886,7 @@ dependencies = [
 
 [[package]]
 name = "public-server"
-version = "6.1.0"
+version = "6.1.1"
 dependencies = [
  "axum",
  "axum-client-ip",
