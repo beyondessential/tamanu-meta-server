@@ -47,6 +47,23 @@ fn spec_has_paths_for_every_module() {
 	}
 }
 
+/// Drift-check: the committed `private-web/openapi.json` must match what the
+/// current rust handlers produce. If this fails, run `just gen-openapi` and
+/// commit the resulting diff.
+#[test]
+fn committed_spec_matches_generated() {
+	let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../private-web/openapi.json");
+	let raw =
+		std::fs::read_to_string(path).expect("read private-web/openapi.json — generate it with `just gen-openapi`");
+	let committed: serde_json::Value =
+		serde_json::from_str(&raw).expect("private-web/openapi.json is valid JSON");
+	let generated = build_spec();
+	assert!(
+		committed == generated,
+		"private-web/openapi.json is stale — run `just gen-openapi` to refresh and commit the diff",
+	);
+}
+
 #[test]
 fn spec_path_count() {
 	let spec = build_spec();
