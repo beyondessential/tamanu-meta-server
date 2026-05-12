@@ -106,6 +106,35 @@ hold tailscale identity, or both are attached to a server. The
 operator must clear one side first (detach tailscale or null out
 `servers.device_id`) before retrying the merge.
 
+## Bad request
+
+Issued when a client sends syntactically or semantically invalid
+input. Body content explains the specific issue (e.g. malformed
+ticket, unsupported ticket version, unparseable URL).
+
+## Conflict
+
+Issued when the requested change conflicts with existing state in
+a way the operator can resolve (e.g. importing a ticket whose
+canonical URL is already claimed by a different server id). Body
+content explains the conflict.
+
+## Auth: tailnet identity missing
+
+Issued on the private-server's `/public/...` mount when the
+extractor can't resolve the caller to a tailnet identity. Causes,
+in order of likelihood:
+
+- `CLIENT_IP_SOURCE` doesn't match what the upstream proxy emits,
+  so `ClientIp` resolves to the wrong address.
+- The caller's IP isn't in Tailscale's CGNAT v4 (`100.64.0.0/10`)
+  or ULA v6 (`fd7a:115c:a1e0::/48`) ranges — i.e. they aren't
+  reaching us through the Tailscale ingress.
+- The IP *is* in tailnet space, but the directory cache doesn't
+  know about it: the node may have just joined the tailnet and a
+  refresh hasn't happened yet, or the directory background task
+  is failing.
+
 ## Other
 
 An unclassified error.

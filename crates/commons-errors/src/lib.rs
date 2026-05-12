@@ -108,6 +108,20 @@ pub enum AppError {
 
 	#[error("cannot merge devices: conflict on tailscale identity or server attachment")]
 	DeviceMergeConflict,
+
+	#[error("no tailnet identity could be resolved for this request")]
+	AuthTailnetIdentityMissing,
+
+	/// User-supplied input was syntactically or semantically invalid.
+	/// Maps to 400 so callers don't have to chase a generic 500.
+	#[error("invalid request: {0}")]
+	BadRequest(String),
+
+	/// Resource conflict — e.g. attempting to import a ticket whose
+	/// canonical URL already belongs to a different server id. Maps
+	/// to 409.
+	#[error("conflict: {0}")]
+	Conflict(String),
 }
 
 impl AppError {
@@ -170,6 +184,9 @@ impl AppError {
 			Self::TaggedDeviceNotAllowed => StatusCode::FORBIDDEN,
 			Self::DeviceTailscaleNodeAlreadyClaimed => StatusCode::CONFLICT,
 			Self::DeviceMergeConflict => StatusCode::CONFLICT,
+			Self::AuthTailnetIdentityMissing => StatusCode::UNAUTHORIZED,
+			Self::BadRequest(_) => StatusCode::BAD_REQUEST,
+			Self::Conflict(_) => StatusCode::CONFLICT,
 			_ => StatusCode::INTERNAL_SERVER_ERROR,
 		}
 	}
@@ -216,6 +233,9 @@ impl AppError {
 						Self::DeviceTailscaleNodeAlreadyClaimed =>
 							"device-tailscale-node-already-claimed",
 						Self::DeviceMergeConflict => "device-merge-conflict",
+						Self::AuthTailnetIdentityMissing => "auth-tailnet-identity-missing",
+						Self::BadRequest(_) => "bad-request",
+						Self::Conflict(_) => "conflict",
 						Self::Problem(_) => unreachable!(),
 					}
 				))
