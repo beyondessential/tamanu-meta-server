@@ -13,6 +13,7 @@ pub mod notes;
 pub mod pg_duration;
 pub mod schema;
 pub mod servers;
+pub mod slack_outbox;
 pub mod sql_playground_history;
 pub mod statuses;
 pub mod tailscale_users;
