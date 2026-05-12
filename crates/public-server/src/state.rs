@@ -15,6 +15,12 @@ pub struct AppState {
 	pub tera: Arc<Tera>,
 	#[cfg(feature = "ui")]
 	pub server_versions_secret: Option<String>,
+	/// Populated only when the public-server's router is nested into
+	/// the private-server's `/public/...` mount and the private-server
+	/// has a directory configured. The internet-facing public-server
+	/// binary's `init()` leaves this `None`, so the tailnet path of
+	/// the device-auth extractor can never fire on the open internet.
+	pub tailnet_directory: Option<TailnetDirectory>,
 }
 
 impl AppState {
@@ -46,12 +52,20 @@ impl AppState {
 	}
 
 	pub fn from_db(db: Db) -> Result<Self> {
+		Self::from_db_with_directory(db, None)
+	}
+
+	pub fn from_db_with_directory(
+		db: Db,
+		tailnet_directory: Option<TailnetDirectory>,
+	) -> Result<Self> {
 		Ok(Self {
 			db,
 			#[cfg(feature = "ui")]
 			tera: Self::init_tera()?,
 			#[cfg(feature = "ui")]
 			server_versions_secret: std::env::var("SERVER_VERSIONS_SECRET").ok(),
+			tailnet_directory,
 		})
 	}
 }
@@ -62,13 +76,9 @@ impl FromRef<AppState> for Db {
 	}
 }
 
-/// Public-server is internet-facing and never authenticates by tailnet
-/// identity. The dual-auth device extractor reads this slot through
-/// `FromRef`; returning `None` here keeps the tailnet path
-/// short-circuited by type-system construction.
 impl FromRef<AppState> for Option<TailnetDirectory> {
-	fn from_ref(_state: &AppState) -> Self {
-		None
+	fn from_ref(state: &AppState) -> Self {
+		state.tailnet_directory.clone()
 	}
 }
 

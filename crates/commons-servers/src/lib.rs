@@ -14,6 +14,7 @@ pub mod device_auth;
 pub mod headers;
 pub mod health;
 pub mod tailnet_directory;
+pub mod tailnet_guard;
 pub mod tailscale_auth;
 
 pub fn router(routes: Router<()>, client_ip_source: ClientIpSource) -> Router<()> {
