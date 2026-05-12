@@ -17,6 +17,7 @@ import SnoozeIcon from "@mui/icons-material/Snooze";
 import { useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
+import { humanDuration } from "../lib/humanDuration";
 import NotesList, { AddNoteButton } from "./NotesList";
 import SeverityChip from "./SeverityChip";
 import SourceChip from "./SourceChip";
@@ -184,10 +185,39 @@ function Header({
 				color="text.secondary"
 				sx={{ flexShrink: 0 }}
 			>
-				<TimeAgo timestamp={issue.last_seen} />
+				<ClosureOrTime issue={issue} />
 			</Typography>
 		</Stack>
 	);
+}
+
+/** Header time slot. For closed issues, gives the closure context — reason
+ * (human-resolved) or "on its own" (device sent inactive) — plus the
+ * lifetime. For still-active issues, falls back to last-seen. */
+function ClosureOrTime({ issue }: { issue: IssueData }) {
+	if (issue.resolved_at) {
+		const reasonKey = issue.resolved_reason as ResolvedReason | null;
+		const reasonLabel =
+			reasonKey && reasonKey in RESOLVED_REASON_LABEL
+				? RESOLVED_REASON_LABEL[reasonKey].toLowerCase()
+				: issue.resolved_reason;
+		const lasted = humanDuration(issue.first_seen, issue.resolved_at);
+		return (
+			<>
+				closed{reasonLabel ? ` as ${reasonLabel}` : ""}{" "}
+				<TimeAgo timestamp={issue.resolved_at} />, lasted {lasted}
+			</>
+		);
+	}
+	if (!issue.active) {
+		const lasted = humanDuration(issue.first_seen, issue.last_seen);
+		return (
+			<>
+				closed on its own <TimeAgo timestamp={issue.last_seen} />, lasted {lasted}
+			</>
+		);
+	}
+	return <TimeAgo timestamp={issue.last_seen} />;
 }
 
 /** Leftmost slot of the right-side header cluster. Avatar (resolver or

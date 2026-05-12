@@ -161,9 +161,15 @@ function Header({
 		const closedAt = incident.closed_at;
 		if (!closedAt) return null;
 		const lasted = humanDuration(incident.opened_at, closedAt);
+		const reasonKey = incident.resolved_reason as ResolvedReason | null;
+		const reasonLabel =
+			reasonKey && reasonKey in RESOLVED_REASON_LABEL
+				? RESOLVED_REASON_LABEL[reasonKey].toLowerCase()
+				: incident.resolved_reason;
 		return (
 			<>
-				closed <TimeAgo timestamp={closedAt} />, lasted {lasted}
+				closed
+				{reasonLabel ? ` as ${reasonLabel}` : ""} <TimeAgo timestamp={closedAt} />, lasted {lasted}
 			</>
 		);
 	})();
