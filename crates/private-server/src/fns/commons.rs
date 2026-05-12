@@ -43,13 +43,16 @@ pub async fn server_versions_url() -> Result<Json<Option<String>>> {
 	Ok(Json(url))
 }
 
+// No `security` block: the handler intentionally accepts unauthenticated
+// callers and reports `false`. Marking it admin-gated (or even user-gated)
+// would make Swagger UI demand auth before letting you call it, defeating
+// the point of the probe.
 #[utoipa::path(
 	post,
 	path = "/is_current_user_admin",
 	tag = "commons",
-	security(("tailscale-user" = [])),
 	responses(
-		(status = 200, description = "Whether the calling Tailscale user is on the admin allow-list.", body = bool, content_type = "application/json"),
+		(status = 200, description = "`true` if the caller's Tailscale identity is on the admin allow-list; `false` otherwise (including when no Tailscale identity is present).", body = bool, content_type = "application/json"),
 	),
 )]
 pub async fn is_current_user_admin(

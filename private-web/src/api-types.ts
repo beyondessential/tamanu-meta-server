@@ -2136,7 +2136,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Whether the calling Tailscale user is on the admin allow-list. */
+            /** @description `true` if the caller's Tailscale identity is on the admin allow-list; `false` otherwise (including when no Tailscale identity is present). */
             200: {
                 headers: {
                     [name: string]: unknown;

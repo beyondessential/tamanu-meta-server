@@ -374,7 +374,7 @@
         "operationId": "is_current_user_admin",
         "responses": {
           "200": {
-            "description": "Whether the calling Tailscale user is on the admin allow-list.",
+            "description": "`true` if the caller's Tailscale identity is on the admin allow-list; `false` otherwise (including when no Tailscale identity is present).",
             "content": {
               "application/json": {
                 "schema": {
@@ -383,12 +383,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "tailscale-user": []
-          }
-        ]
+        }
       }
     },
     "/api/commons/public_url": {
