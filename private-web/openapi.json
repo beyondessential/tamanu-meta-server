@@ -10,7 +10,7 @@
     "license": {
       "name": "GPL-3.0-or-later"
     },
-    "version": "6.1.1"
+    "version": "6.1.2"
   },
   "paths": {
     "/api/admins/add": {
