@@ -93,6 +93,15 @@ pub enum AppError {
 
 	#[error("source 'manual' is reserved for operator submissions")]
 	SourceManualForbidden,
+
+	#[error("tailnet directory is unavailable")]
+	AuthTailnetDirectoryUnavailable,
+
+	#[error("tailnet node lacks the required tag")]
+	AuthTailnetNodeNotPermitted,
+
+	#[error("tagged-device callers are only allowed on /public/... routes")]
+	TaggedDeviceNotAllowed,
 }
 
 impl AppError {
@@ -150,6 +159,9 @@ impl AppError {
 			Self::AuthFailed { .. } => StatusCode::UNAUTHORIZED,
 			Self::DeviceHasNoServer => StatusCode::PRECONDITION_FAILED,
 			Self::SourceManualForbidden => StatusCode::BAD_REQUEST,
+			Self::AuthTailnetDirectoryUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+			Self::AuthTailnetNodeNotPermitted => StatusCode::FORBIDDEN,
+			Self::TaggedDeviceNotAllowed => StatusCode::FORBIDDEN,
 			_ => StatusCode::INTERNAL_SERVER_ERROR,
 		}
 	}
@@ -190,6 +202,9 @@ impl AppError {
 						Self::AuthFailed { .. } => "auth-failed",
 						Self::DeviceHasNoServer => "device-has-no-server",
 						Self::SourceManualForbidden => "source-manual-forbidden",
+						Self::AuthTailnetDirectoryUnavailable => "auth-tailnet-directory-unavailable",
+						Self::AuthTailnetNodeNotPermitted => "auth-tailnet-node-not-permitted",
+						Self::TaggedDeviceNotAllowed => "tagged-device-not-allowed",
 						Self::Problem(_) => unreachable!(),
 					}
 				))

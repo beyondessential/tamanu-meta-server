@@ -73,6 +73,26 @@ they can report issues.
 Issued when an event submission to the public API uses `source = "manual"`.
 That source is reserved for operator-submitted events via the private API.
 
+## Auth: tailnet directory unavailable
+
+Issued when the private server can't reach the Tailscale control plane to
+resolve a caller's tailnet IP to a node identity. The path to recover is
+operator-side: check the OAuth credentials and the `TAILSCALE_TAILNET`
+config, and confirm the device-list refresh loop is making progress.
+
+## Auth: tailnet node not permitted
+
+Issued when a tailnet caller's resolved node identity is missing the tag
+required by `TAILSCALE_REQUIRED_TAG`. The node is on the tailnet, but not
+one that's allowed to authenticate as a device.
+
+## Tagged device not allowed
+
+Issued when a tagged-device caller (no `Tailscale-User-Login` header,
+source IP in the Tailscale CGNAT or ULA ranges) hits any private-server
+route outside `/public/...`. Those routes are for human admins and
+internal callers only.
+
 ## Other
 
 An unclassified error.
