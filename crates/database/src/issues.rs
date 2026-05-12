@@ -812,6 +812,15 @@ impl Issue {
 	}
 }
 
+/// Minimal incident metadata returned alongside an issue so the UI can
+/// link from the issue card to the incident(s) the issue is attached to.
+#[derive(Debug, Clone)]
+pub struct IssueIncidentRef {
+	pub incident_id: Uuid,
+	pub opened_at: Timestamp,
+	pub closed_at: Option<Timestamp>,
+}
+
 /// Aggregate counts displayed against an incident in the UI.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct IncidentStats {
@@ -972,6 +981,50 @@ impl Incident {
 			.load(db)
 			.await
 			.map_err(AppError::from)
+	}
+
+	/// Bulk lookup: for each issue id, the distinct incidents it is or was
+	/// linked to, with their open/close timestamps. Used to surface the
+	/// "attaching incident(s)" pill on each issue card.
+	///
+	/// The same `(issue, incident)` pair can have multiple `incident_issues`
+	/// rows (issue left and rejoined). We dedupe on `incident_id` and order
+	/// by `opened_at desc` so the most recent attachment is first.
+	pub async fn for_issues(
+		db: &mut AsyncPgConnection,
+		issue_ids: &[Uuid],
+	) -> Result<std::collections::HashMap<Uuid, Vec<IssueIncidentRef>>> {
+		use crate::schema::{incident_issues, incidents};
+		use std::collections::HashMap;
+
+		let mut out: HashMap<Uuid, Vec<IssueIncidentRef>> = HashMap::new();
+		if issue_ids.is_empty() {
+			return Ok(out);
+		}
+
+		let rows: Vec<(Uuid, Uuid, jiff_diesel::Timestamp, jiff_diesel::NullableTimestamp)> =
+			incident_issues::table
+				.inner_join(incidents::table.on(incidents::id.eq(incident_issues::incident_id)))
+				.filter(incident_issues::issue_id.eq_any(issue_ids))
+				.select((
+					incident_issues::issue_id,
+					incidents::id,
+					incidents::opened_at,
+					incidents::closed_at,
+				))
+				.distinct()
+				.order(incidents::opened_at.desc())
+				.load(db)
+				.await?;
+
+		for (issue_id, incident_id, opened_at, closed_at) in rows {
+			out.entry(issue_id).or_default().push(IssueIncidentRef {
+				incident_id,
+				opened_at: opened_at.into(),
+				closed_at: Option::<Timestamp>::from(closed_at),
+			});
+		}
+		Ok(out)
 	}
 
 	pub async fn get_with_issues(

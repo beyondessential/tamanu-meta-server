@@ -2,6 +2,7 @@ import {
 	Alert as MuiAlert,
 	Box,
 	Button,
+	Chip,
 	IconButton,
 	Link as MuiLink,
 	MenuItem,
@@ -13,7 +14,9 @@ import {
 import CheckCircleOutlinedIcon from "@mui/icons-material/CheckCircleOutlined";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import HistoryIcon from "@mui/icons-material/History";
 import SnoozeIcon from "@mui/icons-material/Snooze";
+import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
@@ -28,6 +31,7 @@ import {
 	RESOLVED_REASONS,
 	RESOLVED_REASON_LABEL,
 	type IssueData,
+	type IssueIncidentLink,
 	type ResolvedReason,
 } from "../types";
 
@@ -179,6 +183,7 @@ function Header({
 					snoozed
 				</Typography>
 			)}
+			<IncidentLinks incidents={issue.incidents} />
 			<HeaderActor issue={issue} isAdmin={isAdmin} onChanged={onChanged} />
 			<Box sx={{ flexShrink: 0 }}>
 				<SourceChip source={issue.source} refValue={issue.ref} />
@@ -522,6 +527,39 @@ function IssueActions({
 				</MuiAlert>
 			)}
 		</Box>
+	);
+}
+
+/** One small chip per attaching incident, each linking to its detail page.
+ * Open incidents are warning-coloured with a warning icon; closed ones use a
+ * history icon and a neutral tone. Without these, there's no way to navigate
+ * from an issue back to the incident(s) it joined. */
+function IncidentLinks({ incidents }: { incidents: IssueIncidentLink[] }) {
+	if (incidents.length === 0) return null;
+	return (
+		<Stack direction="row" spacing={0.5} sx={{ flexShrink: 0, flexWrap: "wrap" }}>
+			{incidents.map((inc) => {
+				const open = inc.closed_at == null;
+				const opened = new Date(inc.opened_at).toLocaleString();
+				const tooltip = open
+					? `Open incident, opened ${opened}`
+					: `Closed incident, opened ${opened}`;
+				return (
+					<Tooltip key={inc.incident_id} title={tooltip}>
+						<Chip
+							component={RouterLink}
+							to={`/incidents/${inc.incident_id}`}
+							size="small"
+							variant="outlined"
+							color={open ? "error" : "default"}
+							icon={open ? <WarningAmberIcon /> : <HistoryIcon />}
+							label="incident"
+							clickable
+						/>
+					</Tooltip>
+				);
+			})}
+		</Stack>
 	);
 }
 

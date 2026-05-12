@@ -6,7 +6,9 @@ use commons_types::{
 	Uuid,
 	issue::{ResolvedReason, Severity},
 };
-use database::issues::{Event, Issue, IssueFilter, IssueListFilters, NewEvent};
+use database::issues::{
+	Event, Incident, Issue, IssueFilter, IssueIncidentRef, IssueListFilters, NewEvent,
+};
 use database::notes::IssueNote;
 use database::servers::Server;
 use database::tailscale_users::TailscaleUser as CachedTailscaleUser;
@@ -52,6 +54,28 @@ pub struct IssueData {
 	pub snoozed_until: Option<Timestamp>,
 	pub created_at: Timestamp,
 	pub updated_at: Timestamp,
+	/// Distinct incidents this issue is or was attached to, most recent first.
+	/// Empty for issues that never crossed the threshold to join an incident.
+	pub incidents: Vec<IssueIncidentLink>,
+}
+
+/// Minimal incident reference attached to an issue, enough for the UI to
+/// render a link and indicate open/closed status. See `Incident::for_issues`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct IssueIncidentLink {
+	pub incident_id: Uuid,
+	pub opened_at: Timestamp,
+	pub closed_at: Option<Timestamp>,
+}
+
+impl From<IssueIncidentRef> for IssueIncidentLink {
+	fn from(r: IssueIncidentRef) -> Self {
+		Self {
+			incident_id: r.incident_id,
+			opened_at: r.opened_at,
+			closed_at: r.closed_at,
+		}
+	}
 }
 
 /// All the non-Issue extras we tuck into an `IssueData`.
@@ -59,6 +83,7 @@ struct IssueEnrichment<'a> {
 	server_name: Option<String>,
 	server_host: String,
 	users: &'a std::collections::HashMap<String, CachedTailscaleUser>,
+	incidents: Vec<IssueIncidentLink>,
 }
 
 impl IssueData {
@@ -91,6 +116,7 @@ impl IssueData {
 			snoozed_until: i.snoozed_until,
 			created_at: i.created_at,
 			updated_at: i.updated_at,
+			incidents: e.incidents,
 		}
 	}
 }
@@ -121,8 +147,9 @@ fn collect_user_logins(issues: &[Issue]) -> Vec<&str> {
 	s.into_iter().collect()
 }
 
-/// Enrich a list of issues with their server names/hosts and acker/resolver
-/// display info in two extra batch queries.
+/// Enrich a list of issues with their server names/hosts, acker/resolver
+/// display info, and the incidents each issue is attached to. Three extra
+/// batch queries (servers, users, incidents).
 pub(crate) async fn enrich_issues(
 	conn: &mut database::diesel_async::AsyncPgConnection,
 	issues: Vec<Issue>,
@@ -131,6 +158,8 @@ pub(crate) async fn enrich_issues(
 	let names = Server::names_by_ids(conn, &server_ids).await?;
 	let user_logins = collect_user_logins(&issues);
 	let users = CachedTailscaleUser::by_logins(conn, &user_logins).await?;
+	let issue_ids: Vec<Uuid> = issues.iter().map(|i| i.id).collect();
+	let mut incidents = Incident::for_issues(conn, &issue_ids).await?;
 	Ok(issues
 		.into_iter()
 		.map(|i| {
@@ -138,12 +167,19 @@ pub(crate) async fn enrich_issues(
 				.get(&i.server_id)
 				.cloned()
 				.unwrap_or((None, String::new()));
+			let links = incidents
+				.remove(&i.id)
+				.unwrap_or_default()
+				.into_iter()
+				.map(IssueIncidentLink::from)
+				.collect();
 			IssueData::from_with(
 				i,
 				IssueEnrichment {
 					server_name: name,
 					server_host: host,
 					users: &users,
+					incidents: links,
 				},
 			)
 		})
@@ -161,12 +197,20 @@ pub(crate) async fn enrich_issue(
 		.unwrap_or((None, String::new()));
 	let user_logins = collect_user_logins(std::slice::from_ref(&issue));
 	let users = CachedTailscaleUser::by_logins(conn, &user_logins).await?;
+	let mut incidents = Incident::for_issues(conn, &[issue.id]).await?;
+	let links = incidents
+		.remove(&issue.id)
+		.unwrap_or_default()
+		.into_iter()
+		.map(IssueIncidentLink::from)
+		.collect();
 	Ok(IssueData::from_with(
 		issue,
 		IssueEnrichment {
 			server_name: name,
 			server_host: host,
 			users: &users,
+			incidents: links,
 		},
 	))
 }
