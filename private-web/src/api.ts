@@ -42,9 +42,21 @@ export async function callApi<
 		} catch {
 			detail = await response.text().catch(() => null);
 		}
+		// Surface the problem-details title (and detail line, if present)
+		// in the thrown error's message so action.error?.message in the UI
+		// shows the actual server-side cause, not just the HTTP status.
+		let extra = "";
+		if (
+			detail &&
+			typeof detail === "object" &&
+			"title" in detail &&
+			typeof (detail as { title?: unknown }).title === "string"
+		) {
+			extra = `: ${(detail as { title: string }).title}`;
+		}
 		throw new ApiError(
 			response.status,
-			`server fn ${module}.${fn} failed: ${response.status}`,
+			`server fn ${module}.${fn} failed: ${response.status}${extra}`,
 			detail,
 		);
 	}

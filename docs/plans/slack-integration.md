@@ -143,11 +143,17 @@ The canopy incident link points at the private-server (admin UI,
 Tailscale-gated) at `<PRIVATE_URL>/incidents/<id>`. Operators receiving
 Slack notifications are on Tailscale, so `PRIVATE_URL` is the right
 base — `PUBLIC_URL` is the device-facing API origin and would render
-a 404 / unauthorised page for an operator who clicked through. If
-`PRIVATE_URL` is unset, `link` falls back to `http://localhost/...`
-so the workflow's `<{{link}}|Open in canopy>` mrkdwn still renders as
-a clickable (broken) link rather than malformed text. Set
-`PRIVATE_URL` in any env that posts to a real Slack.
+a 404 / unauthorised page for an operator who clicked through.
+
+`link` is **injected by the drainer** at delivery time, not rendered at
+enqueue time. Reasoning: enqueue happens in whichever process called
+`Incident::open_for` / `Incident::resolve` (public-server, private-server,
+reachability job…). Rendering the link at enqueue would force every one
+of those processes to read `PRIVATE_URL`, which is a deploy footgun.
+Pushing it down to the drainer means one process needs the env var.
+If `PRIVATE_URL` is unset *and* any `SLACK_WEBHOOK_*_URL` is set, the
+drainer refuses to start — better to fail loud than to ship messages
+with broken links.
 
 ### Configuration
 
@@ -157,7 +163,10 @@ a clickable (broken) link rather than malformed text. Set
 - `SLACK_WEBHOOK_RESOLVE_URL` — same, for the `incident_resolve`
   workflow.
 - `PRIVATE_URL` — base URL of the private-server admin UI (e.g.
-  `https://canopy.example.ts.net`). Gates the `link` field.
+  `https://canopy.example.ts.net`). Required on the drainer process
+  whenever any `SLACK_WEBHOOK_*_URL` is set; the drainer refuses to
+  start otherwise. Only the drainer reads this — no other canopy
+  process needs it for Slack purposes.
 
 ### Out of scope for Phase A
 

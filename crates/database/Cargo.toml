@@ -47,3 +47,4 @@ bestool-postgres = "1.0.6"
 
 [dev-dependencies]
 commons-tests = { path = "../commons-tests" }
+rcgen = "0.14.7"

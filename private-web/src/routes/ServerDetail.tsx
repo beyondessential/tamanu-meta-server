@@ -3,27 +3,33 @@ import {
 	Box,
 	Button,
 	Chip,
+	Dialog,
+	DialogActions,
+	DialogContent,
+	DialogTitle,
 	IconButton,
 	LinearProgress,
 	Link as MuiLink,
 	Paper,
 	Stack,
+	TextField,
 	Tooltip,
 	Typography,
 } from "@mui/material";
 import EditIcon from "@mui/icons-material/Edit";
 import LanguageIcon from "@mui/icons-material/Language";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import IncidentsLink from "../components/IncidentsLink";
 import ManualEventButton from "../components/ManualEventButton";
 import StatusDot from "../components/StatusDot";
+import TailnetIdentitySection from "../components/TailnetIdentitySection";
 import TimeAgo from "../components/TimeAgo";
 import VersionIndicator from "../components/VersionIndicator";
 import { StatusLegend, VersionLegend } from "../components/Legends";
 import ServerKindChip from "../components/ServerKindChip";
 import ServerRankChip from "../components/ServerRankChip";
-import { useApi } from "../api";
+import { callApi, useApi, useApiAction } from "../api";
 import { usePageTitle } from "../hooks/usePageTitle";
 import type {
 	DeviceInfo,
@@ -87,8 +93,16 @@ export default function ServerDetail() {
 			/>
 			<UrlAndDevice
 				host={data.server.host}
+				serverId={data.server.id}
 				deviceInfo={data.device_info}
+				refresh={() => detail.reload()}
 			/>
+			{data.device_info && (
+				<TailnetIdentitySection
+					device={data.device_info}
+					refresh={() => detail.reload()}
+				/>
+			)}
 			<InfoSection
 				server={data.server}
 				status={data.last_status}
@@ -185,11 +199,16 @@ function Header({
 
 function UrlAndDevice({
 	host,
+	serverId,
 	deviceInfo,
+	refresh,
 }: {
 	host: string;
+	serverId: string;
 	deviceInfo: DeviceInfo | null;
+	refresh: () => void;
 }) {
+	const [attachOpen, setAttachOpen] = useState(false);
 	return (
 		<Stack
 			direction={{ xs: "column", md: "row" }}
@@ -205,11 +224,11 @@ function UrlAndDevice({
 					{host}
 				</MuiLink>
 			</Paper>
-			{deviceInfo && (
-				<Paper variant="outlined" sx={{ p: 2 }}>
-					<Typography variant="h6" component="h2" gutterBottom>
-						Device
-					</Typography>
+			<Paper variant="outlined" sx={{ p: 2 }}>
+				<Typography variant="h6" component="h2" gutterBottom>
+					Device
+				</Typography>
+				{deviceInfo ? (
 					<Stack
 						direction="row"
 						spacing={1}
@@ -239,9 +258,173 @@ function UrlAndDevice({
 							/>
 						)}
 					</Stack>
-				</Paper>
-			)}
+				) : (
+					<Stack spacing={1} sx={{ alignItems: "flex-start" }}>
+						<Typography variant="body2" color="text.secondary">
+							No device attached. Bind this server to a Tailscale
+							node and canopy will auto-create the device row if
+							it doesn't exist yet.
+						</Typography>
+						<Button
+							variant="contained"
+							onClick={() => setAttachOpen(true)}
+						>
+							Attach Tailscale device
+						</Button>
+					</Stack>
+				)}
+			</Paper>
+			<AttachServerDeviceDialog
+				open={attachOpen}
+				onClose={() => setAttachOpen(false)}
+				serverId={serverId}
+				onAttached={() => {
+					setAttachOpen(false);
+					refresh();
+				}}
+			/>
 		</Stack>
+	);
+}
+
+function AttachServerDeviceDialog({
+	open,
+	onClose,
+	serverId,
+	onAttached,
+}: {
+	open: boolean;
+	onClose: () => void;
+	serverId: string;
+	onAttached: () => void;
+}) {
+	const [identifier, setIdentifier] = useState("");
+	const [preview, setPreview] = useState<
+		import("../types").TailnetLiveInfo | null
+	>(null);
+	const [previewError, setPreviewError] = useState<string | null>(null);
+	const [previewLoading, setPreviewLoading] = useState(false);
+	const attachAction = useApiAction("servers", "attach_tailscale_device");
+
+	useEffect(() => {
+		if (!open) {
+			setIdentifier("");
+			setPreview(null);
+			setPreviewError(null);
+		}
+	}, [open]);
+
+	useEffect(() => {
+		const value = identifier.trim();
+		if (!open || value === "") {
+			setPreview(null);
+			setPreviewError(null);
+			return;
+		}
+		let cancelled = false;
+		setPreviewLoading(true);
+		const handle = setTimeout(async () => {
+			try {
+				const r = await callApi(
+					"devices",
+					"resolve_tailnet_identifier",
+					{ identifier: value },
+				);
+				if (cancelled) return;
+				setPreview(r.matched);
+				setPreviewError(
+					r.matched ? null : "No tailnet node matches that identifier.",
+				);
+			} catch (err) {
+				if (cancelled) return;
+				setPreview(null);
+				setPreviewError(err instanceof Error ? err.message : String(err));
+			} finally {
+				if (!cancelled) setPreviewLoading(false);
+			}
+		}, 250);
+		return () => {
+			cancelled = true;
+			clearTimeout(handle);
+		};
+	}, [identifier, open]);
+
+	const onConfirm = async () => {
+		try {
+			await attachAction.call({ server_id: serverId, identifier });
+			onAttached();
+		} catch {
+			/* surfaced via attachAction.error */
+		}
+	};
+
+	return (
+		<Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
+			<DialogTitle>Attach Tailscale device to server</DialogTitle>
+			<DialogContent>
+				<Stack spacing={2} sx={{ mt: 1 }}>
+					<Typography variant="body2" color="text.secondary">
+						Paste any Tailscale identifier — IP, node ID, or DNS
+						name. If a device row exists for that node, it's
+						attached to the server; otherwise canopy creates a new
+						device row first.
+					</Typography>
+					<TextField
+						label="Tailscale identifier"
+						placeholder="100.64.0.42 / nodekey:… / device.example.ts.net"
+						value={identifier}
+						onChange={(e) => setIdentifier(e.target.value)}
+						autoFocus
+						fullWidth
+					/>
+					{previewLoading && <LinearProgress />}
+					{preview && (
+						<Paper variant="outlined" sx={{ p: 1.5 }}>
+							<Stack spacing={0.5}>
+								<Typography variant="caption" color="text.secondary">
+									Resolves to
+								</Typography>
+								<Typography variant="body2">
+									{preview.display_name}
+								</Typography>
+								<Typography
+									variant="body2"
+									color="text.secondary"
+									sx={{ fontFamily: "monospace" }}
+								>
+									{preview.node_id}
+								</Typography>
+								<Typography variant="body2" color="text.secondary">
+									{preview.addresses.join(", ")}
+								</Typography>
+							</Stack>
+						</Paper>
+					)}
+					{previewError && identifier.trim() !== "" && (
+						<Alert severity="info">{previewError}</Alert>
+					)}
+					{attachAction.error && (
+						<Alert severity="error">{attachAction.error.message}</Alert>
+					)}
+				</Stack>
+			</DialogContent>
+			<DialogActions>
+				<Button onClick={onClose} disabled={attachAction.pending}>
+					Cancel
+				</Button>
+				<Button
+					variant="contained"
+					onClick={onConfirm}
+					disabled={
+						attachAction.pending ||
+						preview === null ||
+						identifier.trim() === ""
+					}
+				>
+					{attachAction.pending ? "Attaching…" : "Attach"}
+				</Button>
+			</DialogActions>
+		</Dialog>
 	);
 }
 
@@ -273,6 +456,10 @@ function InfoSection({
 				{server.kind === "central" && (
 					<InfoItem label="Mobile list" value={server.listed ? "Public" : "No"} />
 				)}
+				<InfoItem
+					label="Status alerts"
+					value={server.alert_when_down ? "On" : "Off"}
+				/>
 				{server.parent_server_id && (
 					<Stack spacing={0.25}>
 						<Typography variant="caption" color="text.secondary">
@@ -448,6 +635,15 @@ function ChildServers({
 						</MuiLink>
 						{child.rank && <ServerRankChip rank={child.rank} />}
 						<ServerKindChip kind={child.kind} />
+						{!child.alert_when_down && (
+							<Tooltip title="Status alerts are off for this server — canopy isn't watching it.">
+								<Chip
+									size="small"
+									variant="outlined"
+									label="unmonitored"
+								/>
+							</Tooltip>
+						)}
 						<Box sx={{ flex: 1 }} />
 						{isAdmin && (
 							<ManualEventButton
