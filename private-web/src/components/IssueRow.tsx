@@ -17,6 +17,8 @@ import SnoozeIcon from "@mui/icons-material/Snooze";
 import { useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
+import { useIsAdmin } from "../hooks/useIsAdmin";
+import { humanDuration } from "../lib/humanDuration";
 import NotesList, { AddNoteButton } from "./NotesList";
 import SeverityChip from "./SeverityChip";
 import SourceChip from "./SourceChip";
@@ -70,6 +72,7 @@ export default function IssueRow({
 	const [notesRefresh, setNotesRefresh] = useState(0);
 	const snoozeActive = isSnoozeActive(issue.snoozed_until);
 	const struckThrough = !issue.active || !!issue.resolved_at;
+	const isAdmin = useIsAdmin() === true;
 	return (
 		<Box
 			sx={{
@@ -87,6 +90,7 @@ export default function IssueRow({
 				snoozeActive={snoozeActive}
 				struckThrough={struckThrough}
 				showServer={showServer}
+				isAdmin={isAdmin}
 				onChanged={onChanged}
 			/>
 			{expanded && (
@@ -94,6 +98,7 @@ export default function IssueRow({
 					issue={issue}
 					snoozeActive={snoozeActive}
 					notesRefresh={notesRefresh}
+					isAdmin={isAdmin}
 					onNoteAdded={() => setNotesRefresh((t) => t + 1)}
 					onChanged={onChanged}
 				/>
@@ -109,6 +114,7 @@ function Header({
 	snoozeActive,
 	struckThrough,
 	showServer,
+	isAdmin,
 	onChanged,
 }: {
 	issue: IssueData;
@@ -117,6 +123,7 @@ function Header({
 	snoozeActive: boolean;
 	struckThrough: boolean;
 	showServer: boolean;
+	isAdmin: boolean;
 	onChanged: () => void;
 }) {
 	return (
@@ -172,7 +179,7 @@ function Header({
 					snoozed
 				</Typography>
 			)}
-			<HeaderActor issue={issue} onChanged={onChanged} />
+			<HeaderActor issue={issue} isAdmin={isAdmin} onChanged={onChanged} />
 			<Box sx={{ flexShrink: 0 }}>
 				<SourceChip source={issue.source} refValue={issue.ref} />
 			</Box>
@@ -184,20 +191,51 @@ function Header({
 				color="text.secondary"
 				sx={{ flexShrink: 0 }}
 			>
-				<TimeAgo timestamp={issue.last_seen} />
+				<ClosureOrTime issue={issue} />
 			</Typography>
 		</Stack>
 	);
 }
 
+/** Header time slot. For closed issues, gives the closure context — reason
+ * (human-resolved) or "on its own" (device sent inactive) — plus the
+ * lifetime. For still-active issues, falls back to last-seen. */
+function ClosureOrTime({ issue }: { issue: IssueData }) {
+	if (issue.resolved_at) {
+		const reasonKey = issue.resolved_reason as ResolvedReason | null;
+		const reasonLabel =
+			reasonKey && reasonKey in RESOLVED_REASON_LABEL
+				? RESOLVED_REASON_LABEL[reasonKey].toLowerCase()
+				: issue.resolved_reason;
+		const lasted = humanDuration(issue.first_seen, issue.resolved_at);
+		return (
+			<>
+				closed{reasonLabel ? ` as ${reasonLabel}` : ""}{" "}
+				<TimeAgo timestamp={issue.resolved_at} />, lasted {lasted}
+			</>
+		);
+	}
+	if (!issue.active) {
+		const lasted = humanDuration(issue.first_seen, issue.last_seen);
+		return (
+			<>
+				closed on its own <TimeAgo timestamp={issue.last_seen} />, lasted {lasted}
+			</>
+		);
+	}
+	return <TimeAgo timestamp={issue.last_seen} />;
+}
+
 /** Leftmost slot of the right-side header cluster. Avatar (resolver or
- * acker) when applicable; an Ack button otherwise. There is no Unack in
- * the UI — the backend still supports it. */
+ * acker) when applicable; an Ack button otherwise (admins only). There is
+ * no Unack in the UI — the backend still supports it. */
 function HeaderActor({
 	issue,
+	isAdmin,
 	onChanged,
 }: {
 	issue: IssueData;
+	isAdmin: boolean;
 	onChanged: () => void;
 }) {
 	const ack = useApiAction("issues", "ack");
@@ -241,6 +279,7 @@ function HeaderActor({
 			</Tooltip>
 		);
 	}
+	if (!isAdmin) return null;
 	return (
 		<Button
 			size="small"
@@ -257,12 +296,14 @@ function Body({
 	issue,
 	snoozeActive,
 	notesRefresh,
+	isAdmin,
 	onNoteAdded,
 	onChanged,
 }: {
 	issue: IssueData;
 	snoozeActive: boolean;
 	notesRefresh: number;
+	isAdmin: boolean;
 	onNoteAdded: () => void;
 	onChanged: () => void;
 }) {
@@ -280,12 +321,14 @@ function Body({
 			>
 				{issue.message}
 			</Typography>
-			<IssueActions
-				issue={issue}
-				snoozeActive={snoozeActive}
-				onNoteAdded={onNoteAdded}
-				onChanged={onChanged}
-			/>
+			{isAdmin && (
+				<IssueActions
+					issue={issue}
+					snoozeActive={snoozeActive}
+					onNoteAdded={onNoteAdded}
+					onChanged={onChanged}
+				/>
+			)}
 			<Box
 				sx={{
 					mt: 1.5,
@@ -300,6 +343,7 @@ function Body({
 					parentKey="issue_id"
 					parentId={issue.id}
 					refreshKey={notesRefresh}
+					canEdit={isAdmin}
 				/>
 			</Box>
 		</Box>

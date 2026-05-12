@@ -10,6 +10,7 @@ import {
 import OpenInNewIcon from "@mui/icons-material/OpenInNew";
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
 import { useApi } from "./api";
+import { AdminProvider } from "./hooks/useIsAdmin";
 import { useReloadInterval } from "./hooks/useReloadInterval";
 import Admins from "./routes/Admins";
 import Bestool from "./routes/Bestool";
@@ -78,6 +79,7 @@ export default function App() {
 	];
 
 	return (
+		<AdminProvider>
 		<Box>
 			<AppBar position="static" color="default" elevation={1}>
 				<Toolbar variant="dense" sx={{ gap: 2 }}>
@@ -203,5 +205,6 @@ export default function App() {
 				</Routes>
 			</Container>
 		</Box>
+		</AdminProvider>
 	);
 }

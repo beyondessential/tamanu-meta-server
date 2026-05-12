@@ -1,7 +1,7 @@
 use axum::Json;
 use axum::extract::State;
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
-use commons_servers::tailscale_auth::TailscaleAdmin;
+use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
 use commons_types::{
 	Uuid,
 	issue::{ResolvedReason, Severity},
@@ -246,7 +246,7 @@ pub struct ListArgs {
 	path = "/list",
 	operation_id = "issue_list",
 	tag = "issues",
-	security(("tailscale-admin" = [])),
+	security(("tailscale-user" = [])),
 	request_body = ListArgs,
 	responses(
 		(status = 200, body = Vec<IssueData>),
@@ -254,7 +254,7 @@ pub struct ListArgs {
 )]
 pub async fn list(
 	State(state): State<AppState>,
-	_admin: TailscaleAdmin,
+	_user: TailscaleUser,
 	Json(args): Json<ListArgs>,
 ) -> Result<Json<Vec<IssueData>>> {
 	let mut conn = state.db.get().await?;
@@ -285,7 +285,7 @@ pub struct ListForDeviceArgs {
 	post,
 	path = "/list_for_device",
 	tag = "issues",
-	security(("tailscale-admin" = [])),
+	security(("tailscale-user" = [])),
 	request_body = ListForDeviceArgs,
 	responses(
 		(status = 200, body = Vec<IssueData>),
@@ -293,7 +293,7 @@ pub struct ListForDeviceArgs {
 )]
 pub async fn list_for_device(
 	State(state): State<AppState>,
-	_admin: TailscaleAdmin,
+	_user: TailscaleUser,
 	Json(args): Json<ListForDeviceArgs>,
 ) -> Result<Json<Vec<IssueData>>> {
 	let mut conn = state.db.get().await?;
@@ -321,7 +321,7 @@ pub struct ListForServerArgs {
 	path = "/list_for_server",
 	operation_id = "issue_list_for_server",
 	tag = "issues",
-	security(("tailscale-admin" = [])),
+	security(("tailscale-user" = [])),
 	request_body = ListForServerArgs,
 	responses(
 		(status = 200, body = Vec<IssueData>),
@@ -329,7 +329,7 @@ pub struct ListForServerArgs {
 )]
 pub async fn list_for_server(
 	State(state): State<AppState>,
-	_admin: TailscaleAdmin,
+	_user: TailscaleUser,
 	Json(args): Json<ListForServerArgs>,
 ) -> Result<Json<Vec<IssueData>>> {
 	let mut conn = state.db.get().await?;
@@ -354,7 +354,7 @@ pub struct ListEventsArgs {
 	post,
 	path = "/list_events",
 	tag = "issues",
-	security(("tailscale-admin" = [])),
+	security(("tailscale-user" = [])),
 	request_body = ListEventsArgs,
 	responses(
 		(status = 200, body = Vec<EventData>),
@@ -362,7 +362,7 @@ pub struct ListEventsArgs {
 )]
 pub async fn list_events(
 	State(state): State<AppState>,
-	_admin: TailscaleAdmin,
+	_user: TailscaleUser,
 	Json(args): Json<ListEventsArgs>,
 ) -> Result<Json<Vec<EventData>>> {
 	let mut conn = state.db.get().await?;
@@ -631,7 +631,7 @@ pub struct ListNotesArgs {
 	path = "/list_notes",
 	operation_id = "issue_list_notes",
 	tag = "issues",
-	security(("tailscale-admin" = [])),
+	security(("tailscale-user" = [])),
 	request_body = ListNotesArgs,
 	responses(
 		(status = 200, body = Vec<IssueNoteData>),
@@ -639,7 +639,7 @@ pub struct ListNotesArgs {
 )]
 pub async fn list_notes(
 	State(state): State<AppState>,
-	_admin: TailscaleAdmin,
+	_user: TailscaleUser,
 	Json(args): Json<ListNotesArgs>,
 ) -> Result<Json<Vec<IssueNoteData>>> {
 	let mut conn = state.db.get().await?;

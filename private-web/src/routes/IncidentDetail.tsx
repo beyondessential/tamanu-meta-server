@@ -24,6 +24,7 @@ import { useApi, useApiAction } from "../api";
 import IssueRow from "../components/IssueRow";
 import ManualEventButton from "../components/ManualEventButton";
 import { AddNoteButton } from "../components/NotesList";
+import { useIsAdmin } from "../hooks/useIsAdmin";
 import TimeAgo from "../components/TimeAgo";
 import UserAvatar from "../components/UserAvatar";
 import { usePageTitle } from "../hooks/usePageTitle";
@@ -133,6 +134,7 @@ function Header({
 	onChanged: () => void;
 }) {
 	const open = incident.closed_at == null;
+	const isAdmin = useIsAdmin() === true;
 	const ack = useApiAction("incidents", "ack");
 	const resolve = useApiAction("incidents", "resolve");
 	const unresolve = useApiAction("incidents", "unresolve");
@@ -161,9 +163,15 @@ function Header({
 		const closedAt = incident.closed_at;
 		if (!closedAt) return null;
 		const lasted = humanDuration(incident.opened_at, closedAt);
+		const reasonKey = incident.resolved_reason as ResolvedReason | null;
+		const reasonLabel =
+			reasonKey && reasonKey in RESOLVED_REASON_LABEL
+				? RESOLVED_REASON_LABEL[reasonKey].toLowerCase()
+				: incident.resolved_reason;
 		return (
 			<>
-				closed <TimeAgo timestamp={closedAt} />, lasted {lasted}
+				closed
+				{reasonLabel ? ` as ${reasonLabel}` : ""} <TimeAgo timestamp={closedAt} />, lasted {lasted}
 			</>
 		);
 	})();
@@ -227,7 +235,7 @@ function Header({
 								/>
 							</span>
 						</Tooltip>
-					) : (
+					) : isAdmin ? (
 						<Button
 							size="small"
 							variant="outlined"
@@ -237,7 +245,7 @@ function Header({
 						>
 							Ack
 						</Button>
-					)}
+					) : null}
 				</Box>
 			</Stack>
 
@@ -247,7 +255,7 @@ function Header({
 				sx={{ mt: 2, alignItems: "center", flexWrap: "wrap" }}
 				useFlexGap
 			>
-				{incident.resolved_at ? (
+				{isAdmin && (incident.resolved_at ? (
 					<Button
 						size="small"
 						variant="outlined"
@@ -277,20 +285,24 @@ function Header({
 							</Button>
 						</span>
 					</Tooltip>
+				))}
+				{isAdmin && (
+					<>
+						<ManualEventButton
+							serverId={incident.server_id}
+							hasOpenIncident={open}
+							onSubmitted={onChanged}
+							size="small"
+						/>
+						<AddNoteButton
+							apiModule="incidents"
+							parentKey="incident_id"
+							parentId={incident.id}
+							onAdded={onChanged}
+							variant="outlined"
+						/>
+					</>
 				)}
-				<ManualEventButton
-					serverId={incident.server_id}
-					hasOpenIncident={open}
-					onSubmitted={onChanged}
-					size="small"
-				/>
-				<AddNoteButton
-					apiModule="incidents"
-					parentKey="incident_id"
-					parentId={incident.id}
-					onAdded={onChanged}
-					variant="outlined"
-				/>
 				<Box sx={{ ml: "auto" }}>
 					<Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
 						<Stat
