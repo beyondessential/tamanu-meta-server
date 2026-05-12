@@ -23,13 +23,16 @@ use reqwest::Client;
 use serde::Deserialize;
 use tokio::sync::RwLock;
 
-/// Resolved node identity for a tailnet IP.
+/// Resolved node identity for a tailnet IP. `addresses` carries every
+/// IP the control plane reports for this node, so a UI can surface
+/// the current IPs of a device that's already attached by node id.
 #[derive(Clone, Debug)]
 pub struct DirectoryEntry {
 	pub node_id: String,
 	pub node_name: String,
 	pub tailnet: String,
 	pub tags: Vec<String>,
+	pub addresses: Vec<IpAddr>,
 }
 
 /// Configuration for constructing a [`TailnetDirectory`].
@@ -90,6 +93,7 @@ struct Inner {
 #[derive(Debug, Default)]
 struct Cache {
 	by_ip: HashMap<IpAddr, DirectoryEntry>,
+	by_node_id: HashMap<String, DirectoryEntry>,
 	last_refresh: Option<Instant>,
 }
 
@@ -189,6 +193,82 @@ impl TailnetDirectory {
 		Ok(cache.by_ip.get(&ip).cloned())
 	}
 
+	/// Reverse-lookup by stable node id. Same miss-cooldown discipline
+	/// as [`Self::lookup`]. Used by the admin UI to surface the current
+	/// tailnet IPs / display name of an already-attached device.
+	pub async fn find_by_node_id(&self, node_id: &str) -> Result<Option<DirectoryEntry>> {
+		{
+			let cache = self.inner.cache.read().await;
+			if let Some(entry) = cache.by_node_id.get(node_id) {
+				return Ok(Some(entry.clone()));
+			}
+			if let Some(last) = cache.last_refresh
+				&& last.elapsed() < self.inner.config.miss_cooldown
+			{
+				return Ok(None);
+			}
+		}
+
+		self.refresh().await?;
+
+		let cache = self.inner.cache.read().await;
+		Ok(cache.by_node_id.get(node_id).cloned())
+	}
+
+	/// Find an entry by DNS name (exact match against `name`, or
+	/// `name` with the tailnet suffix stripped). Linear scan over the
+	/// cached entries — at typical fleet sizes that's well under a
+	/// millisecond and the alternative is a third index to maintain.
+	pub async fn find_by_name(&self, name: &str) -> Result<Option<DirectoryEntry>> {
+		let matcher = name.trim().to_ascii_lowercase();
+		let needle = matcher.trim_end_matches('.');
+
+		let scan = |cache: &Cache| -> Option<DirectoryEntry> {
+			for entry in cache.by_node_id.values() {
+				let entry_name = entry.node_name.to_ascii_lowercase();
+				let short = entry_name.split('.').next().unwrap_or("");
+				if entry_name == needle || short == needle {
+					return Some(entry.clone());
+				}
+			}
+			None
+		};
+
+		{
+			let cache = self.inner.cache.read().await;
+			if let Some(hit) = scan(&cache) {
+				return Ok(Some(hit));
+			}
+			if let Some(last) = cache.last_refresh
+				&& last.elapsed() < self.inner.config.miss_cooldown
+			{
+				return Ok(None);
+			}
+		}
+
+		self.refresh().await?;
+		let cache = self.inner.cache.read().await;
+		Ok(scan(&cache))
+	}
+
+	/// Resolve any of: a Tailscale IP, a node id, or a DNS name. Used
+	/// by the admin attach-tailscale endpoint so an operator can paste
+	/// whichever identifier they grabbed from the Tailscale admin
+	/// console.
+	pub async fn resolve_identifier(&self, raw: &str) -> Result<Option<DirectoryEntry>> {
+		let trimmed = raw.trim();
+		if trimmed.is_empty() {
+			return Ok(None);
+		}
+		if let Ok(ip) = trimmed.parse::<IpAddr>() {
+			return self.lookup(ip).await;
+		}
+		if let Some(hit) = self.find_by_node_id(trimmed).await? {
+			return Ok(Some(hit));
+		}
+		self.find_by_name(trimmed).await
+	}
+
 	/// Force-refresh the cache from the Tailscale control plane.
 	pub async fn refresh(&self) -> Result<()> {
 		let token = self.access_token().await?;
@@ -239,22 +319,29 @@ impl TailnetDirectory {
 			.map_err(|e| AppError::custom(format!("decoding devices response: {e}")))?;
 
 		let mut by_ip = HashMap::with_capacity(parsed.devices.len() * 2);
+		let mut by_node_id = HashMap::with_capacity(parsed.devices.len());
 		for d in parsed.devices {
+			let addresses: Vec<IpAddr> = d
+				.addresses
+				.iter()
+				.filter_map(|a| a.parse::<IpAddr>().ok())
+				.collect();
 			let entry = DirectoryEntry {
-				node_id: d.node_id,
+				node_id: d.node_id.clone(),
 				node_name: d.name,
 				tailnet: d.tailnet_name,
 				tags: d.tags,
+				addresses: addresses.clone(),
 			};
-			for addr in d.addresses {
-				if let Ok(ip) = addr.parse::<IpAddr>() {
-					by_ip.insert(ip, entry.clone());
-				}
+			for ip in &addresses {
+				by_ip.insert(*ip, entry.clone());
 			}
+			by_node_id.insert(d.node_id, entry);
 		}
 
 		let mut cache = self.inner.cache.write().await;
 		cache.by_ip = by_ip;
+		cache.by_node_id = by_node_id;
 		cache.last_refresh = Some(Instant::now());
 		Ok(())
 	}
@@ -315,15 +402,18 @@ impl TailnetDirectory {
 	}
 
 	/// Construct a directory pre-populated with fixed entries, for tests.
-	/// No background refresh, no API calls. The entries are indexed by
-	/// each address they list.
+	/// No background refresh, no API calls. Each entry is indexed both
+	/// by the IP key passed in and by its `node_id`.
 	pub fn for_test(entries: impl IntoIterator<Item = (IpAddr, DirectoryEntry)>) -> Self {
 		let mut by_ip = HashMap::new();
+		let mut by_node_id = HashMap::new();
 		for (ip, entry) in entries {
+			by_node_id.insert(entry.node_id.clone(), entry.clone());
 			by_ip.insert(ip, entry);
 		}
 		let cache = Cache {
 			by_ip,
+			by_node_id,
 			last_refresh: Some(Instant::now()),
 		};
 		Self {
@@ -407,13 +497,14 @@ mod tests {
 
 	#[test]
 	fn for_test_lookup() {
+		let ip: IpAddr = "100.64.0.42".parse().unwrap();
 		let entry = DirectoryEntry {
 			node_id: "n1".into(),
 			node_name: "alpha".into(),
 			tailnet: "test".into(),
 			tags: vec!["tag:server".into()],
+			addresses: vec![ip],
 		};
-		let ip: IpAddr = "100.64.0.42".parse().unwrap();
 		let dir = TailnetDirectory::for_test([(ip, entry.clone())]);
 		let runtime = tokio::runtime::Runtime::new().unwrap();
 		let resolved = runtime.block_on(dir.lookup(ip)).unwrap().unwrap();

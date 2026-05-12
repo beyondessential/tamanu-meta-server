@@ -171,6 +171,7 @@ where
 				node_name: "canopy-test-server".to_string(),
 				tailnet: "test-tailnet".to_string(),
 				tags: vec!["tag:canopy-server".to_string()],
+				addresses: vec![tailnet_ip],
 			},
 		)]);
 
