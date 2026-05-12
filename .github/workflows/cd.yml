@@ -59,7 +59,11 @@ jobs:
       - name: Prepare artifacts
         run: |
           mkdir -p artifacts/${{ matrix.arch }}
-          cp target/${{ matrix.target }}/release/{public-server,private-server,migrate,ownstatus,pingtask,chrome_versions,reachability} artifacts/${{ matrix.arch }}/
+          cargo metadata --format-version=1 --no-deps \
+            | jq -r '.packages[].targets[] | select(.kind | index("bin")) | .name' \
+            | while IFS= read -r bin; do
+                cp "target/${{ matrix.target }}/release/$bin" "artifacts/${{ matrix.arch }}/"
+              done
 
       - uses: actions/upload-artifact@v7
         with:
