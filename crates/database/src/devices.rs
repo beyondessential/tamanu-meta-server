@@ -3,7 +3,7 @@ use commons_errors::{AppError, Result};
 use commons_types::device::DeviceRole;
 use diesel::QueryableByName;
 use diesel::prelude::*;
-use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -160,6 +160,243 @@ impl Device {
 			.get_result(db)
 			.await
 			.map_err(AppError::from)
+	}
+
+	/// Pre-attach a tailnet identity to an existing device. Used by the
+	/// admin "attach Tailscale identity" workflow when the operator
+	/// knows a device is about to come online over the tailnet (or is
+	/// being moved off mTLS). Errors with
+	/// `DeviceTailscaleNodeAlreadyClaimed` if another device already
+	/// holds this `node_id` — the operator should use the merge flow
+	/// in that case.
+	pub async fn attach_tailscale(
+		db: &mut AsyncPgConnection,
+		device_id: Uuid,
+		identity: TailscaleIdentity,
+	) -> Result<()> {
+		use crate::schema::devices::dsl;
+
+		// Pre-check: another device already claiming this node id?
+		let conflict: Option<Uuid> = dsl::devices
+			.select(dsl::id)
+			.filter(dsl::tailscale_node_id.eq(&identity.node_id))
+			.filter(dsl::id.ne(device_id))
+			.first(db)
+			.await
+			.optional()
+			.map_err(AppError::from)?;
+		if conflict.is_some() {
+			return Err(AppError::DeviceTailscaleNodeAlreadyClaimed);
+		}
+
+		diesel::update(dsl::devices.filter(dsl::id.eq(device_id)))
+			.set((
+				dsl::tailscale_node_id.eq(identity.node_id),
+				dsl::tailscale_node_name.eq(identity.node_name),
+				dsl::tailscale_tailnet.eq(identity.tailnet),
+			))
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(())
+	}
+
+	/// Clear the tailnet identity from a device. The opposite of
+	/// `attach_tailscale`; leaves the device row otherwise untouched
+	/// (keys, role, server attachment all stay).
+	pub async fn detach_tailscale(db: &mut AsyncPgConnection, device_id: Uuid) -> Result<()> {
+		use crate::schema::devices::dsl;
+
+		diesel::update(dsl::devices.filter(dsl::id.eq(device_id)))
+			.set((
+				dsl::tailscale_node_id.eq(None::<String>),
+				dsl::tailscale_node_name.eq(None::<String>),
+				dsl::tailscale_tailnet.eq(None::<String>),
+			))
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(())
+	}
+
+	/// Merge `source_id` into `target_id`: every foreign-key reference
+	/// to `source_id` is re-parented to `target_id`, then `source_id`
+	/// is deleted. Runs in a single transaction.
+	///
+	/// Conflict cases (returns [`AppError::DeviceMergeConflict`]):
+	///
+	/// - Both source and target hold a tailscale identity. The
+	///   operator must `detach_tailscale` on one side first.
+	/// - Both source and target are attached to a server
+	///   (`servers.device_id`). The operator must clear one
+	///   `servers.device_id` first; otherwise the unique constraint
+	///   would fail during the rewrite.
+	///
+	/// Target wins for `role` and for `tailscale_*` (if it already
+	/// has them). If only the source has a tailscale identity, the
+	/// merge adopts it onto the target.
+	pub async fn merge_into(
+		db: &mut AsyncPgConnection,
+		source_id: Uuid,
+		target_id: Uuid,
+	) -> Result<()> {
+		use crate::schema::{
+			artifacts, device_connections, device_keys, device_server_associations, devices,
+			issues, servers, statuses, versions,
+		};
+
+		if source_id == target_id {
+			return Err(AppError::custom("merge_into: source and target are the same"));
+		}
+
+		db.transaction::<_, AppError, _>(async |conn| {
+			let source: Self = devices::table
+					.select(Self::as_select())
+					.filter(devices::id.eq(source_id))
+					.first(conn)
+					.await
+					.map_err(AppError::from)?;
+				let target: Self = devices::table
+					.select(Self::as_select())
+					.filter(devices::id.eq(target_id))
+					.first(conn)
+					.await
+					.map_err(AppError::from)?;
+
+				// Conflict: both have tailscale identity.
+				if source.tailscale_node_id.is_some() && target.tailscale_node_id.is_some() {
+					return Err(AppError::DeviceMergeConflict);
+				}
+
+				// Conflict: both attached to a (possibly different) server.
+				let source_server_count: i64 = servers::table
+					.filter(servers::device_id.eq(source_id))
+					.count()
+					.get_result(conn)
+					.await
+					.map_err(AppError::from)?;
+				let target_server_count: i64 = servers::table
+					.filter(servers::device_id.eq(target_id))
+					.count()
+					.get_result(conn)
+					.await
+					.map_err(AppError::from)?;
+				if source_server_count > 0 && target_server_count > 0 {
+					return Err(AppError::DeviceMergeConflict);
+				}
+
+				// Adopt source's tailscale identity onto target if target
+				// has none. (We don't need to clear source first; deleting
+				// source at the end is sufficient. But the partial unique
+				// index on tailscale_node_id would fire if both rows held
+				// the same value briefly — we already ruled that out via
+				// the conflict check above.)
+				if target.tailscale_node_id.is_none() && source.tailscale_node_id.is_some() {
+					diesel::update(devices::table.filter(devices::id.eq(target_id)))
+						.set((
+							devices::tailscale_node_id.eq(source.tailscale_node_id.as_deref()),
+							devices::tailscale_node_name
+								.eq(source.tailscale_node_name.as_deref()),
+							devices::tailscale_tailnet.eq(source.tailscale_tailnet.as_deref()),
+						))
+						.execute(conn)
+						.await
+						.map_err(AppError::from)?;
+					// Clear source's identity so the delete-source step
+					// below doesn't trip the partial unique index.
+					diesel::update(devices::table.filter(devices::id.eq(source_id)))
+						.set((
+							devices::tailscale_node_id.eq(None::<String>),
+							devices::tailscale_node_name.eq(None::<String>),
+							devices::tailscale_tailnet.eq(None::<String>),
+						))
+						.execute(conn)
+						.await
+						.map_err(AppError::from)?;
+				}
+
+				// Re-parent simple foreign keys.
+				diesel::update(device_keys::table.filter(device_keys::device_id.eq(source_id)))
+					.set(device_keys::device_id.eq(target_id))
+					.execute(conn)
+					.await
+					.map_err(AppError::from)?;
+				diesel::update(
+					device_connections::table.filter(device_connections::device_id.eq(source_id)),
+				)
+				.set(device_connections::device_id.eq(target_id))
+				.execute(conn)
+				.await
+				.map_err(AppError::from)?;
+				diesel::update(artifacts::table.filter(artifacts::device_id.eq(source_id)))
+					.set(artifacts::device_id.eq(target_id))
+					.execute(conn)
+					.await
+					.map_err(AppError::from)?;
+				diesel::update(issues::table.filter(issues::device_id.eq(source_id)))
+					.set(issues::device_id.eq(target_id))
+					.execute(conn)
+					.await
+					.map_err(AppError::from)?;
+				diesel::update(statuses::table.filter(statuses::device_id.eq(source_id)))
+					.set(statuses::device_id.eq(target_id))
+					.execute(conn)
+					.await
+					.map_err(AppError::from)?;
+				diesel::update(versions::table.filter(versions::device_id.eq(source_id)))
+					.set(versions::device_id.eq(target_id))
+					.execute(conn)
+					.await
+					.map_err(AppError::from)?;
+
+				// servers.device_id is UNIQUE. We already ruled out the
+				// both-attached case above; here the only writers are
+				// source-attached (rewrite to target) or neither (no-op).
+				diesel::update(servers::table.filter(servers::device_id.eq(source_id)))
+					.set(servers::device_id.eq(target_id))
+					.execute(conn)
+					.await
+					.map_err(AppError::from)?;
+
+				// device_server_associations has composite PK (device_id, server_id).
+				// Two cases:
+				// 1. source has an association for a server that target doesn't —
+				//    rewrite source's device_id to target.
+				// 2. source has an association for a server that target also has —
+				//    collapse: keep target's row, drop source's. (Operator-facing
+				//    semantics: the timeline is now under the target id.)
+				diesel::sql_query(
+					"UPDATE device_server_associations \
+					 SET device_id = $1 \
+					 WHERE device_id = $2 \
+					   AND NOT EXISTS ( \
+					     SELECT 1 FROM device_server_associations target_dsa \
+					     WHERE target_dsa.device_id = $1 \
+					       AND target_dsa.server_id = device_server_associations.server_id \
+					   )",
+				)
+				.bind::<diesel::sql_types::Uuid, _>(target_id)
+				.bind::<diesel::sql_types::Uuid, _>(source_id)
+				.execute(conn)
+				.await
+				.map_err(AppError::from)?;
+				diesel::delete(
+					device_server_associations::table
+						.filter(device_server_associations::device_id.eq(source_id)),
+				)
+				.execute(conn)
+				.await
+				.map_err(AppError::from)?;
+
+			// Finally, delete the source device row.
+			diesel::delete(devices::table.filter(devices::id.eq(source_id)))
+				.execute(conn)
+				.await
+				.map_err(AppError::from)?;
+
+			Ok(())
+		})
+		.await
 	}
 
 	/// Get a single device by ID with its keys and latest connection info.

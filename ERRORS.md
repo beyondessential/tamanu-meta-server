@@ -93,6 +93,19 @@ source IP in the Tailscale CGNAT or ULA ranges) hits any private-server
 route outside `/public/...`. Those routes are for human admins and
 internal callers only.
 
+## Device tailscale node already claimed
+
+Issued by the admin attach-tailscale flow when the requested node id
+is already attached to a different device row. Resolve with the merge
+flow if those two rows represent the same physical machine.
+
+## Device merge conflict
+
+Issued by the admin device-merge flow when source and target both
+hold tailscale identity, or both are attached to a server. The
+operator must clear one side first (detach tailscale or null out
+`servers.device_id`) before retrying the merge.
+
 ## Other
 
 An unclassified error.
