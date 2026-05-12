@@ -42,10 +42,16 @@ our public-facing inbound endpoint. **Phase B is gated on that.**
    per-server channel selection. (Re-open later if needed.)
 2. **Formatting.** Block Kit — header block + section/context fields,
    not plaintext.
-3. **Topology.** Separate crate `crates/slacker/`, two binaries:
-   `slacker-outbox` (Phase A + B background worker) and `slacker-inbound`
-   (Phase B inbound HTTP). Not folded into `public-server` (mTLS-only,
-   device auth) or `private-server` (Tailscale-only).
+3. **Topology.** No new crate for Phase A:
+   - Block Kit renderer + outbox model live in `database` (next to the
+     enqueue call sites).
+   - Worker binary is `crates/jobs/src/bin/slacker_outbox.rs`, alongside
+     the existing periodic-task bins.
+   - Phase B's inbound webhook *will* want its own bin
+     (`crates/jobs/src/bin/slacker_inbound.rs` or a separate crate),
+     because it needs to bind a public HTTP listener and isn't a
+     periodic loop. Not folded into `public-server` (mTLS-only, device
+     auth) or `private-server` (Tailscale-only).
 4. **Inbound filtering.** Tier 3 ingests only human messages — drop
    anything with a `bot_id` field, or from canopy's own bot user id.
    Allow-listing other bots is a follow-up, case-by-case.
@@ -67,10 +73,8 @@ metadata, so threading is physically impossible on this path.
 
 ### Wiring
 
-- New crate `crates/slacker/` exposing a `slacker::Client` over
-  `reqwest`. Constructor reads `SLACK_WEBHOOK_URL` from env; if unset,
-  `Client::disabled()` returns a no-op that the rest of the system can
-  call freely.
+- Block Kit renderer at `crates/database/src/slack_outbox/blocks.rs`,
+  alongside the model.
 - New table `slack_outbox`:
   ```
   id            UUID PK
