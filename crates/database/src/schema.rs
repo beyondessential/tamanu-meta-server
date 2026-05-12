@@ -190,6 +190,21 @@ diesel::table! {
 }
 
 diesel::table! {
+	slack_outbox (id) {
+		id -> Uuid,
+		created_at -> Timestamptz,
+		kind -> Text,
+		incident_id -> Uuid,
+		issue_id -> Nullable<Uuid>,
+		note_id -> Nullable<Uuid>,
+		payload -> Jsonb,
+		delivered_at -> Nullable<Timestamptz>,
+		attempts -> Int4,
+		last_error -> Nullable<Text>,
+	}
+}
+
+diesel::table! {
 	sql_playground_history (id) {
 		id -> Uuid,
 		query -> Text,
@@ -248,6 +263,9 @@ diesel::joinable!(issue_notes -> issues (issue_id));
 diesel::joinable!(issues -> devices (device_id));
 diesel::joinable!(issues -> servers (server_id));
 diesel::joinable!(servers -> devices (device_id));
+diesel::joinable!(slack_outbox -> incident_notes (note_id));
+diesel::joinable!(slack_outbox -> incidents (incident_id));
+diesel::joinable!(slack_outbox -> issues (issue_id));
 diesel::joinable!(statuses -> devices (device_id));
 diesel::joinable!(statuses -> servers (server_id));
 diesel::joinable!(versions -> devices (device_id));
@@ -268,6 +286,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 	issue_notes,
 	issues,
 	servers,
+	slack_outbox,
 	sql_playground_history,
 	statuses,
 	tailscale_users,
