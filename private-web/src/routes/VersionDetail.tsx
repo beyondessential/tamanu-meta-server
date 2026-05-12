@@ -38,13 +38,13 @@ import type {
 export default function VersionDetail() {
 	const { version = "" } = useParams<{ version: string }>();
 	usePageTitle(version || "Version");
-	const detail = useApi<VersionDetailData>(
+	const detail = useApi(
 		"versions",
 		"get_version_detail",
 		{ version },
 		[version],
 	);
-	const isAdmin = useApi<boolean>("commons", "is_current_user_admin");
+	const isAdmin = useApi("commons", "is_current_user_admin");
 
 	if (detail.status === "loading" || detail.status === "idle") {
 		return <LinearProgress />;
@@ -298,7 +298,7 @@ function ArtifactsSection({
 	versionId: string;
 	isAdmin: boolean;
 }) {
-	const result = useApi<ArtifactData[]>(
+	const result = useApi(
 		"versions",
 		"get_version_artifacts",
 		{ version },

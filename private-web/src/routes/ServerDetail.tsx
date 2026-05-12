@@ -25,22 +25,21 @@ import ServerRankChip from "../components/ServerRankChip";
 import { useApi } from "../api";
 import { usePageTitle } from "../hooks/usePageTitle";
 import type {
-	DeviceShortInfo,
-	IncidentData,
+	DeviceInfo,
 	ServerDetailData,
-	ServerInfoFull,
+	ServerInfo,
 	ServerLastStatusData,
 } from "../types";
 
 export default function ServerDetail() {
 	const { id = "" } = useParams<{ id: string }>();
-	const detail = useApi<ServerDetailData>(
+	const detail = useApi(
 		"servers",
 		"get_detail",
 		{ server_id: id },
 		[id],
 	);
-	const isAdmin = useApi<boolean>("commons", "is_current_user_admin");
+	const isAdmin = useApi("commons", "is_current_user_admin");
 	// Single refresh signal for everything on the page that talks to the
 	// issues/incidents APIs. Any mutation (manual-event submit, ack/resolve/
 	// snooze on a row, etc.) bumps this so all sibling panels refetch in
@@ -52,7 +51,7 @@ export default function ServerDetail() {
 	// label every ManualEventButton on the page identically — a child
 	// server's own incidents list is empty (incidents live at the root),
 	// so per-button local queries would mislabel.
-	const openIncidents = useApi<IncidentData[]>(
+	const openIncidents = useApi(
 		"incidents",
 		"list_for_server",
 		{ server_id: id, include_closed: false },
@@ -188,7 +187,7 @@ function UrlAndDevice({
 	deviceInfo,
 }: {
 	host: string;
-	deviceInfo: DeviceShortInfo | null;
+	deviceInfo: DeviceInfo | null;
 }) {
 	return (
 		<Stack
@@ -223,7 +222,7 @@ function UrlAndDevice({
 	);
 }
 
-function deviceShortName(info: DeviceShortInfo): string {
+function deviceShortName(info: DeviceInfo): string {
 	const namedKey = info.keys.findLast(
 		(k) => k.name && k.name !== "Initial Key",
 	);
@@ -236,7 +235,7 @@ function InfoSection({
 	server,
 	status,
 }: {
-	server: ServerInfoFull;
+	server: ServerInfo;
 	status: ServerLastStatusData | null;
 }) {
 	return (
@@ -367,7 +366,7 @@ function InfoItem({
 	);
 }
 
-function renderLocation(server: ServerInfoFull): string {
+function renderLocation(server: ServerInfo): string {
 	if (!server.cloud) return "On premise";
 	return "Cloud";
 }

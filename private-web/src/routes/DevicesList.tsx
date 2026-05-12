@@ -9,7 +9,6 @@ import { useState } from "react";
 import DeviceShorty from "../components/DeviceShorty";
 import { useApi } from "../api";
 import { usePageTitle } from "../hooks/usePageTitle";
-import type { DeviceInfoData, Page } from "../types";
 
 const PAGE_SIZE = 10;
 
@@ -22,7 +21,7 @@ export default function DevicesList({
 	const [page, setPage] = useState(0);
 
 	const listFn = scope === "trusted" ? "list_trusted" : "list_untrusted";
-	const result = useApi<Page<DeviceInfoData>>(
+	const result = useApi(
 		"devices",
 		listFn,
 		{ offset: page * PAGE_SIZE, limit: PAGE_SIZE },

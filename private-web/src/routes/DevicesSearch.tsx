@@ -25,16 +25,16 @@ import { callApi, useApi, useApiAction } from "../api";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { parseCanopyTicket, type CanopyTicket } from "../lib/canopyTicket";
 import type {
-	DeviceInfoData,
+	DeviceInfo,
 	ServerKind,
 	ServerRank,
 } from "../types";
 
 export default function DevicesSearch() {
 	usePageTitle("Search devices");
-	const isAdmin = useApi<boolean>("commons", "is_current_user_admin");
+	const isAdmin = useApi("commons", "is_current_user_admin");
 	const [query, setQuery] = useState("");
-	const [results, setResults] = useState<DeviceInfoData[] | null>(null);
+	const [results, setResults] = useState<DeviceInfo[] | null>(null);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
@@ -49,7 +49,7 @@ export default function DevicesSearch() {
 		setError(null);
 		(async () => {
 			try {
-				const found = await callApi<DeviceInfoData[]>(
+				const found = await callApi(
 					"devices",
 					"search",
 					{ query: query.trim() },
@@ -120,7 +120,7 @@ function ImportTicketDialog({ onClose }: { onClose: () => void }) {
 	const [kind, setKind] = useState<ServerKind>("facility");
 	const [rank, setRank] = useState<ServerRank | "">("");
 	const [error, setError] = useState<string | null>(null);
-	const action = useApiAction<string>("servers", "import_ticket");
+	const action = useApiAction("servers", "import_ticket");
 
 	const parsed: CanopyTicket | null = useMemo(
 		() => parseCanopyTicket(ticket),

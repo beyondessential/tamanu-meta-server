@@ -20,7 +20,7 @@ import { usePageTitle } from "../hooks/usePageTitle";
 
 export default function Admins() {
 	usePageTitle("Admins");
-	const list = useApi<string[]>("admins", "list");
+	const list = useApi("admins", "list");
 	const [email, setEmail] = useState("");
 	const [pending, setPending] = useState(false);
 	const [error, setError] = useState<string | null>(null);

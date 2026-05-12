@@ -115,20 +115,13 @@ export type BestoolSnippetDetail = Solidify<Schemas["BestoolSnippetDetail"]>;
 export type SqlResult = Solidify<Schemas["SqlResult"]>;
 export type SqlHistoryEntry = Solidify<Schemas["SqlHistoryEntry"]>;
 
-// Aliases for the hand-written names still used by the React code. These are
-// kept so the rename doesn't fan out through every component; new code should
-// prefer the unsuffixed names above.
-export type DeviceInfoData = DeviceInfo;
-export type DeviceShortInfo = DeviceInfo;
-export type ServerInfoFull = ServerInfo;
-
 // ── Pagination wrapper ─────────────────────────────────────────────────────
 //
 // utoipa emits one schema per concrete `Page<T>` instantiation
 // (`Page_DeviceInfo`, `Page_ServerInfo`, …) — there's no parametric `Page<T>`
 // in the generated file. We keep a hand-written generic here so call sites
-// can still write `useApi<Page<DeviceInfo>>(...)`; it's structurally
-// identical to each emitted variant.
+// (mostly state shapes outside `useApi`) can still write `Page<DeviceInfo>`;
+// it's structurally identical to each emitted variant.
 export interface Page<T> {
 	items: T[];
 	total: number;

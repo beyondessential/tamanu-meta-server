@@ -15,7 +15,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { callApi, useApi, useApiAction } from "../api";
 import { usePageTitle } from "../hooks/usePageTitle";
-import type { ServerInfoFull, ServerKind, ServerRank } from "../types";
+import type { ServerInfo, ServerKind, ServerRank } from "../types";
 
 const RANK_OPTIONS: Array<{ value: ServerRank | ""; label: string }> = [
 	{ value: "", label: "unranked" },
@@ -29,7 +29,7 @@ const RANK_OPTIONS: Array<{ value: ServerRank | ""; label: string }> = [
 export default function ServerEdit() {
 	const { id = "" } = useParams<{ id: string }>();
 	usePageTitle("Edit server");
-	const info = useApi<ServerInfoFull>(
+	const info = useApi(
 		"servers",
 		"get_info",
 		{ server_id: id },
@@ -42,7 +42,7 @@ export default function ServerEdit() {
 	return <EditForm info={info.data} />;
 }
 
-function EditForm({ info }: { info: ServerInfoFull }) {
+function EditForm({ info }: { info: ServerInfo }) {
 	const navigate = useNavigate();
 	const action = useApiAction("servers", "update");
 
@@ -230,10 +230,10 @@ function ParentServerControl({
 	disabled: boolean;
 }) {
 	const [query, setQuery] = useState("");
-	const [results, setResults] = useState<ServerInfoFull[]>([]);
+	const [results, setResults] = useState<ServerInfo[]>([]);
 	const [loading, setLoading] = useState(false);
 
-	const currentInfo = useApi<ServerInfoFull>(
+	const currentInfo = useApi(
 		"servers",
 		"get_info",
 		{ server_id: currentParentId ?? "" },
@@ -249,7 +249,7 @@ function ParentServerControl({
 		setLoading(true);
 		(async () => {
 			try {
-				const found = await callApi<ServerInfoFull[]>(
+				const found = await callApi(
 					"servers",
 					"search_parent",
 					{
@@ -274,11 +274,11 @@ function ParentServerControl({
 	const currentValue = useMemo(() => {
 		if (!currentParentId) return null;
 		if (currentInfo.status === "ok") return currentInfo.data;
-		return { id: currentParentId } as Partial<ServerInfoFull> as ServerInfoFull;
+		return { id: currentParentId } as Partial<ServerInfo> as ServerInfo;
 	}, [currentParentId, currentInfo]);
 
 	return (
-		<Autocomplete<ServerInfoFull, false, false, false>
+		<Autocomplete<ServerInfo, false, false, false>
 			disabled={disabled}
 			options={results}
 			value={currentValue}

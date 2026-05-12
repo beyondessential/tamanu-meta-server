@@ -15,7 +15,6 @@ import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import SqlEditor from "../components/SqlEditor";
 import { usePageTitle } from "../hooks/usePageTitle";
-import type { BestoolSnippetInfo, Page } from "../types";
 
 const PAGE_SIZE = 10;
 
@@ -24,7 +23,7 @@ export default function BestoolSnippets() {
 	const [page, setPage] = useState(0);
 	const [showCreate, setShowCreate] = useState(false);
 
-	const list = useApi<Page<BestoolSnippetInfo>>(
+	const list = useApi(
 		"bestool",
 		"list_snippets",
 		{ offset: page * PAGE_SIZE, limit: PAGE_SIZE },
