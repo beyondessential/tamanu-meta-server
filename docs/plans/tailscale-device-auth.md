@@ -294,18 +294,107 @@ ALTER TABLE devices
   gives — `commons-tests` will build a mock `TailnetDirectory` that
   hands out fixed entries, and inject it via `FromRef`.
 
+## Admin attach / detach / merge — the migration bootstrap
+
+The fleet today is mTLS-only. Moving it onto the tailnet routes
+through one of two operator workflows, both of which need first-class
+admin tooling — auto-discovery alone is not enough, because an
+auto-discovered tailnet device row is a *new* `Device` (role
+`Untrusted`, no server attachment, no history), while the existing
+mTLS row is the one that owns all the device's state.
+
+**Workflow A — proactive attach.** Operator knows a device is about
+to come online over the tailnet (or wants to switch one from mTLS).
+They look up the node id in the Tailscale admin console, then attach
+it to the existing `Device` row. The next inbound tailnet request
+from that machine lands in the right row immediately and the mTLS
+key is no longer needed.
+
+**Workflow B — reactive merge.** Device shows up over the tailnet
+before anyone got to step (A); auto-discovery files it as a new
+`Untrusted` row. Operator recognises it (by tailscale hostname,
+recent connection IP, or both) and merges the new row's identity
+back into the existing mTLS device row.
+
+### Device methods (in `crates/database/src/devices.rs`)
+
+- `Device::attach_tailscale(&mut conn, device_id, identity) -> Result<()>`
+  — set the three columns. Errors if another device already claims
+  that `node_id` (caller should merge instead).
+- `Device::detach_tailscale(&mut conn, device_id) -> Result<()>` —
+  clear the three columns.
+- `Device::merge_into(&mut conn, source_id, target_id) -> Result<()>`
+  — within a transaction, re-parent every foreign-key reference to
+  `source_id` to point at `target_id` instead (`device_keys`,
+  `device_connections`, `issues.device_id`, `servers.device_id`,
+  `statuses.device_id`, `versions.device_id`), then delete `source_id`.
+  The target wins for `role` and for any tailscale identity it
+  already has; if **both** source and target hold a tailscale
+  identity (or both hold the same role-pinned attachment), the call
+  errors and the operator must resolve manually. Servers' `device_id`
+  has a uniqueness constraint — if both rows are attached to a
+  server, the call errors too.
+
+### Private-server admin endpoints (under `/api/devices/...`)
+
+All three admin-only (`TailscaleAdmin` extractor):
+
+- `POST /api/devices/{id}/tailscale` with body
+  `{ node_id, node_name?, tailnet? }` — `Device::attach_tailscale`.
+  409 on node-id conflict.
+- `DELETE /api/devices/{id}/tailscale` — `Device::detach_tailscale`.
+- `POST /api/devices/{source_id}/merge_into/{target_id}` —
+  `Device::merge_into`. Returns the merged (target) device.
+
+New `AppError` variants:
+
+- `DeviceTailscaleNodeAlreadyClaimed` (409) — attach attempted on a
+  node id already in use by another device.
+- `DeviceMergeConflict` (409) — merge attempted where both source
+  and target hold tailscale identity or are attached to a server.
+
+### Private-web UI (`private-web/src/...`)
+
+On the existing devices admin page, alongside the role / connection
+columns:
+
+- Show `tailscale_node_id`, `tailscale_node_name`, `tailscale_tailnet`
+  in the list/detail view, with the "unknown" state for null (per
+  the indicator-unknown-state convention).
+- Row actions: "Attach Tailscale identity" (modal with `node_id`,
+  `node_name?`, `tailnet?` fields) → calls
+  `POST /api/devices/{id}/tailscale`.
+- Row action: "Detach" → `DELETE /api/devices/{id}/tailscale`.
+- Row action on an Untrusted, tailnet-only auto-discovered device:
+  "Merge into existing device" → opens a picker of other devices,
+  ordered by best-guess match (suggest candidates by matching
+  `tailscale_node_name` prefix to an existing device's most-recent
+  `device_connections` user-agent / hostname, but a free-text picker
+  also works). On confirm, calls
+  `POST /api/devices/{source}/merge_into/{target}`.
+- Filter the device list by:
+  - has Tailscale identity / mTLS only / Tailscale only;
+  - role.
+
+The filter view is operator UX for the cutover: at a glance,
+how many devices still need attaching, how many are dual-auth,
+how many are tailnet-only.
+
+### Tests
+
+- `crates/database/tests/device_merge.rs` covering: clean merge
+  (FK re-parent + source row deleted); conflict cases
+  (both-have-tailscale, both-have-server); idempotency of
+  attach/detach.
+- `crates/private-server/tests/device_admin_endpoints.rs` covering
+  the three endpoints: happy path, conflict 409s, non-admin caller
+  rejected.
+- Playwright e2e for the merge flow in `private-web/e2e/`.
+
 ## What's NOT in this plan
 
-Deliberately deferred — each becomes its own plan if/when wanted:
+Real "won't do" — out of scope by design:
 
-- **Admin attach/detach UI.** Auto-discovery is the only bootstrap.
-  Pre-attaching a node id to an existing device row can be done by
-  `UPDATE devices SET tailscale_node_id = ... WHERE id = ...` for
-  the rare case where it matters. The May-11 plan sketched a full
-  attach/detach/merge UI; we can revive that when there's demand.
-- **Merge of an mTLS-only device row and a tailnet-only row.**
-  Devices that present *both* end up as two separate `Device`
-  rows. Surface to the admin UI later.
 - **Self-hosted Headscale support.** The API contract differs
   slightly. `TAILSCALE_API_BASE` leaves the door ajar but we don't
   exercise the Headscale path.
@@ -351,6 +440,11 @@ Modified:
     the resolved node lacks it.
   - `TaggedDeviceNotAllowed` (403) — tagged-device caller hit a
     non-`/public` surface.
+  - `DeviceTailscaleNodeAlreadyClaimed` (409) — attach attempted
+    on a node id already in use by another device.
+  - `DeviceMergeConflict` (409) — merge attempted where both
+    source and target hold tailscale identity or are attached to
+    a server.
 
 Untouched (deliberately):
 
@@ -404,6 +498,13 @@ when:
 - Migration applied in prod.
 - At least one real tagged device round-trips `/public/events` and
   `/public/status/<id>` via the tailnet (no mTLS cert) in prod.
+- An operator has used the attach UI to pre-attach a node id to a
+  device and observed the next inbound tailnet call land in that
+  row (workflow A).
+- An operator has used the merge UI to fold an auto-discovered
+  tailnet row into an existing mTLS row, and observed the merged
+  row keeps the original's server attachment and history
+  (workflow B).
 - CI is green on the new test files.
 - `commons-tests` exposes `run_with_tailnet_device_auth` and at
   least one private-server integration test consumes it.
