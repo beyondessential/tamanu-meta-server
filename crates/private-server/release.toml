@@ -1,0 +1,9 @@
+# utoipa bakes `CARGO_PKG_VERSION` into both committed openapi.json files as
+# `info.version`. Without this hook, every cargo-release bump leaves the
+# specs one revision behind their crates, and the `committed_spec_matches_
+# generated` drift-check tests start failing on the very first push after
+# release. Running `just gen-openapi` here rebuilds the dump bins against
+# the post-bump Cargo.toml and rewrites both `private-web/openapi.json` and
+# `crates/public-server/openapi.json` (plus the regenerated TS api-types)
+# so cargo-release picks them up in the release commit.
+pre-release-hook = ["bash", "-c", "cd ../.. && just gen-openapi"]
