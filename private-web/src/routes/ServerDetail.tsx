@@ -18,6 +18,7 @@ import { Link as RouterLink, useParams } from "react-router-dom";
 import IncidentsLink from "../components/IncidentsLink";
 import ManualEventButton from "../components/ManualEventButton";
 import StatusDot from "../components/StatusDot";
+import TailnetIdentitySection from "../components/TailnetIdentitySection";
 import TimeAgo from "../components/TimeAgo";
 import VersionIndicator from "../components/VersionIndicator";
 import { StatusLegend, VersionLegend } from "../components/Legends";
@@ -89,6 +90,12 @@ export default function ServerDetail() {
 				host={data.server.host}
 				deviceInfo={data.device_info}
 			/>
+			{data.device_info && (
+				<TailnetIdentitySection
+					device={data.device_info}
+					refresh={() => detail.reload()}
+				/>
+			)}
 			<InfoSection
 				server={data.server}
 				status={data.last_status}
@@ -273,6 +280,10 @@ function InfoSection({
 				{server.kind === "central" && (
 					<InfoItem label="Mobile list" value={server.listed ? "Public" : "No"} />
 				)}
+				<InfoItem
+					label="Reachability alerts"
+					value={server.alert_when_down ? "On" : "Off"}
+				/>
 				{server.parent_server_id && (
 					<Stack spacing={0.25}>
 						<Typography variant="caption" color="text.secondary">
@@ -448,6 +459,15 @@ function ChildServers({
 						</MuiLink>
 						{child.rank && <ServerRankChip rank={child.rank} />}
 						<ServerKindChip kind={child.kind} />
+						{!child.alert_when_down && (
+							<Tooltip title="Reachability alerts are off for this server — canopy isn't watching it.">
+								<Chip
+									size="small"
+									variant="outlined"
+									label="unmonitored"
+								/>
+							</Tooltip>
+						)}
 						<Box sx={{ flex: 1 }} />
 						{isAdmin && (
 							<ManualEventButton
