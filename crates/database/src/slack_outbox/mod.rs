@@ -20,6 +20,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use uuid::Uuid;
 
+pub mod blocks;
+
 /// Newly-opened incident — top-level message.
 pub const KIND_INCIDENT_OPEN: &str = "incident_open";
 /// Incident resolved — Phase A: top-level; Phase B: reply in the incident thread.
