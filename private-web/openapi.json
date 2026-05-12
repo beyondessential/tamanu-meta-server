@@ -10,7 +10,7 @@
     "license": {
       "name": "GPL-3.0-or-later"
     },
-    "version": "6.0.2"
+    "version": "6.1.0"
   },
   "paths": {
     "/api/admins/add": {
@@ -3909,9 +3909,13 @@
                 "id",
                 "kind",
                 "host",
-                "listed"
+                "listed",
+                "alert_when_down"
               ],
               "properties": {
+                "alert_when_down": {
+                  "type": "boolean"
+                },
                 "cloud": {
                   "type": [
                     "boolean",
@@ -4228,6 +4232,12 @@
       "ServerDataUpdate": {
         "type": "object",
         "properties": {
+          "alert_when_down": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "cloud": {
             "type": [
               "boolean",
@@ -4328,9 +4338,13 @@
                     "id",
                     "kind",
                     "host",
-                    "listed"
+                    "listed",
+                    "alert_when_down"
                   ],
                   "properties": {
+                    "alert_when_down": {
+                      "type": "boolean"
+                    },
                     "cloud": {
                       "type": [
                         "boolean",
@@ -4459,9 +4473,13 @@
           "id",
           "kind",
           "host",
-          "listed"
+          "listed",
+          "alert_when_down"
         ],
         "properties": {
+          "alert_when_down": {
+            "type": "boolean"
+          },
           "cloud": {
             "type": [
               "boolean",

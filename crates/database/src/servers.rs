@@ -11,7 +11,14 @@ use uuid::Uuid;
 use super::url_field::UrlField;
 
 #[derive(
-	Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable, AsChangeset,
+	Debug,
+	Clone,
+	Serialize,
+	Deserialize,
+	Queryable,
+	Selectable,
+	Insertable,
+	AsChangeset,
 	utoipa::ToSchema,
 )]
 #[diesel(table_name = crate::schema::servers)]
@@ -37,6 +44,16 @@ pub struct Server {
 	pub cloud: Option<bool>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub geolocation: Option<GeoPoint>,
+	/// When true, the canopy reachability sweep observes this server's
+	/// status freshness and files an issue when it goes Blip/Away/Down/Gone.
+	/// Set to false on servers whose downtime is expected (test
+	/// environments, ad-hoc demos) — the sweep simply doesn't collect
+	/// events for them.
+	///
+	/// The DB default is `true` for freshly-inserted rows, but the migration
+	/// that added the column backfilled existing rows with `false` to avoid
+	/// flooding incidents on rollout. Operators flip it on per server.
+	pub alert_when_down: bool,
 }
 
 impl Server {
@@ -226,6 +243,7 @@ impl Server {
 			listed: false,
 			cloud,
 			geolocation: None,
+			alert_when_down: true,
 		};
 
 		let host_str = server_value.host.0.to_string();
@@ -495,6 +513,7 @@ fn test_server_serialization() {
 		listed: true,
 		cloud: None,
 		geolocation: None,
+		alert_when_down: true,
 	};
 
 	let serialized = serde_json::to_string_pretty(&server).unwrap();
@@ -507,7 +526,8 @@ fn test_server_serialization() {
   "kind": "central",
   "rank": "production",
   "device_id": "00000000-0000-0000-0000-000000000000",
-  "listed": true
+  "listed": true,
+  "alert_when_down": true
 }"#
 	);
 }
@@ -534,6 +554,7 @@ impl From<NewServer> for Server {
 			listed: false,
 			cloud: None,
 			geolocation: None,
+			alert_when_down: true,
 		}
 	}
 }
@@ -554,4 +575,5 @@ pub struct PartialServer {
 	pub listed: Option<bool>,
 	pub cloud: Option<Option<bool>>,
 	pub geolocation: Option<Option<GeoPoint>>,
+	pub alert_when_down: Option<bool>,
 }

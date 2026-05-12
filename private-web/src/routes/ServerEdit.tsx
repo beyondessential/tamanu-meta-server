@@ -51,6 +51,9 @@ function EditForm({ info }: { info: ServerInfo }) {
 	const [kind, setKind] = useState<ServerKind>(info.kind);
 	const [rank, setRank] = useState<ServerRank | "">(info.rank ?? "");
 	const [listed, setListed] = useState(info.listed);
+	const [alertWhenDown, setAlertWhenDown] = useState(
+		info.alert_when_down,
+	);
 	const [parentId, setParentId] = useState<string | null>(
 		info.parent_server_id,
 	);
@@ -76,6 +79,7 @@ function EditForm({ info }: { info: ServerInfo }) {
 				lat && lon
 					? { lat: Number(lat), lon: Number(lon) }
 					: null,
+			alert_when_down: alertWhenDown,
 		};
 		try {
 			await action.call({ server_id: info.id, data });
@@ -186,6 +190,17 @@ function EditForm({ info }: { info: ServerInfo }) {
 						label="Available in Tamanu Mobile app"
 					/>
 				)}
+
+				<FormControlLabel
+					control={
+						<Checkbox
+							checked={alertWhenDown}
+							onChange={(e) => setAlertWhenDown(e.target.checked)}
+							disabled={action.pending}
+						/>
+					}
+					label="File an issue when this server goes unreachable (untick for test environments and other servers that are expected to be down sometimes)"
+				/>
 
 				{action.error && (
 					<Alert severity="error">{action.error.message}</Alert>

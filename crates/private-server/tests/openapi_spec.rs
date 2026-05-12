@@ -15,8 +15,14 @@ fn build_spec() -> serde_json::Value {
 fn spec_has_security_schemes() {
 	let spec = build_spec();
 	let schemes = &spec["components"]["securitySchemes"];
-	assert!(schemes["tailscale-admin"].is_object(), "tailscale-admin scheme present");
-	assert!(schemes["tailscale-user"].is_object(), "tailscale-user scheme present");
+	assert!(
+		schemes["tailscale-admin"].is_object(),
+		"tailscale-admin scheme present"
+	);
+	assert!(
+		schemes["tailscale-user"].is_object(),
+		"tailscale-user scheme present"
+	);
 }
 
 #[test]
@@ -52,9 +58,12 @@ fn spec_has_paths_for_every_module() {
 /// commit the resulting diff.
 #[test]
 fn committed_spec_matches_generated() {
-	let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../private-web/openapi.json");
-	let raw =
-		std::fs::read_to_string(path).expect("read private-web/openapi.json — generate it with `just gen-openapi`");
+	let path = concat!(
+		env!("CARGO_MANIFEST_DIR"),
+		"/../../private-web/openapi.json"
+	);
+	let raw = std::fs::read_to_string(path)
+		.expect("read private-web/openapi.json — generate it with `just gen-openapi`");
 	let committed: serde_json::Value =
 		serde_json::from_str(&raw).expect("private-web/openapi.json is valid JSON");
 	let generated = build_spec();
@@ -67,9 +76,7 @@ fn committed_spec_matches_generated() {
 #[test]
 fn spec_path_count() {
 	let spec = build_spec();
-	let paths = spec["paths"]
-		.as_object()
-		.expect("paths is an object");
+	let paths = spec["paths"].as_object().expect("paths is an object");
 	// Sanity bound: every handler in private-server is annotated. If this drops
 	// far below ~70, someone removed annotations; if it climbs much higher,
 	// new endpoints exist that should be reviewed.

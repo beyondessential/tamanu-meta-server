@@ -49,6 +49,7 @@ pub struct ServerInfo {
 	pub listed: bool,
 	pub cloud: Option<bool>,
 	pub geolocation: Option<GeoPoint>,
+	pub alert_when_down: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -101,6 +102,8 @@ pub struct ServerDataUpdate {
 		skip_serializing_if = "Option::is_none"
 	)]
 	pub geolocation: Option<Option<GeoPoint>>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub alert_when_down: Option<bool>,
 }
 
 fn deserialize_some<'de, T, D>(deserializer: D) -> std::result::Result<Option<T>, D::Error>
@@ -124,6 +127,7 @@ fn server_to_info(s: Server) -> ServerInfo {
 		listed: s.listed,
 		cloud: s.cloud,
 		geolocation: s.geolocation,
+		alert_when_down: s.alert_when_down,
 	}
 }
 
@@ -255,6 +259,7 @@ pub async fn get_info(
 		listed: server.listed,
 		cloud: server.cloud,
 		geolocation: server.geolocation,
+		alert_when_down: server.alert_when_down,
 	}))
 }
 
@@ -314,6 +319,7 @@ pub async fn get_detail(
 		listed: server.listed,
 		cloud: server.cloud,
 		geolocation: server.geolocation,
+		alert_when_down: server.alert_when_down,
 	};
 
 	let up = status
@@ -395,6 +401,7 @@ pub async fn get_detail(
 							device_id: child.device_id,
 							parent_server_id: Some(server.id),
 							parent_server_name: server.name.clone(),
+							alert_when_down: child.alert_when_down,
 						},
 					)
 				})
@@ -453,6 +460,7 @@ pub async fn update(
 		listed: args.data.listed,
 		cloud: args.data.cloud,
 		geolocation: args.data.geolocation,
+		alert_when_down: args.data.alert_when_down,
 	};
 	Server::update(&mut conn, args.server_id, update_data).await?;
 	Ok(Json(()))

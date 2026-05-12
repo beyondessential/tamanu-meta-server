@@ -10,7 +10,7 @@
     "license": {
       "name": "GPL-3.0-or-later"
     },
-    "version": "6.0.2"
+    "version": "6.1.0"
   },
   "paths": {
     "/artifacts/{version}/{artifact_type}/{platform}": {
@@ -1006,6 +1006,12 @@
           "id"
         ],
         "properties": {
+          "alert_when_down": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "cloud": {
             "type": [
               "boolean",
@@ -1150,9 +1156,14 @@
           "id",
           "host",
           "kind",
-          "listed"
+          "listed",
+          "alert_when_down"
         ],
         "properties": {
+          "alert_when_down": {
+            "type": "boolean",
+            "description": "When true, the canopy reachability sweep observes this server's\nstatus freshness and files an issue when it goes Blip/Away/Down/Gone.\nSet to false on servers whose downtime is expected (test\nenvironments, ad-hoc demos) — the sweep simply doesn't collect\nevents for them.\n\nThe DB default is `true` for freshly-inserted rows, but the migration\nthat added the column backfilled existing rows with `false` to avoid\nflooding incidents on rollout. Operators flip it on per server."
+          },
           "cloud": {
             "type": [
               "boolean",

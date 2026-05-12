@@ -53,8 +53,8 @@ fn spec_has_one_path_per_module() {
 #[test]
 fn committed_spec_matches_generated() {
 	let path = concat!(env!("CARGO_MANIFEST_DIR"), "/openapi.json");
-	let raw =
-		std::fs::read_to_string(path).expect("read crates/public-server/openapi.json — generate it with `just gen-openapi`");
+	let raw = std::fs::read_to_string(path)
+		.expect("read crates/public-server/openapi.json — generate it with `just gen-openapi`");
 	let committed: serde_json::Value =
 		serde_json::from_str(&raw).expect("crates/public-server/openapi.json is valid JSON");
 	let generated = build_spec();

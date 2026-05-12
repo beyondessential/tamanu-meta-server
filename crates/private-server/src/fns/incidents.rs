@@ -201,7 +201,9 @@ pub async fn list_for_server(
 		args.limit.unwrap_or(DEFAULT_LIMIT),
 	)
 	.await?;
-	Ok(Json(enrich_incidents(&mut conn, &state.db, incidents).await?))
+	Ok(Json(
+		enrich_incidents(&mut conn, &state.db, incidents).await?,
+	))
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -227,7 +229,9 @@ pub async fn list_active(
 ) -> Result<Json<Vec<IncidentData>>> {
 	let mut conn = state.db.get().await?;
 	let incidents = Incident::list_active(&mut conn, args.limit.unwrap_or(DEFAULT_LIMIT)).await?;
-	Ok(Json(enrich_incidents(&mut conn, &state.db, incidents).await?))
+	Ok(Json(
+		enrich_incidents(&mut conn, &state.db, incidents).await?,
+	))
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -334,7 +338,8 @@ pub async fn resolve(
 	Json(args): Json<ResolveIncidentArgs>,
 ) -> Result<Json<IncidentData>> {
 	let mut conn = state.db.get().await?;
-	let incident = Incident::resolve(&mut conn, args.incident_id, &admin.0.login, args.reason).await?;
+	let incident =
+		Incident::resolve(&mut conn, args.incident_id, &admin.0.login, args.reason).await?;
 	Ok(Json(enrich_incident(&mut conn, &state.db, incident).await?))
 }
 

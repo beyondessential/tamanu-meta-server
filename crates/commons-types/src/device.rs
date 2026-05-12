@@ -8,7 +8,15 @@ use diesel::{
 use serde::{Deserialize, Serialize};
 
 #[derive(
-	Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, AsExpression,
+	Debug,
+	Clone,
+	Copy,
+	Default,
+	PartialEq,
+	Eq,
+	Serialize,
+	Deserialize,
+	AsExpression,
 	utoipa::ToSchema,
 )]
 #[diesel(sql_type = Text)]

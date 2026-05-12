@@ -1515,6 +1515,7 @@ export interface components {
          */
         Page_ServerInfo: {
             items: {
+                alert_when_down: boolean;
                 cloud?: boolean | null;
                 /** Format: uuid */
                 device_id?: string | null;
@@ -1638,6 +1639,7 @@ export interface components {
             query: string;
         };
         ServerDataUpdate: {
+            alert_when_down?: boolean | null;
             cloud?: boolean | null;
             /** Format: uuid */
             device_id?: string | null;
@@ -1654,6 +1656,7 @@ export interface components {
             child_servers: [
                 "up" | "down" | "away" | "blip" | "gone",
                 {
+                    alert_when_down: boolean;
                     cloud?: boolean | null;
                     /** Format: uuid */
                     device_id?: string | null;
@@ -1684,6 +1687,7 @@ export interface components {
             server_id: string;
         };
         ServerInfo: {
+            alert_when_down: boolean;
             cloud?: boolean | null;
             /** Format: uuid */
             device_id?: string | null;

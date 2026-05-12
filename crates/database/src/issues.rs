@@ -593,6 +593,32 @@ impl Issue {
 			.map_err(AppError::from)
 	}
 
+	/// Bulk lookup of issues that share the same `(source, ref)` across many
+	/// servers. Each `(server_id, source, ref)` is unique, so at most one row
+	/// per server is returned. Used by the canopy reachability sweep.
+	pub async fn list_by_source_ref(
+		db: &mut AsyncPgConnection,
+		source: &str,
+		ref_: &str,
+		server_ids: &[Uuid],
+	) -> Result<Vec<Self>> {
+		use crate::schema::issues::dsl;
+		if server_ids.is_empty() {
+			return Ok(Vec::new());
+		}
+		dsl::issues
+			.select(Self::as_select())
+			.filter(
+				dsl::source
+					.eq(source)
+					.and(dsl::ref_.eq(ref_))
+					.and(dsl::server_id.eq_any(server_ids)),
+			)
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	/// Mark an issue as acknowledged (or update the acker). Doesn't touch
 	/// incident membership — ack is purely informational.
 	pub async fn ack(db: &mut AsyncPgConnection, issue_id: Uuid, by: &str) -> Result<Self> {
@@ -978,28 +1004,26 @@ impl Incident {
 				re_evaluate_incident_membership(conn, &issue, root, now).await?;
 			}
 
-			let incident: Incident = diesel::update(
-				incidents::table.filter(incidents::id.eq(incident_id)),
-			)
-			.set((
-				incidents::resolved_at.eq(jiff_diesel::Timestamp::from(now)),
-				incidents::resolved_by.eq(Some(by)),
-				incidents::resolved_reason.eq(Some(reason.to_string())),
-			))
-			.returning(Incident::as_select())
-			.get_result(conn)
-			.await?;
+			let incident: Incident =
+				diesel::update(incidents::table.filter(incidents::id.eq(incident_id)))
+					.set((
+						incidents::resolved_at.eq(jiff_diesel::Timestamp::from(now)),
+						incidents::resolved_by.eq(Some(by)),
+						incidents::resolved_reason.eq(Some(reason.to_string())),
+					))
+					.returning(Incident::as_select())
+					.get_result(conn)
+					.await?;
 
 			if incident.closed_at.is_some() {
 				return Ok(incident);
 			}
-			let incident: Incident = diesel::update(
-				incidents::table.filter(incidents::id.eq(incident_id)),
-			)
-			.set(incidents::closed_at.eq(jiff_diesel::Timestamp::from(now)))
-			.returning(Incident::as_select())
-			.get_result(conn)
-			.await?;
+			let incident: Incident =
+				diesel::update(incidents::table.filter(incidents::id.eq(incident_id)))
+					.set(incidents::closed_at.eq(jiff_diesel::Timestamp::from(now)))
+					.returning(Incident::as_select())
+					.get_result(conn)
+					.await?;
 			Ok(incident)
 		})
 		.await
