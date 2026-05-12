@@ -1162,7 +1162,7 @@
         "properties": {
           "alert_when_down": {
             "type": "boolean",
-            "description": "When true (the default), the canopy reachability sweep observes this\nserver's status freshness and files an issue when it goes\nBlip/Away/Down/Gone. Set to false on servers whose downtime is\nexpected (test environments, ad-hoc demos) — the sweep simply\ndoesn't collect events for them."
+            "description": "When true, the canopy reachability sweep observes this server's\nstatus freshness and files an issue when it goes Blip/Away/Down/Gone.\nSet to false on servers whose downtime is expected (test\nenvironments, ad-hoc demos) — the sweep simply doesn't collect\nevents for them.\n\nThe DB default is `true` for freshly-inserted rows, but the migration\nthat added the column backfilled existing rows with `false` to avoid\nflooding incidents on rollout. Operators flip it on per server."
           },
           "cloud": {
             "type": [
