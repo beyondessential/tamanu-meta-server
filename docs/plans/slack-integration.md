@@ -73,7 +73,11 @@ metadata, so threading is physically impossible on this path.
 
 ### Wiring
 
-- Block Kit renderer at `crates/database/src/slack_outbox/blocks.rs`,
+- Workflow Builder webhooks bind 1:1 to a workflow with a fixed set of
+  declared trigger variables. Block Kit lives in the workflow editor;
+  canopy POSTs flat JSON keyed by those variable names. Two workflows
+  (open + resolve) with two webhook URLs.
+- Variable payload renderer at `crates/database/src/slack_outbox/vars.rs`,
   alongside the model.
 - New table `slack_outbox`:
   ```
@@ -85,7 +89,7 @@ metadata, so threading is physically impossible on this path.
   incident_id   UUID REFERENCES incidents(id)
   issue_id      UUID NULL REFERENCES issues(id)    -- Phase B
   note_id       UUID NULL REFERENCES incident_notes(id)  -- Phase B
-  payload       JSONB    -- Block Kit blocks rendered at enqueue time
+  payload       JSONB    -- Flat workflow-variables object rendered at enqueue time
   delivered_at  TIMESTAMPTZ NULL
   attempts      INT NOT NULL DEFAULT 0
   last_error    TEXT NULL
@@ -106,7 +110,10 @@ metadata, so threading is physically impossible on this path.
   - Tick every 5 seconds (cheap — only does work when rows exist).
   - `SELECT ... FROM slack_outbox WHERE delivered_at IS NULL ORDER BY
     created_at LIMIT 10 FOR UPDATE SKIP LOCKED`.
-  - POST the rendered blocks payload to `SLACK_WEBHOOK_URL`.
+  - POST the row's payload verbatim to the URL matching `row.kind`
+    (`SLACK_WEBHOOK_OPEN_URL` for `incident_open`,
+    `SLACK_WEBHOOK_RESOLVE_URL` for `incident_resolve`). No wrapper —
+    Workflow Builder consumes the top-level object as trigger variables.
   - On 200: `UPDATE slack_outbox SET delivered_at = NOW()`.
   - On error: `attempts = attempts + 1, last_error = ?`. Give up after
     N attempts (log + leave delivered_at NULL with a final last_error
@@ -114,26 +121,39 @@ metadata, so threading is physically impossible on this path.
 - Wire `slacker_outbox` into whatever supervisor runs `reachability`,
   `pingtask`, etc. so deployment is the same shape.
 
-### Block Kit payload (Phase A)
+### Workflow variables (Phase A)
 
-Open:
+Slack-side: two workflows in Workflow Builder, each with a webhook
+trigger declaring these variables (all text). The Block Kit message
+itself is composed in the workflow editor, referencing the variables.
 
-- Header: `🚨 Incident opened: <server.host>`
-- Section: severity badge, source/ref, brief.
-- Context: `Opened <relative-time> · <link to canopy incident page>`.
+Open (`SLACK_WEBHOOK_OPEN_URL`):
+- `server` — `<name> (<host>)` or just `<host>`
+- `severity` — `Error`, `Critical`, …
+- `source_ref` — `canopy/reachability`
+- `message` — issue body
+- `link` — canopy incident URL
+
+Resolve (`SLACK_WEBHOOK_RESOLVE_URL`):
+- `server` — same shape as open
+- `by` — operator name/email or `automation` for cascade-close
+- `link` — canopy incident URL
 
 The canopy incident link uses `PUBLIC_URL` (same env var the private
 server reads in `crates/private-server/src/fns/commons.rs`). If
-`PUBLIC_URL` is unset, omit the link line — don't fail the post.
-
-Resolve:
-
-- Header: `✅ Incident resolved: <server.host>`
-- Context: `Resolved <relative-time> by <who> · <link>`.
+`PUBLIC_URL` is unset, `link` falls back to a localhost-rooted URL so
+the workflow's `<{{link}}|Open in canopy>` mrkdwn still renders as a
+clickable (broken) link rather than malformed text. Set `PUBLIC_URL`
+in any env that posts to a real Slack.
 
 ### Configuration
 
-- `SLACK_WEBHOOK_URL` — required to enable posts; absent disables.
+- `SLACK_WEBHOOK_OPEN_URL` — Workflow Builder webhook for the
+  `incident_open` workflow. Absent → opens are dropped (marked
+  delivered, never posted).
+- `SLACK_WEBHOOK_RESOLVE_URL` — same, for the `incident_resolve`
+  workflow.
+- `PUBLIC_URL` — already used elsewhere; gates the `link` field.
 
 ### Out of scope for Phase A
 

@@ -1,23 +1,22 @@
 //! Slack outbox drainer.
 //!
-//! Phase A: posts to `SLACK_WEBHOOK_URL` (a Slack Workflow Builder incoming
-//! webhook). The webhook is single-channel, single-direction, single-shape
-//! — it accepts a JSON body and returns `200 ok` with no message metadata.
-//! No threading, no inbound. Phase B will swap delivery for `chat.postMessage`
-//! if a bot token is configured.
+//! Phase A: posts to Slack Workflow Builder webhooks. One workflow (and one
+//! webhook URL) per outbox kind, because Workflow Builder webhooks bind 1:1
+//! to a workflow with a fixed variable set. The payload column in each
+//! `slack_outbox` row is already the flat JSON the workflow expects — we
+//! POST it verbatim.
 //!
-//! Each loop iteration claims up to `BATCH` pending rows with
+//! Each loop iteration claims up to [`BATCH`] pending rows with
 //! `FOR UPDATE SKIP LOCKED`, posts them one at a time, and marks them
 //! delivered or failed inside the same transaction.
 
 use std::time::Duration;
 
 use clap::Parser;
-use database::slack_outbox::SlackOutbox;
+use database::slack_outbox::{KIND_INCIDENT_OPEN, KIND_INCIDENT_RESOLVE, SlackOutbox};
 use diesel_async::AsyncConnection;
 use lloggs::{LoggingArgs, PreArgs};
 use miette::IntoDiagnostic;
-use serde_json::json;
 use tokio::{
 	task::{self, JoinHandle},
 	time::sleep,
@@ -28,11 +27,37 @@ const BATCH: i64 = 10;
 const TICK: Duration = Duration::from_secs(5);
 const MAX_ATTEMPTS: i32 = 10;
 
+/// One webhook URL per outbox kind. Each Slack workflow binds to a single
+/// variable set declared in its trigger, so `incident_open` and
+/// `incident_resolve` need separate workflows and therefore separate URLs.
+#[derive(Clone, Default)]
+struct Webhooks {
+	open: Option<String>,
+	resolve: Option<String>,
+}
+
+impl Webhooks {
+	fn from_env() -> Self {
+		Self {
+			open: std::env::var("SLACK_WEBHOOK_OPEN_URL").ok(),
+			resolve: std::env::var("SLACK_WEBHOOK_RESOLVE_URL").ok(),
+		}
+	}
+
+	fn url_for(&self, kind: &str) -> Option<&str> {
+		match kind {
+			KIND_INCIDENT_OPEN => self.open.as_deref(),
+			KIND_INCIDENT_RESOLVE => self.resolve.as_deref(),
+			_ => None,
+		}
+	}
+}
+
 pub fn spawn() -> JoinHandle<()> {
 	let pool = database::init();
-	let webhook = std::env::var("SLACK_WEBHOOK_URL").ok();
-	if webhook.is_none() {
-		info!("SLACK_WEBHOOK_URL not set; slack outbox drainer running in no-op mode");
+	let hooks = Webhooks::from_env();
+	if hooks.open.is_none() && hooks.resolve.is_none() {
+		info!("no SLACK_WEBHOOK_*_URL set; slack outbox drainer running in no-op mode");
 	}
 	let client = reqwest::Client::new();
 	task::spawn(async move {
@@ -56,7 +81,7 @@ pub fn spawn() -> JoinHandle<()> {
 							SlackOutbox::mark_failed(conn, row.id, "max attempts exceeded").await?;
 							continue;
 						}
-						match deliver(&client, webhook.as_deref(), &row).await {
+						match deliver(&client, &hooks, &row).await {
 							Ok(()) => SlackOutbox::mark_delivered(conn, row.id).await?,
 							Err(err) => {
 								warn!(id = %row.id, %err, "slack delivery failed");
@@ -74,27 +99,24 @@ pub fn spawn() -> JoinHandle<()> {
 	})
 }
 
-/// Post the row's blocks payload to the webhook. If `webhook` is `None` we
-/// pretend it succeeded — the row gets marked delivered and we move on.
-/// That keeps non-Slack-configured environments from accumulating an
-/// unbounded backlog.
+/// Post the row's payload to the workflow webhook for this row's kind.
+/// Returns `Ok(())` for both real deliveries and silent no-ops (no webhook
+/// configured for this kind, or unknown kind logged as warn); the row gets
+/// marked delivered so the table doesn't grow unbounded in non-Slack envs.
 async fn deliver(
 	client: &reqwest::Client,
-	webhook: Option<&str>,
+	hooks: &Webhooks,
 	row: &SlackOutbox,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-	let Some(url) = webhook else {
-		debug!(id = %row.id, "slack webhook not configured; dropping row");
+	let Some(url) = hooks.url_for(&row.kind) else {
+		if !is_known_kind(&row.kind) {
+			warn!(id = %row.id, kind = %row.kind, "unknown slack outbox kind; dropping");
+		} else {
+			debug!(id = %row.id, kind = %row.kind, "no webhook url configured for kind; dropping");
+		}
 		return Ok(());
 	};
-	// Workflow Builder webhooks accept the same shape as legacy
-	// incoming-webhooks: a top-level object with a `blocks` array, plus
-	// an optional `text` fallback used by notifications.
-	let body = json!({
-		"text": fallback_text(row),
-		"blocks": row.payload,
-	});
-	let resp = client.post(url).json(&body).send().await?;
+	let resp = client.post(url).json(&row.payload).send().await?;
 	let status = resp.status();
 	if status.is_success() {
 		Ok(())
@@ -104,19 +126,8 @@ async fn deliver(
 	}
 }
 
-/// Best-effort plain-text fallback for screen readers / push notifications,
-/// pulled from the first header block. Slack falls back to this when it
-/// can't render blocks (e.g. in the mobile lock-screen notification).
-fn fallback_text(row: &SlackOutbox) -> String {
-	let blocks = row.payload.as_array().map(|a| a.as_slice()).unwrap_or(&[]);
-	for b in blocks {
-		if b.get("type").and_then(|v| v.as_str()) == Some("header")
-			&& let Some(text) = b.pointer("/text/text").and_then(|v| v.as_str())
-		{
-			return text.to_string();
-		}
-	}
-	format!("canopy: {}", row.kind)
+fn is_known_kind(kind: &str) -> bool {
+	matches!(kind, KIND_INCIDENT_OPEN | KIND_INCIDENT_RESOLVE)
 }
 
 #[derive(Debug, Parser)]
@@ -132,11 +143,11 @@ mod tests {
 	use serde_json::Value;
 	use uuid::Uuid;
 
-	fn row(payload: Value) -> SlackOutbox {
+	fn row(kind: &str, payload: Value) -> SlackOutbox {
 		SlackOutbox {
 			id: Uuid::nil(),
 			created_at: Timestamp::now(),
-			kind: "incident_open".into(),
+			kind: kind.into(),
 			incident_id: Uuid::nil(),
 			issue_id: None,
 			note_id: None,
@@ -147,40 +158,23 @@ mod tests {
 		}
 	}
 
-	#[test]
-	fn fallback_text_pulls_first_header_block() {
-		let r = row(serde_json::json!([
-			{ "type": "header", "text": { "type": "plain_text", "text": "🚨 hi" } },
-			{ "type": "section", "text": { "type": "mrkdwn", "text": "body" } },
-		]));
-		assert_eq!(fallback_text(&r), "🚨 hi");
-	}
-
-	#[test]
-	fn fallback_text_defaults_to_kind_when_no_header() {
-		let r = row(serde_json::json!([
-			{ "type": "section", "text": { "type": "mrkdwn", "text": "body" } },
-		]));
-		assert_eq!(fallback_text(&r), "canopy: incident_open");
-	}
-
 	#[tokio::test(flavor = "multi_thread")]
-	async fn deliver_no_webhook_succeeds_as_noop() {
-		let r = row(serde_json::json!([]));
-		deliver(&reqwest::Client::new(), None, &r)
+	async fn deliver_with_no_hooks_is_a_noop() {
+		let r = row(KIND_INCIDENT_OPEN, serde_json::json!({}));
+		deliver(&reqwest::Client::new(), &Webhooks::default(), &r)
 			.await
 			.expect("noop ok");
 	}
 
 	#[tokio::test(flavor = "multi_thread")]
-	async fn deliver_posts_to_webhook_and_includes_blocks() {
+	async fn deliver_posts_flat_payload_verbatim() {
 		use std::sync::{Arc, Mutex};
 
 		let recorded: Arc<Mutex<Option<Value>>> = Arc::new(Mutex::new(None));
 		let recorded_clone = recorded.clone();
 
-		// Tiny single-shot HTTP server. We don't pull in axum/wiremock for
-		// one test — std::net + a hand-parsed POST is enough.
+		// Hand-rolled single-shot HTTP listener; one test isn't worth a
+		// wiremock dep.
 		let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
 		let addr = listener.local_addr().unwrap();
 		let url = format!("http://{addr}/hook");
@@ -222,25 +216,68 @@ mod tests {
 			}
 		});
 
-		let r = row(serde_json::json!([
-			{ "type": "header", "text": { "type": "plain_text", "text": "🚨 hi" } },
-		]));
-		deliver(&reqwest::Client::new(), Some(&url), &r)
+		let hooks = Webhooks {
+			open: Some(url.clone()),
+			resolve: None,
+		};
+		let r = row(
+			KIND_INCIDENT_OPEN,
+			serde_json::json!({
+				"server": "Prod (https://db.example.com/)",
+				"severity": "Error",
+				"source_ref": "canopy/reachability",
+				"message": "boom",
+				"link": "https://canopy.example.com/incidents/abc",
+			}),
+		);
+		deliver(&reqwest::Client::new(), &hooks, &r)
 			.await
 			.expect("deliver ok");
 		server.join().unwrap();
 
 		let got = recorded.lock().unwrap().clone().expect("got a request");
-		assert_eq!(got["text"], "🚨 hi");
-		assert!(got["blocks"].is_array());
-		assert_eq!(got["blocks"][0]["type"], "header");
+		// We POST the row's payload verbatim — no `text`/`blocks` wrapper.
+		assert_eq!(got["server"], "Prod (https://db.example.com/)");
+		assert_eq!(got["severity"], "Error");
+		assert_eq!(got["source_ref"], "canopy/reachability");
+		assert_eq!(got["message"], "boom");
+		assert_eq!(got["link"], "https://canopy.example.com/incidents/abc");
+		assert!(got.get("blocks").is_none(), "no blocks wrapper");
+		assert!(got.get("text").is_none(), "no text wrapper");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn deliver_routes_resolve_kind_to_resolve_url() {
+		// Open URL points at a port nothing's listening on; if the drainer
+		// accidentally routed by anything other than `kind`, the test would
+		// fail by hanging or by hitting connection-refused.
+		let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+		let resolve_url = format!("http://{}/hook", listener.local_addr().unwrap());
+		let server = std::thread::spawn(move || {
+			let (mut stream, _) = listener.accept().unwrap();
+			use std::io::{Read, Write};
+			let mut buf = [0u8; 4096];
+			let _ = stream.read(&mut buf);
+			stream
+				.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+				.unwrap();
+		});
+
+		let hooks = Webhooks {
+			open: Some("http://127.0.0.1:1/open-should-not-be-hit".into()),
+			resolve: Some(resolve_url),
+		};
+		let r = row(KIND_INCIDENT_RESOLVE, serde_json::json!({"server": "x", "by": "me", "link": "http://l/"}));
+		deliver(&reqwest::Client::new(), &hooks, &r)
+			.await
+			.expect("deliver ok");
+		server.join().unwrap();
 	}
 
 	#[tokio::test(flavor = "multi_thread")]
 	async fn deliver_returns_error_on_non_2xx() {
 		let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-		let addr = listener.local_addr().unwrap();
-		let url = format!("http://{addr}/hook");
+		let url = format!("http://{}/hook", listener.local_addr().unwrap());
 		let server = std::thread::spawn(move || {
 			let (mut stream, _) = listener.accept().unwrap();
 			use std::io::{Read, Write};
@@ -251,13 +288,28 @@ mod tests {
 				.unwrap();
 		});
 
-		let r = row(serde_json::json!([]));
-		let err = deliver(&reqwest::Client::new(), Some(&url), &r)
+		let hooks = Webhooks {
+			open: Some(url),
+			resolve: None,
+		};
+		let r = row(KIND_INCIDENT_OPEN, serde_json::json!({}));
+		let err = deliver(&reqwest::Client::new(), &hooks, &r)
 			.await
 			.expect_err("should error");
 		server.join().unwrap();
-		let msg = err.to_string();
-		assert!(msg.contains("500"), "error mentions status: {msg}");
+		assert!(err.to_string().contains("500"), "error mentions status");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn deliver_drops_unknown_kind_as_noop() {
+		let hooks = Webhooks {
+			open: Some("http://127.0.0.1:1/should-not-be-hit".into()),
+			resolve: None,
+		};
+		let r = row("bogus_kind", serde_json::json!({}));
+		deliver(&reqwest::Client::new(), &hooks, &r)
+			.await
+			.expect("noop ok");
 	}
 }
 

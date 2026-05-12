@@ -504,7 +504,7 @@ async fn enqueue_slack_open(
 		.first(conn)
 		.await?;
 	let public_url = std::env::var("PUBLIC_URL").ok();
-	let payload = crate::slack_outbox::blocks::incident_open(
+	let payload = crate::slack_outbox::vars::incident_open(
 		&incident,
 		&server,
 		issue.severity,
@@ -550,7 +550,7 @@ async fn enqueue_slack_resolve_inner(
 ) -> Result<()> {
 	let server = Server::get_by_id(conn, incident.server_id).await?;
 	let public_url = std::env::var("PUBLIC_URL").ok();
-	let payload = crate::slack_outbox::blocks::incident_resolve(
+	let payload = crate::slack_outbox::vars::incident_resolve(
 		incident,
 		&server,
 		by,

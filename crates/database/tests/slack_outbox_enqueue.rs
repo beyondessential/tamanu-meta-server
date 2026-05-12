@@ -86,13 +86,18 @@ async fn opening_incident_enqueues_slack_open_row() {
 		assert_eq!(open.issue_id, Some(issue.id));
 		assert!(open.delivered_at.is_none());
 		assert_eq!(open.attempts, 0);
+		// Payload is a flat object matching the workflow trigger's variables.
+		let payload = open.payload.as_object().expect("payload is a JSON object");
+		assert!(payload.contains_key("server"));
+		assert_eq!(payload["severity"].as_str(), Some("Error"));
+		assert_eq!(payload["source_ref"].as_str(), Some("test/ref-1"));
+		assert_eq!(payload["message"].as_str(), Some("boom"));
 		assert!(
-			open.payload
-				.as_array()
-				.expect("payload is a blocks array")
-				.iter()
-				.any(|b| b.get("type").and_then(|v| v.as_str()) == Some("header")),
-			"payload contains a header block"
+			payload["link"]
+				.as_str()
+				.expect("link is a string")
+				.contains("/incidents/"),
+			"link looks like a canopy incident URL"
 		);
 	})
 	.await
