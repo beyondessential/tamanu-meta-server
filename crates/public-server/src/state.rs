@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use axum::extract::FromRef;
 use commons_errors::Result;
+use commons_servers::tailnet_directory::TailnetDirectory;
 use database::Db;
 #[cfg(feature = "ui")]
 use tera::Tera;
@@ -58,6 +59,16 @@ impl AppState {
 impl FromRef<AppState> for Db {
 	fn from_ref(state: &AppState) -> Self {
 		state.db.clone()
+	}
+}
+
+/// Public-server is internet-facing and never authenticates by tailnet
+/// identity. The dual-auth device extractor reads this slot through
+/// `FromRef`; returning `None` here keeps the tailnet path
+/// short-circuited by type-system construction.
+impl FromRef<AppState> for Option<TailnetDirectory> {
+	fn from_ref(_state: &AppState) -> Self {
+		None
 	}
 }
 
