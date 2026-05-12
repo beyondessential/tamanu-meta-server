@@ -1,7 +1,4 @@
-use utoipa::{
-	Modify, OpenApi,
-	openapi::security::{ApiKey, ApiKeyValue, SecurityScheme},
-};
+use utoipa::{Modify, OpenApi, openapi::security::SecurityScheme};
 
 /// Base OpenAPI document. Path entries are pulled in by `utoipa-axum`'s
 /// `OpenApiRouter` as routes are registered. HTML, redirect, and binary-stream
@@ -11,7 +8,7 @@ use utoipa::{
 #[openapi(
 	info(
 		title = "canopy public-server",
-		description = "Internet-facing API for the canopy fleet. Device-authenticated endpoints require an mTLS client certificate carried through the edge proxy as the `x-forwarded-client-cert` (XFCC) header, with `mtls-certificate` and `ssl-client-cert` accepted as fallbacks; the certificate's public key is matched against the device registry and its role (server / releaser / admin) gates access.",
+		description = "Internet-facing API for the canopy fleet. Device-authenticated endpoints require an mTLS client certificate.",
 		contact(name = "BES Developers", email = "contact@bes.au"),
 		license(name = "GPL-3.0-or-later"),
 	),
@@ -32,38 +29,28 @@ struct SecuritySchemes;
 impl Modify for SecuritySchemes {
 	fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
 		let components = openapi.components.get_or_insert_with(Default::default);
-		// OpenAPI 3.1 has no first-class mTLS scheme. The actual transport is
-		// mTLS terminated at the edge proxy, which forwards the client cert
-		// as an HTTP header; we model that header as an apiKey scheme.
-		let scheme_for = |role: &str, extra: &str| -> SecurityScheme {
-			let description = format!(
-				"Envoy-style XFCC header carrying the device's mTLS client certificate. {extra} The device's role is read from the registry on each request; {role} role (or admin) is required.",
-			);
-			SecurityScheme::ApiKey(ApiKey::Header(ApiKeyValue::with_description(
-				"x-forwarded-client-cert",
-				&description,
-			)))
+		// One mTLS scheme per role so individual endpoints can name what they
+		// require; the actual transport (mTLS terminated at the edge proxy,
+		// cert keyed against the device registry) is an implementation
+		// detail callers don't need.
+		let role_scheme = |role: &str| -> SecurityScheme {
+			SecurityScheme::MutualTls {
+				description: Some(format!(
+					"mTLS client certificate for a device with the `{role}` role (or `admin`).",
+				)),
+				extensions: None,
+			}
 		};
-		components.add_security_scheme(
-			"server-device",
-			scheme_for(
-				"server",
-				"Devices register themselves as `server` role on first contact.",
-			),
-		);
-		components.add_security_scheme(
-			"releaser-device",
-			scheme_for(
-				"releaser",
-				"Releaser certificates are issued out-of-band to CI / release machines.",
-			),
-		);
+		components.add_security_scheme("server-device", role_scheme("server"));
+		components.add_security_scheme("releaser-device", role_scheme("releaser"));
 		components.add_security_scheme(
 			"admin-device",
-			scheme_for(
-				"admin",
-				"Admin certificates are issued out-of-band to operators.",
-			),
+			SecurityScheme::MutualTls {
+				description: Some(
+					"mTLS client certificate for a device with the `admin` role.".to_string(),
+				),
+				extensions: None,
+			},
 		);
 	}
 }

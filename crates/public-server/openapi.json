@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "canopy public-server",
-    "description": "Internet-facing API for the canopy fleet. Device-authenticated endpoints require an mTLS client certificate carried through the edge proxy as the `x-forwarded-client-cert` (XFCC) header, with `mtls-certificate` and `ssl-client-cert` accepted as fallbacks; the certificate's public key is matched against the device registry and its role (server / releaser / admin) gates access.",
+    "description": "Internet-facing API for the canopy fleet. Device-authenticated endpoints require an mTLS client certificate.",
     "contact": {
       "name": "BES Developers",
       "email": "contact@bes.au"
@@ -1410,22 +1410,16 @@
     },
     "securitySchemes": {
       "admin-device": {
-        "type": "apiKey",
-        "in": "header",
-        "name": "x-forwarded-client-cert",
-        "description": "Envoy-style XFCC header carrying the device's mTLS client certificate. Admin certificates are issued out-of-band to operators. The device's role is read from the registry on each request; admin role (or admin) is required."
+        "type": "mutualTLS",
+        "description": "mTLS client certificate for a device with the `admin` role."
       },
       "releaser-device": {
-        "type": "apiKey",
-        "in": "header",
-        "name": "x-forwarded-client-cert",
-        "description": "Envoy-style XFCC header carrying the device's mTLS client certificate. Releaser certificates are issued out-of-band to CI / release machines. The device's role is read from the registry on each request; releaser role (or admin) is required."
+        "type": "mutualTLS",
+        "description": "mTLS client certificate for a device with the `releaser` role (or `admin`)."
       },
       "server-device": {
-        "type": "apiKey",
-        "in": "header",
-        "name": "x-forwarded-client-cert",
-        "description": "Envoy-style XFCC header carrying the device's mTLS client certificate. Devices register themselves as `server` role on first contact. The device's role is read from the registry on each request; server role (or admin) is required."
+        "type": "mutualTLS",
+        "description": "mTLS client certificate for a device with the `server` role (or `admin`)."
       }
     }
   },
