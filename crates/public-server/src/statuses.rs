@@ -1,20 +1,84 @@
+use std::collections::BTreeSet;
+
 use axum::{
 	Json,
 	extract::{Path, State},
 };
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::{device_auth::ServerDevice, headers::VersionHeader};
-use commons_types::device::DeviceRole;
+use commons_types::{device::DeviceRole, issue::Severity};
 use database::{
 	Db,
 	devices::Device,
+	diesel_async::{AsyncConnection, AsyncPgConnection},
+	issues::NewEvent,
 	servers::Server,
 	statuses::{NewStatus, Status},
 };
+use serde::Deserialize;
+use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
 use uuid::Uuid;
 
 use crate::state::AppState;
+
+/// Status payload contract — documents the wire shape only. The
+/// handler actually receives `serde_json::Value` and runs its own
+/// validation so arbitrary additional fields flow through into
+/// `statuses.extra` unchanged.
+///
+/// Schema is reproduced here so the openapi spec describes the
+/// `healthy` and `health` keys explicitly; otherwise consumers have
+/// to read the prose to know they exist.
+#[derive(Debug, Deserialize, ToSchema)]
+#[allow(dead_code)] // schema-only struct, never deserialized into
+pub struct StatusPayload {
+	/// Overall server self-reported health. **Absent ⇒ `true`** —
+	/// legacy senders that don't know about this field never
+	/// false-positive unhealthy. When `false`, the public-server
+	/// files an incident-class event against the server's group via
+	/// the normal issues/events pipeline.
+	pub healthy: Option<bool>,
+
+	/// Per-check breakdown. Each entry must include `check` (non-empty)
+	/// and `healthy`; arbitrary additional fields per check (latency,
+	/// free disk %, certificate expiry, etc.) are passed through
+	/// verbatim and surfaced in the status snapshot UI.
+	///
+	/// A failing check while the top-level `healthy` is `true` is
+	/// treated as a warning, not an incident. A failing check with
+	/// the top-level `false` is incident-class.
+	pub health: Option<Vec<HealthCheck>>,
+
+	/// Free-form additional data (uptime, postgres version, timezone,
+	/// hostname, etc.). Stored verbatim in `statuses.extra` and
+	/// surfaced as raw JSON in the status snapshot.
+	#[serde(flatten)]
+	#[schema(additional_properties = true, value_type = Object)]
+	pub extra: serde_json::Map<String, serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[allow(dead_code)] // schema-only struct, never deserialized into
+pub struct HealthCheck {
+	/// Identifier for the check. Must be a non-empty string. Used as
+	/// the issue's `ref` (`health/<check>`) so the same check
+	/// transitions land on the same issue across pushes.
+	pub check: String,
+	/// Pass/fail for the check.
+	pub healthy: bool,
+	/// Arbitrary additional fields specific to the check (rendered in
+	/// the snapshot UI as a key/value block).
+	#[serde(flatten)]
+	#[schema(additional_properties = true, value_type = Object)]
+	pub extra: serde_json::Map<String, serde_json::Value>,
+}
+
+/// `source` value for the events filed below. Distinct from
+/// `canopy` (reachability sweep) so operators can tell apart "we
+/// couldn't reach you" from "you told us you're sick".
+const STATUS_SOURCE: &str = "status";
+const HEALTH_REF: &str = "health";
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new().routes(routes!(create))
@@ -29,8 +93,8 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		("server_id" = Uuid, Path),
 	),
 	request_body(
-		content = serde_json::Value,
-		description = "Optional free-form `extra` payload. Empty body or JSON `null` are both treated as `{}`.",
+		content = StatusPayload,
+		description = "Status push. Empty body or JSON `null` are both treated as `{}` (all fields default).",
 	),
 	responses(
 		(status = 200, body = Status),
@@ -62,18 +126,223 @@ async fn create(
 	let raw = body.map(|j| j.0).unwrap_or(serde_json::Value::Null);
 	let (healthy, health, extra) = split_health_from_extra(raw)?;
 
-	let status = NewStatus {
-		server_id,
-		device_id: Some(id),
-		version: Some(current_version.0),
-		extra,
-		healthy,
-		health,
-	}
-	.save(&mut db)
-	.await?;
+	// Read previous-latest BEFORE the write transaction so we can
+	// detect transitions (top-level healthy and per-check). The
+	// snapshot is a small read; no need to hold a lock.
+	let prev = Status::latest_for_server(&mut db, server_id).await?;
+	let prev_healthy = prev.as_ref().map(|s| s.healthy).unwrap_or(true);
+	let prev_failing_checks = prev
+		.as_ref()
+		.map(|s| collect_failing_checks(&s.health))
+		.unwrap_or_default();
+
+	// Insert + file events atomically. NewEvent::save itself opens
+	// a transaction; diesel-async nests it as a SAVEPOINT.
+	let status = db
+		.transaction::<_, AppError, _>(async |conn| {
+			let status = NewStatus {
+				server_id,
+				device_id: Some(id),
+				version: Some(current_version.0),
+				extra,
+				healthy,
+				health,
+			}
+			.save(conn)
+			.await?;
+
+			file_health_events(
+				conn,
+				server_id,
+				Some(id),
+				&status,
+				prev_healthy,
+				&prev_failing_checks,
+			)
+			.await?;
+
+			Ok(status)
+		})
+		.await?;
 
 	Ok(Json(status))
+}
+
+/// Per-push event filing. See `docs/plans/status-snapshots-and-health.md`
+/// §3 ("Filing logic") for the rule set. Order matters: all opens
+/// (severity-descending) fire before any closes, so the incident's
+/// `re_evaluate_incident_membership` sees an up-to-date contributor
+/// set when each close re-checks "is anyone else still in?".
+async fn file_health_events(
+	conn: &mut AsyncPgConnection,
+	server_id: Uuid,
+	device_id: Option<Uuid>,
+	status: &Status,
+	prev_healthy: bool,
+	prev_failing_checks: &BTreeSet<String>,
+) -> Result<()> {
+	let curr_failing_checks = collect_failing_checks(&status.health);
+	// Severity for per-check filings depends on the *current* push's
+	// top-level. A check still failing across a healthy transition
+	// naturally demotes from Error to Warning here.
+	let per_check_severity = if status.healthy {
+		Severity::Warning
+	} else {
+		Severity::Error
+	};
+	let occurred_at = Some(status.created_at);
+
+	// --- Opens first (severity-descending). ---
+
+	// Roll-up open: always file while the server is unhealthy.
+	// NewEvent::save will coalesce against the existing event if
+	// nothing changed; otherwise it opens/updates the roll-up issue.
+	if !status.healthy {
+		NewEvent {
+			source: STATUS_SOURCE.into(),
+			r#ref: HEALTH_REF.into(),
+			severity: Some(Severity::Error),
+			description: roll_up_unhealthy_description(&status.health),
+			message: roll_up_unhealthy_message(&curr_failing_checks),
+			active: Some(true),
+			occurred_at,
+		}
+		.save(conn, server_id, device_id)
+		.await?;
+	}
+
+	// Per-check opens.
+	for check in &curr_failing_checks {
+		let entry = find_health_entry(&status.health, check);
+		NewEvent {
+			source: STATUS_SOURCE.into(),
+			r#ref: format!("{HEALTH_REF}/{check}"),
+			severity: Some(per_check_severity),
+			description: per_check_description(entry),
+			message: format!("Health check '{check}' failed"),
+			active: Some(true),
+			occurred_at,
+		}
+		.save(conn, server_id, device_id)
+		.await?;
+	}
+
+	// --- Closes last. ---
+
+	// Roll-up close: only on transition. If we hadn't ever opened a
+	// roll-up, sending an active=false event would create a
+	// resolved-from-birth issue — noise. Skip.
+	if status.healthy && !prev_healthy {
+		NewEvent {
+			source: STATUS_SOURCE.into(),
+			r#ref: HEALTH_REF.into(),
+			severity: Some(Severity::Info),
+			description: None,
+			message: "Server reports healthy".into(),
+			active: Some(false),
+			occurred_at,
+		}
+		.save(conn, server_id, device_id)
+		.await?;
+	}
+
+	// Per-check closes: anything that was failing last time but
+	// isn't failing now. Two paths roll into this: the server
+	// explicitly says `healthy: true` for the check, OR the server
+	// stops mentioning the check altogether ("trust the reporter").
+	for check in prev_failing_checks.difference(&curr_failing_checks) {
+		NewEvent {
+			source: STATUS_SOURCE.into(),
+			r#ref: format!("{HEALTH_REF}/{check}"),
+			severity: Some(Severity::Info),
+			description: None,
+			message: format!("Health check '{check}' recovered"),
+			active: Some(false),
+			occurred_at,
+		}
+		.save(conn, server_id, device_id)
+		.await?;
+	}
+
+	Ok(())
+}
+
+/// Names of checks in a `health[]` blob where `healthy == false`.
+/// Anything malformed (non-object entry, missing/invalid `check`,
+/// missing/invalid `healthy`) is ignored — the public endpoint
+/// validates on the way in, so by the time we read it back from the
+/// DB we're either looking at our own well-formed data or at
+/// historical pre-contract rows where missing means absent.
+fn collect_failing_checks(health: &serde_json::Value) -> BTreeSet<String> {
+	let Some(arr) = health.as_array() else {
+		return BTreeSet::new();
+	};
+	arr.iter()
+		.filter_map(|e| {
+			let obj = e.as_object()?;
+			let healthy = obj.get("healthy")?.as_bool()?;
+			if healthy {
+				return None;
+			}
+			let check = obj.get("check")?.as_str()?;
+			Some(check.to_string())
+		})
+		.collect()
+}
+
+fn find_health_entry<'a>(
+	health: &'a serde_json::Value,
+	name: &str,
+) -> Option<&'a serde_json::Map<String, serde_json::Value>> {
+	health.as_array()?.iter().find_map(|e| {
+		let obj = e.as_object()?;
+		let check = obj.get("check")?.as_str()?;
+		(check == name).then_some(obj)
+	})
+}
+
+fn per_check_description(
+	entry: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> Option<String> {
+	let entry = entry?;
+	let mut lines = Vec::new();
+	for (k, v) in entry.iter() {
+		if k == "check" || k == "healthy" {
+			continue;
+		}
+		let rendered = match v {
+			serde_json::Value::String(s) => s.clone(),
+			other => other.to_string(),
+		};
+		lines.push(format!("- **{k}**: {rendered}"));
+	}
+	(!lines.is_empty()).then(|| lines.join("\n"))
+}
+
+fn roll_up_unhealthy_message(failing: &BTreeSet<String>) -> String {
+	if failing.is_empty() {
+		"Server reports unhealthy".into()
+	} else {
+		let names: Vec<&str> = failing.iter().map(|s| s.as_str()).collect();
+		format!("Server reports unhealthy ({})", names.join(", "))
+	}
+}
+
+fn roll_up_unhealthy_description(health: &serde_json::Value) -> Option<String> {
+	let arr = health.as_array()?;
+	let bullets: Vec<String> = arr
+		.iter()
+		.filter_map(|e| {
+			let obj = e.as_object()?;
+			let healthy = obj.get("healthy")?.as_bool()?;
+			if healthy {
+				return None;
+			}
+			let check = obj.get("check")?.as_str()?;
+			Some(format!("- {check}"))
+		})
+		.collect();
+	(!bullets.is_empty()).then(|| format!("Failing checks:\n{}", bullets.join("\n")))
 }
 
 /// Pulls the reserved `healthy` and `health` keys out of the incoming
