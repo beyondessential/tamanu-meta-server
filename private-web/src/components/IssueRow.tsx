@@ -25,6 +25,7 @@ import { humanDuration } from "../lib/humanDuration";
 import NotesList, { AddNoteButton } from "./NotesList";
 import SeverityChip from "./SeverityChip";
 import SourceChip from "./SourceChip";
+import StatusSnapshotModal, { StatusSnapshotButton } from "./StatusSnapshotModal";
 import TimeAgo from "./TimeAgo";
 import UserAvatar from "./UserAvatar";
 import {
@@ -74,9 +75,15 @@ export default function IssueRow({
 }) {
 	const [expanded, setExpanded] = useState(defaultExpanded);
 	const [notesRefresh, setNotesRefresh] = useState(0);
+	const [snapshotAt, setSnapshotAt] = useState<string | null>(null);
+	const [snapshotOpen, setSnapshotOpen] = useState(false);
 	const snoozeActive = isSnoozeActive(issue.snoozed_until);
 	const struckThrough = !issue.active || !!issue.resolved_at;
 	const isAdmin = useIsAdmin() === true;
+	const openSnapshot = (at: string) => {
+		setSnapshotAt(at);
+		setSnapshotOpen(true);
+	};
 	return (
 		<Box
 			sx={{
@@ -96,6 +103,7 @@ export default function IssueRow({
 				showServer={showServer}
 				isAdmin={isAdmin}
 				onChanged={onChanged}
+				onOpenSnapshot={() => openSnapshot(issue.last_seen)}
 			/>
 			{expanded && (
 				<Body
@@ -105,8 +113,15 @@ export default function IssueRow({
 					isAdmin={isAdmin}
 					onNoteAdded={() => setNotesRefresh((t) => t + 1)}
 					onChanged={onChanged}
+					onOpenSnapshot={openSnapshot}
 				/>
 			)}
+			<StatusSnapshotModal
+				serverId={issue.server_id}
+				at={snapshotAt}
+				open={snapshotOpen}
+				onClose={() => setSnapshotOpen(false)}
+			/>
 		</Box>
 	);
 }
@@ -120,6 +135,7 @@ function Header({
 	showServer,
 	isAdmin,
 	onChanged,
+	onOpenSnapshot,
 }: {
 	issue: IssueData;
 	expanded: boolean;
@@ -129,6 +145,7 @@ function Header({
 	showServer: boolean;
 	isAdmin: boolean;
 	onChanged: () => void;
+	onOpenSnapshot: () => void;
 }) {
 	return (
 		<Stack
@@ -185,6 +202,12 @@ function Header({
 			)}
 			<IncidentLinks incidents={issue.incidents} />
 			<HeaderActor issue={issue} isAdmin={isAdmin} onChanged={onChanged} />
+			<Box sx={{ flexShrink: 0 }}>
+				<StatusSnapshotButton
+					onClick={onOpenSnapshot}
+					tooltip="Status snapshot when this issue was last seen"
+				/>
+			</Box>
 			<Box sx={{ flexShrink: 0 }}>
 				<SourceChip source={issue.source} refValue={issue.ref} />
 			</Box>
@@ -304,6 +327,7 @@ function Body({
 	isAdmin,
 	onNoteAdded,
 	onChanged,
+	onOpenSnapshot,
 }: {
 	issue: IssueData;
 	snoozeActive: boolean;
@@ -311,6 +335,7 @@ function Body({
 	isAdmin: boolean;
 	onNoteAdded: () => void;
 	onChanged: () => void;
+	onOpenSnapshot: (at: string) => void;
 }) {
 	return (
 		<Box sx={{ mt: 1 }}>
@@ -342,7 +367,7 @@ function Body({
 					gap: 2,
 				}}
 			>
-				<EventLog issueId={issue.id} />
+				<EventLog issueId={issue.id} onOpenSnapshot={onOpenSnapshot} />
 				<NotesList
 					apiModule="issues"
 					parentKey="issue_id"
@@ -563,7 +588,13 @@ function IncidentLinks({ incidents }: { incidents: IssueIncidentLink[] }) {
 	);
 }
 
-function EventLog({ issueId }: { issueId: string }) {
+function EventLog({
+	issueId,
+	onOpenSnapshot,
+}: {
+	issueId: string;
+	onOpenSnapshot: (at: string) => void;
+}) {
 	const result = useApi(
 		"issues",
 		"list_events",
@@ -588,59 +619,68 @@ function EventLog({ issueId }: { issueId: string }) {
 
 	return (
 		<Stack spacing={0.5}>
-			{result.data.map((e) => (
-				<Box
-					key={e.id}
-					sx={{
-						p: 1,
-						border: 1,
-						borderColor: "divider",
-						borderRadius: 1,
-					}}
-				>
-					<Stack
-						direction="row"
-						spacing={1}
-						sx={{ alignItems: "center", minWidth: 0 }}
+			{result.data.map((e) => {
+				const at = e.occurred_at ?? e.created_at;
+				return (
+					<Box
+						key={e.id}
+						sx={{
+							p: 1,
+							border: 1,
+							borderColor: "divider",
+							borderRadius: 1,
+						}}
 					>
-						<Typography
-							variant="body2"
-							component="span"
-							sx={{
-								fontFamily: "monospace",
-								fontSize: "0.85em",
-								flex: 1,
-								minWidth: 0,
-								overflow: "hidden",
-								textOverflow: "ellipsis",
-								whiteSpace: "nowrap",
-							}}
-							title={e.message}
+						<Stack
+							direction="row"
+							spacing={1}
+							sx={{ alignItems: "center", minWidth: 0 }}
 						>
-							{e.message}
-						</Typography>
-						{e.occurrences > 1 && (
+							<Typography
+								variant="body2"
+								component="span"
+								sx={{
+									fontFamily: "monospace",
+									fontSize: "0.85em",
+									flex: 1,
+									minWidth: 0,
+									overflow: "hidden",
+									textOverflow: "ellipsis",
+									whiteSpace: "nowrap",
+								}}
+								title={e.message}
+							>
+								{e.message}
+							</Typography>
+							{e.occurrences > 1 && (
+								<Typography
+									variant="caption"
+									color="text.secondary"
+									sx={{ flexShrink: 0 }}
+								>
+									×{e.occurrences}
+								</Typography>
+							)}
+							<Box sx={{ flexShrink: 0 }}>
+								<StatusSnapshotButton
+									onClick={() => onOpenSnapshot(at)}
+									tooltip="Status snapshot at this event"
+								/>
+							</Box>
+							<Box sx={{ flexShrink: 0 }}>
+								<SeverityChip severity={e.severity} />
+							</Box>
 							<Typography
 								variant="caption"
 								color="text.secondary"
 								sx={{ flexShrink: 0 }}
 							>
-								×{e.occurrences}
+								<TimeAgo timestamp={at} />
 							</Typography>
-						)}
-						<Box sx={{ flexShrink: 0 }}>
-							<SeverityChip severity={e.severity} />
-						</Box>
-						<Typography
-							variant="caption"
-							color="text.secondary"
-							sx={{ flexShrink: 0 }}
-						>
-							<TimeAgo timestamp={e.occurred_at ?? e.created_at} />
-						</Typography>
-					</Stack>
-				</Box>
-			))}
+						</Stack>
+					</Box>
+				);
+			})}
 		</Stack>
 	);
 }

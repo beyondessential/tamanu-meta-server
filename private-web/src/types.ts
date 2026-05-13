@@ -96,6 +96,7 @@ export type ArtifactData = Solidify<Schemas["ArtifactData"]>;
 export type ServerInfo = Solidify<Schemas["ServerInfo"]>;
 export type ServerLastStatusData = Solidify<Schemas["ServerLastStatusData"]>;
 export type ServerDetailData = Solidify<Schemas["ServerDetailData"]>;
+export type StatusSnapshotData = Solidify<Schemas["StatusSnapshotData"]>;
 
 export type DeviceData = Solidify<Schemas["DeviceData"]>;
 export type DeviceKeyInfo = Solidify<Schemas["DeviceKeyInfo"]>;
