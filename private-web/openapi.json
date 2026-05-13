@@ -3794,7 +3794,8 @@
           "first_seen",
           "last_seen",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "incidents"
         ],
         "properties": {
           "acknowledged_at": {
@@ -3851,6 +3852,13 @@
           "id": {
             "type": "string",
             "format": "uuid"
+          },
+          "incidents": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IssueIncidentLink"
+            },
+            "description": "Distinct incidents this issue is or was attached to, most recent first.\nEmpty for issues that never crossed the threshold to join an incident."
           },
           "last_seen": {
             "type": "string",
@@ -3936,6 +3944,31 @@
           "issue_id": {
             "type": "string",
             "format": "uuid"
+          }
+        }
+      },
+      "IssueIncidentLink": {
+        "type": "object",
+        "description": "Minimal incident reference attached to an issue, enough for the UI to\nrender a link and indicate open/closed status. See `Incident::for_issues`.",
+        "required": [
+          "incident_id",
+          "opened_at"
+        ],
+        "properties": {
+          "closed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "incident_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "opened_at": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },

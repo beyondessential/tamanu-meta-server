@@ -1506,6 +1506,11 @@ export interface components {
             first_seen: string;
             /** Format: uuid */
             id: string;
+            /**
+             * @description Distinct incidents this issue is or was attached to, most recent first.
+             *     Empty for issues that never crossed the threshold to join an incident.
+             */
+            incidents: components["schemas"]["IssueIncidentLink"][];
             /** Format: date-time */
             last_seen: string;
             message: string;
@@ -1535,6 +1540,18 @@ export interface components {
         IssueIdArgs: {
             /** Format: uuid */
             issue_id: string;
+        };
+        /**
+         * @description Minimal incident reference attached to an issue, enough for the UI to
+         *     render a link and indicate open/closed status. See `Incident::for_issues`.
+         */
+        IssueIncidentLink: {
+            /** Format: date-time */
+            closed_at?: string | null;
+            /** Format: uuid */
+            incident_id: string;
+            /** Format: date-time */
+            opened_at: string;
         };
         IssueNoteData: {
             author: string;
