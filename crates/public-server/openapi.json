@@ -10,7 +10,7 @@
     "license": {
       "name": "GPL-3.0-or-later"
     },
-    "version": "6.2.0"
+    "version": "6.2.1"
   },
   "paths": {
     "/artifacts/{version}/{artifact_type}/{platform}": {
