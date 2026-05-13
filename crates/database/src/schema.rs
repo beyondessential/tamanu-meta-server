@@ -226,6 +226,8 @@ diesel::table! {
 		version -> Nullable<Text>,
 		extra -> Jsonb,
 		device_id -> Nullable<Uuid>,
+		healthy -> Bool,
+		health -> Jsonb,
 	}
 }
 

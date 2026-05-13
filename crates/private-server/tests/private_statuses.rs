@@ -802,3 +802,141 @@ async fn server_grouped_ids_excludes_unnamed() {
 	})
 	.await
 }
+
+// -----------------------------------------------------------------
+// Status snapshot endpoint
+// -----------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct SnapshotData {
+	#[serde(default)]
+	healthy: Option<bool>,
+	#[serde(default)]
+	health: Option<serde_json::Value>,
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn snapshot_returns_latest_when_at_omitted() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO servers (id, host, kind) VALUES
+			('20000000-0000-0000-0000-000000000001', 'https://snap.example.com', 'central')",
+		)
+		.await
+		.unwrap();
+		conn.batch_execute(
+			"INSERT INTO statuses (server_id, created_at, healthy, health) VALUES
+			('20000000-0000-0000-0000-000000000001', NOW() - INTERVAL '2 hours', true, '[]'::jsonb),
+			('20000000-0000-0000-0000-000000000001', NOW() - INTERVAL '1 hour', false,
+				'[{\"check\":\"db\",\"healthy\":false}]'::jsonb)",
+		)
+		.await
+		.unwrap();
+
+		let r = private
+			.post("/api/statuses/snapshot")
+			.json(&serde_json::json!({
+				"server_id": "20000000-0000-0000-0000-000000000001"
+			}))
+			.await;
+		r.assert_status_ok();
+		let data: Option<SnapshotData> = r.json();
+		let data = data.expect("snapshot returned for server with statuses");
+		assert_eq!(data.healthy, Some(false), "latest is the most recent");
+		let health = data.health.unwrap();
+		assert_eq!(health.as_array().unwrap().len(), 1);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn snapshot_at_time_returns_prior_row() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO servers (id, host, kind) VALUES
+			('20000000-0000-0000-0000-000000000002', 'https://snap2.example.com', 'central')",
+		)
+		.await
+		.unwrap();
+		// Three rows at NOW-relative timestamps so they fall into the
+		// time-range-partitioned `statuses` table's live partitions.
+		conn.batch_execute(
+			"INSERT INTO statuses (server_id, created_at, healthy, health) VALUES
+			('20000000-0000-0000-0000-000000000002', NOW() - INTERVAL '3 hours', true, '[]'::jsonb),
+			('20000000-0000-0000-0000-000000000002', NOW() - INTERVAL '2 hours', false, '[]'::jsonb),
+			('20000000-0000-0000-0000-000000000002', NOW() - INTERVAL '1 hour', true, '[]'::jsonb)",
+		)
+		.await
+		.unwrap();
+
+		// 90 minutes ago → unhealthy row (2h ago) is the most recent
+		// at-or-before; the healthy row 1h ago is excluded.
+		let at = (jiff::Timestamp::now() - jiff::SignedDuration::from_mins(90)).to_string();
+		let r = private
+			.post("/api/statuses/snapshot")
+			.json(&serde_json::json!({
+				"server_id": "20000000-0000-0000-0000-000000000002",
+				"at": at,
+			}))
+			.await;
+		r.assert_status_ok();
+		let data: Option<SnapshotData> = r.json();
+		let data = data.expect("row exists at this point");
+		assert_eq!(data.healthy, Some(false));
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn snapshot_before_any_row_returns_null() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO servers (id, host, kind) VALUES
+			('20000000-0000-0000-0000-000000000003', 'https://snap3.example.com', 'central')",
+		)
+		.await
+		.unwrap();
+		conn.batch_execute(
+			"INSERT INTO statuses (server_id, created_at, healthy, health) VALUES
+			('20000000-0000-0000-0000-000000000003', NOW() - INTERVAL '1 hour', true, '[]'::jsonb)",
+		)
+		.await
+		.unwrap();
+
+		let at = (jiff::Timestamp::now() - jiff::SignedDuration::from_hours(2)).to_string();
+		let r = private
+			.post("/api/statuses/snapshot")
+			.json(&serde_json::json!({
+				"server_id": "20000000-0000-0000-0000-000000000003",
+				"at": at,
+			}))
+			.await;
+		r.assert_status_ok();
+		let data: Option<SnapshotData> = r.json();
+		assert!(data.is_none(), "no row at-or-before the requested time");
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn snapshot_server_without_statuses_returns_null() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO servers (id, host, kind) VALUES
+			('20000000-0000-0000-0000-000000000004', 'https://snap4.example.com', 'central')",
+		)
+		.await
+		.unwrap();
+
+		let r = private
+			.post("/api/statuses/snapshot")
+			.json(&serde_json::json!({
+				"server_id": "20000000-0000-0000-0000-000000000004"
+			}))
+			.await;
+		r.assert_status_ok();
+		let data: Option<SnapshotData> = r.json();
+		assert!(data.is_none());
+	})
+	.await
+}

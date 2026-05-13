@@ -5,7 +5,10 @@ use std::{
 
 use commons_errors::{AppError, Result};
 use commons_types::{
-	issue::Severity, server::rank::ServerRank, status::ShortStatus, version::VersionStr,
+	issue::Severity,
+	server::rank::ServerRank,
+	status::{HealthState, ShortStatus},
+	version::VersionStr,
 };
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -72,6 +75,13 @@ pub struct Status {
 	pub device_id: Option<Uuid>,
 	pub version: Option<VersionStr>,
 	pub extra: serde_json::Value,
+	/// Server's overall self-reported health. Absent in the payload ⇒ true
+	/// (legacy compat); see `docs/plans/status-snapshots-and-health.md`.
+	pub healthy: bool,
+	/// Per-check breakdown. Each entry is an object with at least
+	/// `{check: string, healthy: bool, ...}`; extra fields are passed
+	/// through verbatim.
+	pub health: serde_json::Value,
 }
 
 #[derive(Debug, Insertable)]
@@ -83,6 +93,8 @@ pub struct NewStatus {
 	pub device_id: Option<Uuid>,
 	pub version: Option<VersionStr>,
 	pub extra: serde_json::Value,
+	pub healthy: bool,
+	pub health: serde_json::Value,
 }
 
 impl Default for NewStatus {
@@ -92,6 +104,8 @@ impl Default for NewStatus {
 			device_id: Default::default(),
 			version: Default::default(),
 			extra: serde_json::Value::Object(Default::default()),
+			healthy: true,
+			health: serde_json::Value::Array(Default::default()),
 		}
 	}
 }
@@ -131,8 +145,12 @@ impl Status {
 					device_id: None,
 					created_at: Timestamp::now(),
 					version,
-
 					extra: Default::default(),
+					// Pingtask doesn't know the server's self-reported health;
+					// it only knows the server is reachable. Default to healthy
+					// to avoid false-positive unhealthy events from this path.
+					healthy: true,
+					health: serde_json::Value::Array(Default::default()),
 				})
 			}
 			Err(err) => {
@@ -278,6 +296,31 @@ impl Status {
 			.map_err(AppError::from)
 	}
 
+	/// Most recent status row for `server` with `created_at <= at`. No
+	/// time-window cap — operators reviewing historical issues need
+	/// the actual contemporary status, even if it's old.
+	pub async fn at_time(
+		db: &mut AsyncPgConnection,
+		server: Uuid,
+		at: Timestamp,
+	) -> Result<Option<Status>> {
+		use crate::schema::statuses::dsl::*;
+
+		statuses
+			.select(Status::as_select())
+			.filter(
+				server_id
+					.eq(server)
+					.and(created_at.le(jiff_diesel::Timestamp::from(at)))
+					.and(id.ne(Uuid::nil())),
+			)
+			.order(created_at.desc())
+			.first(db)
+			.await
+			.optional()
+			.map_err(AppError::from)
+	}
+
 	pub async fn latest_for_servers(
 		db: &mut AsyncPgConnection,
 		server_ids: &[Uuid],
@@ -288,7 +331,7 @@ impl Status {
 
 		// Get the latest status for each server using DISTINCT ON
 		let query = diesel::sql_query(
-			"SELECT DISTINCT ON (server_id) id, created_at, server_id, device_id, version, extra
+			"SELECT DISTINCT ON (server_id) id, created_at, server_id, device_id, version, extra, healthy, health
 				FROM statuses
 				WHERE server_id = ANY($1)
 				AND created_at >= NOW() - INTERVAL '7 days'
@@ -349,6 +392,33 @@ impl Status {
 			.and_then(|pg| pg.as_str())
 			.and_then(|pg| pg.split_ascii_whitespace().nth(1))
 			.map(|vers| vers.trim_end_matches(',').into())
+	}
+
+	/// Server's self-reported health state derived from this status
+	/// row. Returns [`HealthState::Unhealthy`] if top-level is
+	/// `false`, [`HealthState::Warning`] if any `health[]` entry is
+	/// failing while top-level is `true`, and [`HealthState::Healthy`]
+	/// otherwise.
+	pub fn health_state(&self) -> HealthState {
+		if !self.healthy {
+			return HealthState::Unhealthy;
+		}
+		let any_failing = self
+			.health
+			.as_array()
+			.is_some_and(|arr| {
+				arr.iter().any(|e| {
+					e.as_object()
+						.and_then(|o| o.get("healthy"))
+						.and_then(|v| v.as_bool())
+						.is_some_and(|b| !b)
+				})
+			});
+		if any_failing {
+			HealthState::Warning
+		} else {
+			HealthState::Healthy
+		}
 	}
 
 	pub fn short_status(&self) -> ShortStatus {

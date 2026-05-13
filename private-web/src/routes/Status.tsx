@@ -13,7 +13,7 @@ import {
 import { Link as RouterLink } from "react-router-dom";
 import StatusDot from "../components/StatusDot";
 import VersionIndicator from "../components/VersionIndicator";
-import { StatusLegend, VersionLegend } from "../components/Legends";
+import { HealthLegend, StatusLegend, VersionLegend } from "../components/Legends";
 import { useApi } from "../api";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { useReloadInterval } from "../hooks/useReloadInterval";
@@ -34,6 +34,9 @@ export default function Status() {
 				<VersionLegend />
 				<Box sx={{ mt: 1 }}>
 					<StatusLegend />
+				</Box>
+				<Box sx={{ mt: 1 }}>
+					<HealthLegend />
 				</Box>
 			</Box>
 		</Stack>
@@ -243,12 +246,21 @@ function ServerCard({
 				sx={{ alignItems: "center", justifyContent: "space-between" }}
 			>
 				<Stack direction="row" spacing={0} sx={{ flexWrap: "wrap" }}>
-					<StatusDot up={server.up} title={`${server.name}: ${server.up}`} />
+					<StatusDot
+						up={server.up}
+						health={server.health}
+						title={`${server.name}: ${server.up}${
+							server.health !== "healthy" ? ` (${server.health})` : ""
+						}`}
+					/>
 					{server.facility_servers.map((facility) => (
 						<StatusDot
 							key={facility.id}
 							up={facility.up}
-							title={`${facility.name}: ${facility.up}`}
+							health={facility.health}
+							title={`${facility.name}: ${facility.up}${
+								facility.health !== "healthy" ? ` (${facility.health})` : ""
+							}`}
 							dim
 						/>
 					))}

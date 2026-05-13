@@ -7,7 +7,7 @@ use commons_types::{
 	Uuid,
 	geo::GeoPoint,
 	server::{kind::ServerKind, rank::ServerRank},
-	status::ShortStatus,
+	status::{HealthState, ShortStatus},
 	version::VersionStr,
 };
 use database::{
@@ -33,7 +33,8 @@ pub struct ServerDetailData {
 	pub device_info: Option<super::devices::DeviceInfo>,
 	pub last_status: Option<ServerLastStatusData>,
 	pub up: ShortStatus,
-	pub child_servers: Vec<(ShortStatus, ServerInfo)>,
+	pub health: HealthState,
+	pub child_servers: Vec<(ShortStatus, HealthState, ServerInfo)>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -63,6 +64,11 @@ pub struct ServerLastStatusData {
 	pub postgres: Option<String>,
 	pub nodejs: Option<String>,
 	pub timezone: Option<String>,
+	/// Server's overall self-reported health from this status push.
+	/// `true` for legacy rows that predate the contract.
+	pub healthy: bool,
+	/// Per-check breakdown from this push. `[]` for legacy rows.
+	pub health: JsonValue,
 	pub extra: JsonValue,
 }
 
@@ -327,6 +333,10 @@ pub async fn get_detail(
 		.as_ref()
 		.map(|s| s.short_status())
 		.unwrap_or_default();
+	let health = status
+		.as_ref()
+		.map(|s| s.health_state())
+		.unwrap_or_default();
 
 	let last_status = if let Some(st) = status.as_ref() {
 		let device = if let Some(device_id) = st.device_id {
@@ -360,6 +370,8 @@ pub async fn get_detail(
 			timezone: st
 				.extra("timezone")
 				.and_then(|s| s.as_str().map(|s| s.to_string())),
+			healthy: st.healthy,
+			health: st.health.clone(),
 			extra: st.extra.clone(),
 		})
 	} else {
@@ -388,8 +400,10 @@ pub async fn get_detail(
 				.map(|child| {
 					let child_status = status_map.get(&child.id).copied();
 					let child_up = child_status.map(|s| s.short_status()).unwrap_or_default();
+					let child_health = child_status.map(|s| s.health_state()).unwrap_or_default();
 					(
 						child_up,
+						child_health,
 						ServerInfo {
 							id: child.id,
 							name: child.name,
@@ -417,6 +431,7 @@ pub async fn get_detail(
 		device_info,
 		last_status,
 		up,
+		health,
 		child_servers,
 	}))
 }
@@ -675,7 +690,7 @@ pub async fn attach_tailscale_device(
 	Ok(Json(device.id))
 }
 
-async fn compute_min_chrome_version(
+pub(crate) async fn compute_min_chrome_version(
 	conn: &mut database::diesel_async::AsyncPgConnection,
 	version: &VersionStr,
 ) -> Option<u32> {

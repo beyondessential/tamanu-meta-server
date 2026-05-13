@@ -16,9 +16,11 @@ import {
 	Tooltip,
 	Typography,
 } from "@mui/material";
+import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+import CancelIcon from "@mui/icons-material/Cancel";
 import EditIcon from "@mui/icons-material/Edit";
 import LanguageIcon from "@mui/icons-material/Language";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import IncidentsLink from "../components/IncidentsLink";
 import ManualEventButton from "../components/ManualEventButton";
@@ -26,7 +28,7 @@ import StatusDot from "../components/StatusDot";
 import TailnetIdentitySection from "../components/TailnetIdentitySection";
 import TimeAgo from "../components/TimeAgo";
 import VersionIndicator from "../components/VersionIndicator";
-import { StatusLegend, VersionLegend } from "../components/Legends";
+import { HealthLegend, StatusLegend, VersionLegend } from "../components/Legends";
 import ServerKindChip from "../components/ServerKindChip";
 import ServerRankChip from "../components/ServerRankChip";
 import { callApi, useApi, useApiAction } from "../api";
@@ -120,6 +122,9 @@ export default function ServerDetail() {
 				<Box sx={{ mt: 1 }}>
 					<StatusLegend />
 				</Box>
+				<Box sx={{ mt: 1 }}>
+					<HealthLegend />
+				</Box>
 			</Box>
 		</Stack>
 	);
@@ -155,13 +160,15 @@ function Header({
 				<Typography variant="h4" component="h1" sx={{ ml: 1 }}>
 					<StatusDot
 						up={data.up}
+						health={data.health}
 						title={data.server.name ?? ""}
 						size="0.8em"
 					/>
-					{data.child_servers.map(([up, child]) => (
+					{data.child_servers.map(([up, health, child]) => (
 						<StatusDot
 							key={child.id}
 							up={up}
+							health={health}
 							title={child.name ?? ""}
 							dim
 							size="0.8em"
@@ -446,6 +453,7 @@ function InfoSection({
 }) {
 	return (
 		<Paper variant="outlined" sx={{ p: 2 }}>
+			{status && <HealthIndicator healthy={status.healthy} />}
 			<Stack
 				direction="row"
 				spacing={4}
@@ -481,6 +489,7 @@ function InfoSection({
 					/>
 				)}
 			</Stack>
+			{status && <ChecksTable health={status.health} />}
 			{status && Object.keys((status.extra ?? {}) as Record<string, unknown>).length > 0 && (
 				<Box sx={{ mt: 2 }}>
 					<details>
@@ -503,6 +512,160 @@ function InfoSection({
 			)}
 		</Paper>
 	);
+}
+
+/** Global health chip rendered at the top of the InfoSection. The
+ * server's per-check breakdown is shown by `<ChecksTable>` below — this
+ * is the "headline" answer to "does the server think it's OK". */
+function HealthIndicator({ healthy }: { healthy: boolean }) {
+	return (
+		<Box sx={{ mb: 1.5 }}>
+			<Chip
+				size="small"
+				color={healthy ? "success" : "error"}
+				icon={healthy ? <CheckCircleIcon /> : <CancelIcon />}
+				label={healthy ? "Healthy" : "Unhealthy"}
+			/>
+		</Box>
+	);
+}
+
+/** Per-check table from the most recent status push. Failing entries
+ * sort first so the operator sees them without scrolling, then
+ * alphabetical. Capped at 5 visible rows with an "expand all" toggle
+ * so a server reporting 30 checks doesn't push the rest of the page
+ * off-screen. Render nothing when the server doesn't ship per-check
+ * data (legacy / minimal payloads). */
+function ChecksTable({ health }: { health: ServerLastStatusData["health"] }) {
+	const entries = parseChecks(health);
+	const [expanded, setExpanded] = useState(false);
+	if (entries.length === 0) return null;
+	const HIDE_AFTER = 5;
+	const visible = expanded ? entries : entries.slice(0, HIDE_AFTER);
+	const hidden = entries.length - visible.length;
+	return (
+		<Box sx={{ mt: 2 }}>
+			<Typography variant="overline" color="text.secondary">
+				Checks ({entries.length})
+			</Typography>
+			<Stack spacing={1} sx={{ mt: 0.5 }}>
+				{visible.map((entry) => (
+					<CheckRow key={entry.check} entry={entry} />
+				))}
+			</Stack>
+			{hidden > 0 && (
+				<Button
+					size="small"
+					onClick={() => setExpanded(true)}
+					sx={{ mt: 0.5 }}
+				>
+					Show {hidden} more
+				</Button>
+			)}
+			{expanded && entries.length > HIDE_AFTER && (
+				<Button
+					size="small"
+					onClick={() => setExpanded(false)}
+					sx={{ mt: 0.5 }}
+				>
+					Collapse
+				</Button>
+			)}
+		</Box>
+	);
+}
+
+type ParsedCheck = {
+	check: string;
+	healthy: boolean;
+	/** Everything other than `check` and `healthy`, preserved in source
+	 * order. */
+	extras: Array<[string, unknown]>;
+};
+
+function parseChecks(health: ServerLastStatusData["health"]): ParsedCheck[] {
+	if (!Array.isArray(health)) return [];
+	const parsed: ParsedCheck[] = [];
+	for (const raw of health as unknown[]) {
+		if (typeof raw !== "object" || raw === null) continue;
+		const obj = raw as Record<string, unknown>;
+		const check = obj.check;
+		const healthy = obj.healthy;
+		if (typeof check !== "string" || typeof healthy !== "boolean") continue;
+		const extras: Array<[string, unknown]> = Object.entries(obj).filter(
+			([k]) => k !== "check" && k !== "healthy",
+		);
+		parsed.push({ check, healthy, extras });
+	}
+	// Failing first, then alphabetical by name. Stable: same input
+	// always produces the same visible order.
+	parsed.sort((a, b) => {
+		if (a.healthy !== b.healthy) return a.healthy ? 1 : -1;
+		return a.check.localeCompare(b.check);
+	});
+	return parsed;
+}
+
+function CheckRow({ entry }: { entry: ParsedCheck }) {
+	return (
+		<Stack
+			direction="row"
+			spacing={1.5}
+			sx={{
+				p: 1,
+				border: 1,
+				borderColor: "divider",
+				borderRadius: 1,
+				alignItems: "flex-start",
+				bgcolor: entry.healthy ? undefined : "action.hover",
+			}}
+		>
+			{entry.healthy ? (
+				<CheckCircleIcon fontSize="small" color="success" />
+			) : (
+				<CancelIcon fontSize="small" color="error" />
+			)}
+			<Box sx={{ flex: 1, minWidth: 0 }}>
+				<Typography variant="body2" sx={{ fontFamily: "monospace" }}>
+					{entry.check}
+				</Typography>
+				{entry.extras.length > 0 && (
+					<Box
+						component="dl"
+						sx={{
+							m: 0,
+							mt: 0.5,
+							display: "grid",
+							gridTemplateColumns: "max-content 1fr",
+							columnGap: 1.5,
+							rowGap: 0.25,
+							fontSize: "0.8em",
+						}}
+					>
+						{entry.extras.map(([k, v]) => (
+							<Fragment key={k}>
+								<Box component="dt" sx={{ color: "text.secondary" }}>
+									{k}
+								</Box>
+								<Box
+									component="dd"
+									sx={{ m: 0, fontFamily: "monospace" }}
+								>
+									{renderCheckValue(v)}
+								</Box>
+							</Fragment>
+						))}
+					</Box>
+				)}
+			</Box>
+		</Stack>
+	);
+}
+
+function renderCheckValue(v: unknown): string {
+	if (typeof v === "string") return v;
+	if (v === null) return "null";
+	return JSON.stringify(v);
 }
 
 function StatusInfoFields({ status }: { status: ServerLastStatusData }) {
@@ -598,7 +761,7 @@ function ChildServers({
 				Child servers ({children.length})
 			</Typography>
 			<Stack spacing={1}>
-				{children.map(([up, child]) => (
+				{children.map(([up, health, child]) => (
 					<Stack
 						key={child.id}
 						direction="row"
@@ -623,7 +786,7 @@ function ChildServers({
 								<LanguageIcon fontSize="small" />
 							</IconButton>
 						</Tooltip>
-						<StatusDot up={up} />
+						<StatusDot up={up} health={health} />
 						<MuiLink
 							component={RouterLink}
 							to={`/servers/${child.id}`}

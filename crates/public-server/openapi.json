@@ -430,10 +430,12 @@
           }
         ],
         "requestBody": {
-          "description": "Optional free-form `extra` payload. Empty body or JSON `null` are both treated as `{}`.",
+          "description": "Status push. Empty body or JSON `null` are both treated as `{}` (all fields default).",
           "content": {
             "application/json": {
-              "schema": {}
+              "schema": {
+                "$ref": "#/components/schemas/StatusPayload"
+              }
             }
           },
           "required": true
@@ -802,6 +804,31 @@
             "format": "double"
           }
         }
+      },
+      "HealthCheck": {
+        "allOf": [
+          {
+            "type": "object",
+            "description": "Arbitrary additional fields specific to the check (rendered in\nthe snapshot UI as a key/value block)."
+          },
+          {
+            "type": "object",
+            "required": [
+              "check",
+              "healthy"
+            ],
+            "properties": {
+              "check": {
+                "type": "string",
+                "description": "Identifier for the check. Must be a non-empty string. Used as\nthe issue's `ref` (`health/<check>`) so the same check\ntransitions land on the same issue across pushes."
+              },
+              "healthy": {
+                "type": "boolean",
+                "description": "Pass/fail for the check."
+              }
+            }
+          }
+        ]
       },
       "Issue": {
         "type": "object",
@@ -1280,7 +1307,9 @@
           "id",
           "created_at",
           "server_id",
-          "extra"
+          "extra",
+          "healthy",
+          "health"
         ],
         "properties": {
           "created_at": {
@@ -1295,6 +1324,13 @@
             "format": "uuid"
           },
           "extra": {},
+          "health": {
+            "description": "Per-check breakdown. Each entry is an object with at least\n`{check: string, healthy: bool, ...}`; extra fields are passed\nthrough verbatim."
+          },
+          "healthy": {
+            "type": "boolean",
+            "description": "Server's overall self-reported health. Absent in the payload ⇒ true\n(legacy compat); see `docs/plans/status-snapshots-and-health.md`."
+          },
           "id": {
             "type": "string",
             "format": "uuid"
@@ -1314,6 +1350,37 @@
             ]
           }
         }
+      },
+      "StatusPayload": {
+        "allOf": [
+          {
+            "type": "object",
+            "description": "Free-form additional data (uptime, postgres version, timezone,\nhostname, etc.). Stored verbatim in `statuses.extra` and\nsurfaced as raw JSON in the status snapshot."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "health": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "$ref": "#/components/schemas/HealthCheck"
+                },
+                "description": "Per-check breakdown. Each entry must include `check` (non-empty)\nand `healthy`; arbitrary additional fields per check (latency,\nfree disk %, certificate expiry, etc.) are passed through\nverbatim and surfaced in the status snapshot UI.\n\nA failing check while the top-level `healthy` is `true` is\ntreated as a warning, not an incident. A failing check with\nthe top-level `false` is incident-class."
+              },
+              "healthy": {
+                "type": [
+                  "boolean",
+                  "null"
+                ],
+                "description": "Overall server self-reported health. **Absent ⇒ `true`** —\nlegacy senders that don't know about this field never\nfalse-positive unhealthy. When `false`, the public-server\nfiles an incident-class event against the server's group via\nthe normal issues/events pipeline."
+              }
+            }
+          }
+        ],
+        "description": "Status payload contract — documents the wire shape only. The\nhandler actually receives `serde_json::Value` and runs its own\nvalidation so arbitrary additional fields flow through into\n`statuses.extra` unchanged.\n\nSchema is reproduced here so the openapi spec describes the\n`healthy` and `health` keys explicitly; otherwise consumers have\nto read the prose to know they exist."
       },
       "UrlField": {
         "type": "string",

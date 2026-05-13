@@ -38,9 +38,8 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 /// watchdog declares it deadlocked and exits the process. K8s restarts us
 /// from there. Generously sized: TICK + worst-case batch (BATCH * REQUEST_TIMEOUT)
 /// + slack.
-const WATCHDOG_STALE_AFTER: Duration = Duration::from_secs(
-	TICK.as_secs() + (BATCH as u64) * REQUEST_TIMEOUT.as_secs() + 30,
-);
+const WATCHDOG_STALE_AFTER: Duration =
+	Duration::from_secs(TICK.as_secs() + (BATCH as u64) * REQUEST_TIMEOUT.as_secs() + 30);
 /// How often the watchdog wakes to compare the heartbeat to `now`.
 const WATCHDOG_CHECK_EVERY: Duration = Duration::from_secs(30);
 
