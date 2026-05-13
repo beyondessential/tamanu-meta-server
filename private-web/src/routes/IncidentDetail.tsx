@@ -67,7 +67,7 @@ export default function IncidentDetail() {
 
 	usePageTitle(
 		detail.status === "ok"
-			? `Incident on ${serverLabel(detail.data.incident.server_name, detail.data.incident.server_host)}`
+			? `Incident ${detail.data.incident.id.slice(0, 8)} on ${serverLabel(detail.data.incident.server_name, detail.data.incident.server_host)}`
 			: "Incident",
 	);
 
@@ -192,7 +192,14 @@ function Header({
 			>
 				<Box sx={{ minWidth: 0, flex: 1 }}>
 					<Typography variant="h4" component="h1">
-						Incident on{" "}
+						Incident{" "}
+						<Box
+							component="span"
+							sx={{ fontFamily: "monospace", color: "text.secondary" }}
+						>
+							{incident.id.slice(0, 8)}
+						</Box>{" "}
+						on{" "}
 						<MuiLink
 							component={RouterLink}
 							to={`/servers/${incident.server_id}`}
