@@ -41,12 +41,24 @@ function randomLabel(prefix: string): string {
 	return `${prefix}-${randomBytes(4).toString("hex")}`;
 }
 
+/** Wipe every table this suite seeds into. Use from a `beforeEach`
+ * when a test needs to make assertions that depend on the absence
+ * of data (the "empty state" UI banners, mostly). Fast — single
+ * statement with CASCADE. */
+export async function resetSeededTables(sql: Sql): Promise<void> {
+	await sql.query(
+		"TRUNCATE statuses, issues, device_keys, servers, devices, versions RESTART IDENTITY CASCADE",
+	);
+}
+
+export type ServerRank = "production" | "clone" | "demo" | "test" | "dev";
+
 export interface SeededServer {
 	id: string;
 	name: string;
 	host: string;
 	kind: "central" | "facility";
-	rank: "production" | "staging" | "development" | null;
+	rank: ServerRank | null;
 }
 
 export async function seedServer(
@@ -55,7 +67,7 @@ export async function seedServer(
 		name?: string;
 		host?: string;
 		kind?: "central" | "facility";
-		rank?: "production" | "staging" | "development" | null;
+		rank?: ServerRank | null;
 		parentServerId?: string;
 		deviceId?: string;
 		alertWhenDown?: boolean;
