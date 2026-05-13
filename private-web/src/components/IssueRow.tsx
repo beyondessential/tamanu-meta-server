@@ -21,7 +21,7 @@ import { useIsAdmin } from "../hooks/useIsAdmin";
 import { humanDuration } from "../lib/humanDuration";
 import NotesList, { AddNoteButton } from "./NotesList";
 import SeverityChip from "./SeverityChip";
-import StatusSnapshotModal, { StatusSnapshotButton } from "./StatusSnapshotModal";
+import StatusSnapshotPanel, { StatusSnapshotButton } from "./StatusSnapshot";
 import TimeAgo from "./TimeAgo";
 import UserAvatar from "./UserAvatar";
 import {
@@ -71,15 +71,10 @@ export default function IssueRow({
 }) {
 	const [expanded, setExpanded] = useState(defaultExpanded);
 	const [notesRefresh, setNotesRefresh] = useState(0);
-	const [snapshotAt, setSnapshotAt] = useState<string | null>(null);
-	const [snapshotOpen, setSnapshotOpen] = useState(false);
+	const [headerSnapshotOpen, setHeaderSnapshotOpen] = useState(false);
 	const snoozeActive = isSnoozeActive(issue.snoozed_until);
 	const struckThrough = !issue.active || !!issue.resolved_at;
 	const isAdmin = useIsAdmin() === true;
-	const openSnapshot = (at: string) => {
-		setSnapshotAt(at);
-		setSnapshotOpen(true);
-	};
 	return (
 		<Box
 			sx={{
@@ -99,8 +94,16 @@ export default function IssueRow({
 				showServer={showServer}
 				isAdmin={isAdmin}
 				onChanged={onChanged}
-				onOpenSnapshot={() => openSnapshot(issue.last_seen)}
+				headerSnapshotOpen={headerSnapshotOpen}
+				toggleHeaderSnapshot={() => setHeaderSnapshotOpen((v) => !v)}
 			/>
+			{headerSnapshotOpen && (
+				<StatusSnapshotPanel
+					serverId={issue.server_id}
+					at={issue.last_seen}
+					onClose={() => setHeaderSnapshotOpen(false)}
+				/>
+			)}
 			{expanded && (
 				<Body
 					issue={issue}
@@ -109,15 +112,8 @@ export default function IssueRow({
 					isAdmin={isAdmin}
 					onNoteAdded={() => setNotesRefresh((t) => t + 1)}
 					onChanged={onChanged}
-					onOpenSnapshot={openSnapshot}
 				/>
 			)}
-			<StatusSnapshotModal
-				serverId={issue.server_id}
-				at={snapshotAt}
-				open={snapshotOpen}
-				onClose={() => setSnapshotOpen(false)}
-			/>
 		</Box>
 	);
 }
@@ -131,7 +127,8 @@ function Header({
 	showServer,
 	isAdmin,
 	onChanged,
-	onOpenSnapshot,
+	headerSnapshotOpen,
+	toggleHeaderSnapshot,
 }: {
 	issue: IssueData;
 	expanded: boolean;
@@ -141,7 +138,8 @@ function Header({
 	showServer: boolean;
 	isAdmin: boolean;
 	onChanged: () => void;
-	onOpenSnapshot: () => void;
+	headerSnapshotOpen: boolean;
+	toggleHeaderSnapshot: () => void;
 }) {
 	return (
 		<Stack
@@ -199,7 +197,8 @@ function Header({
 			<HeaderActor issue={issue} isAdmin={isAdmin} onChanged={onChanged} />
 			<Box sx={{ flexShrink: 0 }}>
 				<StatusSnapshotButton
-					onClick={onOpenSnapshot}
+					open={headerSnapshotOpen}
+					onClick={toggleHeaderSnapshot}
 					tooltip="Status snapshot when this issue was last seen"
 				/>
 			</Box>
@@ -319,7 +318,6 @@ function Body({
 	isAdmin,
 	onNoteAdded,
 	onChanged,
-	onOpenSnapshot,
 }: {
 	issue: IssueData;
 	snoozeActive: boolean;
@@ -327,7 +325,6 @@ function Body({
 	isAdmin: boolean;
 	onNoteAdded: () => void;
 	onChanged: () => void;
-	onOpenSnapshot: (at: string) => void;
 }) {
 	return (
 		<Box sx={{ mt: 1 }}>
@@ -360,7 +357,7 @@ function Body({
 					gap: 2,
 				}}
 			>
-				<EventLog issueId={issue.id} onOpenSnapshot={onOpenSnapshot} />
+				<EventLog issueId={issue.id} serverId={issue.server_id} />
 				<NotesList
 					apiModule="issues"
 					parentKey="issue_id"
@@ -587,10 +584,10 @@ function IssueMeta({ issue }: { issue: IssueData }) {
 
 function EventLog({
 	issueId,
-	onOpenSnapshot,
+	serverId,
 }: {
 	issueId: string;
-	onOpenSnapshot: (at: string) => void;
+	serverId: string;
 }) {
 	const result = useApi(
 		"issues",
@@ -598,6 +595,23 @@ function EventLog({
 		{ issue_id: issueId },
 		[issueId],
 	);
+	const [snapshotOpen, setSnapshotOpen] = useState<ReadonlySet<string>>(
+		() => new Set(),
+	);
+	const toggleSnapshot = (eventId: string) =>
+		setSnapshotOpen((prev) => {
+			const next = new Set(prev);
+			if (next.has(eventId)) next.delete(eventId);
+			else next.add(eventId);
+			return next;
+		});
+	const closeSnapshot = (eventId: string) =>
+		setSnapshotOpen((prev) => {
+			if (!prev.has(eventId)) return prev;
+			const next = new Set(prev);
+			next.delete(eventId);
+			return next;
+		});
 
 	if (result.status === "loading" || result.status === "idle")
 		return (
@@ -618,6 +632,7 @@ function EventLog({
 		<Stack spacing={0.5}>
 			{result.data.map((e) => {
 				const at = e.occurred_at ?? e.created_at;
+				const open = snapshotOpen.has(e.id);
 				return (
 					<Box
 						key={e.id}
@@ -660,7 +675,8 @@ function EventLog({
 							)}
 							<Box sx={{ flexShrink: 0 }}>
 								<StatusSnapshotButton
-									onClick={() => onOpenSnapshot(at)}
+									open={open}
+									onClick={() => toggleSnapshot(e.id)}
 									tooltip="Status snapshot at this event"
 								/>
 							</Box>
@@ -675,6 +691,13 @@ function EventLog({
 								<TimeAgo timestamp={at} />
 							</Typography>
 						</Stack>
+						{open && (
+							<StatusSnapshotPanel
+								serverId={serverId}
+								at={at}
+								onClose={() => closeSnapshot(e.id)}
+							/>
+						)}
 					</Box>
 				);
 			})}
