@@ -227,7 +227,8 @@ impl AppError {
 						Self::AuthFailed { .. } => "auth-failed",
 						Self::DeviceHasNoServer => "device-has-no-server",
 						Self::SourceManualForbidden => "source-manual-forbidden",
-						Self::AuthTailnetDirectoryUnavailable => "auth-tailnet-directory-unavailable",
+						Self::AuthTailnetDirectoryUnavailable =>
+							"auth-tailnet-directory-unavailable",
 						Self::AuthTailnetNodeNotPermitted => "auth-tailnet-node-not-permitted",
 						Self::TaggedDeviceNotAllowed => "tagged-device-not-allowed",
 						Self::DeviceTailscaleNodeAlreadyClaimed =>

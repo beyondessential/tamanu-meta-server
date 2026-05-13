@@ -10,9 +10,13 @@
 //! `FOR UPDATE SKIP LOCKED`, posts them one at a time, and marks them
 //! delivered or failed inside the same transaction.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
 use clap::Parser;
+use commons_types::issue::Severity;
+use database::issues::NewEvent;
 use database::slack_outbox::{KIND_INCIDENT_OPEN, KIND_INCIDENT_RESOLVE, SlackOutbox};
 use diesel_async::AsyncConnection;
 use lloggs::{LoggingArgs, PreArgs};
@@ -26,17 +30,30 @@ use tracing::{debug, error, info, warn};
 const BATCH: i64 = 10;
 const TICK: Duration = Duration::from_secs(5);
 const MAX_ATTEMPTS: i32 = 10;
+/// Cap on a single HTTP POST to Slack. Slack typically responds in well
+/// under a second; anything past this is almost certainly a black-holed
+/// destination and would otherwise wedge the whole drain loop.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+/// How long the main loop is allowed to go without ticking before the
+/// watchdog declares it deadlocked and exits the process. K8s restarts us
+/// from there. Generously sized: TICK + worst-case batch (BATCH * REQUEST_TIMEOUT)
+/// + slack.
+const WATCHDOG_STALE_AFTER: Duration = Duration::from_secs(
+	TICK.as_secs() + (BATCH as u64) * REQUEST_TIMEOUT.as_secs() + 30,
+);
+/// How often the watchdog wakes to compare the heartbeat to `now`.
+const WATCHDOG_CHECK_EVERY: Duration = Duration::from_secs(30);
 
 /// Drainer configuration. One webhook URL per outbox kind (each Slack
 /// workflow binds to a single variable set declared in its trigger, so
 /// `incident_open` and `incident_resolve` need separate workflows), plus
 /// the `PRIVATE_URL` base that the `link` variable points at.
 ///
-/// `PRIVATE_URL` is required whenever any webhook URL is set. The link is
-/// injected here at delivery time rather than at enqueue time so the
-/// operator only has to configure one process. Localhost fallback would
-/// produce a Slack message with a link that nobody can click — better to
-/// refuse to start than to ship broken messages.
+/// Validation policy: either **all** known webhook URLs are set (along with
+/// `PRIVATE_URL`), or **none** of them are (no-op mode for dev). Partial
+/// configuration is a hard error at startup — silently dropping rows for an
+/// unconfigured kind is exactly how we missed an entire month of resolve
+/// notifications previously, so a noisy startup failure is preferred.
 #[derive(Clone, Debug, Default)]
 struct Config {
 	open: Option<String>,
@@ -46,19 +63,51 @@ struct Config {
 
 impl Config {
 	fn from_env() -> miette::Result<Self> {
-		let cfg = Self {
-			open: std::env::var("SLACK_WEBHOOK_OPEN_URL").ok(),
-			resolve: std::env::var("SLACK_WEBHOOK_RESOLVE_URL").ok(),
-			private_url: std::env::var("PRIVATE_URL").ok(),
-		};
-		if cfg.any_hook() && cfg.private_url.is_none() {
+		Self::build(
+			std::env::var("SLACK_WEBHOOK_OPEN_URL").ok(),
+			std::env::var("SLACK_WEBHOOK_RESOLVE_URL").ok(),
+			std::env::var("PRIVATE_URL").ok(),
+		)
+	}
+
+	fn build(
+		open: Option<String>,
+		resolve: Option<String>,
+		private_url: Option<String>,
+	) -> miette::Result<Self> {
+		let inputs: [(&str, &Option<String>); 2] = [
+			("SLACK_WEBHOOK_OPEN_URL", &open),
+			("SLACK_WEBHOOK_RESOLVE_URL", &resolve),
+		];
+		let set_count = inputs.iter().filter(|(_, v)| v.is_some()).count();
+		if set_count == 0 {
+			return Ok(Self::default());
+		}
+		if set_count != inputs.len() {
+			let missing: Vec<&str> = inputs
+				.iter()
+				.filter(|(_, v)| v.is_none())
+				.map(|(name, _)| *name)
+				.collect();
+			return Err(miette::miette!(
+				"slack outbox drainer requires every SLACK_WEBHOOK_*_URL to be set \
+				 when any is set (missing: {}). Set all of them, or leave them all \
+				 unset for no-op mode.",
+				missing.join(", ")
+			));
+		}
+		let Some(private_url) = private_url else {
 			return Err(miette::miette!(
 				"PRIVATE_URL must be set when any SLACK_WEBHOOK_*_URL is set \
 				 — it's the base of the operator-facing admin UI that the \
 				 `link` variable in each Slack message points at",
 			));
-		}
-		Ok(cfg)
+		};
+		Ok(Self {
+			open,
+			resolve,
+			private_url: Some(private_url),
+		})
 	}
 
 	fn any_hook(&self) -> bool {
@@ -84,10 +133,16 @@ fn spawn(cfg: Config) -> JoinHandle<()> {
 	if !cfg.any_hook() {
 		info!("no SLACK_WEBHOOK_*_URL set; slack outbox drainer running in no-op mode");
 	}
-	let client = reqwest::Client::new();
+	let client = reqwest::Client::builder()
+		.timeout(REQUEST_TIMEOUT)
+		.build()
+		.expect("build reqwest client");
+	let heartbeat = Arc::new(AtomicI64::new(now_ms()));
+	spawn_watchdog(heartbeat.clone());
 	task::spawn(async move {
 		loop {
 			sleep(TICK).await;
+			heartbeat.store(now_ms(), Ordering::Relaxed);
 			let Ok(mut db) = pool.get().await else {
 				error!("Failed to get database connection");
 				continue;
@@ -97,20 +152,63 @@ fn spawn(cfg: Config) -> JoinHandle<()> {
 				.transaction::<_, commons_errors::AppError, _>(async |conn| {
 					let claimed = SlackOutbox::claim_pending(conn, BATCH).await?;
 					for row in claimed {
-						if row.attempts >= MAX_ATTEMPTS {
-							warn!(
-								id = %row.id,
-								attempts = row.attempts,
-								"giving up on slack outbox row"
-							);
-							SlackOutbox::mark_failed(conn, row.id, "max attempts exceeded").await?;
-							continue;
-						}
 						match deliver(&client, &cfg, &row).await {
-							Ok(()) => SlackOutbox::mark_delivered(conn, row.id).await?,
+							Ok(body) => {
+								info!(
+									id = %row.id,
+									kind = %row.kind,
+									incident_id = %row.incident_id,
+									response = %body,
+									"slack delivered"
+								);
+								SlackOutbox::mark_delivered(conn, row.id, &body).await?;
+							}
 							Err(err) => {
-								warn!(id = %row.id, %err, "slack delivery failed");
-								SlackOutbox::mark_failed(conn, row.id, &err.to_string()).await?;
+								let next_attempts = row.attempts + 1;
+								if next_attempts >= MAX_ATTEMPTS {
+									error!(
+										id = %row.id,
+										kind = %row.kind,
+										incident_id = %row.incident_id,
+										attempts = next_attempts,
+										err = %err.msg,
+										response = ?err.body,
+										"slack delivery permanently failed; giving up"
+									);
+									SlackOutbox::mark_given_up(
+										conn,
+										row.id,
+										&format!(
+											"giving up after {next_attempts} attempts: {}",
+											err.msg
+										),
+									)
+									.await?;
+									// Surface the failure as a canopy-self
+									// issue (nil-server) so it shows up in
+									// the UI alongside everything else.
+									// `enqueue_slack_*` skips nil-server
+									// incidents to avoid feeding back into
+									// the very loop that's failing.
+									file_self_event(conn, &row, next_attempts, &err).await?;
+								} else {
+									warn!(
+										id = %row.id,
+										kind = %row.kind,
+										incident_id = %row.incident_id,
+										attempts = next_attempts,
+										err = %err.msg,
+										response = ?err.body,
+										"slack delivery failed; will retry"
+									);
+									SlackOutbox::mark_failed(
+										conn,
+										row.id,
+										&err.msg,
+										err.body.as_deref(),
+									)
+									.await?;
+								}
 							}
 						}
 					}
@@ -124,25 +222,115 @@ fn spawn(cfg: Config) -> JoinHandle<()> {
 	})
 }
 
+/// File a `canopy/slack-delivery-failure` event against the nil/meta
+/// server when the drainer abandons a row. All such events coalesce into
+/// one issue (same source + ref), so a flapping drainer becomes a single
+/// long-lived issue with rising event counts rather than many small ones.
+async fn file_self_event(
+	conn: &mut diesel_async::AsyncPgConnection,
+	row: &SlackOutbox,
+	attempts: i32,
+	err: &DeliveryError,
+) -> Result<(), commons_errors::AppError> {
+	let evt = NewEvent {
+		source: "canopy".to_string(),
+		r#ref: "slack-delivery-failure".to_string(),
+		severity: Some(Severity::Error),
+		description: Some(format!(
+			"outbox row {} (kind={}, incident={}): gave up after {attempts} attempts. Last error: {}. Last response: {}",
+			row.id,
+			row.kind,
+			row.incident_id,
+			err.msg,
+			err.body.as_deref().unwrap_or("<none>"),
+		)),
+		message: format!("Slack delivery permanently failed ({})", row.kind),
+		active: Some(true),
+		occurred_at: None,
+	};
+	evt.save(conn, uuid::Uuid::nil(), None).await?;
+	Ok(())
+}
+
+fn now_ms() -> i64 {
+	std::time::SystemTime::now()
+		.duration_since(std::time::UNIX_EPOCH)
+		.map(|d| d.as_millis() as i64)
+		.unwrap_or(0)
+}
+
+/// Watchdog: every [`WATCHDOG_CHECK_EVERY`] verify that the main loop has
+/// ticked at least once within [`WATCHDOG_STALE_AFTER`]. If not, it's
+/// almost certainly wedged (deadlocked DB pool, hung reqwest connection
+/// past its timeout, runtime stuck). Log and exit so Kubernetes restarts
+/// us — visible to operators via the pod restart count.
+fn spawn_watchdog(heartbeat: Arc<AtomicI64>) -> JoinHandle<()> {
+	task::spawn(async move {
+		loop {
+			sleep(WATCHDOG_CHECK_EVERY).await;
+			let last = heartbeat.load(Ordering::Relaxed);
+			let age = now_ms().saturating_sub(last);
+			if age > WATCHDOG_STALE_AFTER.as_millis() as i64 {
+				error!(
+					stale_ms = age,
+					threshold_ms = WATCHDOG_STALE_AFTER.as_millis() as i64,
+					"slack outbox drainer heartbeat is stale; assuming deadlock and exiting"
+				);
+				std::process::exit(1);
+			}
+		}
+	})
+}
+
+/// Returned by [`deliver`] on failure. Carries both the human-readable
+/// error and (when there was one) the raw HTTP body Slack sent, so the
+/// row can record both for postmortem use.
+#[derive(Debug)]
+struct DeliveryError {
+	msg: String,
+	body: Option<String>,
+}
+
+impl std::fmt::Display for DeliveryError {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.write_str(&self.msg)
+	}
+}
+
+impl std::error::Error for DeliveryError {}
+
+impl From<reqwest::Error> for DeliveryError {
+	fn from(e: reqwest::Error) -> Self {
+		Self {
+			msg: e.to_string(),
+			body: None,
+		}
+	}
+}
+
 /// Post the row's payload — augmented with a `link` derived from the row's
 /// `incident_id` plus the configured `PRIVATE_URL` — to the workflow
-/// webhook for this row's kind. Returns `Ok(())` for both real deliveries
-/// and silent no-ops (no webhook configured for this kind, or unknown
-/// kind logged as warn); the row gets marked delivered so the table
-/// doesn't grow unbounded in non-Slack envs.
+/// webhook for this row's kind. Returns the raw HTTP response body so the
+/// caller can stamp it on the row.
+///
+/// In no-op mode (no webhook URLs configured at all — dev) returns an
+/// empty body without posting so the table doesn't grow unbounded. With
+/// any hooks configured, an unknown / unconfigured kind is a hard error
+/// instead of a silent drop — that silence is what made resolve-hook
+/// misconfigurations invisible in production.
 async fn deliver(
 	client: &reqwest::Client,
 	cfg: &Config,
 	row: &SlackOutbox,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-	let Some(url) = cfg.url_for(&row.kind) else {
-		if !is_known_kind(&row.kind) {
-			warn!(id = %row.id, kind = %row.kind, "unknown slack outbox kind; dropping");
-		} else {
-			debug!(id = %row.id, kind = %row.kind, "no webhook url configured for kind; dropping");
-		}
-		return Ok(());
-	};
+) -> Result<String, DeliveryError> {
+	if !cfg.any_hook() {
+		debug!(id = %row.id, kind = %row.kind, "no-op mode; row marked delivered without posting");
+		return Ok(String::new());
+	}
+	let url = cfg.url_for(&row.kind).ok_or_else(|| DeliveryError {
+		msg: format!("no webhook url configured for kind {:?}", row.kind),
+		body: None,
+	})?;
 	let mut payload = row.payload.clone();
 	if let Some(obj) = payload.as_object_mut()
 		&& let Some(link) = cfg.incident_link(row.incident_id)
@@ -151,16 +339,15 @@ async fn deliver(
 	}
 	let resp = client.post(url).json(&payload).send().await?;
 	let status = resp.status();
+	let body = resp.text().await.unwrap_or_default();
 	if status.is_success() {
-		Ok(())
+		Ok(body)
 	} else {
-		let body = resp.text().await.unwrap_or_default();
-		Err(format!("slack returned {status}: {body}").into())
+		Err(DeliveryError {
+			msg: format!("slack returned {status}"),
+			body: Some(body),
+		})
 	}
-}
-
-fn is_known_kind(kind: &str) -> bool {
-	matches!(kind, KIND_INCIDENT_OPEN | KIND_INCIDENT_RESOLVE)
 }
 
 #[derive(Debug, Parser)]
@@ -188,6 +375,8 @@ mod tests {
 			delivered_at: None,
 			attempts: 0,
 			last_error: None,
+			last_response: None,
+			gave_up_at: None,
 		}
 	}
 
@@ -243,31 +432,50 @@ mod tests {
 	}
 
 	#[test]
+	fn config_rejects_partial_webhook_set() {
+		let err = Config::build(
+			Some("http://example/open".into()),
+			None,
+			Some("https://canopy.test".into()),
+		)
+		.expect_err("must require every SLACK_WEBHOOK_*_URL when any is set");
+		assert!(
+			err.to_string().contains("SLACK_WEBHOOK_RESOLVE_URL"),
+			"error names the missing var; got: {err}"
+		);
+	}
+
+	#[test]
 	fn config_rejects_missing_private_url_when_any_hook_set() {
-		// SAFETY: this test mutates global env, but cargo-test isolates
-		// processes per binary so we won't collide with other tests in
-		// this file (none of which read these vars).
-		unsafe {
-			std::env::set_var("SLACK_WEBHOOK_OPEN_URL", "http://example/");
-			std::env::remove_var("SLACK_WEBHOOK_RESOLVE_URL");
-			std::env::remove_var("PRIVATE_URL");
-		}
-		let err = Config::from_env().expect_err("must require PRIVATE_URL");
+		let err = Config::build(
+			Some("http://example/open".into()),
+			Some("http://example/resolve".into()),
+			None,
+		)
+		.expect_err("must require PRIVATE_URL");
 		assert!(err.to_string().contains("PRIVATE_URL"));
-		unsafe {
-			std::env::remove_var("SLACK_WEBHOOK_OPEN_URL");
-		}
 	}
 
 	#[test]
 	fn config_ok_when_no_hooks_set_even_without_private_url() {
-		unsafe {
-			std::env::remove_var("SLACK_WEBHOOK_OPEN_URL");
-			std::env::remove_var("SLACK_WEBHOOK_RESOLVE_URL");
-			std::env::remove_var("PRIVATE_URL");
-		}
-		let cfg = Config::from_env().expect("no-op mode is fine");
+		let cfg = Config::build(None, None, None).expect("no-op mode is fine");
 		assert!(!cfg.any_hook());
+	}
+
+	#[test]
+	fn config_ok_when_all_set() {
+		let cfg = Config::build(
+			Some("http://example/open".into()),
+			Some("http://example/resolve".into()),
+			Some("https://canopy.test".into()),
+		)
+		.expect("complete config is fine");
+		assert!(cfg.any_hook());
+		assert_eq!(cfg.url_for(KIND_INCIDENT_OPEN), Some("http://example/open"));
+		assert_eq!(
+			cfg.url_for(KIND_INCIDENT_RESOLVE),
+			Some("http://example/resolve")
+		);
 	}
 
 	#[tokio::test(flavor = "multi_thread")]
@@ -297,11 +505,15 @@ mod tests {
 			}),
 		);
 		r.incident_id = incident_id;
-		deliver(&reqwest::Client::new(), &cfg, &r)
+		let body = deliver(&reqwest::Client::new(), &cfg, &r)
 			.await
 			.expect("deliver ok");
 		server.join().unwrap();
 
+		assert_eq!(
+			body, "ok",
+			"deliver returns Slack's response body so the row can stamp it",
+		);
 		let got = recorded.lock().unwrap().clone().expect("got a request");
 		assert_eq!(got["server"], "Prod");
 		assert_eq!(got["severity"], "Error");
@@ -367,7 +579,10 @@ mod tests {
 			resolve: Some(resolve_url),
 			private_url: Some("https://canopy.test".into()),
 		};
-		let r = row(KIND_INCIDENT_RESOLVE, serde_json::json!({"server": "x", "by": "me"}));
+		let r = row(
+			KIND_INCIDENT_RESOLVE,
+			serde_json::json!({"server": "x", "by": "me"}),
+		);
 		deliver(&reqwest::Client::new(), &cfg, &r)
 			.await
 			.expect("deliver ok");
@@ -399,17 +614,39 @@ mod tests {
 			.expect_err("should error");
 		server.join().unwrap();
 		assert!(err.to_string().contains("500"), "error mentions status");
+		assert_eq!(
+			err.body.as_deref(),
+			Some("nope!"),
+			"failure body is captured for the row's last_response column",
+		);
 	}
 
 	#[tokio::test(flavor = "multi_thread")]
-	async fn deliver_drops_unknown_kind_as_noop() {
+	async fn deliver_errors_on_unknown_kind_when_hooks_configured() {
+		// In configured (non-noop) mode, an unknown kind is a loud failure
+		// rather than a silent drop — the silent path is what previously
+		// hid missing resolve-hook configuration in production.
 		let cfg = Config {
 			open: Some("http://127.0.0.1:1/should-not-be-hit".into()),
-			resolve: None,
+			resolve: Some("http://127.0.0.1:1/should-not-be-hit".into()),
 			private_url: Some("https://canopy.test".into()),
 		};
 		let r = row("bogus_kind", serde_json::json!({}));
-		deliver(&reqwest::Client::new(), &cfg, &r)
+		let err = deliver(&reqwest::Client::new(), &cfg, &r)
+			.await
+			.expect_err("unknown kind must error in configured mode");
+		assert!(
+			err.to_string().contains("no webhook url configured"),
+			"error explains why; got: {err}"
+		);
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn deliver_noop_swallows_unknown_kind() {
+		// In dev / no-op mode (no hooks configured) any kind is a no-op —
+		// drainer-less environments shouldn't accumulate undelivered rows.
+		let r = row("bogus_kind", serde_json::json!({}));
+		deliver(&reqwest::Client::new(), &Config::default(), &r)
 			.await
 			.expect("noop ok");
 	}

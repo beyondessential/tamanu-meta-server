@@ -134,14 +134,7 @@ where
 #[allow(dead_code)]
 pub async fn run_with_tailnet_device_auth<F, T, Fut>(role: &'static str, test: F) -> T
 where
-	F: FnOnce(
-		AsyncPgConnection,
-		std::net::IpAddr,
-		String,
-		Uuid,
-		TestServer,
-		TestServer,
-	) -> Fut,
+	F: FnOnce(AsyncPgConnection, std::net::IpAddr, String, Uuid, TestServer, TestServer) -> Fut,
 	Fut: Future<Output = T>,
 {
 	use commons_servers::tailnet_directory::{DirectoryEntry, TailnetDirectory};

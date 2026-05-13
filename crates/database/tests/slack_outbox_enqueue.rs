@@ -7,7 +7,7 @@
 
 use commons_types::issue::{ResolvedReason, Severity};
 use database::{
-	issues::{Incident, NewEvent},
+	issues::{Incident, Issue, NewEvent},
 	slack_outbox::{KIND_INCIDENT_OPEN, KIND_INCIDENT_RESOLVE, SlackOutbox},
 };
 use diesel::{QueryableByName, sql_query, sql_types};
@@ -40,8 +40,8 @@ async fn pending_for_incident(
 	incident_id: Uuid,
 ) -> Vec<SlackOutbox> {
 	use database::diesel_async::RunQueryDsl;
-	use diesel::prelude::*;
 	use database::schema::slack_outbox::dsl;
+	use diesel::prelude::*;
 	dsl::slack_outbox
 		.select(SlackOutbox::as_select())
 		.filter(dsl::incident_id.eq(incident_id))
@@ -144,6 +144,128 @@ async fn resolving_incident_enqueues_resolve_row() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn cascade_close_via_issue_resolve_attributes_to_operator() {
+	// When the operator resolves the last live issue and the cascade
+	// closes the incident, the resulting Slack resolve row must credit
+	// the operator — not say "automation". Earlier behavior threaded
+	// `None` through the cascade path and lost the attribution.
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server_id = insert_server(&mut conn, "http://attribute.invalid/").await;
+		let event = NewEvent {
+			source: "test".into(),
+			r#ref: "ref-only".into(),
+			severity: Some(Severity::Error),
+			description: None,
+			message: "boom".into(),
+			active: Some(true),
+			occurred_at: None,
+		};
+		let issue = event.save(&mut conn, server_id, None).await.expect("save");
+		let incident = Incident::list_for_server(&mut conn, server_id, false, 10)
+			.await
+			.expect("list incidents")
+			.into_iter()
+			.next()
+			.expect("incident opened");
+
+		Issue::resolve(
+			&mut conn,
+			issue.id,
+			"operator@example.test",
+			ResolvedReason::Fixed,
+		)
+		.await
+		.expect("resolve issue");
+
+		let rows = pending_for_incident(&mut conn, incident.id).await;
+		let resolve = rows
+			.iter()
+			.find(|r| r.kind == KIND_INCIDENT_RESOLVE)
+			.expect("resolve row enqueued");
+		assert_eq!(
+			resolve.payload["by"].as_str(),
+			Some("operator@example.test"),
+			"cascade close must credit the operator, not automation"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn nil_server_incidents_do_not_enqueue_slack() {
+	// The meta/nil server hosts canopy's own self-monitoring events
+	// (e.g. "Slack delivery failure"). Slacking those would loop the
+	// drainer back into itself. Verify the guard skips the enqueue
+	// even though the incident is created.
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let event = NewEvent {
+			source: "canopy".into(),
+			r#ref: "slack-delivery-failure".into(),
+			severity: Some(Severity::Error),
+			description: None,
+			message: "boom".into(),
+			active: Some(true),
+			occurred_at: None,
+		};
+		event
+			.save(&mut conn, Uuid::nil(), None)
+			.await
+			.expect("save");
+
+		let incident = Incident::list_for_server(&mut conn, Uuid::nil(), false, 10)
+			.await
+			.expect("list incidents")
+			.into_iter()
+			.next()
+			.expect("incident opened on nil server");
+
+		let rows = pending_for_incident(&mut conn, incident.id).await;
+		assert!(
+			rows.is_empty(),
+			"nil-server incidents must not enqueue slack rows; got {}",
+			rows.len()
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mark_given_up_removes_row_from_claim_pending() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server_id = insert_server(&mut conn, "http://giveup.invalid/").await;
+		let event = NewEvent {
+			source: "test".into(),
+			r#ref: "ref-g".into(),
+			severity: Some(Severity::Error),
+			description: None,
+			message: "boom".into(),
+			active: Some(true),
+			occurred_at: None,
+		};
+		event.save(&mut conn, server_id, None).await.expect("save");
+		let row = SlackOutbox::claim_pending(&mut conn, 10)
+			.await
+			.expect("claim")
+			.into_iter()
+			.next()
+			.expect("one pending row");
+
+		SlackOutbox::mark_given_up(&mut conn, row.id, "deliberately abandoned")
+			.await
+			.expect("mark_given_up");
+
+		let still_pending = SlackOutbox::claim_pending(&mut conn, 10)
+			.await
+			.expect("claim again");
+		assert!(
+			still_pending.iter().all(|r| r.id != row.id),
+			"gave-up row must not be reclaimed"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn rejoining_open_incident_does_not_re_enqueue_open() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let server_id = insert_server(&mut conn, "http://rejoin.invalid/").await;
@@ -184,7 +306,10 @@ async fn rejoining_open_incident_does_not_re_enqueue_open() {
 
 		let rows = pending_for_incident(&mut conn, incident.id).await;
 		let opens = rows.iter().filter(|r| r.kind == KIND_INCIDENT_OPEN).count();
-		assert_eq!(opens, 1, "only the first issue opens; the second just joins");
+		assert_eq!(
+			opens, 1,
+			"only the first issue opens; the second just joins"
+		);
 	})
 	.await
 }

@@ -321,7 +321,15 @@ impl NewEvent {
 			}
 
 			// 3. (re-)evaluate incident contribution against the new issue state.
-			re_evaluate_incident_membership(conn, &issue, root_server_id, effective_time).await?;
+			// `by = None`: this came from a device push, not an operator action.
+			re_evaluate_incident_membership(
+				conn,
+				&issue,
+				root_server_id,
+				effective_time,
+				None,
+			)
+			.await?;
 
 			Ok(issue)
 		})
@@ -342,11 +350,18 @@ impl NewEvent {
 ///     even low-severity ones, joins it. The threshold only governs
 ///     incident *creation*; once an incident is in progress everything else
 ///     piles in for context.
+/// `by` is the operator login when this re-evaluation was triggered by a
+/// human action (e.g. resolving an issue or incident). It's threaded
+/// through so a cascade close caused by that action can attribute the
+/// resulting Slack `incident_resolve` row to the operator rather than
+/// "automation". `None` for device-driven flows (event push with
+/// `active:false`).
 async fn re_evaluate_incident_membership(
 	conn: &mut AsyncPgConnection,
 	issue: &Issue,
 	root_server_id: Uuid,
 	transition_time: Timestamp,
+	by: Option<&str>,
 ) -> Result<()> {
 	use crate::schema::{incident_issues, incidents};
 
@@ -387,6 +402,21 @@ async fn re_evaluate_incident_membership(
 				.for_update()
 				.first(conn)
 				.await?;
+
+			// Serialize against concurrent leaves of *other* issues on
+			// the same incident. Without this incident-row lock, two
+			// transactions each removing one of the last two live
+			// issues can each observe remaining_open >= 1 (each sees
+			// its own in-flight left_at update but not the other's)
+			// and skip the close, leaving the incident in "no live
+			// issues but closed_at IS NULL" with no Slack fired.
+			let _incident_lock: Uuid = incidents::table
+				.select(incidents::id)
+				.filter(incidents::id.eq(open_link.incident_id))
+				.for_update()
+				.first(conn)
+				.await?;
+
 			diesel::update(
 				incident_issues::table.filter(
 					incident_issues::incident_id
@@ -412,13 +442,14 @@ async fn re_evaluate_incident_membership(
 				.get_result(conn)
 				.await?;
 			if remaining_open == 0 {
-				let closed: Incident =
-					diesel::update(incidents::table.filter(incidents::id.eq(open_link.incident_id)))
-						.set(incidents::closed_at.eq(jiff_diesel::Timestamp::from(transition_time)))
-						.returning(Incident::as_select())
-						.get_result(conn)
-						.await?;
-				enqueue_slack_cascade_close(conn, &closed).await?;
+				let closed: Incident = diesel::update(
+					incidents::table.filter(incidents::id.eq(open_link.incident_id)),
+				)
+				.set(incidents::closed_at.eq(jiff_diesel::Timestamp::from(transition_time)))
+				.returning(Incident::as_select())
+				.get_result(conn)
+				.await?;
+				enqueue_slack_resolve_inner(conn, &closed, by).await?;
 			}
 		}
 		_ => {}
@@ -496,6 +527,12 @@ async fn enqueue_slack_open(
 	root_server_id: Uuid,
 	issue: &Issue,
 ) -> Result<()> {
+	// Incidents on the nil/meta server (canopy itself) never round-trip
+	// to Slack: those are the canopy-self events the drainer files for
+	// its own failures, and Slacking them would loop indefinitely.
+	if root_server_id == Uuid::nil() {
+		return Ok(());
+	}
 	let server = Server::get_by_id(conn, root_server_id).await?;
 	let payload = crate::slack_outbox::vars::incident_open(
 		&server,
@@ -524,21 +561,17 @@ async fn enqueue_slack_resolve(
 	enqueue_slack_resolve_inner(conn, incident, Some(by)).await
 }
 
-/// Cascade close: every issue left the incident, so we close it without an
-/// operator. Posts a "resolved by automation" Slack notification so the
-/// channel doesn't lose the close event.
-async fn enqueue_slack_cascade_close(
-	conn: &mut AsyncPgConnection,
-	incident: &Incident,
-) -> Result<()> {
-	enqueue_slack_resolve_inner(conn, incident, None).await
-}
-
 async fn enqueue_slack_resolve_inner(
 	conn: &mut AsyncPgConnection,
 	incident: &Incident,
 	by: Option<&str>,
 ) -> Result<()> {
+	// Mirror of `enqueue_slack_open`: nil-server incidents are
+	// canopy-internal and must not Slack, to avoid a feedback loop
+	// when the failure being filed is "Slack delivery itself failed".
+	if incident.server_id == Uuid::nil() {
+		return Ok(());
+	}
 	let server = Server::get_by_id(conn, incident.server_id).await?;
 	let payload = crate::slack_outbox::vars::incident_resolve(&server, by);
 	crate::slack_outbox::SlackOutbox::enqueue(
@@ -744,7 +777,7 @@ impl Issue {
 				.get_result(conn)
 				.await?;
 			let root = Server::root_id(conn, issue.server_id).await?;
-			re_evaluate_incident_membership(conn, &issue, root, now).await?;
+			re_evaluate_incident_membership(conn, &issue, root, now, Some(by)).await?;
 			Ok(issue)
 		})
 		.await
@@ -765,7 +798,8 @@ impl Issue {
 				.get_result(conn)
 				.await?;
 			let root = Server::root_id(conn, issue.server_id).await?;
-			re_evaluate_incident_membership(conn, &issue, root, now).await?;
+			// Unresolve rejoins; cascade close path doesn't fire here.
+			re_evaluate_incident_membership(conn, &issue, root, now, None).await?;
 			Ok(issue)
 		})
 		.await
@@ -773,6 +807,11 @@ impl Issue {
 
 	/// Snooze an issue until the given timestamp. While snoozed, the issue
 	/// can't open or join incidents. Triggers re-evaluation.
+	///
+	/// Snooze doesn't carry an operator login today, so a cascade close
+	/// triggered by snoozing the last live issue still attributes to
+	/// "automation" in Slack. Worth revisiting if/when snooze records its
+	/// `by`.
 	pub async fn snooze(
 		db: &mut AsyncPgConnection,
 		issue_id: Uuid,
@@ -788,7 +827,7 @@ impl Issue {
 				.get_result(conn)
 				.await?;
 			let root = Server::root_id(conn, issue.server_id).await?;
-			re_evaluate_incident_membership(conn, &issue, root, now).await?;
+			re_evaluate_incident_membership(conn, &issue, root, now, None).await?;
 			Ok(issue)
 		})
 		.await
@@ -805,7 +844,7 @@ impl Issue {
 				.get_result(conn)
 				.await?;
 			let root = Server::root_id(conn, issue.server_id).await?;
-			re_evaluate_incident_membership(conn, &issue, root, now).await?;
+			re_evaluate_incident_membership(conn, &issue, root, now, None).await?;
 			Ok(issue)
 		})
 		.await
@@ -1002,20 +1041,24 @@ impl Incident {
 			return Ok(out);
 		}
 
-		let rows: Vec<(Uuid, Uuid, jiff_diesel::Timestamp, jiff_diesel::NullableTimestamp)> =
-			incident_issues::table
-				.inner_join(incidents::table.on(incidents::id.eq(incident_issues::incident_id)))
-				.filter(incident_issues::issue_id.eq_any(issue_ids))
-				.select((
-					incident_issues::issue_id,
-					incidents::id,
-					incidents::opened_at,
-					incidents::closed_at,
-				))
-				.distinct()
-				.order(incidents::opened_at.desc())
-				.load(db)
-				.await?;
+		let rows: Vec<(
+			Uuid,
+			Uuid,
+			jiff_diesel::Timestamp,
+			jiff_diesel::NullableTimestamp,
+		)> = incident_issues::table
+			.inner_join(incidents::table.on(incidents::id.eq(incident_issues::incident_id)))
+			.filter(incident_issues::issue_id.eq_any(issue_ids))
+			.select((
+				incident_issues::issue_id,
+				incidents::id,
+				incidents::opened_at,
+				incidents::closed_at,
+			))
+			.distinct()
+			.order(incidents::opened_at.desc())
+			.load(db)
+			.await?;
 
 		for (issue_id, incident_id, opened_at, closed_at) in rows {
 			out.entry(issue_id).or_default().push(IssueIncidentRef {
@@ -1128,7 +1171,7 @@ impl Incident {
 					.get_result(conn)
 					.await?;
 				let root = Server::root_id(conn, issue.server_id).await?;
-				re_evaluate_incident_membership(conn, &issue, root, now).await?;
+				re_evaluate_incident_membership(conn, &issue, root, now, Some(by)).await?;
 			}
 
 			let incident: Incident =

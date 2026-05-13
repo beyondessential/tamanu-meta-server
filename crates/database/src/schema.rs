@@ -204,6 +204,8 @@ diesel::table! {
 		delivered_at -> Nullable<Timestamptz>,
 		attempts -> Int4,
 		last_error -> Nullable<Text>,
+		last_response -> Nullable<Text>,
+		gave_up_at -> Nullable<Timestamptz>,
 	}
 }
 

@@ -246,129 +246,130 @@ impl Device {
 		};
 
 		if source_id == target_id {
-			return Err(AppError::custom("merge_into: source and target are the same"));
+			return Err(AppError::custom(
+				"merge_into: source and target are the same",
+			));
 		}
 
 		db.transaction::<_, AppError, _>(async |conn| {
 			let source: Self = devices::table
-					.select(Self::as_select())
-					.filter(devices::id.eq(source_id))
-					.first(conn)
-					.await
-					.map_err(AppError::from)?;
-				let target: Self = devices::table
-					.select(Self::as_select())
-					.filter(devices::id.eq(target_id))
-					.first(conn)
-					.await
-					.map_err(AppError::from)?;
+				.select(Self::as_select())
+				.filter(devices::id.eq(source_id))
+				.first(conn)
+				.await
+				.map_err(AppError::from)?;
+			let target: Self = devices::table
+				.select(Self::as_select())
+				.filter(devices::id.eq(target_id))
+				.first(conn)
+				.await
+				.map_err(AppError::from)?;
 
-				// Conflict: both have tailscale identity.
-				if source.tailscale_node_id.is_some() && target.tailscale_node_id.is_some() {
-					return Err(AppError::DeviceMergeConflict);
-				}
+			// Conflict: both have tailscale identity.
+			if source.tailscale_node_id.is_some() && target.tailscale_node_id.is_some() {
+				return Err(AppError::DeviceMergeConflict);
+			}
 
-				// Conflict: both attached to a (possibly different) server.
-				let source_server_count: i64 = servers::table
-					.filter(servers::device_id.eq(source_id))
-					.count()
-					.get_result(conn)
-					.await
-					.map_err(AppError::from)?;
-				let target_server_count: i64 = servers::table
-					.filter(servers::device_id.eq(target_id))
-					.count()
-					.get_result(conn)
-					.await
-					.map_err(AppError::from)?;
-				if source_server_count > 0 && target_server_count > 0 {
-					return Err(AppError::DeviceMergeConflict);
-				}
+			// Conflict: both attached to a (possibly different) server.
+			let source_server_count: i64 = servers::table
+				.filter(servers::device_id.eq(source_id))
+				.count()
+				.get_result(conn)
+				.await
+				.map_err(AppError::from)?;
+			let target_server_count: i64 = servers::table
+				.filter(servers::device_id.eq(target_id))
+				.count()
+				.get_result(conn)
+				.await
+				.map_err(AppError::from)?;
+			if source_server_count > 0 && target_server_count > 0 {
+				return Err(AppError::DeviceMergeConflict);
+			}
 
-				// Adopt source's tailscale identity onto target if target
-				// has none. (We don't need to clear source first; deleting
-				// source at the end is sufficient. But the partial unique
-				// index on tailscale_node_id would fire if both rows held
-				// the same value briefly — we already ruled that out via
-				// the conflict check above.)
-				if target.tailscale_node_id.is_none() && source.tailscale_node_id.is_some() {
-					// Clear source's identity *first* so we don't transiently
-					// hold the same `tailscale_node_id` on two rows (the
-					// `devices_tailscale_node_id_key` unique constraint would
-					// fire on the target update otherwise).
-					diesel::update(devices::table.filter(devices::id.eq(source_id)))
-						.set((
-							devices::tailscale_node_id.eq(None::<String>),
-							devices::tailscale_node_name.eq(None::<String>),
-							devices::tailscale_tailnet.eq(None::<String>),
-						))
-						.execute(conn)
-						.await
-						.map_err(AppError::from)?;
-					diesel::update(devices::table.filter(devices::id.eq(target_id)))
-						.set((
-							devices::tailscale_node_id.eq(source.tailscale_node_id.as_deref()),
-							devices::tailscale_node_name
-								.eq(source.tailscale_node_name.as_deref()),
-							devices::tailscale_tailnet.eq(source.tailscale_tailnet.as_deref()),
-						))
-						.execute(conn)
-						.await
-						.map_err(AppError::from)?;
-				}
-
-				// Re-parent simple foreign keys.
-				diesel::update(device_keys::table.filter(device_keys::device_id.eq(source_id)))
-					.set(device_keys::device_id.eq(target_id))
+			// Adopt source's tailscale identity onto target if target
+			// has none. (We don't need to clear source first; deleting
+			// source at the end is sufficient. But the partial unique
+			// index on tailscale_node_id would fire if both rows held
+			// the same value briefly — we already ruled that out via
+			// the conflict check above.)
+			if target.tailscale_node_id.is_none() && source.tailscale_node_id.is_some() {
+				// Clear source's identity *first* so we don't transiently
+				// hold the same `tailscale_node_id` on two rows (the
+				// `devices_tailscale_node_id_key` unique constraint would
+				// fire on the target update otherwise).
+				diesel::update(devices::table.filter(devices::id.eq(source_id)))
+					.set((
+						devices::tailscale_node_id.eq(None::<String>),
+						devices::tailscale_node_name.eq(None::<String>),
+						devices::tailscale_tailnet.eq(None::<String>),
+					))
 					.execute(conn)
 					.await
 					.map_err(AppError::from)?;
-				diesel::update(
-					device_connections::table.filter(device_connections::device_id.eq(source_id)),
-				)
-				.set(device_connections::device_id.eq(target_id))
+				diesel::update(devices::table.filter(devices::id.eq(target_id)))
+					.set((
+						devices::tailscale_node_id.eq(source.tailscale_node_id.as_deref()),
+						devices::tailscale_node_name.eq(source.tailscale_node_name.as_deref()),
+						devices::tailscale_tailnet.eq(source.tailscale_tailnet.as_deref()),
+					))
+					.execute(conn)
+					.await
+					.map_err(AppError::from)?;
+			}
+
+			// Re-parent simple foreign keys.
+			diesel::update(device_keys::table.filter(device_keys::device_id.eq(source_id)))
+				.set(device_keys::device_id.eq(target_id))
 				.execute(conn)
 				.await
 				.map_err(AppError::from)?;
-				diesel::update(artifacts::table.filter(artifacts::device_id.eq(source_id)))
-					.set(artifacts::device_id.eq(target_id))
-					.execute(conn)
-					.await
-					.map_err(AppError::from)?;
-				diesel::update(issues::table.filter(issues::device_id.eq(source_id)))
-					.set(issues::device_id.eq(target_id))
-					.execute(conn)
-					.await
-					.map_err(AppError::from)?;
-				diesel::update(statuses::table.filter(statuses::device_id.eq(source_id)))
-					.set(statuses::device_id.eq(target_id))
-					.execute(conn)
-					.await
-					.map_err(AppError::from)?;
-				diesel::update(versions::table.filter(versions::device_id.eq(source_id)))
-					.set(versions::device_id.eq(target_id))
-					.execute(conn)
-					.await
-					.map_err(AppError::from)?;
+			diesel::update(
+				device_connections::table.filter(device_connections::device_id.eq(source_id)),
+			)
+			.set(device_connections::device_id.eq(target_id))
+			.execute(conn)
+			.await
+			.map_err(AppError::from)?;
+			diesel::update(artifacts::table.filter(artifacts::device_id.eq(source_id)))
+				.set(artifacts::device_id.eq(target_id))
+				.execute(conn)
+				.await
+				.map_err(AppError::from)?;
+			diesel::update(issues::table.filter(issues::device_id.eq(source_id)))
+				.set(issues::device_id.eq(target_id))
+				.execute(conn)
+				.await
+				.map_err(AppError::from)?;
+			diesel::update(statuses::table.filter(statuses::device_id.eq(source_id)))
+				.set(statuses::device_id.eq(target_id))
+				.execute(conn)
+				.await
+				.map_err(AppError::from)?;
+			diesel::update(versions::table.filter(versions::device_id.eq(source_id)))
+				.set(versions::device_id.eq(target_id))
+				.execute(conn)
+				.await
+				.map_err(AppError::from)?;
 
-				// servers.device_id is UNIQUE. We already ruled out the
-				// both-attached case above; here the only writers are
-				// source-attached (rewrite to target) or neither (no-op).
-				diesel::update(servers::table.filter(servers::device_id.eq(source_id)))
-					.set(servers::device_id.eq(target_id))
-					.execute(conn)
-					.await
-					.map_err(AppError::from)?;
+			// servers.device_id is UNIQUE. We already ruled out the
+			// both-attached case above; here the only writers are
+			// source-attached (rewrite to target) or neither (no-op).
+			diesel::update(servers::table.filter(servers::device_id.eq(source_id)))
+				.set(servers::device_id.eq(target_id))
+				.execute(conn)
+				.await
+				.map_err(AppError::from)?;
 
-				// device_server_associations has composite PK (device_id, server_id).
-				// Two cases:
-				// 1. source has an association for a server that target doesn't —
-				//    rewrite source's device_id to target.
-				// 2. source has an association for a server that target also has —
-				//    collapse: keep target's row, drop source's. (Operator-facing
-				//    semantics: the timeline is now under the target id.)
-				diesel::sql_query(
-					"UPDATE device_server_associations \
+			// device_server_associations has composite PK (device_id, server_id).
+			// Two cases:
+			// 1. source has an association for a server that target doesn't —
+			//    rewrite source's device_id to target.
+			// 2. source has an association for a server that target also has —
+			//    collapse: keep target's row, drop source's. (Operator-facing
+			//    semantics: the timeline is now under the target id.)
+			diesel::sql_query(
+				"UPDATE device_server_associations \
 					 SET device_id = $1 \
 					 WHERE device_id = $2 \
 					   AND NOT EXISTS ( \
@@ -376,19 +377,19 @@ impl Device {
 					     WHERE target_dsa.device_id = $1 \
 					       AND target_dsa.server_id = device_server_associations.server_id \
 					   )",
-				)
-				.bind::<diesel::sql_types::Uuid, _>(target_id)
-				.bind::<diesel::sql_types::Uuid, _>(source_id)
-				.execute(conn)
-				.await
-				.map_err(AppError::from)?;
-				diesel::delete(
-					device_server_associations::table
-						.filter(device_server_associations::device_id.eq(source_id)),
-				)
-				.execute(conn)
-				.await
-				.map_err(AppError::from)?;
+			)
+			.bind::<diesel::sql_types::Uuid, _>(target_id)
+			.bind::<diesel::sql_types::Uuid, _>(source_id)
+			.execute(conn)
+			.await
+			.map_err(AppError::from)?;
+			diesel::delete(
+				device_server_associations::table
+					.filter(device_server_associations::device_id.eq(source_id)),
+			)
+			.execute(conn)
+			.await
+			.map_err(AppError::from)?;
 
 			// Finally, delete the source device row.
 			diesel::delete(devices::table.filter(devices::id.eq(source_id)))

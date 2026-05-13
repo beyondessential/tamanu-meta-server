@@ -20,8 +20,9 @@ pub async fn resolve(parts: &Parts, db: &mut AsyncPgConnection) -> Result<Option
 
 	let (_, der) = parse_x509_pem(pem.as_bytes())
 		.map_err(|e| AppError::AuthInvalidCertificate(format!("Invalid PEM format: {}", e)))?;
-	let (_, cert) = parse_x509_certificate(&der.contents)
-		.map_err(|e| AppError::AuthInvalidCertificate(format!("Invalid X.509 certificate: {}", e)))?;
+	let (_, cert) = parse_x509_certificate(&der.contents).map_err(|e| {
+		AppError::AuthInvalidCertificate(format!("Invalid X.509 certificate: {}", e))
+	})?;
 
 	let key = cert.tbs_certificate.subject_pki.raw.to_vec();
 

@@ -1,6 +1,4 @@
-use commons_types::{
-	server::{kind::ServerKind, rank::ServerRank, ticket::CanopyTicket},
-};
+use commons_types::server::{kind::ServerKind, rank::ServerRank, ticket::CanopyTicket};
 use database::servers::Server;
 use uuid::Uuid;
 

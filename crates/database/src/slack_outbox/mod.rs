@@ -43,6 +43,17 @@ pub struct SlackOutbox {
 	pub delivered_at: Option<Timestamp>,
 	pub attempts: i32,
 	pub last_error: Option<String>,
+	/// Last raw HTTP body Slack returned (whether 2xx or not). Slack
+	/// Workflow Builder webhooks 2xx the *trigger acceptance* even when
+	/// the workflow downstream did nothing, so a delivered row with an
+	/// unexpected body is the only DB-side evidence of that failure mode.
+	pub last_response: Option<String>,
+	/// Set when the drainer has stopped retrying this row (max attempts
+	/// hit). Distinct from `delivered_at` — gave-up rows never reached
+	/// Slack. The pending index excludes both, so `claim_pending` won't
+	/// pick them up again.
+	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
+	pub gave_up_at: Option<Timestamp>,
 }
 
 impl SlackOutbox {
@@ -76,16 +87,15 @@ impl SlackOutbox {
 	/// `FOR UPDATE SKIP LOCKED` so multiple workers (or a worker plus a
 	/// hand-run reprocess) won't fight over the same row. The caller must
 	/// hold these inside its own transaction and call
-	/// [`mark_delivered`](Self::mark_delivered) or
-	/// [`mark_failed`](Self::mark_failed) before committing.
-	pub async fn claim_pending(
-		db: &mut AsyncPgConnection,
-		limit: i64,
-	) -> Result<Vec<Self>> {
+	/// [`mark_delivered`](Self::mark_delivered),
+	/// [`mark_failed`](Self::mark_failed), or
+	/// [`mark_given_up`](Self::mark_given_up) before committing.
+	pub async fn claim_pending(db: &mut AsyncPgConnection, limit: i64) -> Result<Vec<Self>> {
 		use crate::schema::slack_outbox::dsl;
 		dsl::slack_outbox
 			.select(Self::as_select())
 			.filter(dsl::delivered_at.is_null())
+			.filter(dsl::gave_up_at.is_null())
 			.order(dsl::created_at.asc())
 			.limit(limit)
 			.for_update()
@@ -95,12 +105,20 @@ impl SlackOutbox {
 			.map_err(AppError::from)
 	}
 
-	pub async fn mark_delivered(db: &mut AsyncPgConnection, id: Uuid) -> Result<()> {
+	/// `response` is the raw HTTP body Slack returned (may be empty). It's
+	/// recorded so postmortems can tell a real delivery apart from
+	/// "Slack 2xx'd the trigger and the workflow did nothing".
+	pub async fn mark_delivered(
+		db: &mut AsyncPgConnection,
+		id: Uuid,
+		response: &str,
+	) -> Result<()> {
 		use crate::schema::slack_outbox::dsl;
 		diesel::update(dsl::slack_outbox.filter(dsl::id.eq(id)))
 			.set((
 				dsl::delivered_at.eq(jiff_diesel::Timestamp::from(Timestamp::now())),
 				dsl::last_error.eq(None::<String>),
+				dsl::last_response.eq(response),
 			))
 			.execute(db)
 			.await
@@ -108,7 +126,32 @@ impl SlackOutbox {
 		Ok(())
 	}
 
+	/// `response` is the HTTP body Slack returned for this attempt, if we
+	/// got one (network errors before any response leave this `None`).
 	pub async fn mark_failed(
+		db: &mut AsyncPgConnection,
+		id: Uuid,
+		error: &str,
+		response: Option<&str>,
+	) -> Result<()> {
+		use crate::schema::slack_outbox::dsl;
+		diesel::update(dsl::slack_outbox.filter(dsl::id.eq(id)))
+			.set((
+				dsl::attempts.eq(dsl::attempts + 1),
+				dsl::last_error.eq(error),
+				dsl::last_response.eq(response),
+			))
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(())
+	}
+
+	/// Mark the row as terminally given-up — the drainer will not retry
+	/// it. Sets `gave_up_at` so the pending index excludes it. Leaves
+	/// `last_error` / `last_response` as the operator-visible record of
+	/// why we stopped.
+	pub async fn mark_given_up(
 		db: &mut AsyncPgConnection,
 		id: Uuid,
 		error: &str,
@@ -116,7 +159,7 @@ impl SlackOutbox {
 		use crate::schema::slack_outbox::dsl;
 		diesel::update(dsl::slack_outbox.filter(dsl::id.eq(id)))
 			.set((
-				dsl::attempts.eq(dsl::attempts + 1),
+				dsl::gave_up_at.eq(jiff_diesel::Timestamp::from(Timestamp::now())),
 				dsl::last_error.eq(error),
 			))
 			.execute(db)
