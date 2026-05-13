@@ -106,9 +106,14 @@ pub struct DeviceConnectionData {
 	pub user_agent: Option<String>,
 }
 
-impl From<DeviceWithInfo> for DeviceInfo {
-	fn from(d: DeviceWithInfo) -> Self {
-		Self {
+impl DeviceInfo {
+	/// Build a wire-shape `DeviceInfo` from a `DeviceWithInfo` row plus
+	/// the live tailnet snapshot from the directory (if any). This is
+	/// the **only** way to produce a `DeviceInfo` — every handler that
+	/// returns one should go through here so `tailnet_live` is filled
+	/// consistently across views.
+	pub(super) async fn from_db(d: DeviceWithInfo, state: &AppState) -> Self {
+		let mut info = Self {
 			device: DeviceData {
 				id: d.device.id,
 				created_at: d.device.created_at,
@@ -121,21 +126,14 @@ impl From<DeviceWithInfo> for DeviceInfo {
 			keys: d.keys.into_iter().map(DeviceKeyInfo::from).collect(),
 			latest_connection: d.latest_connection.map(DeviceConnectionData::from),
 			tailnet_live: None,
-		}
-	}
-}
-
-impl DeviceInfo {
-	/// Populate `tailnet_live` from the directory if this device has a
-	/// `tailscale_node_id` and the directory has it cached.
-	async fn enrich_with_live(mut self, state: &AppState) -> Self {
-		if let Some(node_id) = self.device.tailscale_node_id.clone()
+		};
+		if let Some(node_id) = info.device.tailscale_node_id.clone()
 			&& let Some(directory) = &state.tailnet_directory
 			&& let Ok(Some(entry)) = directory.find_by_node_id(&node_id).await
 		{
-			self.tailnet_live = Some(entry.into());
+			info.tailnet_live = Some(entry.into());
 		}
-		self
+		info
 	}
 }
 
@@ -236,7 +234,7 @@ pub async fn get_device_by_id(
 ) -> Result<Json<DeviceInfo>> {
 	let mut conn = state.db.get().await?;
 	let device_with_info = Device::get_with_info(&mut conn, args.device_id).await?;
-	let info = DeviceInfo::from(device_with_info).enrich_with_live(&state).await;
+	let info = DeviceInfo::from_db(device_with_info, &state).await;
 	Ok(Json(info))
 }
 
@@ -272,10 +270,10 @@ pub async fn list_untrusted(
 		args.offset.try_into().unwrap_or(0),
 	)
 	.await?;
-	let items = devices_with_info
-		.into_iter()
-		.map(DeviceInfo::from)
-		.collect();
+	let mut items = Vec::with_capacity(devices_with_info.len());
+	for d in devices_with_info {
+		items.push(DeviceInfo::from_db(d, &state).await);
+	}
 	Ok(Json(Page { items, total }))
 }
 
@@ -444,10 +442,10 @@ pub async fn list_trusted(
 		args.offset.try_into().unwrap_or(0),
 	)
 	.await?;
-	let items = devices_with_info
-		.into_iter()
-		.map(DeviceInfo::from)
-		.collect();
+	let mut items = Vec::with_capacity(devices_with_info.len());
+	for d in devices_with_info {
+		items.push(DeviceInfo::from_db(d, &state).await);
+	}
 	Ok(Json(Page { items, total }))
 }
 
@@ -560,10 +558,9 @@ pub async fn search(
 		seen.insert(d.device.id, d);
 	}
 
-	// Enrich each result with live tailnet info.
 	let mut out = Vec::with_capacity(seen.len());
 	for d in seen.into_values() {
-		out.push(DeviceInfo::from(d).enrich_with_live(&state).await);
+		out.push(DeviceInfo::from_db(d, &state).await);
 	}
 	Ok(Json(out))
 }
@@ -646,9 +643,7 @@ pub async fn attach_tailscale(
 	.await?;
 
 	let device_with_info = Device::get_with_info(&mut conn, args.device_id).await?;
-	let info = DeviceInfo::from(device_with_info)
-		.enrich_with_live(&state)
-		.await;
+	let info = DeviceInfo::from_db(device_with_info, &state).await;
 	Ok(Json(info))
 }
 
@@ -671,9 +666,7 @@ pub async fn detach_tailscale(
 	let mut conn = state.db.get().await?;
 	Device::detach_tailscale(&mut conn, args.device_id).await?;
 	let device_with_info = Device::get_with_info(&mut conn, args.device_id).await?;
-	let info = DeviceInfo::from(device_with_info)
-		.enrich_with_live(&state)
-		.await;
+	let info = DeviceInfo::from_db(device_with_info, &state).await;
 	Ok(Json(info))
 }
 
@@ -707,9 +700,7 @@ pub async fn merge_into(
 	let mut conn = state.db.get().await?;
 	Device::merge_into(&mut conn, args.source_id, args.target_id).await?;
 	let device_with_info = Device::get_with_info(&mut conn, args.target_id).await?;
-	let info = DeviceInfo::from(device_with_info)
-		.enrich_with_live(&state)
-		.await;
+	let info = DeviceInfo::from_db(device_with_info, &state).await;
 	Ok(Json(info))
 }
 
