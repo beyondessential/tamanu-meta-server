@@ -623,28 +623,25 @@ pub async fn attach_tailscale_device(
 		.resolve_identifier(&args.identifier)
 		.await
 		.map_err(|_| AppError::AuthTailnetDirectoryUnavailable)?
-		.ok_or_else(|| {
-			AppError::BadRequest("no tailnet device matches that identifier".into())
-		})?;
+		.ok_or_else(|| AppError::BadRequest("no tailnet device matches that identifier".into()))?;
 
 	let mut conn = state.db.get().await?;
 
 	// Find existing device by node id, or create a new one.
-	let device = if let Some(existing) =
-		Device::from_tailscale_node_id(&mut conn, &entry.node_id).await?
-	{
-		existing
-	} else {
-		Device::create_with_tailscale(
-			&mut conn,
-			database::devices::TailscaleIdentity {
-				node_id: entry.node_id.clone(),
-				node_name: Some(entry.node_name.clone()),
-				tailnet: Some(entry.tailnet.clone()),
-			},
-		)
-		.await?
-	};
+	let device =
+		if let Some(existing) = Device::from_tailscale_node_id(&mut conn, &entry.node_id).await? {
+			existing
+		} else {
+			Device::create_with_tailscale(
+				&mut conn,
+				database::devices::TailscaleIdentity {
+					node_id: entry.node_id.clone(),
+					node_name: Some(entry.node_name.clone()),
+					tailnet: Some(entry.tailnet.clone()),
+				},
+			)
+			.await?
+		};
 
 	// Refuse if the device is already attached to a *different* server
 	// — the operator should clear that one first.

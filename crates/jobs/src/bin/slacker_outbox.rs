@@ -135,14 +135,39 @@ fn spawn(cfg: Config) -> JoinHandle<()> {
 								attempts = row.attempts,
 								"giving up on slack outbox row"
 							);
-							SlackOutbox::mark_failed(conn, row.id, "max attempts exceeded").await?;
+							SlackOutbox::mark_failed(
+								conn,
+								row.id,
+								"max attempts exceeded",
+								None,
+							)
+							.await?;
 							continue;
 						}
 						match deliver(&client, &cfg, &row).await {
-							Ok(()) => SlackOutbox::mark_delivered(conn, row.id).await?,
+							Ok(body) => {
+								info!(
+									id = %row.id,
+									kind = %row.kind,
+									response = %body,
+									"slack delivered"
+								);
+								SlackOutbox::mark_delivered(conn, row.id, &body).await?;
+							}
 							Err(err) => {
-								warn!(id = %row.id, %err, "slack delivery failed");
-								SlackOutbox::mark_failed(conn, row.id, &err.to_string()).await?;
+								warn!(
+									id = %row.id,
+									err = %err.msg,
+									response = ?err.body,
+									"slack delivery failed"
+								);
+								SlackOutbox::mark_failed(
+									conn,
+									row.id,
+									&err.msg,
+									err.body.as_deref(),
+								)
+								.await?;
 							}
 						}
 					}
@@ -156,26 +181,54 @@ fn spawn(cfg: Config) -> JoinHandle<()> {
 	})
 }
 
+/// Returned by [`deliver`] on failure. Carries both the human-readable
+/// error and (when there was one) the raw HTTP body Slack sent, so the
+/// row can record both for postmortem use.
+#[derive(Debug)]
+struct DeliveryError {
+	msg: String,
+	body: Option<String>,
+}
+
+impl std::fmt::Display for DeliveryError {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.write_str(&self.msg)
+	}
+}
+
+impl std::error::Error for DeliveryError {}
+
+impl From<reqwest::Error> for DeliveryError {
+	fn from(e: reqwest::Error) -> Self {
+		Self {
+			msg: e.to_string(),
+			body: None,
+		}
+	}
+}
+
 /// Post the row's payload — augmented with a `link` derived from the row's
 /// `incident_id` plus the configured `PRIVATE_URL` — to the workflow
-/// webhook for this row's kind.
+/// webhook for this row's kind. Returns the raw HTTP response body so the
+/// caller can stamp it on the row.
 ///
-/// In no-op mode (no webhook URLs configured at all — dev) returns
-/// `Ok(())` without posting so the table doesn't grow unbounded. With any
-/// hooks configured, an unknown / unconfigured kind is a hard error
+/// In no-op mode (no webhook URLs configured at all — dev) returns an
+/// empty body without posting so the table doesn't grow unbounded. With
+/// any hooks configured, an unknown / unconfigured kind is a hard error
 /// instead of a silent drop — that silence is what made resolve-hook
 /// misconfigurations invisible in production.
 async fn deliver(
 	client: &reqwest::Client,
 	cfg: &Config,
 	row: &SlackOutbox,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<String, DeliveryError> {
 	if !cfg.any_hook() {
 		debug!(id = %row.id, kind = %row.kind, "no-op mode; row marked delivered without posting");
-		return Ok(());
+		return Ok(String::new());
 	}
-	let url = cfg.url_for(&row.kind).ok_or_else(|| -> Box<dyn std::error::Error + Send + Sync> {
-		format!("no webhook url configured for kind {:?}", row.kind).into()
+	let url = cfg.url_for(&row.kind).ok_or_else(|| DeliveryError {
+		msg: format!("no webhook url configured for kind {:?}", row.kind),
+		body: None,
 	})?;
 	let mut payload = row.payload.clone();
 	if let Some(obj) = payload.as_object_mut()
@@ -185,11 +238,14 @@ async fn deliver(
 	}
 	let resp = client.post(url).json(&payload).send().await?;
 	let status = resp.status();
+	let body = resp.text().await.unwrap_or_default();
 	if status.is_success() {
-		Ok(())
+		Ok(body)
 	} else {
-		let body = resp.text().await.unwrap_or_default();
-		Err(format!("slack returned {status}: {body}").into())
+		Err(DeliveryError {
+			msg: format!("slack returned {status}"),
+			body: Some(body),
+		})
 	}
 }
 
@@ -218,6 +274,7 @@ mod tests {
 			delivered_at: None,
 			attempts: 0,
 			last_error: None,
+			last_response: None,
 		}
 	}
 
@@ -416,7 +473,10 @@ mod tests {
 			resolve: Some(resolve_url),
 			private_url: Some("https://canopy.test".into()),
 		};
-		let r = row(KIND_INCIDENT_RESOLVE, serde_json::json!({"server": "x", "by": "me"}));
+		let r = row(
+			KIND_INCIDENT_RESOLVE,
+			serde_json::json!({"server": "x", "by": "me"}),
+		);
 		deliver(&reqwest::Client::new(), &cfg, &r)
 			.await
 			.expect("deliver ok");

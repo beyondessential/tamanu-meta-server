@@ -522,8 +522,7 @@ pub async fn search(
 	let devices_by_key = Device::search_by_key(&mut conn, &args.query).await?;
 	let devices_by_key_name = Device::search_by_key_name(&mut conn, &args.query).await?;
 	let devices_by_ip = Device::search_by_connection_ip(&mut conn, &args.query).await?;
-	let devices_by_tailscale =
-		Device::search_by_tailscale_fields(&mut conn, &args.query).await?;
+	let devices_by_tailscale = Device::search_by_tailscale_fields(&mut conn, &args.query).await?;
 
 	// If the directory is configured, also resolve the query as a
 	// Tailscale IP / node id / DNS name and surface any device
@@ -532,9 +531,7 @@ pub async fn search(
 	// yet (so search_by_connection_ip would miss it).
 	let directory_match = if let Some(directory) = &state.tailnet_directory {
 		match directory.resolve_identifier(&args.query).await {
-			Ok(Some(entry)) => {
-				Device::get_with_info_by_node_id(&mut conn, &entry.node_id).await?
-			}
+			Ok(Some(entry)) => Device::get_with_info_by_node_id(&mut conn, &entry.node_id).await?,
 			_ => None,
 		}
 	} else {

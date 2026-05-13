@@ -40,8 +40,8 @@ async fn pending_for_incident(
 	incident_id: Uuid,
 ) -> Vec<SlackOutbox> {
 	use database::diesel_async::RunQueryDsl;
-	use diesel::prelude::*;
 	use database::schema::slack_outbox::dsl;
+	use diesel::prelude::*;
 	dsl::slack_outbox
 		.select(SlackOutbox::as_select())
 		.filter(dsl::incident_id.eq(incident_id))
@@ -184,7 +184,10 @@ async fn rejoining_open_incident_does_not_re_enqueue_open() {
 
 		let rows = pending_for_incident(&mut conn, incident.id).await;
 		let opens = rows.iter().filter(|r| r.kind == KIND_INCIDENT_OPEN).count();
-		assert_eq!(opens, 1, "only the first issue opens; the second just joins");
+		assert_eq!(
+			opens, 1,
+			"only the first issue opens; the second just joins"
+		);
 	})
 	.await
 }

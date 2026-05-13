@@ -412,12 +412,13 @@ async fn re_evaluate_incident_membership(
 				.get_result(conn)
 				.await?;
 			if remaining_open == 0 {
-				let closed: Incident =
-					diesel::update(incidents::table.filter(incidents::id.eq(open_link.incident_id)))
-						.set(incidents::closed_at.eq(jiff_diesel::Timestamp::from(transition_time)))
-						.returning(Incident::as_select())
-						.get_result(conn)
-						.await?;
+				let closed: Incident = diesel::update(
+					incidents::table.filter(incidents::id.eq(open_link.incident_id)),
+				)
+				.set(incidents::closed_at.eq(jiff_diesel::Timestamp::from(transition_time)))
+				.returning(Incident::as_select())
+				.get_result(conn)
+				.await?;
 				enqueue_slack_cascade_close(conn, &closed).await?;
 			}
 		}
@@ -1002,20 +1003,24 @@ impl Incident {
 			return Ok(out);
 		}
 
-		let rows: Vec<(Uuid, Uuid, jiff_diesel::Timestamp, jiff_diesel::NullableTimestamp)> =
-			incident_issues::table
-				.inner_join(incidents::table.on(incidents::id.eq(incident_issues::incident_id)))
-				.filter(incident_issues::issue_id.eq_any(issue_ids))
-				.select((
-					incident_issues::issue_id,
-					incidents::id,
-					incidents::opened_at,
-					incidents::closed_at,
-				))
-				.distinct()
-				.order(incidents::opened_at.desc())
-				.load(db)
-				.await?;
+		let rows: Vec<(
+			Uuid,
+			Uuid,
+			jiff_diesel::Timestamp,
+			jiff_diesel::NullableTimestamp,
+		)> = incident_issues::table
+			.inner_join(incidents::table.on(incidents::id.eq(incident_issues::incident_id)))
+			.filter(incident_issues::issue_id.eq_any(issue_ids))
+			.select((
+				incident_issues::issue_id,
+				incidents::id,
+				incidents::opened_at,
+				incidents::closed_at,
+			))
+			.distinct()
+			.order(incidents::opened_at.desc())
+			.load(db)
+			.await?;
 
 		for (issue_id, incident_id, opened_at, closed_at) in rows {
 			out.entry(issue_id).or_default().push(IssueIncidentRef {

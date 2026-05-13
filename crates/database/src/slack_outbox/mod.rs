@@ -43,6 +43,11 @@ pub struct SlackOutbox {
 	pub delivered_at: Option<Timestamp>,
 	pub attempts: i32,
 	pub last_error: Option<String>,
+	/// Last raw HTTP body Slack returned (whether 2xx or not). Slack
+	/// Workflow Builder webhooks 2xx the *trigger acceptance* even when
+	/// the workflow downstream did nothing, so a delivered row with an
+	/// unexpected body is the only DB-side evidence of that failure mode.
+	pub last_response: Option<String>,
 }
 
 impl SlackOutbox {
@@ -78,10 +83,7 @@ impl SlackOutbox {
 	/// hold these inside its own transaction and call
 	/// [`mark_delivered`](Self::mark_delivered) or
 	/// [`mark_failed`](Self::mark_failed) before committing.
-	pub async fn claim_pending(
-		db: &mut AsyncPgConnection,
-		limit: i64,
-	) -> Result<Vec<Self>> {
+	pub async fn claim_pending(db: &mut AsyncPgConnection, limit: i64) -> Result<Vec<Self>> {
 		use crate::schema::slack_outbox::dsl;
 		dsl::slack_outbox
 			.select(Self::as_select())
@@ -95,12 +97,20 @@ impl SlackOutbox {
 			.map_err(AppError::from)
 	}
 
-	pub async fn mark_delivered(db: &mut AsyncPgConnection, id: Uuid) -> Result<()> {
+	/// `response` is the raw HTTP body Slack returned (may be empty). It's
+	/// recorded so postmortems can tell a real delivery apart from
+	/// "Slack 2xx'd the trigger and the workflow did nothing".
+	pub async fn mark_delivered(
+		db: &mut AsyncPgConnection,
+		id: Uuid,
+		response: &str,
+	) -> Result<()> {
 		use crate::schema::slack_outbox::dsl;
 		diesel::update(dsl::slack_outbox.filter(dsl::id.eq(id)))
 			.set((
 				dsl::delivered_at.eq(jiff_diesel::Timestamp::from(Timestamp::now())),
 				dsl::last_error.eq(None::<String>),
+				dsl::last_response.eq(response),
 			))
 			.execute(db)
 			.await
@@ -108,16 +118,20 @@ impl SlackOutbox {
 		Ok(())
 	}
 
+	/// `response` is the HTTP body Slack returned for this attempt, if we
+	/// got one (network errors before any response leave this `None`).
 	pub async fn mark_failed(
 		db: &mut AsyncPgConnection,
 		id: Uuid,
 		error: &str,
+		response: Option<&str>,
 	) -> Result<()> {
 		use crate::schema::slack_outbox::dsl;
 		diesel::update(dsl::slack_outbox.filter(dsl::id.eq(id)))
 			.set((
 				dsl::attempts.eq(dsl::attempts + 1),
 				dsl::last_error.eq(error),
+				dsl::last_response.eq(response),
 			))
 			.execute(db)
 			.await
