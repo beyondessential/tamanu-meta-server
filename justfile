@@ -36,8 +36,12 @@ watch-private-build:
 
 # Run the private server's HTTP API, bound to 127.0.0.1:8081, for the private-web Vite frontend.
 # Watches the built binary so it restarts when watch-private-build produces a fresh artefact.
+# CLIENT_IP_SOURCE is overridden to ConnectInfo because the prod default
+# (RightmostXForwardedFor, for behind the Tailscale K8s Operator's ingress)
+# would have the axum-client-ip middleware reject every request — locally
+# there's no proxy in front to set X-Forwarded-For.
 watch-private-api:
-    BIND_ADDRESS=127.0.0.1:8081 watchexec -I -W target/debug -f private-server -- target/debug/private-server
+    CLIENT_IP_SOURCE=ConnectInfo BIND_ADDRESS=127.0.0.1:8081 watchexec -I -W target/debug -f private-server -- target/debug/private-server
 
 # Run the private-web React frontend dev server (Vite proxy expects watch-private-api)
 watch-private-web:

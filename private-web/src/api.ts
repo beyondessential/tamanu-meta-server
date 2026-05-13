@@ -86,7 +86,12 @@ export function useApi<
 	const run = useCallback(() => {
 		const myTick = ++tick.current;
 		const controller = new AbortController();
-		setState({ status: "loading" });
+		// Keep prior data on screen during background refetches so the UI
+		// doesn't collapse to a loading placeholder on every reload tick.
+		// Only flip to `loading` when there's no prior data to show.
+		setState((prev) =>
+			prev.status === "ok" ? prev : { status: "loading" },
+		);
 		callApi<M, F, T>(module, fn, params, controller.signal)
 			.then((data) => {
 				if (tick.current === myTick) setState({ status: "ok", data });
