@@ -144,6 +144,42 @@ async fn resolving_incident_enqueues_resolve_row() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn mark_given_up_removes_row_from_claim_pending() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server_id = insert_server(&mut conn, "http://giveup.invalid/").await;
+		let event = NewEvent {
+			source: "test".into(),
+			r#ref: "ref-g".into(),
+			severity: Some(Severity::Error),
+			description: None,
+			message: "boom".into(),
+			active: Some(true),
+			occurred_at: None,
+		};
+		event.save(&mut conn, server_id, None).await.expect("save");
+		let row = SlackOutbox::claim_pending(&mut conn, 10)
+			.await
+			.expect("claim")
+			.into_iter()
+			.next()
+			.expect("one pending row");
+
+		SlackOutbox::mark_given_up(&mut conn, row.id, "deliberately abandoned")
+			.await
+			.expect("mark_given_up");
+
+		let still_pending = SlackOutbox::claim_pending(&mut conn, 10)
+			.await
+			.expect("claim again");
+		assert!(
+			still_pending.iter().all(|r| r.id != row.id),
+			"gave-up row must not be reclaimed"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn rejoining_open_incident_does_not_re_enqueue_open() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let server_id = insert_server(&mut conn, "http://rejoin.invalid/").await;

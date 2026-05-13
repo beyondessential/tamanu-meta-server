@@ -129,45 +129,56 @@ fn spawn(cfg: Config) -> JoinHandle<()> {
 				.transaction::<_, commons_errors::AppError, _>(async |conn| {
 					let claimed = SlackOutbox::claim_pending(conn, BATCH).await?;
 					for row in claimed {
-						if row.attempts >= MAX_ATTEMPTS {
-							warn!(
-								id = %row.id,
-								attempts = row.attempts,
-								"giving up on slack outbox row"
-							);
-							SlackOutbox::mark_failed(
-								conn,
-								row.id,
-								"max attempts exceeded",
-								None,
-							)
-							.await?;
-							continue;
-						}
 						match deliver(&client, &cfg, &row).await {
 							Ok(body) => {
 								info!(
 									id = %row.id,
 									kind = %row.kind,
+									incident_id = %row.incident_id,
 									response = %body,
 									"slack delivered"
 								);
 								SlackOutbox::mark_delivered(conn, row.id, &body).await?;
 							}
 							Err(err) => {
-								warn!(
-									id = %row.id,
-									err = %err.msg,
-									response = ?err.body,
-									"slack delivery failed"
-								);
-								SlackOutbox::mark_failed(
-									conn,
-									row.id,
-									&err.msg,
-									err.body.as_deref(),
-								)
-								.await?;
+								let next_attempts = row.attempts + 1;
+								if next_attempts >= MAX_ATTEMPTS {
+									error!(
+										id = %row.id,
+										kind = %row.kind,
+										incident_id = %row.incident_id,
+										attempts = next_attempts,
+										err = %err.msg,
+										response = ?err.body,
+										"slack delivery permanently failed; giving up"
+									);
+									SlackOutbox::mark_given_up(
+										conn,
+										row.id,
+										&format!(
+											"giving up after {next_attempts} attempts: {}",
+											err.msg
+										),
+									)
+									.await?;
+								} else {
+									warn!(
+										id = %row.id,
+										kind = %row.kind,
+										incident_id = %row.incident_id,
+										attempts = next_attempts,
+										err = %err.msg,
+										response = ?err.body,
+										"slack delivery failed; will retry"
+									);
+									SlackOutbox::mark_failed(
+										conn,
+										row.id,
+										&err.msg,
+										err.body.as_deref(),
+									)
+									.await?;
+								}
 							}
 						}
 					}
@@ -275,6 +286,7 @@ mod tests {
 			attempts: 0,
 			last_error: None,
 			last_response: None,
+			gave_up_at: None,
 		}
 	}
 
