@@ -10,6 +10,8 @@
 //! `FOR UPDATE SKIP LOCKED`, posts them one at a time, and marks them
 //! delivered or failed inside the same transaction.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
 use clap::Parser;
@@ -26,6 +28,19 @@ use tracing::{debug, error, info, warn};
 const BATCH: i64 = 10;
 const TICK: Duration = Duration::from_secs(5);
 const MAX_ATTEMPTS: i32 = 10;
+/// Cap on a single HTTP POST to Slack. Slack typically responds in well
+/// under a second; anything past this is almost certainly a black-holed
+/// destination and would otherwise wedge the whole drain loop.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+/// How long the main loop is allowed to go without ticking before the
+/// watchdog declares it deadlocked and exits the process. K8s restarts us
+/// from there. Generously sized: TICK + worst-case batch (BATCH * REQUEST_TIMEOUT)
+/// + slack.
+const WATCHDOG_STALE_AFTER: Duration = Duration::from_secs(
+	TICK.as_secs() + (BATCH as u64) * REQUEST_TIMEOUT.as_secs() + 30,
+);
+/// How often the watchdog wakes to compare the heartbeat to `now`.
+const WATCHDOG_CHECK_EVERY: Duration = Duration::from_secs(30);
 
 /// Drainer configuration. One webhook URL per outbox kind (each Slack
 /// workflow binds to a single variable set declared in its trigger, so
@@ -116,10 +131,16 @@ fn spawn(cfg: Config) -> JoinHandle<()> {
 	if !cfg.any_hook() {
 		info!("no SLACK_WEBHOOK_*_URL set; slack outbox drainer running in no-op mode");
 	}
-	let client = reqwest::Client::new();
+	let client = reqwest::Client::builder()
+		.timeout(REQUEST_TIMEOUT)
+		.build()
+		.expect("build reqwest client");
+	let heartbeat = Arc::new(AtomicI64::new(now_ms()));
+	spawn_watchdog(heartbeat.clone());
 	task::spawn(async move {
 		loop {
 			sleep(TICK).await;
+			heartbeat.store(now_ms(), Ordering::Relaxed);
 			let Ok(mut db) = pool.get().await else {
 				error!("Failed to get database connection");
 				continue;
@@ -187,6 +208,36 @@ fn spawn(cfg: Config) -> JoinHandle<()> {
 				.await;
 			if let Err(err) = result {
 				error!("slack outbox tx failed: {err}");
+			}
+		}
+	})
+}
+
+fn now_ms() -> i64 {
+	std::time::SystemTime::now()
+		.duration_since(std::time::UNIX_EPOCH)
+		.map(|d| d.as_millis() as i64)
+		.unwrap_or(0)
+}
+
+/// Watchdog: every [`WATCHDOG_CHECK_EVERY`] verify that the main loop has
+/// ticked at least once within [`WATCHDOG_STALE_AFTER`]. If not, it's
+/// almost certainly wedged (deadlocked DB pool, hung reqwest connection
+/// past its timeout, runtime stuck). Log and exit so Kubernetes restarts
+/// us — visible to operators via the pod restart count.
+fn spawn_watchdog(heartbeat: Arc<AtomicI64>) -> JoinHandle<()> {
+	task::spawn(async move {
+		loop {
+			sleep(WATCHDOG_CHECK_EVERY).await;
+			let last = heartbeat.load(Ordering::Relaxed);
+			let age = now_ms().saturating_sub(last);
+			if age > WATCHDOG_STALE_AFTER.as_millis() as i64 {
+				error!(
+					stale_ms = age,
+					threshold_ms = WATCHDOG_STALE_AFTER.as_millis() as i64,
+					"slack outbox drainer heartbeat is stale; assuming deadlock and exiting"
+				);
+				std::process::exit(1);
 			}
 		}
 	})
