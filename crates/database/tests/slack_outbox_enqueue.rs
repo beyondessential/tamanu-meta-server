@@ -7,7 +7,7 @@
 
 use commons_types::issue::{ResolvedReason, Severity};
 use database::{
-	issues::{Incident, NewEvent},
+	issues::{Incident, Issue, NewEvent},
 	slack_outbox::{KIND_INCIDENT_OPEN, KIND_INCIDENT_RESOLVE, SlackOutbox},
 };
 use diesel::{QueryableByName, sql_query, sql_types};
@@ -139,6 +139,54 @@ async fn resolving_incident_enqueues_resolve_row() {
 			.collect();
 		assert_eq!(resolves.len(), 1, "exactly one resolve row");
 		assert!(resolves[0].delivered_at.is_none());
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cascade_close_via_issue_resolve_attributes_to_operator() {
+	// When the operator resolves the last live issue and the cascade
+	// closes the incident, the resulting Slack resolve row must credit
+	// the operator — not say "automation". Earlier behavior threaded
+	// `None` through the cascade path and lost the attribution.
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server_id = insert_server(&mut conn, "http://attribute.invalid/").await;
+		let event = NewEvent {
+			source: "test".into(),
+			r#ref: "ref-only".into(),
+			severity: Some(Severity::Error),
+			description: None,
+			message: "boom".into(),
+			active: Some(true),
+			occurred_at: None,
+		};
+		let issue = event.save(&mut conn, server_id, None).await.expect("save");
+		let incident = Incident::list_for_server(&mut conn, server_id, false, 10)
+			.await
+			.expect("list incidents")
+			.into_iter()
+			.next()
+			.expect("incident opened");
+
+		Issue::resolve(
+			&mut conn,
+			issue.id,
+			"operator@example.test",
+			ResolvedReason::Fixed,
+		)
+		.await
+		.expect("resolve issue");
+
+		let rows = pending_for_incident(&mut conn, incident.id).await;
+		let resolve = rows
+			.iter()
+			.find(|r| r.kind == KIND_INCIDENT_RESOLVE)
+			.expect("resolve row enqueued");
+		assert_eq!(
+			resolve.payload["by"].as_str(),
+			Some("operator@example.test"),
+			"cascade close must credit the operator, not automation"
+		);
 	})
 	.await
 }

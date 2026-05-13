@@ -321,7 +321,15 @@ impl NewEvent {
 			}
 
 			// 3. (re-)evaluate incident contribution against the new issue state.
-			re_evaluate_incident_membership(conn, &issue, root_server_id, effective_time).await?;
+			// `by = None`: this came from a device push, not an operator action.
+			re_evaluate_incident_membership(
+				conn,
+				&issue,
+				root_server_id,
+				effective_time,
+				None,
+			)
+			.await?;
 
 			Ok(issue)
 		})
@@ -342,11 +350,18 @@ impl NewEvent {
 ///     even low-severity ones, joins it. The threshold only governs
 ///     incident *creation*; once an incident is in progress everything else
 ///     piles in for context.
+/// `by` is the operator login when this re-evaluation was triggered by a
+/// human action (e.g. resolving an issue or incident). It's threaded
+/// through so a cascade close caused by that action can attribute the
+/// resulting Slack `incident_resolve` row to the operator rather than
+/// "automation". `None` for device-driven flows (event push with
+/// `active:false`).
 async fn re_evaluate_incident_membership(
 	conn: &mut AsyncPgConnection,
 	issue: &Issue,
 	root_server_id: Uuid,
 	transition_time: Timestamp,
+	by: Option<&str>,
 ) -> Result<()> {
 	use crate::schema::{incident_issues, incidents};
 
@@ -434,7 +449,7 @@ async fn re_evaluate_incident_membership(
 				.returning(Incident::as_select())
 				.get_result(conn)
 				.await?;
-				enqueue_slack_cascade_close(conn, &closed).await?;
+				enqueue_slack_resolve_inner(conn, &closed, by).await?;
 			}
 		}
 		_ => {}
@@ -544,16 +559,6 @@ async fn enqueue_slack_resolve(
 	by: &str,
 ) -> Result<()> {
 	enqueue_slack_resolve_inner(conn, incident, Some(by)).await
-}
-
-/// Cascade close: every issue left the incident, so we close it without an
-/// operator. Posts a "resolved by automation" Slack notification so the
-/// channel doesn't lose the close event.
-async fn enqueue_slack_cascade_close(
-	conn: &mut AsyncPgConnection,
-	incident: &Incident,
-) -> Result<()> {
-	enqueue_slack_resolve_inner(conn, incident, None).await
 }
 
 async fn enqueue_slack_resolve_inner(
@@ -772,7 +777,7 @@ impl Issue {
 				.get_result(conn)
 				.await?;
 			let root = Server::root_id(conn, issue.server_id).await?;
-			re_evaluate_incident_membership(conn, &issue, root, now).await?;
+			re_evaluate_incident_membership(conn, &issue, root, now, Some(by)).await?;
 			Ok(issue)
 		})
 		.await
@@ -793,7 +798,8 @@ impl Issue {
 				.get_result(conn)
 				.await?;
 			let root = Server::root_id(conn, issue.server_id).await?;
-			re_evaluate_incident_membership(conn, &issue, root, now).await?;
+			// Unresolve rejoins; cascade close path doesn't fire here.
+			re_evaluate_incident_membership(conn, &issue, root, now, None).await?;
 			Ok(issue)
 		})
 		.await
@@ -801,6 +807,11 @@ impl Issue {
 
 	/// Snooze an issue until the given timestamp. While snoozed, the issue
 	/// can't open or join incidents. Triggers re-evaluation.
+	///
+	/// Snooze doesn't carry an operator login today, so a cascade close
+	/// triggered by snoozing the last live issue still attributes to
+	/// "automation" in Slack. Worth revisiting if/when snooze records its
+	/// `by`.
 	pub async fn snooze(
 		db: &mut AsyncPgConnection,
 		issue_id: Uuid,
@@ -816,7 +827,7 @@ impl Issue {
 				.get_result(conn)
 				.await?;
 			let root = Server::root_id(conn, issue.server_id).await?;
-			re_evaluate_incident_membership(conn, &issue, root, now).await?;
+			re_evaluate_incident_membership(conn, &issue, root, now, None).await?;
 			Ok(issue)
 		})
 		.await
@@ -833,7 +844,7 @@ impl Issue {
 				.get_result(conn)
 				.await?;
 			let root = Server::root_id(conn, issue.server_id).await?;
-			re_evaluate_incident_membership(conn, &issue, root, now).await?;
+			re_evaluate_incident_membership(conn, &issue, root, now, None).await?;
 			Ok(issue)
 		})
 		.await
@@ -1160,7 +1171,7 @@ impl Incident {
 					.get_result(conn)
 					.await?;
 				let root = Server::root_id(conn, issue.server_id).await?;
-				re_evaluate_incident_membership(conn, &issue, root, now).await?;
+				re_evaluate_incident_membership(conn, &issue, root, now, Some(by)).await?;
 			}
 
 			let incident: Incident =
