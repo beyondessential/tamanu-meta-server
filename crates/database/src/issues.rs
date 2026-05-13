@@ -387,6 +387,21 @@ async fn re_evaluate_incident_membership(
 				.for_update()
 				.first(conn)
 				.await?;
+
+			// Serialize against concurrent leaves of *other* issues on
+			// the same incident. Without this incident-row lock, two
+			// transactions each removing one of the last two live
+			// issues can each observe remaining_open >= 1 (each sees
+			// its own in-flight left_at update but not the other's)
+			// and skip the close, leaving the incident in "no live
+			// issues but closed_at IS NULL" with no Slack fired.
+			let _incident_lock: Uuid = incidents::table
+				.select(incidents::id)
+				.filter(incidents::id.eq(open_link.incident_id))
+				.for_update()
+				.first(conn)
+				.await?;
+
 			diesel::update(
 				incident_issues::table.filter(
 					incident_issues::incident_id
