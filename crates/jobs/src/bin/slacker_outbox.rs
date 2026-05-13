@@ -32,11 +32,11 @@ const MAX_ATTEMPTS: i32 = 10;
 /// `incident_open` and `incident_resolve` need separate workflows), plus
 /// the `PRIVATE_URL` base that the `link` variable points at.
 ///
-/// `PRIVATE_URL` is required whenever any webhook URL is set. The link is
-/// injected here at delivery time rather than at enqueue time so the
-/// operator only has to configure one process. Localhost fallback would
-/// produce a Slack message with a link that nobody can click — better to
-/// refuse to start than to ship broken messages.
+/// Validation policy: either **all** known webhook URLs are set (along with
+/// `PRIVATE_URL`), or **none** of them are (no-op mode for dev). Partial
+/// configuration is a hard error at startup — silently dropping rows for an
+/// unconfigured kind is exactly how we missed an entire month of resolve
+/// notifications previously, so a noisy startup failure is preferred.
 #[derive(Clone, Debug, Default)]
 struct Config {
 	open: Option<String>,
@@ -46,19 +46,51 @@ struct Config {
 
 impl Config {
 	fn from_env() -> miette::Result<Self> {
-		let cfg = Self {
-			open: std::env::var("SLACK_WEBHOOK_OPEN_URL").ok(),
-			resolve: std::env::var("SLACK_WEBHOOK_RESOLVE_URL").ok(),
-			private_url: std::env::var("PRIVATE_URL").ok(),
-		};
-		if cfg.any_hook() && cfg.private_url.is_none() {
+		Self::build(
+			std::env::var("SLACK_WEBHOOK_OPEN_URL").ok(),
+			std::env::var("SLACK_WEBHOOK_RESOLVE_URL").ok(),
+			std::env::var("PRIVATE_URL").ok(),
+		)
+	}
+
+	fn build(
+		open: Option<String>,
+		resolve: Option<String>,
+		private_url: Option<String>,
+	) -> miette::Result<Self> {
+		let inputs: [(&str, &Option<String>); 2] = [
+			("SLACK_WEBHOOK_OPEN_URL", &open),
+			("SLACK_WEBHOOK_RESOLVE_URL", &resolve),
+		];
+		let set_count = inputs.iter().filter(|(_, v)| v.is_some()).count();
+		if set_count == 0 {
+			return Ok(Self::default());
+		}
+		if set_count != inputs.len() {
+			let missing: Vec<&str> = inputs
+				.iter()
+				.filter(|(_, v)| v.is_none())
+				.map(|(name, _)| *name)
+				.collect();
+			return Err(miette::miette!(
+				"slack outbox drainer requires every SLACK_WEBHOOK_*_URL to be set \
+				 when any is set (missing: {}). Set all of them, or leave them all \
+				 unset for no-op mode.",
+				missing.join(", ")
+			));
+		}
+		let Some(private_url) = private_url else {
 			return Err(miette::miette!(
 				"PRIVATE_URL must be set when any SLACK_WEBHOOK_*_URL is set \
 				 — it's the base of the operator-facing admin UI that the \
 				 `link` variable in each Slack message points at",
 			));
-		}
-		Ok(cfg)
+		};
+		Ok(Self {
+			open,
+			resolve,
+			private_url: Some(private_url),
+		})
 	}
 
 	fn any_hook(&self) -> bool {
@@ -126,23 +158,25 @@ fn spawn(cfg: Config) -> JoinHandle<()> {
 
 /// Post the row's payload — augmented with a `link` derived from the row's
 /// `incident_id` plus the configured `PRIVATE_URL` — to the workflow
-/// webhook for this row's kind. Returns `Ok(())` for both real deliveries
-/// and silent no-ops (no webhook configured for this kind, or unknown
-/// kind logged as warn); the row gets marked delivered so the table
-/// doesn't grow unbounded in non-Slack envs.
+/// webhook for this row's kind.
+///
+/// In no-op mode (no webhook URLs configured at all — dev) returns
+/// `Ok(())` without posting so the table doesn't grow unbounded. With any
+/// hooks configured, an unknown / unconfigured kind is a hard error
+/// instead of a silent drop — that silence is what made resolve-hook
+/// misconfigurations invisible in production.
 async fn deliver(
 	client: &reqwest::Client,
 	cfg: &Config,
 	row: &SlackOutbox,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-	let Some(url) = cfg.url_for(&row.kind) else {
-		if !is_known_kind(&row.kind) {
-			warn!(id = %row.id, kind = %row.kind, "unknown slack outbox kind; dropping");
-		} else {
-			debug!(id = %row.id, kind = %row.kind, "no webhook url configured for kind; dropping");
-		}
+	if !cfg.any_hook() {
+		debug!(id = %row.id, kind = %row.kind, "no-op mode; row marked delivered without posting");
 		return Ok(());
-	};
+	}
+	let url = cfg.url_for(&row.kind).ok_or_else(|| -> Box<dyn std::error::Error + Send + Sync> {
+		format!("no webhook url configured for kind {:?}", row.kind).into()
+	})?;
 	let mut payload = row.payload.clone();
 	if let Some(obj) = payload.as_object_mut()
 		&& let Some(link) = cfg.incident_link(row.incident_id)
@@ -157,10 +191,6 @@ async fn deliver(
 		let body = resp.text().await.unwrap_or_default();
 		Err(format!("slack returned {status}: {body}").into())
 	}
-}
-
-fn is_known_kind(kind: &str) -> bool {
-	matches!(kind, KIND_INCIDENT_OPEN | KIND_INCIDENT_RESOLVE)
 }
 
 #[derive(Debug, Parser)]
@@ -243,31 +273,50 @@ mod tests {
 	}
 
 	#[test]
+	fn config_rejects_partial_webhook_set() {
+		let err = Config::build(
+			Some("http://example/open".into()),
+			None,
+			Some("https://canopy.test".into()),
+		)
+		.expect_err("must require every SLACK_WEBHOOK_*_URL when any is set");
+		assert!(
+			err.to_string().contains("SLACK_WEBHOOK_RESOLVE_URL"),
+			"error names the missing var; got: {err}"
+		);
+	}
+
+	#[test]
 	fn config_rejects_missing_private_url_when_any_hook_set() {
-		// SAFETY: this test mutates global env, but cargo-test isolates
-		// processes per binary so we won't collide with other tests in
-		// this file (none of which read these vars).
-		unsafe {
-			std::env::set_var("SLACK_WEBHOOK_OPEN_URL", "http://example/");
-			std::env::remove_var("SLACK_WEBHOOK_RESOLVE_URL");
-			std::env::remove_var("PRIVATE_URL");
-		}
-		let err = Config::from_env().expect_err("must require PRIVATE_URL");
+		let err = Config::build(
+			Some("http://example/open".into()),
+			Some("http://example/resolve".into()),
+			None,
+		)
+		.expect_err("must require PRIVATE_URL");
 		assert!(err.to_string().contains("PRIVATE_URL"));
-		unsafe {
-			std::env::remove_var("SLACK_WEBHOOK_OPEN_URL");
-		}
 	}
 
 	#[test]
 	fn config_ok_when_no_hooks_set_even_without_private_url() {
-		unsafe {
-			std::env::remove_var("SLACK_WEBHOOK_OPEN_URL");
-			std::env::remove_var("SLACK_WEBHOOK_RESOLVE_URL");
-			std::env::remove_var("PRIVATE_URL");
-		}
-		let cfg = Config::from_env().expect("no-op mode is fine");
+		let cfg = Config::build(None, None, None).expect("no-op mode is fine");
 		assert!(!cfg.any_hook());
+	}
+
+	#[test]
+	fn config_ok_when_all_set() {
+		let cfg = Config::build(
+			Some("http://example/open".into()),
+			Some("http://example/resolve".into()),
+			Some("https://canopy.test".into()),
+		)
+		.expect("complete config is fine");
+		assert!(cfg.any_hook());
+		assert_eq!(cfg.url_for(KIND_INCIDENT_OPEN), Some("http://example/open"));
+		assert_eq!(
+			cfg.url_for(KIND_INCIDENT_RESOLVE),
+			Some("http://example/resolve")
+		);
 	}
 
 	#[tokio::test(flavor = "multi_thread")]
@@ -402,14 +451,31 @@ mod tests {
 	}
 
 	#[tokio::test(flavor = "multi_thread")]
-	async fn deliver_drops_unknown_kind_as_noop() {
+	async fn deliver_errors_on_unknown_kind_when_hooks_configured() {
+		// In configured (non-noop) mode, an unknown kind is a loud failure
+		// rather than a silent drop — the silent path is what previously
+		// hid missing resolve-hook configuration in production.
 		let cfg = Config {
 			open: Some("http://127.0.0.1:1/should-not-be-hit".into()),
-			resolve: None,
+			resolve: Some("http://127.0.0.1:1/should-not-be-hit".into()),
 			private_url: Some("https://canopy.test".into()),
 		};
 		let r = row("bogus_kind", serde_json::json!({}));
-		deliver(&reqwest::Client::new(), &cfg, &r)
+		let err = deliver(&reqwest::Client::new(), &cfg, &r)
+			.await
+			.expect_err("unknown kind must error in configured mode");
+		assert!(
+			err.to_string().contains("no webhook url configured"),
+			"error explains why; got: {err}"
+		);
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn deliver_noop_swallows_unknown_kind() {
+		// In dev / no-op mode (no hooks configured) any kind is a no-op —
+		// drainer-less environments shouldn't accumulate undelivered rows.
+		let r = row("bogus_kind", serde_json::json!({}));
+		deliver(&reqwest::Client::new(), &Config::default(), &r)
 			.await
 			.expect("noop ok");
 	}
