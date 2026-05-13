@@ -63,6 +63,19 @@ test-name name:
 test-verbose:
     DATABASE_URL={{ DATABASE_URL }} cargo nextest run --no-capture
 
+# Run the private-web Playwright end-to-end suite. Builds the
+# private-server + migrate binaries first (the e2e fixture spawns its
+# own server/Vite per worker — no `just watch-*` needed).
+test-e2e:
+    cargo build --bin private-server --bin migrate
+    cd private-web && npm run test:e2e
+
+# Same as `test-e2e` but launches Playwright's interactive UI runner.
+# Useful for stepping through failures and inspecting traces.
+test-e2e-ui:
+    cargo build --bin private-server --bin migrate
+    cd private-web && npx playwright test --ui
+
 # Run migrations
 migrate:
     DATABASE_URL={{ DATABASE_URL }} diesel migration run
