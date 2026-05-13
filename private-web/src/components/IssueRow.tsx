@@ -2,7 +2,6 @@ import {
 	Alert as MuiAlert,
 	Box,
 	Button,
-	Chip,
 	IconButton,
 	Link as MuiLink,
 	MenuItem,
@@ -14,17 +13,14 @@ import {
 import CheckCircleOutlinedIcon from "@mui/icons-material/CheckCircleOutlined";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
-import HistoryIcon from "@mui/icons-material/History";
 import SnoozeIcon from "@mui/icons-material/Snooze";
-import WarningAmberIcon from "@mui/icons-material/WarningAmber";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { humanDuration } from "../lib/humanDuration";
 import NotesList, { AddNoteButton } from "./NotesList";
 import SeverityChip from "./SeverityChip";
-import SourceChip from "./SourceChip";
 import StatusSnapshotModal, { StatusSnapshotButton } from "./StatusSnapshotModal";
 import TimeAgo from "./TimeAgo";
 import UserAvatar from "./UserAvatar";
@@ -32,7 +28,6 @@ import {
 	RESOLVED_REASONS,
 	RESOLVED_REASON_LABEL,
 	type IssueData,
-	type IssueIncidentLink,
 	type ResolvedReason,
 } from "../types";
 
@@ -54,10 +49,11 @@ function headline(issue: IssueData): string {
 	return issue.message.split("\n")[0] ?? "";
 }
 
-/** One issue. Expanded by default: shows message body, action buttons and
- * a two-column Events / Notes panel. When collapsed, only the header row
- * is visible — even the action buttons are hidden. Header layout:
- * `[toggle] [server?] [headline] [ack/avatar] [source] [severity] [time]`.
+/** One issue. Expanded by default: shows a provenance line (source, ref,
+ * incident links), the message body, action buttons and a two-column
+ * Events / Notes panel. When collapsed, only the header row is visible —
+ * even the action buttons are hidden. Header layout:
+ * `[toggle] [server?] [headline] [ack/avatar] [snapshot] [severity] [time]`.
  * The headline is struck through when the issue is inactive or resolved.
  */
 export default function IssueRow({
@@ -200,16 +196,12 @@ function Header({
 					snoozed
 				</Typography>
 			)}
-			<IncidentLinks incidents={issue.incidents} />
 			<HeaderActor issue={issue} isAdmin={isAdmin} onChanged={onChanged} />
 			<Box sx={{ flexShrink: 0 }}>
 				<StatusSnapshotButton
 					onClick={onOpenSnapshot}
 					tooltip="Status snapshot when this issue was last seen"
 				/>
-			</Box>
-			<Box sx={{ flexShrink: 0 }}>
-				<SourceChip source={issue.source} refValue={issue.ref} />
 			</Box>
 			<Box sx={{ flexShrink: 0 }}>
 				<SeverityChip severity={issue.severity} />
@@ -339,6 +331,7 @@ function Body({
 }) {
 	return (
 		<Box sx={{ mt: 1 }}>
+			<IssueMeta issue={issue} />
 			<Typography
 				variant="body2"
 				component="pre"
@@ -555,36 +548,40 @@ function IssueActions({
 	);
 }
 
-/** One small chip per attaching incident, each linking to its detail page.
- * Open incidents are warning-coloured with a warning icon; closed ones use a
- * history icon and a neutral tone. Without these, there's no way to navigate
- * from an issue back to the incident(s) it joined. */
-function IncidentLinks({ incidents }: { incidents: IssueIncidentLink[] }) {
-	if (incidents.length === 0) return null;
+/** One-line provenance shown just below the title in the expanded body:
+ * who reported it (source + ref) and which incident(s) it joined, if any.
+ * Each incident is linked by the first 8 hex chars of its UUID. */
+function IssueMeta({ issue }: { issue: IssueData }) {
 	return (
-		<Stack direction="row" spacing={0.5} sx={{ flexShrink: 0, flexWrap: "wrap" }}>
-			{incidents.map((inc) => {
-				const open = inc.closed_at == null;
-				const opened = new Date(inc.opened_at).toLocaleString();
-				const tooltip = open
-					? `Open incident, opened ${opened}`
-					: `Closed incident, opened ${opened}`;
-				return (
-					<Tooltip key={inc.incident_id} title={tooltip}>
-						<Chip
-							component={RouterLink}
-							to={`/incidents/${inc.incident_id}`}
-							size="small"
-							variant="outlined"
-							color={open ? "error" : "default"}
-							icon={open ? <WarningAmberIcon /> : <HistoryIcon />}
-							label="incident"
-							clickable
-						/>
-					</Tooltip>
-				);
-			})}
-		</Stack>
+		<Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+			Issue created by <b>{issue.source}</b> (
+			<Box
+				component="code"
+				sx={{ fontFamily: "monospace", fontSize: "0.9em" }}
+			>
+				{issue.ref}
+			</Box>
+			)
+			{issue.incidents.length > 0 && ", in "}
+			{issue.incidents.map((inc, i) => (
+				<Fragment key={inc.incident_id}>
+					{i > 0 && ", "}
+					<MuiLink
+						component={RouterLink}
+						to={`/incidents/${inc.incident_id}`}
+					>
+						incident {inc.incident_id.slice(0, 8)}
+					</MuiLink>{" "}
+					(opened <TimeAgo timestamp={inc.opened_at} />
+					{inc.closed_at && (
+						<>
+							, closed <TimeAgo timestamp={inc.closed_at} />
+						</>
+					)}
+					)
+				</Fragment>
+			))}
+		</Typography>
 	);
 }
 
