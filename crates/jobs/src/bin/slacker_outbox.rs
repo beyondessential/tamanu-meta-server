@@ -505,11 +505,15 @@ mod tests {
 			}),
 		);
 		r.incident_id = incident_id;
-		deliver(&reqwest::Client::new(), &cfg, &r)
+		let body = deliver(&reqwest::Client::new(), &cfg, &r)
 			.await
 			.expect("deliver ok");
 		server.join().unwrap();
 
+		assert_eq!(
+			body, "ok",
+			"deliver returns Slack's response body so the row can stamp it",
+		);
 		let got = recorded.lock().unwrap().clone().expect("got a request");
 		assert_eq!(got["server"], "Prod");
 		assert_eq!(got["severity"], "Error");
@@ -610,6 +614,11 @@ mod tests {
 			.expect_err("should error");
 		server.join().unwrap();
 		assert!(err.to_string().contains("500"), "error mentions status");
+		assert_eq!(
+			err.body.as_deref(),
+			Some("nope!"),
+			"failure body is captured for the row's last_response column",
+		);
 	}
 
 	#[tokio::test(flavor = "multi_thread")]
