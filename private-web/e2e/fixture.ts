@@ -35,6 +35,9 @@ export interface StackHandle {
 	apiUrl: string;
 	/** Name of the Postgres database created for this stack. */
 	dbName: string;
+	/** Full DSN for the per-worker Postgres database. Tests use this
+	 * to open their own pg.Client for seeding. */
+	databaseUrl: string;
 	stop: () => Promise<void>;
 }
 
@@ -228,7 +231,7 @@ export async function startStack(opts: StartOptions = {}): Promise<StackHandle> 
 			throw e;
 		}
 
-		return { baseUrl, apiUrl, dbName, stop };
+		return { baseUrl, apiUrl, dbName, databaseUrl, stop };
 	} catch (e) {
 		dropDb();
 		throw e;
