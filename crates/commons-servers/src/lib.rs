@@ -7,7 +7,9 @@ use axum::{Router, middleware};
 use axum_client_ip::{ClientIp, ClientIpSource};
 use axum_server_timing::ServerTimingLayer;
 use tokio::net::TcpListener;
-use tower_http::{compression::CompressionLayer, trace::TraceLayer};
+use tower_http::{
+	compression::CompressionLayer, decompression::RequestDecompressionLayer, trace::TraceLayer,
+};
 use tracing::Span;
 
 pub mod device_auth;
@@ -53,6 +55,7 @@ pub fn router(routes: Router<()>, client_ip_source: ClientIpSource) -> Router<()
 				),
 		)
 		.layer(CompressionLayer::new())
+		.layer(RequestDecompressionLayer::new())
 		.layer(ServerTimingLayer::new("srv"))
 }
 

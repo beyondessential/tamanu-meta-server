@@ -37,6 +37,7 @@ time = "0.3.47"
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
 tower-http = { version = "0.6.8", features = [
 	"compression-full",
+	"decompression-full",
 	"fs",
 	"trace",
 ] }
