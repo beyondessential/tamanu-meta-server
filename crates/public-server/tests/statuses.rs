@@ -12,6 +12,16 @@ struct StatusResult {
 	extra: serde_json::Value,
 }
 
+#[derive(QueryableByName)]
+struct HealthResult {
+	#[diesel(sql_type = sql_types::Bool)]
+	healthy: bool,
+	#[diesel(sql_type = sql_types::Jsonb)]
+	health: serde_json::Value,
+	#[diesel(sql_type = sql_types::Jsonb)]
+	extra: serde_json::Value,
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn submit_status() {
 	commons_tests::server::run_with_device_auth(
@@ -391,6 +401,235 @@ async fn submit_status_with_geolocation_and_cloud() {
 				Some(false),
 				"Server should have cloud=false"
 			);
+		},
+	)
+	.await
+}
+
+/// Helper used by the health-payload tests below. Bare server with a device
+/// attached, no extras. Returns the created server's id.
+async fn insert_health_test_server(
+	conn: &mut diesel_async::AsyncPgConnection,
+	device_id: Uuid,
+) -> Uuid {
+	let server_id = Uuid::new_v4();
+	sql_query(
+		r#"
+		INSERT INTO servers (id, host, kind, device_id)
+		VALUES ($1, 'https://health.example.com', 'central', $2)
+	"#,
+	)
+	.bind::<sql_types::Uuid, _>(server_id)
+	.bind::<sql_types::Nullable<sql_types::Uuid>, _>(Some(device_id))
+	.execute(conn)
+	.await
+	.expect("insert server");
+	server_id
+}
+
+async fn fetch_latest_health(
+	conn: &mut diesel_async::AsyncPgConnection,
+	server_id: Uuid,
+) -> HealthResult {
+	sql_query(
+		r#"
+		SELECT healthy, health, extra
+		FROM statuses
+		WHERE server_id = $1
+		ORDER BY created_at DESC
+		LIMIT 1
+	"#,
+	)
+	.bind::<sql_types::Uuid, _>(server_id)
+	.get_result(conn)
+	.await
+	.expect("fetch latest health")
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn submit_status_legacy_no_healthy_field() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+
+			let response = public
+				.post(&format!("/status/{}", server_id))
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({ "uptime": 100 }))
+				.await;
+			response.assert_status_ok();
+
+			let row = fetch_latest_health(&mut conn, server_id).await;
+			assert!(row.healthy, "absent `healthy` ⇒ true (legacy compat)");
+			assert_eq!(row.health, serde_json::json!([]));
+			assert_eq!(row.extra.get("uptime").and_then(|v| v.as_i64()), Some(100));
+			assert!(
+				row.extra.get("healthy").is_none(),
+				"`healthy` must not leak into `extra`"
+			);
+		},
+	)
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn submit_status_with_healthy_true_no_checks() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+
+			let response = public
+				.post(&format!("/status/{}", server_id))
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({ "healthy": true }))
+				.await;
+			response.assert_status_ok();
+
+			let row = fetch_latest_health(&mut conn, server_id).await;
+			assert!(row.healthy);
+			assert_eq!(row.health, serde_json::json!([]));
+			assert_eq!(row.extra, serde_json::json!({}));
+		},
+	)
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn submit_status_with_healthy_false_persists() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+
+			let response = public
+				.post(&format!("/status/{}", server_id))
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"healthy": false,
+					"uptime": 42,
+				}))
+				.await;
+			response.assert_status_ok();
+
+			let row = fetch_latest_health(&mut conn, server_id).await;
+			assert!(!row.healthy);
+			assert_eq!(row.extra.get("uptime").and_then(|v| v.as_i64()), Some(42));
+			assert!(row.extra.get("healthy").is_none());
+		},
+	)
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn submit_status_with_health_checks_persists() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+
+			let response = public
+				.post(&format!("/status/{}", server_id))
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"healthy": true,
+					"health": [
+						{ "check": "database", "healthy": true, "latency_ms": 12 },
+						{ "check": "disk", "healthy": false, "free_pct": 4, "message": "almost full" },
+					],
+					"timezone": "UTC",
+				}))
+				.await;
+			response.assert_status_ok();
+
+			let row = fetch_latest_health(&mut conn, server_id).await;
+			assert!(row.healthy);
+			let arr = row.health.as_array().expect("array");
+			assert_eq!(arr.len(), 2);
+			assert_eq!(arr[0]["check"], "database");
+			assert_eq!(arr[0]["latency_ms"], 12);
+			assert_eq!(arr[1]["check"], "disk");
+			assert_eq!(arr[1]["free_pct"], 4);
+			assert_eq!(arr[1]["message"], "almost full");
+			assert!(row.extra.get("health").is_none(), "`health` must not leak into `extra`");
+			assert_eq!(row.extra.get("timezone").and_then(|v| v.as_str()), Some("UTC"));
+		},
+	)
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn submit_status_rejects_non_bool_healthy() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+
+			let response = public
+				.post(&format!("/status/{}", server_id))
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({ "healthy": "yes" }))
+				.await;
+			response.assert_status_bad_request();
+		},
+	)
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn submit_status_rejects_non_array_health() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+
+			let response = public
+				.post(&format!("/status/{}", server_id))
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({ "health": { "check": "x", "healthy": true } }))
+				.await;
+			response.assert_status_bad_request();
+		},
+	)
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn submit_status_rejects_health_entry_missing_check() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+
+			let response = public
+				.post(&format!("/status/{}", server_id))
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"health": [ { "healthy": true } ]
+				}))
+				.await;
+			response.assert_status_bad_request();
+		},
+	)
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn submit_status_rejects_health_entry_missing_healthy() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+
+			let response = public
+				.post(&format!("/status/{}", server_id))
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"health": [ { "check": "database" } ]
+				}))
+				.await;
+			response.assert_status_bad_request();
 		},
 	)
 	.await
