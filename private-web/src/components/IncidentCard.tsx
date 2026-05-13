@@ -56,23 +56,32 @@ export default function IncidentCard({ incident }: { incident: IncidentData }) {
 			<Stack
 				direction="row"
 				spacing={1.5}
-				sx={{ mt: 1, justifyContent: "flex-end", alignItems: "center" }}
+				sx={{ mt: 1, justifyContent: "space-between", alignItems: "center" }}
 			>
-				<Stat
-					icon={<BugReportIcon fontSize="inherit" />}
-					value={incident.issue_count ?? 0}
-					noun="issue"
-				/>
-				<Stat
-					icon={<TimelineIcon fontSize="inherit" />}
-					value={incident.event_count ?? 0}
-					noun="event"
-				/>
-				<Stat
-					icon={<NotesIcon fontSize="inherit" />}
-					value={incident.note_count ?? 0}
-					noun="note"
-				/>
+				<Typography
+					variant="caption"
+					color="text.secondary"
+					sx={{ fontFamily: "monospace" }}
+				>
+					{incident.id.slice(0, 8)}
+				</Typography>
+				<Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
+					<Stat
+						icon={<BugReportIcon fontSize="inherit" />}
+						value={incident.issue_count ?? 0}
+						noun="issue"
+					/>
+					<Stat
+						icon={<TimelineIcon fontSize="inherit" />}
+						value={incident.event_count ?? 0}
+						noun="event"
+					/>
+					<Stat
+						icon={<NotesIcon fontSize="inherit" />}
+						value={incident.note_count ?? 0}
+						noun="note"
+					/>
+				</Stack>
 			</Stack>
 		</Box>
 	);

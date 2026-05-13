@@ -44,7 +44,7 @@ export default function IncidentsLink({
 				color="error"
 				startIcon={<WarningAmberIcon />}
 			>
-				Open incident
+				Incident {openIncident.id.slice(0, 8)}
 			</Button>
 		);
 	}

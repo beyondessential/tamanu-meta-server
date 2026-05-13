@@ -2,16 +2,11 @@ import {
 	Alert,
 	Box,
 	Chip,
-	Dialog,
-	DialogActions,
-	DialogContent,
-	DialogTitle,
 	IconButton,
 	LinearProgress,
 	Stack,
 	Tooltip,
 	Typography,
-	Button,
 } from "@mui/material";
 import CancelIcon from "@mui/icons-material/Cancel";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
@@ -23,52 +18,73 @@ import TimeAgo from "./TimeAgo";
 import VersionIndicator from "./VersionIndicator";
 import type { StatusSnapshotData } from "../types";
 
-/** Modal renderer for the server's status at a given point in time.
- * Hits `/api/statuses/snapshot` lazily on open and renders the same
- * curated fields ServerDetail shows, plus the per-check breakdown
- * (if any) and a raw-JSON details block. */
-export default function StatusSnapshotModal({
+/** Inline panel rendering the server's status at a given point in time.
+ * Hits `/api/statuses/snapshot` lazily on mount; each (serverId, at)
+ * gets its own component instance via the caller's keying so there is no
+ * stale-data flash when the user toggles between snapshots. Two or more
+ * panels can be open at once for side-by-side comparison. */
+export default function StatusSnapshotPanel({
 	serverId,
 	at,
-	open,
 	onClose,
 }: {
 	serverId: string;
 	/** Timestamp to look up "as of". When null, the endpoint returns
 	 * the latest status. */
 	at: string | null;
-	open: boolean;
 	onClose: () => void;
 }) {
 	const result = useApi(
 		"statuses",
 		"snapshot",
 		{ server_id: serverId, at },
-		[serverId, at, open],
+		[serverId, at],
 	);
 	return (
-		<Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
-			<DialogTitle sx={{ pr: 6 }}>
-				Status snapshot
-				<IconButton
-					aria-label="Close"
-					onClick={onClose}
-					sx={{ position: "absolute", right: 8, top: 8 }}
-				>
-					<CloseIcon />
-				</IconButton>
-			</DialogTitle>
-			<DialogContent dividers>
-				<ModalBody result={result} />
-			</DialogContent>
-			<DialogActions>
-				<Button onClick={onClose}>Close</Button>
-			</DialogActions>
-		</Dialog>
+		<Box
+			sx={{
+				mt: 1,
+				p: 1.5,
+				border: 1,
+				borderColor: "divider",
+				borderRadius: 1,
+			}}
+		>
+			<Stack
+				direction="row"
+				spacing={1.5}
+				sx={{ alignItems: "center", flexWrap: "wrap", mb: 1 }}
+			>
+				<Typography variant="overline" color="text.secondary">
+					Status snapshot
+				</Typography>
+				{result.status === "ok" && result.data && (
+					<>
+						<Chip
+							size="small"
+							color={result.data.healthy ? "success" : "error"}
+							icon={
+								result.data.healthy ? <CheckCircleIcon /> : <CancelIcon />
+							}
+							label={result.data.healthy ? "Healthy" : "Unhealthy"}
+						/>
+						<Typography variant="body2" color="text.secondary">
+							<TimeAgo timestamp={result.data.created_at} />
+						</Typography>
+					</>
+				)}
+				<Box sx={{ ml: "auto" }}>
+					<IconButton aria-label="Close" size="small" onClick={onClose}>
+						<CloseIcon fontSize="small" />
+					</IconButton>
+				</Box>
+			</Stack>
+			<PanelBody result={result} />
+		</Box>
 	);
 }
 
-function ModalBody({
+function PanelBody({
 	result,
 }: {
 	result: ApiState<StatusSnapshotData | null>;
@@ -90,17 +106,6 @@ function ModalBody({
 	const snap = result.data;
 	return (
 		<Stack spacing={2}>
-			<Stack direction="row" spacing={1.5} sx={{ alignItems: "center", flexWrap: "wrap" }}>
-				<Chip
-					size="small"
-					color={snap.healthy ? "success" : "error"}
-					icon={snap.healthy ? <CheckCircleIcon /> : <CancelIcon />}
-					label={snap.healthy ? "Healthy" : "Unhealthy"}
-				/>
-				<Typography variant="body2" color="text.secondary">
-					<TimeAgo timestamp={snap.created_at} />
-				</Typography>
-			</Stack>
 			<CuratedFields snap={snap} />
 			<ChecksBlock health={snap.health} />
 			<ExtrasBlock extra={snap.extra} />
@@ -112,7 +117,10 @@ function CuratedFields({ snap }: { snap: StatusSnapshotData }) {
 	return (
 		<Stack direction="row" spacing={3} sx={{ flexWrap: "wrap" }} useFlexGap>
 			<Field label="Tamanu">
-				<VersionIndicator version={snap.version} distance={snap.version_distance} />
+				<VersionIndicator
+					version={snap.version}
+					distance={snap.version_distance}
+				/>
 			</Field>
 			{snap.platform && <Field label="Platform" value={snap.platform} />}
 			{snap.timezone && <Field label="Timezone" value={snap.timezone} />}
@@ -207,7 +215,10 @@ function ChecksBlock({ health }: { health: StatusSnapshotData["health"] }) {
 											<Box component="dt" sx={{ color: "text.secondary" }}>
 												{k}
 											</Box>
-											<Box component="dd" sx={{ m: 0, fontFamily: "monospace" }}>
+											<Box
+												component="dd"
+												sx={{ m: 0, fontFamily: "monospace" }}
+											>
 												{renderValue(v)}
 											</Box>
 										</Fragment>
@@ -280,21 +291,24 @@ function renderValue(v: unknown): string {
 	return JSON.stringify(v);
 }
 
-/** Small icon-only trigger used in IssueRow / EventLog. Caller wires
- * the modal open-state and timestamp; this component just renders the
- * button. */
+/** Toggle button that opens an inline snapshot panel. Caller owns the
+ * `open` state and decides where to render the panel — the button just
+ * reflects open/closed visually. */
 export function StatusSnapshotButton({
+	open,
 	onClick,
 	tooltip = "View status snapshot",
 }: {
+	open: boolean;
 	onClick: () => void;
 	tooltip?: string;
 }) {
 	return (
-		<Tooltip title={tooltip}>
+		<Tooltip title={open ? "Close status snapshot" : tooltip}>
 			<IconButton
 				aria-label={tooltip}
 				size="small"
+				color={open ? "primary" : "default"}
 				onClick={(e) => {
 					e.stopPropagation();
 					onClick();
