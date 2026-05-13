@@ -497,6 +497,12 @@ async fn enqueue_slack_open(
 	root_server_id: Uuid,
 	issue: &Issue,
 ) -> Result<()> {
+	// Incidents on the nil/meta server (canopy itself) never round-trip
+	// to Slack: those are the canopy-self events the drainer files for
+	// its own failures, and Slacking them would loop indefinitely.
+	if root_server_id == Uuid::nil() {
+		return Ok(());
+	}
 	let server = Server::get_by_id(conn, root_server_id).await?;
 	let payload = crate::slack_outbox::vars::incident_open(
 		&server,
@@ -540,6 +546,12 @@ async fn enqueue_slack_resolve_inner(
 	incident: &Incident,
 	by: Option<&str>,
 ) -> Result<()> {
+	// Mirror of `enqueue_slack_open`: nil-server incidents are
+	// canopy-internal and must not Slack, to avoid a feedback loop
+	// when the failure being filed is "Slack delivery itself failed".
+	if incident.server_id == Uuid::nil() {
+		return Ok(());
+	}
 	let server = Server::get_by_id(conn, incident.server_id).await?;
 	let payload = crate::slack_outbox::vars::incident_resolve(&server, by);
 	crate::slack_outbox::SlackOutbox::enqueue(

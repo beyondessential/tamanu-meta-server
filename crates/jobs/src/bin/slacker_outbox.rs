@@ -15,6 +15,8 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
 use clap::Parser;
+use commons_types::issue::Severity;
+use database::issues::NewEvent;
 use database::slack_outbox::{KIND_INCIDENT_OPEN, KIND_INCIDENT_RESOLVE, SlackOutbox};
 use diesel_async::AsyncConnection;
 use lloggs::{LoggingArgs, PreArgs};
@@ -182,6 +184,13 @@ fn spawn(cfg: Config) -> JoinHandle<()> {
 										),
 									)
 									.await?;
+									// Surface the failure as a canopy-self
+									// issue (nil-server) so it shows up in
+									// the UI alongside everything else.
+									// `enqueue_slack_*` skips nil-server
+									// incidents to avoid feeding back into
+									// the very loop that's failing.
+									file_self_event(conn, &row, next_attempts, &err).await?;
 								} else {
 									warn!(
 										id = %row.id,
@@ -211,6 +220,36 @@ fn spawn(cfg: Config) -> JoinHandle<()> {
 			}
 		}
 	})
+}
+
+/// File a `canopy/slack-delivery-failure` event against the nil/meta
+/// server when the drainer abandons a row. All such events coalesce into
+/// one issue (same source + ref), so a flapping drainer becomes a single
+/// long-lived issue with rising event counts rather than many small ones.
+async fn file_self_event(
+	conn: &mut diesel_async::AsyncPgConnection,
+	row: &SlackOutbox,
+	attempts: i32,
+	err: &DeliveryError,
+) -> Result<(), commons_errors::AppError> {
+	let evt = NewEvent {
+		source: "canopy".to_string(),
+		r#ref: "slack-delivery-failure".to_string(),
+		severity: Some(Severity::Error),
+		description: Some(format!(
+			"outbox row {} (kind={}, incident={}): gave up after {attempts} attempts. Last error: {}. Last response: {}",
+			row.id,
+			row.kind,
+			row.incident_id,
+			err.msg,
+			err.body.as_deref().unwrap_or("<none>"),
+		)),
+		message: format!("Slack delivery permanently failed ({})", row.kind),
+		active: Some(true),
+		occurred_at: None,
+	};
+	evt.save(conn, uuid::Uuid::nil(), None).await?;
+	Ok(())
 }
 
 fn now_ms() -> i64 {

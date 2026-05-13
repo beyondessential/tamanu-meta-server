@@ -144,6 +144,44 @@ async fn resolving_incident_enqueues_resolve_row() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn nil_server_incidents_do_not_enqueue_slack() {
+	// The meta/nil server hosts canopy's own self-monitoring events
+	// (e.g. "Slack delivery failure"). Slacking those would loop the
+	// drainer back into itself. Verify the guard skips the enqueue
+	// even though the incident is created.
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let event = NewEvent {
+			source: "canopy".into(),
+			r#ref: "slack-delivery-failure".into(),
+			severity: Some(Severity::Error),
+			description: None,
+			message: "boom".into(),
+			active: Some(true),
+			occurred_at: None,
+		};
+		event
+			.save(&mut conn, Uuid::nil(), None)
+			.await
+			.expect("save");
+
+		let incident = Incident::list_for_server(&mut conn, Uuid::nil(), false, 10)
+			.await
+			.expect("list incidents")
+			.into_iter()
+			.next()
+			.expect("incident opened on nil server");
+
+		let rows = pending_for_incident(&mut conn, incident.id).await;
+		assert!(
+			rows.is_empty(),
+			"nil-server incidents must not enqueue slack rows; got {}",
+			rows.len()
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn mark_given_up_removes_row_from_claim_pending() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let server_id = insert_server(&mut conn, "http://giveup.invalid/").await;
