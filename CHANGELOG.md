@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
+## [6.2.0](https://github.com/beyondessential/canopy/compare/v6.1.5..6.2.0) - 2026-05-13
+
+
+- **Feature:** Add healthy/health columns to statuses - ([1652117](https://github.com/beyondessential/canopy/commit/16521179e5443eee3a1ea9d95f8a3cb80a47978d))
+- **Feature:** Parse healthy/health from /status payload - ([4aca8bb](https://github.com/beyondessential/canopy/commit/4aca8bbc95bc9d651b600850e4521eebd23de198))
+- **Feature:** File status/health events on healthy transitions - ([cda8e97](https://github.com/beyondessential/canopy/commit/cda8e97ed561e2c40a2bced6baf4462622869e93))
+- **Feature:** Status snapshot endpoint + HealthState wire type - ([0099701](https://github.com/beyondessential/canopy/commit/0099701609b692fb860a2351206afb05d57f6dd4))
+
+---
+## [6.1.5](https://github.com/beyondessential/canopy/compare/v6.1.4..v6.1.5) - 2026-05-13
+
+
+- **Repo:** Release - ([bab240b](https://github.com/beyondessential/canopy/commit/bab240bba6b62ebae7efa717d9c4f70fc0e95a60))
+
+---
 ## [6.1.4](https://github.com/beyondessential/canopy/compare/v6.1.3..v6.1.4) - 2026-05-13
 
 
