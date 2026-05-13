@@ -56,9 +56,9 @@ export default function StatusDot({
 				// Outline rather than border: it draws *outside* the box so
 				// adjacent dots don't reflow when a server gains or loses a
 				// health ring.
-				outline: outlineColor ? "0.18em solid" : "none",
+				outline: outlineColor ? "0.25em solid" : "none",
 				outlineColor,
-				outlineOffset: outlineColor ? "-0.05em" : 0,
+				outlineOffset: outlineColor ? "-0.20em" : 0,
 			}}
 		/>
 	);
