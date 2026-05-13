@@ -70,6 +70,7 @@ async fn create(
 				v => v,
 			},
 		),
+		..Default::default()
 	}
 	.save(&mut db)
 	.await?;

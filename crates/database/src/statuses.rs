@@ -72,6 +72,13 @@ pub struct Status {
 	pub device_id: Option<Uuid>,
 	pub version: Option<VersionStr>,
 	pub extra: serde_json::Value,
+	/// Server's overall self-reported health. Absent in the payload ⇒ true
+	/// (legacy compat); see `docs/plans/status-snapshots-and-health.md`.
+	pub healthy: bool,
+	/// Per-check breakdown. Each entry is an object with at least
+	/// `{check: string, healthy: bool, ...}`; extra fields are passed
+	/// through verbatim.
+	pub health: serde_json::Value,
 }
 
 #[derive(Debug, Insertable)]
@@ -83,6 +90,8 @@ pub struct NewStatus {
 	pub device_id: Option<Uuid>,
 	pub version: Option<VersionStr>,
 	pub extra: serde_json::Value,
+	pub healthy: bool,
+	pub health: serde_json::Value,
 }
 
 impl Default for NewStatus {
@@ -92,6 +101,8 @@ impl Default for NewStatus {
 			device_id: Default::default(),
 			version: Default::default(),
 			extra: serde_json::Value::Object(Default::default()),
+			healthy: true,
+			health: serde_json::Value::Array(Default::default()),
 		}
 	}
 }
@@ -131,8 +142,12 @@ impl Status {
 					device_id: None,
 					created_at: Timestamp::now(),
 					version,
-
 					extra: Default::default(),
+					// Pingtask doesn't know the server's self-reported health;
+					// it only knows the server is reachable. Default to healthy
+					// to avoid false-positive unhealthy events from this path.
+					healthy: true,
+					health: serde_json::Value::Array(Default::default()),
 				})
 			}
 			Err(err) => {
@@ -288,7 +303,7 @@ impl Status {
 
 		// Get the latest status for each server using DISTINCT ON
 		let query = diesel::sql_query(
-			"SELECT DISTINCT ON (server_id) id, created_at, server_id, device_id, version, extra
+			"SELECT DISTINCT ON (server_id) id, created_at, server_id, device_id, version, extra, healthy, health
 				FROM statuses
 				WHERE server_id = ANY($1)
 				AND created_at >= NOW() - INTERVAL '7 days'

@@ -1280,7 +1280,9 @@
           "id",
           "created_at",
           "server_id",
-          "extra"
+          "extra",
+          "healthy",
+          "health"
         ],
         "properties": {
           "created_at": {
@@ -1295,6 +1297,13 @@
             "format": "uuid"
           },
           "extra": {},
+          "health": {
+            "description": "Per-check breakdown. Each entry is an object with at least\n`{check: string, healthy: bool, ...}`; extra fields are passed\nthrough verbatim."
+          },
+          "healthy": {
+            "type": "boolean",
+            "description": "Server's overall self-reported health. Absent in the payload ⇒ true\n(legacy compat); see `docs/plans/status-snapshots-and-health.md`."
+          },
           "id": {
             "type": "string",
             "format": "uuid"
