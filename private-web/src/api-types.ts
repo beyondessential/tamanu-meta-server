@@ -1079,6 +1079,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/statuses/snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["snapshot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/statuses/summary": {
         parameters: {
             query?: never;
@@ -1894,6 +1910,17 @@ export interface components {
         Severity: "emergency" | "alert" | "critical" | "error" | "warning" | "notice" | "info" | "debug";
         /** @enum {string} */
         ShortStatus: "up" | "down" | "away" | "blip" | "gone";
+        SnapshotArgs: {
+            /**
+             * Format: date-time
+             * @description When the snapshot should be "as of". Returns the most recent
+             *     status row with `created_at <= at`. Omit (or `null`) to get
+             *     the latest status (no time bound).
+             */
+            at?: string | null;
+            /** Format: uuid */
+            server_id: string;
+        };
         SnoozeArgs: {
             /** Format: uuid */
             issue_id: string;
@@ -1917,6 +1944,34 @@ export interface components {
             execution_time_ms: number;
             row_count: number;
             rows: unknown[][];
+        };
+        /**
+         * @description What the UI needs to render a status snapshot — the curated
+         *     fields ServerDetail already shows (so the modal/section can look
+         *     like the rest of the app) plus the new `healthy` / `health` and
+         *     the raw `extra` blob for forward-compat as the contract expands.
+         */
+        StatusSnapshotData: {
+            /** Format: date-time */
+            created_at: string;
+            /** Format: uuid */
+            device_id?: string | null;
+            extra: unknown;
+            health: unknown;
+            healthy: boolean;
+            /** Format: uuid */
+            id: string;
+            /** Format: int32 */
+            min_chrome_version?: number | null;
+            nodejs?: string | null;
+            platform?: string | null;
+            postgres?: string | null;
+            /** Format: uuid */
+            server_id: string;
+            timezone?: string | null;
+            version?: null | components["schemas"]["VersionStr"];
+            /** Format: int64 */
+            version_distance?: number | null;
         };
         SubmitManualEventArgs: {
             active?: boolean | null;
@@ -3839,6 +3894,37 @@ export interface operations {
                     "application/json": {
                         [key: string]: string[];
                     };
+                };
+            };
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    snapshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SnapshotArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": null | components["schemas"]["StatusSnapshotData"];
                 };
             };
             500: {

@@ -2601,6 +2601,58 @@
         }
       }
     },
+    "/api/statuses/snapshot": {
+      "post": {
+        "tags": [
+          "statuses"
+        ],
+        "operationId": "snapshot",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SnapshotArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/StatusSnapshotData"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
     "/api/statuses/summary": {
       "post": {
         "tags": [
@@ -5091,6 +5143,26 @@
           "gone"
         ]
       },
+      "SnapshotArgs": {
+        "type": "object",
+        "required": [
+          "server_id"
+        ],
+        "properties": {
+          "at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the snapshot should be \"as of\". Returns the most recent\nstatus row with `created_at <= at`. Omit (or `null`) to get\nthe latest status (no time bound)."
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
       "SnoozeArgs": {
         "type": "object",
         "required": [
@@ -5174,6 +5246,94 @@
               "type": "array",
               "items": {}
             }
+          }
+        }
+      },
+      "StatusSnapshotData": {
+        "type": "object",
+        "description": "What the UI needs to render a status snapshot — the curated\nfields ServerDetail already shows (so the modal/section can look\nlike the rest of the app) plus the new `healthy` / `health` and\nthe raw `extra` blob for forward-compat as the contract expands.",
+        "required": [
+          "id",
+          "created_at",
+          "server_id",
+          "healthy",
+          "health",
+          "extra"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "device_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "extra": {},
+          "health": {},
+          "healthy": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "min_chrome_version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "nodejs": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "platform": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "postgres": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "timezone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "version": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/VersionStr"
+              }
+            ]
+          },
+          "version_distance": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
           }
         }
       },

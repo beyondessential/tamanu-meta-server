@@ -31,7 +31,6 @@ use crate::state::AppState;
 /// `healthy` and `health` keys explicitly; otherwise consumers have
 /// to read the prose to know they exist.
 #[derive(Debug, Deserialize, ToSchema)]
-#[allow(dead_code)] // schema-only struct, never deserialized into
 pub struct StatusPayload {
 	/// Overall server self-reported health. **Absent ⇒ `true`** —
 	/// legacy senders that don't know about this field never
@@ -59,7 +58,6 @@ pub struct StatusPayload {
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
-#[allow(dead_code)] // schema-only struct, never deserialized into
 pub struct HealthCheck {
 	/// Identifier for the check. Must be a non-empty string. Used as
 	/// the issue's `ref` (`health/<check>`) so the same check
