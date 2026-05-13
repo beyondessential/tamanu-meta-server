@@ -105,6 +105,7 @@ End-to-end tests use Playwright. Run with `npm run test:e2e` from `/private-web/
 ## Troubleshooting and common mistakes
 - Always use just for tests, never use `cargo test`.
 - Unless you've done wide-ranging changes, prefer to test specific packages with `just test-package <package_name>` instead of the full test suite.
+- For frontend type checking, use `just typecheck`, not `npx tsc` at the repo root. There's no `package.json` at the root so the bare `tsc` invocation silently no-ops and you get false confidence that types are fine.
 - If you're trying to import diesel in the private-server crate, stop that and put database stuff in the database crate instead.
 - When files change from under you (ie when the dev changes things without telling you), assume those changes are intentional instead of reverting them.
 - If you're not sure, STOP AND ASK.

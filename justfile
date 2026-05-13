@@ -76,6 +76,12 @@ test-e2e-ui:
     cargo build --bin private-server --bin migrate
     cd private-web && npx playwright test --ui
 
+# Typecheck the private-web React frontend. Running `npx tsc` at the
+# repo root silently no-ops (no package.json), so always go through
+# this recipe.
+typecheck:
+    cd private-web && npx tsc --noEmit
+
 # Run migrations
 migrate:
     DATABASE_URL={{ DATABASE_URL }} diesel migration run
