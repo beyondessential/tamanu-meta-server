@@ -1,5 +1,5 @@
 import { Stack, Typography } from "@mui/material";
-import type { ShortStatus } from "../types";
+import type { HealthState, ShortStatus } from "../types";
 import StatusDot from "./StatusDot";
 import VersionSquare from "./VersionSquare";
 
@@ -9,6 +9,12 @@ const STATUS_ENTRIES: Array<{ up: ShortStatus; label: string }> = [
 	{ up: "away", label: "Away (last seen 2-10m ago)" },
 	{ up: "down", label: "Down (last seen 10m-7d ago)" },
 	{ up: "gone", label: "Gone (never or more than 7d ago)" },
+];
+
+const HEALTH_ENTRIES: Array<{ health: HealthState; label: string }> = [
+	{ health: "healthy", label: "Healthy (server reports OK)" },
+	{ health: "warning", label: "Warning (some check failing, overall OK)" },
+	{ health: "unhealthy", label: "Unhealthy (server reports problems)" },
 ];
 
 const VERSION_ENTRIES: Array<{ distance: number | null; label: string }> = [
@@ -40,6 +46,26 @@ export function StatusLegend() {
 			{STATUS_ENTRIES.map(({ up, label }) => (
 				<Stack key={up} direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
 					<StatusDot up={up} />
+					<Typography variant="body2" color="text.secondary">
+						{label}
+					</Typography>
+				</Stack>
+			))}
+		</Stack>
+	);
+}
+
+export function HealthLegend() {
+	return (
+		<Stack direction="row" spacing={2} useFlexGap sx={{ flexWrap: "wrap" }}>
+			{HEALTH_ENTRIES.map(({ health, label }) => (
+				<Stack
+					key={health}
+					direction="row"
+					spacing={0.5}
+					sx={{ alignItems: "center" }}
+				>
+					<StatusDot up="up" health={health} />
 					<Typography variant="body2" color="text.secondary">
 						{label}
 					</Typography>

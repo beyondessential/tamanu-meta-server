@@ -72,6 +72,7 @@ export type Solidify<T> = T extends readonly unknown[]
 // ── Wire types ─────────────────────────────────────────────────────────────
 
 export type ShortStatus = Solidify<Schemas["ShortStatus"]>;
+export type HealthState = Solidify<Schemas["HealthState"]>;
 export type ServerKind = Solidify<Schemas["ServerKind"]>;
 export type ServerRank = Solidify<Schemas["ServerRank"]>;
 export type VersionStatus = Solidify<Schemas["VersionStatus"]>;

@@ -3137,6 +3137,7 @@
           "name",
           "host",
           "up",
+          "health",
           "facility_servers"
         ],
         "properties": {
@@ -3145,6 +3146,9 @@
             "items": {
               "$ref": "#/components/schemas/FacilityServerStatus"
             }
+          },
+          "health": {
+            "$ref": "#/components/schemas/HealthState"
           },
           "host": {
             "type": "string"
@@ -3508,9 +3512,13 @@
         "required": [
           "id",
           "name",
-          "up"
+          "up",
+          "health"
         ],
         "properties": {
+          "health": {
+            "$ref": "#/components/schemas/HealthState"
+          },
           "id": {
             "type": "string",
             "format": "uuid"
@@ -3563,6 +3571,15 @@
             "format": "uuid"
           }
         }
+      },
+      "HealthState": {
+        "type": "string",
+        "description": "Server's self-reported health state, derived from the most\nrecent status row's `healthy` field and `health[]` array.\nOrthogonal to [`ShortStatus`]: a server can be reachable\n(`up`) and reporting itself unhealthy at the same time.\n\nThe UI renders this as the *border* of `<StatusDot>` so both\ndimensions (reachability and self-report) show in one glyph.",
+        "enum": [
+          "healthy",
+          "warning",
+          "unhealthy"
+        ]
       },
       "HistoryArgs": {
         "type": "object",
@@ -4796,6 +4813,7 @@
         "required": [
           "server",
           "up",
+          "health",
           "child_servers"
         ],
         "properties": {
@@ -4813,6 +4831,15 @@
                     "away",
                     "blip",
                     "gone"
+                  ]
+                },
+                {
+                  "type": "string",
+                  "description": "Server's self-reported health state, derived from the most\nrecent status row's `healthy` field and `health[]` array.\nOrthogonal to [`ShortStatus`]: a server can be reachable\n(`up`) and reporting itself unhealthy at the same time.\n\nThe UI renders this as the *border* of `<StatusDot>` so both\ndimensions (reachability and self-report) show in one glyph.",
+                  "enum": [
+                    "healthy",
+                    "warning",
+                    "unhealthy"
                   ]
                 },
                 {
@@ -4907,6 +4934,9 @@
                 "$ref": "#/components/schemas/DeviceInfo"
               }
             ]
+          },
+          "health": {
+            "$ref": "#/components/schemas/HealthState"
           },
           "last_status": {
             "oneOf": [
@@ -5043,6 +5073,8 @@
         "required": [
           "id",
           "created_at",
+          "healthy",
+          "health",
           "extra"
         ],
         "properties": {
@@ -5052,6 +5084,14 @@
           },
           "extra": {
             "$ref": "#/components/schemas/Value"
+          },
+          "health": {
+            "$ref": "#/components/schemas/Value",
+            "description": "Per-check breakdown from this push. `[]` for legacy rows."
+          },
+          "healthy": {
+            "type": "boolean",
+            "description": "Server's overall self-reported health from this status push.\n`true` for legacy rows that predate the contract."
           },
           "id": {
             "type": "string",

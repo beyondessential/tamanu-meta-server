@@ -26,7 +26,7 @@ import StatusDot from "../components/StatusDot";
 import TailnetIdentitySection from "../components/TailnetIdentitySection";
 import TimeAgo from "../components/TimeAgo";
 import VersionIndicator from "../components/VersionIndicator";
-import { StatusLegend, VersionLegend } from "../components/Legends";
+import { HealthLegend, StatusLegend, VersionLegend } from "../components/Legends";
 import ServerKindChip from "../components/ServerKindChip";
 import ServerRankChip from "../components/ServerRankChip";
 import { callApi, useApi, useApiAction } from "../api";
@@ -120,6 +120,9 @@ export default function ServerDetail() {
 				<Box sx={{ mt: 1 }}>
 					<StatusLegend />
 				</Box>
+				<Box sx={{ mt: 1 }}>
+					<HealthLegend />
+				</Box>
 			</Box>
 		</Stack>
 	);
@@ -155,13 +158,15 @@ function Header({
 				<Typography variant="h4" component="h1" sx={{ ml: 1 }}>
 					<StatusDot
 						up={data.up}
+						health={data.health}
 						title={data.server.name ?? ""}
 						size="0.8em"
 					/>
-					{data.child_servers.map(([up, child]) => (
+					{data.child_servers.map(([up, health, child]) => (
 						<StatusDot
 							key={child.id}
 							up={up}
+							health={health}
 							title={child.name ?? ""}
 							dim
 							size="0.8em"
@@ -598,7 +603,7 @@ function ChildServers({
 				Child servers ({children.length})
 			</Typography>
 			<Stack spacing={1}>
-				{children.map(([up, child]) => (
+				{children.map(([up, health, child]) => (
 					<Stack
 						key={child.id}
 						direction="row"
@@ -623,7 +628,7 @@ function ChildServers({
 								<LanguageIcon fontSize="small" />
 							</IconButton>
 						</Tooltip>
-						<StatusDot up={up} />
+						<StatusDot up={up} health={health} />
 						<MuiLink
 							component={RouterLink}
 							to={`/servers/${child.id}`}
