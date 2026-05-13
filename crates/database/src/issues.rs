@@ -322,14 +322,8 @@ impl NewEvent {
 
 			// 3. (re-)evaluate incident contribution against the new issue state.
 			// `by = None`: this came from a device push, not an operator action.
-			re_evaluate_incident_membership(
-				conn,
-				&issue,
-				root_server_id,
-				effective_time,
-				None,
-			)
-			.await?;
+			re_evaluate_incident_membership(conn, &issue, root_server_id, effective_time, None)
+				.await?;
 
 			Ok(issue)
 		})

@@ -151,11 +151,7 @@ impl SlackOutbox {
 	/// it. Sets `gave_up_at` so the pending index excludes it. Leaves
 	/// `last_error` / `last_response` as the operator-visible record of
 	/// why we stopped.
-	pub async fn mark_given_up(
-		db: &mut AsyncPgConnection,
-		id: Uuid,
-		error: &str,
-	) -> Result<()> {
+	pub async fn mark_given_up(db: &mut AsyncPgConnection, id: Uuid, error: &str) -> Result<()> {
 		use crate::schema::slack_outbox::dsl;
 		diesel::update(dsl::slack_outbox.filter(dsl::id.eq(id)))
 			.set((
