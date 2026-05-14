@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
+## [6.2.2](https://github.com/beyondessential/canopy/compare/v6.2.1..v6.2.2) - 2026-05-14
+
+
+- **Repo:** Release - ([0227261](https://github.com/beyondessential/canopy/commit/0227261611c2b1025599fc50d6a3726d88157e97))
+
+---
 ## [6.2.1](https://github.com/beyondessential/canopy/compare/v6.2.0..v6.2.1) - 2026-05-13
 
 
