@@ -19,6 +19,7 @@ import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { humanDuration } from "../lib/humanDuration";
+import MessageView from "./MessageView";
 import NotesList, { AddNoteButton } from "./NotesList";
 import SeverityChip from "./SeverityChip";
 import StatusSnapshotPanel, { StatusSnapshotButton } from "./StatusSnapshot";
@@ -324,18 +325,7 @@ function Body({
 	return (
 		<Box sx={{ mt: 1 }}>
 			<IssueMeta issue={issue} />
-			<Typography
-				variant="body2"
-				component="pre"
-				sx={{
-					m: 0,
-					whiteSpace: "pre-wrap",
-					fontFamily: "monospace",
-					fontSize: "0.85em",
-				}}
-			>
-				{issue.message}
-			</Typography>
+			<MessageView message={issue.message} />
 			{isAdmin && (
 				<IssueActions
 					issue={issue}
