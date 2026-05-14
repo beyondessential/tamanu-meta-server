@@ -53,17 +53,17 @@ function headline(issue: IssueData): string {
  * incident links), the message body, action buttons and a two-column
  * Events / Notes panel. When collapsed, only the header row is visible —
  * even the action buttons are hidden. Header layout:
- * `[toggle] [server?] [headline] [ack/avatar] [snapshot] [severity] [time]`.
+ * `[toggle] [server] [headline] [ack/avatar] [snapshot] [severity] [time]`.
  * The headline is struck through when the issue is inactive or resolved.
+ * The server is always shown because incidents can span child servers in
+ * a group — relying on a page H1 to identify the server is insufficient.
  */
 export default function IssueRow({
 	issue,
-	showServer = false,
 	defaultExpanded = false,
 	onChanged,
 }: {
 	issue: IssueData;
-	showServer?: boolean;
 	/** Initial expanded state. Default `false` (collapsed) — fits list views;
 	 * incident-detail timelines pass `true`. */
 	defaultExpanded?: boolean;
@@ -91,7 +91,6 @@ export default function IssueRow({
 				setExpanded={setExpanded}
 				snoozeActive={snoozeActive}
 				struckThrough={struckThrough}
-				showServer={showServer}
 				isAdmin={isAdmin}
 				onChanged={onChanged}
 				headerSnapshotOpen={headerSnapshotOpen}
@@ -124,7 +123,6 @@ function Header({
 	setExpanded,
 	snoozeActive,
 	struckThrough,
-	showServer,
 	isAdmin,
 	onChanged,
 	headerSnapshotOpen,
@@ -135,7 +133,6 @@ function Header({
 	setExpanded: (v: (p: boolean) => boolean) => void;
 	snoozeActive: boolean;
 	struckThrough: boolean;
-	showServer: boolean;
 	isAdmin: boolean;
 	onChanged: () => void;
 	headerSnapshotOpen: boolean;
@@ -158,17 +155,15 @@ function Header({
 					<ExpandMoreIcon fontSize="small" />
 				)}
 			</IconButton>
-			{showServer && (
-				<MuiLink
-					component={RouterLink}
-					to={`/servers/${issue.server_id}`}
-					underline="hover"
-					color="text.primary"
-					sx={{ fontWeight: 500, flexShrink: 0 }}
-				>
-					{serverLabel(issue.server_name, issue.server_host)}
-				</MuiLink>
-			)}
+			<MuiLink
+				component={RouterLink}
+				to={`/servers/${issue.server_id}`}
+				underline="hover"
+				color="text.primary"
+				sx={{ fontWeight: 500, flexShrink: 0 }}
+			>
+				{serverLabel(issue.server_name, issue.server_host)}
+			</MuiLink>
 			<Typography
 				variant="body2"
 				sx={{

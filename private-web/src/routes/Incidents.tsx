@@ -145,7 +145,6 @@ export default function Incidents() {
 						<IssueRow
 							key={issue.id}
 							issue={issue}
-							showServer
 							onChanged={bumpRefresh}
 						/>
 					))}
