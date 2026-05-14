@@ -43,3 +43,4 @@ uuid = { version = "1.23.1", features = ["serde", "v4"] }
 [dev-dependencies]
 commons-tests = { path = "../commons-tests" }
 hex = "0.4.3"
+rcgen = "0.14.7"

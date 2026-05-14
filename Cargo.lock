@@ -2845,6 +2845,7 @@ dependencies = [
  "miette",
  "mime_guess",
  "public-server",
+ "rcgen",
  "rust-embed",
  "serde",
  "serde_json",
