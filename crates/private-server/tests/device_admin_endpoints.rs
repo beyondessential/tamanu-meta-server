@@ -166,6 +166,60 @@ async fn attach_tailscale_conflict_when_node_id_already_claimed() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn attach_tailscale_detaches_untrusted_claimant() {
+	TestDb::run(async |mut conn, url| {
+		let (_ip, node_id, dir) = test_directory();
+		let private = private_with_directory(&url, dir).await;
+
+		// Untrusted placeholder, auto-created on first contact, holds the node id.
+		let placeholder = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO devices (id, role, tailscale_node_id, tailscale_node_name) \
+			 VALUES ('{placeholder}', 'untrusted', '{node_id}', 'placeholder-name');"
+		))
+		.await
+		.expect("seed placeholder");
+
+		// Real (server-role) device the operator wants to bind the node id to.
+		let target = insert_device(&mut conn).await;
+
+		let resp = private
+			.post("/api/devices/attach_tailscale")
+			.json(&serde_json::json!({
+				"device_id": target,
+				"identifier": node_id,
+			}))
+			.await;
+		resp.assert_status_ok();
+		let body: serde_json::Value = resp.json();
+		assert_eq!(
+			body["device"]["tailscale_node_id"].as_str(),
+			Some(node_id.as_str()),
+		);
+		assert_eq!(
+			body["device"]["id"].as_str(),
+			Some(target.to_string().as_str()),
+		);
+
+		// Placeholder row is still there, but its tailscale fields are cleared.
+		conn.batch_execute(&format!(
+			"DO $$ BEGIN \
+			   IF NOT EXISTS ( \
+			     SELECT 1 FROM devices \
+			     WHERE id = '{placeholder}' \
+			       AND tailscale_node_id IS NULL \
+			       AND tailscale_node_name IS NULL \
+			       AND tailscale_tailnet IS NULL \
+			   ) THEN RAISE EXCEPTION 'placeholder should be detached'; END IF; \
+			 END $$;"
+		))
+		.await
+		.expect("placeholder detached");
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn detach_tailscale_clears_columns() {
 	TestDb::run(async |mut conn, url| {
 		let (_ip, node_id, dir) = test_directory();

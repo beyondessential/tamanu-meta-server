@@ -165,10 +165,18 @@ impl Device {
 	/// Pre-attach a tailnet identity to an existing device. Used by the
 	/// admin "attach Tailscale identity" workflow when the operator
 	/// knows a device is about to come online over the tailnet (or is
-	/// being moved off mTLS). Errors with
-	/// `DeviceTailscaleNodeAlreadyClaimed` if another device already
-	/// holds this `node_id` — the operator should use the merge flow
-	/// in that case.
+	/// being moved off mTLS).
+	///
+	/// If another device already holds this `node_id`:
+	///
+	/// - If that device is `Untrusted` (the typical case — an
+	///   auto-created placeholder from a tailnet first-contact), the
+	///   identity is detached from it so the target can claim it. The
+	///   placeholder row is left in place but with its tailscale_*
+	///   columns cleared.
+	/// - Otherwise (the conflicting device has a real role), this
+	///   returns `DeviceTailscaleNodeAlreadyClaimed` and the operator
+	///   must reach for the merge flow.
 	pub async fn attach_tailscale(
 		db: &mut AsyncPgConnection,
 		device_id: Uuid,
@@ -176,29 +184,42 @@ impl Device {
 	) -> Result<()> {
 		use crate::schema::devices::dsl;
 
-		// Pre-check: another device already claiming this node id?
-		let conflict: Option<Uuid> = dsl::devices
-			.select(dsl::id)
-			.filter(dsl::tailscale_node_id.eq(&identity.node_id))
-			.filter(dsl::id.ne(device_id))
-			.first(db)
-			.await
-			.optional()
-			.map_err(AppError::from)?;
-		if conflict.is_some() {
-			return Err(AppError::DeviceTailscaleNodeAlreadyClaimed);
-		}
+		db.transaction::<_, AppError, _>(async |conn| {
+			let conflict: Option<Self> = dsl::devices
+				.select(Self::as_select())
+				.filter(dsl::tailscale_node_id.eq(&identity.node_id))
+				.filter(dsl::id.ne(device_id))
+				.first(conn)
+				.await
+				.optional()
+				.map_err(AppError::from)?;
+			if let Some(conflict) = conflict {
+				if conflict.role != DeviceRole::Untrusted {
+					return Err(AppError::DeviceTailscaleNodeAlreadyClaimed);
+				}
+				diesel::update(dsl::devices.filter(dsl::id.eq(conflict.id)))
+					.set((
+						dsl::tailscale_node_id.eq(None::<String>),
+						dsl::tailscale_node_name.eq(None::<String>),
+						dsl::tailscale_tailnet.eq(None::<String>),
+					))
+					.execute(conn)
+					.await
+					.map_err(AppError::from)?;
+			}
 
-		diesel::update(dsl::devices.filter(dsl::id.eq(device_id)))
-			.set((
-				dsl::tailscale_node_id.eq(identity.node_id),
-				dsl::tailscale_node_name.eq(identity.node_name),
-				dsl::tailscale_tailnet.eq(identity.tailnet),
-			))
-			.execute(db)
-			.await
-			.map_err(AppError::from)?;
-		Ok(())
+			diesel::update(dsl::devices.filter(dsl::id.eq(device_id)))
+				.set((
+					dsl::tailscale_node_id.eq(identity.node_id),
+					dsl::tailscale_node_name.eq(identity.node_name),
+					dsl::tailscale_tailnet.eq(identity.tailnet),
+				))
+				.execute(conn)
+				.await
+				.map_err(AppError::from)?;
+			Ok(())
+		})
+		.await
 	}
 
 	/// Clear the tailnet identity from a device. The opposite of
