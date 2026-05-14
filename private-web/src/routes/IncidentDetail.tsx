@@ -415,7 +415,9 @@ function Timeline({
 					<IssueRow
 						key={`issue-${e.issue.issue.id}`}
 						issue={e.issue.issue}
-						defaultExpanded
+						defaultExpanded={
+							e.issue.issue.active && !e.issue.issue.resolved_at
+						}
 						onChanged={onChanged}
 					/>
 				) : (
