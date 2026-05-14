@@ -1,8 +1,27 @@
 import { Box } from "@mui/material";
 import ReactMarkdown from "react-markdown";
+import rehypeRaw from "rehype-raw";
+import rehypeSanitize from "rehype-sanitize";
+import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 
-export default function Markdown({ children }: { children: string }) {
+/** Renders markdown with GFM extensions and a sanitised subset of inline
+ * HTML. Sources sometimes wrap their messages in `<b>`, `<a>`, `<code>`
+ * and similar — those pass through; anything dangerous (scripts, inline
+ * event handlers, iframes, etc.) is stripped by `rehype-sanitize`'s
+ * default GitHub-compatible schema. Pass `preserveNewlines` when input
+ * may be plain text with significant line breaks (e.g. log messages),
+ * which converts soft breaks to `<br>`. */
+export default function Markdown({
+	children,
+	preserveNewlines = false,
+}: {
+	children: string;
+	preserveNewlines?: boolean;
+}) {
+	const remarkPlugins = preserveNewlines
+		? [remarkGfm, remarkBreaks]
+		: [remarkGfm];
 	return (
 		<Box
 			sx={{
@@ -47,7 +66,12 @@ export default function Markdown({ children }: { children: string }) {
 				},
 			}}
 		>
-			<ReactMarkdown remarkPlugins={[remarkGfm]}>{children}</ReactMarkdown>
+			<ReactMarkdown
+				remarkPlugins={remarkPlugins}
+				rehypePlugins={[rehypeRaw, rehypeSanitize]}
+			>
+				{children}
+			</ReactMarkdown>
 		</Box>
 	);
 }
