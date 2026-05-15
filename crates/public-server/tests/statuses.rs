@@ -767,13 +767,13 @@ async fn submit_status_warning_check_only() {
 			assert_eq!(per_check.severity, "warning");
 			assert!(per_check.active);
 			assert!(!per_check.is_resolved);
-			assert!(per_check.message.contains("disk"));
 			assert!(
 				per_check
 					.description
 					.as_ref()
-					.is_some_and(|d| d.contains("free_pct"))
+					.is_some_and(|d| d.contains("disk"))
 			);
+			assert!(per_check.message.contains("free_pct"));
 
 			// No roll-up while top-level healthy.
 			assert!(fetch_issue(&mut conn, server_id, "status", "health").await.is_none());
@@ -811,8 +811,9 @@ async fn submit_status_unhealthy_with_checks_opens_incident() {
 				.expect("roll-up issue filed");
 			assert_eq!(roll_up.severity, "error");
 			assert!(roll_up.active);
-			assert!(roll_up.message.contains("database"));
-			assert!(roll_up.message.contains("disk"));
+			let roll_up_headline = roll_up.description.as_deref().unwrap_or_default();
+			assert!(roll_up_headline.contains("database"));
+			assert!(roll_up_headline.contains("disk"));
 
 			for check in ["database", "disk"] {
 				let i = fetch_issue(&mut conn, server_id, "status", &format!("health/{check}"))
@@ -854,7 +855,7 @@ async fn submit_status_unhealthy_no_checks_files_roll_up_only() {
 				.expect("roll-up issue filed");
 			assert_eq!(roll_up.severity, "error");
 			assert!(roll_up.active);
-			assert_eq!(roll_up.message, "Server reports unhealthy");
+			assert_eq!(roll_up.description.as_deref(), Some("Server reports unhealthy"));
 			assert_eq!(count_issues_for_server(&mut conn, server_id).await, 1);
 			assert!(fetch_open_incident(&mut conn, server_id).await.is_some());
 		},
