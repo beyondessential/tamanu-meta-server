@@ -30,7 +30,7 @@ reqwest = { version = "0.13.3", default-features = false, features = ["json", "r
 serde = "1.0.228"
 tera = "1.20.1"
 timesimp = "1.0.0"
-tokio = "1.52.2"
+tokio = "1.52.3"
 tracing = "0.1.44"
 utoipa = { version = "5", features = ["jiff_0_2", "uuid", "axum_extras"] }
 utoipa-axum = "0.2"
