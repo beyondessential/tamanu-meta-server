@@ -1,5 +1,6 @@
 use commons_errors::{AppError, Result};
 use commons_types::{
+	device::DeviceRole,
 	geo::GeoPoint,
 	server::{kind::ServerKind, rank::ServerRank, ticket::CanopyTicket},
 };
@@ -223,12 +224,18 @@ impl Server {
 			_ => {}
 		}
 
-		// Find or create the device that owns this key.
+		// Find or create the device that owns this key. The ticket is
+		// the operator's trust signal — promote a freshly-created (or
+		// previously-Untrusted) device to `Server` so they don't have
+		// to flip it manually after import.
 		let device = if let Some(device) = crate::devices::Device::from_key(db, &key_der).await? {
 			device
 		} else {
 			crate::devices::Device::create(db, key_der).await?
 		};
+		if device.role == DeviceRole::Untrusted {
+			crate::devices::Device::trust(db, device.id, DeviceRole::Server).await?;
+		}
 
 		let cloud = ticket.hosting.as_deref().map(|h| {
 			matches!(
@@ -252,23 +259,34 @@ impl Server {
 		};
 
 		let kind_str = server_value.kind.to_string();
+		let rank_str = server_value.rank.map(|r| r.to_string());
 
-		// Upsert: insert or update on conflict.
+		// Upsert: insert or update on conflict. Ticket-derived fields
+		// (kind, rank, cloud, parent_server_id) re-apply on update;
+		// operator-edited state (listed, geolocation, alert_when_down)
+		// is preserved.
 		diesel::insert_into(servers::table)
 			.values((
 				servers::id.eq(server_value.id),
 				servers::name.eq(&server_value.name),
 				servers::host.eq(&host_str),
 				servers::kind.eq(&kind_str),
+				servers::rank.eq(&rank_str),
 				servers::device_id.eq(server_value.device_id),
+				servers::parent_server_id.eq(server_value.parent_server_id),
 				servers::listed.eq(server_value.listed),
+				servers::cloud.eq(server_value.cloud),
 			))
 			.on_conflict(servers::id)
 			.do_update()
 			.set((
 				servers::name.eq(&server_value.name),
 				servers::host.eq(&host_str),
+				servers::kind.eq(&kind_str),
+				servers::rank.eq(&rank_str),
 				servers::device_id.eq(server_value.device_id),
+				servers::parent_server_id.eq(server_value.parent_server_id),
+				servers::cloud.eq(server_value.cloud),
 			))
 			.returning(Self::as_select())
 			.get_result(db)
