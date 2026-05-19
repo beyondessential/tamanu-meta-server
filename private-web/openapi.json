@@ -1640,10 +1640,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/EventData"
-                  }
+                  "$ref": "#/components/schemas/Page_EventData"
                 }
               }
             }
@@ -4120,6 +4117,13 @@
               "null"
             ],
             "format": "int64"
+          },
+          "offset": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
           }
         }
       },
@@ -4356,6 +4360,81 @@
                       "description": "Live snapshot from the Tailscale control plane for a device\nthat's currently attached by `tailscale_node_id`. `None` if the\ndevice has no tailnet attachment, the directory isn't\nconfigured, or the node id isn't in the directory's cache."
                     }
                   ]
+                }
+              }
+            }
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "Page_EventData": {
+        "type": "object",
+        "description": "Standard wrapper for paginated list responses. The total reflects the full\nrow count (not just the current page) so the frontend can render page\ncounts without a separate count fetch.",
+        "required": [
+          "items",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "issue_id",
+                "created_at",
+                "severity",
+                "message",
+                "active",
+                "occurrences",
+                "last_seen"
+              ],
+              "properties": {
+                "active": {
+                  "type": "boolean"
+                },
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "description": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "issue_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "last_seen": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "occurred_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "occurrences": {
+                  "type": "integer",
+                  "format": "int32"
+                },
+                "severity": {
+                  "$ref": "#/components/schemas/Severity"
                 }
               }
             }

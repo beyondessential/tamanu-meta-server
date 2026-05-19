@@ -5,6 +5,7 @@ import {
 	IconButton,
 	Link as MuiLink,
 	MenuItem,
+	Pagination,
 	Stack,
 	TextField,
 	Tooltip,
@@ -567,6 +568,9 @@ function IssueMeta({ issue }: { issue: IssueData }) {
 	);
 }
 
+const COLLAPSED_EVENT_COUNT = 3;
+const EXPANDED_PAGE_SIZE = 10;
+
 function EventLog({
 	issueId,
 	serverId,
@@ -574,11 +578,15 @@ function EventLog({
 	issueId: string;
 	serverId: string;
 }) {
+	const [expanded, setExpanded] = useState(false);
+	const [page, setPage] = useState(0);
+	const limit = expanded ? EXPANDED_PAGE_SIZE : COLLAPSED_EVENT_COUNT;
+	const offset = expanded ? page * EXPANDED_PAGE_SIZE : 0;
 	const result = useApi(
 		"issues",
 		"list_events",
-		{ issue_id: issueId },
-		[issueId],
+		{ issue_id: issueId, offset, limit },
+		[issueId, offset, limit],
 	);
 	const [snapshotOpen, setSnapshotOpen] = useState<ReadonlySet<string>>(
 		() => new Set(),
@@ -606,16 +614,20 @@ function EventLog({
 		);
 	if (result.status === "error")
 		return <MuiAlert severity="error">{result.error.message}</MuiAlert>;
-	if (result.data.length === 0)
+	const { items, total } = result.data;
+	if (total === 0)
 		return (
 			<Typography variant="caption" color="text.secondary">
 				No events recorded.
 			</Typography>
 		);
 
+	const pageCount = Math.max(1, Math.ceil(total / EXPANDED_PAGE_SIZE));
+	const hiddenCount = Math.max(0, total - COLLAPSED_EVENT_COUNT);
+
 	return (
 		<Stack spacing={0.5}>
-			{result.data.map((e) => {
+			{items.map((e) => {
 				const at = e.occurred_at ?? e.created_at;
 				const open = snapshotOpen.has(e.id);
 				return (
@@ -686,6 +698,43 @@ function EventLog({
 					</Box>
 				);
 			})}
+			{!expanded && hiddenCount > 0 && (
+				<Button
+					size="small"
+					onClick={() => {
+						setExpanded(true);
+						setPage(0);
+					}}
+					sx={{ alignSelf: "flex-start" }}
+				>
+					Show {hiddenCount} more {hiddenCount === 1 ? "event" : "events"}
+				</Button>
+			)}
+			{expanded && (
+				<Stack
+					direction="row"
+					spacing={1}
+					sx={{ alignItems: "center", justifyContent: "space-between" }}
+				>
+					<Button
+						size="small"
+						onClick={() => {
+							setExpanded(false);
+							setPage(0);
+						}}
+					>
+						Show less
+					</Button>
+					{pageCount > 1 && (
+						<Pagination
+							size="small"
+							count={pageCount}
+							page={page + 1}
+							onChange={(_, p) => setPage(p - 1)}
+						/>
+					)}
+				</Stack>
+			)}
 		</Stack>
 	);
 }

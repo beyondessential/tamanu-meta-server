@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
+use crate::fns::Page;
 use crate::state::AppState;
 
 const DEFAULT_LIMIT: i64 = 100;
@@ -393,6 +394,8 @@ pub async fn list_for_server(
 pub struct ListEventsArgs {
 	pub issue_id: Uuid,
 	#[serde(default)]
+	pub offset: Option<i64>,
+	#[serde(default)]
 	pub limit: Option<i64>,
 }
 
@@ -403,22 +406,25 @@ pub struct ListEventsArgs {
 	security(("tailscale-user" = [])),
 	request_body = ListEventsArgs,
 	responses(
-		(status = 200, body = Vec<EventData>),
+		(status = 200, body = Page<EventData>),
 	),
 )]
 pub async fn list_events(
 	State(state): State<AppState>,
 	_user: TailscaleUser,
 	Json(args): Json<ListEventsArgs>,
-) -> Result<Json<Vec<EventData>>> {
+) -> Result<Json<Page<EventData>>> {
 	let mut conn = state.db.get().await?;
+	let total = Event::count_for_issue(&mut conn, args.issue_id).await? as u64;
 	let events = Event::list_for_issue(
 		&mut conn,
 		args.issue_id,
+		args.offset.unwrap_or(0),
 		args.limit.unwrap_or(DEFAULT_LIMIT),
 	)
 	.await?;
-	Ok(Json(events.into_iter().map(EventData::from).collect()))
+	let items = events.into_iter().map(EventData::from).collect();
+	Ok(Json(Page { items, total }))
 }
 
 #[derive(Deserialize, ToSchema)]
