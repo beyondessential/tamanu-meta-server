@@ -235,15 +235,15 @@ async fn file_self_event(
 		source: "canopy".to_string(),
 		r#ref: "slack-delivery-failure".to_string(),
 		severity: Some(Severity::Error),
-		description: Some(format!(
+		description: Some(format!("Slack delivery permanently failed ({})", row.kind)),
+		message: format!(
 			"outbox row {} (kind={}, incident={}): gave up after {attempts} attempts. Last error: {}. Last response: {}",
 			row.id,
 			row.kind,
 			row.incident_id,
 			err.msg,
 			err.body.as_deref().unwrap_or("<none>"),
-		)),
-		message: format!("Slack delivery permanently failed ({})", row.kind),
+		),
 		active: Some(true),
 		occurred_at: None,
 	};

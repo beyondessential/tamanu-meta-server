@@ -870,7 +870,8 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Single-line title/subject. See [`NewEvent::description`]."
           },
           "device_id": {
             "type": [
@@ -892,7 +893,8 @@
             "format": "date-time"
           },
           "message": {
-            "type": "string"
+            "type": "string",
+            "description": "Body / long detail. See [`NewEvent::message`]."
           },
           "ref": {
             "type": "string"
@@ -959,10 +961,12 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Short single-line title/subject for this event. Rendered as the\nissue's headline in the UI and as the Slack message subject.\nMust not contain newlines — `save()` returns `BadRequest` if it\ndoes. Use [`Self::message`] for the body / longer detail."
           },
           "message": {
-            "type": "string"
+            "type": "string",
+            "description": "Body text for this event. Free-form, multi-line OK. Falls back\nto the headline when [`Self::description`] is `None` (the UI\nuses the first line in that case)."
           },
           "occurredAt": {
             "type": [
