@@ -1033,11 +1033,12 @@
           "id"
         ],
         "properties": {
-          "alert_when_down": {
+          "alert_when_down_for": {
             "type": [
-              "boolean",
+              "integer",
               "null"
-            ]
+            ],
+            "format": "int64"
           },
           "cloud": {
             "type": [
@@ -1184,12 +1185,13 @@
           "host",
           "kind",
           "listed",
-          "alert_when_down"
+          "alert_when_down_for"
         ],
         "properties": {
-          "alert_when_down": {
-            "type": "boolean",
-            "description": "When true, the canopy reachability sweep observes this server's\nstatus freshness and files an issue when it goes Blip/Away/Down/Gone.\nSet to false on servers whose downtime is expected (test\nenvironments, ad-hoc demos) — the sweep simply doesn't collect\nevents for them.\n\nThe DB default is `true` for freshly-inserted rows, but the migration\nthat added the column backfilled existing rows with `false` to avoid\nflooding incidents on rollout. Operators flip it on per server."
+          "alert_when_down_for": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How long a server's status row may go un-updated before the canopy\nreachability sweep files an issue.\n\n`INTERVAL '0'` disables the sweep for this server entirely — useful\nfor test environments and ad-hoc demos whose downtime is expected.\nPositive values are the per-server downtime threshold: bump it up\nfor flappy servers, drop it for critical ones that should page\npromptly. Negative durations are rejected by a CHECK constraint on\nthe column.\n\nDefault 10 minutes for newly-inserted rows. On the JSON wire this\nis represented as a count of whole seconds (`i64`)."
           },
           "cloud": {
             "type": [

@@ -33,6 +33,7 @@ import ServerKindChip from "../components/ServerKindChip";
 import ServerRankChip from "../components/ServerRankChip";
 import { callApi, useApi, useApiAction } from "../api";
 import { usePageTitle } from "../hooks/usePageTitle";
+import { humanSeconds } from "../lib/humanDuration";
 import type {
 	DeviceInfo,
 	ServerDetailData,
@@ -466,7 +467,11 @@ function InfoSection({
 				)}
 				<InfoItem
 					label="Status alerts"
-					value={server.alert_when_down ? "On" : "Off"}
+					value={
+						server.alert_when_down_for > 0
+							? `After ${humanSeconds(server.alert_when_down_for)}`
+							: "Off"
+					}
 				/>
 				{server.parent_server_id && (
 					<Stack spacing={0.25}>
@@ -798,7 +803,7 @@ function ChildServers({
 						</MuiLink>
 						{child.rank && <ServerRankChip rank={child.rank} />}
 						<ServerKindChip kind={child.kind} />
-						{!child.alert_when_down && (
+						{child.alert_when_down_for <= 0 && (
 							<Tooltip title="Status alerts are off for this server — canopy isn't watching it.">
 								<Chip
 									size="small"

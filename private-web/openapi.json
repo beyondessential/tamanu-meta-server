@@ -4384,11 +4384,13 @@
                 "kind",
                 "host",
                 "listed",
-                "alert_when_down"
+                "alert_when_down_for"
               ],
               "properties": {
-                "alert_when_down": {
-                  "type": "boolean"
+                "alert_when_down_for": {
+                  "type": "integer",
+                  "format": "int64",
+                  "description": "Downtime threshold in seconds before the reachability sweep files an\nissue. `0` (or any non-positive value) disables alerting for this\nserver; the default at creation is 600 (10 minutes)."
                 },
                 "cloud": {
                   "type": [
@@ -4732,11 +4734,12 @@
       "ServerDataUpdate": {
         "type": "object",
         "properties": {
-          "alert_when_down": {
+          "alert_when_down_for": {
             "type": [
-              "boolean",
+              "integer",
               "null"
-            ]
+            ],
+            "format": "int64"
           },
           "cloud": {
             "type": [
@@ -4849,11 +4852,13 @@
                     "kind",
                     "host",
                     "listed",
-                    "alert_when_down"
+                    "alert_when_down_for"
                   ],
                   "properties": {
-                    "alert_when_down": {
-                      "type": "boolean"
+                    "alert_when_down_for": {
+                      "type": "integer",
+                      "format": "int64",
+                      "description": "Downtime threshold in seconds before the reachability sweep files an\nissue. `0` (or any non-positive value) disables alerting for this\nserver; the default at creation is 600 (10 minutes)."
                     },
                     "cloud": {
                       "type": [
@@ -4987,11 +4992,13 @@
           "kind",
           "host",
           "listed",
-          "alert_when_down"
+          "alert_when_down_for"
         ],
         "properties": {
-          "alert_when_down": {
-            "type": "boolean"
+          "alert_when_down_for": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Downtime threshold in seconds before the reachability sweep files an\nissue. `0` (or any non-positive value) disables alerting for this\nserver; the default at creation is 600 (10 minutes)."
           },
           "cloud": {
             "type": [

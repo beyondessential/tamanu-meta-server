@@ -6,10 +6,14 @@ use commons_types::{
 };
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use jiff::SignedDuration;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::pg_duration::PgDuration;
 use super::url_field::UrlField;
+
+const TEN_MINUTES: PgDuration = PgDuration(SignedDuration::from_secs(600));
 
 #[derive(
 	Debug,
@@ -45,16 +49,20 @@ pub struct Server {
 	pub cloud: Option<bool>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub geolocation: Option<GeoPoint>,
-	/// When true, the canopy reachability sweep observes this server's
-	/// status freshness and files an issue when it goes Blip/Away/Down/Gone.
-	/// Set to false on servers whose downtime is expected (test
-	/// environments, ad-hoc demos) — the sweep simply doesn't collect
-	/// events for them.
+	/// How long a server's status row may go un-updated before the canopy
+	/// reachability sweep files an issue.
 	///
-	/// The DB default is `true` for freshly-inserted rows, but the migration
-	/// that added the column backfilled existing rows with `false` to avoid
-	/// flooding incidents on rollout. Operators flip it on per server.
-	pub alert_when_down: bool,
+	/// `INTERVAL '0'` disables the sweep for this server entirely — useful
+	/// for test environments and ad-hoc demos whose downtime is expected.
+	/// Positive values are the per-server downtime threshold: bump it up
+	/// for flappy servers, drop it for critical ones that should page
+	/// promptly. Negative durations are rejected by a CHECK constraint on
+	/// the column.
+	///
+	/// Default 10 minutes for newly-inserted rows. On the JSON wire this
+	/// is represented as a count of whole seconds (`i64`).
+	#[schema(value_type = i64)]
+	pub alert_when_down_for: PgDuration,
 }
 
 impl Server {
@@ -255,7 +263,7 @@ impl Server {
 			listed: false,
 			cloud,
 			geolocation: None,
-			alert_when_down: true,
+			alert_when_down_for: TEN_MINUTES,
 		};
 
 		let kind_str = server_value.kind.to_string();
@@ -263,7 +271,7 @@ impl Server {
 
 		// Upsert: insert or update on conflict. Ticket-derived fields
 		// (kind, rank, cloud, parent_server_id) re-apply on update;
-		// operator-edited state (listed, geolocation, alert_when_down)
+		// operator-edited state (listed, geolocation, alert_when_down_for)
 		// is preserved.
 		diesel::insert_into(servers::table)
 			.values((
@@ -535,7 +543,7 @@ fn test_server_serialization() {
 		listed: true,
 		cloud: None,
 		geolocation: None,
-		alert_when_down: true,
+		alert_when_down_for: TEN_MINUTES,
 	};
 
 	let serialized = serde_json::to_string_pretty(&server).unwrap();
@@ -549,7 +557,7 @@ fn test_server_serialization() {
   "rank": "production",
   "device_id": "00000000-0000-0000-0000-000000000000",
   "listed": true,
-  "alert_when_down": true
+  "alert_when_down_for": 600
 }"#
 	);
 }
@@ -576,7 +584,7 @@ impl From<NewServer> for Server {
 			listed: false,
 			cloud: None,
 			geolocation: None,
-			alert_when_down: true,
+			alert_when_down_for: TEN_MINUTES,
 		}
 	}
 }
@@ -597,5 +605,7 @@ pub struct PartialServer {
 	pub listed: Option<bool>,
 	pub cloud: Option<Option<bool>>,
 	pub geolocation: Option<Option<GeoPoint>>,
-	pub alert_when_down: Option<bool>,
+	#[schema(value_type = Option<i64>)]
+	#[diesel(serialize_as = PgDuration)]
+	pub alert_when_down_for: Option<PgDuration>,
 }

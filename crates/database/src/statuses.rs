@@ -31,25 +31,21 @@ pub const CANOPY_SOURCE: &str = "canopy";
 /// same issue row.
 pub const REACHABILITY_REF: &str = "reachability";
 
-/// Severity for canopy to file when a server's most recent status puts it in
-/// the given short state. `None` for `Up` — a healthy server doesn't open an
-/// issue.
-///
-/// The mapping escalates one step at a time below the incident floor
-/// (`Notice` → `Warning`), then jumps to `Error` (which opens an incident),
-/// then `Critical` for the long-gone state.
-pub fn reachability_severity(short: ShortStatus) -> Option<Severity> {
-	match short {
-		ShortStatus::Up => None,
-		ShortStatus::Blip => Some(Severity::Notice),
-		ShortStatus::Away => Some(Severity::Warning),
-		ShortStatus::Down => Some(Severity::Error),
-		ShortStatus::Gone => Some(Severity::Critical),
-	}
-}
-
 fn server_label(s: &Server) -> String {
 	s.name.clone().unwrap_or_else(|| s.host.0.to_string())
+}
+
+fn format_secs(secs: i64) -> String {
+	let s = secs.max(0);
+	if s >= 86_400 {
+		format!("{}d", s / 86_400)
+	} else if s >= 3_600 {
+		format!("{}h", s / 3_600)
+	} else if s >= 60 {
+		format!("{}m", s / 60)
+	} else {
+		format!("{s}s")
+	}
 }
 
 #[derive(
@@ -204,10 +200,10 @@ impl Status {
 		Ok(())
 	}
 
-	/// Sweep every server's most recent status. For each non-silenced server
-	/// whose state has crossed (or just left) one of the reachability tiers
-	/// (`Blip`/`Away`/`Down`/`Gone`), file (or close) a canopy-sourced issue
-	/// keyed by [`REACHABILITY_REF`].
+	/// Sweep every server's most recent status. For each monitored server
+	/// (i.e. `alert_when_down_for > 0`) whose freshness has crossed the
+	/// per-server threshold, file (or close) a canopy-sourced issue keyed
+	/// by [`REACHABILITY_REF`].
 	///
 	/// Most servers report by pushing their own status to the public-server
 	/// (so their `device_id` is non-null); the pingtask only handles legacy
@@ -219,7 +215,7 @@ impl Status {
 		let servers = Server::get_all(db, 0, None).await?;
 		let monitored: Vec<&Server> = servers
 			.iter()
-			.filter(|s| s.alert_when_down && s.id != Uuid::nil())
+			.filter(|s| s.alert_when_down_for.0 > SignedDuration::ZERO && s.id != Uuid::nil())
 			.collect();
 		if monitored.is_empty() {
 			return Ok(0);
@@ -237,17 +233,20 @@ impl Status {
 		let now = Timestamp::now();
 		let mut filed = 0usize;
 		for server in &monitored {
-			let short = status_map
-				.get(&server.id)
-				.map(Self::short_status)
-				.unwrap_or_default();
-			let severity = reachability_severity(short);
+			let threshold = server.alert_when_down_for.0;
+			let elapsed = match status_map.get(&server.id) {
+				Some(s) => now.duration_since(s.created_at).abs(),
+				// No status ever recorded: treat as infinite downtime so the
+				// threshold always trips. Caps at i64::MAX seconds for arithmetic.
+				None => SignedDuration::MAX,
+			};
+			let down = elapsed >= threshold;
 			let existing = issue_map.get(&server.id).copied();
 
-			let event = match (severity, existing) {
-				(None, None) => continue,
-				(None, Some(issue)) if !issue.active => continue,
-				(None, Some(_)) => NewEvent {
+			let event = match (down, existing) {
+				(false, None) => continue,
+				(false, Some(issue)) if !issue.active => continue,
+				(false, Some(_)) => NewEvent {
 					source: CANOPY_SOURCE.into(),
 					r#ref: REACHABILITY_REF.into(),
 					severity: Some(Severity::Info),
@@ -256,14 +255,16 @@ impl Status {
 					active: Some(false),
 					occurred_at: Some(now),
 				},
-				(Some(sev), _) => NewEvent {
+				(true, _) => NewEvent {
 					source: CANOPY_SOURCE.into(),
 					r#ref: REACHABILITY_REF.into(),
-					severity: Some(sev),
+					severity: Some(Severity::Error),
 					description: None,
 					message: format!(
-						"Server {} hasn't reported (state: {short})",
+						"Server {} has not reported for {} (threshold {})",
 						server_label(server),
+						format_secs(elapsed.as_secs()),
+						format_secs(threshold.as_secs()),
 					),
 					active: Some(true),
 					occurred_at: Some(now),
@@ -403,17 +404,14 @@ impl Status {
 		if !self.healthy {
 			return HealthState::Unhealthy;
 		}
-		let any_failing = self
-			.health
-			.as_array()
-			.is_some_and(|arr| {
-				arr.iter().any(|e| {
-					e.as_object()
-						.and_then(|o| o.get("healthy"))
-						.and_then(|v| v.as_bool())
-						.is_some_and(|b| !b)
-				})
-			});
+		let any_failing = self.health.as_array().is_some_and(|arr| {
+			arr.iter().any(|e| {
+				e.as_object()
+					.and_then(|o| o.get("healthy"))
+					.and_then(|v| v.as_bool())
+					.is_some_and(|b| !b)
+			})
+		});
 		if any_failing {
 			HealthState::Warning
 		} else {

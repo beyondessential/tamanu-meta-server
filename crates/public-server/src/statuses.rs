@@ -405,5 +405,9 @@ fn split_health_from_extra(
 		}
 	}
 
-	Ok((healthy, serde_json::Value::Array(health_arr), serde_json::Value::Object(obj)))
+	Ok((
+		healthy,
+		serde_json::Value::Array(health_arr),
+		serde_json::Value::Object(obj),
+	))
 }

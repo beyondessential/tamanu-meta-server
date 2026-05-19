@@ -48,7 +48,12 @@ async fn private_with_directory(url: &str, directory: TailnetDirectory) -> TestS
 	server
 }
 
-fn synthesize_ticket(server_id: Uuid, hostname: &str, url: &str, tailscale_ip: &str) -> CanopyTicket {
+fn synthesize_ticket(
+	server_id: Uuid,
+	hostname: &str,
+	url: &str,
+	tailscale_ip: &str,
+) -> CanopyTicket {
 	use rcgen::{KeyPair, PKCS_ECDSA_P256_SHA256};
 
 	let key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("keygen");
