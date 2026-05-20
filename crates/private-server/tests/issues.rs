@@ -443,35 +443,6 @@ async fn open_issue(
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn ack_does_not_close_incident() {
-	commons_tests::server::run(async |mut conn, _public, private| {
-		let server_id = Uuid::new_v4();
-		let issue_id = open_issue(&mut conn, &private, server_id).await;
-
-		let r = private
-			.post("/api/issues/ack")
-			.json(&serde_json::json!({ "issue_id": issue_id }))
-			.await;
-		r.assert_status_ok();
-		let body: serde_json::Value = r.json();
-		assert!(body.get("acknowledged_at").is_some_and(|v| !v.is_null()));
-		assert_eq!(
-			body.get("acknowledged_by").and_then(|v| v.as_str()),
-			Some("admin@localhost"),
-		);
-
-		// Incident should still be open.
-		let resp = private
-			.post("/api/incidents/list_for_server")
-			.json(&serde_json::json!({ "server_id": server_id }))
-			.await;
-		let items: Vec<serde_json::Value> = resp.json();
-		assert_eq!(items.len(), 1, "ack must not close the incident");
-	})
-	.await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn resolve_closes_incident_and_records_reason() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let server_id = Uuid::new_v4();
@@ -675,7 +646,7 @@ async fn snooze_leaves_incident_and_blocks_rejoin() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn incident_ack_resolve_metadata() {
+async fn incident_resolve_metadata() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let server_id = Uuid::new_v4();
 		open_issue(&mut conn, &private, server_id).await;
@@ -686,14 +657,6 @@ async fn incident_ack_resolve_metadata() {
 			.await;
 		let items: Vec<serde_json::Value> = resp.json();
 		let incident_id = items[0].get("id").unwrap().as_str().unwrap().to_string();
-
-		let acked = private
-			.post("/api/incidents/ack")
-			.json(&serde_json::json!({ "incident_id": incident_id }))
-			.await;
-		acked.assert_status_ok();
-		let body: serde_json::Value = acked.json();
-		assert!(body.get("acknowledged_at").is_some_and(|v| !v.is_null()));
 
 		// Incident resolve cascades to the issues inside, which auto-closes
 		// the incident — operators shouldn't see a 'resolved but still open'

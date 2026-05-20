@@ -135,7 +135,6 @@ function Header({
 }) {
 	const open = incident.closed_at == null;
 	const isAdmin = useIsAdmin() === true;
-	const ack = useApiAction("incidents", "ack");
 	const resolve = useApiAction("incidents", "resolve");
 	const unresolve = useApiAction("incidents", "unresolve");
 
@@ -150,7 +149,7 @@ function Header({
 			/* surfaced via *.error */
 		}
 	};
-	const error = ack.error ?? resolve.error ?? unresolve.error;
+	const error = resolve.error ?? unresolve.error;
 
 	const timeText = (() => {
 		if (open) {
@@ -214,7 +213,7 @@ function Header({
 					</Typography>
 				</Box>
 				<Box sx={{ flexShrink: 0 }}>
-					{incident.resolved_at ? (
+					{incident.resolved_at && (
 						<Tooltip
 							title={`resolved (${incident.resolved_reason ?? "?"}) by ${
 								incident.resolved_by_name ?? incident.resolved_by ?? "?"
@@ -229,30 +228,7 @@ function Header({
 								/>
 							</span>
 						</Tooltip>
-					) : incident.acknowledged_at ? (
-						<Tooltip
-							title={`acked by ${incident.acknowledged_by_name ?? incident.acknowledged_by ?? "?"}`}
-						>
-							<span>
-								<UserAvatar
-									login={incident.acknowledged_by}
-									name={incident.acknowledged_by_name}
-									profilePic={incident.acknowledged_by_pic}
-									size={36}
-								/>
-							</span>
-						</Tooltip>
-					) : isAdmin ? (
-						<Button
-							size="small"
-							variant="outlined"
-							onClick={() =>
-								wrap(() => ack.call({ incident_id: incident.id }))
-							}
-						>
-							Ack
-						</Button>
-					) : null}
+					)}
 				</Box>
 			</Stack>
 
@@ -275,23 +251,15 @@ function Header({
 						Unresolve
 					</Button>
 				) : (
-					<Tooltip
-						title={incident.acknowledged_at ? "" : "Ack the incident first"}
-						disableHoverListener={!!incident.acknowledged_at}
+					<Button
+						size="small"
+						variant="outlined"
+						color="success"
+						startIcon={<CheckCircleOutlinedIcon />}
+						onClick={() => setResolveOpen((v) => !v)}
 					>
-						<span>
-							<Button
-								size="small"
-								variant="outlined"
-								color="success"
-								startIcon={<CheckCircleOutlinedIcon />}
-								disabled={!incident.acknowledged_at}
-								onClick={() => setResolveOpen((v) => !v)}
-							>
-								Resolve…
-							</Button>
-						</span>
-					</Tooltip>
+						Resolve…
+					</Button>
 				))}
 				{isAdmin && (
 					<>

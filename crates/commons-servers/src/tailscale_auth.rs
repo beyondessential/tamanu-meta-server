@@ -137,7 +137,7 @@ where
 		};
 
 		// Cache the user's name + pic so endpoints that record human actions
-		// (issue/incident ack and resolve) can render avatars without
+		// (issue/incident resolve, notes) can render avatars without
 		// round-tripping to Tailscale. Centralised here so every admin
 		// handler gets it for free.
 		let mut db = Db::from_ref(state).get().await?;

@@ -44,9 +44,6 @@ pub struct Issue {
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub last_seen: Timestamp,
 	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
-	pub acknowledged_at: Option<Timestamp>,
-	pub acknowledged_by: Option<String>,
-	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
 	pub resolved_at: Option<Timestamp>,
 	pub resolved_by: Option<String>,
 	/// Stored as nullable text; validated as `ResolvedReason` at the API layer
@@ -95,9 +92,6 @@ pub struct Incident {
 	pub opened_at: Timestamp,
 	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
 	pub closed_at: Option<Timestamp>,
-	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
-	pub acknowledged_at: Option<Timestamp>,
-	pub acknowledged_by: Option<String>,
 	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
 	pub resolved_at: Option<Timestamp>,
 	pub resolved_by: Option<String>,
@@ -163,8 +157,6 @@ pub struct IssueListFilters {
 	/// Any server id in the group; the query walks to the root and then
 	/// restricts to issues on servers in the root's descendant tree.
 	pub server_group_id: Option<Uuid>,
-	/// `Some(true)` = acknowledged; `Some(false)` = un-acknowledged; `None` = either.
-	pub acked: Option<bool>,
 }
 
 fn hash_event(
@@ -208,7 +200,8 @@ impl NewEvent {
 			&& d.contains('\n')
 		{
 			return Err(AppError::BadRequest(
-				"description must be a single line (no newlines); use `message` for body text".into(),
+				"description must be a single line (no newlines); use `message` for body text"
+					.into(),
 			));
 		}
 
@@ -247,8 +240,7 @@ impl NewEvent {
 				};
 				// Sentry-style reopen: a device event with `active = true` against a
 				// human-resolved issue clears the resolved_* fields (issue is back
-				// in unresolved state). Ack is *not* cleared — the operator's "I
-				// know about this" still applies through a reopen.
+				// in unresolved state).
 				let clear_resolved = active && existing.resolved_at.is_some();
 				let issue = diesel::update(issues::table.filter(issues::id.eq(existing.id)))
 					.set((
@@ -660,8 +652,6 @@ impl Issue {
 	/// - `server_group_id`: when `Some`, restrict to issues whose server is
 	///   in the descendant tree of that root (uses a recursive CTE via
 	///   `Server::descendant_ids`).
-	/// - `acked`: when `Some(true)`, only acknowledged; `Some(false)`, only
-	///   un-acknowledged; `None`, either.
 	pub async fn list(
 		db: &mut AsyncPgConnection,
 		filters: IssueListFilters,
@@ -692,11 +682,6 @@ impl Issue {
 		}
 		if let Some(ids) = group_ids {
 			q = q.filter(dsl::server_id.eq_any(ids));
-		}
-		match filters.acked {
-			Some(true) => q = q.filter(dsl::acknowledged_at.is_not_null()),
-			Some(false) => q = q.filter(dsl::acknowledged_at.is_null()),
-			None => {}
 		}
 		q.order(dsl::last_seen.desc())
 			.limit(limit)
@@ -738,35 +723,6 @@ impl Issue {
 					.and(dsl::server_id.eq_any(server_ids)),
 			)
 			.load(db)
-			.await
-			.map_err(AppError::from)
-	}
-
-	/// Mark an issue as acknowledged (or update the acker). Doesn't touch
-	/// incident membership — ack is purely informational.
-	pub async fn ack(db: &mut AsyncPgConnection, issue_id: Uuid, by: &str) -> Result<Self> {
-		use crate::schema::issues;
-
-		diesel::update(issues::table.filter(issues::id.eq(issue_id)))
-			.set((
-				issues::acknowledged_at.eq(jiff_diesel::Timestamp::from(Timestamp::now())),
-				issues::acknowledged_by.eq(Some(by)),
-			))
-			.returning(Self::as_select())
-			.get_result(db)
-			.await
-			.map_err(AppError::from)
-	}
-
-	pub async fn unack(db: &mut AsyncPgConnection, issue_id: Uuid) -> Result<Self> {
-		use crate::schema::issues;
-		diesel::update(issues::table.filter(issues::id.eq(issue_id)))
-			.set((
-				issues::acknowledged_at.eq(None::<jiff_diesel::Timestamp>),
-				issues::acknowledged_by.eq(None::<String>),
-			))
-			.returning(Self::as_select())
-			.get_result(db)
 			.await
 			.map_err(AppError::from)
 	}
@@ -1108,36 +1064,9 @@ impl Incident {
 		Ok((incident, rows))
 	}
 
-	pub async fn ack(db: &mut AsyncPgConnection, incident_id: Uuid, by: &str) -> Result<Self> {
-		use crate::schema::incidents;
-
-		diesel::update(incidents::table.filter(incidents::id.eq(incident_id)))
-			.set((
-				incidents::acknowledged_at.eq(jiff_diesel::Timestamp::from(Timestamp::now())),
-				incidents::acknowledged_by.eq(Some(by)),
-			))
-			.returning(Self::as_select())
-			.get_result(db)
-			.await
-			.map_err(AppError::from)
-	}
-
-	pub async fn unack(db: &mut AsyncPgConnection, incident_id: Uuid) -> Result<Self> {
-		use crate::schema::incidents;
-		diesel::update(incidents::table.filter(incidents::id.eq(incident_id)))
-			.set((
-				incidents::acknowledged_at.eq(None::<jiff_diesel::Timestamp>),
-				incidents::acknowledged_by.eq(None::<String>),
-			))
-			.returning(Self::as_select())
-			.get_result(db)
-			.await
-			.map_err(AppError::from)
-	}
-
 	/// Mark an incident as human-resolved. This is metadata only — it does
 	/// *not* force `closed_at` (that's still driven by auto rules). An
-	/// open incident can be resolved (acknowledging the cause) and a closed
+	/// open incident can be resolved (the cause is dealt with) and a closed
 	/// incident can be resolved retroactively.
 	/// Resolve the incident. Cascades to every currently-contributing issue
 	/// (active link), marking them with the same reason and timestamp; each

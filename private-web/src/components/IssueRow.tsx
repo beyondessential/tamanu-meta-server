@@ -54,7 +54,7 @@ function headline(issue: IssueData): string {
  * incident links), the message body, action buttons and a two-column
  * Events / Notes panel. When collapsed, only the header row is visible —
  * even the action buttons are hidden. Header layout:
- * `[toggle] [server] [headline] [ack/avatar] [snapshot] [severity] [time]`.
+ * `[toggle] [server] [headline] [resolver-avatar?] [snapshot] [severity] [time]`.
  * The headline is struck through when the issue is inactive or resolved.
  * The server is always shown because incidents can span child servers in
  * a group — relying on a page H1 to identify the server is insufficient.
@@ -92,8 +92,6 @@ export default function IssueRow({
 				setExpanded={setExpanded}
 				snoozeActive={snoozeActive}
 				struckThrough={struckThrough}
-				isAdmin={isAdmin}
-				onChanged={onChanged}
 				headerSnapshotOpen={headerSnapshotOpen}
 				toggleHeaderSnapshot={() => setHeaderSnapshotOpen((v) => !v)}
 			/>
@@ -124,8 +122,6 @@ function Header({
 	setExpanded,
 	snoozeActive,
 	struckThrough,
-	isAdmin,
-	onChanged,
 	headerSnapshotOpen,
 	toggleHeaderSnapshot,
 }: {
@@ -134,8 +130,6 @@ function Header({
 	setExpanded: (v: (p: boolean) => boolean) => void;
 	snoozeActive: boolean;
 	struckThrough: boolean;
-	isAdmin: boolean;
-	onChanged: () => void;
 	headerSnapshotOpen: boolean;
 	toggleHeaderSnapshot: () => void;
 }) {
@@ -190,7 +184,7 @@ function Header({
 					snoozed
 				</Typography>
 			)}
-			<HeaderActor issue={issue} isAdmin={isAdmin} onChanged={onChanged} />
+			<HeaderActor issue={issue} />
 			<Box sx={{ flexShrink: 0 }}>
 				<StatusSnapshotButton
 					open={headerSnapshotOpen}
@@ -241,69 +235,24 @@ function ClosureOrTime({ issue }: { issue: IssueData }) {
 	return <TimeAgo timestamp={issue.last_seen} />;
 }
 
-/** Leftmost slot of the right-side header cluster. Avatar (resolver or
- * acker) when applicable; an Ack button otherwise (admins only). There is
- * no Unack in the UI — the backend still supports it. */
-function HeaderActor({
-	issue,
-	isAdmin,
-	onChanged,
-}: {
-	issue: IssueData;
-	isAdmin: boolean;
-	onChanged: () => void;
-}) {
-	const ack = useApiAction("issues", "ack");
-	const doAck = async () => {
-		try {
-			await ack.call({ issue_id: issue.id });
-			onChanged();
-		} catch {
-			/* surfaced via ack.error inside Body */
-		}
-	};
-	if (issue.resolved_at) {
-		return (
-			<Tooltip
-				title={`resolved (${issue.resolved_reason ?? "?"}) by ${
-					issue.resolved_by_name ?? issue.resolved_by ?? "?"
-				}`}
-			>
-				<span>
-					<UserAvatar
-						login={issue.resolved_by}
-						name={issue.resolved_by_name}
-						profilePic={issue.resolved_by_pic}
-					/>
-				</span>
-			</Tooltip>
-		);
-	}
-	if (issue.acknowledged_at) {
-		return (
-			<Tooltip
-				title={`acked by ${issue.acknowledged_by_name ?? issue.acknowledged_by ?? "?"}`}
-			>
-				<span>
-					<UserAvatar
-						login={issue.acknowledged_by}
-						name={issue.acknowledged_by_name}
-						profilePic={issue.acknowledged_by_pic}
-					/>
-				</span>
-			</Tooltip>
-		);
-	}
-	if (!isAdmin) return null;
+/** Leftmost slot of the right-side header cluster. Resolver avatar when the
+ * issue has been resolved; empty otherwise. */
+function HeaderActor({ issue }: { issue: IssueData }) {
+	if (!issue.resolved_at) return null;
 	return (
-		<Button
-			size="small"
-			variant="outlined"
-			onClick={doAck}
-			disabled={ack.pending}
+		<Tooltip
+			title={`resolved (${issue.resolved_reason ?? "?"}) by ${
+				issue.resolved_by_name ?? issue.resolved_by ?? "?"
+			}`}
 		>
-			Ack
-		</Button>
+			<span>
+				<UserAvatar
+					login={issue.resolved_by}
+					name={issue.resolved_by_name}
+					profilePic={issue.resolved_by_pic}
+				/>
+			</span>
+		</Tooltip>
 	);
 }
 
@@ -402,23 +351,15 @@ function IssueActions({
 						Unresolve
 					</Button>
 				) : (
-					<Tooltip
-						title={issue.acknowledged_at ? "" : "Ack the issue first"}
-						disableHoverListener={!!issue.acknowledged_at}
+					<Button
+						size="small"
+						variant="outlined"
+						color="success"
+						startIcon={<CheckCircleOutlinedIcon />}
+						onClick={() => setResolveOpen((v) => !v)}
 					>
-						<span>
-							<Button
-								size="small"
-								variant="outlined"
-								color="success"
-								startIcon={<CheckCircleOutlinedIcon />}
-								disabled={!issue.acknowledged_at}
-								onClick={() => setResolveOpen((v) => !v)}
-							>
-								Resolve…
-							</Button>
-						</span>
-					</Tooltip>
+						Resolve…
+					</Button>
 				)}
 				{snoozeActive ? (
 					<Button

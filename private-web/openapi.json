@@ -1099,41 +1099,6 @@
         ]
       }
     },
-    "/api/incidents/ack": {
-      "post": {
-        "tags": [
-          "incidents"
-        ],
-        "operationId": "incident_ack",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/IncidentIdArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IncidentData"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
     "/api/incidents/add_note": {
       "post": {
         "tags": [
@@ -1401,41 +1366,6 @@
         ]
       }
     },
-    "/api/incidents/unack": {
-      "post": {
-        "tags": [
-          "incidents"
-        ],
-        "operationId": "incident_unack",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/IncidentIdArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IncidentData"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
     "/api/incidents/unresolve": {
       "post": {
         "tags": [
@@ -1459,41 +1389,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/IncidentData"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
-    "/api/issues/ack": {
-      "post": {
-        "tags": [
-          "issues"
-        ],
-        "operationId": "issue_ack",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/IssueIdArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IssueData"
                 }
               }
             }
@@ -1873,41 +1768,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
-    "/api/issues/unack": {
-      "post": {
-        "tags": [
-          "issues"
-        ],
-        "operationId": "issue_unack",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/IssueIdArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IssueData"
                 }
               }
             }
@@ -3658,31 +3518,6 @@
           "updated_at"
         ],
         "properties": {
-          "acknowledged_at": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time"
-          },
-          "acknowledged_by": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "acknowledged_by_name": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "acknowledged_by_pic": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "closed_at": {
             "type": [
               "string",
@@ -3867,33 +3702,6 @@
           "incidents"
         ],
         "properties": {
-          "acknowledged_at": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time"
-          },
-          "acknowledged_by": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "acknowledged_by_name": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Display name of the acker (from the cached Tailscale users table)."
-          },
-          "acknowledged_by_pic": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Profile picture URL of the acker."
-          },
           "active": {
             "type": "boolean"
           },
