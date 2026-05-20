@@ -91,6 +91,7 @@ export type VersionData = Solidify<Schemas["VersionData"]>;
 export type MinorVersionGroup = Solidify<Schemas["MinorVersionGroup"]>;
 export type RelatedVersionData = Solidify<Schemas["RelatedVersionData"]>;
 export type VersionDetail = Solidify<Schemas["VersionDetail"]>;
+export type KnownIssueData = Solidify<Schemas["KnownIssueData"]>;
 export type ArtifactData = Solidify<Schemas["ArtifactData"]>;
 
 export type ServerInfo = Solidify<Schemas["ServerInfo"]>;

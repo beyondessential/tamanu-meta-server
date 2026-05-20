@@ -62,7 +62,10 @@ async fn upsert_from_ticket_persists_rank_and_trusts_device() {
 		assert_eq!(server.kind, ServerKind::Facility);
 
 		let device_id = server.device_id.expect("server has a device");
-		let device = Device::get_with_info(&mut conn, device_id).await.expect("device").device;
+		let device = Device::get_with_info(&mut conn, device_id)
+			.await
+			.expect("device")
+			.device;
 		assert_eq!(device.role, DeviceRole::Server);
 	})
 	.await
@@ -130,7 +133,10 @@ async fn upsert_from_ticket_preserves_higher_role_on_existing_device() {
 		)
 		.await
 		.expect("second upsert");
-		let device = Device::get_with_info(&mut conn, device_id).await.expect("device").device;
+		let device = Device::get_with_info(&mut conn, device_id)
+			.await
+			.expect("device")
+			.device;
 		assert_eq!(device.role, DeviceRole::Admin);
 	})
 	.await

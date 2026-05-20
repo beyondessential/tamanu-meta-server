@@ -242,6 +242,19 @@ diesel::table! {
 }
 
 diesel::table! {
+	version_known_issues (id) {
+		id -> Uuid,
+		created_at -> Timestamptz,
+		version_id -> Uuid,
+		author -> Text,
+		description -> Text,
+		resolved_at -> Nullable<Timestamptz>,
+		resolved_by -> Nullable<Text>,
+		resolution_message -> Nullable<Text>,
+	}
+}
+
+diesel::table! {
 	versions (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
@@ -275,6 +288,7 @@ diesel::joinable!(slack_outbox -> incidents (incident_id));
 diesel::joinable!(slack_outbox -> issues (issue_id));
 diesel::joinable!(statuses -> devices (device_id));
 diesel::joinable!(statuses -> servers (server_id));
+diesel::joinable!(version_known_issues -> versions (version_id));
 diesel::joinable!(versions -> devices (device_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
@@ -297,5 +311,6 @@ diesel::allow_tables_to_appear_in_same_query!(
 	sql_playground_history,
 	statuses,
 	tailscale_users,
+	version_known_issues,
 	versions,
 );

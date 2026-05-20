@@ -2,6 +2,11 @@ import {
 	Alert,
 	Box,
 	Button,
+	Chip,
+	Dialog,
+	DialogActions,
+	DialogContent,
+	DialogTitle,
 	IconButton,
 	LinearProgress,
 	MenuItem,
@@ -17,19 +22,23 @@ import {
 	TextField,
 	Typography,
 } from "@mui/material";
+import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import DeleteIcon from "@mui/icons-material/Delete";
 import EditIcon from "@mui/icons-material/Edit";
+import ErrorOutlineIcon from "@mui/icons-material/ErrorOutlined";
 import LockIcon from "@mui/icons-material/Lock";
 import LockOpenIcon from "@mui/icons-material/LockOpen";
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 import Markdown from "../components/Markdown";
+import TimeAgo from "../components/TimeAgo";
 import VersionStatusChip from "../components/VersionStatusChip";
 import { useApi, useApiAction } from "../api";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { prettifyVersionRange } from "../lib/versionRange";
 import type {
 	ArtifactData,
+	KnownIssueData,
 	RelatedVersionData,
 	VersionDetail as VersionDetailData,
 	VersionStatus,
@@ -64,9 +73,12 @@ export default function VersionDetail() {
 				spacing={2}
 				sx={{ alignItems: "center", justifyContent: "space-between" }}
 			>
-				<Typography variant="h4" component="h1" sx={{ fontFamily: "monospace" }}>
-					{versionStr}
-				</Typography>
+				<Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
+					<Typography variant="h4" component="h1" sx={{ fontFamily: "monospace" }}>
+						{versionStr}
+					</Typography>
+					<ReadyChip ready={v.ready} />
+				</Stack>
 				<StatusControl
 					detail={v}
 					versionStr={versionStr}
@@ -86,6 +98,13 @@ export default function VersionDetail() {
 			<ChangelogSection
 				detail={v}
 				versionStr={versionStr}
+				isAdmin={admin}
+				onChanged={() => detail.reload()}
+			/>
+
+			<KnownIssuesSection
+				versionId={v.id}
+				issues={v.known_issues}
 				isAdmin={admin}
 				onChanged={() => detail.reload()}
 			/>
@@ -709,4 +728,323 @@ function RelatedVersionsSection({
 
 function formatDate(iso: string): string {
 	return iso.slice(0, 10);
+}
+
+function ReadyChip({ ready }: { ready: boolean }) {
+	if (ready) {
+		return (
+			<Chip
+				size="small"
+				color="success"
+				variant="outlined"
+				icon={<CheckCircleIcon />}
+				label="Ready"
+			/>
+		);
+	}
+	return (
+		<Chip
+			size="small"
+			color="warning"
+			variant="outlined"
+			icon={<ErrorOutlineIcon />}
+			label="Known issues"
+		/>
+	);
+}
+
+function KnownIssuesSection({
+	versionId,
+	issues,
+	isAdmin,
+	onChanged,
+}: {
+	versionId: string;
+	issues: KnownIssueData[];
+	isAdmin: boolean;
+	onChanged: () => void;
+}) {
+	const [addOpen, setAddOpen] = useState(false);
+
+	const open = issues.filter((i) => i.resolved_at == null);
+	const resolved = issues.filter((i) => i.resolved_at != null);
+
+	return (
+		<Box>
+			<Stack
+				direction="row"
+				spacing={1}
+				sx={{ mb: 1, alignItems: "center", justifyContent: "space-between" }}
+			>
+				<Typography variant="h5" component="h2">
+					Known issues
+				</Typography>
+				{isAdmin && (
+					<Button
+						variant="outlined"
+						size="small"
+						onClick={() => setAddOpen(true)}
+					>
+						Add known issue
+					</Button>
+				)}
+			</Stack>
+
+			{issues.length === 0 ? (
+				<Typography variant="body2" color="text.secondary">
+					No known issues — this version is marked ready.
+				</Typography>
+			) : (
+				<Stack spacing={1}>
+					{open.map((k) => (
+						<KnownIssueRow
+							key={k.id}
+							issue={k}
+							isAdmin={isAdmin}
+							onChanged={onChanged}
+						/>
+					))}
+					{resolved.length > 0 && open.length > 0 && (
+						<Typography
+							variant="caption"
+							color="text.secondary"
+							sx={{ mt: 1 }}
+						>
+							Resolved
+						</Typography>
+					)}
+					{resolved.map((k) => (
+						<KnownIssueRow
+							key={k.id}
+							issue={k}
+							isAdmin={isAdmin}
+							onChanged={onChanged}
+						/>
+					))}
+				</Stack>
+			)}
+
+			<AddKnownIssueDialog
+				open={addOpen}
+				onClose={() => setAddOpen(false)}
+				versionId={versionId}
+				onAdded={() => {
+					setAddOpen(false);
+					onChanged();
+				}}
+			/>
+		</Box>
+	);
+}
+
+function KnownIssueRow({
+	issue,
+	isAdmin,
+	onChanged,
+}: {
+	issue: KnownIssueData;
+	isAdmin: boolean;
+	onChanged: () => void;
+}) {
+	const [resolveOpen, setResolveOpen] = useState(false);
+	const open = issue.resolved_at == null;
+
+	return (
+		<Paper
+			variant="outlined"
+			sx={{
+				p: 1.5,
+				borderLeft: 4,
+				borderLeftColor: open ? "warning.main" : "success.main",
+			}}
+		>
+			<Stack
+				direction="row"
+				spacing={1}
+				sx={{ alignItems: "center", justifyContent: "space-between" }}
+			>
+				<Typography variant="caption" color="text.secondary">
+					{issue.author} • <TimeAgo timestamp={issue.created_at} />
+				</Typography>
+				{open && isAdmin && (
+					<Button size="small" onClick={() => setResolveOpen(true)}>
+						Resolve
+					</Button>
+				)}
+			</Stack>
+			<Typography
+				variant="body2"
+				component="pre"
+				sx={{ mt: 0.5, mb: 0, whiteSpace: "pre-wrap", fontFamily: "inherit" }}
+			>
+				{issue.description}
+			</Typography>
+			{!open && issue.resolution_message && (
+				<Box
+					sx={{
+						mt: 1,
+						pt: 1,
+						borderTop: 1,
+						borderTopColor: "divider",
+					}}
+				>
+					<Typography variant="caption" color="text.secondary">
+						Resolved by {issue.resolved_by ?? "?"}
+						{issue.resolved_at && (
+							<>
+								{" "}
+								(<TimeAgo timestamp={issue.resolved_at} />)
+							</>
+						)}
+					</Typography>
+					<Typography
+						variant="body2"
+						component="pre"
+						sx={{ mt: 0.5, whiteSpace: "pre-wrap", fontFamily: "inherit" }}
+					>
+						{issue.resolution_message}
+					</Typography>
+				</Box>
+			)}
+			<ResolveKnownIssueDialog
+				open={resolveOpen}
+				onClose={() => setResolveOpen(false)}
+				knownIssueId={issue.id}
+				onResolved={() => {
+					setResolveOpen(false);
+					onChanged();
+				}}
+			/>
+		</Paper>
+	);
+}
+
+function AddKnownIssueDialog({
+	open,
+	onClose,
+	versionId,
+	onAdded,
+}: {
+	open: boolean;
+	onClose: () => void;
+	versionId: string;
+	onAdded: () => void;
+}) {
+	const [draft, setDraft] = useState("");
+	const action = useApiAction("versions", "add_known_issue");
+	const submit = async () => {
+		const description = draft.trim();
+		if (description === "") return;
+		try {
+			await action.call({ version_id: versionId, description });
+			setDraft("");
+			onAdded();
+		} catch {
+			/* surfaced via action.error */
+		}
+	};
+	const cancel = () => {
+		setDraft("");
+		onClose();
+	};
+	return (
+		<Dialog open={open} onClose={cancel} fullWidth maxWidth="sm">
+			<DialogTitle>Add known issue</DialogTitle>
+			<DialogContent>
+				<TextField
+					autoFocus
+					fullWidth
+					multiline
+					minRows={3}
+					value={draft}
+					onChange={(e) => setDraft(e.target.value)}
+					disabled={action.pending}
+					placeholder="Describe the issue, including any user-facing impact"
+					sx={{ mt: 1 }}
+				/>
+				{action.error && (
+					<Alert severity="error" sx={{ mt: 1 }}>
+						{action.error.message}
+					</Alert>
+				)}
+			</DialogContent>
+			<DialogActions>
+				<Button onClick={cancel} disabled={action.pending}>
+					Cancel
+				</Button>
+				<Button
+					variant="contained"
+					onClick={submit}
+					disabled={action.pending || draft.trim() === ""}
+				>
+					{action.pending ? "Adding…" : "Add"}
+				</Button>
+			</DialogActions>
+		</Dialog>
+	);
+}
+
+function ResolveKnownIssueDialog({
+	open,
+	onClose,
+	knownIssueId,
+	onResolved,
+}: {
+	open: boolean;
+	onClose: () => void;
+	knownIssueId: string;
+	onResolved: () => void;
+}) {
+	const [draft, setDraft] = useState("");
+	const action = useApiAction("versions", "resolve_known_issue");
+	const submit = async () => {
+		const resolution_message = draft.trim();
+		if (resolution_message === "") return;
+		try {
+			await action.call({ known_issue_id: knownIssueId, resolution_message });
+			setDraft("");
+			onResolved();
+		} catch {
+			/* surfaced via action.error */
+		}
+	};
+	const cancel = () => {
+		setDraft("");
+		onClose();
+	};
+	return (
+		<Dialog open={open} onClose={cancel} fullWidth maxWidth="sm">
+			<DialogTitle>Resolve known issue</DialogTitle>
+			<DialogContent>
+				<TextField
+					autoFocus
+					fullWidth
+					multiline
+					minRows={3}
+					value={draft}
+					onChange={(e) => setDraft(e.target.value)}
+					disabled={action.pending}
+					placeholder="How was this resolved? (e.g. fixed in 1.0.1, workaround documented)"
+					sx={{ mt: 1 }}
+				/>
+				{action.error && (
+					<Alert severity="error" sx={{ mt: 1 }}>
+						{action.error.message}
+					</Alert>
+				)}
+			</DialogContent>
+			<DialogActions>
+				<Button onClick={cancel} disabled={action.pending}>
+					Cancel
+				</Button>
+				<Button
+					variant="contained"
+					onClick={submit}
+					disabled={action.pending || draft.trim() === ""}
+				>
+					{action.pending ? "Resolving…" : "Resolve"}
+				</Button>
+			</DialogActions>
+		</Dialog>
+	);
 }

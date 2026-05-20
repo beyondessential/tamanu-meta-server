@@ -1111,6 +1111,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/versions/add_known_issue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["add_known_issue"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/versions/create_artifact": {
         parameters: {
             query?: never;
@@ -1191,6 +1207,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/versions/list_known_issues": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["list_known_issues"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/versions/resolve_known_issue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["resolve_known_issue"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/versions/update_artifact": {
         parameters: {
             query?: never;
@@ -1245,6 +1293,11 @@ export interface components {
     schemas: {
         AddArgs: {
             email: string;
+        };
+        AddKnownIssueArgs: {
+            description: string;
+            /** Format: uuid */
+            version_id: string;
         };
         AddNoteArgs: {
             body: string;
@@ -1592,6 +1645,18 @@ export interface components {
             /** Format: uuid */
             issue_id: string;
         };
+        KnownIssueData: {
+            author: string;
+            /** Format: date-time */
+            created_at: string;
+            description: string;
+            /** Format: uuid */
+            id: string;
+            resolution_message?: string | null;
+            /** Format: date-time */
+            resolved_at?: string | null;
+            resolved_by?: string | null;
+        };
         ListActiveArgs: {
             /** Format: int64 */
             limit?: number | null;
@@ -1783,6 +1848,11 @@ export interface components {
             /** Format: uuid */
             incident_id: string;
             reason: components["schemas"]["ResolvedReason"];
+        };
+        ResolveKnownIssueArgs: {
+            /** Format: uuid */
+            known_issue_id: string;
+            resolution_message: string;
         };
         ResolveTailnetIdentifierArgs: {
             identifier: string;
@@ -2061,6 +2131,12 @@ export interface components {
             minor: number;
             /** Format: int32 */
             patch: number;
+            /**
+             * @description `true` when this version has no unresolved known issues. See the
+             *     `version_known_issues` table and `add_known_issue`/`resolve_known_issue`
+             *     endpoints for management.
+             */
+            ready: boolean;
             status: components["schemas"]["VersionStatus"];
         };
         VersionDetail: {
@@ -2070,6 +2146,7 @@ export interface components {
             /** Format: uuid */
             id: string;
             is_latest_in_minor: boolean;
+            known_issues: components["schemas"]["KnownIssueData"][];
             /** Format: int32 */
             major: number;
             /** Format: int32 */
@@ -2078,10 +2155,16 @@ export interface components {
             minor: number;
             /** Format: int32 */
             patch: number;
+            /** @description `true` when this version has no unresolved known issues. */
+            ready: boolean;
             related_versions: components["schemas"]["RelatedVersionData"][];
             status: components["schemas"]["VersionStatus"];
             /** Format: date-time */
             updated_at: string;
+        };
+        VersionIdArgs: {
+            /** Format: uuid */
+            version_id: string;
         };
         /** @enum {string} */
         VersionStatus: "draft" | "published" | "yanked";
@@ -3986,6 +4069,37 @@ export interface operations {
             };
         };
     };
+    add_known_issue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddKnownIssueArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnownIssueData"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
     create_artifact: {
         parameters: {
             query?: never;
@@ -4107,6 +4221,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VersionDetail"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    list_known_issues: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VersionIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnownIssueData"][];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    resolve_known_issue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolveKnownIssueArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnownIssueData"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
             404: {
