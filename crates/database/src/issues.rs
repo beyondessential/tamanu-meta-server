@@ -981,6 +981,7 @@ impl Event {
 	pub async fn list_for_issue(
 		db: &mut AsyncPgConnection,
 		issue_id: Uuid,
+		offset: i64,
 		limit: i64,
 	) -> Result<Vec<Self>> {
 		use crate::schema::events::dsl;
@@ -989,8 +990,20 @@ impl Event {
 			.select(Self::as_select())
 			.filter(dsl::issue_id.eq(issue_id))
 			.order(dsl::created_at.desc())
+			.offset(offset)
 			.limit(limit)
 			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	pub async fn count_for_issue(db: &mut AsyncPgConnection, issue_id: Uuid) -> Result<i64> {
+		use crate::schema::events::dsl;
+
+		dsl::events
+			.filter(dsl::issue_id.eq(issue_id))
+			.count()
+			.get_result(db)
 			.await
 			.map_err(AppError::from)
 	}

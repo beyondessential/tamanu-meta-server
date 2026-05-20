@@ -1672,6 +1672,8 @@ export interface components {
             issue_id: string;
             /** Format: int64 */
             limit?: number | null;
+            /** Format: int64 */
+            offset?: number | null;
         };
         ListForDeviceArgs: {
             active_only?: boolean | null;
@@ -1751,6 +1753,33 @@ export interface components {
                 keys: components["schemas"]["DeviceKeyInfo"][];
                 latest_connection?: null | components["schemas"]["DeviceConnectionData"];
                 tailnet_live?: null | components["schemas"]["TailnetLiveInfo"];
+            }[];
+            /** Format: int64 */
+            total: number;
+        };
+        /**
+         * @description Standard wrapper for paginated list responses. The total reflects the full
+         *     row count (not just the current page) so the frontend can render page
+         *     counts without a separate count fetch.
+         */
+        Page_EventData: {
+            items: {
+                active: boolean;
+                /** Format: date-time */
+                created_at: string;
+                description?: string | null;
+                /** Format: uuid */
+                id: string;
+                /** Format: uuid */
+                issue_id: string;
+                /** Format: date-time */
+                last_seen: string;
+                message: string;
+                /** Format: date-time */
+                occurred_at?: string | null;
+                /** Format: int32 */
+                occurrences: number;
+                severity: components["schemas"]["Severity"];
             }[];
             /** Format: int64 */
             total: number;
@@ -3338,7 +3367,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EventData"][];
+                    "application/json": components["schemas"]["Page_EventData"];
                 };
             };
         };

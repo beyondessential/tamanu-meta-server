@@ -403,8 +403,29 @@ async fn list_events_returns_event_log() {
 			.json(&serde_json::json!({ "issue_id": issue_id }))
 			.await;
 		events.assert_status_ok();
-		let evs: Vec<serde_json::Value> = events.json();
-		assert_eq!(evs.len(), 3, "each distinct push is its own event row");
+		let page: serde_json::Value = events.json();
+		let items = page.get("items").and_then(|v| v.as_array()).unwrap();
+		assert_eq!(items.len(), 3, "each distinct push is its own event row");
+		assert_eq!(page.get("total").and_then(|v| v.as_u64()), Some(3));
+
+		// Pagination: limit=2 returns 2 items but total still reflects 3.
+		let page1 = private
+			.post("/api/issues/list_events")
+			.json(&serde_json::json!({ "issue_id": issue_id, "offset": 0, "limit": 2 }))
+			.await;
+		page1.assert_status_ok();
+		let page1: serde_json::Value = page1.json();
+		assert_eq!(page1.get("items").and_then(|v| v.as_array()).unwrap().len(), 2);
+		assert_eq!(page1.get("total").and_then(|v| v.as_u64()), Some(3));
+
+		let page2 = private
+			.post("/api/issues/list_events")
+			.json(&serde_json::json!({ "issue_id": issue_id, "offset": 2, "limit": 2 }))
+			.await;
+		page2.assert_status_ok();
+		let page2: serde_json::Value = page2.json();
+		assert_eq!(page2.get("items").and_then(|v| v.as_array()).unwrap().len(), 1);
+		assert_eq!(page2.get("total").and_then(|v| v.as_u64()), Some(3));
 	})
 	.await;
 }
