@@ -4,7 +4,6 @@ import NotesIcon from "@mui/icons-material/StickyNote2";
 import TimelineIcon from "@mui/icons-material/Timeline";
 import { Link as RouterLink } from "react-router-dom";
 import TimeAgo from "./TimeAgo";
-import UserAvatar from "./UserAvatar";
 import type { IncidentData } from "../types";
 
 function serverLabel(name: string | null, host: string): string {
@@ -14,8 +13,8 @@ function serverLabel(name: string | null, host: string): string {
 }
 
 /** Compact view of an open incident; click-through goes to the incident
- * detail page. Header carries the acker's avatar (top-right) and the body
- * has a stats row (bottom-right) with issue / event / note counts. */
+ * detail page. The body has a stats row (bottom-right) with issue / event
+ * / note counts. */
 export default function IncidentCard({ incident }: { incident: IncidentData }) {
 	return (
 		<Box
@@ -32,27 +31,14 @@ export default function IncidentCard({ incident }: { incident: IncidentData }) {
 				"&:hover": { bgcolor: "action.hover" },
 			}}
 		>
-			<Stack
-				direction="row"
-				spacing={1}
-				sx={{ alignItems: "flex-start", justifyContent: "space-between" }}
-			>
-				<Box sx={{ minWidth: 0, flex: 1 }}>
-					<Typography variant="subtitle1" sx={{ fontWeight: 500 }} noWrap>
-						{serverLabel(incident.server_name, incident.server_host)}
-					</Typography>
-					<Typography variant="body2" color="text.secondary">
-						opened <TimeAgo timestamp={incident.opened_at} />
-					</Typography>
-				</Box>
-				{incident.acknowledged_at && (
-					<UserAvatar
-						login={incident.acknowledged_by}
-						name={incident.acknowledged_by_name}
-						profilePic={incident.acknowledged_by_pic}
-					/>
-				)}
-			</Stack>
+			<Box>
+				<Typography variant="subtitle1" sx={{ fontWeight: 500 }} noWrap>
+					{serverLabel(incident.server_name, incident.server_host)}
+				</Typography>
+				<Typography variant="body2" color="text.secondary">
+					opened <TimeAgo timestamp={incident.opened_at} />
+				</Typography>
+			</Box>
 			<Stack
 				direction="row"
 				spacing={1.5}

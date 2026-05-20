@@ -871,7 +871,10 @@ async fn submit_status_unhealthy_no_checks_files_roll_up_only() {
 				.expect("roll-up issue filed");
 			assert_eq!(roll_up.severity, "error");
 			assert!(roll_up.active);
-			assert_eq!(roll_up.description.as_deref(), Some("Server reports unhealthy"));
+			assert_eq!(
+				roll_up.description.as_deref(),
+				Some("Server reports unhealthy")
+			);
 			assert_eq!(count_issues_for_server(&mut conn, server_id).await, 1);
 			assert!(fetch_open_incident(&mut conn, server_id).await.is_some());
 		},

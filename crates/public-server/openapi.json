@@ -846,19 +846,6 @@
           "last_seen"
         ],
         "properties": {
-          "acknowledged_at": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time"
-          },
-          "acknowledged_by": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "active": {
             "type": "boolean"
           },

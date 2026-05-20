@@ -39,12 +39,6 @@ pub struct IssueData {
 	pub active: bool,
 	pub first_seen: Timestamp,
 	pub last_seen: Timestamp,
-	pub acknowledged_at: Option<Timestamp>,
-	pub acknowledged_by: Option<String>,
-	/// Display name of the acker (from the cached Tailscale users table).
-	pub acknowledged_by_name: Option<String>,
-	/// Profile picture URL of the acker.
-	pub acknowledged_by_pic: Option<String>,
 	pub resolved_at: Option<Timestamp>,
 	pub resolved_by: Option<String>,
 	pub resolved_by_name: Option<String>,
@@ -89,7 +83,6 @@ struct IssueEnrichment<'a> {
 
 impl IssueData {
 	fn from_with(i: Issue, e: IssueEnrichment<'_>) -> Self {
-		let (ack_name, ack_pic) = lookup_user(e.users, i.acknowledged_by.as_deref());
 		let (res_name, res_pic) = lookup_user(e.users, i.resolved_by.as_deref());
 		Self {
 			id: i.id,
@@ -105,10 +98,6 @@ impl IssueData {
 			active: i.active,
 			first_seen: i.first_seen,
 			last_seen: i.last_seen,
-			acknowledged_at: i.acknowledged_at,
-			acknowledged_by: i.acknowledged_by,
-			acknowledged_by_name: ack_name,
-			acknowledged_by_pic: ack_pic,
 			resolved_at: i.resolved_at,
 			resolved_by: i.resolved_by,
 			resolved_by_name: res_name,
@@ -138,9 +127,6 @@ pub(crate) fn lookup_user(
 fn collect_user_logins(issues: &[Issue]) -> Vec<&str> {
 	let mut s: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
 	for i in issues {
-		if let Some(l) = i.acknowledged_by.as_deref() {
-			s.insert(l);
-		}
 		if let Some(l) = i.resolved_by.as_deref() {
 			s.insert(l);
 		}
@@ -254,8 +240,6 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(list_for_server))
 		.routes(routes!(list_events))
 		.routes(routes!(submit_manual_event))
-		.routes(routes!(ack))
-		.routes(routes!(unack))
 		.routes(routes!(resolve))
 		.routes(routes!(unresolve))
 		.routes(routes!(snooze))
@@ -281,8 +265,6 @@ pub struct ListArgs {
 	pub severities: Option<Vec<Severity>>,
 	#[serde(default)]
 	pub server_group_id: Option<Uuid>,
-	#[serde(default)]
-	pub acked: Option<bool>,
 	#[serde(default)]
 	pub limit: Option<i64>,
 }
@@ -311,7 +293,6 @@ pub async fn list(
 			active_only: args.active_only.unwrap_or(true),
 			severities: args.severities,
 			server_group_id: args.server_group_id,
-			acked: args.acked,
 		},
 		args.limit.unwrap_or(DEFAULT_LIMIT),
 	)
@@ -481,48 +462,6 @@ pub async fn submit_manual_event(
 #[derive(Deserialize, ToSchema)]
 pub struct IssueIdArgs {
 	pub issue_id: Uuid,
-}
-
-#[utoipa::path(
-	post,
-	path = "/ack",
-	operation_id = "issue_ack",
-	tag = "issues",
-	security(("tailscale-admin" = [])),
-	request_body = IssueIdArgs,
-	responses(
-		(status = 200, body = IssueData),
-	),
-)]
-pub async fn ack(
-	State(state): State<AppState>,
-	admin: TailscaleAdmin,
-	Json(args): Json<IssueIdArgs>,
-) -> Result<Json<IssueData>> {
-	let mut conn = state.db.get().await?;
-	let issue = Issue::ack(&mut conn, args.issue_id, &admin.0.login).await?;
-	Ok(Json(enrich_issue(&mut conn, issue).await?))
-}
-
-#[utoipa::path(
-	post,
-	path = "/unack",
-	operation_id = "issue_unack",
-	tag = "issues",
-	security(("tailscale-admin" = [])),
-	request_body = IssueIdArgs,
-	responses(
-		(status = 200, body = IssueData),
-	),
-)]
-pub async fn unack(
-	State(state): State<AppState>,
-	_admin: TailscaleAdmin,
-	Json(args): Json<IssueIdArgs>,
-) -> Result<Json<IssueData>> {
-	let mut conn = state.db.get().await?;
-	let issue = Issue::unack(&mut conn, args.issue_id).await?;
-	Ok(Json(enrich_issue(&mut conn, issue).await?))
 }
 
 #[derive(Deserialize, ToSchema)]

@@ -26,10 +26,6 @@ pub struct IncidentData {
 	pub server_host: String,
 	pub opened_at: Timestamp,
 	pub closed_at: Option<Timestamp>,
-	pub acknowledged_at: Option<Timestamp>,
-	pub acknowledged_by: Option<String>,
-	pub acknowledged_by_name: Option<String>,
-	pub acknowledged_by_pic: Option<String>,
 	pub resolved_at: Option<Timestamp>,
 	pub resolved_by: Option<String>,
 	pub resolved_by_name: Option<String>,
@@ -51,7 +47,6 @@ impl IncidentData {
 		users: &std::collections::HashMap<String, CachedTailscaleUser>,
 		stats: IncidentStats,
 	) -> Self {
-		let (ack_name, ack_pic) = lookup_user(users, i.acknowledged_by.as_deref());
 		let (res_name, res_pic) = lookup_user(users, i.resolved_by.as_deref());
 		Self {
 			id: i.id,
@@ -60,10 +55,6 @@ impl IncidentData {
 			server_host,
 			opened_at: i.opened_at,
 			closed_at: i.closed_at,
-			acknowledged_at: i.acknowledged_at,
-			acknowledged_by: i.acknowledged_by,
-			acknowledged_by_name: ack_name,
-			acknowledged_by_pic: ack_pic,
 			resolved_at: i.resolved_at,
 			resolved_by: i.resolved_by,
 			resolved_by_name: res_name,
@@ -81,9 +72,6 @@ impl IncidentData {
 fn collect_incident_user_logins(incidents: &[Incident]) -> Vec<&str> {
 	let mut s: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
 	for i in incidents {
-		if let Some(l) = i.acknowledged_by.as_deref() {
-			s.insert(l);
-		}
 		if let Some(l) = i.resolved_by.as_deref() {
 			s.insert(l);
 		}
@@ -159,8 +147,6 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(list_for_server))
 		.routes(routes!(list_active))
 		.routes(routes!(get_incident))
-		.routes(routes!(ack))
-		.routes(routes!(unack))
 		.routes(routes!(resolve))
 		.routes(routes!(unresolve))
 		.routes(routes!(add_note))
@@ -271,48 +257,6 @@ pub async fn get_incident(
 #[derive(Deserialize, ToSchema)]
 pub struct IncidentIdArgs {
 	pub incident_id: Uuid,
-}
-
-#[utoipa::path(
-	post,
-	path = "/ack",
-	operation_id = "incident_ack",
-	tag = "incidents",
-	security(("tailscale-admin" = [])),
-	request_body = IncidentIdArgs,
-	responses(
-		(status = 200, body = IncidentData),
-	),
-)]
-pub async fn ack(
-	State(state): State<AppState>,
-	admin: TailscaleAdmin,
-	Json(args): Json<IncidentIdArgs>,
-) -> Result<Json<IncidentData>> {
-	let mut conn = state.db.get().await?;
-	let incident = Incident::ack(&mut conn, args.incident_id, &admin.0.login).await?;
-	Ok(Json(enrich_incident(&mut conn, &state.db, incident).await?))
-}
-
-#[utoipa::path(
-	post,
-	path = "/unack",
-	operation_id = "incident_unack",
-	tag = "incidents",
-	security(("tailscale-admin" = [])),
-	request_body = IncidentIdArgs,
-	responses(
-		(status = 200, body = IncidentData),
-	),
-)]
-pub async fn unack(
-	State(state): State<AppState>,
-	_admin: TailscaleAdmin,
-	Json(args): Json<IncidentIdArgs>,
-) -> Result<Json<IncidentData>> {
-	let mut conn = state.db.get().await?;
-	let incident = Incident::unack(&mut conn, args.incident_id).await?;
-	Ok(Json(enrich_incident(&mut conn, &state.db, incident).await?))
 }
 
 #[derive(Deserialize, ToSchema)]
