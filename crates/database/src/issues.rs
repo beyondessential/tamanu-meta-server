@@ -842,19 +842,26 @@ pub struct IncidentStats {
 }
 
 impl Incident {
-	/// Bulk-fetch stats for a set of incidents in four grouped queries —
-	/// issues, events, incident-notes, issue-notes — run concurrently on
-	/// four pool connections. Missing incident_ids get `Default` (zero).
+	/// Bulk-fetch stats for a set of incidents. Missing incident_ids get
+	/// `Default` (zero).
 	///
-	/// Takes the pool (`&Db`) rather than a single connection so the four
-	/// futures don't fight over one mutable handle.
+	/// `incident_issues` is keyed on `(incident_id, issue_id, joined_at)`,
+	/// so an issue that leaves and rejoins the same incident produces
+	/// multiple rows for the same pair. Counts must dedupe on the pair
+	/// before joining to `events` or `issue_notes`, otherwise every event
+	/// or note gets multiplied by the rejoin count.
+	///
+	/// Strategy: pull the distinct `(incident_id, issue_id)` pairs first,
+	/// then run the per-issue event/note counts and the direct
+	/// incident_notes count concurrently. Takes the pool (`&Db`) so the
+	/// parallel futures don't fight over one mutable conn handle.
 	pub async fn stats_for(
 		pool: &crate::Db,
 		incident_ids: &[Uuid],
 	) -> Result<std::collections::HashMap<Uuid, IncidentStats>> {
 		use crate::schema::{events, incident_issues, incident_notes, issue_notes};
 		use diesel::dsl::count_star;
-		use std::collections::HashMap;
+		use std::collections::{HashMap, HashSet};
 
 		let mut out: HashMap<Uuid, IncidentStats> = incident_ids
 			.iter()
@@ -864,28 +871,45 @@ impl Incident {
 			return Ok(out);
 		}
 
-		// Each future grabs its own pool connection so the four queries
-		// run in parallel rather than serialised on one mutable conn.
 		let ids = incident_ids.to_vec();
-		let f_issues = async {
+		let pairs: Vec<(Uuid, Uuid)> = {
 			let mut c = pool.get().await?;
 			incident_issues::table
-				.group_by(incident_issues::incident_id)
-				.select((incident_issues::incident_id, count_star()))
 				.filter(incident_issues::incident_id.eq_any(&ids))
-				.load::<(Uuid, i64)>(&mut c)
-				.await
-				.map_err(AppError::from)
+				.select((incident_issues::incident_id, incident_issues::issue_id))
+				.distinct()
+				.load(&mut c)
+				.await?
 		};
+
+		let mut issues_by_incident: HashMap<Uuid, HashSet<Uuid>> = HashMap::new();
+		for (incident_id, issue_id) in &pairs {
+			issues_by_incident
+				.entry(*incident_id)
+				.or_default()
+				.insert(*issue_id);
+		}
+		for (incident_id, issues) in &issues_by_incident {
+			out.entry(*incident_id).or_default().issue_count = issues.len() as i64;
+		}
+
+		let unique_issue_ids: Vec<Uuid> = issues_by_incident
+			.values()
+			.flatten()
+			.copied()
+			.collect::<HashSet<_>>()
+			.into_iter()
+			.collect();
+
 		let f_events = async {
+			if unique_issue_ids.is_empty() {
+				return Result::<Vec<(Uuid, i64)>>::Ok(Vec::new());
+			}
 			let mut c = pool.get().await?;
 			events::table
-				.inner_join(
-					incident_issues::table.on(events::issue_id.eq(incident_issues::issue_id)),
-				)
-				.group_by(incident_issues::incident_id)
-				.select((incident_issues::incident_id, count_star()))
-				.filter(incident_issues::incident_id.eq_any(&ids))
+				.group_by(events::issue_id)
+				.select((events::issue_id, count_star()))
+				.filter(events::issue_id.eq_any(&unique_issue_ids))
 				.load::<(Uuid, i64)>(&mut c)
 				.await
 				.map_err(AppError::from)
@@ -901,31 +925,32 @@ impl Incident {
 				.map_err(AppError::from)
 		};
 		let f_jnotes = async {
+			if unique_issue_ids.is_empty() {
+				return Result::<Vec<(Uuid, i64)>>::Ok(Vec::new());
+			}
 			let mut c = pool.get().await?;
 			issue_notes::table
-				.inner_join(
-					incident_issues::table.on(issue_notes::issue_id.eq(incident_issues::issue_id)),
-				)
-				.group_by(incident_issues::incident_id)
-				.select((incident_issues::incident_id, count_star()))
-				.filter(incident_issues::incident_id.eq_any(&ids))
+				.group_by(issue_notes::issue_id)
+				.select((issue_notes::issue_id, count_star()))
+				.filter(issue_notes::issue_id.eq_any(&unique_issue_ids))
 				.load::<(Uuid, i64)>(&mut c)
 				.await
 				.map_err(AppError::from)
 		};
-		let (issue_rows, event_rows, inote_rows, jnote_rows) =
-			futures::try_join!(f_issues, f_events, f_inotes, f_jnotes)?;
+		let (event_rows, inote_rows, jnote_rows) =
+			futures::try_join!(f_events, f_inotes, f_jnotes)?;
 
-		for (id, n) in issue_rows {
-			out.entry(id).or_default().issue_count = n;
-		}
-		for (id, n) in event_rows {
-			out.entry(id).or_default().event_count = n;
+		let events_per_issue: HashMap<Uuid, i64> = event_rows.into_iter().collect();
+		let notes_per_issue: HashMap<Uuid, i64> = jnote_rows.into_iter().collect();
+
+		for (incident_id, issues) in &issues_by_incident {
+			let entry = out.entry(*incident_id).or_default();
+			for issue_id in issues {
+				entry.event_count += events_per_issue.get(issue_id).copied().unwrap_or(0);
+				entry.note_count += notes_per_issue.get(issue_id).copied().unwrap_or(0);
+			}
 		}
 		for (id, n) in inote_rows {
-			out.entry(id).or_default().note_count += n;
-		}
-		for (id, n) in jnote_rows {
 			out.entry(id).or_default().note_count += n;
 		}
 
