@@ -496,12 +496,25 @@ async fn group_has_open_incident(db: &mut AsyncPgConnection, root_server_id: Uui
 /// The boolean is consumed by `re_evaluate_incident_membership` to decide
 /// whether a Slack `incident_open` outbox row should be enqueued (re-joining
 /// an existing incident shouldn't re-notify).
+///
+/// Two parallel event pushes against the same group must not each insert a
+/// fresh incident row. We take a `FOR UPDATE` lock on the root server's
+/// row up-front so the find-or-create pair serializes per-server. A
+/// unique partial index on `incidents (server_id) WHERE closed_at IS NULL`
+/// is the belt-and-braces backstop at the DB layer.
 async fn find_or_open_incident(
 	db: &mut AsyncPgConnection,
 	root_server_id: Uuid,
 	opened_at: Timestamp,
 ) -> Result<(Uuid, bool)> {
-	use crate::schema::incidents;
+	use crate::schema::{incidents, servers};
+
+	let _server_lock: Uuid = servers::table
+		.select(servers::id)
+		.filter(servers::id.eq(root_server_id))
+		.for_update()
+		.first(db)
+		.await?;
 
 	let open: Option<Incident> = incidents::table
 		.select(Incident::as_select())
