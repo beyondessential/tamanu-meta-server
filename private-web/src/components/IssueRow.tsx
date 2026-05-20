@@ -29,6 +29,7 @@ import {
 	RESOLVED_REASONS,
 	RESOLVED_REASON_LABEL,
 	type IssueData,
+	type IssueIncidentLink,
 	type ResolvedReason,
 } from "../types";
 
@@ -532,8 +533,16 @@ function IssueActions({
 
 /** One-line provenance shown just below the title in the expanded body:
  * who reported it (source + ref) and which incident(s) it joined, if any.
- * Each incident is linked by the first 8 hex chars of its UUID. */
+ * Each incident is linked by the first 8 hex chars of its UUID.
+ *
+ * Flappy issues can attach to dozens of incidents — listing them all turns
+ * the meta line into a wall of text. For chains of four or more, collapse
+ * the middle to `N more times` and only render the two latest plus the
+ * earliest. */
 function IssueMeta({ issue }: { issue: IssueData }) {
+	const incidents = issue.incidents;
+	const n = incidents.length;
+
 	return (
 		<Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
 			Issue created by <b>{issue.source}</b> (
@@ -544,26 +553,51 @@ function IssueMeta({ issue }: { issue: IssueData }) {
 				{issue.ref}
 			</Box>
 			)
-			{issue.incidents.length > 0 && ", in "}
-			{issue.incidents.map((inc, i) => (
-				<Fragment key={inc.incident_id}>
-					{i > 0 && ", "}
-					<MuiLink
-						component={RouterLink}
-						to={`/incidents/${inc.incident_id}`}
-					>
-						incident {inc.incident_id.slice(0, 8)}
-					</MuiLink>{" "}
-					(opened <TimeAgo timestamp={inc.opened_at} />
-					{inc.closed_at && (
+			{n > 0 && (
+				<>
+					, {n} {n === 1 ? "time" : "times"}
+					{n <= 3 ? (
 						<>
-							, closed <TimeAgo timestamp={inc.closed_at} />
+							{", in "}
+							{incidents.map((inc, i) => (
+								<Fragment key={inc.incident_id}>
+									{i > 0 && ", "}
+									<IncidentRef inc={inc} />
+								</Fragment>
+							))}
+						</>
+					) : (
+						<>
+							{", latest in "}
+							<IncidentRef inc={incidents[0]} />,{" "}
+							<IncidentRef inc={incidents[1]} />, {n - 3} more{" "}
+							{n - 3 === 1 ? "time" : "times"}, earliest in{" "}
+							<IncidentRef inc={incidents[n - 1]} />
 						</>
 					)}
-					)
-				</Fragment>
-			))}
+				</>
+			)}
 		</Typography>
+	);
+}
+
+function IncidentRef({ inc }: { inc: IssueIncidentLink }) {
+	return (
+		<>
+			<MuiLink
+				component={RouterLink}
+				to={`/incidents/${inc.incident_id}`}
+			>
+				incident {inc.incident_id.slice(0, 8)}
+			</MuiLink>{" "}
+			(opened <TimeAgo timestamp={inc.opened_at} />
+			{inc.closed_at && (
+				<>
+					, closed <TimeAgo timestamp={inc.closed_at} />
+				</>
+			)}
+			)
+		</>
 	);
 }
 
