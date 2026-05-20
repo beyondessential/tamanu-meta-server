@@ -104,6 +104,7 @@ export default function VersionDetail() {
 
 			<KnownIssuesSection
 				versionId={v.id}
+				currentVersion={{ major: v.major, minor: v.minor, patch: v.patch }}
 				issues={v.known_issues}
 				isAdmin={admin}
 				onChanged={() => detail.reload()}
@@ -755,11 +756,13 @@ function ReadyChip({ ready }: { ready: boolean }) {
 
 function KnownIssuesSection({
 	versionId,
+	currentVersion,
 	issues,
 	isAdmin,
 	onChanged,
 }: {
 	versionId: string;
+	currentVersion: { major: number; minor: number; patch: number };
 	issues: KnownIssueData[];
 	isAdmin: boolean;
 	onChanged: () => void;
@@ -800,6 +803,7 @@ function KnownIssuesSection({
 						<KnownIssueRow
 							key={k.id}
 							issue={k}
+							currentVersion={currentVersion}
 							isAdmin={isAdmin}
 							onChanged={onChanged}
 						/>
@@ -817,6 +821,7 @@ function KnownIssuesSection({
 						<KnownIssueRow
 							key={k.id}
 							issue={k}
+							currentVersion={currentVersion}
 							isAdmin={isAdmin}
 							onChanged={onChanged}
 						/>
@@ -856,10 +861,12 @@ function formatIssueRange(issue: KnownIssueData): string {
 
 function KnownIssueRow({
 	issue,
+	currentVersion,
 	isAdmin,
 	onChanged,
 }: {
 	issue: KnownIssueData;
+	currentVersion: { major: number; minor: number; patch: number };
 	isAdmin: boolean;
 	onChanged: () => void;
 }) {
@@ -934,6 +941,7 @@ function KnownIssueRow({
 				open={resolveOpen}
 				onClose={() => setResolveOpen(false)}
 				issue={issue}
+				currentVersion={currentVersion}
 				onResolved={() => {
 					setResolveOpen(false);
 					onChanged();
@@ -1012,15 +1020,27 @@ function ResolveKnownIssueDialog({
 	open,
 	onClose,
 	issue,
+	currentVersion,
 	onResolved,
 }: {
 	open: boolean;
 	onClose: () => void;
 	issue: KnownIssueData;
+	currentVersion: { major: number; minor: number; patch: number };
 	onResolved: () => void;
 }) {
 	const minPatch = issue.min_patch;
-	const defaultFix = `${issue.min_major}.${issue.min_minor}.${minPatch + 1}`;
+	// Default to the page's version if it's a plausible fix (same minor,
+	// strictly above the issue's min) — operators often resolve from the
+	// detail page of the version that carries the fix. Otherwise fall
+	// back to the smallest narrowing (min_patch + 1).
+	const currentIsValidFix =
+		currentVersion.major === issue.min_major &&
+		currentVersion.minor === issue.min_minor &&
+		currentVersion.patch > minPatch;
+	const defaultFix = currentIsValidFix
+		? `${currentVersion.major}.${currentVersion.minor}.${currentVersion.patch}`
+		: `${issue.min_major}.${issue.min_minor}.${minPatch + 1}`;
 	const [fixVersion, setFixVersion] = useState(defaultFix);
 	const [draft, setDraft] = useState("");
 	const action = useApiAction("versions", "resolve_known_issue");
