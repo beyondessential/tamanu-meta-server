@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
+## [6.2.4](https://github.com/beyondessential/canopy/compare/v6.2.3..6.2.4) - 2026-05-20
+
+
+- **Bugfix:** Canopy-internal events were filing the title as message and the body as description - ([1e4b818](https://github.com/beyondessential/canopy/commit/1e4b81836124fcc029ad0d1ebcebc8dc82537635))
+- **Feature:** Remove ack from issues and incidents - ([50393b8](https://github.com/beyondessential/canopy/commit/50393b85107186c559ed1c4ff62bba20d3df2c30))
+
+### Events
+
+- **Feature:** Document description as a single-line title; reject newlines - ([523e340](https://github.com/beyondessential/canopy/commit/523e3406b0fbc4e5603cdbf869438bcd65ba43ed))
+
+### Servers
+
+- **Feature:** Configurable alert_when_down_for duration - ([76ef777](https://github.com/beyondessential/canopy/commit/76ef77796ef21ca75dfb5a2b7e3c45250537a9b5))
+
+### Versions
+
+- **Feature:** Known issues with ready flag and resolve flow - ([a883635](https://github.com/beyondessential/canopy/commit/a883635703cf0f822e844f73f2151a6e64fdf65f))
+
+---
+## [6.2.3](https://github.com/beyondessential/canopy/compare/v6.2.2..v6.2.3) - 2026-05-14
+
+
+- **Repo:** Release - ([fa9a2a0](https://github.com/beyondessential/canopy/commit/fa9a2a05e453d33fc601586f25a5a87620c2dc89))
+
+---
 ## [6.2.2](https://github.com/beyondessential/canopy/compare/v6.2.1..v6.2.2) - 2026-05-14
 
 
