@@ -20,6 +20,7 @@ import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import CancelIcon from "@mui/icons-material/Cancel";
 import EditIcon from "@mui/icons-material/Edit";
 import LanguageIcon from "@mui/icons-material/Language";
+import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { Fragment, useEffect, useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import IncidentsLink from "../components/IncidentsLink";
@@ -489,7 +490,9 @@ function InfoSection({
 					/>
 				)}
 			</Stack>
-			{status && <ChecksTable health={status.health} />}
+			{status && (
+				<ChecksTable health={status.health} overallHealthy={status.healthy} />
+			)}
 			{status && Object.keys((status.extra ?? {}) as Record<string, unknown>).length > 0 && (
 				<Box sx={{ mt: 2 }}>
 					<details>
@@ -536,7 +539,13 @@ function HealthIndicator({ healthy }: { healthy: boolean }) {
  * so a server reporting 30 checks doesn't push the rest of the page
  * off-screen. Render nothing when the server doesn't ship per-check
  * data (legacy / minimal payloads). */
-function ChecksTable({ health }: { health: ServerLastStatusData["health"] }) {
+function ChecksTable({
+	health,
+	overallHealthy,
+}: {
+	health: ServerLastStatusData["health"];
+	overallHealthy: boolean;
+}) {
 	const entries = parseChecks(health);
 	const [expanded, setExpanded] = useState(false);
 	if (entries.length === 0) return null;
@@ -550,7 +559,11 @@ function ChecksTable({ health }: { health: ServerLastStatusData["health"] }) {
 			</Typography>
 			<Stack spacing={1} sx={{ mt: 0.5 }}>
 				{visible.map((entry) => (
-					<CheckRow key={entry.check} entry={entry} />
+					<CheckRow
+						key={entry.check}
+						entry={entry}
+						overallHealthy={overallHealthy}
+					/>
 				))}
 			</Stack>
 			{hidden > 0 && (
@@ -606,7 +619,13 @@ function parseChecks(health: ServerLastStatusData["health"]): ParsedCheck[] {
 	return parsed;
 }
 
-function CheckRow({ entry }: { entry: ParsedCheck }) {
+function CheckRow({
+	entry,
+	overallHealthy,
+}: {
+	entry: ParsedCheck;
+	overallHealthy: boolean;
+}) {
 	return (
 		<Stack
 			direction="row"
@@ -622,6 +641,8 @@ function CheckRow({ entry }: { entry: ParsedCheck }) {
 		>
 			{entry.healthy ? (
 				<CheckCircleIcon fontSize="small" color="success" />
+			) : overallHealthy ? (
+				<WarningAmberIcon fontSize="small" color="warning" />
 			) : (
 				<CancelIcon fontSize="small" color="error" />
 			)}
