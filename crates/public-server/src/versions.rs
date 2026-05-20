@@ -18,10 +18,13 @@ use commons_types::version::{VersionRange, VersionStr};
 use database::{
 	Db,
 	artifacts::Artifact,
+	version_known_issues::VersionKnownIssue,
 	versions::{NewVersion, Version, ViewVersion},
 };
-use diesel::{ExpressionMethods as _, SelectableHelper as _};
-use diesel_async::RunQueryDsl as _;
+use diesel::{
+	BoolExpressionMethods as _, ExpressionMethods as _, QueryDsl as _, SelectableHelper as _,
+};
+use diesel_async::{AsyncPgConnection, RunQueryDsl as _};
 use futures::AsyncReadExt;
 #[cfg(feature = "ui")]
 use pulldown_cmark::{Options, Parser, html};
@@ -34,6 +37,63 @@ use tera::{Context, Tera};
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::state::AppState;
+
+/// Drop versions that any known issue's range still covers. The public
+/// site never serves these — the admin UI shows them, but clients only
+/// see what's been vouched for.
+async fn filter_ready(
+	conn: &mut AsyncPgConnection,
+	versions: Vec<Version>,
+) -> Result<Vec<Version>> {
+	let ids: Vec<_> = versions.iter().map(|v| v.id).collect();
+	let affected = VersionKnownIssue::affected_versions(conn, &ids).await?;
+	Ok(versions
+		.into_iter()
+		.filter(|v| !affected.contains(&v.id))
+		.collect())
+}
+
+/// Pick the latest *ready* version that satisfies `range`. Mirrors
+/// `Version::get_latest_matching` but skips versions any known issue
+/// still covers.
+async fn latest_matching_ready(
+	conn: &mut AsyncPgConnection,
+	range: node_semver::Range,
+) -> Result<Version> {
+	use database::schema::versions::*;
+
+	let node_semver::Version {
+		major: target_major,
+		minor: target_minor,
+		patch: target_patch,
+		..
+	} = range.min_version().ok_or(AppError::UnusableRange)?;
+
+	let candidates: Vec<Version> = table
+		.select(Version::as_select())
+		.filter(
+			status
+				.eq(commons_types::version::VersionStatus::Published)
+				.and(major.ge(target_major as i32))
+				.and(minor.ge(target_minor as i32))
+				.and(patch.ge(target_patch as i32)),
+		)
+		.order_by(major.desc())
+		.then_order_by(minor.desc())
+		.then_order_by(patch.desc())
+		.load(conn)
+		.await
+		.map_err(AppError::from)?;
+
+	let ids: Vec<_> = candidates.iter().map(|v| v.id).collect();
+	let affected = VersionKnownIssue::affected_versions(conn, &ids).await?;
+
+	candidates
+		.into_iter()
+		.filter(|v| !affected.contains(&v.id))
+		.find(|v| range.satisfies(&v.as_semver()))
+		.ok_or(AppError::NoMatchingVersions)
+}
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	let api = OpenApiRouter::new()
@@ -108,6 +168,7 @@ pub fn parse_markdown(text: &str) -> String {
 async fn list(State(db): State<Db>) -> Result<Json<Vec<Version>>> {
 	let mut db = db.get().await?;
 	let versions = Version::get_all(&mut db).await?;
+	let versions = filter_ready(&mut db, versions).await?;
 	Ok(Json(versions))
 }
 
@@ -245,7 +306,7 @@ async fn view_artifacts(
 
 	let mut db = db.get().await?;
 	let version = VersionRange::from_str(&version)?;
-	let mut version = Version::get_latest_matching(&mut db, version.0).await?;
+	let mut version = latest_matching_ready(&mut db, version.0).await?;
 	version.changelog = parse_markdown(&version.changelog);
 	let artifacts = Artifact::get_for_version(&mut db, version.id).await?;
 
@@ -336,7 +397,7 @@ async fn list_artifacts(
 ) -> Result<Json<Vec<Artifact>>> {
 	let mut db = db.get().await?;
 	let version = VersionRange::from_str(&version)?;
-	let version = Version::get_latest_matching(&mut db, version.0).await?;
+	let version = latest_matching_ready(&mut db, version.0).await?;
 	let artifacts = Artifact::get_for_version(&mut db, version.id).await?;
 
 	Ok(Json(artifacts))
@@ -350,7 +411,7 @@ async fn view_mobile_install(
 ) -> Result<Html<String>> {
 	let mut db = db.get().await?;
 	let version = VersionRange::from_str(&version)?;
-	let version = Version::get_latest_matching(&mut db, version.0).await?;
+	let version = latest_matching_ready(&mut db, version.0).await?;
 	let artifacts = Artifact::get_for_version(&mut db, version.id)
 		.await?
 		.into_iter()
@@ -378,10 +439,57 @@ async fn update_for(
 	State(db): State<Db>,
 	Path(version): Path<String>,
 ) -> Result<Json<Vec<ViewVersion>>> {
+	use commons_types::version::VersionStatus;
+	use database::schema::versions::dsl::*;
+	use std::collections::HashMap;
+
 	let mut db = db.get().await?;
-	let version = VersionStr::from_str(&version)?;
-	let updates = Version::get_updates_for_version(&mut db, version).await?;
-	Ok(Json(updates))
+	let target = VersionStr::from_str(&version)?.0;
+
+	// Pull all candidate updates within the same major, ahead of the
+	// caller's exact version.
+	let candidates: Vec<Version> = versions
+		.filter(major.eq(target.major as i32))
+		.filter(status.eq(VersionStatus::Published))
+		.filter(
+			minor.gt(target.minor as i32).or(minor
+				.eq(target.minor as i32)
+				.and(patch.gt(target.patch as i32))),
+		)
+		.select(Version::as_select())
+		.load(&mut db)
+		.await?;
+
+	// Filter to ready THEN reduce to latest-per-(major,minor); doing this
+	// in this order means a not-ready latest patch falls back to an older
+	// ready one within the same minor (instead of dropping the minor).
+	let candidates = filter_ready(&mut db, candidates).await?;
+	let mut latest: HashMap<(i32, i32), Version> = HashMap::new();
+	for v in candidates {
+		let key = (v.major, v.minor);
+		latest
+			.entry(key)
+			.and_modify(|cur| {
+				if v.patch > cur.patch {
+					*cur = v.clone();
+				}
+			})
+			.or_insert(v);
+	}
+
+	let mut out: Vec<ViewVersion> = latest
+		.into_values()
+		.map(|v| ViewVersion {
+			id: v.id,
+			major: v.major,
+			minor: v.minor,
+			patch: v.patch,
+			status: v.status,
+			changelog: v.changelog,
+		})
+		.collect();
+	out.sort_by_key(|v| (v.major, v.minor));
+	Ok(Json(out))
 }
 
 async fn download_artifact(
@@ -392,7 +500,7 @@ async fn download_artifact(
 
 	let mut db = db.get().await?;
 	let version = VersionRange::from_str(&version)?;
-	let version = Version::get_latest_matching(&mut db, version.0).await?;
+	let version = latest_matching_ready(&mut db, version.0).await?;
 
 	let artifact_uuid =
 		Uuid::parse_str(&artifact_id).map_err(|_| AppError::custom("Invalid artifact ID"))?;
