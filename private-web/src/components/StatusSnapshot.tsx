@@ -15,6 +15,7 @@ import PreviewIcon from "@mui/icons-material/Preview";
 import { Fragment } from "react";
 import { useApi, type ApiState } from "../api";
 import TimeAgo from "./TimeAgo";
+import TimezoneTooltip from "./TimezoneTooltip";
 import VersionIndicator from "./VersionIndicator";
 import type { StatusSnapshotData } from "../types";
 
@@ -123,7 +124,13 @@ function CuratedFields({ snap }: { snap: StatusSnapshotData }) {
 				/>
 			</Field>
 			{snap.platform && <Field label="Platform" value={snap.platform} />}
-			{snap.timezone && <Field label="Timezone" value={snap.timezone} />}
+			{snap.timezone && (
+				<Field label="Timezone">
+					<Typography variant="body2">
+						<TimezoneTooltip tz={snap.timezone} />
+					</Typography>
+				</Field>
+			)}
 			{snap.postgres && <Field label="PostgreSQL" value={snap.postgres} mono />}
 			{snap.nodejs && <Field label="Node.js" value={snap.nodejs} mono />}
 			{snap.min_chrome_version != null && (
