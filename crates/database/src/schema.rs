@@ -165,8 +165,6 @@ diesel::table! {
 		active -> Bool,
 		first_seen -> Timestamptz,
 		last_seen -> Timestamptz,
-		acknowledged_at -> Nullable<Timestamptz>,
-		acknowledged_by -> Nullable<Text>,
 		resolved_at -> Nullable<Timestamptz>,
 		resolved_by -> Nullable<Text>,
 		resolved_reason -> Nullable<Text>,

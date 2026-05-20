@@ -12,9 +12,7 @@ use commons_types::{
 	},
 	version::VersionStr,
 };
-use database::{
-	devices::DeviceConnection, servers::Server, statuses::Status, versions::Version,
-};
+use database::{devices::DeviceConnection, servers::Server, statuses::Status, versions::Version};
 use itertools::Itertools;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};

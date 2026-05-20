@@ -622,8 +622,14 @@ async fn submit_status_with_health_checks_persists() {
 			assert_eq!(arr[1]["check"], "disk");
 			assert_eq!(arr[1]["free_pct"], 4);
 			assert_eq!(arr[1]["message"], "almost full");
-			assert!(row.extra.get("health").is_none(), "`health` must not leak into `extra`");
-			assert_eq!(row.extra.get("timezone").and_then(|v| v.as_str()), Some("UTC"));
+			assert!(
+				row.extra.get("health").is_none(),
+				"`health` must not leak into `extra`"
+			);
+			assert_eq!(
+				row.extra.get("timezone").and_then(|v| v.as_str()),
+				Some("UTC")
+			);
 		},
 	)
 	.await
@@ -730,7 +736,13 @@ async fn submit_status_legacy_files_no_health_issues() {
 		async |mut conn, cert, device_id, public, _| {
 			let server_id = insert_health_test_server(&mut conn, device_id).await;
 
-			post_status(&public, &cert, server_id, serde_json::json!({ "uptime": 1 })).await;
+			post_status(
+				&public,
+				&cert,
+				server_id,
+				serde_json::json!({ "uptime": 1 }),
+			)
+			.await;
 
 			assert_eq!(
 				count_issues_for_server(&mut conn, server_id).await,
@@ -776,7 +788,11 @@ async fn submit_status_warning_check_only() {
 			assert!(per_check.message.contains("free_pct"));
 
 			// No roll-up while top-level healthy.
-			assert!(fetch_issue(&mut conn, server_id, "status", "health").await.is_none());
+			assert!(
+				fetch_issue(&mut conn, server_id, "status", "health")
+					.await
+					.is_none()
+			);
 			// Warning alone doesn't cross the incident threshold.
 			assert!(fetch_open_incident(&mut conn, server_id).await.is_none());
 		},
@@ -855,7 +871,10 @@ async fn submit_status_unhealthy_no_checks_files_roll_up_only() {
 				.expect("roll-up issue filed");
 			assert_eq!(roll_up.severity, "error");
 			assert!(roll_up.active);
-			assert_eq!(roll_up.description.as_deref(), Some("Server reports unhealthy"));
+			assert_eq!(
+				roll_up.description.as_deref(),
+				Some("Server reports unhealthy")
+			);
 			assert_eq!(count_issues_for_server(&mut conn, server_id).await, 1);
 			assert!(fetch_open_incident(&mut conn, server_id).await.is_some());
 		},

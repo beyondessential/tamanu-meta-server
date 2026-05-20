@@ -8,7 +8,6 @@ import {
 	ListItemText,
 	MenuItem,
 	Paper,
-	Select,
 	Stack,
 	Switch,
 	TextField,
@@ -25,13 +24,11 @@ import { SEVERITIES, type Severity } from "../types";
 
 const DEFAULT_LIMIT = 200;
 
-type AckedFilter = "either" | "acked" | "unacked";
-
 export default function Incidents() {
 	usePageTitle("Incidents");
 
 	// Page-level refresh signal: a single tick refetches incidents + issues
-	// together after any mutation (ack, resolve, snooze, manual submit).
+	// together after any mutation (resolve, snooze, manual submit).
 	const [refreshTick, setRefreshTick] = useState(0);
 	const bumpRefresh = () => setRefreshTick((t) => t + 1);
 
@@ -44,12 +41,6 @@ export default function Incidents() {
 		.split(",")
 		.filter((s) => s.length > 0) as Severity[];
 	const groupId = params.get("group") ?? "";
-	const acked: AckedFilter =
-		params.get("ack") === "acked"
-			? "acked"
-			: params.get("ack") === "unacked"
-				? "unacked"
-				: "either";
 
 	const updateParam = (key: string, value: string | null) => {
 		setParams(
@@ -66,8 +57,6 @@ export default function Incidents() {
 	const setSeverities = (v: Severity[]) =>
 		updateParam("severity", v.length === 0 ? null : v.join(","));
 	const setGroupId = (v: string) => updateParam("group", v === "" ? null : v);
-	const setAcked = (v: AckedFilter) =>
-		updateParam("ack", v === "either" ? null : v);
 
 	const incidents = useApi(
 		"incidents",
@@ -83,10 +72,9 @@ export default function Incidents() {
 			activeOnly,
 			severities: severities.length === 0 ? null : severities,
 			serverGroupId: groupId === "" ? null : groupId,
-			acked: acked === "either" ? null : acked === "acked",
 			limit: DEFAULT_LIMIT,
 		},
-		[refreshTick, activeOnly, severities.join(","), groupId, acked],
+		[refreshTick, activeOnly, severities.join(","), groupId],
 	);
 
 	return (
@@ -127,8 +115,6 @@ export default function Incidents() {
 				setSeverities={setSeverities}
 				groupId={groupId}
 				setGroupId={setGroupId}
-				acked={acked}
-				setAcked={setAcked}
 				roots={roots}
 				onRefresh={bumpRefresh}
 			/>
@@ -161,8 +147,6 @@ function FilterBar({
 	setSeverities,
 	groupId,
 	setGroupId,
-	acked,
-	setAcked,
 	roots,
 	onRefresh,
 }: {
@@ -172,8 +156,6 @@ function FilterBar({
 	setSeverities: (v: Severity[]) => void;
 	groupId: string;
 	setGroupId: (v: string) => void;
-	acked: AckedFilter;
-	setAcked: (v: AckedFilter) => void;
 	roots: ReturnType<typeof useApi<"servers", "list_roots">>;
 	onRefresh: () => void;
 }) {
@@ -242,16 +224,6 @@ function FilterBar({
 							</MenuItem>
 						))}
 				</TextField>
-				<Select
-					size="small"
-					value={acked}
-					onChange={(e) => setAcked(e.target.value as AckedFilter)}
-					sx={{ minWidth: 140 }}
-				>
-					<MenuItem value="either">Acked: any</MenuItem>
-					<MenuItem value="acked">Acked only</MenuItem>
-					<MenuItem value="unacked">Unacked only</MenuItem>
-				</Select>
 				<Box sx={{ ml: "auto" }}>
 					<IconButton aria-label="Refresh" size="small" onClick={onRefresh}>
 						<RefreshIcon fontSize="small" />

@@ -1471,41 +1471,6 @@
         ]
       }
     },
-    "/api/issues/ack": {
-      "post": {
-        "tags": [
-          "issues"
-        ],
-        "operationId": "issue_ack",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/IssueIdArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IssueData"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
     "/api/issues/add_note": {
       "post": {
         "tags": [
@@ -1873,41 +1838,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
-    "/api/issues/unack": {
-      "post": {
-        "tags": [
-          "issues"
-        ],
-        "operationId": "issue_unack",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/IssueIdArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IssueData"
                 }
               }
             }
@@ -3867,33 +3797,6 @@
           "incidents"
         ],
         "properties": {
-          "acknowledged_at": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time"
-          },
-          "acknowledged_by": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "acknowledged_by_name": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Display name of the acker (from the cached Tailscale users table)."
-          },
-          "acknowledged_by_pic": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Profile picture URL of the acker."
-          },
           "active": {
             "type": "boolean"
           },

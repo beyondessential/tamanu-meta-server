@@ -50,7 +50,7 @@ export default function ServerDetail() {
 	);
 	const isAdmin = useApi("commons", "is_current_user_admin");
 	// Single refresh signal for everything on the page that talks to the
-	// issues/incidents APIs. Any mutation (manual-event submit, ack/resolve/
+	// issues/incidents APIs. Any mutation (manual-event submit, resolve/
 	// snooze on a row, etc.) bumps this so all sibling panels refetch in
 	// lockstep — otherwise resolving an issue (which can auto-close an
 	// incident) leaves a stale incidents list.

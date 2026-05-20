@@ -1,6 +1,6 @@
 //! Cached display metadata for Tailscale users (name + profile picture).
 //!
-//! Handlers that record "this human did X" (issue/incident ack and resolve)
+//! Handlers that record "this human did X" (issue resolve, incident ack/resolve)
 //! upsert here from the request's Tailscale headers so the rest of the API
 //! can render avatars without having to round-trip through the Tailscale
 //! API.

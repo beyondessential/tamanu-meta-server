@@ -602,22 +602,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/issues/ack": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["issue_ack"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/issues/add_note": {
         parameters: {
             query?: never;
@@ -773,22 +757,6 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["submit_manual_event"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/issues/unack": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["issue_unack"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1518,13 +1486,6 @@ export interface components {
             issues: components["schemas"]["IncidentIssueData"][];
         };
         IssueData: {
-            /** Format: date-time */
-            acknowledged_at?: string | null;
-            acknowledged_by?: string | null;
-            /** @description Display name of the acker (from the cached Tailscale users table). */
-            acknowledged_by_name?: string | null;
-            /** @description Profile picture URL of the acker. */
-            acknowledged_by_pic?: string | null;
             active: boolean;
             /** Format: date-time */
             created_at: string;
@@ -3139,29 +3100,6 @@ export interface operations {
             };
         };
     };
-    issue_ack: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["IssueIdArgs"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["IssueData"];
-                };
-            };
-        };
-    };
     issue_add_note: {
         parameters: {
             query?: never;
@@ -3402,29 +3340,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-        };
-    };
-    issue_unack: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["IssueIdArgs"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["IssueData"];
                 };
             };
         };
