@@ -12,6 +12,7 @@ import CancelIcon from "@mui/icons-material/Cancel";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import CloseIcon from "@mui/icons-material/Close";
 import PreviewIcon from "@mui/icons-material/Preview";
+import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { Fragment } from "react";
 import { useApi, type ApiState } from "../api";
 import TimeAgo from "./TimeAgo";
@@ -108,7 +109,7 @@ function PanelBody({
 	return (
 		<Stack spacing={2}>
 			<CuratedFields snap={snap} />
-			<ChecksBlock health={snap.health} />
+			<ChecksBlock health={snap.health} overallHealthy={snap.healthy} />
 			<ExtrasBlock extra={snap.extra} />
 		</Stack>
 	);
@@ -172,7 +173,13 @@ function Field({
 	);
 }
 
-function ChecksBlock({ health }: { health: StatusSnapshotData["health"] }) {
+function ChecksBlock({
+	health,
+	overallHealthy,
+}: {
+	health: StatusSnapshotData["health"];
+	overallHealthy: boolean;
+}) {
 	const entries = parseChecks(health);
 	if (entries.length === 0) return null;
 	return (
@@ -197,6 +204,8 @@ function ChecksBlock({ health }: { health: StatusSnapshotData["health"] }) {
 					>
 						{entry.healthy ? (
 							<CheckCircleIcon fontSize="small" color="success" />
+						) : overallHealthy ? (
+							<WarningAmberIcon fontSize="small" color="warning" />
 						) : (
 							<CancelIcon fontSize="small" color="error" />
 						)}
