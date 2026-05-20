@@ -155,12 +155,10 @@ struct RowSecs {
 #[tokio::test(flavor = "multi_thread")]
 async fn new_servers_default_to_ten_minutes() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		sql_query(
-			"INSERT INTO servers (host) VALUES ('http://new.invalid/')",
-		)
-		.execute(&mut conn)
-		.await
-		.expect("insert default");
+		sql_query("INSERT INTO servers (host) VALUES ('http://new.invalid/')")
+			.execute(&mut conn)
+			.await
+			.expect("insert default");
 
 		let row: RowSecs = sql_query(
 			r#"

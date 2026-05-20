@@ -23,7 +23,10 @@ async fn ready_is_true_when_no_known_issues() {
 			.json();
 		assert_eq!(detail.get("ready").and_then(|v| v.as_bool()), Some(true));
 		assert_eq!(
-			detail.get("known_issues").and_then(|v| v.as_array()).map(|a| a.len()),
+			detail
+				.get("known_issues")
+				.and_then(|v| v.as_array())
+				.map(|a| a.len()),
 			Some(0)
 		);
 
@@ -77,7 +80,9 @@ async fn add_open_issue_makes_version_not_ready() {
 			.json(&serde_json::json!({}))
 			.await
 			.json();
-		let v = &grouped.as_array().unwrap()[0]["versions"].as_array().unwrap()[0];
+		let v = &grouped.as_array().unwrap()[0]["versions"]
+			.as_array()
+			.unwrap()[0];
 		assert_eq!(v.get("ready"), Some(&Value::Bool(false)));
 	})
 	.await;

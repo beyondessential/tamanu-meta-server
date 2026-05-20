@@ -6,9 +6,7 @@ use axum::extract::State;
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
 use commons_types::version::{VersionStatus, VersionStr};
-use database::{
-	artifacts::Artifact, version_known_issues::VersionKnownIssue, versions::Version,
-};
+use database::{artifacts::Artifact, version_known_issues::VersionKnownIssue, versions::Version};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -140,8 +138,7 @@ pub async fn get_grouped_versions(
 
 	// One batched query to compute `ready` for every version returned.
 	let version_ids: Vec<Uuid> = versions.iter().map(|v| v.id).collect();
-	let with_open_issues =
-		VersionKnownIssue::versions_with_open(&mut conn, &version_ids).await?;
+	let with_open_issues = VersionKnownIssue::versions_with_open(&mut conn, &version_ids).await?;
 
 	let mut grouped: BTreeMap<(i32, i32), Vec<Version>> = BTreeMap::new();
 	for version in versions {
@@ -545,9 +542,7 @@ pub async fn add_known_issue(
 ) -> Result<Json<KnownIssueData>> {
 	let description = args.description.trim();
 	if description.is_empty() {
-		return Err(AppError::BadRequest(
-			"Description must not be empty".into(),
-		));
+		return Err(AppError::BadRequest("Description must not be empty".into()));
 	}
 	let mut conn = state.db.get().await?;
 	let row =
@@ -585,7 +580,8 @@ pub async fn resolve_known_issue(
 		));
 	}
 	let mut conn = state.db.get().await?;
-	let row = VersionKnownIssue::resolve(&mut conn, args.known_issue_id, &admin.0.login, resolution)
-		.await?;
+	let row =
+		VersionKnownIssue::resolve(&mut conn, args.known_issue_id, &admin.0.login, resolution)
+			.await?;
 	Ok(Json(KnownIssueData::from(row)))
 }
