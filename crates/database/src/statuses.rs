@@ -403,17 +403,14 @@ impl Status {
 		if !self.healthy {
 			return HealthState::Unhealthy;
 		}
-		let any_failing = self
-			.health
-			.as_array()
-			.is_some_and(|arr| {
-				arr.iter().any(|e| {
-					e.as_object()
-						.and_then(|o| o.get("healthy"))
-						.and_then(|v| v.as_bool())
-						.is_some_and(|b| !b)
-				})
-			});
+		let any_failing = self.health.as_array().is_some_and(|arr| {
+			arr.iter().any(|e| {
+				e.as_object()
+					.and_then(|o| o.get("healthy"))
+					.and_then(|v| v.as_bool())
+					.is_some_and(|b| !b)
+			})
+		});
 		if any_failing {
 			HealthState::Warning
 		} else {

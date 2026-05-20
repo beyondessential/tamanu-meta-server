@@ -4,11 +4,14 @@ import {
 	AccordionSummary,
 	Alert,
 	Box,
+	Chip,
 	LinearProgress,
 	Link as MuiLink,
 	Stack,
+	Tooltip,
 	Typography,
 } from "@mui/material";
+import ErrorOutlineIcon from "@mui/icons-material/ErrorOutlined";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { Link as RouterLink } from "react-router-dom";
 import VersionStatusChip from "../components/VersionStatusChip";
@@ -118,6 +121,17 @@ function MinorGroup({ group }: { group: MinorVersionGroup }) {
 									</Typography>
 									{v.status !== "published" && (
 										<VersionStatusChip status={v.status} />
+									)}
+									{!v.ready && (
+										<Tooltip title="This version has unresolved known issues">
+											<Chip
+												size="small"
+												color="warning"
+												variant="outlined"
+												icon={<ErrorOutlineIcon />}
+												label="Known issues"
+											/>
+										</Tooltip>
 									)}
 									<Typography
 										variant="body2"

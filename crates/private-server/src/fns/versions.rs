@@ -4,9 +4,11 @@ use std::str::FromStr;
 use axum::Json;
 use axum::extract::State;
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
-use commons_servers::tailscale_auth::TailscaleAdmin;
+use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
 use commons_types::version::{VersionStatus, VersionStr};
-use database::{artifacts::Artifact, versions::Version};
+use database::{
+	artifacts::Artifact, version_known_issues::VersionKnownIssue, versions::Version,
+};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -22,6 +24,10 @@ pub struct VersionData {
 	pub patch: i32,
 	pub status: VersionStatus,
 	pub created_at: Timestamp,
+	/// `true` when this version has no unresolved known issues. See the
+	/// `version_known_issues` table and `add_known_issue`/`resolve_known_issue`
+	/// endpoints for management.
+	pub ready: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -48,6 +54,34 @@ pub struct VersionDetail {
 	pub min_chrome_version: Option<u32>,
 	pub is_latest_in_minor: bool,
 	pub related_versions: Vec<RelatedVersionData>,
+	/// `true` when this version has no unresolved known issues.
+	pub ready: bool,
+	pub known_issues: Vec<KnownIssueData>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct KnownIssueData {
+	pub id: Uuid,
+	pub created_at: Timestamp,
+	pub author: String,
+	pub description: String,
+	pub resolved_at: Option<Timestamp>,
+	pub resolved_by: Option<String>,
+	pub resolution_message: Option<String>,
+}
+
+impl From<VersionKnownIssue> for KnownIssueData {
+	fn from(k: VersionKnownIssue) -> Self {
+		Self {
+			id: k.id,
+			created_at: k.created_at,
+			author: k.author,
+			description: k.description,
+			resolved_at: k.resolved_at,
+			resolved_by: k.resolved_by,
+			resolution_message: k.resolution_message,
+		}
+	}
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -84,6 +118,9 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(update_artifact))
 		.routes(routes!(create_artifact))
 		.routes(routes!(delete_artifact))
+		.routes(routes!(list_known_issues))
+		.routes(routes!(add_known_issue))
+		.routes(routes!(resolve_known_issue))
 }
 
 #[utoipa::path(
@@ -100,6 +137,11 @@ pub async fn get_grouped_versions(
 ) -> Result<Json<Vec<MinorVersionGroup>>> {
 	let mut conn = state.db.get().await?;
 	let versions = Version::get_all_including_drafts(&mut conn).await?;
+
+	// One batched query to compute `ready` for every version returned.
+	let version_ids: Vec<Uuid> = versions.iter().map(|v| v.id).collect();
+	let with_open_issues =
+		VersionKnownIssue::versions_with_open(&mut conn, &version_ids).await?;
 
 	let mut grouped: BTreeMap<(i32, i32), Vec<Version>> = BTreeMap::new();
 	for version in versions {
@@ -141,6 +183,7 @@ pub async fn get_grouped_versions(
 			let version_data: Vec<VersionData> = versions
 				.into_iter()
 				.map(|v| VersionData {
+					ready: !with_open_issues.contains(&v.id),
 					major: v.major,
 					minor: v.minor,
 					patch: v.patch,
@@ -218,6 +261,14 @@ pub async fn get_version_detail(
 		})
 		.collect();
 
+	let known_issues: Vec<KnownIssueData> =
+		VersionKnownIssue::list_for_version(&mut conn, version_record.id)
+			.await?
+			.into_iter()
+			.map(KnownIssueData::from)
+			.collect();
+	let ready = known_issues.iter().all(|k| k.resolved_at.is_some());
+
 	Ok(Json(VersionDetail {
 		id: version_record.id,
 		major: version_record.major,
@@ -230,6 +281,8 @@ pub async fn get_version_detail(
 		min_chrome_version,
 		is_latest_in_minor,
 		related_versions,
+		ready,
+		known_issues,
 	}))
 }
 
@@ -440,4 +493,99 @@ pub async fn delete_artifact(
 	let mut conn = state.db.get().await?;
 	Artifact::delete(&mut conn, args.artifact_id).await?;
 	Ok(Json(()))
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct VersionIdArgs {
+	pub version_id: Uuid,
+}
+
+#[utoipa::path(
+	post,
+	path = "/list_known_issues",
+	tag = "versions",
+	security(("tailscale-user" = [])),
+	request_body = VersionIdArgs,
+	responses(
+		(status = 200, body = Vec<KnownIssueData>),
+		(status = 404, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn list_known_issues(
+	State(state): State<AppState>,
+	_user: TailscaleUser,
+	Json(args): Json<VersionIdArgs>,
+) -> Result<Json<Vec<KnownIssueData>>> {
+	let mut conn = state.db.get().await?;
+	let rows = VersionKnownIssue::list_for_version(&mut conn, args.version_id).await?;
+	Ok(Json(rows.into_iter().map(KnownIssueData::from).collect()))
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct AddKnownIssueArgs {
+	pub version_id: Uuid,
+	pub description: String,
+}
+
+#[utoipa::path(
+	post,
+	path = "/add_known_issue",
+	tag = "versions",
+	security(("tailscale-admin" = [])),
+	request_body = AddKnownIssueArgs,
+	responses(
+		(status = 200, body = KnownIssueData),
+		(status = 400, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn add_known_issue(
+	State(state): State<AppState>,
+	admin: TailscaleAdmin,
+	Json(args): Json<AddKnownIssueArgs>,
+) -> Result<Json<KnownIssueData>> {
+	let description = args.description.trim();
+	if description.is_empty() {
+		return Err(AppError::BadRequest(
+			"Description must not be empty".into(),
+		));
+	}
+	let mut conn = state.db.get().await?;
+	let row =
+		VersionKnownIssue::add(&mut conn, args.version_id, &admin.0.login, description).await?;
+	Ok(Json(KnownIssueData::from(row)))
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct ResolveKnownIssueArgs {
+	pub known_issue_id: Uuid,
+	pub resolution_message: String,
+}
+
+#[utoipa::path(
+	post,
+	path = "/resolve_known_issue",
+	tag = "versions",
+	security(("tailscale-admin" = [])),
+	request_body = ResolveKnownIssueArgs,
+	responses(
+		(status = 200, body = KnownIssueData),
+		(status = 400, body = ProblemDetailsSchema),
+		(status = 404, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn resolve_known_issue(
+	State(state): State<AppState>,
+	admin: TailscaleAdmin,
+	Json(args): Json<ResolveKnownIssueArgs>,
+) -> Result<Json<KnownIssueData>> {
+	let resolution = args.resolution_message.trim();
+	if resolution.is_empty() {
+		return Err(AppError::BadRequest(
+			"Resolution message must not be empty".into(),
+		));
+	}
+	let mut conn = state.db.get().await?;
+	let row = VersionKnownIssue::resolve(&mut conn, args.known_issue_id, &admin.0.login, resolution)
+		.await?;
+	Ok(Json(KnownIssueData::from(row)))
 }

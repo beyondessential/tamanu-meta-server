@@ -18,6 +18,7 @@ pub mod sql_playground_history;
 pub mod statuses;
 pub mod tailscale_users;
 pub mod url_field;
+pub mod version_known_issues;
 pub mod versions;
 pub mod views;
 

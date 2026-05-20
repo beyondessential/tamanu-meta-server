@@ -2683,6 +2683,51 @@
         }
       }
     },
+    "/api/versions/add_known_issue": {
+      "post": {
+        "tags": [
+          "versions"
+        ],
+        "operationId": "add_known_issue",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddKnownIssueArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnownIssueData"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/versions/create_artifact": {
       "post": {
         "tags": [
@@ -2862,6 +2907,109 @@
         }
       }
     },
+    "/api/versions/list_known_issues": {
+      "post": {
+        "tags": [
+          "versions"
+        ],
+        "operationId": "list_known_issues",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VersionIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/KnownIssueData"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/versions/resolve_known_issue": {
+      "post": {
+        "tags": [
+          "versions"
+        ],
+        "operationId": "resolve_known_issue",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveKnownIssueArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnownIssueData"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/versions/update_artifact": {
       "post": {
         "tags": [
@@ -2967,6 +3115,22 @@
         "properties": {
           "email": {
             "type": "string"
+          }
+        }
+      },
+      "AddKnownIssueArgs": {
+        "type": "object",
+        "required": [
+          "version_id",
+          "description"
+        ],
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "version_id": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
@@ -4071,6 +4235,50 @@
           }
         }
       },
+      "KnownIssueData": {
+        "type": "object",
+        "required": [
+          "id",
+          "created_at",
+          "author",
+          "description"
+        ],
+        "properties": {
+          "author": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "resolution_message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "resolved_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "resolved_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "ListActiveArgs": {
         "type": "object",
         "properties": {
@@ -4619,6 +4827,22 @@
           },
           "reason": {
             "$ref": "#/components/schemas/ResolvedReason"
+          }
+        }
+      },
+      "ResolveKnownIssueArgs": {
+        "type": "object",
+        "required": [
+          "known_issue_id",
+          "resolution_message"
+        ],
+        "properties": {
+          "known_issue_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "resolution_message": {
+            "type": "string"
           }
         }
       },
@@ -5609,7 +5833,8 @@
           "minor",
           "patch",
           "status",
-          "created_at"
+          "created_at",
+          "ready"
         ],
         "properties": {
           "created_at": {
@@ -5628,6 +5853,10 @@
             "type": "integer",
             "format": "int32"
           },
+          "ready": {
+            "type": "boolean",
+            "description": "`true` when this version has no unresolved known issues. See the\n`version_known_issues` table and `add_known_issue`/`resolve_known_issue`\nendpoints for management."
+          },
           "status": {
             "$ref": "#/components/schemas/VersionStatus"
           }
@@ -5645,7 +5874,9 @@
           "updated_at",
           "changelog",
           "is_latest_in_minor",
-          "related_versions"
+          "related_versions",
+          "ready",
+          "known_issues"
         ],
         "properties": {
           "changelog": {
@@ -5661,6 +5892,12 @@
           },
           "is_latest_in_minor": {
             "type": "boolean"
+          },
+          "known_issues": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KnownIssueData"
+            }
           },
           "major": {
             "type": "integer",
@@ -5682,6 +5919,10 @@
             "type": "integer",
             "format": "int32"
           },
+          "ready": {
+            "type": "boolean",
+            "description": "`true` when this version has no unresolved known issues."
+          },
           "related_versions": {
             "type": "array",
             "items": {
@@ -5694,6 +5935,18 @@
           "updated_at": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "VersionIdArgs": {
+        "type": "object",
+        "required": [
+          "version_id"
+        ],
+        "properties": {
+          "version_id": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
