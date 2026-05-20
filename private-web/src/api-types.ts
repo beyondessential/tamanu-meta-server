@@ -1791,7 +1791,13 @@ export interface components {
          */
         Page_ServerInfo: {
             items: {
-                alert_when_down: boolean;
+                /**
+                 * Format: int64
+                 * @description Downtime threshold in seconds before the reachability sweep files an
+                 *     issue. `0` (or any non-positive value) disables alerting for this
+                 *     server; the default at creation is 600 (10 minutes).
+                 */
+                alert_when_down_for: number;
                 cloud?: boolean | null;
                 /** Format: uuid */
                 device_id?: string | null;
@@ -1926,7 +1932,8 @@ export interface components {
             query: string;
         };
         ServerDataUpdate: {
-            alert_when_down?: boolean | null;
+            /** Format: int64 */
+            alert_when_down_for?: number | null;
             cloud?: boolean | null;
             /** Format: uuid */
             device_id?: string | null;
@@ -1944,7 +1951,13 @@ export interface components {
                 "up" | "down" | "away" | "blip" | "gone",
                 "healthy" | "warning" | "unhealthy",
                 {
-                    alert_when_down: boolean;
+                    /**
+                     * Format: int64
+                     * @description Downtime threshold in seconds before the reachability sweep files an
+                     *     issue. `0` (or any non-positive value) disables alerting for this
+                     *     server; the default at creation is 600 (10 minutes).
+                     */
+                    alert_when_down_for: number;
                     cloud?: boolean | null;
                     /** Format: uuid */
                     device_id?: string | null;
@@ -1976,7 +1989,13 @@ export interface components {
             server_id: string;
         };
         ServerInfo: {
-            alert_when_down: boolean;
+            /**
+             * Format: int64
+             * @description Downtime threshold in seconds before the reachability sweep files an
+             *     issue. `0` (or any non-positive value) disables alerting for this
+             *     server; the default at creation is 600 (10 minutes).
+             */
+            alert_when_down_for: number;
             cloud?: boolean | null;
             /** Format: uuid */
             device_id?: string | null;

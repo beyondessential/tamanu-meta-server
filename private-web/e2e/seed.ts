@@ -70,7 +70,8 @@ export async function seedServer(
 		rank?: ServerRank | null;
 		parentServerId?: string;
 		deviceId?: string;
-		alertWhenDown?: boolean;
+		/** Threshold in seconds; `0` disables alerting (the default for e2e seeds). */
+		alertWhenDownFor?: number;
 	} = {},
 ): Promise<SeededServer> {
 	const id = randomUUID();
@@ -78,9 +79,9 @@ export async function seedServer(
 	const host = opts.host ?? `https://${randomLabel("host")}.e2e.invalid`;
 	const kind = opts.kind ?? "central";
 	const rank = opts.rank ?? "production";
-	const alertWhenDown = opts.alertWhenDown ?? false;
+	const alertWhenDownFor = opts.alertWhenDownFor ?? 0;
 	await sql.query(
-		`INSERT INTO servers (id, name, host, kind, rank, parent_server_id, device_id, alert_when_down)
+		`INSERT INTO servers (id, name, host, kind, rank, parent_server_id, device_id, alert_when_down_for)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
 		[
 			id,
@@ -90,7 +91,7 @@ export async function seedServer(
 			rank,
 			opts.parentServerId ?? null,
 			opts.deviceId ?? null,
-			alertWhenDown,
+			alertWhenDownFor,
 		],
 	);
 	return { id, name, host, kind, rank };

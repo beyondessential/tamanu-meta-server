@@ -50,7 +50,10 @@ pub struct ServerInfo {
 	pub listed: bool,
 	pub cloud: Option<bool>,
 	pub geolocation: Option<GeoPoint>,
-	pub alert_when_down: bool,
+	/// Downtime threshold in seconds before the reachability sweep files an
+	/// issue. `0` (or any non-positive value) disables alerting for this
+	/// server; the default at creation is 600 (10 minutes).
+	pub alert_when_down_for: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -109,7 +112,7 @@ pub struct ServerDataUpdate {
 	)]
 	pub geolocation: Option<Option<GeoPoint>>,
 	#[serde(skip_serializing_if = "Option::is_none")]
-	pub alert_when_down: Option<bool>,
+	pub alert_when_down_for: Option<i64>,
 }
 
 fn deserialize_some<'de, T, D>(deserializer: D) -> std::result::Result<Option<T>, D::Error>
@@ -133,7 +136,7 @@ fn server_to_info(s: Server) -> ServerInfo {
 		listed: s.listed,
 		cloud: s.cloud,
 		geolocation: s.geolocation,
-		alert_when_down: s.alert_when_down,
+		alert_when_down_for: s.alert_when_down_for.0.as_secs(),
 	}
 }
 
@@ -266,7 +269,7 @@ pub async fn get_info(
 		listed: server.listed,
 		cloud: server.cloud,
 		geolocation: server.geolocation,
-		alert_when_down: server.alert_when_down,
+		alert_when_down_for: server.alert_when_down_for.0.as_secs(),
 	}))
 }
 
@@ -326,7 +329,7 @@ pub async fn get_detail(
 		listed: server.listed,
 		cloud: server.cloud,
 		geolocation: server.geolocation,
-		alert_when_down: server.alert_when_down,
+		alert_when_down_for: server.alert_when_down_for.0.as_secs(),
 	};
 
 	let up = status
@@ -416,7 +419,7 @@ pub async fn get_detail(
 							device_id: child.device_id,
 							parent_server_id: Some(server.id),
 							parent_server_name: server.name.clone(),
-							alert_when_down: child.alert_when_down,
+							alert_when_down_for: child.alert_when_down_for.0.as_secs(),
 						},
 					)
 				})
@@ -476,7 +479,10 @@ pub async fn update(
 		listed: args.data.listed,
 		cloud: args.data.cloud,
 		geolocation: args.data.geolocation,
-		alert_when_down: args.data.alert_when_down,
+		alert_when_down_for: args
+			.data
+			.alert_when_down_for
+			.map(|s| database::pg_duration::PgDuration(jiff::SignedDuration::from_secs(s))),
 	};
 	Server::update(&mut conn, args.server_id, update_data).await?;
 	Ok(Json(()))
@@ -682,7 +688,7 @@ pub async fn attach_tailscale_device(
 			listed: None,
 			cloud: None,
 			geolocation: None,
-			alert_when_down: None,
+			alert_when_down_for: None,
 		},
 	)
 	.await?;

@@ -51,8 +51,16 @@ function EditForm({ info }: { info: ServerInfo }) {
 	const [kind, setKind] = useState<ServerKind>(info.kind);
 	const [rank, setRank] = useState<ServerRank | "">(info.rank ?? "");
 	const [listed, setListed] = useState(info.listed);
-	const [alertWhenDown, setAlertWhenDown] = useState(
-		info.alert_when_down,
+	// Threshold in seconds; 0 (or negative) means alerting is disabled. The
+	// UI works in minutes for the operator and the empty string represents
+	// "disabled" — converted back to seconds at submit time.
+	const [alertWhenDownEnabled, setAlertWhenDownEnabled] = useState(
+		info.alert_when_down_for > 0,
+	);
+	const [alertWhenDownMinutes, setAlertWhenDownMinutes] = useState<string>(
+		info.alert_when_down_for > 0
+			? Math.round(info.alert_when_down_for / 60).toString()
+			: "10",
 	);
 	const [parentId, setParentId] = useState<string | null>(
 		info.parent_server_id,
@@ -79,7 +87,9 @@ function EditForm({ info }: { info: ServerInfo }) {
 				lat && lon
 					? { lat: Number(lat), lon: Number(lon) }
 					: null,
-			alert_when_down: alertWhenDown,
+			alert_when_down_for: alertWhenDownEnabled
+				? Math.max(0, Math.round(Number(alertWhenDownMinutes) * 60))
+				: 0,
 		};
 		try {
 			await action.call({ server_id: info.id, data });
@@ -191,16 +201,36 @@ function EditForm({ info }: { info: ServerInfo }) {
 					/>
 				)}
 
-				<FormControlLabel
-					control={
-						<Checkbox
-							checked={alertWhenDown}
-							onChange={(e) => setAlertWhenDown(e.target.checked)}
-							disabled={action.pending}
-						/>
-					}
-					label="File an issue when this server goes unreachable (untick for test environments and other servers that are expected to be down sometimes)"
-				/>
+				<Stack
+					direction={{ xs: "column", md: "row" }}
+					spacing={2}
+					sx={{ alignItems: { md: "center" } }}
+				>
+					<FormControlLabel
+						control={
+							<Checkbox
+								checked={alertWhenDownEnabled}
+								onChange={(e) => setAlertWhenDownEnabled(e.target.checked)}
+								disabled={action.pending}
+							/>
+						}
+						label="File an issue when this server is unreachable for"
+					/>
+					<TextField
+						label="minutes"
+						type="number"
+						value={alertWhenDownMinutes}
+						onChange={(e) => setAlertWhenDownMinutes(e.target.value)}
+						disabled={action.pending || !alertWhenDownEnabled}
+						slotProps={{ htmlInput: { min: 0, step: 1 } }}
+						sx={{ width: 140 }}
+					/>
+				</Stack>
+				<Typography variant="caption" color="text.secondary">
+					Raise this for flappy servers (so brief blips don't fire) or lower it
+					for critical servers that should page promptly. Uncheck for test
+					environments and ad-hoc demos that are expected to be down.
+				</Typography>
 
 				{action.error && (
 					<Alert severity="error">{action.error.message}</Alert>
