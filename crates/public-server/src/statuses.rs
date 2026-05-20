@@ -200,8 +200,8 @@ async fn file_health_events(
 			source: STATUS_SOURCE.into(),
 			r#ref: HEALTH_REF.into(),
 			severity: Some(Severity::Error),
-			description: roll_up_unhealthy_description(&status.health),
-			message: roll_up_unhealthy_message(&curr_failing_checks),
+			description: Some(roll_up_unhealthy_message(&curr_failing_checks)),
+			message: roll_up_unhealthy_description(&status.health).unwrap_or_default(),
 			active: Some(true),
 			occurred_at,
 		}
@@ -216,8 +216,8 @@ async fn file_health_events(
 			source: STATUS_SOURCE.into(),
 			r#ref: format!("{HEALTH_REF}/{check}"),
 			severity: Some(per_check_severity),
-			description: per_check_description(entry),
-			message: format!("Health check '{check}' failed"),
+			description: Some(format!("Health check '{check}' failed")),
+			message: per_check_description(entry).unwrap_or_default(),
 			active: Some(true),
 			occurred_at,
 		}

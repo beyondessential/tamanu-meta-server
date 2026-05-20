@@ -34,7 +34,9 @@ pub struct Issue {
 	pub r#ref: String,
 	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub severity: Severity,
+	/// Single-line title/subject. See [`NewEvent::description`].
 	pub description: Option<String>,
+	/// Body / long detail. See [`NewEvent::message`].
 	pub message: String,
 	pub active: bool,
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
@@ -67,7 +69,9 @@ pub struct Event {
 	pub issue_id: Uuid,
 	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub severity: Severity,
+	/// Single-line title/subject. See [`NewEvent::description`].
 	pub description: Option<String>,
+	/// Body / long detail. See [`NewEvent::message`].
 	pub message: String,
 	pub active: bool,
 	pub hash: Vec<u8>,
@@ -127,8 +131,15 @@ pub struct NewEvent {
 	pub r#ref: String,
 	#[serde(default)]
 	pub severity: Option<Severity>,
+	/// Short single-line title/subject for this event. Rendered as the
+	/// issue's headline in the UI and as the Slack message subject.
+	/// Must not contain newlines — `save()` returns `BadRequest` if it
+	/// does. Use [`Self::message`] for the body / longer detail.
 	#[serde(default)]
 	pub description: Option<String>,
+	/// Body text for this event. Free-form, multi-line OK. Falls back
+	/// to the headline when [`Self::description`] is `None` (the UI
+	/// uses the first line in that case).
 	pub message: String,
 	#[serde(default)]
 	pub active: Option<bool>,
@@ -189,6 +200,17 @@ impl NewEvent {
 		device_id: Option<Uuid>,
 	) -> Result<Issue> {
 		use crate::schema::{events, issues};
+
+		// description is the single-line title; reject multi-line input
+		// up front so the UI never has to fight with a multi-line
+		// "headline".
+		if let Some(d) = self.description.as_deref()
+			&& d.contains('\n')
+		{
+			return Err(AppError::BadRequest(
+				"description must be a single line (no newlines); use `message` for body text".into(),
+			));
+		}
 
 		let severity = self.severity.unwrap_or_default();
 		let active = self.active.unwrap_or(true);
