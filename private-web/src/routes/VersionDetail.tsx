@@ -792,7 +792,7 @@ function KnownIssuesSection({
 
 			{issues.length === 0 ? (
 				<Typography variant="body2" color="text.secondary">
-					No known issues — this version is marked ready.
+					No known issues for this minor.
 				</Typography>
 			) : (
 				<Stack spacing={1}>
@@ -837,6 +837,23 @@ function KnownIssuesSection({
 	);
 }
 
+function formatIssueRange(issue: KnownIssueData): string {
+	const min = `${issue.min_major}.${issue.min_minor}.${issue.min_patch}`;
+	if (
+		issue.max_major == null ||
+		issue.max_minor == null ||
+		issue.max_patch == null
+	) {
+		return `Affects ${min} and later in ${issue.min_major}.${issue.min_minor}.x`;
+	}
+	const fix = `${issue.max_major}.${issue.max_minor}.${issue.max_patch}`;
+	const lastAffected = `${issue.max_major}.${issue.max_minor}.${issue.max_patch - 1}`;
+	if (issue.max_patch - 1 === issue.min_patch) {
+		return `Affects ${min} (fixed in ${fix})`;
+	}
+	return `Affects ${min} – ${lastAffected} (fixed in ${fix})`;
+}
+
 function KnownIssueRow({
 	issue,
 	isAdmin,
@@ -872,6 +889,13 @@ function KnownIssueRow({
 					</Button>
 				)}
 			</Stack>
+			<Typography
+				variant="caption"
+				color="text.secondary"
+				sx={{ display: "block", fontFamily: "monospace" }}
+			>
+				{formatIssueRange(issue)}
+			</Typography>
 			<Typography
 				variant="body2"
 				component="pre"
@@ -909,7 +933,7 @@ function KnownIssueRow({
 			<ResolveKnownIssueDialog
 				open={resolveOpen}
 				onClose={() => setResolveOpen(false)}
-				knownIssueId={issue.id}
+				issue={issue}
 				onResolved={() => {
 					setResolveOpen(false);
 					onChanged();
@@ -987,22 +1011,39 @@ function AddKnownIssueDialog({
 function ResolveKnownIssueDialog({
 	open,
 	onClose,
-	knownIssueId,
+	issue,
 	onResolved,
 }: {
 	open: boolean;
 	onClose: () => void;
-	knownIssueId: string;
+	issue: KnownIssueData;
 	onResolved: () => void;
 }) {
+	const minPatch = issue.min_patch;
+	const defaultFix = `${issue.min_major}.${issue.min_minor}.${minPatch + 1}`;
+	const [fixVersion, setFixVersion] = useState(defaultFix);
 	const [draft, setDraft] = useState("");
 	const action = useApiAction("versions", "resolve_known_issue");
+
+	const parsed = parseSemver(fixVersion);
+	const sameMinor =
+		parsed != null &&
+		parsed.major === issue.min_major &&
+		parsed.minor === issue.min_minor;
+	const aboveMin = parsed != null && parsed.patch > minPatch;
+	const fixValid = parsed != null && sameMinor && aboveMin;
+
 	const submit = async () => {
 		const resolution_message = draft.trim();
-		if (resolution_message === "") return;
+		if (resolution_message === "" || !fixValid) return;
 		try {
-			await action.call({ known_issue_id: knownIssueId, resolution_message });
+			await action.call({
+				known_issue_id: issue.id,
+				fix_version: fixVersion.trim(),
+				resolution_message,
+			});
 			setDraft("");
+			setFixVersion(defaultFix);
 			onResolved();
 		} catch {
 			/* surfaced via action.error */
@@ -1010,6 +1051,7 @@ function ResolveKnownIssueDialog({
 	};
 	const cancel = () => {
 		setDraft("");
+		setFixVersion(defaultFix);
 		onClose();
 	};
 	return (
@@ -1017,7 +1059,25 @@ function ResolveKnownIssueDialog({
 			<DialogTitle>Resolve known issue</DialogTitle>
 			<DialogContent>
 				<TextField
-					autoFocus
+					fullWidth
+					label="Fix version"
+					value={fixVersion}
+					onChange={(e) => setFixVersion(e.target.value)}
+					disabled={action.pending}
+					error={fixVersion !== "" && !fixValid}
+					helperText={
+						parsed == null
+							? `Semver of the first unaffected patch (e.g. ${defaultFix}).`
+							: !sameMinor
+								? `Must be in the same minor as the issue (${issue.min_major}.${issue.min_minor}.x).`
+								: !aboveMin
+									? `Must be above the affected patch ${issue.min_major}.${issue.min_minor}.${minPatch}.`
+									: `Issue will cover ${issue.min_major}.${issue.min_minor}.${minPatch}–${parsed.major}.${parsed.minor}.${parsed.patch - 1}.`
+					}
+					slotProps={{ input: { sx: { fontFamily: "monospace" } } }}
+					sx={{ mt: 1 }}
+				/>
+				<TextField
 					fullWidth
 					multiline
 					minRows={3}
@@ -1025,7 +1085,7 @@ function ResolveKnownIssueDialog({
 					onChange={(e) => setDraft(e.target.value)}
 					disabled={action.pending}
 					placeholder="How was this resolved? (e.g. fixed in 1.0.1, workaround documented)"
-					sx={{ mt: 1 }}
+					sx={{ mt: 2 }}
 				/>
 				{action.error && (
 					<Alert severity="error" sx={{ mt: 1 }}>
@@ -1040,11 +1100,23 @@ function ResolveKnownIssueDialog({
 				<Button
 					variant="contained"
 					onClick={submit}
-					disabled={action.pending || draft.trim() === ""}
+					disabled={action.pending || draft.trim() === "" || !fixValid}
 				>
 					{action.pending ? "Resolving…" : "Resolve"}
 				</Button>
 			</DialogActions>
 		</Dialog>
 	);
+}
+
+function parseSemver(
+	s: string,
+): { major: number; minor: number; patch: number } | null {
+	const m = s.trim().match(/^(\d+)\.(\d+)\.(\d+)$/);
+	if (!m) return null;
+	return {
+		major: Number(m[1]),
+		minor: Number(m[2]),
+		patch: Number(m[3]),
+	};
 }
