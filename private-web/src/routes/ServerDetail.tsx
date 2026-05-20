@@ -27,6 +27,7 @@ import ManualEventButton from "../components/ManualEventButton";
 import StatusDot from "../components/StatusDot";
 import TailnetIdentitySection from "../components/TailnetIdentitySection";
 import TimeAgo from "../components/TimeAgo";
+import TimezoneTooltip from "../components/TimezoneTooltip";
 import VersionIndicator from "../components/VersionIndicator";
 import { HealthLegend, StatusLegend, VersionLegend } from "../components/Legends";
 import ServerKindChip from "../components/ServerKindChip";
@@ -688,7 +689,11 @@ function StatusInfoFields({ status }: { status: ServerLastStatusData }) {
 				<InfoItem label="Platform" value={status.platform} />
 			)}
 			{status.timezone && (
-				<InfoItem label="Timezone" value={status.timezone} />
+				<InfoItem label="Timezone">
+					<Typography variant="body2">
+						<TimezoneTooltip tz={status.timezone} />
+					</Typography>
+				</InfoItem>
 			)}
 			<Stack spacing={0.25}>
 				<Typography variant="caption" color="text.secondary">
@@ -724,22 +729,26 @@ function InfoItem({
 	label,
 	value,
 	mono = false,
+	children,
 }: {
 	label: string;
-	value: string;
+	value?: string;
 	mono?: boolean;
+	children?: React.ReactNode;
 }) {
 	return (
 		<Stack spacing={0.25}>
 			<Typography variant="caption" color="text.secondary">
 				{label}
 			</Typography>
-			<Typography
-				variant="body2"
-				sx={mono ? { fontFamily: "monospace" } : undefined}
-			>
-				{value}
-			</Typography>
+			{children ?? (
+				<Typography
+					variant="body2"
+					sx={mono ? { fontFamily: "monospace" } : undefined}
+				>
+					{value}
+				</Typography>
+			)}
 		</Stack>
 	);
 }
