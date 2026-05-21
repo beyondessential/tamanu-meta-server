@@ -289,7 +289,10 @@ function Body({
 				sx={{
 					mt: 1.5,
 					display: "grid",
-					gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" },
+					gridTemplateColumns: {
+						xs: "minmax(0, 1fr)",
+						sm: "minmax(0, 1fr) minmax(0, 1fr)",
+					},
 					gap: 2,
 				}}
 			>
@@ -613,56 +616,33 @@ function EventLog({
 							border: 1,
 							borderColor: "divider",
 							borderRadius: 1,
+							minWidth: 0,
 						}}
 					>
 						<Stack
 							direction="row"
 							spacing={1}
-							sx={{ alignItems: "center", minWidth: 0 }}
+							sx={{ alignItems: "center", mb: 0.5 }}
 						>
-							<Typography
-								variant="body2"
-								component="span"
-								sx={{
-									fontFamily: "monospace",
-									fontSize: "0.85em",
-									flex: 1,
-									minWidth: 0,
-									overflow: "hidden",
-									textOverflow: "ellipsis",
-									whiteSpace: "nowrap",
-								}}
-								title={e.message}
-							>
-								{e.message}
-							</Typography>
+							<SeverityChip severity={e.severity} />
 							{e.occurrences > 1 && (
-								<Typography
-									variant="caption"
-									color="text.secondary"
-									sx={{ flexShrink: 0 }}
-								>
+								<Typography variant="caption" color="text.secondary">
 									×{e.occurrences}
 								</Typography>
 							)}
-							<Box sx={{ flexShrink: 0 }}>
-								<StatusSnapshotButton
-									open={open}
-									onClick={() => toggleSnapshot(e.id)}
-									tooltip="Status snapshot at this event"
-								/>
-							</Box>
-							<Box sx={{ flexShrink: 0 }}>
-								<SeverityChip severity={e.severity} />
-							</Box>
-							<Typography
-								variant="caption"
-								color="text.secondary"
-								sx={{ flexShrink: 0 }}
-							>
+							<Box sx={{ flex: 1 }} />
+							<StatusSnapshotButton
+								open={open}
+								onClick={() => toggleSnapshot(e.id)}
+								tooltip="Status snapshot at this event"
+							/>
+							<Typography variant="caption" color="text.secondary">
 								<TimeAgo timestamp={at} />
 							</Typography>
 						</Stack>
+						<Box sx={{ minWidth: 0, overflow: "hidden" }}>
+							<MessageView message={e.message} />
+						</Box>
 						{open && (
 							<StatusSnapshotPanel
 								serverId={serverId}
