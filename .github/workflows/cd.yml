@@ -179,5 +179,6 @@ jobs:
         working-directory: ops/${{ vars.OPS_PULUMI_PATH }}
         run: |
           pulumi stack select ${{ vars.PULUMI_STACK }}
+          pulumi config refresh
           pulumi config set imageTag ${{ needs.build-image.outputs.image-tag }}
           pulumi up --yes
