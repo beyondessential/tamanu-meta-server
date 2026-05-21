@@ -8,6 +8,7 @@ use utoipa::{Modify, OpenApi, openapi::security::SecurityScheme};
 #[openapi(
 	info(
 		title = "canopy public-server",
+		version = "",
 		description = "Internet-facing API for the canopy fleet. Device-authenticated endpoints require an mTLS client certificate.",
 		contact(name = "BES Developers", email = "contact@bes.au"),
 		license(name = "GPL-3.0-or-later"),
