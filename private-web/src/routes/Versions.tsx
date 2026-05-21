@@ -11,6 +11,7 @@ import {
 	Tooltip,
 	Typography,
 } from "@mui/material";
+import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import ErrorOutlineIcon from "@mui/icons-material/ErrorOutlined";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { Link as RouterLink } from "react-router-dom";
@@ -78,6 +79,7 @@ function MinorGroup({ group }: { group: MinorVersionGroup }) {
 					>
 						{group.major}.{group.minor}.{group.latest_patch}
 					</Typography>
+					<MinorReadyChip ready={group.ready} />
 					<Typography variant="body2" color="text.secondary" sx={{ ml: "auto !important" }}>
 						{group.count} version{group.count === 1 ? "" : "s"}
 					</Typography>
@@ -156,4 +158,31 @@ function formatDate(iso: string): string {
 	} catch {
 		return iso;
 	}
+}
+
+function MinorReadyChip({ ready }: { ready: boolean }) {
+	if (ready) {
+		return (
+			<Tooltip title="Latest patch in this minor has no current known issues">
+				<Chip
+					size="small"
+					color="success"
+					variant="outlined"
+					icon={<CheckCircleIcon />}
+					label="Ready"
+				/>
+			</Tooltip>
+		);
+	}
+	return (
+		<Tooltip title="Latest patch in this minor has unresolved known issues">
+			<Chip
+				size="small"
+				color="warning"
+				variant="outlined"
+				icon={<ErrorOutlineIcon />}
+				label="Known issues"
+			/>
+		</Tooltip>
+	);
 }

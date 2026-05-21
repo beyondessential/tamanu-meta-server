@@ -1576,6 +1576,22 @@ export interface components {
             description: string;
             /** Format: uuid */
             id: string;
+            /**
+             * Format: int32
+             * @description First unaffected patch. NULL while open — open issues
+             *     implicitly cover every patch from `min` to the end of the minor.
+             */
+            max_major?: number | null;
+            /** Format: int32 */
+            max_minor?: number | null;
+            /** Format: int32 */
+            max_patch?: number | null;
+            /** Format: int32 */
+            min_major: number;
+            /** Format: int32 */
+            min_minor: number;
+            /** Format: int32 */
+            min_patch: number;
             resolution_message?: string | null;
             /** Format: date-time */
             resolved_at?: string | null;
@@ -1649,6 +1665,12 @@ export interface components {
             major: number;
             /** Format: int32 */
             minor: number;
+            /**
+             * @description `true` when the latest published patch in this minor is itself
+             *     ready. An old, since-fixed issue on an earlier patch doesn't
+             *     dim the whole minor.
+             */
+            ready: boolean;
             versions: components["schemas"]["VersionData"][];
         };
         /**
@@ -1809,6 +1831,11 @@ export interface components {
             reason: components["schemas"]["ResolvedReason"];
         };
         ResolveKnownIssueArgs: {
+            /**
+             * @description Semver of the version that contains the fix. Must be in the same
+             *     minor as the issue's `min` and strictly above it.
+             */
+            fix_version: string;
             /** Format: uuid */
             known_issue_id: string;
             resolution_message: string;
