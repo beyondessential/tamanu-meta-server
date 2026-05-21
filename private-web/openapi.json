@@ -5636,7 +5636,8 @@
           "display_name",
           "tailnet",
           "addresses",
-          "tags"
+          "tags",
+          "online"
         ],
         "properties": {
           "addresses": {
@@ -5648,8 +5649,20 @@
           "display_name": {
             "type": "string"
           },
+          "last_seen": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the Tailscale control plane last saw this node. `None` if\nthe API didn't carry a value (or it didn't parse)."
+          },
           "node_id": {
             "type": "string"
+          },
+          "online": {
+            "type": "boolean",
+            "description": "Derived: `last_seen` is within the last 5 minutes — Tailscale's\nown \"online\" heuristic in the admin console. False when\n`last_seen` is missing."
           },
           "tags": {
             "type": "array",

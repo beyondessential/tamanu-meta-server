@@ -165,6 +165,8 @@ where
 				tailnet: "test-tailnet".to_string(),
 				tags: vec!["tag:canopy-server".to_string()],
 				addresses: vec![tailnet_ip],
+				last_seen: None,
+				key_expiry_disabled: true,
 			},
 		)]);
 

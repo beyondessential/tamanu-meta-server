@@ -72,6 +72,8 @@ async fn unknown_tailnet_node_auto_creates_untrusted_then_403s_role_gate() {
 				tailnet: "test-tailnet".into(),
 				tags: vec!["tag:canopy-server".into()],
 				addresses: vec![tailnet_ip],
+				last_seen: None,
+				key_expiry_disabled: true,
 			},
 		)]);
 

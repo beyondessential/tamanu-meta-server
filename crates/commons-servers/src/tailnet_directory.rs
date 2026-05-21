@@ -19,6 +19,7 @@ use std::{
 };
 
 use commons_errors::{AppError, Result};
+use jiff::Timestamp;
 use reqwest::Client;
 use serde::Deserialize;
 use tokio::sync::RwLock;
@@ -33,6 +34,13 @@ pub struct DirectoryEntry {
 	pub tailnet: String,
 	pub tags: Vec<String>,
 	pub addresses: Vec<IpAddr>,
+	/// When the Tailscale control plane last saw this node. `None` if
+	/// the API didn't return a value or the value didn't parse.
+	pub last_seen: Option<Timestamp>,
+	/// True if the node's key has been pinned not to expire. Headless
+	/// canopy-managed devices should always have this on; if it's
+	/// false the node will drop off the tailnet when its key expires.
+	pub key_expiry_disabled: bool,
 }
 
 /// Configuration for constructing a [`TailnetDirectory`].
@@ -132,6 +140,10 @@ struct DeviceRecord {
 	tags: Vec<String>,
 	#[serde(rename = "tailnetName", default)]
 	tailnet_name: String,
+	#[serde(rename = "lastSeen", default)]
+	last_seen: Option<String>,
+	#[serde(rename = "keyExpiryDisabled", default)]
+	key_expiry_disabled: bool,
 }
 
 impl TailnetDirectory {
@@ -269,6 +281,14 @@ impl TailnetDirectory {
 		self.find_by_name(trimmed).await
 	}
 
+	/// Snapshot of every cached node, keyed by `node_id`. Cheap clone
+	/// of the inner map; the caller is free to iterate without holding
+	/// the cache lock. Used by sweeps that need to check directory
+	/// state against persisted devices.
+	pub async fn snapshot_by_node_id(&self) -> HashMap<String, DirectoryEntry> {
+		self.inner.cache.read().await.by_node_id.clone()
+	}
+
 	/// Force-refresh the cache from the Tailscale control plane.
 	pub async fn refresh(&self) -> Result<()> {
 		let token = self.access_token().await?;
@@ -326,12 +346,15 @@ impl TailnetDirectory {
 				.iter()
 				.filter_map(|a| a.parse::<IpAddr>().ok())
 				.collect();
+			let last_seen = d.last_seen.as_deref().and_then(|s| s.parse().ok());
 			let entry = DirectoryEntry {
 				node_id: d.node_id.clone(),
 				node_name: d.name,
 				tailnet: d.tailnet_name,
 				tags: d.tags,
 				addresses: addresses.clone(),
+				last_seen,
+				key_expiry_disabled: d.key_expiry_disabled,
 			};
 			for ip in &addresses {
 				by_ip.insert(*ip, entry.clone());
@@ -504,6 +527,8 @@ mod tests {
 			tailnet: "test".into(),
 			tags: vec!["tag:server".into()],
 			addresses: vec![ip],
+			last_seen: None,
+			key_expiry_disabled: true,
 		};
 		let dir = TailnetDirectory::for_test([(ip, entry.clone())]);
 		let runtime = tokio::runtime::Runtime::new().unwrap();

@@ -13,6 +13,7 @@ authors = [
 [dependencies]
 clap = { workspace = true, features = ["derive", "env"] }
 commons-errors = { path = "../commons-errors" }
+commons-servers = { path = "../commons-servers" }
 commons-types = { path = "../commons-types" }
 database = { path = "../database" }
 diesel-async = { workspace = true, features = ["mobc", "postgres"] }

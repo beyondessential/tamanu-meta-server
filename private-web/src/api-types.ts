@@ -2086,7 +2086,19 @@ export interface components {
         TailnetLiveInfo: {
             addresses: string[];
             display_name: string;
+            /**
+             * Format: date-time
+             * @description When the Tailscale control plane last saw this node. `None` if
+             *     the API didn't carry a value (or it didn't parse).
+             */
+            last_seen?: string | null;
             node_id: string;
+            /**
+             * @description Derived: `last_seen` is within the last 5 minutes — Tailscale's
+             *     own "online" heuristic in the admin console. False when
+             *     `last_seen` is missing.
+             */
+            online: boolean;
             tags: string[];
             tailnet: string;
         };

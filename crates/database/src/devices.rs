@@ -1040,6 +1040,30 @@ impl Device {
 		};
 		Self::get_with_info(db, device.id).await.map(Some)
 	}
+
+	/// Every `(device, attached_server_id, node_id)` triple for devices
+	/// that have a Tailscale node id and at least one attached server.
+	/// Drives the key-expiry sweep: the tailnet carries plenty of nodes
+	/// that aren't canopy-managed servers (operator laptops, other
+	/// infra, …), and the sweep deliberately ignores those — it's
+	/// scoped to the headless devices canopy actually runs.
+	pub async fn list_tailnet_attached_with_server(
+		db: &mut AsyncPgConnection,
+	) -> Result<Vec<(Self, Uuid, String)>> {
+		use crate::schema::{devices, servers};
+
+		let rows: Vec<(Self, Uuid, String)> = devices::table
+			.inner_join(servers::table.on(servers::device_id.eq(devices::id.nullable())))
+			.filter(devices::tailscale_node_id.is_not_null())
+			.select((
+				Self::as_select(),
+				servers::id,
+				devices::tailscale_node_id.assume_not_null(),
+			))
+			.load(db)
+			.await?;
+		Ok(rows)
+	}
 }
 
 impl DeviceKey {
