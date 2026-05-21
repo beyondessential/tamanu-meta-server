@@ -233,7 +233,12 @@ function ChecksBlock({
 											</Box>
 											<Box
 												component="dd"
-												sx={{ m: 0, fontFamily: "monospace" }}
+												sx={{
+													m: 0,
+													fontFamily: "monospace",
+													minWidth: 0,
+													overflowWrap: "anywhere",
+												}}
 											>
 												{renderValue(v)}
 											</Box>
