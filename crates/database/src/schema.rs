@@ -202,6 +202,7 @@ diesel::table! {
 		last_error -> Nullable<Text>,
 		last_response -> Nullable<Text>,
 		gave_up_at -> Nullable<Timestamptz>,
+		deliver_after -> Timestamptz,
 	}
 }
 

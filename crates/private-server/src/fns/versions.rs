@@ -287,15 +287,12 @@ pub async fn get_version_detail(
 	// Surface every issue ever raised against this minor (resolved or
 	// not), so the operator sees the full timeline of caveats for the
 	// branch.
-	let known_issues: Vec<KnownIssueData> = VersionKnownIssue::list_for_minor(
-		&mut conn,
-		version_record.major,
-		version_record.minor,
-	)
-	.await?
-	.into_iter()
-	.map(KnownIssueData::from)
-	.collect();
+	let known_issues: Vec<KnownIssueData> =
+		VersionKnownIssue::list_for_minor(&mut conn, version_record.major, version_record.minor)
+			.await?
+			.into_iter()
+			.map(KnownIssueData::from)
+			.collect();
 	// `ready` is whether THIS exact patch is unaffected — older issues
 	// fixed below this patch don't affect us.
 	let ready = VersionKnownIssue::version_is_ready(
@@ -630,11 +627,7 @@ pub async fn resolve_known_issue(
 		));
 	}
 	let fix = VersionStr::from_str(&args.fix_version)?;
-	let fix = (
-		fix.0.major as i32,
-		fix.0.minor as i32,
-		fix.0.patch as i32,
-	);
+	let fix = (fix.0.major as i32, fix.0.minor as i32, fix.0.patch as i32);
 	let mut conn = state.db.get().await?;
 	let row = VersionKnownIssue::resolve(
 		&mut conn,
