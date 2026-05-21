@@ -6,9 +6,7 @@ use axum::extract::State;
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
 use commons_types::version::{VersionStatus, VersionStr};
-use database::{
-	artifacts::Artifact, version_known_issues::VersionKnownIssue, versions::Version,
-};
+use database::{artifacts::Artifact, version_known_issues::VersionKnownIssue, versions::Version};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -39,6 +37,10 @@ pub struct MinorVersionGroup {
 	pub first_created_at: Timestamp,
 	pub last_created_at: Timestamp,
 	pub versions: Vec<VersionData>,
+	/// `true` when the latest published patch in this minor is itself
+	/// ready. An old, since-fixed issue on an earlier patch doesn't
+	/// dim the whole minor.
+	pub ready: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -65,6 +67,14 @@ pub struct KnownIssueData {
 	pub created_at: Timestamp,
 	pub author: String,
 	pub description: String,
+	pub min_major: i32,
+	pub min_minor: i32,
+	pub min_patch: i32,
+	/// First unaffected patch. NULL while open — open issues
+	/// implicitly cover every patch from `min` to the end of the minor.
+	pub max_major: Option<i32>,
+	pub max_minor: Option<i32>,
+	pub max_patch: Option<i32>,
 	pub resolved_at: Option<Timestamp>,
 	pub resolved_by: Option<String>,
 	pub resolution_message: Option<String>,
@@ -77,6 +87,12 @@ impl From<VersionKnownIssue> for KnownIssueData {
 			created_at: k.created_at,
 			author: k.author,
 			description: k.description,
+			min_major: k.min_major,
+			min_minor: k.min_minor,
+			min_patch: k.min_patch,
+			max_major: k.max_major,
+			max_minor: k.max_minor,
+			max_patch: k.max_patch,
 			resolved_at: k.resolved_at,
 			resolved_by: k.resolved_by,
 			resolution_message: k.resolution_message,
@@ -140,8 +156,7 @@ pub async fn get_grouped_versions(
 
 	// One batched query to compute `ready` for every version returned.
 	let version_ids: Vec<Uuid> = versions.iter().map(|v| v.id).collect();
-	let with_open_issues =
-		VersionKnownIssue::versions_with_open(&mut conn, &version_ids).await?;
+	let affected = VersionKnownIssue::affected_versions(&mut conn, &version_ids).await?;
 
 	let mut grouped: BTreeMap<(i32, i32), Vec<Version>> = BTreeMap::new();
 	for version in versions {
@@ -163,6 +178,13 @@ pub async fn get_grouped_versions(
 				.collect();
 
 			let latest_patch = published_versions.first().map(|v| v.patch).unwrap_or(0);
+			// The minor is "ready" iff its latest published patch is itself
+			// ready. If no patches are published, treat the minor as ready
+			// — there's nothing for users to receive yet.
+			let ready = published_versions
+				.first()
+				.map(|v| !affected.contains(&v.id))
+				.unwrap_or(true);
 
 			let first_created_at = published_versions
 				.iter()
@@ -183,7 +205,7 @@ pub async fn get_grouped_versions(
 			let version_data: Vec<VersionData> = versions
 				.into_iter()
 				.map(|v| VersionData {
-					ready: !with_open_issues.contains(&v.id),
+					ready: !affected.contains(&v.id),
 					major: v.major,
 					minor: v.minor,
 					patch: v.patch,
@@ -200,6 +222,7 @@ pub async fn get_grouped_versions(
 				first_created_at,
 				last_created_at,
 				versions: version_data,
+				ready,
 			}
 		})
 		.collect();
@@ -261,13 +284,24 @@ pub async fn get_version_detail(
 		})
 		.collect();
 
+	// Surface every issue ever raised against this minor (resolved or
+	// not), so the operator sees the full timeline of caveats for the
+	// branch.
 	let known_issues: Vec<KnownIssueData> =
-		VersionKnownIssue::list_for_version(&mut conn, version_record.id)
+		VersionKnownIssue::list_for_minor(&mut conn, version_record.major, version_record.minor)
 			.await?
 			.into_iter()
 			.map(KnownIssueData::from)
 			.collect();
-	let ready = known_issues.iter().all(|k| k.resolved_at.is_some());
+	// `ready` is whether THIS exact patch is unaffected — older issues
+	// fixed below this patch don't affect us.
+	let ready = VersionKnownIssue::version_is_ready(
+		&mut conn,
+		version_record.major,
+		version_record.minor,
+		version_record.patch,
+	)
+	.await?;
 
 	Ok(Json(VersionDetail {
 		id: version_record.id,
@@ -517,7 +551,8 @@ pub async fn list_known_issues(
 	Json(args): Json<VersionIdArgs>,
 ) -> Result<Json<Vec<KnownIssueData>>> {
 	let mut conn = state.db.get().await?;
-	let rows = VersionKnownIssue::list_for_version(&mut conn, args.version_id).await?;
+	let v = Version::get_by_id(&mut conn, args.version_id).await?;
+	let rows = VersionKnownIssue::list_for_minor(&mut conn, v.major, v.minor).await?;
 	Ok(Json(rows.into_iter().map(KnownIssueData::from).collect()))
 }
 
@@ -545,19 +580,26 @@ pub async fn add_known_issue(
 ) -> Result<Json<KnownIssueData>> {
 	let description = args.description.trim();
 	if description.is_empty() {
-		return Err(AppError::BadRequest(
-			"Description must not be empty".into(),
-		));
+		return Err(AppError::BadRequest("Description must not be empty".into()));
 	}
 	let mut conn = state.db.get().await?;
-	let row =
-		VersionKnownIssue::add(&mut conn, args.version_id, &admin.0.login, description).await?;
+	let v = Version::get_by_id(&mut conn, args.version_id).await?;
+	let row = VersionKnownIssue::add(
+		&mut conn,
+		(v.major, v.minor, v.patch),
+		&admin.0.login,
+		description,
+	)
+	.await?;
 	Ok(Json(KnownIssueData::from(row)))
 }
 
 #[derive(Deserialize, ToSchema)]
 pub struct ResolveKnownIssueArgs {
 	pub known_issue_id: Uuid,
+	/// Semver of the version that contains the fix. Must be in the same
+	/// minor as the issue's `min` and strictly above it.
+	pub fix_version: String,
 	pub resolution_message: String,
 }
 
@@ -584,8 +626,16 @@ pub async fn resolve_known_issue(
 			"Resolution message must not be empty".into(),
 		));
 	}
+	let fix = VersionStr::from_str(&args.fix_version)?;
+	let fix = (fix.0.major as i32, fix.0.minor as i32, fix.0.patch as i32);
 	let mut conn = state.db.get().await?;
-	let row = VersionKnownIssue::resolve(&mut conn, args.known_issue_id, &admin.0.login, resolution)
-		.await?;
+	let row = VersionKnownIssue::resolve(
+		&mut conn,
+		args.known_issue_id,
+		fix,
+		&admin.0.login,
+		resolution,
+	)
+	.await?;
 	Ok(Json(KnownIssueData::from(row)))
 }

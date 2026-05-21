@@ -177,6 +177,73 @@ async fn update_for_version_with_newer() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn public_excludes_versions_with_open_known_issues() {
+	commons_tests::server::run(async |mut conn, public, _| {
+		conn.batch_execute(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status) VALUES
+			('11111111-1111-1111-1111-111111111100', 1, 0, 0, 'good', 'published'),
+			('11111111-1111-1111-1111-111111111101', 1, 0, 1, 'broken', 'published');
+			INSERT INTO version_known_issues (author, description, min_major, min_minor, min_patch)
+			VALUES ('admin', 'broken', 1, 0, 1)",
+		)
+		.await
+		.unwrap();
+
+		// /versions lists only the ready one.
+		let response = public.get("/versions").await;
+		response.assert_status_ok();
+		let versions: Vec<Version> = response.json();
+		assert_eq!(versions.len(), 1);
+		assert_eq!(versions[0].patch, 0);
+
+		// update-for from 1.0.0 — 1.0.1 is broken, so no offer (would
+		// otherwise be the latest-per-minor for 1.0.x).
+		let response = public.get("/versions/update-for/1.0.0").await;
+		response.assert_status_ok();
+		let updates: Vec<Version> = response.json();
+		assert_eq!(updates.len(), 0);
+
+		// Range query for 1.0.x falls back to the ready 1.0.0.
+		let response = public.get("/versions/1.0.x/artifacts").await;
+		response.assert_status_ok();
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn public_serves_versions_once_known_issue_is_resolved() {
+	commons_tests::server::run(async |mut conn, public, _| {
+		conn.batch_execute(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status) VALUES
+			('11111111-1111-1111-1111-111111111101', 1, 0, 1, 'broken', 'published'),
+			('11111111-1111-1111-1111-111111111102', 1, 0, 2, 'fix', 'published');
+			-- Range covers only 1.0.1, fixed in 1.0.2.
+			INSERT INTO version_known_issues (
+				author, description, min_major, min_minor, min_patch,
+				max_major, max_minor, max_patch,
+				resolved_at, resolved_by, resolution_message
+			)
+			VALUES (
+				'admin', 'broken', 1, 0, 1,
+				1, 0, 2,
+				now(), 'admin', 'fixed'
+			)",
+		)
+		.await
+		.unwrap();
+
+		// /versions still excludes 1.0.1 (it's covered by the resolved
+		// range) but includes 1.0.2.
+		let response = public.get("/versions").await;
+		response.assert_status_ok();
+		let versions: Vec<Version> = response.json();
+		assert_eq!(versions.len(), 1);
+		assert_eq!(versions[0].patch, 2);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn version_not_found() {
 	commons_tests::server::run(async |_conn, public, _| {
 		let response = public.get("/versions/999.999.999").await;

@@ -3,15 +3,15 @@ name: CD
 on:
   push:
     branches: [main]
-    tags: ["v*.*.*"]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 permissions:
-  contents: write # to update the release
-  packages: write # to pull and push images
+  contents: read
+  packages: write
+  id-token: write # Tailscale OIDC
 
 env:
   CARGO_TERM_COLOR: always
@@ -71,19 +71,20 @@ jobs:
           path: artifacts/${{ matrix.arch }}/
           retention-days: 1
 
-  build-images:
-    name: Build container images
+  build-image:
+    name: Build container image
     runs-on: ubuntu-24.04
     needs: [build-binaries]
+    outputs:
+      image-tag: ${{ steps.tag.outputs.value }}
     steps:
       - name: Login to ghcr.io
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u $ --password-stdin
 
       - uses: actions/checkout@v6
 
-      - name: Extract version
-        id: version
-        run: echo "version=$(cargo pkgid -p public-server | cut -d# -f2)" >> "$GITHUB_OUTPUT"
+      - id: tag
+        run: echo "value=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
       - name: Download AMD64 binaries
         uses: actions/download-artifact@v8
@@ -101,10 +102,6 @@ jobs:
       - name: Stage static assets
         run: cp -r static .github/build-context/static
 
-      - name: Debug build context structure
-        run: |
-          ls -laR .github/build-context/
-
       - name: Setup buildkit
         uses: docker/setup-buildx-action@v4
 
@@ -113,15 +110,13 @@ jobs:
         with:
           images: ghcr.io/beyondessential/canopy
           tags: |
-            type=semver,value=v${{ steps.version.outputs.version }},pattern={{version}}
-            type=semver,value=v${{ steps.version.outputs.version }},pattern={{major}}.{{minor}}
-            type=semver,value=v${{ steps.version.outputs.version }},pattern={{major}}
+            type=raw,value=latest
+            type=raw,value=${{ steps.tag.outputs.value }}
           labels: |
             org.opencontainers.image.vendor=BES
             org.opencontainers.image.title=Canopy
             org.opencontainers.image.url=https://www.bes.au/products/tamanu/
             org.opencontainers.image.source=https://github.com/beyondessential/canopy/
-            org.opencontainers.image.version=${{ steps.version.outputs.version }}
             org.opencontainers.image.licenses=GPL-3.0-or-later
 
       - name: Build and push
@@ -130,6 +125,61 @@ jobs:
           context: .github/build-context
           file: .github/Dockerfile.native
           platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+          push: true
           labels: ${{ steps.meta.outputs.labels }}
           tags: ${{ steps.meta.outputs.tags }}
+
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-24.04
+    needs: [build-image]
+    steps:
+      - name: Checkout ops repo
+        uses: actions/checkout@v6
+        with:
+          repository: beyondessential/ops
+          ssh-key: ${{ secrets.OPS_SSH }}
+          ref: ${{ vars.OPS_REF }}
+          path: ops
+
+      # Drop ops/.git so pulumi doesn't pick it up as the repo context.
+      - name: Strip ops/.git
+        run: rm -rf ops/.git
+
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ vars.TS_OAUTH_CLIENT_ID }}
+          audience: api.tailscale.com/${{ vars.TS_OAUTH_CLIENT_ID }}
+          tags: ${{ vars.TS_TAGS }}
+
+      - name: Configure kubeconfig
+        run: |
+          sudo tailscale set --operator=$USER
+          tailscale configure kubeconfig ${{ vars.TS_K8S_OPERATOR_HOSTNAME }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+
+      - name: Install pulumi dependencies
+        run: |
+          cd ops/pulumi
+          npm ci
+
+      - name: Install pulumi CLI
+        uses: pulumi/actions@v5
+
+      - name: Authenticate to Pulumi Cloud
+        uses: pulumi/auth-actions@v1
+        with:
+          organization: bes
+          requested-token-type: urn:pulumi:token-type:access_token:organization
+
+      - name: Pulumi up
+        run: |
+          cd ops/${{ vars.OPS_PULUMI_PATH }}
+          pulumi stack select ${{ vars.PULUMI_STACK }}
+          pulumi config refresh
+          pulumi config set imageTag ${{ needs.build-image.outputs.image-tag }}
+          pulumi up --yes

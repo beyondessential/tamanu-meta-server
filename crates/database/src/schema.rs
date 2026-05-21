@@ -202,6 +202,7 @@ diesel::table! {
 		last_error -> Nullable<Text>,
 		last_response -> Nullable<Text>,
 		gave_up_at -> Nullable<Timestamptz>,
+		deliver_after -> Timestamptz,
 	}
 }
 
@@ -241,12 +242,17 @@ diesel::table! {
 	version_known_issues (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
-		version_id -> Uuid,
 		author -> Text,
 		description -> Text,
 		resolved_at -> Nullable<Timestamptz>,
 		resolved_by -> Nullable<Text>,
 		resolution_message -> Nullable<Text>,
+		min_major -> Int4,
+		min_minor -> Int4,
+		min_patch -> Int4,
+		max_major -> Nullable<Int4>,
+		max_minor -> Nullable<Int4>,
+		max_patch -> Nullable<Int4>,
 	}
 }
 
@@ -284,7 +290,6 @@ diesel::joinable!(slack_outbox -> incidents (incident_id));
 diesel::joinable!(slack_outbox -> issues (issue_id));
 diesel::joinable!(statuses -> devices (device_id));
 diesel::joinable!(statuses -> servers (server_id));
-diesel::joinable!(version_known_issues -> versions (version_id));
 diesel::joinable!(versions -> devices (device_id));
 
 diesel::allow_tables_to_appear_in_same_query!(

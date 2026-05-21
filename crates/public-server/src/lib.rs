@@ -55,6 +55,7 @@ async fn index(
 	State(tera): State<std::sync::Arc<tera::Tera>>,
 ) -> commons_errors::Result<axum::response::Html<String>> {
 	use commons_types::version::VersionStatus;
+	use database::version_known_issues::VersionKnownIssue;
 	use database::versions::Version;
 	use serde::Serialize;
 	use std::collections::BTreeMap;
@@ -85,6 +86,16 @@ async fn index(
 
 	let mut db = db.get().await?;
 	let versions = Version::get_all_including_drafts(&mut db).await?;
+
+	// Public listing only exposes ready versions, matching the JSON
+	// endpoints and the per-version detail pages (which 404 for
+	// non-ready versions via latest_matching_ready).
+	let version_ids: Vec<_> = versions.iter().map(|v| v.id).collect();
+	let affected = VersionKnownIssue::affected_versions(&mut db, &version_ids).await?;
+	let versions: Vec<Version> = versions
+		.into_iter()
+		.filter(|v| !affected.contains(&v.id))
+		.collect();
 
 	let mut grouped: BTreeMap<(i32, i32), Vec<Version>> = BTreeMap::new();
 	for version in versions {
@@ -155,7 +166,6 @@ async fn index(
 #[cfg(feature = "ui")]
 async fn error(axum::extract::Path(slug): axum::extract::Path<String>) -> axum::response::Redirect {
 	axum::response::Redirect::temporary(&format!(
-		"https://github.com/beyondessential/canopy/blob/{version}/ERRORS.md#{slug}",
-		version = env!("CARGO_PKG_VERSION")
+		"https://github.com/beyondessential/canopy/blob/main/ERRORS.md#{slug}",
 	))
 }

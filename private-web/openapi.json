@@ -10,7 +10,7 @@
     "license": {
       "name": "GPL-3.0-or-later"
     },
-    "version": "6.2.4"
+    "version": ""
   },
   "paths": {
     "/api/admins/add": {
@@ -4046,7 +4046,10 @@
           "id",
           "created_at",
           "author",
-          "description"
+          "description",
+          "min_major",
+          "min_minor",
+          "min_patch"
         ],
         "properties": {
           "author": {
@@ -4062,6 +4065,40 @@
           "id": {
             "type": "string",
             "format": "uuid"
+          },
+          "max_major": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "First unaffected patch. NULL while open — open issues\nimplicitly cover every patch from `min` to the end of the minor."
+          },
+          "max_minor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "max_patch": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "min_major": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "min_minor": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "min_patch": {
+            "type": "integer",
+            "format": "int32"
           },
           "resolution_message": {
             "type": [
@@ -4255,7 +4292,8 @@
           "latest_patch",
           "first_created_at",
           "last_created_at",
-          "versions"
+          "versions",
+          "ready"
         ],
         "properties": {
           "count": {
@@ -4281,6 +4319,10 @@
           "minor": {
             "type": "integer",
             "format": "int32"
+          },
+          "ready": {
+            "type": "boolean",
+            "description": "`true` when the latest published patch in this minor is itself\nready. An old, since-fixed issue on an earlier patch doesn't\ndim the whole minor."
           },
           "versions": {
             "type": "array",
@@ -4723,9 +4765,14 @@
         "type": "object",
         "required": [
           "known_issue_id",
+          "fix_version",
           "resolution_message"
         ],
         "properties": {
+          "fix_version": {
+            "type": "string",
+            "description": "Semver of the version that contains the fix. Must be in the same\nminor as the issue's `min` and strictly above it."
+          },
           "known_issue_id": {
             "type": "string",
             "format": "uuid"

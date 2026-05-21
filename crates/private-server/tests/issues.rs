@@ -415,7 +415,10 @@ async fn list_events_returns_event_log() {
 			.await;
 		page1.assert_status_ok();
 		let page1: serde_json::Value = page1.json();
-		assert_eq!(page1.get("items").and_then(|v| v.as_array()).unwrap().len(), 2);
+		assert_eq!(
+			page1.get("items").and_then(|v| v.as_array()).unwrap().len(),
+			2
+		);
 		assert_eq!(page1.get("total").and_then(|v| v.as_u64()), Some(3));
 
 		let page2 = private
@@ -424,7 +427,10 @@ async fn list_events_returns_event_log() {
 			.await;
 		page2.assert_status_ok();
 		let page2: serde_json::Value = page2.json();
-		assert_eq!(page2.get("items").and_then(|v| v.as_array()).unwrap().len(), 1);
+		assert_eq!(
+			page2.get("items").and_then(|v| v.as_array()).unwrap().len(),
+			1
+		);
 		assert_eq!(page2.get("total").and_then(|v| v.as_u64()), Some(3));
 	})
 	.await;
