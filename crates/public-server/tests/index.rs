@@ -34,6 +34,31 @@ async fn index_page_with_versions() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn index_page_hides_versions_with_open_known_issues() {
+	commons_tests::server::run(async |mut conn, public, _| {
+		conn.batch_execute(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status) VALUES
+			('11111111-1111-1111-1111-111111111100', 1, 0, 0, 'good', 'published'),
+			('11111111-1111-1111-1111-111111111101', 1, 0, 1, 'broken', 'published');
+			INSERT INTO version_known_issues (author, description, min_major, min_minor, min_patch)
+			VALUES ('admin', 'broken', 1, 0, 1)",
+		)
+		.await
+		.unwrap();
+
+		let response = public.get("/").await;
+		response.assert_status_ok();
+		let body = response.text();
+		assert!(body.contains("1.0.0"), "ready version 1.0.0 missing");
+		assert!(
+			!body.contains("1.0.1"),
+			"non-ready 1.0.1 should not appear in listing"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn error_redirect() {
 	commons_tests::server::run(async |_conn, public, _| {
 		let response = public.get("/errors/some-error-slug").await;
