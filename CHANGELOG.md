@@ -5,11 +5,21 @@ All notable changes to this project will be documented in this file.
 See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
-## [6.2.4](https://github.com/beyondessential/canopy/compare/v6.2.3..6.2.4) - 2026-05-20
+## [6.2.5](https://github.com/beyondessential/canopy/compare/v6.2.4..6.2.5) - 2026-05-21
+
+
+
+### Known-issues
+
+- **Test:** Range, minor-ready, public filter cases - ([3691c6f](https://github.com/beyondessential/canopy/commit/3691c6f5223c0d62235fe34ae6a38632f262ad2e))
+
+---
+## [6.2.4](https://github.com/beyondessential/canopy/compare/v6.2.3..v6.2.4) - 2026-05-20
 
 
 - **Bugfix:** Canopy-internal events were filing the title as message and the body as description - ([1e4b818](https://github.com/beyondessential/canopy/commit/1e4b81836124fcc029ad0d1ebcebc8dc82537635))
 - **Feature:** Remove ack from issues and incidents - ([50393b8](https://github.com/beyondessential/canopy/commit/50393b85107186c559ed1c4ff62bba20d3df2c30))
+- **Repo:** Release - ([ac633c9](https://github.com/beyondessential/canopy/commit/ac633c99be090efeab209e1f1b0209a5b0b1ea32))
 
 ### Events
 
