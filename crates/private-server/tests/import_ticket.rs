@@ -28,6 +28,8 @@ fn test_directory() -> (std::net::IpAddr, String, TailnetDirectory) {
 			tailnet: "example.ts.net".into(),
 			tags: vec!["tag:canopy-server".into()],
 			addresses: vec![ip],
+			last_seen: None,
+			key_expiry_disabled: true,
 		},
 	)]);
 	(ip, node_id, dir)
