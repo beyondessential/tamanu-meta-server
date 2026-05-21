@@ -169,10 +169,14 @@ jobs:
       - name: Install pulumi CLI
         uses: pulumi/actions@v5
 
+      - name: Authenticate to Pulumi Cloud
+        uses: pulumi/auth-actions@v1
+        with:
+          organization: bes
+          requested-token-type: urn:pulumi:token-type:access_token:organization
+
       - name: Pulumi up
         working-directory: ops/${{ vars.OPS_PULUMI_PATH }}
-        env:
-          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
         run: |
           pulumi stack select ${{ vars.PULUMI_STACK }}
           pulumi config set imageTag ${{ needs.build-image.outputs.image-tag }}
