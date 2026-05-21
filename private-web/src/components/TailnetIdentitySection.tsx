@@ -15,6 +15,7 @@ import {
 import { useEffect, useState } from "react";
 import { callApi, useApiAction } from "../api";
 import type { DeviceInfo, TailnetLiveInfo } from "../types";
+import TimeAgo from "./TimeAgo";
 
 /// Shared between the device detail page and the server detail page.
 /// On the server view, the device underlying a server is the natural
@@ -56,16 +57,26 @@ export default function TailnetIdentitySection({
 					<Typography variant="h6" component="h2">
 						Tailscale identity
 					</Typography>
-					{nodeId ? (
-						<Chip
-							size="small"
-							label="Attached"
-							color="success"
-							variant="outlined"
-						/>
-					) : (
-						<Chip size="small" label="Unknown" variant="outlined" />
-					)}
+					<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+						{nodeId && live && (
+							<Chip
+								size="small"
+								label={live.online ? "Online" : "Offline"}
+								color={live.online ? "success" : "default"}
+								variant={live.online ? "filled" : "outlined"}
+							/>
+						)}
+						{nodeId ? (
+							<Chip
+								size="small"
+								label="Attached"
+								color="success"
+								variant="outlined"
+							/>
+						) : (
+							<Chip size="small" label="Unknown" variant="outlined" />
+						)}
+					</Stack>
 				</Stack>
 
 				{nodeId ? (
@@ -183,6 +194,10 @@ function TailnetAttachedView({
 			label: "Current IPs",
 			value: live.addresses.join(", "),
 			mono: true,
+		});
+		items.push({
+			label: "Last seen",
+			value: live.last_seen ? <TimeAgo timestamp={live.last_seen} /> : "—",
 		});
 		if (live.tags.length > 0) {
 			items.push({ label: "Tags", value: live.tags.join(", "), mono: true });
