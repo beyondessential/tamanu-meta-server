@@ -122,9 +122,9 @@ async fn sweep_closes_issue_when_operator_pins_key() {
 #[tokio::test(flavor = "multi_thread")]
 async fn sweep_ignores_tailnet_device_with_no_server() {
 	TestDb::run(async |mut conn, _| {
-		// Device with a tailnet node id but no server attached: the
-		// sweep can't (and shouldn't) file an issue — issues are
-		// server-scoped.
+		// Tailnet-attached but no server: the tailnet has lots of these
+		// (operator laptops, other infra) and we deliberately don't
+		// touch them.
 		let _device_id = insert_tailnet_device(&mut conn).await;
 
 		let filed = sweep_key_expiry(&mut conn, &directory_with(false))

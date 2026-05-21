@@ -24,8 +24,11 @@ pub const KEY_EXPIRY_REF: &str = "tailscale-key-expiry";
 /// server, and file (or close) a Critical issue per `(server, device)`
 /// pair based on the node's `keyExpiryDisabled`.
 ///
-/// Devices that have no attached server are skipped — issues are
-/// server-scoped, so there's no row to attach to.
+/// Tailnet-attached devices with no server are intentionally skipped:
+/// the tailnet hosts plenty of nodes that aren't canopy-managed
+/// servers (operator laptops, other infra, …) and we have nothing to
+/// say about those — the sweep is scoped to the headless devices
+/// canopy actually runs.
 ///
 /// Returns the number of events filed in this pass.
 pub async fn sweep_key_expiry(

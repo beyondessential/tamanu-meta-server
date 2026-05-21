@@ -1041,11 +1041,12 @@ impl Device {
 		Self::get_with_info(db, device.id).await.map(Some)
 	}
 
-	/// Every `(device, attached_server_id)` pair for devices that have a
-	/// Tailscale node id and at least one attached server. Drives the
-	/// key-expiry sweep: only tailnet-attached devices with a server
-	/// can have an issue filed against them, since issues are
-	/// server-scoped.
+	/// Every `(device, attached_server_id, node_id)` triple for devices
+	/// that have a Tailscale node id and at least one attached server.
+	/// Drives the key-expiry sweep: the tailnet carries plenty of nodes
+	/// that aren't canopy-managed servers (operator laptops, other
+	/// infra, …), and the sweep deliberately ignores those — it's
+	/// scoped to the headless devices canopy actually runs.
 	pub async fn list_tailnet_attached_with_server(
 		db: &mut AsyncPgConnection,
 	) -> Result<Vec<(Self, Uuid, String)>> {
