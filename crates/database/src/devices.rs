@@ -1040,6 +1040,29 @@ impl Device {
 		};
 		Self::get_with_info(db, device.id).await.map(Some)
 	}
+
+	/// Every `(device, attached_server_id)` pair for devices that have a
+	/// Tailscale node id and at least one attached server. Drives the
+	/// key-expiry sweep: only tailnet-attached devices with a server
+	/// can have an issue filed against them, since issues are
+	/// server-scoped.
+	pub async fn list_tailnet_attached_with_server(
+		db: &mut AsyncPgConnection,
+	) -> Result<Vec<(Self, Uuid, String)>> {
+		use crate::schema::{devices, servers};
+
+		let rows: Vec<(Self, Uuid, String)> = devices::table
+			.inner_join(servers::table.on(servers::device_id.eq(devices::id.nullable())))
+			.filter(devices::tailscale_node_id.is_not_null())
+			.select((
+				Self::as_select(),
+				servers::id,
+				devices::tailscale_node_id.assume_not_null(),
+			))
+			.load(db)
+			.await?;
+		Ok(rows)
+	}
 }
 
 impl DeviceKey {

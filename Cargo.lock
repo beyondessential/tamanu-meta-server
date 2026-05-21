@@ -2089,6 +2089,7 @@ version = "6.6.6"
 dependencies = [
  "clap",
  "commons-errors",
+ "commons-servers",
  "commons-types",
  "database",
  "diesel-async",
