@@ -140,7 +140,7 @@ build-servers-release target:
 # Install development dependencies
 install-deps:
     cargo binstall -y cargo-binstall || cargo install cargo-binstall
-    cargo binstall -y cargo-nextest cargo-release git-cliff watchexec-cli diesel_cli
+    cargo binstall -y cargo-nextest watchexec-cli diesel_cli
 
 # Download database from Kubernetes
 download-db dbname namespace="canopy-dev" pod="meta-db-1" output="app.dump":
@@ -151,7 +151,3 @@ download-db dbname namespace="canopy-dev" pod="meta-db-1" output="app.dump":
 
 # Development cycle: format, lint, test
 dev: fmt lint test
-
-# Make a new release
-release level="minor":
-    cargo release --workspace --execute {{ level }}

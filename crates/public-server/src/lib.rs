@@ -166,7 +166,6 @@ async fn index(
 #[cfg(feature = "ui")]
 async fn error(axum::extract::Path(slug): axum::extract::Path<String>) -> axum::response::Redirect {
 	axum::response::Redirect::temporary(&format!(
-		"https://github.com/beyondessential/canopy/blob/{version}/ERRORS.md#{slug}",
-		version = env!("CARGO_PKG_VERSION")
+		"https://github.com/beyondessential/canopy/blob/main/ERRORS.md#{slug}",
 	))
 }
