@@ -37,16 +37,33 @@ pub struct TailnetLiveInfo {
 	pub tailnet: String,
 	pub addresses: Vec<String>,
 	pub tags: Vec<String>,
+	/// When the Tailscale control plane last saw this node. `None` if
+	/// the API didn't carry a value (or it didn't parse).
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub last_seen: Option<Timestamp>,
+	/// Derived: `last_seen` is within the last 5 minutes — Tailscale's
+	/// own "online" heuristic in the admin console. False when
+	/// `last_seen` is missing.
+	pub online: bool,
 }
+
+/// `last_seen` newer than this counts the node as online. Matches the
+/// Tailscale admin console's own heuristic.
+const ONLINE_THRESHOLD: jiff::SignedDuration = jiff::SignedDuration::from_mins(5);
 
 impl From<DirectoryEntry> for TailnetLiveInfo {
 	fn from(e: DirectoryEntry) -> Self {
+		let online = e
+			.last_seen
+			.is_some_and(|t| Timestamp::now().duration_since(t).abs() <= ONLINE_THRESHOLD);
 		Self {
 			node_id: e.node_id,
 			display_name: e.node_name,
 			tailnet: e.tailnet,
 			addresses: e.addresses.into_iter().map(|a| a.to_string()).collect(),
 			tags: e.tags,
+			last_seen: e.last_seen,
+			online,
 		}
 	}
 }
