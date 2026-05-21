@@ -562,6 +562,11 @@ async fn enqueue_slack_open(
 		&issue.r#ref,
 		&issue.message,
 	);
+	// Sit in the outbox for OPEN_DELAY before the drainer is allowed to
+	// pick the row up. If the incident closes within that window the
+	// resolve path will cancel this row outright (see
+	// `enqueue_slack_resolve_inner`), and Slack never hears about a flap.
+	let deliver_after = Timestamp::now() + crate::slack_outbox::OPEN_DELAY;
 	crate::slack_outbox::SlackOutbox::enqueue(
 		conn,
 		crate::slack_outbox::KIND_INCIDENT_OPEN,
@@ -569,6 +574,7 @@ async fn enqueue_slack_open(
 		Some(issue.id),
 		None,
 		payload,
+		deliver_after,
 	)
 	.await?;
 	Ok(())
@@ -593,6 +599,21 @@ async fn enqueue_slack_resolve_inner(
 	if incident.server_id == Uuid::nil() {
 		return Ok(());
 	}
+	// If the matching open is still inside its `deliver_after` window
+	// (or has otherwise not been delivered yet) we cancel it and skip
+	// posting the resolve too: Slack never heard about the incident,
+	// so there's nothing to "resolve" there. Once the drainer has shipped
+	// the open this update affects zero rows and we fall through to the
+	// normal enqueue.
+	let cancelled = crate::slack_outbox::SlackOutbox::cancel_pending_open(
+		conn,
+		incident.id,
+		"cancelled: incident resolved before the open had been delivered to Slack",
+	)
+	.await?;
+	if cancelled > 0 {
+		return Ok(());
+	}
 	let server = Server::get_by_id(conn, incident.server_id).await?;
 	let payload = crate::slack_outbox::vars::incident_resolve(&server, by);
 	crate::slack_outbox::SlackOutbox::enqueue(
@@ -602,6 +623,7 @@ async fn enqueue_slack_resolve_inner(
 		None,
 		None,
 		payload,
+		Timestamp::now(),
 	)
 	.await?;
 	Ok(())

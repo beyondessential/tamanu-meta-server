@@ -376,6 +376,7 @@ mod tests {
 			last_error: None,
 			last_response: None,
 			gave_up_at: None,
+			deliver_after: Timestamp::now(),
 		}
 	}
 
