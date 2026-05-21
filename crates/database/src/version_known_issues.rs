@@ -123,7 +123,11 @@ impl VersionKnownIssue {
 					.eq(v::major)
 					.and(k::min_minor.eq(v::minor))
 					.and(v::patch.ge(k::min_patch))
-					.and(k::max_patch.is_null().or(v::patch.lt(k::max_patch.assume_not_null())))),
+					.and(
+						k::max_patch
+							.is_null()
+							.or(v::patch.lt(k::max_patch.assume_not_null())),
+					)),
 			)
 			.select(v::id)
 			.filter(v::id.eq_any(ids))
