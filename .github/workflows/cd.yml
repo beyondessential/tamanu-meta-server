@@ -163,8 +163,9 @@ jobs:
           node-version: lts/*
 
       - name: Install pulumi dependencies
-        working-directory: ops/${{ vars.OPS_PULUMI_PATH }}
-        run: npm ci
+        run: |
+          cd ops/pulumi
+          npm ci
 
       - name: Install pulumi CLI
         uses: pulumi/actions@v5
@@ -176,8 +177,8 @@ jobs:
           requested-token-type: urn:pulumi:token-type:access_token:organization
 
       - name: Pulumi up
-        working-directory: ops/${{ vars.OPS_PULUMI_PATH }}
         run: |
+          cd ops/${{ vars.OPS_PULUMI_PATH }}
           pulumi stack select ${{ vars.PULUMI_STACK }}
           pulumi config refresh
           pulumi config set imageTag ${{ needs.build-image.outputs.image-tag }}
