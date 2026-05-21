@@ -13,8 +13,11 @@ Canopy provides:
 We have a container image for linux/amd64 and linux/arm64:
 
 ```
-ghcr.io/beyondessential/canopy:6.2.6
+ghcr.io/beyondessential/canopy:latest
 ```
+
+Each push to `main` builds and publishes a new image (also tagged
+`sha-<short>` for the source commit) and triggers a pulumi deploy.
 
 ## Develop
 
@@ -34,7 +37,6 @@ $ just install-deps
 
 This will install [cargo-nextest](https://nextest.rs),
 [diesel CLI](https://diesel.rs/guides/getting-started.html#installing-diesel-cli),
-[cargo-release](https://github.com/crate-ci/cargo-release), [git-cliff](https://git-cliff.org),
 and [watchexec](https://github.com/watchexec/watchexec).
 
 ### Quick Start
@@ -131,18 +133,6 @@ You'll need to have `kubectl` installed and authorised.
 # just download-db {database name} {kubernetes namespace} [dump file]
 $ just download-db canopy canopy-prod
 ```
-
-### Releasing
-
-(You need write access to the main branch directly)
-
-On the main branch:
-
-```console
-$ just release minor
-```
-
-(or use `patch` or `major` instead of `minor`)
 
 ### Public API Authentication
 
