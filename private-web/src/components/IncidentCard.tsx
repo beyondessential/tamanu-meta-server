@@ -6,12 +6,6 @@ import { Link as RouterLink } from "react-router-dom";
 import TimeAgo from "./TimeAgo";
 import type { IncidentData } from "../types";
 
-function serverLabel(name: string | null, host: string): string {
-	if (name && name.trim() !== "") return name;
-	if (host && host.trim() !== "") return host;
-	return "(unknown)";
-}
-
 /** Compact view of an open incident; click-through goes to the incident
  * detail page. The body has a stats row (bottom-right) with issue / event
  * / note counts. */
@@ -33,7 +27,7 @@ export default function IncidentCard({ incident }: { incident: IncidentData }) {
 		>
 			<Box>
 				<Typography variant="subtitle1" sx={{ fontWeight: 500 }} noWrap>
-					{serverLabel(incident.server_name, incident.server_host)}
+					{incident.server_group_name || "(unknown group)"}
 				</Typography>
 				<Typography variant="body2" color="text.secondary">
 					opened <TimeAgo timestamp={incident.opened_at} />

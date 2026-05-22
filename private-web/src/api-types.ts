@@ -1626,6 +1626,11 @@ export interface components {
              *     Kept as String to round-trip any historical value.
              */
             resolved_reason?: string | null;
+            /**
+             * @description Display name of the group the issue's server belongs to. `None` when
+             *     the server is ungrouped; the UI hides the group prefix in that case.
+             */
+            server_group_name?: string | null;
             server_host: string;
             /** Format: uuid */
             server_id: string;

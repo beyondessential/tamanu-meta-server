@@ -84,8 +84,11 @@ export type VersionStr = Solidify<Schemas["VersionStr"]>;
 
 export type GeoPoint = Solidify<Schemas["GeoPoint"]>;
 export type FacilityServerStatus = Solidify<Schemas["FacilityServerStatus"]>;
-export type CentralServerCard = Solidify<Schemas["CentralServerCard"]>;
+export type ServerGroupCard = Solidify<Schemas["ServerGroupCard"]>;
+export type ServerGroup = Solidify<Schemas["ServerGroup"]>;
+export type GroupDetail = Solidify<Schemas["GroupDetail"]>;
 export type SummaryData = Solidify<Schemas["SummaryData"]>;
+export type TagMap = Solidify<Schemas["TagMap"]>;
 
 export type VersionData = Solidify<Schemas["VersionData"]>;
 export type MinorVersionGroup = Solidify<Schemas["MinorVersionGroup"]>;

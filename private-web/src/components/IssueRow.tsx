@@ -22,6 +22,7 @@ import { useIsAdmin } from "../hooks/useIsAdmin";
 import { humanDuration } from "../lib/humanDuration";
 import MessageView from "./MessageView";
 import NotesList, { AddNoteButton } from "./NotesList";
+import ServerNameWithGroup from "./ServerNameWithGroup";
 import SeverityChip from "./SeverityChip";
 import StatusSnapshotPanel, { StatusSnapshotButton } from "./StatusSnapshot";
 import TimeAgo from "./TimeAgo";
@@ -37,12 +38,6 @@ import {
 function isSnoozeActive(snoozedUntil: string | null): boolean {
 	if (!snoozedUntil) return false;
 	return Date.parse(snoozedUntil) > Date.now();
-}
-
-function serverLabel(name: string | null, host: string): string {
-	if (name && name.trim() !== "") return name;
-	if (host && host.trim() !== "") return host;
-	return "(unknown)";
 }
 
 function headline(issue: IssueData): string {
@@ -159,7 +154,14 @@ function Header({
 				color="text.primary"
 				sx={{ fontWeight: 500, flexShrink: 0 }}
 			>
-				{serverLabel(issue.server_name, issue.server_host)}
+				<ServerNameWithGroup
+					groupName={issue.server_group_name}
+					serverName={
+						issue.server_name && issue.server_name.trim() !== ""
+							? issue.server_name
+							: issue.server_host || "(unknown)"
+					}
+				/>
 			</MuiLink>
 			<Typography
 				variant="body2"

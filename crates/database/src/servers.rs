@@ -376,6 +376,28 @@ impl Server {
 		Ok(rows.into_iter().map(|(i, n, h)| (i, (n, h))).collect())
 	}
 
+	/// Bulk-fetch the group name for each given server. Servers that are
+	/// ungrouped (or don't exist) get `None`.
+	pub async fn group_names_by_server_ids(
+		db: &mut AsyncPgConnection,
+		ids: &[Uuid],
+	) -> Result<std::collections::HashMap<Uuid, Option<String>>> {
+		use crate::schema::{server_groups, servers};
+		use std::collections::HashMap;
+
+		if ids.is_empty() {
+			return Ok(HashMap::new());
+		}
+		let rows: Vec<(Uuid, Option<String>)> = servers::table
+			.left_join(server_groups::table.on(server_groups::id.nullable().eq(servers::group_id)))
+			.select((servers::id, server_groups::name.nullable()))
+			.filter(servers::id.eq_any(ids))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(rows.into_iter().collect())
+	}
+
 	pub async fn search_central(
 		db: &mut AsyncPgConnection,
 		query: &str,

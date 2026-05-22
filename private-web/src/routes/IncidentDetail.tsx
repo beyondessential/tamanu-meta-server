@@ -22,7 +22,6 @@ import { useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import IssueRow from "../components/IssueRow";
-import ManualEventButton from "../components/ManualEventButton";
 import { AddNoteButton } from "../components/NotesList";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import TimeAgo from "../components/TimeAgo";
@@ -40,11 +39,6 @@ import {
 
 type Filter = "all" | "issues" | "notes";
 
-function serverLabel(name: string | null, host: string): string {
-	if (name && name.trim() !== "") return name;
-	if (host && host.trim() !== "") return host;
-	return "(unknown)";
-}
 
 export default function IncidentDetail() {
 	const { id = "" } = useParams<{ id: string }>();
@@ -67,7 +61,7 @@ export default function IncidentDetail() {
 
 	usePageTitle(
 		detail.status === "ok"
-			? `Incident ${detail.data.incident.id.slice(0, 8)} on ${serverLabel(detail.data.incident.server_name, detail.data.incident.server_host)}`
+			? `Incident ${detail.data.incident.id.slice(0, 8)} on ${detail.data.incident.server_group_name || "(unknown)"}`
 			: "Incident",
 	);
 
@@ -201,11 +195,11 @@ function Header({
 						on{" "}
 						<MuiLink
 							component={RouterLink}
-							to={`/servers/${incident.server_id}`}
+							to={`/groups/${incident.server_group_id}`}
 							underline="hover"
 							color="inherit"
 						>
-							{serverLabel(incident.server_name, incident.server_host)}
+							{incident.server_group_name || "(unknown group)"}
 						</MuiLink>
 					</Typography>
 					<Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
@@ -263,12 +257,6 @@ function Header({
 				))}
 				{isAdmin && (
 					<>
-						<ManualEventButton
-							serverId={incident.server_id}
-							hasOpenIncident={open}
-							onSubmitted={onChanged}
-							size="small"
-						/>
 						<AddNoteButton
 							apiModule="incidents"
 							parentKey="incident_id"

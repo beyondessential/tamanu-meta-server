@@ -36,9 +36,11 @@ import ServerRankChip from "../components/ServerRankChip";
 import { callApi, useApi, useApiAction } from "../api";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { humanSeconds } from "../lib/humanDuration";
+import ServerNameWithGroup from "../components/ServerNameWithGroup";
 import type {
 	DeviceInfo,
 	ServerDetailData,
+	ServerGroup,
 	ServerInfo,
 	ServerLastStatusData,
 } from "../types";
@@ -112,9 +114,16 @@ export default function ServerDetail() {
 				server={data.server}
 				status={data.last_status}
 			/>
-			{data.child_servers.length > 0 && (
-				<ChildServers
-					children={data.child_servers}
+			{data.group && <GroupSection group={data.group} />}
+			{(data.server.notes || Object.keys(data.server.tags ?? {}).length > 0) && (
+				<NotesAndTagsSection
+					notes={data.server.notes}
+					tags={data.server.tags}
+				/>
+			)}
+			{data.siblings.length > 0 && (
+				<SiblingServers
+					siblings={data.siblings}
 					isAdmin={admin}
 					hasOpenIncident={hasOpenIncident}
 					onEventSubmitted={bumpRefresh}
@@ -167,17 +176,20 @@ function Header({
 						title={data.server.name ?? ""}
 						size="0.8em"
 					/>
-					{data.child_servers.map(([up, health, child]) => (
+					{data.siblings.map(([up, health, sib]) => (
 						<StatusDot
-							key={child.id}
+							key={sib.id}
 							up={up}
 							health={health}
-							title={child.name ?? ""}
+							title={sib.name ?? ""}
 							dim
 							size="0.8em"
 						/>
 					))}
-					{data.server.name ?? "Unnamed"}
+					<ServerNameWithGroup
+						groupName={data.server.group_name}
+						serverName={data.server.name ?? "Unnamed"}
+					/>
 				</Typography>
 			</Stack>
 			<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
@@ -475,20 +487,6 @@ function InfoSection({
 							: "Off"
 					}
 				/>
-				{server.parent_server_id && (
-					<Stack spacing={0.25}>
-						<Typography variant="caption" color="text.secondary">
-							Parent
-						</Typography>
-						<MuiLink
-							component={RouterLink}
-							to={`/servers/${server.parent_server_id}`}
-							underline="hover"
-						>
-							{server.parent_server_name ?? server.parent_server_id}
-						</MuiLink>
-					</Stack>
-				)}
 				{server.cloud != null && (
 					<InfoItem
 						label="Location"
@@ -779,13 +777,13 @@ function renderLocation(server: ServerInfo): string {
 	return "Cloud";
 }
 
-function ChildServers({
-	children,
+function SiblingServers({
+	siblings,
 	isAdmin,
 	hasOpenIncident,
 	onEventSubmitted,
 }: {
-	children: ServerDetailData["child_servers"];
+	siblings: ServerDetailData["siblings"];
 	isAdmin: boolean;
 	hasOpenIncident: boolean;
 	onEventSubmitted: () => void;
@@ -793,12 +791,12 @@ function ChildServers({
 	return (
 		<Box>
 			<Typography variant="h5" component="h2" gutterBottom>
-				Child servers ({children.length})
+				Other servers in this group ({siblings.length})
 			</Typography>
 			<Stack spacing={1}>
-				{children.map(([up, health, child]) => (
+				{siblings.map(([up, health, sib]) => (
 					<Stack
-						key={child.id}
+						key={sib.id}
 						direction="row"
 						spacing={1}
 						sx={{
@@ -809,14 +807,14 @@ function ChildServers({
 							alignItems: "center",
 						}}
 					>
-						<Tooltip title={child.host}>
+						<Tooltip title={sib.host}>
 							<IconButton
 								component="a"
-								href={child.host}
+								href={sib.host}
 								target="_blank"
 								rel="noopener noreferrer"
 								size="small"
-								aria-label={`Open ${child.name ?? "server"} (${child.host})`}
+								aria-label={`Open ${sib.name ?? "server"} (${sib.host})`}
 							>
 								<LanguageIcon fontSize="small" />
 							</IconButton>
@@ -824,16 +822,16 @@ function ChildServers({
 						<StatusDot up={up} health={health} />
 						<MuiLink
 							component={RouterLink}
-							to={`/servers/${child.id}`}
+							to={`/servers/${sib.id}`}
 							underline="hover"
 							color="text.primary"
 							sx={{ fontWeight: 500 }}
 						>
-							{child.name ?? "Unnamed"}
+							{sib.name ?? "Unnamed"}
 						</MuiLink>
-						{child.rank && <ServerRankChip rank={child.rank} />}
-						<ServerKindChip kind={child.kind} />
-						{child.alert_when_down_for <= 0 && (
+						{sib.rank && <ServerRankChip rank={sib.rank} />}
+						<ServerKindChip kind={sib.kind} />
+						{sib.alert_when_down_for <= 0 && (
 							<Tooltip title="Status alerts are off for this server — canopy isn't watching it.">
 								<Chip
 									size="small"
@@ -845,7 +843,7 @@ function ChildServers({
 						<Box sx={{ flex: 1 }} />
 						{isAdmin && (
 							<ManualEventButton
-								serverId={child.id}
+								serverId={sib.id}
 								hasOpenIncident={hasOpenIncident}
 								onSubmitted={onEventSubmitted}
 							/>
@@ -854,5 +852,82 @@ function ChildServers({
 				))}
 			</Stack>
 		</Box>
+	);
+}
+
+function GroupSection({ group }: { group: ServerGroup }) {
+	const tagEntries = Object.entries(group.tags ?? {});
+	return (
+		<Paper variant="outlined" sx={{ p: 2 }}>
+			<Stack
+				direction="row"
+				sx={{ alignItems: "center", justifyContent: "space-between", mb: 1 }}
+			>
+				<Typography variant="h6" component="h2">
+					Group
+				</Typography>
+				<MuiLink
+					component={RouterLink}
+					to={`/groups/${group.id}`}
+					underline="hover"
+				>
+					{group.name}
+				</MuiLink>
+			</Stack>
+			{group.notes && (
+				<Typography
+					variant="body2"
+					sx={{ whiteSpace: "pre-wrap", color: "text.secondary", mb: 1 }}
+				>
+					{group.notes}
+				</Typography>
+			)}
+			{tagEntries.length > 0 && (
+				<Stack direction="row" sx={{ flexWrap: "wrap", gap: 0.5 }}>
+					{tagEntries.map(([k, v]) => (
+						<Chip
+							key={k}
+							size="small"
+							variant="outlined"
+							label={`${k}=${v}`}
+						/>
+					))}
+				</Stack>
+			)}
+		</Paper>
+	);
+}
+
+function NotesAndTagsSection({
+	notes,
+	tags,
+}: {
+	notes: string;
+	tags: Record<string, string>;
+}) {
+	const tagEntries = Object.entries(tags ?? {});
+	return (
+		<Paper variant="outlined" sx={{ p: 2 }}>
+			<Typography variant="h6" component="h2" gutterBottom>
+				Notes & tags
+			</Typography>
+			{notes && (
+				<Typography variant="body2" sx={{ whiteSpace: "pre-wrap", mb: 1 }}>
+					{notes}
+				</Typography>
+			)}
+			{tagEntries.length > 0 && (
+				<Stack direction="row" sx={{ flexWrap: "wrap", gap: 0.5 }}>
+					{tagEntries.map(([k, v]) => (
+						<Chip
+							key={k}
+							size="small"
+							variant="outlined"
+							label={`${k}=${v}`}
+						/>
+					))}
+				</Stack>
+			)}
+		</Paper>
 	);
 }

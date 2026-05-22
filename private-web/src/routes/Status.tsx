@@ -17,19 +17,21 @@ import { HealthLegend, StatusLegend, VersionLegend } from "../components/Legends
 import { useApi } from "../api";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { useReloadInterval } from "../hooks/useReloadInterval";
-import { type CentralServerCard, SERVER_RANK_ORDER } from "../types";
+import { type ServerGroupCard, SERVER_RANK_ORDER } from "../types";
 
 export default function Status() {
 	usePageTitle("Status");
 	const tick = useReloadInterval(60_000, "canopy-reload-status");
 	const incidents = useApi("incidents", "list_active", {}, [tick]);
-	const openIncidentServers = new Set<string>(
-		incidents.status === "ok" ? incidents.data.map((i) => i.server_id) : [],
+	const openIncidentGroups = new Set<string>(
+		incidents.status === "ok"
+			? incidents.data.map((i) => i.server_group_id)
+			: [],
 	);
 	return (
 		<Stack spacing={3}>
 			<ReleaseSummary tick={tick} />
-			<ServerCards tick={tick} openIncidentServers={openIncidentServers} />
+			<GroupCards tick={tick} openIncidentGroups={openIncidentGroups} />
 			<Box>
 				<VersionLegend />
 				<Box sx={{ mt: 1 }}>
@@ -67,12 +69,12 @@ function ReleaseSummary({ tick }: { tick: number }) {
 	);
 }
 
-function ServerCards({
+function GroupCards({
 	tick,
-	openIncidentServers,
+	openIncidentGroups,
 }: {
 	tick: number;
-	openIncidentServers: Set<string>;
+	openIncidentGroups: Set<string>;
 }) {
 	const grouped = useApi(
 		"statuses",
@@ -97,7 +99,7 @@ function ServerCards({
 	if (sections.length === 0) {
 		return (
 			<Alert severity="info">
-				No servers configured. Add some via the Servers page.
+				No server groups configured. Create one via the Servers page.
 			</Alert>
 		);
 	}
@@ -121,11 +123,11 @@ function ServerCards({
 						}}
 					>
 						{ids.map((id) => (
-							<ServerCardLoader
+							<GroupCardLoader
 								key={id}
-								serverId={id}
+								groupId={id}
 								tick={tick}
-								hasOpenIncident={openIncidentServers.has(id)}
+								hasOpenIncident={openIncidentGroups.has(id)}
 							/>
 						))}
 					</Box>
@@ -135,26 +137,26 @@ function ServerCards({
 	);
 }
 
-function ServerCardLoader({
-	serverId,
+function GroupCardLoader({
+	groupId,
 	tick,
 	hasOpenIncident,
 }: {
-	serverId: string;
+	groupId: string;
 	tick: number;
 	hasOpenIncident: boolean;
 }) {
 	const result = useApi(
 		"statuses",
-		"server_details",
-		{ server_id: serverId },
-		[serverId, tick],
+		"group_details",
+		{ server_group_id: groupId },
+		[groupId, tick],
 	);
 
 	return (
 		<MuiLink
 			component={RouterLink}
-			to={`/servers/${serverId}`}
+			to={`/groups/${groupId}`}
 			underline="none"
 			color="inherit"
 		>
@@ -177,8 +179,8 @@ function ServerCardLoader({
 					) : result.status === "error" ? (
 						<Alert severity="error">{result.error.message}</Alert>
 					) : (
-						<ServerCard
-							server={result.data}
+						<GroupCard
+							group={result.data}
 							hasOpenIncident={hasOpenIncident}
 						/>
 					)}
@@ -188,11 +190,11 @@ function ServerCardLoader({
 	);
 }
 
-function ServerCard({
-	server,
+function GroupCard({
+	group,
 	hasOpenIncident,
 }: {
-	server: CentralServerCard;
+	group: ServerGroupCard;
 	hasOpenIncident: boolean;
 }) {
 	return (
@@ -202,40 +204,22 @@ function ServerCard({
 				spacing={1}
 				sx={{ alignItems: "baseline", justifyContent: "space-between" }}
 			>
-				<Stack
-					direction="row"
-					spacing={1}
-					sx={{ alignItems: "baseline", minWidth: 0 }}
+				<Typography
+					variant="subtitle1"
+					component="h3"
+					sx={{
+						overflow: "hidden",
+						textOverflow: "ellipsis",
+						whiteSpace: "nowrap",
+						minWidth: 0,
+					}}
 				>
-					<Tooltip title={server.host} placement="top">
-						<MuiLink
-							href={server.host}
-							target="_blank"
-							rel="noopener"
-							color="text.secondary"
-							onClick={(e) => e.stopPropagation()}
-							sx={{ textDecoration: "none", flexShrink: 0 }}
-						>
-							🌐
-						</MuiLink>
-					</Tooltip>
-					<Typography
-						variant="subtitle1"
-						component="h3"
-						sx={{
-							overflow: "hidden",
-							textOverflow: "ellipsis",
-							whiteSpace: "nowrap",
-							minWidth: 0,
-						}}
-					>
-						{server.name}
-					</Typography>
-				</Stack>
+					{group.name}
+				</Typography>
 				<Box sx={{ flexShrink: 0 }}>
 					<VersionIndicator
-						version={server.version}
-						distance={server.version_distance}
+						version={group.version}
+						distance={group.version_distance}
 						addLink={false}
 					/>
 				</Box>
@@ -246,23 +230,18 @@ function ServerCard({
 				sx={{ alignItems: "center", justifyContent: "space-between" }}
 			>
 				<Stack direction="row" spacing={0} sx={{ flexWrap: "wrap" }}>
-					<StatusDot
-						up={server.up}
-						health={server.health}
-						title={`${server.name}: ${server.up}${
-							server.health !== "healthy" ? ` (${server.health})` : ""
-						}`}
-					/>
-					{server.facility_servers.map((facility) => (
-						<StatusDot
-							key={facility.id}
-							up={facility.up}
-							health={facility.health}
-							title={`${facility.name}: ${facility.up}${
-								facility.health !== "healthy" ? ` (${facility.health})` : ""
-							}`}
-							dim
-						/>
+					{group.members.map((m) => (
+						<Tooltip key={m.id} title={m.name || "(unnamed)"}>
+							<Box component="span" sx={{ display: "inline-flex" }}>
+								<StatusDot
+									up={m.up}
+									health={m.health}
+									title={`${m.name}: ${m.up}${
+										m.health !== "healthy" ? ` (${m.health})` : ""
+									}`}
+								/>
+							</Box>
+						</Tooltip>
 					))}
 				</Stack>
 				{hasOpenIncident && (

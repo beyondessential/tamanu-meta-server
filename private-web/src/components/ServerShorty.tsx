@@ -2,6 +2,7 @@ import { Box, Link as MuiLink, Stack, Typography } from "@mui/material";
 import { Link as RouterLink } from "react-router-dom";
 import type { ServerKind, ServerRank } from "../types";
 import ServerKindChip from "./ServerKindChip";
+import ServerNameWithGroup from "./ServerNameWithGroup";
 import ServerRankChip from "./ServerRankChip";
 
 export interface ServerInfo {
@@ -10,6 +11,7 @@ export interface ServerInfo {
 	host: string;
 	kind: ServerKind;
 	rank: ServerRank | null;
+	group_name?: string | null;
 }
 
 export default function ServerShorty({ server }: { server: ServerInfo }) {
@@ -33,7 +35,10 @@ export default function ServerShorty({ server }: { server: ServerInfo }) {
 				color="text.primary"
 				sx={{ fontWeight: 500 }}
 			>
-				{name}
+				<ServerNameWithGroup
+					groupName={server.group_name}
+					serverName={name}
+				/>
 			</MuiLink>
 			{server.rank && <ServerRankChip rank={server.rank} />}
 			<ServerKindChip kind={server.kind} />

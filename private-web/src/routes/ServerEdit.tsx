@@ -14,8 +14,15 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { callApi, useApi, useApiAction } from "../api";
+import TagsEditor from "../components/TagsEditor";
 import { usePageTitle } from "../hooks/usePageTitle";
-import type { ServerInfo, ServerKind, ServerRank } from "../types";
+import type {
+	ServerGroup,
+	ServerInfo,
+	ServerKind,
+	ServerRank,
+	TagMap,
+} from "../types";
 
 const RANK_OPTIONS: Array<{ value: ServerRank | ""; label: string }> = [
 	{ value: "", label: "unranked" },
@@ -62,15 +69,15 @@ function EditForm({ info }: { info: ServerInfo }) {
 			? Math.round(info.alert_when_down_for / 60).toString()
 			: "10",
 	);
-	const [parentId, setParentId] = useState<string | null>(
-		info.parent_server_id,
-	);
+	const [groupId, setGroupId] = useState<string | null>(info.group_id);
 	const [deviceId, setDeviceId] = useState<string>(info.device_id ?? "");
 	const [cloud, setCloud] = useState<"" | "true" | "false">(
 		info.cloud == null ? "" : info.cloud ? "true" : "false",
 	);
 	const [lat, setLat] = useState<string>(info.geolocation?.lat?.toString() ?? "");
 	const [lon, setLon] = useState<string>(info.geolocation?.lon?.toString() ?? "");
+	const [notes, setNotes] = useState<string>(info.notes ?? "");
+	const [tags, setTags] = useState<TagMap>(info.tags ?? {});
 
 	const onSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
@@ -80,7 +87,7 @@ function EditForm({ info }: { info: ServerInfo }) {
 			kind,
 			rank: rank === "" ? null : rank,
 			listed,
-			parent_server_id: parentId,
+			group_id: groupId,
 			device_id: deviceId.trim() === "" ? null : deviceId.trim(),
 			cloud: cloud === "" ? null : cloud === "true",
 			geolocation:
@@ -90,6 +97,8 @@ function EditForm({ info }: { info: ServerInfo }) {
 			alert_when_down_for: alertWhenDownEnabled
 				? Math.max(0, Math.round(Number(alertWhenDownMinutes) * 60))
 				: 0,
+			notes,
+			tags,
 		};
 		try {
 			await action.call({ server_id: info.id, data });
@@ -150,12 +159,9 @@ function EditForm({ info }: { info: ServerInfo }) {
 					disabled={action.pending}
 				/>
 
-				<ParentServerControl
-					serverId={info.id}
-					currentParentId={parentId}
-					currentKind={kind}
-					currentRank={rank === "" ? null : rank}
-					onChange={setParentId}
+				<GroupControl
+					currentGroupId={groupId}
+					onChange={setGroupId}
 					disabled={action.pending}
 				/>
 
@@ -232,6 +238,21 @@ function EditForm({ info }: { info: ServerInfo }) {
 					environments and ad-hoc demos that are expected to be down.
 				</Typography>
 
+				<TextField
+					label="Notes"
+					multiline
+					minRows={3}
+					value={notes}
+					onChange={(e) => setNotes(e.target.value)}
+					disabled={action.pending}
+					helperText="Operator notes shown on the server's detail page. Plain text."
+				/>
+
+				<Stack spacing={1}>
+					<Typography variant="subtitle1">Tags</Typography>
+					<TagsEditor value={tags} onChange={setTags} disabled={action.pending} />
+				</Stack>
+
 				{action.error && (
 					<Alert severity="error">{action.error.message}</Alert>
 				)}
@@ -259,31 +280,22 @@ function EditForm({ info }: { info: ServerInfo }) {
 	);
 }
 
-function ParentServerControl({
-	serverId,
-	currentParentId,
-	currentKind,
-	currentRank,
+function GroupControl({
+	currentGroupId,
 	onChange,
 	disabled,
 }: {
-	serverId: string;
-	currentParentId: string | null;
-	currentKind: ServerKind;
-	currentRank: ServerRank | null;
-	onChange: (parentId: string | null) => void;
+	currentGroupId: string | null;
+	onChange: (groupId: string | null) => void;
 	disabled: boolean;
 }) {
 	const [query, setQuery] = useState("");
-	const [results, setResults] = useState<ServerInfo[]>([]);
+	const [results, setResults] = useState<ServerGroup[]>([]);
 	const [loading, setLoading] = useState(false);
 
-	const currentInfo = useApi(
-		"servers",
-		"get_info",
-		{ server_id: currentParentId ?? "" },
-		[currentParentId ?? ""],
-	);
+	// We fetch the *list* once so we have access to the names for whatever id
+	// is currently selected. The search endpoint is for typeahead.
+	const allGroups = useApi("server_groups", "list", {}, []);
 
 	useEffect(() => {
 		if (!query) {
@@ -294,16 +306,7 @@ function ParentServerControl({
 		setLoading(true);
 		(async () => {
 			try {
-				const found = await callApi(
-					"servers",
-					"search_parent",
-					{
-						query,
-						current_server_id: serverId,
-						current_rank: currentRank,
-						current_kind: currentKind,
-					},
-				);
+				const found = await callApi("server_groups", "search", { query });
 				if (!cancelled) setResults(found);
 			} catch {
 				if (!cancelled) setResults([]);
@@ -314,42 +317,58 @@ function ParentServerControl({
 		return () => {
 			cancelled = true;
 		};
-	}, [query, serverId, currentRank, currentKind]);
+	}, [query]);
 
-	const currentValue = useMemo(() => {
-		if (!currentParentId) return null;
-		if (currentInfo.status === "ok") return currentInfo.data;
-		return { id: currentParentId } as Partial<ServerInfo> as ServerInfo;
-	}, [currentParentId, currentInfo]);
+	const currentValue = useMemo<ServerGroup | null>(() => {
+		if (!currentGroupId) return null;
+		if (allGroups.status === "ok") {
+			return allGroups.data.find((g) => g.id === currentGroupId) ?? null;
+		}
+		return null;
+	}, [currentGroupId, allGroups]);
+
+	const options = useMemo<ServerGroup[]>(() => {
+		if (query) return results;
+		return allGroups.status === "ok" ? allGroups.data : [];
+	}, [query, results, allGroups]);
 
 	return (
-		<Autocomplete<ServerInfo, false, false, false>
+		<Autocomplete<ServerGroup, false, false, false>
 			disabled={disabled}
-			options={results}
+			options={options}
 			value={currentValue}
 			onChange={(_, v) => onChange(v?.id ?? null)}
 			onInputChange={(_, v) => setQuery(v)}
 			loading={loading}
-			getOptionLabel={(s) => s.name ?? s.host ?? s.id}
+			getOptionLabel={(g) => g.name}
 			isOptionEqualToValue={(a, b) => a.id === b.id}
 			filterOptions={(x) => x}
 			renderInput={(params) => (
 				<TextField
 					{...params}
-					label="Parent server"
-					placeholder="Search by name or host, or paste a UUID"
+					label="Group"
+					placeholder="Search by name, or pick from the list"
+					helperText="Leave empty to keep this server ungrouped."
 				/>
 			)}
-			renderOption={(props, server) => (
-				<li {...props} key={server.id}>
+			renderOption={(props, group) => (
+				<li {...props} key={group.id}>
 					<Stack>
-						<Typography variant="body2">
-							{server.name ?? server.host}
-						</Typography>
-						<Typography variant="caption" color="text.secondary">
-							{server.host} • {server.kind}
-							{server.rank ? ` • ${server.rank}` : " • unranked"}
-						</Typography>
+						<Typography variant="body2">{group.name}</Typography>
+						{group.notes && (
+							<Typography
+								variant="caption"
+								color="text.secondary"
+								sx={{
+									overflow: "hidden",
+									textOverflow: "ellipsis",
+									whiteSpace: "nowrap",
+									maxWidth: "60ch",
+								}}
+							>
+								{group.notes.split("\n")[0]}
+							</Typography>
+						)}
 					</Stack>
 				</li>
 			)}

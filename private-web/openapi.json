@@ -4153,6 +4153,13 @@
             ],
             "description": "The string stored in the DB; parses to `ResolvedReason` if valid.\nKept as String to round-trip any historical value."
           },
+          "server_group_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Display name of the group the issue's server belongs to. `None` when\nthe server is ungrouped; the UI hides the group prefix in that case."
+          },
           "server_host": {
             "type": "string"
           },
