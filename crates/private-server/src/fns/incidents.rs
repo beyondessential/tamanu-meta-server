@@ -5,7 +5,7 @@ use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
 use commons_types::{Uuid, issue::ResolvedReason};
 use database::issues::{Incident, IncidentIssue, IncidentStats};
 use database::notes::IncidentNote;
-use database::servers::Server;
+use database::server_groups::ServerGroup;
 use database::tailscale_users::TailscaleUser as CachedTailscaleUser;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -20,10 +20,11 @@ const DEFAULT_LIMIT: i64 = 100;
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct IncidentData {
 	pub id: Uuid,
-	pub server_id: Uuid,
-	/// The root server's name (may be null — fall back to `server_host`).
-	pub server_name: Option<String>,
-	pub server_host: String,
+	pub server_group_id: Uuid,
+	/// Display name of the group this incident rolls up to. Empty string
+	/// only if the group has been deleted out from under the incident,
+	/// which shouldn't happen via the API.
+	pub server_group_name: String,
 	pub opened_at: Timestamp,
 	pub closed_at: Option<Timestamp>,
 	pub resolved_at: Option<Timestamp>,
@@ -42,17 +43,15 @@ pub struct IncidentData {
 impl IncidentData {
 	fn from_with(
 		i: Incident,
-		server_name: Option<String>,
-		server_host: String,
+		server_group_name: String,
 		users: &std::collections::HashMap<String, CachedTailscaleUser>,
 		stats: IncidentStats,
 	) -> Self {
 		let (res_name, res_pic) = lookup_user(users, i.resolved_by.as_deref());
 		Self {
 			id: i.id,
-			server_id: i.server_id,
-			server_name,
-			server_host,
+			server_group_id: i.server_group_id,
+			server_group_name,
 			opened_at: i.opened_at,
 			closed_at: i.closed_at,
 			resolved_at: i.resolved_at,
@@ -84,21 +83,23 @@ async fn enrich_incidents(
 	pool: &database::Db,
 	incidents: Vec<Incident>,
 ) -> Result<Vec<IncidentData>> {
-	let server_ids: Vec<Uuid> = incidents.iter().map(|i| i.server_id).collect();
+	let group_ids: Vec<Uuid> = incidents.iter().map(|i| i.server_group_id).collect();
 	let incident_ids: Vec<Uuid> = incidents.iter().map(|i| i.id).collect();
-	let names = Server::names_by_ids(conn, &server_ids).await?;
+	let groups = ServerGroup::list_by_ids(conn, &group_ids).await?;
+	let group_names: std::collections::HashMap<Uuid, String> =
+		groups.into_iter().map(|g| (g.id, g.name)).collect();
 	let user_logins = collect_incident_user_logins(&incidents);
 	let users = CachedTailscaleUser::by_logins(conn, &user_logins).await?;
 	let stats = Incident::stats_for(pool, &incident_ids).await?;
 	Ok(incidents
 		.into_iter()
 		.map(|i| {
-			let (name, host) = names
-				.get(&i.server_id)
+			let name = group_names
+				.get(&i.server_group_id)
 				.cloned()
-				.unwrap_or((None, String::new()));
+				.unwrap_or_default();
 			let s = stats.get(&i.id).copied().unwrap_or_default();
-			IncidentData::from_with(i, name, host, &users, s)
+			IncidentData::from_with(i, name, &users, s)
 		})
 		.collect())
 }
@@ -108,15 +109,12 @@ async fn enrich_incident(
 	pool: &database::Db,
 	incident: Incident,
 ) -> Result<IncidentData> {
-	let mut names = Server::names_by_ids(conn, &[incident.server_id]).await?;
-	let (name, host) = names
-		.remove(&incident.server_id)
-		.unwrap_or((None, String::new()));
+	let group = ServerGroup::get_by_id(conn, incident.server_group_id).await?;
 	let user_logins = collect_incident_user_logins(std::slice::from_ref(&incident));
 	let users = CachedTailscaleUser::by_logins(conn, &user_logins).await?;
 	let mut stats = Incident::stats_for(pool, &[incident.id]).await?;
 	let s = stats.remove(&incident.id).unwrap_or_default();
-	Ok(IncidentData::from_with(incident, name, host, &users, s))
+	Ok(IncidentData::from_with(incident, group.name, &users, s))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

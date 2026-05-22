@@ -15,6 +15,7 @@ pub mod server_versions;
 pub mod servers;
 pub mod state;
 pub mod statuses;
+pub mod tags;
 #[cfg(feature = "ui")]
 pub mod timesync;
 pub mod versions;
@@ -27,6 +28,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.nest("/bestool", bestool::routes())
 		.nest("/servers", servers::routes())
 		.nest("/status", statuses::routes())
+		.nest("/tags", tags::routes())
 		.nest("/versions", versions::routes());
 
 	#[cfg(feature = "ui")]

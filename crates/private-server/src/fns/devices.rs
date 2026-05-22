@@ -199,12 +199,14 @@ fn server_to_info(s: database::servers::Server) -> ServerInfo {
 		kind: s.kind,
 		rank: s.rank,
 		device_id: s.device_id,
-		parent_server_id: s.parent_server_id,
-		parent_server_name: None,
+		group_id: s.group_id,
+		group_name: None,
 		listed: s.listed,
 		cloud: s.cloud,
 		geolocation: s.geolocation,
 		alert_when_down_for: s.alert_when_down_for.0.as_secs(),
+		notes: s.notes,
+		tags: s.tags,
 	}
 }
 

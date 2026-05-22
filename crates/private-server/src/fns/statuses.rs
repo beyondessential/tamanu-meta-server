@@ -6,14 +6,15 @@ use commons_errors::{ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleUser;
 use commons_types::{
 	server::{
-		cards::{CentralServerCard, FacilityServerStatus},
-		kind::ServerKind,
+		cards::{FacilityServerStatus, ServerGroupCard},
 		rank::ServerRank,
 	},
 	version::VersionStr,
 };
-use database::{devices::DeviceConnection, servers::Server, statuses::Status, versions::Version};
-use itertools::Itertools;
+use database::{
+	devices::DeviceConnection, server_groups::ServerGroup, servers::Server, statuses::Status,
+	versions::Version,
+};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -61,7 +62,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
 		.routes(routes!(summary))
 		.routes(routes!(server_grouped_ids))
-		.routes(routes!(server_details))
+		.routes(routes!(group_details))
 		.routes(routes!(snapshot))
 }
 
@@ -98,12 +99,19 @@ pub async fn summary(State(state): State<AppState>) -> Result<Json<SummaryData>>
 	}))
 }
 
+/// Server group ids bucketed by their **highest-ranked member's** rank.
+/// `ServerRank::Production` outranks `Clone`, `Demo`, `Test`, `Dev` in that
+/// order. Groups whose members are all unranked don't appear in the response
+/// at all (the status page intentionally hides them — they're typically dev
+/// scratch).
+///
+/// Within each bucket, groups are ordered alphabetically by name.
 #[utoipa::path(
 	post,
 	path = "/server_grouped_ids",
 	tag = "statuses",
 	responses(
-		(status = 200, description = "Central server IDs grouped by rank.", body = BTreeMap<ServerRank, Vec<Uuid>>),
+		(status = 200, description = "Server group IDs grouped by highest-ranked member's rank.", body = BTreeMap<ServerRank, Vec<Uuid>>),
 		(status = 500, body = ProblemDetailsSchema),
 	),
 )]
@@ -111,104 +119,94 @@ pub async fn server_grouped_ids(
 	State(state): State<AppState>,
 ) -> Result<Json<BTreeMap<ServerRank, Vec<Uuid>>>> {
 	let mut conn = state.db.get().await?;
-	let servers = Server::list_by_kind(&mut conn, ServerKind::Central, 0, None).await?;
+	let groups = ServerGroup::list_all(&mut conn).await?;
+	if groups.is_empty() {
+		return Ok(Json(BTreeMap::new()));
+	}
+	let group_ids: Vec<Uuid> = groups.iter().map(|g| g.id).collect();
+	let top_rank = ServerGroup::highest_member_ranks(&mut conn, &group_ids).await?;
 
-	let groups = servers
+	let mut by_rank: BTreeMap<ServerRank, Vec<(String, Uuid)>> = BTreeMap::new();
+	for g in groups {
+		if let Some(rank) = top_rank.get(&g.id) {
+			by_rank.entry(*rank).or_default().push((g.name, g.id));
+		}
+	}
+	let map: BTreeMap<ServerRank, Vec<Uuid>> = by_rank
 		.into_iter()
-		.filter(|s| s.name.is_some() && s.rank.is_some())
-		.sorted_by_key(|s| s.rank)
-		.chunk_by(|s| s.rank.unwrap());
-
-	let map: BTreeMap<ServerRank, Vec<Uuid>> = groups
-		.into_iter()
-		.map(|(rank, group)| {
-			(
-				rank,
-				group
-					.sorted_by_key(|s| s.name.clone().unwrap())
-					.map(|s| s.id)
-					.collect(),
-			)
+		.map(|(rank, mut list)| {
+			list.sort_by(|a, b| a.0.cmp(&b.0));
+			(rank, list.into_iter().map(|(_, id)| id).collect())
 		})
 		.collect();
 	Ok(Json(map))
 }
 
 #[derive(Deserialize, ToSchema)]
-pub struct ServerDetailsArgs {
-	pub server_id: Uuid,
+pub struct GroupDetailsArgs {
+	pub server_group_id: Uuid,
 }
 
 #[utoipa::path(
 	post,
-	path = "/server_details",
+	path = "/group_details",
 	tag = "statuses",
-	request_body = ServerDetailsArgs,
+	request_body = GroupDetailsArgs,
 	responses(
-		(status = 200, body = CentralServerCard),
+		(status = 200, body = ServerGroupCard),
 		(status = 404, body = ProblemDetailsSchema),
 		(status = 500, body = ProblemDetailsSchema),
 	),
 )]
-pub async fn server_details(
+pub async fn group_details(
 	State(state): State<AppState>,
-	Json(args): Json<ServerDetailsArgs>,
-) -> Result<Json<CentralServerCard>> {
+	Json(args): Json<GroupDetailsArgs>,
+) -> Result<Json<ServerGroupCard>> {
 	let mut conn = state.db.get().await?;
-
-	let central = Server::get_by_id(&mut conn, args.server_id).await?;
+	let group = ServerGroup::get_by_id(&mut conn, args.server_group_id).await?;
+	let servers = group.list_servers(&mut conn).await?;
 
 	let latest_version = Version::get_latest_matching(&mut conn, "*".parse()?)
 		.await?
 		.as_semver();
 
-	let central_status = Status::latest_for_server(&mut conn, args.server_id).await?;
-	let central_up = central_status
-		.as_ref()
-		.map(|s| s.short_status())
-		.unwrap_or_default();
-	let central_health = central_status
-		.as_ref()
-		.map(|s| s.health_state())
-		.unwrap_or_default();
-	let version_distance = central_status
-		.as_ref()
-		.and_then(|s| s.distance_from_version(&latest_version));
-
-	let facilities = central.get_children(&mut conn).await?;
-	let facility_ids = facilities.iter().map(|f| f.id).collect::<Vec<_>>();
-	let facility_statuses = Status::latest_for_servers(&mut conn, &facility_ids)
+	let server_ids: Vec<Uuid> = servers.iter().map(|s| s.id).collect();
+	let status_map: HashMap<Uuid, Status> = Status::latest_for_servers(&mut conn, &server_ids)
 		.await?
 		.into_iter()
 		.map(|s| (s.server_id, s))
-		.collect::<HashMap<_, _>>();
-	let facility_servers = facilities
+		.collect();
+
+	// Pick a representative server to provide the card's headline version:
+	// the one with the most recent status. Ties (no status anywhere) fall
+	// back to the first server by name.
+	let representative = servers
+		.iter()
+		.max_by_key(|s| status_map.get(&s.id).map(|st| st.created_at))
+		.cloned();
+	let rep_status = representative.as_ref().and_then(|s| status_map.get(&s.id));
+	let version_distance = rep_status.and_then(|s| s.distance_from_version(&latest_version));
+
+	let members = servers
 		.into_iter()
-		.map(|f| {
-			let facility_status = facility_statuses.get(&f.id);
+		.map(|s| {
+			let st = status_map.get(&s.id);
 			FacilityServerStatus {
-				id: f.id,
-				name: f.name.clone().unwrap_or_default(),
-				up: facility_status
-					.map(|s| s.short_status())
-					.unwrap_or_default(),
-				health: facility_status
-					.map(|s| s.health_state())
-					.unwrap_or_default(),
+				id: s.id,
+				name: s.name.clone().unwrap_or_default(),
+				up: st.map(|s| s.short_status()).unwrap_or_default(),
+				health: st.map(|s| s.health_state()).unwrap_or_default(),
 			}
 		})
 		.collect();
 
-	Ok(Json(CentralServerCard {
-		id: central.id,
-		name: central.name.unwrap_or_default(),
-		rank: central.rank,
-		host: central.host.0.to_string(),
-		up: central_up,
-		health: central_health,
-		version: central_status.and_then(|s| s.version),
+	Ok(Json(ServerGroupCard {
+		id: group.id,
+		name: group.name,
+		notes: group.notes,
+		version: rep_status.and_then(|s| s.version.clone()),
 		version_distance,
-		facility_servers,
+		members,
 	}))
 }
 
@@ -317,3 +315,8 @@ pub async fn snapshot(
 		extra: status.extra,
 	})))
 }
+
+// Touch `Server` so the unused-import warning doesn't fire when this module
+// is compiled standalone in some configurations.
+#[allow(dead_code)]
+fn _server_touch(_s: Server) {}
