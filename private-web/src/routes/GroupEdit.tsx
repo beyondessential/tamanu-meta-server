@@ -7,7 +7,7 @@ import {
 	TextField,
 	Typography,
 } from "@mui/material";
-import DeleteIcon from "@mui/icons-material/DeleteOutline";
+import DeleteIcon from "@mui/icons-material/DeleteOutlined";
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import TagsEditor from "../components/TagsEditor";

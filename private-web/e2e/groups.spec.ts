@@ -67,7 +67,8 @@ test.describe("group edit page", () => {
 
 		await page.goto(`/groups/${group.id}/edit`);
 
-		await expect(page.getByLabel(/^Name$/i)).toHaveValue(group.name);
+		// Name is marked required so MUI renders the label as "Name *".
+		await expect(page.getByLabel(/^Name\b/i)).toHaveValue(group.name);
 		await expect(page.getByLabel(/^Notes$/i)).toHaveValue("be careful");
 		await expect(page.getByLabel(/^Key$/i)).toHaveValue("region");
 		await expect(page.getByLabel(/^Value$/i)).toHaveValue("au");

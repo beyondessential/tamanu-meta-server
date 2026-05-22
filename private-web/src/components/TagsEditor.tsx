@@ -1,6 +1,6 @@
 import { Alert, Box, IconButton, Stack, TextField, Tooltip } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
-import DeleteIcon from "@mui/icons-material/DeleteOutline";
+import DeleteIcon from "@mui/icons-material/DeleteOutlined";
 import { useMemo } from "react";
 
 export type TagMap = Record<string, string>;

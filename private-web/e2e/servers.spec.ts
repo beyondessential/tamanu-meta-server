@@ -75,11 +75,15 @@ test.describe("server detail page", () => {
 
 		await page.goto(`/servers/${server.id}`);
 
-		// Heading contains "group · server" (interpunct), but Playwright's
-		// name matcher is lenient — match on the server name substring.
+		// The page renders two h1s (app bar "Canopy" + page heading);
+		// scope to the heading whose accessible name includes the server
+		// name, which the group prefix becomes part of.
 		await expect(
-			page.getByRole("heading", { level: 1 }),
-		).toContainText(server.name);
+			page.getByRole("heading", {
+				level: 1,
+				name: new RegExp(server.name),
+			}),
+		).toBeVisible();
 		const hostLink = page.getByRole("link", { name: new RegExp(server.host) });
 		await expect(hostLink).toBeVisible();
 	});
