@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-	server::rank::ServerRank,
 	status::{HealthState, ShortStatus},
 	version::VersionStr,
 };
@@ -15,15 +14,16 @@ pub struct FacilityServerStatus {
 	pub health: HealthState,
 }
 
+/// Status-page card for a server group. Replaces the old per-central-server
+/// card: each card now stands for a group of equal-level servers (no implicit
+/// root). The card carries the headline name plus the per-member status dots
+/// — version comes from the most recently-pushing member.
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
-pub struct CentralServerCard {
+pub struct ServerGroupCard {
 	pub id: Uuid,
 	pub name: String,
-	pub rank: Option<ServerRank>,
-	pub host: String,
-	pub up: ShortStatus,
-	pub health: HealthState,
+	pub notes: String,
 	pub version: Option<VersionStr>,
 	pub version_distance: Option<u64>,
-	pub facility_servers: Vec<FacilityServerStatus>,
+	pub members: Vec<FacilityServerStatus>,
 }

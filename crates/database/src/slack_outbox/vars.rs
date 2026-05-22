@@ -20,15 +20,6 @@
 use commons_types::issue::Severity;
 use serde_json::{Value, json};
 
-use crate::servers::Server;
-
-fn server_label(server: &Server) -> String {
-	match &server.name {
-		Some(n) if !n.is_empty() => format!("{n} ({})", server.host.0),
-		_ => server.host.0.to_string(),
-	}
-}
-
 fn title_case(s: &str) -> String {
 	let mut chars = s.chars();
 	match chars.next() {
@@ -38,23 +29,23 @@ fn title_case(s: &str) -> String {
 }
 
 pub fn incident_open(
-	server: &Server,
+	server_label: &str,
 	severity: Severity,
 	source: &str,
 	issue_ref: &str,
 	message: &str,
 ) -> Value {
 	json!({
-		"server": server_label(server),
+		"server": server_label,
 		"severity": title_case(&severity.to_string()),
 		"source_ref": format!("{source}/{issue_ref}"),
 		"message": message,
 	})
 }
 
-pub fn incident_resolve(server: &Server, by: Option<&str>) -> Value {
+pub fn incident_resolve(server_label: &str, by: Option<&str>) -> Value {
 	json!({
-		"server": server_label(server),
+		"server": server_label,
 		"by": by.unwrap_or("automation"),
 	})
 }

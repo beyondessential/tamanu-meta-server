@@ -2,7 +2,7 @@ use commons_errors::{AppError, Result};
 use commons_types::{
 	device::DeviceRole,
 	geo::GeoPoint,
-	server::{kind::ServerKind, rank::ServerRank, ticket::CanopyTicket},
+	server::{TagMap, kind::ServerKind, rank::ServerRank, ticket::CanopyTicket},
 };
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -43,7 +43,7 @@ pub struct Server {
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub device_id: Option<Uuid>,
 	#[serde(skip_serializing_if = "Option::is_none")]
-	pub parent_server_id: Option<Uuid>,
+	pub group_id: Option<Uuid>,
 	pub listed: bool,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub cloud: Option<bool>,
@@ -63,6 +63,10 @@ pub struct Server {
 	/// is represented as a count of whole seconds (`i64`).
 	#[schema(value_type = i64)]
 	pub alert_when_down_for: PgDuration,
+	#[serde(default)]
+	pub notes: String,
+	#[serde(default)]
+	pub tags: TagMap,
 }
 
 impl Server {
@@ -175,7 +179,9 @@ impl Server {
 	/// Find or create the device for a ticket, then upsert the server record.
 	///
 	/// Errors if a server already exists with `ticket.canonical_url` as its host
-	/// but a different ID than `ticket.server_id`.
+	/// but a different ID than `ticket.server_id`. Newly-imported servers are
+	/// **ungrouped** (`group_id IS NULL`); operators assign a group from the
+	/// admin UI after import.
 	pub async fn upsert_from_ticket(
 		db: &mut AsyncPgConnection,
 		ticket: &CanopyTicket,
@@ -185,24 +191,6 @@ impl Server {
 		let kind = ticket.kind.unwrap_or(kind);
 		let rank = ticket.rank.or(rank);
 		use crate::schema::servers;
-
-		// Look up parent server by its public key if provided.
-		let parent_server_id = if let Some(ref pem) = ticket.central_public_key {
-			let central_key_der = CanopyTicket::pem_to_der(pem)?;
-			if let Some(central_device) =
-				crate::devices::Device::from_key(db, &central_key_der).await?
-			{
-				Server::get_by_device_id(db, central_device.id)
-					.await?
-					.into_iter()
-					.find(|s| s.kind == ServerKind::Central)
-					.map(|s| s.id)
-			} else {
-				None
-			}
-		} else {
-			None
-		};
 
 		// Parse the public key bytes we'll use to find/create the device.
 		let key_der = ticket.public_key_der()?;
@@ -252,49 +240,33 @@ impl Server {
 			)
 		});
 
-		let server_value = Server {
-			id: ticket.server_id,
-			name: Some(ticket.hostname.clone()),
-			host,
-			kind,
-			rank,
-			device_id: Some(device.id),
-			parent_server_id,
-			listed: false,
-			cloud,
-			geolocation: None,
-			alert_when_down_for: TEN_MINUTES,
-		};
-
-		let kind_str = server_value.kind.to_string();
-		let rank_str = server_value.rank.map(|r| r.to_string());
+		let kind_str = kind.to_string();
+		let rank_str = rank.map(|r| r.to_string());
 
 		// Upsert: insert or update on conflict. Ticket-derived fields
-		// (kind, rank, cloud, parent_server_id) re-apply on update;
-		// operator-edited state (listed, geolocation, alert_when_down_for)
-		// is preserved.
+		// (kind, rank, cloud) re-apply on update; operator-edited state
+		// (listed, geolocation, alert_when_down_for, group_id, notes,
+		// tags) is preserved.
 		diesel::insert_into(servers::table)
 			.values((
-				servers::id.eq(server_value.id),
-				servers::name.eq(&server_value.name),
+				servers::id.eq(ticket.server_id),
+				servers::name.eq(&Some(ticket.hostname.clone())),
 				servers::host.eq(&host_str),
 				servers::kind.eq(&kind_str),
 				servers::rank.eq(&rank_str),
-				servers::device_id.eq(server_value.device_id),
-				servers::parent_server_id.eq(server_value.parent_server_id),
-				servers::listed.eq(server_value.listed),
-				servers::cloud.eq(server_value.cloud),
+				servers::device_id.eq(Some(device.id)),
+				servers::listed.eq(false),
+				servers::cloud.eq(cloud),
 			))
 			.on_conflict(servers::id)
 			.do_update()
 			.set((
-				servers::name.eq(&server_value.name),
+				servers::name.eq(&Some(ticket.hostname.clone())),
 				servers::host.eq(&host_str),
 				servers::kind.eq(&kind_str),
 				servers::rank.eq(&rank_str),
-				servers::device_id.eq(server_value.device_id),
-				servers::parent_server_id.eq(server_value.parent_server_id),
-				servers::cloud.eq(server_value.cloud),
+				servers::device_id.eq(Some(device.id)),
+				servers::cloud.eq(cloud),
 			))
 			.returning(Self::as_select())
 			.get_result(db)
@@ -341,28 +313,46 @@ impl Server {
 			.map_err(AppError::from)
 	}
 
-	pub async fn get_children(&self, db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
+	/// All servers in the same group as `self`, excluding `self`. If the
+	/// server is ungrouped, returns an empty Vec.
+	pub async fn siblings(&self, db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
 		use crate::schema::servers::dsl::*;
+		let Some(gid) = self.group_id else {
+			return Ok(Vec::new());
+		};
 		servers
 			.select(Self::as_select())
-			.filter(parent_server_id.eq(self.id))
+			.filter(group_id.eq(gid))
+			.filter(id.ne(self.id))
+			.order(name.asc())
 			.load(db)
 			.await
 			.map_err(AppError::from)
 	}
 
-	/// Root servers — those without a parent. Each one heads a server group
-	/// (the unit used for incident rollup). Ordered by name.
-	pub async fn list_roots(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
+	/// All servers without a group, ordered by name. Used by the Ungrouped UI tab.
+	pub async fn list_ungrouped(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
 		use crate::schema::servers::dsl::*;
 		servers
 			.select(Self::as_select())
-			.filter(parent_server_id.is_null())
+			.filter(group_id.is_null())
 			.filter(id.ne(Uuid::nil()))
 			.order(name.asc())
 			.load(db)
 			.await
 			.map_err(AppError::from)
+	}
+
+	pub async fn count_ungrouped(db: &mut AsyncPgConnection) -> Result<u64> {
+		use crate::schema::servers::dsl::*;
+		servers
+			.count()
+			.filter(group_id.is_null())
+			.filter(id.ne(Uuid::nil()))
+			.get_result(db)
+			.await
+			.map_err(AppError::from)
+			.map(|n: i64| n.try_into().unwrap_or_default())
 	}
 
 	/// Bulk-fetch `(name, host)` for a set of server ids — used by the
@@ -384,101 +374,6 @@ impl Server {
 			.await
 			.map_err(AppError::from)?;
 		Ok(rows.into_iter().map(|(i, n, h)| (i, (n, h))).collect())
-	}
-
-	/// Walks `parent_server_id` upwards from `server_id` and returns the
-	/// root of the server group (the server with no parent). When `server_id`
-	/// is already a root, returns it unchanged.
-	pub async fn root_id(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<Uuid> {
-		use diesel::sql_types::Uuid as SqlUuid;
-
-		#[derive(QueryableByName)]
-		struct RootId {
-			#[diesel(sql_type = SqlUuid)]
-			id: Uuid,
-		}
-
-		let row: RootId = diesel::sql_query(
-			"WITH RECURSIVE chain AS (\
-				SELECT id, parent_server_id FROM servers WHERE id = $1 \
-				UNION ALL \
-				SELECT s.id, s.parent_server_id FROM servers s \
-					JOIN chain c ON s.id = c.parent_server_id \
-			) SELECT id FROM chain WHERE parent_server_id IS NULL LIMIT 1",
-		)
-		.bind::<SqlUuid, _>(server_id)
-		.get_result(db)
-		.await?;
-		Ok(row.id)
-	}
-
-	/// All server ids reachable from `root_id` via `parent_server_id` links,
-	/// inclusive of the root itself. A single recursive CTE.
-	pub async fn descendant_ids(db: &mut AsyncPgConnection, root_id: Uuid) -> Result<Vec<Uuid>> {
-		use diesel::sql_types::Uuid as SqlUuid;
-
-		#[derive(QueryableByName)]
-		struct Row {
-			#[diesel(sql_type = SqlUuid)]
-			id: Uuid,
-		}
-
-		let rows: Vec<Row> = diesel::sql_query(
-			"WITH RECURSIVE descendants AS (\
-				SELECT id FROM servers WHERE id = $1 \
-				UNION ALL \
-				SELECT s.id FROM servers s \
-					JOIN descendants d ON s.parent_server_id = d.id \
-			) SELECT id FROM descendants",
-		)
-		.bind::<SqlUuid, _>(root_id)
-		.load(db)
-		.await?;
-		Ok(rows.into_iter().map(|r| r.id).collect())
-	}
-
-	pub async fn search_for_parent(
-		db: &mut AsyncPgConnection,
-		query: &str,
-		current_server_id: Uuid,
-		current_rank: Option<ServerRank>,
-		current_kind: ServerKind,
-	) -> Result<Vec<Self>> {
-		use crate::schema::servers::dsl::*;
-		let search_pattern = format!("%{}%", query);
-		let mut all_servers = Vec::new();
-
-		if let Ok(query_uuid) = query.parse::<Uuid>()
-			&& query_uuid != current_server_id
-			&& let Ok(server) = Self::get_by_id(db, query_uuid).await
-		{
-			all_servers.push(server);
-		}
-
-		if all_servers.is_empty() {
-			all_servers = servers
-				.select(Self::as_select())
-				.filter(
-					id.ne(current_server_id)
-						.and(name.ilike(&search_pattern).or(host.ilike(&search_pattern))),
-				)
-				.limit(50)
-				.load(db)
-				.await?;
-		}
-
-		all_servers.sort_by_key(|server| {
-			let rank_matches = server.rank == current_rank;
-			let kind_matches = server.kind == current_kind;
-
-			match (rank_matches, kind_matches) {
-				(true, _) => 0,
-				(false, false) => 1,
-				(false, true) => 2,
-			}
-		});
-
-		Ok(all_servers)
 	}
 
 	pub async fn search_central(
@@ -528,6 +423,47 @@ impl Server {
 
 		Self::get_by_id(db, server_id).await
 	}
+
+	/// Set or clear the server's group. On a `None → Some(group)` transition,
+	/// the server's currently-open issues get re-evaluated against the new
+	/// group so any that warrant promotion to an incident do so. The clear
+	/// case is the simpler direction: the server's open issues stay, but
+	/// they no longer contribute to a group-level incident (the existing
+	/// incident's other-server contributors keep it alive on their own).
+	pub async fn assign_to_group(
+		db: &mut AsyncPgConnection,
+		server_id: Uuid,
+		new_group_id: Option<Uuid>,
+	) -> Result<Self> {
+		use crate::schema::servers::dsl;
+
+		let before = Self::get_by_id(db, server_id).await?;
+		diesel::update(dsl::servers.filter(dsl::id.eq(server_id)))
+			.set(dsl::group_id.eq(new_group_id))
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+		let after = Self::get_by_id(db, server_id).await?;
+
+		if before.group_id.is_none() && new_group_id.is_some() {
+			// Promote currently-open issues now that this server has somewhere
+			// to attach an incident to.
+			crate::issues::reevaluate_open_issues_for_server(db, server_id).await?;
+		}
+
+		Ok(after)
+	}
+
+	/// Tags as seen by the public-server tags endpoint: the group's tags
+	/// with the server's own tags overlaid (server wins on key collision).
+	/// If the server is ungrouped, returns just the server's tags.
+	pub async fn tags_merged_with_group(&self, db: &mut AsyncPgConnection) -> Result<TagMap> {
+		let Some(gid) = self.group_id else {
+			return Ok(self.tags.clone());
+		};
+		let group = crate::server_groups::ServerGroup::get_by_id(db, gid).await?;
+		Ok(self.tags.merged_with(&group.tags))
+	}
 }
 
 #[test]
@@ -539,11 +475,13 @@ fn test_server_serialization() {
 		rank: Some(ServerRank::Production),
 		host: UrlField("https://example.com/".parse().unwrap()),
 		device_id: Some(Uuid::nil()),
-		parent_server_id: None,
+		group_id: None,
 		listed: true,
 		cloud: None,
 		geolocation: None,
 		alert_when_down_for: TEN_MINUTES,
+		notes: String::new(),
+		tags: TagMap::default(),
 	};
 
 	let serialized = serde_json::to_string_pretty(&server).unwrap();
@@ -557,7 +495,9 @@ fn test_server_serialization() {
   "rank": "production",
   "device_id": "00000000-0000-0000-0000-000000000000",
   "listed": true,
-  "alert_when_down_for": 600
+  "alert_when_down_for": 600,
+  "notes": "",
+  "tags": {}
 }"#
 	);
 }
@@ -569,6 +509,8 @@ pub struct NewServer {
 	pub kind: ServerKind,
 	pub rank: Option<ServerRank>,
 	pub device_id: Option<Uuid>,
+	#[serde(default)]
+	pub group_id: Option<Uuid>,
 }
 
 impl From<NewServer> for Server {
@@ -580,11 +522,13 @@ impl From<NewServer> for Server {
 			rank: server.rank,
 			host: server.host,
 			device_id: server.device_id,
-			parent_server_id: None,
+			group_id: server.group_id,
 			listed: false,
 			cloud: None,
 			geolocation: None,
 			alert_when_down_for: TEN_MINUTES,
+			notes: String::new(),
+			tags: TagMap::default(),
 		}
 	}
 }
@@ -601,11 +545,13 @@ pub struct PartialServer {
 	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub host: Option<UrlField>,
 	pub device_id: Option<Option<Uuid>>,
-	pub parent_server_id: Option<Option<Uuid>>,
+	pub group_id: Option<Option<Uuid>>,
 	pub listed: Option<bool>,
 	pub cloud: Option<Option<bool>>,
 	pub geolocation: Option<Option<GeoPoint>>,
 	#[schema(value_type = Option<i64>)]
 	#[diesel(serialize_as = PgDuration)]
 	pub alert_when_down_for: Option<PgDuration>,
+	pub notes: Option<String>,
+	pub tags: Option<TagMap>,
 }

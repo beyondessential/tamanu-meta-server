@@ -27,8 +27,6 @@ pub struct CanopyTicket {
 	pub kind: Option<ServerKind>,
 	/// Server rank hint, if provided by the ticket.
 	pub rank: Option<ServerRank>,
-	/// The public key of the parent (central) server, in SubjectPublicKeyInfo PEM format.
-	pub central_public_key: Option<String>,
 }
 
 impl CanopyTicket {
