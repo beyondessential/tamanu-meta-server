@@ -1,61 +1,60 @@
 import { expect, test } from "./test-fixtures";
-import { resetSeededTables, seedServer, seedVersion } from "./seed";
+import { resetSeededTables, seedServer, seedServerGroup, seedVersion } from "./seed";
 
 test.describe("servers list page", () => {
 	test.beforeEach(async ({ sql }) => {
 		await resetSeededTables(sql);
 	});
 
-	test("renders the central/facility tabs and the seeded central row", async ({
+	test("renders the groups/ungrouped tabs and the seeded group row", async ({
 		page,
 		sql,
 	}) => {
-		const central = await seedServer(sql, {
-			name: "central-uno",
+		const group = await seedServerGroup(sql, { name: "cluster-uno" });
+		await seedServer(sql, {
+			name: "in-group",
 			kind: "central",
+			groupId: group.id,
 		});
 
 		await page.goto("/servers");
 
 		await expect(
-			page.getByRole("tab", { name: "Central servers" }),
+			page.getByRole("tab", { name: "Groups" }),
 		).toHaveAttribute("aria-selected", "true");
 		await expect(
-			page.getByRole("tab", { name: "Facility servers" }),
+			page.getByRole("tab", { name: "Ungrouped" }),
 		).toBeVisible();
 
-		// The seeded server's name shows as a link to its detail page.
+		// The group's name shows as a link to its detail page.
 		await expect(
-			page.getByRole("link", { name: central.name }),
-		).toHaveAttribute("href", `/servers/${central.id}`);
-		// And the host appears in the row.
-		await expect(page.getByText(central.host)).toBeVisible();
+			page.getByRole("link", { name: group.name }),
+		).toHaveAttribute("href", `/groups/${group.id}`);
 	});
 
-	test("facilities tab switches the URL and lists facility servers only", async ({
+	test("ungrouped tab switches the URL and lists servers without a group", async ({
 		page,
 		sql,
 	}) => {
-		const central = await seedServer(sql, {
-			name: "central-only",
-			kind: "central",
+		const group = await seedServerGroup(sql, { name: "the-group" });
+		const grouped = await seedServer(sql, {
+			name: "is-grouped",
+			groupId: group.id,
 		});
-		const facility = await seedServer(sql, {
-			name: "facility-only",
-			kind: "facility",
-			parentServerId: central.id,
+		const orphan = await seedServer(sql, {
+			name: "no-group",
+			groupId: null,
 		});
 
 		await page.goto("/servers");
-		await page.getByRole("tab", { name: "Facility servers" }).click();
-		await expect(page).toHaveURL(/\/servers\/facilities$/);
+		await page.getByRole("tab", { name: "Ungrouped" }).click();
+		await expect(page).toHaveURL(/\/servers\/ungrouped$/);
 
-		// The facility's row is visible; the central's isn't.
 		await expect(
-			page.getByRole("link", { name: facility.name }),
+			page.getByRole("link", { name: new RegExp(orphan.name) }),
 		).toBeVisible();
 		await expect(
-			page.getByRole("link", { name: central.name }),
+			page.getByRole("link", { name: new RegExp(grouped.name) }),
 		).not.toBeVisible();
 	});
 });
@@ -67,18 +66,20 @@ test.describe("server detail page", () => {
 
 	test("renders the seeded server's name and host", async ({ page, sql }) => {
 		await seedVersion(sql, { major: 1, minor: 0, patch: 0 });
+		const group = await seedServerGroup(sql, { name: "host-group" });
 		const server = await seedServer(sql, {
 			name: "detail-target",
 			kind: "central",
+			groupId: group.id,
 		});
 
 		await page.goto(`/servers/${server.id}`);
 
+		// Heading contains "group · server" (interpunct), but Playwright's
+		// name matcher is lenient — match on the server name substring.
 		await expect(
-			page.getByRole("heading", { name: server.name, level: 1 }),
-		).toBeVisible();
-		// Backend normalises the URL with a trailing slash; just check the
-		// host link points back at the seeded URL ignoring that.
+			page.getByRole("heading", { level: 1 }),
+		).toContainText(server.name);
 		const hostLink = page.getByRole("link", { name: new RegExp(server.host) });
 		await expect(hostLink).toBeVisible();
 	});
