@@ -763,6 +763,102 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/server_groups/create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["server_groups_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/server_groups/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["server_groups_delete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/server_groups/get": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["server_groups_get"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/server_groups/list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["server_groups_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/server_groups/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["server_groups_search"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/server_groups/update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["server_groups_update"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/servers/attach_tailscale_device": {
         parameters: {
             query?: never;
@@ -851,26 +947,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/servers/list_roots": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Root servers — those without a parent. Each one heads a server-group
-         *     (the unit incidents roll up to). Used by the Incidents page filter.
-         */
-        post: operations["list_roots"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/servers/list_some": {
         parameters: {
             query?: never;
@@ -887,7 +963,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/servers/search_parent": {
+    "/api/servers/list_ungrouped": {
         parameters: {
             query?: never;
             header?: never;
@@ -896,7 +972,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["search_parent"];
+        /**
+         * Servers without a group, used by the Ungrouped tab. Returned alongside a
+         *     total count so the UI can show "(N ungrouped)" without a second fetch.
+         */
+        post: operations["list_ungrouped"];
         delete?: never;
         options?: never;
         head?: never;
@@ -983,7 +1063,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/statuses/server_details": {
+    "/api/statuses/group_details": {
         parameters: {
             query?: never;
             header?: never;
@@ -992,7 +1072,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["server_details"];
+        post: operations["group_details"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1008,6 +1088,14 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Server group ids bucketed by their **highest-ranked member's** rank.
+         *     `ServerRank::Production` outranks `Clone`, `Demo`, `Test`, `Dev` in that
+         *     order. Groups whose members are all unranked don't appear in the response
+         *     at all (the status page intentionally hides them — they're typically dev
+         *     scratch).
+         * @description Within each bucket, groups are ordered alphabetically by name.
+         */
         post: operations["server_grouped_ids"];
         delete?: never;
         options?: never;
@@ -1291,25 +1379,17 @@ export interface components {
             id: string;
             name: string;
         };
-        CentralServerCard: {
-            facility_servers: components["schemas"]["FacilityServerStatus"][];
-            health: components["schemas"]["HealthState"];
-            host: string;
-            /** Format: uuid */
-            id: string;
-            name: string;
-            rank?: null | components["schemas"]["ServerRank"];
-            up: components["schemas"]["ShortStatus"];
-            version?: null | components["schemas"]["VersionStr"];
-            /** Format: int64 */
-            version_distance?: number | null;
-        };
         ConnectionHistoryArgs: {
             before?: null | components["schemas"]["HistoryCursor"];
             /** Format: uuid */
             device_id: string;
             /** Format: int64 */
             limit?: number | null;
+        };
+        CreateArgs: {
+            name: string;
+            notes?: string;
+            tags?: components["schemas"]["TagMap"];
         };
         CreateArtifactArgs: {
             artifact_type: string;
@@ -1416,6 +1496,18 @@ export interface components {
             /** Format: uuid */
             incident_id: string;
         };
+        GroupDetail: {
+            group: components["schemas"]["ServerGroup"];
+            servers: components["schemas"]["ServerInfo"][];
+        };
+        GroupDetailsArgs: {
+            /** Format: uuid */
+            server_group_id: string;
+        };
+        GroupIdArgs: {
+            /** Format: uuid */
+            server_group_id: string;
+        };
         /**
          * @description Server's self-reported health state, derived from the most
          *     recent status row's `healthy` field and `health[]` array.
@@ -1468,11 +1560,14 @@ export interface components {
             resolved_by_name?: string | null;
             resolved_by_pic?: string | null;
             resolved_reason?: string | null;
-            server_host: string;
             /** Format: uuid */
-            server_id: string;
-            /** @description The root server's name (may be null — fall back to `server_host`). */
-            server_name?: string | null;
+            server_group_id: string;
+            /**
+             * @description Display name of the group this incident rolls up to. Empty string
+             *     only if the group has been deleted out from under the incident,
+             *     which shouldn't happen via the API.
+             */
+            server_group_name: string;
             /** Format: date-time */
             updated_at: string;
         };
@@ -1748,16 +1843,22 @@ export interface components {
                 /** Format: uuid */
                 device_id?: string | null;
                 geolocation?: null | components["schemas"]["GeoPoint"];
+                /** Format: uuid */
+                group_id?: string | null;
+                /**
+                 * @description Display name of the group this server belongs to (denormalised so list
+                 *     rows don't need to fetch the group separately). `None` if ungrouped.
+                 */
+                group_name?: string | null;
                 host: string;
                 /** Format: uuid */
                 id: string;
                 kind: components["schemas"]["ServerKind"];
                 listed: boolean;
                 name?: string | null;
-                /** Format: uuid */
-                parent_server_id?: string | null;
-                parent_server_name?: string | null;
+                notes: string;
                 rank?: null | components["schemas"]["ServerRank"];
+                tags: components["schemas"]["TagMap"];
             }[];
             /** Format: int64 */
             total: number;
@@ -1784,6 +1885,11 @@ export interface components {
             limit?: number | null;
             /** Format: int64 */
             offset: number;
+        };
+        PartialServerGroup: {
+            name?: string | null;
+            notes?: string | null;
+            tags?: null | components["schemas"]["TagMap"];
         };
         /**
          * @description Wire-shape mirror of [`problem_details::ProblemDetails`] for OpenAPI.
@@ -1875,13 +1981,6 @@ export interface components {
         SearchArgs: {
             query: string;
         };
-        SearchParentArgs: {
-            current_kind: components["schemas"]["ServerKind"];
-            current_rank?: null | components["schemas"]["ServerRank"];
-            /** Format: uuid */
-            current_server_id: string;
-            query: string;
-        };
         ServerDataUpdate: {
             /** Format: int64 */
             alert_when_down_for?: number | null;
@@ -1889,16 +1988,27 @@ export interface components {
             /** Format: uuid */
             device_id?: string | null;
             geolocation?: null | components["schemas"]["GeoPoint"];
+            /** Format: uuid */
+            group_id?: string | null;
             host?: string | null;
             kind?: null | components["schemas"]["ServerKind"];
             listed?: boolean | null;
             name?: string | null;
-            /** Format: uuid */
-            parent_server_id?: string | null;
+            notes?: string | null;
             rank?: null | components["schemas"]["ServerRank"];
+            tags?: null | components["schemas"]["TagMap"];
         };
         ServerDetailData: {
-            child_servers: [
+            device_info?: null | components["schemas"]["DeviceInfo"];
+            group?: null | components["schemas"]["ServerGroup"];
+            health: components["schemas"]["HealthState"];
+            last_status?: null | components["schemas"]["ServerLastStatusData"];
+            server: components["schemas"]["ServerInfo"];
+            /**
+             * @description Other servers in the same group (excluding `server`). Empty when the
+             *     server is ungrouped or alone in its group.
+             */
+            siblings: [
                 "up" | "down" | "away" | "blip" | "gone",
                 "healthy" | "warning" | "unhealthy",
                 {
@@ -1913,27 +2023,52 @@ export interface components {
                     /** Format: uuid */
                     device_id?: string | null;
                     geolocation?: null | components["schemas"]["GeoPoint"];
+                    /** Format: uuid */
+                    group_id?: string | null;
+                    /**
+                     * @description Display name of the group this server belongs to (denormalised so list
+                     *     rows don't need to fetch the group separately). `None` if ungrouped.
+                     */
+                    group_name?: string | null;
                     host: string;
                     /** Format: uuid */
                     id: string;
                     kind: components["schemas"]["ServerKind"];
                     listed: boolean;
                     name?: string | null;
-                    /** Format: uuid */
-                    parent_server_id?: string | null;
-                    parent_server_name?: string | null;
+                    notes: string;
                     rank?: null | components["schemas"]["ServerRank"];
+                    tags: components["schemas"]["TagMap"];
                 }
             ][];
-            device_info?: null | components["schemas"]["DeviceInfo"];
-            health: components["schemas"]["HealthState"];
-            last_status?: null | components["schemas"]["ServerLastStatusData"];
-            server: components["schemas"]["ServerInfo"];
             up: components["schemas"]["ShortStatus"];
         };
-        ServerDetailsArgs: {
+        ServerGroup: {
+            /** Format: date-time */
+            created_at: string;
             /** Format: uuid */
-            server_id: string;
+            id: string;
+            name: string;
+            notes?: string;
+            tags?: components["schemas"]["TagMap"];
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /**
+         * @description Status-page card for a server group. Replaces the old per-central-server
+         *     card: each card now stands for a group of equal-level servers (no implicit
+         *     root). The card carries the headline name plus the per-member status dots
+         *     — version comes from the most recently-pushing member.
+         */
+        ServerGroupCard: {
+            /** Format: uuid */
+            id: string;
+            members: components["schemas"]["FacilityServerStatus"][];
+            name: string;
+            notes: string;
+            version?: null | components["schemas"]["VersionStr"];
+            /** Format: int64 */
+            version_distance?: number | null;
         };
         ServerIdArgs: {
             /** Format: uuid */
@@ -1951,16 +2086,22 @@ export interface components {
             /** Format: uuid */
             device_id?: string | null;
             geolocation?: null | components["schemas"]["GeoPoint"];
+            /** Format: uuid */
+            group_id?: string | null;
+            /**
+             * @description Display name of the group this server belongs to (denormalised so list
+             *     rows don't need to fetch the group separately). `None` if ungrouped.
+             */
+            group_name?: string | null;
             host: string;
             /** Format: uuid */
             id: string;
             kind: components["schemas"]["ServerKind"];
             listed: boolean;
             name?: string | null;
-            /** Format: uuid */
-            parent_server_id?: string | null;
-            parent_server_name?: string | null;
+            notes: string;
             rank?: null | components["schemas"]["ServerRank"];
+            tags: components["schemas"]["TagMap"];
         };
         /** @enum {string} */
         ServerKind: "central" | "facility" | "canopy";
@@ -2083,6 +2224,9 @@ export interface components {
             ][];
             versions: components["schemas"]["VersionStr"][];
         };
+        TagMap: {
+            [key: string]: string;
+        };
         TailnetLiveInfo: {
             addresses: string[];
             display_name: string;
@@ -2108,9 +2252,9 @@ export interface components {
             role: components["schemas"]["DeviceRole"];
         };
         UpdateArgs: {
-            data: components["schemas"]["ServerDataUpdate"];
+            data: components["schemas"]["PartialServerGroup"];
             /** Format: uuid */
-            server_id: string;
+            server_group_id: string;
         };
         UpdateArtifactArgs: {
             /** Format: uuid */
@@ -3477,6 +3621,182 @@ export interface operations {
             };
         };
     };
+    server_groups_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerGroup"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    server_groups_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroupIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    server_groups_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroupIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupDetail"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    server_groups_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": unknown;
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerGroup"][];
+                };
+            };
+        };
+    };
+    server_groups_search: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SearchArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerGroup"][];
+                };
+            };
+        };
+    };
+    server_groups_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerGroup"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
     attach_tailscale_device: {
         parameters: {
             query?: never;
@@ -3653,29 +3973,6 @@ export interface operations {
             };
         };
     };
-    list_roots: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": unknown;
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ServerInfo"][];
-                };
-            };
-        };
-    };
     list_some: {
         parameters: {
             query?: never;
@@ -3699,7 +3996,7 @@ export interface operations {
             };
         };
     };
-    search_parent: {
+    list_ungrouped: {
         parameters: {
             query?: never;
             header?: never;
@@ -3708,7 +4005,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["SearchParentArgs"];
+                "application/json": unknown;
             };
         };
         responses: {
@@ -3717,7 +4014,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ServerInfo"][];
+                    "application/json": components["schemas"]["Page_ServerInfo"];
                 };
             };
         };
@@ -3861,7 +4158,7 @@ export interface operations {
             };
         };
     };
-    server_details: {
+    group_details: {
         parameters: {
             query?: never;
             header?: never;
@@ -3870,7 +4167,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ServerDetailsArgs"];
+                "application/json": components["schemas"]["GroupDetailsArgs"];
             };
         };
         responses: {
@@ -3879,7 +4176,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CentralServerCard"];
+                    "application/json": components["schemas"]["ServerGroupCard"];
                 };
             };
             404: {
@@ -3909,7 +4206,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Central server IDs grouped by rank. */
+            /** @description Server group IDs grouped by highest-ranked member's rank. */
             200: {
                 headers: {
                     [name: string]: unknown;

@@ -1847,6 +1847,263 @@
         ]
       }
     },
+    "/api/server_groups/create": {
+      "post": {
+        "tags": [
+          "server_groups"
+        ],
+        "operationId": "server_groups_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/server_groups/delete": {
+      "post": {
+        "tags": [
+          "server_groups"
+        ],
+        "operationId": "server_groups_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/server_groups/get": {
+      "post": {
+        "tags": [
+          "server_groups"
+        ],
+        "operationId": "server_groups_get",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/server_groups/list": {
+      "post": {
+        "tags": [
+          "server_groups"
+        ],
+        "operationId": "server_groups_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ServerGroup"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/server_groups/search": {
+      "post": {
+        "tags": [
+          "server_groups"
+        ],
+        "operationId": "server_groups_search",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ServerGroup"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/server_groups/update": {
+      "post": {
+        "tags": [
+          "server_groups"
+        ],
+        "operationId": "server_groups_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/servers/attach_tailscale_device": {
       "post": {
         "tags": [
@@ -2080,43 +2337,6 @@
         ]
       }
     },
-    "/api/servers/list_roots": {
-      "post": {
-        "tags": [
-          "servers"
-        ],
-        "summary": "Root servers — those without a parent. Each one heads a server-group\n(the unit incidents roll up to). Used by the Incidents page filter.",
-        "operationId": "list_roots",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {}
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ServerInfo"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
     "/api/servers/list_some": {
       "post": {
         "tags": [
@@ -2147,18 +2367,17 @@
         }
       }
     },
-    "/api/servers/search_parent": {
+    "/api/servers/list_ungrouped": {
       "post": {
         "tags": [
           "servers"
         ],
-        "operationId": "search_parent",
+        "summary": "Servers without a group, used by the Ungrouped tab. Returned alongside a\ntotal count so the UI can show \"(N ungrouped)\" without a second fetch.",
+        "operationId": "list_ungrouped",
         "requestBody": {
           "content": {
             "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SearchParentArgs"
-              }
+              "schema": {}
             }
           },
           "required": true
@@ -2169,15 +2388,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ServerInfo"
-                  }
+                  "$ref": "#/components/schemas/Page_ServerInfo"
                 }
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
       }
     },
     "/api/servers/update": {
@@ -2361,17 +2582,17 @@
         }
       }
     },
-    "/api/statuses/server_details": {
+    "/api/statuses/group_details": {
       "post": {
         "tags": [
           "statuses"
         ],
-        "operationId": "server_details",
+        "operationId": "group_details",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ServerDetailsArgs"
+                "$ref": "#/components/schemas/GroupDetailsArgs"
               }
             }
           },
@@ -2383,7 +2604,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CentralServerCard"
+                  "$ref": "#/components/schemas/ServerGroupCard"
                 }
               }
             }
@@ -2416,10 +2637,12 @@
         "tags": [
           "statuses"
         ],
+        "summary": "Server group ids bucketed by their **highest-ranked member's** rank.\n`ServerRank::Production` outranks `Clone`, `Demo`, `Test`, `Dev` in that\norder. Groups whose members are all unranked don't appear in the response\nat all (the status page intentionally hides them — they're typically dev\nscratch).",
+        "description": "Within each bucket, groups are ordered alphabetically by name.",
         "operationId": "server_grouped_ids",
         "responses": {
           "200": {
-            "description": "Central server IDs grouped by rank.",
+            "description": "Server group IDs grouped by highest-ranked member's rank.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3151,69 +3374,6 @@
           }
         }
       },
-      "CentralServerCard": {
-        "type": "object",
-        "required": [
-          "id",
-          "name",
-          "host",
-          "up",
-          "health",
-          "facility_servers"
-        ],
-        "properties": {
-          "facility_servers": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/FacilityServerStatus"
-            }
-          },
-          "health": {
-            "$ref": "#/components/schemas/HealthState"
-          },
-          "host": {
-            "type": "string"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "name": {
-            "type": "string"
-          },
-          "rank": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/ServerRank"
-              }
-            ]
-          },
-          "up": {
-            "$ref": "#/components/schemas/ShortStatus"
-          },
-          "version": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/VersionStr"
-              }
-            ]
-          },
-          "version_distance": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "minimum": 0
-          }
-        }
-      },
       "ConnectionHistoryArgs": {
         "type": "object",
         "required": [
@@ -3241,6 +3401,23 @@
             ],
             "format": "int64",
             "minimum": 0
+          }
+        }
+      },
+      "CreateArgs": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "tags": {
+            "$ref": "#/components/schemas/TagMap"
           }
         }
       },
@@ -3593,6 +3770,48 @@
           }
         }
       },
+      "GroupDetail": {
+        "type": "object",
+        "required": [
+          "group",
+          "servers"
+        ],
+        "properties": {
+          "group": {
+            "$ref": "#/components/schemas/ServerGroup"
+          },
+          "servers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServerInfo"
+            }
+          }
+        }
+      },
+      "GroupDetailsArgs": {
+        "type": "object",
+        "required": [
+          "server_group_id"
+        ],
+        "properties": {
+          "server_group_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "GroupIdArgs": {
+        "type": "object",
+        "required": [
+          "server_group_id"
+        ],
+        "properties": {
+          "server_group_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
       "HealthState": {
         "type": "string",
         "description": "Server's self-reported health state, derived from the most\nrecent status row's `healthy` field and `health[]` array.\nOrthogonal to [`ShortStatus`]: a server can be reachable\n(`up`) and reporting itself unhealthy at the same time.\n\nThe UI renders this as the *border* of `<StatusDot>` so both\ndimensions (reachability and self-report) show in one glyph.",
@@ -3669,8 +3888,8 @@
         "type": "object",
         "required": [
           "id",
-          "server_id",
-          "server_host",
+          "server_group_id",
+          "server_group_name",
           "opened_at",
           "issue_count",
           "event_count",
@@ -3742,19 +3961,13 @@
               "null"
             ]
           },
-          "server_host": {
-            "type": "string"
-          },
-          "server_id": {
+          "server_group_id": {
             "type": "string",
             "format": "uuid"
           },
-          "server_name": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The root server's name (may be null — fall back to `server_host`)."
+          "server_group_name": {
+            "type": "string",
+            "description": "Display name of the group this incident rolls up to. Empty string\nonly if the group has been deleted out from under the incident,\nwhich shouldn't happen via the API."
           },
           "updated_at": {
             "type": "string",
@@ -4521,7 +4734,9 @@
                 "kind",
                 "host",
                 "listed",
-                "alert_when_down_for"
+                "alert_when_down_for",
+                "notes",
+                "tags"
               ],
               "properties": {
                 "alert_when_down_for": {
@@ -4552,6 +4767,20 @@
                     }
                   ]
                 },
+                "group_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid"
+                },
+                "group_name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Display name of the group this server belongs to (denormalised so list\nrows don't need to fetch the group separately). `None` if ungrouped."
+                },
                 "host": {
                   "type": "string"
                 },
@@ -4571,18 +4800,8 @@
                     "null"
                   ]
                 },
-                "parent_server_id": {
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "format": "uuid"
-                },
-                "parent_server_name": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
+                "notes": {
+                  "type": "string"
                 },
                 "rank": {
                   "oneOf": [
@@ -4593,6 +4812,9 @@
                       "$ref": "#/components/schemas/ServerRank"
                     }
                   ]
+                },
+                "tags": {
+                  "$ref": "#/components/schemas/TagMap"
                 }
               }
             }
@@ -4665,6 +4887,33 @@
             "type": "integer",
             "format": "int64",
             "minimum": 0
+          }
+        }
+      },
+      "PartialServerGroup": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tags": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TagMap"
+              }
+            ]
           }
         }
       },
@@ -4859,36 +5108,6 @@
           }
         }
       },
-      "SearchParentArgs": {
-        "type": "object",
-        "required": [
-          "query",
-          "current_server_id",
-          "current_kind"
-        ],
-        "properties": {
-          "current_kind": {
-            "$ref": "#/components/schemas/ServerKind"
-          },
-          "current_rank": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/ServerRank"
-              }
-            ]
-          },
-          "current_server_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "query": {
-            "type": "string"
-          }
-        }
-      },
       "ServerDataUpdate": {
         "type": "object",
         "properties": {
@@ -4922,6 +5141,13 @@
               }
             ]
           },
+          "group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
           "host": {
             "type": [
               "string",
@@ -4950,12 +5176,11 @@
               "null"
             ]
           },
-          "parent_server_id": {
+          "notes": {
             "type": [
               "string",
               "null"
-            ],
-            "format": "uuid"
+            ]
           },
           "rank": {
             "oneOf": [
@@ -4964,6 +5189,16 @@
               },
               {
                 "$ref": "#/components/schemas/ServerRank"
+              }
+            ]
+          },
+          "tags": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TagMap"
               }
             ]
           }
@@ -4975,10 +5210,47 @@
           "server",
           "up",
           "health",
-          "child_servers"
+          "siblings"
         ],
         "properties": {
-          "child_servers": {
+          "device_info": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DeviceInfo"
+              }
+            ]
+          },
+          "group": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerGroup",
+                "description": "The group this server belongs to, with its notes/tags so the UI can\nrender the \"Group\" section without a second fetch. `None` when the\nserver is ungrouped."
+              }
+            ]
+          },
+          "health": {
+            "$ref": "#/components/schemas/HealthState"
+          },
+          "last_status": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerLastStatusData"
+              }
+            ]
+          },
+          "server": {
+            "$ref": "#/components/schemas/ServerInfo"
+          },
+          "siblings": {
             "type": "array",
             "items": {
               "type": "array",
@@ -5010,7 +5282,9 @@
                     "kind",
                     "host",
                     "listed",
-                    "alert_when_down_for"
+                    "alert_when_down_for",
+                    "notes",
+                    "tags"
                   ],
                   "properties": {
                     "alert_when_down_for": {
@@ -5041,6 +5315,20 @@
                         }
                       ]
                     },
+                    "group_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "uuid"
+                    },
+                    "group_name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Display name of the group this server belongs to (denormalised so list\nrows don't need to fetch the group separately). `None` if ungrouped."
+                    },
                     "host": {
                       "type": "string"
                     },
@@ -5060,18 +5348,8 @@
                         "null"
                       ]
                     },
-                    "parent_server_id": {
-                      "type": [
-                        "string",
-                        "null"
-                      ],
-                      "format": "uuid"
-                    },
-                    "parent_server_name": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                    "notes": {
+                      "type": "string"
                     },
                     "rank": {
                       "oneOf": [
@@ -5082,52 +5360,96 @@
                           "$ref": "#/components/schemas/ServerRank"
                         }
                       ]
+                    },
+                    "tags": {
+                      "$ref": "#/components/schemas/TagMap"
                     }
                   }
                 }
               ]
-            }
-          },
-          "device_info": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/DeviceInfo"
-              }
-            ]
-          },
-          "health": {
-            "$ref": "#/components/schemas/HealthState"
-          },
-          "last_status": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/ServerLastStatusData"
-              }
-            ]
-          },
-          "server": {
-            "$ref": "#/components/schemas/ServerInfo"
+            },
+            "description": "Other servers in the same group (excluding `server`). Empty when the\nserver is ungrouped or alone in its group."
           },
           "up": {
             "$ref": "#/components/schemas/ShortStatus"
           }
         }
       },
-      "ServerDetailsArgs": {
+      "ServerGroup": {
         "type": "object",
         "required": [
-          "server_id"
+          "id",
+          "created_at",
+          "updated_at",
+          "name"
         ],
         "properties": {
-          "server_id": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
             "type": "string",
             "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "tags": {
+            "$ref": "#/components/schemas/TagMap"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ServerGroupCard": {
+        "type": "object",
+        "description": "Status-page card for a server group. Replaces the old per-central-server\ncard: each card now stands for a group of equal-level servers (no implicit\nroot). The card carries the headline name plus the per-member status dots\n— version comes from the most recently-pushing member.",
+        "required": [
+          "id",
+          "name",
+          "notes",
+          "members"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FacilityServerStatus"
+            }
+          },
+          "name": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "version": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/VersionStr"
+              }
+            ]
+          },
+          "version_distance": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
           }
         }
       },
@@ -5150,7 +5472,9 @@
           "kind",
           "host",
           "listed",
-          "alert_when_down_for"
+          "alert_when_down_for",
+          "notes",
+          "tags"
         ],
         "properties": {
           "alert_when_down_for": {
@@ -5181,6 +5505,20 @@
               }
             ]
           },
+          "group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "group_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Display name of the group this server belongs to (denormalised so list\nrows don't need to fetch the group separately). `None` if ungrouped."
+          },
           "host": {
             "type": "string"
           },
@@ -5200,18 +5538,8 @@
               "null"
             ]
           },
-          "parent_server_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          },
-          "parent_server_name": {
-            "type": [
-              "string",
-              "null"
-            ]
+          "notes": {
+            "type": "string"
           },
           "rank": {
             "oneOf": [
@@ -5222,6 +5550,9 @@
                 "$ref": "#/components/schemas/ServerRank"
               }
             ]
+          },
+          "tags": {
+            "$ref": "#/components/schemas/TagMap"
           }
         }
       },
@@ -5629,6 +5960,12 @@
           }
         }
       },
+      "TagMap": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        }
+      },
       "TailnetLiveInfo": {
         "type": "object",
         "required": [
@@ -5694,14 +6031,14 @@
       "UpdateArgs": {
         "type": "object",
         "required": [
-          "server_id",
+          "server_group_id",
           "data"
         ],
         "properties": {
           "data": {
-            "$ref": "#/components/schemas/ServerDataUpdate"
+            "$ref": "#/components/schemas/PartialServerGroup"
           },
-          "server_id": {
+          "server_group_id": {
             "type": "string",
             "format": "uuid"
           }

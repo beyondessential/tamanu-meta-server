@@ -12,6 +12,7 @@ use uuid::Uuid;
 #[tokio::test(flavor = "multi_thread")]
 async fn stats_for_dedupes_repeat_join_rows() {
 	commons_tests::db::TestDb::run(async |mut conn, url| {
+		let group_id = Uuid::new_v4();
 		let server_id = Uuid::new_v4();
 		let device_id = Uuid::new_v4();
 		let issue_id = Uuid::new_v4();
@@ -23,14 +24,15 @@ async fn stats_for_dedupes_repeat_join_rows() {
 
 		conn.batch_execute(&format!(
 			"INSERT INTO devices (id, role) VALUES ('{device_id}', 'server'); \
-			 INSERT INTO servers (id, host, kind, device_id) VALUES \
-				('{server_id}', 'https://example.com', 'central', '{device_id}'); \
+			 INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g'); \
+			 INSERT INTO servers (id, host, kind, device_id, group_id) VALUES \
+				('{server_id}', 'https://example.com', 'central', '{device_id}', '{group_id}'); \
 			 INSERT INTO issues \
 				(id, server_id, device_id, source, ref, severity, message, active, first_seen, last_seen) \
 			   VALUES \
 				('{issue_id}', '{server_id}', '{device_id}', 'test', 'r', 'error', 'm', true, NOW(), NOW()); \
-			 INSERT INTO incidents (id, server_id, opened_at) \
-			   VALUES ('{incident_id}', '{server_id}', NOW()); \
+			 INSERT INTO incidents (id, server_group_id, opened_at) \
+			   VALUES ('{incident_id}', '{group_id}', NOW()); \
 			 INSERT INTO events \
 				(id, issue_id, severity, message, active, hash, occurrences, last_seen) \
 			   VALUES \

@@ -6,9 +6,11 @@ async fn seed_issue_and_incident(
 	private: &commons_tests::axum_test::TestServer,
 ) -> (Uuid, Uuid) {
 	let server_id = Uuid::new_v4();
+	let group_id = Uuid::new_v4();
 	conn.batch_execute(&format!(
-		"INSERT INTO servers (id, host, kind) VALUES \
-			('{server_id}', 'https://example.com', 'central');"
+		"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g'); \
+		 INSERT INTO servers (id, host, kind, group_id) VALUES \
+			('{server_id}', 'https://example.com', 'central', '{group_id}');"
 	))
 	.await
 	.expect("seed server");

@@ -22,13 +22,22 @@ struct IssueRow {
 }
 
 async fn provision_server(conn: &mut diesel_async::AsyncPgConnection, device_id: Uuid) -> Uuid {
+	// Put each provisioned server in its own group so events can promote
+	// to incidents (incidents are group-keyed; ungrouped servers don't).
+	let group_id = Uuid::new_v4();
+	sql_query("INSERT INTO server_groups (id, name) VALUES ($1, 'test-group')")
+		.bind::<sql_types::Uuid, _>(group_id)
+		.execute(conn)
+		.await
+		.expect("insert group");
 	let server_id = Uuid::new_v4();
 	sql_query(
-		"INSERT INTO servers (id, host, kind, device_id) \
-		 VALUES ($1, 'https://test.example.com', 'central', $2)",
+		"INSERT INTO servers (id, host, kind, device_id, group_id) \
+		 VALUES ($1, 'https://test.example.com', 'central', $2, $3)",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
 	.bind::<sql_types::Uuid, _>(device_id)
+	.bind::<sql_types::Uuid, _>(group_id)
 	.execute(conn)
 	.await
 	.expect("insert server");
@@ -349,22 +358,18 @@ async fn submit_event_opens_incident_at_error() {
 			struct IncidentCheck {
 				#[diesel(sql_type = sql_types::Uuid)]
 				id: Uuid,
-				#[diesel(sql_type = sql_types::Uuid)]
-				server_id: Uuid,
 				#[diesel(sql_type = sql_types::Bool)]
 				is_open: bool,
 			}
 			let inc: IncidentCheck = sql_query(
-				"SELECT id, server_id, closed_at IS NULL AS is_open FROM incidents WHERE server_id = $1",
+				"SELECT i.id, i.closed_at IS NULL AS is_open \
+				 FROM incidents i JOIN servers s ON i.server_group_id = s.group_id \
+				 WHERE s.id = $1",
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
 			.get_result(&mut conn)
 			.await
 			.expect("one incident");
-			assert_eq!(
-				inc.server_id, server_id,
-				"incident should be on this server (no parent)"
-			);
 			assert!(inc.is_open, "incident should still be open");
 
 			#[derive(QueryableByName)]
@@ -409,12 +414,14 @@ async fn submit_event_at_warning_does_not_open_incident() {
 				#[diesel(sql_type = sql_types::BigInt)]
 				count: i64,
 			}
-			let counts: Counts =
-				sql_query("SELECT COUNT(*) AS count FROM incidents WHERE server_id = $1")
-					.bind::<sql_types::Uuid, _>(server_id)
-					.get_result(&mut conn)
-					.await
-					.expect("count");
+			let counts: Counts = sql_query(
+				"SELECT COUNT(*) AS count FROM incidents i \
+				 JOIN servers s ON i.server_group_id = s.group_id WHERE s.id = $1",
+			)
+			.bind::<sql_types::Uuid, _>(server_id)
+			.get_result(&mut conn)
+			.await
+			.expect("count");
 			assert_eq!(counts.count, 0, "warning shouldn't open an incident");
 		},
 	)
@@ -459,7 +466,9 @@ async fn incident_closes_when_last_issue_resolves() {
 				is_closed: bool,
 			}
 			let inc: IncidentCheck = sql_query(
-				"SELECT closed_at IS NOT NULL AS is_closed FROM incidents WHERE server_id = $1",
+				"SELECT closed_at IS NOT NULL AS is_closed \
+				 FROM incidents i JOIN servers s ON i.server_group_id = s.group_id \
+				 WHERE s.id = $1",
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
 			.get_result(&mut conn)

@@ -459,11 +459,16 @@ pub async fn update(
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
 
-	// `group_id` transitions go through Server::assign_to_group so that a
+	// `group_id` transitions ALSO go through Server::assign_to_group so a
 	// move from "ungrouped" → "grouped" can promote any pending issues into
-	// an incident. Apply this before the rest of the field update so the
-	// re-evaluation sees the same row state as the caller intends.
-	let group_change = args.data.group_id;
+	// an incident. Capture the original state before the update so the
+	// catch-up decision sees the previous group.
+	let before_group_id = if args.data.group_id.is_some() {
+		Some(Server::get_by_id(&mut conn, args.server_id).await?.group_id)
+	} else {
+		None
+	};
+	let new_group_id = args.data.group_id;
 
 	let update_data = PartialServer {
 		id: args.server_id,
@@ -478,7 +483,7 @@ pub async fn update(
 			None
 		},
 		device_id: args.data.device_id,
-		group_id: None,
+		group_id: new_group_id,
 		listed: args.data.listed,
 		cloud: args.data.cloud,
 		geolocation: args.data.geolocation,
@@ -491,8 +496,9 @@ pub async fn update(
 	};
 	Server::update(&mut conn, args.server_id, update_data).await?;
 
-	if let Some(new_group_id) = group_change {
-		Server::assign_to_group(&mut conn, args.server_id, new_group_id).await?;
+	// Catch up open issues if we just moved an ungrouped server into a group.
+	if let (Some(None), Some(Some(_))) = (before_group_id, new_group_id) {
+		database::issues::reevaluate_open_issues_for_server(&mut conn, args.server_id).await?;
 	}
 	Ok(Json(()))
 }

@@ -239,9 +239,11 @@ async fn assigning_group_opens_pending_incident() {
 async fn issue_reopen_keeps_identity_and_joins_new_incident() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let server_id = Uuid::new_v4();
+		let group_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO servers (id, host, kind) VALUES \
-				('{server_id}', 'https://example.com', 'central');"
+			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g'); \
+			 INSERT INTO servers (id, host, kind, group_id) VALUES \
+				('{server_id}', 'https://example.com', 'central', '{group_id}');"
 		))
 		.await
 		.expect("seed");
@@ -328,9 +330,11 @@ async fn issue_reopen_keeps_identity_and_joins_new_incident() {
 async fn low_severity_issue_joins_existing_open_incident() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let server_id = Uuid::new_v4();
+		let group_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO servers (id, host, kind) VALUES \
-				('{server_id}', 'https://example.com', 'central');"
+			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g'); \
+			 INSERT INTO servers (id, host, kind, group_id) VALUES \
+				('{server_id}', 'https://example.com', 'central', '{group_id}');"
 		))
 		.await
 		.expect("seed");
@@ -420,9 +424,11 @@ async fn low_severity_alone_does_not_open_incident() {
 async fn severity_downgrade_keeps_issue_in_incident() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let server_id = Uuid::new_v4();
+		let group_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO servers (id, host, kind) VALUES \
-				('{server_id}', 'https://example.com', 'central');"
+			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g'); \
+			 INSERT INTO servers (id, host, kind, group_id) VALUES \
+				('{server_id}', 'https://example.com', 'central', '{group_id}');"
 		))
 		.await
 		.expect("seed");
@@ -542,10 +548,12 @@ async fn open_issue(
 	private: &commons_tests::axum_test::TestServer,
 	server_id: Uuid,
 ) -> Uuid {
-	// Standalone server, no parent — the incident grouping lives on this server.
+	// Standalone server in its own group — incidents are group-keyed.
+	let group_id = Uuid::new_v4();
 	conn.batch_execute(&format!(
-		"INSERT INTO servers (id, host, kind) VALUES \
-			('{server_id}', 'https://example.com', 'central') ON CONFLICT DO NOTHING;"
+		"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g') ON CONFLICT DO NOTHING; \
+		 INSERT INTO servers (id, host, kind, group_id) VALUES \
+			('{server_id}', 'https://example.com', 'central', '{group_id}') ON CONFLICT DO NOTHING;"
 	))
 	.await
 	.expect("seed");
