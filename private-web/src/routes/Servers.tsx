@@ -1,10 +1,5 @@
 import { Box, Tab, Tabs, Typography } from "@mui/material";
-import {
-	Outlet,
-	useLocation,
-	useNavigate,
-	useParams,
-} from "react-router-dom";
+import { Outlet, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useApi } from "../api";
 
 export default function Servers() {
@@ -12,21 +7,21 @@ export default function Servers() {
 	const navigate = useNavigate();
 	const params = useParams<{ id?: string }>();
 
-	const value = location.pathname.startsWith("/servers/facilities")
-		? "facilities"
-		: "centrals";
+	const value = location.pathname.startsWith("/servers/ungrouped")
+		? "ungrouped"
+		: "groups";
 
 	return (
 		<Box>
 			<Tabs
 				value={value}
 				onChange={(_, v) =>
-					navigate(v === "centrals" ? "/servers" : "/servers/facilities")
+					navigate(v === "groups" ? "/servers" : "/servers/ungrouped")
 				}
 				sx={{ mb: 2 }}
 			>
-				<Tab label="Central servers" value="centrals" />
-				<Tab label="Facility servers" value="facilities" />
+				<Tab label="Groups" value="groups" />
+				<Tab label="Ungrouped" value="ungrouped" />
 			</Tabs>
 			{params.id && <ServerNameBreadcrumb serverId={params.id} />}
 			<Outlet />

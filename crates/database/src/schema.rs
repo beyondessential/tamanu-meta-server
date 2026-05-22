@@ -128,7 +128,7 @@ diesel::table! {
 		id -> Uuid,
 		created_at -> Timestamptz,
 		updated_at -> Timestamptz,
-		server_id -> Uuid,
+		server_group_id -> Uuid,
 		opened_at -> Timestamptz,
 		closed_at -> Nullable<Timestamptz>,
 		resolved_at -> Nullable<Timestamptz>,
@@ -171,6 +171,17 @@ diesel::table! {
 }
 
 diesel::table! {
+	server_groups (id) {
+		id -> Uuid,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
+		name -> Text,
+		notes -> Text,
+		tags -> Jsonb,
+	}
+}
+
+diesel::table! {
 	servers (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
@@ -180,11 +191,13 @@ diesel::table! {
 		host -> Text,
 		device_id -> Nullable<Uuid>,
 		kind -> Text,
-		parent_server_id -> Nullable<Uuid>,
+		group_id -> Nullable<Uuid>,
 		listed -> Bool,
 		cloud -> Nullable<Bool>,
 		geolocation -> Nullable<Array<Nullable<Float8>>>,
 		alert_when_down_for -> Interval,
+		notes -> Text,
+		tags -> Jsonb,
 	}
 }
 
@@ -280,11 +293,12 @@ diesel::joinable!(events -> issues (issue_id));
 diesel::joinable!(incident_issues -> incidents (incident_id));
 diesel::joinable!(incident_issues -> issues (issue_id));
 diesel::joinable!(incident_notes -> incidents (incident_id));
-diesel::joinable!(incidents -> servers (server_id));
+diesel::joinable!(incidents -> server_groups (server_group_id));
 diesel::joinable!(issue_notes -> issues (issue_id));
 diesel::joinable!(issues -> devices (device_id));
 diesel::joinable!(issues -> servers (server_id));
 diesel::joinable!(servers -> devices (device_id));
+diesel::joinable!(servers -> server_groups (group_id));
 diesel::joinable!(slack_outbox -> incident_notes (note_id));
 diesel::joinable!(slack_outbox -> incidents (incident_id));
 diesel::joinable!(slack_outbox -> issues (issue_id));
@@ -307,6 +321,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 	incidents,
 	issue_notes,
 	issues,
+	server_groups,
 	servers,
 	slack_outbox,
 	sql_playground_history,

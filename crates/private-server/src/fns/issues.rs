@@ -29,6 +29,9 @@ pub struct IssueData {
 	/// The issue's server name (may be null — fall back to `server_host`).
 	pub server_name: Option<String>,
 	pub server_host: String,
+	/// Display name of the group the issue's server belongs to. `None` when
+	/// the server is ungrouped; the UI hides the group prefix in that case.
+	pub server_group_name: Option<String>,
 	pub device_id: Option<Uuid>,
 	pub source: String,
 	#[serde(rename = "ref")]
@@ -77,6 +80,7 @@ impl From<IssueIncidentRef> for IssueIncidentLink {
 struct IssueEnrichment<'a> {
 	server_name: Option<String>,
 	server_host: String,
+	server_group_name: Option<String>,
 	users: &'a std::collections::HashMap<String, CachedTailscaleUser>,
 	incidents: Vec<IssueIncidentLink>,
 }
@@ -89,6 +93,7 @@ impl IssueData {
 			server_id: i.server_id,
 			server_name: e.server_name,
 			server_host: e.server_host,
+			server_group_name: e.server_group_name,
 			device_id: i.device_id,
 			source: i.source,
 			r#ref: i.r#ref,
@@ -143,6 +148,7 @@ pub(crate) async fn enrich_issues(
 ) -> Result<Vec<IssueData>> {
 	let server_ids: Vec<Uuid> = issues.iter().map(|i| i.server_id).collect();
 	let names = Server::names_by_ids(conn, &server_ids).await?;
+	let group_names = Server::group_names_by_server_ids(conn, &server_ids).await?;
 	let user_logins = collect_user_logins(&issues);
 	let users = CachedTailscaleUser::by_logins(conn, &user_logins).await?;
 	let issue_ids: Vec<Uuid> = issues.iter().map(|i| i.id).collect();
@@ -154,6 +160,7 @@ pub(crate) async fn enrich_issues(
 				.get(&i.server_id)
 				.cloned()
 				.unwrap_or((None, String::new()));
+			let group_name = group_names.get(&i.server_id).cloned().unwrap_or(None);
 			let links = incidents
 				.remove(&i.id)
 				.unwrap_or_default()
@@ -165,6 +172,7 @@ pub(crate) async fn enrich_issues(
 				IssueEnrichment {
 					server_name: name,
 					server_host: host,
+					server_group_name: group_name,
 					users: &users,
 					incidents: links,
 				},
@@ -182,6 +190,8 @@ pub(crate) async fn enrich_issue(
 	let (name, host) = names
 		.remove(&issue.server_id)
 		.unwrap_or((None, String::new()));
+	let mut group_names = Server::group_names_by_server_ids(conn, &[issue.server_id]).await?;
+	let group_name = group_names.remove(&issue.server_id).unwrap_or(None);
 	let user_logins = collect_user_logins(std::slice::from_ref(&issue));
 	let users = CachedTailscaleUser::by_logins(conn, &user_logins).await?;
 	let mut incidents = Incident::for_issues(conn, &[issue.id]).await?;
@@ -196,6 +206,7 @@ pub(crate) async fn enrich_issue(
 		IssueEnrichment {
 			server_name: name,
 			server_host: host,
+			server_group_name: group_name,
 			users: &users,
 			incidents: links,
 		},

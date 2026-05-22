@@ -47,8 +47,27 @@ function randomLabel(prefix: string): string {
  * statement with CASCADE. */
 export async function resetSeededTables(sql: Sql): Promise<void> {
 	await sql.query(
-		"TRUNCATE statuses, issues, device_keys, servers, devices, versions RESTART IDENTITY CASCADE",
+		"TRUNCATE statuses, issues, device_keys, servers, server_groups, devices, versions RESTART IDENTITY CASCADE",
 	);
+}
+
+export interface SeededServerGroup {
+	id: string;
+	name: string;
+}
+
+export async function seedServerGroup(
+	sql: Sql,
+	opts: { name?: string; notes?: string; tags?: Record<string, string> } = {},
+): Promise<SeededServerGroup> {
+	const id = randomUUID();
+	const name = opts.name ?? randomLabel("group");
+	await sql.query(
+		`INSERT INTO server_groups (id, name, notes, tags)
+		 VALUES ($1, $2, $3, $4::jsonb)`,
+		[id, name, opts.notes ?? "", JSON.stringify(opts.tags ?? {})],
+	);
+	return { id, name };
 }
 
 export type ServerRank = "production" | "clone" | "demo" | "test" | "dev";
@@ -68,8 +87,10 @@ export async function seedServer(
 		host?: string;
 		kind?: "central" | "facility";
 		rank?: ServerRank | null;
-		parentServerId?: string;
+		groupId?: string | null;
 		deviceId?: string;
+		notes?: string;
+		tags?: Record<string, string>;
 		/** Threshold in seconds; `0` disables alerting (the default for e2e seeds). */
 		alertWhenDownFor?: number;
 	} = {},
@@ -81,17 +102,19 @@ export async function seedServer(
 	const rank = opts.rank ?? "production";
 	const alertWhenDownFor = opts.alertWhenDownFor ?? 0;
 	await sql.query(
-		`INSERT INTO servers (id, name, host, kind, rank, parent_server_id, device_id, alert_when_down_for)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		`INSERT INTO servers (id, name, host, kind, rank, group_id, device_id, alert_when_down_for, notes, tags)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)`,
 		[
 			id,
 			name,
 			host,
 			kind,
 			rank,
-			opts.parentServerId ?? null,
+			opts.groupId ?? null,
 			opts.deviceId ?? null,
 			alertWhenDownFor,
+			opts.notes ?? "",
+			JSON.stringify(opts.tags ?? {}),
 		],
 	);
 	return { id, name, host, kind, rank };

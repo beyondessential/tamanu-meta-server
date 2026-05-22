@@ -71,7 +71,6 @@ fn synthesize_ticket(
 		hosting: None,
 		kind: None,
 		rank: None,
-		central_public_key: None,
 	}
 }
 

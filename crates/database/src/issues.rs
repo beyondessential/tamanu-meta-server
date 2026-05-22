@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::{devices::Device, servers::Server};
+use crate::{devices::Device, server_groups::ServerGroup, servers::Server};
 
 #[derive(
 	Clone, Debug, Serialize, Deserialize, Queryable, Selectable, Associations, utoipa::ToSchema,
@@ -78,7 +78,7 @@ pub struct Event {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Queryable, Selectable, Associations)]
-#[diesel(belongs_to(Server))]
+#[diesel(belongs_to(ServerGroup, foreign_key = server_group_id))]
 #[diesel(table_name = crate::schema::incidents)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Incident {
@@ -87,7 +87,7 @@ pub struct Incident {
 	pub created_at: Timestamp,
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub updated_at: Timestamp,
-	pub server_id: Uuid,
+	pub server_group_id: Uuid,
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub opened_at: Timestamp,
 	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
@@ -154,8 +154,7 @@ pub enum IssueFilter {
 pub struct IssueListFilters {
 	pub active_only: bool,
 	pub severities: Option<Vec<Severity>>,
-	/// Any server id in the group; the query walks to the root and then
-	/// restricts to issues on servers in the root's descendant tree.
+	/// Restrict to issues whose server belongs to this group.
 	pub server_group_id: Option<Uuid>,
 }
 
@@ -180,11 +179,19 @@ impl NewEvent {
 	/// Persist this event push:
 	/// 1. find-or-create the issue keyed by (server_id, source, ref),
 	/// 2. append the event or coalesce into the latest matching one,
-	/// 3. (re)evaluate incident contribution.
+	/// 3. if the server is in a group: (re)evaluate incident contribution.
 	///
 	/// `server_id` is the server the issue is attached to: derived from the
 	/// device for public submissions, supplied by the operator for manual.
 	/// `device_id` is `None` for manual events.
+	///
+	/// Issues from an **ungrouped** server are still recorded — the issue
+	/// and event rows go in just like any other push — but the incident
+	/// flow is skipped (`server_group_id` would have nowhere to point).
+	/// When the operator later assigns the server to a group,
+	/// [`Server::assign_to_group`] runs `reevaluate_open_issues_for_server`
+	/// over the now-grouped issues so anything that should have opened an
+	/// incident does so retroactively.
 	pub async fn save(
 		self,
 		db: &mut AsyncPgConnection,
@@ -212,9 +219,12 @@ impl NewEvent {
 		let description = self.description.as_deref();
 		let hash = hash_event(severity, active, &self.message, description);
 
-		// Find the root server for the group up-front; needed if we end up
-		// opening an incident. A single recursive CTE walks parent_server_id.
-		let root_server_id = Server::root_id(db, server_id).await?;
+		// Look up the server's group up-front; needed by the incident-open
+		// path. If `None`, we still record the issue/event but skip
+		// incident logic — see `reevaluate_open_issues_for_server` for the
+		// catch-up path.
+		let server = Server::get_by_id(db, server_id).await?;
+		let server_group_id = server.group_id;
 
 		db.transaction::<_, AppError, _>(async |conn| {
 			// 1. find-or-create issue (FOR UPDATE so concurrent pushes on
@@ -335,9 +345,11 @@ impl NewEvent {
 			}
 
 			// 3. (re-)evaluate incident contribution against the new issue state.
-			// `by = None`: this came from a device push, not an operator action.
-			re_evaluate_incident_membership(conn, &issue, root_server_id, effective_time, None)
-				.await?;
+			//    `by = None`: this came from a device push, not an operator action.
+			//    Skipped when the server is ungrouped: incidents are group-keyed.
+			if let Some(gid) = server_group_id {
+				re_evaluate_incident_membership(conn, &issue, gid, effective_time, None).await?;
+			}
 
 			Ok(issue)
 		})
@@ -367,7 +379,7 @@ impl NewEvent {
 async fn re_evaluate_incident_membership(
 	conn: &mut AsyncPgConnection,
 	issue: &Issue,
-	root_server_id: Uuid,
+	server_group_id: Uuid,
 	transition_time: Timestamp,
 	by: Option<&str>,
 ) -> Result<()> {
@@ -375,7 +387,7 @@ async fn re_evaluate_incident_membership(
 
 	let was_in = is_issue_in_open_incident(conn, issue.id).await?;
 	let snoozed = issue.snoozed_until.map_or(false, |t| t > Timestamp::now());
-	let group_open = group_has_open_incident(conn, root_server_id).await?;
+	let group_open = group_has_open_incident(conn, server_group_id).await?;
 
 	let should_leave = !issue.active || issue.resolved_at.is_some() || snoozed;
 	let should_join = issue.active
@@ -386,7 +398,7 @@ async fn re_evaluate_incident_membership(
 	match (was_in, should_join, should_leave) {
 		(false, true, _) => {
 			let (incident_id, newly_opened) =
-				find_or_open_incident(conn, root_server_id, transition_time).await?;
+				find_or_open_incident(conn, server_group_id, transition_time).await?;
 			diesel::insert_into(incident_issues::table)
 				.values((
 					incident_issues::incident_id.eq(incident_id),
@@ -396,7 +408,7 @@ async fn re_evaluate_incident_membership(
 				.execute(conn)
 				.await?;
 			if newly_opened {
-				enqueue_slack_open(conn, incident_id, root_server_id, issue).await?;
+				enqueue_slack_open(conn, incident_id, server_group_id, issue).await?;
 			}
 		}
 		(true, _, true) => {
@@ -465,6 +477,35 @@ async fn re_evaluate_incident_membership(
 	Ok(())
 }
 
+/// Re-evaluate every currently-open issue on `server_id` against incident
+/// membership. Used by [`Server::assign_to_group`] to catch up issues that
+/// accumulated while the server was ungrouped.
+pub async fn reevaluate_open_issues_for_server(
+	db: &mut AsyncPgConnection,
+	server_id: Uuid,
+) -> Result<()> {
+	use crate::schema::issues::dsl;
+
+	let server = Server::get_by_id(db, server_id).await?;
+	let Some(gid) = server.group_id else {
+		return Ok(());
+	};
+
+	let open_issues: Vec<Issue> = dsl::issues
+		.select(Issue::as_select())
+		.filter(dsl::server_id.eq(server_id))
+		.filter(dsl::active.eq(true))
+		.filter(dsl::resolved_at.is_null())
+		.load(db)
+		.await?;
+
+	let now = Timestamp::now();
+	for issue in open_issues {
+		re_evaluate_incident_membership(db, &issue, gid, now, None).await?;
+	}
+	Ok(())
+}
+
 async fn is_issue_in_open_incident(db: &mut AsyncPgConnection, issue_id: Uuid) -> Result<bool> {
 	use crate::schema::incident_issues;
 
@@ -480,11 +521,14 @@ async fn is_issue_in_open_incident(db: &mut AsyncPgConnection, issue_id: Uuid) -
 	Ok(count > 0)
 }
 
-async fn group_has_open_incident(db: &mut AsyncPgConnection, root_server_id: Uuid) -> Result<bool> {
+async fn group_has_open_incident(
+	db: &mut AsyncPgConnection,
+	server_group_id: Uuid,
+) -> Result<bool> {
 	use crate::schema::incidents::dsl;
 
 	let count: i64 = dsl::incidents
-		.filter(dsl::server_id.eq(root_server_id))
+		.filter(dsl::server_group_id.eq(server_group_id))
 		.filter(dsl::closed_at.is_null())
 		.count()
 		.get_result(db)
@@ -498,20 +542,20 @@ async fn group_has_open_incident(db: &mut AsyncPgConnection, root_server_id: Uui
 /// an existing incident shouldn't re-notify).
 ///
 /// Two parallel event pushes against the same group must not each insert a
-/// fresh incident row. We take a `FOR UPDATE` lock on the root server's
-/// row up-front so the find-or-create pair serializes per-server. A
-/// unique partial index on `incidents (server_id) WHERE closed_at IS NULL`
+/// fresh incident row. We take a `FOR UPDATE` lock on the group's row
+/// up-front so the find-or-create pair serializes per-group. A unique
+/// partial index on `incidents (server_group_id) WHERE closed_at IS NULL`
 /// is the belt-and-braces backstop at the DB layer.
 async fn find_or_open_incident(
 	db: &mut AsyncPgConnection,
-	root_server_id: Uuid,
+	server_group_id: Uuid,
 	opened_at: Timestamp,
 ) -> Result<(Uuid, bool)> {
-	use crate::schema::{incidents, servers};
+	use crate::schema::{incidents, server_groups};
 
-	let _server_lock: Uuid = servers::table
-		.select(servers::id)
-		.filter(servers::id.eq(root_server_id))
+	let _group_lock: Uuid = server_groups::table
+		.select(server_groups::id)
+		.filter(server_groups::id.eq(server_group_id))
 		.for_update()
 		.first(db)
 		.await?;
@@ -519,8 +563,8 @@ async fn find_or_open_incident(
 	let open: Option<Incident> = incidents::table
 		.select(Incident::as_select())
 		.filter(
-			incidents::server_id
-				.eq(root_server_id)
+			incidents::server_group_id
+				.eq(server_group_id)
 				.and(incidents::closed_at.is_null()),
 		)
 		.order(incidents::opened_at.desc())
@@ -533,7 +577,7 @@ async fn find_or_open_incident(
 
 	let new_incident: Incident = diesel::insert_into(incidents::table)
 		.values((
-			incidents::server_id.eq(root_server_id),
+			incidents::server_group_id.eq(server_group_id),
 			incidents::opened_at.eq(jiff_diesel::Timestamp::from(opened_at)),
 		))
 		.returning(Incident::as_select())
@@ -545,18 +589,14 @@ async fn find_or_open_incident(
 async fn enqueue_slack_open(
 	conn: &mut AsyncPgConnection,
 	incident_id: Uuid,
-	root_server_id: Uuid,
+	server_group_id: Uuid,
 	issue: &Issue,
 ) -> Result<()> {
-	// Incidents on the nil/meta server (canopy itself) never round-trip
-	// to Slack: those are the canopy-self events the drainer files for
-	// its own failures, and Slacking them would loop indefinitely.
-	if root_server_id == Uuid::nil() {
-		return Ok(());
-	}
-	let server = Server::get_by_id(conn, root_server_id).await?;
+	let group = ServerGroup::get_by_id(conn, server_group_id).await?;
+	let server = Server::get_by_id(conn, issue.server_id).await?;
+	let label = format_group_label(&group, Some(&server));
 	let payload = crate::slack_outbox::vars::incident_open(
-		&server,
+		&label,
 		issue.severity,
 		&issue.source,
 		&issue.r#ref,
@@ -593,12 +633,6 @@ async fn enqueue_slack_resolve_inner(
 	incident: &Incident,
 	by: Option<&str>,
 ) -> Result<()> {
-	// Mirror of `enqueue_slack_open`: nil-server incidents are
-	// canopy-internal and must not Slack, to avoid a feedback loop
-	// when the failure being filed is "Slack delivery itself failed".
-	if incident.server_id == Uuid::nil() {
-		return Ok(());
-	}
 	// If the matching open is still inside its `deliver_after` window
 	// (or has otherwise not been delivered yet) we cancel it and skip
 	// posting the resolve too: Slack never heard about the incident,
@@ -614,8 +648,9 @@ async fn enqueue_slack_resolve_inner(
 	if cancelled > 0 {
 		return Ok(());
 	}
-	let server = Server::get_by_id(conn, incident.server_id).await?;
-	let payload = crate::slack_outbox::vars::incident_resolve(&server, by);
+	let group = ServerGroup::get_by_id(conn, incident.server_group_id).await?;
+	let label = format_group_label(&group, None);
+	let payload = crate::slack_outbox::vars::incident_resolve(&label, by);
 	crate::slack_outbox::SlackOutbox::enqueue(
 		conn,
 		crate::slack_outbox::KIND_INCIDENT_RESOLVE,
@@ -627,6 +662,18 @@ async fn enqueue_slack_resolve_inner(
 	)
 	.await?;
 	Ok(())
+}
+
+fn format_group_label(group: &ServerGroup, server: Option<&Server>) -> String {
+	if let Some(server) = server {
+		let server_part = match &server.name {
+			Some(n) if !n.is_empty() => format!("{n} ({})", server.host.0),
+			_ => server.host.0.to_string(),
+		};
+		format!("{} · {}", group.name, server_part)
+	} else {
+		group.name.clone()
+	}
 }
 
 impl Issue {
@@ -685,25 +732,14 @@ impl Issue {
 	///   keeps pushing them.
 	/// - `severities`: when `Some` and non-empty, restrict to those.
 	/// - `server_group_id`: when `Some`, restrict to issues whose server is
-	///   in the descendant tree of that root (uses a recursive CTE via
-	///   `Server::descendant_ids`).
+	///   in that group. A direct `IN (SELECT id FROM servers WHERE group_id = $)`.
 	pub async fn list(
 		db: &mut AsyncPgConnection,
 		filters: IssueListFilters,
 		limit: i64,
 	) -> Result<Vec<Self>> {
 		use crate::schema::issues::dsl;
-
-		// Resolve to the group root then enumerate descendants up-front
-		// (two recursive CTEs); cheaper than embedding both into the main
-		// query, and lets the later filter be a plain `IN`. Callers can
-		// pass any server id in the group — the root walk handles it.
-		let group_ids = if let Some(any_in_group) = filters.server_group_id {
-			let root = Server::root_id(db, any_in_group).await?;
-			Some(Server::descendant_ids(db, root).await?)
-		} else {
-			None
-		};
+		use crate::schema::servers;
 
 		let mut q = dsl::issues.select(Self::as_select()).into_boxed();
 		if filters.active_only {
@@ -715,8 +751,13 @@ impl Issue {
 			let strs: Vec<String> = sevs.iter().map(|s| s.to_string()).collect();
 			q = q.filter(dsl::severity.eq_any(strs));
 		}
-		if let Some(ids) = group_ids {
-			q = q.filter(dsl::server_id.eq_any(ids));
+		if let Some(gid) = filters.server_group_id {
+			let server_ids: Vec<Uuid> = servers::table
+				.select(servers::id)
+				.filter(servers::group_id.eq(gid))
+				.load(db)
+				.await?;
+			q = q.filter(dsl::server_id.eq_any(server_ids));
 		}
 		q.order(dsl::last_seen.desc())
 			.limit(limit)
@@ -783,8 +824,9 @@ impl Issue {
 				.returning(Self::as_select())
 				.get_result(conn)
 				.await?;
-			let root = Server::root_id(conn, issue.server_id).await?;
-			re_evaluate_incident_membership(conn, &issue, root, now, Some(by)).await?;
+			if let Some(gid) = Server::get_by_id(conn, issue.server_id).await?.group_id {
+				re_evaluate_incident_membership(conn, &issue, gid, now, Some(by)).await?;
+			}
 			Ok(issue)
 		})
 		.await
@@ -804,9 +846,10 @@ impl Issue {
 				.returning(Self::as_select())
 				.get_result(conn)
 				.await?;
-			let root = Server::root_id(conn, issue.server_id).await?;
-			// Unresolve rejoins; cascade close path doesn't fire here.
-			re_evaluate_incident_membership(conn, &issue, root, now, None).await?;
+			if let Some(gid) = Server::get_by_id(conn, issue.server_id).await?.group_id {
+				// Unresolve rejoins; cascade close path doesn't fire here.
+				re_evaluate_incident_membership(conn, &issue, gid, now, None).await?;
+			}
 			Ok(issue)
 		})
 		.await
@@ -833,8 +876,9 @@ impl Issue {
 				.returning(Self::as_select())
 				.get_result(conn)
 				.await?;
-			let root = Server::root_id(conn, issue.server_id).await?;
-			re_evaluate_incident_membership(conn, &issue, root, now, None).await?;
+			if let Some(gid) = Server::get_by_id(conn, issue.server_id).await?.group_id {
+				re_evaluate_incident_membership(conn, &issue, gid, now, None).await?;
+			}
 			Ok(issue)
 		})
 		.await
@@ -850,8 +894,9 @@ impl Issue {
 				.returning(Self::as_select())
 				.get_result(conn)
 				.await?;
-			let root = Server::root_id(conn, issue.server_id).await?;
-			re_evaluate_incident_membership(conn, &issue, root, now, None).await?;
+			if let Some(gid) = Server::get_by_id(conn, issue.server_id).await?.group_id {
+				re_evaluate_incident_membership(conn, &issue, gid, now, None).await?;
+			}
 			Ok(issue)
 		})
 		.await
@@ -932,7 +977,7 @@ impl Incident {
 			.values()
 			.flatten()
 			.copied()
-			.collect::<HashSet<_>>()
+			.collect::<std::collections::HashSet<_>>()
 			.into_iter()
 			.collect();
 
@@ -1026,11 +1071,10 @@ impl Event {
 }
 
 impl Incident {
-	/// Incidents are owned by the *root* of the server group, so a caller
-	/// asking for a child's incidents really wants the root's. Walk up the
-	/// `parent_server_id` chain (same helper used at incident-open time) so
-	/// the API returns the group's incidents regardless of which server in
-	/// the group the caller named.
+	/// Incidents are owned by the server's group, so a caller asking for a
+	/// specific server's incidents really wants the group's. Look up the
+	/// server's `group_id` and list incidents on that group; ungrouped
+	/// servers return an empty Vec.
 	pub async fn list_for_server(
 		db: &mut AsyncPgConnection,
 		server_id: Uuid,
@@ -1039,10 +1083,34 @@ impl Incident {
 	) -> Result<Vec<Self>> {
 		use crate::schema::incidents::dsl;
 
-		let root = Server::root_id(db, server_id).await?;
+		let Some(gid) = Server::get_by_id(db, server_id).await?.group_id else {
+			return Ok(Vec::new());
+		};
 		let mut q = dsl::incidents
 			.select(Self::as_select())
-			.filter(dsl::server_id.eq(root))
+			.filter(dsl::server_group_id.eq(gid))
+			.into_boxed();
+		if !include_closed {
+			q = q.filter(dsl::closed_at.is_null());
+		}
+		q.order(dsl::opened_at.desc())
+			.limit(limit)
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	pub async fn list_for_group(
+		db: &mut AsyncPgConnection,
+		server_group_id: Uuid,
+		include_closed: bool,
+		limit: i64,
+	) -> Result<Vec<Self>> {
+		use crate::schema::incidents::dsl;
+
+		let mut q = dsl::incidents
+			.select(Self::as_select())
+			.filter(dsl::server_group_id.eq(server_group_id))
 			.into_boxed();
 		if !include_closed {
 			q = q.filter(dsl::closed_at.is_null());
@@ -1158,6 +1226,13 @@ impl Incident {
 		let now = Timestamp::now();
 
 		db.transaction::<_, AppError, _>(async |conn| {
+			let incident_loaded: Incident = incidents::table
+				.select(Incident::as_select())
+				.filter(incidents::id.eq(incident_id))
+				.first(conn)
+				.await?;
+			let gid = incident_loaded.server_group_id;
+
 			let open_issue_ids: Vec<Uuid> = incident_issues::table
 				.select(incident_issues::issue_id)
 				.filter(
@@ -1188,8 +1263,7 @@ impl Incident {
 					.returning(Issue::as_select())
 					.get_result(conn)
 					.await?;
-				let root = Server::root_id(conn, issue.server_id).await?;
-				re_evaluate_incident_membership(conn, &issue, root, now, Some(by)).await?;
+				re_evaluate_incident_membership(conn, &issue, gid, now, Some(by)).await?;
 			}
 
 			let incident: Incident =

@@ -1,5 +1,10 @@
 import { expect, test } from "./test-fixtures";
-import { resetSeededTables, seedServer, seedVersion } from "./seed";
+import {
+	resetSeededTables,
+	seedServer,
+	seedServerGroup,
+	seedVersion,
+} from "./seed";
 
 test.describe("status page", () => {
 	test.beforeEach(async ({ sql }) => {
@@ -18,25 +23,29 @@ test.describe("status page", () => {
 
 	test("empty database surfaces an info banner", async ({ page }) => {
 		await page.goto("/status");
-		await expect(page.getByText(/No servers configured/i)).toBeVisible();
+		await expect(page.getByText(/no server groups configured/i)).toBeVisible();
 	});
 
-	test("groups centrals by rank and links to their detail page", async ({
+	test("groups by rank bucket and links to each group's detail page", async ({
 		page,
 		sql,
 	}) => {
-		// server_details computes version-distance against the latest
-		// published version; without one it 404s the card.
+		// group_details computes version-distance against the latest
+		// published version; without one the card 404s.
 		await seedVersion(sql, { major: 1, minor: 0, patch: 0 });
-		const prodCentral = await seedServer(sql, {
+		const prodGroup = await seedServerGroup(sql, { name: "prod-cluster" });
+		const demoGroup = await seedServerGroup(sql, { name: "demo-cluster" });
+		await seedServer(sql, {
 			name: "prod-alpha",
 			kind: "central",
 			rank: "production",
+			groupId: prodGroup.id,
 		});
 		await seedServer(sql, {
 			name: "demo-beta",
 			kind: "central",
 			rank: "demo",
+			groupId: demoGroup.id,
 		});
 
 		await page.goto("/status");
@@ -49,17 +58,17 @@ test.describe("status page", () => {
 			page.getByRole("heading", { name: "demo", exact: true }),
 		).toBeVisible();
 
-		// Server names render as h3 inside each card.
+		// Group names render as h3 inside each card.
 		await expect(
-			page.getByRole("heading", { name: prodCentral.name }),
+			page.getByRole("heading", { name: prodGroup.name }),
 		).toBeVisible();
 		await expect(
-			page.getByRole("heading", { name: "demo-beta" }),
+			page.getByRole("heading", { name: demoGroup.name }),
 		).toBeVisible();
 
-		// Each card is wrapped in a router link to /servers/<id>.
+		// Each card is wrapped in a router link to /groups/<id>.
 		await expect(
-			page.locator(`a[href="/servers/${prodCentral.id}"]`),
+			page.locator(`a[href="/groups/${prodGroup.id}"]`),
 		).toBeVisible();
 	});
 });

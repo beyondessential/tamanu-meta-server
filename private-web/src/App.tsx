@@ -20,14 +20,17 @@ import DeviceDetail from "./routes/DeviceDetail";
 import Devices from "./routes/Devices";
 import DevicesList from "./routes/DevicesList";
 import DevicesSearch from "./routes/DevicesSearch";
+import GroupDetail from "./routes/GroupDetail";
+import GroupEdit from "./routes/GroupEdit";
+import GroupsList from "./routes/GroupsList";
 import IncidentDetail from "./routes/IncidentDetail";
 import Incidents from "./routes/Incidents";
 import Status from "./routes/Status";
 import ServerDetail from "./routes/ServerDetail";
 import ServerEdit from "./routes/ServerEdit";
 import Servers from "./routes/Servers";
-import ServersList from "./routes/ServersList";
 import Sql from "./routes/Sql";
+import UngroupedServersList from "./routes/UngroupedServersList";
 import VersionDetail from "./routes/VersionDetail";
 import Versions from "./routes/Versions";
 
@@ -170,14 +173,13 @@ export default function App() {
 					<Route path="/versions" element={<Versions />} />
 					<Route path="/versions/:version" element={<VersionDetail />} />
 					<Route path="/servers" element={<Servers />}>
-						<Route index element={<ServersList kind="central" />} />
-						<Route
-							path="facilities"
-							element={<ServersList kind="facility" />}
-						/>
+						<Route index element={<GroupsList />} />
+						<Route path="ungrouped" element={<UngroupedServersList />} />
 					</Route>
 					<Route path="/servers/:id" element={<ServerDetail />} />
 					<Route path="/servers/:id/edit" element={<ServerEdit />} />
+					<Route path="/groups/:id" element={<GroupDetail />} />
+					<Route path="/groups/:id/edit" element={<GroupEdit />} />
 					<Route path="/devices" element={<Devices />}>
 						<Route index element={<DevicesSearch />} />
 						<Route

@@ -85,11 +85,15 @@ async fn fetch_open_incident(
 	conn: &mut diesel_async::AsyncPgConnection,
 	server_id: Uuid,
 ) -> Option<IncidentRow> {
-	sql_query("SELECT id FROM incidents WHERE server_id = $1 AND closed_at IS NULL")
-		.bind::<sql_types::Uuid, _>(server_id)
-		.get_result(conn)
-		.await
-		.ok()
+	sql_query(
+		"SELECT i.id FROM incidents i \
+		 JOIN servers s ON i.server_group_id = s.group_id \
+		 WHERE s.id = $1 AND i.closed_at IS NULL",
+	)
+	.bind::<sql_types::Uuid, _>(server_id)
+	.get_result(conn)
+	.await
+	.ok()
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -482,15 +486,23 @@ async fn insert_health_test_server(
 	conn: &mut diesel_async::AsyncPgConnection,
 	device_id: Uuid,
 ) -> Uuid {
+	// Server gets a group so events promote to incidents normally.
+	let group_id = Uuid::new_v4();
+	sql_query("INSERT INTO server_groups (id, name) VALUES ($1, 'health-group')")
+		.bind::<sql_types::Uuid, _>(group_id)
+		.execute(conn)
+		.await
+		.expect("insert group");
 	let server_id = Uuid::new_v4();
 	sql_query(
 		r#"
-		INSERT INTO servers (id, host, kind, device_id)
-		VALUES ($1, 'https://health.example.com', 'central', $2)
+		INSERT INTO servers (id, host, kind, device_id, group_id)
+		VALUES ($1, 'https://health.example.com', 'central', $2, $3)
 	"#,
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
 	.bind::<sql_types::Nullable<sql_types::Uuid>, _>(Some(device_id))
+	.bind::<sql_types::Uuid, _>(group_id)
 	.execute(conn)
 	.await
 	.expect("insert server");

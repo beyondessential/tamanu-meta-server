@@ -21,14 +21,27 @@ struct RowId {
 }
 
 async fn insert_server(conn: &mut diesel_async::AsyncPgConnection, host: &str) -> Uuid {
+	// Group + server pair so events can open incidents (incidents are
+	// group-keyed; ungrouped servers don't promote issues to incidents).
+	let group: RowId = sql_query(
+		r#"
+			INSERT INTO server_groups (name)
+			VALUES ('test-group')
+			RETURNING id
+		"#,
+	)
+	.get_result(conn)
+	.await
+	.expect("insert group");
 	let row: RowId = sql_query(
 		r#"
-			INSERT INTO servers (host)
-			VALUES ($1)
+			INSERT INTO servers (host, group_id)
+			VALUES ($1, $2)
 			RETURNING id
 		"#,
 	)
 	.bind::<sql_types::Text, _>(host)
+	.bind::<sql_types::Uuid, _>(group.id)
 	.get_result(conn)
 	.await
 	.expect("insert server");
@@ -300,11 +313,12 @@ async fn cascade_close_via_issue_resolve_attributes_to_operator() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn nil_server_incidents_do_not_enqueue_slack() {
+async fn nil_server_events_do_not_open_incidents() {
 	// The meta/nil server hosts canopy's own self-monitoring events
-	// (e.g. "Slack delivery failure"). Slacking those would loop the
-	// drainer back into itself. Verify the guard skips the enqueue
-	// even though the incident is created.
+	// (e.g. "Slack delivery failure"). It is intentionally **ungrouped**
+	// in the new model, so events file as issues but never roll up to a
+	// group-level incident — which means the Slack drainer can never
+	// loop back into itself by re-firing on a canopy-self failure.
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let event = NewEvent {
 			source: "canopy".into(),
@@ -320,18 +334,12 @@ async fn nil_server_incidents_do_not_enqueue_slack() {
 			.await
 			.expect("save");
 
-		let incident = Incident::list_for_server(&mut conn, Uuid::nil(), false, 10)
+		let incidents = Incident::list_for_server(&mut conn, Uuid::nil(), false, 10)
 			.await
-			.expect("list incidents")
-			.into_iter()
-			.next()
-			.expect("incident opened on nil server");
-
-		let rows = pending_for_incident(&mut conn, incident.id).await;
+			.expect("list incidents");
 		assert!(
-			rows.is_empty(),
-			"nil-server incidents must not enqueue slack rows; got {}",
-			rows.len()
+			incidents.is_empty(),
+			"nil/meta server is ungrouped — events don't open incidents",
 		);
 	})
 	.await

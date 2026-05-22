@@ -21,7 +21,6 @@ fn synthesize_ticket(server_id: Uuid, hostname: &str, url: &str) -> CanopyTicket
 		hosting: None,
 		kind: None,
 		rank: None,
-		central_public_key: None,
 	}
 }
 

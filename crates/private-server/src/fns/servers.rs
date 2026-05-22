@@ -6,12 +6,13 @@ use commons_types::server::CanopyTicket;
 use commons_types::{
 	Uuid,
 	geo::GeoPoint,
-	server::{kind::ServerKind, rank::ServerRank},
+	server::{TagMap, kind::ServerKind, rank::ServerRank},
 	status::{HealthState, ShortStatus},
 	version::VersionStr,
 };
 use database::{
 	devices::{Device, DeviceConnection},
+	server_groups::ServerGroup,
 	servers::{PartialServer, Server},
 	statuses::Status,
 	url_field::UrlField,
@@ -34,7 +35,13 @@ pub struct ServerDetailData {
 	pub last_status: Option<ServerLastStatusData>,
 	pub up: ShortStatus,
 	pub health: HealthState,
-	pub child_servers: Vec<(ShortStatus, HealthState, ServerInfo)>,
+	/// The group this server belongs to, with its notes/tags so the UI can
+	/// render the "Group" section without a second fetch. `None` when the
+	/// server is ungrouped.
+	pub group: Option<ServerGroup>,
+	/// Other servers in the same group (excluding `server`). Empty when the
+	/// server is ungrouped or alone in its group.
+	pub siblings: Vec<(ShortStatus, HealthState, ServerInfo)>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -45,8 +52,10 @@ pub struct ServerInfo {
 	pub rank: Option<ServerRank>,
 	pub host: String,
 	pub device_id: Option<Uuid>,
-	pub parent_server_id: Option<Uuid>,
-	pub parent_server_name: Option<String>,
+	pub group_id: Option<Uuid>,
+	/// Display name of the group this server belongs to (denormalised so list
+	/// rows don't need to fetch the group separately). `None` if ungrouped.
+	pub group_name: Option<String>,
 	pub listed: bool,
 	pub cloud: Option<bool>,
 	pub geolocation: Option<GeoPoint>,
@@ -54,6 +63,8 @@ pub struct ServerInfo {
 	/// issue. `0` (or any non-positive value) disables alerting for this
 	/// server; the default at creation is 600 (10 minutes).
 	pub alert_when_down_for: i64,
+	pub notes: String,
+	pub tags: TagMap,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -96,7 +107,7 @@ pub struct ServerDataUpdate {
 		deserialize_with = "deserialize_some",
 		skip_serializing_if = "Option::is_none"
 	)]
-	pub parent_server_id: Option<Option<Uuid>>,
+	pub group_id: Option<Option<Uuid>>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub listed: Option<bool>,
 	#[serde(
@@ -113,6 +124,10 @@ pub struct ServerDataUpdate {
 	pub geolocation: Option<Option<GeoPoint>>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub alert_when_down_for: Option<i64>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub notes: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub tags: Option<TagMap>,
 }
 
 fn deserialize_some<'de, T, D>(deserializer: D) -> std::result::Result<Option<T>, D::Error>
@@ -123,7 +138,7 @@ where
 	Deserialize::deserialize(deserializer).map(Some)
 }
 
-fn server_to_info(s: Server) -> ServerInfo {
+pub(super) fn server_to_info(s: Server) -> ServerInfo {
 	ServerInfo {
 		id: s.id,
 		name: s.name,
@@ -131,47 +146,39 @@ fn server_to_info(s: Server) -> ServerInfo {
 		rank: s.rank,
 		host: s.host.0.to_string(),
 		device_id: s.device_id,
-		parent_server_id: s.parent_server_id,
-		parent_server_name: None,
+		group_id: s.group_id,
+		group_name: None,
 		listed: s.listed,
 		cloud: s.cloud,
 		geolocation: s.geolocation,
 		alert_when_down_for: s.alert_when_down_for.0.as_secs(),
+		notes: s.notes,
+		tags: s.tags,
 	}
+}
+
+/// Like [`server_to_info`] but populates `group_name` by looking it up from
+/// the supplied map (caller pre-fetches the relevant groups in one batch).
+fn server_to_info_with_group(
+	s: Server,
+	group_names: &std::collections::HashMap<Uuid, String>,
+) -> ServerInfo {
+	let group_name = s.group_id.and_then(|gid| group_names.get(&gid).cloned());
+	let mut info = server_to_info(s);
+	info.group_name = group_name;
+	info
 }
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
 		.routes(routes!(list_some))
-		.routes(routes!(list_roots))
+		.routes(routes!(list_ungrouped))
 		.routes(routes!(get_name))
 		.routes(routes!(get_info))
 		.routes(routes!(get_detail))
 		.routes(routes!(update))
 		.routes(routes!(import_ticket))
-		.routes(routes!(search_parent))
 		.routes(routes!(attach_tailscale_device))
-}
-
-/// Root servers — those without a parent. Each one heads a server-group
-/// (the unit incidents roll up to). Used by the Incidents page filter.
-#[utoipa::path(
-	post,
-	path = "/list_roots",
-	tag = "servers",
-	security(("tailscale-admin" = [])),
-	responses(
-		(status = 200, body = Vec<ServerInfo>),
-	),
-)]
-pub async fn list_roots(
-	State(state): State<AppState>,
-	_admin: TailscaleAdmin,
-	_body: Json<serde_json::Value>,
-) -> Result<Json<Vec<ServerInfo>>> {
-	let mut conn = state.db.get().await?;
-	let servers = Server::list_roots(&mut conn).await?;
-	Ok(Json(servers.into_iter().map(server_to_info).collect()))
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -205,6 +212,33 @@ pub async fn list_some(
 	} else {
 		Server::get_all(&mut conn, args.offset, args.limit).await?
 	};
+	let group_names = collect_group_names(&mut conn, &servers).await?;
+	let items = servers
+		.into_iter()
+		.map(|s| server_to_info_with_group(s, &group_names))
+		.collect();
+	Ok(Json(Page { items, total }))
+}
+
+/// Servers without a group, used by the Ungrouped tab. Returned alongside a
+/// total count so the UI can show "(N ungrouped)" without a second fetch.
+#[utoipa::path(
+	post,
+	path = "/list_ungrouped",
+	tag = "servers",
+	security(("tailscale-admin" = [])),
+	responses(
+		(status = 200, body = Page<ServerInfo>),
+	),
+)]
+pub async fn list_ungrouped(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	_body: Json<serde_json::Value>,
+) -> Result<Json<Page<ServerInfo>>> {
+	let mut conn = state.db.get().await?;
+	let total = Server::count_ungrouped(&mut conn).await?;
+	let servers = Server::list_ungrouped(&mut conn).await?;
 	let items = servers.into_iter().map(server_to_info).collect();
 	Ok(Json(Page { items, total }))
 }
@@ -252,25 +286,14 @@ pub async fn get_info(
 	let db = state.db;
 	let mut conn = db.get().await?;
 	let server = Server::get_by_id(&mut conn, args.server_id).await?;
-	let parent_server_name = if let Some(parent_id) = server.parent_server_id {
-		Server::get_by_id(&mut conn, parent_id).await?.name
+	let group_name = if let Some(gid) = server.group_id {
+		Some(ServerGroup::get_by_id(&mut conn, gid).await?.name)
 	} else {
 		None
 	};
-	Ok(Json(ServerInfo {
-		id: server.id,
-		name: server.name.clone(),
-		kind: server.kind,
-		rank: server.rank,
-		host: server.host.0.to_string(),
-		device_id: server.device_id,
-		parent_server_id: server.parent_server_id,
-		parent_server_name,
-		listed: server.listed,
-		cloud: server.cloud,
-		geolocation: server.geolocation,
-		alert_when_down_for: server.alert_when_down_for.0.as_secs(),
-	}))
+	let mut info = server_to_info(server);
+	info.group_name = group_name;
+	Ok(Json(info))
 }
 
 #[utoipa::path(
@@ -292,16 +315,15 @@ pub async fn get_detail(
 	let server = Server::get_by_id(&mut conn, args.server_id).await?;
 	let device_id = server.device_id;
 
-	let (parent_server_name, status, latest_version) = {
-		let mut conn_parent = db.get().await?;
+	let (group, status, latest_version) = {
+		let mut conn_group = db.get().await?;
 		let mut conn_status = db.get().await?;
 
-		let parent_lookup = async {
-			if let Some(parent_id) = server.parent_server_id {
-				let parent = Server::get_by_id(&mut conn_parent, parent_id).await?;
-				Ok::<_, AppError>(parent.name)
+		let group_lookup = async {
+			if let Some(gid) = server.group_id {
+				ServerGroup::get_by_id(&mut conn_group, gid).await.map(Some)
 			} else {
-				Ok(None)
+				Ok::<_, AppError>(None)
 			}
 		};
 
@@ -313,24 +335,12 @@ pub async fn get_detail(
 				.map(|v| v.as_semver())
 		};
 
-		let (parent_result, status_result) = join(parent_lookup, status_lookup).await;
-		(parent_result?, status_result?, latest_version_lookup.await?)
+		let (group_result, status_result) = join(group_lookup, status_lookup).await;
+		(group_result?, status_result?, latest_version_lookup.await?)
 	};
 
-	let server_details = ServerInfo {
-		id: server.id,
-		name: server.name.clone(),
-		kind: server.kind,
-		rank: server.rank,
-		host: server.host.0.to_string(),
-		device_id,
-		parent_server_id: server.parent_server_id,
-		parent_server_name,
-		listed: server.listed,
-		cloud: server.cloud,
-		geolocation: server.geolocation,
-		alert_when_down_for: server.alert_when_down_for.0.as_secs(),
-	};
+	let mut server_details = server_to_info(server.clone());
+	server_details.group_name = group.as_ref().map(|g| g.name.clone());
 
 	let up = status
 		.as_ref()
@@ -388,40 +398,25 @@ pub async fn get_detail(
 		None
 	};
 
-	let child_servers = if server.kind == ServerKind::Central {
-		let children = server.get_children(&mut conn).await?;
-		if children.is_empty() {
+	let siblings = if let Some(g) = group.as_ref() {
+		let raw_siblings = server.siblings(&mut conn).await?;
+		if raw_siblings.is_empty() {
 			Vec::new()
 		} else {
-			let child_ids: Vec<Uuid> = children.iter().map(|c| c.id).collect();
-			let statuses = Status::latest_for_servers(&mut conn, &child_ids).await?;
+			let sibling_ids: Vec<Uuid> = raw_siblings.iter().map(|s| s.id).collect();
+			let statuses = Status::latest_for_servers(&mut conn, &sibling_ids).await?;
 			let status_map: std::collections::HashMap<Uuid, &Status> =
 				statuses.iter().map(|s| (s.server_id, s)).collect();
 
-			children
+			raw_siblings
 				.into_iter()
-				.map(|child| {
-					let child_status = status_map.get(&child.id).copied();
-					let child_up = child_status.map(|s| s.short_status()).unwrap_or_default();
-					let child_health = child_status.map(|s| s.health_state()).unwrap_or_default();
-					(
-						child_up,
-						child_health,
-						ServerInfo {
-							id: child.id,
-							name: child.name,
-							kind: child.kind,
-							rank: child.rank,
-							host: child.host.0.to_string(),
-							listed: child.listed,
-							cloud: child.cloud,
-							geolocation: child.geolocation,
-							device_id: child.device_id,
-							parent_server_id: Some(server.id),
-							parent_server_name: server.name.clone(),
-							alert_when_down_for: child.alert_when_down_for.0.as_secs(),
-						},
-					)
+				.map(|s| {
+					let st = status_map.get(&s.id).copied();
+					let sib_up = st.map(|s| s.short_status()).unwrap_or_default();
+					let sib_health = st.map(|s| s.health_state()).unwrap_or_default();
+					let mut info = server_to_info(s);
+					info.group_name = Some(g.name.clone());
+					(sib_up, sib_health, info)
 				})
 				.collect()
 		}
@@ -435,7 +430,8 @@ pub async fn get_detail(
 		last_status,
 		up,
 		health,
-		child_servers,
+		group,
+		siblings,
 	}))
 }
 
@@ -462,6 +458,18 @@ pub async fn update(
 	Json(args): Json<UpdateArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
+
+	// `group_id` transitions ALSO go through Server::assign_to_group so a
+	// move from "ungrouped" → "grouped" can promote any pending issues into
+	// an incident. Capture the original state before the update so the
+	// catch-up decision sees the previous group.
+	let before_group_id = if args.data.group_id.is_some() {
+		Some(Server::get_by_id(&mut conn, args.server_id).await?.group_id)
+	} else {
+		None
+	};
+	let new_group_id = args.data.group_id;
+
 	let update_data = PartialServer {
 		id: args.server_id,
 		name: args.data.name,
@@ -475,7 +483,7 @@ pub async fn update(
 			None
 		},
 		device_id: args.data.device_id,
-		parent_server_id: args.data.parent_server_id,
+		group_id: new_group_id,
 		listed: args.data.listed,
 		cloud: args.data.cloud,
 		geolocation: args.data.geolocation,
@@ -483,8 +491,15 @@ pub async fn update(
 			.data
 			.alert_when_down_for
 			.map(|s| database::pg_duration::PgDuration(jiff::SignedDuration::from_secs(s))),
+		notes: args.data.notes,
+		tags: args.data.tags,
 	};
 	Server::update(&mut conn, args.server_id, update_data).await?;
+
+	// Catch up open issues if we just moved an ungrouped server into a group.
+	if let (Some(None), Some(Some(_))) = (before_group_id, new_group_id) {
+		database::issues::reevaluate_open_issues_for_server(&mut conn, args.server_id).await?;
+	}
 	Ok(Json(()))
 }
 
@@ -573,39 +588,6 @@ pub async fn import_ticket(
 }
 
 #[derive(Deserialize, ToSchema)]
-pub struct SearchParentArgs {
-	pub query: String,
-	pub current_server_id: Uuid,
-	pub current_rank: Option<ServerRank>,
-	pub current_kind: ServerKind,
-}
-
-#[utoipa::path(
-	post,
-	path = "/search_parent",
-	tag = "servers",
-	request_body = SearchParentArgs,
-	responses(
-		(status = 200, body = Vec<ServerInfo>),
-	),
-)]
-pub async fn search_parent(
-	State(state): State<AppState>,
-	Json(args): Json<SearchParentArgs>,
-) -> Result<Json<Vec<ServerInfo>>> {
-	let mut conn = state.db.get().await?;
-	let all_servers = Server::search_for_parent(
-		&mut conn,
-		&args.query,
-		args.current_server_id,
-		args.current_rank,
-		args.current_kind,
-	)
-	.await?;
-	Ok(Json(all_servers.into_iter().map(server_to_info).collect()))
-}
-
-#[derive(Deserialize, ToSchema)]
 pub struct AttachTailscaleDeviceArgs {
 	pub server_id: Uuid,
 	/// Any of: a Tailscale CGNAT/ULA IP, a node id, or a DNS name.
@@ -684,11 +666,13 @@ pub async fn attach_tailscale_device(
 			rank: None,
 			host: None,
 			device_id: Some(Some(device.id)),
-			parent_server_id: None,
+			group_id: None,
 			listed: None,
 			cloud: None,
 			geolocation: None,
 			alert_when_down_for: None,
+			notes: None,
+			tags: None,
 		},
 	)
 	.await?;
@@ -706,4 +690,16 @@ pub(crate) async fn compute_min_chrome_version(
 	database::chrome_releases::ChromeRelease::get_min_version_at_date(conn, head_release_date)
 		.await
 		.ok()?
+}
+
+pub(crate) async fn collect_group_names(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	servers: &[Server],
+) -> Result<std::collections::HashMap<Uuid, String>> {
+	let ids: Vec<Uuid> = servers.iter().filter_map(|s| s.group_id).collect();
+	if ids.is_empty() {
+		return Ok(std::collections::HashMap::new());
+	}
+	let groups = ServerGroup::list_by_ids(conn, &ids).await?;
+	Ok(groups.into_iter().map(|g| (g.id, g.name)).collect())
 }

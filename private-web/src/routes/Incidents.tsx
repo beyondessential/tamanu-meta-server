@@ -64,7 +64,7 @@ export default function Incidents() {
 		{},
 		[refreshTick],
 	);
-	const roots = useApi("servers", "list_roots", {}, []);
+	const groups = useApi("server_groups", "list", {}, []);
 	const issues = useApi(
 		"issues",
 		"list",
@@ -115,7 +115,7 @@ export default function Incidents() {
 				setSeverities={setSeverities}
 				groupId={groupId}
 				setGroupId={setGroupId}
-				roots={roots}
+				groups={groups}
 				onRefresh={bumpRefresh}
 			/>
 
@@ -147,7 +147,7 @@ function FilterBar({
 	setSeverities,
 	groupId,
 	setGroupId,
-	roots,
+	groups,
 	onRefresh,
 }: {
 	activeOnly: boolean;
@@ -156,7 +156,7 @@ function FilterBar({
 	setSeverities: (v: Severity[]) => void;
 	groupId: string;
 	setGroupId: (v: string) => void;
-	roots: ReturnType<typeof useApi<"servers", "list_roots">>;
+	groups: ReturnType<typeof useApi<"server_groups", "list">>;
 	onRefresh: () => void;
 }) {
 	return (
@@ -217,10 +217,10 @@ function FilterBar({
 					sx={{ minWidth: 200 }}
 				>
 					<MenuItem value="">All groups</MenuItem>
-					{roots.status === "ok" &&
-						roots.data.map((r) => (
-							<MenuItem key={r.id} value={r.id}>
-								{r.name ?? r.host}
+					{groups.status === "ok" &&
+						groups.data.map((g) => (
+							<MenuItem key={g.id} value={g.id}>
+								{g.name}
 							</MenuItem>
 						))}
 				</TextField>

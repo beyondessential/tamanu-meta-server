@@ -3,26 +3,21 @@ use commons_tests::diesel_async::SimpleAsyncConnection;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
-struct ServerDetailsResponse {
-	id: String,
-	name: String,
-	rank: String,
-	host: String,
-	up: String,
-	version: Option<String>,
-	version_distance: Option<u64>,
-	facility_servers: Vec<FacilityServerCardResponse>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
 struct ServerDetailsDataResponse {
 	id: String,
 	name: String,
 	kind: String,
 	rank: String,
 	host: String,
-	parent_server_id: Option<String>,
-	parent_server_name: Option<String>,
+	group_id: Option<String>,
+	group_name: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct ServerGroupResponse {
+	id: String,
+	name: String,
+	notes: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -31,18 +26,10 @@ struct ServerDetailResponse {
 	device_info: Option<DeviceInfo>,
 	last_status: Option<ServerLastStatusData>,
 	up: String,
-	child_servers: Vec<ChildServerData>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct ChildServerData {
-	id: String,
-	name: String,
-	kind: String,
-	rank: String,
-	host: String,
-	up: String,
-	last_status: Option<ServerLastStatusData>,
+	#[serde(default)]
+	group: Option<ServerGroupResponse>,
+	#[serde(default)]
+	siblings: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -133,7 +120,6 @@ async fn status_json_empty_database() {
 #[tokio::test(flavor = "multi_thread")]
 async fn status_json_basic_server() {
 	commons_tests::server::run(async |mut conn, _, private| {
-		// Add a version to satisfy server_details requirement
 		conn.batch_execute(
 			"INSERT INTO versions (id, major, minor, patch, status, changelog, created_at) VALUES
 			('00000000-0000-0000-0000-000000000001', 1, 0, 0, 'published', 'Test version', NOW())"
@@ -142,33 +128,35 @@ async fn status_json_basic_server() {
 		.unwrap();
 
 		conn.batch_execute(
-			"INSERT INTO servers (id, name, host, rank, kind) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Test Server', 'https://test.example.com', 'production', 'central')"
+			"INSERT INTO server_groups (id, name) VALUES
+			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Test cluster');
+			INSERT INTO servers (id, name, host, rank, kind, group_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Test Server', 'https://test.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')",
 		)
 		.await
 		.unwrap();
 
-		// Get server IDs
-		let server_ids_response = private.post("/api/statuses/server_grouped_ids").json(&serde_json::json!({})).await;
+		let server_ids_response = private
+			.post("/api/statuses/server_grouped_ids")
+			.json(&serde_json::json!({}))
+			.await;
 		server_ids_response.assert_status_ok();
 		let grouped_ids: std::collections::BTreeMap<String, Vec<String>> = server_ids_response.json();
-		let server_ids: Vec<String> = grouped_ids.into_values().flatten().collect();
-		assert_eq!(server_ids.len(), 1);
+		let group_ids: Vec<String> = grouped_ids.into_values().flatten().collect();
+		assert_eq!(group_ids.len(), 1);
 
-		let server_id = &server_ids[0];
-
-		// Get server details
+		let group_id = &group_ids[0];
 		let details_response = private
-			.post("/api/statuses/server_details")
-			.json(&serde_json::json!({"server_id": server_id}))
+			.post("/api/statuses/group_details")
+			.json(&serde_json::json!({"server_group_id": group_id}))
 			.await;
 		details_response.assert_status_ok();
-		let details: ServerDetailsResponse = details_response.json();
+		let details: ServerGroupCardResponse = details_response.json();
 
-		assert_eq!(details.name, "Test Server");
-		assert_eq!(details.host, "https://test.example.com/");
-		assert_eq!(details.rank, "production");
-		assert_eq!(details.up, "gone"); // No status means "gone"
+		assert_eq!(details.name, "Test cluster");
+		assert_eq!(details.members.len(), 1);
+		assert_eq!(details.members[0].name, "Test Server");
+		assert_eq!(details.members[0].up, "gone");
 	})
 	.await
 }
@@ -185,8 +173,10 @@ async fn status_json_server_with_recent_status() {
 		.unwrap();
 
 		conn.batch_execute(
-			"INSERT INTO servers (id, name, host, rank, kind) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Active Server', 'https://active.example.com', 'production', 'central');
+			"INSERT INTO server_groups (id, name) VALUES
+			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Active cluster');
+			INSERT INTO servers (id, name, host, rank, kind, group_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Active Server', 'https://active.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
 
 			INSERT INTO statuses (server_id, version, extra, created_at) VALUES
 			('11111111-1111-1111-1111-111111111111', '1.2.3', '{\"uptime\": 3600}'::jsonb, NOW())"
@@ -205,14 +195,16 @@ async fn status_json_server_with_recent_status() {
 
 		// Get server details
 		let details_response = private
-			.post("/api/statuses/server_details")
-			.json(&serde_json::json!({"server_id": server_id}))
+			.post("/api/statuses/group_details")
+			.json(&serde_json::json!({"server_group_id": server_id}))
 			.await;
 		details_response.assert_status_ok();
-		let details: ServerDetailsResponse = details_response.json();
+		let details: ServerGroupCardResponse = details_response.json();
 
-		assert_eq!(details.name, "Active Server");
-		assert_eq!(details.up, "up"); // Recent status means "up"
+		assert_eq!(details.name, "Active cluster");
+		assert_eq!(details.members.len(), 1);
+		assert_eq!(details.members[0].name, "Active Server");
+		assert_eq!(details.members[0].up, "up"); // Recent status means "up"
 		assert_eq!(details.version, Some("1.2.3".to_string()));
 	})
 	.await
@@ -230,9 +222,12 @@ async fn status_json_server_status_ages() {
 		.unwrap();
 
 		conn.batch_execute(
-			"INSERT INTO servers (id, name, host, rank, kind) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Down Server', 'https://down.example.com', 'production', 'central'),
-			('22222222-2222-2222-2222-222222222222', 'Away Server', 'https://away.example.com', 'production', 'central');
+			"INSERT INTO server_groups (id, name) VALUES
+			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Down cluster'),
+			('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'Away cluster');
+			INSERT INTO servers (id, name, host, rank, kind, group_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Down Server', 'https://down.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+			('22222222-2222-2222-2222-222222222222', 'Away Server', 'https://away.example.com', 'production', 'central', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
 
 			INSERT INTO statuses (server_id, version, created_at) VALUES
 			('11111111-1111-1111-1111-111111111111', '1.0.0', NOW() - INTERVAL '45 minutes'),
@@ -248,22 +243,23 @@ async fn status_json_server_status_ages() {
 		let server_ids: Vec<String> = grouped_ids.into_values().flatten().collect();
 		assert_eq!(server_ids.len(), 2);
 
-		// Get status for each server
+		// Each group has one server; check its status via the group card.
 		let mut down_status: Option<String> = None;
 		let mut away_status: Option<String> = None;
 
 		for server_id in &server_ids {
 			let details_response = private
-				.post("/api/statuses/server_details")
-				.json(&serde_json::json!({"server_id": server_id.as_str()}))
+				.post("/api/statuses/group_details")
+				.json(&serde_json::json!({"server_group_id": server_id.as_str()}))
 				.await;
 			details_response.assert_status_ok();
-			let details: ServerDetailsResponse = details_response.json();
+			let details: ServerGroupCardResponse = details_response.json();
+			assert_eq!(details.members.len(), 1);
 
-			if details.name == "Down Server" {
-				down_status = Some(details.up.clone());
-			} else if details.name == "Away Server" {
-				away_status = Some(details.up.clone());
+			match details.members[0].name.as_str() {
+				"Down Server" => down_status = Some(details.members[0].up.clone()),
+				"Away Server" => away_status = Some(details.members[0].up.clone()),
+				_ => {}
 			}
 		}
 
@@ -284,12 +280,15 @@ async fn status_json_platform_detection() {
 		.await
 		.unwrap();
 
-		// Insert servers with different PostgreSQL versions to test platform detection
 		conn.batch_execute(
-			"INSERT INTO servers (id, name, host, rank, kind) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Windows Server', 'https://win.example.com', 'production', 'central'),
-			('22222222-2222-2222-2222-222222222222', 'Linux Server', 'https://linux.example.com', 'production', 'central'),
-			('33333333-3333-3333-3333-333333333333', 'Windows Server 2', 'https://win2.example.com', 'production', 'central');
+			"INSERT INTO server_groups (id, name) VALUES
+			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Windows cluster'),
+			('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'Linux cluster'),
+			('cccccccc-cccc-cccc-cccc-cccccccccccc', 'Windows cluster 2');
+			INSERT INTO servers (id, name, host, rank, kind, group_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Windows Server', 'https://win.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+			('22222222-2222-2222-2222-222222222222', 'Linux Server', 'https://linux.example.com', 'production', 'central', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'),
+			('33333333-3333-3333-3333-333333333333', 'Windows Server 2', 'https://win2.example.com', 'production', 'central', 'cccccccc-cccc-cccc-cccc-cccccccccccc');
 
 			INSERT INTO statuses (server_id, version, extra, created_at) VALUES
 			('11111111-1111-1111-1111-111111111111', '1.0.0', '{\"pgVersion\": \"PostgreSQL 13.7 on x86_64-pc-windows-msvc, compiled by Visual C++ build 1914\"}'::jsonb, NOW()),
@@ -306,30 +305,28 @@ async fn status_json_platform_detection() {
 		let server_ids: Vec<String> = grouped_ids.into_values().flatten().collect();
 		assert_eq!(server_ids.len(), 3);
 
-		// Get status for each server
-		let mut win_status: Option<ServerDetailsResponse> = None;
-		let mut linux_status: Option<ServerDetailsResponse> = None;
-		let mut win2_status: Option<ServerDetailsResponse> = None;
+		let mut win_status: Option<ServerGroupCardResponse> = None;
+		let mut linux_status: Option<ServerGroupCardResponse> = None;
+		let mut win2_status: Option<ServerGroupCardResponse> = None;
 
 		for server_id in &server_ids {
 			let details_response = private
-				.post("/api/statuses/server_details")
-				.json(&serde_json::json!({"server_id": server_id.as_str()}))
+				.post("/api/statuses/group_details")
+				.json(&serde_json::json!({"server_group_id": server_id.as_str()}))
 				.await;
 			details_response.assert_status_ok();
-			let details: ServerDetailsResponse = details_response.json();
+			let details: ServerGroupCardResponse = details_response.json();
 
-			if details.name == "Windows Server" {
-				win_status = Some(details);
-			} else if details.name == "Linux Server" {
-				linux_status = Some(details);
-			} else if details.name == "Windows Server 2" {
-				win2_status = Some(details);
+			match details.members.first().map(|m| m.name.as_str()) {
+				Some("Windows Server") => win_status = Some(details),
+				Some("Linux Server") => linux_status = Some(details),
+				Some("Windows Server 2") => win2_status = Some(details),
+				_ => {}
 			}
 		}
 
-		// Platform detection and postgres version are not available in server_details response
-		// Just verify we got all three servers
+		// Platform/postgres info isn't on the group card; just verify all
+		// three groups round-trip with their single member each.
 		assert!(win_status.is_some());
 		assert!(linux_status.is_some());
 		assert!(win2_status.is_some());
@@ -349,37 +346,39 @@ async fn status_json_mixed_server_ranks() {
 		.unwrap();
 
 		conn.batch_execute(
-			"INSERT INTO servers (id, name, host, rank, kind) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Production', 'https://prod.example.com', 'production', 'central'),
-			('22222222-2222-2222-2222-222222222222', 'Dev', 'https://dev.example.com', 'dev', 'central'),
-			('33333333-3333-3333-3333-333333333333', 'Clone', 'https://clone.example.com', 'clone', 'central')"
+			"INSERT INTO server_groups (id, name) VALUES
+			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Production'),
+			('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'Dev'),
+			('cccccccc-cccc-cccc-cccc-cccccccccccc', 'Clone');
+			INSERT INTO servers (id, name, host, rank, kind, group_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Production', 'https://prod.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+			('22222222-2222-2222-2222-222222222222', 'Dev', 'https://dev.example.com', 'dev', 'central', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'),
+			('33333333-3333-3333-3333-333333333333', 'Clone', 'https://clone.example.com', 'clone', 'central', 'cccccccc-cccc-cccc-cccc-cccccccccccc')",
 		)
 		.await
 		.unwrap();
 
-		// Get server IDs
 		let server_ids_response = private.post("/api/statuses/server_grouped_ids").json(&serde_json::json!({})).await;
 		server_ids_response.assert_status_ok();
 		let grouped_ids: std::collections::BTreeMap<String, Vec<String>> = server_ids_response.json();
 
-		// Verify we have all three ranks
+		// Three rank buckets, one group each.
 		assert_eq!(grouped_ids.len(), 3);
 		assert!(grouped_ids.contains_key("production"));
 		assert!(grouped_ids.contains_key("clone"));
 		assert!(grouped_ids.contains_key("dev"));
 
-		// Get production server details
 		let production_id = &grouped_ids.get("production").unwrap()[0];
 		let details_response = private
-			.post("/api/statuses/server_details")
-			.json(&serde_json::json!({"server_id": production_id}))
+			.post("/api/statuses/group_details")
+			.json(&serde_json::json!({"server_group_id": production_id}))
 			.await;
 		details_response.assert_status_ok();
-		let details: ServerDetailsResponse = details_response.json();
+		let details: ServerGroupCardResponse = details_response.json();
 
-		// Verify we got the production server
 		assert_eq!(details.name, "Production");
-		assert_eq!(details.rank, "production");
+		assert_eq!(details.members.len(), 1);
+		assert_eq!(details.members[0].name, "Production");
 	})
 	.await
 }
@@ -395,30 +394,34 @@ async fn status_json_unnamed_servers_excluded() {
 		.await
 		.unwrap();
 
+		// One named group + one server with no name (groups themselves
+		// always have a name; the test now verifies the group renders even
+		// when a member server is unnamed).
 		conn.batch_execute(
-			"INSERT INTO servers (id, name, host, rank, kind) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Named Server', 'https://named.example.com', 'production', 'central'),
-			('22222222-2222-2222-2222-222222222222', NULL, 'https://unnamed.example.com', 'production', 'central')"
+			"INSERT INTO server_groups (id, name) VALUES
+			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Mixed cluster');
+			INSERT INTO servers (id, name, host, rank, kind, group_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Named Server', 'https://named.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+			('22222222-2222-2222-2222-222222222222', NULL, 'https://unnamed.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')",
 		)
 		.await
 		.unwrap();
 
-		// Get server IDs
 		let server_ids_response = private.post("/api/statuses/server_grouped_ids").json(&serde_json::json!({})).await;
 		server_ids_response.assert_status_ok();
 		let grouped_ids: std::collections::BTreeMap<String, Vec<String>> = server_ids_response.json();
-		let server_ids: Vec<String> = grouped_ids.into_values().flatten().collect();
-		assert_eq!(server_ids.len(), 1);
+		let group_ids: Vec<String> = grouped_ids.into_values().flatten().collect();
+		assert_eq!(group_ids.len(), 1);
 
-		// Get server details
 		let details_response = private
-			.post("/api/statuses/server_details")
-			.json(&serde_json::json!({"server_id": &server_ids[0]}))
+			.post("/api/statuses/group_details")
+			.json(&serde_json::json!({"server_group_id": &group_ids[0]}))
 			.await;
 		details_response.assert_status_ok();
-		let details: ServerDetailsResponse = details_response.json();
+		let details: ServerGroupCardResponse = details_response.json();
 
-		assert_eq!(details.name, "Named Server");
+		assert_eq!(details.name, "Mixed cluster");
+		assert_eq!(details.members.len(), 2);
 	})
 	.await
 }
@@ -426,7 +429,6 @@ async fn status_json_unnamed_servers_excluded() {
 #[tokio::test(flavor = "multi_thread")]
 async fn status_json_blip_status() {
 	commons_tests::server::run(async |mut conn, _, private| {
-		// Add a version to satisfy server_details requirement
 		conn.batch_execute(
 			"INSERT INTO versions (id, major, minor, patch, status, changelog, created_at) VALUES
 			('00000000-0000-0000-0000-000000000001', 1, 0, 0, 'published', 'Test version', NOW())"
@@ -435,34 +437,36 @@ async fn status_json_blip_status() {
 		.unwrap();
 
 		conn.batch_execute(
-			"INSERT INTO servers (id, name, host, rank, kind) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Blip Server', 'https://blip.example.com', 'production', 'central');
-
+			"INSERT INTO server_groups (id, name) VALUES
+			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Blip cluster');
+			INSERT INTO servers (id, name, host, rank, kind, group_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Blip Server', 'https://blip.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
 			INSERT INTO statuses (server_id, version, created_at) VALUES
-			('11111111-1111-1111-1111-111111111111', '1.0.0', NOW() - INTERVAL '4 minutes')"
+			('11111111-1111-1111-1111-111111111111', '1.0.0', NOW() - INTERVAL '4 minutes')",
 		)
 		.await
 		.unwrap();
 
-		// Get server IDs
-		let server_ids_response = private.post("/api/statuses/server_grouped_ids").json(&serde_json::json!({})).await;
+		let server_ids_response = private
+			.post("/api/statuses/server_grouped_ids")
+			.json(&serde_json::json!({}))
+			.await;
 		server_ids_response.assert_status_ok();
 		let grouped_ids: std::collections::BTreeMap<String, Vec<String>> = server_ids_response.json();
-		let server_ids: Vec<String> = grouped_ids.into_values().flatten().collect();
-		assert_eq!(server_ids.len(), 1);
+		let group_ids: Vec<String> = grouped_ids.into_values().flatten().collect();
+		assert_eq!(group_ids.len(), 1);
 
-		let server_id = &server_ids[0];
-
-		// Get server details
+		let group_id = &group_ids[0];
 		let details_response = private
-			.post("/api/statuses/server_details")
-			.json(&serde_json::json!({"server_id": server_id}))
+			.post("/api/statuses/group_details")
+			.json(&serde_json::json!({"server_group_id": group_id}))
 			.await;
 		details_response.assert_status_ok();
-		let details: ServerDetailsResponse = details_response.json();
+		let details: ServerGroupCardResponse = details_response.json();
 
-		assert_eq!(details.name, "Blip Server");
-		assert_eq!(details.up, "blip"); // 4 minutes ago should be "blip"
+		assert_eq!(details.members.len(), 1);
+		assert_eq!(details.members[0].name, "Blip Server");
+		assert_eq!(details.members[0].up, "blip"); // 4 minutes ago should be "blip"
 	})
 	.await
 }
@@ -478,33 +482,34 @@ async fn status_json_gone_server() {
 		.await
 		.unwrap();
 
-		// Insert server with no status (should be "gone")
+		// Group + server with no status — both server-level and card-level
+		// dots should read "gone".
 		conn.batch_execute(
-			"INSERT INTO servers (id, name, host, rank, kind) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Gone Server', 'https://gone.example.com', 'production', 'central')"
+			"INSERT INTO server_groups (id, name) VALUES
+			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Gone cluster');
+			INSERT INTO servers (id, name, host, rank, kind, group_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Gone Server', 'https://gone.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')",
 		)
 		.await
 		.unwrap();
 
-		// Get server IDs
 		let server_ids_response = private.post("/api/statuses/server_grouped_ids").json(&serde_json::json!({})).await;
 		server_ids_response.assert_status_ok();
 		let grouped_ids: std::collections::BTreeMap<String, Vec<String>> = server_ids_response.json();
-		let server_ids: Vec<String> = grouped_ids.into_values().flatten().collect();
-		assert_eq!(server_ids.len(), 1);
+		let group_ids: Vec<String> = grouped_ids.into_values().flatten().collect();
+		assert_eq!(group_ids.len(), 1);
 
-		let server_id = &server_ids[0];
-
-		// Get server details
+		let group_id = &group_ids[0];
 		let details_response = private
-			.post("/api/statuses/server_details")
-			.json(&serde_json::json!({"server_id": server_id}))
+			.post("/api/statuses/group_details")
+			.json(&serde_json::json!({"server_group_id": group_id}))
 			.await;
 		details_response.assert_status_ok();
-		let details: ServerDetailsResponse = details_response.json();
+		let details: ServerGroupCardResponse = details_response.json();
 
-		assert_eq!(details.name, "Gone Server");
-		assert_eq!(details.up, "gone"); // No status means "gone"
+		assert_eq!(details.name, "Gone cluster");
+		assert_eq!(details.members.len(), 1);
+		assert_eq!(details.members[0].up, "gone"); // No status means "gone"
 	})
 	.await
 }
@@ -540,7 +545,7 @@ async fn get_detail_basic() {
 		assert!(detail.device_info.is_none());
 		assert!(detail.last_status.is_none());
 		assert_eq!(detail.up, "gone");
-		assert!(detail.child_servers.is_empty());
+		assert!(detail.siblings.is_empty());
 	})
 	.await
 }
@@ -619,7 +624,7 @@ async fn get_detail_with_device() {
 
 		assert_eq!(detail.server.name, "Device Server");
 		assert!(detail.device_info.is_some());
-		assert!(detail.child_servers.is_empty());
+		assert!(detail.siblings.is_empty());
 
 		let device_info = detail.device_info.unwrap();
 		assert_eq!(device_info.device.id, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
@@ -661,19 +666,17 @@ async fn get_detail_invalid_id() {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-struct CentralServerCardResponse {
+struct ServerGroupCardResponse {
 	id: String,
 	name: String,
-	rank: String,
-	host: String,
-	up: String,
+	notes: String,
 	version: Option<String>,
 	version_distance: Option<i32>,
-	facility_servers: Vec<FacilityServerCardResponse>,
+	members: Vec<GroupMemberResponse>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-struct FacilityServerCardResponse {
+struct GroupMemberResponse {
 	id: String,
 	name: String,
 	up: String,
@@ -697,7 +700,6 @@ async fn server_grouped_ids_empty() {
 #[tokio::test(flavor = "multi_thread")]
 async fn server_grouped_ids_with_data() {
 	commons_tests::server::run(async |mut conn, _, private| {
-		// Add a version to satisfy server_details requirement
 		conn.batch_execute(
 			"INSERT INTO versions (id, major, minor, patch, status, changelog, created_at) VALUES
 			('00000000-0000-0000-0000-000000000001', 1, 0, 0, 'published', 'Test version', NOW())"
@@ -705,21 +707,20 @@ async fn server_grouped_ids_with_data() {
 		.await
 		.unwrap();
 
-		// Create central servers with different ranks
+		// Three groups, each with one or more servers — Production group has
+		// multiple members to make sure the bucket gets exactly one entry per
+		// group rather than per server.
 		conn.batch_execute(
-			"INSERT INTO servers (id, name, host, rank, kind) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Production Central', 'https://prod.example.com', 'production', 'central'),
-			('22222222-2222-2222-2222-222222222222', 'Clone Central', 'https://clone.example.com', 'clone', 'central'),
-			('33333333-3333-3333-3333-333333333333', 'Demo Central', 'https://demo.example.com', 'demo', 'central')"
-		)
-		.await
-		.unwrap();
-
-		// Add facility servers for production central
-		conn.batch_execute(
-			"INSERT INTO servers (id, name, host, rank, kind, parent_server_id) VALUES
-			('44444444-4444-4444-4444-444444444444', 'Facility A', 'https://facility-a.example.com', 'production', 'facility', '11111111-1111-1111-1111-111111111111'),
-			('55555555-5555-5555-5555-555555555555', 'Facility B', 'https://facility-b.example.com', 'production', 'facility', '11111111-1111-1111-1111-111111111111')"
+			"INSERT INTO server_groups (id, name) VALUES
+			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Production cluster'),
+			('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'Clone cluster'),
+			('cccccccc-cccc-cccc-cccc-cccccccccccc', 'Demo cluster');
+			INSERT INTO servers (id, name, host, rank, kind, group_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Prod Central', 'https://prod.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+			('44444444-4444-4444-4444-444444444444', 'Prod Facility A', 'https://facility-a.example.com', 'production', 'facility', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+			('55555555-5555-5555-5555-555555555555', 'Prod Facility B', 'https://facility-b.example.com', 'production', 'facility', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+			('22222222-2222-2222-2222-222222222222', 'Clone Central', 'https://clone.example.com', 'clone', 'central', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'),
+			('33333333-3333-3333-3333-333333333333', 'Demo Central', 'https://demo.example.com', 'demo', 'central', 'cccccccc-cccc-cccc-cccc-cccccccccccc')",
 		)
 		.await
 		.unwrap();
@@ -732,41 +733,34 @@ async fn server_grouped_ids_with_data() {
 
 		let data: std::collections::BTreeMap<String, Vec<String>> = response.json();
 
-		// Check production servers
 		assert_eq!(data.get("production").map(|v| v.len()), Some(1));
 		assert_eq!(
 			data.get("production").and_then(|v| v.first()),
-			Some(&"11111111-1111-1111-1111-111111111111".to_string())
+			Some(&"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa".to_string())
 		);
 
-		// Verify server_details returns correct data for production server
+		// group_details returns the group card with all members.
 		let details_response = private
-			.post("/api/statuses/server_details")
-			.json(&serde_json::json!({"server_id": "11111111-1111-1111-1111-111111111111"}))
+			.post("/api/statuses/group_details")
+			.json(&serde_json::json!({"server_group_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}))
 			.await;
 		details_response.assert_status_ok();
-		let prod_server: CentralServerCardResponse = details_response.json();
-		assert_eq!(prod_server.name, "Production Central");
-		assert_eq!(prod_server.rank, "production");
-		assert_eq!(prod_server.host, "https://prod.example.com/");
-		assert_eq!(prod_server.up, "gone"); // No status, so should be gone
-		assert_eq!(prod_server.facility_servers.len(), 2);
+		let prod_group: ServerGroupCardResponse = details_response.json();
+		assert_eq!(prod_group.name, "Production cluster");
+		assert_eq!(prod_group.members.len(), 3);
 
-		// Check clone servers
 		assert_eq!(data.get("clone").map(|v| v.len()), Some(1));
 		assert_eq!(
 			data.get("clone").and_then(|v| v.first()),
-			Some(&"22222222-2222-2222-2222-222222222222".to_string())
+			Some(&"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb".to_string())
 		);
 
-		// Check demo servers
 		assert_eq!(data.get("demo").map(|v| v.len()), Some(1));
 		assert_eq!(
 			data.get("demo").and_then(|v| v.first()),
-			Some(&"33333333-3333-3333-3333-333333333333".to_string())
+			Some(&"cccccccc-cccc-cccc-cccc-cccccccccccc".to_string())
 		);
 
-		// Other ranks should not exist
 		assert!(!data.contains_key("test"));
 		assert!(!data.contains_key("dev"));
 	})
@@ -774,13 +768,17 @@ async fn server_grouped_ids_with_data() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn server_grouped_ids_excludes_unnamed() {
+async fn server_grouped_ids_excludes_ungrouped() {
 	commons_tests::server::run(async |mut conn, _, private| {
-		// Create central servers, one with name and one without
+		// One group with a production-ranked member, plus a standalone
+		// ungrouped server. The endpoint should expose the group but ignore
+		// the ungrouped server entirely.
 		conn.batch_execute(
-			"INSERT INTO servers (id, name, host, rank, kind) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Named Central', 'https://named.example.com', 'production', 'central'),
-			('22222222-2222-2222-2222-222222222222', NULL, 'https://unnamed.example.com', 'production', 'central')"
+			"INSERT INTO server_groups (id, name) VALUES
+			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Production cluster');
+			INSERT INTO servers (id, name, host, rank, kind, group_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Grouped Central', 'https://grouped.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+			('22222222-2222-2222-2222-222222222222', 'Standalone', 'https://standalone.example.com', 'production', 'central', NULL)",
 		)
 		.await
 		.unwrap();
@@ -793,11 +791,10 @@ async fn server_grouped_ids_excludes_unnamed() {
 
 		let data: std::collections::BTreeMap<String, Vec<String>> = response.json();
 
-		// Only the named central should be included
 		assert_eq!(data.get("production").map(|v| v.len()), Some(1));
 		assert_eq!(
 			data.get("production").and_then(|v| v.first()),
-			Some(&"11111111-1111-1111-1111-111111111111".to_string())
+			Some(&"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa".to_string())
 		);
 	})
 	.await

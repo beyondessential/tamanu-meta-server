@@ -72,63 +72,164 @@ async fn manual_event_submit_creates_issue_without_device() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn incident_groups_at_root_server() {
+async fn incident_groups_at_server_group() {
 	commons_tests::server::run(async |mut conn, _public, private| {
-		// root --child (with device)
+		// One group containing two equal-level servers.
 		let device_id = Uuid::new_v4();
-		let root_id = Uuid::new_v4();
-		let child_id = Uuid::new_v4();
+		let group_id = Uuid::new_v4();
+		let server_a_id = Uuid::new_v4();
+		let server_b_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO devices (id, role) VALUES ('{device_id}', 'server');
+			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'cluster');
+			 INSERT INTO devices (id, role) VALUES ('{device_id}', 'server');
 			 INSERT INTO device_keys (device_id, key_data, name, is_active) VALUES \
 				('{device_id}', '\\x6b6579'::bytea, 'k', true);
-			 INSERT INTO servers (id, host, kind) VALUES \
-				('{root_id}', 'https://root.example.com', 'central');
-			 INSERT INTO servers (id, host, kind, device_id, parent_server_id) VALUES \
-				('{child_id}', 'https://child.example.com', 'facility', '{device_id}', '{root_id}');"
+			 INSERT INTO servers (id, host, kind, group_id) VALUES \
+				('{server_a_id}', 'https://a.example.com', 'central', '{group_id}');
+			 INSERT INTO servers (id, host, kind, device_id, group_id) VALUES \
+				('{server_b_id}', 'https://b.example.com', 'facility', '{device_id}', '{group_id}');"
 		))
 		.await
 		.expect("seed");
 
-		// Submit a manual event on the child server with severity=error → opens incident at root.
+		// Submit a manual event on server B with severity=error → opens incident on group.
 		let resp = private
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
-				"serverId": child_id,
+				"serverId": server_b_id,
 				"ref": "x",
 				"severity": "error",
-				"message": "trouble in child",
+				"message": "trouble in B",
 			}))
 			.await;
 		resp.assert_status_ok();
 
-		// The root has one open incident.
+		// Listing incidents by either member's id finds the same group-level incident.
 		let resp = private
 			.post("/api/incidents/list_for_server")
-			.json(&serde_json::json!({ "server_id": root_id }))
+			.json(&serde_json::json!({ "server_id": server_a_id }))
 			.await;
 		resp.assert_status_ok();
 		let items: Vec<serde_json::Value> = resp.json();
-		assert_eq!(items.len(), 1, "incident lives on the root server");
+		assert_eq!(items.len(), 1, "incident lives on the group");
 		assert!(items[0].get("closed_at").map_or(true, |v| v.is_null()));
-		let root_incident_id = items[0]
+		let group_incident_id = items[0]
 			.get("id")
 			.and_then(|v| v.as_str())
 			.unwrap()
 			.to_string();
 
-		// Asking via the child's id resolves to the same group, so it returns
-		// the same incident — the endpoint walks parent_server_id to the root.
 		let resp = private
 			.post("/api/incidents/list_for_server")
-			.json(&serde_json::json!({ "server_id": child_id }))
+			.json(&serde_json::json!({ "server_id": server_b_id }))
 			.await;
 		resp.assert_status_ok();
 		let items: Vec<serde_json::Value> = resp.json();
-		assert_eq!(items.len(), 1, "child resolves to the same group");
+		assert_eq!(items.len(), 1, "originating member resolves to the same group");
 		assert_eq!(
 			items[0].get("id").and_then(|v| v.as_str()),
-			Some(root_incident_id.as_str()),
+			Some(group_incident_id.as_str()),
+		);
+		assert_eq!(
+			items[0].get("server_group_id").and_then(|v| v.as_str()),
+			Some(group_id.to_string().as_str()),
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ungrouped_server_event_skips_incident() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		// A server with no group_id should still record issues, but no
+		// incident is opened — incidents are group-keyed.
+		let server_id = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO servers (id, host, kind) VALUES \
+				('{server_id}', 'https://orphan.example.com', 'central');"
+		))
+		.await
+		.expect("seed");
+
+		let resp = private
+			.post("/api/issues/submit_manual_event")
+			.json(&serde_json::json!({
+				"serverId": server_id,
+				"ref": "x",
+				"severity": "error",
+				"message": "no group yet",
+			}))
+			.await;
+		resp.assert_status_ok();
+
+		let resp = private
+			.post("/api/incidents/list_for_server")
+			.json(&serde_json::json!({ "server_id": server_id }))
+			.await;
+		resp.assert_status_ok();
+		let items: Vec<serde_json::Value> = resp.json();
+		assert!(items.is_empty(), "ungrouped servers can't have incidents");
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn assigning_group_opens_pending_incident() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		conn.batch_execute("INSERT INTO admins (email) VALUES ('admin@example.com')")
+			.await
+			.expect("seed admin");
+
+		let server_id = Uuid::new_v4();
+		let group_id = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO servers (id, host, kind) VALUES \
+				('{server_id}', 'https://late.example.com', 'central');
+			 INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'late group');"
+		))
+		.await
+		.expect("seed");
+
+		// File an event while ungrouped: issue exists, no incident opens.
+		let resp = private
+			.post("/api/issues/submit_manual_event")
+			.json(&serde_json::json!({
+				"serverId": server_id,
+				"ref": "stuck",
+				"severity": "error",
+				"message": "waiting to be grouped",
+			}))
+			.await;
+		resp.assert_status_ok();
+
+		let resp = private
+			.post("/api/incidents/list_for_server")
+			.json(&serde_json::json!({ "server_id": server_id }))
+			.await;
+		resp.assert_status_ok();
+		let items: Vec<serde_json::Value> = resp.json();
+		assert!(items.is_empty(), "no incident while ungrouped");
+
+		// Assign the server to a group: open issue should now have an incident.
+		let resp = private
+			.post("/api/servers/update")
+			.json(&serde_json::json!({
+				"server_id": server_id,
+				"data": { "group_id": group_id }
+			}))
+			.await;
+		resp.assert_status_ok();
+
+		let resp = private
+			.post("/api/incidents/list_for_server")
+			.json(&serde_json::json!({ "server_id": server_id }))
+			.await;
+		resp.assert_status_ok();
+		let items: Vec<serde_json::Value> = resp.json();
+		assert_eq!(items.len(), 1, "group assignment promoted the open issue");
+		assert_eq!(
+			items[0].get("server_group_id").and_then(|v| v.as_str()),
+			Some(group_id.to_string().as_str()),
 		);
 	})
 	.await;
@@ -138,9 +239,11 @@ async fn incident_groups_at_root_server() {
 async fn issue_reopen_keeps_identity_and_joins_new_incident() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let server_id = Uuid::new_v4();
+		let group_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO servers (id, host, kind) VALUES \
-				('{server_id}', 'https://example.com', 'central');"
+			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g'); \
+			 INSERT INTO servers (id, host, kind, group_id) VALUES \
+				('{server_id}', 'https://example.com', 'central', '{group_id}');"
 		))
 		.await
 		.expect("seed");
@@ -227,9 +330,11 @@ async fn issue_reopen_keeps_identity_and_joins_new_incident() {
 async fn low_severity_issue_joins_existing_open_incident() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let server_id = Uuid::new_v4();
+		let group_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO servers (id, host, kind) VALUES \
-				('{server_id}', 'https://example.com', 'central');"
+			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g'); \
+			 INSERT INTO servers (id, host, kind, group_id) VALUES \
+				('{server_id}', 'https://example.com', 'central', '{group_id}');"
 		))
 		.await
 		.expect("seed");
@@ -319,9 +424,11 @@ async fn low_severity_alone_does_not_open_incident() {
 async fn severity_downgrade_keeps_issue_in_incident() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let server_id = Uuid::new_v4();
+		let group_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO servers (id, host, kind) VALUES \
-				('{server_id}', 'https://example.com', 'central');"
+			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g'); \
+			 INSERT INTO servers (id, host, kind, group_id) VALUES \
+				('{server_id}', 'https://example.com', 'central', '{group_id}');"
 		))
 		.await
 		.expect("seed");
@@ -441,10 +548,12 @@ async fn open_issue(
 	private: &commons_tests::axum_test::TestServer,
 	server_id: Uuid,
 ) -> Uuid {
-	// Standalone server, no parent — the incident grouping lives on this server.
+	// Standalone server in its own group — incidents are group-keyed.
+	let group_id = Uuid::new_v4();
 	conn.batch_execute(&format!(
-		"INSERT INTO servers (id, host, kind) VALUES \
-			('{server_id}', 'https://example.com', 'central') ON CONFLICT DO NOTHING;"
+		"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g') ON CONFLICT DO NOTHING; \
+		 INSERT INTO servers (id, host, kind, group_id) VALUES \
+			('{server_id}', 'https://example.com', 'central', '{group_id}') ON CONFLICT DO NOTHING;"
 	))
 	.await
 	.expect("seed");
