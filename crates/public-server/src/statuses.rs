@@ -312,7 +312,7 @@ fn per_check_description(
 			serde_json::Value::String(s) => s.clone(),
 			other => other.to_string(),
 		};
-		lines.push(format!("- **{k}**: {rendered}"));
+		lines.push(format!("- **{k}**: `{rendered}`"));
 	}
 	(!lines.is_empty()).then(|| lines.join("\n"))
 }
@@ -337,7 +337,7 @@ fn roll_up_unhealthy_description(health: &serde_json::Value) -> Option<String> {
 				return None;
 			}
 			let check = obj.get("check")?.as_str()?;
-			Some(format!("- {check}"))
+			Some(format!("- `{check}`"))
 		})
 		.collect();
 	(!bullets.is_empty()).then(|| format!("Failing checks:\n{}", bullets.join("\n")))
