@@ -1,4 +1,4 @@
-import { Box, Link as MuiLink, Stack, Typography } from "@mui/material";
+import { Box, Chip, Link as MuiLink, Stack, Tooltip, Typography } from "@mui/material";
 import { Link as RouterLink } from "react-router-dom";
 import type { ServerKind, ServerRank } from "../types";
 import ServerKindChip from "./ServerKindChip";
@@ -12,10 +12,13 @@ export interface ServerInfo {
 	kind: ServerKind;
 	rank: ServerRank | null;
 	group_name?: string | null;
+	alert_when_down_for?: number;
 }
 
 export default function ServerShorty({ server }: { server: ServerInfo }) {
 	const name = server.name || "Unnamed server";
+	const unmonitored =
+		server.alert_when_down_for !== undefined && server.alert_when_down_for <= 0;
 	return (
 		<Stack
 			direction="row"
@@ -42,6 +45,11 @@ export default function ServerShorty({ server }: { server: ServerInfo }) {
 			</MuiLink>
 			{server.rank && <ServerRankChip rank={server.rank} />}
 			<ServerKindChip kind={server.kind} />
+			{unmonitored && (
+				<Tooltip title="Status alerts are off for this server — canopy isn't watching it.">
+					<Chip size="small" variant="outlined" label="unmonitored" />
+				</Tooltip>
+			)}
 			<Box sx={{ ml: "auto" }}>
 				<Typography variant="body2" color="text.secondary">
 					{server.host}
