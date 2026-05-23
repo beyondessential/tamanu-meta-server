@@ -56,7 +56,9 @@ pub struct ServerInfo {
 	/// Display name of the group this server belongs to (denormalised so list
 	/// rows don't need to fetch the group separately). `None` if ungrouped.
 	pub group_name: Option<String>,
-	pub listed: bool,
+	/// Name this server appears under in the public mobile-app server list.
+	/// `None` means the server is not listed publicly.
+	pub public_name: Option<String>,
 	pub cloud: Option<bool>,
 	pub geolocation: Option<GeoPoint>,
 	/// Downtime threshold in seconds before the reachability sweep files an
@@ -108,8 +110,12 @@ pub struct ServerDataUpdate {
 		skip_serializing_if = "Option::is_none"
 	)]
 	pub group_id: Option<Option<Uuid>>,
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub listed: Option<bool>,
+	#[serde(
+		default,
+		deserialize_with = "deserialize_some",
+		skip_serializing_if = "Option::is_none"
+	)]
+	pub public_name: Option<Option<String>>,
 	#[serde(
 		default,
 		deserialize_with = "deserialize_some",
@@ -148,7 +154,7 @@ pub(super) fn server_to_info(s: Server) -> ServerInfo {
 		device_id: s.device_id,
 		group_id: s.group_id,
 		group_name: None,
-		listed: s.listed,
+		public_name: s.public_name,
 		cloud: s.cloud,
 		geolocation: s.geolocation,
 		alert_when_down_for: s.alert_when_down_for.0.as_secs(),
@@ -484,7 +490,7 @@ pub async fn update(
 		},
 		device_id: args.data.device_id,
 		group_id: new_group_id,
-		listed: args.data.listed,
+		public_name: args.data.public_name,
 		cloud: args.data.cloud,
 		geolocation: args.data.geolocation,
 		alert_when_down_for: args
@@ -667,7 +673,7 @@ pub async fn attach_tailscale_device(
 			host: None,
 			device_id: Some(Some(device.id)),
 			group_id: None,
-			listed: None,
+			public_name: None,
 			cloud: None,
 			geolocation: None,
 			alert_when_down_for: None,

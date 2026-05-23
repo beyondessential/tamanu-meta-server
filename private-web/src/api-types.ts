@@ -1859,9 +1859,13 @@ export interface components {
                 /** Format: uuid */
                 id: string;
                 kind: components["schemas"]["ServerKind"];
-                listed: boolean;
                 name?: string | null;
                 notes: string;
+                /**
+                 * @description Name this server appears under in the public mobile-app server list.
+                 *     `None` means the server is not listed publicly.
+                 */
+                public_name?: string | null;
                 rank?: null | components["schemas"]["ServerRank"];
                 tags: components["schemas"]["TagMap"];
             }[];
@@ -1997,9 +2001,9 @@ export interface components {
             group_id?: string | null;
             host?: string | null;
             kind?: null | components["schemas"]["ServerKind"];
-            listed?: boolean | null;
             name?: string | null;
             notes?: string | null;
+            public_name?: string | null;
             rank?: null | components["schemas"]["ServerRank"];
             tags?: null | components["schemas"]["TagMap"];
         };
@@ -2039,9 +2043,13 @@ export interface components {
                     /** Format: uuid */
                     id: string;
                     kind: components["schemas"]["ServerKind"];
-                    listed: boolean;
                     name?: string | null;
                     notes: string;
+                    /**
+                     * @description Name this server appears under in the public mobile-app server list.
+                     *     `None` means the server is not listed publicly.
+                     */
+                    public_name?: string | null;
                     rank?: null | components["schemas"]["ServerRank"];
                     tags: components["schemas"]["TagMap"];
                 }
@@ -2102,9 +2110,13 @@ export interface components {
             /** Format: uuid */
             id: string;
             kind: components["schemas"]["ServerKind"];
-            listed: boolean;
             name?: string | null;
             notes: string;
+            /**
+             * @description Name this server appears under in the public mobile-app server list.
+             *     `None` means the server is not listed publicly.
+             */
+            public_name?: string | null;
             rank?: null | components["schemas"]["ServerRank"];
             tags: components["schemas"]["TagMap"];
         };

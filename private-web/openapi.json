@@ -4740,7 +4740,6 @@
                 "id",
                 "kind",
                 "host",
-                "listed",
                 "alert_when_down_for",
                 "notes",
                 "tags"
@@ -4798,9 +4797,6 @@
                 "kind": {
                   "$ref": "#/components/schemas/ServerKind"
                 },
-                "listed": {
-                  "type": "boolean"
-                },
                 "name": {
                   "type": [
                     "string",
@@ -4809,6 +4805,13 @@
                 },
                 "notes": {
                   "type": "string"
+                },
+                "public_name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Name this server appears under in the public mobile-app server list.\n`None` means the server is not listed publicly."
                 },
                 "rank": {
                   "oneOf": [
@@ -5171,12 +5174,6 @@
               }
             ]
           },
-          "listed": {
-            "type": [
-              "boolean",
-              "null"
-            ]
-          },
           "name": {
             "type": [
               "string",
@@ -5184,6 +5181,12 @@
             ]
           },
           "notes": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "public_name": {
             "type": [
               "string",
               "null"
@@ -5288,7 +5291,6 @@
                     "id",
                     "kind",
                     "host",
-                    "listed",
                     "alert_when_down_for",
                     "notes",
                     "tags"
@@ -5346,9 +5348,6 @@
                     "kind": {
                       "$ref": "#/components/schemas/ServerKind"
                     },
-                    "listed": {
-                      "type": "boolean"
-                    },
                     "name": {
                       "type": [
                         "string",
@@ -5357,6 +5356,13 @@
                     },
                     "notes": {
                       "type": "string"
+                    },
+                    "public_name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Name this server appears under in the public mobile-app server list.\n`None` means the server is not listed publicly."
                     },
                     "rank": {
                       "oneOf": [
@@ -5478,7 +5484,6 @@
           "id",
           "kind",
           "host",
-          "listed",
           "alert_when_down_for",
           "notes",
           "tags"
@@ -5536,9 +5541,6 @@
           "kind": {
             "$ref": "#/components/schemas/ServerKind"
           },
-          "listed": {
-            "type": "boolean"
-          },
           "name": {
             "type": [
               "string",
@@ -5547,6 +5549,13 @@
           },
           "notes": {
             "type": "string"
+          },
+          "public_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Name this server appears under in the public mobile-app server list.\n`None` means the server is not listed publicly."
           },
           "rank": {
             "oneOf": [

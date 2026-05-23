@@ -201,7 +201,7 @@ fn server_to_info(s: database::servers::Server) -> ServerInfo {
 		device_id: s.device_id,
 		group_id: s.group_id,
 		group_name: None,
-		listed: s.listed,
+		public_name: s.public_name,
 		cloud: s.cloud,
 		geolocation: s.geolocation,
 		alert_when_down_for: s.alert_when_down_for.0.as_secs(),

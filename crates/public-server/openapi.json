@@ -1149,12 +1149,6 @@
               }
             ]
           },
-          "listed": {
-            "type": [
-              "boolean",
-              "null"
-            ]
-          },
           "name": {
             "type": [
               "string",
@@ -1162,6 +1156,12 @@
             ]
           },
           "notes": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "public_name": {
             "type": [
               "string",
               "null"
@@ -1255,7 +1255,6 @@
           "id",
           "host",
           "kind",
-          "listed",
           "alert_when_down_for"
         ],
         "properties": {
@@ -1304,9 +1303,6 @@
           "kind": {
             "$ref": "#/components/schemas/ServerKind"
           },
-          "listed": {
-            "type": "boolean"
-          },
           "name": {
             "type": [
               "string",
@@ -1315,6 +1311,13 @@
           },
           "notes": {
             "type": "string"
+          },
+          "public_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "If `Some`, the server appears in the public `/servers` list under this\nname (used by the Tamanu Mobile app). `None` means not listed. Decoupled\nfrom `name` because server `name`s are scoped within a group and may not\nbe globally meaningful."
           },
           "rank": {
             "oneOf": [
