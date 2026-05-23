@@ -20,9 +20,7 @@ use commons_servers::{
 	tailnet_directory::{TailnetDirectory, TailnetDirectoryConfig},
 	tailnet_sweeps,
 };
-use database::{
-	issues::reevaluate_open_issues_for_server, servers::Server, statuses::Status,
-};
+use database::{issues::reconcile_open_incidents, statuses::Status};
 use lloggs::{LoggingArgs, PreArgs};
 use miette::IntoDiagnostic;
 use tokio::{
@@ -31,59 +29,49 @@ use tokio::{
 };
 use tracing::{debug, error, info, warn};
 
-/// One-shot cleanup for the deploy window of the monitored-toggle
-/// split (PR #170): the migration in that change bumped
-/// `alert_when_down_for` from 0 to 10 minutes for previously-off
-/// servers so the new `> 0` CHECK constraint would hold, but the
-/// old code (still serving during the rolling deploy) read that
-/// duration as "monitored" and ran one or more reachability sweeps
-/// against those servers, filing canopy/reachability issues and
-/// opening spurious incidents.
+/// Walk every open issue through `re_evaluate_incident_membership` so
+/// the recorded incident state matches what the current code says it
+/// should be.
 ///
-/// Walk every currently-unmonitored server through
-/// `reevaluate_open_issues_for_server`. With the new code's leave
-/// rule, any of its open issues that are still contributing to an
-/// incident now leave it and the incident closes if nothing else
-/// keeps it alive. Idempotent: once the database is clean,
-/// subsequent calls are no-ops.
-async fn cleanup_unmonitored_incidents(pool: &database::Db) {
+/// The reachability binary is the natural home for this: it already
+/// owns the canopy/reachability sweep and runs in its own pod, so a
+/// startup pass doesn't slow API request handling.
+///
+/// Reasons to do this on every startup rather than reach for a one-off:
+///
+/// - **Code changes drift the rules.** When the join/leave logic
+///   changes (new gates like `is_monitored`, `silenced`, …), existing
+///   open incidents that no longer satisfy the rules stay open until
+///   the next event arrives — which may be never for the servers in
+///   question. PR #170 hit exactly this: the migration's value bump
+///   tripped the OLD code's reachability sweep during the deploy
+///   window, opening 22 spurious incidents on unmonitored servers
+///   that the NEW code's rules would never have opened, and which
+///   nothing in the steady-state event flow would reconcile.
+/// - **Idempotent and cheap when consistent.** `re_evaluate_incident_membership`
+///   short-circuits in the `_ => {}` arm when the issue is already in
+///   the right state — so a clean DB only pays the read cost.
+async fn reconcile_on_startup(pool: &database::Db) {
 	let Ok(mut db) = pool.get().await else {
-		warn!("post-migration cleanup: failed to get database connection");
+		warn!("incident reconciliation: failed to get database connection");
 		return;
 	};
-	let unmonitored = match Server::list_unmonitored(&mut db).await {
-		Ok(rows) => rows,
-		Err(err) => {
-			warn!("post-migration cleanup: list_unmonitored failed: {err}");
-			return;
+	match reconcile_open_incidents(&mut db).await {
+		Ok((0, 0)) => debug!("incident reconciliation: nothing to walk"),
+		Ok((servers, issues)) => {
+			info!(
+				"incident reconciliation: walked {issues} open issue(s) across \
+				 {servers} server(s)"
+			);
 		}
-	};
-	if unmonitored.is_empty() {
-		debug!("post-migration cleanup: no unmonitored servers, skipping");
-		return;
-	}
-	info!(
-		"post-migration cleanup: re-evaluating {} unmonitored servers",
-		unmonitored.len()
-	);
-	let mut errors = 0usize;
-	for server in unmonitored {
-		if let Err(err) = reevaluate_open_issues_for_server(&mut db, server.id).await {
-			warn!(server_id = %server.id, "post-migration cleanup: re-evaluate failed: {err}");
-			errors += 1;
-		}
-	}
-	if errors > 0 {
-		warn!("post-migration cleanup: {errors} server(s) failed to re-evaluate");
-	} else {
-		info!("post-migration cleanup: done");
+		Err(err) => warn!("incident reconciliation: failed: {err}"),
 	}
 }
 
 pub fn spawn() -> JoinHandle<()> {
 	let pool = database::init();
 	task::spawn(async move {
-		cleanup_unmonitored_incidents(&pool).await;
+		reconcile_on_startup(&pool).await;
 
 		// The directory is optional: in dev / single-tenant deploys the
 		// TAILSCALE_* env vars aren't set, and the key-expiry sweep just
