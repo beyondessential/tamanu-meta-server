@@ -337,6 +337,21 @@ impl Server {
 			.map_err(AppError::from)
 	}
 
+	/// All servers with `is_monitored = false`. Used by the one-shot
+	/// post-migration cleanup that walks those servers' open issues to
+	/// close any spurious incidents opened during the deploy window of
+	/// the monitored-toggle split.
+	pub async fn list_unmonitored(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
+		use crate::schema::servers::dsl::*;
+		servers
+			.select(Self::as_select())
+			.filter(id.ne(Uuid::nil()))
+			.filter(is_monitored.eq(false))
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	/// All servers without a group, ordered by name. Used by the Ungrouped UI tab.
 	pub async fn list_ungrouped(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
 		use crate::schema::servers::dsl::*;
