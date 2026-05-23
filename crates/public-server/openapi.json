@@ -1139,6 +1139,12 @@
             "type": "string",
             "format": "uuid"
           },
+          "is_monitored": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "kind": {
             "oneOf": [
               {
@@ -1255,13 +1261,14 @@
           "id",
           "host",
           "kind",
+          "is_monitored",
           "alert_when_down_for"
         ],
         "properties": {
           "alert_when_down_for": {
             "type": "integer",
             "format": "int64",
-            "description": "How long a server's status row may go un-updated before the canopy\nreachability sweep files an issue.\n\n`INTERVAL '0'` disables the sweep for this server entirely — useful\nfor test environments and ad-hoc demos whose downtime is expected.\nPositive values are the per-server downtime threshold: bump it up\nfor flappy servers, drop it for critical ones that should page\npromptly. Negative durations are rejected by a CHECK constraint on\nthe column.\n\nDefault 10 minutes for newly-inserted rows. On the JSON wire this\nis represented as a count of whole seconds (`i64`)."
+            "description": "Per-server downtime threshold: how long a server's status row may\ngo un-updated before the canopy reachability sweep files an issue.\nBump it up for flappy servers, drop it for critical ones that\nshould page promptly. Only consulted when `is_monitored` is `true`.\n\nConstrained to strictly positive by the database. Default 10\nminutes for newly-inserted rows. On the JSON wire this is\nrepresented as a count of whole seconds (`i64`)."
           },
           "cloud": {
             "type": [
@@ -1299,6 +1306,10 @@
           "id": {
             "type": "string",
             "format": "uuid"
+          },
+          "is_monitored": {
+            "type": "boolean",
+            "description": "Whether canopy is actively watching this server. When `false`, the\nreachability sweep skips it entirely and any of its issues are\nignored by the incident workflow — operators flip this off for\ntest environments and ad-hoc demos. The accompanying\n`alert_when_down_for` is preserved while muted so flipping back on\ndoesn't lose the chosen threshold."
           },
           "kind": {
             "$ref": "#/components/schemas/ServerKind"

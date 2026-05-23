@@ -54,18 +54,21 @@ pub struct Server {
 	pub cloud: Option<bool>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub geolocation: Option<GeoPoint>,
-	/// How long a server's status row may go un-updated before the canopy
-	/// reachability sweep files an issue.
+	/// Whether canopy is actively watching this server. When `false`, the
+	/// reachability sweep skips it entirely and any of its issues are
+	/// ignored by the incident workflow — operators flip this off for
+	/// test environments and ad-hoc demos. The accompanying
+	/// `alert_when_down_for` is preserved while muted so flipping back on
+	/// doesn't lose the chosen threshold.
+	pub is_monitored: bool,
+	/// Per-server downtime threshold: how long a server's status row may
+	/// go un-updated before the canopy reachability sweep files an issue.
+	/// Bump it up for flappy servers, drop it for critical ones that
+	/// should page promptly. Only consulted when `is_monitored` is `true`.
 	///
-	/// `INTERVAL '0'` disables the sweep for this server entirely — useful
-	/// for test environments and ad-hoc demos whose downtime is expected.
-	/// Positive values are the per-server downtime threshold: bump it up
-	/// for flappy servers, drop it for critical ones that should page
-	/// promptly. Negative durations are rejected by a CHECK constraint on
-	/// the column.
-	///
-	/// Default 10 minutes for newly-inserted rows. On the JSON wire this
-	/// is represented as a count of whole seconds (`i64`).
+	/// Constrained to strictly positive by the database. Default 10
+	/// minutes for newly-inserted rows. On the JSON wire this is
+	/// represented as a count of whole seconds (`i64`).
 	#[schema(value_type = i64)]
 	pub alert_when_down_for: PgDuration,
 	#[serde(default)]
@@ -505,6 +508,7 @@ fn test_server_serialization() {
 		public_name: Some("Test Server".to_string()),
 		cloud: None,
 		geolocation: None,
+		is_monitored: true,
 		alert_when_down_for: TEN_MINUTES,
 		notes: String::new(),
 		tags: TagMap::default(),
@@ -521,6 +525,7 @@ fn test_server_serialization() {
   "rank": "production",
   "device_id": "00000000-0000-0000-0000-000000000000",
   "public_name": "Test Server",
+  "is_monitored": true,
   "alert_when_down_for": 600,
   "notes": "",
   "tags": {}
@@ -552,6 +557,7 @@ impl From<NewServer> for Server {
 			public_name: None,
 			cloud: None,
 			geolocation: None,
+			is_monitored: true,
 			alert_when_down_for: TEN_MINUTES,
 			notes: String::new(),
 			tags: TagMap::default(),
@@ -575,6 +581,7 @@ pub struct PartialServer {
 	pub public_name: Option<Option<String>>,
 	pub cloud: Option<Option<bool>>,
 	pub geolocation: Option<Option<GeoPoint>>,
+	pub is_monitored: Option<bool>,
 	#[schema(value_type = Option<i64>)]
 	#[diesel(serialize_as = PgDuration)]
 	pub alert_when_down_for: Option<PgDuration>,

@@ -62,9 +62,13 @@ pub struct ServerInfo {
 	pub public_name: Option<String>,
 	pub cloud: Option<bool>,
 	pub geolocation: Option<GeoPoint>,
-	/// Downtime threshold in seconds before the reachability sweep files an
-	/// issue. `0` (or any non-positive value) disables alerting for this
-	/// server; the default at creation is 600 (10 minutes).
+	/// Whether canopy is actively watching this server. When `false`, the
+	/// reachability sweep skips it and its issues don't contribute to
+	/// incidents.
+	pub is_monitored: bool,
+	/// Threshold in seconds for the reachability sweep to consider this
+	/// server down. Always positive; only consulted when `is_monitored`
+	/// is `true`. The default at creation is 600 (10 minutes).
 	pub alert_when_down_for: i64,
 	pub notes: String,
 	pub tags: TagMap,
@@ -140,6 +144,8 @@ pub struct ServerDataUpdate {
 	)]
 	pub geolocation: Option<Option<GeoPoint>>,
 	#[serde(skip_serializing_if = "Option::is_none")]
+	pub is_monitored: Option<bool>,
+	#[serde(skip_serializing_if = "Option::is_none")]
 	pub alert_when_down_for: Option<i64>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub notes: Option<String>,
@@ -168,6 +174,7 @@ pub(super) fn server_to_info(s: Server) -> ServerInfo {
 		public_name: s.public_name,
 		cloud: s.cloud,
 		geolocation: s.geolocation,
+		is_monitored: s.is_monitored,
 		alert_when_down_for: s.alert_when_down_for.0.as_secs(),
 		notes: s.notes,
 		tags: s.tags,
@@ -492,12 +499,15 @@ pub async fn update(
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
 
-	// `group_id` transitions ALSO go through Server::assign_to_group so a
-	// move from "ungrouped" → "grouped" can promote any pending issues into
-	// an incident. Capture the original state before the update so the
-	// catch-up decision sees the previous group.
-	let before_group_id = if args.data.group_id.is_some() {
-		Some(Server::get_by_id(&mut conn, args.server_id).await?.group_id)
+	// Capture the server's pre-update state when this request touches either
+	// of the two fields whose transitions warrant an incident catch-up:
+	// `group_id` (ungrouped → grouped opens pending issues into incidents)
+	// and `is_monitored` (un/monitored toggles incident eligibility
+	// symmetrically — on enrols open issues, off cascades them out).
+	let touches_catchup_field =
+		args.data.group_id.is_some() || args.data.is_monitored.is_some();
+	let before = if touches_catchup_field {
+		Some(Server::get_by_id(&mut conn, args.server_id).await?)
 	} else {
 		None
 	};
@@ -520,6 +530,7 @@ pub async fn update(
 		public_name: args.data.public_name,
 		cloud: args.data.cloud,
 		geolocation: args.data.geolocation,
+		is_monitored: args.data.is_monitored,
 		alert_when_down_for: args
 			.data
 			.alert_when_down_for
@@ -529,8 +540,15 @@ pub async fn update(
 	};
 	Server::update(&mut conn, args.server_id, update_data).await?;
 
-	// Catch up open issues if we just moved an ungrouped server into a group.
-	if let (Some(None), Some(Some(_))) = (before_group_id, new_group_id) {
+	let group_just_set = matches!(
+		(before.as_ref().map(|s| s.group_id), new_group_id),
+		(Some(None), Some(Some(_)))
+	);
+	let monitored_toggled = match (before.as_ref(), args.data.is_monitored) {
+		(Some(b), Some(new_value)) => b.is_monitored != new_value,
+		_ => false,
+	};
+	if group_just_set || monitored_toggled {
 		database::issues::reevaluate_open_issues_for_server(&mut conn, args.server_id).await?;
 	}
 	Ok(Json(()))
@@ -703,6 +721,7 @@ pub async fn attach_tailscale_device(
 			public_name: None,
 			cloud: None,
 			geolocation: None,
+			is_monitored: None,
 			alert_when_down_for: None,
 			notes: None,
 			tags: None,

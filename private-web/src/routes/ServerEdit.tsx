@@ -58,16 +58,12 @@ function EditForm({ info }: { info: ServerInfo }) {
 	const [kind, setKind] = useState<ServerKind>(info.kind);
 	const [rank, setRank] = useState<ServerRank | "">(info.rank ?? "");
 	const [publicName, setPublicName] = useState<string>(info.public_name ?? "");
-	// Threshold in seconds; 0 (or negative) means alerting is disabled. The
-	// UI works in minutes for the operator and the empty string represents
-	// "disabled" — converted back to seconds at submit time.
-	const [alertWhenDownEnabled, setAlertWhenDownEnabled] = useState(
-		info.alert_when_down_for > 0,
-	);
+	// `is_monitored` carries the on/off toggle; `alert_when_down_for` is the
+	// (always-positive) threshold to use when monitored. Stored separately
+	// so muting doesn't lose the chosen threshold. UI works in minutes.
+	const [isMonitored, setIsMonitored] = useState(info.is_monitored);
 	const [alertWhenDownMinutes, setAlertWhenDownMinutes] = useState<string>(
-		info.alert_when_down_for > 0
-			? Math.round(info.alert_when_down_for / 60).toString()
-			: "10",
+		Math.max(1, Math.round(info.alert_when_down_for / 60)).toString(),
 	);
 	const [groupId, setGroupId] = useState<string | null>(info.group_id);
 	const [deviceId, setDeviceId] = useState<string>(info.device_id ?? "");
@@ -94,9 +90,11 @@ function EditForm({ info }: { info: ServerInfo }) {
 				lat && lon
 					? { lat: Number(lat), lon: Number(lon) }
 					: null,
-			alert_when_down_for: alertWhenDownEnabled
-				? Math.max(0, Math.round(Number(alertWhenDownMinutes) * 60))
-				: 0,
+			is_monitored: isMonitored,
+			alert_when_down_for: Math.max(
+				60,
+				Math.round(Number(alertWhenDownMinutes) * 60),
+			),
 			notes,
 			tags,
 		};
@@ -204,35 +202,45 @@ function EditForm({ info }: { info: ServerInfo }) {
 					/>
 				)}
 
+				<FormControlLabel
+					control={
+						<Checkbox
+							checked={isMonitored}
+							onChange={(e) => setIsMonitored(e.target.checked)}
+							disabled={action.pending}
+						/>
+					}
+					label="Monitor this server"
+				/>
+				<Typography variant="caption" color="text.secondary">
+					When off, canopy stops watching this server: reachability sweeps
+					skip it and its events/issues no longer trigger or join incidents.
+					Existing issues are kept for the record. Use this for test
+					environments and ad-hoc demos that are expected to be down.
+				</Typography>
+
 				<Stack
 					direction={{ xs: "column", md: "row" }}
 					spacing={2}
 					sx={{ alignItems: { md: "center" } }}
 				>
-					<FormControlLabel
-						control={
-							<Checkbox
-								checked={alertWhenDownEnabled}
-								onChange={(e) => setAlertWhenDownEnabled(e.target.checked)}
-								disabled={action.pending}
-							/>
-						}
-						label="File an issue when this server is unreachable for"
-					/>
+					<Typography variant="body2">
+						File an issue when this server is unreachable for
+					</Typography>
 					<TextField
 						label="minutes"
 						type="number"
 						value={alertWhenDownMinutes}
 						onChange={(e) => setAlertWhenDownMinutes(e.target.value)}
-						disabled={action.pending || !alertWhenDownEnabled}
-						slotProps={{ htmlInput: { min: 0, step: 1 } }}
+						disabled={action.pending || !isMonitored}
+						slotProps={{ htmlInput: { min: 1, step: 1 } }}
 						sx={{ width: 140 }}
 					/>
 				</Stack>
 				<Typography variant="caption" color="text.secondary">
-					Raise this for flappy servers (so brief blips don't fire) or lower it
-					for critical servers that should page promptly. Uncheck for test
-					environments and ad-hoc demos that are expected to be down.
+					Raise this for flappy servers (so brief blips don't fire) or lower
+					it for critical servers that should page promptly. The value is
+					preserved while monitoring is off.
 				</Typography>
 
 				<TextField

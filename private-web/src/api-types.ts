@@ -1839,9 +1839,9 @@ export interface components {
             items: {
                 /**
                  * Format: int64
-                 * @description Downtime threshold in seconds before the reachability sweep files an
-                 *     issue. `0` (or any non-positive value) disables alerting for this
-                 *     server; the default at creation is 600 (10 minutes).
+                 * @description Threshold in seconds for the reachability sweep to consider this
+                 *     server down. Always positive; only consulted when `is_monitored`
+                 *     is `true`. The default at creation is 600 (10 minutes).
                  */
                 alert_when_down_for: number;
                 cloud?: boolean | null;
@@ -1859,6 +1859,12 @@ export interface components {
                 host: string;
                 /** Format: uuid */
                 id: string;
+                /**
+                 * @description Whether canopy is actively watching this server. When `false`, the
+                 *     reachability sweep skips it and its issues don't contribute to
+                 *     incidents.
+                 */
+                is_monitored: boolean;
                 kind: components["schemas"]["ServerKind"];
                 name?: string | null;
                 notes: string;
@@ -2002,6 +2008,7 @@ export interface components {
             /** Format: uuid */
             group_id?: string | null;
             host?: string | null;
+            is_monitored?: boolean | null;
             kind?: null | components["schemas"]["ServerKind"];
             name?: string | null;
             notes?: string | null;
@@ -2057,9 +2064,9 @@ export interface components {
         ServerInfo: {
             /**
              * Format: int64
-             * @description Downtime threshold in seconds before the reachability sweep files an
-             *     issue. `0` (or any non-positive value) disables alerting for this
-             *     server; the default at creation is 600 (10 minutes).
+             * @description Threshold in seconds for the reachability sweep to consider this
+             *     server down. Always positive; only consulted when `is_monitored`
+             *     is `true`. The default at creation is 600 (10 minutes).
              */
             alert_when_down_for: number;
             cloud?: boolean | null;
@@ -2077,6 +2084,12 @@ export interface components {
             host: string;
             /** Format: uuid */
             id: string;
+            /**
+             * @description Whether canopy is actively watching this server. When `false`, the
+             *     reachability sweep skips it and its issues don't contribute to
+             *     incidents.
+             */
+            is_monitored: boolean;
             kind: components["schemas"]["ServerKind"];
             name?: string | null;
             notes: string;

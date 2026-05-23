@@ -4740,6 +4740,7 @@
                 "id",
                 "kind",
                 "host",
+                "is_monitored",
                 "alert_when_down_for",
                 "notes",
                 "tags"
@@ -4748,7 +4749,7 @@
                 "alert_when_down_for": {
                   "type": "integer",
                   "format": "int64",
-                  "description": "Downtime threshold in seconds before the reachability sweep files an\nissue. `0` (or any non-positive value) disables alerting for this\nserver; the default at creation is 600 (10 minutes)."
+                  "description": "Threshold in seconds for the reachability sweep to consider this\nserver down. Always positive; only consulted when `is_monitored`\nis `true`. The default at creation is 600 (10 minutes)."
                 },
                 "cloud": {
                   "type": [
@@ -4804,6 +4805,10 @@
                 "id": {
                   "type": "string",
                   "format": "uuid"
+                },
+                "is_monitored": {
+                  "type": "boolean",
+                  "description": "Whether canopy is actively watching this server. When `false`, the\nreachability sweep skips it and its issues don't contribute to\nincidents."
                 },
                 "kind": {
                   "$ref": "#/components/schemas/ServerKind"
@@ -5186,6 +5191,12 @@
               "null"
             ]
           },
+          "is_monitored": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "kind": {
             "oneOf": [
               {
@@ -5390,6 +5401,7 @@
           "id",
           "kind",
           "host",
+          "is_monitored",
           "alert_when_down_for",
           "notes",
           "tags"
@@ -5398,7 +5410,7 @@
           "alert_when_down_for": {
             "type": "integer",
             "format": "int64",
-            "description": "Downtime threshold in seconds before the reachability sweep files an\nissue. `0` (or any non-positive value) disables alerting for this\nserver; the default at creation is 600 (10 minutes)."
+            "description": "Threshold in seconds for the reachability sweep to consider this\nserver down. Always positive; only consulted when `is_monitored`\nis `true`. The default at creation is 600 (10 minutes)."
           },
           "cloud": {
             "type": [
@@ -5454,6 +5466,10 @@
           "id": {
             "type": "string",
             "format": "uuid"
+          },
+          "is_monitored": {
+            "type": "boolean",
+            "description": "Whether canopy is actively watching this server. When `false`, the\nreachability sweep skips it and its issues don't contribute to\nincidents."
           },
           "kind": {
             "$ref": "#/components/schemas/ServerKind"

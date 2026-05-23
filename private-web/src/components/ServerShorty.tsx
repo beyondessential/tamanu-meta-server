@@ -13,15 +13,14 @@ export interface ServerInfo {
 	kind: ServerKind;
 	rank: ServerRank | null;
 	group_name?: string | null;
-	alert_when_down_for?: number;
+	is_monitored?: boolean;
 	up?: ShortStatus | null;
 	health?: HealthState | null;
 }
 
 export default function ServerShorty({ server }: { server: ServerInfo }) {
 	const name = server.name || "Unnamed server";
-	const unmonitored =
-		server.alert_when_down_for !== undefined && server.alert_when_down_for <= 0;
+	const unmonitored = server.is_monitored === false;
 	return (
 		<Stack
 			direction="row"

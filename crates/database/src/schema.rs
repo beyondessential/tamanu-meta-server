@@ -198,6 +198,7 @@ diesel::table! {
 		notes -> Text,
 		tags -> Jsonb,
 		public_name -> Nullable<Text>,
+		is_monitored -> Bool,
 	}
 }
 
