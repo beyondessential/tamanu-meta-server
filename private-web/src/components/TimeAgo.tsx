@@ -24,7 +24,8 @@ export default function TimeAgo({ timestamp }: { timestamp: string }) {
 
 	if (Number.isNaN(ts)) return <span>?</span>;
 
-	const text = `${formatSecs((now - ts) / 1000)} ago`;
+	const secs = (now - ts) / 1000;
+	const text = Math.abs(secs) < 60 ? "now" : `${formatSecs(secs)} ago`;
 	return (
 		<Tooltip title={new Date(ts).toLocaleString()}>
 			<span>{text}</span>
