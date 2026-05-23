@@ -485,7 +485,7 @@ function InfoSection({
 				<InfoItem
 					label="Status alerts"
 					value={
-						server.alert_when_down_for > 0
+						server.is_monitored
 							? `After ${humanSeconds(server.alert_when_down_for)}`
 							: "Off"
 					}
@@ -837,7 +837,7 @@ function SiblingServers({
 						</MuiLink>
 						{sib.rank && <ServerRankChip rank={sib.rank} />}
 						<ServerKindChip kind={sib.kind} />
-						{sib.alert_when_down_for <= 0 && (
+						{!sib.is_monitored && (
 							<Tooltip title="Status alerts are off for this server — canopy isn't watching it.">
 								<Chip
 									size="small"

@@ -125,7 +125,11 @@ async fn incident_groups_at_server_group() {
 			.await;
 		resp.assert_status_ok();
 		let items: Vec<serde_json::Value> = resp.json();
-		assert_eq!(items.len(), 1, "originating member resolves to the same group");
+		assert_eq!(
+			items.len(),
+			1,
+			"originating member resolves to the same group"
+		);
 		assert_eq!(
 			items[0].get("id").and_then(|v| v.as_str()),
 			Some(group_incident_id.as_str()),
@@ -777,6 +781,153 @@ async fn snooze_leaves_incident_and_blocks_rejoin() {
 			"unsnooze should reopen incident if still eligible"
 		);
 		assert!(items[0].get("closed_at").map_or(false, |v| v.is_null()));
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn unmonitored_server_event_does_not_open_incident() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		conn.batch_execute("INSERT INTO admins (email) VALUES ('admin@example.com')")
+			.await
+			.expect("seed admin");
+
+		let server_id = Uuid::new_v4();
+		let group_id = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g');
+			 INSERT INTO servers (id, host, kind, group_id, is_monitored) VALUES \
+				('{server_id}', 'https://muted.example.com', 'central', '{group_id}', FALSE);"
+		))
+		.await
+		.expect("seed");
+
+		// Manual event with severity=error normally opens an incident. The
+		// server is unmonitored, so the issue is recorded but no incident
+		// fires.
+		let resp = private
+			.post("/api/issues/submit_manual_event")
+			.json(&serde_json::json!({
+				"serverId": server_id,
+				"ref": "ignored",
+				"severity": "error",
+				"message": "should not open an incident",
+			}))
+			.await;
+		resp.assert_status_ok();
+
+		let resp = private
+			.post("/api/incidents/list_for_server")
+			.json(&serde_json::json!({ "server_id": server_id }))
+			.await;
+		resp.assert_status_ok();
+		let items: Vec<serde_json::Value> = resp.json();
+		assert!(items.is_empty(), "unmonitored servers don't open incidents");
+
+		// The issue itself is still there for the record.
+		let resp = private
+			.post("/api/issues/list_for_server")
+			.json(&serde_json::json!({ "server_id": server_id }))
+			.await;
+		let issues: Vec<serde_json::Value> = resp.json();
+		assert_eq!(issues.len(), 1, "issue rows are kept even when unmonitored");
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn enabling_monitoring_opens_pending_incident() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		conn.batch_execute("INSERT INTO admins (email) VALUES ('admin@example.com')")
+			.await
+			.expect("seed admin");
+
+		let server_id = Uuid::new_v4();
+		let group_id = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g');
+			 INSERT INTO servers (id, host, kind, group_id, is_monitored) VALUES \
+				('{server_id}', 'https://later.example.com', 'central', '{group_id}', FALSE);"
+		))
+		.await
+		.expect("seed");
+
+		// File an issue while unmonitored: no incident.
+		let resp = private
+			.post("/api/issues/submit_manual_event")
+			.json(&serde_json::json!({
+				"serverId": server_id,
+				"ref": "stuck",
+				"severity": "error",
+				"message": "waiting to be re-enabled",
+			}))
+			.await;
+		resp.assert_status_ok();
+
+		// Flip monitoring on: the open issue should be promoted.
+		let resp = private
+			.post("/api/servers/update")
+			.json(&serde_json::json!({
+				"server_id": server_id,
+				"data": { "is_monitored": true },
+			}))
+			.await;
+		resp.assert_status_ok();
+
+		let resp = private
+			.post("/api/incidents/list_for_server")
+			.json(&serde_json::json!({ "server_id": server_id }))
+			.await;
+		let items: Vec<serde_json::Value> = resp.json();
+		assert_eq!(items.len(), 1, "monitor-on promoted the open issue");
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn disabling_monitoring_removes_open_contribution() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		conn.batch_execute("INSERT INTO admins (email) VALUES ('admin@example.com')")
+			.await
+			.expect("seed admin");
+
+		let server_id = Uuid::new_v4();
+		open_issue(&mut conn, &private, server_id).await;
+
+		// Sanity: there's an incident before we flip.
+		let resp = private
+			.post("/api/incidents/list_for_server")
+			.json(&serde_json::json!({ "server_id": server_id }))
+			.await;
+		assert_eq!(resp.json::<Vec<serde_json::Value>>().len(), 1);
+
+		// Flip monitoring off: the lone contributor leaves, incident closes.
+		let resp = private
+			.post("/api/servers/update")
+			.json(&serde_json::json!({
+				"server_id": server_id,
+				"data": { "is_monitored": false },
+			}))
+			.await;
+		resp.assert_status_ok();
+
+		let resp = private
+			.post("/api/incidents/list_for_server")
+			.json(&serde_json::json!({ "server_id": server_id, "include_closed": true }))
+			.await;
+		let items: Vec<serde_json::Value> = resp.json();
+		assert_eq!(items.len(), 1, "incident row remains for history");
+		assert!(
+			items[0].get("closed_at").is_some_and(|v| !v.is_null()),
+			"unmonitor closed the incident",
+		);
+
+		let resp = private
+			.post("/api/incidents/list_for_server")
+			.json(&serde_json::json!({ "server_id": server_id }))
+			.await;
+		let items: Vec<serde_json::Value> = resp.json();
+		assert!(items.is_empty(), "no open incidents after unmonitor");
 	})
 	.await;
 }

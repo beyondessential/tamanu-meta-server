@@ -201,9 +201,9 @@ impl Status {
 	}
 
 	/// Sweep every server's most recent status. For each monitored server
-	/// (i.e. `alert_when_down_for > 0`) whose freshness has crossed the
-	/// per-server threshold, file (or close) a canopy-sourced issue keyed
-	/// by [`REACHABILITY_REF`].
+	/// (`is_monitored = true`) whose freshness has crossed the per-server
+	/// `alert_when_down_for` threshold, file (or close) a canopy-sourced
+	/// issue keyed by [`REACHABILITY_REF`].
 	///
 	/// Most servers report by pushing their own status to the public-server
 	/// (so their `device_id` is non-null); the pingtask only handles legacy
@@ -215,7 +215,7 @@ impl Status {
 		let servers = Server::get_all(db, 0, None).await?;
 		let monitored: Vec<&Server> = servers
 			.iter()
-			.filter(|s| s.alert_when_down_for.0 > SignedDuration::ZERO && s.id != Uuid::nil())
+			.filter(|s| s.is_monitored && s.id != Uuid::nil())
 			.collect();
 		if monitored.is_empty() {
 			return Ok(0);

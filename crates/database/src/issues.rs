@@ -222,9 +222,12 @@ impl NewEvent {
 		// Look up the server's group up-front; needed by the incident-open
 		// path. If `None`, we still record the issue/event but skip
 		// incident logic — see `reevaluate_open_issues_for_server` for the
-		// catch-up path.
+		// catch-up path. `monitored` gates the incident workflow the same
+		// way: ungrouped *or* unmonitored → issue/event still recorded,
+		// but no incident contribution.
 		let server = Server::get_by_id(db, server_id).await?;
 		let server_group_id = server.group_id;
+		let monitored = server.is_monitored;
 
 		db.transaction::<_, AppError, _>(async |conn| {
 			// 1. find-or-create issue (FOR UPDATE so concurrent pushes on
@@ -348,7 +351,8 @@ impl NewEvent {
 			//    `by = None`: this came from a device push, not an operator action.
 			//    Skipped when the server is ungrouped: incidents are group-keyed.
 			if let Some(gid) = server_group_id {
-				re_evaluate_incident_membership(conn, &issue, gid, effective_time, None).await?;
+				re_evaluate_incident_membership(conn, &issue, gid, monitored, effective_time, None)
+					.await?;
 			}
 
 			Ok(issue)
@@ -360,9 +364,11 @@ impl NewEvent {
 /// Compute whether the issue *should* currently be contributing to an
 /// open incident, and apply join/leave accordingly. The rules:
 ///
-/// - **Leave**: `!active || resolved || snoozed`. Severity downgrade alone
-///   does *not* remove an issue — once contributing, it stays until it's
-///   actually gone or explicitly suppressed.
+/// - **Leave**: `!active || resolved || snoozed || !monitored`. Severity
+///   downgrade alone does *not* remove an issue — once contributing, it
+///   stays until it's actually gone or explicitly suppressed. Flipping
+///   the server to unmonitored *does* remove it: the operator has said
+///   they're not watching this server, so its issues stop counting.
 /// - **Join**: not leaving, AND one of:
 ///   - severity ≥ floor (`error`), so this issue is high-priority enough to
 ///     create a new incident on its own; or
@@ -370,6 +376,12 @@ impl NewEvent {
 ///     even low-severity ones, joins it. The threshold only governs
 ///     incident *creation*; once an incident is in progress everything else
 ///     piles in for context.
+///
+/// `monitored` reflects the server's `is_monitored()` at call time. When
+/// `false`, the issue is treated as a "leave": this is what makes
+/// `unmonitored` an opt-out of the incident workflow without losing the
+/// issue rows themselves.
+///
 /// `by` is the operator login when this re-evaluation was triggered by a
 /// human action (e.g. resolving an issue or incident). It's threaded
 /// through so a cascade close caused by that action can attribute the
@@ -380,6 +392,7 @@ async fn re_evaluate_incident_membership(
 	conn: &mut AsyncPgConnection,
 	issue: &Issue,
 	server_group_id: Uuid,
+	monitored: bool,
 	transition_time: Timestamp,
 	by: Option<&str>,
 ) -> Result<()> {
@@ -389,8 +402,9 @@ async fn re_evaluate_incident_membership(
 	let snoozed = issue.snoozed_until.map_or(false, |t| t > Timestamp::now());
 	let group_open = group_has_open_incident(conn, server_group_id).await?;
 
-	let should_leave = !issue.active || issue.resolved_at.is_some() || snoozed;
-	let should_join = issue.active
+	let should_leave = !issue.active || issue.resolved_at.is_some() || snoozed || !monitored;
+	let should_join = monitored
+		&& issue.active
 		&& issue.resolved_at.is_none()
 		&& !snoozed
 		&& (issue.severity.opens_incident() || group_open);
@@ -478,8 +492,13 @@ async fn re_evaluate_incident_membership(
 }
 
 /// Re-evaluate every currently-open issue on `server_id` against incident
-/// membership. Used by [`Server::assign_to_group`] to catch up issues that
-/// accumulated while the server was ungrouped.
+/// membership. Used as a catch-up when the operator flips a property of
+/// the server that changes its incident eligibility — currently:
+/// ungrouped→grouped (via [`Server::assign_to_group`]) and monitored
+/// toggles (via the private-server's server update handler). On flips
+/// that should *remove* issues from an incident (e.g. monitored→
+/// unmonitored), `re_evaluate_incident_membership` will leave them and
+/// close the incident if nothing else props it up.
 pub async fn reevaluate_open_issues_for_server(
 	db: &mut AsyncPgConnection,
 	server_id: Uuid,
@@ -490,6 +509,7 @@ pub async fn reevaluate_open_issues_for_server(
 	let Some(gid) = server.group_id else {
 		return Ok(());
 	};
+	let monitored = server.is_monitored;
 
 	let open_issues: Vec<Issue> = dsl::issues
 		.select(Issue::as_select())
@@ -501,7 +521,7 @@ pub async fn reevaluate_open_issues_for_server(
 
 	let now = Timestamp::now();
 	for issue in open_issues {
-		re_evaluate_incident_membership(db, &issue, gid, now, None).await?;
+		re_evaluate_incident_membership(db, &issue, gid, monitored, now, None).await?;
 	}
 	Ok(())
 }
@@ -824,8 +844,17 @@ impl Issue {
 				.returning(Self::as_select())
 				.get_result(conn)
 				.await?;
-			if let Some(gid) = Server::get_by_id(conn, issue.server_id).await?.group_id {
-				re_evaluate_incident_membership(conn, &issue, gid, now, Some(by)).await?;
+			let server = Server::get_by_id(conn, issue.server_id).await?;
+			if let Some(gid) = server.group_id {
+				re_evaluate_incident_membership(
+					conn,
+					&issue,
+					gid,
+					server.is_monitored,
+					now,
+					Some(by),
+				)
+				.await?;
 			}
 			Ok(issue)
 		})
@@ -846,9 +875,18 @@ impl Issue {
 				.returning(Self::as_select())
 				.get_result(conn)
 				.await?;
-			if let Some(gid) = Server::get_by_id(conn, issue.server_id).await?.group_id {
+			let server = Server::get_by_id(conn, issue.server_id).await?;
+			if let Some(gid) = server.group_id {
 				// Unresolve rejoins; cascade close path doesn't fire here.
-				re_evaluate_incident_membership(conn, &issue, gid, now, None).await?;
+				re_evaluate_incident_membership(
+					conn,
+					&issue,
+					gid,
+					server.is_monitored,
+					now,
+					None,
+				)
+				.await?;
 			}
 			Ok(issue)
 		})
@@ -876,8 +914,17 @@ impl Issue {
 				.returning(Self::as_select())
 				.get_result(conn)
 				.await?;
-			if let Some(gid) = Server::get_by_id(conn, issue.server_id).await?.group_id {
-				re_evaluate_incident_membership(conn, &issue, gid, now, None).await?;
+			let server = Server::get_by_id(conn, issue.server_id).await?;
+			if let Some(gid) = server.group_id {
+				re_evaluate_incident_membership(
+					conn,
+					&issue,
+					gid,
+					server.is_monitored,
+					now,
+					None,
+				)
+				.await?;
 			}
 			Ok(issue)
 		})
@@ -894,8 +941,17 @@ impl Issue {
 				.returning(Self::as_select())
 				.get_result(conn)
 				.await?;
-			if let Some(gid) = Server::get_by_id(conn, issue.server_id).await?.group_id {
-				re_evaluate_incident_membership(conn, &issue, gid, now, None).await?;
+			let server = Server::get_by_id(conn, issue.server_id).await?;
+			if let Some(gid) = server.group_id {
+				re_evaluate_incident_membership(
+					conn,
+					&issue,
+					gid,
+					server.is_monitored,
+					now,
+					None,
+				)
+				.await?;
 			}
 			Ok(issue)
 		})
@@ -1263,7 +1319,19 @@ impl Incident {
 					.returning(Issue::as_select())
 					.get_result(conn)
 					.await?;
-				re_evaluate_incident_membership(conn, &issue, gid, now, Some(by)).await?;
+				// The issue is now resolved so the leave path fires
+				// regardless of `monitored`; pass the live value
+				// anyway so the function never sees stale state.
+				let server = Server::get_by_id(conn, issue.server_id).await?;
+				re_evaluate_incident_membership(
+					conn,
+					&issue,
+					gid,
+					server.is_monitored,
+					now,
+					Some(by),
+				)
+				.await?;
 			}
 
 			let incident: Incident =

@@ -13,23 +13,32 @@ struct RowId {
 	id: Uuid,
 }
 
-/// Insert a server with the given `alert_when_down_for` threshold (seconds,
-/// stored as a PostgreSQL `INTERVAL`). `0` disables alerting; positive
-/// values are the per-server downtime threshold the sweep tests against.
+/// Insert a monitored server with the given `alert_when_down_for` threshold
+/// (seconds, stored as a PostgreSQL `INTERVAL`).
 async fn insert_server(
 	conn: &mut diesel_async::AsyncPgConnection,
 	host: &str,
 	alert_when_down_for_secs: i64,
 ) -> Uuid {
+	insert_server_full(conn, host, alert_when_down_for_secs, true).await
+}
+
+async fn insert_server_full(
+	conn: &mut diesel_async::AsyncPgConnection,
+	host: &str,
+	alert_when_down_for_secs: i64,
+	is_monitored: bool,
+) -> Uuid {
 	let row: RowId = sql_query(
 		r#"
-			INSERT INTO servers (host, alert_when_down_for)
-			VALUES ($1, ($2 || ' seconds')::INTERVAL)
+			INSERT INTO servers (host, alert_when_down_for, is_monitored)
+			VALUES ($1, ($2 || ' seconds')::INTERVAL, $3)
 			RETURNING id
 		"#,
 	)
 	.bind::<sql_types::Text, _>(host)
 	.bind::<sql_types::Text, _>(alert_when_down_for_secs.to_string())
+	.bind::<sql_types::Bool, _>(is_monitored)
 	.get_result(conn)
 	.await
 	.expect("insert server");
@@ -103,10 +112,13 @@ async fn sweep_files_when_no_status_ever() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn sweep_skips_when_threshold_zero() {
+async fn sweep_skips_unmonitored_server() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		// `0` disables: never file regardless of how stale the status is.
-		let id = insert_server(&mut conn, "http://silenced.invalid/", 0).await;
+		// is_monitored = false: never file regardless of how stale the status
+		// is. The threshold is preserved so flipping monitoring back on
+		// resumes with the chosen value.
+		let id =
+			insert_server_full(&mut conn, "http://silenced.invalid/", 600, false).await;
 		insert_status_at(&mut conn, id, 120).await;
 		let filed = Status::sweep_reachability(&mut conn).await.expect("sweep");
 		assert_eq!(filed, 0);
@@ -175,22 +187,23 @@ async fn new_servers_default_to_ten_minutes() {
 	.await
 }
 
-/// Negative durations are rejected at the DB level by a CHECK constraint.
+/// Non-positive durations are rejected at the DB level by a CHECK
+/// constraint — "off" is now `is_monitored = false`, not a zero threshold.
 #[tokio::test(flavor = "multi_thread")]
-async fn check_constraint_forbids_negative_duration() {
+async fn check_constraint_forbids_non_positive_duration() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let res = sql_query(
-			r#"
-				INSERT INTO servers (host, alert_when_down_for)
-				VALUES ('http://bad.invalid/', INTERVAL '-1 second')
-			"#,
-		)
-		.execute(&mut conn)
-		.await;
-		assert!(
-			res.is_err(),
-			"expected CHECK constraint to reject negative duration"
-		);
+		for bad in ["INTERVAL '-1 second'", "INTERVAL '0'"] {
+			let res = sql_query(&format!(
+				"INSERT INTO servers (host, alert_when_down_for) \
+				 VALUES ('http://bad.invalid/', {bad})"
+			))
+			.execute(&mut conn)
+			.await;
+			assert!(
+				res.is_err(),
+				"expected CHECK constraint to reject {bad}",
+			);
+		}
 	})
 	.await
 }

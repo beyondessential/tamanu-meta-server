@@ -91,7 +91,10 @@ export async function seedServer(
 		deviceId?: string;
 		notes?: string;
 		tags?: Record<string, string>;
-		/** Threshold in seconds; `0` disables alerting (the default for e2e seeds). */
+		/** Whether canopy actively monitors this server. Off by default so
+		 * e2e seeds don't accidentally trip the reachability sweep. */
+		isMonitored?: boolean;
+		/** Threshold in seconds; defaults to 600 (10 min). Must be > 0. */
 		alertWhenDownFor?: number;
 	} = {},
 ): Promise<SeededServer> {
@@ -100,10 +103,11 @@ export async function seedServer(
 	const host = opts.host ?? `https://${randomLabel("host")}.e2e.invalid`;
 	const kind = opts.kind ?? "central";
 	const rank = opts.rank ?? "production";
-	const alertWhenDownFor = opts.alertWhenDownFor ?? 0;
+	const isMonitored = opts.isMonitored ?? false;
+	const alertWhenDownFor = opts.alertWhenDownFor ?? 600;
 	await sql.query(
-		`INSERT INTO servers (id, name, host, kind, rank, group_id, device_id, alert_when_down_for, notes, tags)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)`,
+		`INSERT INTO servers (id, name, host, kind, rank, group_id, device_id, is_monitored, alert_when_down_for, notes, tags)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)`,
 		[
 			id,
 			name,
@@ -112,6 +116,7 @@ export async function seedServer(
 			rank,
 			opts.groupId ?? null,
 			opts.deviceId ?? null,
+			isMonitored,
 			alertWhenDownFor,
 			opts.notes ?? "",
 			JSON.stringify(opts.tags ?? {}),
