@@ -4787,6 +4787,17 @@
                   ],
                   "description": "Display name of the group this server belongs to (denormalised so list\nrows don't need to fetch the group separately). `None` if ungrouped."
                 },
+                "health": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HealthState",
+                      "description": "Self-reported health from the most recent status row. Same `None`\nvs. populated-default semantics as [`Self::up`]."
+                    }
+                  ]
+                },
                 "host": {
                   "type": "string"
                 },
@@ -4825,6 +4836,17 @@
                 },
                 "tags": {
                   "$ref": "#/components/schemas/TagMap"
+                },
+                "up": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ShortStatus",
+                      "description": "Reachability of the server, derived from the most recent status row.\n`None` when the endpoint that produced this row didn't batch-fetch\nstatuses (e.g. the cheap list/get endpoints); a populated value of\n[`ShortStatus::Gone`] means \"fetched and no status exists\"."
+                    }
+                  ]
                 }
               }
             }
@@ -5263,125 +5285,9 @@
           "siblings": {
             "type": "array",
             "items": {
-              "type": "array",
-              "items": false,
-              "prefixItems": [
-                {
-                  "type": "string",
-                  "enum": [
-                    "up",
-                    "down",
-                    "away",
-                    "blip",
-                    "gone"
-                  ]
-                },
-                {
-                  "type": "string",
-                  "description": "Server's self-reported health state, derived from the most\nrecent status row's `healthy` field and `health[]` array.\nOrthogonal to [`ShortStatus`]: a server can be reachable\n(`up`) and reporting itself unhealthy at the same time.\n\nThe UI renders this as the *border* of `<StatusDot>` so both\ndimensions (reachability and self-report) show in one glyph.",
-                  "enum": [
-                    "healthy",
-                    "warning",
-                    "unhealthy"
-                  ]
-                },
-                {
-                  "type": "object",
-                  "required": [
-                    "id",
-                    "kind",
-                    "host",
-                    "alert_when_down_for",
-                    "notes",
-                    "tags"
-                  ],
-                  "properties": {
-                    "alert_when_down_for": {
-                      "type": "integer",
-                      "format": "int64",
-                      "description": "Downtime threshold in seconds before the reachability sweep files an\nissue. `0` (or any non-positive value) disables alerting for this\nserver; the default at creation is 600 (10 minutes)."
-                    },
-                    "cloud": {
-                      "type": [
-                        "boolean",
-                        "null"
-                      ]
-                    },
-                    "device_id": {
-                      "type": [
-                        "string",
-                        "null"
-                      ],
-                      "format": "uuid"
-                    },
-                    "geolocation": {
-                      "oneOf": [
-                        {
-                          "type": "null"
-                        },
-                        {
-                          "$ref": "#/components/schemas/GeoPoint"
-                        }
-                      ]
-                    },
-                    "group_id": {
-                      "type": [
-                        "string",
-                        "null"
-                      ],
-                      "format": "uuid"
-                    },
-                    "group_name": {
-                      "type": [
-                        "string",
-                        "null"
-                      ],
-                      "description": "Display name of the group this server belongs to (denormalised so list\nrows don't need to fetch the group separately). `None` if ungrouped."
-                    },
-                    "host": {
-                      "type": "string"
-                    },
-                    "id": {
-                      "type": "string",
-                      "format": "uuid"
-                    },
-                    "kind": {
-                      "$ref": "#/components/schemas/ServerKind"
-                    },
-                    "name": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "notes": {
-                      "type": "string"
-                    },
-                    "public_name": {
-                      "type": [
-                        "string",
-                        "null"
-                      ],
-                      "description": "Name this server appears under in the public mobile-app server list.\n`None` means the server is not listed publicly."
-                    },
-                    "rank": {
-                      "oneOf": [
-                        {
-                          "type": "null"
-                        },
-                        {
-                          "$ref": "#/components/schemas/ServerRank"
-                        }
-                      ]
-                    },
-                    "tags": {
-                      "$ref": "#/components/schemas/TagMap"
-                    }
-                  }
-                }
-              ]
+              "$ref": "#/components/schemas/ServerInfo"
             },
-            "description": "Other servers in the same group (excluding `server`). Empty when the\nserver is ungrouped or alone in its group."
+            "description": "Other servers in the same group (excluding `server`). Empty when the\nserver is ungrouped or alone in its group. Each entry carries its\nown `up` / `health` so the UI can render a status dot per sibling."
           },
           "up": {
             "$ref": "#/components/schemas/ShortStatus"
@@ -5531,6 +5437,17 @@
             ],
             "description": "Display name of the group this server belongs to (denormalised so list\nrows don't need to fetch the group separately). `None` if ungrouped."
           },
+          "health": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/HealthState",
+                "description": "Self-reported health from the most recent status row. Same `None`\nvs. populated-default semantics as [`Self::up`]."
+              }
+            ]
+          },
           "host": {
             "type": "string"
           },
@@ -5569,6 +5486,17 @@
           },
           "tags": {
             "$ref": "#/components/schemas/TagMap"
+          },
+          "up": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ShortStatus",
+                "description": "Reachability of the server, derived from the most recent status row.\n`None` when the endpoint that produced this row didn't batch-fetch\nstatuses (e.g. the cheap list/get endpoints); a populated value of\n[`ShortStatus::Gone`] means \"fetched and no status exists\"."
+              }
+            ]
           }
         }
       },

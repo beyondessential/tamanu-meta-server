@@ -84,6 +84,7 @@ pub async fn get(
 			.unwrap_or("")
 			.cmp(b.name.as_deref().unwrap_or(""))
 	});
+	super::servers::decorate_with_status(&mut conn, &mut servers).await?;
 	Ok(Json(GroupDetail { group, servers }))
 }
 

@@ -14,7 +14,7 @@ use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::fns::Page;
-use crate::fns::servers::ServerInfo;
+use crate::fns::servers::{ServerInfo, decorate_with_status, server_to_info};
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -191,25 +191,6 @@ fn format_key_as_pem(key_data: &[u8]) -> String {
 	pem
 }
 
-fn server_to_info(s: database::servers::Server) -> ServerInfo {
-	ServerInfo {
-		id: s.id,
-		name: s.name,
-		host: s.host.into(),
-		kind: s.kind,
-		rank: s.rank,
-		device_id: s.device_id,
-		group_id: s.group_id,
-		group_name: None,
-		public_name: s.public_name,
-		cloud: s.cloud,
-		geolocation: s.geolocation,
-		alert_when_down_for: s.alert_when_down_for.0.as_secs(),
-		notes: s.notes,
-		tags: s.tags,
-	}
-}
-
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
 		.routes(routes!(get_device_by_id))
@@ -313,7 +294,9 @@ pub async fn get_servers_for_device(
 ) -> Result<Json<Vec<ServerInfo>>> {
 	let mut conn = state.db.get().await?;
 	let servers = Server::get_by_device_id(&mut conn, args.device_id).await?;
-	Ok(Json(servers.into_iter().map(server_to_info).collect()))
+	let mut infos: Vec<ServerInfo> = servers.into_iter().map(server_to_info).collect();
+	decorate_with_status(&mut conn, &mut infos).await?;
+	Ok(Json(infos))
 }
 
 #[utoipa::path(
@@ -333,7 +316,9 @@ pub async fn get_past_server_associations(
 ) -> Result<Json<Vec<ServerInfo>>> {
 	let mut conn = state.db.get().await?;
 	let servers = Server::get_past_associations_for_device(&mut conn, args.device_id).await?;
-	Ok(Json(servers.into_iter().map(server_to_info).collect()))
+	let mut infos: Vec<ServerInfo> = servers.into_iter().map(server_to_info).collect();
+	decorate_with_status(&mut conn, &mut infos).await?;
+	Ok(Json(infos))
 }
 
 #[derive(Deserialize, ToSchema)]
