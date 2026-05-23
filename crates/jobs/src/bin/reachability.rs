@@ -20,18 +20,71 @@ use commons_servers::{
 	tailnet_directory::{TailnetDirectory, TailnetDirectoryConfig},
 	tailnet_sweeps,
 };
-use database::statuses::Status;
+use database::{
+	issues::reevaluate_open_issues_for_server, servers::Server, statuses::Status,
+};
 use lloggs::{LoggingArgs, PreArgs};
 use miette::IntoDiagnostic;
 use tokio::{
 	task::{self, JoinHandle},
 	time::sleep,
 };
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
+
+/// One-shot cleanup for the deploy window of the monitored-toggle
+/// split (PR #170): the migration in that change bumped
+/// `alert_when_down_for` from 0 to 10 minutes for previously-off
+/// servers so the new `> 0` CHECK constraint would hold, but the
+/// old code (still serving during the rolling deploy) read that
+/// duration as "monitored" and ran one or more reachability sweeps
+/// against those servers, filing canopy/reachability issues and
+/// opening spurious incidents.
+///
+/// Walk every currently-unmonitored server through
+/// `reevaluate_open_issues_for_server`. With the new code's leave
+/// rule, any of its open issues that are still contributing to an
+/// incident now leave it and the incident closes if nothing else
+/// keeps it alive. Idempotent: once the database is clean,
+/// subsequent calls are no-ops.
+async fn cleanup_unmonitored_incidents(pool: &database::Db) {
+	let Ok(mut db) = pool.get().await else {
+		warn!("post-migration cleanup: failed to get database connection");
+		return;
+	};
+	let unmonitored = match Server::list_unmonitored(&mut db).await {
+		Ok(rows) => rows,
+		Err(err) => {
+			warn!("post-migration cleanup: list_unmonitored failed: {err}");
+			return;
+		}
+	};
+	if unmonitored.is_empty() {
+		debug!("post-migration cleanup: no unmonitored servers, skipping");
+		return;
+	}
+	info!(
+		"post-migration cleanup: re-evaluating {} unmonitored servers",
+		unmonitored.len()
+	);
+	let mut errors = 0usize;
+	for server in unmonitored {
+		if let Err(err) = reevaluate_open_issues_for_server(&mut db, server.id).await {
+			warn!(server_id = %server.id, "post-migration cleanup: re-evaluate failed: {err}");
+			errors += 1;
+		}
+	}
+	if errors > 0 {
+		warn!("post-migration cleanup: {errors} server(s) failed to re-evaluate");
+	} else {
+		info!("post-migration cleanup: done");
+	}
+}
 
 pub fn spawn() -> JoinHandle<()> {
 	let pool = database::init();
 	task::spawn(async move {
+		cleanup_unmonitored_incidents(&pool).await;
+
 		// The directory is optional: in dev / single-tenant deploys the
 		// TAILSCALE_* env vars aren't set, and the key-expiry sweep just
 		// no-ops. Build it once at startup so we don't re-mint OAuth
