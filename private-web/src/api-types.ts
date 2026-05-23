@@ -999,6 +999,102 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/silenced_refs/list_for_group": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["list_for_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/silenced_refs/list_for_server": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["list_for_server"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/silenced_refs/silence_group": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["silence_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/silenced_refs/silence_server": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["silence_server"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/silenced_refs/unsilence_group": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["unsilence_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/silenced_refs/unsilence_server": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["unsilence_server"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sql/execute_query": {
         parameters: {
             query?: never;
@@ -1508,6 +1604,10 @@ export interface components {
             /** Format: uuid */
             server_group_id: string;
         };
+        GroupScopeArgs: {
+            /** Format: uuid */
+            server_group_id: string;
+        };
         /**
          * @description Server's self-reported health state, derived from the most
          *     recent status row's `healthy` field and `health[]` array.
@@ -1626,6 +1726,13 @@ export interface components {
              *     Kept as String to round-trip any historical value.
              */
             resolved_reason?: string | null;
+            /**
+             * Format: uuid
+             * @description Group id the issue's server belongs to; `None` when ungrouped. Used
+             *     by the UI to offer group-scope actions (silence, etc.) without a
+             *     second fetch.
+             */
+            server_group_id?: string | null;
             /**
              * @description Display name of the group the issue's server belongs to. `None` when
              *     the server is ungrouped; the UI hides the group prefix in that case.
@@ -2057,6 +2164,15 @@ export interface components {
             /** Format: int64 */
             version_distance?: number | null;
         };
+        ServerGroupSilencedRef: {
+            /** Format: date-time */
+            created_at: string;
+            created_by?: string | null;
+            ref: string;
+            /** Format: uuid */
+            server_group_id: string;
+            source: string;
+        };
         ServerIdArgs: {
             /** Format: uuid */
             server_id: string;
@@ -2129,6 +2245,19 @@ export interface components {
         };
         /** @enum {string} */
         ServerRank: "production" | "clone" | "demo" | "test" | "dev";
+        ServerScopeArgs: {
+            /** Format: uuid */
+            server_id: string;
+        };
+        ServerSilencedRef: {
+            /** Format: date-time */
+            created_at: string;
+            created_by?: string | null;
+            ref: string;
+            /** Format: uuid */
+            server_id: string;
+            source: string;
+        };
         /**
          * @description RFC 5424 syslog severities.
          *
@@ -2141,6 +2270,18 @@ export interface components {
         Severity: "emergency" | "alert" | "critical" | "error" | "warning" | "notice" | "info" | "debug";
         /** @enum {string} */
         ShortStatus: "up" | "down" | "away" | "blip" | "gone";
+        SilenceGroupArgs: {
+            ref: string;
+            /** Format: uuid */
+            server_group_id: string;
+            source: string;
+        };
+        SilenceServerArgs: {
+            ref: string;
+            /** Format: uuid */
+            server_id: string;
+            source: string;
+        };
         SnapshotArgs: {
             /**
              * Format: date-time
@@ -4044,6 +4185,156 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
+            };
+        };
+    };
+    list_for_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroupScopeArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerGroupSilencedRef"][];
+                };
+            };
+        };
+    };
+    list_for_server: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerScopeArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerSilencedRef"][];
+                };
+            };
+        };
+    };
+    silence_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SilenceGroupArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerGroupSilencedRef"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    silence_server: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SilenceServerArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerSilencedRef"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    unsilence_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SilenceGroupArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    unsilence_server: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SilenceServerArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

@@ -9,6 +9,7 @@ pub mod incidents;
 pub mod issues;
 pub mod server_groups;
 pub mod servers;
+pub mod silenced_refs;
 pub mod sql;
 pub mod statuses;
 pub mod versions;
@@ -34,6 +35,7 @@ pub fn routes() -> OpenApiRouter<crate::state::AppState> {
 			.nest("/issues", issues::routes())
 			.nest("/server_groups", server_groups::routes())
 			.nest("/servers", servers::routes())
+			.nest("/silenced_refs", silenced_refs::routes())
 			.nest("/sql", sql::routes())
 			.nest("/statuses", statuses::routes())
 			.nest("/versions", versions::routes()),

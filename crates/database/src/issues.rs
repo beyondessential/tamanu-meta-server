@@ -364,11 +364,13 @@ impl NewEvent {
 /// Compute whether the issue *should* currently be contributing to an
 /// open incident, and apply join/leave accordingly. The rules:
 ///
-/// - **Leave**: `!active || resolved || snoozed || !monitored`. Severity
-///   downgrade alone does *not* remove an issue — once contributing, it
-///   stays until it's actually gone or explicitly suppressed. Flipping
-///   the server to unmonitored *does* remove it: the operator has said
-///   they're not watching this server, so its issues stop counting.
+/// - **Leave**: `!active || resolved || snoozed || silenced || !monitored`.
+///   Severity downgrade alone does *not* remove an issue — once
+///   contributing, it stays until it's actually gone or explicitly
+///   suppressed. Flipping the server to unmonitored *does* remove it: the
+///   operator has said they're not watching this server, so its issues
+///   stop counting. The same applies if `(source, ref)` is on the server
+///   or group silence list — see [`crate::silenced_refs`].
 /// - **Join**: not leaving, AND one of:
 ///   - severity ≥ floor (`error`), so this issue is high-priority enough to
 ///     create a new incident on its own; or
@@ -400,10 +402,20 @@ async fn re_evaluate_incident_membership(
 
 	let was_in = is_issue_in_open_incident(conn, issue.id).await?;
 	let snoozed = issue.snoozed_until.map_or(false, |t| t > Timestamp::now());
+	let silenced = crate::silenced_refs::is_silenced(
+		conn,
+		issue.server_id,
+		Some(server_group_id),
+		&issue.source,
+		&issue.r#ref,
+	)
+	.await?;
 	let group_open = group_has_open_incident(conn, server_group_id).await?;
 
-	let should_leave = !issue.active || issue.resolved_at.is_some() || snoozed || !monitored;
+	let should_leave =
+		!issue.active || issue.resolved_at.is_some() || snoozed || silenced || !monitored;
 	let should_join = monitored
+		&& !silenced
 		&& issue.active
 		&& issue.resolved_at.is_none()
 		&& !snoozed
@@ -526,6 +538,89 @@ pub async fn reevaluate_open_issues_for_server(
 	Ok(())
 }
 
+/// Re-evaluate every currently-open issue on `server_id` with the given
+/// `(source, ref)`. Narrower variant of [`reevaluate_open_issues_for_server`]
+/// used after a server-scoped silence is added or removed: only the matching
+/// refs need to revisit their incident membership.
+pub async fn reevaluate_open_issues_for_server_ref(
+	db: &mut AsyncPgConnection,
+	server_id: Uuid,
+	source: &str,
+	r#ref: &str,
+) -> Result<()> {
+	use crate::schema::issues::dsl;
+
+	let server = Server::get_by_id(db, server_id).await?;
+	let Some(gid) = server.group_id else {
+		return Ok(());
+	};
+	let monitored = server.is_monitored;
+
+	let open_issues: Vec<Issue> = dsl::issues
+		.select(Issue::as_select())
+		.filter(dsl::server_id.eq(server_id))
+		.filter(dsl::source.eq(source))
+		.filter(dsl::ref_.eq(r#ref))
+		.filter(dsl::active.eq(true))
+		.filter(dsl::resolved_at.is_null())
+		.load(db)
+		.await?;
+
+	let now = Timestamp::now();
+	for issue in open_issues {
+		re_evaluate_incident_membership(db, &issue, gid, monitored, now, None).await?;
+	}
+	Ok(())
+}
+
+/// Re-evaluate every currently-open issue in the group with the given
+/// `(source, ref)`. Used after a group-scoped silence is added or removed.
+pub async fn reevaluate_open_issues_for_group_ref(
+	db: &mut AsyncPgConnection,
+	server_group_id: Uuid,
+	source: &str,
+	r#ref: &str,
+) -> Result<()> {
+	use crate::schema::{issues, servers};
+
+	let server_ids: Vec<Uuid> = servers::table
+		.select(servers::id)
+		.filter(servers::group_id.eq(server_group_id))
+		.load(db)
+		.await?;
+	if server_ids.is_empty() {
+		return Ok(());
+	}
+
+	let open_issues: Vec<Issue> = issues::table
+		.select(Issue::as_select())
+		.filter(issues::server_id.eq_any(&server_ids))
+		.filter(issues::source.eq(source))
+		.filter(issues::ref_.eq(r#ref))
+		.filter(issues::active.eq(true))
+		.filter(issues::resolved_at.is_null())
+		.load(db)
+		.await?;
+
+	let now = Timestamp::now();
+	// Servers in the same group all share the same `monitored` only by
+	// coincidence; look each up so the re-evaluation sees current state.
+	let mut monitored_by_server: std::collections::HashMap<Uuid, bool> =
+		std::collections::HashMap::new();
+	for sid in &server_ids {
+		let s = Server::get_by_id(db, *sid).await?;
+		monitored_by_server.insert(*sid, s.is_monitored);
+	}
+	for issue in open_issues {
+		let monitored = monitored_by_server
+			.get(&issue.server_id)
+			.copied()
+			.unwrap_or(true);
+		re_evaluate_incident_membership(db, &issue, server_group_id, monitored, now, None).await?;
+	}
+	Ok(())
+}
+
 /// Re-evaluate every currently-open issue across every server in the
 /// database against incident membership. Intended as a startup pass for
 /// background workers: if the rules around incident eligibility change
@@ -595,7 +690,6 @@ pub async fn reconcile_open_incidents(
 	})
 	.await
 }
-
 async fn is_issue_in_open_incident(db: &mut AsyncPgConnection, issue_id: Uuid) -> Result<bool> {
 	use crate::schema::incident_issues;
 
@@ -948,15 +1042,8 @@ impl Issue {
 			let server = Server::get_by_id(conn, issue.server_id).await?;
 			if let Some(gid) = server.group_id {
 				// Unresolve rejoins; cascade close path doesn't fire here.
-				re_evaluate_incident_membership(
-					conn,
-					&issue,
-					gid,
-					server.is_monitored,
-					now,
-					None,
-				)
-				.await?;
+				re_evaluate_incident_membership(conn, &issue, gid, server.is_monitored, now, None)
+					.await?;
 			}
 			Ok(issue)
 		})
@@ -986,15 +1073,8 @@ impl Issue {
 				.await?;
 			let server = Server::get_by_id(conn, issue.server_id).await?;
 			if let Some(gid) = server.group_id {
-				re_evaluate_incident_membership(
-					conn,
-					&issue,
-					gid,
-					server.is_monitored,
-					now,
-					None,
-				)
-				.await?;
+				re_evaluate_incident_membership(conn, &issue, gid, server.is_monitored, now, None)
+					.await?;
 			}
 			Ok(issue)
 		})
@@ -1013,15 +1093,8 @@ impl Issue {
 				.await?;
 			let server = Server::get_by_id(conn, issue.server_id).await?;
 			if let Some(gid) = server.group_id {
-				re_evaluate_incident_membership(
-					conn,
-					&issue,
-					gid,
-					server.is_monitored,
-					now,
-					None,
-				)
-				.await?;
+				re_evaluate_incident_membership(conn, &issue, gid, server.is_monitored, now, None)
+					.await?;
 			}
 			Ok(issue)
 		})

@@ -14,6 +14,7 @@ pub mod pg_duration;
 pub mod schema;
 pub mod server_groups;
 pub mod servers;
+pub mod silenced_refs;
 pub mod slack_outbox;
 pub mod sql_playground_history;
 pub mod statuses;

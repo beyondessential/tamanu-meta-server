@@ -504,8 +504,7 @@ pub async fn update(
 	// `group_id` (ungrouped → grouped opens pending issues into incidents)
 	// and `is_monitored` (un/monitored toggles incident eligibility
 	// symmetrically — on enrols open issues, off cascades them out).
-	let touches_catchup_field =
-		args.data.group_id.is_some() || args.data.is_monitored.is_some();
+	let touches_catchup_field = args.data.group_id.is_some() || args.data.is_monitored.is_some();
 	let before = if touches_catchup_field {
 		Some(Server::get_by_id(&mut conn, args.server_id).await?)
 	} else {

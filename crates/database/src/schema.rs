@@ -171,6 +171,17 @@ diesel::table! {
 }
 
 diesel::table! {
+	server_group_silenced_refs (server_group_id, source, ref_) {
+		server_group_id -> Uuid,
+		source -> Text,
+		#[sql_name = "ref"]
+		ref_ -> Text,
+		created_at -> Timestamptz,
+		created_by -> Nullable<Text>,
+	}
+}
+
+diesel::table! {
 	server_groups (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
@@ -178,6 +189,17 @@ diesel::table! {
 		name -> Text,
 		notes -> Text,
 		tags -> Jsonb,
+	}
+}
+
+diesel::table! {
+	server_silenced_refs (server_id, source, ref_) {
+		server_id -> Uuid,
+		source -> Text,
+		#[sql_name = "ref"]
+		ref_ -> Text,
+		created_at -> Timestamptz,
+		created_by -> Nullable<Text>,
 	}
 }
 
@@ -298,6 +320,8 @@ diesel::joinable!(incidents -> server_groups (server_group_id));
 diesel::joinable!(issue_notes -> issues (issue_id));
 diesel::joinable!(issues -> devices (device_id));
 diesel::joinable!(issues -> servers (server_id));
+diesel::joinable!(server_group_silenced_refs -> server_groups (server_group_id));
+diesel::joinable!(server_silenced_refs -> servers (server_id));
 diesel::joinable!(servers -> devices (device_id));
 diesel::joinable!(servers -> server_groups (group_id));
 diesel::joinable!(slack_outbox -> incident_notes (note_id));
@@ -322,7 +346,9 @@ diesel::allow_tables_to_appear_in_same_query!(
 	incidents,
 	issue_notes,
 	issues,
+	server_group_silenced_refs,
 	server_groups,
+	server_silenced_refs,
 	servers,
 	slack_outbox,
 	sql_playground_history,

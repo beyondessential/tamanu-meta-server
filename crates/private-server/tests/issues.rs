@@ -933,6 +933,236 @@ async fn disabling_monitoring_removes_open_contribution() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn silencing_server_ref_closes_only_matching_open_incident() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		conn.batch_execute("INSERT INTO admins (email) VALUES ('admin@example.com')")
+			.await
+			.expect("seed admin");
+
+		let server_id = Uuid::new_v4();
+		let _issue_id = open_issue(&mut conn, &private, server_id).await;
+
+		// File a *different* ref on the same server — also an incident-class
+		// issue. Two incidents, or one incident with two contributors? Per
+		// the existing semantics, the first opens a group incident and the
+		// second joins it. We'll see one open incident with two contributors.
+		let resp = private
+			.post("/api/issues/submit_manual_event")
+			.json(&serde_json::json!({
+				"serverId": server_id,
+				"ref": "other",
+				"severity": "error",
+				"message": "second contributor",
+			}))
+			.await;
+		resp.assert_status_ok();
+		let resp = private
+			.post("/api/incidents/list_for_server")
+			.json(&serde_json::json!({ "server_id": server_id }))
+			.await;
+		assert_eq!(resp.json::<Vec<serde_json::Value>>().len(), 1);
+
+		// Silence the first ref at server scope. The second contributor
+		// keeps the incident open.
+		let resp = private
+			.post("/api/silenced_refs/silence_server")
+			.json(&serde_json::json!({
+				"server_id": server_id,
+				"source": "manual",
+				"ref": "x",
+			}))
+			.await;
+		resp.assert_status_ok();
+
+		let resp = private
+			.post("/api/incidents/list_for_server")
+			.json(&serde_json::json!({ "server_id": server_id }))
+			.await;
+		let items: Vec<serde_json::Value> = resp.json();
+		assert_eq!(items.len(), 1, "still open via the unsilenced contributor");
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn unsilencing_server_ref_rejoins_open_incident() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		conn.batch_execute("INSERT INTO admins (email) VALUES ('admin@example.com')")
+			.await
+			.expect("seed admin");
+
+		let server_id = Uuid::new_v4();
+		let _issue_id = open_issue(&mut conn, &private, server_id).await;
+
+		// Silence then unsilence: the (re-)evaluation should leave the issue
+		// in the same state we started in.
+		let resp = private
+			.post("/api/silenced_refs/silence_server")
+			.json(&serde_json::json!({
+				"server_id": server_id,
+				"source": "manual",
+				"ref": "x",
+			}))
+			.await;
+		resp.assert_status_ok();
+		let resp = private
+			.post("/api/incidents/list_for_server")
+			.json(&serde_json::json!({ "server_id": server_id, "include_closed": true }))
+			.await;
+		let items: Vec<serde_json::Value> = resp.json();
+		assert_eq!(items.len(), 1, "incident row exists for history");
+		assert!(
+			items[0].get("closed_at").is_some_and(|v| !v.is_null()),
+			"silenced lone contributor closes the incident",
+		);
+
+		let resp = private
+			.post("/api/silenced_refs/unsilence_server")
+			.json(&serde_json::json!({
+				"server_id": server_id,
+				"source": "manual",
+				"ref": "x",
+			}))
+			.await;
+		resp.assert_status_ok();
+
+		// Unsilence reopens via a fresh incident (the old one stays closed).
+		let resp = private
+			.post("/api/incidents/list_for_server")
+			.json(&serde_json::json!({ "server_id": server_id }))
+			.await;
+		let items: Vec<serde_json::Value> = resp.json();
+		assert_eq!(items.len(), 1, "fresh incident after unsilence");
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn group_silence_blocks_events_from_all_members() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		conn.batch_execute("INSERT INTO admins (email) VALUES ('admin@example.com')")
+			.await
+			.expect("seed admin");
+
+		let group_id = Uuid::new_v4();
+		let server_a = Uuid::new_v4();
+		let server_b = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g');
+			 INSERT INTO servers (id, host, kind, group_id) VALUES \
+				('{server_a}', 'https://a.example.com', 'central', '{group_id}'),
+				('{server_b}', 'https://b.example.com', 'central', '{group_id}');"
+		))
+		.await
+		.expect("seed");
+
+		// Silence the ref at group scope.
+		let resp = private
+			.post("/api/silenced_refs/silence_group")
+			.json(&serde_json::json!({
+				"server_group_id": group_id,
+				"source": "manual",
+				"ref": "noisy",
+			}))
+			.await;
+		resp.assert_status_ok();
+
+		// Either member firing the silenced ref doesn't open an incident.
+		for sid in [server_a, server_b] {
+			let resp = private
+				.post("/api/issues/submit_manual_event")
+				.json(&serde_json::json!({
+					"serverId": sid,
+					"ref": "noisy",
+					"severity": "error",
+					"message": "should not fire",
+				}))
+				.await;
+			resp.assert_status_ok();
+		}
+
+		let resp = private
+			.post("/api/incidents/list_for_server")
+			.json(&serde_json::json!({ "server_id": server_a }))
+			.await;
+		assert!(resp.json::<Vec<serde_json::Value>>().is_empty());
+
+		// A different ref still opens an incident — silence is ref-specific.
+		let resp = private
+			.post("/api/issues/submit_manual_event")
+			.json(&serde_json::json!({
+				"serverId": server_a,
+				"ref": "other",
+				"severity": "error",
+				"message": "should still fire",
+			}))
+			.await;
+		resp.assert_status_ok();
+		let resp = private
+			.post("/api/incidents/list_for_server")
+			.json(&serde_json::json!({ "server_id": server_a }))
+			.await;
+		assert_eq!(resp.json::<Vec<serde_json::Value>>().len(), 1);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn list_silenced_refs_for_server_and_group() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		conn.batch_execute("INSERT INTO admins (email) VALUES ('admin@example.com')")
+			.await
+			.expect("seed admin");
+
+		let group_id = Uuid::new_v4();
+		let server_id = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g');
+			 INSERT INTO servers (id, host, kind, group_id) VALUES \
+				('{server_id}', 'https://l.example.com', 'central', '{group_id}');"
+		))
+		.await
+		.expect("seed");
+
+		private
+			.post("/api/silenced_refs/silence_server")
+			.json(&serde_json::json!({
+				"server_id": server_id,
+				"source": "manual",
+				"ref": "srv-ref",
+			}))
+			.await
+			.assert_status_ok();
+		private
+			.post("/api/silenced_refs/silence_group")
+			.json(&serde_json::json!({
+				"server_group_id": group_id,
+				"source": "canopy",
+				"ref": "grp-ref",
+			}))
+			.await
+			.assert_status_ok();
+
+		let resp = private
+			.post("/api/silenced_refs/list_for_server")
+			.json(&serde_json::json!({ "server_id": server_id }))
+			.await;
+		let items: Vec<serde_json::Value> = resp.json();
+		assert_eq!(items.len(), 1);
+		assert_eq!(items[0].get("ref").and_then(|v| v.as_str()), Some("srv-ref"));
+
+		let resp = private
+			.post("/api/silenced_refs/list_for_group")
+			.json(&serde_json::json!({ "server_group_id": group_id }))
+			.await;
+		let items: Vec<serde_json::Value> = resp.json();
+		assert_eq!(items.len(), 1);
+		assert_eq!(items[0].get("ref").and_then(|v| v.as_str()), Some("grp-ref"));
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn incident_resolve_metadata() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let server_id = Uuid::new_v4();

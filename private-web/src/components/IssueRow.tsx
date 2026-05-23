@@ -14,6 +14,7 @@ import {
 import CheckCircleOutlinedIcon from "@mui/icons-material/CheckCircleOutlined";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import NotificationsOffOutlinedIcon from "@mui/icons-material/NotificationsOffOutlined";
 import SnoozeIcon from "@mui/icons-material/Snooze";
 import { Fragment, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
@@ -326,9 +327,12 @@ function IssueActions({
 	const unresolve = useApiAction("issues", "unresolve");
 	const snooze = useApiAction("issues", "snooze");
 	const unsnooze = useApiAction("issues", "unsnooze");
+	const silenceServer = useApiAction("silenced_refs", "silence_server");
+	const silenceGroup = useApiAction("silenced_refs", "silence_group");
 
 	const [resolveOpen, setResolveOpen] = useState(false);
 	const [snoozeOpen, setSnoozeOpen] = useState(false);
+	const [silenceOpen, setSilenceOpen] = useState(false);
 	const [reason, setReason] = useState<ResolvedReason>("fixed");
 	const [snoozeHours, setSnoozeHours] = useState(4);
 
@@ -342,7 +346,12 @@ function IssueActions({
 	};
 
 	const error =
-		resolve.error ?? unresolve.error ?? snooze.error ?? unsnooze.error;
+		resolve.error
+		?? unresolve.error
+		?? snooze.error
+		?? unsnooze.error
+		?? silenceServer.error
+		?? silenceGroup.error;
 
 	return (
 		<Box sx={{ mt: 1 }}>
@@ -388,6 +397,14 @@ function IssueActions({
 						Snooze…
 					</Button>
 				)}
+				<Button
+					size="small"
+					variant="outlined"
+					startIcon={<NotificationsOffOutlinedIcon />}
+					onClick={() => setSilenceOpen((v) => !v)}
+				>
+					Silence ref…
+				</Button>
 				<AddNoteButton
 					apiModule="issues"
 					parentKey="issue_id"
@@ -467,6 +484,58 @@ function IssueActions({
 					>
 						Cancel
 					</Button>
+				</Stack>
+			)}
+			{silenceOpen && (
+				<Stack spacing={1} sx={{ mt: 1 }}>
+					<Typography variant="body2" color="text.secondary">
+						Permanently ignore <code>{issue.source}/{issue.ref}</code> issues at
+						the chosen scope. The issues still record, but no longer trigger or
+						join incidents. Manage and un-silence from the detail page.
+					</Typography>
+					<Stack direction="row" spacing={1}>
+						<Button
+							variant="outlined"
+							size="small"
+							startIcon={<NotificationsOffOutlinedIcon />}
+							onClick={() =>
+								wrap(() =>
+									silenceServer.call({
+										server_id: issue.server_id,
+										source: issue.source,
+										ref: issue.ref,
+									}),
+								).then(() => setSilenceOpen(false))
+							}
+						>
+							For this server
+						</Button>
+						{issue.server_group_id && (
+							<Button
+								variant="outlined"
+								size="small"
+								startIcon={<NotificationsOffOutlinedIcon />}
+								onClick={() =>
+									wrap(() =>
+										silenceGroup.call({
+											server_group_id: issue.server_group_id!,
+											source: issue.source,
+											ref: issue.ref,
+										}),
+									).then(() => setSilenceOpen(false))
+								}
+							>
+								For this group
+							</Button>
+						)}
+						<Button
+							variant="outlined"
+							size="small"
+							onClick={() => setSilenceOpen(false)}
+						>
+							Cancel
+						</Button>
+					</Stack>
 				</Stack>
 			)}
 			{error && (
