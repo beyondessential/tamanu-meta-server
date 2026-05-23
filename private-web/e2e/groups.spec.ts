@@ -73,4 +73,116 @@ test.describe("group edit page", () => {
 		await expect(page.getByLabel(/^Key$/i)).toHaveValue("region");
 		await expect(page.getByLabel(/^Value$/i)).toHaveValue("au");
 	});
+
+	test("the tags add-row button appends a blank editable row", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, {
+			name: "tagless-group",
+			tags: {},
+		});
+
+		await page.goto(`/groups/${group.id}/edit`);
+
+		// Starts empty.
+		await expect(page.getByText(/^no tags\.$/i)).toBeVisible();
+		await expect(page.getByLabel(/^Key$/i)).toHaveCount(0);
+
+		// One click → one row.
+		await page.getByRole("button", { name: "add tag" }).click();
+		await expect(page.getByLabel(/^Key$/i)).toHaveCount(1);
+		await expect(page.getByLabel(/^Value$/i)).toHaveCount(1);
+
+		// A second click → a second row (the regression: only the second
+		// row would survive re-render because the first held an empty key).
+		await page.getByRole("button", { name: "add tag" }).click();
+		await expect(page.getByLabel(/^Key$/i)).toHaveCount(2);
+
+		// The new rows are editable, and typing into the first doesn't
+		// erase the second (the rowId identity is stable).
+		await page.getByLabel(/^Key$/i).nth(0).fill("env");
+		await page.getByLabel(/^Value$/i).nth(0).fill("prod");
+		await expect(page.getByLabel(/^Key$/i)).toHaveCount(2);
+	});
+
+	test("editing a tag value and saving persists the new value", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, {
+			name: "edit-tag-group",
+			tags: { env: "staging" },
+		});
+
+		await page.goto(`/groups/${group.id}/edit`);
+
+		const valueInput = page.getByLabel(/^Value$/i);
+		await expect(valueInput).toHaveValue("staging");
+		await valueInput.fill("prod");
+		await page.getByRole("button", { name: /^save$/i }).click();
+
+		// Save navigates to detail; wait for that.
+		await page.waitForURL(`**/groups/${group.id}`);
+
+		// DB has the new value.
+		const rows = await sql.query<{ tags: Record<string, string> }>(
+			"SELECT tags FROM server_groups WHERE id = $1",
+			[group.id],
+		);
+		expect(rows[0]!.tags).toEqual({ env: "prod" });
+	});
+
+	test("removing a tag row and saving drops it from the DB", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, {
+			name: "delete-tag-group",
+			tags: { env: "prod", tier: "1" },
+		});
+
+		await page.goto(`/groups/${group.id}/edit`);
+
+		await expect(page.getByLabel(/^Key$/i)).toHaveCount(2);
+		// Rows render sorted by key — "env" is first, "tier" is second.
+		await page.getByRole("button", { name: "remove tag" }).nth(1).click();
+		await expect(page.getByLabel(/^Key$/i)).toHaveCount(1);
+		await expect(page.getByLabel(/^Key$/i)).toHaveValue("env");
+
+		await page.getByRole("button", { name: /^save$/i }).click();
+		await page.waitForURL(`**/groups/${group.id}`);
+
+		const rows = await sql.query<{ tags: Record<string, string> }>(
+			"SELECT tags FROM server_groups WHERE id = $1",
+			[group.id],
+		);
+		expect(rows[0]!.tags).toEqual({ env: "prod" });
+	});
+
+	test("adding a new row and saving writes the tag to the DB", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, {
+			name: "add-tag-group",
+			tags: { env: "prod" },
+		});
+
+		await page.goto(`/groups/${group.id}/edit`);
+
+		await page.getByRole("button", { name: "add tag" }).click();
+		// The new (empty-keyed) row sorts last under the existing "env" row.
+		await page.getByLabel(/^Key$/i).nth(1).fill("tier");
+		await page.getByLabel(/^Value$/i).nth(1).fill("1");
+
+		await page.getByRole("button", { name: /^save$/i }).click();
+		await page.waitForURL(`**/groups/${group.id}`);
+
+		const rows = await sql.query<{ tags: Record<string, string> }>(
+			"SELECT tags FROM server_groups WHERE id = $1",
+			[group.id],
+		);
+		expect(rows[0]!.tags).toEqual({ env: "prod", tier: "1" });
+	});
 });

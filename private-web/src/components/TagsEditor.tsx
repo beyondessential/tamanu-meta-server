@@ -1,16 +1,28 @@
 import { Alert, Box, IconButton, Stack, TextField, Tooltip } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
 import DeleteIcon from "@mui/icons-material/DeleteOutlined";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 export type TagMap = Record<string, string>;
 
+interface Row {
+	key: string;
+	value: string;
+	/** Stable React key — survives reordering and lets a half-typed key keep
+	 * focus without the row identity flipping under it. */
+	rowId: number;
+}
+
 /**
- * Stable row identity is keyed by index — the parent passes the full map back
- * each onChange and we render from the entries-sorted-by-key view. To allow
- * editing the key without losing focus, we hold the row list locally as
- * `(key, value)` pairs (preserving entry order) and only materialise the
- * deduplicated TagMap on change.
+ * The component holds its own list of rows so a freshly-added row with an
+ * empty key can sit on screen while the operator types one. The parent only
+ * ever sees a deduplicated `TagMap` (empty keys are dropped on emit), which
+ * means a blank row round-tripping through the parent would vanish — hence
+ * the local mirror.
+ *
+ * The initial state seeds from `value` on mount; later parent updates are
+ * not re-read. Parents that need to reset the editor (e.g. cancel) should
+ * key on the entity id with React's `key` prop to force a remount.
  */
 export default function TagsEditor({
 	value,
@@ -21,42 +33,44 @@ export default function TagsEditor({
 	onChange: (next: TagMap) => void;
 	disabled?: boolean;
 }) {
-	const rows: Array<[string, string]> = useMemo(
-		() => Object.entries(value).sort(([a], [b]) => a.localeCompare(b)),
-		[value],
-	);
+	const [rows, setRows] = useState<Row[]>(() => initRows(value));
 
-	const updateRow = (index: number, key: string, val: string) => {
-		const next = rows.slice();
-		next[index] = [key, val];
-		emit(next);
-	};
-
-	const removeRow = (index: number) => {
-		const next = rows.slice();
-		next.splice(index, 1);
-		emit(next);
-	};
-
-	const addRow = () => {
-		emit([...rows, ["", ""]]);
-	};
-
-	const emit = (entries: Array<[string, string]>) => {
+	const update = (next: Row[]) => {
+		setRows(next);
 		const out: TagMap = {};
-		for (const [k, v] of entries) {
-			const trimmed = k.trim();
-			if (trimmed === "") continue;
-			out[trimmed] = v;
+		for (const r of next) {
+			const k = r.key.trim();
+			if (k === "") continue;
+			// Last write wins on duplicates — surfaced as a warning below.
+			out[k] = r.value;
 		}
 		onChange(out);
+	};
+
+	const setKey = (i: number, key: string) => {
+		const next = rows.slice();
+		next[i] = { ...next[i]!, key };
+		update(next);
+	};
+	const setValue = (i: number, val: string) => {
+		const next = rows.slice();
+		next[i] = { ...next[i]!, value: val };
+		update(next);
+	};
+	const removeRow = (i: number) => {
+		const next = rows.slice();
+		next.splice(i, 1);
+		update(next);
+	};
+	const addRow = () => {
+		update([...rows, { key: "", value: "", rowId: nextRowId() }]);
 	};
 
 	const dupKeys = useMemo(() => {
 		const seen = new Set<string>();
 		const dups = new Set<string>();
-		for (const [k] of rows) {
-			const t = k.trim();
+		for (const r of rows) {
+			const t = r.key.trim();
 			if (t === "") continue;
 			if (seen.has(t)) dups.add(t);
 			seen.add(t);
@@ -69,26 +83,26 @@ export default function TagsEditor({
 			{rows.length === 0 && (
 				<Box sx={{ color: "text.secondary", fontSize: 14 }}>No tags.</Box>
 			)}
-			{rows.map(([k, v], i) => (
+			{rows.map((row, i) => (
 				<Stack
-					key={i}
+					key={row.rowId}
 					direction={{ xs: "column", sm: "row" }}
 					spacing={1}
 					sx={{ alignItems: { sm: "flex-start" } }}
 				>
 					<TextField
 						label="Key"
-						value={k}
-						onChange={(e) => updateRow(i, e.target.value, v)}
+						value={row.key}
+						onChange={(e) => setKey(i, e.target.value)}
 						disabled={disabled}
-						error={dupKeys.has(k.trim())}
-						helperText={dupKeys.has(k.trim()) ? "duplicate key" : undefined}
+						error={dupKeys.has(row.key.trim())}
+						helperText={dupKeys.has(row.key.trim()) ? "duplicate key" : undefined}
 						sx={{ flex: 1 }}
 					/>
 					<TextField
 						label="Value"
-						value={v}
-						onChange={(e) => updateRow(i, k, e.target.value)}
+						value={row.value}
+						onChange={(e) => setValue(i, e.target.value)}
 						disabled={disabled}
 						sx={{ flex: 2 }}
 					/>
@@ -124,4 +138,16 @@ export default function TagsEditor({
 			</Box>
 		</Stack>
 	);
+}
+
+let rowIdCounter = 0;
+function nextRowId(): number {
+	rowIdCounter += 1;
+	return rowIdCounter;
+}
+
+function initRows(map: TagMap): Row[] {
+	return Object.entries(map)
+		.sort(([a], [b]) => a.localeCompare(b))
+		.map(([key, value]) => ({ key, value, rowId: nextRowId() }));
 }
