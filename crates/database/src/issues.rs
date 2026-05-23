@@ -526,6 +526,76 @@ pub async fn reevaluate_open_issues_for_server(
 	Ok(())
 }
 
+/// Re-evaluate every currently-open issue across every server in the
+/// database against incident membership. Intended as a startup pass for
+/// background workers: if the rules around incident eligibility change
+/// in code (or a migration silently bumped state the running code now
+/// reads differently — see PR #170), this drives the actual incident
+/// rows into agreement with what the current code says they should be.
+///
+/// Idempotent. Cheap when the database is already consistent — each
+/// issue's `re_evaluate_incident_membership` call short-circuits in the
+/// `_ => {}` arm when the incident state already matches.
+///
+/// Runs as a single transaction so a crash mid-reconcile doesn't leave
+/// the incident state half-fixed. The per-issue FOR UPDATE locks held
+/// inside `re_evaluate_incident_membership` accumulate across the
+/// transaction's lifetime — fine at canopy's scale (hundreds of open
+/// issues at most) but worth keeping in mind if the corpus grows.
+///
+/// Returns `(servers_walked, issues_evaluated)` for the caller to log.
+pub async fn reconcile_open_incidents(
+	db: &mut AsyncPgConnection,
+) -> Result<(usize, usize)> {
+	use crate::schema::issues::dsl;
+
+	db.transaction::<_, AppError, _>(async |conn| {
+		let open_issues: Vec<Issue> = dsl::issues
+			.select(Issue::as_select())
+			.filter(dsl::active.eq(true))
+			.filter(dsl::resolved_at.is_null())
+			.load(conn)
+			.await?;
+
+		if open_issues.is_empty() {
+			return Ok((0, 0));
+		}
+
+		let server_ids: Vec<Uuid> = {
+			let mut s: std::collections::HashSet<Uuid> =
+				open_issues.iter().map(|i| i.server_id).collect();
+			s.drain().collect()
+		};
+		let servers = Server::get_by_ids(conn, &server_ids).await?;
+		let by_id: std::collections::HashMap<Uuid, Server> =
+			servers.into_iter().map(|s| (s.id, s)).collect();
+
+		let now = Timestamp::now();
+		let mut evaluated = 0usize;
+		for issue in open_issues {
+			let Some(server) = by_id.get(&issue.server_id) else {
+				continue;
+			};
+			let Some(gid) = server.group_id else {
+				// Ungrouped servers can't have incidents; nothing to reconcile.
+				continue;
+			};
+			re_evaluate_incident_membership(
+				conn,
+				&issue,
+				gid,
+				server.is_monitored,
+				now,
+				None,
+			)
+			.await?;
+			evaluated += 1;
+		}
+		Ok((by_id.len(), evaluated))
+	})
+	.await
+}
+
 async fn is_issue_in_open_incident(db: &mut AsyncPgConnection, issue_id: Uuid) -> Result<bool> {
 	use crate::schema::incident_issues;
 
