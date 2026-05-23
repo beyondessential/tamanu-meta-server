@@ -1,0 +1,5 @@
+ALTER TABLE servers ADD COLUMN listed BOOLEAN NOT NULL DEFAULT FALSE;
+
+UPDATE servers SET listed = TRUE WHERE public_name IS NOT NULL;
+
+ALTER TABLE servers DROP COLUMN public_name;

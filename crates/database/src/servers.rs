@@ -44,7 +44,12 @@ pub struct Server {
 	pub device_id: Option<Uuid>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub group_id: Option<Uuid>,
-	pub listed: bool,
+	/// If `Some`, the server appears in the public `/servers` list under this
+	/// name (used by the Tamanu Mobile app). `None` means not listed. Decoupled
+	/// from `name` because server `name`s are scoped within a group and may not
+	/// be globally meaningful.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub public_name: Option<String>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub cloud: Option<bool>,
 	#[serde(skip_serializing_if = "Option::is_none")]
@@ -245,7 +250,7 @@ impl Server {
 
 		// Upsert: insert or update on conflict. Ticket-derived fields
 		// (kind, rank, cloud) re-apply on update; operator-edited state
-		// (listed, geolocation, alert_when_down_for, group_id, notes,
+		// (public_name, geolocation, alert_when_down_for, group_id, notes,
 		// tags) is preserved.
 		diesel::insert_into(servers::table)
 			.values((
@@ -255,7 +260,6 @@ impl Server {
 				servers::kind.eq(&kind_str),
 				servers::rank.eq(&rank_str),
 				servers::device_id.eq(Some(device.id)),
-				servers::listed.eq(false),
 				servers::cloud.eq(cloud),
 			))
 			.on_conflict(servers::id)
@@ -409,7 +413,7 @@ impl Server {
 		let mut query_builder = servers
 			.select(Self::as_select())
 			.filter(kind.eq(ServerKind::Central.to_string()))
-			.filter(listed.eq(true))
+			.filter(public_name.is_not_null())
 			.into_boxed();
 
 		if let Ok(query_uuid) = query.parse::<Uuid>() {
@@ -498,7 +502,7 @@ fn test_server_serialization() {
 		host: UrlField("https://example.com/".parse().unwrap()),
 		device_id: Some(Uuid::nil()),
 		group_id: None,
-		listed: true,
+		public_name: Some("Test Server".to_string()),
 		cloud: None,
 		geolocation: None,
 		alert_when_down_for: TEN_MINUTES,
@@ -516,7 +520,7 @@ fn test_server_serialization() {
   "kind": "central",
   "rank": "production",
   "device_id": "00000000-0000-0000-0000-000000000000",
-  "listed": true,
+  "public_name": "Test Server",
   "alert_when_down_for": 600,
   "notes": "",
   "tags": {}
@@ -545,7 +549,7 @@ impl From<NewServer> for Server {
 			host: server.host,
 			device_id: server.device_id,
 			group_id: server.group_id,
-			listed: false,
+			public_name: None,
 			cloud: None,
 			geolocation: None,
 			alert_when_down_for: TEN_MINUTES,
@@ -568,7 +572,7 @@ pub struct PartialServer {
 	pub host: Option<UrlField>,
 	pub device_id: Option<Option<Uuid>>,
 	pub group_id: Option<Option<Uuid>>,
-	pub listed: Option<bool>,
+	pub public_name: Option<Option<String>>,
 	pub cloud: Option<Option<bool>>,
 	pub geolocation: Option<Option<GeoPoint>>,
 	#[schema(value_type = Option<i64>)]

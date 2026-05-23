@@ -57,7 +57,7 @@ function EditForm({ info }: { info: ServerInfo }) {
 	const [host, setHost] = useState(info.host);
 	const [kind, setKind] = useState<ServerKind>(info.kind);
 	const [rank, setRank] = useState<ServerRank | "">(info.rank ?? "");
-	const [listed, setListed] = useState(info.listed);
+	const [publicName, setPublicName] = useState<string>(info.public_name ?? "");
 	// Threshold in seconds; 0 (or negative) means alerting is disabled. The
 	// UI works in minutes for the operator and the empty string represents
 	// "disabled" — converted back to seconds at submit time.
@@ -86,7 +86,7 @@ function EditForm({ info }: { info: ServerInfo }) {
 			host: host.trim(),
 			kind,
 			rank: rank === "" ? null : rank,
-			listed,
+			public_name: publicName.trim() === "" ? null : publicName.trim(),
 			group_id: groupId,
 			device_id: deviceId.trim() === "" ? null : deviceId.trim(),
 			cloud: cloud === "" ? null : cloud === "true",
@@ -195,15 +195,12 @@ function EditForm({ info }: { info: ServerInfo }) {
 				</Stack>
 
 				{kind === "central" && (
-					<FormControlLabel
-						control={
-							<Checkbox
-								checked={listed}
-								onChange={(e) => setListed(e.target.checked)}
-								disabled={action.pending}
-							/>
-						}
-						label="Available in Tamanu Mobile app"
+					<TextField
+						label="Name in Tamanu Mobile app"
+						value={publicName}
+						onChange={(e) => setPublicName(e.target.value)}
+						disabled={action.pending}
+						helperText="Leave empty to hide this server from the public mobile-app list."
 					/>
 				)}
 

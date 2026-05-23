@@ -52,29 +52,21 @@ pub async fn list(State(db): State<Db>) -> Result<Json<Vec<PublicServer>>> {
 		.await?
 		.into_iter()
 		.filter_map(|s| {
-			s.listed
-				.then(|| s.name.map(|name| (name, s.host, s.rank)))
-				.flatten()
-		})
-		.map(|(name, host, rank)| {
-			(
-				PublicServer {
-					name: name.clone(),
-					host,
-					rank,
-				},
+			s.public_name.map(|name| PublicServer {
 				name,
-			)
+				host: s.host,
+				rank: s.rank,
+			})
 		})
 		.collect::<Vec<_>>();
 
-	servers.sort_by(|(a, a_name), (b, b_name)| {
+	servers.sort_by(|a, b| {
 		rank_order(&a.rank)
 			.cmp(&rank_order(&b.rank))
-			.then_with(|| a_name.cmp(b_name))
+			.then_with(|| a.name.cmp(&b.name))
 	});
 
-	Ok(Json(servers.into_iter().map(|(s, _)| s).collect()))
+	Ok(Json(servers))
 }
 
 #[utoipa::path(

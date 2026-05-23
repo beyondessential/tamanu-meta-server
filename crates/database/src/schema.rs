@@ -128,12 +128,12 @@ diesel::table! {
 		id -> Uuid,
 		created_at -> Timestamptz,
 		updated_at -> Timestamptz,
-		server_group_id -> Uuid,
 		opened_at -> Timestamptz,
 		closed_at -> Nullable<Timestamptz>,
 		resolved_at -> Nullable<Timestamptz>,
 		resolved_by -> Nullable<Text>,
 		resolved_reason -> Nullable<Text>,
+		server_group_id -> Uuid,
 	}
 }
 
@@ -191,13 +191,13 @@ diesel::table! {
 		host -> Text,
 		device_id -> Nullable<Uuid>,
 		kind -> Text,
-		group_id -> Nullable<Uuid>,
-		listed -> Bool,
 		cloud -> Nullable<Bool>,
 		geolocation -> Nullable<Array<Nullable<Float8>>>,
 		alert_when_down_for -> Interval,
+		group_id -> Nullable<Uuid>,
 		notes -> Text,
 		tags -> Jsonb,
+		public_name -> Nullable<Text>,
 	}
 }
 

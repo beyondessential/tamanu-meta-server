@@ -477,7 +477,10 @@ function InfoSection({
 			>
 				{status && <StatusInfoFields status={status} />}
 				{server.kind === "central" && (
-					<InfoItem label="Mobile list" value={server.listed ? "Public" : "No"} />
+					<InfoItem
+						label="Mobile list"
+						value={server.public_name ?? "Not listed"}
+					/>
 				)}
 				<InfoItem
 					label="Status alerts"

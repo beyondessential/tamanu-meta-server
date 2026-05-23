@@ -22,10 +22,16 @@ pub struct NewServer {
 #[derive(Debug, Serialize)]
 pub struct PartialServer {
 	pub id: Uuid,
+	#[serde(skip_serializing_if = "Option::is_none")]
 	pub name: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
 	pub host: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
 	pub kind: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
 	pub rank: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub public_name: Option<String>,
 }
 
 #[derive(QueryableByName)]
@@ -63,7 +69,7 @@ async fn get_empty_list() {
 async fn get_with_central_server() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		conn.batch_execute(
-			"INSERT INTO servers (name, host, kind, rank, listed) VALUES ('Test Server', 'https://test.com', 'central', 'production', true)",
+			"INSERT INTO servers (name, host, kind, rank, public_name) VALUES ('Test Server', 'https://test.com', 'central', 'production', 'Test Server')",
 		)
 		.await
 		.unwrap();
@@ -82,10 +88,10 @@ async fn get_with_central_server() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn get_with_unnamed_server() {
+async fn get_without_public_name() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		conn.batch_execute(
-			"INSERT INTO servers (host, kind, rank, listed) VALUES ('https://test.com', 'central', 'production', true)",
+			"INSERT INTO servers (name, host, kind, rank) VALUES ('Internal Server', 'https://test.com', 'central', 'production')",
 		)
 		.await
 		.unwrap();
@@ -101,9 +107,9 @@ async fn get_with_unnamed_server() {
 async fn get_filters_facility_servers() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		conn.batch_execute(
-			"INSERT INTO servers (name, host, kind, rank, listed) VALUES
-			('Central Server', 'https://central.com', 'central', 'production', true),
-			('Facility Server', 'https://facility.com', 'facility', 'production', false)",
+			"INSERT INTO servers (name, host, kind, rank, public_name) VALUES
+			('Central Server', 'https://central.com', 'central', 'production', 'Central Server'),
+			('Facility Server', 'https://facility.com', 'facility', 'production', NULL)",
 		)
 		.await
 		.unwrap();
@@ -123,9 +129,9 @@ async fn get_filters_facility_servers() {
 async fn get_multiple_central_servers() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		conn.batch_execute(
-			"INSERT INTO servers (name, host, kind, rank, listed) VALUES
-			('Server A', 'https://a.com', 'central', 'production', true),
-			('Server B', 'https://b.com', 'central', 'staging', true)",
+			"INSERT INTO servers (name, host, kind, rank, public_name) VALUES
+			('Server A', 'https://a.com', 'central', 'production', 'Server A'),
+			('Server B', 'https://b.com', 'central', 'staging', 'Server B')",
 		)
 		.await
 		.unwrap();
@@ -277,6 +283,7 @@ async fn patch_edit_server_success() {
 			host: Some("https://updated.com".to_string()),
 			kind: None,
 			rank: Some("production".to_string()),
+			public_name: None,
 		};
 
 		let response = public.patch("/servers")
@@ -318,6 +325,7 @@ async fn patch_edit_server_unauthorized() {
 			host: None,
 			kind: None,
 			rank: None,
+			public_name: None,
 		};
 
 		let response = public.patch("/servers").json(&partial_server).await;
@@ -338,6 +346,7 @@ async fn patch_edit_nonexistent_server() {
 				host: None,
 				kind: None,
 				rank: None,
+				public_name: None,
 			};
 
 			let response = public
@@ -370,6 +379,7 @@ async fn delete_server_success_with_admin() {
 			host: None,
 			kind: None,
 			rank: None,
+			public_name: None,
 		};
 
 		let response = public.delete("/servers")
@@ -408,6 +418,7 @@ async fn delete_server_unauthorized_no_auth() {
 			host: None,
 			kind: None,
 			rank: None,
+			public_name: None,
 		};
 
 		let response = public.delete("/servers").json(&partial_server).await;
@@ -434,6 +445,7 @@ async fn delete_server_unauthorized_server_role() {
 			host: None,
 			kind: None,
 			rank: None,
+			public_name: None,
 		};
 
 		let response = public.delete("/servers")
@@ -457,6 +469,7 @@ async fn delete_nonexistent_server() {
 				host: None,
 				kind: None,
 				rank: None,
+				public_name: None,
 			};
 
 			public.add_header("mtls-certificate", &cert);
@@ -555,6 +568,7 @@ async fn patch_edit_server_invalid_certificate() {
 			host: None,
 			kind: None,
 			rank: None,
+			public_name: None,
 		};
 
 		// Send invalid certificate data
@@ -584,6 +598,7 @@ async fn delete_server_invalid_certificate() {
 			host: None,
 			kind: None,
 			rank: None,
+			public_name: None,
 		};
 
 		// Send invalid certificate data
@@ -626,7 +641,7 @@ async fn integration_full_crud_cycle() {
 			.unwrap();
 			let server_id = server_rows[0].id;
 
-			sql_query("UPDATE servers SET listed = true WHERE id = $1")
+			sql_query("UPDATE servers SET public_name = 'CRUD Test Server' WHERE id = $1")
 				.bind::<diesel::sql_types::Uuid, _>(server_id)
 				.execute(&mut conn)
 				.await
@@ -640,13 +655,15 @@ async fn integration_full_crud_cycle() {
 				.find(|s| s.name == "CRUD Test Server")
 				.unwrap();
 
-			// Update the server
+			// Update the server, including the public_name so it shows up
+			// under the new label in the public list.
 			let partial_server = PartialServer {
 				id: server_id,
 				name: Some("Updated CRUD Server".to_string()),
 				host: None,
 				kind: None,
 				rank: Some("production".to_string()),
+				public_name: Some("Updated CRUD Server".to_string()),
 			};
 
 			let response = public
@@ -673,6 +690,7 @@ async fn integration_full_crud_cycle() {
 				host: None,
 				kind: None,
 				rank: None,
+				public_name: None,
 			};
 
 			let response = public
