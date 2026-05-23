@@ -176,11 +176,11 @@ function Header({
 						title={data.server.name ?? ""}
 						size="0.8em"
 					/>
-					{data.siblings.map(([up, health, sib]) => (
+					{data.siblings.map((sib) => (
 						<StatusDot
 							key={sib.id}
-							up={up}
-							health={health}
+							up={sib.up ?? "gone"}
+							health={sib.health ?? undefined}
 							title={sib.name ?? ""}
 							dim
 							size="0.8em"
@@ -797,7 +797,7 @@ function SiblingServers({
 				Other servers in this group ({siblings.length})
 			</Typography>
 			<Stack spacing={1}>
-				{siblings.map(([up, health, sib]) => (
+				{siblings.map((sib) => (
 					<Stack
 						key={sib.id}
 						direction="row"
@@ -822,7 +822,10 @@ function SiblingServers({
 								<LanguageIcon fontSize="small" />
 							</IconButton>
 						</Tooltip>
-						<StatusDot up={up} health={health} />
+						<StatusDot
+							up={sib.up ?? "gone"}
+							health={sib.health ?? undefined}
+						/>
 						<MuiLink
 							component={RouterLink}
 							to={`/servers/${sib.id}`}

@@ -1855,6 +1855,7 @@ export interface components {
                  *     rows don't need to fetch the group separately). `None` if ungrouped.
                  */
                 group_name?: string | null;
+                health?: null | components["schemas"]["HealthState"];
                 host: string;
                 /** Format: uuid */
                 id: string;
@@ -1868,6 +1869,7 @@ export interface components {
                 public_name?: string | null;
                 rank?: null | components["schemas"]["ServerRank"];
                 tags: components["schemas"]["TagMap"];
+                up?: null | components["schemas"]["ShortStatus"];
             }[];
             /** Format: int64 */
             total: number;
@@ -2015,45 +2017,10 @@ export interface components {
             server: components["schemas"]["ServerInfo"];
             /**
              * @description Other servers in the same group (excluding `server`). Empty when the
-             *     server is ungrouped or alone in its group.
+             *     server is ungrouped or alone in its group. Each entry carries its
+             *     own `up` / `health` so the UI can render a status dot per sibling.
              */
-            siblings: [
-                "up" | "down" | "away" | "blip" | "gone",
-                "healthy" | "warning" | "unhealthy",
-                {
-                    /**
-                     * Format: int64
-                     * @description Downtime threshold in seconds before the reachability sweep files an
-                     *     issue. `0` (or any non-positive value) disables alerting for this
-                     *     server; the default at creation is 600 (10 minutes).
-                     */
-                    alert_when_down_for: number;
-                    cloud?: boolean | null;
-                    /** Format: uuid */
-                    device_id?: string | null;
-                    geolocation?: null | components["schemas"]["GeoPoint"];
-                    /** Format: uuid */
-                    group_id?: string | null;
-                    /**
-                     * @description Display name of the group this server belongs to (denormalised so list
-                     *     rows don't need to fetch the group separately). `None` if ungrouped.
-                     */
-                    group_name?: string | null;
-                    host: string;
-                    /** Format: uuid */
-                    id: string;
-                    kind: components["schemas"]["ServerKind"];
-                    name?: string | null;
-                    notes: string;
-                    /**
-                     * @description Name this server appears under in the public mobile-app server list.
-                     *     `None` means the server is not listed publicly.
-                     */
-                    public_name?: string | null;
-                    rank?: null | components["schemas"]["ServerRank"];
-                    tags: components["schemas"]["TagMap"];
-                }
-            ][];
+            siblings: components["schemas"]["ServerInfo"][];
             up: components["schemas"]["ShortStatus"];
         };
         ServerGroup: {
@@ -2106,6 +2073,7 @@ export interface components {
              *     rows don't need to fetch the group separately). `None` if ungrouped.
              */
             group_name?: string | null;
+            health?: null | components["schemas"]["HealthState"];
             host: string;
             /** Format: uuid */
             id: string;
@@ -2119,6 +2087,7 @@ export interface components {
             public_name?: string | null;
             rank?: null | components["schemas"]["ServerRank"];
             tags: components["schemas"]["TagMap"];
+            up?: null | components["schemas"]["ShortStatus"];
         };
         /** @enum {string} */
         ServerKind: "central" | "facility" | "canopy";

@@ -1,9 +1,10 @@
 import { Box, Chip, Link as MuiLink, Stack, Tooltip, Typography } from "@mui/material";
 import { Link as RouterLink } from "react-router-dom";
-import type { ServerKind, ServerRank } from "../types";
+import type { HealthState, ServerKind, ServerRank, ShortStatus } from "../types";
 import ServerKindChip from "./ServerKindChip";
 import ServerNameWithGroup from "./ServerNameWithGroup";
 import ServerRankChip from "./ServerRankChip";
+import StatusDot from "./StatusDot";
 
 export interface ServerInfo {
 	id: string;
@@ -13,6 +14,8 @@ export interface ServerInfo {
 	rank: ServerRank | null;
 	group_name?: string | null;
 	alert_when_down_for?: number;
+	up?: ShortStatus | null;
+	health?: HealthState | null;
 }
 
 export default function ServerShorty({ server }: { server: ServerInfo }) {
@@ -31,6 +34,9 @@ export default function ServerShorty({ server }: { server: ServerInfo }) {
 				alignItems: "center",
 			}}
 		>
+			{server.up && (
+				<StatusDot up={server.up} health={server.health ?? undefined} />
+			)}
 			<MuiLink
 				component={RouterLink}
 				to={`/servers/${server.id}`}

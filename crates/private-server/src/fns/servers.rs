@@ -40,8 +40,9 @@ pub struct ServerDetailData {
 	/// server is ungrouped.
 	pub group: Option<ServerGroup>,
 	/// Other servers in the same group (excluding `server`). Empty when the
-	/// server is ungrouped or alone in its group.
-	pub siblings: Vec<(ShortStatus, HealthState, ServerInfo)>,
+	/// server is ungrouped or alone in its group. Each entry carries its
+	/// own `up` / `health` so the UI can render a status dot per sibling.
+	pub siblings: Vec<ServerInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -67,6 +68,16 @@ pub struct ServerInfo {
 	pub alert_when_down_for: i64,
 	pub notes: String,
 	pub tags: TagMap,
+	/// Reachability of the server, derived from the most recent status row.
+	/// `None` when the endpoint that produced this row didn't batch-fetch
+	/// statuses (e.g. the cheap list/get endpoints); a populated value of
+	/// [`ShortStatus::Gone`] means "fetched and no status exists".
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub up: Option<ShortStatus>,
+	/// Self-reported health from the most recent status row. Same `None`
+	/// vs. populated-default semantics as [`Self::up`].
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub health: Option<HealthState>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -160,7 +171,32 @@ pub(super) fn server_to_info(s: Server) -> ServerInfo {
 		alert_when_down_for: s.alert_when_down_for.0.as_secs(),
 		notes: s.notes,
 		tags: s.tags,
+		up: None,
+		health: None,
 	}
+}
+
+/// Batch-fetch the latest status for each server and write its short/health
+/// representation onto the corresponding `ServerInfo`. Use this on listing
+/// endpoints that feed a UI which renders status dots — skip it on cheap
+/// fetches that don't surface the dot.
+pub(super) async fn decorate_with_status(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	infos: &mut [ServerInfo],
+) -> Result<()> {
+	if infos.is_empty() {
+		return Ok(());
+	}
+	let ids: Vec<Uuid> = infos.iter().map(|i| i.id).collect();
+	let statuses = Status::latest_for_servers(conn, &ids).await?;
+	let by_server: std::collections::HashMap<Uuid, &Status> =
+		statuses.iter().map(|s| (s.server_id, s)).collect();
+	for info in infos.iter_mut() {
+		let st = by_server.get(&info.id).copied();
+		info.up = Some(st.map(|s| s.short_status()).unwrap_or_default());
+		info.health = Some(st.map(|s| s.health_state()).unwrap_or_default());
+	}
+	Ok(())
 }
 
 /// Like [`server_to_info`] but populates `group_name` by looking it up from
@@ -245,7 +281,8 @@ pub async fn list_ungrouped(
 	let mut conn = state.db.get().await?;
 	let total = Server::count_ungrouped(&mut conn).await?;
 	let servers = Server::list_ungrouped(&mut conn).await?;
-	let items = servers.into_iter().map(server_to_info).collect();
+	let mut items: Vec<ServerInfo> = servers.into_iter().map(server_to_info).collect();
+	decorate_with_status(&mut conn, &mut items).await?;
 	Ok(Json(Page { items, total }))
 }
 
@@ -406,26 +443,16 @@ pub async fn get_detail(
 
 	let siblings = if let Some(g) = group.as_ref() {
 		let raw_siblings = server.siblings(&mut conn).await?;
-		if raw_siblings.is_empty() {
-			Vec::new()
-		} else {
-			let sibling_ids: Vec<Uuid> = raw_siblings.iter().map(|s| s.id).collect();
-			let statuses = Status::latest_for_servers(&mut conn, &sibling_ids).await?;
-			let status_map: std::collections::HashMap<Uuid, &Status> =
-				statuses.iter().map(|s| (s.server_id, s)).collect();
-
-			raw_siblings
-				.into_iter()
-				.map(|s| {
-					let st = status_map.get(&s.id).copied();
-					let sib_up = st.map(|s| s.short_status()).unwrap_or_default();
-					let sib_health = st.map(|s| s.health_state()).unwrap_or_default();
-					let mut info = server_to_info(s);
-					info.group_name = Some(g.name.clone());
-					(sib_up, sib_health, info)
-				})
-				.collect()
-		}
+		let mut infos: Vec<ServerInfo> = raw_siblings
+			.into_iter()
+			.map(|s| {
+				let mut info = server_to_info(s);
+				info.group_name = Some(g.name.clone());
+				info
+			})
+			.collect();
+		decorate_with_status(&mut conn, &mut infos).await?;
+		infos
 	} else {
 		Vec::new()
 	};

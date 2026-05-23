@@ -58,9 +58,9 @@ export type ApiBody<M extends ApiModule, F extends ApiFn<M>> =
 // that off, making `field: T | null`, which is what the wire shape actually
 // gives us.
 //
-// Tuples need separate handling so `[ShortStatus, ServerInfo]` doesn't collapse
-// into `(ShortStatus | ServerInfo)[]`. `number extends T['length']` is true for
-// regular arrays and false for fixed-length tuples.
+// Tuples need separate handling so `[u64, u64]` doesn't collapse into
+// `(u64 | u64)[]`. `number extends T['length']` is true for regular arrays
+// and false for fixed-length tuples.
 export type Solidify<T> = T extends readonly unknown[]
 	? number extends T["length"]
 		? Solidify<T[number]>[]
