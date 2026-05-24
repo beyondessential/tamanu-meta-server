@@ -24,7 +24,7 @@ miette.workspace = true
 percent-encoding = "2.3.2"
 private-server = { path = "../private-server" }
 public-server = { path = "../public-server" }
-rcgen = "0.14.7"
+rcgen = "0.14.8"
 time = "0.3.47"
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread"] }
 tracing.workspace = true
