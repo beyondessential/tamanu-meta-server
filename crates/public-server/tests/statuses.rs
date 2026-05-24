@@ -894,6 +894,106 @@ async fn submit_status_unhealthy_no_checks_files_roll_up_only() {
 	.await
 }
 
+/// All failing checks are silenced at server scope → the public-server
+/// corrects the top-level `healthy` to `true` so no incident opens.
+#[tokio::test(flavor = "multi_thread")]
+async fn submit_status_with_all_failing_checks_silenced_is_corrected_to_healthy() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+
+			// Pre-silence both failing checks at server scope.
+			for check in ["database", "disk"] {
+				sql_query(
+					"INSERT INTO server_silenced_refs (server_id, source, ref) \
+					 VALUES ($1, 'status', $2)",
+				)
+				.bind::<sql_types::Uuid, _>(server_id)
+				.bind::<sql_types::Text, _>(format!("health/{check}"))
+				.execute(&mut conn)
+				.await
+				.expect("seed silence");
+			}
+
+			post_status(
+				&public,
+				&cert,
+				server_id,
+				serde_json::json!({
+					"healthy": false,
+					"health": [
+						{ "check": "database", "healthy": false },
+						{ "check": "disk", "healthy": false },
+					],
+				}),
+			)
+			.await;
+
+			// Persisted as healthy=true (corrected by proxy of silence).
+			let row = fetch_latest_health(&mut conn, server_id).await;
+			assert!(row.healthy, "all-silenced should correct to healthy");
+
+			// No roll-up issue, no per-check issues (the silence path skips
+			// them too because the corrected `healthy=true` demotes them).
+			assert!(
+				fetch_issue(&mut conn, server_id, "status", "health")
+					.await
+					.is_none(),
+				"roll-up must not fire when corrected to healthy"
+			);
+			assert!(fetch_open_incident(&mut conn, server_id).await.is_none());
+		},
+	)
+	.await
+}
+
+/// A mix of silenced and unsilenced failing checks does NOT correct: at
+/// least one check still warrants an incident.
+#[tokio::test(flavor = "multi_thread")]
+async fn submit_status_with_partial_silence_still_files_roll_up() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+
+			// Silence only one of the two failing checks.
+			sql_query(
+				"INSERT INTO server_silenced_refs (server_id, source, ref) \
+				 VALUES ($1, 'status', 'health/database')",
+			)
+			.bind::<sql_types::Uuid, _>(server_id)
+			.execute(&mut conn)
+			.await
+			.expect("seed silence");
+
+			post_status(
+				&public,
+				&cert,
+				server_id,
+				serde_json::json!({
+					"healthy": false,
+					"health": [
+						{ "check": "database", "healthy": false },
+						{ "check": "disk", "healthy": false },
+					],
+				}),
+			)
+			.await;
+
+			let row = fetch_latest_health(&mut conn, server_id).await;
+			assert!(!row.healthy, "partial silence shouldn't correct");
+			assert!(
+				fetch_issue(&mut conn, server_id, "status", "health")
+					.await
+					.is_some(),
+				"roll-up fires because one failing check is unsilenced"
+			);
+		},
+	)
+	.await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn submit_status_severity_demotes_on_recovery_of_top_level() {
 	commons_tests::server::run_with_device_auth(

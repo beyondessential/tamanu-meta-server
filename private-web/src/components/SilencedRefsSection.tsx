@@ -20,9 +20,14 @@ import TimeAgo from "./TimeAgo";
 export default function SilencedRefsSection({
 	scope,
 	id,
+	refreshKey,
 }: {
 	scope: "server" | "group";
 	id: string;
+	/** Parent-controlled cache-bust; bump to refetch the list after the
+	 * parent took an action that may have added a silence (e.g. silencing
+	 * a healthcheck from the ChecksTable). */
+	refreshKey?: number;
 }) {
 	const isAdmin = useIsAdmin() === true;
 	const [tick, setTick] = useState(0);
@@ -34,13 +39,13 @@ export default function SilencedRefsSection({
 					"silenced_refs",
 					"list_for_server",
 					{ server_id: id },
-					[id, tick],
+					[id, tick, refreshKey],
 				)
 			: useApi(
 					"silenced_refs",
 					"list_for_group",
 					{ server_group_id: id },
-					[id, tick],
+					[id, tick, refreshKey],
 				);
 
 	if (result.status === "loading" || result.status === "idle") {
