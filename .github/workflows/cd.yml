@@ -168,7 +168,7 @@ jobs:
           npm ci
 
       - name: Install pulumi CLI
-        uses: pulumi/actions@v5
+        uses: pulumi/actions@v7
 
       - name: Authenticate to Pulumi Cloud
         uses: pulumi/auth-actions@v1
