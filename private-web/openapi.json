@@ -2439,6 +2439,228 @@
         ]
       }
     },
+    "/api/silenced_refs/list_for_group": {
+      "post": {
+        "tags": [
+          "silenced_refs"
+        ],
+        "operationId": "list_for_group",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupScopeArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ServerGroupSilencedRef"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/silenced_refs/list_for_server": {
+      "post": {
+        "tags": [
+          "silenced_refs"
+        ],
+        "operationId": "list_for_server",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerScopeArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ServerSilencedRef"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/silenced_refs/silence_group": {
+      "post": {
+        "tags": [
+          "silenced_refs"
+        ],
+        "operationId": "silence_group",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SilenceGroupArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerGroupSilencedRef"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/silenced_refs/silence_server": {
+      "post": {
+        "tags": [
+          "silenced_refs"
+        ],
+        "operationId": "silence_server",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SilenceServerArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerSilencedRef"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/silenced_refs/unsilence_group": {
+      "post": {
+        "tags": [
+          "silenced_refs"
+        ],
+        "operationId": "unsilence_group",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SilenceGroupArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/silenced_refs/unsilence_server": {
+      "post": {
+        "tags": [
+          "silenced_refs"
+        ],
+        "operationId": "unsilence_server",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SilenceServerArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/sql/execute_query": {
       "post": {
         "tags": [
@@ -3812,6 +4034,18 @@
           }
         }
       },
+      "GroupScopeArgs": {
+        "type": "object",
+        "required": [
+          "server_group_id"
+        ],
+        "properties": {
+          "server_group_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
       "HealthState": {
         "type": "string",
         "description": "Server's self-reported health state, derived from the most\nrecent status row's `healthy` field and `health[]` array.\nOrthogonal to [`ShortStatus`]: a server can be reachable\n(`up`) and reporting itself unhealthy at the same time.\n\nThe UI renders this as the *border* of `<StatusDot>` so both\ndimensions (reachability and self-report) show in one glyph.",
@@ -4152,6 +4386,14 @@
               "null"
             ],
             "description": "The string stored in the DB; parses to `ResolvedReason` if valid.\nKept as String to round-trip any historical value."
+          },
+          "server_group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Group id the issue's server belongs to; `None` when ungrouped. Used\nby the UI to offer group-scope actions (silence, etc.) without a\nsecond fetch."
           },
           "server_group_name": {
             "type": [
@@ -5383,6 +5625,37 @@
           }
         }
       },
+      "ServerGroupSilencedRef": {
+        "type": "object",
+        "required": [
+          "server_group_id",
+          "source",
+          "ref",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ref": {
+            "type": "string"
+          },
+          "server_group_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "source": {
+            "type": "string"
+          }
+        }
+      },
       "ServerIdArgs": {
         "type": "object",
         "required": [
@@ -5615,6 +5888,49 @@
           "dev"
         ]
       },
+      "ServerScopeArgs": {
+        "type": "object",
+        "required": [
+          "server_id"
+        ],
+        "properties": {
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "ServerSilencedRef": {
+        "type": "object",
+        "required": [
+          "server_id",
+          "source",
+          "ref",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ref": {
+            "type": "string"
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "source": {
+            "type": "string"
+          }
+        }
+      },
       "Severity": {
         "type": "string",
         "description": "RFC 5424 syslog severities.\n\nStored as text in Postgres; validated as this enum at the API layer.\nDefault is `Error` (incidents only open at severity ≥ Error, so the\ndefault is intentionally above the floor — most devices that bother\npushing an event mean it).",
@@ -5638,6 +5954,46 @@
           "blip",
           "gone"
         ]
+      },
+      "SilenceGroupArgs": {
+        "type": "object",
+        "required": [
+          "server_group_id",
+          "source",
+          "ref"
+        ],
+        "properties": {
+          "ref": {
+            "type": "string"
+          },
+          "server_group_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "source": {
+            "type": "string"
+          }
+        }
+      },
+      "SilenceServerArgs": {
+        "type": "object",
+        "required": [
+          "server_id",
+          "source",
+          "ref"
+        ],
+        "properties": {
+          "ref": {
+            "type": "string"
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "source": {
+            "type": "string"
+          }
+        }
       },
       "SnapshotArgs": {
         "type": "object",

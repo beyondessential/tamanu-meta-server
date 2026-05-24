@@ -25,6 +25,7 @@ import { Fragment, useEffect, useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import IncidentsLink from "../components/IncidentsLink";
 import ManualEventButton from "../components/ManualEventButton";
+import SilencedRefsSection from "../components/SilencedRefsSection";
 import StatusDot from "../components/StatusDot";
 import TailnetIdentitySection from "../components/TailnetIdentitySection";
 import TimeAgo from "../components/TimeAgo";
@@ -129,6 +130,7 @@ export default function ServerDetail() {
 					onEventSubmitted={bumpRefresh}
 				/>
 			)}
+			<SilencedRefsSection scope="server" id={data.server.id} />
 			<Box>
 				<VersionLegend />
 				<Box sx={{ mt: 1 }}>

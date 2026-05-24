@@ -11,6 +11,7 @@ import {
 import EditIcon from "@mui/icons-material/Edit";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import ServerShorty from "../components/ServerShorty";
+import SilencedRefsSection from "../components/SilencedRefsSection";
 import { useApi } from "../api";
 import { usePageTitle } from "../hooks/usePageTitle";
 
@@ -99,6 +100,8 @@ export default function GroupDetail() {
 					</Stack>
 				)}
 			</Box>
+
+			<SilencedRefsSection scope="group" id={group.id} />
 		</Stack>
 	);
 }

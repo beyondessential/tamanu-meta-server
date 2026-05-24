@@ -405,6 +405,32 @@ impl Server {
 		Ok(rows.into_iter().collect())
 	}
 
+	/// Bulk-fetch `(group_id, group_name)` for each given server. Servers
+	/// that are ungrouped (or don't exist) get `(None, None)`.
+	pub async fn group_refs_by_server_ids(
+		db: &mut AsyncPgConnection,
+		ids: &[Uuid],
+	) -> Result<std::collections::HashMap<Uuid, (Option<Uuid>, Option<String>)>> {
+		use crate::schema::{server_groups, servers};
+		use std::collections::HashMap;
+
+		if ids.is_empty() {
+			return Ok(HashMap::new());
+		}
+		let rows: Vec<(Uuid, Option<Uuid>, Option<String>)> = servers::table
+			.left_join(server_groups::table.on(server_groups::id.nullable().eq(servers::group_id)))
+			.select((
+				servers::id,
+				servers::group_id,
+				server_groups::name.nullable(),
+			))
+			.filter(servers::id.eq_any(ids))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(rows.into_iter().map(|(id, gid, gn)| (id, (gid, gn))).collect())
+	}
+
 	pub async fn search_central(
 		db: &mut AsyncPgConnection,
 		query: &str,
