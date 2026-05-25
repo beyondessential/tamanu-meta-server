@@ -21,6 +21,8 @@ import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import CancelIcon from "@mui/icons-material/Cancel";
 import EditIcon from "@mui/icons-material/Edit";
 import LanguageIcon from "@mui/icons-material/Language";
+import NotificationsActiveOutlinedIcon from "@mui/icons-material/NotificationsActiveOutlined";
+import NotificationsOffIcon from "@mui/icons-material/NotificationsOff";
 import NotificationsOffOutlinedIcon from "@mui/icons-material/NotificationsOffOutlined";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { Fragment, useEffect, useState } from "react";
@@ -45,8 +47,10 @@ import type {
 	DeviceInfo,
 	ServerDetailData,
 	ServerGroup,
+	ServerGroupSilencedRef,
 	ServerInfo,
 	ServerLastStatusData,
+	ServerSilencedRef,
 	ShortStatus,
 } from "../types";
 
@@ -120,6 +124,7 @@ export default function ServerDetail() {
 				status={data.last_status}
 				onSilenced={bumpRefresh}
 				up={data.up}
+				refreshTick={refreshTick}
 			/>
 			{data.group && <GroupSection group={data.group} />}
 			{(data.server.notes || Object.keys(data.server.tags ?? {}).length > 0) && (
@@ -140,6 +145,7 @@ export default function ServerDetail() {
 				scope="server"
 				id={data.server.id}
 				refreshKey={refreshTick}
+				onChanged={bumpRefresh}
 			/>
 			<Box>
 				<VersionLegend />
@@ -476,11 +482,13 @@ function InfoSection({
 	status,
 	onSilenced,
 	up,
+	refreshTick,
 }: {
 	server: ServerInfo;
 	status: ServerLastStatusData | null;
 	onSilenced: () => void;
 	up: ShortStatus;
+	refreshTick: number;
 }) {
 	return (
 		<Paper variant="outlined" sx={{ p: 2 }}>
@@ -519,6 +527,7 @@ function InfoSection({
 					overallHealthy={status.healthy}
 					serverId={server.id}
 					groupId={server.group_id}
+					refreshTick={refreshTick}
 					onSilenced={onSilenced}
 				/>
 			)}
@@ -588,19 +597,80 @@ function HealthIndicator({
  * alphabetical. Capped at 5 visible rows with an "expand all" toggle
  * so a server reporting 30 checks doesn't push the rest of the page
  * off-screen. Render nothing when the server doesn't ship per-check
- * data (legacy / minimal payloads). */
-function ChecksTable({
+ * data (legacy / minimal payloads).
+ *
+ * Splits into a grouped/ungrouped variant only to keep the group-scope
+ * silenced-refs fetch off ungrouped servers — `useApi` is unconditional,
+ * so a single component can't gate the hook on `groupId`. */
+function ChecksTable(props: {
+	health: ServerLastStatusData["health"];
+	overallHealthy: boolean;
+	serverId: string;
+	groupId: string | null;
+	refreshTick: number;
+	onSilenced: () => void;
+}) {
+	const serverApi = useApi(
+		"silenced_refs",
+		"list_for_server",
+		{ server_id: props.serverId },
+		[props.serverId, props.refreshTick],
+	);
+	const serverSilences =
+		serverApi.status === "ok" ? serverApi.data : [];
+	if (props.groupId) {
+		return (
+			<ChecksTableGrouped
+				{...props}
+				groupId={props.groupId}
+				serverSilences={serverSilences}
+			/>
+		);
+	}
+	return (
+		<ChecksTableBody
+			{...props}
+			serverSilences={serverSilences}
+			groupSilences={[]}
+		/>
+	);
+}
+
+function ChecksTableGrouped(props: {
+	health: ServerLastStatusData["health"];
+	overallHealthy: boolean;
+	serverId: string;
+	groupId: string;
+	refreshTick: number;
+	onSilenced: () => void;
+	serverSilences: ServerSilencedRef[];
+}) {
+	const groupApi = useApi(
+		"silenced_refs",
+		"list_for_group",
+		{ server_group_id: props.groupId },
+		[props.groupId, props.refreshTick],
+	);
+	const groupSilences = groupApi.status === "ok" ? groupApi.data : [];
+	return <ChecksTableBody {...props} groupSilences={groupSilences} />;
+}
+
+function ChecksTableBody({
 	health,
 	overallHealthy,
 	serverId,
 	groupId,
 	onSilenced,
+	serverSilences,
+	groupSilences,
 }: {
 	health: ServerLastStatusData["health"];
 	overallHealthy: boolean;
 	serverId: string;
 	groupId: string | null;
 	onSilenced: () => void;
+	serverSilences: ServerSilencedRef[];
+	groupSilences: ServerGroupSilencedRef[];
 }) {
 	const entries = parseChecks(health);
 	const [expanded, setExpanded] = useState(false);
@@ -614,16 +684,29 @@ function ChecksTable({
 				Checks ({entries.length})
 			</Typography>
 			<Stack spacing={1} sx={{ mt: 0.5 }}>
-				{visible.map((entry) => (
-					<CheckRow
-						key={entry.check}
-						entry={entry}
-						overallHealthy={overallHealthy}
-						serverId={serverId}
-						groupId={groupId}
-						onSilenced={onSilenced}
-					/>
-				))}
+				{visible.map((entry) => {
+					const refName = `health/${entry.check}`;
+					const serverSilence =
+						serverSilences.find(
+							(s) => s.source === "status" && s.ref === refName,
+						) ?? null;
+					const groupSilence =
+						groupSilences.find(
+							(s) => s.source === "status" && s.ref === refName,
+						) ?? null;
+					return (
+						<CheckRow
+							key={entry.check}
+							entry={entry}
+							overallHealthy={overallHealthy}
+							serverId={serverId}
+							groupId={groupId}
+							onSilenced={onSilenced}
+							serverSilence={serverSilence}
+							groupSilence={groupSilence}
+						/>
+					);
+				})}
 			</Stack>
 			{hidden > 0 && (
 				<Button
@@ -684,12 +767,16 @@ function CheckRow({
 	serverId,
 	groupId,
 	onSilenced,
+	serverSilence,
+	groupSilence,
 }: {
 	entry: ParsedCheck;
 	overallHealthy: boolean;
 	serverId: string;
 	groupId: string | null;
 	onSilenced: () => void;
+	serverSilence: ServerSilencedRef | null;
+	groupSilence: ServerGroupSilencedRef | null;
 }) {
 	const isAdmin = useIsAdmin() === true;
 	return (
@@ -713,9 +800,20 @@ function CheckRow({
 				<CancelIcon fontSize="small" color="error" />
 			)}
 			<Box sx={{ flex: 1, minWidth: 0 }}>
-				<Typography variant="body2" sx={{ fontFamily: "monospace" }}>
-					{entry.check}
-				</Typography>
+				<Stack
+					direction="row"
+					spacing={1}
+					sx={{ alignItems: "center", flexWrap: "wrap" }}
+					useFlexGap
+				>
+					<Typography variant="body2" sx={{ fontFamily: "monospace" }}>
+						{entry.check}
+					</Typography>
+					<SilencedChip
+						serverSilence={serverSilence}
+						groupSilence={groupSilence}
+					/>
+				</Stack>
 				{entry.extras.length > 0 && (
 					<Box
 						component="dl"
@@ -751,32 +849,90 @@ function CheckRow({
 					serverId={serverId}
 					groupId={groupId}
 					onSilenced={onSilenced}
+					serverSilence={serverSilence}
+					groupSilence={groupSilence}
 				/>
 			)}
 		</Stack>
 	);
 }
 
-/** Compact silence trigger on each `CheckRow`. Opens a popover with
- * "For this server" / "For this group" (the latter only when the
- * server is grouped). On success, calls the parent's `onSilenced` so
- * the `SilencedRefsSection` at the bottom of the page refetches. */
+/** Inline indicator showing that a check's `(status, health/<check>)` ref
+ * is already in the silence list at one or both scopes. Shown for all
+ * viewers (silences are listable without admin); the row's silence
+ * button still gates the manage actions on admin. */
+function SilencedChip({
+	serverSilence,
+	groupSilence,
+}: {
+	serverSilence: ServerSilencedRef | null;
+	groupSilence: ServerGroupSilencedRef | null;
+}) {
+	if (!serverSilence && !groupSilence) return null;
+	const scopes: string[] = [];
+	if (serverSilence) scopes.push("server");
+	if (groupSilence) scopes.push("group");
+	const tooltipLines: string[] = [];
+	if (serverSilence) {
+		tooltipLines.push(
+			`Server-scope silence${
+				serverSilence.created_by ? ` by ${serverSilence.created_by}` : ""
+			}`,
+		);
+	}
+	if (groupSilence) {
+		tooltipLines.push(
+			`Group-scope silence${
+				groupSilence.created_by ? ` by ${groupSilence.created_by}` : ""
+			}`,
+		);
+	}
+	return (
+		<Tooltip title={tooltipLines.join(" · ")}>
+			<Chip
+				size="small"
+				variant="outlined"
+				icon={<NotificationsOffIcon />}
+				label={`silenced (${scopes.join(" + ")})`}
+			/>
+		</Tooltip>
+	);
+}
+
+/** Compact silence trigger on each `CheckRow`. Opens a popover that
+ * shows, per scope, either the existing silence (with an Un-silence
+ * action) or a Silence button. Filled icon + primary colour signals that
+ * the row is already silenced at one or both scopes — operators can spot
+ * "this check is covered" without opening the popover. On any mutation,
+ * calls the parent's `onSilenced` so the `ChecksTable`'s silence fetches
+ * and the page's `SilencedRefsSection` refetch in lockstep. */
 function SilenceCheckButton({
 	check,
 	serverId,
 	groupId,
 	onSilenced,
+	serverSilence,
+	groupSilence,
 }: {
 	check: string;
 	serverId: string;
 	groupId: string | null;
 	onSilenced: () => void;
+	serverSilence: ServerSilencedRef | null;
+	groupSilence: ServerGroupSilencedRef | null;
 }) {
 	const silenceServer = useApiAction("silenced_refs", "silence_server");
 	const silenceGroup = useApiAction("silenced_refs", "silence_group");
+	const unsilenceServer = useApiAction("silenced_refs", "unsilence_server");
+	const unsilenceGroup = useApiAction("silenced_refs", "unsilence_group");
 	const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
-	const error = silenceServer.error ?? silenceGroup.error;
+	const error =
+		silenceServer.error ??
+		silenceGroup.error ??
+		unsilenceServer.error ??
+		unsilenceGroup.error;
 	const refName = `health/${check}`;
+	const silenced = !!serverSilence || !!groupSilence;
 	const handle = async (fn: () => Promise<unknown>) => {
 		try {
 			await fn();
@@ -788,13 +944,24 @@ function SilenceCheckButton({
 	};
 	return (
 		<>
-			<Tooltip title="Silence this check…">
+			<Tooltip
+				title={silenced ? "Silenced — manage…" : "Silence this check…"}
+			>
 				<IconButton
 					size="small"
-					aria-label={`Silence ${check}`}
+					color={silenced ? "primary" : "default"}
+					aria-label={
+						silenced
+							? `Manage silence for ${check}`
+							: `Silence ${check}`
+					}
 					onClick={(e) => setAnchorEl(e.currentTarget)}
 				>
-					<NotificationsOffOutlinedIcon fontSize="small" />
+					{silenced ? (
+						<NotificationsOffIcon fontSize="small" />
+					) : (
+						<NotificationsOffOutlinedIcon fontSize="small" />
+					)}
 				</IconButton>
 			</Tooltip>
 			<Popover
@@ -804,18 +971,16 @@ function SilenceCheckButton({
 				anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
 				transformOrigin={{ vertical: "top", horizontal: "right" }}
 			>
-				<Box sx={{ p: 1.5, maxWidth: 320 }}>
+				<Box sx={{ p: 1.5, maxWidth: 360 }}>
 					<Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
 						Permanently ignore <code>status/{refName}</code>. The check still
-						records, but no longer triggers or joins incidents. Manage from
-						the "Silenced refs" section below.
+						records, but no longer triggers or joins incidents.
 					</Typography>
-					<Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }} useFlexGap>
-						<Button
-							size="small"
-							variant="outlined"
-							startIcon={<NotificationsOffOutlinedIcon />}
-							onClick={() =>
+					<Stack spacing={0.75}>
+						<SilenceScopeRow
+							scopeLabel="this server"
+							silence={serverSilence}
+							onSilence={() =>
 								handle(() =>
 									silenceServer.call({
 										server_id: serverId,
@@ -824,15 +989,21 @@ function SilenceCheckButton({
 									}),
 								)
 							}
-						>
-							For this server
-						</Button>
+							onUnsilence={() =>
+								handle(() =>
+									unsilenceServer.call({
+										server_id: serverId,
+										source: "status",
+										ref: refName,
+									}),
+								)
+							}
+						/>
 						{groupId && (
-							<Button
-								size="small"
-								variant="outlined"
-								startIcon={<NotificationsOffOutlinedIcon />}
-								onClick={() =>
+							<SilenceScopeRow
+								scopeLabel="this group"
+								silence={groupSilence}
+								onSilence={() =>
 									handle(() =>
 										silenceGroup.call({
 											server_group_id: groupId,
@@ -841,9 +1012,16 @@ function SilenceCheckButton({
 										}),
 									)
 								}
-							>
-								For this group
-							</Button>
+								onUnsilence={() =>
+									handle(() =>
+										unsilenceGroup.call({
+											server_group_id: groupId,
+											source: "status",
+											ref: refName,
+										}),
+									)
+								}
+							/>
 						)}
 					</Stack>
 					{error && (
@@ -854,6 +1032,61 @@ function SilenceCheckButton({
 				</Box>
 			</Popover>
 		</>
+	);
+}
+
+/** One row in the silence-check popover, scoped to either the server or
+ * the group. Renders an Un-silence button (with provenance) when the
+ * scope already has a silence for this ref, or a Silence button when it
+ * doesn't. */
+function SilenceScopeRow({
+	scopeLabel,
+	silence,
+	onSilence,
+	onUnsilence,
+}: {
+	scopeLabel: string;
+	silence: { created_at: string; created_by: string | null } | null;
+	onSilence: () => void;
+	onUnsilence: () => void;
+}) {
+	if (silence) {
+		return (
+			<Stack
+				direction="row"
+				spacing={1}
+				sx={{ alignItems: "center", flexWrap: "wrap" }}
+				useFlexGap
+			>
+				<Typography variant="caption" sx={{ flex: 1, minWidth: 0 }}>
+					Silenced for {scopeLabel}
+					<Box component="span" sx={{ color: "text.secondary" }}>
+						{" — "}
+						<TimeAgo timestamp={silence.created_at} />
+						{silence.created_by && ` by ${silence.created_by}`}
+					</Box>
+				</Typography>
+				<Button
+					size="small"
+					variant="outlined"
+					startIcon={<NotificationsActiveOutlinedIcon />}
+					onClick={onUnsilence}
+				>
+					Un-silence
+				</Button>
+			</Stack>
+		);
+	}
+	return (
+		<Button
+			size="small"
+			variant="outlined"
+			startIcon={<NotificationsOffOutlinedIcon />}
+			onClick={onSilence}
+			sx={{ alignSelf: "flex-start" }}
+		>
+			For {scopeLabel}
+		</Button>
 	);
 }
 
