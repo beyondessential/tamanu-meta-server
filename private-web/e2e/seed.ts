@@ -58,15 +58,35 @@ export interface SeededServerGroup {
 
 export async function seedServerGroup(
 	sql: Sql,
-	opts: { name?: string; notes?: string; tags?: Record<string, string> } = {},
+	opts: {
+		name?: string;
+		notes?: string;
+		tags?: Record<string, string>;
+		/** Slack open cooldown in seconds. Omit to keep the migration default. */
+		slackOpenDelaySeconds?: number;
+	} = {},
 ): Promise<SeededServerGroup> {
 	const id = randomUUID();
 	const name = opts.name ?? randomLabel("group");
-	await sql.query(
-		`INSERT INTO server_groups (id, name, notes, tags)
-		 VALUES ($1, $2, $3, $4::jsonb)`,
-		[id, name, opts.notes ?? "", JSON.stringify(opts.tags ?? {})],
-	);
+	if (opts.slackOpenDelaySeconds !== undefined) {
+		await sql.query(
+			`INSERT INTO server_groups (id, name, notes, tags, slack_open_delay)
+			 VALUES ($1, $2, $3, $4::jsonb, make_interval(secs => $5))`,
+			[
+				id,
+				name,
+				opts.notes ?? "",
+				JSON.stringify(opts.tags ?? {}),
+				opts.slackOpenDelaySeconds,
+			],
+		);
+	} else {
+		await sql.query(
+			`INSERT INTO server_groups (id, name, notes, tags)
+			 VALUES ($1, $2, $3, $4::jsonb)`,
+			[id, name, opts.notes ?? "", JSON.stringify(opts.tags ?? {})],
+		);
+	}
 	return { id, name };
 }
 
