@@ -21,6 +21,7 @@ export default function SilencedRefsSection({
 	scope,
 	id,
 	refreshKey,
+	onChanged,
 }: {
 	scope: "server" | "group";
 	id: string;
@@ -28,10 +29,18 @@ export default function SilencedRefsSection({
 	 * parent took an action that may have added a silence (e.g. silencing
 	 * a healthcheck from the ChecksTable). */
 	refreshKey?: number;
+	/** Called after this section un-silences a row. Lets the parent
+	 * (e.g. ServerDetail) refresh sibling views that key off silence
+	 * state — the ChecksTable's per-row "silenced" chip would otherwise
+	 * stay stale until the next page-wide refresh. */
+	onChanged?: () => void;
 }) {
 	const isAdmin = useIsAdmin() === true;
 	const [tick, setTick] = useState(0);
-	const reload = () => setTick((t) => t + 1);
+	const reload = () => {
+		setTick((t) => t + 1);
+		onChanged?.();
+	};
 
 	const result =
 		scope === "server"
