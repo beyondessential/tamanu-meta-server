@@ -47,6 +47,7 @@ import type {
 	ServerGroup,
 	ServerInfo,
 	ServerLastStatusData,
+	ShortStatus,
 } from "../types";
 
 export default function ServerDetail() {
@@ -118,6 +119,7 @@ export default function ServerDetail() {
 				server={data.server}
 				status={data.last_status}
 				onSilenced={bumpRefresh}
+				up={data.up}
 			/>
 			{data.group && <GroupSection group={data.group} />}
 			{(data.server.notes || Object.keys(data.server.tags ?? {}).length > 0) && (
@@ -472,15 +474,16 @@ function deviceShortName(info: DeviceInfo): string {
 function InfoSection({
 	server,
 	status,
-	onSilenced,
+	up,
 }: {
 	server: ServerInfo;
 	status: ServerLastStatusData | null;
-	onSilenced: () => void;
+  onSilenced: () => void;
+	up: ShortStatus;
 }) {
 	return (
 		<Paper variant="outlined" sx={{ p: 2 }}>
-			{status && <HealthIndicator healthy={status.healthy} />}
+			{status && <HealthIndicator healthy={status.healthy} up={up} />}
 			<Stack
 				direction="row"
 				spacing={4}
@@ -544,18 +547,39 @@ function InfoSection({
 
 /** Global health chip rendered at the top of the InfoSection. The
  * server's per-check breakdown is shown by `<ChecksTable>` below — this
- * is the "headline" answer to "does the server think it's OK". */
-function HealthIndicator({ healthy }: { healthy: boolean }) {
-	return (
-		<Box sx={{ mb: 1.5 }}>
+ * is the "headline" answer to "does the server think it's OK".
+ *
+ * When the server isn't currently reporting (anything other than `up` or
+ * `blip`), the chip is recoloured to a stale variant so an operator
+ * isn't misled into thinking a stale "Healthy" still holds — the data
+ * is whatever the server last said before going quiet. */
+function HealthIndicator({
+	healthy,
+	up,
+}: {
+	healthy: boolean;
+	up: ShortStatus;
+}) {
+	const reporting = up === "up" || up === "blip";
+	const chip = reporting ? (
+		<Chip
+			size="small"
+			color={healthy ? "success" : "error"}
+			icon={healthy ? <CheckCircleIcon /> : <CancelIcon />}
+			label={healthy ? "Healthy" : "Unhealthy"}
+		/>
+	) : (
+		<Tooltip title="Server isn't currently reporting status; this reflects its most recent received report.">
 			<Chip
 				size="small"
-				color={healthy ? "success" : "error"}
-				icon={healthy ? <CheckCircleIcon /> : <CancelIcon />}
-				label={healthy ? "Healthy" : "Unhealthy"}
+				variant="outlined"
+				color="warning"
+				icon={<WarningAmberIcon />}
+				label={healthy ? "Last reported healthy" : "Last reported unhealthy"}
 			/>
-		</Box>
+		</Tooltip>
 	);
+	return <Box sx={{ mb: 1.5 }}>{chip}</Box>;
 }
 
 /** Per-check table from the most recent status push. Failing entries
