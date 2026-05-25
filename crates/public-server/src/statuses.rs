@@ -13,6 +13,7 @@ use database::{
 	diesel_async::{AsyncConnection, AsyncPgConnection},
 	issues::NewEvent,
 	servers::Server,
+	silenced_refs,
 	statuses::{NewStatus, Status},
 };
 use serde::Deserialize;
@@ -111,9 +112,8 @@ async fn create(
 	let mut db = db.get().await?;
 	let Device { role, id, .. } = device.0.0;
 
-	let is_authorized = role == DeviceRole::Admin || {
-		Server::get_by_id(&mut db, server_id).await?.device_id == Some(id)
-	};
+	let server = Server::get_by_id(&mut db, server_id).await?;
+	let is_authorized = role == DeviceRole::Admin || server.device_id == Some(id);
 
 	if !is_authorized {
 		return Err(AppError::custom(
@@ -123,6 +123,21 @@ async fn create(
 
 	let raw = body.map(|j| j.0).unwrap_or(serde_json::Value::Null);
 	let (healthy, health, extra) = split_health_from_extra(raw)?;
+
+	// "Healthy by proxy of silence": if the device reports unhealthy but
+	// every failing check's `(status, health/<check>)` ref is silenced at
+	// server or group scope, treat the overall as healthy. Without this,
+	// the per-check issues correctly skip the incident workflow (silence
+	// gates them) but the *roll-up* `(status, health)` issue still fires
+	// — opening an incident anyway, defeating the silence. See
+	// `database::silenced_refs::is_silenced`.
+	let healthy = if healthy {
+		true
+	} else {
+		let failing = collect_failing_checks(&health);
+		!failing.is_empty()
+			&& all_health_refs_silenced(&mut db, &server, &failing).await?
+	};
 
 	// Read previous-latest BEFORE the write transaction so we can
 	// detect transitions (top-level healthy and per-check). The
@@ -263,6 +278,32 @@ async fn file_health_events(
 	}
 
 	Ok(())
+}
+
+/// Returns true iff every check in `failing` has a silence at server or
+/// group scope. Empty input returns true vacuously; callers wanting the
+/// "no per-check info → don't correct" semantic should check that
+/// themselves.
+async fn all_health_refs_silenced(
+	conn: &mut AsyncPgConnection,
+	server: &Server,
+	failing: &BTreeSet<String>,
+) -> Result<bool> {
+	for check in failing {
+		let r#ref = format!("{HEALTH_REF}/{check}");
+		let silenced = silenced_refs::is_silenced(
+			conn,
+			server.id,
+			server.group_id,
+			STATUS_SOURCE,
+			&r#ref,
+		)
+		.await?;
+		if !silenced {
+			return Ok(false);
+		}
+	}
+	Ok(true)
 }
 
 /// Names of checks in a `health[]` blob where `healthy == false`.

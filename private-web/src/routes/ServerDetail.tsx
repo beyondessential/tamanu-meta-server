@@ -11,6 +11,7 @@ import {
 	LinearProgress,
 	Link as MuiLink,
 	Paper,
+	Popover,
 	Stack,
 	TextField,
 	Tooltip,
@@ -20,6 +21,7 @@ import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import CancelIcon from "@mui/icons-material/Cancel";
 import EditIcon from "@mui/icons-material/Edit";
 import LanguageIcon from "@mui/icons-material/Language";
+import NotificationsOffOutlinedIcon from "@mui/icons-material/NotificationsOffOutlined";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { Fragment, useEffect, useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
@@ -35,6 +37,7 @@ import { HealthLegend, StatusLegend, VersionLegend } from "../components/Legends
 import ServerKindChip from "../components/ServerKindChip";
 import ServerRankChip from "../components/ServerRankChip";
 import { callApi, useApi, useApiAction } from "../api";
+import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { humanSeconds } from "../lib/humanDuration";
 import ServerNameWithGroup from "../components/ServerNameWithGroup";
@@ -115,6 +118,7 @@ export default function ServerDetail() {
 			<InfoSection
 				server={data.server}
 				status={data.last_status}
+				onSilenced={bumpRefresh}
 				up={data.up}
 			/>
 			{data.group && <GroupSection group={data.group} />}
@@ -132,7 +136,11 @@ export default function ServerDetail() {
 					onEventSubmitted={bumpRefresh}
 				/>
 			)}
-			<SilencedRefsSection scope="server" id={data.server.id} />
+			<SilencedRefsSection
+				scope="server"
+				id={data.server.id}
+				refreshKey={refreshTick}
+			/>
 			<Box>
 				<VersionLegend />
 				<Box sx={{ mt: 1 }}>
@@ -466,10 +474,12 @@ function deviceShortName(info: DeviceInfo): string {
 function InfoSection({
 	server,
 	status,
+	onSilenced,
 	up,
 }: {
 	server: ServerInfo;
 	status: ServerLastStatusData | null;
+	onSilenced: () => void;
 	up: ShortStatus;
 }) {
 	return (
@@ -504,7 +514,13 @@ function InfoSection({
 				)}
 			</Stack>
 			{status && (
-				<ChecksTable health={status.health} overallHealthy={status.healthy} />
+				<ChecksTable
+					health={status.health}
+					overallHealthy={status.healthy}
+					serverId={server.id}
+					groupId={server.group_id}
+					onSilenced={onSilenced}
+				/>
 			)}
 			{status && Object.keys((status.extra ?? {}) as Record<string, unknown>).length > 0 && (
 				<Box sx={{ mt: 2 }}>
@@ -576,9 +592,15 @@ function HealthIndicator({
 function ChecksTable({
 	health,
 	overallHealthy,
+	serverId,
+	groupId,
+	onSilenced,
 }: {
 	health: ServerLastStatusData["health"];
 	overallHealthy: boolean;
+	serverId: string;
+	groupId: string | null;
+	onSilenced: () => void;
 }) {
 	const entries = parseChecks(health);
 	const [expanded, setExpanded] = useState(false);
@@ -597,6 +619,9 @@ function ChecksTable({
 						key={entry.check}
 						entry={entry}
 						overallHealthy={overallHealthy}
+						serverId={serverId}
+						groupId={groupId}
+						onSilenced={onSilenced}
 					/>
 				))}
 			</Stack>
@@ -656,10 +681,17 @@ function parseChecks(health: ServerLastStatusData["health"]): ParsedCheck[] {
 function CheckRow({
 	entry,
 	overallHealthy,
+	serverId,
+	groupId,
+	onSilenced,
 }: {
 	entry: ParsedCheck;
 	overallHealthy: boolean;
+	serverId: string;
+	groupId: string | null;
+	onSilenced: () => void;
 }) {
+	const isAdmin = useIsAdmin() === true;
 	return (
 		<Stack
 			direction="row"
@@ -713,7 +745,115 @@ function CheckRow({
 					</Box>
 				)}
 			</Box>
+			{isAdmin && (
+				<SilenceCheckButton
+					check={entry.check}
+					serverId={serverId}
+					groupId={groupId}
+					onSilenced={onSilenced}
+				/>
+			)}
 		</Stack>
+	);
+}
+
+/** Compact silence trigger on each `CheckRow`. Opens a popover with
+ * "For this server" / "For this group" (the latter only when the
+ * server is grouped). On success, calls the parent's `onSilenced` so
+ * the `SilencedRefsSection` at the bottom of the page refetches. */
+function SilenceCheckButton({
+	check,
+	serverId,
+	groupId,
+	onSilenced,
+}: {
+	check: string;
+	serverId: string;
+	groupId: string | null;
+	onSilenced: () => void;
+}) {
+	const silenceServer = useApiAction("silenced_refs", "silence_server");
+	const silenceGroup = useApiAction("silenced_refs", "silence_group");
+	const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
+	const error = silenceServer.error ?? silenceGroup.error;
+	const refName = `health/${check}`;
+	const handle = async (fn: () => Promise<unknown>) => {
+		try {
+			await fn();
+			onSilenced();
+			setAnchorEl(null);
+		} catch {
+			/* surfaced via error */
+		}
+	};
+	return (
+		<>
+			<Tooltip title="Silence this check…">
+				<IconButton
+					size="small"
+					aria-label={`Silence ${check}`}
+					onClick={(e) => setAnchorEl(e.currentTarget)}
+				>
+					<NotificationsOffOutlinedIcon fontSize="small" />
+				</IconButton>
+			</Tooltip>
+			<Popover
+				open={!!anchorEl}
+				anchorEl={anchorEl}
+				onClose={() => setAnchorEl(null)}
+				anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+				transformOrigin={{ vertical: "top", horizontal: "right" }}
+			>
+				<Box sx={{ p: 1.5, maxWidth: 320 }}>
+					<Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+						Permanently ignore <code>status/{refName}</code>. The check still
+						records, but no longer triggers or joins incidents. Manage from
+						the "Silenced refs" section below.
+					</Typography>
+					<Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }} useFlexGap>
+						<Button
+							size="small"
+							variant="outlined"
+							startIcon={<NotificationsOffOutlinedIcon />}
+							onClick={() =>
+								handle(() =>
+									silenceServer.call({
+										server_id: serverId,
+										source: "status",
+										ref: refName,
+									}),
+								)
+							}
+						>
+							For this server
+						</Button>
+						{groupId && (
+							<Button
+								size="small"
+								variant="outlined"
+								startIcon={<NotificationsOffOutlinedIcon />}
+								onClick={() =>
+									handle(() =>
+										silenceGroup.call({
+											server_group_id: groupId,
+											source: "status",
+											ref: refName,
+										}),
+									)
+								}
+							>
+								For this group
+							</Button>
+						)}
+					</Stack>
+					{error && (
+						<Alert severity="error" sx={{ mt: 1 }}>
+							{error.message}
+						</Alert>
+					)}
+				</Box>
+			</Popover>
+		</>
 	);
 }
 
