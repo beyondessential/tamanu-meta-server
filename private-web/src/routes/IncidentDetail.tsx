@@ -226,7 +226,7 @@ function Header({
 								icon={<AccessTimeIcon />}
 								label={
 									<>
-										Slack notice held; ships{" "}
+										Holding; posting{" "}
 										<TimeAgo
 											timestamp={incident.notification_held_until}
 										/>

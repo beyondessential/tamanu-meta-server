@@ -160,18 +160,13 @@ function ActiveIncidentCard({ incident }: { incident: IncidentData }) {
 						</Typography>
 						<Typography variant="body2" color="text.secondary">
 							opened <TimeAgo timestamp={incident.opened_at} />
-							{held && incident.notification_held_until && (
-								<>
-									{" · "}
-									<Box component="span" sx={{ color: "warning.main" }}>
-										Slack notice held; ships{" "}
-										<TimeAgo
-											timestamp={incident.notification_held_until}
-										/>
-									</Box>
-								</>
-							)}
 						</Typography>
+						{held && incident.notification_held_until && (
+							<Typography variant="body2" sx={{ color: "warning.main" }}>
+								Holding; posting{" "}
+								<TimeAgo timestamp={incident.notification_held_until} />
+							</Typography>
+						)}
 					</Box>
 				</Stack>
 				<Button
