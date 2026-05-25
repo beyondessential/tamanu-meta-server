@@ -6,7 +6,10 @@ import { useApi } from "../api";
 
 /** Server-detail header button into the incidents view. Any server id in
  * a group works — the backend resolves to the group root. Three states:
- * - open incident exists → direct link to /incidents/:id (error-coloured)
+ * - open incident exists → direct link to /incidents/:id (error-coloured,
+ *   or warning-coloured when the Slack notice is still inside the
+ *   per-group cooldown window so the operator can tell at a glance that
+ *   nobody else has been paged yet)
  * - no open incident, but active issues → /incidents filtered to this group
  * - nothing active → same, with `showAll=1` so closed/inactive surface */
 export default function IncidentsLink({
@@ -36,15 +39,22 @@ export default function IncidentsLink({
 	const hasActive = issues.status === "ok" && issues.data.length > 0;
 
 	if (openIncident) {
+		const held = openIncident.notification_held_until != null;
 		return (
 			<Button
 				component={RouterLink}
 				to={`/incidents/${openIncident.id}`}
 				variant="outlined"
-				color="error"
+				color={held ? "warning" : "error"}
 				startIcon={<WarningAmberIcon />}
+				title={
+					held
+						? "Slack notice still inside the per-group cooldown window"
+						: undefined
+				}
 			>
 				Incident {openIncident.id.slice(0, 8)}
+				{held && " (held)"}
 			</Button>
 		);
 	}

@@ -19,13 +19,22 @@ import { usePageTitle } from "../hooks/usePageTitle";
 import { useReloadInterval } from "../hooks/useReloadInterval";
 import { type ServerGroupCard, SERVER_RANK_ORDER } from "../types";
 
+/// Held vs loud: a group has an open incident, but the Slack notice is
+/// still inside the per-group cooldown window (held) or has already fired
+/// or been cancelled (loud). Drives the warning-vs-error colouring on the
+/// Status page and elsewhere.
+export type IncidentLoudness = "held" | "loud";
+
 export default function Status() {
 	usePageTitle("Status");
 	const tick = useReloadInterval(60_000, "canopy-reload-status");
 	const incidents = useApi("incidents", "list_active", {}, [tick]);
-	const openIncidentGroups = new Set<string>(
+	const openIncidentGroups = new Map<string, IncidentLoudness>(
 		incidents.status === "ok"
-			? incidents.data.map((i) => i.server_group_id)
+			? incidents.data.map((i) => [
+					i.server_group_id,
+					i.notification_held_until ? "held" : "loud",
+				])
 			: [],
 	);
 	return (
@@ -74,7 +83,7 @@ function GroupCards({
 	openIncidentGroups,
 }: {
 	tick: number;
-	openIncidentGroups: Set<string>;
+	openIncidentGroups: Map<string, IncidentLoudness>;
 }) {
 	const grouped = useApi(
 		"statuses",
@@ -127,7 +136,7 @@ function GroupCards({
 								key={id}
 								groupId={id}
 								tick={tick}
-								hasOpenIncident={openIncidentGroups.has(id)}
+								openIncident={openIncidentGroups.get(id) ?? null}
 							/>
 						))}
 					</Box>
@@ -140,11 +149,11 @@ function GroupCards({
 function GroupCardLoader({
 	groupId,
 	tick,
-	hasOpenIncident,
+	openIncident,
 }: {
 	groupId: string;
 	tick: number;
-	hasOpenIncident: boolean;
+	openIncident: IncidentLoudness | null;
 }) {
 	const result = useApi(
 		"statuses",
@@ -152,6 +161,16 @@ function GroupCardLoader({
 		{ server_group_id: groupId },
 		[groupId, tick],
 	);
+
+	// Held incidents tone the border down to warning so an operator can see
+	// at a glance "yes there's a thing, but Slack hasn't been told yet — it
+	// might still self-resolve". Loud incidents stay full red.
+	const borderColor =
+		openIncident === "loud"
+			? "error.main"
+			: openIncident === "held"
+				? "warning.main"
+				: undefined;
 
 	return (
 		<MuiLink
@@ -165,8 +184,8 @@ function GroupCardLoader({
 				sx={{
 					transition: "background-color 150ms",
 					"&:hover": { bgcolor: "action.hover" },
-					...(hasOpenIncident && {
-						borderColor: "error.main",
+					...(borderColor && {
+						borderColor,
 						borderWidth: 2,
 					}),
 				}}
@@ -181,7 +200,7 @@ function GroupCardLoader({
 					) : (
 						<GroupCard
 							group={result.data}
-							hasOpenIncident={hasOpenIncident}
+							openIncident={openIncident}
 						/>
 					)}
 				</CardContent>
@@ -192,10 +211,10 @@ function GroupCardLoader({
 
 function GroupCard({
 	group,
-	hasOpenIncident,
+	openIncident,
 }: {
 	group: ServerGroupCard;
-	hasOpenIncident: boolean;
+	openIncident: IncidentLoudness | null;
 }) {
 	return (
 		<Stack spacing={1}>
@@ -244,8 +263,13 @@ function GroupCard({
 						</Tooltip>
 					))}
 				</Stack>
-				{hasOpenIncident && (
+				{openIncident === "loud" && (
 					<Chip label="incident" color="error" size="small" />
+				)}
+				{openIncident === "held" && (
+					<Tooltip title="Open incident; Slack notice is still inside the per-group cooldown window">
+						<Chip label="incident (held)" color="warning" size="small" />
+					</Tooltip>
 				)}
 			</Stack>
 		</Stack>
