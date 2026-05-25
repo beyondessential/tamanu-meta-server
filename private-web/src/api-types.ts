@@ -506,6 +506,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/incidents/list_for_group": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["incident_list_for_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/incidents/list_for_server": {
         parameters: {
             query?: never;
@@ -1658,6 +1674,15 @@ export interface components {
              * @description Combined: this incident's notes + notes on all contributing issues.
              */
             note_count: number;
+            /**
+             * Format: date-time
+             * @description `Some(t)` when this incident's Slack `incident_open` notice is
+             *     still inside the per-group cooldown window (`deliver_after = t`,
+             *     not yet shipped, not given up). `None` once Slack has heard about
+             *     the incident — or the open was cancelled. Lets the UI distinguish
+             *     "open but quietly held" from "open and operators have been paged".
+             */
+            notification_held_until?: string | null;
             /** Format: date-time */
             opened_at: string;
             /** Format: date-time */
@@ -1834,6 +1859,13 @@ export interface components {
             device_id: string;
             /** Format: int64 */
             limit?: number | null;
+        };
+        ListForGroupArgs: {
+            include_closed?: boolean | null;
+            /** Format: int64 */
+            limit?: number | null;
+            /** Format: uuid */
+            server_group_id: string;
         };
         ListForServerArgs: {
             include_closed?: boolean | null;
@@ -3383,6 +3415,29 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ListActiveArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncidentData"][];
+                };
+            };
+        };
+    };
+    incident_list_for_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ListForGroupArgs"];
             };
         };
         responses: {

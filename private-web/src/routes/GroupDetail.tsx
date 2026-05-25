@@ -9,16 +9,27 @@ import {
 	Typography,
 } from "@mui/material";
 import EditIcon from "@mui/icons-material/Edit";
+import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import ServerShorty from "../components/ServerShorty";
 import SilencedRefsSection from "../components/SilencedRefsSection";
+import TimeAgo from "../components/TimeAgo";
 import { useApi } from "../api";
 import { usePageTitle } from "../hooks/usePageTitle";
+import type { IncidentData } from "../types";
 
 export default function GroupDetail() {
 	const { id = "" } = useParams<{ id: string }>();
 	const detail = useApi("server_groups", "get", { server_group_id: id }, [id]);
 	const isAdmin = useApi("commons", "is_current_user_admin");
+	// Only the currently-open incident matters for the active-incident
+	// section; closed ones live behind the /incidents filter route.
+	const activeIncidents = useApi(
+		"incidents",
+		"list_for_group",
+		{ server_group_id: id, include_closed: false, limit: 1 },
+		[id],
+	);
 	usePageTitle(detail.status === "ok" ? detail.data.group.name : "Group");
 
 	if (detail.status === "loading" || detail.status === "idle") {
@@ -31,6 +42,10 @@ export default function GroupDetail() {
 	const { group, servers } = detail.data;
 	const admin = isAdmin.status === "ok" && isAdmin.data;
 	const tagEntries = Object.entries(group.tags ?? {});
+	const openIncident =
+		activeIncidents.status === "ok" && activeIncidents.data.length > 0
+			? activeIncidents.data[0]
+			: null;
 
 	return (
 		<Stack spacing={3}>
@@ -53,6 +68,8 @@ export default function GroupDetail() {
 					</Button>
 				)}
 			</Stack>
+
+			{openIncident && <ActiveIncidentCard incident={openIncident} />}
 
 			{group.notes && (
 				<Paper variant="outlined" sx={{ p: 2 }}>
@@ -103,5 +120,68 @@ export default function GroupDetail() {
 
 			<SilencedRefsSection scope="group" id={group.id} />
 		</Stack>
+	);
+}
+
+function ActiveIncidentCard({ incident }: { incident: IncidentData }) {
+	const held = incident.notification_held_until != null;
+	return (
+		<Paper
+			variant="outlined"
+			sx={{
+				p: 2,
+				borderColor: held ? "warning.main" : "error.main",
+				borderWidth: 2,
+			}}
+		>
+			<Stack
+				direction="row"
+				spacing={2}
+				sx={{ alignItems: "center", justifyContent: "space-between" }}
+			>
+				<Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
+					<WarningAmberIcon color={held ? "warning" : "error"} />
+					<Box>
+						<Typography variant="h6" component="h2">
+							Active incident
+							<Box
+								component="span"
+								sx={{
+									ml: 1,
+									fontFamily: "monospace",
+									color: "text.secondary",
+									fontWeight: "normal",
+									fontSize: "0.85em",
+								}}
+							>
+								{incident.id.slice(0, 8)}
+							</Box>
+						</Typography>
+						<Typography variant="body2" color="text.secondary">
+							opened <TimeAgo timestamp={incident.opened_at} />
+							{held && incident.notification_held_until && (
+								<>
+									{" · "}
+									<Box component="span" sx={{ color: "warning.main" }}>
+										Slack notice held; ships{" "}
+										<TimeAgo
+											timestamp={incident.notification_held_until}
+										/>
+									</Box>
+								</>
+							)}
+						</Typography>
+					</Box>
+				</Stack>
+				<Button
+					component={RouterLink}
+					to={`/incidents/${incident.id}`}
+					variant="outlined"
+					color={held ? "warning" : "error"}
+				>
+					Open
+				</Button>
+			</Stack>
+		</Paper>
 	);
 }

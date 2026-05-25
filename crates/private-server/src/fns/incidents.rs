@@ -36,6 +36,12 @@ pub struct IncidentData {
 	pub event_count: i64,
 	/// Combined: this incident's notes + notes on all contributing issues.
 	pub note_count: i64,
+	/// `Some(t)` when this incident's Slack `incident_open` notice is
+	/// still inside the per-group cooldown window (`deliver_after = t`,
+	/// not yet shipped, not given up). `None` once Slack has heard about
+	/// the incident — or the open was cancelled. Lets the UI distinguish
+	/// "open but quietly held" from "open and operators have been paged".
+	pub notification_held_until: Option<Timestamp>,
 	pub created_at: Timestamp,
 	pub updated_at: Timestamp,
 }
@@ -46,6 +52,7 @@ impl IncidentData {
 		server_group_name: String,
 		users: &std::collections::HashMap<String, CachedTailscaleUser>,
 		stats: IncidentStats,
+		notification_held_until: Option<Timestamp>,
 	) -> Self {
 		let (res_name, res_pic) = lookup_user(users, i.resolved_by.as_deref());
 		Self {
@@ -62,6 +69,7 @@ impl IncidentData {
 			issue_count: stats.issue_count,
 			event_count: stats.event_count,
 			note_count: stats.note_count,
+			notification_held_until,
 			created_at: i.created_at,
 			updated_at: i.updated_at,
 		}
@@ -91,6 +99,8 @@ async fn enrich_incidents(
 	let user_logins = collect_incident_user_logins(&incidents);
 	let users = CachedTailscaleUser::by_logins(conn, &user_logins).await?;
 	let stats = Incident::stats_for(pool, &incident_ids).await?;
+	let held =
+		database::slack_outbox::SlackOutbox::pending_opens_until(conn, &incident_ids).await?;
 	Ok(incidents
 		.into_iter()
 		.map(|i| {
@@ -99,7 +109,8 @@ async fn enrich_incidents(
 				.cloned()
 				.unwrap_or_default();
 			let s = stats.get(&i.id).copied().unwrap_or_default();
-			IncidentData::from_with(i, name, &users, s)
+			let held_until = held.get(&i.id).copied();
+			IncidentData::from_with(i, name, &users, s, held_until)
 		})
 		.collect())
 }
@@ -114,7 +125,12 @@ async fn enrich_incident(
 	let users = CachedTailscaleUser::by_logins(conn, &user_logins).await?;
 	let mut stats = Incident::stats_for(pool, &[incident.id]).await?;
 	let s = stats.remove(&incident.id).unwrap_or_default();
-	Ok(IncidentData::from_with(incident, group.name, &users, s))
+	let mut held =
+		database::slack_outbox::SlackOutbox::pending_opens_until(conn, &[incident.id]).await?;
+	let held_until = held.remove(&incident.id);
+	Ok(IncidentData::from_with(
+		incident, group.name, &users, s, held_until,
+	))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -143,6 +159,7 @@ pub struct IncidentWithIssues {
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
 		.routes(routes!(list_for_server))
+		.routes(routes!(list_for_group))
 		.routes(routes!(list_active))
 		.routes(routes!(get_incident))
 		.routes(routes!(resolve))
@@ -181,6 +198,44 @@ pub async fn list_for_server(
 	let incidents = Incident::list_for_server(
 		&mut conn,
 		args.server_id,
+		args.include_closed.unwrap_or(false),
+		args.limit.unwrap_or(DEFAULT_LIMIT),
+	)
+	.await?;
+	Ok(Json(
+		enrich_incidents(&mut conn, &state.db, incidents).await?,
+	))
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct ListForGroupArgs {
+	pub server_group_id: Uuid,
+	#[serde(default)]
+	pub include_closed: Option<bool>,
+	#[serde(default)]
+	pub limit: Option<i64>,
+}
+
+#[utoipa::path(
+	post,
+	path = "/list_for_group",
+	operation_id = "incident_list_for_group",
+	tag = "incidents",
+	security(("tailscale-user" = [])),
+	request_body = ListForGroupArgs,
+	responses(
+		(status = 200, body = Vec<IncidentData>),
+	),
+)]
+pub async fn list_for_group(
+	State(state): State<AppState>,
+	_user: TailscaleUser,
+	Json(args): Json<ListForGroupArgs>,
+) -> Result<Json<Vec<IncidentData>>> {
+	let mut conn = state.db.get().await?;
+	let incidents = Incident::list_for_group(
+		&mut conn,
+		args.server_group_id,
 		args.include_closed.unwrap_or(false),
 		args.limit.unwrap_or(DEFAULT_LIMIT),
 	)

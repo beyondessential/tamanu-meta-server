@@ -13,6 +13,7 @@ import {
 	Tooltip,
 	Typography,
 } from "@mui/material";
+import AccessTimeIcon from "@mui/icons-material/AccessTime";
 import BugReportIcon from "@mui/icons-material/BugReport";
 import CheckCircleOutlinedIcon from "@mui/icons-material/CheckCircleOutlined";
 import NotesIcon from "@mui/icons-material/StickyNote2";
@@ -128,6 +129,7 @@ function Header({
 	onChanged: () => void;
 }) {
 	const open = incident.closed_at == null;
+	const held = open && incident.notification_held_until != null;
 	const isAdmin = useIsAdmin() === true;
 	const resolve = useApiAction("incidents", "resolve");
 	const unresolve = useApiAction("incidents", "unresolve");
@@ -174,7 +176,11 @@ function Header({
 			variant="outlined"
 			sx={{
 				p: 2,
-				borderColor: open ? "error.main" : "divider",
+				borderColor: open
+					? held
+						? "warning.main"
+						: "error.main"
+					: "divider",
 				borderWidth: open ? 2 : 1,
 			}}
 		>
@@ -205,6 +211,33 @@ function Header({
 					<Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
 						{timeText}
 					</Typography>
+					{held && incident.notification_held_until && (
+						<Stack
+							direction="row"
+							spacing={1}
+							sx={{ mt: 1, alignItems: "center", flexWrap: "wrap" }}
+							useFlexGap
+						>
+							<Chip
+								icon={<AccessTimeIcon />}
+								label={
+									<>
+										Slack notice held; ships{" "}
+										<TimeAgo
+											timestamp={incident.notification_held_until}
+										/>
+									</>
+								}
+								color="warning"
+								variant="outlined"
+								size="small"
+							/>
+							<Typography variant="caption" color="text.secondary">
+								Resolving inside the window cancels the open and skips
+								the resolve, so Slack never hears about either edge.
+							</Typography>
+						</Stack>
+					)}
 				</Box>
 				<Box sx={{ flexShrink: 0 }}>
 					{incident.resolved_at && (

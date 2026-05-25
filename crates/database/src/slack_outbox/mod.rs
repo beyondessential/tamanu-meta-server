@@ -136,6 +136,37 @@ impl SlackOutbox {
 		Ok(rows)
 	}
 
+	/// For each of `incident_ids`, return the `deliver_after` of its
+	/// pending `incident_open` row — i.e. an incident that has been opened
+	/// in the database but whose Slack notice hasn't been sent yet (and
+	/// isn't given up on). Incidents whose open has already shipped, was
+	/// given up, or whose `deliver_after` has elapsed are absent from the
+	/// map. The UI uses this to distinguish "open and the world knows" from
+	/// "open but still inside the flap-suppression window".
+	pub async fn pending_opens_until(
+		db: &mut AsyncPgConnection,
+		incident_ids: &[Uuid],
+	) -> Result<std::collections::HashMap<Uuid, Timestamp>> {
+		use crate::schema::slack_outbox::dsl;
+		use std::collections::HashMap;
+
+		if incident_ids.is_empty() {
+			return Ok(HashMap::new());
+		}
+		let now = Timestamp::now();
+		let rows: Vec<(Uuid, jiff_diesel::Timestamp)> = dsl::slack_outbox
+			.select((dsl::incident_id, dsl::deliver_after))
+			.filter(dsl::kind.eq(KIND_INCIDENT_OPEN))
+			.filter(dsl::incident_id.eq_any(incident_ids))
+			.filter(dsl::delivered_at.is_null())
+			.filter(dsl::gave_up_at.is_null())
+			.filter(dsl::deliver_after.gt(jiff_diesel::Timestamp::from(now)))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(rows.into_iter().map(|(id, t)| (id, t.into())).collect())
+	}
+
 	/// Claim up to `limit` pending rows in insertion order. Uses
 	/// `FOR UPDATE SKIP LOCKED` so multiple workers (or a worker plus a
 	/// hand-run reprocess) won't fight over the same row. The caller must

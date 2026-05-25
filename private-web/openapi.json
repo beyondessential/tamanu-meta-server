@@ -1255,6 +1255,44 @@
         ]
       }
     },
+    "/api/incidents/list_for_group": {
+      "post": {
+        "tags": [
+          "incidents"
+        ],
+        "operationId": "incident_list_for_group",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListForGroupArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/IncidentData"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
     "/api/incidents/list_for_server": {
       "post": {
         "tags": [
@@ -4168,6 +4206,14 @@
             "format": "int64",
             "description": "Combined: this incident's notes + notes on all contributing issues."
           },
+          "notification_held_until": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "`Some(t)` when this incident's Slack `incident_open` notice is\nstill inside the per-group cooldown window (`deliver_after = t`,\nnot yet shipped, not given up). `None` once Slack has heard about\nthe incident — or the open was cancelled. Lets the UI distinguish\n\"open but quietly held\" from \"open and operators have been paged\"."
+          },
           "opened_at": {
             "type": "string",
             "format": "date-time"
@@ -4672,6 +4718,31 @@
               "null"
             ],
             "format": "int64"
+          }
+        }
+      },
+      "ListForGroupArgs": {
+        "type": "object",
+        "required": [
+          "server_group_id"
+        ],
+        "properties": {
+          "include_closed": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "server_group_id": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
