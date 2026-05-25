@@ -72,10 +72,7 @@ pub async fn sweep_key_expiry(
 				r#ref: KEY_EXPIRY_REF.into(),
 				severity: Some(Severity::Info),
 				description: None,
-				message: format!(
-					"Tailscale key expiry disabled for {}",
-					entry.node_name,
-				),
+				message: format!("Tailscale key expiry disabled for {}", entry.node_name,),
 				active: Some(false),
 				occurred_at: Some(now),
 			},
@@ -84,10 +81,7 @@ pub async fn sweep_key_expiry(
 				source: TAILSCALE_SOURCE.into(),
 				r#ref: KEY_EXPIRY_REF.into(),
 				severity: Some(Severity::Critical),
-				description: Some(format!(
-					"Tailscale key will expire for {}",
-					entry.node_name,
-				)),
+				description: Some(format!("Tailscale key will expire for {}", entry.node_name,)),
 				message: format!(
 					"Tailnet node {} ({}) has key expiry enabled. When the \
 					 node's key expires, it will drop off the tailnet and \

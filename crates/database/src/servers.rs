@@ -428,7 +428,10 @@ impl Server {
 			.load(db)
 			.await
 			.map_err(AppError::from)?;
-		Ok(rows.into_iter().map(|(id, gid, gn)| (id, (gid, gn))).collect())
+		Ok(rows
+			.into_iter()
+			.map(|(id, gid, gn)| (id, (gid, gn)))
+			.collect())
 	}
 
 	pub async fn search_central(

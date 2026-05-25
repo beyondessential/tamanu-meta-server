@@ -47,9 +47,9 @@ impl utoipa::PartialSchema for TagMap {
 
 		let mut object = Object::with_type(SchemaType::Type(Type::Object));
 		object.additional_properties = Some(Box::new(AdditionalProperties::RefOr(
-			utoipa::openapi::RefOr::T(utoipa::openapi::schema::Schema::Object(
-				Object::with_type(SchemaType::Type(Type::String)),
-			)),
+			utoipa::openapi::RefOr::T(utoipa::openapi::schema::Schema::Object(Object::with_type(
+				SchemaType::Type(Type::String),
+			))),
 		)));
 		utoipa::openapi::RefOr::T(utoipa::openapi::schema::Schema::Object(object))
 	}

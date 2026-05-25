@@ -117,8 +117,7 @@ async fn sweep_skips_unmonitored_server() {
 		// is_monitored = false: never file regardless of how stale the status
 		// is. The threshold is preserved so flipping monitoring back on
 		// resumes with the chosen value.
-		let id =
-			insert_server_full(&mut conn, "http://silenced.invalid/", 600, false).await;
+		let id = insert_server_full(&mut conn, "http://silenced.invalid/", 600, false).await;
 		insert_status_at(&mut conn, id, 120).await;
 		let filed = Status::sweep_reachability(&mut conn).await.expect("sweep");
 		assert_eq!(filed, 0);
@@ -199,10 +198,7 @@ async fn check_constraint_forbids_non_positive_duration() {
 			))
 			.execute(&mut conn)
 			.await;
-			assert!(
-				res.is_err(),
-				"expected CHECK constraint to reject {bad}",
-			);
+			assert!(res.is_err(), "expected CHECK constraint to reject {bad}",);
 		}
 	})
 	.await

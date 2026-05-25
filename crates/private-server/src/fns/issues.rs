@@ -201,9 +201,7 @@ pub(crate) async fn enrich_issue(
 		.remove(&issue.server_id)
 		.unwrap_or((None, String::new()));
 	let mut group_refs = Server::group_refs_by_server_ids(conn, &[issue.server_id]).await?;
-	let (group_id, group_name) = group_refs
-		.remove(&issue.server_id)
-		.unwrap_or((None, None));
+	let (group_id, group_name) = group_refs.remove(&issue.server_id).unwrap_or((None, None));
 	let user_logins = collect_user_logins(std::slice::from_ref(&issue));
 	let users = CachedTailscaleUser::by_logins(conn, &user_logins).await?;
 	let mut incidents = Incident::for_issues(conn, &[issue.id]).await?;

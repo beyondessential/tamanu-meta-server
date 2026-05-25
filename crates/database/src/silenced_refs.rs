@@ -158,10 +158,7 @@ impl ServerSilencedRef {
 		Ok(())
 	}
 
-	pub async fn list_for_server(
-		db: &mut AsyncPgConnection,
-		server_id: Uuid,
-	) -> Result<Vec<Self>> {
+	pub async fn list_for_server(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<Vec<Self>> {
 		use crate::schema::server_silenced_refs::dsl;
 		dsl::server_silenced_refs
 			.select(Self::as_select())

@@ -1149,7 +1149,10 @@ async fn list_silenced_refs_for_server_and_group() {
 			.await;
 		let items: Vec<serde_json::Value> = resp.json();
 		assert_eq!(items.len(), 1);
-		assert_eq!(items[0].get("ref").and_then(|v| v.as_str()), Some("srv-ref"));
+		assert_eq!(
+			items[0].get("ref").and_then(|v| v.as_str()),
+			Some("srv-ref")
+		);
 
 		let resp = private
 			.post("/api/silenced_refs/list_for_group")
@@ -1157,7 +1160,10 @@ async fn list_silenced_refs_for_server_and_group() {
 			.await;
 		let items: Vec<serde_json::Value> = resp.json();
 		assert_eq!(items.len(), 1);
-		assert_eq!(items[0].get("ref").and_then(|v| v.as_str()), Some("grp-ref"));
+		assert_eq!(
+			items[0].get("ref").and_then(|v| v.as_str()),
+			Some("grp-ref")
+		);
 	})
 	.await;
 }

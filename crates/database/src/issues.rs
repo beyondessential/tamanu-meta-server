@@ -639,9 +639,7 @@ pub async fn reevaluate_open_issues_for_group_ref(
 /// issues at most) but worth keeping in mind if the corpus grows.
 ///
 /// Returns `(servers_walked, issues_evaluated)` for the caller to log.
-pub async fn reconcile_open_incidents(
-	db: &mut AsyncPgConnection,
-) -> Result<(usize, usize)> {
+pub async fn reconcile_open_incidents(db: &mut AsyncPgConnection) -> Result<(usize, usize)> {
 	use crate::schema::issues::dsl;
 
 	db.transaction::<_, AppError, _>(async |conn| {
@@ -675,15 +673,8 @@ pub async fn reconcile_open_incidents(
 				// Ungrouped servers can't have incidents; nothing to reconcile.
 				continue;
 			};
-			re_evaluate_incident_membership(
-				conn,
-				&issue,
-				gid,
-				server.is_monitored,
-				now,
-				None,
-			)
-			.await?;
+			re_evaluate_incident_membership(conn, &issue, gid, server.is_monitored, now, None)
+				.await?;
 			evaluated += 1;
 		}
 		Ok((by_id.len(), evaluated))

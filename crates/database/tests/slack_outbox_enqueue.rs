@@ -233,7 +233,11 @@ async fn resolving_before_open_ships_cancels_open_and_skips_resolve() {
 			.iter()
 			.filter(|r| r.kind == KIND_INCIDENT_OPEN)
 			.collect();
-		assert_eq!(opens.len(), 1, "open row stays in the table for historicity");
+		assert_eq!(
+			opens.len(),
+			1,
+			"open row stays in the table for historicity"
+		);
 		assert!(
 			opens[0].gave_up_at.is_some(),
 			"open row marked given-up so the drainer won't ship it"

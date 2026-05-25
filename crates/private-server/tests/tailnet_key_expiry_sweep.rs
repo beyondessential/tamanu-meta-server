@@ -69,9 +69,7 @@ async fn sweep_opens_critical_issue_when_key_expiry_enabled() {
 		let server_id = insert_server_for(&mut conn, device_id, "https://srv1.invalid/").await;
 
 		let dir = directory_with(false);
-		let filed = sweep_key_expiry(&mut conn, &dir)
-			.await
-			.expect("sweep");
+		let filed = sweep_key_expiry(&mut conn, &dir).await.expect("sweep");
 		assert_eq!(filed, 1);
 
 		let issue = issue_for(&mut conn, server_id).await.expect("issue");
@@ -89,9 +87,7 @@ async fn sweep_skips_when_key_expiry_disabled() {
 		let server_id = insert_server_for(&mut conn, device_id, "https://srv2.invalid/").await;
 
 		let dir = directory_with(true);
-		let filed = sweep_key_expiry(&mut conn, &dir)
-			.await
-			.expect("sweep");
+		let filed = sweep_key_expiry(&mut conn, &dir).await.expect("sweep");
 		assert_eq!(filed, 0);
 		assert!(issue_for(&mut conn, server_id).await.is_none());
 	})
@@ -146,9 +142,7 @@ async fn sweep_ignores_node_not_in_directory() {
 		let server_id = insert_server_for(&mut conn, device_id, "https://srv4.invalid/").await;
 
 		let empty = TailnetDirectory::for_test([]);
-		let filed = sweep_key_expiry(&mut conn, &empty)
-			.await
-			.expect("sweep");
+		let filed = sweep_key_expiry(&mut conn, &empty).await.expect("sweep");
 		assert_eq!(filed, 0);
 		assert!(issue_for(&mut conn, server_id).await.is_none());
 	})
