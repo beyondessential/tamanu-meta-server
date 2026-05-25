@@ -25,6 +25,7 @@ import { useApi, useApiAction } from "../api";
 import IssueRow from "../components/IssueRow";
 import { AddNoteButton } from "../components/NotesList";
 import { useIsAdmin } from "../hooks/useIsAdmin";
+import { useIsNotificationHeld } from "../hooks/useIsNotificationHeld";
 import TimeAgo from "../components/TimeAgo";
 import UserAvatar from "../components/UserAvatar";
 import { usePageTitle } from "../hooks/usePageTitle";
@@ -129,7 +130,10 @@ function Header({
 	onChanged: () => void;
 }) {
 	const open = incident.closed_at == null;
-	const held = open && incident.notification_held_until != null;
+	const heldUntilActive = useIsNotificationHeld(
+		incident.notification_held_until,
+	);
+	const held = open && heldUntilActive;
 	const isAdmin = useIsAdmin() === true;
 	const resolve = useApiAction("incidents", "resolve");
 	const unresolve = useApiAction("incidents", "unresolve");

@@ -15,6 +15,7 @@ import ServerShorty from "../components/ServerShorty";
 import SilencedRefsSection from "../components/SilencedRefsSection";
 import TimeAgo from "../components/TimeAgo";
 import { useApi } from "../api";
+import { useIsNotificationHeld } from "../hooks/useIsNotificationHeld";
 import { usePageTitle } from "../hooks/usePageTitle";
 import type { IncidentData } from "../types";
 
@@ -124,7 +125,7 @@ export default function GroupDetail() {
 }
 
 function ActiveIncidentCard({ incident }: { incident: IncidentData }) {
-	const held = incident.notification_held_until != null;
+	const held = useIsNotificationHeld(incident.notification_held_until);
 	return (
 		<Paper
 			variant="outlined"
