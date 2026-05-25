@@ -3,6 +3,7 @@ import OpenInNewIcon from "@mui/icons-material/OpenInNew";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi } from "../api";
+import { useIsNotificationHeld } from "../hooks/useIsNotificationHeld";
 
 /** Server-detail header button into the incidents view. Any server id in
  * a group works — the backend resolves to the group root. Three states:
@@ -38,8 +39,10 @@ export default function IncidentsLink({
 	);
 	const hasActive = issues.status === "ok" && issues.data.length > 0;
 
+	const held = useIsNotificationHeld(
+		openIncident?.notification_held_until ?? null,
+	);
 	if (openIncident) {
-		const held = openIncident.notification_held_until != null;
 		return (
 			<Button
 				component={RouterLink}

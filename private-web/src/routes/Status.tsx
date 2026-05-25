@@ -29,11 +29,20 @@ export default function Status() {
 	usePageTitle("Status");
 	const tick = useReloadInterval(60_000, "canopy-reload-status");
 	const incidents = useApi("incidents", "list_active", {}, [tick]);
+	// `held` only counts while the deliver-after deadline is still ahead:
+	// once it slips into the past the worker has shipped (or is about to)
+	// and this page is just behind on the data — fall through to "loud"
+	// rather than asserting a held state we can't verify. The 60s tick
+	// re-evaluates this naturally.
+	const now = Date.now();
 	const openIncidentGroups = new Map<string, IncidentLoudness>(
 		incidents.status === "ok"
 			? incidents.data.map((i) => [
 					i.server_group_id,
-					i.notification_held_until ? "held" : "loud",
+					i.notification_held_until &&
+					Date.parse(i.notification_held_until) > now
+						? "held"
+						: "loud",
 				])
 			: [],
 	);

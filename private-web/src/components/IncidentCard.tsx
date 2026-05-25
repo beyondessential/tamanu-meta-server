@@ -4,12 +4,17 @@ import NotesIcon from "@mui/icons-material/StickyNote2";
 import TimelineIcon from "@mui/icons-material/Timeline";
 import { Link as RouterLink } from "react-router-dom";
 import TimeAgo from "./TimeAgo";
+import { useIsNotificationHeld } from "../hooks/useIsNotificationHeld";
 import type { IncidentData } from "../types";
 
 /** Compact view of an open incident; click-through goes to the incident
  * detail page. The body has a stats row (bottom-right) with issue / event
- * / note counts. */
+ * / note counts. A warning-coloured border (rather than the default error)
+ * signals that the Slack notice is still inside the per-group cooldown
+ * window — operators scanning the /incidents grid can tell at a glance
+ * which cards have already paged out. */
 export default function IncidentCard({ incident }: { incident: IncidentData }) {
+	const held = useIsNotificationHeld(incident.notification_held_until);
 	return (
 		<Box
 			component={RouterLink}
@@ -17,7 +22,7 @@ export default function IncidentCard({ incident }: { incident: IncidentData }) {
 			sx={{
 				p: 1.5,
 				border: 1,
-				borderColor: "error.main",
+				borderColor: held ? "warning.main" : "error.main",
 				borderRadius: 1,
 				textDecoration: "none",
 				color: "text.primary",
@@ -31,6 +36,17 @@ export default function IncidentCard({ incident }: { incident: IncidentData }) {
 				</Typography>
 				<Typography variant="body2" color="text.secondary">
 					opened <TimeAgo timestamp={incident.opened_at} />
+					{held && incident.notification_held_until && (
+						<>
+							{" · "}
+							<Box component="span" sx={{ color: "warning.main" }}>
+								Slack notice held; ships{" "}
+								<TimeAgo
+									timestamp={incident.notification_held_until}
+								/>
+							</Box>
+						</>
+					)}
 				</Typography>
 			</Box>
 			<Stack
