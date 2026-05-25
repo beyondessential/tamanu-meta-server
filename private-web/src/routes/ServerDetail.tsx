@@ -474,11 +474,12 @@ function deviceShortName(info: DeviceInfo): string {
 function InfoSection({
 	server,
 	status,
+	onSilenced,
 	up,
 }: {
 	server: ServerInfo;
 	status: ServerLastStatusData | null;
-  onSilenced: () => void;
+	onSilenced: () => void;
 	up: ShortStatus;
 }) {
 	return (
