@@ -189,6 +189,7 @@ diesel::table! {
 		name -> Text,
 		notes -> Text,
 		tags -> Jsonb,
+		slack_open_delay -> Interval,
 	}
 }
 

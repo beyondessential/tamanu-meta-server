@@ -135,8 +135,7 @@ async fn create(
 		true
 	} else {
 		let failing = collect_failing_checks(&health);
-		!failing.is_empty()
-			&& all_health_refs_silenced(&mut db, &server, &failing).await?
+		!failing.is_empty() && all_health_refs_silenced(&mut db, &server, &failing).await?
 	};
 
 	// Read previous-latest BEFORE the write transaction so we can
@@ -291,14 +290,9 @@ async fn all_health_refs_silenced(
 ) -> Result<bool> {
 	for check in failing {
 		let r#ref = format!("{HEALTH_REF}/{check}");
-		let silenced = silenced_refs::is_silenced(
-			conn,
-			server.id,
-			server.group_id,
-			STATUS_SOURCE,
-			&r#ref,
-		)
-		.await?;
+		let silenced =
+			silenced_refs::is_silenced(conn, server.id, server.group_id, STATUS_SOURCE, &r#ref)
+				.await?;
 		if !silenced {
 			return Ok(false);
 		}

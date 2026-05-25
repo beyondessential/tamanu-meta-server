@@ -3638,6 +3638,14 @@
           "notes": {
             "type": "string"
           },
+          "slack_open_delay": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Optional initial value (seconds) for the group's Slack open\ncooldown. Omit to let the database default apply."
+          },
           "tags": {
             "$ref": "#/components/schemas/TagMap"
           }
@@ -5184,6 +5192,13 @@
               "null"
             ]
           },
+          "slack_open_delay": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
           "tags": {
             "oneOf": [
               {
@@ -5553,7 +5568,8 @@
           "id",
           "created_at",
           "updated_at",
-          "name"
+          "name",
+          "slack_open_delay"
         ],
         "properties": {
           "created_at": {
@@ -5569,6 +5585,11 @@
           },
           "notes": {
             "type": "string"
+          },
+          "slack_open_delay": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How long an `incident_open` Slack notification waits in the outbox\nbefore the drainer is allowed to ship it. A resolve that arrives\ninside this window cancels the open outright (and skips its own\nnotification), so groups with chronic flap can crank this up to\nkeep Slack quiet without losing the underlying incident record."
           },
           "tags": {
             "$ref": "#/components/schemas/TagMap"

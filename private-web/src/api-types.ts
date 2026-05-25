@@ -1485,6 +1485,12 @@ export interface components {
         CreateArgs: {
             name: string;
             notes?: string;
+            /**
+             * Format: int64
+             * @description Optional initial value (seconds) for the group's Slack open
+             *     cooldown. Omit to let the database default apply.
+             */
+            slack_open_delay?: number | null;
             tags?: components["schemas"]["TagMap"];
         };
         CreateArtifactArgs: {
@@ -2013,6 +2019,8 @@ export interface components {
         PartialServerGroup: {
             name?: string | null;
             notes?: string | null;
+            /** Format: int64 */
+            slack_open_delay?: number | null;
             tags?: null | components["schemas"]["TagMap"];
         };
         /**
@@ -2144,6 +2152,15 @@ export interface components {
             id: string;
             name: string;
             notes?: string;
+            /**
+             * Format: int64
+             * @description How long an `incident_open` Slack notification waits in the outbox
+             *     before the drainer is allowed to ship it. A resolve that arrives
+             *     inside this window cancels the open outright (and skips its own
+             *     notification), so groups with chronic flap can crank this up to
+             *     keep Slack quiet without losing the underlying incident record.
+             */
+            slack_open_delay: number;
             tags?: components["schemas"]["TagMap"];
             /** Format: date-time */
             updated_at: string;

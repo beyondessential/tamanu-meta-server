@@ -8,11 +8,16 @@
 use commons_types::issue::{ResolvedReason, Severity};
 use database::{
 	issues::{Incident, Issue, NewEvent},
-	slack_outbox::{KIND_INCIDENT_OPEN, KIND_INCIDENT_RESOLVE, OPEN_DELAY, SlackOutbox},
+	slack_outbox::{KIND_INCIDENT_OPEN, KIND_INCIDENT_RESOLVE, SlackOutbox},
 };
 use diesel::{QueryableByName, sql_query, sql_types};
 use diesel_async::RunQueryDsl;
+use jiff::SignedDuration;
 use uuid::Uuid;
+
+/// Migration default for `server_groups.slack_open_delay`. Tests that
+/// don't override it via `insert_server_with_delay` get this value.
+const DEFAULT_OPEN_DELAY: SignedDuration = SignedDuration::from_mins(3);
 
 #[derive(QueryableByName)]
 struct RowId {
@@ -21,18 +26,43 @@ struct RowId {
 }
 
 async fn insert_server(conn: &mut diesel_async::AsyncPgConnection, host: &str) -> Uuid {
+	insert_server_with_delay(conn, host, None).await
+}
+
+/// Variant of [`insert_server`] that pins the group's `slack_open_delay`
+/// to `delay_secs` instead of taking the migration default. Pass `None`
+/// to keep the default.
+async fn insert_server_with_delay(
+	conn: &mut diesel_async::AsyncPgConnection,
+	host: &str,
+	delay_secs: Option<i64>,
+) -> Uuid {
 	// Group + server pair so events can open incidents (incidents are
 	// group-keyed; ungrouped servers don't promote issues to incidents).
-	let group: RowId = sql_query(
-		r#"
-			INSERT INTO server_groups (name)
-			VALUES ('test-group')
-			RETURNING id
-		"#,
-	)
-	.get_result(conn)
-	.await
-	.expect("insert group");
+	let group: RowId = if let Some(secs) = delay_secs {
+		sql_query(
+			r#"
+				INSERT INTO server_groups (name, slack_open_delay)
+				VALUES ('test-group', make_interval(secs => $1))
+				RETURNING id
+			"#,
+		)
+		.bind::<sql_types::BigInt, _>(secs)
+		.get_result(conn)
+		.await
+		.expect("insert group with delay")
+	} else {
+		sql_query(
+			r#"
+				INSERT INTO server_groups (name)
+				VALUES ('test-group')
+				RETURNING id
+			"#,
+		)
+		.get_result(conn)
+		.await
+		.expect("insert group")
+	};
 	let row: RowId = sql_query(
 		r#"
 			INSERT INTO servers (host, group_id)
@@ -67,7 +97,7 @@ async fn pending_for_incident(
 /// Force-deliver the open row for `incident_id` so a subsequent resolve
 /// no longer treats it as cancellable. Used by tests that want to
 /// exercise the post-delivery code path (where the resolve actually does
-/// enqueue) without waiting `OPEN_DELAY` for the real drainer.
+/// enqueue) without waiting `slack_open_delay` for the real drainer.
 async fn mark_open_delivered(conn: &mut diesel_async::AsyncPgConnection, incident_id: Uuid) {
 	use database::diesel_async::RunQueryDsl;
 	use database::schema::slack_outbox::dsl;
@@ -119,15 +149,16 @@ async fn opening_incident_enqueues_slack_open_row() {
 		assert_eq!(open.issue_id, Some(issue.id));
 		assert!(open.delivered_at.is_none());
 		assert_eq!(open.attempts, 0);
-		// Open rows wait OPEN_DELAY (3 minutes today) before the drainer
-		// is allowed to ship them. `created_at` is set server-side by
-		// the migration default, so the gap should equal OPEN_DELAY
-		// give-or-take the round-trip time of the enqueue itself.
-		let target = open.created_at + OPEN_DELAY;
+		// Open rows wait the group's `slack_open_delay` (defaults to 3
+		// minutes) before the drainer is allowed to ship them.
+		// `created_at` is set server-side by the migration default, so
+		// the gap should equal the per-group delay give-or-take the
+		// round-trip time of the enqueue itself.
+		let target = open.created_at + DEFAULT_OPEN_DELAY;
 		let drift = (open.deliver_after - target).get_seconds().unsigned_abs();
 		assert!(
 			drift <= 5,
-			"deliver_after should sit ~OPEN_DELAY past created_at; drift={drift}s \
+			"deliver_after should sit ~slack_open_delay past created_at; drift={drift}s \
 			 (created_at={}, deliver_after={})",
 			open.created_at,
 			open.deliver_after,
@@ -233,7 +264,11 @@ async fn resolving_before_open_ships_cancels_open_and_skips_resolve() {
 			.iter()
 			.filter(|r| r.kind == KIND_INCIDENT_OPEN)
 			.collect();
-		assert_eq!(opens.len(), 1, "open row stays in the table for historicity");
+		assert_eq!(
+			opens.len(),
+			1,
+			"open row stays in the table for historicity"
+		);
 		assert!(
 			opens[0].gave_up_at.is_some(),
 			"open row marked given-up so the drainer won't ship it"
@@ -360,7 +395,7 @@ async fn mark_given_up_removes_row_from_claim_pending() {
 		};
 		event.save(&mut conn, server_id, None).await.expect("save");
 		// `event.save` enqueues an open whose deliver_after sits
-		// OPEN_DELAY in the future. Drop it back to the past so
+		// `slack_open_delay` in the future. Drop it back to the past so
 		// claim_pending will return the row immediately.
 		expire_deliver_after(&mut conn).await;
 		let row = SlackOutbox::claim_pending(&mut conn, 10)
@@ -388,8 +423,8 @@ async fn mark_given_up_removes_row_from_claim_pending() {
 #[tokio::test(flavor = "multi_thread")]
 async fn claim_pending_skips_rows_whose_deliver_after_is_in_the_future() {
 	// Direct check on the drainer's claim filter: an open row that's
-	// still inside its OPEN_DELAY window must not be claimed, but the
-	// moment its deliver_after slides into the past it becomes
+	// still inside its `slack_open_delay` window must not be claimed,
+	// but the moment its deliver_after slides into the past it becomes
 	// claimable. This is the core flap-suppression mechanism.
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let server_id = insert_server(&mut conn, "http://delayed.invalid/").await;
@@ -408,7 +443,7 @@ async fn claim_pending_skips_rows_whose_deliver_after_is_in_the_future() {
 			.expect("claim");
 		assert!(
 			pending_before.is_empty(),
-			"open row must wait OPEN_DELAY before becoming claimable; got {} rows",
+			"open row must wait the group delay before becoming claimable; got {} rows",
 			pending_before.len(),
 		);
 
@@ -426,8 +461,48 @@ async fn claim_pending_skips_rows_whose_deliver_after_is_in_the_future() {
 	.await
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn open_delay_honours_per_group_slack_open_delay() {
+	// A group with a custom `slack_open_delay` sets the new open's
+	// `deliver_after` from that value, not the migration default. Zero
+	// means "ship immediately" — the drainer's claim filter
+	// (`deliver_after <= NOW()`) will see the row on the very next tick.
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server_id =
+			insert_server_with_delay(&mut conn, "http://nowait.invalid/", Some(0)).await;
+		let event = NewEvent {
+			source: "test".into(),
+			r#ref: "ref-zero".into(),
+			severity: Some(Severity::Error),
+			description: None,
+			message: "boom".into(),
+			active: Some(true),
+			occurred_at: None,
+		};
+		event.save(&mut conn, server_id, None).await.expect("save");
+
+		let claimable = SlackOutbox::claim_pending(&mut conn, 10)
+			.await
+			.expect("claim");
+		assert_eq!(
+			claimable.len(),
+			1,
+			"zero-delay group ships its open immediately",
+		);
+		let open = &claimable[0];
+		let drift = (open.deliver_after - open.created_at)
+			.get_seconds()
+			.unsigned_abs();
+		assert!(
+			drift <= 2,
+			"zero delay should put deliver_after ≈ created_at; drift={drift}s",
+		);
+	})
+	.await
+}
+
 /// Backdate every pending row's `deliver_after` so the drainer can pick
-/// them up without the test having to sleep through `OPEN_DELAY`.
+/// them up without the test having to sleep through `slack_open_delay`.
 async fn expire_deliver_after(conn: &mut diesel_async::AsyncPgConnection) {
 	sql_query("UPDATE slack_outbox SET deliver_after = NOW() - INTERVAL '1 minute' WHERE delivered_at IS NULL AND gave_up_at IS NULL")
 		.execute(conn)

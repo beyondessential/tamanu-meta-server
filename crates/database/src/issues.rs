@@ -639,9 +639,7 @@ pub async fn reevaluate_open_issues_for_group_ref(
 /// issues at most) but worth keeping in mind if the corpus grows.
 ///
 /// Returns `(servers_walked, issues_evaluated)` for the caller to log.
-pub async fn reconcile_open_incidents(
-	db: &mut AsyncPgConnection,
-) -> Result<(usize, usize)> {
+pub async fn reconcile_open_incidents(db: &mut AsyncPgConnection) -> Result<(usize, usize)> {
 	use crate::schema::issues::dsl;
 
 	db.transaction::<_, AppError, _>(async |conn| {
@@ -675,15 +673,8 @@ pub async fn reconcile_open_incidents(
 				// Ungrouped servers can't have incidents; nothing to reconcile.
 				continue;
 			};
-			re_evaluate_incident_membership(
-				conn,
-				&issue,
-				gid,
-				server.is_monitored,
-				now,
-				None,
-			)
-			.await?;
+			re_evaluate_incident_membership(conn, &issue, gid, server.is_monitored, now, None)
+				.await?;
 			evaluated += 1;
 		}
 		Ok((by_id.len(), evaluated))
@@ -786,11 +777,11 @@ async fn enqueue_slack_open(
 		&issue.r#ref,
 		&issue.message,
 	);
-	// Sit in the outbox for OPEN_DELAY before the drainer is allowed to
-	// pick the row up. If the incident closes within that window the
-	// resolve path will cancel this row outright (see
+	// Sit in the outbox for the group's `slack_open_delay` before the
+	// drainer is allowed to pick the row up. If the incident closes within
+	// that window the resolve path will cancel this row outright (see
 	// `enqueue_slack_resolve_inner`), and Slack never hears about a flap.
-	let deliver_after = Timestamp::now() + crate::slack_outbox::OPEN_DELAY;
+	let deliver_after = Timestamp::now() + group.slack_open_delay.0;
 	crate::slack_outbox::SlackOutbox::enqueue(
 		conn,
 		crate::slack_outbox::KIND_INCIDENT_OPEN,

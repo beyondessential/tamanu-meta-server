@@ -48,13 +48,27 @@ function EditForm({
 	const [name, setName] = useState(group.name);
 	const [notes, setNotes] = useState(group.notes ?? "");
 	const [tags, setTags] = useState<TagMap>(group.tags ?? {});
+	// Slack open cooldown: how long a newly-opened incident's Slack notice
+	// sits in the outbox before the drainer is allowed to ship it. UI works
+	// in minutes; 0 = ship immediately.
+	const [slackOpenDelayMinutes, setSlackOpenDelayMinutes] = useState<string>(
+		Math.max(0, Math.round(group.slack_open_delay / 60)).toString(),
+	);
 
 	const onSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
 		try {
 			await update.call({
 				server_group_id: group.id,
-				data: { name, notes, tags },
+				data: {
+					name,
+					notes,
+					tags,
+					slack_open_delay: Math.max(
+						0,
+						Math.round(Number(slackOpenDelayMinutes) * 60),
+					),
+				},
 			});
 			navigate(`/groups/${group.id}`);
 		} catch {
@@ -104,6 +118,33 @@ function EditForm({
 					disabled={pending}
 					helperText="Plain text shown on the group's detail page."
 				/>
+
+				<Stack spacing={1}>
+					<Typography variant="subtitle1">Slack cooldown</Typography>
+					<Stack
+						direction={{ xs: "column", md: "row" }}
+						spacing={2}
+						sx={{ alignItems: { md: "center" } }}
+					>
+						<Typography variant="body2">
+							Hold incident-open Slack notices for
+						</Typography>
+						<TextField
+							label="minutes"
+							type="number"
+							value={slackOpenDelayMinutes}
+							onChange={(e) => setSlackOpenDelayMinutes(e.target.value)}
+							disabled={pending}
+							slotProps={{ htmlInput: { min: 0, step: 1 } }}
+							sx={{ width: 140 }}
+						/>
+					</Stack>
+					<Typography variant="caption" color="text.secondary">
+						If the incident resolves inside the window, no Slack notice is
+						sent for either edge — useful for flappy probes. Set to 0 to ship
+						opens immediately.
+					</Typography>
+				</Stack>
 
 				<Stack spacing={1}>
 					<Typography variant="subtitle1">Tags</Typography>

@@ -9,6 +9,7 @@ use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::pg_duration::PgDuration;
 use crate::servers::Server;
 
 fn higher_rank(a: ServerRank, b: ServerRank) -> ServerRank {
@@ -46,6 +47,13 @@ pub struct ServerGroup {
 	pub notes: String,
 	#[serde(default)]
 	pub tags: TagMap,
+	/// How long an `incident_open` Slack notification waits in the outbox
+	/// before the drainer is allowed to ship it. A resolve that arrives
+	/// inside this window cancels the open outright (and skips its own
+	/// notification), so groups with chronic flap can crank this up to
+	/// keep Slack quiet without losing the underlying incident record.
+	#[schema(value_type = i64, format = "int64")]
+	pub slack_open_delay: PgDuration,
 }
 
 #[derive(Debug, Clone, Deserialize, Insertable, utoipa::ToSchema)]
@@ -57,6 +65,9 @@ pub struct NewServerGroup {
 	pub notes: String,
 	#[serde(default)]
 	pub tags: TagMap,
+	#[serde(default)]
+	#[schema(value_type = Option<i64>, format = "int64")]
+	pub slack_open_delay: Option<PgDuration>,
 }
 
 #[derive(Debug, Clone, Deserialize, AsChangeset, utoipa::ToSchema)]
@@ -66,6 +77,8 @@ pub struct PartialServerGroup {
 	pub name: Option<String>,
 	pub notes: Option<String>,
 	pub tags: Option<TagMap>,
+	#[schema(value_type = Option<i64>, format = "int64")]
+	pub slack_open_delay: Option<PgDuration>,
 }
 
 impl ServerGroup {

@@ -95,6 +95,11 @@ pub struct CreateArgs {
 	pub notes: String,
 	#[serde(default)]
 	pub tags: TagMap,
+	/// Optional initial value (seconds) for the group's Slack open
+	/// cooldown. Omit to let the database default apply.
+	#[serde(default)]
+	#[schema(value_type = Option<i64>, format = "int64")]
+	pub slack_open_delay: Option<database::pg_duration::PgDuration>,
 }
 
 #[utoipa::path(
@@ -121,6 +126,7 @@ pub async fn create(
 			name: args.name,
 			notes: args.notes,
 			tags: args.tags,
+			slack_open_delay: args.slack_open_delay,
 		},
 	)
 	.await?;
