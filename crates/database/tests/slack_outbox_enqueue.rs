@@ -501,6 +501,72 @@ async fn open_delay_honours_per_group_slack_open_delay() {
 	.await
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn pending_opens_until_filters_to_undelivered_in_window() {
+	// `pending_opens_until` powers the UI's "held" state — only opens that
+	// are still inside their `deliver_after` window AND haven't been
+	// delivered or given up qualify.
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		// Held incident: default-delay group → open sits 3 min in the future.
+		let held_server = insert_server(&mut conn, "http://held.invalid/").await;
+		let event = NewEvent {
+			source: "test".into(),
+			r#ref: "ref-held".into(),
+			severity: Some(Severity::Error),
+			description: None,
+			message: "boom".into(),
+			active: Some(true),
+			occurred_at: None,
+		};
+		event
+			.save(&mut conn, held_server, None)
+			.await
+			.expect("save held");
+		let held_incident = Incident::list_for_server(&mut conn, held_server, false, 10)
+			.await
+			.expect("list incidents")[0]
+			.id;
+
+		// Delivered incident: open already shipped → not held any more.
+		let delivered_server = insert_server(&mut conn, "http://delivered.invalid/").await;
+		let event = NewEvent {
+			source: "test".into(),
+			r#ref: "ref-delivered".into(),
+			severity: Some(Severity::Error),
+			description: None,
+			message: "boom".into(),
+			active: Some(true),
+			occurred_at: None,
+		};
+		event
+			.save(&mut conn, delivered_server, None)
+			.await
+			.expect("save delivered");
+		let delivered_incident = Incident::list_for_server(&mut conn, delivered_server, false, 10)
+			.await
+			.expect("list incidents")[0]
+			.id;
+		mark_open_delivered(&mut conn, delivered_incident).await;
+
+		let held = SlackOutbox::pending_opens_until(
+			&mut conn,
+			&[held_incident, delivered_incident],
+		)
+		.await
+		.expect("pending_opens_until");
+
+		assert!(
+			held.contains_key(&held_incident),
+			"held incident must appear in the map",
+		);
+		assert!(
+			!held.contains_key(&delivered_incident),
+			"once shipped, the open is no longer held",
+		);
+	})
+	.await
+}
+
 /// Backdate every pending row's `deliver_after` so the drainer can pick
 /// them up without the test having to sleep through `slack_open_delay`.
 async fn expire_deliver_after(conn: &mut diesel_async::AsyncPgConnection) {
