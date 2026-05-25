@@ -9,12 +9,13 @@
 //!
 //! Each row carries a `deliver_after` timestamp. Resolves enqueue with
 //! `deliver_after = now`, so they ship on the next drain tick. Opens enqueue
-//! with a small future delay (see [`OPEN_DELAY`]) so a probe that flaps open
-//! and resolved within that window can be cancelled before we tell Slack
-//! anything happened: the cascade in [`crate::issues::Incident::resolve`]
-//! and the auto-close path both call [`SlackOutbox::cancel_pending_open`]
-//! before enqueueing the resolve, which marks the open row given-up and
-//! skips the resolve when it succeeds.
+//! with a small future delay (the per-group `slack_open_delay`) so a probe
+//! that flaps open and resolved within that window can be cancelled before
+//! we tell Slack anything happened: the cascade in
+//! [`crate::issues::Incident::resolve`] and the auto-close path both call
+//! [`SlackOutbox::cancel_pending_open`] before enqueueing the resolve,
+//! which marks the open row given-up and skips the resolve when it
+//! succeeds.
 //!
 //! The payload is rendered to Block Kit JSON at enqueue time, not at delivery
 //! time, so we capture state as it was when the event happened rather than
@@ -24,7 +25,7 @@
 use commons_errors::{AppError, Result};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use jiff::{SignedDuration, Timestamp};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use uuid::Uuid;
@@ -35,13 +36,6 @@ pub mod vars;
 pub const KIND_INCIDENT_OPEN: &str = "incident_open";
 /// Incident resolved — Phase A: top-level; Phase B: reply in the incident thread.
 pub const KIND_INCIDENT_RESOLVE: &str = "incident_resolve";
-
-/// How long an `incident_open` row sits in the outbox before the drainer
-/// is allowed to ship it. Long enough to swallow probe flaps that open and
-/// resolve within seconds; short enough that real incidents still page
-/// promptly. Resolve rows aren't delayed — once we've told Slack an
-/// incident opened, we want the resolve out as soon as it happens.
-pub const OPEN_DELAY: SignedDuration = SignedDuration::from_mins(3);
 
 #[derive(Clone, Debug, Serialize, Deserialize, Queryable, Selectable)]
 #[diesel(table_name = crate::schema::slack_outbox)]
@@ -72,8 +66,8 @@ pub struct SlackOutbox {
 	pub gave_up_at: Option<Timestamp>,
 	/// Earliest time `claim_pending` will return this row. Resolves are
 	/// enqueued with `deliver_after = now` (ship immediately); opens use
-	/// `now + OPEN_DELAY` so flap-and-resolve incidents can be cancelled
-	/// before they hit Slack.
+	/// `now + group.slack_open_delay` so flap-and-resolve incidents can be
+	/// cancelled before they hit Slack.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub deliver_after: Timestamp,
 }
@@ -85,7 +79,7 @@ impl SlackOutbox {
 	///
 	/// `deliver_after` is the earliest time the drainer is allowed to ship
 	/// this row. Most callers pass `Timestamp::now()`; the open path
-	/// passes `now + OPEN_DELAY`.
+	/// passes `now + group.slack_open_delay`.
 	pub async fn enqueue(
 		db: &mut AsyncPgConnection,
 		kind: &str,

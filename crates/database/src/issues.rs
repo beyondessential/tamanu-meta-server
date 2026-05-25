@@ -777,11 +777,11 @@ async fn enqueue_slack_open(
 		&issue.r#ref,
 		&issue.message,
 	);
-	// Sit in the outbox for OPEN_DELAY before the drainer is allowed to
-	// pick the row up. If the incident closes within that window the
-	// resolve path will cancel this row outright (see
+	// Sit in the outbox for the group's `slack_open_delay` before the
+	// drainer is allowed to pick the row up. If the incident closes within
+	// that window the resolve path will cancel this row outright (see
 	// `enqueue_slack_resolve_inner`), and Slack never hears about a flap.
-	let deliver_after = Timestamp::now() + crate::slack_outbox::OPEN_DELAY;
+	let deliver_after = Timestamp::now() + group.slack_open_delay.0;
 	crate::slack_outbox::SlackOutbox::enqueue(
 		conn,
 		crate::slack_outbox::KIND_INCIDENT_OPEN,
