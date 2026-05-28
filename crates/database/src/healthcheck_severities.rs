@@ -14,9 +14,7 @@ use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
-#[derive(
-	Clone, Debug, Serialize, Deserialize, Queryable, Selectable, utoipa::ToSchema,
-)]
+#[derive(Clone, Debug, Serialize, Deserialize, Queryable, Selectable, utoipa::ToSchema)]
 #[diesel(table_name = crate::schema::healthcheck_severities)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct HealthcheckSeverity {

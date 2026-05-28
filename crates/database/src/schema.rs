@@ -113,6 +113,7 @@ diesel::table! {
 		reviewed_by -> Nullable<Text>,
 		notes -> Nullable<Text>,
 		updated_at -> Timestamptz,
+		rules -> Nullable<Jsonb>,
 	}
 }
 
