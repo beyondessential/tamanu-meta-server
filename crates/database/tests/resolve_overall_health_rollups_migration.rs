@@ -9,8 +9,9 @@ use diesel::sql_types;
 use diesel_async::{RunQueryDsl, SimpleAsyncConnection as _};
 use uuid::Uuid;
 
-const MIGRATION_UP: &str =
-	include_str!("../../../migrations/2026-05-28-100000-0000_resolve_overall_health_rollups/up.sql");
+const MIGRATION_UP: &str = include_str!(
+	"../../../migrations/2026-05-28-100000-0000_resolve_overall_health_rollups/up.sql"
+);
 
 #[tokio::test(flavor = "multi_thread")]
 async fn migration_retires_active_rollup_and_orphan_incident() {

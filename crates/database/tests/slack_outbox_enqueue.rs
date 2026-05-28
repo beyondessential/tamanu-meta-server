@@ -548,12 +548,10 @@ async fn pending_opens_until_filters_to_undelivered_in_window() {
 			.id;
 		mark_open_delivered(&mut conn, delivered_incident).await;
 
-		let held = SlackOutbox::pending_opens_until(
-			&mut conn,
-			&[held_incident, delivered_incident],
-		)
-		.await
-		.expect("pending_opens_until");
+		let held =
+			SlackOutbox::pending_opens_until(&mut conn, &[held_incident, delivered_incident])
+				.await
+				.expect("pending_opens_until");
 
 		assert!(
 			held.contains_key(&held_incident),
