@@ -8,8 +8,6 @@
 -- Validation of the JSON shape lives in Rust at the API layer; the
 -- column is a plain JSONB so a hand-edited row only degrades to the
 -- base severity at evaluation time, never crashes the ingestion path.
---
--- See docs/plans/healthcheck-severity-rules-v2.md.
 
 ALTER TABLE healthcheck_severities
 	ADD COLUMN rules JSONB;
