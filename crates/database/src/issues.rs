@@ -506,14 +506,24 @@ async fn re_evaluate_incident_membership(
 				.get_result(conn)
 				.await?;
 			if remaining_open == 0 {
-				let closed: Incident = diesel::update(
-					incidents::table.filter(incidents::id.eq(open_link.incident_id)),
+				// Filter on `closed_at IS NULL` so that when a stranded
+				// low-severity contributor eventually leaves an already-
+				// closed incident (because the severity-filter close above
+				// already retired it), we skip both the no-op update and
+				// the double Slack resolve.
+				let closed: Option<Incident> = diesel::update(
+					incidents::table
+						.filter(incidents::id.eq(open_link.incident_id))
+						.filter(incidents::closed_at.is_null()),
 				)
 				.set(incidents::closed_at.eq(jiff_diesel::Timestamp::from(transition_time)))
 				.returning(Incident::as_select())
 				.get_result(conn)
-				.await?;
-				enqueue_slack_resolve_inner(conn, &closed, by).await?;
+				.await
+				.optional()?;
+				if let Some(closed) = closed {
+					enqueue_slack_resolve_inner(conn, &closed, by).await?;
+				}
 			}
 		}
 		_ => {}
