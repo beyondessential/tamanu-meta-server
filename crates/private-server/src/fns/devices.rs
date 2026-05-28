@@ -399,6 +399,7 @@ pub struct TrustArgs {
 #[utoipa::path(
 	post,
 	path = "/trust",
+	operation_id = "device_trust",
 	tag = "devices",
 	security(("tailscale-admin" = [])),
 	request_body = TrustArgs,
@@ -456,6 +457,7 @@ pub async fn list_trusted(
 #[utoipa::path(
 	post,
 	path = "/untrust",
+	operation_id = "device_untrust",
 	tag = "devices",
 	security(("tailscale-admin" = [])),
 	request_body = DeviceIdArgs,
@@ -507,6 +509,7 @@ pub struct SearchArgs {
 #[utoipa::path(
 	post,
 	path = "/search",
+	operation_id = "device_search",
 	tag = "devices",
 	security(("tailscale-admin" = [])),
 	request_body = SearchArgs,

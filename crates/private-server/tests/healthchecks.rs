@@ -1,4 +1,4 @@
-//! `/api/healthchecks/list_severities` and `/api/healthchecks/update_severity`.
+//! `/api/healthchecks/list` and `/api/healthchecks/update`.
 
 use commons_tests::diesel_async::SimpleAsyncConnection;
 use serde_json::json;
@@ -18,7 +18,7 @@ async fn list_returns_catalog_rows_with_pending_review_flag() {
 		.unwrap();
 
 		let response = private
-			.post("/api/healthchecks/list_severities")
+			.post("/api/healthchecks/list")
 			.json(&json!({}))
 			.await;
 		response.assert_status_ok();
@@ -50,7 +50,7 @@ async fn update_changes_severity_and_stamps_review_metadata() {
 		.unwrap();
 
 		let response = private
-			.post("/api/healthchecks/update_severity")
+			.post("/api/healthchecks/update")
 			.json(&json!({
 				"check_name": "disk_space",
 				"severity": "error"
@@ -82,7 +82,7 @@ async fn update_rejects_unknown_severity() {
 		.unwrap();
 
 		let response = private
-			.post("/api/healthchecks/update_severity")
+			.post("/api/healthchecks/update")
 			.json(&json!({
 				"check_name": "disk_space",
 				"severity": "extremely_critical"
@@ -104,7 +104,7 @@ async fn update_marks_reviewed_even_when_severity_unchanged() {
 
 		// Pass the same default severity to ack without changing.
 		let response = private
-			.post("/api/healthchecks/update_severity")
+			.post("/api/healthchecks/update")
 			.json(&json!({
 				"check_name": "noisy_check",
 				"severity": "warning"

@@ -18,8 +18,8 @@ use crate::state::AppState;
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(list_severities))
-		.routes(routes!(update_severity))
+		.routes(routes!(list))
+		.routes(routes!(update))
 }
 
 /// Catalog row enriched with a `pending_review` flag for the UI.
@@ -55,7 +55,8 @@ impl From<HealthcheckSeverity> for HealthcheckSeverityData {
 
 #[utoipa::path(
 	post,
-	path = "/list_severities",
+	path = "/list",
+	operation_id = "healthcheck_list",
 	tag = "healthchecks",
 	security(("tailscale-admin" = [])),
 	responses(
@@ -64,7 +65,7 @@ impl From<HealthcheckSeverity> for HealthcheckSeverityData {
 		(status = 403, body = ProblemDetailsSchema),
 	),
 )]
-pub async fn list_severities(
+pub async fn list(
 	State(state): State<AppState>,
 	_admin: TailscaleAdmin,
 ) -> Result<Json<Vec<HealthcheckSeverityData>>> {
@@ -86,7 +87,8 @@ pub struct UpdateArgs {
 
 #[utoipa::path(
 	post,
-	path = "/update_severity",
+	path = "/update",
+	operation_id = "healthcheck_update",
 	tag = "healthchecks",
 	security(("tailscale-admin" = [])),
 	request_body = UpdateArgs,
@@ -96,7 +98,7 @@ pub struct UpdateArgs {
 		(status = 403, body = ProblemDetailsSchema),
 	),
 )]
-pub async fn update_severity(
+pub async fn update(
 	State(state): State<AppState>,
 	admin: TailscaleAdmin,
 	Json(args): Json<UpdateArgs>,

@@ -484,6 +484,7 @@ pub struct UpdateArgs {
 #[utoipa::path(
 	post,
 	path = "/update",
+	operation_id = "server_update",
 	tag = "servers",
 	security(("tailscale-admin" = [])),
 	request_body = UpdateArgs,

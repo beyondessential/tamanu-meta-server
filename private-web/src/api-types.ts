@@ -13,7 +13,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["add"];
+        post: operations["admin_add"];
         delete?: never;
         options?: never;
         head?: never;
@@ -29,7 +29,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["delete"];
+        post: operations["admin_delete"];
         delete?: never;
         options?: never;
         head?: never;
@@ -45,7 +45,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["list"];
+        post: operations["admin_list"];
         delete?: never;
         options?: never;
         head?: never;
@@ -371,7 +371,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["search"];
+        post: operations["device_search"];
         delete?: never;
         options?: never;
         head?: never;
@@ -387,7 +387,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["trust"];
+        post: operations["device_trust"];
         delete?: never;
         options?: never;
         head?: never;
@@ -403,7 +403,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["untrust"];
+        post: operations["device_untrust"];
         delete?: never;
         options?: never;
         head?: never;
@@ -442,7 +442,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/healthchecks/list_severities": {
+    "/api/healthchecks/list": {
         parameters: {
             query?: never;
             header?: never;
@@ -451,14 +451,14 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["list_severities"];
+        post: operations["healthcheck_list"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/healthchecks/update_severity": {
+    "/api/healthchecks/update": {
         parameters: {
             query?: never;
             header?: never;
@@ -467,7 +467,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["update_severity"];
+        post: operations["healthcheck_update"];
         delete?: never;
         options?: never;
         head?: never;
@@ -756,7 +756,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["snooze"];
+        post: operations["issue_snooze"];
         delete?: never;
         options?: never;
         head?: never;
@@ -804,7 +804,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["unsnooze"];
+        post: operations["issue_unsnooze"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1040,7 +1040,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["update"];
+        post: operations["server_update"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1256,7 +1256,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["snapshot"];
+        post: operations["status_snapshot"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1272,7 +1272,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["summary"];
+        post: operations["status_summary"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2581,7 +2581,7 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    add: {
+    admin_add: {
         parameters: {
             query?: never;
             header?: never;
@@ -2619,7 +2619,7 @@ export interface operations {
             };
         };
     };
-    delete: {
+    admin_delete: {
         parameters: {
             query?: never;
             header?: never;
@@ -2657,7 +2657,7 @@ export interface operations {
             };
         };
     };
-    list: {
+    admin_list: {
         parameters: {
             query?: never;
             header?: never;
@@ -3254,7 +3254,7 @@ export interface operations {
             };
         };
     };
-    search: {
+    device_search: {
         parameters: {
             query?: never;
             header?: never;
@@ -3277,7 +3277,7 @@ export interface operations {
             };
         };
     };
-    trust: {
+    device_trust: {
         parameters: {
             query?: never;
             header?: never;
@@ -3306,7 +3306,7 @@ export interface operations {
             };
         };
     };
-    untrust: {
+    device_untrust: {
         parameters: {
             query?: never;
             header?: never;
@@ -3377,7 +3377,7 @@ export interface operations {
             };
         };
     };
-    list_severities: {
+    healthcheck_list: {
         parameters: {
             query?: never;
             header?: never;
@@ -3413,7 +3413,7 @@ export interface operations {
             };
         };
     };
-    update_severity: {
+    healthcheck_update: {
         parameters: {
             query?: never;
             header?: never;
@@ -3864,7 +3864,7 @@ export interface operations {
             };
         };
     };
-    snooze: {
+    issue_snooze: {
         parameters: {
             query?: never;
             header?: never;
@@ -3941,7 +3941,7 @@ export interface operations {
             };
         };
     };
-    unsnooze: {
+    issue_unsnooze: {
         parameters: {
             query?: never;
             header?: never;
@@ -4362,7 +4362,7 @@ export interface operations {
             };
         };
     };
-    update: {
+    server_update: {
         parameters: {
             query?: never;
             header?: never;
@@ -4720,7 +4720,7 @@ export interface operations {
             };
         };
     };
-    snapshot: {
+    status_snapshot: {
         parameters: {
             query?: never;
             header?: never;
@@ -4751,7 +4751,7 @@ export interface operations {
             };
         };
     };
-    summary: {
+    status_summary: {
         parameters: {
             query?: never;
             header?: never;

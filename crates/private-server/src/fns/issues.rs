@@ -543,6 +543,7 @@ pub struct SnoozeArgs {
 #[utoipa::path(
 	post,
 	path = "/snooze",
+	operation_id = "issue_snooze",
 	tag = "issues",
 	security(("tailscale-admin" = [])),
 	request_body = SnoozeArgs,
@@ -563,6 +564,7 @@ pub async fn snooze(
 #[utoipa::path(
 	post,
 	path = "/unsnooze",
+	operation_id = "issue_unsnooze",
 	tag = "issues",
 	security(("tailscale-admin" = [])),
 	request_body = IssueIdArgs,

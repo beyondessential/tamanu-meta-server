@@ -18,7 +18,7 @@
         "tags": [
           "admins"
         ],
-        "operationId": "add",
+        "operationId": "admin_add",
         "requestBody": {
           "content": {
             "application/json": {
@@ -66,7 +66,7 @@
         "tags": [
           "admins"
         ],
-        "operationId": "delete",
+        "operationId": "admin_delete",
         "requestBody": {
           "content": {
             "application/json": {
@@ -114,7 +114,7 @@
         "tags": [
           "admins"
         ],
-        "operationId": "list",
+        "operationId": "admin_list",
         "responses": {
           "200": {
             "description": "Admin emails.",
@@ -934,7 +934,7 @@
         "tags": [
           "devices"
         ],
-        "operationId": "search",
+        "operationId": "device_search",
         "requestBody": {
           "content": {
             "application/json": {
@@ -972,7 +972,7 @@
         "tags": [
           "devices"
         ],
-        "operationId": "trust",
+        "operationId": "device_trust",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1010,7 +1010,7 @@
         "tags": [
           "devices"
         ],
-        "operationId": "untrust",
+        "operationId": "device_untrust",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1099,12 +1099,12 @@
         ]
       }
     },
-    "/api/healthchecks/list_severities": {
+    "/api/healthchecks/list": {
       "post": {
         "tags": [
           "healthchecks"
         ],
-        "operationId": "list_severities",
+        "operationId": "healthcheck_list",
         "responses": {
           "200": {
             "description": "Catalog rows ordered by check_name.",
@@ -1147,12 +1147,12 @@
         ]
       }
     },
-    "/api/healthchecks/update_severity": {
+    "/api/healthchecks/update": {
       "post": {
         "tags": [
           "healthchecks"
         ],
-        "operationId": "update_severity",
+        "operationId": "healthcheck_update",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1843,7 +1843,7 @@
         "tags": [
           "issues"
         ],
-        "operationId": "snooze",
+        "operationId": "issue_snooze",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1958,7 +1958,7 @@
         "tags": [
           "issues"
         ],
-        "operationId": "unsnooze",
+        "operationId": "issue_unsnooze",
         "requestBody": {
           "content": {
             "application/json": {
@@ -2547,7 +2547,7 @@
         "tags": [
           "servers"
         ],
-        "operationId": "update",
+        "operationId": "server_update",
         "requestBody": {
           "content": {
             "application/json": {
@@ -3049,7 +3049,7 @@
         "tags": [
           "statuses"
         ],
-        "operationId": "snapshot",
+        "operationId": "status_snapshot",
         "requestBody": {
           "content": {
             "application/json": {
@@ -3101,7 +3101,7 @@
         "tags": [
           "statuses"
         ],
-        "operationId": "summary",
+        "operationId": "status_summary",
         "responses": {
           "200": {
             "description": "",
