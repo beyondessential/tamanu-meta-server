@@ -1202,6 +1202,71 @@
         ]
       }
     },
+    "/api/healthchecks/update_rules": {
+      "post": {
+        "tags": [
+          "healthchecks"
+        ],
+        "operationId": "healthcheck_update_rules",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateRulesArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated catalog row.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthcheckSeverityData"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/incidents/add_note": {
       "post": {
         "tags": [
@@ -4206,13 +4271,14 @@
       },
       "HealthcheckSeverityData": {
         "type": "object",
-        "description": "Catalog row enriched with a `pending_review` flag for the UI.",
+        "description": "Catalog row enriched with `pending_review` and `rule_count` derivations\nfor the UI. `rules` is the raw JsonLogic blob exactly as stored; the\nReact side parses it client-side (or the per-check editor rebuilds it\nfrom form state and POSTs to /update_rules). Malformed `rules` parses\nto `rule_count: 0` and the row behaves as \"no conditional rules\" — the\nevaluator does the same on the ingestion path.",
         "required": [
           "check_name",
           "severity",
           "first_seen",
           "updated_at",
-          "pending_review"
+          "pending_review",
+          "rule_count"
         ],
         "properties": {
           "check_name": {
@@ -4244,6 +4310,15 @@
               "string",
               "null"
             ]
+          },
+          "rule_count": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Number of branches in the rules ladder; 0 when `rules` is null\nor malformed. The main /healthchecks page uses this to decide\nbetween the simple severity dropdown and the \"Custom rules\" link.",
+            "minimum": 0
+          },
+          "rules": {
+            "description": "JsonLogic if-ladder; `null` means no conditional rules."
           },
           "severity": {
             "$ref": "#/components/schemas/Severity"
@@ -6665,6 +6740,20 @@
               "string",
               "null"
             ]
+          }
+        }
+      },
+      "UpdateRulesArgs": {
+        "type": "object",
+        "required": [
+          "check_name"
+        ],
+        "properties": {
+          "check_name": {
+            "type": "string"
+          },
+          "rules": {
+            "description": "Either `null` (clear the ladder) or a JsonLogic if-ladder as\ndocumented on `IfLadder`. An empty-branches ladder is normalised\nto null at the API layer."
           }
         }
       },

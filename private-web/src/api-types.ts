@@ -474,6 +474,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/healthchecks/update_rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["healthcheck_update_rules"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/incidents/add_note": {
         parameters: {
             query?: never;
@@ -1673,7 +1689,14 @@ export interface components {
          * @enum {string}
          */
         HealthState: "healthy" | "warning" | "unhealthy";
-        /** @description Catalog row enriched with a `pending_review` flag for the UI. */
+        /**
+         * @description Catalog row enriched with `pending_review` and `rule_count` derivations
+         *     for the UI. `rules` is the raw JsonLogic blob exactly as stored; the
+         *     React side parses it client-side (or the per-check editor rebuilds it
+         *     from form state and POSTs to /update_rules). Malformed `rules` parses
+         *     to `rule_count: 0` and the row behaves as "no conditional rules" — the
+         *     evaluator does the same on the ingestion path.
+         */
         HealthcheckSeverityData: {
             check_name: string;
             /** Format: date-time */
@@ -1687,6 +1710,15 @@ export interface components {
             /** Format: date-time */
             reviewed_at?: string | null;
             reviewed_by?: string | null;
+            /**
+             * Format: int32
+             * @description Number of branches in the rules ladder; 0 when `rules` is null
+             *     or malformed. The main /healthchecks page uses this to decide
+             *     between the simple severity dropdown and the "Custom rules" link.
+             */
+            rule_count: number;
+            /** @description JsonLogic if-ladder; `null` means no conditional rules. */
+            rules?: unknown;
             severity: components["schemas"]["Severity"];
             /** Format: date-time */
             updated_at: string;
@@ -2515,6 +2547,15 @@ export interface components {
             /** Format: uuid */
             key_id: string;
             name?: string | null;
+        };
+        UpdateRulesArgs: {
+            check_name: string;
+            /**
+             * @description Either `null` (clear the ladder) or a JsonLogic if-ladder as
+             *     documented on `IfLadder`. An empty-branches ladder is normalised
+             *     to null at the API layer.
+             */
+            rules?: unknown;
         };
         UpdateStatusArgs: {
             status: string;
@@ -3433,6 +3474,54 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthcheckSeverityData"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    healthcheck_update_rules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateRulesArgs"];
+            };
+        };
+        responses: {
+            /** @description Updated catalog row. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthcheckSeverityData"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
             401: {
