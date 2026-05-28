@@ -442,6 +442,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/healthchecks/list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/healthchecks/update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["update"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/incidents/add_note": {
         parameters: {
             query?: never;
@@ -1641,6 +1673,24 @@ export interface components {
          * @enum {string}
          */
         HealthState: "healthy" | "warning" | "unhealthy";
+        /** @description Catalog row enriched with a `pending_review` flag for the UI. */
+        HealthcheckSeverityData: {
+            check_name: string;
+            /** Format: date-time */
+            first_seen: string;
+            notes?: string | null;
+            /**
+             * @description `true` when no operator has confirmed this row yet
+             *     (`reviewed_at IS NULL`). The catalog UI surfaces these.
+             */
+            pending_review: boolean;
+            /** Format: date-time */
+            reviewed_at?: string | null;
+            reviewed_by?: string | null;
+            severity: components["schemas"]["Severity"];
+            /** Format: date-time */
+            updated_at: string;
+        };
         HistoryArgs: {
             /** Format: int64 */
             limit?: number | null;
@@ -2441,9 +2491,14 @@ export interface components {
             role: components["schemas"]["DeviceRole"];
         };
         UpdateArgs: {
-            data: components["schemas"]["PartialServerGroup"];
-            /** Format: uuid */
-            server_group_id: string;
+            check_name: string;
+            /**
+             * @description Optional operator notes. `None` leaves the existing notes alone…
+             *     well, actually it overwrites with NULL — pass the current value
+             *     to preserve. The UI sends the full current state.
+             */
+            notes?: string | null;
+            severity: components["schemas"]["Severity"];
         };
         UpdateArtifactArgs: {
             /** Format: uuid */
@@ -3313,6 +3368,82 @@ export interface operations {
                 content?: never;
             };
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Catalog rows ordered by check_name. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthcheckSeverityData"][];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateArgs"];
+            };
+        };
+        responses: {
+            /** @description Updated catalog row. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthcheckSeverityData"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
