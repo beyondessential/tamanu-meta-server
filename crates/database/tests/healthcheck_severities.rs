@@ -53,9 +53,16 @@ async fn upsert_default_does_not_overwrite_operator_severity() {
 #[tokio::test(flavor = "multi_thread")]
 async fn severity_for_returns_catalog_value_or_warning_default() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let empty_map = serde_json::Map::new();
+		let empty_tags = std::collections::HashMap::new();
+		let ctx = database::healthcheck_severities::EvaluationContext {
+			status_extra: &empty_map,
+			check_extra: &empty_map,
+			tags: &empty_tags,
+		};
 		// Unknown check → fallback (programmer-error path; ingestion
 		// upserts before reading in production).
-		let unknown = HealthcheckSeverity::severity_for(&mut conn, "ghost")
+		let unknown = HealthcheckSeverity::severity_for(&mut conn, "ghost", &ctx)
 			.await
 			.expect("lookup");
 		assert_eq!(unknown, Severity::Warning);
@@ -67,7 +74,7 @@ async fn severity_for_returns_catalog_value_or_warning_default() {
 			.await
 			.expect("update");
 
-		let known = HealthcheckSeverity::severity_for(&mut conn, "cert_expiry")
+		let known = HealthcheckSeverity::severity_for(&mut conn, "cert_expiry", &ctx)
 			.await
 			.expect("lookup");
 		assert_eq!(known, Severity::Critical);
