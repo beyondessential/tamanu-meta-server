@@ -1,6 +1,7 @@
 import {
 	Alert,
 	Box,
+	Button,
 	Chip,
 	FormControlLabel,
 	LinearProgress,
@@ -128,7 +129,7 @@ function HealthcheckRow({
 	const update = useApiAction("healthchecks", "update");
 	const [localSeverity, setLocalSeverity] = useState<Severity>(row.severity);
 
-	const onChange = async (next: Severity) => {
+	const save = async (next: Severity) => {
 		setLocalSeverity(next);
 		try {
 			await update.call({
@@ -151,7 +152,7 @@ function HealthcheckRow({
 					<Select
 						size="small"
 						value={localSeverity}
-						onChange={(e) => onChange(e.target.value as Severity)}
+						onChange={(e) => save(e.target.value as Severity)}
 						disabled={update.pending}
 						sx={{ minWidth: 120 }}
 					>
@@ -175,7 +176,18 @@ function HealthcheckRow({
 			</TableCell>
 			<TableCell>
 				{row.pending_review ? (
-					<Chip label="pending review" color="warning" size="small" />
+					<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+						<Chip label="pending review" color="warning" size="small" />
+						{canEdit && (
+							<Button
+								size="small"
+								onClick={() => save(localSeverity)}
+								disabled={update.pending}
+							>
+								Acknowledge
+							</Button>
+						)}
+					</Stack>
 				) : (
 					<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
 						{row.reviewed_at && <TimeAgo timestamp={row.reviewed_at} />}
