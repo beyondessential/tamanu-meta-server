@@ -44,12 +44,8 @@ impl Severity {
 	/// open. Low-severity issues (warning and below) join an already-open
 	/// incident for context but don't hold it open — see
 	/// `database::issues::re_evaluate_incident_membership`.
-	pub const OPENS_INCIDENT: &'static [Severity] = &[
-		Self::Emergency,
-		Self::Alert,
-		Self::Critical,
-		Self::Error,
-	];
+	pub const OPENS_INCIDENT: &'static [Severity] =
+		&[Self::Emergency, Self::Alert, Self::Critical, Self::Error];
 
 	/// Issues at or above this severity open incidents.
 	pub fn opens_incident(self) -> bool {

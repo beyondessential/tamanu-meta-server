@@ -1246,9 +1246,15 @@ async fn submit_status_reachability_to_health_handoff() {
 				.await
 				.expect("incident opened by reachability");
 
+			// Bump `db` to Error so that when reachability recovers later,
+			// the per-check issue can hold the incident open on its own.
+			// (Default Warning would let the incident close once reachability
+			// leaves — see the severity-≥-error close rule.)
+			set_check_severity(&mut conn, "db", "error").await;
+
 			// Server pings in with a failing per-check; the per-check
-			// issue joins the existing incident rather than opening a
-			// separate one.
+			// issue (Error severity) joins the existing incident rather
+			// than opening a separate one.
 			post_status(
 				&public,
 				&cert,
@@ -1449,6 +1455,252 @@ async fn submit_status_uses_catalog_severity_on_failure() {
 				.await
 				.expect("per-check issue filed");
 			assert_eq!(issue.severity, "critical");
+		},
+	)
+	.await
+}
+
+// ── v2 conditional rules ─────────────────────────────────────────────────
+
+/// Write a raw JsonLogic blob to the catalog row's `rules` column. The
+/// helper bypasses the typed API on purpose: tests want to assert the
+/// ingestion path's behaviour for the constrained shape itself.
+async fn set_check_rules(
+	conn: &mut diesel_async::AsyncPgConnection,
+	check_name: &str,
+	rules: serde_json::Value,
+) {
+	// Ensure the catalog row exists.
+	sql_query(
+		"INSERT INTO healthcheck_severities (check_name) VALUES ($1) \
+		 ON CONFLICT (check_name) DO NOTHING",
+	)
+	.bind::<sql_types::Text, _>(check_name)
+	.execute(conn)
+	.await
+	.expect("ensure catalog row");
+	sql_query("UPDATE healthcheck_severities SET rules = $1::jsonb WHERE check_name = $2")
+		.bind::<sql_types::Text, _>(rules.to_string())
+		.bind::<sql_types::Text, _>(check_name)
+		.execute(conn)
+		.await
+		.expect("set rules");
+}
+
+async fn set_server_tags(
+	conn: &mut diesel_async::AsyncPgConnection,
+	server_id: Uuid,
+	tags: serde_json::Value,
+) {
+	sql_query("UPDATE servers SET tags = $1::jsonb WHERE id = $2")
+		.bind::<sql_types::Text, _>(tags.to_string())
+		.bind::<sql_types::Uuid, _>(server_id)
+		.execute(conn)
+		.await
+		.expect("set server tags");
+}
+
+/// A rule predicated on `check.<field>` raises the per-check issue
+/// to its branch severity, overriding the catalog base. Below-threshold
+/// pushes fall back to base.
+#[tokio::test(flavor = "multi_thread")]
+async fn submit_status_rule_on_check_extra_overrides_base() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+			set_check_rules(
+				&mut conn,
+				"disk_space",
+				serde_json::json!({"if": [
+					{">": [{"var": "check.used_pct"}, 90]}, "critical"
+				]}),
+			)
+			.await;
+
+			post_status(
+				&public,
+				&cert,
+				server_id,
+				serde_json::json!({
+					"healthy": false,
+					"health": [{"check": "disk_space", "healthy": false, "used_pct": 95}],
+				}),
+			)
+			.await;
+			let issue = fetch_issue(&mut conn, server_id, "status", "health/disk_space")
+				.await
+				.expect("per-check issue filed");
+			assert_eq!(issue.severity, "critical");
+
+			// Below-threshold push falls back to base (default warning).
+			post_status(
+				&public,
+				&cert,
+				server_id,
+				serde_json::json!({
+					"healthy": false,
+					"health": [{"check": "disk_space", "healthy": false, "used_pct": 50}],
+				}),
+			)
+			.await;
+			let issue = fetch_issue(&mut conn, server_id, "status", "health/disk_space")
+				.await
+				.expect("per-check issue still present");
+			assert_eq!(issue.severity, "warning");
+		},
+	)
+	.await
+}
+
+/// `status.bestoolVersion` from the top-level extras drives an in_range
+/// rule. Outside the range falls back to base.
+#[tokio::test(flavor = "multi_thread")]
+async fn submit_status_rule_on_bestool_version_range() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+			set_check_rules(
+				&mut conn,
+				"tamanu_service",
+				serde_json::json!({"if": [
+					{"in_range": [{"var": "status.bestoolVersion"}, ">=2.4.0 <2.5.4"]},
+					"warning"
+				]}),
+			)
+			.await;
+			// Bump base to Error so the contrast is visible.
+			set_check_severity(&mut conn, "tamanu_service", "error").await;
+
+			// Inside range → warning.
+			post_status(
+				&public,
+				&cert,
+				server_id,
+				serde_json::json!({
+					"healthy": false,
+					"bestoolVersion": "2.4.7",
+					"health": [{"check": "tamanu_service", "healthy": false}],
+				}),
+			)
+			.await;
+			let issue = fetch_issue(&mut conn, server_id, "status", "health/tamanu_service")
+				.await
+				.expect("per-check issue filed");
+			assert_eq!(issue.severity, "warning");
+
+			// Outside range → falls back to base (error).
+			post_status(
+				&public,
+				&cert,
+				server_id,
+				serde_json::json!({
+					"healthy": false,
+					"bestoolVersion": "2.6.0",
+					"health": [{"check": "tamanu_service", "healthy": false}],
+				}),
+			)
+			.await;
+			let issue = fetch_issue(&mut conn, server_id, "status", "health/tamanu_service")
+				.await
+				.expect("per-check issue still present");
+			assert_eq!(issue.severity, "error");
+		},
+	)
+	.await
+}
+
+/// A rule on `tag.<key>` resolves against the server's merged tag map.
+/// Servers without the tag fall through to base.
+#[tokio::test(flavor = "multi_thread")]
+async fn submit_status_rule_on_server_tag() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+			set_server_tags(
+				&mut conn,
+				server_id,
+				serde_json::json!({"environment": "prod"}),
+			)
+			.await;
+			set_check_rules(
+				&mut conn,
+				"cert_expiry",
+				serde_json::json!({"if": [
+					{"==": [{"var": "tag.environment"}, "prod"]}, "error"
+				]}),
+			)
+			.await;
+
+			post_status(
+				&public,
+				&cert,
+				server_id,
+				serde_json::json!({
+					"healthy": false,
+					"health": [{"check": "cert_expiry", "healthy": false}],
+				}),
+			)
+			.await;
+			let issue = fetch_issue(&mut conn, server_id, "status", "health/cert_expiry")
+				.await
+				.expect("per-check issue filed");
+			assert_eq!(issue.severity, "error", "tag.environment=prod fires the rule");
+		},
+	)
+	.await
+}
+
+/// Two-branch ladder; first-match-wins.
+#[tokio::test(flavor = "multi_thread")]
+async fn submit_status_tiered_ladder() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+			set_check_rules(
+				&mut conn,
+				"cert_expiry",
+				serde_json::json!({"if": [
+					{"<": [{"var": "check.days_remaining"}, 7]},  "error",
+					{"<": [{"var": "check.days_remaining"}, 30]}, "warning"
+				]}),
+			)
+			.await;
+
+			// Within 7 days → error.
+			post_status(
+				&public,
+				&cert,
+				server_id,
+				serde_json::json!({
+					"healthy": false,
+					"health": [{"check": "cert_expiry", "healthy": false, "days_remaining": 3}],
+				}),
+			)
+			.await;
+			let issue = fetch_issue(&mut conn, server_id, "status", "health/cert_expiry")
+				.await
+				.expect("issue");
+			assert_eq!(issue.severity, "error");
+
+			// Within 30 days but not 7 → warning.
+			post_status(
+				&public,
+				&cert,
+				server_id,
+				serde_json::json!({
+					"healthy": false,
+					"health": [{"check": "cert_expiry", "healthy": false, "days_remaining": 15}],
+				}),
+			)
+			.await;
+			let issue = fetch_issue(&mut conn, server_id, "status", "health/cert_expiry")
+				.await
+				.expect("issue");
+			assert_eq!(issue.severity, "warning");
 		},
 	)
 	.await

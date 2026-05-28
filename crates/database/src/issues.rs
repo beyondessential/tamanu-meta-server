@@ -1422,10 +1422,7 @@ impl Incident {
 			.select((IncidentIssue::as_select(), Issue::as_select()))
 			.filter(incident_issues::incident_id.eq(incident_id))
 			.distinct_on(incident_issues::issue_id)
-			.order((
-				incident_issues::issue_id,
-				incident_issues::joined_at.desc(),
-			))
+			.order((incident_issues::issue_id, incident_issues::joined_at.desc()))
 			.load(db)
 			.await?;
 		rows.sort_by_key(|(link, _)| link.joined_at);

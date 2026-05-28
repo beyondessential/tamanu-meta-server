@@ -11,7 +11,7 @@ use database::{
 	Db,
 	devices::Device,
 	diesel_async::{AsyncConnection, AsyncPgConnection},
-	healthcheck_severities::HealthcheckSeverity,
+	healthcheck_severities::{EvaluationContext, HealthcheckSeverity},
 	issues::NewEvent,
 	servers::Server,
 	statuses::{NewStatus, Status},
@@ -146,6 +146,16 @@ async fn create(
 		.map(|s| collect_failing_checks(&s.health))
 		.unwrap_or_default();
 
+	// Resolve the server's effective tag map outside the write transaction.
+	// Read-only; shared across every rule evaluation for this push. JSON-
+	// wrapped so the rule evaluator can compare uniformly with extras.
+	let tag_map = server.tags_merged_with_group(&mut db).await?;
+	let tags: std::collections::HashMap<String, serde_json::Value> = tag_map
+		.0
+		.into_iter()
+		.map(|(k, v)| (k, serde_json::Value::String(v)))
+		.collect();
+
 	// Insert + file events atomically. NewEvent::save itself opens
 	// a transaction; diesel-async nests it as a SAVEPOINT.
 	let status = db
@@ -161,7 +171,15 @@ async fn create(
 			.save(conn)
 			.await?;
 
-			file_health_events(conn, server_id, Some(id), &status, &prev_failing_checks).await?;
+			file_health_events(
+				conn,
+				server_id,
+				Some(id),
+				&status,
+				&prev_failing_checks,
+				&tags,
+			)
+			.await?;
 
 			Ok(status)
 		})
@@ -188,6 +206,7 @@ async fn file_health_events(
 	device_id: Option<Uuid>,
 	status: &Status,
 	prev_failing_checks: &BTreeSet<String>,
+	tags: &std::collections::HashMap<String, serde_json::Value>,
 ) -> Result<()> {
 	let curr_failing_checks = collect_failing_checks(&status.health);
 	let occurred_at = Some(status.created_at);
@@ -199,10 +218,25 @@ async fn file_health_events(
 		HealthcheckSeverity::upsert_default(conn, &check_name).await?;
 	}
 
+	// Status-level extras are shared across every per-check evaluation.
+	let empty_map = serde_json::Map::new();
+	let status_extra = status.extra.as_object().unwrap_or(&empty_map);
+
 	// Per-check opens.
 	for check in &curr_failing_checks {
 		let entry = find_health_entry(&status.health, check);
-		let severity = HealthcheckSeverity::severity_for(conn, check).await?;
+		// Strip the reserved `check` / `healthy` keys so a rule like
+		// `check.healthy` doesn't shortcut against the trivially-known
+		// failing state; everything else on the entry is operator-visible.
+		let mut check_extra = entry.cloned().unwrap_or_default();
+		check_extra.remove("check");
+		check_extra.remove("healthy");
+		let ctx = EvaluationContext {
+			status_extra,
+			check_extra: &check_extra,
+			tags,
+		};
+		let severity = HealthcheckSeverity::severity_for(conn, check, &ctx).await?;
 		NewEvent {
 			source: STATUS_SOURCE.into(),
 			r#ref: format!("{HEALTH_REF}/{check}"),

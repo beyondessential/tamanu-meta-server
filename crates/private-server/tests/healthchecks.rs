@@ -117,3 +117,164 @@ async fn update_marks_reviewed_even_when_severity_unchanged() {
 	})
 	.await
 }
+
+// ── v2: /update_rules + list returns rule_count and rules ──────────────────
+
+/// list_severities surfaces `rules` (raw JsonLogic) and a derived
+/// `rule_count` (branch count, or 0 when rules is null/malformed).
+#[tokio::test(flavor = "multi_thread")]
+async fn list_returns_rules_and_rule_count() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO healthcheck_severities (check_name, rules) VALUES \
+				('no_rules', NULL), \
+				('one_rule', '{\"if\": [{\"==\": [{\"var\": \"check.x\"}, 1]}, \"error\"]}'::jsonb), \
+				('two_rules', '{\"if\": [{\"==\": [{\"var\": \"check.x\"}, 1]}, \"error\", {\"==\": [{\"var\": \"check.x\"}, 2]}, \"warning\"]}'::jsonb), \
+				('garbage_rules', '{\"and\": [true]}'::jsonb);",
+		)
+		.await
+		.unwrap();
+
+		let response = private.post("/api/healthchecks/list").json(&json!({})).await;
+		response.assert_status_ok();
+		let body: Vec<serde_json::Value> = response.json();
+		let by_name: std::collections::HashMap<&str, &serde_json::Value> = body
+			.iter()
+			.map(|r| (r["check_name"].as_str().unwrap(), r))
+			.collect();
+
+		assert_eq!(by_name["no_rules"]["rule_count"], 0);
+		assert!(by_name["no_rules"]["rules"].is_null());
+
+		assert_eq!(by_name["one_rule"]["rule_count"], 1);
+		assert!(by_name["one_rule"]["rules"].is_object());
+
+		assert_eq!(by_name["two_rules"]["rule_count"], 2);
+
+		// Malformed rules deserialise to rule_count 0; the raw JSONB is
+		// still returned verbatim so the UI can show a warning banner.
+		assert_eq!(
+			by_name["garbage_rules"]["rule_count"], 0,
+			"malformed rules → rule_count 0"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn update_rules_accepts_valid_ladder() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO healthcheck_severities (check_name) VALUES ('disk_space');",
+		)
+		.await
+		.unwrap();
+
+		let response = private
+			.post("/api/healthchecks/update_rules")
+			.json(&json!({
+				"check_name": "disk_space",
+				"rules": {"if": [
+					{">": [{"var": "check.used_pct"}, 95]}, "critical"
+				]}
+			}))
+			.await;
+		response.assert_status_ok();
+		let body: serde_json::Value = response.json();
+		assert_eq!(body["rule_count"], 1);
+		assert!(body["rules"].is_object());
+		assert_eq!(body["pending_review"], false, "edit stamps reviewed_at");
+		assert_eq!(body["reviewed_by"], "admin@localhost");
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn update_rules_with_null_clears_the_column() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO healthcheck_severities (check_name, rules) VALUES \
+				('disk_space', '{\"if\": [{\"==\": [{\"var\": \"check.x\"}, 1]}, \"error\"]}'::jsonb);",
+		)
+		.await
+		.unwrap();
+
+		let response = private
+			.post("/api/healthchecks/update_rules")
+			.json(&json!({"check_name": "disk_space", "rules": null}))
+			.await;
+		response.assert_status_ok();
+		let body: serde_json::Value = response.json();
+		assert_eq!(body["rule_count"], 0);
+		assert!(body["rules"].is_null());
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn update_rules_normalises_empty_ladder_to_null() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO healthcheck_severities (check_name) VALUES ('disk_space');",
+		)
+		.await
+		.unwrap();
+		// `{"if": []}` is a valid-looking empty ladder; expect the API to
+		// normalise it to null at write time.
+		let response = private
+			.post("/api/healthchecks/update_rules")
+			.json(&json!({"check_name": "disk_space", "rules": {"if": []}}))
+			.await;
+		// Either the API rejects an empty ladder OR normalises it. Both
+		// land at `rule_count == 0` and a null rules column.
+		if response.status_code().is_success() {
+			let body: serde_json::Value = response.json();
+			assert_eq!(body["rule_count"], 0);
+			assert!(body["rules"].is_null());
+		} else {
+			response.assert_status_bad_request();
+		}
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn update_rules_rejects_malformed_shapes() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO healthcheck_severities (check_name) VALUES ('disk_space');",
+		)
+		.await
+		.unwrap();
+		let cases: &[(serde_json::Value, &str)] = &[
+			(json!({"and": [true]}), "AND composition"),
+			(
+				json!({"if": [{"if": [true, true]}, "error"]}),
+				"nested if",
+			),
+			(
+				json!({"if": [{"==": [{"var": "BAD.x"}, 1]}, "error"]}),
+				"unknown var namespace",
+			),
+			(
+				json!({"if": [{"==": [{"var": "check.x"}, 1]}, "not_a_severity"]}),
+				"bad severity",
+			),
+			(
+				json!({"if": [{"in_range": [{"var": "status.v"}, "not-a-range"]}, "warning"]}),
+				"bad semver range",
+			),
+		];
+		for (rules, label) in cases {
+			let response = private
+				.post("/api/healthchecks/update_rules")
+				.json(&json!({"check_name": "disk_space", "rules": rules}))
+				.await;
+			assert!(
+				!response.status_code().is_success(),
+				"{label} should have been rejected"
+			);
+		}
+	})
+	.await
+}

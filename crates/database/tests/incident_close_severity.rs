@@ -64,23 +64,19 @@ async fn mark_open_delivered(conn: &mut diesel_async::AsyncPgConnection, inciden
 		#[diesel(sql_type = sql_types::Uuid)]
 		id: Uuid,
 	}
-	let row: Row = sql_query(
-		"SELECT id FROM slack_outbox WHERE incident_id = $1 AND kind = $2 LIMIT 1",
-	)
-	.bind::<sql_types::Uuid, _>(incident_id)
-	.bind::<sql_types::Text, _>(KIND_INCIDENT_OPEN)
-	.get_result(conn)
-	.await
-	.expect("pending open row exists");
+	let row: Row =
+		sql_query("SELECT id FROM slack_outbox WHERE incident_id = $1 AND kind = $2 LIMIT 1")
+			.bind::<sql_types::Uuid, _>(incident_id)
+			.bind::<sql_types::Text, _>(KIND_INCIDENT_OPEN)
+			.get_result(conn)
+			.await
+			.expect("pending open row exists");
 	SlackOutbox::mark_delivered(conn, row.id, "ok")
 		.await
 		.expect("mark delivered");
 }
 
-async fn count_resolve_rows(
-	conn: &mut diesel_async::AsyncPgConnection,
-	incident_id: Uuid,
-) -> i64 {
+async fn count_resolve_rows(conn: &mut diesel_async::AsyncPgConnection, incident_id: Uuid) -> i64 {
 	#[derive(QueryableByName)]
 	struct Count {
 		#[diesel(sql_type = sql_types::BigInt)]

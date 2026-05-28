@@ -23,6 +23,7 @@ import DevicesSearch from "./routes/DevicesSearch";
 import GroupDetail from "./routes/GroupDetail";
 import GroupEdit from "./routes/GroupEdit";
 import GroupsList from "./routes/GroupsList";
+import HealthcheckDetail from "./routes/HealthcheckDetail";
 import Healthchecks from "./routes/Healthchecks";
 import IncidentDetail from "./routes/IncidentDetail";
 import Incidents from "./routes/Incidents";
@@ -172,6 +173,7 @@ export default function App() {
 					<Route path="/incidents" element={<Incidents />} />
 					<Route path="/incidents/:id" element={<IncidentDetail />} />
 					<Route path="/healthchecks" element={<Healthchecks />} />
+					<Route path="/healthchecks/:checkName" element={<HealthcheckDetail />} />
 					<Route path="/admins" element={<Admins />} />
 					<Route path="/versions" element={<Versions />} />
 					<Route path="/versions/:version" element={<VersionDetail />} />
