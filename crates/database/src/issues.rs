@@ -378,6 +378,13 @@ impl NewEvent {
 ///     even low-severity ones, joins it. The threshold only governs
 ///     incident *creation*; once an incident is in progress everything else
 ///     piles in for context.
+/// - **Close**: the incident auto-closes when the last contributor at
+///   severity ≥ error leaves. Low-severity contributors that joined
+///   because the group had an open incident stay attached (so the audit
+///   trail and Slack thread retain them) but **do not** hold the incident
+///   open by themselves. Without this asymmetry, a check that's stuck
+///   firing at warning could keep an incident open indefinitely after the
+///   higher-severity contributor that opened it has long since gone away.
 ///
 /// `monitored` reflects the server's `is_monitored()` at call time. When
 /// `false`, the issue is treated as a "leave": this is what makes
@@ -478,24 +485,45 @@ async fn re_evaluate_incident_membership(
 			.execute(conn)
 			.await?;
 
+			// Only count contributors that are *currently* at a severity
+			// that opens an incident. Low-severity issues stay attached
+			// for context but don't hold the incident open on their own;
+			// see the function doc-comment for the rationale.
+			let opens_incident_severities: Vec<String> = Severity::OPENS_INCIDENT
+				.iter()
+				.map(|s| s.to_string())
+				.collect();
+			use crate::schema::issues;
 			let remaining_open: i64 = incident_issues::table
+				.inner_join(issues::table.on(issues::id.eq(incident_issues::issue_id)))
 				.filter(
 					incident_issues::incident_id
 						.eq(open_link.incident_id)
-						.and(incident_issues::left_at.is_null()),
+						.and(incident_issues::left_at.is_null())
+						.and(issues::severity.eq_any(&opens_incident_severities)),
 				)
 				.count()
 				.get_result(conn)
 				.await?;
 			if remaining_open == 0 {
-				let closed: Incident = diesel::update(
-					incidents::table.filter(incidents::id.eq(open_link.incident_id)),
+				// Filter on `closed_at IS NULL` so that when a stranded
+				// low-severity contributor eventually leaves an already-
+				// closed incident (because the severity-filter close above
+				// already retired it), we skip both the no-op update and
+				// the double Slack resolve.
+				let closed: Option<Incident> = diesel::update(
+					incidents::table
+						.filter(incidents::id.eq(open_link.incident_id))
+						.filter(incidents::closed_at.is_null()),
 				)
 				.set(incidents::closed_at.eq(jiff_diesel::Timestamp::from(transition_time)))
 				.returning(Incident::as_select())
 				.get_result(conn)
-				.await?;
-				enqueue_slack_resolve_inner(conn, &closed, by).await?;
+				.await
+				.optional()?;
+				if let Some(closed) = closed {
+					enqueue_slack_resolve_inner(conn, &closed, by).await?;
+				}
 			}
 		}
 		_ => {}

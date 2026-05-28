@@ -1227,6 +1227,11 @@ async fn submit_status_reachability_to_health_handoff() {
 		async |mut conn, cert, device_id, public, _| {
 			let server_id = insert_health_test_server(&mut conn, device_id).await;
 
+			// db is at Error in the catalog so the per-check is a
+			// meaningful contributor that can hold the incident open
+			// once reachability resolves.
+			set_check_severity(&mut conn, "db", "error").await;
+
 			// Initial state: server silent → reachability sweep files a
 			// canopy/reachability issue at Critical (severity for `Gone`),
 			// which opens an incident on the server's group.
@@ -1241,11 +1246,9 @@ async fn submit_status_reachability_to_health_handoff() {
 				.await
 				.expect("incident opened by reachability");
 
-			// Server pings in with a failing per-check; the per-check issue
-			// (default Warning severity from the catalog) joins the existing
-			// incident rather than opening a separate one. Group already has
-			// an open incident, so any active issue piles in regardless of
-			// severity floor.
+			// Server pings in with a failing per-check; the per-check
+			// issue joins the existing incident rather than opening a
+			// separate one.
 			post_status(
 				&public,
 				&cert,

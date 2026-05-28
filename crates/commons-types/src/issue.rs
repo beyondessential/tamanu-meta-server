@@ -40,12 +40,20 @@ pub enum Severity {
 }
 
 impl Severity {
+	/// Severities that may open an incident on their own and may keep one
+	/// open. Low-severity issues (warning and below) join an already-open
+	/// incident for context but don't hold it open — see
+	/// `database::issues::re_evaluate_incident_membership`.
+	pub const OPENS_INCIDENT: &'static [Severity] = &[
+		Self::Emergency,
+		Self::Alert,
+		Self::Critical,
+		Self::Error,
+	];
+
 	/// Issues at or above this severity open incidents.
 	pub fn opens_incident(self) -> bool {
-		matches!(
-			self,
-			Self::Emergency | Self::Alert | Self::Critical | Self::Error
-		)
+		Self::OPENS_INCIDENT.contains(&self)
 	}
 }
 
