@@ -1373,6 +1373,10 @@ impl Incident {
 		Ok(out)
 	}
 
+	/// One row per distinct issue. An issue that left and rejoined this
+	/// incident shows up once with its most recent link metadata
+	/// (`joined_at`/`left_at`); without the dedup a flapping issue can
+	/// produce hundreds of repeated rows.
 	pub async fn get_with_issues(
 		db: &mut AsyncPgConnection,
 		incident_id: Uuid,
@@ -1385,13 +1389,18 @@ impl Incident {
 			.first(db)
 			.await?;
 
-		let rows: Vec<(IncidentIssue, Issue)> = incident_issues::table
+		let mut rows: Vec<(IncidentIssue, Issue)> = incident_issues::table
 			.inner_join(issues::table.on(issues::id.eq(incident_issues::issue_id)))
 			.select((IncidentIssue::as_select(), Issue::as_select()))
 			.filter(incident_issues::incident_id.eq(incident_id))
-			.order(incident_issues::joined_at.asc())
+			.distinct_on(incident_issues::issue_id)
+			.order((
+				incident_issues::issue_id,
+				incident_issues::joined_at.desc(),
+			))
 			.load(db)
 			.await?;
+		rows.sort_by_key(|(link, _)| link.joined_at);
 		Ok((incident, rows))
 	}
 
