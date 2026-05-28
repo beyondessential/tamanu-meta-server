@@ -1,6 +1,7 @@
 import {
 	Alert,
 	Box,
+	Button,
 	Chip,
 	FormControlLabel,
 	LinearProgress,
@@ -128,17 +129,17 @@ function HealthcheckRow({
 	const update = useApiAction("healthchecks", "update");
 	const [localSeverity, setLocalSeverity] = useState<Severity>(row.severity);
 
-	const onChange = async (next: Severity) => {
-		setLocalSeverity(next);
+	const save = async () => {
 		try {
 			await update.call({
 				check_name: row.check_name,
-				severity: next,
+				severity: localSeverity,
 				notes: row.notes,
 			});
 			onChanged();
 		} catch {
-			// Revert local optimistic value on failure.
+			// Revert the dropdown selection on failure so the row's
+			// rendered state matches the server's.
 			setLocalSeverity(row.severity);
 		}
 	};
@@ -147,23 +148,35 @@ function HealthcheckRow({
 		<TableRow hover>
 			<TableCell sx={{ fontFamily: "monospace" }}>{row.check_name}</TableCell>
 			<TableCell>
-				{canEdit ? (
-					<Select
-						size="small"
-						value={localSeverity}
-						onChange={(e) => onChange(e.target.value as Severity)}
-						disabled={update.pending}
-						sx={{ minWidth: 120 }}
-					>
-						{SEVERITIES.map((s) => (
-							<MenuItem key={s} value={s}>
-								<SeverityChip severity={s} />
-							</MenuItem>
-						))}
-					</Select>
-				) : (
-					<SeverityChip severity={row.severity} />
-				)}
+				<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+					{canEdit ? (
+						<Select
+							size="small"
+							value={localSeverity}
+							onChange={(e) => setLocalSeverity(e.target.value as Severity)}
+							disabled={update.pending}
+							sx={{ minWidth: 120 }}
+						>
+							{SEVERITIES.map((s) => (
+								<MenuItem key={s} value={s}>
+									<SeverityChip severity={s} />
+								</MenuItem>
+							))}
+						</Select>
+					) : (
+						<SeverityChip severity={row.severity} />
+					)}
+					{canEdit && (
+						<Button
+							size="small"
+							variant="outlined"
+							onClick={save}
+							disabled={update.pending}
+						>
+							Save
+						</Button>
+					)}
+				</Stack>
 				{update.error && (
 					<Typography variant="caption" color="error" sx={{ display: "block" }}>
 						{formatError(update.error)}
