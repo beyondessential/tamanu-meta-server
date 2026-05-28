@@ -28,7 +28,7 @@ import { SEVERITIES, type HealthcheckSeverityData, type Severity } from "../type
 export default function Healthchecks() {
 	usePageTitle("Healthchecks");
 	const isAdmin = useIsAdmin() === true;
-	const list = useApi("healthchecks", "list");
+	const list = useApi("healthchecks", "list_severities");
 	const [onlyPending, setOnlyPending] = useState(false);
 
 	const rows: HealthcheckSeverityData[] = list.status === "ok" ? list.data : [];
@@ -125,7 +125,7 @@ function HealthcheckRow({
 	canEdit: boolean;
 	onChanged: () => void;
 }) {
-	const update = useApiAction("healthchecks", "update");
+	const update = useApiAction("healthchecks", "update_severity");
 	const [localSeverity, setLocalSeverity] = useState<Severity>(row.severity);
 
 	const onChange = async (next: Severity) => {

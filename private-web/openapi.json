@@ -1099,12 +1099,12 @@
         ]
       }
     },
-    "/api/healthchecks/list": {
+    "/api/healthchecks/list_severities": {
       "post": {
         "tags": [
           "healthchecks"
         ],
-        "operationId": "list",
+        "operationId": "list_severities",
         "responses": {
           "200": {
             "description": "Catalog rows ordered by check_name.",
@@ -1147,12 +1147,12 @@
         ]
       }
     },
-    "/api/healthchecks/update": {
+    "/api/healthchecks/update_severity": {
       "post": {
         "tags": [
           "healthchecks"
         ],
-        "operationId": "update",
+        "operationId": "update_severity",
         "requestBody": {
           "content": {
             "application/json": {

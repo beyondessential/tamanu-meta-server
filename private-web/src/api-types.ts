@@ -442,7 +442,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/healthchecks/list": {
+    "/api/healthchecks/list_severities": {
         parameters: {
             query?: never;
             header?: never;
@@ -451,14 +451,14 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["list"];
+        post: operations["list_severities"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/healthchecks/update": {
+    "/api/healthchecks/update_severity": {
         parameters: {
             query?: never;
             header?: never;
@@ -467,7 +467,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["update"];
+        post: operations["update_severity"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3377,7 +3377,7 @@ export interface operations {
             };
         };
     };
-    list: {
+    list_severities: {
         parameters: {
             query?: never;
             header?: never;
@@ -3413,7 +3413,7 @@ export interface operations {
             };
         };
     };
-    update: {
+    update_severity: {
         parameters: {
             query?: never;
             header?: never;
