@@ -19,6 +19,7 @@ import {
 	Typography,
 } from "@mui/material";
 import { useMemo, useState } from "react";
+import { Link as RouterLink } from "react-router-dom";
 import { ApiError, useApi, useApiAction } from "../api";
 import SeverityChip from "../components/SeverityChip";
 import TimeAgo from "../components/TimeAgo";
@@ -144,39 +145,63 @@ function HealthcheckRow({
 		}
 	};
 
+	const hasRules = row.rule_count > 0;
+
 	return (
 		<TableRow hover>
-			<TableCell sx={{ fontFamily: "monospace" }}>{row.check_name}</TableCell>
+			<TableCell sx={{ fontFamily: "monospace" }}>
+				<RouterLink to={`/healthchecks/${row.check_name}`}>{row.check_name}</RouterLink>
+			</TableCell>
 			<TableCell>
-				<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-					{canEdit ? (
-						<Select
-							size="small"
-							value={localSeverity}
-							onChange={(e) => setLocalSeverity(e.target.value as Severity)}
-							disabled={update.pending}
-							sx={{ minWidth: 120 }}
-						>
-							{SEVERITIES.map((s) => (
-								<MenuItem key={s} value={s}>
-									<SeverityChip severity={s} />
-								</MenuItem>
-							))}
-						</Select>
-					) : (
+				{hasRules ? (
+					<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+						<Typography variant="body2">
+							<RouterLink to={`/healthchecks/${row.check_name}`}>
+								Custom rules ({row.rule_count})
+							</RouterLink>
+						</Typography>
+						<Typography variant="caption" color="text.secondary">
+							· base
+						</Typography>
 						<SeverityChip severity={row.severity} />
-					)}
-					{canEdit && (
-						<Button
-							size="small"
-							variant="outlined"
-							onClick={save}
-							disabled={update.pending}
-						>
-							Save
-						</Button>
-					)}
-				</Stack>
+					</Stack>
+				) : (
+					<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+						{canEdit ? (
+							<Select
+								size="small"
+								value={localSeverity}
+								onChange={(e) => setLocalSeverity(e.target.value as Severity)}
+								disabled={update.pending}
+								sx={{ minWidth: 120 }}
+							>
+								{SEVERITIES.map((s) => (
+									<MenuItem key={s} value={s}>
+										<SeverityChip severity={s} />
+									</MenuItem>
+								))}
+							</Select>
+						) : (
+							<SeverityChip severity={row.severity} />
+						)}
+						{canEdit && (
+							<Button
+								size="small"
+								variant="outlined"
+								onClick={save}
+								disabled={update.pending}
+							>
+								Save
+							</Button>
+						)}
+						<Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+							·{" "}
+							<RouterLink to={`/healthchecks/${row.check_name}`}>
+								Add custom rules
+							</RouterLink>
+						</Typography>
+					</Stack>
+				)}
 				{update.error && (
 					<Typography variant="caption" color="error" sx={{ display: "block" }}>
 						{formatError(update.error)}
