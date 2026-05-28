@@ -13,7 +13,6 @@ use database::{
 	diesel_async::{AsyncConnection, AsyncPgConnection},
 	issues::NewEvent,
 	servers::Server,
-	silenced_refs,
 	statuses::{NewStatus, Status},
 };
 use serde::Deserialize;
@@ -35,9 +34,11 @@ use crate::state::AppState;
 pub struct StatusPayload {
 	/// Overall server self-reported health. **Absent ⇒ `true`** —
 	/// legacy senders that don't know about this field never
-	/// false-positive unhealthy. When `false`, the public-server
-	/// files an incident-class event against the server's group via
-	/// the normal issues/events pipeline.
+	/// false-positive unhealthy. Persisted on `statuses.healthy` for
+	/// historical analysis and the status snapshot UI, but the value
+	/// is no longer authoritative: canopy derives the system-healthy
+	/// judgement from per-check results, not from this flag. See
+	/// `docs/plans/healthcheck-severity-catalog.md` for the rationale.
 	pub healthy: Option<bool>,
 
 	/// Per-check breakdown. Each entry must include `check` (non-empty)
@@ -45,9 +46,9 @@ pub struct StatusPayload {
 	/// free disk %, certificate expiry, etc.) are passed through
 	/// verbatim and surfaced in the status snapshot UI.
 	///
-	/// A failing check while the top-level `healthy` is `true` is
-	/// treated as a warning, not an incident. A failing check with
-	/// the top-level `false` is incident-class.
+	/// A failing check files (or keeps active) an issue at
+	/// `(status, health/<check>)`. Severity is chosen per the
+	/// transitional rule documented in `file_health_events`.
 	pub health: Option<Vec<HealthCheck>>,
 
 	/// Free-form additional data (uptime, postgres version, timezone,
@@ -77,6 +78,12 @@ pub struct HealthCheck {
 /// `canopy` (reachability sweep) so operators can tell apart "we
 /// couldn't reach you" from "you told us you're sick".
 const STATUS_SOURCE: &str = "status";
+/// Prefix for per-check refs. Each failing check is filed at
+/// `(status, health/<check_name>)`. There used to be a roll-up
+/// issue at `(status, health)` driven by bestool's top-level
+/// `healthy` flag — that was retired (see
+/// `docs/plans/healthcheck-severity-catalog.md`); the prefix lives
+/// on for the per-check refs.
 const HEALTH_REF: &str = "health";
 
 pub fn routes() -> OpenApiRouter<AppState> {
@@ -124,25 +131,11 @@ async fn create(
 	let raw = body.map(|j| j.0).unwrap_or(serde_json::Value::Null);
 	let (healthy, health, extra) = split_health_from_extra(raw)?;
 
-	// "Healthy by proxy of silence": if the device reports unhealthy but
-	// every failing check's `(status, health/<check>)` ref is silenced at
-	// server or group scope, treat the overall as healthy. Without this,
-	// the per-check issues correctly skip the incident workflow (silence
-	// gates them) but the *roll-up* `(status, health)` issue still fires
-	// — opening an incident anyway, defeating the silence. See
-	// `database::silenced_refs::is_silenced`.
-	let healthy = if healthy {
-		true
-	} else {
-		let failing = collect_failing_checks(&health);
-		!failing.is_empty() && all_health_refs_silenced(&mut db, &server, &failing).await?
-	};
-
 	// Read previous-latest BEFORE the write transaction so we can
-	// detect transitions (top-level healthy and per-check). The
+	// detect per-check transitions (the close events on recovered
+	// checks need to know which checks were failing last time). The
 	// snapshot is a small read; no need to hold a lock.
 	let prev = Status::latest_for_server(&mut db, server_id).await?;
-	let prev_healthy = prev.as_ref().map(|s| s.healthy).unwrap_or(true);
 	let prev_failing_checks = prev
 		.as_ref()
 		.map(|s| collect_failing_checks(&s.health))
@@ -163,15 +156,7 @@ async fn create(
 			.save(conn)
 			.await?;
 
-			file_health_events(
-				conn,
-				server_id,
-				Some(id),
-				&status,
-				prev_healthy,
-				&prev_failing_checks,
-			)
-			.await?;
+			file_health_events(conn, server_id, Some(id), &status, &prev_failing_checks).await?;
 
 			Ok(status)
 		})
@@ -180,48 +165,30 @@ async fn create(
 	Ok(Json(status))
 }
 
-/// Per-push event filing. See `docs/plans/status-snapshots-and-health.md`
-/// §3 ("Filing logic") for the rule set. Order matters: all opens
-/// (severity-descending) fire before any closes, so the incident's
-/// `re_evaluate_incident_membership` sees an up-to-date contributor
-/// set when each close re-checks "is anyone else still in?".
+/// Per-push event filing. Per-check failures land at
+/// `(status, health/<check>)`; recoveries close those issues. The
+/// roll-up issue that used to live at `(status, health)` (driven by
+/// bestool's top-level `healthy` flag) is retired — see
+/// `docs/plans/healthcheck-severity-catalog.md`.
+///
+/// Per-check severity stays coupled to `status.healthy` for now
+/// (Warning while bestool calls itself healthy overall; Error
+/// otherwise). v1 of the catalog plan replaces this with a
+/// catalog-driven lookup so the choice becomes operator-owned.
 async fn file_health_events(
 	conn: &mut AsyncPgConnection,
 	server_id: Uuid,
 	device_id: Option<Uuid>,
 	status: &Status,
-	prev_healthy: bool,
 	prev_failing_checks: &BTreeSet<String>,
 ) -> Result<()> {
 	let curr_failing_checks = collect_failing_checks(&status.health);
-	// Severity for per-check filings depends on the *current* push's
-	// top-level. A check still failing across a healthy transition
-	// naturally demotes from Error to Warning here.
 	let per_check_severity = if status.healthy {
 		Severity::Warning
 	} else {
 		Severity::Error
 	};
 	let occurred_at = Some(status.created_at);
-
-	// --- Opens first (severity-descending). ---
-
-	// Roll-up open: always file while the server is unhealthy.
-	// NewEvent::save will coalesce against the existing event if
-	// nothing changed; otherwise it opens/updates the roll-up issue.
-	if !status.healthy {
-		NewEvent {
-			source: STATUS_SOURCE.into(),
-			r#ref: HEALTH_REF.into(),
-			severity: Some(Severity::Error),
-			description: Some(roll_up_unhealthy_message(&curr_failing_checks)),
-			message: roll_up_unhealthy_description(&status.health).unwrap_or_default(),
-			active: Some(true),
-			occurred_at,
-		}
-		.save(conn, server_id, device_id)
-		.await?;
-	}
 
 	// Per-check opens.
 	for check in &curr_failing_checks {
@@ -233,25 +200,6 @@ async fn file_health_events(
 			description: Some(format!("Health check '{check}' failed")),
 			message: per_check_description(entry).unwrap_or_default(),
 			active: Some(true),
-			occurred_at,
-		}
-		.save(conn, server_id, device_id)
-		.await?;
-	}
-
-	// --- Closes last. ---
-
-	// Roll-up close: only on transition. If we hadn't ever opened a
-	// roll-up, sending an active=false event would create a
-	// resolved-from-birth issue — noise. Skip.
-	if status.healthy && !prev_healthy {
-		NewEvent {
-			source: STATUS_SOURCE.into(),
-			r#ref: HEALTH_REF.into(),
-			severity: Some(Severity::Info),
-			description: None,
-			message: "Server reports healthy".into(),
-			active: Some(false),
 			occurred_at,
 		}
 		.save(conn, server_id, device_id)
@@ -277,27 +225,6 @@ async fn file_health_events(
 	}
 
 	Ok(())
-}
-
-/// Returns true iff every check in `failing` has a silence at server or
-/// group scope. Empty input returns true vacuously; callers wanting the
-/// "no per-check info → don't correct" semantic should check that
-/// themselves.
-async fn all_health_refs_silenced(
-	conn: &mut AsyncPgConnection,
-	server: &Server,
-	failing: &BTreeSet<String>,
-) -> Result<bool> {
-	for check in failing {
-		let r#ref = format!("{HEALTH_REF}/{check}");
-		let silenced =
-			silenced_refs::is_silenced(conn, server.id, server.group_id, STATUS_SOURCE, &r#ref)
-				.await?;
-		if !silenced {
-			return Ok(false);
-		}
-	}
-	Ok(true)
 }
 
 /// Names of checks in a `health[]` blob where `healthy == false`.
@@ -350,32 +277,6 @@ fn per_check_description(
 		lines.push(format!("- **{k}**: `{rendered}`"));
 	}
 	(!lines.is_empty()).then(|| lines.join("\n"))
-}
-
-fn roll_up_unhealthy_message(failing: &BTreeSet<String>) -> String {
-	if failing.is_empty() {
-		"Server reports unhealthy".into()
-	} else {
-		let names: Vec<&str> = failing.iter().map(|s| s.as_str()).collect();
-		format!("Server reports unhealthy ({})", names.join(", "))
-	}
-}
-
-fn roll_up_unhealthy_description(health: &serde_json::Value) -> Option<String> {
-	let arr = health.as_array()?;
-	let bullets: Vec<String> = arr
-		.iter()
-		.filter_map(|e| {
-			let obj = e.as_object()?;
-			let healthy = obj.get("healthy")?.as_bool()?;
-			if healthy {
-				return None;
-			}
-			let check = obj.get("check")?.as_str()?;
-			Some(format!("- `{check}`"))
-		})
-		.collect();
-	(!bullets.is_empty()).then(|| format!("Failing checks:\n{}", bullets.join("\n")))
 }
 
 /// Pulls the reserved `healthy` and `health` keys out of the incoming
