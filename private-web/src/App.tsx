@@ -23,6 +23,7 @@ import DevicesSearch from "./routes/DevicesSearch";
 import GroupDetail from "./routes/GroupDetail";
 import GroupEdit from "./routes/GroupEdit";
 import GroupsList from "./routes/GroupsList";
+import Healthchecks from "./routes/Healthchecks";
 import IncidentDetail from "./routes/IncidentDetail";
 import Incidents from "./routes/Incidents";
 import Status from "./routes/Status";
@@ -42,6 +43,7 @@ interface NavItem {
 const BASE_NAV: NavItem[] = [
 	{ label: "Status", to: "/status" },
 	{ label: "Incidents", to: "/incidents" },
+	{ label: "Healthchecks", to: "/healthchecks" },
 	{ label: "Servers", to: "/servers" },
 	{ label: "Versions", to: "/versions" },
 	{ label: "Devices", to: "/devices" },
@@ -169,6 +171,7 @@ export default function App() {
 					<Route path="/status" element={<Status />} />
 					<Route path="/incidents" element={<Incidents />} />
 					<Route path="/incidents/:id" element={<IncidentDetail />} />
+					<Route path="/healthchecks" element={<Healthchecks />} />
 					<Route path="/admins" element={<Admins />} />
 					<Route path="/versions" element={<Versions />} />
 					<Route path="/versions/:version" element={<VersionDetail />} />
