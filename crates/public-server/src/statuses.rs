@@ -11,6 +11,7 @@ use database::{
 	Db,
 	devices::Device,
 	diesel_async::{AsyncConnection, AsyncPgConnection},
+	healthcheck_severities::HealthcheckSeverity,
 	issues::NewEvent,
 	servers::Server,
 	statuses::{NewStatus, Status},
@@ -35,10 +36,12 @@ pub struct StatusPayload {
 	/// Overall server self-reported health. **Absent ⇒ `true`** —
 	/// legacy senders that don't know about this field never
 	/// false-positive unhealthy. Persisted on `statuses.healthy` for
-	/// historical analysis and the status snapshot UI, but the value
-	/// is no longer authoritative: canopy derives the system-healthy
-	/// judgement from per-check results, not from this flag. See
-	/// `docs/plans/healthcheck-severity-catalog.md` for the rationale.
+	/// historical analysis and the status snapshot UI, but **not
+	/// consulted for incident or severity decisions**: canopy derives
+	/// the system-healthy judgement from per-check results, with each
+	/// check's severity coming from the operator-owned
+	/// `healthcheck_severities` catalog. See
+	/// `docs/plans/healthcheck-severity-catalog.md`.
 	pub healthy: Option<bool>,
 
 	/// Per-check breakdown. Each entry must include `check` (non-empty)
@@ -46,9 +49,11 @@ pub struct StatusPayload {
 	/// free disk %, certificate expiry, etc.) are passed through
 	/// verbatim and surfaced in the status snapshot UI.
 	///
-	/// A failing check files (or keeps active) an issue at
-	/// `(status, health/<check>)`. Severity is chosen per the
-	/// transitional rule documented in `file_health_events`.
+	/// Each check name seen — failing or healthy — upserts into
+	/// `healthcheck_severities` so operators can review and adjust the
+	/// severity assigned to its failures. Failing checks file (or keep
+	/// active) an issue at `(status, health/<check>)` using the
+	/// catalog's current severity for that check name.
 	pub health: Option<Vec<HealthCheck>>,
 
 	/// Free-form additional data (uptime, postgres version, timezone,
@@ -171,10 +176,12 @@ async fn create(
 /// bestool's top-level `healthy` flag) is retired — see
 /// `docs/plans/healthcheck-severity-catalog.md`.
 ///
-/// Per-check severity stays coupled to `status.healthy` for now
-/// (Warning while bestool calls itself healthy overall; Error
-/// otherwise). v1 of the catalog plan replaces this with a
-/// catalog-driven lookup so the choice becomes operator-owned.
+/// Severity for each failing check comes from the operator-owned
+/// `healthcheck_severities` catalog. Every check seen on a push —
+/// failing or healthy — upserts a default catalog row so new checks
+/// are visible to operators immediately at the default Warning
+/// severity. `status.healthy` is intentionally not consulted: the
+/// catalog is canopy's single source of truth for per-check severity.
 async fn file_health_events(
 	conn: &mut AsyncPgConnection,
 	server_id: Uuid,
@@ -183,20 +190,23 @@ async fn file_health_events(
 	prev_failing_checks: &BTreeSet<String>,
 ) -> Result<()> {
 	let curr_failing_checks = collect_failing_checks(&status.health);
-	let per_check_severity = if status.healthy {
-		Severity::Warning
-	} else {
-		Severity::Error
-	};
 	let occurred_at = Some(status.created_at);
+
+	// Upsert a catalog row for every check name seen on this push,
+	// failing or healthy. New checks land at default Warning; operators
+	// can review and adjust from the /healthchecks page.
+	for check_name in collect_all_check_names(&status.health) {
+		HealthcheckSeverity::upsert_default(conn, &check_name).await?;
+	}
 
 	// Per-check opens.
 	for check in &curr_failing_checks {
 		let entry = find_health_entry(&status.health, check);
+		let severity = HealthcheckSeverity::severity_for(conn, check).await?;
 		NewEvent {
 			source: STATUS_SOURCE.into(),
 			r#ref: format!("{HEALTH_REF}/{check}"),
-			severity: Some(per_check_severity),
+			severity: Some(severity),
 			description: Some(format!("Health check '{check}' failed")),
 			message: per_check_description(entry).unwrap_or_default(),
 			active: Some(true),
@@ -244,6 +254,24 @@ fn collect_failing_checks(health: &serde_json::Value) -> BTreeSet<String> {
 			if healthy {
 				return None;
 			}
+			let check = obj.get("check")?.as_str()?;
+			Some(check.to_string())
+		})
+		.collect()
+}
+
+/// Names of every well-formed check in a `health[]` blob, regardless
+/// of pass/fail. Used by ingestion to populate the operator-owned
+/// severity catalog: a check that's passing today might fail tomorrow,
+/// and we want operators to be able to review its mapping in advance.
+fn collect_all_check_names(health: &serde_json::Value) -> BTreeSet<String> {
+	let Some(arr) = health.as_array() else {
+		return BTreeSet::new();
+	};
+	arr.iter()
+		.filter_map(|e| {
+			let obj = e.as_object()?;
+			obj.get("healthy")?.as_bool()?;
 			let check = obj.get("check")?.as_str()?;
 			Some(check.to_string())
 		})
