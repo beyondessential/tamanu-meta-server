@@ -81,6 +81,31 @@ struct IncidentRow {
 	id: Uuid,
 }
 
+/// Pre-seed (or update) a catalog row so a check's failure severity is
+/// known up-front. v1 ingestion would otherwise auto-insert at the
+/// default Warning, which only opens an incident when one already
+/// exists. Tests that want to exercise Error-class behaviour seed
+/// here.
+async fn set_check_severity(
+	conn: &mut diesel_async::AsyncPgConnection,
+	check_name: &str,
+	severity: &str,
+) {
+	sql_query(
+		"INSERT INTO healthcheck_severities (check_name, severity, reviewed_at, reviewed_by) \
+		 VALUES ($1, $2, NOW(), 'test') \
+		 ON CONFLICT (check_name) DO UPDATE \
+		 SET severity = EXCLUDED.severity, \
+		     reviewed_at = EXCLUDED.reviewed_at, \
+		     reviewed_by = EXCLUDED.reviewed_by",
+	)
+	.bind::<sql_types::Text, _>(check_name)
+	.bind::<sql_types::Text, _>(severity)
+	.execute(conn)
+	.await
+	.expect("seed catalog severity");
+}
+
 async fn fetch_open_incident(
 	conn: &mut diesel_async::AsyncPgConnection,
 	server_id: Uuid,
@@ -799,7 +824,7 @@ async fn submit_status_warning_check_only() {
 			);
 			assert!(per_check.message.contains("free_pct"));
 
-			// No roll-up while top-level healthy.
+			// Rollup is retired — never filed in any case.
 			assert!(
 				fetch_issue(&mut conn, server_id, "status", "health")
 					.await
@@ -819,6 +844,12 @@ async fn submit_status_unhealthy_with_checks_opens_incident() {
 		async |mut conn, cert, device_id, public, _| {
 			let server_id = insert_health_test_server(&mut conn, device_id).await;
 
+			// Operator has elevated these to Error in the catalog. Without
+			// this seed, both would default to Warning and not open an
+			// incident on their own.
+			set_check_severity(&mut conn, "database", "error").await;
+			set_check_severity(&mut conn, "disk", "error").await;
+
 			post_status(
 				&public,
 				&cert,
@@ -834,14 +865,13 @@ async fn submit_status_unhealthy_with_checks_opens_incident() {
 			)
 			.await;
 
-			let roll_up = fetch_issue(&mut conn, server_id, "status", "health")
-				.await
-				.expect("roll-up issue filed");
-			assert_eq!(roll_up.severity, "error");
-			assert!(roll_up.active);
-			let roll_up_headline = roll_up.description.as_deref().unwrap_or_default();
-			assert!(roll_up_headline.contains("database"));
-			assert!(roll_up_headline.contains("disk"));
+			// The (status, health) rollup was retired — only per-check issues now.
+			assert!(
+				fetch_issue(&mut conn, server_id, "status", "health")
+					.await
+					.is_none(),
+				"rollup issue must not be created"
+			);
 
 			for check in ["database", "disk"] {
 				let i = fetch_issue(&mut conn, server_id, "status", &format!("health/{check}"))
@@ -857,6 +887,7 @@ async fn submit_status_unhealthy_with_checks_opens_incident() {
 					.is_none(),
 				"passing check must not create an issue"
 			);
+			// Per-check failures at the catalog's Error severity open an incident.
 			assert!(fetch_open_incident(&mut conn, server_id).await.is_some());
 		},
 	)
@@ -864,7 +895,7 @@ async fn submit_status_unhealthy_with_checks_opens_incident() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn submit_status_unhealthy_no_checks_files_roll_up_only() {
+async fn submit_status_unhealthy_no_checks_files_nothing() {
 	commons_tests::server::run_with_device_auth(
 		"server",
 		async |mut conn, cert, device_id, public, _| {
@@ -878,26 +909,27 @@ async fn submit_status_unhealthy_no_checks_files_roll_up_only() {
 			)
 			.await;
 
-			let roll_up = fetch_issue(&mut conn, server_id, "status", "health")
-				.await
-				.expect("roll-up issue filed");
-			assert_eq!(roll_up.severity, "error");
-			assert!(roll_up.active);
-			assert_eq!(
-				roll_up.description.as_deref(),
-				Some("Server reports unhealthy")
+			// The retired rollup is no longer filed and there are no per-check
+			// failures to file individual issues against, so the unhealthy flag
+			// on its own produces nothing.
+			assert!(
+				fetch_issue(&mut conn, server_id, "status", "health")
+					.await
+					.is_none(),
+				"rollup issue must not be created"
 			);
-			assert_eq!(count_issues_for_server(&mut conn, server_id).await, 1);
-			assert!(fetch_open_incident(&mut conn, server_id).await.is_some());
+			assert_eq!(count_issues_for_server(&mut conn, server_id).await, 0);
+			assert!(fetch_open_incident(&mut conn, server_id).await.is_none());
 		},
 	)
 	.await
 }
 
-/// All failing checks are silenced at server scope → the public-server
-/// corrects the top-level `healthy` to `true` so no incident opens.
+/// All failing checks are silenced at server scope → per-check issues
+/// are still recorded (silence doesn't suppress the row) but none of
+/// them join an incident. The retired rollup no longer factors in.
 #[tokio::test(flavor = "multi_thread")]
-async fn submit_status_with_all_failing_checks_silenced_is_corrected_to_healthy() {
+async fn submit_status_with_all_failing_checks_silenced_opens_no_incident() {
 	commons_tests::server::run_with_device_auth(
 		"server",
 		async |mut conn, cert, device_id, public, _| {
@@ -930,28 +962,29 @@ async fn submit_status_with_all_failing_checks_silenced_is_corrected_to_healthy(
 			)
 			.await;
 
-			// Persisted as healthy=true (corrected by proxy of silence).
+			// `healthy` is persisted as-is now that the silence-proxy
+			// correction is gone — operators see what bestool said.
 			let row = fetch_latest_health(&mut conn, server_id).await;
-			assert!(row.healthy, "all-silenced should correct to healthy");
+			assert!(!row.healthy);
 
-			// No roll-up issue, no per-check issues (the silence path skips
-			// them too because the corrected `healthy=true` demotes them).
-			assert!(
-				fetch_issue(&mut conn, server_id, "status", "health")
+			// Per-check issues exist (silence doesn't gate row creation)
+			// but the silence prevents them from joining an incident.
+			for check in ["database", "disk"] {
+				let i = fetch_issue(&mut conn, server_id, "status", &format!("health/{check}"))
 					.await
-					.is_none(),
-				"roll-up must not fire when corrected to healthy"
-			);
+					.unwrap_or_else(|| panic!("per-check issue for {check} missing"));
+				assert!(i.active, "{check}");
+			}
 			assert!(fetch_open_incident(&mut conn, server_id).await.is_none());
 		},
 	)
 	.await
 }
 
-/// A mix of silenced and unsilenced failing checks does NOT correct: at
-/// least one check still warrants an incident.
+/// Partial silence: the unsilenced failing check (operator-elevated to
+/// Error in the catalog) is enough to open an incident.
 #[tokio::test(flavor = "multi_thread")]
-async fn submit_status_with_partial_silence_still_files_roll_up() {
+async fn submit_status_with_partial_silence_opens_incident_for_unsilenced() {
 	commons_tests::server::run_with_device_auth(
 		"server",
 		async |mut conn, cert, device_id, public, _| {
@@ -966,6 +999,9 @@ async fn submit_status_with_partial_silence_still_files_roll_up() {
 			.execute(&mut conn)
 			.await
 			.expect("seed silence");
+
+			// Operator has elevated the unsilenced check to Error.
+			set_check_severity(&mut conn, "disk", "error").await;
 
 			post_status(
 				&public,
@@ -982,26 +1018,38 @@ async fn submit_status_with_partial_silence_still_files_roll_up() {
 			.await;
 
 			let row = fetch_latest_health(&mut conn, server_id).await;
-			assert!(!row.healthy, "partial silence shouldn't correct");
+			assert!(!row.healthy);
 			assert!(
 				fetch_issue(&mut conn, server_id, "status", "health")
 					.await
-					.is_some(),
-				"roll-up fires because one failing check is unsilenced"
+					.is_none(),
+				"rollup must not be created"
 			);
+			// Disk is unsilenced and configured at Error severity → opens an incident.
+			let disk = fetch_issue(&mut conn, server_id, "status", "health/disk")
+				.await
+				.expect("disk issue filed");
+			assert_eq!(disk.severity, "error");
+			assert!(fetch_open_incident(&mut conn, server_id).await.is_some());
 		},
 	)
 	.await
 }
 
+/// In v1, per-check severity comes from the catalog and is therefore
+/// independent of bestool's top-level `healthy` flag. Two consecutive
+/// pushes — one with healthy=false and one with healthy=true — file
+/// the same check at the same severity.
 #[tokio::test(flavor = "multi_thread")]
-async fn submit_status_severity_demotes_on_recovery_of_top_level() {
+async fn submit_status_per_check_severity_is_catalog_driven() {
 	commons_tests::server::run_with_device_auth(
 		"server",
 		async |mut conn, cert, device_id, public, _| {
 			let server_id = insert_health_test_server(&mut conn, device_id).await;
 
-			// First push: top unhealthy, disk failing → disk issue lands Error.
+			// First push: bestool reports overall unhealthy, but the
+			// catalog hasn't been touched yet — disk defaults to Warning,
+			// not Error.
 			post_status(
 				&public,
 				&cert,
@@ -1015,10 +1063,10 @@ async fn submit_status_severity_demotes_on_recovery_of_top_level() {
 			let after_first = fetch_issue(&mut conn, server_id, "status", "health/disk")
 				.await
 				.expect("per-check issue");
-			assert_eq!(after_first.severity, "error");
+			assert_eq!(after_first.severity, "warning");
 
-			// Second push: top healthy again, disk still failing → per-check
-			// severity demotes to Warning, roll-up resolves.
+			// Second push: bestool reports overall healthy. Same severity —
+			// the catalog is the source of truth, not the top-level flag.
 			post_status(
 				&public,
 				&cert,
@@ -1035,10 +1083,12 @@ async fn submit_status_severity_demotes_on_recovery_of_top_level() {
 			assert_eq!(disk.severity, "warning");
 			assert!(disk.active, "still failing, must stay active");
 
-			let roll_up = fetch_issue(&mut conn, server_id, "status", "health")
-				.await
-				.expect("roll-up still around with active=false");
-			assert!(!roll_up.active, "roll-up issue closed");
+			assert!(
+				fetch_issue(&mut conn, server_id, "status", "health")
+					.await
+					.is_none(),
+				"rollup is retired and must not exist"
+			);
 		},
 	)
 	.await
@@ -1127,6 +1177,11 @@ async fn submit_status_full_recovery_closes_incident() {
 		async |mut conn, cert, device_id, public, _| {
 			let server_id = insert_health_test_server(&mut conn, device_id).await;
 
+			// Both checks need to be at Error for the initial push to open
+			// an incident on its own; catalog default of Warning wouldn't.
+			set_check_severity(&mut conn, "db", "error").await;
+			set_check_severity(&mut conn, "disk", "error").await;
+
 			post_status(
 				&public,
 				&cert,
@@ -1186,23 +1241,29 @@ async fn submit_status_reachability_to_health_handoff() {
 				.await
 				.expect("incident opened by reachability");
 
-			// Server pings in with healthy:false — health roll-up should
-			// join the same incident rather than open a separate one.
+			// Server pings in with a failing per-check; the per-check issue
+			// (default Warning severity from the catalog) joins the existing
+			// incident rather than opening a separate one. Group already has
+			// an open incident, so any active issue piles in regardless of
+			// severity floor.
 			post_status(
 				&public,
 				&cert,
 				server_id,
-				serde_json::json!({ "healthy": false }),
+				serde_json::json!({
+					"healthy": false,
+					"health": [ { "check": "db", "healthy": false } ],
+				}),
 			)
 			.await;
 
-			let roll_up = fetch_issue(&mut conn, server_id, "status", "health")
+			let per_check = fetch_issue(&mut conn, server_id, "status", "health/db")
 				.await
-				.expect("status/health roll-up opened");
-			assert!(roll_up.active);
+				.expect("per-check issue opened");
+			assert!(per_check.active);
 			let incident_after_push = fetch_open_incident(&mut conn, server_id)
 				.await
-				.expect("incident still open after health roll-up");
+				.expect("incident still open after health push");
 			assert_eq!(
 				incident_before.id, incident_after_push.id,
 				"same incident absorbs both contributors"
@@ -1210,7 +1271,7 @@ async fn submit_status_reachability_to_health_handoff() {
 
 			// Reachability sweep runs again. Server's latest status is fresh
 			// so the sweep closes the reachability issue. The incident must
-			// stay open because the health roll-up is still contributing.
+			// stay open because the per-check issue is still contributing.
 			database::statuses::Status::sweep_reachability(&mut conn)
 				.await
 				.expect("reachability sweep (recovery)");
@@ -1229,13 +1290,18 @@ async fn submit_status_reachability_to_health_handoff() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn submit_status_keeps_incident_open_across_roll_up_recovery() {
+async fn submit_status_keeps_incident_open_when_failure_swaps() {
 	commons_tests::server::run_with_device_auth(
 		"server",
 		async |mut conn, cert, device_id, public, _| {
 			let server_id = insert_health_test_server(&mut conn, device_id).await;
 
-			// Prior state: top unhealthy + db failing.
+			// Operator has elevated db and disk to Error in the catalog so
+			// either failing check opens an incident on its own.
+			set_check_severity(&mut conn, "db", "error").await;
+			set_check_severity(&mut conn, "disk", "error").await;
+
+			// Prior state: db failing.
 			post_status(
 				&public,
 				&cert,
@@ -1250,9 +1316,9 @@ async fn submit_status_keeps_incident_open_across_roll_up_recovery() {
 				.await
 				.expect("incident opened by initial push");
 
-			// New push: top still unhealthy (so roll-up stays open and is
-			// not the close-side of the transition), db has recovered,
-			// disk newly failing. Mix of opens and closes in one push.
+			// New push: db has recovered, disk newly failing. Mix of opens
+			// and closes in one push — the incident must stay open because
+			// disk is now contributing in db's place.
 			post_status(
 				&public,
 				&cert,
@@ -1283,6 +1349,103 @@ async fn submit_status_keeps_incident_open_across_roll_up_recovery() {
 				.await
 				.expect("disk issue");
 			assert!(disk.active, "disk is new failure");
+		},
+	)
+	.await
+}
+
+#[derive(QueryableByName, Debug)]
+struct CatalogRow {
+	#[diesel(sql_type = sql_types::Text)]
+	severity: String,
+	#[diesel(sql_type = sql_types::Bool)]
+	pending_review: bool,
+}
+
+async fn fetch_catalog(
+	conn: &mut diesel_async::AsyncPgConnection,
+	check_name: &str,
+) -> Option<CatalogRow> {
+	sql_query(
+		"SELECT severity, reviewed_at IS NULL AS pending_review \
+		 FROM healthcheck_severities WHERE check_name = $1",
+	)
+	.bind::<sql_types::Text, _>(check_name)
+	.get_result(conn)
+	.await
+	.ok()
+}
+
+/// A status push with a never-before-seen check name inserts a catalog
+/// row at the default Warning severity, marked as pending review.
+/// Applies to both failing and passing checks: operators should be able
+/// to pre-configure severities before a check ever fails.
+#[tokio::test(flavor = "multi_thread")]
+async fn submit_status_seeds_catalog_for_new_checks() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+
+			assert!(fetch_catalog(&mut conn, "brand_new_check").await.is_none());
+			assert!(fetch_catalog(&mut conn, "passing_check").await.is_none());
+
+			post_status(
+				&public,
+				&cert,
+				server_id,
+				serde_json::json!({
+					"healthy": true,
+					"health": [
+						{ "check": "brand_new_check", "healthy": false },
+						{ "check": "passing_check", "healthy": true },
+					],
+				}),
+			)
+			.await;
+
+			let failing = fetch_catalog(&mut conn, "brand_new_check")
+				.await
+				.expect("failing check seeded in catalog");
+			assert_eq!(failing.severity, "warning");
+			assert!(failing.pending_review);
+
+			let passing = fetch_catalog(&mut conn, "passing_check")
+				.await
+				.expect("passing check seeded in catalog");
+			assert_eq!(passing.severity, "warning");
+			assert!(passing.pending_review);
+		},
+	)
+	.await
+}
+
+/// Editing the catalog severity for a check changes the severity used
+/// by subsequent status pushes' per-check issue filings.
+#[tokio::test(flavor = "multi_thread")]
+async fn submit_status_uses_catalog_severity_on_failure() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+
+			set_check_severity(&mut conn, "tunable_check", "critical").await;
+
+			post_status(
+				&public,
+				&cert,
+				server_id,
+				serde_json::json!({
+					"healthy": false,
+					"health": [ { "check": "tunable_check", "healthy": false } ],
+				}),
+			)
+			.await;
+
+			let issue = fetch_issue(&mut conn, server_id, "status", "health/tunable_check")
+				.await
+				.expect("per-check issue filed");
+			assert_eq!(issue.severity, "critical");
 		},
 	)
 	.await

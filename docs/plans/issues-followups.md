@@ -189,6 +189,14 @@ substantial.
 
 ## 5. Per-group configurable severity floor
 
+**Relation to the healthcheck severity catalog (shipped).** v1 of the
+catalog (`healthcheck_severities`) lets operators tune severity *per
+check* globally; this item is *per group, across all sources*. They
+don't overlap. With per-check tuning available, the urgency of the
+per-group floor is lower (operators can already raise or lower a noisy
+check globally), but the use case for "this whole group cares only
+about critical" remains.
+
 **What it is.** The current `error` floor is hardcoded. For some groups
 (prod), `error` is right. For dev/test environments, you might want
 `critical` (less noisy) or `warning` (more sensitive). Per-group config.

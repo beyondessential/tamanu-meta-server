@@ -105,6 +105,18 @@ diesel::table! {
 }
 
 diesel::table! {
+	healthcheck_severities (check_name) {
+		check_name -> Text,
+		severity -> Text,
+		first_seen -> Timestamptz,
+		reviewed_at -> Nullable<Timestamptz>,
+		reviewed_by -> Nullable<Text>,
+		notes -> Nullable<Text>,
+		updated_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
 	incident_issues (incident_id, issue_id, joined_at) {
 		incident_id -> Uuid,
 		issue_id -> Uuid,
@@ -342,6 +354,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 	device_server_associations,
 	devices,
 	events,
+	healthcheck_severities,
 	incident_issues,
 	incident_notes,
 	incidents,

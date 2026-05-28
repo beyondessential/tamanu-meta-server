@@ -69,6 +69,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 #[utoipa::path(
 	post,
 	path = "/summary",
+	operation_id = "status_summary",
 	tag = "statuses",
 	responses(
 		(status = 200, body = SummaryData),
@@ -245,6 +246,7 @@ pub struct SnapshotArgs {
 #[utoipa::path(
 	post,
 	path = "/snapshot",
+	operation_id = "status_snapshot",
 	tag = "statuses",
 	security(("tailscale-user" = [])),
 	request_body = SnapshotArgs,

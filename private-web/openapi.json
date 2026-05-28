@@ -18,7 +18,7 @@
         "tags": [
           "admins"
         ],
-        "operationId": "add",
+        "operationId": "admin_add",
         "requestBody": {
           "content": {
             "application/json": {
@@ -66,7 +66,7 @@
         "tags": [
           "admins"
         ],
-        "operationId": "delete",
+        "operationId": "admin_delete",
         "requestBody": {
           "content": {
             "application/json": {
@@ -114,7 +114,7 @@
         "tags": [
           "admins"
         ],
-        "operationId": "list",
+        "operationId": "admin_list",
         "responses": {
           "200": {
             "description": "Admin emails.",
@@ -934,7 +934,7 @@
         "tags": [
           "devices"
         ],
-        "operationId": "search",
+        "operationId": "device_search",
         "requestBody": {
           "content": {
             "application/json": {
@@ -972,7 +972,7 @@
         "tags": [
           "devices"
         ],
-        "operationId": "trust",
+        "operationId": "device_trust",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1010,7 +1010,7 @@
         "tags": [
           "devices"
         ],
-        "operationId": "untrust",
+        "operationId": "device_untrust",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1082,6 +1082,109 @@
             "description": ""
           },
           "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/healthchecks/list": {
+      "post": {
+        "tags": [
+          "healthchecks"
+        ],
+        "operationId": "healthcheck_list",
+        "responses": {
+          "200": {
+            "description": "Catalog rows ordered by check_name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/HealthcheckSeverityData"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/healthchecks/update": {
+      "post": {
+        "tags": [
+          "healthchecks"
+        ],
+        "operationId": "healthcheck_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated catalog row.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthcheckSeverityData"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
             "description": "",
             "content": {
               "application/json": {
@@ -1740,7 +1843,7 @@
         "tags": [
           "issues"
         ],
-        "operationId": "snooze",
+        "operationId": "issue_snooze",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1855,7 +1958,7 @@
         "tags": [
           "issues"
         ],
-        "operationId": "unsnooze",
+        "operationId": "issue_unsnooze",
         "requestBody": {
           "content": {
             "application/json": {
@@ -2444,7 +2547,7 @@
         "tags": [
           "servers"
         ],
-        "operationId": "update",
+        "operationId": "server_update",
         "requestBody": {
           "content": {
             "application/json": {
@@ -2946,7 +3049,7 @@
         "tags": [
           "statuses"
         ],
-        "operationId": "snapshot",
+        "operationId": "status_snapshot",
         "requestBody": {
           "content": {
             "application/json": {
@@ -2998,7 +3101,7 @@
         "tags": [
           "statuses"
         ],
-        "operationId": "summary",
+        "operationId": "status_summary",
         "responses": {
           "200": {
             "description": "",
@@ -4100,6 +4203,56 @@
           "warning",
           "unhealthy"
         ]
+      },
+      "HealthcheckSeverityData": {
+        "type": "object",
+        "description": "Catalog row enriched with a `pending_review` flag for the UI.",
+        "required": [
+          "check_name",
+          "severity",
+          "first_seen",
+          "updated_at",
+          "pending_review"
+        ],
+        "properties": {
+          "check_name": {
+            "type": "string"
+          },
+          "first_seen": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pending_review": {
+            "type": "boolean",
+            "description": "`true` when no operator has confirmed this row yet\n(`reviewed_at IS NULL`). The catalog UI surfaces these."
+          },
+          "reviewed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "reviewed_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "severity": {
+            "$ref": "#/components/schemas/Severity"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
       },
       "HistoryArgs": {
         "type": "object",
@@ -6439,16 +6592,22 @@
       "UpdateArgs": {
         "type": "object",
         "required": [
-          "server_group_id",
-          "data"
+          "check_name",
+          "severity"
         ],
         "properties": {
-          "data": {
-            "$ref": "#/components/schemas/PartialServerGroup"
+          "check_name": {
+            "type": "string"
           },
-          "server_group_id": {
-            "type": "string",
-            "format": "uuid"
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional operator notes. `None` leaves the existing notes alone…\nwell, actually it overwrites with NULL — pass the current value\nto preserve. The UI sends the full current state."
+          },
+          "severity": {
+            "$ref": "#/components/schemas/Severity"
           }
         }
       },

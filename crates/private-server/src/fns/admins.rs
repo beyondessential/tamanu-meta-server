@@ -18,6 +18,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 #[utoipa::path(
 	post,
 	path = "/list",
+	operation_id = "admin_list",
 	tag = "admins",
 	security(("tailscale-admin" = [])),
 	responses(
@@ -47,6 +48,7 @@ pub struct AddArgs {
 #[utoipa::path(
 	post,
 	path = "/add",
+	operation_id = "admin_add",
 	tag = "admins",
 	security(("tailscale-admin" = [])),
 	request_body = AddArgs,
@@ -74,6 +76,7 @@ pub struct DeleteArgs {
 #[utoipa::path(
 	post,
 	path = "/delete",
+	operation_id = "admin_delete",
 	tag = "admins",
 	security(("tailscale-admin" = [])),
 	request_body = DeleteArgs,
