@@ -155,6 +155,38 @@ export const SERVER_RANK_ORDER: ServerRank[] = [
 	"dev",
 ];
 
+/// Display order for server kinds — centrals first, then facilities,
+/// then canopy's own. Used as a tiebreak within a single rank in
+/// status-dot lists / group detail views.
+export const SERVER_KIND_ORDER: ServerKind[] = ["central", "facility", "canopy"];
+
+/// Sort key combining rank index (with `null` ranks pushed last) and
+/// kind index. Stable per-rank ordering matches what the UI grouping
+/// expects.
+export function serverSortKey(s: {
+	rank?: ServerRank | null;
+	kind: ServerKind;
+}): [number, number] {
+	const rankIndex =
+		s.rank == null ? Infinity : SERVER_RANK_ORDER.indexOf(s.rank);
+	const rankKey = rankIndex === -1 ? SERVER_RANK_ORDER.length : rankIndex;
+	const kindIndex = SERVER_KIND_ORDER.indexOf(s.kind);
+	const kindKey = kindIndex === -1 ? SERVER_KIND_ORDER.length : kindIndex;
+	return [rankKey, kindKey];
+}
+
+export function compareServersByRankThenKind<
+	T extends { rank?: ServerRank | null; kind: ServerKind; name?: string | null },
+>(a: T, b: T): number {
+	const [ar, ak] = serverSortKey(a);
+	const [br, bk] = serverSortKey(b);
+	if (ar !== br) return ar - br;
+	if (ak !== bk) return ak - bk;
+	const an = a.name ?? "";
+	const bn = b.name ?? "";
+	return an.localeCompare(bn);
+}
+
 /// Operator-facing severity vocabulary, loud → quiet. Used for both
 /// display and selection (the API now restricts severities to these
 /// five — see commons-types::issue::Severity and the

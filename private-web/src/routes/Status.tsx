@@ -17,7 +17,12 @@ import { HealthLegend, StatusLegend, VersionLegend } from "../components/Legends
 import { useApi } from "../api";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { useReloadInterval } from "../hooks/useReloadInterval";
-import { type ServerGroupCard, SERVER_RANK_ORDER } from "../types";
+import {
+	type FacilityServerStatus,
+	type ServerGroupCard,
+	SERVER_RANK_ORDER,
+	compareServersByRankThenKind,
+} from "../types";
 
 /// Held vs loud: a group has an open incident, but the Slack notice is
 /// still inside the per-group cooldown window (held) or has already fired
@@ -257,9 +262,61 @@ function GroupCard({
 				spacing={1}
 				sx={{ alignItems: "center", justifyContent: "space-between" }}
 			>
-				<Stack direction="row" spacing={0} sx={{ flexWrap: "wrap" }}>
-					{group.members.map((m) => (
-						<Tooltip key={m.id} title={m.name || "(unnamed)"}>
+				<RankedDotStrip members={group.members} />
+				{openIncident === "loud" && (
+					<Chip label="incident" color="error" size="small" />
+				)}
+				{openIncident === "held" && (
+					<Tooltip title="Open incident; Slack notice is still inside the per-group cooldown window">
+						<Chip label="incident (held)" color="warning" size="small" />
+					</Tooltip>
+				)}
+			</Stack>
+		</Stack>
+	);
+}
+
+/// Strip of StatusDots for a group's members, sorted by rank then kind
+/// (centrals first within a rank). A thin grey vertical bar separates
+/// adjacent ranks, so operators can see at a glance how the group
+/// breaks down without naming each dot.
+export function RankedDotStrip({ members }: { members: FacilityServerStatus[] }) {
+	const sorted = [...members].sort(compareServersByRankThenKind);
+	const chunks: Array<{ rank: string; entries: FacilityServerStatus[] }> = [];
+	for (const m of sorted) {
+		const key = m.rank ?? "_unranked";
+		const last = chunks[chunks.length - 1];
+		if (last && last.rank === key) last.entries.push(m);
+		else chunks.push({ rank: key, entries: [m] });
+	}
+	return (
+		<Stack direction="row" spacing={0} sx={{ flexWrap: "wrap", alignItems: "center" }}>
+			{chunks.map((chunk, idx) => (
+				<Box
+					key={chunk.rank}
+					component="span"
+					sx={{ display: "inline-flex", alignItems: "center" }}
+				>
+					{idx > 0 && (
+						<Box
+							component="span"
+							aria-hidden
+							sx={{
+								display: "inline-block",
+								width: "1px",
+								height: "0.9em",
+								mx: 0.5,
+								bgcolor: "text.disabled",
+							}}
+						/>
+					)}
+					{chunk.entries.map((m) => (
+						<Tooltip
+							key={m.id}
+							title={`${m.name || "(unnamed)"}${
+								m.rank ? ` · ${m.rank}` : ""
+							} · ${m.kind}`}
+						>
 							<Box component="span" sx={{ display: "inline-flex" }}>
 								<StatusDot
 									up={m.up}
@@ -271,16 +328,8 @@ function GroupCard({
 							</Box>
 						</Tooltip>
 					))}
-				</Stack>
-				{openIncident === "loud" && (
-					<Chip label="incident" color="error" size="small" />
-				)}
-				{openIncident === "held" && (
-					<Tooltip title="Open incident; Slack notice is still inside the per-group cooldown window">
-						<Chip label="incident (held)" color="warning" size="small" />
-					</Tooltip>
-				)}
-			</Stack>
+				</Box>
+			))}
 		</Stack>
 	);
 }

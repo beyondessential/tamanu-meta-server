@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
+	server::{kind::ServerKind, rank::ServerRank},
 	status::{HealthState, ShortStatus},
 	version::VersionStr,
 };
@@ -12,6 +13,12 @@ pub struct FacilityServerStatus {
 	pub name: String,
 	pub up: ShortStatus,
 	pub health: HealthState,
+	/// Server's rank, when set. Surfaced so the UI can group dots by
+	/// rank (production first, then clone, demo, …) in a stable order.
+	pub rank: Option<ServerRank>,
+	/// Server's kind (central / facility / canopy). UI breaks ties
+	/// within a rank by kind, centrals first.
+	pub kind: ServerKind,
 }
 
 /// Status-page card for a server group. Replaces the old per-central-server

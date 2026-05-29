@@ -197,6 +197,8 @@ pub async fn group_details(
 				name: s.name.clone().unwrap_or_default(),
 				up: st.map(|s| s.short_status()).unwrap_or_default(),
 				health: st.map(|s| s.health_state()).unwrap_or_default(),
+				rank: s.rank,
+				kind: s.kind,
 			}
 		})
 		.collect();

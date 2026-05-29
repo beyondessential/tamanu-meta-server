@@ -1661,7 +1661,13 @@ export interface components {
             health: components["schemas"]["HealthState"];
             /** Format: uuid */
             id: string;
+            /**
+             * @description Server's kind (central / facility / canopy). UI breaks ties
+             *     within a rank by kind, centrals first.
+             */
+            kind: components["schemas"]["ServerKind"];
             name: string;
+            rank?: null | components["schemas"]["ServerRank"];
             up: components["schemas"]["ShortStatus"];
         };
         GeoPoint: {
