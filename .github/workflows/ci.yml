@@ -30,6 +30,19 @@ jobs:
         with:
           tool: cargo-nextest,just
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: private-web/package-lock.json
+      # The private-server tests serve the embedded React SPA via rust-embed,
+      # so they need private-web/dist/ to exist. `just test` sets
+      # SKIP_FRONTEND_BUILD=1 (build.rs won't build it) and a fresh checkout has
+      # no dist/, so build it explicitly here. Dev machines already have a dist/
+      # from working on the frontend.
+      - name: Build frontend
+        run: npm ci && npm run build
+        working-directory: private-web
       # `just test` runs nextest against a throwaway tmpfs Postgres that
       # scripts/ramdisk-pg.sh spins up with the runner's own initdb/pg_ctl
       # (preinstalled on ubuntu-latest), so no system Postgres service or
