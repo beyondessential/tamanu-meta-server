@@ -385,6 +385,12 @@ function RulesCard({
 	const sample: HealthcheckSample | null =
 		sampleResp.status === "ok" ? (sampleResp.data.sample ?? null) : null;
 
+	// Widen the autocomplete with every `tag.*` key known to canopy. The
+	// sample-resolved tag map only covers one server; a rule may want to
+	// predicate on a tag that exists on a different server or group.
+	const tagKeysResp = useApi("healthchecks", "tag_keys");
+	const knownTagKeys = tagKeysResp.status === "ok" ? tagKeysResp.data : [];
+
 	const dirty = useMemo(
 		() => JSON.stringify(branches) !== JSON.stringify(parsed.branches),
 		[branches, parsed.branches],
@@ -547,6 +553,7 @@ function RulesCard({
 				<BranchDialog
 					initial={dialog.index != null ? branches[dialog.index] : null}
 					sample={sample}
+					knownTagKeys={knownTagKeys}
 					onCancel={() => setDialog(null)}
 					onSave={(b) => {
 						setBranches((bs) => {
@@ -582,11 +589,13 @@ function sampleVarOptions(sample: HealthcheckSample | null): string[] {
 function BranchDialog({
 	initial,
 	sample,
+	knownTagKeys,
 	onCancel,
 	onSave,
 }: {
 	initial: Branch | null;
 	sample: HealthcheckSample | null;
+	knownTagKeys: string[];
 	onCancel: () => void;
 	onSave: (b: Branch) => void;
 }) {
@@ -600,9 +609,20 @@ function BranchDialog({
 
 	// Did the sample carry a value for this exact var path? Powers the
 	// pass/warn badge: green when the operator's predicating on a field
-	// the most recent push actually had, yellow otherwise.
-	const options = useMemo(() => sampleVarOptions(sample), [sample]);
-	const varInSample = varValid && options.includes(varPath);
+	// the most recent push actually had, yellow otherwise. A tag that
+	// exists on some *other* server is fine to predicate on but stays
+	// yellow here — at evaluation time the sampled server's tag map
+	// won't carry it, so the rule branch would be false.
+	const sampleKeys = useMemo(() => sampleVarOptions(sample), [sample]);
+	const varInSample = varValid && sampleKeys.includes(varPath);
+
+	// Autocomplete suggestions widen the sample with every known tag
+	// key across the system. Sorted, de-duplicated.
+	const options = useMemo(() => {
+		const merged = new Set<string>(sampleKeys);
+		for (const k of knownTagKeys) merged.add(`tag.${k}`);
+		return [...merged].sort();
+	}, [sampleKeys, knownTagKeys]);
 
 	const submit = () => {
 		if (!varValid) return;

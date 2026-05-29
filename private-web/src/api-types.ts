@@ -474,6 +474,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/healthchecks/tag_keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Distinct tag keys known anywhere in the system — union across all
+         *     servers and server groups, sorted. Feeds the rule editor's
+         *     Autocomplete so operators can pick `tag.<key>` even when the
+         *     sampled server doesn't carry that key. The sample-based pass/warn
+         *     badge still reflects the sample only; this list only widens the
+         *     completion menu.
+         */
+        post: operations["healthcheck_tag_keys"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/healthchecks/update": {
         parameters: {
             query?: never;
@@ -3561,6 +3585,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthcheckSampleResponse"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    healthcheck_tag_keys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sorted, distinct tag keys. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": string[];
                 };
             };
             401: {

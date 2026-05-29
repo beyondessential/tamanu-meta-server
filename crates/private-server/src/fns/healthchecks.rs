@@ -26,6 +26,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(update))
 		.routes(routes!(update_rules))
 		.routes(routes!(sample))
+		.routes(routes!(tag_keys))
 }
 
 /// Catalog row enriched with `pending_review` and `rule_count` derivations
@@ -304,4 +305,31 @@ pub async fn sample(
 			seen_at: status.created_at,
 		}),
 	}))
+}
+
+/// Distinct tag keys known anywhere in the system — union across all
+/// servers and server groups, sorted. Feeds the rule editor's
+/// Autocomplete so operators can pick `tag.<key>` even when the
+/// sampled server doesn't carry that key. The sample-based pass/warn
+/// badge still reflects the sample only; this list only widens the
+/// completion menu.
+#[utoipa::path(
+	post,
+	path = "/tag_keys",
+	operation_id = "healthcheck_tag_keys",
+	tag = "healthchecks",
+	security(("tailscale-admin" = [])),
+	responses(
+		(status = 200, description = "Sorted, distinct tag keys.", body = Vec<String>),
+		(status = 401, body = ProblemDetailsSchema),
+		(status = 403, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn tag_keys(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+) -> Result<Json<Vec<String>>> {
+	let mut conn = state.db.get().await?;
+	let keys = database::tags::all_known_keys(&mut conn).await?;
+	Ok(Json(keys))
 }
