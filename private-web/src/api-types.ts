@@ -458,6 +458,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/healthchecks/sample": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["healthcheck_sample"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/healthchecks/update": {
         parameters: {
             query?: never;
@@ -1690,6 +1706,43 @@ export interface components {
          */
         HealthState: "healthy" | "warning" | "unhealthy";
         /**
+         * @description Materialised sample of the inputs available to a rule when this check
+         *     fails — fetched from the most recent status push (across all servers)
+         *     that reported `check_name`. The UI uses this to power autocomplete
+         *     suggestions, pass/warn validation on `var` input, and live previews
+         *     of a rule's effect against realistic data.
+         */
+        HealthcheckSample: {
+            /**
+             * @description The failing check's own fields (`health[i]` minus `check` /
+             *     `healthy`).
+             */
+            check_extra: {
+                [key: string]: components["schemas"]["Value"];
+            };
+            /**
+             * Format: date-time
+             * @description When the sampled status push happened.
+             */
+            seen_at: string;
+            /** @description Server hostname for display. */
+            server_host: string;
+            /** @description Optional friendly server name. */
+            server_name?: string | null;
+            /** @description Top-level status extras (`statuses.extra`). */
+            status_extra: {
+                [key: string]: components["schemas"]["Value"];
+            };
+            /** @description Server's resolved tag map (server + group merge). */
+            tags: {
+                [key: string]: string;
+            };
+        };
+        HealthcheckSampleResponse: {
+            check_name: string;
+            sample?: null | components["schemas"]["HealthcheckSample"];
+        };
+        /**
          * @description Catalog row enriched with `pending_review` and `rule_count` derivations
          *     for the UI. `rules` is the raw JsonLogic blob exactly as stored; the
          *     React side parses it client-side (or the per-check editor rebuilds it
@@ -2213,6 +2266,9 @@ export interface components {
          * @enum {string}
          */
         ResolvedReason: "fixed" | "wont_fix" | "expected" | "duplicate" | "flapping";
+        SampleArgs: {
+            check_name: string;
+        };
         SaveArgs: {
             description?: string | null;
             name: string;
@@ -3434,6 +3490,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthcheckSeverityData"][];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    healthcheck_sample: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SampleArgs"];
+            };
+        };
+        responses: {
+            /** @description Sample payload or null if no server has reported this check yet. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthcheckSampleResponse"];
                 };
             };
             401: {

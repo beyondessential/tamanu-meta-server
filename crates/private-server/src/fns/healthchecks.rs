@@ -9,9 +9,12 @@ use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
 use commons_types::issue::Severity;
 use database::healthcheck_severities::{HealthcheckSeverity, IfLadder};
+use database::servers::Server;
+use database::statuses::Status;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+use std::collections::HashMap;
 use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
@@ -22,6 +25,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(list))
 		.routes(routes!(update))
 		.routes(routes!(update_rules))
+		.routes(routes!(sample))
 }
 
 /// Catalog row enriched with `pending_review` and `rule_count` derivations
@@ -192,4 +196,112 @@ pub async fn update_rules(
 	)
 	.await?;
 	Ok(Json(row.into()))
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct SampleArgs {
+	pub check_name: String,
+}
+
+/// Materialised sample of the inputs available to a rule when this check
+/// fails — fetched from the most recent status push (across all servers)
+/// that reported `check_name`. The UI uses this to power autocomplete
+/// suggestions, pass/warn validation on `var` input, and live previews
+/// of a rule's effect against realistic data.
+#[derive(Serialize, ToSchema)]
+pub struct HealthcheckSample {
+	/// Top-level status extras (`statuses.extra`).
+	pub status_extra: serde_json::Map<String, JsonValue>,
+	/// The failing check's own fields (`health[i]` minus `check` /
+	/// `healthy`).
+	pub check_extra: serde_json::Map<String, JsonValue>,
+	/// Server's resolved tag map (server + group merge).
+	pub tags: HashMap<String, String>,
+	/// Server hostname for display.
+	pub server_host: String,
+	/// Optional friendly server name.
+	pub server_name: Option<String>,
+	/// When the sampled status push happened.
+	pub seen_at: Timestamp,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct HealthcheckSampleResponse {
+	pub check_name: String,
+	pub sample: Option<HealthcheckSample>,
+}
+
+#[utoipa::path(
+	post,
+	path = "/sample",
+	operation_id = "healthcheck_sample",
+	tag = "healthchecks",
+	security(("tailscale-admin" = [])),
+	request_body = SampleArgs,
+	responses(
+		(status = 200, description = "Sample payload or null if no server has reported this check yet.", body = HealthcheckSampleResponse),
+		(status = 401, body = ProblemDetailsSchema),
+		(status = 403, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn sample(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<SampleArgs>,
+) -> Result<Json<HealthcheckSampleResponse>> {
+	let mut conn = state.db.get().await?;
+	let Some(status) = Status::latest_for_check_name(&mut conn, &args.check_name).await? else {
+		return Ok(Json(HealthcheckSampleResponse {
+			check_name: args.check_name,
+			sample: None,
+		}));
+	};
+	let server = Server::get_by_id(&mut conn, status.server_id).await?;
+
+	// Top-level extras — the column is always an object after our
+	// ingestion path strips reserved keys.
+	let status_extra = status
+		.extra
+		.as_object()
+		.cloned()
+		.unwrap_or_default();
+
+	// Pull the failing-check entry out of the health array (any entry
+	// matching by name; we don't require unhealthy here so we still
+	// surface the check's typical shape even on a healthy push). Strip
+	// the reserved fields so the UI sees only the operator-predicatable
+	// extras — mirrors what the ingestion path passes to severity_for.
+	let check_extra = status
+		.health
+		.as_array()
+		.and_then(|arr| {
+			arr.iter().find_map(|e| {
+				let obj = e.as_object()?;
+				let name = obj.get("check")?.as_str()?;
+				if name == args.check_name {
+					let mut m = obj.clone();
+					m.remove("check");
+					m.remove("healthy");
+					Some(m)
+				} else {
+					None
+				}
+			})
+		})
+		.unwrap_or_default();
+
+	let tag_map = server.tags_merged_with_group(&mut conn).await?;
+	let tags: HashMap<String, String> = tag_map.0.into_iter().collect();
+
+	Ok(Json(HealthcheckSampleResponse {
+		check_name: args.check_name,
+		sample: Some(HealthcheckSample {
+			status_extra,
+			check_extra,
+			tags,
+			server_host: server.host.0.to_string(),
+			server_name: server.name,
+			seen_at: status.created_at,
+		}),
+	}))
 }
