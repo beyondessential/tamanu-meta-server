@@ -47,28 +47,47 @@ watch-private-api:
 watch-private-web:
     cd private-web && npm run dev
 
-# Run all tests
-test:
-    DATABASE_URL={{ DATABASE_URL }} cargo nextest run
+# Run all tests. Uses a throwaway RAM-backed Postgres (tmpfs + fsync off) via
+# scripts/ramdisk-pg.sh so the per-test CREATE/DROP DATABASE churn never hits
+# disk — fast, no I/O grind. Args pass straight to nextest, so `just test`,
+# `just test -p database`, and `just test some_name` all work. Use test-system
+# to run against $DATABASE_URL instead.
+test *args:
+    scripts/ramdisk-pg.sh cargo nextest run --no-fail-fast {{ args }}
 
-# Run tests for a specific package
+# Run tests for a specific package (RAM-backed; see `test`)
 test-package package:
-    DATABASE_URL={{ DATABASE_URL }} cargo nextest run -p {{ package }}
+    scripts/ramdisk-pg.sh cargo nextest run --no-fail-fast -p {{ package }}
 
-# Run a specific test
+# Run a specific test (RAM-backed; see `test`)
 test-name name:
-    DATABASE_URL={{ DATABASE_URL }} cargo nextest run {{ name }}
+    scripts/ramdisk-pg.sh cargo nextest run --no-fail-fast {{ name }}
 
-# Run tests with no capture (show output)
+# Run tests with no capture (show output) (RAM-backed; see `test`)
 test-verbose:
-    DATABASE_URL={{ DATABASE_URL }} cargo nextest run --no-capture
+    scripts/ramdisk-pg.sh cargo nextest run --no-fail-fast --no-capture
+
+# Run tests against your system Postgres ($DATABASE_URL) rather than the
+# throwaway RAM-backed one — e.g. to inspect the DB afterwards, or where
+# initdb/pg_ctl aren't available. Args pass through to nextest. Prefix with
+# `nice` to soften the I/O grind. `just test-system`, `just test-system -p
+# database`, `just test-system some_name`.
+test-system *args:
+    DATABASE_URL={{ DATABASE_URL }} cargo nextest run --no-fail-fast {{ args }}
+
+# Run any command against the throwaway RAM-backed Postgres (escape hatch for
+# things the test recipes don't cover).
+fast +cmd:
+    scripts/ramdisk-pg.sh {{ cmd }}
 
 # Run the private-web Playwright end-to-end suite. Builds the
 # private-server + migrate binaries first (the e2e fixture spawns its
-# own server/Vite per worker — no `just watch-*` needed).
+# own server/Vite per worker — no `just watch-*` needed). Runs against the
+# throwaway RAM-backed Postgres; the fixture creates its per-worker databases
+# on the cluster the wrapper points CANOPY_E2E_ADMIN_DATABASE_URL at.
 test-e2e:
     cargo build --bin private-server --bin migrate
-    cd private-web && npm run test:e2e
+    cd private-web && {{ justfile_directory() }}/scripts/ramdisk-pg.sh npm run test:e2e
 
 # Same as `test-e2e` but launches Playwright's interactive UI runner.
 # Useful for stepping through failures and inspecting traces.

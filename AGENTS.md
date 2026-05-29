@@ -98,6 +98,32 @@ End-to-end tests use Playwright. Run with `npm run test:e2e` from `/private-web/
 - Run specific tests: `just test-name <test_name>`
 - Verify no compilation warnings in tests and main code
 
+### Tests run on a throwaway RAM-backed Postgres by default
+Each test creates and drops its own database (and runs every migration), and
+nextest runs many in parallel. Against a disk-backed Postgres the resulting
+`CREATE DATABASE`/`DROP DATABASE` fsync storm saturates disk I/O and can make
+the whole machine unresponsive.
+
+So `just test` (and `test-package`/`test-name`/`test-verbose`/`test-e2e`) run
+through `scripts/ramdisk-pg.sh`, which spins up a disposable Postgres on tmpfs
+(`/dev/shm`) with `fsync`/`synchronous_commit`/`full_page_writes` off, points
+`DATABASE_URL` at it, then tears it down. Nothing touches a physical disk, so
+there's no grind and runs are dramatically faster. It reuses your installed
+`initdb`/`pg_ctl`, so the server version matches your system Postgres with no
+container or image to manage. `just test` takes nextest args, so `just test`,
+`just test -p database`, and `just test <name>` all work. Wrap other commands
+with `just fast <cmd>`.
+
+Requirements/caveats: needs the Postgres *server* tools (`initdb`/`pg_ctl`), not
+just the `psql` client. On macOS there's no `/dev/shm`, so it falls back to disk
+— still fast (fsync is off), just not RAM-backed unless you point
+`CANOPY_TEST_PG_DIR` at a real ramdisk. Other overrides: `CANOPY_TEST_PG_PORT`,
+`CANOPY_TEST_PG_ROLE`.
+
+To run against your **system** Postgres instead (to inspect the DB afterwards,
+or where `initdb` isn't available), use `just test-system [nextest args]` —
+prefix with `nice` to soften the I/O grind.
+
 ## Version Control
 - If the working copy is a jujutsu repo (a `.jj` directory exists at the repo root), prefer `jj` commands over `git` for VCS operations (status, diff, log, commit/describe, etc.). The repo may be colocated with git, but `jj` is the source of truth for local work.
 - If there is no `.jj` directory, use `git` as normal.
