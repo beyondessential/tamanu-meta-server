@@ -2468,6 +2468,18 @@ export interface components {
          *     the raw `extra` blob for forward-compat as the contract expands.
          */
         StatusSnapshotData: {
+            /**
+             * @description For each unhealthy check on this push, the severity the
+             *     catalog + rules engine would file at. Healthy checks are
+             *     absent; absence on an unhealthy check means the catalog has
+             *     no row yet (treat as the default Warning) — the UI surfaces
+             *     the explicit severity when one is known so operators see
+             *     all five levels, not just the legacy "warning/error" pair
+             *     derived from `healthy`.
+             */
+            check_severities: {
+                [key: string]: components["schemas"]["Severity"];
+            };
             /** Format: date-time */
             created_at: string;
             /** Format: uuid */

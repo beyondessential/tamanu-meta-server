@@ -937,3 +937,60 @@ async fn snapshot_server_without_statuses_returns_null() {
 	})
 	.await
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn snapshot_surfaces_per_check_severity() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		// Seed catalog: catalog_only stays at the default warning;
+		// elevated has its base severity bumped to error so the snapshot
+		// returns the operator-set value, not the legacy heuristic;
+		// version_gated has a rules ladder firing on a specific
+		// status.bestoolVersion.
+		conn.batch_execute(
+			"INSERT INTO healthcheck_severities (check_name, severity) VALUES \
+				('catalog_only', 'warning'), \
+				('elevated', 'error'), \
+				('version_gated', 'warning'); \
+			 UPDATE healthcheck_severities \
+				SET rules = '{\"if\":[{\"in_range\":[{\"var\":\"status.bestoolVersion\"},\">=1.0.0 <2.0.0\"]},\"critical\"]}'::jsonb \
+				WHERE check_name = 'version_gated';",
+		)
+		.await
+		.unwrap();
+
+		conn.batch_execute(
+			"INSERT INTO servers (id, host, kind) VALUES \
+				('30000000-0000-0000-0000-000000000001', 'https://snap-sev.example.com', 'central'); \
+			 INSERT INTO statuses (server_id, healthy, health, extra) VALUES \
+				('30000000-0000-0000-0000-000000000001', false, \
+				 '[{\"check\":\"catalog_only\",\"healthy\":false}, \
+				   {\"check\":\"elevated\",\"healthy\":false}, \
+				   {\"check\":\"version_gated\",\"healthy\":false}, \
+				   {\"check\":\"passing\",\"healthy\":true}]'::jsonb, \
+				 '{\"bestoolVersion\":\"1.5.0\"}'::jsonb);",
+		)
+		.await
+		.unwrap();
+
+		let r = private
+			.post("/api/statuses/snapshot")
+			.json(&serde_json::json!({
+				"server_id": "30000000-0000-0000-0000-000000000001"
+			}))
+			.await;
+		r.assert_status_ok();
+		let body: serde_json::Value = r.json();
+		let severities = &body["check_severities"];
+		assert_eq!(severities["catalog_only"], "warning");
+		assert_eq!(severities["elevated"], "error");
+		// version_gated's rule fires because bestoolVersion 1.5.0 is in
+		// the >=1.0.0 <2.0.0 range — Critical wins over the base.
+		assert_eq!(severities["version_gated"], "critical");
+		// Passing checks must not appear in the map.
+		assert!(
+			severities.get("passing").is_none(),
+			"healthy checks are omitted; got {severities}",
+		);
+	})
+	.await
+}
