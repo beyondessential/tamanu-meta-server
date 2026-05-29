@@ -11,6 +11,9 @@ import {
 import CancelIcon from "@mui/icons-material/Cancel";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import CloseIcon from "@mui/icons-material/Close";
+import CircleIcon from "@mui/icons-material/Circle";
+import ErrorIcon from "@mui/icons-material/Error";
+import InfoIcon from "@mui/icons-material/Info";
 import PreviewIcon from "@mui/icons-material/Preview";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { Fragment } from "react";
@@ -18,7 +21,11 @@ import { useApi, type ApiState } from "../api";
 import TimeAgo from "./TimeAgo";
 import TimezoneTooltip from "./TimezoneTooltip";
 import VersionIndicator from "./VersionIndicator";
-import type { StatusSnapshotData } from "../types";
+import {
+	SEVERITY_INTENT,
+	type Severity,
+	type StatusSnapshotData,
+} from "../types";
 
 /** Inline panel rendering the server's status at a given point in time.
  * Hits `/api/statuses/snapshot` lazily on mount; each (serverId, at)
@@ -109,7 +116,7 @@ function PanelBody({
 	return (
 		<Stack spacing={2}>
 			<CuratedFields snap={snap} />
-			<ChecksBlock health={snap.health} overallHealthy={snap.healthy} />
+			<ChecksBlock health={snap.health} severities={snap.check_severities} />
 			<ExtrasBlock extra={snap.extra} />
 		</Stack>
 	);
@@ -175,10 +182,10 @@ function Field({
 
 function ChecksBlock({
 	health,
-	overallHealthy,
+	severities,
 }: {
 	health: StatusSnapshotData["health"];
-	overallHealthy: boolean;
+	severities: StatusSnapshotData["check_severities"];
 }) {
 	const entries = parseChecks(health);
 	if (entries.length === 0) return null;
@@ -202,13 +209,10 @@ function ChecksBlock({
 							bgcolor: entry.healthy ? undefined : "action.hover",
 						}}
 					>
-						{entry.healthy ? (
-							<CheckCircleIcon fontSize="small" color="success" />
-						) : overallHealthy ? (
-							<WarningAmberIcon fontSize="small" color="warning" />
-						) : (
-							<CancelIcon fontSize="small" color="error" />
-						)}
+						<CheckIcon
+							healthy={entry.healthy}
+							severity={severities[entry.check] ?? null}
+						/>
 						<Box sx={{ flex: 1, minWidth: 0 }}>
 							<Typography variant="body2" sx={{ fontFamily: "monospace" }}>
 								{entry.check}
@@ -304,6 +308,63 @@ function parseChecks(health: StatusSnapshotData["health"]): ParsedCheck[] {
 		return a.check.localeCompare(b.check);
 	});
 	return parsed;
+}
+
+/// Per-check status indicator. Healthy checks always render as a green
+/// tick. Unhealthy checks render the icon for the rules engine's
+/// computed severity (debug → grey dot, info → blue i, warning →
+/// yellow triangle, error → red ⊘, critical → red filled exclamation).
+/// Falls back to the warning icon when the severity is absent — the
+/// catalog hasn't been touched for this check yet, so we surface it
+/// at the default level rather than miscolouring it.
+function CheckIcon({
+	healthy,
+	severity,
+}: {
+	healthy: boolean;
+	severity: Severity | null;
+}) {
+	if (healthy) {
+		return (
+			<Tooltip title="Passing" arrow>
+				<CheckCircleIcon fontSize="small" color="success" />
+			</Tooltip>
+		);
+	}
+	const sev: Severity = severity ?? "warning";
+	const tooltip = `${sev} — ${SEVERITY_INTENT[sev]}`;
+	switch (sev) {
+		case "critical":
+			return (
+				<Tooltip title={tooltip} arrow>
+					<ErrorIcon fontSize="small" color="error" />
+				</Tooltip>
+			);
+		case "error":
+			return (
+				<Tooltip title={tooltip} arrow>
+					<CancelIcon fontSize="small" color="error" />
+				</Tooltip>
+			);
+		case "warning":
+			return (
+				<Tooltip title={tooltip} arrow>
+					<WarningAmberIcon fontSize="small" color="warning" />
+				</Tooltip>
+			);
+		case "info":
+			return (
+				<Tooltip title={tooltip} arrow>
+					<InfoIcon fontSize="small" color="info" />
+				</Tooltip>
+			);
+		case "debug":
+			return (
+				<Tooltip title={tooltip} arrow>
+					<CircleIcon fontSize="small" color="disabled" sx={{ fontSize: 12 }} />
+				</Tooltip>
+			);
+	}
 }
 
 function renderValue(v: unknown): string {

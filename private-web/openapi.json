@@ -6573,9 +6573,20 @@
           "server_id",
           "healthy",
           "health",
-          "extra"
+          "extra",
+          "check_severities"
         ],
         "properties": {
+          "check_severities": {
+            "type": "object",
+            "description": "For each unhealthy check on this push, the severity the\ncatalog + rules engine would file at. Healthy checks are\nabsent; absence on an unhealthy check means the catalog has\nno row yet (treat as the default Warning) — the UI surfaces\nthe explicit severity when one is known so operators see\nall five levels, not just the legacy \"warning/error\" pair\nderived from `healthy`.",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Severity"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
           "created_at": {
             "type": "string",
             "format": "date-time"

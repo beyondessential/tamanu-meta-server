@@ -231,6 +231,15 @@ pub struct StatusSnapshotData {
 	pub healthy: bool,
 	pub health: serde_json::Value,
 	pub extra: serde_json::Value,
+	/// For each unhealthy check on this push, the severity the
+	/// catalog + rules engine would file at. Healthy checks are
+	/// absent; absence on an unhealthy check means the catalog has
+	/// no row yet (treat as the default Warning) — the UI surfaces
+	/// the explicit severity when one is known so operators see
+	/// all five levels, not just the legacy "warning/error" pair
+	/// derived from `healthy`.
+	pub check_severities:
+		std::collections::HashMap<String, commons_types::issue::Severity>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -300,6 +309,12 @@ pub async fn snapshot(
 	let platform = status.platform();
 	let postgres = status.postgres_version();
 
+	// Compute the per-unhealthy-check severity the rules engine would
+	// file at given this push. Healthy checks are omitted; the UI
+	// renders them with its 'passing' affordance regardless.
+	let check_severities =
+		compute_check_severities(&mut conn, args.server_id, &status).await?;
+
 	Ok(Json(Some(StatusSnapshotData {
 		id: status.id,
 		created_at: status.created_at,
@@ -315,7 +330,66 @@ pub async fn snapshot(
 		healthy: status.healthy,
 		health: status.health,
 		extra: status.extra,
+		check_severities,
 	})))
+}
+
+/// For every unhealthy check on `status`, resolve the catalog + rules
+/// severity given the snapshot's actual extras and the server's
+/// resolved tag map. Mirrors the public-server ingestion path
+/// (`file_health_events`) so the UI displays what *would* be filed.
+async fn compute_check_severities(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	server_id: Uuid,
+	status: &Status,
+) -> commons_errors::Result<std::collections::HashMap<String, commons_types::issue::Severity>> {
+	use database::healthcheck_severities::{EvaluationContext, HealthcheckSeverity};
+	use database::servers::Server as DbServer;
+
+	let Some(arr) = status.health.as_array() else {
+		return Ok(Default::default());
+	};
+	// Walk the health array once, collect (check_name, check_extra) for
+	// every unhealthy entry. Healthy entries don't drive the rules
+	// engine on the ingestion path either, so we skip them.
+	let mut failing: Vec<(String, serde_json::Map<String, serde_json::Value>)> = Vec::new();
+	for raw in arr {
+		let Some(obj) = raw.as_object() else { continue };
+		let Some(check_name) = obj.get("check").and_then(|v| v.as_str()) else { continue };
+		let Some(healthy) = obj.get("healthy").and_then(|v| v.as_bool()) else { continue };
+		if healthy {
+			continue;
+		}
+		let mut extra = obj.clone();
+		extra.remove("check");
+		extra.remove("healthy");
+		failing.push((check_name.to_string(), extra));
+	}
+	if failing.is_empty() {
+		return Ok(Default::default());
+	}
+
+	let server = DbServer::get_by_id(conn, server_id).await?;
+	let tag_map = server.tags_merged_with_group(conn).await?;
+	let tags: std::collections::HashMap<String, serde_json::Value> = tag_map
+		.0
+		.into_iter()
+		.map(|(k, v)| (k, serde_json::Value::String(v)))
+		.collect();
+	let empty_map = serde_json::Map::new();
+	let status_extra = status.extra.as_object().unwrap_or(&empty_map);
+
+	let mut out = std::collections::HashMap::with_capacity(failing.len());
+	for (name, check_extra) in failing {
+		let ctx = EvaluationContext {
+			status_extra,
+			check_extra: &check_extra,
+			tags: &tags,
+		};
+		let sev = HealthcheckSeverity::severity_for(conn, &name, &ctx).await?;
+		out.insert(name, sev);
+	}
+	Ok(out)
 }
 
 // Touch `Server` so the unused-import warning doesn't fire when this module
