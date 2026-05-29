@@ -276,6 +276,51 @@ impl Status {
 		Ok(filed)
 	}
 
+	/// Most recent status row (across all servers) whose `health` array
+	/// contains an entry for `check_name`. Used by the rule-editor UI to
+	/// surface a realistic sample of the variables an operator can
+	/// predicate on (the check's extras, the status-level extras, and
+	/// the server's tags resolved up the group).
+	pub async fn latest_for_check_name(
+		db: &mut AsyncPgConnection,
+		check_name: &str,
+	) -> Result<Option<Status>> {
+		use diesel::sql_types::{Text, Uuid as DUuid};
+		use diesel::{QueryableByName, sql_query};
+
+		#[derive(QueryableByName)]
+		struct Picked {
+			#[diesel(sql_type = DUuid, column_name = "id")]
+			row_id: Uuid,
+		}
+
+		// Two-step: pick the id via raw SQL (JSONB containment needs a
+		// parameterised JSON literal that Diesel's typed DSL doesn't
+		// express cleanly), then load the typed Status row by id.
+		let picked: Option<Picked> = sql_query(
+			"SELECT id FROM statuses \
+			 WHERE health @> jsonb_build_array(jsonb_build_object('check', $1::text)) \
+			 ORDER BY created_at DESC LIMIT 1",
+		)
+		.bind::<Text, _>(check_name)
+		.get_result(db)
+		.await
+		.optional()
+		.map_err(AppError::from)?;
+		let Some(Picked { row_id }) = picked else {
+			return Ok(None);
+		};
+
+		use crate::schema::statuses::dsl;
+		dsl::statuses
+			.select(Self::as_select())
+			.filter(dsl::id.eq(row_id))
+			.first(db)
+			.await
+			.optional()
+			.map_err(AppError::from)
+	}
+
 	pub async fn latest_for_server(
 		db: &mut AsyncPgConnection,
 		server: Uuid,

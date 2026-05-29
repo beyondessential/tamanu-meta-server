@@ -1,5 +1,6 @@
 import {
 	Alert,
+	Autocomplete,
 	Box,
 	Button,
 	Chip,
@@ -8,6 +9,7 @@ import {
 	DialogContent,
 	DialogTitle,
 	IconButton,
+	InputAdornment,
 	LinearProgress,
 	MenuItem,
 	Paper,
@@ -24,8 +26,10 @@ import {
 } from "@mui/material";
 import ArrowDownwardIcon from "@mui/icons-material/ArrowDownward";
 import ArrowUpwardIcon from "@mui/icons-material/ArrowUpward";
+import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import DeleteIcon from "@mui/icons-material/Delete";
 import EditIcon from "@mui/icons-material/Edit";
+import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { useMemo, useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import { ApiError, useApi, useApiAction } from "../api";
@@ -33,7 +37,12 @@ import SeverityChip from "../components/SeverityChip";
 import TimeAgo from "../components/TimeAgo";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
-import { SEVERITIES, type HealthcheckSeverityData, type Severity } from "../types";
+import {
+	SEVERITIES,
+	type HealthcheckSample,
+	type HealthcheckSeverityData,
+	type Severity,
+} from "../types";
 
 // ── Constrained JsonLogic shape ───────────────────────────────────────────
 //
@@ -361,6 +370,14 @@ function RulesCard({
 	const [dialog, setDialog] = useState<{ index: number | null } | null>(null);
 	const update = useApiAction("healthchecks", "update_rules");
 
+	// Pull a representative sample of variables operators can reach for —
+	// the most recent status push (across all servers) that reported
+	// this check. Powers the Add/Edit dialog's autocomplete + validation.
+	// Fetched lazily; the dialog handles a null sample gracefully.
+	const sampleResp = useApi("healthchecks", "sample", { check_name: row.check_name });
+	const sample: HealthcheckSample | null =
+		sampleResp.status === "ok" ? (sampleResp.data.sample ?? null) : null;
+
 	const dirty = useMemo(
 		() => JSON.stringify(branches) !== JSON.stringify(parsed.branches),
 		[branches, parsed.branches],
@@ -405,6 +422,18 @@ function RulesCard({
 				Evaluated top-to-bottom on every failing push for this check. First matching
 				branch's severity wins; if none match, the base severity above is used.
 			</Typography>
+			{sample ? (
+				<Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: "block" }}>
+					Editor uses the most recent push from{" "}
+					<code>{sample.server_name ?? sample.server_host}</code> (
+					<TimeAgo timestamp={sample.seen_at} />) to suggest fields and validate inputs.
+				</Typography>
+			) : sampleResp.status === "ok" ? (
+				<Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: "block" }}>
+					No server has reported this check yet — the editor can't suggest fields
+					until one does.
+				</Typography>
+			) : null}
 			{parsed.error && (
 				<Alert severity="warning" sx={{ mb: 1 }}>
 					Stored rules are malformed ({parsed.error}) — ingestion falls back to the
@@ -510,6 +539,7 @@ function RulesCard({
 			{dialog && (
 				<BranchDialog
 					initial={dialog.index != null ? branches[dialog.index] : null}
+					sample={sample}
 					onCancel={() => setDialog(null)}
 					onSave={(b) => {
 						setBranches((bs) => {
@@ -532,12 +562,24 @@ function swap<T>(arr: T[], i: number, j: number): T[] {
 	return next;
 }
 
+/// Fields available on the sample, projected as dotted paths.
+function sampleVarOptions(sample: HealthcheckSample | null): string[] {
+	if (!sample) return [];
+	const opts: string[] = [];
+	for (const k of Object.keys(sample.check_extra)) opts.push(`check.${k}`);
+	for (const k of Object.keys(sample.status_extra)) opts.push(`status.${k}`);
+	for (const k of Object.keys(sample.tags)) opts.push(`tag.${k}`);
+	return opts.sort();
+}
+
 function BranchDialog({
 	initial,
+	sample,
 	onCancel,
 	onSave,
 }: {
 	initial: Branch | null;
+	sample: HealthcheckSample | null;
 	onCancel: () => void;
 	onSave: (b: Branch) => void;
 }) {
@@ -549,6 +591,12 @@ function BranchDialog({
 	const [severity, setSeverity] = useState<Severity>(initial?.severity ?? "error");
 	const varValid = VAR_PATTERN.test(varPath);
 
+	// Did the sample carry a value for this exact var path? Powers the
+	// pass/warn badge: green when the operator's predicating on a field
+	// the most recent push actually had, yellow otherwise.
+	const options = useMemo(() => sampleVarOptions(sample), [sample]);
+	const varInSample = varValid && options.includes(varPath);
+
 	const submit = () => {
 		if (!varValid) return;
 		onSave({
@@ -559,22 +607,64 @@ function BranchDialog({
 		});
 	};
 
+	const varAdornment = varValid ? (
+		varInSample ? (
+			<InputAdornment position="end">
+				<CheckCircleIcon
+					fontSize="small"
+					color="success"
+					titleAccess="Field is present in the sample push"
+				/>
+			</InputAdornment>
+		) : sample ? (
+			<InputAdornment position="end">
+				<WarningAmberIcon
+					fontSize="small"
+					color="warning"
+					titleAccess="Field is not present in the sampled push — the rule will be evaluated against an absent value (typically falsy)."
+				/>
+			</InputAdornment>
+		) : undefined
+	) : undefined;
+
+	const varHelper = !varValid
+		? "Must match check.<field>, status.<field>, or tag.<field>"
+		: !sample
+			? "No sample available to validate against. Path like status.bestoolVersion, check.used_pct, tag.environment."
+			: varInSample
+				? "Field is present in the sampled push."
+				: "Field is not present in the sample — predicates referring to it will see an absent value at evaluation time.";
+
 	return (
 		<Dialog open onClose={onCancel} fullWidth maxWidth="sm">
 			<DialogTitle>{initial ? "Edit rule" : "Add rule"}</DialogTitle>
 			<DialogContent>
 				<Stack spacing={2} sx={{ mt: 1 }}>
-					<TextField
-						label="Variable"
-						helperText={
-							varValid
-								? "Path like status.bestoolVersion, check.used_pct, tag.environment"
-								: "Must match check.<field>, status.<field>, or tag.<field>"
-						}
-						error={!varValid}
-						size="small"
+					<Autocomplete
+						freeSolo
+						options={options}
 						value={varPath}
-						onChange={(e) => setVarPath(e.target.value)}
+						onInputChange={(_, v) => setVarPath(v)}
+						renderInput={(params) => (
+							<TextField
+								{...params}
+								label="Variable"
+								helperText={varHelper}
+								error={!varValid}
+								size="small"
+								slotProps={{
+									input: {
+										...params.slotProps.input,
+										endAdornment: (
+											<>
+												{varAdornment}
+												{params.slotProps.input.endAdornment}
+											</>
+										),
+									},
+								}}
+							/>
+						)}
 					/>
 					<Stack direction="row" spacing={1}>
 						<TextField
