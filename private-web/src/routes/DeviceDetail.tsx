@@ -23,11 +23,12 @@ import { deviceDisplayName } from "../components/DeviceShorty";
 import TimeAgo from "../components/TimeAgo";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { humanDuration } from "../lib/humanDuration";
-import type {
-	DeviceConnectionData,
-	DeviceInfo,
-	DeviceKeyInfo,
-	DeviceRole,
+import {
+	compareServersByRankThenKind,
+	type DeviceConnectionData,
+	type DeviceInfo,
+	type DeviceKeyInfo,
+	type DeviceRole,
 } from "../types";
 
 const TRUSTABLE_ROLES: DeviceRole[] = ["server", "releaser", "admin"];
@@ -390,6 +391,7 @@ function AssociatedServersSection({ deviceId }: { deviceId: string }) {
 			title="Associated servers"
 			result={result}
 			emptyText="No servers are associated with this device."
+			sort
 		/>
 	);
 }
@@ -414,11 +416,19 @@ function ServersListSection({
 	title,
 	result,
 	emptyText,
+	sort = false,
 }: {
 	title: string;
 	result: ApiState<ServerShortyInfo[]> & { reload: () => void };
 	emptyText: string;
+	sort?: boolean;
 }) {
+	const items =
+		result.status === "ok" && sort
+			? [...result.data].sort(compareServersByRankThenKind)
+			: result.status === "ok"
+				? result.data
+				: [];
 	return (
 		<Paper variant="outlined" sx={{ p: 2 }}>
 			<Stack
@@ -441,11 +451,11 @@ function ServersListSection({
 				<LinearProgress />
 			) : result.status === "error" ? (
 				<Alert severity="error">{result.error.message}</Alert>
-			) : result.data.length === 0 ? (
+			) : items.length === 0 ? (
 				<Alert severity="info">{emptyText}</Alert>
 			) : (
 				<Stack spacing={1}>
-					{result.data.map((s) => (
+					{items.map((s) => (
 						<ServerShorty key={s.id} server={s} />
 					))}
 				</Stack>
