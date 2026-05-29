@@ -240,8 +240,7 @@ pub struct StatusSnapshotData {
 	/// the explicit severity when one is known so operators see
 	/// all five levels, not just the legacy "warning/error" pair
 	/// derived from `healthy`.
-	pub check_severities:
-		std::collections::HashMap<String, commons_types::issue::Severity>,
+	pub check_severities: std::collections::HashMap<String, commons_types::issue::Severity>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -314,8 +313,7 @@ pub async fn snapshot(
 	// Compute the per-unhealthy-check severity the rules engine would
 	// file at given this push. Healthy checks are omitted; the UI
 	// renders them with its 'passing' affordance regardless.
-	let check_severities =
-		compute_check_severities(&mut conn, args.server_id, &status).await?;
+	let check_severities = compute_check_severities(&mut conn, args.server_id, &status).await?;
 
 	Ok(Json(Some(StatusSnapshotData {
 		id: status.id,
@@ -357,8 +355,12 @@ async fn compute_check_severities(
 	let mut failing: Vec<(String, serde_json::Map<String, serde_json::Value>)> = Vec::new();
 	for raw in arr {
 		let Some(obj) = raw.as_object() else { continue };
-		let Some(check_name) = obj.get("check").and_then(|v| v.as_str()) else { continue };
-		let Some(healthy) = obj.get("healthy").and_then(|v| v.as_bool()) else { continue };
+		let Some(check_name) = obj.get("check").and_then(|v| v.as_str()) else {
+			continue;
+		};
+		let Some(healthy) = obj.get("healthy").and_then(|v| v.as_bool()) else {
+			continue;
+		};
 		if healthy {
 			continue;
 		}

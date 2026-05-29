@@ -96,6 +96,8 @@ pub struct Incident {
 	pub resolved_at: Option<Timestamp>,
 	pub resolved_by: Option<String>,
 	pub resolved_reason: Option<String>,
+	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
+	pub escalated_at: Option<Timestamp>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Queryable, Selectable, Associations)]
@@ -453,11 +455,35 @@ async fn re_evaluate_incident_membership(
 			if newly_opened {
 				enqueue_slack_open(conn, incident_id, server_group_id, issue).await?;
 			} else if issue.severity == Severity::Critical {
-				// Critical joining an existing incident whose open is
-				// still inside its holding window: pull the delivery
-				// forward to now. enqueue_slack_open already does this
-				// for newly-opened incidents.
-				accelerate_pending_open(conn, incident_id).await?;
+				// Two sub-cases when a Critical joins an existing incident:
+				//  - The original open is still pending in the outbox →
+				//    accelerate so the "incident opened" message lands
+				//    immediately. No second message: the open hasn't been
+				//    seen yet, so a fresh open would be redundant noise.
+				//  - The original open has already shipped → enqueue a
+				//    fresh open at Critical severity as the escalation
+				//    signal. Gated on incidents.escalated_at IS NULL so
+				//    repeated Critical joins (or a Critical leaving and
+				//    rejoining) don't re-fire the message.
+				let accelerated = accelerate_pending_open(conn, incident_id).await?;
+				if !accelerated {
+					let escalated: Option<Incident> = diesel::update(
+						incidents::table
+							.filter(incidents::id.eq(incident_id))
+							.filter(incidents::escalated_at.is_null()),
+					)
+					.set(
+						incidents::escalated_at
+							.eq(jiff_diesel::Timestamp::from(transition_time)),
+					)
+					.returning(Incident::as_select())
+					.get_result(conn)
+					.await
+					.optional()?;
+					if escalated.is_some() {
+						enqueue_slack_open(conn, incident_id, server_group_id, issue).await?;
+					}
+				}
 			}
 		}
 		(true, _, true) => {
@@ -853,10 +879,17 @@ async fn enqueue_slack_open(
 /// Affects only rows that are still in their delay window
 /// (`delivered_at IS NULL`, `gave_up_at IS NULL`, `deliver_after > now`).
 /// Already-shipped or cancelled rows are left alone.
-async fn accelerate_pending_open(conn: &mut AsyncPgConnection, incident_id: Uuid) -> Result<()> {
+///
+/// Returns true if at least one row was accelerated. The caller uses
+/// this to distinguish "open is still pending" (no extra Slack message
+/// needed) from "open has already shipped" (fire an escalation open).
+async fn accelerate_pending_open(
+	conn: &mut AsyncPgConnection,
+	incident_id: Uuid,
+) -> Result<bool> {
 	use crate::schema::slack_outbox::dsl;
 	let now = Timestamp::now();
-	diesel::update(
+	let updated = diesel::update(
 		dsl::slack_outbox
 			.filter(dsl::incident_id.eq(incident_id))
 			.filter(dsl::kind.eq(crate::slack_outbox::KIND_INCIDENT_OPEN))
@@ -868,7 +901,7 @@ async fn accelerate_pending_open(conn: &mut AsyncPgConnection, incident_id: Uuid
 	.execute(conn)
 	.await
 	.map_err(AppError::from)?;
-	Ok(())
+	Ok(updated > 0)
 }
 
 async fn enqueue_slack_resolve(

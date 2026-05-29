@@ -85,15 +85,12 @@ struct OpenInfo {
 	/// Seconds until (positive) or since (negative) `deliver_after`.
 	#[diesel(sql_type = sql_types::Double)]
 	delay_secs: f64,
-	#[diesel(sql_type = sql_types::Bool)]
-	is_delivered: bool,
 }
 
 async fn pending_open(conn: &mut diesel_async::AsyncPgConnection, incident_id: Uuid) -> OpenInfo {
 	sql_query(
 		"SELECT id, \
-				EXTRACT(EPOCH FROM (deliver_after - NOW()))::float8 AS delay_secs, \
-				delivered_at IS NOT NULL AS is_delivered \
+				EXTRACT(EPOCH FROM (deliver_after - NOW()))::float8 AS delay_secs \
 		 FROM slack_outbox WHERE incident_id = $1 AND kind = $2 LIMIT 1",
 	)
 	.bind::<sql_types::Uuid, _>(incident_id)
@@ -305,7 +302,12 @@ async fn critical_joining_existing_open_accelerates_pending_delivery() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn critical_join_does_not_disturb_already_delivered_open() {
+async fn critical_join_after_delivered_open_fires_escalation_open() {
+	// Once the original "incident opened" Slack message has shipped, a
+	// Critical contributor joining is treated as an escalation: a fresh
+	// `incident_open` row is enqueued at Critical-severity timing so
+	// operators hear the change. Incident.escalated_at is stamped so we
+	// don't re-fire on every subsequent Critical join.
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let server_id =
 			insert_grouped_server(&mut conn, "http://crit-after-delivered.invalid/").await;
@@ -329,9 +331,12 @@ async fn critical_join_does_not_disturb_already_delivered_open() {
 		SlackOutbox::mark_delivered(&mut conn, pending.id, "ok")
 			.await
 			.expect("mark delivered");
+		assert!(
+			incident.escalated_at.is_none(),
+			"precondition: not yet escalated"
+		);
 
-		// A Critical issue now joins. There's no pending open to accelerate,
-		// so the call is a no-op and crucially doesn't re-enqueue Slack noise.
+		// A Critical issue joins → escalation fires.
 		save_event(
 			&mut conn,
 			server_id,
@@ -342,8 +347,101 @@ async fn critical_join_does_not_disturb_already_delivered_open() {
 		)
 		.await;
 
-		// The (now-delivered) outbox row still has its delivered_at set; no
-		// duplicate incident_open rows have been created.
+		// Two open rows now: the original (delivered) and the escalation
+		// (pending, with delay ~0 because Critical bypasses the holding
+		// window).
+		#[derive(QueryableByName)]
+		struct OpenRow {
+			#[diesel(sql_type = sql_types::Double)]
+			delay_secs: f64,
+			#[diesel(sql_type = sql_types::Bool)]
+			is_delivered: bool,
+		}
+		let rows: Vec<OpenRow> = sql_query(
+			"SELECT EXTRACT(EPOCH FROM (deliver_after - NOW()))::float8 AS delay_secs, \
+					delivered_at IS NOT NULL AS is_delivered \
+			 FROM slack_outbox WHERE incident_id = $1 AND kind = $2 \
+			 ORDER BY created_at",
+		)
+		.bind::<sql_types::Uuid, _>(incident.id)
+		.bind::<sql_types::Text, _>(KIND_INCIDENT_OPEN)
+		.get_results(&mut conn)
+		.await
+		.expect("rows");
+		assert_eq!(rows.len(), 2, "two open rows: original + escalation");
+		assert!(rows[0].is_delivered, "original is delivered");
+		assert!(!rows[1].is_delivered, "escalation is freshly enqueued");
+		assert!(
+			rows[1].delay_secs.abs() <= 5.0,
+			"escalation deliver_after is ~now (Critical bypasses delay); got {}s",
+			rows[1].delay_secs,
+		);
+
+		// incident.escalated_at is now set.
+		let refreshed = Incident::list_for_server(&mut conn, server_id, false, 10)
+			.await
+			.expect("list")
+			.into_iter()
+			.next()
+			.expect("incident");
+		assert!(
+			refreshed.escalated_at.is_some(),
+			"escalated_at recorded after first Critical escalation"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn repeated_critical_joins_do_not_re_fire_escalation() {
+	// escalated_at is the latch: the first Critical-after-delivered-open
+	// fires a fresh "incident opened" message, and every subsequent
+	// Critical contributor is silent. Otherwise a flapping check could
+	// repeatedly re-page operators long after the incident is well-known.
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server_id =
+			insert_grouped_server(&mut conn, "http://crit-no-double-escalate.invalid/").await;
+		save_event(
+			&mut conn,
+			server_id,
+			"warmup",
+			Severity::Error,
+			true,
+			"boom",
+		)
+		.await;
+		let incident = Incident::list_for_server(&mut conn, server_id, false, 10)
+			.await
+			.expect("list")
+			.into_iter()
+			.next()
+			.expect("incident");
+		let pending = pending_open(&mut conn, incident.id).await;
+		SlackOutbox::mark_delivered(&mut conn, pending.id, "ok")
+			.await
+			.expect("mark delivered");
+
+		// First Critical → escalation fires.
+		save_event(
+			&mut conn,
+			server_id,
+			"crit-1",
+			Severity::Critical,
+			true,
+			"red alert",
+		)
+		.await;
+		// Second Critical → no new outbox row.
+		save_event(
+			&mut conn,
+			server_id,
+			"crit-2",
+			Severity::Critical,
+			true,
+			"also red",
+		)
+		.await;
+
 		#[derive(QueryableByName)]
 		struct Count {
 			#[diesel(sql_type = sql_types::BigInt)]
@@ -358,9 +456,10 @@ async fn critical_join_does_not_disturb_already_delivered_open() {
 		.get_result(&mut conn)
 		.await
 		.expect("count");
-		assert_eq!(count.n, 1);
-		let row = pending_open(&mut conn, incident.id).await;
-		assert!(row.is_delivered);
+		assert_eq!(
+			count.n, 2,
+			"original + one escalation; second Critical is silent"
+		);
 	})
 	.await
 }
