@@ -29,10 +29,15 @@ fi
 
 ROLE="${CANOPY_TEST_PG_ROLE:-canopy}"
 
-# Locate the Postgres server binaries. They're on PATH on Arch/macOS-brew, but
-# Debian/Ubuntu hide them under a versioned directory, so fall back to those.
+# Locate the Postgres server binaries. They're on PATH on Arch, but other
+# installs hide them: Debian/Ubuntu under a versioned dir, Homebrew under
+# opt/postgresql@NN, and Postgres.app inside its bundle. Fall back to those.
 if ! command -v initdb >/dev/null 2>&1; then
-	for d in /usr/lib/postgresql/*/bin /usr/local/opt/postgresql*/bin /opt/homebrew/opt/postgresql*/bin; do
+	for d in \
+		/usr/lib/postgresql/*/bin \
+		/opt/homebrew/opt/postgresql*/bin \
+		/usr/local/opt/postgresql*/bin \
+		/Applications/Postgres.app/Contents/Versions/*/bin; do
 		if [ -x "$d/initdb" ]; then
 			PATH="$d:$PATH"
 			break
@@ -56,8 +61,12 @@ else
 	if [ -d /dev/shm ] && [ -w /dev/shm ]; then
 		BASE=/dev/shm
 	else
+		# No tmpfs by default on macOS. We still turn fsync off below, which is
+		# what actually removes the I/O grind, so this stays fast — it just lands
+		# on disk. For a true ramdisk, create one and pass CANOPY_TEST_PG_DIR,
+		# e.g. macOS: diskutil erasevolume APFS canopy-pg $(hdiutil attach -nomount ram://1048576)
 		BASE="${TMPDIR:-/tmp}"
-		echo "warn: /dev/shm unavailable; using $BASE (NOT RAM-backed, so no speedup)" >&2
+		echo "note: no /dev/shm; using $BASE (disk-backed, but fsync is off so still fast)" >&2
 	fi
 	DATADIR="$(mktemp -d "$BASE/canopy-test-pg.XXXXXX")"
 	OWN_DATADIR=1
