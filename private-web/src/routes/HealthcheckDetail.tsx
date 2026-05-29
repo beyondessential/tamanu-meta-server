@@ -44,14 +44,14 @@ import { SEVERITIES, type HealthcheckSeverityData, type Severity } from "../type
 
 const RULE_OPS = ["==", "!=", "<", "<=", ">", ">=", "in_range"] as const;
 type RuleOp = (typeof RULE_OPS)[number];
-const OP_SYMBOL: Record<RuleOp, string> = {
-	"==": "=",
-	"!=": "≠",
-	"<": "<",
-	"<=": "≤",
-	">": ">",
-	">=": "≥",
-	in_range: "∈",
+const OP_LABEL: Record<RuleOp, string> = {
+	"==": "equal",
+	"!=": "not equal",
+	"<": "less than",
+	"<=": "less than or equal",
+	">": "greater than",
+	">=": "greater than or equal",
+	in_range: "version in range",
 };
 const VAR_PATTERN = /^(check|status|tag)\.[A-Za-z0-9_]+$/;
 
@@ -429,7 +429,7 @@ function RulesCard({
 								<TableRow key={idx} hover>
 									<TableCell>{idx}</TableCell>
 									<TableCell sx={{ fontFamily: "monospace", fontSize: "0.85em" }}>
-										{b.varPath} {OP_SYMBOL[b.op]} {valueToInputText(b.value)}
+										{b.varPath} {OP_LABEL[b.op]} {valueToInputText(b.value)}
 									</TableCell>
 									<TableCell>
 										<SeverityChip severity={b.severity} />
@@ -577,18 +577,20 @@ function BranchDialog({
 						onChange={(e) => setVarPath(e.target.value)}
 					/>
 					<Stack direction="row" spacing={1}>
-						<Select
+						<TextField
+							select
+							label="Operator"
 							size="small"
 							value={op}
 							onChange={(e) => setOp(e.target.value as RuleOp)}
-							sx={{ minWidth: 100 }}
+							sx={{ minWidth: 220 }}
 						>
 							{RULE_OPS.map((o) => (
 								<MenuItem key={o} value={o}>
-									{OP_SYMBOL[o]} ({o})
+									{OP_LABEL[o]}
 								</MenuItem>
 							))}
-						</Select>
+						</TextField>
 						<TextField
 							label="Value"
 							size="small"
@@ -602,7 +604,9 @@ function BranchDialog({
 							onChange={(e) => setValueText(e.target.value)}
 						/>
 					</Stack>
-					<Select
+					<TextField
+						select
+						label="Severity"
 						size="small"
 						value={severity}
 						onChange={(e) => setSeverity(e.target.value as Severity)}
@@ -612,7 +616,7 @@ function BranchDialog({
 								<SeverityChip severity={s} />
 							</MenuItem>
 						))}
-					</Select>
+					</TextField>
 				</Stack>
 			</DialogContent>
 			<DialogActions>
