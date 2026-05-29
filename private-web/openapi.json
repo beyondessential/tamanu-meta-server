@@ -4202,7 +4202,8 @@
           "id",
           "name",
           "up",
-          "health"
+          "health",
+          "kind"
         ],
         "properties": {
           "health": {
@@ -4212,8 +4213,23 @@
             "type": "string",
             "format": "uuid"
           },
+          "kind": {
+            "$ref": "#/components/schemas/ServerKind",
+            "description": "Server's kind (central / facility / canopy). UI breaks ties\nwithin a rank by kind, centrals first."
+          },
           "name": {
             "type": "string"
+          },
+          "rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "Server's rank, when set. Surfaced so the UI can group dots by\nrank (production first, then clone, demo, …) in a stable order."
+              }
+            ]
           },
           "up": {
             "$ref": "#/components/schemas/ShortStatus"

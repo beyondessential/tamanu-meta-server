@@ -43,15 +43,17 @@ import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { humanSeconds } from "../lib/humanDuration";
 import ServerNameWithGroup from "../components/ServerNameWithGroup";
-import type {
-	DeviceInfo,
-	ServerDetailData,
-	ServerGroup,
-	ServerGroupSilencedRef,
-	ServerInfo,
-	ServerLastStatusData,
-	ServerSilencedRef,
-	ShortStatus,
+import {
+	compareServersByRankThenKind,
+	type DeviceInfo,
+	type HealthState,
+	type ServerDetailData,
+	type ServerGroup,
+	type ServerGroupSilencedRef,
+	type ServerInfo,
+	type ServerLastStatusData,
+	type ServerSilencedRef,
+	type ShortStatus,
 } from "../types";
 
 export default function ServerDetail() {
@@ -188,22 +190,12 @@ function Header({
 				{data.server.rank && <ServerRankChip rank={data.server.rank} />}
 				<ServerKindChip kind={data.server.kind} />
 				<Typography variant="h4" component="h1" sx={{ ml: 1 }}>
-					<StatusDot
-						up={data.up}
-						health={data.health}
-						title={data.server.name ?? ""}
-						size="0.8em"
+					<SiblingDotStrip
+						focused={data.server}
+						focusedUp={data.up}
+						focusedHealth={data.health}
+						siblings={data.siblings}
 					/>
-					{data.siblings.map((sib) => (
-						<StatusDot
-							key={sib.id}
-							up={sib.up ?? "gone"}
-							health={sib.health ?? undefined}
-							title={sib.name ?? ""}
-							dim
-							size="0.8em"
-						/>
-					))}
 					<ServerNameWithGroup
 						groupName={data.server.group_name}
 						serverName={data.server.name ?? "Unnamed"}
@@ -1335,5 +1327,92 @@ function NotesAndTagsSection({
 				</Stack>
 			)}
 		</Paper>
+	);
+}
+
+/// Header strip of StatusDots: the focused server (full-colour) plus its
+/// siblings (dimmed), sorted by rank then kind. A thin grey vertical bar
+/// separates adjacent ranks. The focused server's dot is the only one
+/// without `dim`, so it visually pops regardless of where in the strip
+/// rank+kind ordering places it.
+function SiblingDotStrip({
+	focused,
+	focusedUp,
+	focusedHealth,
+	siblings,
+}: {
+	focused: ServerInfo & { name?: string | null };
+	focusedUp: ShortStatus;
+	focusedHealth: HealthState;
+	siblings: Array<
+		ServerInfo & {
+			up?: ShortStatus | null;
+			health?: HealthState | null;
+			name?: string | null;
+		}
+	>;
+}) {
+	// Combine + sort. The focused server keeps a marker so we can render
+	// it without `dim` once the order is established.
+	const combined: Array<{
+		entry: ServerInfo & {
+			up?: ShortStatus | null;
+			health?: HealthState | null;
+		};
+		focused: boolean;
+	}> = [
+		{
+			entry: { ...focused, up: focusedUp, health: focusedHealth },
+			focused: true,
+		},
+		...siblings.map((sib) => ({ entry: sib, focused: false })),
+	];
+	combined.sort((a, b) => compareServersByRankThenKind(a.entry, b.entry));
+
+	const chunks: Array<{
+		rank: string;
+		entries: typeof combined;
+	}> = [];
+	for (const m of combined) {
+		const key = m.entry.rank ?? "_unranked";
+		const last = chunks[chunks.length - 1];
+		if (last && last.rank === key) last.entries.push(m);
+		else chunks.push({ rank: key, entries: [m] });
+	}
+
+	return (
+		<Box component="span" sx={{ display: "inline-flex", alignItems: "center" }}>
+			{chunks.map((chunk, idx) => (
+				<Box
+					key={chunk.rank}
+					component="span"
+					sx={{ display: "inline-flex", alignItems: "center" }}
+				>
+					{idx > 0 && (
+						<Box
+							component="span"
+							aria-hidden
+							sx={{
+								display: "inline-block",
+								width: "2px",
+								height: "0.7em",
+								mx: 0.5,
+								bgcolor: "text.disabled",
+							}}
+						/>
+					)}
+					{chunk.entries.map((m) => (
+						<StatusDot
+							key={m.entry.id}
+							up={(m.entry.up as ShortStatus | undefined) ?? "gone"}
+							health={(m.entry.health as HealthState | undefined) ?? undefined}
+							title={m.entry.name ?? ""}
+							dim={!m.focused}
+							size="0.8em"
+						/>
+					))}
+				</Box>
+			))}
+		</Box>
 	);
 }
