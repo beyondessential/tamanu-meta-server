@@ -8,9 +8,10 @@
 # disposable cluster on tmpfs with durability turned off, so none of that churn
 # ever reaches a physical disk.
 #
-# This is opt-in (you need RAM to spare) and self-contained: it uses the
+# This is what `just test` uses by default. It's self-contained: it uses the
 # `initdb`/`pg_ctl` already on your machine, so the server version matches your
 # system Postgres exactly and there's no container runtime or image to manage.
+# To run against your system Postgres instead, use `just test-system`.
 #
 # Usage:
 #   scripts/ramdisk-pg.sh cargo nextest run -p database
