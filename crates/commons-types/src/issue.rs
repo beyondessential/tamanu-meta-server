@@ -63,9 +63,7 @@ impl Severity {
 }
 
 #[derive(Debug, Clone, Copy, thiserror::Error)]
-#[error(
-	"invalid severity; expected one of: critical, error, warning, info, debug"
-)]
+#[error("invalid severity; expected one of: critical, error, warning, info, debug")]
 pub struct SeverityFromStringError;
 
 impl std::str::FromStr for Severity {
@@ -75,9 +73,7 @@ impl std::str::FromStr for Severity {
 		match s.to_ascii_lowercase().as_ref() {
 			// Retired severities still parse — emergency/alert collapse into
 			// critical and notice collapses into info, matching the migration.
-			"emergency" | "emerg" | "panic" | "alert" | "critical" | "crit" => {
-				Ok(Self::Critical)
-			}
+			"emergency" | "emerg" | "panic" | "alert" | "critical" | "crit" => Ok(Self::Critical),
 			"error" | "err" => Ok(Self::Error),
 			"warning" | "warn" => Ok(Self::Warning),
 			"notice" | "info" | "informational" => Ok(Self::Info),

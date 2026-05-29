@@ -96,6 +96,8 @@ pub struct Incident {
 	pub resolved_at: Option<Timestamp>,
 	pub resolved_by: Option<String>,
 	pub resolved_reason: Option<String>,
+	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
+	pub escalated_at: Option<Timestamp>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Queryable, Selectable, Associations)]

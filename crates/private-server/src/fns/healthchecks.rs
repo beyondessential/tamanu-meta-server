@@ -260,11 +260,7 @@ pub async fn sample(
 
 	// Top-level extras — the column is always an object after our
 	// ingestion path strips reserved keys.
-	let status_extra = status
-		.extra
-		.as_object()
-		.cloned()
-		.unwrap_or_default();
+	let status_extra = status.extra.as_object().cloned().unwrap_or_default();
 
 	// Pull the failing-check entry out of the health array (any entry
 	// matching by name; we don't require unhealthy here so we still
