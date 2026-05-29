@@ -63,6 +63,21 @@ test-name name:
 test-verbose:
     DATABASE_URL={{ DATABASE_URL }} cargo nextest run --no-capture
 
+# Opt-in fast tests: run nextest against a throwaway, RAM-backed Postgres
+# (tmpfs + fsync off) so the per-test CREATE/DROP DATABASE churn never hits
+# disk. Needs spare RAM. Args pass straight to nextest, so this subsumes
+# test / test-package / test-name on the fast path:
+#   just test-fast                 # everything
+#   just test-fast -p database     # one package
+#   just test-fast some_test_name  # by name
+test-fast *args:
+    scripts/ramdisk-pg.sh cargo nextest run {{ args }}
+
+# Run any command against the throwaway RAM-backed Postgres (escape hatch for
+# things test-fast doesn't cover, e.g. `just fast just test-e2e`).
+fast +cmd:
+    scripts/ramdisk-pg.sh {{ cmd }}
+
 # Run the private-web Playwright end-to-end suite. Builds the
 # private-server + migrate binaries first (the e2e fixture spawns its
 # own server/Vite per worker — no `just watch-*` needed).

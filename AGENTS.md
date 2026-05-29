@@ -98,6 +98,27 @@ End-to-end tests use Playwright. Run with `npm run test:e2e` from `/private-web/
 - Run specific tests: `just test-name <test_name>`
 - Verify no compilation warnings in tests and main code
 
+### Fast, RAM-backed tests (opt-in)
+Each test creates and drops its own database (and runs every migration), and
+nextest runs many in parallel. Against a disk-backed Postgres the resulting
+`CREATE DATABASE`/`DROP DATABASE` fsync storm saturates disk I/O and can make
+the whole machine unresponsive — that's why disk-backed runs are usually
+prefixed with `nice`.
+
+If you have RAM to spare, `just test-fast [nextest args]` runs the suite
+against a throwaway Postgres that `scripts/ramdisk-pg.sh` spins up on tmpfs
+(`/dev/shm`) with `fsync`/`synchronous_commit`/`full_page_writes` off, then
+tears down. Nothing touches a physical disk, so there's no I/O grind and runs
+are dramatically faster. It reuses your installed `initdb`/`pg_ctl`, so the
+server version matches your system Postgres with no container or image to
+manage. Args pass through to nextest, so `just test-fast`, `just test-fast -p
+database`, and `just test-fast <name>` mirror `test`/`test-package`/`test-name`.
+For other commands (e.g. e2e), wrap them: `just fast just test-e2e`.
+
+This is opt-in because it assumes free RAM; default `just test` still uses your
+system Postgres. Overrides: `CANOPY_TEST_PG_DIR`, `CANOPY_TEST_PG_PORT`,
+`CANOPY_TEST_PG_ROLE`.
+
 ## Version Control
 - If the working copy is a jujutsu repo (a `.jj` directory exists at the repo root), prefer `jj` commands over `git` for VCS operations (status, diff, log, commit/describe, etc.). The repo may be colocated with git, but `jj` is the source of truth for local work.
 - If there is no `.jj` directory, use `git` as normal.
