@@ -44,6 +44,7 @@ import { usePageTitle } from "../hooks/usePageTitle";
 import { humanSeconds } from "../lib/humanDuration";
 import ServerNameWithGroup from "../components/ServerNameWithGroup";
 import {
+	SERVER_RANK_ORDER,
 	compareServersByRankThenKind,
 	type DeviceInfo,
 	type HealthState,
@@ -52,6 +53,7 @@ import {
 	type ServerGroupSilencedRef,
 	type ServerInfo,
 	type ServerLastStatusData,
+	type ServerRank,
 	type ServerSilencedRef,
 	type ShortStatus,
 } from "../types";
@@ -1183,70 +1185,106 @@ function SiblingServers({
 	hasOpenIncident: boolean;
 	onEventSubmitted: () => void;
 }) {
+	// Same rank-then-kind grouping as the GroupDetail server list, so a
+	// reader scanning ServerDetail's sibling section sees the production
+	// peers up top and the dev scratch at the bottom in a predictable
+	// order. Unranked servers fall into a trailing `null` bucket.
+	const buckets = new Map<ServerRank | null, ServerDetailData["siblings"]>();
+	for (const sib of siblings) {
+		const rank = sib.rank ?? null;
+		const list = buckets.get(rank);
+		if (list) list.push(sib);
+		else buckets.set(rank, [sib]);
+	}
+	const order: Array<ServerRank | null> = [...SERVER_RANK_ORDER, null];
+	const groups: Array<[ServerRank | null, ServerDetailData["siblings"]]> = [];
+	for (const rank of order) {
+		const list = buckets.get(rank);
+		if (list && list.length > 0) {
+			list.sort(compareServersByRankThenKind);
+			groups.push([rank, list]);
+		}
+	}
+
 	return (
 		<Box>
 			<Typography variant="h5" component="h2" gutterBottom>
 				Other servers in this group ({siblings.length})
 			</Typography>
-			<Stack spacing={1}>
-				{siblings.map((sib) => (
-					<Stack
-						key={sib.id}
-						direction="row"
-						spacing={1}
-						sx={{
-							p: 1.5,
-							border: 1,
-							borderColor: "divider",
-							borderRadius: 1,
-							alignItems: "center",
-						}}
-					>
-						<Tooltip title={sib.host}>
-							<IconButton
-								component="a"
-								href={sib.host}
-								target="_blank"
-								rel="noopener noreferrer"
-								size="small"
-								aria-label={`Open ${sib.name ?? "server"} (${sib.host})`}
+			<Stack spacing={2}>
+				{groups.map(([rank, members]) => (
+					<Box key={rank ?? "_unranked"}>
+						{rank && (
+							<Typography
+								variant="overline"
+								color="text.secondary"
+								sx={{ display: "block", mb: 0.5 }}
 							>
-								<LanguageIcon fontSize="small" />
-							</IconButton>
-						</Tooltip>
-						<StatusDot
-							up={sib.up ?? "gone"}
-							health={sib.health ?? undefined}
-						/>
-						<MuiLink
-							component={RouterLink}
-							to={`/servers/${sib.id}`}
-							underline="hover"
-							color="text.primary"
-							sx={{ fontWeight: 500 }}
-						>
-							{sib.name ?? "Unnamed"}
-						</MuiLink>
-						{sib.rank && <ServerRankChip rank={sib.rank} />}
-						<ServerKindChip kind={sib.kind} />
-						{!sib.is_monitored && (
-							<Tooltip title="Status alerts are off for this server — canopy isn't watching it.">
-								<Chip
-									size="small"
-									variant="outlined"
-									label="unmonitored"
-								/>
-							</Tooltip>
+								{rank}
+							</Typography>
 						)}
-						<Box sx={{ flex: 1 }} />
-						{isAdmin && (
-							<ManualEventButton
-								serverId={sib.id}
-								hasOpenIncident={hasOpenIncident}
-								onSubmitted={onEventSubmitted}
-							/>
-						)}
-					</Stack>
+						<Stack spacing={1}>
+							{members.map((sib) => (
+								<Stack
+									key={sib.id}
+									direction="row"
+									spacing={1}
+									sx={{
+										p: 1.5,
+										border: 1,
+										borderColor: "divider",
+										borderRadius: 1,
+										alignItems: "center",
+									}}
+								>
+									<Tooltip title={sib.host}>
+										<IconButton
+											component="a"
+											href={sib.host}
+											target="_blank"
+											rel="noopener noreferrer"
+											size="small"
+											aria-label={`Open ${sib.name ?? "server"} (${sib.host})`}
+										>
+											<LanguageIcon fontSize="small" />
+										</IconButton>
+									</Tooltip>
+									<StatusDot
+										up={sib.up ?? "gone"}
+										health={sib.health ?? undefined}
+									/>
+									<MuiLink
+										component={RouterLink}
+										to={`/servers/${sib.id}`}
+										underline="hover"
+										color="text.primary"
+										sx={{ fontWeight: 500 }}
+									>
+										{sib.name ?? "Unnamed"}
+									</MuiLink>
+									{sib.rank && <ServerRankChip rank={sib.rank} />}
+									<ServerKindChip kind={sib.kind} />
+									{!sib.is_monitored && (
+										<Tooltip title="Status alerts are off for this server — canopy isn't watching it.">
+											<Chip
+												size="small"
+												variant="outlined"
+												label="unmonitored"
+											/>
+										</Tooltip>
+									)}
+									<Box sx={{ flex: 1 }} />
+									{isAdmin && (
+										<ManualEventButton
+											serverId={sib.id}
+											hasOpenIncident={hasOpenIncident}
+											onSubmitted={onEventSubmitted}
+										/>
+									)}
+								</Stack>
+							))}
+						</Stack>
+					</Box>
 				))}
 			</Stack>
 		</Box>
