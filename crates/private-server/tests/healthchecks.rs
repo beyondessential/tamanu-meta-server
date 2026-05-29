@@ -275,3 +275,112 @@ async fn update_rules_rejects_malformed_shapes() {
 	})
 	.await
 }
+
+// ── /sample ───────────────────────────────────────────────────────────────
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sample_returns_null_when_no_server_has_reported_the_check() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO healthcheck_severities (check_name) VALUES ('uncharted_check');",
+		)
+		.await
+		.unwrap();
+		let response = private
+			.post("/api/healthchecks/sample")
+			.json(&json!({"check_name": "uncharted_check"}))
+			.await;
+		response.assert_status_ok();
+		let body: serde_json::Value = response.json();
+		assert_eq!(body["check_name"], "uncharted_check");
+		assert!(body["sample"].is_null());
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sample_materialises_latest_push_for_this_check() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO server_groups (id, name, tags) VALUES \
+				('11111111-1111-1111-1111-111111111111', 'prod', '{\"env\": \"prod\"}'::jsonb); \
+			 INSERT INTO servers (id, host, name, kind, group_id, tags) VALUES \
+				('22222222-2222-2222-2222-222222222222', 'https://prod-host', 'Prod Central', 'central', \
+				 '11111111-1111-1111-1111-111111111111', '{\"region\": \"au\"}'::jsonb); \
+			 INSERT INTO statuses (server_id, healthy, health, extra, created_at) VALUES \
+				('22222222-2222-2222-2222-222222222222', false, \
+				 '[{\"check\": \"disk_space\", \"healthy\": false, \"used_pct\": 97}, {\"check\": \"other\", \"healthy\": true}]'::jsonb, \
+				 '{\"bestoolVersion\": \"1.13.0\", \"uptimeSecs\": 6038594}'::jsonb, \
+				 NOW() - interval '2 minutes');",
+		)
+		.await
+		.unwrap();
+
+		let response = private
+			.post("/api/healthchecks/sample")
+			.json(&json!({"check_name": "disk_space"}))
+			.await;
+		response.assert_status_ok();
+		let body: serde_json::Value = response.json();
+		assert_eq!(body["check_name"], "disk_space");
+		let sample = &body["sample"];
+		assert!(!sample.is_null(), "sample populated when a status push exists");
+
+		// Status-level extras come straight from statuses.extra.
+		assert_eq!(sample["status_extra"]["bestoolVersion"], "1.13.0");
+		assert_eq!(sample["status_extra"]["uptimeSecs"], 6_038_594);
+
+		// Check-level extras strip the reserved fields.
+		assert_eq!(sample["check_extra"]["used_pct"], 97);
+		assert!(
+			sample["check_extra"].get("check").is_none(),
+			"reserved `check` must be stripped"
+		);
+		assert!(
+			sample["check_extra"].get("healthy").is_none(),
+			"reserved `healthy` must be stripped"
+		);
+
+		// Tags merge: server overlays group; both keys present here.
+		assert_eq!(sample["tags"]["env"], "prod");
+		assert_eq!(sample["tags"]["region"], "au");
+
+		assert_eq!(sample["server_host"], "https://prod-host/");
+		assert_eq!(sample["server_name"], "Prod Central");
+		assert!(sample["seen_at"].is_string());
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sample_picks_the_most_recent_push_across_servers() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO servers (id, host, kind) VALUES \
+				('33333333-3333-3333-3333-333333333333', 'https://older-host', 'central'), \
+				('44444444-4444-4444-4444-444444444444', 'https://newer-host', 'central'); \
+			 INSERT INTO statuses (server_id, healthy, health, extra, created_at) VALUES \
+				('33333333-3333-3333-3333-333333333333', false, \
+				 '[{\"check\": \"cert_expiry\", \"healthy\": false, \"days_remaining\": 30}]'::jsonb, \
+				 '{}'::jsonb, NOW() - interval '1 hour'), \
+				('44444444-4444-4444-4444-444444444444', false, \
+				 '[{\"check\": \"cert_expiry\", \"healthy\": false, \"days_remaining\": 5}]'::jsonb, \
+				 '{}'::jsonb, NOW() - interval '1 minute');",
+		)
+		.await
+		.unwrap();
+
+		let response = private
+			.post("/api/healthchecks/sample")
+			.json(&json!({"check_name": "cert_expiry"}))
+			.await;
+		response.assert_status_ok();
+		let body: serde_json::Value = response.json();
+		assert_eq!(
+			body["sample"]["check_extra"]["days_remaining"], 5,
+			"newer push wins"
+		);
+		assert_eq!(body["sample"]["server_host"], "https://newer-host/");
+	})
+	.await
+}

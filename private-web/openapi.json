@@ -1147,6 +1147,61 @@
         ]
       }
     },
+    "/api/healthchecks/sample": {
+      "post": {
+        "tags": [
+          "healthchecks"
+        ],
+        "operationId": "healthcheck_sample",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SampleArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Sample payload or null if no server has reported this check yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthcheckSampleResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/healthchecks/update": {
       "post": {
         "tags": [
@@ -4269,6 +4324,86 @@
           "unhealthy"
         ]
       },
+      "HealthcheckSample": {
+        "type": "object",
+        "description": "Materialised sample of the inputs available to a rule when this check\nfails — fetched from the most recent status push (across all servers)\nthat reported `check_name`. The UI uses this to power autocomplete\nsuggestions, pass/warn validation on `var` input, and live previews\nof a rule's effect against realistic data.",
+        "required": [
+          "status_extra",
+          "check_extra",
+          "tags",
+          "server_host",
+          "seen_at"
+        ],
+        "properties": {
+          "check_extra": {
+            "type": "object",
+            "description": "The failing check's own fields (`health[i]` minus `check` /\n`healthy`).",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Value"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "seen_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the sampled status push happened."
+          },
+          "server_host": {
+            "type": "string",
+            "description": "Server hostname for display."
+          },
+          "server_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional friendly server name."
+          },
+          "status_extra": {
+            "type": "object",
+            "description": "Top-level status extras (`statuses.extra`).",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Value"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "tags": {
+            "type": "object",
+            "description": "Server's resolved tag map (server + group merge).",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "HealthcheckSampleResponse": {
+        "type": "object",
+        "required": [
+          "check_name"
+        ],
+        "properties": {
+          "check_name": {
+            "type": "string"
+          },
+          "sample": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/HealthcheckSample"
+              }
+            ]
+          }
+        }
+      },
       "HealthcheckSeverityData": {
         "type": "object",
         "description": "Catalog row enriched with `pending_review` and `rule_count` derivations\nfor the UI. `rules` is the raw JsonLogic blob exactly as stored; the\nReact side parses it client-side (or the per-check editor rebuilds it\nfrom form state and POSTs to /update_rules). Malformed `rules` parses\nto `rule_count: 0` and the row behaves as \"no conditional rules\" — the\nevaluator does the same on the ingestion path.",
@@ -5660,6 +5795,17 @@
           "duplicate",
           "flapping"
         ]
+      },
+      "SampleArgs": {
+        "type": "object",
+        "required": [
+          "check_name"
+        ],
+        "properties": {
+          "check_name": {
+            "type": "string"
+          }
+        }
       },
       "SaveArgs": {
         "type": "object",

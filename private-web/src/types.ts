@@ -111,6 +111,8 @@ export type DeviceInfo = Solidify<Schemas["DeviceInfo"]>;
 export type TailnetLiveInfo = Solidify<Schemas["TailnetLiveInfo"]>;
 
 export type HealthcheckSeverityData = Solidify<Schemas["HealthcheckSeverityData"]>;
+export type HealthcheckSample = Solidify<Schemas["HealthcheckSample"]>;
+export type HealthcheckSampleResponse = Solidify<Schemas["HealthcheckSampleResponse"]>;
 
 export type IssueData = Solidify<Schemas["IssueData"]>;
 export type IssueIncidentLink = Solidify<Schemas["IssueIncidentLink"]>;
