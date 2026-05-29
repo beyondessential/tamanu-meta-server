@@ -19,6 +19,7 @@ pub mod silenced_refs;
 pub mod slack_outbox;
 pub mod sql_playground_history;
 pub mod statuses;
+pub mod tags;
 pub mod tailscale_users;
 pub mod url_field;
 pub mod version_known_issues;

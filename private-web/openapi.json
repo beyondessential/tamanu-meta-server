@@ -1202,6 +1202,55 @@
         ]
       }
     },
+    "/api/healthchecks/tag_keys": {
+      "post": {
+        "tags": [
+          "healthchecks"
+        ],
+        "summary": "Distinct tag keys known anywhere in the system — union across all\nservers and server groups, sorted. Feeds the rule editor's\nAutocomplete so operators can pick `tag.<key>` even when the\nsampled server doesn't carry that key. The sample-based pass/warn\nbadge still reflects the sample only; this list only widens the\ncompletion menu.",
+        "operationId": "healthcheck_tag_keys",
+        "responses": {
+          "200": {
+            "description": "Sorted, distinct tag keys.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/healthchecks/update": {
       "post": {
         "tags": [
