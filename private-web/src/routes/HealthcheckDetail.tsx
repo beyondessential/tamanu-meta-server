@@ -650,7 +650,7 @@ function BranchDialog({
 					<Autocomplete
 						freeSolo
 						options={options}
-						value={varPath}
+						inputValue={varPath}
 						onInputChange={(_, v) => setVarPath(v)}
 						renderInput={(params) => (
 							<TextField
@@ -660,6 +660,7 @@ function BranchDialog({
 								error={!varValid}
 								size="small"
 								slotProps={{
+									...params.slotProps,
 									input: {
 										...params.slotProps.input,
 										endAdornment: (
