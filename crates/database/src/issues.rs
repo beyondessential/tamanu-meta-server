@@ -419,9 +419,19 @@ async fn re_evaluate_incident_membership(
 	.await?;
 	let group_open = group_has_open_incident(conn, server_group_id).await?;
 
-	let should_leave =
-		!issue.active || issue.resolved_at.is_some() || snoozed || silenced || !monitored;
-	let should_join = monitored
+	// Debug-severity issues are intentionally invisible to the incident
+	// workflow: they don't join, and any that are currently attached
+	// (because their catalog/rule severity dropped to Debug after they
+	// joined) get treated as a leave on next re-evaluation.
+	let is_debug = issue.severity == Severity::Debug;
+	let should_leave = is_debug
+		|| !issue.active
+		|| issue.resolved_at.is_some()
+		|| snoozed
+		|| silenced
+		|| !monitored;
+	let should_join = !is_debug
+		&& monitored
 		&& !silenced
 		&& issue.active
 		&& issue.resolved_at.is_none()
@@ -442,6 +452,12 @@ async fn re_evaluate_incident_membership(
 				.await?;
 			if newly_opened {
 				enqueue_slack_open(conn, incident_id, server_group_id, issue).await?;
+			} else if issue.severity == Severity::Critical {
+				// Critical joining an existing incident whose open is
+				// still inside its holding window: pull the delivery
+				// forward to now. enqueue_slack_open already does this
+				// for newly-opened incidents.
+				accelerate_pending_open(conn, incident_id).await?;
 			}
 		}
 		(true, _, true) => {
@@ -805,11 +821,17 @@ async fn enqueue_slack_open(
 		&issue.r#ref,
 		&issue.message,
 	);
-	// Sit in the outbox for the group's `slack_open_delay` before the
-	// drainer is allowed to pick the row up. If the incident closes within
-	// that window the resolve path will cancel this row outright (see
-	// `enqueue_slack_resolve_inner`), and Slack never hears about a flap.
-	let deliver_after = Timestamp::now() + group.slack_open_delay.0;
+	// Normally the row sits in the outbox for the group's
+	// `slack_open_delay` before the drainer can ship it — that's the
+	// flap-suppression window, so a transient open/close pair never
+	// reaches Slack. Critical bypasses this: it's the
+	// "stop-the-world" tier where operators have signalled they don't
+	// want any delay.
+	let deliver_after = if issue.severity == Severity::Critical {
+		Timestamp::now()
+	} else {
+		Timestamp::now() + group.slack_open_delay.0
+	};
 	crate::slack_outbox::SlackOutbox::enqueue(
 		conn,
 		crate::slack_outbox::KIND_INCIDENT_OPEN,
@@ -820,6 +842,32 @@ async fn enqueue_slack_open(
 		deliver_after,
 	)
 	.await?;
+	Ok(())
+}
+
+/// Pull forward the `deliver_after` of any pending `incident_open` row
+/// for `incident_id` to now. Used when a Critical-severity issue joins
+/// an incident whose open was originally enqueued by a lower-severity
+/// contributor — the operator's signal is "no more delay".
+///
+/// Affects only rows that are still in their delay window
+/// (`delivered_at IS NULL`, `gave_up_at IS NULL`, `deliver_after > now`).
+/// Already-shipped or cancelled rows are left alone.
+async fn accelerate_pending_open(conn: &mut AsyncPgConnection, incident_id: Uuid) -> Result<()> {
+	use crate::schema::slack_outbox::dsl;
+	let now = Timestamp::now();
+	diesel::update(
+		dsl::slack_outbox
+			.filter(dsl::incident_id.eq(incident_id))
+			.filter(dsl::kind.eq(crate::slack_outbox::KIND_INCIDENT_OPEN))
+			.filter(dsl::delivered_at.is_null())
+			.filter(dsl::gave_up_at.is_null())
+			.filter(dsl::deliver_after.gt(jiff_diesel::Timestamp::from(now))),
+	)
+	.set(dsl::deliver_after.eq(jiff_diesel::Timestamp::from(now)))
+	.execute(conn)
+	.await
+	.map_err(AppError::from)?;
 	Ok(())
 }
 

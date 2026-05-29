@@ -33,7 +33,12 @@ import SeverityChip from "../components/SeverityChip";
 import TimeAgo from "../components/TimeAgo";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
-import { SEVERITIES, type HealthcheckSeverityData, type Severity } from "../types";
+import {
+	SEVERITIES,
+	SEVERITY_INTENT,
+	type HealthcheckSeverityData,
+	type Severity,
+} from "../types";
 
 // ── Constrained JsonLogic shape ───────────────────────────────────────────
 //
@@ -265,11 +270,16 @@ function BaseSeverityCard({
 						value={severity}
 						onChange={(e) => setSeverity(e.target.value as Severity)}
 						disabled={update.pending}
-						sx={{ minWidth: 140 }}
+						sx={{ minWidth: 320 }}
 					>
 						{SEVERITIES.map((s) => (
 							<MenuItem key={s} value={s}>
-								<SeverityChip severity={s} />
+								<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+									<SeverityChip severity={s} />
+									<Typography variant="caption" color="text.secondary">
+										{SEVERITY_INTENT[s]}
+									</Typography>
+								</Stack>
 							</MenuItem>
 						))}
 					</Select>
@@ -606,10 +616,16 @@ function BranchDialog({
 						size="small"
 						value={severity}
 						onChange={(e) => setSeverity(e.target.value as Severity)}
+						sx={{ minWidth: 320 }}
 					>
 						{SEVERITIES.map((s) => (
 							<MenuItem key={s} value={s}>
-								<SeverityChip severity={s} />
+								<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+									<SeverityChip severity={s} />
+									<Typography variant="caption" color="text.secondary">
+										{SEVERITY_INTENT[s]}
+									</Typography>
+								</Stack>
 							</MenuItem>
 						))}
 					</Select>
