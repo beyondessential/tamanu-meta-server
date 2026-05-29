@@ -37,6 +37,7 @@ import SeverityChip from "../components/SeverityChip";
 import TimeAgo from "../components/TimeAgo";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
+import { evaluate as evalCondition } from "../lib/healthcheck-rule-eval";
 import {
 	SEVERITIES,
 	SEVERITY_INTENT,
@@ -719,6 +720,15 @@ function BranchDialog({
 							</MenuItem>
 						))}
 					</TextField>
+					{varValid && sample && (
+						<PreviewBox
+							sample={sample}
+							varPath={varPath}
+							op={op}
+							valueText={valueText}
+							severity={severity}
+						/>
+					)}
 				</Stack>
 			</DialogContent>
 			<DialogActions>
@@ -728,6 +738,58 @@ function BranchDialog({
 				</Button>
 			</DialogActions>
 		</Dialog>
+	);
+}
+
+function PreviewBox({
+	sample,
+	varPath,
+	op,
+	valueText,
+	severity,
+}: {
+	sample: HealthcheckSample;
+	varPath: string;
+	op: RuleOp;
+	valueText: string;
+	severity: Severity;
+}) {
+	const result = useMemo(
+		() =>
+			evalCondition(
+				{ varPath, op, value: parseValueInput(valueText) },
+				sample,
+			),
+		[varPath, op, valueText, sample],
+	);
+	return (
+		<Alert
+			severity={result.matched ? "success" : "info"}
+			variant="outlined"
+			sx={{ alignItems: "center" }}
+		>
+			<Stack direction="row" spacing={1} sx={{ alignItems: "center", flexWrap: "wrap" }}>
+				<Typography variant="body2">
+					Against the sample push (
+					<code>{sample.server_name ?? sample.server_host}</code>):
+				</Typography>
+				{result.matched ? (
+					<Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
+						<Typography variant="body2">would file at</Typography>
+						<SeverityChip severity={severity} />
+					</Stack>
+				) : (
+					<Typography variant="body2">would not match → base severity used</Typography>
+				)}
+			</Stack>
+			<Typography
+				variant="caption"
+				color="text.secondary"
+				sx={{ display: "block", mt: 0.5 }}
+			>
+				{result.notes}
+			</Typography>
+		</Alert>
 	);
 }
 
