@@ -155,16 +155,29 @@ export const SERVER_RANK_ORDER: ServerRank[] = [
 	"dev",
 ];
 
+/// Operator-facing severity vocabulary, loud → quiet. Used for both
+/// display and selection (the API now restricts severities to these
+/// five — see commons-types::issue::Severity and the
+/// 2026-05-29-restrict_severities migration).
 export const SEVERITIES: Severity[] = [
-	"emergency",
-	"alert",
 	"critical",
 	"error",
 	"warning",
-	"notice",
 	"info",
 	"debug",
 ];
+
+/// Short one-line description of how each severity participates in the
+/// incident workflow. Used in dropdown helper text and as the
+/// SeverityChip tooltip so operators see the semantic meaning at the
+/// point of choice.
+export const SEVERITY_INTENT: Record<Severity, string> = {
+	critical: "Opens an incident immediately (no holding period)",
+	error: "Opens an incident (after the group's holding period)",
+	warning: "Joins an open incident; doesn't open one on its own",
+	info: "Joins an open incident; doesn't open one on its own",
+	debug: "Not shown in incidents",
+};
 
 export const RESOLVED_REASONS: ResolvedReason[] = [
 	"fixed",

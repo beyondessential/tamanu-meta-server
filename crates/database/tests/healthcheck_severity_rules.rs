@@ -26,8 +26,7 @@ fn empty_ctx<'a>(
 fn deserialise_accepts_all_supported_ops() {
 	for op in ["==", "!=", "<", "<=", ">", ">="] {
 		let json = json!({"if": [{op: [{"var": "check.x"}, 10]}, "error"]});
-		serde_json::from_value::<IfLadder>(json)
-			.unwrap_or_else(|e| panic!("op {op} failed: {e}"));
+		serde_json::from_value::<IfLadder>(json).unwrap_or_else(|e| panic!("op {op} failed: {e}"));
 	}
 	let in_range = json!({"if": [
 		{"in_range": [{"var": "status.bestoolVersion"}, ">=2.4.0 <2.5.4"]},
@@ -43,7 +42,10 @@ fn deserialise_rejects_composition_and_unknown_ops() {
 		(json!({"if": [{"or": [true, true]}, "error"]}), "or"),
 		(json!({"if": [{"!": [true]}, "error"]}), "not"),
 		(json!({"if": [{"if": [true, true]}, "error"]}), "nested if"),
-		(json!({"if": [{"foo": [{"var": "check.x"}, 1]}, "error"]}), "unknown"),
+		(
+			json!({"if": [{"foo": [{"var": "check.x"}, 1]}, "error"]}),
+			"unknown",
+		),
 	];
 	for (val, label) in cases {
 		serde_json::from_value::<IfLadder>(val.clone())
@@ -56,8 +58,14 @@ fn deserialise_rejects_composition_and_unknown_ops() {
 fn deserialise_rejects_malformed_shapes() {
 	let cases: &[(serde_json::Value, &str)] = &[
 		(json!({"if": []}), "empty args"),
-		(json!({"if": [{"==": [{"var": "check.x"}, 1]}]}), "odd-length"),
-		(json!({"if": [{"==": [{"var": "check.x"}, 1]}, "warning", "trailing"]}), "trailing else"),
+		(
+			json!({"if": [{"==": [{"var": "check.x"}, 1]}]}),
+			"odd-length",
+		),
+		(
+			json!({"if": [{"==": [{"var": "check.x"}, 1]}, "warning", "trailing"]}),
+			"trailing else",
+		),
 		(json!({"not_if": []}), "wrong top-level op"),
 		(
 			json!({"if": [{"==": [{"var": "check.x"}, 1]}, "not_a_severity"]}),
@@ -161,10 +169,7 @@ fn numeric_ops_coerce_string_of_digits() {
 
 	// Missing field → false.
 	let missing = serde_json::Map::new();
-	assert_eq!(
-		ladder.evaluate(&empty_ctx(&missing, &status, &tags)),
-		None,
-	);
+	assert_eq!(ladder.evaluate(&empty_ctx(&missing, &status, &tags)), None,);
 }
 
 #[test]
@@ -175,7 +180,12 @@ fn eq_neq_handle_bool_string_numeric() {
 		(json!("prod"), json!("prod"), true, "string eq"),
 		(json!("prod"), json!("staging"), false, "string neq"),
 		(json!(5), json!(5.0), true, "numeric coercion 5 == 5.0"),
-		(json!("21608625"), json!(21_608_625), true, "string-of-digits eq number"),
+		(
+			json!("21608625"),
+			json!(21_608_625),
+			true,
+			"string-of-digits eq number",
+		),
 	];
 	for (lhs, rhs, want_eq, label) in cases {
 		let ladder: IfLadder = serde_json::from_value(json!({"if": [
@@ -203,7 +213,10 @@ fn tag_namespace_resolves_against_tag_map() {
 	let status = serde_json::Map::new();
 
 	let mut tags = HashMap::new();
-	tags.insert("environment".to_string(), serde_json::Value::String("prod".into()));
+	tags.insert(
+		"environment".to_string(),
+		serde_json::Value::String("prod".into()),
+	);
 	assert_eq!(
 		ladder.evaluate(&empty_ctx(&check, &status, &tags)),
 		Some(Severity::Error),
@@ -298,7 +311,11 @@ async fn severity_for_uses_rules_or_falls_back_to_base() {
 		)
 		.await
 		.expect("severity_for");
-		assert_eq!(sev, Severity::Error, "falls back to base when no branch matches");
+		assert_eq!(
+			sev,
+			Severity::Error,
+			"falls back to base when no branch matches"
+		);
 	})
 	.await
 }
@@ -354,10 +371,9 @@ async fn update_rules_clears_column_when_passed_none() {
 				.expect("save");
 		assert!(saved.rules.is_some(), "rules should be populated");
 
-		let cleared =
-			HealthcheckSeverity::update_rules(&mut conn, "disk_space", None, "ops")
-				.await
-				.expect("clear");
+		let cleared = HealthcheckSeverity::update_rules(&mut conn, "disk_space", None, "ops")
+			.await
+			.expect("clear");
 		assert!(cleared.rules.is_none(), "rules should be cleared by None");
 	})
 	.await

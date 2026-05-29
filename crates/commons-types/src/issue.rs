@@ -7,12 +7,25 @@ use diesel::{
 };
 use serde::{Deserialize, Serialize};
 
-/// RFC 5424 syslog severities.
+/// Canopy's severity vocabulary, narrowed from RFC 5424 to a five-level
+/// set with operator semantics:
+///
+/// - `Debug`: never participates in incidents (filed for the audit
+///   trail / per-server view only).
+/// - `Info`, `Warning`: join an open incident for context but don't
+///   open one or keep one open on their own.
+/// - `Error`: opens an incident; sits in the per-group `slack_open_delay`
+///   holding window before the Slack notification ships.
+/// - `Critical`: opens an incident and bypasses the holding window —
+///   the Slack notification is enqueued for immediate delivery.
 ///
 /// Stored as text in Postgres; validated as this enum at the API layer.
-/// Default is `Error` (incidents only open at severity ≥ Error, so the
-/// default is intentionally above the floor — most devices that bother
-/// pushing an event mean it).
+/// Default is `Error` (the most common severity for a deliberately
+/// filed event). The legacy syslog severities `emergency` / `alert` /
+/// `notice` have been retired — see the
+/// `2026-05-29-000000-0000_restrict_severities` migration; the
+/// `FromStr` impl still accepts them as aliases for forward-compat with
+/// any device that hasn't been updated.
 #[derive(
 	Debug,
 	Clone,
@@ -28,24 +41,20 @@ use serde::{Deserialize, Serialize};
 #[diesel(sql_type = Text)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
-	Emergency,
-	Alert,
 	Critical,
 	#[default]
 	Error,
 	Warning,
-	Notice,
 	Info,
 	Debug,
 }
 
 impl Severity {
 	/// Severities that may open an incident on their own and may keep one
-	/// open. Low-severity issues (warning and below) join an already-open
+	/// open. Lower-severity issues (warning and below) join an already-open
 	/// incident for context but don't hold it open — see
 	/// `database::issues::re_evaluate_incident_membership`.
-	pub const OPENS_INCIDENT: &'static [Severity] =
-		&[Self::Emergency, Self::Alert, Self::Critical, Self::Error];
+	pub const OPENS_INCIDENT: &'static [Severity] = &[Self::Critical, Self::Error];
 
 	/// Issues at or above this severity open incidents.
 	pub fn opens_incident(self) -> bool {
@@ -55,7 +64,7 @@ impl Severity {
 
 #[derive(Debug, Clone, Copy, thiserror::Error)]
 #[error(
-	"invalid severity; expected one of: emergency, alert, critical, error, warning, notice, info, debug"
+	"invalid severity; expected one of: critical, error, warning, info, debug"
 )]
 pub struct SeverityFromStringError;
 
@@ -64,13 +73,14 @@ impl std::str::FromStr for Severity {
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		match s.to_ascii_lowercase().as_ref() {
-			"emergency" | "emerg" | "panic" => Ok(Self::Emergency),
-			"alert" => Ok(Self::Alert),
-			"critical" | "crit" => Ok(Self::Critical),
+			// Retired severities still parse — emergency/alert collapse into
+			// critical and notice collapses into info, matching the migration.
+			"emergency" | "emerg" | "panic" | "alert" | "critical" | "crit" => {
+				Ok(Self::Critical)
+			}
 			"error" | "err" => Ok(Self::Error),
 			"warning" | "warn" => Ok(Self::Warning),
-			"notice" => Ok(Self::Notice),
-			"info" | "informational" => Ok(Self::Info),
+			"notice" | "info" | "informational" => Ok(Self::Info),
 			"debug" => Ok(Self::Debug),
 			_ => Err(SeverityFromStringError),
 		}
@@ -88,12 +98,9 @@ impl TryFrom<String> for Severity {
 impl std::fmt::Display for Severity {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		let s = match self {
-			Self::Emergency => "emergency",
-			Self::Alert => "alert",
 			Self::Critical => "critical",
 			Self::Error => "error",
 			Self::Warning => "warning",
-			Self::Notice => "notice",
 			Self::Info => "info",
 			Self::Debug => "debug",
 		};

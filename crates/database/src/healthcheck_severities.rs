@@ -112,8 +112,8 @@ impl HealthcheckSeverity {
 	) -> Result<Self> {
 		use crate::schema::healthcheck_severities::dsl;
 		let now = Timestamp::now();
-		let rules_json: Option<JsonValue> = rules
-			.map(|l| serde_json::to_value(l).expect("IfLadder always serialises"));
+		let rules_json: Option<JsonValue> =
+			rules.map(|l| serde_json::to_value(l).expect("IfLadder always serialises"));
 		diesel::update(dsl::healthcheck_severities.filter(dsl::check_name.eq(check_name)))
 			.set((
 				dsl::rules.eq(rules_json),
@@ -271,7 +271,9 @@ impl Condition {
 			Self::Gt(_, rhs) => json_compare(lhs, rhs, |a, b| a > b).unwrap_or(false),
 			Self::Gte(_, rhs) => json_compare(lhs, rhs, |a, b| a >= b).unwrap_or(false),
 			Self::InRange(_, range_str) => {
-				let Some(lhs_str) = lhs.as_str() else { return false };
+				let Some(lhs_str) = lhs.as_str() else {
+					return false;
+				};
 				let Ok(version) = lhs_str.parse::<node_semver::Version>() else {
 					return false;
 				};
@@ -335,10 +337,7 @@ impl std::str::FromStr for Var {
 		if field.is_empty() {
 			return Err(format!("var path '{s}' has an empty field name"));
 		}
-		if !field
-			.chars()
-			.all(|c| c.is_ascii_alphanumeric() || c == '_')
-		{
+		if !field.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
 			return Err(format!(
 				"var field '{field}' must be ASCII alphanumeric or underscore"
 			));
@@ -424,9 +423,9 @@ impl<'de> Deserialize<'de> for Condition {
 				let range = rhs
 					.as_str()
 					.ok_or_else(|| de::Error::custom("'in_range' value must be a string"))?;
-				range
-					.parse::<node_semver::Range>()
-					.map_err(|e| de::Error::custom(format!("invalid semver range '{range}': {e}")))?;
+				range.parse::<node_semver::Range>().map_err(|e| {
+					de::Error::custom(format!("invalid semver range '{range}': {e}"))
+				})?;
 				Ok(Self::InRange(var, range.to_string()))
 			}
 			other => Err(de::Error::custom(format!(
@@ -454,7 +453,9 @@ impl<'de> Deserialize<'de> for IfLadder {
 			.as_object()
 			.ok_or_else(|| de::Error::custom("rules must be a JSON object"))?;
 		if obj.len() != 1 {
-			return Err(de::Error::custom("rules must be a single-key {\"if\": …} object"));
+			return Err(de::Error::custom(
+				"rules must be a single-key {\"if\": …} object",
+			));
 		}
 		let (key, args) = obj.iter().next().expect("len == 1");
 		if key != "if" {

@@ -2446,15 +2446,28 @@ export interface components {
             source: string;
         };
         /**
-         * @description RFC 5424 syslog severities.
+         * @description Canopy's severity vocabulary, narrowed from RFC 5424 to a five-level
+         *     set with operator semantics:
+         *
+         *     - `Debug`: never participates in incidents (filed for the audit
+         *       trail / per-server view only).
+         *     - `Info`, `Warning`: join an open incident for context but don't
+         *       open one or keep one open on their own.
+         *     - `Error`: opens an incident; sits in the per-group `slack_open_delay`
+         *       holding window before the Slack notification ships.
+         *     - `Critical`: opens an incident and bypasses the holding window —
+         *       the Slack notification is enqueued for immediate delivery.
          *
          *     Stored as text in Postgres; validated as this enum at the API layer.
-         *     Default is `Error` (incidents only open at severity ≥ Error, so the
-         *     default is intentionally above the floor — most devices that bother
-         *     pushing an event mean it).
+         *     Default is `Error` (the most common severity for a deliberately
+         *     filed event). The legacy syslog severities `emergency` / `alert` /
+         *     `notice` have been retired — see the
+         *     `2026-05-29-000000-0000_restrict_severities` migration; the
+         *     `FromStr` impl still accepts them as aliases for forward-compat with
+         *     any device that hasn't been updated.
          * @enum {string}
          */
-        Severity: "emergency" | "alert" | "critical" | "error" | "warning" | "notice" | "info" | "debug";
+        Severity: "critical" | "error" | "warning" | "info" | "debug";
         /** @enum {string} */
         ShortStatus: "up" | "down" | "away" | "blip" | "gone";
         SilenceGroupArgs: {

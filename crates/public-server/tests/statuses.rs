@@ -1647,7 +1647,10 @@ async fn submit_status_rule_on_server_tag() {
 			let issue = fetch_issue(&mut conn, server_id, "status", "health/cert_expiry")
 				.await
 				.expect("per-check issue filed");
-			assert_eq!(issue.severity, "error", "tag.environment=prod fires the rule");
+			assert_eq!(
+				issue.severity, "error",
+				"tag.environment=prod fires the rule"
+			);
 		},
 	)
 	.await

@@ -248,10 +248,7 @@ async fn update_rules_rejects_malformed_shapes() {
 		.unwrap();
 		let cases: &[(serde_json::Value, &str)] = &[
 			(json!({"and": [true]}), "AND composition"),
-			(
-				json!({"if": [{"if": [true, true]}, "error"]}),
-				"nested if",
-			),
+			(json!({"if": [{"if": [true, true]}, "error"]}), "nested if"),
 			(
 				json!({"if": [{"==": [{"var": "BAD.x"}, 1]}, "error"]}),
 				"unknown var namespace",
