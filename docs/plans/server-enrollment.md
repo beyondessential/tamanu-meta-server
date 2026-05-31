@@ -131,7 +131,7 @@ CREATE TABLE server_enrollment_tokens (
     token_hash  BYTEA NOT NULL UNIQUE,        -- SHA-256 of the plaintext token
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at  TIMESTAMPTZ NOT NULL,
-    consumed_at TIMESTAMPTZ                   -- NULL until first successful register
+    consumed_at TIMESTAMPTZ                   -- set the instant a valid token is presented, win or lose (replay safety)
 );
 CREATE INDEX server_enrollment_tokens_server ON server_enrollment_tokens (server_id);
 ```
@@ -181,10 +181,15 @@ ever valid at a time.
   hash, `expires_at = now() + ttl`; in the same tx expire prior un-consumed
   tokens for the server. Returns the plaintext for the blob (caller must not
   persist it).
-- `consume(conn, server_id, plaintext) -> Result<()>` — hash, find row by
-  (`server_id`, `token_hash`) with `consumed_at IS NULL AND expires_at > now()`;
-  set `consumed_at = now()`. Distinct errors for not-found/expired/consumed
-  (see ERRORS.md below).
+- `consume(conn, server_id, plaintext) -> Result<()>` — hash, then a single
+  atomic `UPDATE server_enrollment_tokens SET consumed_at = now() WHERE
+  server_id = $1 AND token_hash = $2 AND consumed_at IS NULL AND expires_at >
+  now() RETURNING …`. The burn is **committed on its own**, before any binding
+  work — a valid token is spent the instant it is presented, regardless of
+  whether the rest of registration then succeeds (replay safety; the operator
+  reissues on any failure). The `RETURNING`-guarded update also makes concurrent
+  registers race-safe (only one wins). Distinct errors for
+  not-found/expired/already-consumed (see ERRORS.md below).
 - `active_for(conn, server_id) -> Result<Option<ServerEnrollmentToken>>` — for
   the server page to show "token pending / expires <when>" without revealing the
   secret.
@@ -208,11 +213,13 @@ New `POST /servers/register` (`crates/public-server/src/servers.rs`).
   go through the auto-creating `Device` extractor.
 - **Body:** `RegisterArgs { server_id: Uuid, token: String }` (accept and
   ignore/cross-check `group_id`).
-- **Logic (one transaction):**
+- **Logic (token burn first, then binding):**
   1. Load the server by id; 404 if missing, 409 if archived (`deleted_at` set).
   2. `ServerEnrollmentToken::consume(server_id, token)` — rejects
-     invalid/expired/consumed.
-  3. Resolve target device:
+     invalid/expired/already-consumed. **This commits the burn on its own** so a
+     presented-but-then-failed register can't be retried with the same token.
+  3. The remaining steps run in their own transaction (rolled back together on
+     failure, but the token stays burned). Resolve target device:
      - If `server.device_id` is set (Tailscale-precreated) → target = that
        device; `Device::add_key(target, key)`.
      - Else → `Device::from_key(key)`; if found use it, else `Device::create`;
@@ -316,7 +323,8 @@ After create (and reachable from a not-yet-registered server's detail page):
   delete `private-web/src/lib/canopyTicket.ts` + `parseCanopyTicket` usage.
 - Fold device info on `ServerDetail` into a collapsible **Advanced / identity**
   section (mTLS key(s), Tailscale identity, connection history) rather than a
-  primary panel. Keep the `/devices` area for power users (trust/untrust/merge),
+  primary panel. It is **collapsed by default** — device is an internal detail,
+  surfaced only when the operator expands it. Keep the `/devices` area for power users (trust/untrust/merge),
   but it is no longer where servers are born.
 - Group delete: keep the guarded behaviour; show a friendly "move or delete its
   servers first" message on the 4xx.
@@ -340,7 +348,10 @@ Backend (`commons_tests::db` and `::server`):
     device (no second device), promoted;
   - re-register of a soft-deleted-then-recreated server by the same cert → the
     freed device is matched by key and rebound;
-  - expired/consumed/invalid token, archived server → correct errors.
+  - expired/consumed/invalid token, archived server → correct errors;
+  - replay safety: a register whose binding step fails *after* a valid token is
+    presented leaves the token consumed (a retry with the same token is rejected
+    as already-consumed) — assert `consumed_at` is set even on the failure path.
 - Removing `import_ticket`: delete `crates/private-server/tests/import_ticket.rs`
   and `crates/database/tests/upsert_from_ticket.rs` (or repoint to register).
 
