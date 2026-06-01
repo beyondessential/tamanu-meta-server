@@ -30,6 +30,7 @@ DECLARE
     v_year INT;
     v_week_num INT;
     v_current_week DATE;
+    v_past_weeks INT := 8; -- Create 8 weeks of past partitions as buffer
     v_future_weeks INT := 8; -- Create 8 weeks of future partitions as buffer
 BEGIN
     -- Find the date range of existing data
@@ -39,11 +40,13 @@ BEGIN
     INTO v_min_date, v_max_date
     FROM statuses_old;
 
-    -- If table is empty, start from current week
+    -- If table is empty, centre the buffer on the current week. Rows arriving
+    -- with a slightly-past created_at (clock skew, or near a week boundary)
+    -- still land in an existing partition.
     IF v_min_date IS NULL THEN
-        v_min_date := DATE_TRUNC('week', CURRENT_DATE)::DATE;
-        v_max_date := v_min_date;
-        RAISE NOTICE 'Table is empty, creating partitions starting from current week';
+        v_min_date := (DATE_TRUNC('week', CURRENT_DATE) - (v_past_weeks * INTERVAL '1 week'))::DATE;
+        v_max_date := DATE_TRUNC('week', CURRENT_DATE)::DATE;
+        RAISE NOTICE 'Table is empty, creating partitions around the current week';
     ELSE
         RAISE NOTICE 'Creating partitions from % to % plus % weeks buffer',
             v_min_date, v_max_date, v_future_weeks;

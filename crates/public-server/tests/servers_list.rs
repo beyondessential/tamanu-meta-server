@@ -267,11 +267,13 @@ async fn post_create_server_invalid_role() {
 // PATCH /servers tests
 #[tokio::test(flavor = "multi_thread")]
 async fn patch_edit_server_success() {
-	commons_tests::server::run_with_device_auth("server", async |mut conn, cert, _device_id, public, _| {
-		// Create a server first
+	commons_tests::server::run_with_device_auth("server", async |mut conn, cert, device_id, public, _| {
+		// Create a server bound to the calling device: the edit handler scopes
+		// updates to the device's own server.
 		let server_row: IdRow = sql_query(
-			"INSERT INTO servers (name, host, kind, rank) VALUES ('Original Server', 'https://original.com', 'central', 'dev') RETURNING id"
+			"INSERT INTO servers (name, host, kind, rank, device_id) VALUES ('Original Server', 'https://original.com', 'central', 'dev', $1) RETURNING id"
 		)
+		.bind::<sql_types::Uuid, _>(device_id)
 		.get_result(&mut conn)
 		.await
 		.unwrap();

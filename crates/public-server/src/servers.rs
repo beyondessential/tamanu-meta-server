@@ -113,7 +113,7 @@ pub async fn create(
 	),
 )]
 pub async fn edit(
-	_device: ServerDevice,
+	device: ServerDevice,
 	State(db): State<Db>,
 	Json(input): Json<PartialServer>,
 ) -> Result<Json<Server>> {
@@ -121,9 +121,13 @@ pub async fn edit(
 
 	let mut db = db.get().await?;
 	let input_id = input.id;
+	let dev_id = device.0.0.id;
 
+	// Scope to the calling device's own server: a device may only edit the
+	// server it is bound to, never an arbitrary server id from the body.
 	diesel::update(servers)
 		.filter(id.eq(input_id))
+		.filter(device_id.eq(dev_id))
 		.set(input)
 		.execute(&mut db)
 		.await?;
@@ -131,6 +135,7 @@ pub async fn edit(
 	Ok(Json(
 		servers
 			.filter(id.eq(input_id))
+			.filter(device_id.eq(dev_id))
 			.select(Server::as_select())
 			.first(&mut db)
 			.await?,
