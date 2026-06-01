@@ -570,6 +570,33 @@ Frontend e2e (Playwright, `private-web/e2e`):
 - create server → setup view shows a (revealed) blob + reissue;
 - archive a server hides it from lists and shows restore.
 
+## Implementation status
+
+Shipped (backend + frontend + tests): migrations; archival + token/challenge
+models; the two-step PoP register endpoints with env-gated channel binding,
+no-merge and reject-key-bound-elsewhere guards; no-auto-create at the mTLS
+boundary; private-server create/delete/restore/mint_enrollment/enrollment_status;
+removal of the public create/edit/remove surface, `import_ticket`, and the
+`CanopyTicket` type; the full React flow (create → setup blob → archive/restore,
+collapsed device section, group→server flow, Import-Ticket UI removed);
+ERRORS.md; regenerated OpenAPI + TS types. Backend tests cover the PoP happy
+path, bad-signature-keeps-token, opaque errors, Tailscale-precreated add-key,
+reject-key-bound-to-another-live-server, archival release/deactivate/hide +
+host reuse, and token reissue/single-use.
+
+**Deferred (not yet done — do not consider the plan complete):**
+
+- **Rate-limiting + alerting on `/register/*`** (security model item 3). The
+  cryptographic guarantees are in; this operational hardening (per-`server_id`/
+  source rate limit + alert on token-consumed-without-completed-bind) is not.
+- **Frontend e2e (Playwright)** tests for the create→setup→archive flow.
+- **`register/complete`** re-checks `deleted_at` but not under `SELECT … FOR
+  UPDATE`; tighten the archive-vs-register TOCTOU with a row lock.
+- A `mint_enrollment`-side test asserting the token never appears in any
+  response/error body; a channel-binding (`CANOPY_ENROLL_EKM_HEADER`) test.
+- `attach_tailscale_device`'s "already attached" check uses
+  `get_by_device_id` (includes archived); switch to `live_by_device_id`.
+
 ## Open items / follow-ups (surface, don't drop)
 
 - **Channel-binding rollout:** the feature is in (env-gated on

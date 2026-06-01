@@ -32,14 +32,7 @@ async fn recompute_groups(
 }
 
 #[derive(
-	Debug,
-	Clone,
-	Serialize,
-	Deserialize,
-	Queryable,
-	Selectable,
-	Insertable,
-	utoipa::ToSchema,
+	Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable, utoipa::ToSchema,
 )]
 #[diesel(table_name = crate::schema::servers)]
 #[diesel(check_for_backend(diesel::pg::Pg))]

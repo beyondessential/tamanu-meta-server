@@ -4,12 +4,8 @@ use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::device_auth::{mtls, pop};
 use commons_types::server::{kind::ServerKind, rank::ServerRank};
 use database::{
-	Db,
-	devices::Device,
-	server_enrollment_challenges::ServerEnrollmentChallenge,
-	server_enrollment_tokens::ServerEnrollmentToken,
-	servers::Server,
-	url_field::UrlField,
+	Db, devices::Device, server_enrollment_challenges::ServerEnrollmentChallenge,
+	server_enrollment_tokens::ServerEnrollmentToken, servers::Server, url_field::UrlField,
 };
 use diesel_async::AsyncConnection;
 use serde::{Deserialize, Serialize};

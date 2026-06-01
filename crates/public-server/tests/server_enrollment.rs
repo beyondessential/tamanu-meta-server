@@ -38,6 +38,117 @@ fn new_server(host: &str) -> Server {
 	}
 }
 
+/// Drive begin → sign → complete for a server with the given cert/key, and
+/// return the `complete` response (caller asserts status).
+async fn run_handshake(
+	public: &axum_test::TestServer,
+	server_id: Uuid,
+	token: &str,
+	spki: &[u8],
+	cert: &str,
+	signing_key: &ring::signature::EcdsaKeyPair,
+) -> axum_test::TestResponse {
+	let begin = public
+		.post("/servers/register/begin")
+		.add_header("mtls-certificate", cert)
+		.json(&json!({"server_id": server_id, "token": token}))
+		.await;
+	begin.assert_status_ok();
+	let nonce_b64 = begin.json::<Value>()["nonce"].as_str().unwrap().to_string();
+	let nonce = b64().decode(&nonce_b64).unwrap();
+
+	let mut transcript = nonce.clone();
+	transcript.extend_from_slice(server_id.as_bytes());
+	transcript.extend_from_slice(spki);
+	let rng = ring::rand::SystemRandom::new();
+	let sig = signing_key.sign(&rng, &transcript).unwrap();
+
+	public
+		.post("/servers/register/complete")
+		.add_header("mtls-certificate", cert)
+		.json(&json!({
+			"server_id": server_id,
+			"nonce": nonce_b64,
+			"signature": b64().encode(sig.as_ref()),
+		}))
+		.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn enrollment_adds_key_to_tailscale_precreated_device() {
+	run(async |mut conn, public, _private| {
+		use database::Device;
+		let (spki, cert, key) = make_signing_certificate();
+
+		// A device pre-created from a Tailscale identity (no mTLS key yet),
+		// bound to the server at creation time.
+		let device = Device::create_with_tailscale(
+			&mut conn,
+			database::devices::TailscaleIdentity {
+				node_id: "nodekey:precreated".into(),
+				node_name: None,
+				tailnet: None,
+			},
+		)
+		.await
+		.unwrap();
+		let mut s = new_server("https://ts.example/");
+		s.device_id = Some(device.id);
+		let server = Server::create(&mut conn, s).await.unwrap();
+		let (_t, token) =
+			ServerEnrollmentToken::mint(&mut conn, server.id, SignedDuration::from_hours(1))
+				.await
+				.unwrap();
+
+		run_handshake(&public, server.id, &token, &spki, &cert, &key)
+			.await
+			.assert_status_ok();
+
+		// The key landed on the *existing* device; no second device was made.
+		let after = Server::get_by_id(&mut conn, server.id).await.unwrap();
+		assert_eq!(
+			after.device_id,
+			Some(device.id),
+			"still the precreated device"
+		);
+		let bound = Device::from_key(&mut conn, &spki).await.unwrap().unwrap();
+		assert_eq!(bound.id, device.id, "key attached to the precreated device");
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn enrollment_rejects_key_bound_to_another_live_server() {
+	run(async |mut conn, public, _private| {
+		let (spki, cert, key) = make_signing_certificate();
+
+		// Server A enrolls with this cert.
+		let a = Server::create(&mut conn, new_server("https://a.example/"))
+			.await
+			.unwrap();
+		let (_ta, token_a) =
+			ServerEnrollmentToken::mint(&mut conn, a.id, SignedDuration::from_hours(1))
+				.await
+				.unwrap();
+		run_handshake(&public, a.id, &token_a, &spki, &cert, &key)
+			.await
+			.assert_status_ok();
+
+		// Server B tries to enroll with the SAME key while A is live → refused.
+		let b = Server::create(&mut conn, new_server("https://b.example/"))
+			.await
+			.unwrap();
+		let (_tb, token_b) =
+			ServerEnrollmentToken::mint(&mut conn, b.id, SignedDuration::from_hours(1))
+				.await
+				.unwrap();
+		run_handshake(&public, b.id, &token_b, &spki, &cert, &key)
+			.await
+			.assert_status_forbidden();
+	})
+	.await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn enrollment_happy_path() {
 	run(async |mut conn, public, _private| {
