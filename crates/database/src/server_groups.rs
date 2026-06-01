@@ -201,6 +201,7 @@ impl ServerGroup {
 		dsl::servers
 			.select(Server::as_select())
 			.filter(dsl::group_id.eq(self.id))
+			.filter(dsl::deleted_at.is_null())
 			.order(dsl::name.asc())
 			.load(db)
 			.await
@@ -223,6 +224,7 @@ impl ServerGroup {
 		let rows: Vec<(Uuid, Option<String>)> = dsl::servers
 			.select((dsl::group_id.assume_not_null(), dsl::rank))
 			.filter(dsl::group_id.eq_any(group_ids))
+			.filter(dsl::deleted_at.is_null())
 			.load(db)
 			.await?;
 

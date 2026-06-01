@@ -975,6 +975,7 @@ dependencies = [
  "diesel-derive-enum",
  "diesel_migrations",
  "futures",
+ "getrandom 0.3.4",
  "hex",
  "ipnet",
  "jiff",
