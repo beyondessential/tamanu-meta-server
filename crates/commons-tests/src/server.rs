@@ -42,6 +42,45 @@ pub fn make_certificate() -> (Vec<u8>, String) {
 	(key_data, cert)
 }
 
+/// Like [`make_certificate`] but also returns a ring ECDSA key pair that can
+/// sign arbitrary messages with the same key as the certificate — for testing
+/// the enrollment proof-of-possession handshake. Returns
+/// `(spki_der, percent_encoded_pem, signing_key)`.
+pub fn make_signing_certificate() -> (Vec<u8>, String, ring::signature::EcdsaKeyPair) {
+	use ring::signature::ECDSA_P256_SHA256_ASN1_SIGNING;
+
+	let rng = ring::rand::SystemRandom::new();
+	let pkcs8 =
+		ring::signature::EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &rng)
+			.expect("keygen");
+	let signing_key = ring::signature::EcdsaKeyPair::from_pkcs8(
+		&ECDSA_P256_SHA256_ASN1_SIGNING,
+		pkcs8.as_ref(),
+		&rng,
+	)
+	.expect("ring key");
+
+	let key = KeyPair::try_from(pkcs8.as_ref()).expect("rcgen key from pkcs8");
+
+	let mut cert = CertificateParams::default();
+	cert.is_ca = IsCa::NoCa;
+	cert.not_before = OffsetDateTime::now_utc();
+	cert.key_usages = vec![KeyUsagePurpose::DigitalSignature];
+	cert.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
+	cert.use_authority_key_identifier_extension = true;
+	cert.distinguished_name = DistinguishedName::new();
+	let cert = cert.self_signed(&key).expect("sign cert");
+
+	let cert_pem = cert.pem();
+	let cert_enc = utf8_percent_encode(&cert_pem, percent_encoding::NON_ALPHANUMERIC).to_string();
+
+	let (_, pem_parsed) = parse_x509_pem(cert_pem.as_bytes()).expect("parse pem");
+	let (_, x509_cert) = parse_x509_certificate(&pem_parsed.contents).expect("parse cert");
+	let key_data = x509_cert.tbs_certificate.subject_pki.raw.to_vec();
+
+	(key_data, cert_enc, signing_key)
+}
+
 pub async fn run<F, T, Fut>(test: F) -> T
 where
 	F: FnOnce(AsyncPgConnection, TestServer, TestServer) -> Fut,

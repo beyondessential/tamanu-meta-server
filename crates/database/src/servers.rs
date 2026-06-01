@@ -230,10 +230,9 @@ impl Server {
 		use crate::schema::servers;
 
 		let host_str = server.host.0.to_string();
-		if let Ok(existing) = Self::get_by_host(db, host_str.clone()).await {
+		if let Some(existing) = Self::live_id_by_host(db, &host_str).await? {
 			return Err(AppError::Conflict(format!(
-				"A live server with host '{host_str}' already exists ({})",
-				existing.id,
+				"A live server with host '{host_str}' already exists ({existing})",
 			)));
 		}
 
@@ -292,11 +291,11 @@ impl Server {
 		use crate::schema::servers::dsl;
 
 		let server = Self::get_by_id(db, server_id).await?;
-		if let Ok(existing) = Self::get_by_host(db, server.host.0.to_string()).await {
-			if existing.id != server_id {
+		if let Some(existing) = Self::live_id_by_host(db, &server.host.0.to_string()).await? {
+			if existing != server_id {
 				return Err(AppError::Conflict(format!(
-					"a live server with host '{}' already exists ({})",
-					server.host.0, existing.id,
+					"a live server with host '{}' already exists ({existing})",
+					server.host.0,
 				)));
 			}
 		}
@@ -323,6 +322,20 @@ impl Server {
 			hosting,
 			"ec2" | "azure" | "gce" | "gcp" | "digitalocean" | "oracle" | "cloudstack"
 		)
+	}
+
+	/// Id of the live (non-archived) server with this host, if any. Archived
+	/// rows keep their host but don't block reuse.
+	async fn live_id_by_host(db: &mut AsyncPgConnection, host: &str) -> Result<Option<Uuid>> {
+		use crate::schema::servers::dsl;
+		dsl::servers
+			.select(dsl::id)
+			.filter(dsl::host.eq(host))
+			.filter(dsl::deleted_at.is_null())
+			.first(db)
+			.await
+			.optional()
+			.map_err(AppError::from)
 	}
 
 	/// Live (non-archived) servers currently bound to this device.

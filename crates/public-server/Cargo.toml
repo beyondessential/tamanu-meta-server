@@ -59,6 +59,7 @@ axum-test.workspace = true
 commons-tests = { path = "../commons-tests" }
 http.workspace = true
 percent-encoding = "2.3.2"
+ring = "0.17"
 serde_json = "1.0.150"
 
 [features]
