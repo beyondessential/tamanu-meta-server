@@ -574,7 +574,7 @@ const DEFAULT_ALERT_SECS: i64 = 600;
 const ENROLLMENT_TTL: jiff::SignedDuration = jiff::SignedDuration::from_hours(24 * 7);
 
 #[derive(Deserialize, ToSchema)]
-pub struct CreateArgs {
+pub struct CreateServerArgs {
 	pub name: Option<String>,
 	pub host: String,
 	pub kind: ServerKind,
@@ -600,7 +600,7 @@ pub struct CreateArgs {
 	path = "/create",
 	tag = "servers",
 	security(("tailscale-admin" = [])),
-	request_body = CreateArgs,
+	request_body = CreateServerArgs,
 	responses(
 		(status = 200, description = "New server id.", body = Uuid, content_type = "application/json"),
 		(status = 400, body = ProblemDetailsSchema),
@@ -610,7 +610,7 @@ pub struct CreateArgs {
 pub async fn create(
 	State(state): State<AppState>,
 	_admin: TailscaleAdmin,
-	Json(args): Json<CreateArgs>,
+	Json(args): Json<CreateServerArgs>,
 ) -> Result<Json<Uuid>> {
 	let mut conn = state.db.get().await?;
 

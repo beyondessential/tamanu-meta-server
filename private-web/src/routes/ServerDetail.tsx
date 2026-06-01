@@ -1,4 +1,7 @@
 import {
+	Accordion,
+	AccordionDetails,
+	AccordionSummary,
 	Alert,
 	Box,
 	Button,
@@ -6,6 +9,7 @@ import {
 	Dialog,
 	DialogActions,
 	DialogContent,
+	DialogContentText,
 	DialogTitle,
 	IconButton,
 	LinearProgress,
@@ -19,14 +23,17 @@ import {
 } from "@mui/material";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import CancelIcon from "@mui/icons-material/Cancel";
+import DeleteIcon from "@mui/icons-material/DeleteOutlined";
 import EditIcon from "@mui/icons-material/Edit";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import LanguageIcon from "@mui/icons-material/Language";
+import RestoreIcon from "@mui/icons-material/RestoreFromTrash";
 import NotificationsActiveOutlinedIcon from "@mui/icons-material/NotificationsActiveOutlined";
 import NotificationsOffIcon from "@mui/icons-material/NotificationsOff";
 import NotificationsOffOutlinedIcon from "@mui/icons-material/NotificationsOffOutlined";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { Fragment, useEffect, useState } from "react";
-import { Link as RouterLink, useParams } from "react-router-dom";
+import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import IncidentsLink from "../components/IncidentsLink";
 import ManualEventButton from "../components/ManualEventButton";
 import SilencedRefsSection from "../components/SilencedRefsSection";
@@ -38,6 +45,7 @@ import VersionIndicator from "../components/VersionIndicator";
 import { HealthLegend, StatusLegend, VersionLegend } from "../components/Legends";
 import ServerKindChip from "../components/ServerKindChip";
 import ServerRankChip from "../components/ServerRankChip";
+import ServerSetupInstructions from "../components/ServerSetupInstructions";
 import { callApi, useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
@@ -101,6 +109,8 @@ export default function ServerDetail() {
 
 	const data = detail.data;
 	const admin = isAdmin.status === "ok" && isAdmin.data;
+	const archived = data.server.archived;
+	const registered = data.server.registered_at != null;
 
 	return (
 		<Stack spacing={3}>
@@ -110,19 +120,34 @@ export default function ServerDetail() {
 				hasOpenIncident={hasOpenIncident}
 				refreshTick={refreshTick}
 				onEventSubmitted={bumpRefresh}
+				onArchived={() => detail.reload()}
 			/>
-			<UrlAndDevice
+			{archived ? (
+				<ArchivedBanner
+					serverId={data.server.id}
+					isAdmin={admin}
+					onRestored={() => detail.reload()}
+				/>
+			) : (
+				!registered && (
+					<>
+						<Alert severity="info">
+							This server hasn't checked in yet. Follow the setup
+							instructions below to enroll it.
+						</Alert>
+						<ServerSetupInstructions
+							serverId={data.server.id}
+							onRegistered={() => detail.reload()}
+						/>
+					</>
+				)
+			)}
+			<AdvancedIdentitySection
 				host={data.server.host}
 				serverId={data.server.id}
 				deviceInfo={data.device_info}
 				refresh={() => detail.reload()}
 			/>
-			{data.device_info && (
-				<TailnetIdentitySection
-					device={data.device_info}
-					refresh={() => detail.reload()}
-				/>
-			)}
 			<InfoSection
 				server={data.server}
 				status={data.last_status}
@@ -170,13 +195,16 @@ function Header({
 	hasOpenIncident,
 	refreshTick,
 	onEventSubmitted,
+	onArchived,
 }: {
 	data: ServerDetailData;
 	isAdmin: boolean;
 	hasOpenIncident: boolean;
 	refreshTick: number;
 	onEventSubmitted: () => void;
+	onArchived: () => void;
 }) {
+	const archived = data.server.archived;
 	return (
 		<Stack
 			direction="row"
@@ -224,6 +252,13 @@ function Header({
 						>
 							Edit
 						</Button>
+						{!archived && (
+							<DeleteServerButton
+								serverId={data.server.id}
+								serverName={data.server.name ?? "this server"}
+								onArchived={onArchived}
+							/>
+						)}
 					</>
 				)}
 			</Stack>
@@ -231,13 +266,177 @@ function Header({
 	);
 }
 
-function UrlAndDevice({
+/// Inline admin action: archive (soft-delete) the server behind a confirm
+/// dialog, then navigate back to the servers list.
+function DeleteServerButton({
+	serverId,
+	serverName,
+	onArchived,
+}: {
+	serverId: string;
+	serverName: string;
+	onArchived: () => void;
+}) {
+	const navigate = useNavigate();
+	const action = useApiAction("servers", "delete");
+	const [open, setOpen] = useState(false);
+
+	const onConfirm = async () => {
+		try {
+			await action.call({ server_id: serverId });
+			setOpen(false);
+			onArchived();
+			navigate("/servers");
+		} catch {
+			/* surfaced via action.error */
+		}
+	};
+
+	return (
+		<>
+			<Button
+				variant="outlined"
+				color="error"
+				startIcon={<DeleteIcon />}
+				onClick={() => setOpen(true)}
+			>
+				Delete
+			</Button>
+			<Dialog open={open} onClose={() => setOpen(false)} maxWidth="sm" fullWidth>
+				<DialogTitle>Archive server?</DialogTitle>
+				<DialogContent>
+					<DialogContentText>
+						Archive <strong>{serverName}</strong>? This soft-deletes the
+						server — it stops being monitored and its device is released,
+						but its history is kept and it can be restored later.
+					</DialogContentText>
+					{action.error && (
+						<Alert severity="error" sx={{ mt: 2 }}>
+							{action.error.message}
+						</Alert>
+					)}
+				</DialogContent>
+				<DialogActions>
+					<Button onClick={() => setOpen(false)} disabled={action.pending}>
+						Cancel
+					</Button>
+					<Button
+						variant="contained"
+						color="error"
+						onClick={onConfirm}
+						disabled={action.pending}
+					>
+						{action.pending ? "Archiving…" : "Archive"}
+					</Button>
+				</DialogActions>
+			</Dialog>
+		</>
+	);
+}
+
+/// Shown in place of the setup/registration area when a server has been
+/// archived. Keeps the rest of the page (history, status, etc.) visible.
+function ArchivedBanner({
+	serverId,
+	isAdmin,
+	onRestored,
+}: {
+	serverId: string;
+	isAdmin: boolean;
+	onRestored: () => void;
+}) {
+	const action = useApiAction("servers", "restore");
+	const onRestore = async () => {
+		try {
+			await action.call({ server_id: serverId });
+			onRestored();
+		} catch {
+			/* surfaced via action.error */
+		}
+	};
+	return (
+		<Alert
+			severity="warning"
+			action={
+				isAdmin ? (
+					<Button
+						color="inherit"
+						size="small"
+						startIcon={<RestoreIcon />}
+						onClick={onRestore}
+						disabled={action.pending}
+					>
+						{action.pending ? "Restoring…" : "Restore"}
+					</Button>
+				) : undefined
+			}
+		>
+			This server is archived. Its history is preserved below; restore it to
+			resume monitoring.
+			{action.error && (
+				<Box sx={{ mt: 1 }}>{action.error.message}</Box>
+			)}
+		</Alert>
+	);
+}
+
+/// "Advanced / identity" — keeps the URL visible (operators need it at a
+/// glance) but folds the device + Tailscale identity detail into a
+/// collapsed-by-default accordion, since the device is now an internal
+/// implementation detail of enrollment rather than something operators set
+/// up by hand.
+function AdvancedIdentitySection({
 	host,
 	serverId,
 	deviceInfo,
 	refresh,
 }: {
 	host: string;
+	serverId: string;
+	deviceInfo: DeviceInfo | null;
+	refresh: () => void;
+}) {
+	return (
+		<Stack spacing={2}>
+			<Paper variant="outlined" sx={{ p: 2 }}>
+				<Typography variant="h6" component="h2" gutterBottom>
+					URL
+				</Typography>
+				<MuiLink href={host} target="_blank" rel="noopener noreferrer">
+					{host}
+				</MuiLink>
+			</Paper>
+			<Accordion variant="outlined" disableGutters>
+				<AccordionSummary expandIcon={<ExpandMoreIcon />}>
+					<Typography variant="h6" component="h2">
+						Advanced / identity
+					</Typography>
+				</AccordionSummary>
+				<AccordionDetails>
+					<Stack spacing={2}>
+						<DeviceCard
+							serverId={serverId}
+							deviceInfo={deviceInfo}
+							refresh={refresh}
+						/>
+						{deviceInfo && (
+							<TailnetIdentitySection
+								device={deviceInfo}
+								refresh={refresh}
+							/>
+						)}
+					</Stack>
+				</AccordionDetails>
+			</Accordion>
+		</Stack>
+	);
+}
+
+function DeviceCard({
+	serverId,
+	deviceInfo,
+	refresh,
+}: {
 	serverId: string;
 	deviceInfo: DeviceInfo | null;
 	refresh: () => void;
@@ -250,14 +449,6 @@ function UrlAndDevice({
 			useFlexGap
 			sx={{ "& > *": { flex: 1 } }}
 		>
-			<Paper variant="outlined" sx={{ p: 2 }}>
-				<Typography variant="h6" component="h2" gutterBottom>
-					URL
-				</Typography>
-				<MuiLink href={host} target="_blank" rel="noopener noreferrer">
-					{host}
-				</MuiLink>
-			</Paper>
 			<Paper variant="outlined" sx={{ p: 2 }}>
 				<Typography variant="h6" component="h2" gutterBottom>
 					Device

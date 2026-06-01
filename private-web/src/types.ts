@@ -104,6 +104,9 @@ export type StatusSnapshotData = Solidify<Schemas["StatusSnapshotData"]>;
 export type ServerSilencedRef = Solidify<Schemas["ServerSilencedRef"]>;
 export type ServerGroupSilencedRef = Solidify<Schemas["ServerGroupSilencedRef"]>;
 
+export type EnrollmentBlob = Solidify<Schemas["EnrollmentBlob"]>;
+export type EnrollmentStatus = Solidify<Schemas["EnrollmentStatus"]>;
+
 export type DeviceData = Solidify<Schemas["DeviceData"]>;
 export type DeviceKeyInfo = Solidify<Schemas["DeviceKeyInfo"]>;
 export type DeviceConnectionData = Solidify<Schemas["DeviceConnectionData"]>;

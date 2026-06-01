@@ -1683,6 +1683,28 @@ export interface components {
             /** Format: uuid */
             version_id: string;
         };
+        CreateServerArgs: {
+            /** Format: int64 */
+            alert_when_down_for?: number | null;
+            cloud?: boolean | null;
+            geolocation?: null | components["schemas"]["GeoPoint"];
+            /** Format: uuid */
+            group_id?: string | null;
+            host: string;
+            is_monitored?: boolean | null;
+            kind: components["schemas"]["ServerKind"];
+            name?: string | null;
+            notes?: string | null;
+            public_name?: string | null;
+            rank?: null | components["schemas"]["ServerRank"];
+            tags?: null | components["schemas"]["TagMap"];
+            /**
+             * @description Optional Tailscale identity to pre-bind a device to (IP / node id / DNS
+             *     name). When given, a device row is created for that identity now and the
+             *     enrolling box's mTLS key is added to it at register time.
+             */
+            tailscale_identifier?: string | null;
+        };
         DeleteArgs: {
             email: string;
         };
@@ -4598,7 +4620,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CreateArgs"];
+                "application/json": components["schemas"]["CreateServerArgs"];
             };
         };
         responses: {

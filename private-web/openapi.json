@@ -2492,7 +2492,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CreateArgs"
+                "$ref": "#/components/schemas/CreateServerArgs"
               }
             }
           },
@@ -4163,6 +4163,102 @@
           "version_id": {
             "type": "string",
             "format": "uuid"
+          }
+        }
+      },
+      "CreateServerArgs": {
+        "type": "object",
+        "required": [
+          "host",
+          "kind"
+        ],
+        "properties": {
+          "alert_when_down_for": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "cloud": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "geolocation": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/GeoPoint"
+              }
+            ]
+          },
+          "group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "host": {
+            "type": "string"
+          },
+          "is_monitored": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ServerKind"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "public_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank"
+              }
+            ]
+          },
+          "tags": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TagMap"
+              }
+            ]
+          },
+          "tailscale_identifier": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional Tailscale identity to pre-bind a device to (IP / node id / DNS\nname). When given, a device row is created for that identity now and the\nenrolling box's mTLS key is added to it at register time."
           }
         }
       },

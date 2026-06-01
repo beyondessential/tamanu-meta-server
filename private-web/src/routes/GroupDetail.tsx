@@ -8,6 +8,7 @@ import {
 	Stack,
 	Typography,
 } from "@mui/material";
+import AddIcon from "@mui/icons-material/Add";
 import EditIcon from "@mui/icons-material/Edit";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { Link as RouterLink, useParams } from "react-router-dom";
@@ -65,14 +66,24 @@ export default function GroupDetail() {
 					{group.name}
 				</Typography>
 				{admin && (
-					<Button
-						component={RouterLink}
-						to={`/groups/${group.id}/edit`}
-						variant="contained"
-						startIcon={<EditIcon />}
-					>
-						Edit
-					</Button>
+					<Stack direction="row" spacing={1}>
+						<Button
+							component={RouterLink}
+							to={`/groups/${group.id}/servers/new`}
+							variant="contained"
+							startIcon={<AddIcon />}
+						>
+							Add server
+						</Button>
+						<Button
+							component={RouterLink}
+							to={`/groups/${group.id}/edit`}
+							variant="outlined"
+							startIcon={<EditIcon />}
+						>
+							Edit
+						</Button>
+					</Stack>
 				)}
 			</Stack>
 
@@ -113,8 +124,8 @@ export default function GroupDetail() {
 				</Typography>
 				{servers.length === 0 ? (
 					<Alert severity="info">
-						No servers in this group yet. Edit a server and pick this group
-						from the group selector.
+						No servers in this group yet. Use “Add server” above to enroll
+						one into this group.
 					</Alert>
 				) : (
 					<Stack spacing={2}>

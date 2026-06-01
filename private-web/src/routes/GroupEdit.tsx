@@ -16,9 +16,17 @@ import { usePageTitle } from "../hooks/usePageTitle";
 import type { ServerGroup, TagMap } from "../types";
 
 export default function GroupEdit() {
-	const { id = "" } = useParams<{ id: string }>();
-	usePageTitle("Edit group");
-	const result = useApi("server_groups", "get", { server_group_id: id }, [id]);
+	const { id } = useParams<{ id?: string }>();
+	const isCreate = id == null;
+	usePageTitle(isCreate ? "New group" : "Edit group");
+	const result = useApi(
+		"server_groups",
+		"get",
+		{ server_group_id: id ?? "" },
+		[id ?? ""],
+	);
+
+	if (isCreate) return <CreateForm />;
 
 	if (result.status === "loading" || result.status === "idle") {
 		return <LinearProgress />;
@@ -31,6 +39,82 @@ export default function GroupEdit() {
 			group={result.data.group}
 			memberCount={result.data.servers.length}
 		/>
+	);
+}
+
+/// Create mode. Collects just a name (notes/tags/cooldown are editable
+/// afterwards) and, on success, drops the operator straight into the
+/// add-server flow for the freshly-created group.
+function CreateForm() {
+	const navigate = useNavigate();
+	const create = useApiAction("server_groups", "create");
+	const [name, setName] = useState("");
+	const [notes, setNotes] = useState("");
+	const [tags, setTags] = useState<TagMap>({});
+
+	const onSubmit = async (e: React.FormEvent) => {
+		e.preventDefault();
+		try {
+			const group = await create.call({ name, notes, tags });
+			navigate(`/groups/${group.id}/servers/new`);
+		} catch {
+			/* surfaced via create.error */
+		}
+	};
+
+	return (
+		<Paper variant="outlined" sx={{ p: 3 }} component="form" onSubmit={onSubmit}>
+			<Stack spacing={2}>
+				<Typography variant="h5" component="h1">
+					New group
+				</Typography>
+
+				<TextField
+					label="Name"
+					value={name}
+					onChange={(e) => setName(e.target.value)}
+					disabled={create.pending}
+					required
+				/>
+
+				<TextField
+					label="Notes"
+					multiline
+					minRows={3}
+					value={notes}
+					onChange={(e) => setNotes(e.target.value)}
+					disabled={create.pending}
+					helperText="Plain text shown on the group's detail page."
+				/>
+
+				<Stack spacing={1}>
+					<Typography variant="subtitle1">Tags</Typography>
+					<TagsEditor value={tags} onChange={setTags} disabled={create.pending} />
+					<Typography variant="caption" color="text.secondary">
+						These tags are inherited by every server in the group.
+					</Typography>
+				</Stack>
+
+				{create.error && (
+					<Alert severity="error">{create.error.message}</Alert>
+				)}
+
+				<Stack direction="row" spacing={1}>
+					<Button type="submit" variant="contained" disabled={create.pending}>
+						{create.pending ? "Creating…" : "Create group"}
+					</Button>
+					<Button
+						type="button"
+						variant="outlined"
+						color="error"
+						onClick={() => navigate("/servers")}
+						disabled={create.pending}
+					>
+						Cancel
+					</Button>
+				</Stack>
+			</Stack>
+		</Paper>
 	);
 }
 
