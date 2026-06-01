@@ -2481,6 +2481,148 @@
         ]
       }
     },
+    "/api/servers/create": {
+      "post": {
+        "tags": [
+          "servers"
+        ],
+        "summary": "Operator-driven server creation. Creates the `servers` row (optionally\npre-bound to a Tailscale device), ungrouped or in the supplied group.",
+        "operationId": "create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "New server id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/servers/delete": {
+      "post": {
+        "tags": [
+          "servers"
+        ],
+        "summary": "Archive (soft-delete) a server. Releases and demotes its device.",
+        "operationId": "delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerIdOnlyArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/servers/enrollment_status": {
+      "post": {
+        "tags": [
+          "servers"
+        ],
+        "summary": "Enrollment state for a server: whether it has registered, and whether an\nenrollment token is currently outstanding (expiry only).",
+        "operationId": "enrollment_status",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerIdOnlyArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrollmentStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/servers/get_detail": {
       "post": {
         "tags": [
@@ -2601,52 +2743,6 @@
         }
       }
     },
-    "/api/servers/import_ticket": {
-      "post": {
-        "tags": [
-          "servers"
-        ],
-        "operationId": "import_ticket",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ImportTicketArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "New server id.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "string",
-                  "format": "uuid"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
     "/api/servers/list_some": {
       "post": {
         "tags": [
@@ -2699,6 +2795,91 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Page_ServerInfo"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/servers/mint_enrollment": {
+      "post": {
+        "tags": [
+          "servers"
+        ],
+        "summary": "Mint (or reissue) an enrollment token for a server and return the base64\nblob the operator runs through bestool. The plaintext token lives only in\nthe blob; reissuing invalidates any prior token.",
+        "operationId": "mint_enrollment",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerIdOnlyArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrollmentBlob"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/servers/restore": {
+      "post": {
+        "tags": [
+          "servers"
+        ],
+        "summary": "Un-archive a server. The box must re-enroll to rebind a device.",
+        "operationId": "restore",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerIdOnlyArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
                 }
               }
             }
@@ -4177,6 +4358,44 @@
           "server"
         ]
       },
+      "EnrollmentBlob": {
+        "type": "object",
+        "required": [
+          "blob",
+          "expires_at"
+        ],
+        "properties": {
+          "blob": {
+            "type": "string",
+            "description": "Base64url of the enrollment JSON to feed to `bestool canopy register`."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "EnrollmentStatus": {
+        "type": "object",
+        "properties": {
+          "registered_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When enrollment completed; `None` while awaiting first check-in."
+          },
+          "token_expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Expiry of the currently-active enrollment token, if one is outstanding.\nNever reveals the token itself."
+          }
+        }
+      },
       "EventData": {
         "type": "object",
         "required": [
@@ -4564,31 +4783,6 @@
           "id": {
             "type": "string",
             "format": "uuid"
-          }
-        }
-      },
-      "ImportTicketArgs": {
-        "type": "object",
-        "required": [
-          "ticket_b64",
-          "kind"
-        ],
-        "properties": {
-          "kind": {
-            "$ref": "#/components/schemas/ServerKind"
-          },
-          "rank": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/ServerRank"
-              }
-            ]
-          },
-          "ticket_b64": {
-            "type": "string"
           }
         }
       },
@@ -5492,13 +5686,18 @@
                 "is_monitored",
                 "alert_when_down_for",
                 "notes",
-                "tags"
+                "tags",
+                "archived"
               ],
               "properties": {
                 "alert_when_down_for": {
                   "type": "integer",
                   "format": "int64",
                   "description": "Threshold in seconds for the reachability sweep to consider this\nserver down. Always positive; only consulted when `is_monitored`\nis `true`. The default at creation is 600 (10 minutes)."
+                },
+                "archived": {
+                  "type": "boolean",
+                  "description": "Whether the server is archived (soft-deleted)."
                 },
                 "cloud": {
                   "type": [
@@ -5587,6 +5786,14 @@
                       "$ref": "#/components/schemas/ServerRank"
                     }
                   ]
+                },
+                "registered_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time",
+                  "description": "Set once a device has completed enrollment for this server. While\n`None`, the UI shows setup instructions."
                 },
                 "tags": {
                   "$ref": "#/components/schemas/TagMap"
@@ -6218,6 +6425,18 @@
           }
         }
       },
+      "ServerIdOnlyArgs": {
+        "type": "object",
+        "required": [
+          "server_id"
+        ],
+        "properties": {
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
       "ServerInfo": {
         "type": "object",
         "required": [
@@ -6227,13 +6446,18 @@
           "is_monitored",
           "alert_when_down_for",
           "notes",
-          "tags"
+          "tags",
+          "archived"
         ],
         "properties": {
           "alert_when_down_for": {
             "type": "integer",
             "format": "int64",
             "description": "Threshold in seconds for the reachability sweep to consider this\nserver down. Always positive; only consulted when `is_monitored`\nis `true`. The default at creation is 600 (10 minutes)."
+          },
+          "archived": {
+            "type": "boolean",
+            "description": "Whether the server is archived (soft-deleted)."
           },
           "cloud": {
             "type": [
@@ -6322,6 +6546,14 @@
                 "$ref": "#/components/schemas/ServerRank"
               }
             ]
+          },
+          "registered_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Set once a device has completed enrollment for this server. While\n`None`, the UI shows setup instructions."
           },
           "tags": {
             "$ref": "#/components/schemas/TagMap"

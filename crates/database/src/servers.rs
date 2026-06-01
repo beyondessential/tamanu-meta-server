@@ -337,6 +337,21 @@ impl Server {
 			.map_err(AppError::from)
 	}
 
+	/// Bind a device to a server (sets `device_id`).
+	pub async fn bind_device(
+		db: &mut AsyncPgConnection,
+		server_id: Uuid,
+		device_id: Uuid,
+	) -> Result<()> {
+		use crate::schema::servers::dsl;
+		diesel::update(dsl::servers.filter(dsl::id.eq(server_id)))
+			.set(dsl::device_id.eq(Some(device_id)))
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(())
+	}
+
 	/// Mark a server enrolled (sets `registered_at = now()`).
 	pub async fn mark_registered(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<()> {
 		use crate::schema::servers::dsl;

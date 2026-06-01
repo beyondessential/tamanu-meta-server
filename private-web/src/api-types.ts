@@ -987,6 +987,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/servers/create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Operator-driven server creation. Creates the `servers` row (optionally
+         *     pre-bound to a Tailscale device), ungrouped or in the supplied group.
+         */
+        post: operations["create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/servers/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Archive (soft-delete) a server. Releases and demotes its device. */
+        post: operations["delete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/servers/enrollment_status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enrollment state for a server: whether it has registered, and whether an
+         *     enrollment token is currently outstanding (expiry only).
+         */
+        post: operations["enrollment_status"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/servers/get_detail": {
         parameters: {
             query?: never;
@@ -1035,22 +1092,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/servers/import_ticket": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["import_ticket"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/servers/list_some": {
         parameters: {
             query?: never;
@@ -1081,6 +1122,44 @@ export interface paths {
          *     total count so the UI can show "(N ungrouped)" without a second fetch.
          */
         post: operations["list_ungrouped"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/servers/mint_enrollment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint (or reissue) an enrollment token for a server and return the base64
+         *     blob the operator runs through bestool. The plaintext token lives only in
+         *     the blob; reissuing invalidates any prior token.
+         */
+        post: operations["mint_enrollment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/servers/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Un-archive a server. The box must re-enroll to rebind a device. */
+        post: operations["restore"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1660,6 +1739,25 @@ export interface components {
         };
         /** @enum {string} */
         DeviceRole: "untrusted" | "admin" | "releaser" | "server";
+        EnrollmentBlob: {
+            /** @description Base64url of the enrollment JSON to feed to `bestool canopy register`. */
+            blob: string;
+            /** Format: date-time */
+            expires_at: string;
+        };
+        EnrollmentStatus: {
+            /**
+             * Format: date-time
+             * @description When enrollment completed; `None` while awaiting first check-in.
+             */
+            registered_at?: string | null;
+            /**
+             * Format: date-time
+             * @description Expiry of the currently-active enrollment token, if one is outstanding.
+             *     Never reveals the token itself.
+             */
+            token_expires_at?: string | null;
+        };
         EventData: {
             active: boolean;
             /** Format: date-time */
@@ -1817,11 +1915,6 @@ export interface components {
             created_at: string;
             /** Format: uuid */
             id: string;
-        };
-        ImportTicketArgs: {
-            kind: components["schemas"]["ServerKind"];
-            rank?: null | components["schemas"]["ServerRank"];
-            ticket_b64: string;
         };
         IncidentData: {
             /** Format: date-time */
@@ -2154,6 +2247,8 @@ export interface components {
                  *     is `true`. The default at creation is 600 (10 minutes).
                  */
                 alert_when_down_for: number;
+                /** @description Whether the server is archived (soft-deleted). */
+                archived: boolean;
                 cloud?: boolean | null;
                 /** Format: uuid */
                 device_id?: string | null;
@@ -2184,6 +2279,12 @@ export interface components {
                  */
                 public_name?: string | null;
                 rank?: null | components["schemas"]["ServerRank"];
+                /**
+                 * Format: date-time
+                 * @description Set once a device has completed enrollment for this server. While
+                 *     `None`, the UI shows setup instructions.
+                 */
+                registered_at?: string | null;
                 tags: components["schemas"]["TagMap"];
                 up?: null | components["schemas"]["ShortStatus"];
             }[];
@@ -2403,6 +2504,10 @@ export interface components {
             /** Format: uuid */
             server_id: string;
         };
+        ServerIdOnlyArgs: {
+            /** Format: uuid */
+            server_id: string;
+        };
         ServerInfo: {
             /**
              * Format: int64
@@ -2411,6 +2516,8 @@ export interface components {
              *     is `true`. The default at creation is 600 (10 minutes).
              */
             alert_when_down_for: number;
+            /** @description Whether the server is archived (soft-deleted). */
+            archived: boolean;
             cloud?: boolean | null;
             /** Format: uuid */
             device_id?: string | null;
@@ -2441,6 +2548,12 @@ export interface components {
              */
             public_name?: string | null;
             rank?: null | components["schemas"]["ServerRank"];
+            /**
+             * Format: date-time
+             * @description Set once a device has completed enrollment for this server. While
+             *     `None`, the UI shows setup instructions.
+             */
+            registered_at?: string | null;
             tags: components["schemas"]["TagMap"];
             up?: null | components["schemas"]["ShortStatus"];
         };
@@ -4476,6 +4589,106 @@ export interface operations {
             };
         };
     };
+    create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateArgs"];
+            };
+        };
+        responses: {
+            /** @description New server id. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": string;
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerIdOnlyArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    enrollment_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerIdOnlyArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrollmentStatus"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
     get_detail: {
         parameters: {
             query?: never;
@@ -4569,38 +4782,6 @@ export interface operations {
             };
         };
     };
-    import_ticket: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ImportTicketArgs"];
-            };
-        };
-        responses: {
-            /** @description New server id. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": string;
-                };
-            };
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-        };
-    };
     list_some: {
         parameters: {
             query?: never;
@@ -4643,6 +4824,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Page_ServerInfo"];
+                };
+            };
+        };
+    };
+    mint_enrollment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerIdOnlyArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrollmentBlob"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    restore: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerIdOnlyArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
         };

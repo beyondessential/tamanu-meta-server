@@ -1,22 +1,38 @@
-use axum::{Json, extract::State};
-use commons_errors::{ProblemDetailsSchema, Result};
-use commons_servers::device_auth::{AdminDevice, ServerDevice};
+use axum::{Json, extract::State, http::HeaderMap};
+use base64::Engine;
+use commons_errors::{AppError, ProblemDetailsSchema, Result};
+use commons_servers::device_auth::{mtls, pop};
 use commons_types::server::{kind::ServerKind, rank::ServerRank};
 use database::{
 	Db,
-	servers::{NewServer, PartialServer, Server},
+	devices::Device,
+	server_enrollment_challenges::ServerEnrollmentChallenge,
+	server_enrollment_tokens::ServerEnrollmentToken,
+	servers::Server,
 	url_field::UrlField,
 };
-use diesel::{ExpressionMethods as _, QueryDsl as _, SelectableHelper as _};
-use diesel_async::RunQueryDsl as _;
-use serde::Serialize;
+use diesel_async::AsyncConnection;
+use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
+use uuid::Uuid;
 
 use crate::state::AppState;
 
+/// Env var naming the request header the terminating proxy populates with the
+/// TLS exporter (RFC 9266 channel binding). When set, enrollment requires
+/// channel binding; when unset, application-layer proof-of-possession runs
+/// alone.
+const EKM_HEADER_ENV: &str = "CANOPY_ENROLL_EKM_HEADER";
+
+/// Challenge lifetime: short, since the device fetches it and immediately signs.
+const CHALLENGE_TTL: jiff::SignedDuration = jiff::SignedDuration::from_mins(5);
+
 pub fn routes() -> OpenApiRouter<AppState> {
-	OpenApiRouter::new().routes(routes!(list, create, edit, remove))
+	OpenApiRouter::new()
+		.routes(routes!(list))
+		.routes(routes!(register_begin))
+		.routes(routes!(register_complete))
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -69,136 +85,186 @@ pub async fn list(State(db): State<Db>) -> Result<Json<Vec<PublicServer>>> {
 	Ok(Json(servers))
 }
 
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct BeginArgs {
+	pub server_id: Uuid,
+	pub token: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct BeginResponse {
+	/// Base64 (standard) of the 32-byte challenge nonce.
+	pub nonce: String,
+	/// True iff the server requires the TLS exporter (`EKM`) be folded into the
+	/// signed transcript (channel binding). The client must then append it.
+	pub channel_binding_required: bool,
+}
+
+/// Read the presented client cert's public key, or fail opaquely.
+fn presented_key(headers: &HeaderMap) -> Result<Vec<u8>> {
+	mtls::spki_from_headers(headers)
+		.map_err(|_| AppError::EnrollmentFailed)?
+		.ok_or(AppError::EnrollmentFailed)
+}
+
+/// The configured EKM header name, if channel binding is enabled.
+fn ekm_header_name() -> Option<String> {
+	std::env::var(EKM_HEADER_ENV).ok().filter(|s| !s.is_empty())
+}
+
 #[utoipa::path(
 	post,
-	path = "/",
+	path = "/register/begin",
 	tag = "servers",
-	security(("server-device" = [])),
-	request_body = NewServer,
+	request_body = BeginArgs,
 	responses(
-		(status = 200, body = Server),
-		(status = 401, body = ProblemDetailsSchema),
+		(status = 200, body = BeginResponse),
 		(status = 403, body = ProblemDetailsSchema),
 	),
 )]
-pub async fn create(
-	device: ServerDevice,
+pub async fn register_begin(
 	State(db): State<Db>,
-	Json(input): Json<NewServer>,
-) -> Result<Json<Server>> {
+	headers: HeaderMap,
+	Json(args): Json<BeginArgs>,
+) -> Result<Json<BeginResponse>> {
 	let mut db = db.get().await?;
-	let mut input = Server::from(input);
-	input.device_id = Some(device.0.0.id);
+	let spki = presented_key(&headers)?;
 
-	let server = diesel::insert_into(database::schema::servers::table)
-		.values(input)
-		.returning(Server::as_select())
-		.get_result(&mut db)
-		.await?;
-
-	// A new member can shift the group's canonical member, so refresh the cache.
-	if let Some(group_id) = server.group_id {
-		database::server_groups::ServerGroup::recompute_version(&mut db, group_id).await?;
+	// Server must exist and be live.
+	let server = Server::get_by_id(&mut db, args.server_id)
+		.await
+		.map_err(|_| AppError::EnrollmentFailed)?;
+	if server.deleted_at.is_some() {
+		return Err(AppError::EnrollmentFailed);
 	}
 
-	Ok(Json(server))
+	// Validate (do not consume) the token, then issue a challenge bound to it
+	// and the presented key.
+	let token = ServerEnrollmentToken::find_active(&mut db, args.server_id, &args.token).await?;
+	let nonce = ServerEnrollmentChallenge::create(
+		&mut db,
+		args.server_id,
+		&token.token_hash,
+		&spki,
+		CHALLENGE_TTL,
+	)
+	.await?;
+
+	Ok(Json(BeginResponse {
+		nonce: base64::engine::general_purpose::STANDARD.encode(&nonce),
+		channel_binding_required: ekm_header_name().is_some(),
+	}))
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct CompleteArgs {
+	pub server_id: Uuid,
+	/// Base64 (standard) of the nonce returned by `begin`.
+	pub nonce: String,
+	/// Base64 (standard) of the ASN.1 DER ECDSA-P256-SHA256 signature over the
+	/// transcript `nonce ‖ server_id ‖ spki [‖ ekm]`.
+	pub signature: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct CompleteResponse {
+	pub server_id: Uuid,
+	pub device_id: Uuid,
 }
 
 #[utoipa::path(
-	patch,
-	path = "/",
+	post,
+	path = "/register/complete",
 	tag = "servers",
-	security(("server-device" = [])),
-	request_body = PartialServer,
+	request_body = CompleteArgs,
 	responses(
-		(status = 200, body = Server),
-		(status = 401, body = ProblemDetailsSchema),
-		(status = 403, body = ProblemDetailsSchema),
-		(status = 404, body = ProblemDetailsSchema),
-	),
-)]
-pub async fn edit(
-	device: ServerDevice,
-	State(db): State<Db>,
-	Json(input): Json<PartialServer>,
-) -> Result<Json<Server>> {
-	use database::schema::servers::dsl::*;
-
-	let mut db = db.get().await?;
-	let input_id = input.id;
-	let dev_id = device.0.0.id;
-
-	// Capture the old group before the update: rank/kind/group_id may all
-	// change, so both the old and new group's canonical member can shift.
-	let old_group_id = Server::get_by_id(&mut db, input_id)
-		.await
-		.ok()
-		.and_then(|s| s.group_id);
-
-	// Scope to the calling device's own server: a device may only edit the
-	// server it is bound to, never an arbitrary server id from the body.
-	diesel::update(servers)
-		.filter(id.eq(input_id))
-		.filter(device_id.eq(dev_id))
-		.set(input)
-		.execute(&mut db)
-		.await?;
-
-	let updated: Server = servers
-		.filter(id.eq(input_id))
-		.filter(device_id.eq(dev_id))
-		.select(Server::as_select())
-		.first(&mut db)
-		.await?;
-
-	for gid in [old_group_id, updated.group_id]
-		.into_iter()
-		.flatten()
-		.collect::<std::collections::BTreeSet<_>>()
-	{
-		database::server_groups::ServerGroup::recompute_version(&mut db, gid).await?;
-	}
-
-	Ok(Json(updated))
-}
-
-#[utoipa::path(
-	delete,
-	path = "/",
-	tag = "servers",
-	security(("admin-device" = [])),
-	request_body = PartialServer,
-	responses(
-		(status = 200),
-		(status = 401, body = ProblemDetailsSchema),
+		(status = 200, body = CompleteResponse),
 		(status = 403, body = ProblemDetailsSchema),
 	),
 )]
-pub async fn remove(
-	_device: AdminDevice,
+pub async fn register_complete(
 	State(db): State<Db>,
-	Json(input): Json<PartialServer>,
-) -> Result<()> {
-	use database::schema::servers::dsl::*;
-
+	headers: HeaderMap,
+	Json(args): Json<CompleteArgs>,
+) -> Result<Json<CompleteResponse>> {
 	let mut db = db.get().await?;
+	let spki = presented_key(&headers)?;
 
-	// Capture the group before the delete: the FK auto-nulls
-	// `version_server_id`, but we must repopulate the cache from the remaining
-	// members.
-	let removed_group_id = Server::get_by_id(&mut db, input.id)
-		.await
-		.ok()
-		.and_then(|s| s.group_id);
+	let nonce = base64::engine::general_purpose::STANDARD
+		.decode(&args.nonce)
+		.map_err(|_| AppError::EnrollmentFailed)?;
+	let signature = base64::engine::general_purpose::STANDARD
+		.decode(&args.signature)
+		.map_err(|_| AppError::EnrollmentFailed)?;
 
-	diesel::delete(servers)
-		.filter(id.eq(input.id))
-		.execute(&mut db)
+	// Single-use take: also confirms the key matches the one used at `begin`.
+	let challenge = ServerEnrollmentChallenge::take(&mut db, args.server_id, &nonce, &spki).await?;
+
+	// Build the transcript and verify proof-of-possession.
+	let mut transcript = nonce.clone();
+	transcript.extend_from_slice(args.server_id.as_bytes());
+	transcript.extend_from_slice(&spki);
+	if let Some(header_name) = ekm_header_name() {
+		// Channel binding required: fold in the proxy-provided TLS exporter.
+		let ekm = headers
+			.get(&header_name)
+			.and_then(|v| v.to_str().ok())
+			.and_then(|v| base64::engine::general_purpose::STANDARD.decode(v).ok())
+			.ok_or(AppError::EnrollmentFailed)?;
+		transcript.extend_from_slice(&ekm);
+	}
+	pop::verify_pop(&spki, &transcript, &signature)?;
+
+	// Bind + promote + burn the token, atomically. The challenge is already
+	// spent; a failure here strands the token (operator reissues) but never
+	// double-binds.
+	let device_id = db
+		.transaction::<_, AppError, _>(async |conn| {
+			let server = Server::get_by_id(conn, args.server_id).await?;
+			if server.deleted_at.is_some() {
+				return Err(AppError::EnrollmentFailed);
+			}
+
+			// Refuse to graft this key onto an identity already serving a
+			// different live server.
+			if let Some(existing) = Device::from_key(conn, &spki).await? {
+				if Server::live_by_device_id(conn, existing.id)
+					.await?
+					.iter()
+					.any(|s| s.id != args.server_id)
+				{
+					return Err(AppError::EnrollmentFailed);
+				}
+			}
+
+			let device_id = if let Some(device_id) = server.device_id {
+				// Tailscale-precreated device: attach the mTLS key (refuses if
+				// it already carries a different active key).
+				Device::add_key(conn, device_id, spki.clone()).await?;
+				device_id
+			} else {
+				// Reuse the box's prior device row (key may be inactive after a
+				// previous archival) or create a fresh one. Never merge.
+				let device_id = match Device::from_key_any_state(conn, &spki).await? {
+					Some(d) => {
+						Device::add_key(conn, d.id, spki.clone()).await?;
+						d.id
+					}
+					None => Device::create(conn, spki.clone()).await?.id,
+				};
+				Server::bind_device(conn, args.server_id, device_id).await?;
+				device_id
+			};
+
+			Device::trust(conn, device_id, commons_types::device::DeviceRole::Server).await?;
+			ServerEnrollmentToken::consume(conn, args.server_id, &challenge.token_hash).await?;
+			Server::mark_registered(conn, args.server_id).await?;
+			Ok(device_id)
+		})
 		.await?;
 
-	if let Some(gid) = removed_group_id {
-		database::server_groups::ServerGroup::recompute_version(&mut db, gid).await?;
-	}
-
-	Ok(())
+	Ok(Json(CompleteResponse {
+		server_id: args.server_id,
+		device_id,
+	}))
 }

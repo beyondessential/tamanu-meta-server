@@ -248,17 +248,19 @@
             }
           }
         }
-      },
+      }
+    },
+    "/servers/register/begin": {
       "post": {
         "tags": [
           "servers"
         ],
-        "operationId": "create",
+        "operationId": "register_begin",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/NewServer"
+                "$ref": "#/components/schemas/BeginArgs"
               }
             }
           },
@@ -270,17 +272,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Server"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                  "$ref": "#/components/schemas/BeginResponse"
                 }
               }
             }
@@ -295,23 +287,20 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "server-device": []
-          }
-        ]
-      },
-      "delete": {
+        }
+      }
+    },
+    "/servers/register/complete": {
+      "post": {
         "tags": [
           "servers"
         ],
-        "operationId": "remove",
+        "operationId": "register_complete",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/PartialServer"
+                "$ref": "#/components/schemas/CompleteArgs"
               }
             }
           },
@@ -319,14 +308,11 @@
         },
         "responses": {
           "200": {
-            "description": ""
-          },
-          "401": {
             "description": "",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                  "$ref": "#/components/schemas/CompleteResponse"
                 }
               }
             }
@@ -341,75 +327,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "admin-device": []
-          }
-        ]
-      },
-      "patch": {
-        "tags": [
-          "servers"
-        ],
-        "operationId": "edit",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PartialServer"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Server"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "server-device": []
-          }
-        ]
+        }
       }
     },
     "/status/{server_id}": {
@@ -845,20 +763,75 @@
           }
         }
       },
-      "GeoPoint": {
+      "BeginArgs": {
         "type": "object",
         "required": [
-          "lat",
-          "lon"
+          "server_id",
+          "token"
         ],
         "properties": {
-          "lat": {
-            "type": "number",
-            "format": "double"
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
           },
-          "lon": {
-            "type": "number",
-            "format": "double"
+          "token": {
+            "type": "string"
+          }
+        }
+      },
+      "BeginResponse": {
+        "type": "object",
+        "required": [
+          "nonce",
+          "channel_binding_required"
+        ],
+        "properties": {
+          "channel_binding_required": {
+            "type": "boolean",
+            "description": "True iff the server requires the TLS exporter (`EKM`) be folded into the\nsigned transcript (channel binding). The client must then append it."
+          },
+          "nonce": {
+            "type": "string",
+            "description": "Base64 (standard) of the 32-byte challenge nonce."
+          }
+        }
+      },
+      "CompleteArgs": {
+        "type": "object",
+        "required": [
+          "server_id",
+          "nonce",
+          "signature"
+        ],
+        "properties": {
+          "nonce": {
+            "type": "string",
+            "description": "Base64 (standard) of the nonce returned by `begin`."
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "signature": {
+            "type": "string",
+            "description": "Base64 (standard) of the ASN.1 DER ECDSA-P256-SHA256 signature over the\ntranscript `nonce ‖ server_id ‖ spki [‖ ekm]`."
+          }
+        }
+      },
+      "CompleteResponse": {
+        "type": "object",
+        "required": [
+          "server_id",
+          "device_id"
+        ],
+        "properties": {
+          "device_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
@@ -1037,164 +1010,6 @@
           }
         }
       },
-      "NewServer": {
-        "type": "object",
-        "required": [
-          "host",
-          "kind"
-        ],
-        "properties": {
-          "device_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          },
-          "group_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          },
-          "host": {
-            "$ref": "#/components/schemas/UrlField"
-          },
-          "kind": {
-            "$ref": "#/components/schemas/ServerKind"
-          },
-          "name": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "rank": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/ServerRank"
-              }
-            ]
-          }
-        }
-      },
-      "PartialServer": {
-        "type": "object",
-        "required": [
-          "id"
-        ],
-        "properties": {
-          "alert_when_down_for": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64"
-          },
-          "cloud": {
-            "type": [
-              "boolean",
-              "null"
-            ]
-          },
-          "device_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          },
-          "geolocation": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/GeoPoint"
-              }
-            ]
-          },
-          "group_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          },
-          "host": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/UrlField"
-              }
-            ]
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "is_monitored": {
-            "type": [
-              "boolean",
-              "null"
-            ]
-          },
-          "kind": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/ServerKind"
-              }
-            ]
-          },
-          "name": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "notes": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "public_name": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "rank": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/ServerRank"
-              }
-            ]
-          },
-          "tags": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/TagMap"
-              }
-            ]
-          }
-        }
-      },
       "ProblemDetailsSchema": {
         "type": "object",
         "description": "Wire-shape mirror of [`problem_details::ProblemDetails`] for OpenAPI.\n\nEvery error response from the servers serializes to this RFC 7807 shape via\n[`AppError`]'s `IntoResponse`. This struct exists so OpenAPI specs can\nreference a concrete schema; nothing actually constructs values of this\ntype at runtime.",
@@ -1254,104 +1069,6 @@
             ]
           }
         }
-      },
-      "Server": {
-        "type": "object",
-        "required": [
-          "id",
-          "host",
-          "kind",
-          "is_monitored",
-          "alert_when_down_for"
-        ],
-        "properties": {
-          "alert_when_down_for": {
-            "type": "integer",
-            "format": "int64",
-            "description": "Per-server downtime threshold: how long a server's status row may\ngo un-updated before the canopy reachability sweep files an issue.\nBump it up for flappy servers, drop it for critical ones that\nshould page promptly. Only consulted when `is_monitored` is `true`.\n\nConstrained to strictly positive by the database. Default 10\nminutes for newly-inserted rows. On the JSON wire this is\nrepresented as a count of whole seconds (`i64`)."
-          },
-          "cloud": {
-            "type": [
-              "boolean",
-              "null"
-            ]
-          },
-          "device_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          },
-          "geolocation": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/GeoPoint"
-              }
-            ]
-          },
-          "group_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          },
-          "host": {
-            "$ref": "#/components/schemas/UrlField"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "is_monitored": {
-            "type": "boolean",
-            "description": "Whether canopy is actively watching this server. When `false`, the\nreachability sweep skips it entirely and any of its issues are\nignored by the incident workflow — operators flip this off for\ntest environments and ad-hoc demos. The accompanying\n`alert_when_down_for` is preserved while muted so flipping back on\ndoesn't lose the chosen threshold."
-          },
-          "kind": {
-            "$ref": "#/components/schemas/ServerKind"
-          },
-          "name": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "notes": {
-            "type": "string"
-          },
-          "public_name": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "If `Some`, the server appears in the public `/servers` list under this\nname (used by the Tamanu Mobile app). `None` means not listed. Decoupled\nfrom `name` because server `name`s are scoped within a group and may not\nbe globally meaningful."
-          },
-          "rank": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/ServerRank"
-              }
-            ]
-          },
-          "tags": {
-            "$ref": "#/components/schemas/TagMap"
-          }
-        }
-      },
-      "ServerKind": {
-        "type": "string",
-        "enum": [
-          "central",
-          "facility",
-          "canopy"
-        ]
       },
       "ServerRank": {
         "type": "string",

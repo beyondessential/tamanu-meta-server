@@ -1,6 +1,11 @@
 //! mTLS path of the device-auth extractor. Reads a client certificate
 //! from one of the supported headers, derives a stable public-key blob,
-//! and resolves it to a [`Device`] row (auto-creating on first contact).
+//! and resolves it to an existing trusted [`Device`] row.
+//!
+//! First-contact auto-creation was deliberately removed: a device row is
+//! born only through the gated enrollment flow (`/servers/register/*`), so
+//! merely connecting once from the internet can no longer mint an `Untrusted`
+//! device. An unknown key here is `AuthCertificateNotFound`.
 
 use commons_errors::{AppError, Result};
 use database::devices::Device;
@@ -10,11 +15,27 @@ use x509_parser::prelude::*;
 
 /// Resolve a request to a [`Device`] via mTLS. Returns:
 ///
-/// - `Ok(Some(device))` — cert present, key matched (or auto-created).
+/// - `Ok(Some(device))` — cert present and its key matches a known device.
 /// - `Ok(None)` — no cert header at all (caller may try another path).
+/// - `Err(AuthCertificateNotFound)` — cert present but its key is unknown.
 /// - `Err(_)` — header present but malformed.
 pub async fn resolve(parts: &Parts, db: &mut AsyncPgConnection) -> Result<Option<Device>> {
-	let Some(pem) = extract_cert_pem(&parts.headers)? else {
+	let Some(key) = spki_from_headers(&parts.headers)? else {
+		return Ok(None);
+	};
+
+	match Device::from_key(db, &key).await? {
+		Some(existing) => Ok(Some(existing)),
+		None => Err(AppError::AuthCertificateNotFound),
+	}
+}
+
+/// Extract the presented client certificate's `SubjectPublicKeyInfo` (DER)
+/// from the request headers, *without* touching the database or creating a
+/// device. Returns `Ok(None)` when no cert header is present. The enrollment
+/// endpoints use this to own device resolution themselves.
+pub fn spki_from_headers(headers: &http::HeaderMap) -> Result<Option<Vec<u8>>> {
+	let Some(pem) = extract_cert_pem(headers)? else {
 		return Ok(None);
 	};
 
@@ -24,19 +45,7 @@ pub async fn resolve(parts: &Parts, db: &mut AsyncPgConnection) -> Result<Option
 		AppError::AuthInvalidCertificate(format!("Invalid X.509 certificate: {}", e))
 	})?;
 
-	let key = cert.tbs_certificate.subject_pki.raw.to_vec();
-
-	let device = if let Some(existing) = Device::from_key(db, &key).await? {
-		existing
-	} else {
-		Device::create(db, key)
-			.await
-			.map_err(|e| AppError::AuthFailed {
-				reason: format!("Failed to create device: {}", e),
-			})?
-	};
-
-	Ok(Some(device))
+	Ok(Some(cert.tbs_certificate.subject_pki.raw.to_vec()))
 }
 
 fn extract_cert_pem(headers: &http::HeaderMap) -> Result<Option<String>> {
