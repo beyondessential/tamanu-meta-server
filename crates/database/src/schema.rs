@@ -185,6 +185,30 @@ diesel::table! {
 }
 
 diesel::table! {
+	server_enrollment_challenges (id) {
+		id -> Uuid,
+		server_id -> Uuid,
+		token_hash -> Bytea,
+		public_key -> Bytea,
+		nonce -> Bytea,
+		created_at -> Timestamptz,
+		expires_at -> Timestamptz,
+		used_at -> Nullable<Timestamptz>,
+	}
+}
+
+diesel::table! {
+	server_enrollment_tokens (id) {
+		id -> Uuid,
+		server_id -> Uuid,
+		token_hash -> Bytea,
+		created_at -> Timestamptz,
+		expires_at -> Timestamptz,
+		consumed_at -> Nullable<Timestamptz>,
+	}
+}
+
+diesel::table! {
 	server_group_silenced_refs (server_group_id, source, ref_) {
 		server_group_id -> Uuid,
 		source -> Text,
@@ -238,6 +262,8 @@ diesel::table! {
 		tags -> Jsonb,
 		public_name -> Nullable<Text>,
 		is_monitored -> Bool,
+		deleted_at -> Nullable<Timestamptz>,
+		registered_at -> Nullable<Timestamptz>,
 	}
 }
 
@@ -337,6 +363,8 @@ diesel::joinable!(incidents -> server_groups (server_group_id));
 diesel::joinable!(issue_notes -> issues (issue_id));
 diesel::joinable!(issues -> devices (device_id));
 diesel::joinable!(issues -> servers (server_id));
+diesel::joinable!(server_enrollment_challenges -> servers (server_id));
+diesel::joinable!(server_enrollment_tokens -> servers (server_id));
 diesel::joinable!(server_group_silenced_refs -> server_groups (server_group_id));
 diesel::joinable!(server_silenced_refs -> servers (server_id));
 diesel::joinable!(servers -> devices (device_id));
@@ -363,6 +391,8 @@ diesel::allow_tables_to_appear_in_same_query!(
 	incidents,
 	issue_notes,
 	issues,
+	server_enrollment_challenges,
+	server_enrollment_tokens,
 	server_group_silenced_refs,
 	server_groups,
 	server_silenced_refs,
