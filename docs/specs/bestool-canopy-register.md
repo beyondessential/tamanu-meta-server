@@ -60,7 +60,12 @@ url-safe-no-pad — mirror Canopy's lenient decoding) encoding of this JSON:
    by a CA chain, so self-signed is fine). Persist this identity in bestool's
    usual config/state location so subsequent Canopy calls reuse it. **You must
    retain the private key** — enrollment now requires signing a challenge with
-   it.
+   it. **Strongly prefer a hardware-bound key:** generate/store the private key
+   in a TPM or secure element so it is non-exfiltratable — it cannot be copied to
+   another machine without explicit operator action. This is the primary defence
+   against key theft/cloning (Canopy verifies possession by signature, so a key
+   that can't leave the box can't be impersonated elsewhere). Fall back to a
+   file-stored key only where no secure element is available.
 3. **Run the two-step enrollment handshake** (see HTTP contract), presenting the
    client certificate (mTLS) on both calls and verifying the server's TLS against
    system roots:
@@ -85,16 +90,24 @@ Both calls are HTTPS with mTLS (present the machine client certificate) to
 ### Step 1 — `POST {api_url}/servers/register/begin`
 
 - **Body:** `{ "server_id": "<uuid>", "token": "<token>" }`
-- **Success `200`:** `{ "nonce": "<base64 of 32 bytes>" }`
+- **Success `200`:** `{ "nonce": "<base64 of 32 bytes>", "channel_binding_required": <bool> }`
 - The token is **not** consumed here; the challenge nonce is short-lived
-  (~minutes).
+  (~minutes). If `channel_binding_required` is `true`, you must include the TLS
+  exporter value in the signature (see below).
 
 ### Step 2 — `POST {api_url}/servers/register/complete`
 
-- **Signature:** sign the transcript `nonce ‖ server_id ‖ SPKI` (the exact
-  concatenation/encoding will be pinned by Canopy — coordinate the byte layout;
-  e.g. raw nonce bytes ‖ server_id UUID bytes ‖ DER SPKI bytes) with the
+- **Signature:** sign the transcript `nonce ‖ server_id ‖ SPKI [‖ EKM]` (the
+  exact concatenation/encoding will be pinned by Canopy — coordinate the byte
+  layout; e.g. raw nonce bytes ‖ server_id UUID bytes ‖ DER SPKI bytes) with the
   machine's private key, using the algorithm matching the cert key (ECDSA).
+- **Channel binding (when `channel_binding_required`):** append the TLS exporter
+  value (`EKM`) to the transcript before signing. Derive it from *this* TLS
+  connection per RFC 9266 "tls-exporter": label `EXPORTER-Channel-Binding`, empty
+  context, 32 bytes. The terminating proxy computes the same value and forwards
+  it to Canopy, which checks your signature covers it — this binds the
+  enrollment to the actual TLS session. (Requires a TLS stack that exposes RFC
+  5705 exporters.)
 - **Body:** `{ "server_id": "<uuid>", "nonce": "<from begin>", "signature": "<base64>" }`
 - **Success `200`:** `{ "server_id": "<uuid>", "device_id": "<uuid>" }`
 - **Errors:** RFC-7807-style problem JSON with a single opaque "enrollment
@@ -123,10 +136,10 @@ bestool canopy register --blob-file <path>
 ## Out of scope / notes
 
 - Status/metric reporting after enrollment is unchanged — this command only
-  performs enrollment. If bestool currently self-creates the server record via
-  Canopy's public `POST /servers` after coming online, that path is now redundant
-  (the operator creates the server). Flag to the Canopy side whether bestool
-  should stop calling it; do not remove Canopy's endpoint from here.
+  performs enrollment. **Canopy is removing the device-driven `POST/PATCH/DELETE
+  /servers` endpoints** (the operator now creates and edits the server record),
+  so bestool must **stop self-creating/self-editing** the server record if it
+  does so today. The public `GET /servers` mobile list is unaffected.
 - Token lifetime is 7 days, single-use, reissuable from Canopy — bestool doesn't
   manage token lifecycle, it just presents whatever is in the blob.
 - Canopy no longer returns a `central_public_key` (it was unused). If a real

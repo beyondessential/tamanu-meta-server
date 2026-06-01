@@ -54,9 +54,14 @@ Problems this plan fixes:
 1. **Legacy ticket import is removed entirely.** Delete the Import Ticket UI,
    the `import_ticket` endpoint, `Server::upsert_from_ticket`, the
    `CanopyTicket` type's Canopy-side usage, and `private-web`'s
-   `lib/canopyTicket.ts`. `bestool t meta-ticket` is removed entirely (noted in
-   the bestool spec). Reusable internals (URL canonicalization, cloud detection)
-   are refactored into helpers consumed by the new register path, not deleted.
+   `lib/canopyTicket.ts`, **and the `CanopyTicket` type itself** (delete
+   `crates/commons-types/src/server/ticket.rs` plus the `pub mod ticket;` /
+   `pub use ticket::CanopyTicket;` in `crates/commons-types/src/server.rs` —
+   verified there are no other Canopy consumers once `upsert_from_ticket` and
+   `import_ticket` are gone). `bestool t meta-ticket` is removed entirely (noted
+   in the bestool spec). Reusable internals (URL canonicalization, cloud
+   detection) are refactored into helpers consumed by the new register path, not
+   deleted.
    This is a net security improvement, with one conscious tradeoff (see
    *Security model*, "Legacy tradeoff").
 2. **Server delete = soft-delete, device rebindable via the gated flow.**
@@ -102,11 +107,19 @@ push model and is mitigated by token secrecy (blob handling, redaction, short
 challenge window) plus alerting, not by PoP. Treated as: blob leakage is a
 breach to investigate, not a routine threat to design DoS-resistance around.
 
-*Channel binding (future, not required):* binding the app-layer signature to the
-TLS session (e.g. signing a TLS exporter value) would be ideal but is almost
-certainly unavailable behind a terminating proxy that the app never shares TLS
-keying material with. If the proxy can be made to inject a session/exporter
-header, fold it into the signed transcript later. Out of scope now.
+*Channel binding (optional, env-gated):* to bind the app-layer signature to the
+TLS session (defeating relay/MITM through the terminating proxy), the signed
+transcript can include the TLS exporter value (RFC 9266 "tls-exporter": label
+`EXPORTER-Channel-Binding`, empty context, 32 bytes). The app never shares TLS
+keying material with a terminating proxy, so this only works if the proxy
+computes the exporter and forwards it in a header. It is therefore **gated on an
+env var that names that header** (e.g. `CANOPY_ENROLL_EKM_HEADER=x-tls-exporter`):
+when set, Canopy requires channel binding (reads the EKM from that header,
+includes it in the expected transcript, rejects if absent/mismatched) and
+`begin` advertises the requirement to the client; when unset, app-layer PoP runs
+without it. Both peers derive the same exporter from the shared TLS session, so
+bestool computes it client-side with the same parameters and includes it in the
+signature. May not be deployable until the proxy supports it — hence the gate.
 
 **2. No device is auto-created at the mTLS boundary.** Today `mtls::resolve`
 auto-creates an `Untrusted` device for any first-contact key
@@ -294,7 +307,8 @@ as-is (no slow hashing). Old/expired/used challenges can be swept opportunistica
   `canonicalize_host(url) -> UrlField` (`servers.rs:211`) and
   `detect_cloud(hosting: &str) -> Option<bool>` (`servers.rs:244`), called by the
   register path.
-- **Delete `Server::upsert_from_ticket`** and its `CanopyTicket` import.
+- **Delete `Server::upsert_from_ticket`** and its `CanopyTicket` import (then the
+  `CanopyTicket` type itself in `commons-types`, per decision 1).
 
 ### `server_groups.rs`
 
@@ -374,16 +388,21 @@ extractor (which is itself being changed to not auto-create).
 - Load server; if missing/archived → **generic** failure (item 5). Validate token
   via `find_active` (does not consume) → generic failure if inactive.
 - `ServerEnrollmentChallenge::create(server_id, token_hash, spki, ~5min)`.
-- Return `{ nonce }`. **Token not consumed.**
+- Return `{ nonce, channel_binding_required: bool }`. **Token not consumed.**
+  `channel_binding_required` is `true` iff `CANOPY_ENROLL_EKM_HEADER` is set, so
+  the client knows to include the TLS exporter in its signature.
 
 ### `POST /servers/register/complete`
 
 - Body: `CompleteArgs { server_id, nonce, signature }`.
 - `ServerEnrollmentChallenge::take(server_id, nonce, spki)` (single-use) → generic
   failure on any mismatch.
-- **Verify `signature` over the transcript `nonce ‖ server_id ‖ spki` against the
-  presented SPKI** (proof-of-possession). Bad signature → generic failure +
-  alert; the challenge is already spent.
+- **Verify `signature` over the transcript `nonce ‖ server_id ‖ spki [‖ ekm]`
+  against the presented SPKI** (proof-of-possession). When
+  `CANOPY_ENROLL_EKM_HEADER` is set, read the EKM from that header (set by the
+  proxy) and append it to the expected transcript; reject if the header is
+  absent. Bad signature → generic failure + alert; the challenge is already
+  spent.
 - One transaction (`SELECT … FOR UPDATE` on the server; re-check
   `deleted_at IS NULL` here — TOCTOU guard against a concurrent archive):
   1. Reject if `spki` is an active key on a device bound to a *different live*
@@ -402,13 +421,14 @@ extractor (which is itself being changed to not auto-create).
   dropped; nothing consumes it and shipping an unverified "trust anchor" is a
   footgun. Re-add only with a real consumer + verification story.)
 
-**Existing public-server endpoints:** `create` (`servers.rs:84`), `edit`
-(`:115`), `remove` (`:152`). The device-driven `create` is made **redundant** by
-operator-first creation. `edit`'s cross-server IDOR (any server device could
-edit any server by body id) is being fixed **separately and ahead of this work**
-(scope `edit` to the calling device's own server). *Follow-up (do not silently
-drop):* decide whether bestool self-reports metadata post-enrollment; if not,
-remove `create`/`edit`/`remove` here entirely. Flagged in "Open items".
+**Remove the device-driven public-server mutation surface.** Operator-first
+creation makes `create` (`servers.rs:84`), `edit` (`:115`), and `remove`
+(`:152`) redundant, so **delete all three** (and trim now-unused `NewServer` /
+`PartialServer` / `ServerDevice` / `AdminDevice` plumbing in this file). Keep
+`list` (`:49`) — that's the public mobile list of central servers, unrelated.
+bestool no longer self-creates or self-edits server records (noted in the bestool
+spec). The separately-landed IDOR fix on `edit` is thus superseded by its
+removal; it was correct to land immediately as interim defence.
 
 ## Backend: `crates/commons-servers` — stop auto-creating devices
 
@@ -530,6 +550,10 @@ Backend (`commons_tests::db` and `::server`):
     challenge spent;
   - **PoP negative**: presenting a victim's SPKI without its private key cannot
     complete;
+  - **channel binding**: with `CANOPY_ENROLL_EKM_HEADER` set, `begin` reports
+    `channel_binding_required: true`, and `complete` rejects a signature that
+    omits the EKM or a request missing the header; with it unset, plain PoP
+    completes;
   - key already bound to a *different live* server → rejected; `merge_into` never
     invoked from register;
   - soft-deleted-then-recreated server, same box → re-enrolls only via full
@@ -548,18 +572,16 @@ Frontend e2e (Playwright, `private-web/e2e`):
 
 ## Open items / follow-ups (surface, don't drop)
 
-- **Public-server `create`/`edit`/`remove` fate:** decide against the bestool
-  spec whether bestool self-reports metadata post-enrollment; if not, remove
-  them. (`edit`'s IDOR is fixed separately and ahead of this work.)
-- **`CanopyTicket` type removal from `commons-types`:** safe within Canopy once
-  `upsert_from_ticket` is gone; confirm no other Canopy consumer. bestool's
-  `meta-ticket` is removed via the spec.
-- **Channel binding (TLS↔app):** if the proxy can inject a TLS session/exporter
-  header, fold it into the signed transcript for full channel binding. Needs
-  proxy capability investigation; out of scope now.
-- **`machine-id` binding (existing annoyance, not this plan):** clients could
-  send/bind `/etc/machine-id` (or equivalent) and be rejected on mismatch, to
-  catch key reuse across cloned images — but it complicates genuine
-  host-to-host migration. Worth exploring separately.
-- **Token TTL configurability:** 7 days is the default; an env override could
-  come later.
+- **Channel-binding rollout:** the feature is in (env-gated on
+  `CANOPY_ENROLL_EKM_HEADER`), but whether our proxy can compute and forward a
+  TLS exporter value needs investigation before it can be switched on in any
+  environment. Until then it stays off and app-layer PoP runs alone.
+- **Token TTL configurability:** 7 days is the fixed default for now. Not made
+  env-configurable; if it becomes adjustable later it will most likely be a
+  per-mint UI control rather than an env var.
+- **Hardware-bound device keys (bestool side, not this plan):** the strongest
+  defence against a copied key is to make the key non-exfiltratable — bestool is
+  expected to bind the device key to a TPM/secure element so it can't be moved to
+  another machine without explicit operator action. Captured in the bestool spec
+  as a recommendation; no Canopy-side change needed (Canopy still just verifies
+  the signature against the presented SPKI).
