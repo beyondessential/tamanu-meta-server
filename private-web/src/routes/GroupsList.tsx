@@ -25,25 +25,17 @@ export default function GroupsList() {
 					<Button
 						component={RouterLink}
 						to="/groups/new"
-						variant="outlined"
-						startIcon={<AddIcon />}
-					>
-						New group
-					</Button>
-					<Button
-						component={RouterLink}
-						to="/servers/new"
 						variant="contained"
 						startIcon={<AddIcon />}
 					>
-						Add server
+						New group
 					</Button>
 				</Stack>
 			)}
 			{groups.data.length === 0 ? (
 				<Alert severity="info">
-					No server groups yet. Create one above, or add a server and assign
-					it to a new group.
+					No server groups yet. Create one above — adding a server starts from
+					its group.
 				</Alert>
 			) : (
 				<Stack spacing={1}>
