@@ -14,23 +14,35 @@ token-push" server enrollment.
   `bestool t meta-ticket`) carrying the machine's own public key; an operator
   pasted that ticket into Canopy to create the server.
 - **New flow:** an operator creates the server *in Canopy first*, and Canopy
-  hands them a base64 **enrollment blob**. The operator runs
-  `bestool canopy register` on the machine (feeding it the blob), which claims
-  the pre-created server over mTLS via a **challenge/response that proves the
-  machine holds the private key** behind the certificate it presents.
+  hands them a **passphrase-encrypted enrollment ticket** plus a separate
+  **4-word passphrase**. The operator runs `bestool canopy register` on the
+  machine (feeding it the ticket and the passphrase), which decrypts the ticket
+  and then claims the pre-created server over mTLS via a **challenge/response
+  that proves the machine holds the private key** behind the certificate it
+  presents.
 
 Net effect for bestool:
 
-1. **Add** `bestool canopy register` (blob read from stdin/file — see CLI shape).
+1. **Add** `bestool canopy register` (ticket read from stdin/file, passphrase
+   prompted — see CLI shape).
 2. **Remove** `bestool t meta-ticket` (the `CanopyTicket` producer) entirely —
    it has zero use once the Canopy change lands, so there's no deprecation
    window. Delete the command and any now-dead `CanopyTicket`-generation code it
    was the sole user of. Do not remove other `t` subcommands.
 
-## The enrollment blob
+## The enrollment ticket
 
-The blob is a base64url (accept all base64 variants: standard, no-pad, url-safe,
-url-safe-no-pad — mirror Canopy's lenient decoding) encoding of this JSON:
+Canopy returns two things from `mint_enrollment`:
+
+- `ticket` — base64 (standard) of an **age-encrypted** payload. The encryption
+  is an age/scrypt passphrase profile: the exact same primitives bestool's
+  `protect`/`reveal` already use (the `algae-cli` crate). Decrypt it with the
+  passphrase to recover the JSON below.
+- `passphrase` — a **4-word, lowercase, hyphen-separated** passphrase (e.g.
+  `correct-horse-battery-staple`, ~52 bits from the EFF large wordlist) that
+  decrypts the ticket. Shared **out-of-band** from the ticket.
+
+The decrypted payload is this JSON:
 
 ```jsonc
 {
@@ -41,18 +53,27 @@ url-safe-no-pad — mirror Canopy's lenient decoding) encoding of this JSON:
 }
 ```
 
+- Base64-decode the ticket (accept all base64 variants: standard, no-pad,
+  url-safe, url-safe-no-pad — mirror Canopy's lenient decoding), then decrypt
+  the resulting age bytestream with the passphrase. Reuse algae's
+  `reveal`/`decrypt_stream` plus `PassphraseArgs` to prompt for the passphrase
+  and decrypt.
 - Validate `v == "enroll-1"`; fail clearly otherwise.
-- `token` is a bearer secret — **never log it**, and read the blob from stdin or
-  a file, never an argv positional (see CLI shape), so it doesn't land in shell
-  history or `ps`/`/proc/<pid>/cmdline`.
-- There is no `group_id` and no CA in the blob. `api_url` is served with a webPKI
-  (Let's Encrypt) certificate, so verify the server's TLS against the system root
-  store; do not pin a CA.
+- `token` is a bearer secret — **never log it**. The ticket itself is encrypted,
+  but the decrypted payload (and the passphrase) are sensitive: read the ticket
+  from stdin or a file and prompt for the passphrase, never an argv positional
+  (see CLI shape), so neither lands in shell history or
+  `ps`/`/proc/<pid>/cmdline`.
+- There is no `group_id` and no CA in the payload. `api_url` is served with a
+  webPKI (Let's Encrypt) certificate, so verify the server's TLS against the
+  system root store; do not pin a CA.
 
 ## What `register` does
 
-1. **Read + parse** the blob (from stdin/file); validate version and required
-   fields (`api_url`, `server_id`, `token`).
+1. **Read + decrypt + parse** the ticket: read it (from stdin/file),
+   base64-decode it, prompt for the passphrase (algae `PassphraseArgs`),
+   `decrypt_stream` the age bytestream, then parse the JSON and validate version
+   and required fields (`api_url`, `server_id`, `token`).
 2. **Establish the machine's mTLS identity.** Use the machine's existing
    bestool/Canopy client key+certificate if one is already provisioned; if not,
    generate a keypair and a self-signed client certificate (ECDSA — Canopy
@@ -123,12 +144,16 @@ device.
 ## CLI shape
 
 ```
-bestool canopy register            # reads the blob from stdin
-bestool canopy register --blob-file <path>
+bestool canopy register            # reads the ticket from stdin, prompts for the passphrase
+bestool canopy register --ticket-file <path>
 ```
 
-- Read the blob from **stdin by default** (or `--blob-file`); do **not** accept it
-  as an argv positional (keeps the secret out of process listings and history).
+- Read the ticket from **stdin by default** (or `--ticket-file`); do **not**
+  accept it as an argv positional. The ticket is encrypted, but keeping it off
+  argv is consistent and avoids it landing in process listings/history.
+- Prompt for the **passphrase** interactively via algae's `PassphraseArgs`
+  (which also supports the usual non-interactive overrides). Never take it as an
+  argv positional.
 - Consider `--config <path>` to override where the mTLS identity/state is stored,
   consistent with other bestool subcommands.
 - Place under a `canopy` subcommand group (new if it doesn't exist).
@@ -141,7 +166,28 @@ bestool canopy register --blob-file <path>
   so bestool must **stop self-creating/self-editing** the server record if it
   does so today. The public `GET /servers` mobile list is unaffected.
 - Token lifetime is 7 days, single-use, reissuable from Canopy — bestool doesn't
-  manage token lifecycle, it just presents whatever is in the blob.
+  manage token lifecycle, it just presents whatever is in the decrypted payload.
+
+## Security model: why encrypt the ticket
+
+The `token` inside the ticket is the actual bearer secret for the PoP handshake;
+the **public-server `register/begin|complete` endpoints and the token/PoP
+handshake do not change** — bestool still presents the plaintext `token`.
+Encryption only protects the ticket *in transit* between the operator's screen
+and the target box, so the ticket can be pasted into chat/email/a config tool
+without that channel alone being enough to enrol.
+
+The residual brute-force risk is bounded by stacking:
+
+- the 4-word passphrase is ~52 bits of entropy, and the age/scrypt KDF makes each
+  guess deliberately expensive; and
+- even a recovered `token` is single-use, expires in 7 days, is rate-limited
+  per-server, and is **PoP-gated** (an attacker still has to sign the challenge
+  with the machine's private key).
+
+The benefit only holds if the **ticket and passphrase travel on different
+channels** — shipping both through the same channel gives an observer everything
+and defeats the point. The UI says as much.
 - Canopy no longer returns a `central_public_key` (it was unused). If a real
   server-trust anchor is added later, this spec will be updated with its
   verification story.

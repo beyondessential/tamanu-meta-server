@@ -2812,7 +2812,7 @@
         "tags": [
           "servers"
         ],
-        "summary": "Mint (or reissue) an enrollment token for a server and return the base64\nblob the operator runs through bestool. The plaintext token lives only in\nthe blob; reissuing invalidates any prior token.",
+        "summary": "Mint (or reissue) an enrollment token for a server and return the\npassphrase-encrypted ticket the operator runs through bestool, plus the\n4-word passphrase that decrypts it. The plaintext token lives only inside\nthe encrypted ticket; reissuing invalidates any prior token.",
         "operationId": "mint_enrollment",
         "requestBody": {
           "content": {
@@ -2830,7 +2830,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/EnrollmentBlob"
+                  "$ref": "#/components/schemas/EnrollmentTicket"
                 }
               }
             }
@@ -4456,23 +4456,6 @@
           "server"
         ]
       },
-      "EnrollmentBlob": {
-        "type": "object",
-        "required": [
-          "blob",
-          "expires_at"
-        ],
-        "properties": {
-          "blob": {
-            "type": "string",
-            "description": "Base64url of the enrollment JSON to feed to `bestool canopy register`."
-          },
-          "expires_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
-      },
       "EnrollmentStatus": {
         "type": "object",
         "properties": {
@@ -4491,6 +4474,28 @@
             ],
             "format": "date-time",
             "description": "Expiry of the currently-active enrollment token, if one is outstanding.\nNever reveals the token itself."
+          }
+        }
+      },
+      "EnrollmentTicket": {
+        "type": "object",
+        "required": [
+          "ticket",
+          "passphrase",
+          "expires_at"
+        ],
+        "properties": {
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "passphrase": {
+            "type": "string",
+            "description": "Freshly-generated 4-word passphrase that decrypts `ticket`. Share this\nout-of-band (a separate channel from the ticket itself)."
+          },
+          "ticket": {
+            "type": "string",
+            "description": "Base64 (standard) of the age-encrypted enrollment JSON to feed to\n`bestool canopy register`. Encrypted under `passphrase` (age/scrypt), so\nit is safe to copy around on its own."
           }
         }
       },

@@ -17,11 +17,12 @@ import { useEffect, useState } from "react";
 import { useApi, useApiAction } from "../api";
 import { useReloadInterval } from "../hooks/useReloadInterval";
 import TimeAgo from "./TimeAgo";
-import type { EnrollmentBlob } from "../types";
+import type { EnrollmentTicket } from "../types";
 
 /// Setup / enrollment instructions for a not-yet-registered server. Mints an
-/// enrollment ticket, shows it for the operator to paste into
-/// `bestool canopy register`, the token expiry, a reissue button, and a live
+/// encrypted enrollment ticket plus its 4-word passphrase, shows the ticket
+/// for the operator to paste into `bestool canopy register` and the passphrase
+/// to share out-of-band, the token expiry, a reissue button, and a live
 /// "waiting for check-in" → "registered" indicator polled from
 /// `servers.enrollment_status`.
 export default function ServerSetupInstructions({
@@ -35,8 +36,9 @@ export default function ServerSetupInstructions({
 	onRegistered?: () => void;
 }) {
 	const mint = useApiAction("servers", "mint_enrollment");
-	const [blob, setBlob] = useState<EnrollmentBlob | null>(null);
+	const [ticket, setTicket] = useState<EnrollmentTicket | null>(null);
 	const [copied, setCopied] = useState(false);
+	const [copiedPassphrase, setCopiedPassphrase] = useState(false);
 
 	// Poll enrollment status while we're showing instructions.
 	const tick = useReloadInterval(5000);
@@ -49,14 +51,14 @@ export default function ServerSetupInstructions({
 	const registeredAt =
 		status.status === "ok" ? status.data.registered_at : null;
 
-	// Mint a fresh blob on mount / when the server changes.
+	// Mint a fresh ticket on mount / when the server changes.
 	useEffect(() => {
 		let cancelled = false;
-		setBlob(null);
+		setTicket(null);
 		mint
 			.call({ server_id: serverId })
-			.then((b) => {
-				if (!cancelled) setBlob(b);
+			.then((t) => {
+				if (!cancelled) setTicket(t);
 			})
 			.catch(() => {
 				/* surfaced via mint.error */
@@ -77,21 +79,32 @@ export default function ServerSetupInstructions({
 	}, [registeredAt, notified, onRegistered]);
 
 	const reissue = () => {
-		setBlob(null);
+		setTicket(null);
 		mint
 			.call({ server_id: serverId })
-			.then((b) => setBlob(b))
+			.then((t) => setTicket(t))
 			.catch(() => {
 				/* surfaced via mint.error */
 			});
 	};
 
 	const onCopy = async () => {
-		if (!blob) return;
+		if (!ticket) return;
 		try {
-			await navigator.clipboard.writeText(blob.blob);
+			await navigator.clipboard.writeText(ticket.ticket);
 			setCopied(true);
 			window.setTimeout(() => setCopied(false), 2000);
+		} catch {
+			/* clipboard may be unavailable; ignore */
+		}
+	};
+
+	const onCopyPassphrase = async () => {
+		if (!ticket) return;
+		try {
+			await navigator.clipboard.writeText(ticket.passphrase);
+			setCopiedPassphrase(true);
+			window.setTimeout(() => setCopiedPassphrase(false), 2000);
 		} catch {
 			/* clipboard may be unavailable; ignore */
 		}
@@ -130,8 +143,9 @@ export default function ServerSetupInstructions({
 						}}
 					>
 						bestool canopy register
-					</Box>{" "}
-					and provide this enrollment ticket when prompted:
+					</Box>
+					, paste the enrollment ticket below when prompted, and it
+					will then ask for the passphrase shown further down.
 				</Typography>
 
 				<Box
@@ -148,12 +162,12 @@ export default function ServerSetupInstructions({
 						wordBreak: "break-all",
 					}}
 				>
-					{mint.pending && !blob
+					{mint.pending && !ticket
 						? "Minting enrollment ticket…"
-						: (blob?.blob ?? "—")}
+						: (ticket?.ticket ?? "—")}
 				</Box>
 
-				{blob && (
+				{ticket && (
 					<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
 						<Tooltip title={copied ? "Copied" : "Copy ticket"}>
 							<IconButton
@@ -174,9 +188,60 @@ export default function ServerSetupInstructions({
 						</Button>
 						<Box sx={{ flex: 1 }} />
 						<Typography variant="caption" color="text.secondary">
-							Only share with the server installer; do not reuse.
+							The ticket is encrypted; it is useless without the
+							passphrase.
 						</Typography>
 					</Stack>
+				)}
+
+				{ticket && (
+					<Box>
+						<Typography variant="subtitle2" gutterBottom>
+							Passphrase
+						</Typography>
+						<Stack
+							direction="row"
+							spacing={1}
+							sx={{ alignItems: "center" }}
+						>
+							<Box
+								component="code"
+								sx={{
+									flex: 1,
+									p: 1.5,
+									borderRadius: 1,
+									bgcolor: "action.selected",
+									fontFamily: "monospace",
+									fontSize: "1.1em",
+									fontWeight: 600,
+									letterSpacing: "0.02em",
+									userSelect: "all",
+									wordBreak: "break-all",
+								}}
+							>
+								{ticket.passphrase}
+							</Box>
+							<Tooltip
+								title={copiedPassphrase ? "Copied" : "Copy passphrase"}
+							>
+								<IconButton
+									size="small"
+									onClick={onCopyPassphrase}
+									aria-label="Copy passphrase"
+								>
+									<ContentCopyIcon fontSize="small" />
+								</IconButton>
+							</Tooltip>
+						</Stack>
+						<Typography
+							variant="caption"
+							color="text.secondary"
+							sx={{ display: "block", mt: 1 }}
+						>
+							Share the passphrase over a separate channel (e.g. a
+							call). The ticket is useless without it.
+						</Typography>
+					</Box>
 				)}
 
 				{mint.error && (

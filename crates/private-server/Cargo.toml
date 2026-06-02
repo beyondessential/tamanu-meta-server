@@ -39,6 +39,9 @@ utoipa.workspace = true
 utoipa-axum.workspace = true
 utoipa-swagger-ui.workspace = true
 uuid = { version = "1.23.1", features = ["serde", "v4"] }
+chbs = "0.1.1"
+algae-cli = "1.0.21"
+age = "0.11.3"
 
 [dev-dependencies]
 commons-tests = { path = "../commons-tests" }

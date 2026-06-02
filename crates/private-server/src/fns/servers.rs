@@ -771,15 +771,36 @@ pub async fn restore(
 }
 
 #[derive(Serialize, ToSchema)]
-pub struct EnrollmentBlob {
-	/// Base64url of the enrollment JSON to feed to `bestool canopy register`.
-	pub blob: String,
+pub struct EnrollmentTicket {
+	/// Base64 (standard) of the age-encrypted enrollment JSON to feed to
+	/// `bestool canopy register`. Encrypted under `passphrase` (age/scrypt), so
+	/// it is safe to copy around on its own.
+	pub ticket: String,
+	/// Freshly-generated 4-word passphrase that decrypts `ticket`. Share this
+	/// out-of-band (a separate channel from the ticket itself).
+	pub passphrase: String,
 	pub expires_at: Timestamp,
 }
 
-/// Mint (or reissue) an enrollment token for a server and return the base64
-/// blob the operator runs through bestool. The plaintext token lives only in
-/// the blob; reissuing invalidates any prior token.
+/// Generate a 4-word lowercase, hyphen-separated passphrase from the EFF large
+/// wordlist (~52 bits of entropy), e.g. `correct-horse-battery-staple`.
+fn generate_passphrase() -> String {
+	use chbs::{config::BasicConfig, prelude::*, probability::Probability, word::WordList};
+
+	let config = BasicConfig {
+		words: 4,
+		word_provider: WordList::builtin_eff_large().sampler(),
+		separator: "-".into(),
+		capitalize_first: Probability::Never,
+		capitalize_words: Probability::Never,
+	};
+	config.to_scheme().generate()
+}
+
+/// Mint (or reissue) an enrollment token for a server and return the
+/// passphrase-encrypted ticket the operator runs through bestool, plus the
+/// 4-word passphrase that decrypts it. The plaintext token lives only inside
+/// the encrypted ticket; reissuing invalidates any prior token.
 #[utoipa::path(
 	post,
 	path = "/mint_enrollment",
@@ -787,7 +808,7 @@ pub struct EnrollmentBlob {
 	security(("tailscale-admin" = [])),
 	request_body = ServerIdOnlyArgs,
 	responses(
-		(status = 200, body = EnrollmentBlob),
+		(status = 200, body = EnrollmentTicket),
 		(status = 400, body = ProblemDetailsSchema),
 	),
 )]
@@ -795,7 +816,10 @@ pub async fn mint_enrollment(
 	State(state): State<AppState>,
 	_admin: TailscaleAdmin,
 	Json(args): Json<ServerIdOnlyArgs>,
-) -> Result<Json<EnrollmentBlob>> {
+) -> Result<Json<EnrollmentTicket>> {
+	use age::secrecy::SecretString;
+	use algae_cli::{passphrases::Passphrase, streams::encrypt_stream};
+
 	let mut conn = state.db.get().await?;
 
 	let server = Server::get_by_id(&mut conn, args.server_id).await?;
@@ -815,11 +839,28 @@ pub async fn mint_enrollment(
 		"server_id": args.server_id,
 		"token": plaintext,
 	});
-	let blob = base64::engine::general_purpose::URL_SAFE_NO_PAD
-		.encode(serde_json::to_vec(&payload).map_err(AppError::custom)?);
+	let payload_bytes = serde_json::to_vec(&payload).map_err(AppError::custom)?;
 
-	Ok(Json(EnrollmentBlob {
-		blob,
+	// Encrypt the payload with a fresh 4-word passphrase (age/scrypt), the same
+	// primitives bestool's `protect`/`reveal` use. The ciphertext is base64'd
+	// for transport; the passphrase travels out-of-band.
+	let passphrase = generate_passphrase();
+	let key = Passphrase::new(SecretString::from(passphrase.clone()));
+
+	let mut encrypted = Vec::new();
+	encrypt_stream(
+		&payload_bytes[..],
+		futures::io::Cursor::new(&mut encrypted),
+		Box::new(key),
+	)
+	.await
+	.map_err(|e| AppError::custom(format!("encrypting enrollment ticket: {e}")))?;
+
+	let ticket = base64::engine::general_purpose::STANDARD.encode(&encrypted);
+
+	Ok(Json(EnrollmentTicket {
+		ticket,
+		passphrase,
 		expires_at: token.expires_at,
 	}))
 }

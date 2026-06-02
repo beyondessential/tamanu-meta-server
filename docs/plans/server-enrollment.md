@@ -5,9 +5,11 @@ Replace the current "device-first / ticket-pull" registration with an
 
 1. An operator creates a **server** directly, inside an existing **group**,
    filling in details and optionally picking a Tailscale identity.
-2. Canopy mints a single-use **enrollment token** for that server and shows a
-   base64 blob.
-3. The operator runs `bestool canopy register` on the box (feeding it the blob);
+2. Canopy mints a single-use **enrollment token** for that server, encrypts the
+   enrollment payload under a freshly-generated 4-word passphrase (age/scrypt),
+   and shows the **encrypted ticket** plus the **passphrase** separately.
+3. The operator runs `bestool canopy register` on the box (feeding it the ticket
+   and the passphrase, which decrypts it back to the token+payload);
    bestool claims the pre-created server over mTLS via a **challenge/response
    that proves it holds the private key** behind the cert it presents, and
    Canopy binds that device to the server.
@@ -103,9 +105,10 @@ Canopy *application-layer* proof-of-possession independent of the proxy.
 public key or a fabricated SPKI, and stops request replay (the nonce is
 single-use). It does **not** stop someone who holds a leaked token from binding
 **their own** key (= takeover) — that residual is inherent to a bearer-token
-push model and is mitigated by token secrecy (blob handling, redaction, short
-challenge window) plus alerting, not by PoP. Treated as: blob leakage is a
-breach to investigate, not a routine threat to design DoS-resistance around.
+push model and is mitigated by token secrecy (encrypted-ticket handling,
+redaction, short challenge window) plus alerting, not by PoP. Treated as: ticket
++ passphrase leakage is a breach to investigate, not a routine threat to design
+DoS-resistance around.
 
 *Channel binding (optional, env-gated):* to bind the app-layer signature to the
 TLS session (defeating relay/MITM through the terminating proxy), the signed
@@ -157,14 +160,28 @@ challenge fails signature verification.
 failures — unknown server, archived server, invalid/expired/consumed token, bad
 nonce, bad signature — return one generic "enrollment failed" to the device, so
 the endpoint isn't an existence/lifecycle oracle for a probed `server_id`
-(UUIDv4, not guessable, but ids leak via URLs/logs/the blob). The specific
+(UUIDv4, not guessable, but ids leak via URLs/logs/the ticket payload). The specific
 reason is logged server-side and exposed only through the admin-gated
 `enrollment_status`.
 
-**6. The token is never logged, on either side.** Redact `token` and `blob` from
-request/response logging, tracing spans, and `AppError`/RFC-7807 `detail`
-(`#[serde(skip)]` on Debug surfaces; ensure no body-logging middleware covers
-`/register/*`). A test asserts the token does not appear in any error body.
+**6. The token is never logged, on either side.** Redact `token` and the
+enrollment payload from request/response logging, tracing spans, and
+`AppError`/RFC-7807 `detail` (`#[serde(skip)]` on Debug surfaces; ensure no
+body-logging middleware covers `/register/*`). A test asserts the token does not
+appear in any error body.
+
+**6a. The enrollment ticket is encrypted at rest in transit.** `mint_enrollment`
+does not return the payload in the clear: it encrypts it with `algae-cli`'s
+age/scrypt passphrase profile (the same primitives bestool's `protect`/`reveal`
+use) under a freshly-generated 4-word passphrase (~52 bits, EFF large wordlist),
+and returns the base64'd ciphertext (`ticket`) and the `passphrase` separately.
+The ticket is then safe to copy around; the passphrase is shared out-of-band.
+This protects the ticket *in transit* only — the public `register/begin|complete`
+endpoints and the token/PoP handshake are unchanged; bestool decrypts with the
+passphrase and presents the same plaintext `token`. The benefit only holds if
+ticket and passphrase travel on **different channels**; the residual brute-force
+risk is bounded by the 4-word entropy + scrypt KDF on top of the token already
+being single-use, 7-day, rate-limited, and PoP-gated.
 
 **7. Soft-delete deactivates keys to prevent silent identity resurrection.**
 Because identity is the (public, non-secret) SPKI, a released device that *kept*
@@ -184,11 +201,12 @@ flow binds whatever key completes PoP against a valid token. With PoP + the
 no-auto-create + no-merge guards above, the per-binding assurance is sound, and
 the usability win is large. Recorded as a conscious decision.
 
-## The enrollment blob (the contract with bestool)
+## The enrollment ticket (the contract with bestool)
 
-`bestool canopy register` consumes a base64url-encoded JSON blob that Canopy
-produces. This shape is the integration contract; it is duplicated in the
-bestool spec.
+`bestool canopy register` consumes a base64-encoded, **age-encrypted** ticket
+that Canopy produces, plus a 4-word passphrase that decrypts it. Decrypting the
+ticket with the passphrase yields the JSON payload below. This shape is the
+integration contract; it is duplicated in the bestool spec.
 
 ```jsonc
 {
@@ -199,21 +217,26 @@ bestool spec.
 }
 ```
 
+- The ticket is the age/scrypt encryption of the JSON above under the
+  freshly-generated 4-word passphrase, base64'd (standard) for transport.
+  bestool reuses algae's `reveal`/`decrypt_stream` + `PassphraseArgs` to prompt
+  for the passphrase and decrypt, then runs the existing PoP handshake with the
+  decrypted token.
 - `api_url` comes from `PUBLIC_URL` (the device-facing origin — operator links
-  use PRIVATE_URL, device API uses PUBLIC_URL). The blob is for the device, so
+  use PRIVATE_URL, device API uses PUBLIC_URL). The payload is for the device, so
   PUBLIC_URL.
-- `token` plaintext lives **only** in the blob; Canopy stores only its hash. The
-  operator-facing UI treats the blob as a credential; bestool reads it from
-  **stdin/file, never an argv positional** (so it stays out of shell history and
-  `ps`/`/proc/<pid>/cmdline`) — see the bestool spec.
-- **No `group_id`** in the blob: the server record already authoritatively holds
-  the group, so shipping it bought no security (it can't be a second factor when
-  it travels in the same blob it'd be checked against). It would only matter for
-  reusable/multi-server tokens, which we are not doing. UI shows the group from
-  the server record.
+- `token` plaintext lives **only** inside the encrypted ticket; Canopy stores
+  only its hash. bestool reads the ticket from **stdin/file, never an argv
+  positional**, and prompts for the passphrase (so neither lands in shell history
+  or `ps`/`/proc/<pid>/cmdline`) — see the bestool spec.
+- **No `group_id`** in the payload: the server record already authoritatively
+  holds the group, so shipping it bought no security (it can't be a second factor
+  when it travels in the same ticket it'd be checked against). It would only
+  matter for reusable/multi-server tokens, which we are not doing. UI shows the
+  group from the server record.
 - No CA/cert is shipped: `api_url` is served with a webPKI (Let's Encrypt)
   certificate, so bestool verifies TLS against system roots. Pinning a CA in the
-  blob would be fragile across rotation.
+  payload would be fragile across rotation.
 
 ## Data model changes (migrations)
 
@@ -329,7 +352,7 @@ as-is (no slow hashing). Old/expired/used challenges can be swept opportunistica
   generate 32 bytes from a CSPRNG (`OsRng`/`getrandom`, **not** a seedable RNG),
   token string = base64url, store SHA-256 hash, `expires_at = now() + ttl`; in
   the same tx mark prior un-consumed tokens `consumed_at = now()`. Returns the
-  plaintext for the blob (caller must not persist or log it).
+  plaintext for the ticket payload (caller must not persist or log it).
 - `find_active(conn, server_id, plaintext) -> Result<ServerEnrollmentToken>` —
   hash, look up by `server_id` + `token_hash` with `consumed_at IS NULL AND
   expires_at > now()`. Used by `begin` to validate **without** consuming.
@@ -450,10 +473,13 @@ removal; it was correct to land immediately as interim defence.
 - **Add `delete`** (`TailscaleAdmin`) → `Server::soft_delete`.
 - **Add `restore`** (`TailscaleAdmin`) → `Server::restore`.
 - **Add `mint_enrollment`** (`TailscaleAdmin`) — `ServerEnrollmentToken::mint`,
-  assemble the blob JSON (`api_url` from `PUBLIC_URL`, `server_id`, plaintext
-  token; **no `group_id`, no `ca`**), base64url it, return `{ blob, expires_at }`.
-  The response carries the secret, so it must be admin-gated, non-cacheable, and
-  never logged.
+  assemble the payload JSON (`api_url` from `PUBLIC_URL`, `server_id`, plaintext
+  token; **no `group_id`, no `ca`**), generate a 4-word passphrase (chbs, EFF
+  large list), `algae-cli` `encrypt_stream` the payload under
+  `Passphrase::new(SecretString::from(passphrase))`, base64 the ciphertext, and
+  return `{ ticket, passphrase, expires_at }` (`EnrollmentTicket`). The response
+  carries the secret (passphrase + decryptable ticket), so it must be
+  admin-gated, non-cacheable, and never logged.
 - **Add `enrollment_status`** (or fold into `get_detail`) — `registered_at` plus
   `active_for` (expiry only) so the UI shows pending vs registered. This is the
   *only* place enrollment failure reasons are exposed (the public endpoint is
@@ -494,10 +520,12 @@ each problem type. The group-non-empty delete keeps its existing problem type.
 After create (and reachable from a not-yet-registered server's detail page):
 
 - Calls `servers.mint_enrollment` and shows install bestool + the
-  `bestool canopy register` command, with the blob revealed on click (treated as
-  a credential) and a copy button.
-- "token expires <relative time>" and a **Reissue** button (re-mints, replaces
-  the blob; old token is invalidated).
+  `bestool canopy register` command, with the encrypted **ticket** in an
+  always-visible code block (copy button) and the **passphrase** shown
+  prominently and separately (its own box + copy button), noting it must be
+  shared over a separate channel — the ticket is useless without it.
+- "token expires <relative time>" and a **Reissue** button (re-mints, issuing a
+  new ticket AND a new passphrase; old token is invalidated).
 - A live status that distinguishes **not yet used → used but not completed →
   registered** (poll `enrollment_status`), so a token consumed without a
   completed bind is visible rather than looking like success.
@@ -567,7 +595,7 @@ Backend (`commons_tests::db` and `::server`):
 Frontend e2e (Playwright, `private-web/e2e`):
 
 - create group → lands on create-server-in-group; back leaves empty group;
-- create server → setup view shows a (revealed) blob + reissue;
+- create server → setup view shows the encrypted ticket + passphrase + reissue;
 - archive a server hides it from lists and shows restore.
 
 ## Implementation status
@@ -577,7 +605,9 @@ models; the two-step PoP register endpoints with env-gated channel binding,
 no-merge and reject-key-bound-elsewhere guards; no-auto-create at the mTLS
 boundary; private-server create/delete/restore/mint_enrollment/enrollment_status;
 removal of the public create/edit/remove surface, `import_ticket`, and the
-`CanopyTicket` type; the full React flow (create → setup blob → archive/restore,
+`CanopyTicket` type; passphrase-encrypted enrollment tickets (algae/age-scrypt
+under a 4-word chbs passphrase, returned as `{ ticket, passphrase }`); the full
+React flow (create → setup ticket+passphrase → archive/restore,
 collapsed device section, group→server flow, Import-Ticket UI removed);
 ERRORS.md; regenerated OpenAPI + TS types. Backend tests cover the PoP happy
 path, bad-signature-keeps-token, opaque errors, Tailscale-precreated add-key,

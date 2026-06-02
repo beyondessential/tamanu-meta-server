@@ -1138,9 +1138,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Mint (or reissue) an enrollment token for a server and return the base64
-         *     blob the operator runs through bestool. The plaintext token lives only in
-         *     the blob; reissuing invalidates any prior token.
+         * Mint (or reissue) an enrollment token for a server and return the
+         *     passphrase-encrypted ticket the operator runs through bestool, plus the
+         *     4-word passphrase that decrypts it. The plaintext token lives only inside
+         *     the encrypted ticket; reissuing invalidates any prior token.
          */
         post: operations["mint_enrollment"];
         delete?: never;
@@ -1761,12 +1762,6 @@ export interface components {
         };
         /** @enum {string} */
         DeviceRole: "untrusted" | "admin" | "releaser" | "server";
-        EnrollmentBlob: {
-            /** @description Base64url of the enrollment JSON to feed to `bestool canopy register`. */
-            blob: string;
-            /** Format: date-time */
-            expires_at: string;
-        };
         EnrollmentStatus: {
             /**
              * Format: date-time
@@ -1779,6 +1774,21 @@ export interface components {
              *     Never reveals the token itself.
              */
             token_expires_at?: string | null;
+        };
+        EnrollmentTicket: {
+            /** Format: date-time */
+            expires_at: string;
+            /**
+             * @description Freshly-generated 4-word passphrase that decrypts `ticket`. Share this
+             *     out-of-band (a separate channel from the ticket itself).
+             */
+            passphrase: string;
+            /**
+             * @description Base64 (standard) of the age-encrypted enrollment JSON to feed to
+             *     `bestool canopy register`. Encrypted under `passphrase` (age/scrypt), so
+             *     it is safe to copy around on its own.
+             */
+            ticket: string;
         };
         EventData: {
             active: boolean;
@@ -4882,7 +4892,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EnrollmentBlob"];
+                    "application/json": components["schemas"]["EnrollmentTicket"];
                 };
             };
             400: {
