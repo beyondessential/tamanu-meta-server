@@ -8,6 +8,7 @@ pub mod artifacts;
 pub mod bestool;
 pub mod events;
 pub mod openapi;
+pub mod ratelimit;
 #[cfg(feature = "ui")]
 pub mod password;
 #[cfg(feature = "ui")]

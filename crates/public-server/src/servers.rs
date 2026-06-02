@@ -1,7 +1,12 @@
+use std::time::Duration;
+
 use axum::{Json, extract::State, http::HeaderMap};
+use axum_client_ip::ClientIp;
 use base64::Engine;
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::device_auth::{mtls, pop};
+
+use crate::ratelimit::RateLimiter;
 use commons_types::server::{kind::ServerKind, rank::ServerRank};
 use database::{
 	Db, devices::Device, server_enrollment_challenges::ServerEnrollmentChallenge,
@@ -108,6 +113,28 @@ fn ekm_header_name() -> Option<String> {
 	std::env::var(EKM_HEADER_ENV).ok().filter(|s| !s.is_empty())
 }
 
+/// Enrollment rate-limit budgets within a 1-minute window. Enrollment is a
+/// rare, human-paced operation, so these are generous for legitimate use but
+/// blunt a token-guesser / griefer hammering the endpoints.
+const RL_WINDOW: Duration = Duration::from_secs(60);
+const RL_PER_IP: u32 = 60;
+const RL_PER_SERVER: u32 = 20;
+
+/// Enforce per-source and per-target rate limits on the enrollment endpoints.
+/// A trip is logged (target `enrollment`) so a log-based alert can fire.
+fn enforce_rate_limit(rl: &RateLimiter, ip: std::net::IpAddr, server_id: uuid::Uuid) -> Result<()> {
+	let ip = ip.to_string();
+	if !rl.check(&format!("ip:{ip}"), RL_PER_IP, RL_WINDOW) {
+		tracing::warn!(target: "enrollment", ip, "enrollment rate limit exceeded (per-ip)");
+		return Err(AppError::RateLimited);
+	}
+	if !rl.check(&format!("srv:{server_id}"), RL_PER_SERVER, RL_WINDOW) {
+		tracing::warn!(target: "enrollment", %server_id, "enrollment rate limit exceeded (per-server)");
+		return Err(AppError::RateLimited);
+	}
+	Ok(())
+}
+
 #[utoipa::path(
 	post,
 	path = "/register/begin",
@@ -120,9 +147,12 @@ fn ekm_header_name() -> Option<String> {
 )]
 pub async fn register_begin(
 	State(db): State<Db>,
+	State(rl): State<RateLimiter>,
+	ClientIp(ip): ClientIp,
 	headers: HeaderMap,
 	Json(args): Json<BeginArgs>,
 ) -> Result<Json<BeginResponse>> {
+	enforce_rate_limit(&rl, ip, args.server_id)?;
 	let mut db = db.get().await?;
 	let spki = presented_key(&headers)?;
 
@@ -180,9 +210,12 @@ pub struct CompleteResponse {
 )]
 pub async fn register_complete(
 	State(db): State<Db>,
+	State(rl): State<RateLimiter>,
+	ClientIp(ip): ClientIp,
 	headers: HeaderMap,
 	Json(args): Json<CompleteArgs>,
 ) -> Result<Json<CompleteResponse>> {
+	enforce_rate_limit(&rl, ip, args.server_id)?;
 	let mut db = db.get().await?;
 	let spki = presented_key(&headers)?;
 
@@ -209,7 +242,17 @@ pub async fn register_complete(
 			.ok_or(AppError::EnrollmentFailed)?;
 		transcript.extend_from_slice(&ekm);
 	}
-	pop::verify_pop(&spki, &transcript, &signature)?;
+	if let Err(e) = pop::verify_pop(&spki, &transcript, &signature) {
+		// A valid challenge was presented but the signature doesn't match the
+		// cert's key — either a misbehaving client or an attacker who holds a
+		// token but not the private key. Worth surfacing.
+		tracing::warn!(
+			target: "enrollment",
+			server_id = %args.server_id,
+			"enrollment proof-of-possession signature verification failed",
+		);
+		return Err(e);
+	}
 
 	// Bind + promote + burn the token, atomically. The challenge is already
 	// spent; a failure here strands the token (operator reissues) but never
@@ -229,6 +272,12 @@ pub async fn register_complete(
 					.iter()
 					.any(|s| s.id != args.server_id)
 				{
+					tracing::warn!(
+						target: "enrollment",
+						server_id = %args.server_id,
+						device_id = %existing.id,
+						"enrollment rejected: presented key is already bound to another live server",
+					);
 					return Err(AppError::EnrollmentFailed);
 				}
 			}

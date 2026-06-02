@@ -150,6 +150,16 @@ server and hit this, re-mint the token from the admin UI (it may have expired
 or already been used) and confirm the box is presenting the same certificate
 across `begin` and `complete`.
 
+## Rate limited
+
+Returned (HTTP 429) when a caller exceeds the enrollment endpoints'
+in-process rate limit — currently per source IP and per target server over a
+one-minute window. Enrollment is a rare, human-paced operation, so the budgets
+are generous for legitimate use; hitting this means an unusual volume of
+`/servers/register/*` traffic (a token-guesser, a griefer burning challenges,
+or a misbehaving client retrying in a tight loop). Trips are logged under the
+`enrollment` target for alerting. Back off and retry after the window.
+
 ## Other
 
 An unclassified error.

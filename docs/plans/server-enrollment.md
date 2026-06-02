@@ -584,11 +584,18 @@ path, bad-signature-keeps-token, opaque errors, Tailscale-precreated add-key,
 reject-key-bound-to-another-live-server, archival release/deactivate/hide +
 host reuse, and token reissue/single-use.
 
+**Rate-limiting + alerting on `/register/*`** (security model item 3) — DONE.
+In-process fixed-window limiter (per source IP 60/min, per server 20/min;
+`crates/public-server/src/ratelimit.rs`) returning 429; `tracing::warn!`
+alerting (target `enrollment`) on rate-limit trips, PoP signature failures, and
+key-already-bound-to-another-live-server attempts. Note: the limiter is
+single-process (each replica has its own window) — fine as an abuse backstop,
+not a distributed quota. Token-consumed-without-bind alerting is moot here:
+`consume` runs inside the bind transaction, so a failed bind rolls the burn
+back (nothing to alert on).
+
 **Deferred (not yet done — do not consider the plan complete):**
 
-- **Rate-limiting + alerting on `/register/*`** (security model item 3). The
-  cryptographic guarantees are in; this operational hardening (per-`server_id`/
-  source rate limit + alert on token-consumed-without-completed-bind) is not.
 - **Frontend e2e (Playwright)** tests for the create→setup→archive flow.
 - **`register/complete`** re-checks `deleted_at` but not under `SELECT … FOR
   UPDATE`; tighten the archive-vs-register TOCTOU with a row lock.

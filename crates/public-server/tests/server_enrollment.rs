@@ -247,6 +247,28 @@ async fn enrollment_bad_signature_is_opaque_and_keeps_token() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn enrollment_rate_limited_per_server() {
+	run(async |_conn, public, _private| {
+		let server_id = Uuid::new_v4();
+		// The per-server budget is 20/min; the rate check runs before any token
+		// or server validation, so even bogus begins count. The 21st trips 429.
+		let mut saw_429 = false;
+		for _ in 0..25 {
+			let resp = public
+				.post("/servers/register/begin")
+				.json(&json!({"server_id": server_id, "token": "x"}))
+				.await;
+			if resp.status_code() == 429 {
+				saw_429 = true;
+				break;
+			}
+		}
+		assert!(saw_429, "per-server rate limit should trip with 429");
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn enrollment_unknown_server_and_bad_token_are_opaque() {
 	run(async |mut conn, public, _private| {
 		let (_spki, cert, _key) = make_signing_certificate();
