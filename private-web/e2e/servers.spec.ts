@@ -110,6 +110,9 @@ test.describe("server edit page", () => {
 
 		await page.goto(`/servers/${server.id}/edit`);
 
-		await expect(page.getByLabel(/^Name$/i)).toHaveValue(server.name);
+		// The label carries a required-field asterisk ("Name *"), and the central
+		// edit form also has a "Name in Tamanu Mobile app" field — so match "Name"
+		// with an optional trailing asterisk, anchored to exclude the latter.
+		await expect(page.getByLabel(/^Name(\s*\*)?$/i)).toHaveValue(server.name);
 	});
 });
