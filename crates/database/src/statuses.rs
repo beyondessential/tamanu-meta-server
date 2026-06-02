@@ -367,6 +367,31 @@ impl Status {
 			.map_err(AppError::from)
 	}
 
+	/// The most recent status for `server` that carries a version — **not**
+	/// bounded by the live 7-day window. Used for the status card's headline
+	/// version, which should reflect the last version a server ever reported
+	/// even if it's currently down (and hence has no recent status).
+	pub async fn last_with_version_for_server(
+		db: &mut AsyncPgConnection,
+		server: Uuid,
+	) -> Result<Option<Status>> {
+		use crate::schema::statuses::dsl::*;
+
+		statuses
+			.select(Status::as_select())
+			.filter(
+				server_id
+					.eq(server)
+					.and(version.is_not_null())
+					.and(id.ne(Uuid::nil())),
+			)
+			.order(created_at.desc())
+			.first(db)
+			.await
+			.optional()
+			.map_err(AppError::from)
+	}
+
 	pub async fn latest_for_servers(
 		db: &mut AsyncPgConnection,
 		server_ids: &[Uuid],
