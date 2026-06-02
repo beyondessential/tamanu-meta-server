@@ -251,7 +251,7 @@ diesel::table! {
 		updated_at -> Timestamptz,
 		name -> Nullable<Text>,
 		rank -> Nullable<Text>,
-		host -> Text,
+		host -> Nullable<Text>,
 		device_id -> Nullable<Uuid>,
 		kind -> Text,
 		cloud -> Nullable<Bool>,

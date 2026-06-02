@@ -681,6 +681,29 @@ impl Device {
 		Ok(())
 	}
 
+	/// Bulk-fetch the Tailscale hostname (`tailscale_node_name`) for each given
+	/// device that has one. Used to derive a display URL for servers that have
+	/// no stored URL but are bound to a tailnet node.
+	pub async fn tailscale_names_by_ids(
+		db: &mut AsyncPgConnection,
+		ids: &[Uuid],
+	) -> Result<HashMap<Uuid, String>> {
+		use crate::schema::devices::dsl;
+		if ids.is_empty() {
+			return Ok(HashMap::new());
+		}
+		let rows: Vec<(Uuid, Option<String>)> = dsl::devices
+			.select((dsl::id, dsl::tailscale_node_name))
+			.filter(dsl::id.eq_any(ids))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(rows
+			.into_iter()
+			.filter_map(|(id, name)| name.map(|n| (id, n)))
+			.collect())
+	}
+
 	/// Deactivate all of a device's keys. Used on server archival so a
 	/// decommissioned box's key cannot silently re-authenticate; re-enrollment
 	/// must go through the gated token + proof-of-possession flow.

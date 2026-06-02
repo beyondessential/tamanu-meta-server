@@ -944,9 +944,12 @@ async fn enqueue_slack_resolve_inner(
 
 fn format_group_label(group: &ServerGroup, server: Option<&Server>) -> String {
 	if let Some(server) = server {
-		let server_part = match &server.name {
-			Some(n) if !n.is_empty() => format!("{n} ({})", server.host.0),
-			_ => server.host.0.to_string(),
+		let host = server.host.as_ref().map(|h| h.0.to_string());
+		let server_part = match (&server.name, host) {
+			(Some(n), Some(h)) if !n.is_empty() => format!("{n} ({h})"),
+			(Some(n), None) if !n.is_empty() => n.clone(),
+			(_, Some(h)) => h,
+			(_, None) => server.id.to_string(),
 		};
 		format!("{} · {}", group.name, server_part)
 	} else {

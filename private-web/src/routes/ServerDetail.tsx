@@ -143,7 +143,7 @@ export default function ServerDetail() {
 				)
 			)}
 			<AdvancedIdentitySection
-				host={data.server.host}
+				host={data.server.display_host}
 				serverId={data.server.id}
 				deviceInfo={data.device_info}
 				refresh={() => detail.reload()}
@@ -402,9 +402,15 @@ function AdvancedIdentitySection({
 				<Typography variant="h6" component="h2" gutterBottom>
 					URL
 				</Typography>
-				<MuiLink href={host} target="_blank" rel="noopener noreferrer">
-					{host}
-				</MuiLink>
+				{host ? (
+					<MuiLink href={host} target="_blank" rel="noopener noreferrer">
+						{host}
+					</MuiLink>
+				) : (
+					<Typography variant="body2" color="text.secondary">
+						No URL — this server is identified by its device only.
+					</Typography>
+				)}
 			</Paper>
 			<Accordion variant="outlined" disableGutters>
 				<AccordionSummary expandIcon={<ExpandMoreIcon />}>
@@ -1428,18 +1434,20 @@ function SiblingServers({
 										alignItems: "center",
 									}}
 								>
-									<Tooltip title={sib.host}>
-										<IconButton
-											component="a"
-											href={sib.host}
-											target="_blank"
-											rel="noopener noreferrer"
-											size="small"
-											aria-label={`Open ${sib.name ?? "server"} (${sib.host})`}
-										>
-											<LanguageIcon fontSize="small" />
-										</IconButton>
-									</Tooltip>
+									{sib.display_host && (
+										<Tooltip title={sib.display_host}>
+											<IconButton
+												component="a"
+												href={sib.display_host}
+												target="_blank"
+												rel="noopener noreferrer"
+												size="small"
+												aria-label={`Open ${sib.name ?? "server"} (${sib.display_host})`}
+											>
+												<LanguageIcon fontSize="small" />
+											</IconButton>
+										</Tooltip>
+									)}
 									<StatusDot
 										up={sib.up ?? "gone"}
 										health={sib.health ?? undefined}

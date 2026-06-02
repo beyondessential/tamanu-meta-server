@@ -41,8 +41,12 @@ pub struct Server {
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub name: Option<String>,
 
-	#[diesel(deserialize_as = String, serialize_as = String)]
-	pub host: UrlField,
+	/// The server's URL. Optional: a server may be identified solely by its
+	/// bound device (e.g. a Tailscale node). Not unique. For a display URL that
+	/// falls back to the tailnet hostname, see the API's `display_host`.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	#[diesel(treat_none_as_default_value = false)]
+	pub host: Option<UrlField>,
 
 	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub kind: ServerKind,
@@ -193,6 +197,7 @@ impl Server {
 			.select(Self::as_select())
 			.filter(device_id.is_null().and(id.ne(Uuid::nil())))
 			.filter(deleted_at.is_null())
+			.filter(host.is_not_null())
 			.load(db)
 			.await
 			.map_err(AppError::from)
@@ -217,17 +222,10 @@ impl Server {
 	}
 
 	/// Operator-driven insert. The caller pre-builds the row (id, defaults,
-	/// optional pre-bound `device_id` for the Tailscale case). Rejects a host
-	/// that collides with a live (non-archived) server.
+	/// optional URL, optional pre-bound `device_id` for the Tailscale case).
+	/// URLs are no longer unique, so there is no collision check.
 	pub async fn create(db: &mut AsyncPgConnection, server: Server) -> Result<Self> {
 		use crate::schema::servers;
-
-		let host_str = server.host.0.to_string();
-		if let Some(existing) = Self::live_id_by_host(db, &host_str).await? {
-			return Err(AppError::Conflict(format!(
-				"A live server with host '{host_str}' already exists ({existing})",
-			)));
-		}
 
 		diesel::insert_into(servers::table)
 			.values(server)
@@ -279,19 +277,8 @@ impl Server {
 	}
 
 	/// Un-archive a server. Does not rebind a device — the box must re-enroll.
-	/// Rejects if its host now collides with a live server.
 	pub async fn restore(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<Self> {
 		use crate::schema::servers::dsl;
-
-		let server = Self::get_by_id(db, server_id).await?;
-		if let Some(existing) = Self::live_id_by_host(db, &server.host.0.to_string()).await? {
-			if existing != server_id {
-				return Err(AppError::Conflict(format!(
-					"a live server with host '{}' already exists ({existing})",
-					server.host.0,
-				)));
-			}
-		}
 
 		diesel::update(dsl::servers.filter(dsl::id.eq(server_id)))
 			.set(dsl::deleted_at.eq(None::<jiff_diesel::Timestamp>))
@@ -315,20 +302,6 @@ impl Server {
 			hosting,
 			"ec2" | "azure" | "gce" | "gcp" | "digitalocean" | "oracle" | "cloudstack"
 		)
-	}
-
-	/// Id of the live (non-archived) server with this host, if any. Archived
-	/// rows keep their host but don't block reuse.
-	async fn live_id_by_host(db: &mut AsyncPgConnection, host: &str) -> Result<Option<Uuid>> {
-		use crate::schema::servers::dsl;
-		dsl::servers
-			.select(dsl::id)
-			.filter(dsl::host.eq(host))
-			.filter(dsl::deleted_at.is_null())
-			.first(db)
-			.await
-			.optional()
-			.map_err(AppError::from)
 	}
 
 	/// Live (non-archived) servers currently bound to this device.
@@ -461,13 +434,13 @@ impl Server {
 	pub async fn names_by_ids(
 		db: &mut AsyncPgConnection,
 		ids: &[Uuid],
-	) -> Result<std::collections::HashMap<Uuid, (Option<String>, String)>> {
+	) -> Result<std::collections::HashMap<Uuid, (Option<String>, Option<String>)>> {
 		use crate::schema::servers::dsl;
 
 		if ids.is_empty() {
 			return Ok(std::collections::HashMap::new());
 		}
-		let rows: Vec<(Uuid, Option<String>, String)> = dsl::servers
+		let rows: Vec<(Uuid, Option<String>, Option<String>)> = dsl::servers
 			.select((dsl::id, dsl::name, dsl::host))
 			.filter(dsl::id.eq_any(ids))
 			.load(db)
@@ -639,7 +612,7 @@ fn test_server_serialization() {
 		name: Some("Test Server".to_string()),
 		kind: ServerKind::Central,
 		rank: Some(ServerRank::Production),
-		host: UrlField("https://example.com/".parse().unwrap()),
+		host: Some(UrlField("https://example.com/".parse().unwrap())),
 		device_id: Some(Uuid::nil()),
 		group_id: None,
 		public_name: Some("Test Server".to_string()),
@@ -675,7 +648,8 @@ fn test_server_serialization() {
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct NewServer {
 	pub name: Option<String>,
-	pub host: UrlField,
+	#[serde(default)]
+	pub host: Option<UrlField>,
 	pub kind: ServerKind,
 	pub rank: Option<ServerRank>,
 	pub device_id: Option<Uuid>,
@@ -715,8 +689,8 @@ pub struct PartialServer {
 	pub kind: Option<ServerKind>,
 	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub rank: Option<ServerRank>,
-	#[diesel(deserialize_as = String, serialize_as = String)]
-	pub host: Option<UrlField>,
+	/// `Some(Some(url))` sets the URL, `Some(None)` clears it, `None` leaves it.
+	pub host: Option<Option<UrlField>>,
 	pub device_id: Option<Option<Uuid>>,
 	pub group_id: Option<Option<Uuid>>,
 	pub public_name: Option<Option<String>>,

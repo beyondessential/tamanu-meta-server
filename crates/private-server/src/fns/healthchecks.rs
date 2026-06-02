@@ -296,7 +296,11 @@ pub async fn sample(
 			status_extra,
 			check_extra,
 			tags,
-			server_host: server.host.0.to_string(),
+			server_host: server
+				.host
+				.as_ref()
+				.map(|h| h.0.to_string())
+				.unwrap_or_default(),
 			server_name: server.name,
 			seen_at: status.created_at,
 		}),

@@ -624,7 +624,7 @@ async fn seed_servers(
 		Server {
 			id: Uuid::new_v4(),
 			name: None,
-			host: url(host),
+			host: Some(url(host)),
 			kind,
 			rank: None,
 			device_id: None,

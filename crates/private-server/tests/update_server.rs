@@ -293,7 +293,10 @@ async fn update_server_preserves_device_id_when_not_provided() {
 			.unwrap();
 
 		assert_eq!(server_info.name, Some("Updated Name".to_string()));
-		assert_eq!(server_info.host.0.to_string(), "https://updated.example.com/");
+		assert_eq!(
+			server_info.host.as_ref().unwrap().0.to_string(),
+			"https://updated.example.com/"
+		);
 		assert_eq!(server_info.device_id, Some("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa".parse().unwrap()),
 			"Device ID should still be present when not provided in update");
 	})

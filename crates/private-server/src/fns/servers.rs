@@ -53,7 +53,12 @@ pub struct ServerInfo {
 	pub name: Option<String>,
 	pub kind: ServerKind,
 	pub rank: Option<ServerRank>,
-	pub host: String,
+	/// The server's stored URL, if any. May be absent for device-only servers.
+	pub host: Option<String>,
+	/// Effective URL for display: the stored `host`, or `https://{tailnet
+	/// hostname}` when the server has no URL but is bound to a Tailscale device,
+	/// else an empty string. Filled by `fill_display_hosts`.
+	pub display_host: String,
 	pub device_id: Option<Uuid>,
 	pub group_id: Option<Uuid>,
 	/// Display name of the group this server belongs to (denormalised so list
@@ -175,7 +180,10 @@ pub(super) fn server_to_info(s: Server) -> ServerInfo {
 		name: s.name,
 		kind: s.kind,
 		rank: s.rank,
-		host: s.host.0.to_string(),
+		host: s.host.as_ref().map(|h| h.0.to_string()),
+		// Default the display host to the raw host; `fill_display_hosts` later
+		// supplies the tailnet fallback for hostless, device-bound servers.
+		display_host: s.host.as_ref().map(|h| h.0.to_string()).unwrap_or_default(),
 		device_id: s.device_id,
 		group_id: s.group_id,
 		group_name: None,
@@ -212,6 +220,33 @@ pub(super) async fn decorate_with_status(
 		let st = by_server.get(&info.id).copied();
 		info.up = Some(st.map(|s| s.short_status()).unwrap_or_default());
 		info.health = Some(st.map(|s| s.health_state()).unwrap_or_default());
+	}
+	Ok(())
+}
+
+/// For servers with no stored URL but a bound device, set `display_host` to
+/// `https://{tailnet hostname}`. (Servers with a URL already have
+/// `display_host == host` from `server_to_info`.)
+pub(super) async fn fill_display_hosts(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	infos: &mut [ServerInfo],
+) -> Result<()> {
+	let needy: Vec<Uuid> = infos
+		.iter()
+		.filter(|i| i.host.is_none())
+		.filter_map(|i| i.device_id)
+		.collect();
+	if needy.is_empty() {
+		return Ok(());
+	}
+	let names = Device::tailscale_names_by_ids(conn, &needy).await?;
+	for info in infos.iter_mut() {
+		if info.host.is_none()
+			&& let Some(dev) = info.device_id
+			&& let Some(name) = names.get(&dev)
+		{
+			info.display_host = format!("https://{name}");
+		}
 	}
 	Ok(())
 }
@@ -276,10 +311,11 @@ pub async fn list_some(
 		Server::get_all(&mut conn, args.offset, args.limit).await?
 	};
 	let group_names = collect_group_names(&mut conn, &servers).await?;
-	let items = servers
+	let mut items: Vec<ServerInfo> = servers
 		.into_iter()
 		.map(|s| server_to_info_with_group(s, &group_names))
 		.collect();
+	fill_display_hosts(&mut conn, &mut items).await?;
 	Ok(Json(Page { items, total }))
 }
 
@@ -304,6 +340,7 @@ pub async fn list_ungrouped(
 	let servers = Server::list_ungrouped(&mut conn).await?;
 	let mut items: Vec<ServerInfo> = servers.into_iter().map(server_to_info).collect();
 	decorate_with_status(&mut conn, &mut items).await?;
+	fill_display_hosts(&mut conn, &mut items).await?;
 	Ok(Json(Page { items, total }))
 }
 
@@ -329,7 +366,10 @@ pub async fn get_name(
 	let mut conn = state.db.get().await?;
 	let server = Server::get_by_id(&mut conn, args.server_id).await?;
 	Ok(Json(
-		server.name.unwrap_or_else(|| server.host.0.to_string()),
+		server
+			.name
+			.or_else(|| server.host.as_ref().map(|h| h.0.to_string()))
+			.unwrap_or_else(|| server.id.to_string()),
 	))
 }
 
@@ -357,6 +397,7 @@ pub async fn get_info(
 	};
 	let mut info = server_to_info(server);
 	info.group_name = group_name;
+	fill_display_hosts(&mut conn, std::slice::from_mut(&mut info)).await?;
 	Ok(Json(info))
 }
 
@@ -405,6 +446,7 @@ pub async fn get_detail(
 
 	let mut server_details = server_to_info(server.clone());
 	server_details.group_name = group.as_ref().map(|g| g.name.clone());
+	fill_display_hosts(&mut conn, std::slice::from_mut(&mut server_details)).await?;
 
 	let up = status
 		.as_ref()
@@ -473,6 +515,7 @@ pub async fn get_detail(
 			})
 			.collect();
 		decorate_with_status(&mut conn, &mut infos).await?;
+		fill_display_hosts(&mut conn, &mut infos).await?;
 		infos
 	} else {
 		Vec::new()
@@ -532,12 +575,16 @@ pub async fn update(
 		name: args.data.name,
 		kind: args.data.kind,
 		rank: args.data.rank,
-		host: if let Some(host_str) = args.data.host {
-			Some(UrlField(host_str.parse().map_err(|e| {
-				AppError::custom(format!("Invalid URL: {}", e))
-			})?))
-		} else {
-			None
+		// `Some(Some(url))` sets, `Some(None)` clears, `None` leaves unchanged.
+		// The form always sends `host`; an empty string clears it.
+		host: match args.data.host {
+			Some(s) if s.trim().is_empty() => Some(None),
+			Some(s) => {
+				Some(Some(UrlField(s.parse().map_err(|e| {
+					AppError::custom(format!("Invalid URL: {}", e))
+				})?)))
+			}
+			None => None,
 		},
 		device_id: args.data.device_id,
 		group_id: new_group_id,
@@ -576,7 +623,8 @@ const ENROLLMENT_TTL: jiff::SignedDuration = jiff::SignedDuration::from_hours(24
 #[derive(Deserialize, ToSchema)]
 pub struct CreateServerArgs {
 	pub name: Option<String>,
-	pub host: String,
+	#[serde(default)]
+	pub host: Option<String>,
 	pub kind: ServerKind,
 	pub rank: Option<ServerRank>,
 	pub group_id: Option<Uuid>,
@@ -614,7 +662,12 @@ pub async fn create(
 ) -> Result<Json<Uuid>> {
 	let mut conn = state.db.get().await?;
 
-	let host = Server::canonicalize_host(&args.host)?;
+	let host = args
+		.host
+		.as_deref()
+		.filter(|s| !s.trim().is_empty())
+		.map(Server::canonicalize_host)
+		.transpose()?;
 
 	// Optionally pre-bind a Tailscale device.
 	let device_id = if let Some(identifier) = args.tailscale_identifier.as_deref() {

@@ -4169,7 +4169,6 @@
       "CreateServerArgs": {
         "type": "object",
         "required": [
-          "host",
           "kind"
         ],
         "properties": {
@@ -4204,7 +4203,10 @@
             "format": "uuid"
           },
           "host": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "is_monitored": {
             "type": [
@@ -5778,7 +5780,7 @@
               "required": [
                 "id",
                 "kind",
-                "host",
+                "display_host",
                 "is_monitored",
                 "alert_when_down_for",
                 "notes",
@@ -5807,6 +5809,10 @@
                     "null"
                   ],
                   "format": "uuid"
+                },
+                "display_host": {
+                  "type": "string",
+                  "description": "Effective URL for display: the stored `host`, or `https://{tailnet\nhostname}` when the server has no URL but is bound to a Tailscale device,\nelse an empty string. Filled by `fill_display_hosts`."
                 },
                 "geolocation": {
                   "oneOf": [
@@ -5844,7 +5850,11 @@
                   ]
                 },
                 "host": {
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The server's stored URL, if any. May be absent for device-only servers."
                 },
                 "id": {
                   "type": "string",
@@ -6538,7 +6548,7 @@
         "required": [
           "id",
           "kind",
-          "host",
+          "display_host",
           "is_monitored",
           "alert_when_down_for",
           "notes",
@@ -6567,6 +6577,10 @@
               "null"
             ],
             "format": "uuid"
+          },
+          "display_host": {
+            "type": "string",
+            "description": "Effective URL for display: the stored `host`, or `https://{tailnet\nhostname}` when the server has no URL but is bound to a Tailscale device,\nelse an empty string. Filled by `fill_display_hosts`."
           },
           "geolocation": {
             "oneOf": [
@@ -6604,7 +6618,11 @@
             ]
           },
           "host": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The server's stored URL, if any. May be absent for device-only servers."
           },
           "id": {
             "type": "string",

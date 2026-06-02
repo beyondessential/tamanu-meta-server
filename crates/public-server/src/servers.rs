@@ -69,11 +69,16 @@ pub async fn list(State(db): State<Db>) -> Result<Json<Vec<PublicServer>>> {
 		.await?
 		.into_iter()
 		.filter_map(|s| {
-			s.public_name.map(|name| PublicServer {
-				name,
-				host: s.host,
-				rank: s.rank,
-			})
+			// Only list servers that have both a public name and a URL — the
+			// mobile app needs a reachable host.
+			match (s.public_name, s.host) {
+				(Some(name), Some(host)) => Some(PublicServer {
+					name,
+					host,
+					rank: s.rank,
+				}),
+				_ => None,
+			}
 		})
 		.collect::<Vec<_>>();
 

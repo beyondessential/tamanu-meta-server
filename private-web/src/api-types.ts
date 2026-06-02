@@ -1690,7 +1690,7 @@ export interface components {
             geolocation?: null | components["schemas"]["GeoPoint"];
             /** Format: uuid */
             group_id?: string | null;
-            host: string;
+            host?: string | null;
             is_monitored?: boolean | null;
             kind: components["schemas"]["ServerKind"];
             name?: string | null;
@@ -2274,6 +2274,12 @@ export interface components {
                 cloud?: boolean | null;
                 /** Format: uuid */
                 device_id?: string | null;
+                /**
+                 * @description Effective URL for display: the stored `host`, or `https://{tailnet
+                 *     hostname}` when the server has no URL but is bound to a Tailscale device,
+                 *     else an empty string. Filled by `fill_display_hosts`.
+                 */
+                display_host: string;
                 geolocation?: null | components["schemas"]["GeoPoint"];
                 /** Format: uuid */
                 group_id?: string | null;
@@ -2283,7 +2289,8 @@ export interface components {
                  */
                 group_name?: string | null;
                 health?: null | components["schemas"]["HealthState"];
-                host: string;
+                /** @description The server's stored URL, if any. May be absent for device-only servers. */
+                host?: string | null;
                 /** Format: uuid */
                 id: string;
                 /**
@@ -2543,6 +2550,12 @@ export interface components {
             cloud?: boolean | null;
             /** Format: uuid */
             device_id?: string | null;
+            /**
+             * @description Effective URL for display: the stored `host`, or `https://{tailnet
+             *     hostname}` when the server has no URL but is bound to a Tailscale device,
+             *     else an empty string. Filled by `fill_display_hosts`.
+             */
+            display_host: string;
             geolocation?: null | components["schemas"]["GeoPoint"];
             /** Format: uuid */
             group_id?: string | null;
@@ -2552,7 +2565,8 @@ export interface components {
              */
             group_name?: string | null;
             health?: null | components["schemas"]["HealthState"];
-            host: string;
+            /** @description The server's stored URL, if any. May be absent for device-only servers. */
+            host?: string | null;
             /** Format: uuid */
             id: string;
             /**

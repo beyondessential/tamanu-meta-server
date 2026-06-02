@@ -54,7 +54,7 @@ function EditForm({ info }: { info: ServerInfo }) {
 	const action = useApiAction("servers", "update");
 
 	const [name, setName] = useState(info.name ?? "");
-	const [host, setHost] = useState(info.host);
+	const [host, setHost] = useState(info.host ?? "");
 	const [kind, setKind] = useState<ServerKind>(info.kind);
 	const [rank, setRank] = useState<ServerRank | "">(info.rank ?? "");
 	const [publicName, setPublicName] = useState<string>(info.public_name ?? "");
@@ -80,6 +80,7 @@ function EditForm({ info }: { info: ServerInfo }) {
 		if (!groupId) return; // a group is required
 		const data: Record<string, unknown> = {
 			name: name.trim() === "" ? null : name.trim(),
+			// Empty string clears the URL (server identified by its device only).
 			host: host.trim(),
 			kind,
 			rank: rank === "" ? null : rank,
@@ -125,7 +126,7 @@ function EditForm({ info }: { info: ServerInfo }) {
 					value={host}
 					onChange={(e) => setHost(e.target.value)}
 					disabled={action.pending}
-					required
+					helperText="Optional. Leave empty for a device-only server (a Tailscale-bound server's URL is shown from its tailnet hostname)."
 				/>
 				<TextField
 					select

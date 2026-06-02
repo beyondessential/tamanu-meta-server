@@ -21,7 +21,7 @@ fn new_server(host: &str) -> Server {
 	Server {
 		id: Uuid::new_v4(),
 		name: Some("test".into()),
-		host: UrlField(host.parse().unwrap()),
+		host: Some(UrlField(host.parse().unwrap())),
 		kind: ServerKind::Central,
 		rank: None,
 		device_id: None,
