@@ -274,6 +274,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(delete))
 		.routes(routes!(restore))
 		.routes(routes!(mint_enrollment))
+		.routes(routes!(revoke_enrollment))
 		.routes(routes!(enrollment_status))
 		.routes(routes!(attach_tailscale_device))
 }
@@ -863,6 +864,29 @@ pub async fn mint_enrollment(
 		passphrase,
 		expires_at: token.expires_at,
 	}))
+}
+
+/// Revoke any outstanding enrollment ticket for a server (e.g. issued by
+/// mistake). The next `enrollment_status` will report no outstanding token.
+#[utoipa::path(
+	post,
+	path = "/revoke_enrollment",
+	tag = "servers",
+	security(("tailscale-admin" = [])),
+	request_body = ServerIdOnlyArgs,
+	responses(
+		(status = 200),
+		(status = 400, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn revoke_enrollment(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<ServerIdOnlyArgs>,
+) -> Result<Json<()>> {
+	let mut conn = state.db.get().await?;
+	ServerEnrollmentToken::revoke(&mut conn, args.server_id).await?;
+	Ok(Json(()))
 }
 
 #[derive(Serialize, ToSchema)]

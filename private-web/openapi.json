@@ -2892,6 +2892,45 @@
         ]
       }
     },
+    "/api/servers/revoke_enrollment": {
+      "post": {
+        "tags": [
+          "servers"
+        ],
+        "summary": "Revoke any outstanding enrollment ticket for a server (e.g. issued by\nmistake). The next `enrollment_status` will report no outstanding token.",
+        "operationId": "revoke_enrollment",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerIdOnlyArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/servers/update": {
       "post": {
         "tags": [

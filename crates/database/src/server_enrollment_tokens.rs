@@ -139,6 +139,23 @@ impl ServerEnrollmentToken {
 		Ok(())
 	}
 
+	/// Revoke any outstanding (un-consumed) token for a server, e.g. an
+	/// enrollment ticket issued by mistake. Marks them consumed so they can no
+	/// longer be used; idempotent.
+	pub async fn revoke(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<()> {
+		use crate::schema::server_enrollment_tokens::dsl;
+		diesel::update(
+			dsl::server_enrollment_tokens
+				.filter(dsl::server_id.eq(server_id))
+				.filter(dsl::consumed_at.is_null()),
+		)
+		.set(dsl::consumed_at.eq(jiff_diesel::NullableTimestamp::from(Some(Timestamp::now()))))
+		.execute(db)
+		.await
+		.map_err(AppError::from)?;
+		Ok(())
+	}
+
 	/// The currently-active token for a server, if any. For the admin UI to show
 	/// "expires <when>" — never reveals the secret (only the hash lives here).
 	pub async fn active_for(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<Option<Self>> {

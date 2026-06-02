@@ -1167,6 +1167,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/servers/revoke_enrollment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke any outstanding enrollment ticket for a server (e.g. issued by
+         *     mistake). The next `enrollment_status` will report no outstanding token.
+         */
+        post: operations["revoke_enrollment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/servers/update": {
         parameters: {
             query?: never;
@@ -4925,6 +4945,35 @@ export interface operations {
                 content?: never;
             };
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    revoke_enrollment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerIdOnlyArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -125,3 +125,39 @@ async fn token_reissue_invalidates_prior_and_consume_is_single_use() {
 	})
 	.await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn revoke_invalidates_the_active_token() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		let server = Server::create(&mut conn, new_server("https://revoke.example/"))
+			.await
+			.unwrap();
+		let (_t, token) =
+			ServerEnrollmentToken::mint(&mut conn, server.id, SignedDuration::from_hours(1))
+				.await
+				.unwrap();
+		assert!(
+			ServerEnrollmentToken::active_for(&mut conn, server.id)
+				.await
+				.unwrap()
+				.is_some()
+		);
+
+		ServerEnrollmentToken::revoke(&mut conn, server.id).await.unwrap();
+
+		assert!(
+			ServerEnrollmentToken::active_for(&mut conn, server.id)
+				.await
+				.unwrap()
+				.is_none(),
+			"no active token after revoke"
+		);
+		assert!(
+			ServerEnrollmentToken::find_active(&mut conn, server.id, &token)
+				.await
+				.is_err(),
+			"revoked token can't be presented"
+		);
+	})
+	.await;
+}

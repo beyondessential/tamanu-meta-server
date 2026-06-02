@@ -19,33 +19,40 @@ import { useReloadInterval } from "../hooks/useReloadInterval";
 import TimeAgo from "./TimeAgo";
 import type { EnrollmentTicket } from "../types";
 
-/// Setup / enrollment instructions for a not-yet-registered server. Mints an
-/// encrypted enrollment ticket plus its 4-word passphrase, shows the ticket
-/// for the operator to paste into `bestool canopy register` and the passphrase
-/// to share out-of-band, the token expiry, a reissue button, and a live
-/// "waiting for check-in" → "registered" indicator polled from
-/// `servers.enrollment_status`.
+/// Setup / enrollment instructions for a server. Mints an encrypted enrollment
+/// ticket plus its 4-word passphrase and shows the `bestool canopy register`
+/// command for the operator to run (with the passphrase shared out-of-band),
+/// plus a live "waiting for check-in" → "registered" indicator.
+///
+/// The component is driven by `servers.enrollment_status`, not local state: if
+/// a ticket is already outstanding (e.g. after a page reload, or a re-enroll
+/// someone else started) it shows that *pending* state rather than minting a
+/// fresh ticket (which would invalidate the outstanding one). The ticket and
+/// passphrase are only displayable in the session that minted them — after a
+/// reload we can show that one is outstanding, but not its secret; the operator
+/// reissues (deliberately) or cancels.
 export default function ServerSetupInstructions({
 	serverId,
 	onRegistered,
 	reEnroll = false,
 }: {
 	serverId: string;
-	/// Fired once when the server first reports `registered_at`. The parent
-	/// can use this to refresh the surrounding page (e.g. flip the detail
-	/// view out of its "not registered" banner).
+	/// Fired once when enrollment completes. For initial setup that's the first
+	/// `registered_at`; for re-enroll it's `registered_at` *changing* from its
+	/// value at mount (a new device completing the handshake).
 	onRegistered?: () => void;
-	/// Re-enrollment of an already-registered server: "registered" is judged by
-	/// `registered_at` *changing* from its value at mount (a new device
-	/// completing the handshake), not merely being set.
+	/// Re-enrollment of an already-registered server. Initial setup auto-mints a
+	/// ticket; re-enroll waits for the operator to press "Re-enroll a device".
 	reEnroll?: boolean;
 }) {
 	const mint = useApiAction("servers", "mint_enrollment");
+	const revoke = useApiAction("servers", "revoke_enrollment");
 	const [ticket, setTicket] = useState<EnrollmentTicket | null>(null);
 	const [copied, setCopied] = useState(false);
 	const [copiedPassphrase, setCopiedPassphrase] = useState(false);
 
-	// Poll enrollment status while we're showing instructions.
+	// Poll enrollment status — the source of truth for whether a ticket is
+	// outstanding and whether the server has (re-)registered.
 	const tick = useReloadInterval(5000);
 	const status = useApi(
 		"servers",
@@ -53,43 +60,48 @@ export default function ServerSetupInstructions({
 		{ server_id: serverId },
 		[serverId, tick],
 	);
-	const registeredAt =
-		status.status === "ok" ? status.data.registered_at : null;
+	const statusLoaded = status.status === "ok";
+	const registeredAt = statusLoaded ? status.data.registered_at : null;
+	const tokenExpiresAt = statusLoaded ? status.data.token_expires_at : null;
+	const outstanding = tokenExpiresAt != null;
 
 	// In re-enroll mode the server is already registered, so "done" means the
-	// `registered_at` timestamp has *changed* since we opened (a new device
-	// completed). Capture the value at first status load as the baseline.
+	// `registered_at` timestamp has *changed* since we opened. Capture the value
+	// at first status load as the baseline.
 	const baselineRegisteredAt = useRef<string | null | undefined>(undefined);
 	useEffect(() => {
-		if (status.status === "ok" && baselineRegisteredAt.current === undefined) {
-			baselineRegisteredAt.current = status.data.registered_at ?? null;
+		if (statusLoaded && baselineRegisteredAt.current === undefined) {
+			baselineRegisteredAt.current = registeredAt;
 		}
-	}, [status]);
+	}, [statusLoaded, registeredAt]);
 	const registeredView = reEnroll
 		? registeredAt != null &&
 			baselineRegisteredAt.current !== undefined &&
 			registeredAt !== baselineRegisteredAt.current
 		: registeredAt != null;
 
-	// Mint a fresh ticket on mount / when the server changes.
-	useEffect(() => {
-		let cancelled = false;
+	const doMint = () => {
 		setTicket(null);
 		mint
 			.call({ server_id: serverId })
-			.then((t) => {
-				if (!cancelled) setTicket(t);
-			})
+			.then(setTicket)
 			.catch(() => {
 				/* surfaced via mint.error */
 			});
-		return () => {
-			cancelled = true;
-		};
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [serverId]);
+	};
 
-	// Notify the parent once when registration first completes.
+	// Initial setup auto-mints once — but only when nothing is outstanding, so a
+	// reload mid-enrollment shows the pending ticket instead of clobbering it.
+	const autoMinted = useRef(false);
+	useEffect(() => {
+		if (reEnroll || !statusLoaded || autoMinted.current || ticket) return;
+		if (outstanding) return;
+		autoMinted.current = true;
+		doMint();
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [reEnroll, statusLoaded, outstanding, ticket]);
+
+	// Notify the parent once when (re-)registration completes.
 	const [notified, setNotified] = useState(false);
 	useEffect(() => {
 		if (registeredView && !notified) {
@@ -98,18 +110,18 @@ export default function ServerSetupInstructions({
 		}
 	}, [registeredView, notified, onRegistered]);
 
-	const reissue = () => {
-		setTicket(null);
-		mint
-			.call({ server_id: serverId })
-			.then((t) => setTicket(t))
-			.catch(() => {
-				/* surfaced via mint.error */
-			});
+	const onCancel = async () => {
+		try {
+			await revoke.call({ server_id: serverId });
+			setTicket(null);
+			status.reload();
+		} catch {
+			/* surfaced via revoke.error */
+		}
 	};
 
-	// The ticket is encrypted, so it's safe to put on the command line — the
-	// whole thing is one copy-paste and bestool only prompts for the passphrase.
+	// The ticket is encrypted, so the whole command is one safe copy-paste;
+	// bestool only prompts for the passphrase.
 	const command = ticket ? `bestool canopy register ${ticket.ticket}` : "";
 
 	const onCopy = async () => {
@@ -134,6 +146,45 @@ export default function ServerSetupInstructions({
 		}
 	};
 
+	// Idle re-enroll: nothing minted in this session and nothing outstanding —
+	// just offer the button.
+	if (reEnroll && statusLoaded && !outstanding && !ticket && !mint.pending) {
+		return (
+			<Box>
+				<Button variant="outlined" onClick={doMint}>
+					Re-enroll a device
+				</Button>
+				<Typography
+					variant="caption"
+					color="text.secondary"
+					sx={{ display: "block", mt: 1 }}
+				>
+					Issue a new enrollment ticket to bind this server to a replacement
+					device. The current device keeps working until the new one checks
+					in.
+				</Typography>
+				{mint.error && (
+					<Alert severity="error" sx={{ mt: 1 }}>
+						{mint.error.message}
+					</Alert>
+				)}
+			</Box>
+		);
+	}
+
+	const reissueButton = (
+		<Tooltip title="Generates a new ticket and passphrase; the current ones immediately stop working.">
+			<Button
+				size="small"
+				startIcon={<RefreshIcon />}
+				onClick={doMint}
+				disabled={mint.pending}
+			>
+				{mint.pending ? "Reissuing…" : "Reissue"}
+			</Button>
+		</Tooltip>
+	);
+
 	return (
 		<Paper variant="outlined" sx={{ p: 2 }}>
 			<Stack spacing={2}>
@@ -147,29 +198,21 @@ export default function ServerSetupInstructions({
 					</Typography>
 					<RegistrationState
 						registered={registeredView}
-						tokenExpiresAt={
-							status.status === "ok"
-								? status.data.token_expires_at
-								: null
-						}
+						tokenExpiresAt={tokenExpiresAt}
 					/>
 				</Stack>
 
-				<Stack
-					direction="row"
-					spacing={1}
-					sx={{ alignItems: "center" }}
-				>
-					<Typography
-						variant="body2"
-						color="text.secondary"
-						sx={{ flex: 1 }}
-					>
-						Run this on the {reEnroll ? "replacement " : ""}server; it
-						will prompt for the passphrase shown below.
-					</Typography>
-					{ticket && (
-						<>
+				{ticket ? (
+					<>
+						<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+							<Typography
+								variant="body2"
+								color="text.secondary"
+								sx={{ flex: 1 }}
+							>
+								Run this on the {reEnroll ? "replacement " : ""}server; it
+								will prompt for the passphrase shown below.
+							</Typography>
 							<Tooltip title={copied ? "Copied" : "Copy command"}>
 								<IconButton
 									size="small"
@@ -179,91 +222,126 @@ export default function ServerSetupInstructions({
 									<ContentCopyIcon fontSize="small" />
 								</IconButton>
 							</Tooltip>
-							<Tooltip title="Generates a new ticket and passphrase; the current ones immediately stop working.">
-								<Button
-									size="small"
-									startIcon={<RefreshIcon />}
-									onClick={reissue}
-									disabled={mint.pending}
-								>
-									{mint.pending ? "Reissuing…" : "Reissue"}
-								</Button>
-							</Tooltip>
-						</>
-					)}
-				</Stack>
-
-				<Box
-					component="pre"
-					sx={{
-						m: 0,
-						p: 1.5,
-						borderRadius: 1,
-						bgcolor: "action.hover",
-						overflow: "auto",
-						fontSize: "0.85em",
-						fontFamily: "monospace",
-						whiteSpace: "pre-wrap",
-						wordBreak: "break-all",
-					}}
-				>
-					{mint.pending && !ticket
-						? "Minting enrollment ticket…"
-						: (command || "—")}
-				</Box>
-
-				{ticket && (
-					<Box>
-						<Typography variant="subtitle2" gutterBottom>
-							Passphrase
-						</Typography>
-						<Stack
-							direction="row"
-							spacing={1}
-							sx={{ alignItems: "center" }}
-						>
-							<Box
-								component="code"
-								sx={{
-									flex: 1,
-									p: 1.5,
-									borderRadius: 1,
-									bgcolor: "action.selected",
-									fontFamily: "monospace",
-									fontSize: "1.1em",
-									fontWeight: 600,
-									letterSpacing: "0.02em",
-									userSelect: "all",
-									wordBreak: "break-all",
-								}}
-							>
-								{ticket.passphrase}
-							</Box>
-							<Tooltip
-								title={copiedPassphrase ? "Copied" : "Copy passphrase"}
-							>
-								<IconButton
-									size="small"
-									onClick={onCopyPassphrase}
-									aria-label="Copy passphrase"
-								>
-									<ContentCopyIcon fontSize="small" />
-								</IconButton>
-							</Tooltip>
+							{reissueButton}
 						</Stack>
-						<Typography
-							variant="caption"
-							color="text.secondary"
-							sx={{ display: "block", mt: 1 }}
+
+						<Box
+							component="pre"
+							sx={{
+								m: 0,
+								p: 1.5,
+								borderRadius: 1,
+								bgcolor: "action.hover",
+								overflow: "auto",
+								fontSize: "0.85em",
+								fontFamily: "monospace",
+								whiteSpace: "pre-wrap",
+								wordBreak: "break-all",
+							}}
 						>
-							Share the passphrase over a separate channel (e.g. a
-							call).
+							{command}
+						</Box>
+
+						<Box>
+							<Typography variant="subtitle2" gutterBottom>
+								Passphrase
+							</Typography>
+							<Stack
+								direction="row"
+								spacing={1}
+								sx={{ alignItems: "center" }}
+							>
+								<Box
+									component="code"
+									sx={{
+										flex: 1,
+										p: 1.5,
+										borderRadius: 1,
+										bgcolor: "action.selected",
+										fontFamily: "monospace",
+										fontSize: "1.1em",
+										fontWeight: 600,
+										letterSpacing: "0.02em",
+										userSelect: "all",
+										wordBreak: "break-all",
+									}}
+								>
+									{ticket.passphrase}
+								</Box>
+								<Tooltip
+									title={copiedPassphrase ? "Copied" : "Copy passphrase"}
+								>
+									<IconButton
+										size="small"
+										onClick={onCopyPassphrase}
+										aria-label="Copy passphrase"
+									>
+										<ContentCopyIcon fontSize="small" />
+									</IconButton>
+								</Tooltip>
+							</Stack>
+							<Typography
+								variant="caption"
+								color="text.secondary"
+								sx={{ display: "block", mt: 1 }}
+							>
+								Share the passphrase over a separate channel (e.g. a call).
+							</Typography>
+						</Box>
+					</>
+				) : mint.pending ? (
+					<Box
+						component="pre"
+						sx={{
+							m: 0,
+							p: 1.5,
+							borderRadius: 1,
+							bgcolor: "action.hover",
+							fontSize: "0.85em",
+							fontFamily: "monospace",
+						}}
+					>
+						Minting enrollment ticket…
+					</Box>
+				) : outstanding ? (
+					<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+						<Typography
+							variant="body2"
+							color="text.secondary"
+							sx={{ flex: 1 }}
+						>
+							An enrollment ticket is outstanding. Its command and passphrase
+							were only shown when generated and can't be displayed again —
+							reissue to generate a new one
+							{reEnroll ? ", or cancel to revoke it" : ""}.
 						</Typography>
+						{reissueButton}
+					</Stack>
+				) : (
+					<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+						<CircularProgress size={16} />
+						<Typography variant="body2" color="text.secondary">
+							Loading…
+						</Typography>
+					</Stack>
+				)}
+
+				{reEnroll && (ticket != null || outstanding) && (
+					<Box>
+						<Button
+							size="small"
+							color="error"
+							onClick={onCancel}
+							disabled={revoke.pending}
+						>
+							{revoke.pending ? "Cancelling…" : "Cancel re-enrollment"}
+						</Button>
 					</Box>
 				)}
 
-				{mint.error && (
-					<Alert severity="error">{mint.error.message}</Alert>
+				{mint.error && <Alert severity="error">{mint.error.message}</Alert>}
+				{revoke.error && (
+					<Alert severity="error">{revoke.error.message}</Alert>
 				)}
 			</Stack>
 		</Paper>
@@ -295,7 +373,7 @@ function RegistrationState({
 				{tokenExpiresAt && (
 					<>
 						{" "}
-						(token expires <TimeAgo timestamp={tokenExpiresAt} />)
+						(ticket expires <TimeAgo timestamp={tokenExpiresAt} />)
 					</>
 				)}
 			</Typography>
