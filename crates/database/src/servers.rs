@@ -288,11 +288,18 @@ impl Server {
 		Self::get_by_id(db, server_id).await
 	}
 
-	/// Canonicalise a URL into a stored host string (normalises scheme, host,
-	/// port, trailing slash). Shared by the enrollment path.
+	/// Canonicalise a user-entered URL. A bare host (no scheme) defaults to
+	/// `https://`, so operators can type `foo.example.com` and get
+	/// `https://foo.example.com`.
 	pub fn canonicalize_host(url: &str) -> Result<UrlField> {
-		Ok(UrlField(url.parse().map_err(|e| {
-			AppError::BadRequest(format!("Invalid canonical URL: {e}"))
+		let url = url.trim();
+		let candidate = if url.contains("://") {
+			url.to_string()
+		} else {
+			format!("https://{url}")
+		};
+		Ok(UrlField(candidate.parse().map_err(|e| {
+			AppError::BadRequest(format!("Invalid URL: {e}"))
 		})?))
 	}
 
@@ -603,6 +610,15 @@ impl Server {
 		let group = crate::server_groups::ServerGroup::get_by_id(db, gid).await?;
 		Ok(self.tags.merged_with(&group.tags))
 	}
+}
+
+#[test]
+fn canonicalize_host_defaults_to_https() {
+	let h = |s: &str| Server::canonicalize_host(s).unwrap().0.to_string();
+	assert_eq!(h("foo.example.com"), "https://foo.example.com/");
+	assert_eq!(h("  bar.example.com  "), "https://bar.example.com/");
+	assert_eq!(h("http://insecure.example"), "http://insecure.example/");
+	assert_eq!(h("https://full.example/path"), "https://full.example/path");
 }
 
 #[test]

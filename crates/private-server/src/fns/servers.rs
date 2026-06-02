@@ -17,7 +17,6 @@ use database::{
 	server_groups::ServerGroup,
 	servers::{PartialServer, Server},
 	statuses::Status,
-	url_field::UrlField,
 	versions::Version,
 };
 use futures::future::join;
@@ -579,11 +578,7 @@ pub async fn update(
 		// The form always sends `host`; an empty string clears it.
 		host: match args.data.host {
 			Some(s) if s.trim().is_empty() => Some(None),
-			Some(s) => {
-				Some(Some(UrlField(s.parse().map_err(|e| {
-					AppError::custom(format!("Invalid URL: {}", e))
-				})?)))
-			}
+			Some(s) => Some(Some(Server::canonicalize_host(&s)?)),
 			None => None,
 		},
 		device_id: args.data.device_id,
