@@ -2,7 +2,8 @@
 //! purposes of incident roll-up, shared tags, and shared operator notes.
 
 use commons_errors::{AppError, Result};
-use commons_types::server::{TagMap, rank::ServerRank};
+use commons_types::server::{TagMap, kind::ServerKind, rank::ServerRank};
+use commons_types::version::VersionStr;
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use jiff::Timestamp;
@@ -11,16 +12,38 @@ use uuid::Uuid;
 
 use crate::pg_duration::PgDuration;
 use crate::servers::Server;
+use crate::statuses::Status;
+
+/// Ordering key for a server's rank — lower is higher priority. Used to pick a
+/// group's canonical member (and to bucket groups on the status page). `None`
+/// (unranked) sorts last.
+pub fn rank_priority(rank: Option<ServerRank>) -> u8 {
+	match rank {
+		Some(ServerRank::Production) => 0,
+		Some(ServerRank::Clone) => 1,
+		Some(ServerRank::Demo) => 2,
+		Some(ServerRank::Test) => 3,
+		Some(ServerRank::Dev) => 4,
+		None => 5,
+	}
+}
+
+/// Ordering key for a server's kind — lower is higher priority. Central servers
+/// are the headline of a group; facility ties below them, canopy-kind last.
+pub fn kind_priority(kind: ServerKind) -> u8 {
+	match kind {
+		ServerKind::Central => 0,
+		ServerKind::Facility => 1,
+		ServerKind::Canopy => 2,
+	}
+}
 
 fn higher_rank(a: ServerRank, b: ServerRank) -> ServerRank {
-	let order = |r: ServerRank| match r {
-		ServerRank::Production => 0u8,
-		ServerRank::Clone => 1,
-		ServerRank::Demo => 2,
-		ServerRank::Test => 3,
-		ServerRank::Dev => 4,
-	};
-	if order(a) <= order(b) { a } else { b }
+	if rank_priority(Some(a)) <= rank_priority(Some(b)) {
+		a
+	} else {
+		b
+	}
 }
 
 #[derive(
@@ -54,6 +77,15 @@ pub struct ServerGroup {
 	/// keep Slack quiet without losing the underlying incident record.
 	#[schema(value_type = i64, format = "int64")]
 	pub slack_open_delay: PgDuration,
+	/// The group's canonical member (highest rank, then highest kind) whose
+	/// version is cached in `effective_version`. Maintained by
+	/// [`ServerGroup::recompute_version`] on membership/rank/kind/delete
+	/// changes. `None` when the group has no members.
+	pub version_server_id: Option<Uuid>,
+	/// The canonical member's last reported version. Maintained by the
+	/// `statuses` AFTER INSERT trigger (canonical member reports a new version)
+	/// and by [`ServerGroup::recompute_version`] (membership changes).
+	pub effective_version: Option<VersionStr>,
 }
 
 #[derive(Debug, Clone, Deserialize, Insertable, utoipa::ToSchema)]
@@ -209,6 +241,56 @@ impl ServerGroup {
 			out.insert(gid, better);
 		}
 		Ok(out)
+	}
+
+	/// Recompute the cached canonical member and its version for `group_id`.
+	///
+	/// Loads every member of the group, picks the canonical one (lowest
+	/// `(rank_priority, kind_priority)`, tie-broken by `id`), and caches that
+	/// member's last version-bearing status. No members → both cache columns
+	/// are cleared. Runs only on infrequent membership/rank/kind/delete
+	/// changes, so the unbounded `last_with_version_for_server` query is fine
+	/// here. The `statuses` trigger handles the hot path (canonical member
+	/// reporting a new version) without touching this.
+	pub async fn recompute_version(db: &mut AsyncPgConnection, group_id: Uuid) -> Result<()> {
+		use crate::schema::server_groups::dsl;
+
+		let members: Vec<Server> = {
+			use crate::schema::servers::dsl as servers_dsl;
+			servers_dsl::servers
+				.select(Server::as_select())
+				.filter(servers_dsl::group_id.eq(group_id))
+				.load(db)
+				.await?
+		};
+
+		let canonical = members.into_iter().min_by(|a, b| {
+			(rank_priority(a.rank), kind_priority(a.kind), a.id).cmp(&(
+				rank_priority(b.rank),
+				kind_priority(b.kind),
+				b.id,
+			))
+		});
+
+		let (version_server_id, effective_version) = match canonical {
+			None => (None, None),
+			Some(server) => {
+				let version = Status::last_with_version_for_server(db, server.id)
+					.await?
+					.and_then(|s| s.version);
+				(Some(server.id), version)
+			}
+		};
+
+		diesel::update(dsl::server_groups.filter(dsl::id.eq(group_id)))
+			.set((
+				dsl::version_server_id.eq(version_server_id),
+				dsl::effective_version.eq(effective_version),
+			))
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(())
 	}
 
 	/// Loose search by UUID or name substring, capped at 50 results, used by

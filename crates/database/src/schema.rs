@@ -204,6 +204,8 @@ diesel::table! {
 		notes -> Text,
 		tags -> Jsonb,
 		slack_open_delay -> Interval,
+		version_server_id -> Nullable<Uuid>,
+		effective_version -> Nullable<Text>,
 	}
 }
 
@@ -338,7 +340,6 @@ diesel::joinable!(issues -> servers (server_id));
 diesel::joinable!(server_group_silenced_refs -> server_groups (server_group_id));
 diesel::joinable!(server_silenced_refs -> servers (server_id));
 diesel::joinable!(servers -> devices (device_id));
-diesel::joinable!(servers -> server_groups (group_id));
 diesel::joinable!(slack_outbox -> incident_notes (note_id));
 diesel::joinable!(slack_outbox -> incidents (incident_id));
 diesel::joinable!(slack_outbox -> issues (issue_id));

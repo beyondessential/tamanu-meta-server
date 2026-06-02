@@ -96,6 +96,11 @@ pub async fn create(
 		.get_result(&mut db)
 		.await?;
 
+	// A new member can shift the group's canonical member, so refresh the cache.
+	if let Some(group_id) = server.group_id {
+		database::server_groups::ServerGroup::recompute_version(&mut db, group_id).await?;
+	}
+
 	Ok(Json(server))
 }
 
@@ -123,6 +128,13 @@ pub async fn edit(
 	let input_id = input.id;
 	let dev_id = device.0.0.id;
 
+	// Capture the old group before the update: rank/kind/group_id may all
+	// change, so both the old and new group's canonical member can shift.
+	let old_group_id = Server::get_by_id(&mut db, input_id)
+		.await
+		.ok()
+		.and_then(|s| s.group_id);
+
 	// Scope to the calling device's own server: a device may only edit the
 	// server it is bound to, never an arbitrary server id from the body.
 	diesel::update(servers)
@@ -132,14 +144,22 @@ pub async fn edit(
 		.execute(&mut db)
 		.await?;
 
-	Ok(Json(
-		servers
-			.filter(id.eq(input_id))
-			.filter(device_id.eq(dev_id))
-			.select(Server::as_select())
-			.first(&mut db)
-			.await?,
-	))
+	let updated: Server = servers
+		.filter(id.eq(input_id))
+		.filter(device_id.eq(dev_id))
+		.select(Server::as_select())
+		.first(&mut db)
+		.await?;
+
+	for gid in [old_group_id, updated.group_id]
+		.into_iter()
+		.flatten()
+		.collect::<std::collections::BTreeSet<_>>()
+	{
+		database::server_groups::ServerGroup::recompute_version(&mut db, gid).await?;
+	}
+
+	Ok(Json(updated))
 }
 
 #[utoipa::path(
@@ -163,10 +183,22 @@ pub async fn remove(
 
 	let mut db = db.get().await?;
 
+	// Capture the group before the delete: the FK auto-nulls
+	// `version_server_id`, but we must repopulate the cache from the remaining
+	// members.
+	let removed_group_id = Server::get_by_id(&mut db, input.id)
+		.await
+		.ok()
+		.and_then(|s| s.group_id);
+
 	diesel::delete(servers)
 		.filter(id.eq(input.id))
 		.execute(&mut db)
 		.await?;
+
+	if let Some(gid) = removed_group_id {
+		database::server_groups::ServerGroup::recompute_version(&mut db, gid).await?;
+	}
 
 	Ok(())
 }

@@ -178,15 +178,14 @@ pub async fn group_details(
 		.map(|s| (s.server_id, s))
 		.collect();
 
-	// Pick a representative server to provide the card's headline version:
-	// the one with the most recent status. Ties (no status anywhere) fall
-	// back to the first server by name.
-	let representative = servers
-		.iter()
-		.max_by_key(|s| status_map.get(&s.id).map(|st| st.created_at))
-		.cloned();
-	let rep_status = representative.as_ref().and_then(|s| status_map.get(&s.id));
-	let version_distance = rep_status.and_then(|s| s.distance_from_version(&latest_version));
+	// The card's headline version is the cached last reported version of the
+	// group's canonical member (highest rank, then highest kind), maintained by
+	// the `statuses` trigger and `ServerGroup::recompute_version`. The distance
+	// is computed against the latest published version.
+	let card_version = group.effective_version.clone();
+	let version_distance = card_version
+		.as_ref()
+		.map(|v| database::statuses::version_distance(&v.0, &latest_version));
 
 	let members = servers
 		.into_iter()
@@ -207,7 +206,7 @@ pub async fn group_details(
 		id: group.id,
 		name: group.name,
 		notes: group.notes,
-		version: rep_status.and_then(|s| s.version.clone()),
+		version: card_version,
 		version_distance,
 		members,
 	}))

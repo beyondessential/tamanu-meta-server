@@ -15,6 +15,23 @@ use super::url_field::UrlField;
 
 const TEN_MINUTES: PgDuration = PgDuration(SignedDuration::from_secs(600));
 
+/// Recompute each distinct, present group id, deduping repeats and skipping
+/// `None`. Used by the server write paths that can change a group's canonical
+/// member (membership/rank/kind/delete).
+async fn recompute_groups(
+	db: &mut AsyncPgConnection,
+	groups: impl IntoIterator<Item = Option<Uuid>>,
+) -> Result<()> {
+	let mut seen: Vec<Uuid> = Vec::new();
+	for gid in groups.into_iter().flatten() {
+		if !seen.contains(&gid) {
+			seen.push(gid);
+			crate::server_groups::ServerGroup::recompute_version(db, gid).await?;
+		}
+	}
+	Ok(())
+}
+
 #[derive(
 	Debug,
 	Clone,
@@ -255,7 +272,7 @@ impl Server {
 		// (kind, rank, cloud) re-apply on update; operator-edited state
 		// (public_name, geolocation, alert_when_down_for, group_id, notes,
 		// tags) is preserved.
-		diesel::insert_into(servers::table)
+		let server: Self = diesel::insert_into(servers::table)
 			.values((
 				servers::id.eq(ticket.server_id),
 				servers::name.eq(&Some(ticket.hostname.clone())),
@@ -278,7 +295,11 @@ impl Server {
 			.returning(Self::as_select())
 			.get_result(db)
 			.await
-			.map_err(AppError::from)
+			.map_err(AppError::from)?;
+
+		// kind/rank/membership may have changed, shifting the canonical member.
+		recompute_groups(db, [server.group_id]).await?;
+		Ok(server)
 	}
 
 	pub async fn get_by_device_id(db: &mut AsyncPgConnection, dev_id: Uuid) -> Result<Vec<Self>> {
@@ -473,13 +494,25 @@ impl Server {
 	) -> Result<Self> {
 		use crate::schema::servers::dsl;
 
+		// Capture the old group before the update: rank/kind/group_id may all
+		// change, so both the old and new group's canonical member can shift.
+		// Non-fatal: a missing server (or read error) just means "no old group
+		// to recompute" and leaves the update's own error handling — e.g. the
+		// empty-changeset path — to set the response, unchanged by us.
+		let old_group_id = Self::get_by_id(db, server_id)
+			.await
+			.ok()
+			.and_then(|s| s.group_id);
+
 		diesel::update(dsl::servers.filter(dsl::id.eq(server_id)))
 			.set(updates)
 			.execute(db)
 			.await
 			.map_err(AppError::from)?;
 
-		Self::get_by_id(db, server_id).await
+		let after = Self::get_by_id(db, server_id).await?;
+		recompute_groups(db, [old_group_id, after.group_id]).await?;
+		Ok(after)
 	}
 
 	/// Set or clear the server's group. On a `None → Some(group)` transition,
@@ -508,6 +541,8 @@ impl Server {
 			// to attach an incident to.
 			crate::issues::reevaluate_open_issues_for_server(db, server_id).await?;
 		}
+
+		recompute_groups(db, [before.group_id, new_group_id]).await?;
 
 		Ok(after)
 	}
