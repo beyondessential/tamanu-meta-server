@@ -19,9 +19,9 @@ common path is one continuous flow. Servers and groups become deletable.
 "Device" stops being a first-class concept in the operator's mental model — it
 is demoted to an internal/advanced detail of a server.
 
-The bestool half is **out of scope for this repo**; it is captured separately
-in `docs/specs/bestool-canopy-register.md` for hand-off to a bestool agent.
-This plan only covers Canopy (database, public-server, private-server, React).
+The bestool half is **out of scope for this repo**; it lives in the bestool
+repo at `docs/plans/canopy-register.md`. This plan only covers Canopy
+(database, public-server, private-server, React).
 
 ## Why the current flow is backwards
 
@@ -61,7 +61,7 @@ Problems this plan fixes:
    `pub use ticket::CanopyTicket;` in `crates/commons-types/src/server.rs` —
    verified there are no other Canopy consumers once `upsert_from_ticket` and
    `import_ticket` are gone). `bestool t meta-ticket` is removed entirely (noted
-   in the bestool spec). Reusable internals (URL canonicalization, cloud
+   in the bestool plan). Reusable internals (URL canonicalization, cloud
    detection) are refactored into helpers consumed by the new register path, not
    deleted.
    This is a net security improvement, with one conscious tradeoff (see
@@ -213,7 +213,7 @@ the usability win is large. Recorded as a conscious decision.
 `bestool canopy register` consumes a base64-encoded, **age-encrypted** ticket
 that Canopy produces, plus a 4-word passphrase that decrypts it. Decrypting the
 ticket with the passphrase yields the JSON payload below. This shape is the
-integration contract; it is duplicated in the bestool spec.
+integration contract; it is duplicated in the bestool plan.
 
 ```jsonc
 {
@@ -235,7 +235,7 @@ integration contract; it is duplicated in the bestool spec.
 - `token` plaintext lives **only** inside the encrypted ticket; Canopy stores
   only its hash. bestool reads the ticket from **stdin/file, never an argv
   positional**, and prompts for the passphrase (so neither lands in shell history
-  or `ps`/`/proc/<pid>/cmdline`) — see the bestool spec.
+  or `ps`/`/proc/<pid>/cmdline`) — see the bestool plan.
 - **No `group_id`** in the payload: the server record already authoritatively
   holds the group, so shipping it bought no security (it can't be a second factor
   when it travels in the same ticket it'd be checked against). It would only
@@ -653,6 +653,6 @@ back (nothing to alert on).
 - **Hardware-bound device keys (bestool side, not this plan):** the strongest
   defence against a copied key is to make the key non-exfiltratable — bestool is
   expected to bind the device key to a TPM/secure element so it can't be moved to
-  another machine without explicit operator action. Captured in the bestool spec
+  another machine without explicit operator action. Captured in the bestool plan
   as a recommendation; no Canopy-side change needed (Canopy still just verifies
   the signature against the presented SPKI).
