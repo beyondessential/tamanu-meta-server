@@ -23,7 +23,7 @@ token-push" server enrollment.
 
 Net effect for bestool:
 
-1. **Add** `bestool canopy register` (ticket read from stdin/file, passphrase
+1. **Add** `bestool canopy register` (ticket as a positional arg or stdin, passphrase
    prompted — see CLI shape).
 2. **Remove** `bestool t meta-ticket` (the `CanopyTicket` producer) entirely —
    it has zero use once the Canopy change lands, so there's no deprecation
@@ -59,19 +59,20 @@ The decrypted payload is this JSON:
   `reveal`/`decrypt_stream` plus `PassphraseArgs` to prompt for the passphrase
   and decrypt.
 - Validate `v == "enroll-1"`; fail clearly otherwise.
-- `token` is a bearer secret — **never log it**. The ticket itself is encrypted,
-  but the decrypted payload (and the passphrase) are sensitive: read the ticket
-  from stdin or a file and prompt for the passphrase, never an argv positional
-  (see CLI shape), so neither lands in shell history or
-  `ps`/`/proc/<pid>/cmdline`.
+- `token` is a bearer secret — **never log it** (nor the decrypted payload). The
+  ticket itself is encrypted, so it is safe to accept as an argv positional (the
+  whole `bestool canopy register <ticket>` line is one copy-paste). The
+  **passphrase** is the sensitive half: prompt for it interactively (algae
+  `PassphraseArgs`) and **never** accept it on argv, so it can't land in shell
+  history or `ps`/`/proc/<pid>/cmdline`.
 - There is no `group_id` and no CA in the payload. `api_url` is served with a
   webPKI (Let's Encrypt) certificate, so verify the server's TLS against the
   system root store; do not pin a CA.
 
 ## What `register` does
 
-1. **Read + decrypt + parse** the ticket: read it (from stdin/file),
-   base64-decode it, prompt for the passphrase (algae `PassphraseArgs`),
+1. **Read + decrypt + parse** the ticket: take it as a positional arg (or
+   stdin/file), base64-decode it, prompt for the passphrase (algae `PassphraseArgs`),
    `decrypt_stream` the age bytestream, then parse the JSON and validate version
    and required fields (`api_url`, `server_id`, `token`).
 2. **Establish the machine's mTLS identity.** Use the machine's existing
@@ -144,13 +145,14 @@ device.
 ## CLI shape
 
 ```
-bestool canopy register            # reads the ticket from stdin, prompts for the passphrase
-bestool canopy register --ticket-file <path>
+bestool canopy register <TICKET>   # ticket as a positional arg; prompts for the passphrase
+bestool canopy register            # ticket from stdin if no positional given
 ```
 
-- Read the ticket from **stdin by default** (or `--ticket-file`); do **not**
-  accept it as an argv positional. The ticket is encrypted, but keeping it off
-  argv is consistent and avoids it landing in process listings/history.
+- Accept the encrypted ticket as a **positional arg** (the operator copy-pastes
+  the whole `bestool canopy register <ticket>` line from Canopy). Also accept it
+  on **stdin** when no positional is given. The ticket is encrypted, so argv is
+  fine.
 - Prompt for the **passphrase** interactively via algae's `PassphraseArgs`
   (which also supports the usual non-interactive overrides). Never take it as an
   argv positional.

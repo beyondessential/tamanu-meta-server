@@ -88,10 +88,14 @@ export default function ServerSetupInstructions({
 			});
 	};
 
+	// The ticket is encrypted, so it's safe to put on the command line — the
+	// whole thing is one copy-paste and bestool only prompts for the passphrase.
+	const command = ticket ? `bestool canopy register ${ticket.ticket}` : "";
+
 	const onCopy = async () => {
 		if (!ticket) return;
 		try {
-			await navigator.clipboard.writeText(ticket.ticket);
+			await navigator.clipboard.writeText(command);
 			setCopied(true);
 			window.setTimeout(() => setCopied(false), 2000);
 		} catch {
@@ -131,22 +135,41 @@ export default function ServerSetupInstructions({
 					/>
 				</Stack>
 
-				<Typography variant="body2" color="text.secondary">
-					Run{" "}
-					<Box
-						component="code"
-						sx={{
-							fontFamily: "monospace",
-							bgcolor: "action.hover",
-							px: 0.5,
-							borderRadius: 0.5,
-						}}
+				<Stack
+					direction="row"
+					spacing={1}
+					sx={{ alignItems: "center" }}
+				>
+					<Typography
+						variant="body2"
+						color="text.secondary"
+						sx={{ flex: 1 }}
 					>
-						bestool canopy register
-					</Box>
-					, paste the enrollment ticket below when prompted, and it
-					will then ask for the passphrase shown further down.
-				</Typography>
+						Run this on the server; it will prompt for the passphrase
+						shown below.
+					</Typography>
+					{ticket && (
+						<>
+							<Tooltip title={copied ? "Copied" : "Copy command"}>
+								<IconButton
+									size="small"
+									onClick={onCopy}
+									aria-label="Copy register command"
+								>
+									<ContentCopyIcon fontSize="small" />
+								</IconButton>
+							</Tooltip>
+							<Button
+								size="small"
+								startIcon={<RefreshIcon />}
+								onClick={reissue}
+								disabled={mint.pending}
+							>
+								{mint.pending ? "Reissuing…" : "Reissue"}
+							</Button>
+						</>
+					)}
+				</Stack>
 
 				<Box
 					component="pre"
@@ -164,30 +187,8 @@ export default function ServerSetupInstructions({
 				>
 					{mint.pending && !ticket
 						? "Minting enrollment ticket…"
-						: (ticket?.ticket ?? "—")}
+						: (command || "—")}
 				</Box>
-
-				{ticket && (
-					<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-						<Tooltip title={copied ? "Copied" : "Copy ticket"}>
-							<IconButton
-								size="small"
-								onClick={onCopy}
-								aria-label="Copy enrollment ticket"
-							>
-								<ContentCopyIcon fontSize="small" />
-							</IconButton>
-						</Tooltip>
-						<Button
-							size="small"
-							startIcon={<RefreshIcon />}
-							onClick={reissue}
-							disabled={mint.pending}
-						>
-							{mint.pending ? "Reissuing…" : "Reissue"}
-						</Button>
-					</Stack>
-				)}
 
 				{ticket && (
 					<Box>
@@ -234,7 +235,7 @@ export default function ServerSetupInstructions({
 							sx={{ display: "block", mt: 1 }}
 						>
 							Share the passphrase over a separate channel (e.g. a
-							call). The ticket is useless without it.
+							call).
 						</Typography>
 					</Box>
 				)}
