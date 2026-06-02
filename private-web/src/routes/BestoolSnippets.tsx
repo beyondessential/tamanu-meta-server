@@ -149,7 +149,7 @@ function CreateSnippetForm({ onCreated }: { onCreated: () => void }) {
 					required
 				/>
 				<TextField
-					label="Description (optional)"
+					label="Description"
 					placeholder="Sentence about what it does and ${variables} required"
 					value={description}
 					onChange={(e) => setDescription(e.target.value)}

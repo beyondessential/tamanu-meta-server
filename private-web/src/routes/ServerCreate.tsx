@@ -313,7 +313,7 @@ function TailscaleIdentityField({
 	return (
 		<Stack spacing={1}>
 			<TextField
-				label="Tailscale identity (optional)"
+				label="Tailscale identity"
 				placeholder="100.64.0.42 / nodekey:… / device.example.ts.net"
 				value={value}
 				onChange={(e) => onChange(e.target.value)}
