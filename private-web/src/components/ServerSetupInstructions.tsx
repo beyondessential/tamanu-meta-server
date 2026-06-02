@@ -13,8 +13,6 @@ import {
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import RefreshIcon from "@mui/icons-material/Refresh";
-import VisibilityIcon from "@mui/icons-material/Visibility";
-import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 import { useEffect, useState } from "react";
 import { useApi, useApiAction } from "../api";
 import { useReloadInterval } from "../hooks/useReloadInterval";
@@ -22,9 +20,9 @@ import TimeAgo from "./TimeAgo";
 import type { EnrollmentBlob } from "../types";
 
 /// Setup / enrollment instructions for a not-yet-registered server. Mints an
-/// enrollment blob, shows the `bestool canopy register` command (with the
-/// blob masked until revealed), the token expiry, a reissue button, and a
-/// live "waiting for check-in" → "registered" indicator polled from
+/// enrollment ticket, shows it for the operator to paste into
+/// `bestool canopy register`, the token expiry, a reissue button, and a live
+/// "waiting for check-in" → "registered" indicator polled from
 /// `servers.enrollment_status`.
 export default function ServerSetupInstructions({
 	serverId,
@@ -38,7 +36,6 @@ export default function ServerSetupInstructions({
 }) {
 	const mint = useApiAction("servers", "mint_enrollment");
 	const [blob, setBlob] = useState<EnrollmentBlob | null>(null);
-	const [revealed, setRevealed] = useState(false);
 	const [copied, setCopied] = useState(false);
 
 	// Poll enrollment status while we're showing instructions.
@@ -56,7 +53,6 @@ export default function ServerSetupInstructions({
 	useEffect(() => {
 		let cancelled = false;
 		setBlob(null);
-		setRevealed(false);
 		mint
 			.call({ server_id: serverId })
 			.then((b) => {
@@ -81,7 +77,6 @@ export default function ServerSetupInstructions({
 	}, [registeredAt, notified, onRegistered]);
 
 	const reissue = () => {
-		setRevealed(false);
 		setBlob(null);
 		mint
 			.call({ server_id: serverId })
@@ -90,10 +85,6 @@ export default function ServerSetupInstructions({
 				/* surfaced via mint.error */
 			});
 	};
-
-	const command = blob
-		? `bestool canopy register${revealed ? `\n${blob.blob}` : ""}`
-		: "";
 
 	const onCopy = async () => {
 		if (!blob) return;
@@ -128,8 +119,19 @@ export default function ServerSetupInstructions({
 				</Stack>
 
 				<Typography variant="body2" color="text.secondary">
-					Install bestool on the server, then run the command below. Paste
-					the enrollment blob into its standard input — for example:
+					Run{" "}
+					<Box
+						component="code"
+						sx={{
+							fontFamily: "monospace",
+							bgcolor: "action.hover",
+							px: 0.5,
+							borderRadius: 0.5,
+						}}
+					>
+						bestool canopy register
+					</Box>{" "}
+					and provide this enrollment ticket when prompted:
 				</Typography>
 
 				<Box
@@ -147,32 +149,17 @@ export default function ServerSetupInstructions({
 					}}
 				>
 					{mint.pending && !blob
-						? "Minting enrollment token…"
-						: command || "—"}
+						? "Minting enrollment ticket…"
+						: (blob?.blob ?? "—")}
 				</Box>
 
 				{blob && (
 					<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-						<Tooltip title={revealed ? "Hide blob" : "Reveal blob"}>
-							<IconButton
-								size="small"
-								onClick={() => setRevealed((v) => !v)}
-								aria-label={
-									revealed ? "Hide enrollment blob" : "Reveal enrollment blob"
-								}
-							>
-								{revealed ? (
-									<VisibilityOffIcon fontSize="small" />
-								) : (
-									<VisibilityIcon fontSize="small" />
-								)}
-							</IconButton>
-						</Tooltip>
-						<Tooltip title={copied ? "Copied" : "Copy blob"}>
+						<Tooltip title={copied ? "Copied" : "Copy ticket"}>
 							<IconButton
 								size="small"
 								onClick={onCopy}
-								aria-label="Copy enrollment blob"
+								aria-label="Copy enrollment ticket"
 							>
 								<ContentCopyIcon fontSize="small" />
 							</IconButton>
@@ -187,8 +174,7 @@ export default function ServerSetupInstructions({
 						</Button>
 						<Box sx={{ flex: 1 }} />
 						<Typography variant="caption" color="text.secondary">
-							The blob is sensitive — anyone holding it can enroll as this
-							server.
+							Only share with the server installer; do not reuse.
 						</Typography>
 					</Stack>
 				)}
