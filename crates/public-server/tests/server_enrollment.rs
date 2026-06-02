@@ -294,3 +294,58 @@ async fn enrollment_unknown_server_and_bad_token_are_opaque() {
 	})
 	.await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn re_enrollment_replaces_the_device() {
+	run(async |mut conn, public, _private| {
+		use database::{Device, DeviceKey};
+
+		// First enrollment with cert A.
+		let (spki_a, cert_a, key_a) = make_signing_certificate();
+		let server = Server::create(&mut conn, new_server("https://reenroll.example/"))
+			.await
+			.unwrap();
+		let (_ta, token_a) =
+			ServerEnrollmentToken::mint(&mut conn, server.id, SignedDuration::from_hours(1))
+				.await
+				.unwrap();
+		run_handshake(&public, server.id, &token_a, &spki_a, &cert_a, &key_a)
+			.await
+			.assert_status_ok();
+		let device_a = Server::get_by_id(&mut conn, server.id)
+			.await
+			.unwrap()
+			.device_id
+			.unwrap();
+
+		// Re-enroll with a DIFFERENT box (cert B) — replaces the device.
+		let (spki_b, cert_b, key_b) = make_signing_certificate();
+		let (_tb, token_b) =
+			ServerEnrollmentToken::mint(&mut conn, server.id, SignedDuration::from_hours(1))
+				.await
+				.unwrap();
+		run_handshake(&public, server.id, &token_b, &spki_b, &cert_b, &key_b)
+			.await
+			.assert_status_ok();
+
+		let device_b = Server::get_by_id(&mut conn, server.id)
+			.await
+			.unwrap()
+			.device_id
+			.unwrap();
+		assert_ne!(device_b, device_a, "re-enroll bound a new device");
+		assert_eq!(
+			Device::from_key(&mut conn, &spki_b).await.unwrap().unwrap().id,
+			device_b,
+			"new box's key authenticates as the new device",
+		);
+		assert!(
+			DeviceKey::find_by_device(&mut conn, device_a)
+				.await
+				.unwrap()
+				.is_empty(),
+			"old device's keys were deactivated on replacement",
+		);
+	})
+	.await;
+}

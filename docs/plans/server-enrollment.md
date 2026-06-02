@@ -144,17 +144,24 @@ and **alerting** when a token is consumed without a completed bind, or when a
 challenge fails signature verification.
 
 **4. Binding never merges and never steals another server's identity.** In
-`complete`:
+`complete`, resolve the device to bind from the server's current `device_id` and
+the presented key:
 - Reject (generic failure) if the presented key is already an **active** key on
   a device bound to a *different live* server.
-- Pre-bound (Tailscale) device: add the presented key only if the device has **no
-  existing active mTLS key** (a Tailscale-precreated device has none); if it
-  already has one, refuse and require operator action. Surface/audit any key
-  addition to an already-trusted device.
-- Otherwise resolve by key to a *free* (unbound / Untrusted) device or create a
-  new one. **Never** call `Device::merge_into` from the register path — merging
-  is destructive (re-parents all FKs, deletes a row) and must stay an admin-only
-  action, never reachable by an enrolling box.
+- Server's device already carries the presented key → idempotent (same box
+  re-running).
+- Server's device has **no** active mTLS key (Tailscale-precreated) → add the
+  presented key as its first.
+- Server's device has a **different** active key → **re-enrollment / device
+  replacement**: this is a deliberate operator action (it required a freshly
+  minted token + its passphrase + PoP), so release the old device (untrust +
+  deactivate its keys, so it can no longer authenticate as this server) and bind
+  the new one. The old device keeps working right up until the new box completes
+  the handshake. Exposed in the UI as "Re-enroll a device".
+- No bound device → resolve by key to a *free* (unbound/Untrusted) device or
+  create a new one, then bind.
+- **Never** call `Device::merge_into` from the register path — merging is
+  destructive (re-parents all FKs, deletes a row) and stays an admin-only action.
 
 **5. Error responses on the public endpoint are opaque.** All pre-completion
 failures — unknown server, archived server, invalid/expired/consumed token, bad

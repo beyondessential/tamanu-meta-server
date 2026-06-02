@@ -9,8 +9,12 @@ use commons_servers::device_auth::{mtls, pop};
 use crate::ratelimit::RateLimiter;
 use commons_types::server::{kind::ServerKind, rank::ServerRank};
 use database::{
-	Db, devices::Device, server_enrollment_challenges::ServerEnrollmentChallenge,
-	server_enrollment_tokens::ServerEnrollmentToken, servers::Server, url_field::UrlField,
+	Db,
+	devices::{Device, DeviceKey},
+	server_enrollment_challenges::ServerEnrollmentChallenge,
+	server_enrollment_tokens::ServerEnrollmentToken,
+	servers::Server,
+	url_field::UrlField,
 };
 use diesel_async::AsyncConnection;
 use serde::{Deserialize, Serialize};
@@ -287,23 +291,45 @@ pub async fn register_complete(
 				}
 			}
 
-			let device_id = if let Some(device_id) = server.device_id {
-				// Tailscale-precreated device: attach the mTLS key (refuses if
-				// it already carries a different active key).
-				Device::add_key(conn, device_id, spki.clone()).await?;
-				device_id
-			} else {
-				// Reuse the box's prior device row (key may be inactive after a
-				// previous archival) or create a fresh one. Never merge.
-				let device_id = match Device::from_key_any_state(conn, &spki).await? {
+			// Resolve the device to bind. Helper: reuse the box's prior device
+			// row (key may be inactive after archival) or create a fresh one,
+			// then bind it to the server. Never merges.
+			async fn bind_fresh_device(
+				conn: &mut diesel_async::AsyncPgConnection,
+				server_id: uuid::Uuid,
+				spki: &[u8],
+			) -> Result<uuid::Uuid> {
+				let device_id = match Device::from_key_any_state(conn, spki).await? {
 					Some(d) => {
-						Device::add_key(conn, d.id, spki.clone()).await?;
+						Device::add_key(conn, d.id, spki.to_vec()).await?;
 						d.id
 					}
-					None => Device::create(conn, spki.clone()).await?.id,
+					None => Device::create(conn, spki.to_vec()).await?.id,
 				};
-				Server::bind_device(conn, args.server_id, device_id).await?;
-				device_id
+				Server::bind_device(conn, server_id, device_id).await?;
+				Ok(device_id)
+			}
+
+			let device_id = match server.device_id {
+				Some(existing_id) => {
+					let active = DeviceKey::find_by_device(conn, existing_id).await?;
+					if active.iter().any(|k| k.key_data == spki) {
+						// Same box re-running — idempotent.
+						existing_id
+					} else if active.is_empty() {
+						// Tailscale-precreated device gaining its first mTLS key.
+						Device::add_key(conn, existing_id, spki.clone()).await?;
+						existing_id
+					} else {
+						// Re-enrollment with a *different* box: replace the device.
+						// The old device kept working until now; release it (so it
+						// can't authenticate as this server) and bind the new one.
+						Device::untrust(conn, existing_id).await?;
+						Device::deactivate_keys(conn, existing_id).await?;
+						bind_fresh_device(conn, args.server_id, &spki).await?
+					}
+				}
+				None => bind_fresh_device(conn, args.server_id, &spki).await?,
 			};
 
 			Device::trust(conn, device_id, commons_types::device::DeviceRole::Server).await?;

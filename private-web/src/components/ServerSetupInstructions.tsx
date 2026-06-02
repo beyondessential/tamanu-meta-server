@@ -13,7 +13,7 @@ import {
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import RefreshIcon from "@mui/icons-material/Refresh";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useApi, useApiAction } from "../api";
 import { useReloadInterval } from "../hooks/useReloadInterval";
 import TimeAgo from "./TimeAgo";
@@ -28,12 +28,17 @@ import type { EnrollmentTicket } from "../types";
 export default function ServerSetupInstructions({
 	serverId,
 	onRegistered,
+	reEnroll = false,
 }: {
 	serverId: string;
 	/// Fired once when the server first reports `registered_at`. The parent
 	/// can use this to refresh the surrounding page (e.g. flip the detail
 	/// view out of its "not registered" banner).
 	onRegistered?: () => void;
+	/// Re-enrollment of an already-registered server: "registered" is judged by
+	/// `registered_at` *changing* from its value at mount (a new device
+	/// completing the handshake), not merely being set.
+	reEnroll?: boolean;
 }) {
 	const mint = useApiAction("servers", "mint_enrollment");
 	const [ticket, setTicket] = useState<EnrollmentTicket | null>(null);
@@ -50,6 +55,21 @@ export default function ServerSetupInstructions({
 	);
 	const registeredAt =
 		status.status === "ok" ? status.data.registered_at : null;
+
+	// In re-enroll mode the server is already registered, so "done" means the
+	// `registered_at` timestamp has *changed* since we opened (a new device
+	// completed). Capture the value at first status load as the baseline.
+	const baselineRegisteredAt = useRef<string | null | undefined>(undefined);
+	useEffect(() => {
+		if (status.status === "ok" && baselineRegisteredAt.current === undefined) {
+			baselineRegisteredAt.current = status.data.registered_at ?? null;
+		}
+	}, [status]);
+	const registeredView = reEnroll
+		? registeredAt != null &&
+			baselineRegisteredAt.current !== undefined &&
+			registeredAt !== baselineRegisteredAt.current
+		: registeredAt != null;
 
 	// Mint a fresh ticket on mount / when the server changes.
 	useEffect(() => {
@@ -72,11 +92,11 @@ export default function ServerSetupInstructions({
 	// Notify the parent once when registration first completes.
 	const [notified, setNotified] = useState(false);
 	useEffect(() => {
-		if (registeredAt && !notified) {
+		if (registeredView && !notified) {
 			setNotified(true);
 			onRegistered?.();
 		}
-	}, [registeredAt, notified, onRegistered]);
+	}, [registeredView, notified, onRegistered]);
 
 	const reissue = () => {
 		setTicket(null);
@@ -123,10 +143,10 @@ export default function ServerSetupInstructions({
 					sx={{ alignItems: "center", justifyContent: "space-between" }}
 				>
 					<Typography variant="h6" component="h2">
-						Set up this server
+						{reEnroll ? "Re-enroll a device" : "Set up this server"}
 					</Typography>
 					<RegistrationState
-						registeredAt={registeredAt}
+						registered={registeredView}
 						tokenExpiresAt={
 							status.status === "ok"
 								? status.data.token_expires_at
@@ -145,8 +165,8 @@ export default function ServerSetupInstructions({
 						color="text.secondary"
 						sx={{ flex: 1 }}
 					>
-						Run this on the server; it will prompt for the passphrase
-						shown below.
+						Run this on the {reEnroll ? "replacement " : ""}server; it
+						will prompt for the passphrase shown below.
 					</Typography>
 					{ticket && (
 						<>
@@ -251,13 +271,13 @@ export default function ServerSetupInstructions({
 }
 
 function RegistrationState({
-	registeredAt,
+	registered,
 	tokenExpiresAt,
 }: {
-	registeredAt: string | null;
+	registered: boolean;
 	tokenExpiresAt: string | null;
 }) {
-	if (registeredAt) {
+	if (registered) {
 		return (
 			<Chip
 				size="small"

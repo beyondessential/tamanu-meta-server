@@ -160,6 +160,7 @@ export default function ServerDetail() {
 				host={data.server.display_host}
 				serverId={data.server.id}
 				deviceInfo={data.device_info}
+				isAdmin={admin}
 				refresh={() => detail.reload()}
 			/>
 			{data.siblings.length > 0 && (
@@ -388,13 +389,16 @@ function AdvancedIdentitySection({
 	host,
 	serverId,
 	deviceInfo,
+	isAdmin,
 	refresh,
 }: {
 	host: string;
 	serverId: string;
 	deviceInfo: DeviceInfo | null;
+	isAdmin: boolean;
 	refresh: () => void;
 }) {
+	const [reEnrolling, setReEnrolling] = useState(false);
 	return (
 		<Stack spacing={2}>
 			{host && (
@@ -426,6 +430,45 @@ function AdvancedIdentitySection({
 								refresh={refresh}
 							/>
 						)}
+						{isAdmin &&
+							(reEnrolling ? (
+								<Stack spacing={1}>
+									<ServerSetupInstructions
+										serverId={serverId}
+										reEnroll
+										onRegistered={() => {
+											setReEnrolling(false);
+											refresh();
+										}}
+									/>
+									<Box>
+										<Button
+											size="small"
+											onClick={() => setReEnrolling(false)}
+										>
+											Cancel re-enrollment
+										</Button>
+									</Box>
+								</Stack>
+							) : (
+								<Box>
+									<Button
+										variant="outlined"
+										onClick={() => setReEnrolling(true)}
+									>
+										Re-enroll a device
+									</Button>
+									<Typography
+										variant="caption"
+										color="text.secondary"
+										sx={{ display: "block", mt: 1 }}
+									>
+										Issue a new enrollment ticket to bind this server to
+										a replacement device. The current device keeps
+										working until the new one checks in.
+									</Typography>
+								</Box>
+							))}
 					</Stack>
 				</AccordionDetails>
 			</Accordion>
