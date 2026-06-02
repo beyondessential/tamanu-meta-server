@@ -4513,6 +4513,14 @@
             ],
             "format": "date-time",
             "description": "Expiry of the currently-active enrollment token, if one is outstanding.\nNever reveals the token itself."
+          },
+          "token_issued_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the currently-active enrollment token was issued, if one is\noutstanding. Lets the UI show \"a ticket was issued on <date>\"."
           }
         }
       },

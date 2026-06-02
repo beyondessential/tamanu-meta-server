@@ -898,6 +898,10 @@ pub struct EnrollmentStatus {
 	/// Never reveals the token itself.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub token_expires_at: Option<Timestamp>,
+	/// When the currently-active enrollment token was issued, if one is
+	/// outstanding. Lets the UI show "a ticket was issued on <date>".
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub token_issued_at: Option<Timestamp>,
 }
 
 /// Enrollment state for a server: whether it has registered, and whether an
@@ -923,7 +927,8 @@ pub async fn enrollment_status(
 	let active = ServerEnrollmentToken::active_for(&mut conn, args.server_id).await?;
 	Ok(Json(EnrollmentStatus {
 		registered_at: server.registered_at,
-		token_expires_at: active.map(|t| t.expires_at),
+		token_expires_at: active.as_ref().map(|t| t.expires_at),
+		token_issued_at: active.as_ref().map(|t| t.created_at),
 	}))
 }
 

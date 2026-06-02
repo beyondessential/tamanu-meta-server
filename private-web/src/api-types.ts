@@ -1794,6 +1794,12 @@ export interface components {
              *     Never reveals the token itself.
              */
             token_expires_at?: string | null;
+            /**
+             * Format: date-time
+             * @description When the currently-active enrollment token was issued, if one is
+             *     outstanding. Lets the UI show "a ticket was issued on <date>".
+             */
+            token_issued_at?: string | null;
         };
         EnrollmentTicket: {
             /** Format: date-time */

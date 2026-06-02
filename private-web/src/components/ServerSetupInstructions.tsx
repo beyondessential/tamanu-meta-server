@@ -63,7 +63,11 @@ export default function ServerSetupInstructions({
 	const statusLoaded = status.status === "ok";
 	const registeredAt = statusLoaded ? status.data.registered_at : null;
 	const tokenExpiresAt = statusLoaded ? status.data.token_expires_at : null;
+	const tokenIssuedAt = statusLoaded ? status.data.token_issued_at : null;
 	const outstanding = tokenExpiresAt != null;
+	const issuedOn = tokenIssuedAt
+		? new Date(tokenIssuedAt).toLocaleString()
+		: null;
 
 	// In re-enroll mode the server is already registered, so "done" means the
 	// `registered_at` timestamp has *changed* since we opened. Capture the value
@@ -242,6 +246,11 @@ export default function ServerSetupInstructions({
 							{command}
 						</Box>
 
+						<Typography variant="caption" color="text.secondary">
+							Copy the command and passphrase now — they won't be shown
+							again.
+						</Typography>
+
 						<Box>
 							<Typography variant="subtitle2" gutterBottom>
 								Passphrase
@@ -310,10 +319,9 @@ export default function ServerSetupInstructions({
 							color="text.secondary"
 							sx={{ flex: 1 }}
 						>
-							An enrollment ticket is outstanding. Its command and passphrase
-							were only shown when generated and can't be displayed again —
-							reissue to generate a new one
-							{reEnroll ? ", or cancel to revoke it" : ""}.
+							A {reEnroll ? "re-enrollment" : "enrollment"} ticket has been
+							issued{issuedOn ? ` on ${issuedOn}` : ""}. You can't see it
+							again: reissue to generate a new one (will cancel the other).
 						</Typography>
 						{reissueButton}
 					</Stack>
