@@ -186,11 +186,6 @@ export default function ServerSetupInstructions({
 						>
 							{mint.pending ? "Reissuing…" : "Reissue"}
 						</Button>
-						<Box sx={{ flex: 1 }} />
-						<Typography variant="caption" color="text.secondary">
-							The ticket is encrypted; it is useless without the
-							passphrase.
-						</Typography>
 					</Stack>
 				)}
 
