@@ -23,7 +23,7 @@ import {
 } from "@mui/material";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import CancelIcon from "@mui/icons-material/Cancel";
-import DeleteIcon from "@mui/icons-material/DeleteOutlined";
+import ArchiveIcon from "@mui/icons-material/ArchiveOutlined";
 import EditIcon from "@mui/icons-material/Edit";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import LanguageIcon from "@mui/icons-material/Language";
@@ -142,12 +142,6 @@ export default function ServerDetail() {
 					</>
 				)
 			)}
-			<AdvancedIdentitySection
-				host={data.server.display_host}
-				serverId={data.server.id}
-				deviceInfo={data.device_info}
-				refresh={() => detail.reload()}
-			/>
 			<InfoSection
 				server={data.server}
 				status={data.last_status}
@@ -162,6 +156,12 @@ export default function ServerDetail() {
 					tags={data.server.tags}
 				/>
 			)}
+			<AdvancedIdentitySection
+				host={data.server.display_host}
+				serverId={data.server.id}
+				deviceInfo={data.device_info}
+				refresh={() => detail.reload()}
+			/>
 			{data.siblings.length > 0 && (
 				<SiblingServers
 					siblings={data.siblings}
@@ -297,10 +297,10 @@ function DeleteServerButton({
 			<Button
 				variant="outlined"
 				color="error"
-				startIcon={<DeleteIcon />}
+				startIcon={<ArchiveIcon />}
 				onClick={() => setOpen(true)}
 			>
-				Delete
+				Archive
 			</Button>
 			<Dialog open={open} onClose={() => setOpen(false)} maxWidth="sm" fullWidth>
 				<DialogTitle>Archive server?</DialogTitle>
