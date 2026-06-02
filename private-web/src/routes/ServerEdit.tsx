@@ -77,6 +77,7 @@ function EditForm({ info }: { info: ServerInfo }) {
 
 	const onSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
+		if (!groupId) return; // a group is required
 		const data: Record<string, unknown> = {
 			name: name.trim() === "" ? null : name.trim(),
 			host: host.trim(),
@@ -161,6 +162,7 @@ function EditForm({ info }: { info: ServerInfo }) {
 					currentGroupId={groupId}
 					onChange={setGroupId}
 					disabled={action.pending}
+					required
 				/>
 
 				<Stack direction={{ xs: "column", md: "row" }} spacing={2}>
@@ -266,7 +268,7 @@ function EditForm({ info }: { info: ServerInfo }) {
 					<Button
 						type="submit"
 						variant="contained"
-						disabled={action.pending}
+						disabled={action.pending || !groupId}
 					>
 						{action.pending ? "Saving…" : "Save"}
 					</Button>
@@ -289,10 +291,12 @@ function GroupControl({
 	currentGroupId,
 	onChange,
 	disabled,
+	required = false,
 }: {
 	currentGroupId: string | null;
 	onChange: (groupId: string | null) => void;
 	disabled: boolean;
+	required?: boolean;
 }) {
 	const [query, setQuery] = useState("");
 	const [results, setResults] = useState<ServerGroup[]>([]);
@@ -348,14 +352,23 @@ function GroupControl({
 			getOptionLabel={(g) => g.name}
 			isOptionEqualToValue={(a, b) => a.id === b.id}
 			filterOptions={(x) => x}
-			renderInput={(params) => (
-				<TextField
-					{...params}
-					label="Group"
-					placeholder="Search by name, or pick from the list"
-					helperText="Leave empty to keep this server ungrouped."
-				/>
-			)}
+			renderInput={(params) => {
+				const missing = required && !currentValue;
+				return (
+					<TextField
+						{...params}
+						label="Group"
+						required={required}
+						error={missing}
+						placeholder="Search by name, or pick from the list"
+						helperText={
+							missing
+								? "Required — every server belongs to a group."
+								: "The group this server belongs to."
+						}
+					/>
+				);
+			}}
 			renderOption={(props, group) => (
 				<li {...props} key={group.id}>
 					<Stack>

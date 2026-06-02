@@ -32,8 +32,8 @@ const RANK_OPTIONS: Array<{ value: ServerRank | ""; label: string }> = [
 	{ value: "dev", label: "dev" },
 ];
 
-/// Operator-first server creation. Reachable at `/servers/new` and
-/// `/groups/:id/servers/new`; in the latter form the group is preselected.
+/// Operator-first server creation, reachable at `/groups/:id/servers/new` with
+/// the group preselected. A group is required — servers are always grouped.
 export default function ServerCreate() {
 	usePageTitle("Add server");
 	const navigate = useNavigate();
@@ -59,6 +59,7 @@ export default function ServerCreate() {
 
 	const onSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
+		if (!groupId) return; // a group is required
 		const data: Record<string, unknown> = {
 			name: name.trim() === "" ? null : name.trim(),
 			host: host.trim(),
@@ -141,6 +142,7 @@ export default function ServerCreate() {
 					currentGroupId={groupId}
 					onChange={setGroupId}
 					disabled={action.pending}
+					required
 				/>
 
 				<Stack direction={{ xs: "column", md: "row" }} spacing={2}>
@@ -238,7 +240,11 @@ export default function ServerCreate() {
 				)}
 
 				<Stack direction="row" spacing={1}>
-					<Button type="submit" variant="contained" disabled={action.pending}>
+					<Button
+						type="submit"
+						variant="contained"
+						disabled={action.pending || !groupId}
+					>
 						{action.pending ? "Creating…" : "Create server"}
 					</Button>
 					<Button
@@ -351,10 +357,12 @@ function GroupControl({
 	currentGroupId,
 	onChange,
 	disabled,
+	required = false,
 }: {
 	currentGroupId: string | null;
 	onChange: (groupId: string | null) => void;
 	disabled: boolean;
+	required?: boolean;
 }) {
 	const [query, setQuery] = useState("");
 	const [results, setResults] = useState<ServerGroup[]>([]);
@@ -408,14 +416,23 @@ function GroupControl({
 			getOptionLabel={(g) => g.name}
 			isOptionEqualToValue={(a, b) => a.id === b.id}
 			filterOptions={(x) => x}
-			renderInput={(params) => (
-				<TextField
-					{...params}
-					label="Group"
-					placeholder="Search by name, or pick from the list"
-					helperText="Leave empty to keep this server ungrouped."
-				/>
-			)}
+			renderInput={(params) => {
+				const missing = required && !currentValue;
+				return (
+					<TextField
+						{...params}
+						label="Group"
+						required={required}
+						error={missing}
+						placeholder="Search by name, or pick from the list"
+						helperText={
+							missing
+								? "Required — every server belongs to a group."
+								: "The group this server belongs to."
+						}
+					/>
+				);
+			}}
 			renderOption={(props, group) => (
 				<li {...props} key={group.id}>
 					<Stack>

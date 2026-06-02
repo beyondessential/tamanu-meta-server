@@ -182,7 +182,6 @@ export default function App() {
 						<Route index element={<GroupsList />} />
 						<Route path="ungrouped" element={<UngroupedServersList />} />
 					</Route>
-					<Route path="/servers/new" element={<ServerCreate />} />
 					<Route
 						path="/groups/:id/servers/new"
 						element={<ServerCreate />}
