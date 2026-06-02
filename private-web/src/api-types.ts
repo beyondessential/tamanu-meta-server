@@ -2348,6 +2348,7 @@ export interface components {
         ServerGroup: {
             /** Format: date-time */
             created_at: string;
+            effective_version?: null | components["schemas"]["VersionStr"];
             /** Format: uuid */
             id: string;
             name: string;
@@ -2364,6 +2365,14 @@ export interface components {
             tags?: components["schemas"]["TagMap"];
             /** Format: date-time */
             updated_at: string;
+            /**
+             * Format: uuid
+             * @description The group's canonical member (highest rank, then highest kind) whose
+             *     version is cached in `effective_version`. Maintained by
+             *     [`ServerGroup::recompute_version`] on membership/rank/kind/delete
+             *     changes. `None` when the group has no members.
+             */
+            version_server_id?: string | null;
         };
         /**
          * @description Status-page card for a server group. Replaces the old per-central-server

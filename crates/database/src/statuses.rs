@@ -503,12 +503,16 @@ impl Status {
 	}
 
 	pub fn distance_from_version(&self, version: &Version) -> Option<u64> {
-		let Some(current) = &self.version.as_ref().map(|v| &v.0) else {
-			return None;
-		};
-
-		let minor_distance = version.minor.saturating_sub(current.minor);
-		let major_distance = version.major.saturating_sub(current.major);
-		Some(major_distance * 1000 + minor_distance)
+		let current = self.version.as_ref().map(|v| &v.0)?;
+		Some(version_distance(current, version))
 	}
+}
+
+/// How far `current` lags behind `latest`, as `major_distance * 1000 +
+/// minor_distance` with saturating subtraction (a newer-than-latest `current`
+/// yields 0). Used for the status snapshot and the group card's headline.
+pub fn version_distance(current: &Version, latest: &Version) -> u64 {
+	let minor_distance = latest.minor.saturating_sub(current.minor);
+	let major_distance = latest.major.saturating_sub(current.major);
+	major_distance * 1000 + minor_distance
 }

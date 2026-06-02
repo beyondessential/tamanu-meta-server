@@ -7,7 +7,6 @@ use commons_servers::tailscale_auth::TailscaleUser;
 use commons_types::{
 	server::{
 		cards::{FacilityServerStatus, ServerGroupCard},
-		kind::ServerKind,
 		rank::ServerRank,
 	},
 	version::VersionStr,
@@ -149,31 +148,6 @@ pub struct GroupDetailsArgs {
 	pub server_group_id: Uuid,
 }
 
-/// Ordering key for "most canonical rank" — lower is higher priority. Mirrors
-/// the public mobile list's rank ordering.
-fn rank_priority(rank: Option<ServerRank>) -> u8 {
-	match rank {
-		Some(ServerRank::Production) => 0,
-		Some(ServerRank::Clone) => 1,
-		Some(ServerRank::Demo) => 2,
-		Some(ServerRank::Test) => 3,
-		Some(ServerRank::Dev) => 4,
-		None => 5,
-	}
-}
-
-/// Ordering key for "most canonical kind" — lower is higher priority. Central
-/// servers are the headline of a group; facility servers tie-break below them.
-fn kind_priority(kind: ServerKind) -> u8 {
-	match kind {
-		ServerKind::Central => 0,
-		ServerKind::Facility => 1,
-		// Canopy-kind servers represent canopy itself, not a Tamanu deployment;
-		// they're the least likely headline for a group card.
-		ServerKind::Canopy => 2,
-	}
-}
-
 #[utoipa::path(
 	post,
 	path = "/group_details",
@@ -204,24 +178,14 @@ pub async fn group_details(
 		.map(|s| (s.server_id, s))
 		.collect();
 
-	// The card's headline version is the last reported version of the group's
-	// most "canonical" member: highest rank first (production > clone > demo >
-	// test > dev > unranked), then highest kind (central > facility). This is a
-	// property of the member, not of who reported most recently. We use that
-	// member's last *version-bearing* status from history (not the 7-day live
-	// window), so a currently-down canonical server still shows the last version
-	// it reported rather than borrowing another member's.
-	let representative = servers
-		.iter()
-		.min_by_key(|s| (rank_priority(s.rank), kind_priority(s.kind)))
-		.cloned();
-	let rep_status = match &representative {
-		Some(s) => Status::last_with_version_for_server(&mut conn, s.id).await?,
-		None => None,
-	};
-	let version_distance = rep_status
+	// The card's headline version is the cached last reported version of the
+	// group's canonical member (highest rank, then highest kind), maintained by
+	// the `statuses` trigger and `ServerGroup::recompute_version`. The distance
+	// is computed against the latest published version.
+	let card_version = group.effective_version.clone();
+	let version_distance = card_version
 		.as_ref()
-		.and_then(|s| s.distance_from_version(&latest_version));
+		.map(|v| database::statuses::version_distance(&v.0, &latest_version));
 
 	let members = servers
 		.into_iter()
@@ -242,7 +206,7 @@ pub async fn group_details(
 		id: group.id,
 		name: group.name,
 		notes: group.notes,
-		version: rep_status.and_then(|s| s.version.clone()),
+		version: card_version,
 		version_distance,
 		members,
 	}))

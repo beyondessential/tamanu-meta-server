@@ -184,6 +184,16 @@ async fn status_json_server_with_recent_status() {
 		.await
 		.unwrap();
 
+		// Raw INSERTs bypass `recompute_version`, which in production runs from
+		// the server create/edit paths and seeds the group's cached headline
+		// version. Run it explicitly so `group_details` has a cache to read.
+		database::server_groups::ServerGroup::recompute_version(
+			&mut conn,
+			"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa".parse().unwrap(),
+		)
+		.await
+		.unwrap();
+
 		// Get server IDs
 		let server_ids_response = private.post("/api/statuses/server_grouped_ids").json(&serde_json::json!({})).await;
 		server_ids_response.assert_status_ok();

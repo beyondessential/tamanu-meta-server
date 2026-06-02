@@ -6086,6 +6086,17 @@
             "type": "string",
             "format": "date-time"
           },
+          "effective_version": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/VersionStr",
+                "description": "The canonical member's last reported version. Maintained by the\n`statuses` AFTER INSERT trigger (canonical member reports a new version)\nand by [`ServerGroup::recompute_version`] (membership changes)."
+              }
+            ]
+          },
           "id": {
             "type": "string",
             "format": "uuid"
@@ -6107,6 +6118,14 @@
           "updated_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "version_server_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The group's canonical member (highest rank, then highest kind) whose\nversion is cached in `effective_version`. Maintained by\n[`ServerGroup::recompute_version`] on membership/rank/kind/delete\nchanges. `None` when the group has no members."
           }
         }
       },
