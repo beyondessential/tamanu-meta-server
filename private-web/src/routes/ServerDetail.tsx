@@ -380,11 +380,10 @@ function ArchivedBanner({
 	);
 }
 
-/// "Advanced / identity" — keeps the URL visible (operators need it at a
-/// glance) but folds the device + Tailscale identity detail into a
-/// collapsed-by-default accordion, since the device is now an internal
-/// implementation detail of enrollment rather than something operators set
-/// up by hand.
+/// Shows the server's URL (when it has one) and folds the device + Tailscale
+/// identity detail into a collapsed-by-default "Identity" accordion, since the
+/// device is now an internal implementation detail of enrollment rather than
+/// something operators set up by hand.
 function AdvancedIdentitySection({
 	host,
 	serverId,
@@ -398,24 +397,20 @@ function AdvancedIdentitySection({
 }) {
 	return (
 		<Stack spacing={2}>
-			<Paper variant="outlined" sx={{ p: 2 }}>
-				<Typography variant="h6" component="h2" gutterBottom>
-					URL
-				</Typography>
-				{host ? (
+			{host && (
+				<Paper variant="outlined" sx={{ p: 2 }}>
+					<Typography variant="h6" component="h2" gutterBottom>
+						URL
+					</Typography>
 					<MuiLink href={host} target="_blank" rel="noopener noreferrer">
 						{host}
 					</MuiLink>
-				) : (
-					<Typography variant="body2" color="text.secondary">
-						No URL — this server is identified by its device only.
-					</Typography>
-				)}
-			</Paper>
+				</Paper>
+			)}
 			<Accordion variant="outlined" disableGutters>
 				<AccordionSummary expandIcon={<ExpandMoreIcon />}>
 					<Typography variant="h6" component="h2">
-						Advanced / identity
+						Identity
 					</Typography>
 				</AccordionSummary>
 				<AccordionDetails>
