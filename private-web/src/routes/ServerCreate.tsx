@@ -106,7 +106,6 @@ export default function ServerCreate() {
 					value={host}
 					onChange={(e) => setHost(e.target.value)}
 					disabled={action.pending}
-					helperText="Optional. Leave empty for a device-only server (a Tailscale-bound server's URL is shown from its tailnet hostname)."
 				/>
 				<TextField
 					select
