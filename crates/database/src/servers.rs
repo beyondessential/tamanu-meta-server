@@ -227,12 +227,15 @@ impl Server {
 	pub async fn create(db: &mut AsyncPgConnection, server: Server) -> Result<Self> {
 		use crate::schema::servers;
 
-		diesel::insert_into(servers::table)
+		let created = diesel::insert_into(servers::table)
 			.values(server)
 			.returning(Self::as_select())
 			.get_result(db)
 			.await
-			.map_err(AppError::from)
+			.map_err(AppError::from)?;
+		// A new member can change the group's canonical version source.
+		recompute_groups(db, [created.group_id]).await?;
+		Ok(created)
 	}
 
 	/// Archive a server: hide it from live listings and monitoring while
@@ -271,6 +274,10 @@ impl Server {
 				.execute(conn)
 				.await
 				.map_err(AppError::from)?;
+
+			// The server just dropped out of its group's live set, so the
+			// group's cached headline version may now belong to someone else.
+			recompute_groups(conn, [server.group_id]).await?;
 			Ok(())
 		})
 		.await
@@ -285,7 +292,10 @@ impl Server {
 			.execute(db)
 			.await
 			.map_err(AppError::from)?;
-		Self::get_by_id(db, server_id).await
+		let restored = Self::get_by_id(db, server_id).await?;
+		// Back in the live set: the group's canonical member may change.
+		recompute_groups(db, [restored.group_id]).await?;
+		Ok(restored)
 	}
 
 	/// Canonicalise a user-entered URL. A bare host (no scheme) defaults to

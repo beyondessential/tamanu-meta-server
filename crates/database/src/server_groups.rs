@@ -262,6 +262,7 @@ impl ServerGroup {
 			servers_dsl::servers
 				.select(Server::as_select())
 				.filter(servers_dsl::group_id.eq(group_id))
+				.filter(servers_dsl::deleted_at.is_null())
 				.load(db)
 				.await?
 		};
