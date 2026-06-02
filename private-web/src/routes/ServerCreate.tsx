@@ -59,9 +59,9 @@ export default function ServerCreate() {
 
 	const onSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
-		if (!groupId) return; // a group is required
+		if (!groupId || !name.trim()) return; // name and group are required
 		const data: Record<string, unknown> = {
-			name: name.trim() === "" ? null : name.trim(),
+			name: name.trim(),
 			host: host.trim(),
 			kind,
 			rank: rank === "" ? null : rank,
@@ -100,6 +100,7 @@ export default function ServerCreate() {
 					value={name}
 					onChange={(e) => setName(e.target.value)}
 					disabled={action.pending}
+					required
 				/>
 				<TextField
 					label="URL"
@@ -242,7 +243,7 @@ export default function ServerCreate() {
 					<Button
 						type="submit"
 						variant="contained"
-						disabled={action.pending || !groupId}
+						disabled={action.pending || !groupId || !name.trim()}
 					>
 						{action.pending ? "Creating…" : "Create server"}
 					</Button>

@@ -77,9 +77,9 @@ function EditForm({ info }: { info: ServerInfo }) {
 
 	const onSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
-		if (!groupId) return; // a group is required
+		if (!groupId || !name.trim()) return; // name and group are required
 		const data: Record<string, unknown> = {
-			name: name.trim() === "" ? null : name.trim(),
+			name: name.trim(),
 			// Empty string clears the URL (server identified by its device only).
 			host: host.trim(),
 			kind,
@@ -120,6 +120,7 @@ function EditForm({ info }: { info: ServerInfo }) {
 					value={name}
 					onChange={(e) => setName(e.target.value)}
 					disabled={action.pending}
+					required
 				/>
 				<TextField
 					label="URL"
@@ -268,7 +269,7 @@ function EditForm({ info }: { info: ServerInfo }) {
 					<Button
 						type="submit"
 						variant="contained"
-						disabled={action.pending || !groupId}
+						disabled={action.pending || !groupId || !name.trim()}
 					>
 						{action.pending ? "Saving…" : "Save"}
 					</Button>
