@@ -159,14 +159,16 @@ export default function ServerSetupInstructions({
 									<ContentCopyIcon fontSize="small" />
 								</IconButton>
 							</Tooltip>
-							<Button
-								size="small"
-								startIcon={<RefreshIcon />}
-								onClick={reissue}
-								disabled={mint.pending}
-							>
-								{mint.pending ? "Reissuing…" : "Reissue"}
-							</Button>
+							<Tooltip title="Generates a new ticket and passphrase; the current ones immediately stop working.">
+								<Button
+									size="small"
+									startIcon={<RefreshIcon />}
+									onClick={reissue}
+									disabled={mint.pending}
+								>
+									{mint.pending ? "Reissuing…" : "Reissue"}
+								</Button>
+							</Tooltip>
 						</>
 					)}
 				</Stack>
