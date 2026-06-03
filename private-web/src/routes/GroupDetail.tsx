@@ -10,12 +10,13 @@ import {
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
 import EditIcon from "@mui/icons-material/Edit";
+import RestoreIcon from "@mui/icons-material/RestoreFromTrash";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import ServerShorty from "../components/ServerShorty";
 import SilencedRefsSection from "../components/SilencedRefsSection";
 import TimeAgo from "../components/TimeAgo";
-import { useApi } from "../api";
+import { useApi, useApiAction } from "../api";
 import { useIsNotificationHeld } from "../hooks/useIsNotificationHeld";
 import { usePageTitle } from "../hooks/usePageTitle";
 import {
@@ -86,6 +87,14 @@ export default function GroupDetail() {
 					</Stack>
 				)}
 			</Stack>
+
+			{group.deleted_at && (
+				<ArchivedGroupBanner
+					groupId={group.id}
+					isAdmin={admin}
+					onRestored={detail.reload}
+				/>
+			)}
 
 			{openIncident && <ActiveIncidentCard incident={openIncident} />}
 
@@ -237,4 +246,45 @@ function groupServersByRank(
 		}
 	}
 	return result;
+}
+
+function ArchivedGroupBanner({
+	groupId,
+	isAdmin,
+	onRestored,
+}: {
+	groupId: string;
+	isAdmin: boolean;
+	onRestored: () => void;
+}) {
+	const action = useApiAction("server_groups", "restore");
+	const onRestore = async () => {
+		try {
+			await action.call({ server_group_id: groupId });
+			onRestored();
+		} catch {
+			/* surfaced via action.error */
+		}
+	};
+	return (
+		<Alert
+			severity="warning"
+			action={
+				isAdmin ? (
+					<Button
+						color="inherit"
+						size="small"
+						startIcon={<RestoreIcon />}
+						onClick={onRestore}
+						disabled={action.pending}
+					>
+						{action.pending ? "Restoring…" : "Restore"}
+					</Button>
+				) : undefined
+			}
+		>
+			This group is archived. Restore it to bring it back to the listings.
+			{action.error && <Box sx={{ mt: 1 }}>{action.error.message}</Box>}
+		</Alert>
+	);
 }

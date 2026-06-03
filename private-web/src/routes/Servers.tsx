@@ -9,19 +9,26 @@ export default function Servers() {
 
 	const value = location.pathname.startsWith("/servers/ungrouped")
 		? "ungrouped"
-		: "groups";
+		: location.pathname.startsWith("/servers/archived")
+			? "archived"
+			: "groups";
+
+	const tabTarget: Record<string, string> = {
+		groups: "/servers",
+		ungrouped: "/servers/ungrouped",
+		archived: "/servers/archived",
+	};
 
 	return (
 		<Box>
 			<Tabs
 				value={value}
-				onChange={(_, v) =>
-					navigate(v === "groups" ? "/servers" : "/servers/ungrouped")
-				}
+				onChange={(_, v) => navigate(tabTarget[v])}
 				sx={{ mb: 2 }}
 			>
 				<Tab label="Groups" value="groups" />
 				<Tab label="Ungrouped" value="ungrouped" />
+				<Tab label="Archived" value="archived" />
 			</Tabs>
 			{params.id && <ServerNameBreadcrumb serverId={params.id} />}
 			<Outlet />

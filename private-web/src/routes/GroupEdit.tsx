@@ -7,7 +7,7 @@ import {
 	TextField,
 	Typography,
 } from "@mui/material";
-import DeleteIcon from "@mui/icons-material/DeleteOutlined";
+import ArchiveIcon from "@mui/icons-material/ArchiveOutlined";
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import TagsEditor from "../components/TagsEditor";
@@ -160,14 +160,19 @@ function EditForm({
 		}
 	};
 
-	const onDelete = async () => {
+	const onArchive = async () => {
 		if (memberCount > 0) {
 			alert(
-				`This group still has ${memberCount} server(s). Move them out before deleting.`,
+				`This group still has ${memberCount} server(s). Move them out before archiving.`,
 			);
 			return;
 		}
-		if (!confirm(`Delete group "${group.name}"? This cannot be undone.`)) return;
+		if (
+			!confirm(
+				`Archive group "${group.name}"? It's hidden from listings but can be restored from the Archived tab.`,
+			)
+		)
+			return;
 		try {
 			await remove.call({ server_group_id: group.id });
 			navigate("/servers");
@@ -272,11 +277,11 @@ function EditForm({
 						type="button"
 						variant="outlined"
 						color="error"
-						startIcon={<DeleteIcon />}
-						onClick={onDelete}
+						startIcon={<ArchiveIcon />}
+						onClick={onArchive}
 						disabled={pending || memberCount > 0}
 					>
-						Delete group
+						Archive group
 					</Button>
 				</Stack>
 			</Stack>

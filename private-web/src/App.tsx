@@ -31,6 +31,7 @@ import Status from "./routes/Status";
 import ServerCreate from "./routes/ServerCreate";
 import ServerDetail from "./routes/ServerDetail";
 import ServerEdit from "./routes/ServerEdit";
+import ArchivedList from "./routes/ArchivedList";
 import Servers from "./routes/Servers";
 import Sql from "./routes/Sql";
 import UngroupedServersList from "./routes/UngroupedServersList";
@@ -181,6 +182,7 @@ export default function App() {
 					<Route path="/servers" element={<Servers />}>
 						<Route index element={<GroupsList />} />
 						<Route path="ungrouped" element={<UngroupedServersList />} />
+						<Route path="archived" element={<ArchivedList />} />
 					</Route>
 					<Route
 						path="/groups/:id/servers/new"

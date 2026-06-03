@@ -117,6 +117,41 @@ test.describe("server edit page", () => {
 	});
 });
 
+test.describe("archived view", () => {
+	test.beforeEach(async ({ sql }) => {
+		await resetSeededTables(sql);
+	});
+
+	test("lists archived servers and groups and restores them", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "arch-group" });
+		const server = await seedServer(sql, { name: "arch-server", kind: "central" });
+		// Archive both directly (the UI paths are covered elsewhere).
+		await sql.query("UPDATE server_groups SET deleted_at = now() WHERE id = $1", [
+			group.id,
+		]);
+		await sql.query("UPDATE servers SET deleted_at = now() WHERE id = $1", [
+			server.id,
+		]);
+
+		await page.goto("/servers/archived");
+
+		// Both archived items are discoverable here (and nowhere else).
+		await expect(page.getByRole("link", { name: "arch-group" })).toBeVisible();
+		await expect(page.getByText(/arch-server/)).toBeVisible();
+
+		// Restore the group (its row renders first, so the first Restore is it).
+		await page.getByRole("button", { name: "Restore" }).first().click();
+		await expect(
+			page.getByRole("link", { name: "arch-group" }),
+		).not.toBeVisible();
+		// The archived server is still listed.
+		await expect(page.getByText(/arch-server/)).toBeVisible();
+	});
+});
+
 test.describe("server create → setup → archive flow", () => {
 	test.beforeEach(async ({ sql }) => {
 		await resetSeededTables(sql);
