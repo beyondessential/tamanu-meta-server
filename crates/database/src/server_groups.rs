@@ -280,6 +280,28 @@ impl ServerGroup {
 		Ok(out)
 	}
 
+	/// Count of live (non-archived) servers in each group, keyed by group id.
+	/// Groups with no live members are absent (callers default to 0).
+	pub async fn live_server_counts(
+		db: &mut AsyncPgConnection,
+	) -> Result<std::collections::HashMap<Uuid, i64>> {
+		use crate::schema::servers::dsl;
+		use std::collections::HashMap;
+
+		let group_ids: Vec<Uuid> = dsl::servers
+			.select(dsl::group_id.assume_not_null())
+			.filter(dsl::group_id.is_not_null())
+			.filter(dsl::deleted_at.is_null())
+			.load(db)
+			.await?;
+
+		let mut counts: HashMap<Uuid, i64> = HashMap::new();
+		for gid in group_ids {
+			*counts.entry(gid).or_insert(0) += 1;
+		}
+		Ok(counts)
+	}
+
 	/// Recompute the cached canonical member and its version for `group_id`.
 	///
 	/// Loads every member of the group, picks the canonical one (lowest

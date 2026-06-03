@@ -2434,6 +2434,43 @@
         ]
       }
     },
+    "/api/server_groups/server_counts": {
+      "post": {
+        "tags": [
+          "server_groups"
+        ],
+        "summary": "Live (non-archived) server count per group, for the groups list. Groups with\nno live members are omitted (the client defaults missing entries to 0).",
+        "operationId": "server_groups_server_counts",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/GroupServerCount"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
     "/api/server_groups/update": {
       "post": {
         "tags": [
@@ -4855,6 +4892,23 @@
           "server_group_id"
         ],
         "properties": {
+          "server_group_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "GroupServerCount": {
+        "type": "object",
+        "required": [
+          "server_group_id",
+          "server_count"
+        ],
+        "properties": {
+          "server_count": {
+            "type": "integer",
+            "format": "int64"
+          },
           "server_group_id": {
             "type": "string",
             "format": "uuid"
