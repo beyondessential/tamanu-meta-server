@@ -193,42 +193,82 @@ impl ServerGroup {
 		Self::get_by_id(db, group_id).await
 	}
 
-	/// Archive (soft-delete) a group: hide it from live listings while keeping
-	/// it (and its archived members) and allowing restore. Refuses if the group
-	/// still has *live* servers attached — operators move those out (or archive
-	/// them) first. Archived members don't block it; they're already hidden.
+	/// Archive (soft-delete) a group, hiding it from live listings while keeping
+	/// it (and its members) and allowing restore.
+	///
+	/// An empty group archives outright. A group with live members archives only
+	/// if *every* live member is **gone** (no status in the last 7 days — the
+	/// same notion the UI shows): in that case the archive **cascades**, also
+	/// archiving those members. If any live member reported recently, it refuses
+	/// (409) — you don't bulk-archive a group with active servers.
 	pub async fn soft_delete(db: &mut AsyncPgConnection, group_id: Uuid) -> Result<()> {
 		use crate::schema::{server_groups::dsl, servers};
+		use diesel_async::AsyncConnection;
 
-		let live_members: i64 = servers::table
-			.count()
-			.filter(servers::group_id.eq(group_id))
-			.filter(servers::deleted_at.is_null())
-			.get_result(db)
-			.await?;
-		if live_members > 0 {
-			return Err(AppError::Conflict(format!(
-				"group {group_id} still has {live_members} live server(s); move them out first",
-			)));
-		}
+		db.transaction::<_, AppError, _>(async |conn| {
+			let member_ids: Vec<Uuid> = servers::table
+				.select(servers::id)
+				.filter(servers::group_id.eq(group_id))
+				.filter(servers::deleted_at.is_null())
+				.load(conn)
+				.await
+				.map_err(AppError::from)?;
 
-		diesel::update(dsl::server_groups.filter(dsl::id.eq(group_id)))
-			.set(dsl::deleted_at.eq(jiff_diesel::NullableTimestamp::from(Some(Timestamp::now()))))
-			.execute(db)
-			.await
-			.map_err(AppError::from)?;
-		Ok(())
+			if !member_ids.is_empty() {
+				// A member is "gone" iff it's absent from `latest_for_servers`
+				// (no status in the last 7 days). Allow the cascade only when
+				// every live member is gone; any recent reporter blocks it.
+				let recent = Status::latest_for_servers(conn, &member_ids).await?;
+				if !recent.is_empty() {
+					return Err(AppError::Conflict(format!(
+						"group {group_id} has {} server(s) that reported within the last \
+						 week; only a group whose servers are all gone can be archived",
+						recent.len(),
+					)));
+				}
+				for id in &member_ids {
+					Server::soft_delete(conn, *id).await?;
+				}
+			}
+
+			diesel::update(dsl::server_groups.filter(dsl::id.eq(group_id)))
+				.set(
+					dsl::deleted_at.eq(jiff_diesel::NullableTimestamp::from(Some(Timestamp::now()))),
+				)
+				.execute(conn)
+				.await
+				.map_err(AppError::from)?;
+			Ok(())
+		})
+		.await
 	}
 
-	/// Un-archive a group.
+	/// Un-archive a group, cascading to restore its archived members (the
+	/// inverse of [`ServerGroup::soft_delete`]'s cascade).
 	pub async fn restore(db: &mut AsyncPgConnection, group_id: Uuid) -> Result<()> {
-		use crate::schema::server_groups::dsl;
-		diesel::update(dsl::server_groups.filter(dsl::id.eq(group_id)))
-			.set(dsl::deleted_at.eq(None::<jiff_diesel::Timestamp>))
-			.execute(db)
-			.await
-			.map_err(AppError::from)?;
-		Ok(())
+		use crate::schema::{server_groups::dsl, servers};
+		use diesel_async::AsyncConnection;
+
+		db.transaction::<_, AppError, _>(async |conn| {
+			let archived_members: Vec<Uuid> = servers::table
+				.select(servers::id)
+				.filter(servers::group_id.eq(group_id))
+				.filter(servers::deleted_at.is_not_null())
+				.load(conn)
+				.await
+				.map_err(AppError::from)?;
+			for id in &archived_members {
+				Server::restore(conn, *id).await?;
+			}
+
+			diesel::update(dsl::server_groups.filter(dsl::id.eq(group_id)))
+				.set(dsl::deleted_at.eq(None::<jiff_diesel::Timestamp>))
+				.execute(conn)
+				.await
+				.map_err(AppError::from)?;
+			Ok(())
+		})
+		.await
 	}
 
 	pub async fn list_servers(&self, db: &mut AsyncPgConnection) -> Result<Vec<Server>> {

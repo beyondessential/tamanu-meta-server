@@ -1,6 +1,8 @@
-//! Group archival (soft-delete): a group can be archived only when it has no
-//! *live* members; archived groups drop out of live listings and show up in the
-//! archived listing; restore reverses it. Also covers `Server::list_archived`.
+//! Group archival (soft-delete): an empty group, or one whose live members are
+//! all "gone" (no status in 7 days), can be archived — the latter cascades,
+//! archiving those members too; a group with a recently-reporting server is
+//! refused. Restore cascades back. Archived groups drop out of live listings.
+//! Also covers `Server::list_archived`.
 
 use commons_tests::db::TestDb;
 use database::server_groups::ServerGroup;
@@ -48,59 +50,96 @@ async fn insert_server(
 	row.id
 }
 
+/// Give a server a recent status so it counts as live (not "gone").
+async fn insert_recent_status(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	server_id: Uuid,
+) {
+	sql_query(
+		"INSERT INTO statuses (server_id, created_at, version, healthy, health)
+		 VALUES ($1, now(), '1.0.0', true, '[]'::jsonb)",
+	)
+	.bind::<sql_types::Uuid, _>(server_id)
+	.execute(conn)
+	.await
+	.expect("insert status");
+}
+
 #[tokio::test(flavor = "multi_thread")]
-async fn group_archival_round_trips_and_guards_live_members() {
+async fn archiving_a_group_with_a_recent_server_is_refused() {
 	TestDb::run(async |mut conn, _| {
 		let group = insert_group(&mut conn, "Group").await;
+		let server = insert_server(&mut conn, group, false).await;
+		insert_recent_status(&mut conn, server).await; // reported now → not gone
 
-		// A live member blocks archival.
-		let live = insert_server(&mut conn, group, false).await;
 		assert!(
 			ServerGroup::soft_delete(&mut conn, group).await.is_err(),
-			"a group with a live member can't be archived",
+			"a group with a recently-reporting server can't be archived",
 		);
+		// Neither the group nor the server was touched.
+		assert!(
+			ServerGroup::get_by_id(&mut conn, group)
+				.await
+				.unwrap()
+				.deleted_at
+				.is_none(),
+		);
+		assert!(
+			Server::get_by_id(&mut conn, server)
+				.await
+				.unwrap()
+				.deleted_at
+				.is_none(),
+		);
+	})
+	.await
+}
 
-		// Archive that member; now the group has only-archived members → allowed.
-		Server::soft_delete(&mut conn, live).await.unwrap();
+#[tokio::test(flavor = "multi_thread")]
+async fn archiving_an_all_gone_group_cascades_and_restore_reverses() {
+	TestDb::run(async |mut conn, _| {
+		let group = insert_group(&mut conn, "Group").await;
+		// Two live members with no status → both "gone".
+		let a = insert_server(&mut conn, group, false).await;
+		let b = insert_server(&mut conn, group, false).await;
+
+		// Archive cascades to the gone members.
 		ServerGroup::soft_delete(&mut conn, group).await.unwrap();
-
-		// (a) live listings exclude it; (b) archived listing includes it.
-		let live_ids: Vec<Uuid> = ServerGroup::list_all(&mut conn)
-			.await
-			.unwrap()
-			.into_iter()
-			.map(|g| g.id)
-			.collect();
-		assert!(!live_ids.contains(&group), "archived group hidden from list_all");
-		let archived_ids: Vec<Uuid> = ServerGroup::list_archived(&mut conn)
-			.await
-			.unwrap()
-			.into_iter()
-			.map(|g| g.id)
-			.collect();
-		assert!(archived_ids.contains(&group), "archived group shows in list_archived");
-
-		// get_by_id still finds it (detail page needs it to offer Restore).
 		assert!(
 			ServerGroup::get_by_id(&mut conn, group)
 				.await
 				.unwrap()
 				.deleted_at
 				.is_some(),
+			"group archived",
 		);
-
-		// Restore: back in live listings, gone from archived.
-		ServerGroup::restore(&mut conn, group).await.unwrap();
-		let live_ids: Vec<Uuid> = ServerGroup::list_all(&mut conn)
-			.await
-			.unwrap()
-			.into_iter()
-			.map(|g| g.id)
-			.collect();
-		assert!(live_ids.contains(&group), "restored group back in list_all");
 		assert!(
-			ServerGroup::list_archived(&mut conn).await.unwrap().is_empty(),
-			"nothing archived after restore",
+			Server::get_by_id(&mut conn, a).await.unwrap().deleted_at.is_some(),
+			"member a cascade-archived",
+		);
+		assert!(
+			Server::get_by_id(&mut conn, b).await.unwrap().deleted_at.is_some(),
+			"member b cascade-archived",
+		);
+		assert!(!ServerGroup::list_all(&mut conn).await.unwrap().iter().any(|g| g.id == group));
+
+		// Restore cascades back.
+		ServerGroup::restore(&mut conn, group).await.unwrap();
+		assert!(
+			ServerGroup::get_by_id(&mut conn, group)
+				.await
+				.unwrap()
+				.deleted_at
+				.is_none(),
+			"group restored",
+		);
+		assert!(
+			Server::get_by_id(&mut conn, a).await.unwrap().deleted_at.is_none(),
+			"member a restored",
+		);
+		assert!(
+			Server::get_by_id(&mut conn, b).await.unwrap().deleted_at.is_none(),
+			"member b restored",
 		);
 	})
 	.await

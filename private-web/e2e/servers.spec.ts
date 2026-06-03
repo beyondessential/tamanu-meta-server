@@ -165,6 +165,28 @@ test.describe("archived view", () => {
 		await page.goto("/servers/archived");
 		await expect(page.getByRole("link", { name: "empty-grp" })).toBeVisible();
 	});
+
+	test("a group whose servers are all gone archives, cascading to them", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "gone-grp" });
+		// No statuses seeded → both servers are "gone".
+		await seedServer(sql, { name: "gone-1", kind: "central", groupId: group.id });
+		await seedServer(sql, { name: "gone-2", kind: "facility", groupId: group.id });
+		page.on("dialog", (d) => d.accept());
+
+		await page.goto(`/groups/${group.id}`);
+		// The Archive button is offered because every member is gone.
+		await page.getByRole("button", { name: "Archive" }).click();
+		await expect(page).toHaveURL(/\/servers$/);
+
+		// The group and both servers are now archived.
+		await page.goto("/servers/archived");
+		await expect(page.getByRole("link", { name: "gone-grp" })).toBeVisible();
+		await expect(page.getByText(/gone-1/)).toBeVisible();
+		await expect(page.getByText(/gone-2/)).toBeVisible();
+	});
 });
 
 test.describe("server create → setup → archive flow", () => {
