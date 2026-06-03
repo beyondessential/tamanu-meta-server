@@ -229,7 +229,15 @@ pub struct StatusSnapshotData {
 	pub postgres: Option<String>,
 	pub nodejs: Option<String>,
 	pub timezone: Option<String>,
+	/// Raw legacy top-level self-report. Being retired from the wire
+	/// (absent ⇒ true on ingestion); UI display should use
+	/// `health_state` instead.
 	pub healthy: bool,
+	/// Rollup over the per-check results (and the legacy top-level
+	/// flag) — same derivation as the status-dot border. The UI's
+	/// headline chip uses this so a failing check can't hide behind
+	/// a self-reported (or defaulted) top-level `healthy: true`.
+	pub health_state: commons_types::status::HealthState,
 	pub health: serde_json::Value,
 	pub extra: serde_json::Value,
 	/// For each unhealthy check on this push, the severity the
@@ -313,6 +321,7 @@ pub async fn snapshot(
 	// file at given this push. Healthy checks are omitted; the UI
 	// renders them with its 'passing' affordance regardless.
 	let check_severities = compute_check_severities(&mut conn, args.server_id, &status).await?;
+	let health_state = status.health_state();
 
 	Ok(Json(Some(StatusSnapshotData {
 		id: status.id,
@@ -327,6 +336,7 @@ pub async fn snapshot(
 		nodejs,
 		timezone,
 		healthy: status.healthy,
+		health_state,
 		health: status.health,
 		extra: status.extra,
 		check_severities,

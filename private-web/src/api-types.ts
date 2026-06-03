@@ -1965,8 +1965,9 @@ export interface components {
         };
         /**
          * @description Server's self-reported health state, derived from the most
-         *     recent status row's `healthy` field and `health[]` array.
-         *     Orthogonal to [`ShortStatus`]: a server can be reachable
+         *     recent status row's per-check results (and, as legacy input, its
+         *     top-level `healthy` field — that flag is being retired from the
+         *     wire). Orthogonal to [`ShortStatus`]: a server can be reachable
          *     (`up`) and reporting itself unhealthy at the same time.
          *
          *     The UI renders this as the *border* of `<StatusDot>` so both
@@ -2855,6 +2856,18 @@ export interface components {
             device_id?: string | null;
             extra: unknown;
             health: unknown;
+            /**
+             * @description Rollup over the per-check results (and the legacy top-level
+             *     flag) — same derivation as the status-dot border. The UI's
+             *     headline chip uses this so a failing check can't hide behind
+             *     a self-reported (or defaulted) top-level `healthy: true`.
+             */
+            health_state: components["schemas"]["HealthState"];
+            /**
+             * @description Raw legacy top-level self-report. Being retired from the wire
+             *     (absent ⇒ true on ingestion); UI display should use
+             *     `health_state` instead.
+             */
             healthy: boolean;
             /** Format: uuid */
             id: string;

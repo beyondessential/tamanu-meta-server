@@ -4917,7 +4917,7 @@
       },
       "HealthState": {
         "type": "string",
-        "description": "Server's self-reported health state, derived from the most\nrecent status row's `healthy` field and `health[]` array.\nOrthogonal to [`ShortStatus`]: a server can be reachable\n(`up`) and reporting itself unhealthy at the same time.\n\nThe UI renders this as the *border* of `<StatusDot>` so both\ndimensions (reachability and self-report) show in one glyph.",
+        "description": "Server's self-reported health state, derived from the most\nrecent status row's per-check results (and, as legacy input, its\ntop-level `healthy` field — that flag is being retired from the\nwire). Orthogonal to [`ShortStatus`]: a server can be reachable\n(`up`) and reporting itself unhealthy at the same time.\n\nThe UI renders this as the *border* of `<StatusDot>` so both\ndimensions (reachability and self-report) show in one glyph.",
         "enum": [
           "healthy",
           "warning",
@@ -7228,6 +7228,7 @@
           "created_at",
           "server_id",
           "healthy",
+          "health_state",
           "health",
           "extra",
           "check_severities"
@@ -7256,8 +7257,13 @@
           },
           "extra": {},
           "health": {},
+          "health_state": {
+            "$ref": "#/components/schemas/HealthState",
+            "description": "Rollup over the per-check results (and the legacy top-level\nflag) — same derivation as the status-dot border. The UI's\nheadline chip uses this so a failing check can't hide behind\na self-reported (or defaulted) top-level `healthy: true`."
+          },
           "healthy": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Raw legacy top-level self-report. Being retired from the wire\n(absent ⇒ true on ingestion); UI display should use\n`health_state` instead."
           },
           "id": {
             "type": "string",
