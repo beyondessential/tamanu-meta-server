@@ -266,6 +266,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
 		.routes(routes!(list_some))
 		.routes(routes!(list_ungrouped))
+		.routes(routes!(list_archived))
 		.routes(routes!(get_name))
 		.routes(routes!(get_info))
 		.routes(routes!(get_detail))
@@ -342,6 +343,30 @@ pub async fn list_ungrouped(
 	decorate_with_status(&mut conn, &mut items).await?;
 	fill_display_hosts(&mut conn, &mut items).await?;
 	Ok(Json(Page { items, total }))
+}
+
+/// Archived (soft-deleted) servers, for the Archived view. Each carries
+/// `archived: true`; the UI offers Restore.
+#[utoipa::path(
+	post,
+	path = "/list_archived",
+	tag = "servers",
+	security(("tailscale-admin" = [])),
+	responses(
+		(status = 200, body = Vec<ServerInfo>),
+	),
+)]
+pub async fn list_archived(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	_body: Json<serde_json::Value>,
+) -> Result<Json<Vec<ServerInfo>>> {
+	let mut conn = state.db.get().await?;
+	let servers = Server::list_archived(&mut conn).await?;
+	let mut items: Vec<ServerInfo> = servers.into_iter().map(server_to_info).collect();
+	decorate_with_status(&mut conn, &mut items).await?;
+	fill_display_hosts(&mut conn, &mut items).await?;
+	Ok(Json(items))
 }
 
 #[derive(Deserialize, ToSchema)]

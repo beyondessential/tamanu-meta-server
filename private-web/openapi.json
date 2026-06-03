@@ -2207,6 +2207,7 @@
         "tags": [
           "server_groups"
         ],
+        "summary": "Archive (soft-delete) a group. Kept at `/delete` for the existing client;\nthe group is hidden from live listings but restorable. Refuses if the group\nstill has live members (409).",
         "operationId": "server_groups_delete",
         "requestBody": {
           "content": {
@@ -2317,6 +2318,80 @@
         "security": [
           {
             "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/server_groups/list_archived": {
+      "post": {
+        "tags": [
+          "server_groups"
+        ],
+        "operationId": "server_groups_list_archived",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ServerGroup"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/server_groups/restore": {
+      "post": {
+        "tags": [
+          "server_groups"
+        ],
+        "operationId": "server_groups_restore",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
           }
         ]
       }
@@ -2741,6 +2816,43 @@
             }
           }
         }
+      }
+    },
+    "/api/servers/list_archived": {
+      "post": {
+        "tags": [
+          "servers"
+        ],
+        "summary": "Archived (soft-deleted) servers, for the Archived view. Each carries\n`archived: true`; the UI offers Restore.",
+        "operationId": "list_archived",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ServerInfo"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
       }
     },
     "/api/servers/list_some": {
@@ -6450,6 +6562,14 @@
           "created_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "deleted_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When set, the group is archived (soft-deleted): hidden from live listings\nbut kept (with its archived members) and restorable."
           },
           "effective_version": {
             "oneOf": [

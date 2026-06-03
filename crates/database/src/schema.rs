@@ -230,6 +230,7 @@ diesel::table! {
 		slack_open_delay -> Interval,
 		version_server_id -> Nullable<Uuid>,
 		effective_version -> Nullable<Text>,
+		deleted_at -> Nullable<Timestamptz>,
 	}
 }
 

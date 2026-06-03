@@ -135,6 +135,19 @@ impl Server {
 		.map_err(AppError::from)
 	}
 
+	/// Archived (soft-deleted) servers, for the Archived view.
+	pub async fn list_archived(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
+		use crate::schema::servers::dsl::*;
+		servers
+			.select(Self::as_select())
+			.filter(id.ne(Uuid::nil()))
+			.filter(deleted_at.is_not_null())
+			.order_by((kind.asc(), name.asc(), created_at.desc()))
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	pub async fn list_by_kind(
 		db: &mut AsyncPgConnection,
 		k: ServerKind,

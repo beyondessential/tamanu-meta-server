@@ -892,6 +892,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Archive (soft-delete) a group. Kept at `/delete` for the existing client;
+         *     the group is hidden from live listings but restorable. Refuses if the group
+         *     still has live members (409).
+         */
         post: operations["server_groups_delete"];
         delete?: never;
         options?: never;
@@ -925,6 +930,38 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["server_groups_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/server_groups/list_archived": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["server_groups_list_archived"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/server_groups/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["server_groups_restore"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1086,6 +1123,26 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["get_name"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/servers/list_archived": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archived (soft-deleted) servers, for the Archived view. Each carries
+         *     `archived: true`; the UI offers Restore.
+         */
+        post: operations["list_archived"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2514,6 +2571,12 @@ export interface components {
         ServerGroup: {
             /** Format: date-time */
             created_at: string;
+            /**
+             * Format: date-time
+             * @description When set, the group is archived (soft-deleted): hidden from live listings
+             *     but kept (with its archived members) and restorable.
+             */
+            deleted_at?: string | null;
             effective_version?: null | components["schemas"]["VersionStr"];
             /** Format: uuid */
             id: string;
@@ -4548,6 +4611,58 @@ export interface operations {
             };
         };
     };
+    server_groups_list_archived: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": unknown;
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerGroup"][];
+                };
+            };
+        };
+    };
+    server_groups_restore: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroupIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
     server_groups_search: {
         parameters: {
             query?: never;
@@ -4850,6 +4965,29 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    list_archived: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": unknown;
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerInfo"][];
                 };
             };
         };
