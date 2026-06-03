@@ -1,0 +1,128 @@
+//! The `2026-06-03-150906-0000_backfill_registered_at` migration fills
+//! `servers.registered_at` for servers enrolled before the column
+//! existed (the add_server_archival migration introduced it with no
+//! backfill, so live, status-reporting servers showed as "hasn't
+//! checked in yet"). Seeds the pre-backfill states and replays the
+//! migration's SQL.
+
+use diesel::sql_types;
+use diesel_async::{RunQueryDsl, SimpleAsyncConnection as _};
+use uuid::Uuid;
+
+const MIGRATION_UP: &str =
+	include_str!("../../../migrations/2026-06-03-150906-0000_backfill_registered_at/up.sql");
+
+#[derive(diesel::QueryableByName)]
+struct RegisteredRow {
+	#[diesel(sql_type = sql_types::Nullable<sql_types::Timestamptz>)]
+	registered_at: Option<jiff_diesel::Timestamp>,
+}
+
+async fn registered_at(
+	conn: &mut diesel_async::AsyncPgConnection,
+	server_id: Uuid,
+) -> Option<jiff::Timestamp> {
+	let row: RegisteredRow =
+		diesel::sql_query("SELECT registered_at FROM servers WHERE id = $1")
+			.bind::<sql_types::Uuid, _>(server_id)
+			.get_result(conn)
+			.await
+			.expect("fetch registered_at");
+	row.registered_at.map(Into::into)
+}
+
+#[derive(diesel::QueryableByName)]
+struct MatchRow {
+	#[diesel(sql_type = sql_types::Bool)]
+	matches: bool,
+}
+
+/// True when the server's `registered_at` equals its earliest status
+/// `created_at` (compared in SQL — statuses are seeded relative to
+/// NOW(), so there's no literal to compare against on the Rust side).
+async fn matches_first_status(
+	conn: &mut diesel_async::AsyncPgConnection,
+	server_id: Uuid,
+) -> bool {
+	let row: MatchRow = diesel::sql_query(
+		"SELECT s.registered_at = \
+			(SELECT MIN(st.created_at) FROM statuses st WHERE st.server_id = s.id) AS matches \
+		 FROM servers s WHERE s.id = $1",
+	)
+	.bind::<sql_types::Uuid, _>(server_id)
+	.get_result(conn)
+	.await
+	.expect("compare registered_at to first status");
+	row.matches
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn migration_backfills_enrolled_servers_only() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		// device_id is unique across servers — one device per server.
+		let device_a = Uuid::new_v4();
+		let device_c = Uuid::new_v4();
+		let device_e = Uuid::new_v4();
+		// Enrolled with device + statuses: backfilled to the first push.
+		let with_statuses = Uuid::new_v4();
+		// Statuses but the device was since deleted: still backfilled.
+		let device_gone = Uuid::new_v4();
+		// Device attached but no statuses yet: backfilled (device created_at).
+		let device_only = Uuid::new_v4();
+		// Never enrolled: stays NULL.
+		let unenrolled = Uuid::new_v4();
+		// Already stamped organically: untouched.
+		let already_set = Uuid::new_v4();
+
+		conn.batch_execute(&format!(
+			"INSERT INTO devices (id, role) VALUES \
+				('{device_a}', 'server'), ('{device_c}', 'server'), ('{device_e}', 'server'); \
+			 INSERT INTO servers (id, host, kind, device_id, registered_at) VALUES \
+				('{with_statuses}', 'https://a.example.com', 'central', '{device_a}', NULL), \
+				('{device_gone}', 'https://b.example.com', 'central', NULL, NULL), \
+				('{device_only}', 'https://c.example.com', 'central', '{device_c}', NULL), \
+				('{unenrolled}', 'https://d.example.com', 'central', NULL, NULL), \
+				('{already_set}', 'https://e.example.com', 'central', '{device_e}', \
+				 '2026-01-01T00:00:00Z'); \
+			 INSERT INTO statuses (server_id, healthy, health, extra, created_at) VALUES \
+				('{with_statuses}', true, '[]'::jsonb, '{{}}'::jsonb, NOW() - interval '3 hours'), \
+				('{with_statuses}', true, '[]'::jsonb, '{{}}'::jsonb, NOW() - interval '2 hours'), \
+				('{device_gone}', true, '[]'::jsonb, '{{}}'::jsonb, NOW() - interval '1 hour');"
+		))
+		.await
+		.expect("seed");
+
+		conn.batch_execute(MIGRATION_UP)
+			.await
+			.expect("replay migration up.sql");
+
+		assert!(
+			matches_first_status(&mut conn, with_statuses).await,
+			"earliest status push wins"
+		);
+
+		assert!(
+			matches_first_status(&mut conn, device_gone).await,
+			"statuses alone are enrollment evidence even with the device gone"
+		);
+
+		assert!(
+			registered_at(&mut conn, device_only).await.is_some(),
+			"device attachment alone is enrollment evidence"
+		);
+
+		assert_eq!(
+			registered_at(&mut conn, unenrolled).await,
+			None,
+			"never-enrolled servers must keep showing setup instructions"
+		);
+
+		let ts = registered_at(&mut conn, already_set).await;
+		assert_eq!(
+			ts,
+			Some("2026-01-01T00:00:00Z".parse::<jiff::Timestamp>().unwrap()),
+			"organically-set values are untouched"
+		);
+	})
+	.await
+}
