@@ -97,9 +97,12 @@ test-e2e-ui:
 
 # Typecheck the private-web React frontend. Running `npx tsc` at the
 # repo root silently no-ops (no package.json), so always go through
-# this recipe.
+# this recipe. `-b` is load-bearing too: the root tsconfig is
+# references-only with `"files": []`, so a bare `tsc --noEmit` checks
+# nothing and always exits 0; build mode follows the references and
+# matches what CI's `npm run build` runs.
 typecheck:
-    cd private-web && npx tsc --noEmit
+    cd private-web && npx tsc -b
 
 # Run migrations
 migrate:

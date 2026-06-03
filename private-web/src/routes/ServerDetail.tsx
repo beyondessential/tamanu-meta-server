@@ -24,7 +24,7 @@ import {
 import BuildCircleIcon from "@mui/icons-material/BuildCircle";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import CancelIcon from "@mui/icons-material/Cancel";
-import RemoveCircleOutlineIcon from "@mui/icons-material/RemoveCircleOutline";
+import RemoveCircleOutlinedIcon from "@mui/icons-material/RemoveCircleOutlined";
 import ArchiveIcon from "@mui/icons-material/ArchiveOutlined";
 import EditIcon from "@mui/icons-material/Edit";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
@@ -1108,7 +1108,7 @@ function CheckResultIcon({ result }: { result: CheckResult }) {
 		case "skipped":
 			return (
 				<Tooltip title="Skipped — a precondition was not met" arrow>
-					<RemoveCircleOutlineIcon fontSize="small" color="disabled" />
+					<RemoveCircleOutlinedIcon fontSize="small" color="disabled" />
 				</Tooltip>
 			);
 	}

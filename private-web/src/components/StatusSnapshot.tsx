@@ -16,7 +16,7 @@ import CircleIcon from "@mui/icons-material/Circle";
 import ErrorIcon from "@mui/icons-material/Error";
 import InfoIcon from "@mui/icons-material/Info";
 import PreviewIcon from "@mui/icons-material/Preview";
-import RemoveCircleOutlineIcon from "@mui/icons-material/RemoveCircleOutline";
+import RemoveCircleOutlinedIcon from "@mui/icons-material/RemoveCircleOutlined";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { Fragment } from "react";
 import { useApi, type ApiState } from "../api";
@@ -358,7 +358,7 @@ function CheckIcon({
 		case "skipped":
 			return (
 				<Tooltip title="Skipped — a precondition was not met" arrow>
-					<RemoveCircleOutlineIcon fontSize="small" color="disabled" />
+					<RemoveCircleOutlinedIcon fontSize="small" color="disabled" />
 				</Tooltip>
 			);
 		case "warning":
