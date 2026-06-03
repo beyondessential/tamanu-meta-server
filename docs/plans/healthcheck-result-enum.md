@@ -117,12 +117,16 @@ reader (wire *and* stored rows):
     `check`/`healthy` stripped.
   - broken ⇒ open `health-broken/<check>` at fixed Warning,
     `description: "Health check '<check>' is broken"`.
-  - closes: prev warning/failed, now not (warning ∪ failed ∪ broken) ⇒
-    close `health/<check>` — message "recovered", or "skipped" when the
-    check is currently skipped; prev-broken not in curr-broken ⇒ close
-    `health-broken/<check>` ("no longer broken").
-  - prev results come from the stored previous status via the same
-    normaliser, so legacy-row → new-push transitions just work.
+  - closes are derived from the issues that are actually open
+    (`Issue::active_refs_with_prefix`), not from diffing the previous
+    status row — an issue can stay open across pushes that don't re-file
+    it (failed → broken keeps the failure open), so the previous push
+    alone can't tell what needs closing. An open `health/<check>` closes
+    when the check is now passed, skipped, or unmentioned — message
+    "recovered", or "skipped" when currently skipped; an open
+    `health-broken/<check>` closes on any current result other than
+    broken ("no longer broken"). Legacy stored rows interoperate because
+    the current push is normalised.
 - `HealthCheck` payload struct (openapi doc shape): `healthy` becomes
   `Option<bool>`, add `result: Option<CheckResult>`, document the
   exactly-one rule and per-state semantics.

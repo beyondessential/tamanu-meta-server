@@ -803,6 +803,17 @@
           }
         }
       },
+      "CheckResult": {
+        "type": "string",
+        "description": "Outcome of a single `health[]` check, as reported by bestool.\n\nThe wire field is `result`; legacy senders use `healthy: bool`\ninstead (exactly one of the two must be present per entry). Use\n[`CheckResult::from_entry`] to read either form — stored status\nrows keep the legacy shape forever, so every reader of `health[]`\nmust go through it.",
+        "enum": [
+          "passed",
+          "warning",
+          "failed",
+          "broken",
+          "skipped"
+        ]
+      },
       "CompleteArgs": {
         "type": "object",
         "required": [
@@ -858,8 +869,7 @@
           {
             "type": "object",
             "required": [
-              "check",
-              "healthy"
+              "check"
             ],
             "properties": {
               "check": {
@@ -867,8 +877,22 @@
                 "description": "Identifier for the check. Must be a non-empty string. Used as\nthe issue's `ref` (`health/<check>`) so the same check\ntransitions land on the same issue across pushes."
               },
               "healthy": {
-                "type": "boolean",
-                "description": "Pass/fail for the check."
+                "type": [
+                  "boolean",
+                  "null"
+                ],
+                "description": "Legacy pass/fail for the check: `true` ⇒ `passed`, `false` ⇒\n`failed`. Mutually exclusive with `result`."
+              },
+              "result": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CheckResult",
+                    "description": "Outcome of the check. Exactly one of `result` / `healthy` must\nbe present per entry. `failed` files an issue at the catalog\nseverity; `broken` (the check itself errored, not the system\nunder test) files at a fixed Warning; `skipped` (precondition\nnot met) and `passed` file nothing and close prior issues."
+                  }
+                ]
               }
             }
           }
@@ -1189,7 +1213,7 @@
                 "items": {
                   "$ref": "#/components/schemas/HealthCheck"
                 },
-                "description": "Per-check breakdown. Each entry must include `check` (non-empty)\nand `healthy`; arbitrary additional fields per check (latency,\nfree disk %, certificate expiry, etc.) are passed through\nverbatim and surfaced in the status snapshot UI.\n\nEach check name seen — failing or healthy — upserts into\n`healthcheck_severities` so operators can review and adjust the\nseverity assigned to its failures. Failing checks file (or keep\nactive) an issue at `(status, health/<check>)` using the\ncatalog's current severity for that check name."
+                "description": "Per-check breakdown. Each entry must include `check` (non-empty)\nand exactly one of `result` / `healthy`; arbitrary additional\nfields per check (latency, free disk %, certificate expiry,\netc.) are passed through verbatim and surfaced in the status\nsnapshot UI.\n\nEach check name seen — whatever its result — upserts into\n`healthcheck_severities` so operators can review and adjust the\nseverity assigned to its failures. Failed checks file (or keep\nactive) an issue at `(status, health/<check>)` using the\ncatalog's current severity for that check name; broken checks\nfile at `(status, health-broken/<check>)` at a fixed Warning."
               },
               "healthy": {
                 "type": [
