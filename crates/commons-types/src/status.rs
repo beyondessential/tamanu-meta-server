@@ -39,6 +39,8 @@ impl Display for ShortStatus {
 pub enum CheckResult {
 	/// Check ran, system under test is fine.
 	Passed,
+	/// Check ran, system under test is degraded but not failing.
+	Warning,
 	/// Check ran, system under test is unhealthy.
 	Failed,
 	/// The check itself errored or is misconfigured; says nothing
@@ -69,6 +71,7 @@ impl Display for CheckResult {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {
 			CheckResult::Passed => write!(f, "passed"),
+			CheckResult::Warning => write!(f, "warning"),
 			CheckResult::Failed => write!(f, "failed"),
 			CheckResult::Broken => write!(f, "broken"),
 			CheckResult::Skipped => write!(f, "skipped"),
@@ -82,11 +85,12 @@ impl std::str::FromStr for CheckResult {
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		match s {
 			"passed" => Ok(CheckResult::Passed),
+			"warning" => Ok(CheckResult::Warning),
 			"failed" => Ok(CheckResult::Failed),
 			"broken" => Ok(CheckResult::Broken),
 			"skipped" => Ok(CheckResult::Skipped),
 			other => Err(format!(
-				"unknown check result '{other}' (expected passed, failed, broken, or skipped)"
+				"unknown check result '{other}' (expected passed, warning, failed, broken, or skipped)"
 			)),
 		}
 	}
@@ -104,6 +108,7 @@ mod tests {
 	fn from_entry_reads_result() {
 		for (s, expected) in [
 			("passed", CheckResult::Passed),
+			("warning", CheckResult::Warning),
 			("failed", CheckResult::Failed),
 			("broken", CheckResult::Broken),
 			("skipped", CheckResult::Skipped),
