@@ -2,7 +2,7 @@
 //! maintained by the public-server status ingestion path and edited
 //! through the private-server `/api/healthchecks` endpoints.
 
-use commons_types::issue::Severity;
+use commons_types::{issue::Severity, status::CheckResult};
 use database::healthcheck_severities::HealthcheckSeverity;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -62,9 +62,10 @@ async fn severity_for_returns_catalog_value_or_warning_default() {
 		};
 		// Unknown check → fallback (programmer-error path; ingestion
 		// upserts before reading in production).
-		let unknown = HealthcheckSeverity::severity_for(&mut conn, "ghost", &ctx)
-			.await
-			.expect("lookup");
+		let unknown =
+			HealthcheckSeverity::severity_for(&mut conn, "ghost", CheckResult::Failed, &ctx)
+				.await
+				.expect("lookup");
 		assert_eq!(unknown, Severity::Warning);
 
 		HealthcheckSeverity::upsert_default(&mut conn, "cert_expiry")
@@ -74,10 +75,19 @@ async fn severity_for_returns_catalog_value_or_warning_default() {
 			.await
 			.expect("update");
 
-		let known = HealthcheckSeverity::severity_for(&mut conn, "cert_expiry", &ctx)
-			.await
-			.expect("lookup");
+		let known =
+			HealthcheckSeverity::severity_for(&mut conn, "cert_expiry", CheckResult::Failed, &ctx)
+				.await
+				.expect("lookup");
 		assert_eq!(known, Severity::Critical);
+
+		// A warning-result check ignores the catalog column and lands
+		// at fixed Warning when no rule matches.
+		let warned =
+			HealthcheckSeverity::severity_for(&mut conn, "cert_expiry", CheckResult::Warning, &ctx)
+				.await
+				.expect("lookup");
+		assert_eq!(warned, Severity::Warning);
 	})
 	.await
 }

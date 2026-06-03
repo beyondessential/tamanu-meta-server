@@ -3,7 +3,7 @@
 //! for "given a status push, what severity does this check fail at?"
 //! See `docs/plans/healthcheck-severity-rules-v2.md`.
 
-use commons_types::issue::Severity;
+use commons_types::{issue::Severity, status::CheckResult};
 use database::healthcheck_severities::{EvaluationContext, HealthcheckSeverity, IfLadder};
 use serde_json::json;
 use std::collections::HashMap;
@@ -282,6 +282,7 @@ async fn severity_for_uses_rules_or_falls_back_to_base() {
 		let sev = HealthcheckSeverity::severity_for(
 			&mut conn,
 			"tamanu_service",
+			CheckResult::Failed,
 			&empty_ctx(&check, &status, &tags),
 		)
 		.await
@@ -293,6 +294,7 @@ async fn severity_for_uses_rules_or_falls_back_to_base() {
 		let sev = HealthcheckSeverity::severity_for(
 			&mut conn,
 			"tamanu_service",
+			CheckResult::Failed,
 			&empty_ctx(&check, &status, &tags),
 		)
 		.await
@@ -307,6 +309,7 @@ async fn severity_for_uses_rules_or_falls_back_to_base() {
 		let sev = HealthcheckSeverity::severity_for(
 			&mut conn,
 			"tamanu_service",
+			CheckResult::Failed,
 			&empty_ctx(&check, &status, &tags),
 		)
 		.await
@@ -316,6 +319,69 @@ async fn severity_for_uses_rules_or_falls_back_to_base() {
 			Severity::Error,
 			"falls back to base when no branch matches"
 		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn severity_for_warning_result_rules_then_fixed_warning() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		HealthcheckSeverity::upsert_default(&mut conn, "queue_depth")
+			.await
+			.expect("seed");
+		HealthcheckSeverity::update(&mut conn, "queue_depth", Severity::Critical, None, "ops")
+			.await
+			.expect("bump base");
+
+		let status = serde_json::Map::new();
+		let tags = HashMap::new();
+		// Ingestion injects the normalised result into check_extra.
+		let mut check = serde_json::Map::new();
+		check.insert("result".into(), json!("warning"));
+
+		// No rules: warning-result checks ignore the catalog column and
+		// land at fixed Warning.
+		let sev = HealthcheckSeverity::severity_for(
+			&mut conn,
+			"queue_depth",
+			CheckResult::Warning,
+			&empty_ctx(&check, &status, &tags),
+		)
+		.await
+		.expect("severity_for");
+		assert_eq!(sev, Severity::Warning);
+
+		// A rule conditioned on check.result overrides the fixed default.
+		let ladder: IfLadder = serde_json::from_value(json!({"if": [
+			{"==": [{"var": "check.result"}, "warning"]}, "info"
+		]}))
+		.unwrap();
+		HealthcheckSeverity::update_rules(&mut conn, "queue_depth", Some(&ladder), "ops")
+			.await
+			.expect("save rules");
+		let sev = HealthcheckSeverity::severity_for(
+			&mut conn,
+			"queue_depth",
+			CheckResult::Warning,
+			&empty_ctx(&check, &status, &tags),
+		)
+		.await
+		.expect("severity_for");
+		assert_eq!(sev, Severity::Info);
+
+		// The same rule doesn't fire for a failed check, which keeps
+		// using the catalog base.
+		let mut failed_check = serde_json::Map::new();
+		failed_check.insert("result".into(), json!("failed"));
+		let sev = HealthcheckSeverity::severity_for(
+			&mut conn,
+			"queue_depth",
+			CheckResult::Failed,
+			&empty_ctx(&failed_check, &status, &tags),
+		)
+		.await
+		.expect("severity_for");
+		assert_eq!(sev, Severity::Critical);
 	})
 	.await
 }
@@ -345,6 +411,7 @@ async fn severity_for_falls_back_when_rules_are_malformed() {
 		let sev = HealthcheckSeverity::severity_for(
 			&mut conn,
 			"tamanu_service",
+			CheckResult::Failed,
 			&empty_ctx(&check, &status, &tags),
 		)
 		.await

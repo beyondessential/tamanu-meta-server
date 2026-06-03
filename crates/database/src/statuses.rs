@@ -7,7 +7,7 @@ use commons_errors::{AppError, Result};
 use commons_types::{
 	issue::Severity,
 	server::rank::ServerRank,
-	status::{HealthState, ShortStatus},
+	status::{CheckResult, HealthState, ShortStatus},
 	version::VersionStr,
 };
 use diesel::prelude::*;
@@ -472,9 +472,10 @@ impl Status {
 
 	/// Server's self-reported health state derived from this status
 	/// row. Returns [`HealthState::Unhealthy`] if top-level is
-	/// `false`, [`HealthState::Warning`] if any `health[]` entry is
-	/// failing while top-level is `true`, and [`HealthState::Healthy`]
-	/// otherwise.
+	/// `false`, [`HealthState::Warning`] if any `health[]` entry
+	/// reports warning, failed, or broken while top-level is `true`,
+	/// and [`HealthState::Healthy`] otherwise (passed and skipped
+	/// entries don't count against the server).
 	pub fn health_state(&self) -> HealthState {
 		if !self.healthy {
 			return HealthState::Unhealthy;
@@ -482,9 +483,13 @@ impl Status {
 		let any_failing = self.health.as_array().is_some_and(|arr| {
 			arr.iter().any(|e| {
 				e.as_object()
-					.and_then(|o| o.get("healthy"))
-					.and_then(|v| v.as_bool())
-					.is_some_and(|b| !b)
+					.and_then(CheckResult::from_entry)
+					.is_some_and(|r| {
+						matches!(
+							r,
+							CheckResult::Warning | CheckResult::Failed | CheckResult::Broken
+						)
+					})
 			})
 		});
 		if any_failing {
