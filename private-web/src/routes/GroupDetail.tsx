@@ -9,10 +9,11 @@ import {
 	Typography,
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
+import ArchiveIcon from "@mui/icons-material/ArchiveOutlined";
 import EditIcon from "@mui/icons-material/Edit";
 import RestoreIcon from "@mui/icons-material/RestoreFromTrash";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
-import { Link as RouterLink, useParams } from "react-router-dom";
+import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import ServerShorty from "../components/ServerShorty";
 import SilencedRefsSection from "../components/SilencedRefsSection";
 import TimeAgo from "../components/TimeAgo";
@@ -29,8 +30,10 @@ import {
 
 export default function GroupDetail() {
 	const { id = "" } = useParams<{ id: string }>();
+	const navigate = useNavigate();
 	const detail = useApi("server_groups", "get", { server_group_id: id }, [id]);
 	const isAdmin = useApi("commons", "is_current_user_admin");
+	const archive = useApiAction("server_groups", "delete");
 	// Only the currently-open incident matters for the active-incident
 	// section; closed ones live behind the /incidents filter route.
 	const activeIncidents = useApi(
@@ -55,6 +58,21 @@ export default function GroupDetail() {
 		activeIncidents.status === "ok" && activeIncidents.data.length > 0
 			? activeIncidents.data[0]
 			: null;
+
+	const onArchive = async () => {
+		if (
+			!confirm(
+				`Archive group "${group.name}"? It's hidden from listings but can be restored from the Archived tab.`,
+			)
+		)
+			return;
+		try {
+			await archive.call({ server_group_id: group.id });
+			navigate("/servers");
+		} catch {
+			/* surfaced via archive.error */
+		}
+	};
 
 	return (
 		<Stack spacing={3}>
@@ -84,9 +102,24 @@ export default function GroupDetail() {
 						>
 							Edit
 						</Button>
+						{servers.length === 0 && !group.deleted_at && (
+							<Button
+								variant="outlined"
+								color="error"
+								startIcon={<ArchiveIcon />}
+								onClick={onArchive}
+								disabled={archive.pending}
+							>
+								Archive
+							</Button>
+						)}
 					</Stack>
 				)}
 			</Stack>
+
+			{archive.error && (
+				<Alert severity="error">{archive.error.message}</Alert>
+			)}
 
 			{group.deleted_at && (
 				<ArchivedGroupBanner
