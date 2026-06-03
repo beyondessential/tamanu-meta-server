@@ -35,6 +35,9 @@ fn no_entries_is_healthy() {
 	);
 }
 
+/// Legacy bestool encoded a per-check *warning* as `healthy: false`
+/// under top-level `true` (real failures flipped top-level to false),
+/// so the legacy bool form rolls up to Warning, not Unhealthy.
 #[test]
 fn legacy_failing_entry_is_warning() {
 	assert_eq!(
@@ -51,8 +54,8 @@ fn legacy_failing_entry_is_warning() {
 }
 
 #[test]
-fn result_warning_failed_broken_count_toward_warning() {
-	for result in ["warning", "failed", "broken"] {
+fn result_warning_and_broken_count_toward_warning() {
+	for result in ["warning", "broken"] {
 		assert_eq!(
 			status(
 				true,
@@ -63,6 +66,24 @@ fn result_warning_failed_broken_count_toward_warning() {
 			"{result}",
 		);
 	}
+}
+
+/// An explicit `result: failed` is what legacy bestool folded into
+/// top-level `healthy: false` — incident-class, regardless of the
+/// (retiring, absent ⇒ true) top-level flag.
+#[test]
+fn result_failed_is_unhealthy() {
+	assert_eq!(
+		status(
+			true,
+			serde_json::json!([
+				{"check": "a", "result": "warning"},
+				{"check": "b", "result": "failed"},
+			])
+		)
+		.health_state(),
+		HealthState::Unhealthy,
+	);
 }
 
 #[test]

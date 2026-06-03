@@ -471,32 +471,46 @@ impl Status {
 	}
 
 	/// Server's self-reported health state derived from this status
-	/// row. Returns [`HealthState::Unhealthy`] if top-level is
-	/// `false`, [`HealthState::Warning`] if any `health[]` entry
-	/// reports warning, failed, or broken while top-level is `true`,
-	/// and [`HealthState::Healthy`] otherwise (passed and skipped
-	/// entries don't count against the server).
+	/// row's per-check results. The top-level `healthy` bool is being
+	/// retired from the wire (absent ⇒ true on ingestion), so this
+	/// rollup is primarily result-driven, consulting top-level only
+	/// as legacy input:
+	///
+	/// - top-level `false` ⇒ [`HealthState::Unhealthy`] (legacy
+	///   self-report; new bestool doesn't send it)
+	/// - any entry with an explicit `result: failed` ⇒ `Unhealthy` —
+	///   this is exactly what legacy bestool folded into top-level
+	///   `healthy: false`
+	/// - any warning/broken entry, or a legacy `healthy: false` entry
+	///   under top-level `true` (legacy bestool's warning encoding) ⇒
+	///   [`HealthState::Warning`]
+	/// - otherwise [`HealthState::Healthy`] (passed and skipped
+	///   entries don't count against the server)
 	pub fn health_state(&self) -> HealthState {
 		if !self.healthy {
 			return HealthState::Unhealthy;
 		}
-		let any_failing = self.health.as_array().is_some_and(|arr| {
-			arr.iter().any(|e| {
-				e.as_object()
-					.and_then(CheckResult::from_entry)
-					.is_some_and(|r| {
-						matches!(
-							r,
-							CheckResult::Warning | CheckResult::Failed | CheckResult::Broken
-						)
-					})
-			})
-		});
-		if any_failing {
-			HealthState::Warning
-		} else {
-			HealthState::Healthy
+		let mut state = HealthState::Healthy;
+		if let Some(arr) = self.health.as_array() {
+			for entry in arr {
+				let Some(obj) = entry.as_object() else {
+					continue;
+				};
+				let Some(result) = CheckResult::from_entry(obj) else {
+					continue;
+				};
+				match result {
+					CheckResult::Failed if obj.contains_key("result") => {
+						return HealthState::Unhealthy;
+					}
+					CheckResult::Failed | CheckResult::Warning | CheckResult::Broken => {
+						state = HealthState::Warning;
+					}
+					CheckResult::Passed | CheckResult::Skipped => {}
+				}
+			}
 		}
+		state
 	}
 
 	pub fn short_status(&self) -> ShortStatus {

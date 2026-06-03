@@ -1,7 +1,6 @@
 import {
 	Alert,
 	Box,
-	Chip,
 	IconButton,
 	LinearProgress,
 	Stack,
@@ -20,6 +19,7 @@ import RemoveCircleOutlinedIcon from "@mui/icons-material/RemoveCircleOutlined";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { Fragment } from "react";
 import { useApi, type ApiState } from "../api";
+import HealthChip from "./HealthChip";
 import TimeAgo from "./TimeAgo";
 import TimezoneTooltip from "./TimezoneTooltip";
 import VersionIndicator from "./VersionIndicator";
@@ -74,14 +74,7 @@ export default function StatusSnapshotPanel({
 				</Typography>
 				{result.status === "ok" && result.data && (
 					<>
-						<Chip
-							size="small"
-							color={result.data.healthy ? "success" : "error"}
-							icon={
-								result.data.healthy ? <CheckCircleIcon /> : <CancelIcon />
-							}
-							label={result.data.healthy ? "Healthy" : "Unhealthy"}
-						/>
+						<HealthChip health={result.data.health_state} />
 						<Typography variant="body2" color="text.secondary">
 							<TimeAgo timestamp={result.data.created_at} />
 						</Typography>

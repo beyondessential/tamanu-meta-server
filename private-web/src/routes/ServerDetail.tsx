@@ -36,6 +36,7 @@ import NotificationsOffOutlinedIcon from "@mui/icons-material/NotificationsOffOu
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { Fragment, useEffect, useState } from "react";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
+import HealthChip from "../components/HealthChip";
 import IncidentsLink from "../components/IncidentsLink";
 import ManualEventButton from "../components/ManualEventButton";
 import SilencedRefsSection from "../components/SilencedRefsSection";
@@ -150,6 +151,7 @@ export default function ServerDetail() {
 			<InfoSection
 				server={data.server}
 				status={data.last_status}
+				health={data.health}
 				onSilenced={bumpRefresh}
 				up={data.up}
 				refreshTick={refreshTick}
@@ -687,19 +689,21 @@ function deviceShortName(info: DeviceInfo): string {
 function InfoSection({
 	server,
 	status,
+	health,
 	onSilenced,
 	up,
 	refreshTick,
 }: {
 	server: ServerInfo;
 	status: ServerLastStatusData | null;
+	health: HealthState;
 	onSilenced: () => void;
 	up: ShortStatus;
 	refreshTick: number;
 }) {
 	return (
 		<Paper variant="outlined" sx={{ p: 2 }}>
-			{status && <HealthIndicator healthy={status.healthy} up={up} />}
+			{status && <HealthIndicator health={health} up={up} />}
 			<Stack
 				direction="row"
 				spacing={4}
@@ -764,39 +768,22 @@ function InfoSection({
 
 /** Global health chip rendered at the top of the InfoSection. The
  * server's per-check breakdown is shown by `<ChecksTable>` below — this
- * is the "headline" answer to "does the server think it's OK".
- *
- * When the server isn't currently reporting (anything other than `up` or
- * `blip`), the chip is recoloured to a stale variant so an operator
- * isn't misled into thinking a stale "Healthy" still holds — the data
- * is whatever the server last said before going quiet. */
+ * is the "headline" answer to "is the server OK", derived from the
+ * `HealthState` rollup rather than the raw top-level `healthy` bool so
+ * a failing check can't hide behind a self-reported "healthy". */
 function HealthIndicator({
-	healthy,
+	health,
 	up,
 }: {
-	healthy: boolean;
+	health: HealthState;
 	up: ShortStatus;
 }) {
 	const reporting = up === "up" || up === "blip";
-	const chip = reporting ? (
-		<Chip
-			size="small"
-			color={healthy ? "success" : "error"}
-			icon={healthy ? <CheckCircleIcon /> : <CancelIcon />}
-			label={healthy ? "Healthy" : "Unhealthy"}
-		/>
-	) : (
-		<Tooltip title="Server isn't currently reporting status; this reflects its most recent received report.">
-			<Chip
-				size="small"
-				variant="outlined"
-				color="warning"
-				icon={<WarningAmberIcon />}
-				label={healthy ? "Last reported healthy" : "Last reported unhealthy"}
-			/>
-		</Tooltip>
+	return (
+		<Box sx={{ mb: 1.5 }}>
+			<HealthChip health={health} stale={!reporting} />
+		</Box>
 	);
-	return <Box sx={{ mb: 1.5 }}>{chip}</Box>;
 }
 
 /** Per-check table from the most recent status push. Failing entries
