@@ -263,11 +263,13 @@ pub async fn sample(
 	// ingestion path strips reserved keys.
 	let status_extra = status.extra.as_object().cloned().unwrap_or_default();
 
-	// Pull the failing-check entry out of the health array (any entry
-	// matching by name; we don't require unhealthy here so we still
-	// surface the check's typical shape even on a healthy push). Strip
-	// the reserved fields so the UI sees only the operator-predicatable
-	// extras — mirrors what the ingestion path passes to severity_for.
+	// Pull the check entry out of the health array (any entry matching
+	// by name; we don't require a failing result here so we still
+	// surface the check's typical shape even on a passing push). Strip
+	// the reserved fields and inject the normalised `result` so the UI
+	// sees exactly what the ingestion path passes to severity_for —
+	// including a `check.result` value on legacy (`healthy: bool`)
+	// pushes.
 	let check_extra = status
 		.health
 		.as_array()
@@ -276,9 +278,13 @@ pub async fn sample(
 				let obj = e.as_object()?;
 				let name = obj.get("check")?.as_str()?;
 				if name == args.check_name {
+					let result = commons_types::status::CheckResult::from_entry(obj);
 					let mut m = obj.clone();
 					m.remove("check");
 					m.remove("healthy");
+					if let Some(result) = result {
+						m.insert("result".into(), JsonValue::String(result.to_string()));
+					}
 					Some(m)
 				} else {
 					None

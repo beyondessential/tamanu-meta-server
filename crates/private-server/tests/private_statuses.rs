@@ -1004,3 +1004,56 @@ async fn snapshot_surfaces_per_check_severity() {
 	})
 	.await
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn snapshot_check_severities_cover_result_form() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		// `elevated` has its catalog base bumped to error: a failed
+		// result uses it, a warning result ignores it (fixed Warning).
+		conn.batch_execute(
+			"INSERT INTO healthcheck_severities (check_name, severity) VALUES \
+				('elevated', 'error'), \
+				('degraded', 'error');",
+		)
+		.await
+		.unwrap();
+
+		conn.batch_execute(
+			"INSERT INTO servers (id, host, kind) VALUES \
+				('30000000-0000-0000-0000-000000000002', 'https://snap-res.example.com', 'central'); \
+			 INSERT INTO statuses (server_id, healthy, health, extra) VALUES \
+				('30000000-0000-0000-0000-000000000002', true, \
+				 '[{\"check\":\"elevated\",\"result\":\"failed\"}, \
+				   {\"check\":\"degraded\",\"result\":\"warning\"}, \
+				   {\"check\":\"busted\",\"result\":\"broken\"}, \
+				   {\"check\":\"absent\",\"result\":\"skipped\"}, \
+				   {\"check\":\"fine\",\"result\":\"passed\"}]'::jsonb, \
+				 '{}'::jsonb);",
+		)
+		.await
+		.unwrap();
+
+		let r = private
+			.post("/api/statuses/snapshot")
+			.json(&serde_json::json!({
+				"server_id": "30000000-0000-0000-0000-000000000002"
+			}))
+			.await;
+		r.assert_status_ok();
+		let body: serde_json::Value = r.json();
+		let severities = &body["check_severities"];
+		assert_eq!(severities["elevated"], "error");
+		assert_eq!(
+			severities["degraded"], "warning",
+			"warning result lands at fixed Warning regardless of catalog base"
+		);
+		// Broken/skipped/passed don't go through the rules engine.
+		for check in ["busted", "absent", "fine"] {
+			assert!(
+				severities.get(check).is_none(),
+				"{check} must be omitted; got {severities}",
+			);
+		}
+	})
+	.await
+}

@@ -340,6 +340,9 @@ async fn sample_materialises_latest_push_for_this_check() {
 			sample["check_extra"].get("healthy").is_none(),
 			"reserved `healthy` must be stripped"
 		);
+		// The normalised result is injected even for legacy pushes, so
+		// the rule editor can preview `check.result` conditions.
+		assert_eq!(sample["check_extra"]["result"], "failed");
 
 		// Tags merge: server overlays group; both keys present here.
 		assert_eq!(sample["tags"]["env"], "prod");
@@ -348,6 +351,33 @@ async fn sample_materialises_latest_push_for_this_check() {
 		assert_eq!(sample["server_host"], "https://prod-host/");
 		assert_eq!(sample["server_name"], "Prod Central");
 		assert!(sample["seen_at"].is_string());
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sample_normalises_result_form_entries() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO servers (id, host, kind) VALUES \
+				('55555555-5555-5555-5555-555555555555', 'https://result-host', 'central'); \
+			 INSERT INTO statuses (server_id, healthy, health, extra) VALUES \
+				('55555555-5555-5555-5555-555555555555', true, \
+				 '[{\"check\": \"queue_depth\", \"result\": \"warning\", \"depth\": 120}]'::jsonb, \
+				 '{}'::jsonb);",
+		)
+		.await
+		.unwrap();
+
+		let response = private
+			.post("/api/healthchecks/sample")
+			.json(&json!({"check_name": "queue_depth"}))
+			.await;
+		response.assert_status_ok();
+		let body: serde_json::Value = response.json();
+		let extra = &body["sample"]["check_extra"];
+		assert_eq!(extra["result"], "warning");
+		assert_eq!(extra["depth"], 120);
 	})
 	.await
 }
