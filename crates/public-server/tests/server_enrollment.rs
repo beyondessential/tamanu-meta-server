@@ -3,7 +3,7 @@
 //! token-state behaviours.
 
 use base64::Engine;
-use commons_tests::server::{make_signing_certificate, run};
+use commons_tests::server::{make_signing_certificate, run, run_with_tailnet_device_auth};
 use commons_types::server::{TagMap, kind::ServerKind};
 use database::{
 	pg_duration::PgDuration, server_enrollment_tokens::ServerEnrollmentToken, servers::Server,
@@ -72,6 +72,162 @@ async fn run_handshake(
 			"signature": b64().encode(sig.as_ref()),
 		}))
 		.await
+}
+
+/// Drive begin → sign → complete over the private-server's tailnet `/public`
+/// mount, where there is no client cert: the SPKI rides in the body. The
+/// `Forwarded` header makes the caller look like the tagged tailnet device the
+/// harness primed. `forged_cert`, if set, is sent as an `mtls-certificate`
+/// header to prove it is *ignored* on this transport. Returns the `complete`
+/// response.
+async fn run_tailnet_handshake(
+	private: &axum_test::TestServer,
+	fwd_ip: std::net::IpAddr,
+	server_id: Uuid,
+	token: &str,
+	spki: &[u8],
+	signing_key: &ring::signature::EcdsaKeyPair,
+	forged_cert: Option<&str>,
+) -> axum_test::TestResponse {
+	let spki_b64 = b64().encode(spki);
+	let fwd = format!("for={fwd_ip}");
+
+	let mut begin_req = private
+		.post("/public/servers/register/begin")
+		.add_header("Forwarded", &fwd);
+	if let Some(cert) = forged_cert {
+		begin_req = begin_req.add_header("mtls-certificate", cert);
+	}
+	let begin = begin_req
+		.json(&json!({"server_id": server_id, "token": token, "spki": spki_b64}))
+		.await;
+	begin.assert_status_ok();
+	let nonce_b64 = begin.json::<Value>()["nonce"].as_str().unwrap().to_string();
+	let nonce = b64().decode(&nonce_b64).unwrap();
+
+	let mut transcript = nonce.clone();
+	transcript.extend_from_slice(server_id.as_bytes());
+	transcript.extend_from_slice(spki);
+	let rng = ring::rand::SystemRandom::new();
+	let sig = signing_key.sign(&rng, &transcript).unwrap();
+
+	let mut complete_req = private
+		.post("/public/servers/register/complete")
+		.add_header("Forwarded", &fwd);
+	if let Some(cert) = forged_cert {
+		complete_req = complete_req.add_header("mtls-certificate", cert);
+	}
+	complete_req
+		.json(&json!({
+			"server_id": server_id,
+			"nonce": nonce_b64,
+			"signature": b64().encode(sig.as_ref()),
+			"spki": spki_b64,
+		}))
+		.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tailnet_enrollment_happy_path() {
+	run_with_tailnet_device_auth("server", async |mut conn, fwd_ip, _node, _dev, _public, private| {
+		use database::Device;
+		let (spki, _cert, key) = make_signing_certificate();
+		let server = Server::create(&mut conn, new_server("https://ts-enroll.example/"))
+			.await
+			.unwrap();
+		let (_t, token) =
+			ServerEnrollmentToken::mint(&mut conn, server.id, SignedDuration::from_hours(1))
+				.await
+				.unwrap();
+
+		run_tailnet_handshake(&private, fwd_ip, server.id, &token, &spki, &key, None)
+			.await
+			.assert_status_ok();
+
+		// Registered + bound to a device carrying the body-supplied key; token spent.
+		let after = Server::get_by_id(&mut conn, server.id).await.unwrap();
+		assert!(after.registered_at.is_some(), "registered_at set");
+		assert!(after.device_id.is_some(), "device bound");
+		let bound = Device::from_key(&mut conn, &spki).await.unwrap().unwrap();
+		assert_eq!(bound.id, after.device_id.unwrap(), "body SPKI bound the device");
+		assert!(
+			ServerEnrollmentToken::find_active(&mut conn, server.id, &token)
+				.await
+				.is_err(),
+			"token consumed",
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn internet_path_rejects_body_spki() {
+	run(async |mut conn, public, _private| {
+		// On the internet mTLS mount there is no tailnet directory, so a
+		// body-supplied SPKI must NOT be accepted — the cert can't be skipped.
+		let (spki, _cert, _key) = make_signing_certificate();
+		let server = Server::create(&mut conn, new_server("https://gate.example/"))
+			.await
+			.unwrap();
+		let (_t, token) =
+			ServerEnrollmentToken::mint(&mut conn, server.id, SignedDuration::from_hours(1))
+				.await
+				.unwrap();
+
+		let resp = public
+			.post("/servers/register/begin")
+			.json(&json!({
+				"server_id": server.id,
+				"token": token,
+				"spki": b64().encode(&spki),
+			}))
+			.await;
+		resp.assert_status_forbidden();
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tailnet_ignores_the_mtls_certificate_header() {
+	run_with_tailnet_device_auth("server", async |mut conn, fwd_ip, _node, _dev, _public, private| {
+		use database::Device;
+		// Real device key (carried in the body) and a *different*, attacker-style
+		// cert sent in the (forgeable) mtls-certificate header.
+		let (spki_real, _c, key_real) = make_signing_certificate();
+		let (spki_forged, cert_forged, _k) = make_signing_certificate();
+		let server = Server::create(&mut conn, new_server("https://ts-forge.example/"))
+			.await
+			.unwrap();
+		let (_t, token) =
+			ServerEnrollmentToken::mint(&mut conn, server.id, SignedDuration::from_hours(1))
+				.await
+				.unwrap();
+
+		// Body SPKI = real key; header cert = forged. The tailnet mount must use
+		// the body and ignore the header, so the handshake (signed by the real
+		// key) succeeds and binds the real key — not the forged one.
+		run_tailnet_handshake(
+			&private,
+			fwd_ip,
+			server.id,
+			&token,
+			&spki_real,
+			&key_real,
+			Some(&cert_forged),
+		)
+		.await
+		.assert_status_ok();
+
+		assert!(
+			Device::from_key(&mut conn, &spki_real).await.unwrap().is_some(),
+			"the body-supplied (real) key was bound",
+		);
+		assert!(
+			Device::from_key(&mut conn, &spki_forged).await.unwrap().is_none(),
+			"the forged cert-header key was ignored, never bound",
+		);
+	})
+	.await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

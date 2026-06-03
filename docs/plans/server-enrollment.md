@@ -124,6 +124,28 @@ without it. Both peers derive the same exporter from the shared TLS session, so
 bestool computes it client-side with the same parameters and includes it in the
 signature. May not be deployable until the proxy supports it — hence the gate.
 
+*Two transports (mTLS + tailnet):* `register/{begin,complete}` are served on two
+mounts and bestool tries the tailnet first, falling back to public mTLS:
+
+- **Internet mTLS** — the public-server binary at the ticket's `api_url`,
+  `/servers/register/*`. The device presents a client cert; Canopy reads the
+  SPKI from it. `tailscale serve` can't do client-cert mTLS, so this is the
+  internet edge only.
+- **Tailnet** — the private-server's `/public/servers/register/*` mount (the
+  public-server router nested behind Tailscale). There is no client cert, so the
+  device carries its **SPKI in the request body** (base64-standard DER) on both
+  `begin` and `complete`; the challenge is still bound to that key at `begin`.
+
+The SPKI source is fixed **by transport, never by precedence**: the internet
+mount reads the cert header only (a body `spki` is ignored, so the cert can't be
+skipped); the tailnet mount reads the body only and **ignores the
+`mtls-certificate` header** — without an mTLS terminator in front it is
+attacker-controllable. The mount is distinguished by `AppState::tailnet_directory`
+(`Some` only on the private-server `/public` nest, `None` on the internet binary).
+Channel binding is an mTLS-path concept (no TLS exporter on the tailnet mount), so
+it never fires there. The PoP transcript (`nonce ‖ server_id ‖ SPKI [‖ EKM]`) is
+identical on both paths — only the route and the SPKI source differ.
+
 **2. No device is auto-created at the mTLS boundary.** Today `mtls::resolve`
 auto-creates an `Untrusted` device for any first-contact key
 (`device_auth/mtls.rs:29-37`), so anyone reaching the endpoint once from the

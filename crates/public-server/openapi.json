@@ -774,6 +774,13 @@
             "type": "string",
             "format": "uuid"
           },
+          "spki": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Base64-standard DER SPKI of the device public key. Required on the\ntailnet transport (there is no client cert to read it from); omitted on\nthe mTLS path, where the key comes from the presented certificate. The\nchallenge is bound to this key, so `complete` must use the same one."
+          },
           "token": {
             "type": "string"
           }
@@ -815,6 +822,13 @@
           "signature": {
             "type": "string",
             "description": "Base64 (standard) of the ASN.1 DER ECDSA-P256-SHA256 signature over the\ntranscript `nonce ‖ server_id ‖ spki [‖ ekm]`."
+          },
+          "spki": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Base64-standard DER SPKI of the device public key. Required on the\ntailnet transport; omitted on the mTLS path (key comes from the cert).\nMust match the key used at `begin`."
           }
         }
       },

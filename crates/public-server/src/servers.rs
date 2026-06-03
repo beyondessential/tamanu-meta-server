@@ -5,6 +5,7 @@ use axum_client_ip::ClientIp;
 use base64::Engine;
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::device_auth::{mtls, pop};
+use commons_servers::tailnet_directory::TailnetDirectory;
 
 use crate::ratelimit::RateLimiter;
 use commons_types::server::{kind::ServerKind, rank::ServerRank};
@@ -99,6 +100,12 @@ pub async fn list(State(db): State<Db>) -> Result<Json<Vec<PublicServer>>> {
 pub struct BeginArgs {
 	pub server_id: Uuid,
 	pub token: String,
+	/// Base64-standard DER SPKI of the device public key. Required on the
+	/// tailnet transport (there is no client cert to read it from); omitted on
+	/// the mTLS path, where the key comes from the presented certificate. The
+	/// challenge is bound to this key, so `complete` must use the same one.
+	#[serde(default)]
+	pub spki: Option<String>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -110,11 +117,27 @@ pub struct BeginResponse {
 	pub channel_binding_required: bool,
 }
 
-/// Read the presented client cert's public key, or fail opaquely.
-fn presented_key(headers: &HeaderMap) -> Result<Vec<u8>> {
-	mtls::spki_from_headers(headers)
-		.map_err(|_| AppError::EnrollmentFailed)?
-		.ok_or(AppError::EnrollmentFailed)
+/// Resolve the device's SPKI for an enrollment request. The source is fixed by
+/// the transport, never chosen by precedence:
+///
+/// - **internet mTLS mount** (`tailnet` false): from the client-cert header the
+///   terminating mTLS proxy sets. The request body's `spki` is ignored, so the
+///   cert can never be skipped via a body field.
+/// - **tailnet `/public` mount** (`tailnet` true): from the request body
+///   (base64-standard DER). `tailscale serve` can't do client-cert mTLS, so the
+///   `mtls-certificate` header is *not* set by a trusted terminator here — it is
+///   attacker-controllable and therefore ignored.
+fn resolve_spki(headers: &HeaderMap, body_spki: Option<&str>, tailnet: bool) -> Result<Vec<u8>> {
+	if tailnet {
+		let b64 = body_spki.ok_or(AppError::EnrollmentFailed)?;
+		base64::engine::general_purpose::STANDARD
+			.decode(b64)
+			.map_err(|_| AppError::EnrollmentFailed)
+	} else {
+		mtls::spki_from_headers(headers)
+			.map_err(|_| AppError::EnrollmentFailed)?
+			.ok_or(AppError::EnrollmentFailed)
+	}
 }
 
 /// The configured EKM header name, if channel binding is enabled.
@@ -157,13 +180,17 @@ fn enforce_rate_limit(rl: &RateLimiter, ip: std::net::IpAddr, server_id: uuid::U
 pub async fn register_begin(
 	State(db): State<Db>,
 	State(rl): State<RateLimiter>,
+	State(directory): State<Option<TailnetDirectory>>,
 	ClientIp(ip): ClientIp,
 	headers: HeaderMap,
 	Json(args): Json<BeginArgs>,
 ) -> Result<Json<BeginResponse>> {
 	enforce_rate_limit(&rl, ip, args.server_id)?;
 	let mut db = db.get().await?;
-	let spki = presented_key(&headers)?;
+	// `Some` only on the private-server's `/public` (tailnet) mount; `None` on
+	// the internet binary — see `AppState::tailnet_directory`.
+	let tailnet = directory.is_some();
+	let spki = resolve_spki(&headers, args.spki.as_deref(), tailnet)?;
 
 	// Server must exist and be live.
 	let server = Server::get_by_id(&mut db, args.server_id)
@@ -187,7 +214,9 @@ pub async fn register_begin(
 
 	Ok(Json(BeginResponse {
 		nonce: base64::engine::general_purpose::STANDARD.encode(&nonce),
-		channel_binding_required: ekm_header_name().is_some(),
+		// Channel binding is an mTLS-path concept (the TLS exporter comes from
+		// the terminating proxy); the tailnet transport has no such exporter.
+		channel_binding_required: !tailnet && ekm_header_name().is_some(),
 	}))
 }
 
@@ -199,6 +228,11 @@ pub struct CompleteArgs {
 	/// Base64 (standard) of the ASN.1 DER ECDSA-P256-SHA256 signature over the
 	/// transcript `nonce ‖ server_id ‖ spki [‖ ekm]`.
 	pub signature: String,
+	/// Base64-standard DER SPKI of the device public key. Required on the
+	/// tailnet transport; omitted on the mTLS path (key comes from the cert).
+	/// Must match the key used at `begin`.
+	#[serde(default)]
+	pub spki: Option<String>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -220,13 +254,15 @@ pub struct CompleteResponse {
 pub async fn register_complete(
 	State(db): State<Db>,
 	State(rl): State<RateLimiter>,
+	State(directory): State<Option<TailnetDirectory>>,
 	ClientIp(ip): ClientIp,
 	headers: HeaderMap,
 	Json(args): Json<CompleteArgs>,
 ) -> Result<Json<CompleteResponse>> {
 	enforce_rate_limit(&rl, ip, args.server_id)?;
 	let mut db = db.get().await?;
-	let spki = presented_key(&headers)?;
+	let tailnet = directory.is_some();
+	let spki = resolve_spki(&headers, args.spki.as_deref(), tailnet)?;
 
 	let nonce = base64::engine::general_purpose::STANDARD
 		.decode(&args.nonce)
@@ -242,8 +278,9 @@ pub async fn register_complete(
 	let mut transcript = nonce.clone();
 	transcript.extend_from_slice(args.server_id.as_bytes());
 	transcript.extend_from_slice(&spki);
-	if let Some(header_name) = ekm_header_name() {
+	if !tailnet && let Some(header_name) = ekm_header_name() {
 		// Channel binding required: fold in the proxy-provided TLS exporter.
+		// mTLS path only — the tailnet transport has no TLS exporter.
 		let ekm = headers
 			.get(&header_name)
 			.and_then(|v| v.to_str().ok())
