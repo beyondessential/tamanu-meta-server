@@ -631,15 +631,23 @@ not a distributed quota. Token-consumed-without-bind alerting is moot here:
 `consume` runs inside the bind transaction, so a failed bind rolls the burn
 back (nothing to alert on).
 
+**Done since the first pass:**
+
+- **Frontend e2e (Playwright)** for the create→setup→archive flow — covered by
+  `servers.spec.ts` (the fixture sets `PUBLIC_URL` so the auto-mint works).
+- **`register/complete`** now reads the server `SELECT … FOR UPDATE`
+  (`Server::get_by_id_for_update`), serialising against a concurrent
+  `soft_delete`, closing the archive-vs-register TOCTOU.
+- A `mint_enrollment` test asserting the token never appears in the clear
+  (`enrollment_token_never_leaks_in_the_clear`): not in the mint response,
+  `enrollment_status`, or a failed register error.
+- `attach_tailscale_device`'s "already attached" check uses
+  `live_by_device_id` (was `get_by_device_id`, which counted archived servers).
+
 **Deferred (not yet done — do not consider the plan complete):**
 
-- **Frontend e2e (Playwright)** tests for the create→setup→archive flow.
-- **`register/complete`** re-checks `deleted_at` but not under `SELECT … FOR
-  UPDATE`; tighten the archive-vs-register TOCTOU with a row lock.
-- A `mint_enrollment`-side test asserting the token never appears in any
-  response/error body; a channel-binding (`CANOPY_ENROLL_EKM_HEADER`) test.
-- `attach_tailscale_device`'s "already attached" check uses
-  `get_by_device_id` (includes archived); switch to `live_by_device_id`.
+- A channel-binding (`CANOPY_ENROLL_EKM_HEADER`) test, pending the
+  channel-binding rollout decision below.
 
 ## Open items / follow-ups (surface, don't drop)
 
