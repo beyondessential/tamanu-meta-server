@@ -10,6 +10,7 @@ pub mod events;
 pub mod openapi;
 #[cfg(feature = "ui")]
 pub mod password;
+pub mod ratelimit;
 #[cfg(feature = "ui")]
 pub mod server_versions;
 pub mod servers;

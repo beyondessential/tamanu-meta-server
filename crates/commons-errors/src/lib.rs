@@ -122,6 +122,19 @@ pub enum AppError {
 	/// to 409.
 	#[error("conflict: {0}")]
 	Conflict(String),
+
+	/// Deliberately opaque failure for the public enrollment endpoints. Every
+	/// pre-completion reason (unknown/archived server, invalid/expired/consumed
+	/// token, bad/expired/used challenge nonce, bad signature) collapses to this
+	/// so the endpoint isn't an existence/lifecycle oracle. The specific reason
+	/// is logged server-side, never returned. Maps to 403.
+	#[error("enrollment failed")]
+	EnrollmentFailed,
+
+	/// Too many requests from a caller (e.g. the enrollment endpoints'
+	/// per-IP / per-server rate limit). Maps to 429.
+	#[error("rate limit exceeded")]
+	RateLimited,
 }
 
 impl AppError {
@@ -187,6 +200,8 @@ impl AppError {
 			Self::AuthTailnetIdentityMissing => StatusCode::UNAUTHORIZED,
 			Self::BadRequest(_) => StatusCode::BAD_REQUEST,
 			Self::Conflict(_) => StatusCode::CONFLICT,
+			Self::EnrollmentFailed => StatusCode::FORBIDDEN,
+			Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
 			_ => StatusCode::INTERNAL_SERVER_ERROR,
 		}
 	}
@@ -237,6 +252,8 @@ impl AppError {
 						Self::AuthTailnetIdentityMissing => "auth-tailnet-identity-missing",
 						Self::BadRequest(_) => "bad-request",
 						Self::Conflict(_) => "conflict",
+						Self::EnrollmentFailed => "enrollment-failed",
+						Self::RateLimited => "rate-limited",
 						Self::Problem(_) => unreachable!(),
 					}
 				))

@@ -17,6 +17,8 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(create))
 		.routes(routes!(update))
 		.routes(routes!(delete))
+		.routes(routes!(restore))
+		.routes(routes!(list_archived))
 		.routes(routes!(search))
 }
 
@@ -85,6 +87,7 @@ pub async fn get(
 			.cmp(b.name.as_deref().unwrap_or(""))
 	});
 	super::servers::decorate_with_status(&mut conn, &mut servers).await?;
+	super::servers::fill_display_hosts(&mut conn, &mut servers).await?;
 	Ok(Json(GroupDetail { group, servers }))
 }
 
@@ -162,6 +165,9 @@ pub async fn update(
 	Ok(Json(group))
 }
 
+/// Archive (soft-delete) a group. Kept at `/delete` for the existing client;
+/// the group is hidden from live listings but restorable. Refuses if the group
+/// still has live members (409).
 #[utoipa::path(
 	post,
 	path = "/delete",
@@ -180,8 +186,49 @@ pub async fn delete(
 	Json(args): Json<GroupIdArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
-	ServerGroup::delete(&mut conn, args.server_group_id).await?;
+	ServerGroup::soft_delete(&mut conn, args.server_group_id).await?;
 	Ok(Json(()))
+}
+
+#[utoipa::path(
+	post,
+	path = "/restore",
+	operation_id = "server_groups_restore",
+	tag = "server_groups",
+	security(("tailscale-admin" = [])),
+	request_body = GroupIdArgs,
+	responses(
+		(status = 200),
+		(status = 404, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn restore(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<GroupIdArgs>,
+) -> Result<Json<()>> {
+	let mut conn = state.db.get().await?;
+	ServerGroup::restore(&mut conn, args.server_group_id).await?;
+	Ok(Json(()))
+}
+
+#[utoipa::path(
+	post,
+	path = "/list_archived",
+	operation_id = "server_groups_list_archived",
+	tag = "server_groups",
+	security(("tailscale-user" = [])),
+	responses(
+		(status = 200, body = Vec<ServerGroup>),
+	),
+)]
+pub async fn list_archived(
+	State(state): State<AppState>,
+	_body: Json<serde_json::Value>,
+) -> Result<Json<Vec<ServerGroup>>> {
+	let mut conn = state.db.get().await?;
+	let groups = ServerGroup::list_archived(&mut conn).await?;
+	Ok(Json(groups))
 }
 
 #[derive(Deserialize, ToSchema)]

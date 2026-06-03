@@ -9,7 +9,8 @@ import StatusDot from "./StatusDot";
 export interface ServerInfo {
 	id: string;
 	name: string | null;
-	host: string;
+	host?: string | null;
+	display_host: string;
 	kind: ServerKind;
 	rank: ServerRank | null;
 	group_name?: string | null;
@@ -57,7 +58,7 @@ export default function ServerShorty({ server }: { server: ServerInfo }) {
 			)}
 			<Box sx={{ ml: "auto" }}>
 				<Typography variant="body2" color="text.secondary">
-					{server.host}
+					{server.display_host}
 				</Typography>
 			</Box>
 		</Stack>

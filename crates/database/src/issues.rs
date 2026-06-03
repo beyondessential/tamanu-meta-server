@@ -472,10 +472,7 @@ async fn re_evaluate_incident_membership(
 							.filter(incidents::id.eq(incident_id))
 							.filter(incidents::escalated_at.is_null()),
 					)
-					.set(
-						incidents::escalated_at
-							.eq(jiff_diesel::Timestamp::from(transition_time)),
-					)
+					.set(incidents::escalated_at.eq(jiff_diesel::Timestamp::from(transition_time)))
 					.returning(Incident::as_select())
 					.get_result(conn)
 					.await
@@ -883,10 +880,7 @@ async fn enqueue_slack_open(
 /// Returns true if at least one row was accelerated. The caller uses
 /// this to distinguish "open is still pending" (no extra Slack message
 /// needed) from "open has already shipped" (fire an escalation open).
-async fn accelerate_pending_open(
-	conn: &mut AsyncPgConnection,
-	incident_id: Uuid,
-) -> Result<bool> {
+async fn accelerate_pending_open(conn: &mut AsyncPgConnection, incident_id: Uuid) -> Result<bool> {
 	use crate::schema::slack_outbox::dsl;
 	let now = Timestamp::now();
 	let updated = diesel::update(
@@ -950,9 +944,12 @@ async fn enqueue_slack_resolve_inner(
 
 fn format_group_label(group: &ServerGroup, server: Option<&Server>) -> String {
 	if let Some(server) = server {
-		let server_part = match &server.name {
-			Some(n) if !n.is_empty() => format!("{n} ({})", server.host.0),
-			_ => server.host.0.to_string(),
+		let host = server.host.as_ref().map(|h| h.0.to_string());
+		let server_part = match (&server.name, host) {
+			(Some(n), Some(h)) if !n.is_empty() => format!("{n} ({h})"),
+			(Some(n), None) if !n.is_empty() => n.clone(),
+			(_, Some(h)) => h,
+			(_, None) => server.id.to_string(),
 		};
 		format!("{} · {}", group.name, server_part)
 	} else {

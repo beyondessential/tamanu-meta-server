@@ -626,6 +626,97 @@ impl Device {
 		Self::trust(db, device_id, DeviceRole::Untrusted).await
 	}
 
+	/// Like [`from_key`] but matches inactive keys too. Used by enrollment to
+	/// rebind a returning box to its existing device row (whose key was
+	/// deactivated on the prior server's archival) rather than spawning a
+	/// duplicate identity.
+	pub async fn from_key_any_state(
+		db: &mut AsyncPgConnection,
+		key: &[u8],
+	) -> Result<Option<Self>> {
+		use crate::schema::{device_keys, devices};
+
+		devices::table
+			.inner_join(device_keys::table.on(device_keys::device_id.eq(devices::id)))
+			.select(Self::as_select())
+			.filter(device_keys::key_data.eq(key))
+			.first(db)
+			.await
+			.optional()
+			.map_err(AppError::from)
+	}
+
+	/// Add (or re-activate) an mTLS key on a device that has no *other* active
+	/// key. Idempotent if the key is already active on this device. Refuses if
+	/// the device already carries a different active key — adding a second
+	/// credential to an already-keyed (e.g. already-enrolled) device is an
+	/// operator action, not something an enrolling box may do.
+	pub async fn add_key(db: &mut AsyncPgConnection, device_id: Uuid, key: Vec<u8>) -> Result<()> {
+		use crate::schema::device_keys::dsl;
+
+		let active: Vec<DeviceKey> = DeviceKey::find_by_device(db, device_id).await?;
+		if active.iter().any(|k| k.key_data == key) {
+			return Ok(());
+		}
+		if !active.is_empty() {
+			return Err(AppError::Conflict(format!(
+				"device {device_id} already has an active key; refusing to add another during enrollment",
+			)));
+		}
+
+		// Re-activate a previously-deactivated copy of this exact key if present
+		// (returning box), else insert a fresh row.
+		let reactivated = diesel::update(
+			dsl::device_keys
+				.filter(dsl::device_id.eq(device_id))
+				.filter(dsl::key_data.eq(&key)),
+		)
+		.set(dsl::is_active.eq(true))
+		.execute(db)
+		.await
+		.map_err(AppError::from)?;
+		if reactivated == 0 {
+			DeviceKey::create(db, device_id, key, Some("Enrollment key".to_string())).await?;
+		}
+		Ok(())
+	}
+
+	/// Bulk-fetch the Tailscale hostname (`tailscale_node_name`) for each given
+	/// device that has one. Used to derive a display URL for servers that have
+	/// no stored URL but are bound to a tailnet node.
+	pub async fn tailscale_names_by_ids(
+		db: &mut AsyncPgConnection,
+		ids: &[Uuid],
+	) -> Result<HashMap<Uuid, String>> {
+		use crate::schema::devices::dsl;
+		if ids.is_empty() {
+			return Ok(HashMap::new());
+		}
+		let rows: Vec<(Uuid, Option<String>)> = dsl::devices
+			.select((dsl::id, dsl::tailscale_node_name))
+			.filter(dsl::id.eq_any(ids))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(rows
+			.into_iter()
+			.filter_map(|(id, name)| name.map(|n| (id, n)))
+			.collect())
+	}
+
+	/// Deactivate all of a device's keys. Used on server archival so a
+	/// decommissioned box's key cannot silently re-authenticate; re-enrollment
+	/// must go through the gated token + proof-of-possession flow.
+	pub async fn deactivate_keys(db: &mut AsyncPgConnection, device_id: Uuid) -> Result<()> {
+		use crate::schema::device_keys::dsl;
+		diesel::update(dsl::device_keys.filter(dsl::device_id.eq(device_id)))
+			.set(dsl::is_active.eq(false))
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(())
+	}
+
 	/// Search devices by key data (supports partial matches).
 	pub async fn search_by_key(
 		db: &mut AsyncPgConnection,

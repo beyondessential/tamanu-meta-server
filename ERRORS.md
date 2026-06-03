@@ -135,6 +135,31 @@ in order of likelihood:
   refresh hasn't happened yet, or the directory background task
   is failing.
 
+## Enrollment failed
+
+Returned by the public-server enrollment endpoints
+(`/servers/register/begin`, `/servers/register/complete`) for *every*
+pre-completion failure: unknown or archived server, invalid/expired/consumed
+enrollment token, invalid/expired/already-used challenge nonce, a key already
+bound to a different live server, or a bad proof-of-possession signature.
+
+The response is deliberately uniform (HTTP 403, no distinguishing detail) so
+the endpoint can't be used as an existence/lifecycle oracle for a probed
+`server_id`. The specific reason is logged server-side. If you're enrolling a
+server and hit this, re-mint the token from the admin UI (it may have expired
+or already been used) and confirm the box is presenting the same certificate
+across `begin` and `complete`.
+
+## Rate limited
+
+Returned (HTTP 429) when a caller exceeds the enrollment endpoints'
+in-process rate limit — currently per source IP and per target server over a
+one-minute window. Enrollment is a rare, human-paced operation, so the budgets
+are generous for legitimate use; hitting this means an unusual volume of
+`/servers/register/*` traffic (a token-guesser, a griefer burning challenges,
+or a misbehaving client retrying in a tight loop). Trips are logged under the
+`enrollment` target for alerting. Back off and retry after the window.
+
 ## Other
 
 An unclassified error.

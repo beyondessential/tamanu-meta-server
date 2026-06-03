@@ -110,6 +110,85 @@ test.describe("server edit page", () => {
 
 		await page.goto(`/servers/${server.id}/edit`);
 
-		await expect(page.getByLabel(/^Name$/i)).toHaveValue(server.name);
+		// The label carries a required-field asterisk ("Name *"), and the central
+		// edit form also has a "Name in Tamanu Mobile app" field — so match "Name"
+		// with an optional trailing asterisk, anchored to exclude the latter.
+		await expect(page.getByLabel(/^Name(\s*\*)?$/i)).toHaveValue(server.name);
+	});
+});
+
+test.describe("archived view", () => {
+	test.beforeEach(async ({ sql }) => {
+		await resetSeededTables(sql);
+	});
+
+	test("lists archived servers and groups and restores them", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "arch-group" });
+		const server = await seedServer(sql, { name: "arch-server", kind: "central" });
+		// Archive both directly (the UI paths are covered elsewhere).
+		await sql.query("UPDATE server_groups SET deleted_at = now() WHERE id = $1", [
+			group.id,
+		]);
+		await sql.query("UPDATE servers SET deleted_at = now() WHERE id = $1", [
+			server.id,
+		]);
+
+		await page.goto("/servers/archived");
+
+		// Both archived items are discoverable here (and nowhere else).
+		await expect(page.getByRole("link", { name: "arch-group" })).toBeVisible();
+		await expect(page.getByText(/arch-server/)).toBeVisible();
+
+		// Restore the group (its row renders first, so the first Restore is it).
+		await page.getByRole("button", { name: "Restore" }).first().click();
+		await expect(
+			page.getByRole("link", { name: "arch-group" }),
+		).not.toBeVisible();
+		// The archived server is still listed.
+		await expect(page.getByText(/arch-server/)).toBeVisible();
+	});
+});
+
+test.describe("server create → setup → archive flow", () => {
+	test.beforeEach(async ({ sql }) => {
+		await resetSeededTables(sql);
+	});
+
+	test("creates a server in a group, surfaces its enrollment ticket, then archives it", async ({
+		page,
+		sql,
+	}) => {
+		// The detail page's get_detail resolves the latest version, so it needs
+		// at least one published version present.
+		await seedVersion(sql, { major: 1, minor: 0, patch: 0 });
+		const group = await seedServerGroup(sql, { name: "flow-group" });
+
+		// Create — the in-group route pre-selects the group, so we only set the
+		// (required) name. Default kind is facility, so there's a single "Name"
+		// field (no "Name in Tamanu Mobile app").
+		await page.goto(`/groups/${group.id}/servers/new`);
+		await page.getByLabel(/^Name(\s*\*)?$/i).fill("flow-server");
+		await page.getByRole("button", { name: "Create server" }).click();
+
+		// Lands on the new server's detail page.
+		await expect(page).toHaveURL(/\/servers\/[0-9a-f-]{36}$/);
+		await expect(
+			page.getByRole("heading", { level: 1, name: /flow-server/ }),
+		).toBeVisible();
+
+		// Setup — an unregistered server auto-mints an enrollment ticket, showing
+		// the bestool register command for the operator to run.
+		await expect(page.getByText(/hasn't checked in yet/i)).toBeVisible();
+		await expect(page.getByText(/bestool canopy register/)).toBeVisible();
+
+		// Archive — confirm the dialog and return to the servers list.
+		await page.getByRole("button", { name: "Archive", exact: true }).click();
+		const dialog = page.getByRole("dialog");
+		await expect(dialog).toBeVisible();
+		await dialog.getByRole("button", { name: "Archive", exact: true }).click();
+		await expect(page).toHaveURL(/\/servers$/);
 	});
 });

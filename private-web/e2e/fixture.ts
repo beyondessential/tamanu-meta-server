@@ -187,6 +187,9 @@ export async function startStack(opts: StartOptions = {}): Promise<StackHandle> 
 				...process.env,
 				DATABASE_URL: databaseUrl,
 				BIND_ADDRESS: `127.0.0.1:${apiPort}`,
+				// Needed by mint_enrollment to build the ticket's api_url; the
+				// setup-instructions flow auto-mints on an unregistered server.
+				PUBLIC_URL: process.env.PUBLIC_URL ?? "https://api.e2e.invalid",
 				META_LOG: process.env.META_LOG ?? "private_server=info,warn",
 				// The binary defaults to RightmostXForwardedFor for production
 				// (behind the Tailscale K8s Operator's ingress). In e2e there's

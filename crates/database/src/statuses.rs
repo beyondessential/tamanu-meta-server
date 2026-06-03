@@ -32,7 +32,10 @@ pub const CANOPY_SOURCE: &str = "canopy";
 pub const REACHABILITY_REF: &str = "reachability";
 
 fn server_label(s: &Server) -> String {
-	s.name.clone().unwrap_or_else(|| s.host.0.to_string())
+	s.name
+		.clone()
+		.or_else(|| s.host.as_ref().map(|h| h.0.to_string()))
+		.unwrap_or_else(|| s.id.to_string())
 }
 
 fn format_secs(secs: i64) -> String {
@@ -123,8 +126,10 @@ impl Status {
 	}
 
 	pub async fn ping_server(client: &reqwest::Client, server: &Server) -> Option<Self> {
+		// A server with no URL can't be reached externally — nothing to ping.
+		let host = &server.host.as_ref()?.0;
 		let start = Instant::now();
-		let url = server.host.0.join("/api/public/ping").unwrap();
+		let url = host.join("/api/public/ping").unwrap();
 		debug!(%url, "pinging");
 		match client.get(url).send().await.map(|res| {
 			res.headers()
@@ -134,7 +139,7 @@ impl Status {
 		}) {
 			Ok(version) => {
 				let latency = start.elapsed().as_millis().try_into().unwrap_or(i32::MAX);
-				info!(server=%server.id, host=%server.host.0, %latency, "ping success");
+				info!(server=%server.id, host=%host, %latency, "ping success");
 				Some(Self {
 					id: Uuid::new_v4(),
 					server_id: server.id,
@@ -150,7 +155,7 @@ impl Status {
 				})
 			}
 			Err(err) => {
-				warn!(server=%server.id, host=%server.host.0, "ping failure: {err}");
+				warn!(server=%server.id, host=%host, "ping failure: {err}");
 				None
 			}
 		}

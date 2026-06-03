@@ -34,6 +34,7 @@ use database::{
 use crate::tailnet_directory::TailnetDirectory;
 
 pub mod mtls;
+pub mod pop;
 pub mod tailnet;
 
 /// Which path produced this [`AuthDevice`]. Carried alongside the device

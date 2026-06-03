@@ -2207,6 +2207,7 @@
         "tags": [
           "server_groups"
         ],
+        "summary": "Archive (soft-delete) a group. Kept at `/delete` for the existing client;\nthe group is hidden from live listings but restorable. Refuses if the group\nstill has live members (409).",
         "operationId": "server_groups_delete",
         "requestBody": {
           "content": {
@@ -2317,6 +2318,80 @@
         "security": [
           {
             "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/server_groups/list_archived": {
+      "post": {
+        "tags": [
+          "server_groups"
+        ],
+        "operationId": "server_groups_list_archived",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ServerGroup"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/server_groups/restore": {
+      "post": {
+        "tags": [
+          "server_groups"
+        ],
+        "operationId": "server_groups_restore",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
           }
         ]
       }
@@ -2481,6 +2556,148 @@
         ]
       }
     },
+    "/api/servers/create": {
+      "post": {
+        "tags": [
+          "servers"
+        ],
+        "summary": "Operator-driven server creation. Creates the `servers` row (optionally\npre-bound to a Tailscale device), ungrouped or in the supplied group.",
+        "operationId": "create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateServerArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "New server id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/servers/delete": {
+      "post": {
+        "tags": [
+          "servers"
+        ],
+        "summary": "Archive (soft-delete) a server. Releases and demotes its device.",
+        "operationId": "delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerIdOnlyArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/servers/enrollment_status": {
+      "post": {
+        "tags": [
+          "servers"
+        ],
+        "summary": "Enrollment state for a server: whether it has registered, and whether an\nenrollment token is currently outstanding (expiry only).",
+        "operationId": "enrollment_status",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerIdOnlyArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrollmentStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/servers/get_detail": {
       "post": {
         "tags": [
@@ -2601,40 +2818,31 @@
         }
       }
     },
-    "/api/servers/import_ticket": {
+    "/api/servers/list_archived": {
       "post": {
         "tags": [
           "servers"
         ],
-        "operationId": "import_ticket",
+        "summary": "Archived (soft-deleted) servers, for the Archived view. Each carries\n`archived: true`; the UI offers Restore.",
+        "operationId": "list_archived",
         "requestBody": {
           "content": {
             "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ImportTicketArgs"
-              }
+              "schema": {}
             }
           },
           "required": true
         },
         "responses": {
           "200": {
-            "description": "New server id.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "string",
-                  "format": "uuid"
-                }
-              }
-            }
-          },
-          "400": {
             "description": "",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ServerInfo"
+                  }
                 }
               }
             }
@@ -2699,6 +2907,130 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Page_ServerInfo"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/servers/mint_enrollment": {
+      "post": {
+        "tags": [
+          "servers"
+        ],
+        "summary": "Mint (or reissue) an enrollment token for a server and return the\npassphrase-encrypted ticket the operator runs through bestool, plus the\n4-word passphrase that decrypts it. The plaintext token lives only inside\nthe encrypted ticket; reissuing invalidates any prior token.",
+        "operationId": "mint_enrollment",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerIdOnlyArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrollmentTicket"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/servers/restore": {
+      "post": {
+        "tags": [
+          "servers"
+        ],
+        "summary": "Un-archive a server. The box must re-enroll to rebind a device.",
+        "operationId": "restore",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerIdOnlyArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/servers/revoke_enrollment": {
+      "post": {
+        "tags": [
+          "servers"
+        ],
+        "summary": "Revoke any outstanding enrollment ticket for a server (e.g. issued by\nmistake). The next `enrollment_status` will report no outstanding token.",
+        "operationId": "revoke_enrollment",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerIdOnlyArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
                 }
               }
             }
@@ -3985,6 +4317,104 @@
           }
         }
       },
+      "CreateServerArgs": {
+        "type": "object",
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "alert_when_down_for": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "cloud": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "geolocation": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/GeoPoint"
+              }
+            ]
+          },
+          "group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "host": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "is_monitored": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ServerKind"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "public_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank"
+              }
+            ]
+          },
+          "tags": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TagMap"
+              }
+            ]
+          },
+          "tailscale_identifier": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional Tailscale identity to pre-bind a device to (IP / node id / DNS\nname). When given, a device row is created for that identity now and the\nenrolling box's mTLS key is added to it at register time."
+          }
+        }
+      },
       "DeleteArgs": {
         "type": "object",
         "required": [
@@ -4176,6 +4606,57 @@
           "releaser",
           "server"
         ]
+      },
+      "EnrollmentStatus": {
+        "type": "object",
+        "properties": {
+          "registered_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When enrollment completed; `None` while awaiting first check-in."
+          },
+          "token_expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Expiry of the currently-active enrollment token, if one is outstanding.\nNever reveals the token itself."
+          },
+          "token_issued_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the currently-active enrollment token was issued, if one is\noutstanding. Lets the UI show \"a ticket was issued on <date>\"."
+          }
+        }
+      },
+      "EnrollmentTicket": {
+        "type": "object",
+        "required": [
+          "ticket",
+          "passphrase",
+          "expires_at"
+        ],
+        "properties": {
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "passphrase": {
+            "type": "string",
+            "description": "Freshly-generated 4-word passphrase that decrypts `ticket`. Share this\nout-of-band (a separate channel from the ticket itself)."
+          },
+          "ticket": {
+            "type": "string",
+            "description": "Base64 (standard) of the age-encrypted enrollment JSON to feed to\n`bestool canopy register`. Encrypted under `passphrase` (age/scrypt), so\nit is safe to copy around on its own."
+          }
+        }
       },
       "EventData": {
         "type": "object",
@@ -4564,31 +5045,6 @@
           "id": {
             "type": "string",
             "format": "uuid"
-          }
-        }
-      },
-      "ImportTicketArgs": {
-        "type": "object",
-        "required": [
-          "ticket_b64",
-          "kind"
-        ],
-        "properties": {
-          "kind": {
-            "$ref": "#/components/schemas/ServerKind"
-          },
-          "rank": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/ServerRank"
-              }
-            ]
-          },
-          "ticket_b64": {
-            "type": "string"
           }
         }
       },
@@ -5488,17 +5944,22 @@
               "required": [
                 "id",
                 "kind",
-                "host",
+                "display_host",
                 "is_monitored",
                 "alert_when_down_for",
                 "notes",
-                "tags"
+                "tags",
+                "archived"
               ],
               "properties": {
                 "alert_when_down_for": {
                   "type": "integer",
                   "format": "int64",
                   "description": "Threshold in seconds for the reachability sweep to consider this\nserver down. Always positive; only consulted when `is_monitored`\nis `true`. The default at creation is 600 (10 minutes)."
+                },
+                "archived": {
+                  "type": "boolean",
+                  "description": "Whether the server is archived (soft-deleted)."
                 },
                 "cloud": {
                   "type": [
@@ -5512,6 +5973,10 @@
                     "null"
                   ],
                   "format": "uuid"
+                },
+                "display_host": {
+                  "type": "string",
+                  "description": "Effective URL for display: the stored `host`, or `https://{tailnet\nhostname}` when the server has no URL but is bound to a Tailscale device,\nelse an empty string. Filled by `fill_display_hosts`."
                 },
                 "geolocation": {
                   "oneOf": [
@@ -5549,7 +6014,11 @@
                   ]
                 },
                 "host": {
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The server's stored URL, if any. May be absent for device-only servers."
                 },
                 "id": {
                   "type": "string",
@@ -5587,6 +6056,14 @@
                       "$ref": "#/components/schemas/ServerRank"
                     }
                   ]
+                },
+                "registered_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time",
+                  "description": "Set once a device has completed enrollment for this server. While\n`None`, the UI shows setup instructions."
                 },
                 "tags": {
                   "$ref": "#/components/schemas/TagMap"
@@ -6086,6 +6563,14 @@
             "type": "string",
             "format": "date-time"
           },
+          "deleted_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When set, the group is archived (soft-deleted): hidden from live listings\nbut kept (with its archived members) and restorable."
+          },
           "effective_version": {
             "oneOf": [
               {
@@ -6218,22 +6703,39 @@
           }
         }
       },
+      "ServerIdOnlyArgs": {
+        "type": "object",
+        "required": [
+          "server_id"
+        ],
+        "properties": {
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
       "ServerInfo": {
         "type": "object",
         "required": [
           "id",
           "kind",
-          "host",
+          "display_host",
           "is_monitored",
           "alert_when_down_for",
           "notes",
-          "tags"
+          "tags",
+          "archived"
         ],
         "properties": {
           "alert_when_down_for": {
             "type": "integer",
             "format": "int64",
             "description": "Threshold in seconds for the reachability sweep to consider this\nserver down. Always positive; only consulted when `is_monitored`\nis `true`. The default at creation is 600 (10 minutes)."
+          },
+          "archived": {
+            "type": "boolean",
+            "description": "Whether the server is archived (soft-deleted)."
           },
           "cloud": {
             "type": [
@@ -6247,6 +6749,10 @@
               "null"
             ],
             "format": "uuid"
+          },
+          "display_host": {
+            "type": "string",
+            "description": "Effective URL for display: the stored `host`, or `https://{tailnet\nhostname}` when the server has no URL but is bound to a Tailscale device,\nelse an empty string. Filled by `fill_display_hosts`."
           },
           "geolocation": {
             "oneOf": [
@@ -6284,7 +6790,11 @@
             ]
           },
           "host": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The server's stored URL, if any. May be absent for device-only servers."
           },
           "id": {
             "type": "string",
@@ -6322,6 +6832,14 @@
                 "$ref": "#/components/schemas/ServerRank"
               }
             ]
+          },
+          "registered_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Set once a device has completed enrollment for this server. While\n`None`, the UI shows setup instructions."
           },
           "tags": {
             "$ref": "#/components/schemas/TagMap"

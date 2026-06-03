@@ -1,0 +1,1224 @@
+//! Local-development database seeder.
+//!
+//! Populates a freshly-migrated database with a broad, obviously-fake spread of
+//! data so the admin UI (and the new server-enrollment flow in particular) has
+//! something to render against. LOCAL DEV ONLY — it truncates the app tables it
+//! manages before reinserting, so it's safe to re-run, but it must never point
+//! at a real deployment.
+//!
+//! Run via `just seed`. It reuses the model functions in this crate wherever
+//! they exist (so the seed tracks the schema and the real code paths), and
+//! falls back to direct diesel inserts for the few rows that have no public
+//! constructor (statuses with backdated timestamps, device keys/connections,
+//! published versions, etc).
+
+use commons_errors::{AppError, Result};
+use commons_types::{
+	device::DeviceRole,
+	geo::GeoPoint,
+	issue::{ResolvedReason, Severity},
+	server::{TagMap, kind::ServerKind, rank::ServerRank},
+	version::{VersionStatus, VersionStr},
+};
+use database::{
+	Device, DeviceKey,
+	admins::Admin,
+	devices::NewDeviceConnection,
+	healthcheck_severities::HealthcheckSeverity,
+	issues::{Incident, Issue, NewEvent},
+	notes::{IncidentNote, IssueNote},
+	pg_duration::PgDuration,
+	server_enrollment_tokens::ServerEnrollmentToken,
+	server_groups::{NewServerGroup, ServerGroup},
+	servers::Server,
+	silenced_refs::{ServerGroupSilencedRef, ServerSilencedRef},
+	statuses::Status,
+	url_field::UrlField,
+	version_known_issues::VersionKnownIssue,
+	versions::NewVersion,
+};
+use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
+use jiff::{SignedDuration, Timestamp};
+use std::collections::BTreeMap;
+use uuid::Uuid;
+
+const TEN_MINUTES: PgDuration = PgDuration(SignedDuration::from_secs(600));
+
+/// Tables this seeder owns. Truncated (CASCADE) at the start of every run so a
+/// re-run produces a clean, deterministic dataset. The migrations table and the
+/// partition machinery are deliberately absent — we never touch schema.
+///
+/// `servers` is excluded from the blanket TRUNCATE because the nil "meta"
+/// server row (id all-zeroes) is inserted by a migration and must survive; we
+/// delete only the non-nil rows below.
+const TRUNCATE_TABLES: &[&str] = &[
+	"server_enrollment_challenges",
+	"server_enrollment_tokens",
+	"slack_outbox",
+	"incident_notes",
+	"issue_notes",
+	"incident_issues",
+	"incidents",
+	"events",
+	"issues",
+	"server_silenced_refs",
+	"server_group_silenced_refs",
+	"device_server_associations",
+	"device_connections",
+	"device_keys",
+	"devices",
+	"server_groups",
+	"version_known_issues",
+	"versions",
+	"healthcheck_severities",
+	"admins",
+];
+
+fn tags(pairs: &[(&str, &str)]) -> TagMap {
+	let mut m = BTreeMap::new();
+	for (k, v) in pairs {
+		m.insert((*k).to_string(), (*v).to_string());
+	}
+	TagMap(m)
+}
+
+fn url(s: &str) -> UrlField {
+	UrlField(s.parse().expect("seed URL parses"))
+}
+
+/// Refuse to run against anything that looks like a real deployment.
+fn guard_database_url(database_url: &str) -> Result<()> {
+	let lower = database_url.to_ascii_lowercase();
+	let looks_prod = [
+		"prod",
+		"production",
+		".rds.",
+		"amazonaws",
+		"azure",
+		"googleapis",
+		"supabase",
+		"neon.tech",
+		"render.com",
+		"canopy-dev",
+		"bes.au",
+	]
+	.iter()
+	.find(|needle| lower.contains(**needle));
+
+	if let Some(needle) = looks_prod {
+		return Err(AppError::custom(format!(
+			"refusing to seed: DATABASE_URL looks like a real deployment (matched {needle:?}). \
+			 The seeder is LOCAL DEV ONLY and truncates application tables."
+		)));
+	}
+	Ok(())
+}
+
+#[tokio::main]
+async fn main() -> miette::Result<()> {
+	let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+
+	eprintln!("┌─────────────────────────────────────────────────────────────┐");
+	eprintln!("│  canopy seed — LOCAL DEVELOPMENT ONLY                        │");
+	eprintln!("│  Truncates and repopulates application tables.              │");
+	eprintln!("│  Never run this against a real deployment.                  │");
+	eprintln!("└─────────────────────────────────────────────────────────────┘");
+
+	// Release builds are for deployments; the seeder is a dev-only tool that
+	// truncates tables, so refuse to run unless built with debug assertions.
+	if !cfg!(debug_assertions) {
+		eprintln!(
+			"error: refusing to seed: this binary was compiled in release mode. \
+			 The seeder is LOCAL DEV ONLY; run it via `just seed` (a debug build)."
+		);
+		std::process::exit(1);
+	}
+
+	if let Err(e) = guard_database_url(&database_url) {
+		eprintln!("error: {e}");
+		std::process::exit(1);
+	}
+
+	let mut conn = AsyncPgConnection::establish(&database_url)
+		.await
+		.map_err(|e| miette::miette!("failed to connect to {database_url}: {e}"))?;
+
+	seed(&mut conn).await.map_err(|e| miette::miette!("{e}"))?;
+
+	eprintln!("seed: done.");
+	Ok(())
+}
+
+async fn seed(conn: &mut AsyncPgConnection) -> Result<()> {
+	clear(conn).await?;
+
+	let admins = seed_admins(conn).await?;
+	let versions = seed_versions(conn).await?;
+	seed_known_issues(conn).await?;
+	seed_healthchecks(conn, &admins).await?;
+
+	let devices = seed_devices(conn).await?;
+	let groups = seed_groups(conn).await?;
+	let servers = seed_servers(conn, &groups, &devices).await?;
+	seed_enrollment_tokens(conn, &servers).await?;
+	seed_statuses(conn, &servers, &devices, &versions).await?;
+	seed_issues_and_incidents(conn, &servers, &admins).await?;
+	seed_silences(conn, &servers, &groups, &admins).await?;
+
+	report(conn).await
+}
+
+/// TRUNCATE every app table we manage, then delete the non-nil servers. We
+/// can't TRUNCATE `servers` because of the nil meta row, and CASCADE from the
+/// truncated children already cleared everything that referenced these rows.
+async fn clear(conn: &mut AsyncPgConnection) -> Result<()> {
+	conn.transaction::<_, AppError, _>(async |conn| {
+		// Release device references and drop every server except the nil meta
+		// server (inserted by a migration) BEFORE truncating `devices` — a
+		// TRUNCATE ... CASCADE would otherwise demand truncating `servers`
+		// wholesale (taking the nil row with it) to satisfy the FK.
+		diesel::sql_query("UPDATE servers SET device_id = NULL")
+			.execute(conn)
+			.await?;
+		diesel::sql_query("DELETE FROM servers WHERE id <> '00000000-0000-0000-0000-000000000000'")
+			.execute(conn)
+			.await?;
+
+		let stmt = format!("TRUNCATE TABLE {} CASCADE", TRUNCATE_TABLES.join(", "));
+		diesel::sql_query(stmt).execute(conn).await?;
+		Ok(())
+	})
+	.await
+}
+
+async fn seed_admins(conn: &mut AsyncPgConnection) -> Result<Vec<String>> {
+	let emails = [
+		"alice.operator@example.com",
+		"bob.oncall@example.com",
+		"carol.releases@example.com",
+	];
+	for email in emails {
+		Admin::add(conn, email).await?;
+	}
+	Ok(emails.iter().map(|s| s.to_string()).collect())
+}
+
+/// A spread of published versions plus a draft and a yanked one, so the
+/// versions UI shows every status and the version-distance maths has something
+/// to chew on.
+async fn seed_versions(conn: &mut AsyncPgConnection) -> Result<Vec<VersionStr>> {
+	use database::schema::versions;
+
+	let rows = [
+		(
+			2,
+			8,
+			0,
+			VersionStatus::Published,
+			"2.8.0 — baseline release.",
+		),
+		(
+			2,
+			9,
+			0,
+			VersionStatus::Published,
+			"2.9.0 — sync throughput improvements.",
+		),
+		(
+			2,
+			9,
+			3,
+			VersionStatus::Published,
+			"2.9.3 — patch: fix migration ordering bug.",
+		),
+		(
+			2,
+			10,
+			0,
+			VersionStatus::Published,
+			"2.10.0 — new facility dashboard.",
+		),
+		(
+			2,
+			10,
+			5,
+			VersionStatus::Published,
+			"2.10.5 — patch: harden auth token refresh.",
+		),
+		(
+			2,
+			11,
+			0,
+			VersionStatus::Yanked,
+			"2.11.0 — YANKED: regressed report exports.",
+		),
+		(
+			2,
+			12,
+			0,
+			VersionStatus::Draft,
+			"2.12.0 — draft: experimental offline mode.",
+		),
+	];
+
+	let mut out = Vec::new();
+	for (major, minor, patch, status, changelog) in rows {
+		diesel::insert_into(versions::table)
+			.values(NewVersion {
+				major,
+				minor,
+				patch,
+				status,
+				changelog: changelog.to_string(),
+				device_id: None,
+			})
+			.execute(conn)
+			.await?;
+		out.push(VersionStr(node_semver::Version::new(
+			major as u64,
+			minor as u64,
+			patch as u64,
+		)));
+	}
+	Ok(out)
+}
+
+/// One open known issue against 2.11.x and one already-resolved one against
+/// 2.9.x, so the version-detail UI shows both states.
+async fn seed_known_issues(conn: &mut AsyncPgConnection) -> Result<()> {
+	VersionKnownIssue::add(
+		conn,
+		(2, 11, 0),
+		"carol.releases@example.com",
+		"Report exports time out on large datasets; avoid 2.11.x in production.",
+	)
+	.await?;
+
+	let resolved = VersionKnownIssue::add(
+		conn,
+		(2, 9, 0),
+		"carol.releases@example.com",
+		"Sync stalls when a facility reconnects after a long outage.",
+	)
+	.await?;
+	VersionKnownIssue::resolve(
+		conn,
+		resolved.id,
+		(2, 9, 3),
+		"carol.releases@example.com",
+		"Fixed in 2.9.3 by reordering the reconnect handshake.",
+	)
+	.await?;
+	Ok(())
+}
+
+/// Seed the healthcheck-severity catalog: a few reviewed entries, an
+/// unreviewed default, and one carrying a conditional rules ladder.
+async fn seed_healthchecks(conn: &mut AsyncPgConnection, admins: &[String]) -> Result<()> {
+	// upsert_default creates rows at the default severity (warning, unreviewed).
+	for check in [
+		"database_connectivity",
+		"disk_space",
+		"sync_lag",
+		"certificate_expiry",
+		"backup_freshness",
+	] {
+		HealthcheckSeverity::upsert_default(conn, check).await?;
+	}
+
+	let reviewer = &admins[0];
+	HealthcheckSeverity::update(
+		conn,
+		"database_connectivity",
+		Severity::Critical,
+		Some("DB down means the server is effectively offline."),
+		reviewer,
+	)
+	.await?;
+	HealthcheckSeverity::update(
+		conn,
+		"disk_space",
+		Severity::Error,
+		Some("Page when disk is critically low."),
+		reviewer,
+	)
+	.await?;
+	HealthcheckSeverity::update(conn, "backup_freshness", Severity::Info, None, reviewer).await?;
+
+	// A conditional rules ladder: escalate sync_lag based on how far behind it is.
+	use database::healthcheck_severities::{Condition, IfLadder, Var};
+	let ladder = IfLadder {
+		branches: vec![
+			(
+				Condition::Gt(
+					"check.lag_seconds".parse::<Var>().expect("var parses"),
+					serde_json::json!(3600),
+				),
+				Severity::Critical,
+			),
+			(
+				Condition::Gt(
+					"check.lag_seconds".parse::<Var>().expect("var parses"),
+					serde_json::json!(600),
+				),
+				Severity::Error,
+			),
+		],
+	};
+	HealthcheckSeverity::update_rules(conn, "sync_lag", Some(&ladder), reviewer).await?;
+
+	Ok(())
+}
+
+/// Identities seeded into `devices`, returned for wiring servers/statuses.
+struct SeededDevices {
+	/// Trusted server devices, mTLS-keyed, bound to registered servers.
+	mtls_server: Vec<Uuid>,
+	/// A trusted server device that also carries a Tailscale identity.
+	tailscale_server: Uuid,
+	/// An admin device authenticating over Tailscale only (no mTLS key).
+	tailscale_admin: Uuid,
+	/// A trusted releaser device (mTLS).
+	releaser: Uuid,
+	/// Untrusted devices awaiting an operator decision (drives the
+	/// "untrusted devices" review queue).
+	untrusted: Vec<Uuid>,
+}
+
+async fn seed_devices(conn: &mut AsyncPgConnection) -> Result<SeededDevices> {
+	// Deterministic fake key material: not real cryptographic keys, just stable
+	// bytes so the device_keys rows differ and search-by-key has something to
+	// match. The seeder never authenticates, so validity doesn't matter.
+	fn fake_key(tag: u8) -> Vec<u8> {
+		let mut k = vec![0x30, 0x59, 0x30, 0x13]; // SPKI-ish prefix so it reads as DER-y
+		k.extend(std::iter::repeat(tag).take(60));
+		k
+	}
+
+	// Three mTLS-keyed server devices, promoted to the Server role.
+	let mut mtls_server = Vec::new();
+	for i in 0..3u8 {
+		let dev = Device::create(conn, fake_key(0x10 + i)).await?;
+		Device::trust(conn, dev.id, DeviceRole::Server).await?;
+		mtls_server.push(dev.id);
+	}
+
+	// A server device with both an mTLS key AND a Tailscale identity.
+	let tailscale_server = {
+		let dev = Device::create(conn, fake_key(0x20)).await?;
+		Device::trust(conn, dev.id, DeviceRole::Server).await?;
+		Device::attach_tailscale(
+			conn,
+			dev.id,
+			database::devices::TailscaleIdentity {
+				node_id: "nodekey:seed-central-01".to_string(),
+				node_name: Some("central-01.example-tailnet.ts.net".to_string()),
+				tailnet: Some("example-tailnet.ts.net".to_string()),
+			},
+		)
+		.await?;
+		dev.id
+	};
+
+	// An admin device authenticating over Tailscale only — no mTLS key.
+	let tailscale_admin = {
+		let dev = Device::create_with_tailscale(
+			conn,
+			database::devices::TailscaleIdentity {
+				node_id: "nodekey:seed-operator-laptop".to_string(),
+				node_name: Some("operator-laptop.example-tailnet.ts.net".to_string()),
+				tailnet: Some("example-tailnet.ts.net".to_string()),
+			},
+		)
+		.await?;
+		Device::trust(conn, dev.id, DeviceRole::Admin).await?;
+		dev.id
+	};
+
+	// A releaser device (mTLS).
+	let releaser = {
+		let dev = Device::create(conn, fake_key(0x30)).await?;
+		Device::trust(conn, dev.id, DeviceRole::Releaser).await?;
+		dev.id
+	};
+
+	// Add a second, named key to one of the mTLS server devices so the device
+	// detail page shows multiple keys. (add_key refuses a second active key, so
+	// insert directly.)
+	DeviceKey::create(
+		conn,
+		mtls_server[0],
+		fake_key(0xA0),
+		Some("rotated-2026 backup key".to_string()),
+	)
+	.await?;
+
+	// Two untrusted devices waiting in the review queue.
+	let mut untrusted = Vec::new();
+	for i in 0..2u8 {
+		let dev = Device::create(conn, fake_key(0x40 + i)).await?;
+		untrusted.push(dev.id);
+	}
+	// One untrusted device discovered over the tailnet (no key).
+	{
+		let dev = Device::create_with_tailscale(
+			conn,
+			database::devices::TailscaleIdentity {
+				node_id: "nodekey:seed-unknown-node".to_string(),
+				node_name: Some("unknown-node.example-tailnet.ts.net".to_string()),
+				tailnet: Some("example-tailnet.ts.net".to_string()),
+			},
+		)
+		.await?;
+		untrusted.push(dev.id);
+	}
+
+	// A few connection rows so the device detail page shows connection history.
+	seed_device_connections(conn, &mtls_server, tailscale_server, &untrusted).await?;
+
+	Ok(SeededDevices {
+		mtls_server,
+		tailscale_server,
+		tailscale_admin,
+		releaser,
+		untrusted,
+	})
+}
+
+async fn seed_device_connections(
+	conn: &mut AsyncPgConnection,
+	mtls_server: &[Uuid],
+	tailscale_server: Uuid,
+	untrusted: &[Uuid],
+) -> Result<()> {
+	let entries: &[(Uuid, &str, &str)] = &[
+		(
+			mtls_server[0],
+			"203.0.113.10/32",
+			"bestool/2.10.5 (Node.js/20.11.0; linux)",
+		),
+		(
+			mtls_server[1],
+			"198.51.100.22/32",
+			"bestool/2.9.3 (Node.js/18.19.0; windows)",
+		),
+		(
+			tailscale_server,
+			"100.64.0.12/32",
+			"bestool/2.10.0 (Node.js/20.11.0; linux)",
+		),
+		(
+			untrusted[0],
+			"192.0.2.55/32",
+			"bestool/2.8.0 (Node.js/18.19.0; linux)",
+		),
+	];
+	for (device_id, ip, ua) in entries {
+		NewDeviceConnection {
+			device_id: *device_id,
+			ip: ip.parse().expect("seed IP parses"),
+			user_agent: Some((*ua).to_string()),
+		}
+		.create(conn)
+		.await?;
+	}
+	Ok(())
+}
+
+/// Returns (named group ids). The last one is intentionally empty so the
+/// "add a server to this group" flow is testable.
+struct SeededGroups {
+	pacific: Uuid,
+	highlands: Uuid,
+	demo: Uuid,
+	empty: Uuid,
+}
+
+async fn seed_groups(conn: &mut AsyncPgConnection) -> Result<SeededGroups> {
+	let pacific = ServerGroup::create(
+		conn,
+		NewServerGroup {
+			name: "Pacific Region".to_string(),
+			notes: "Production deployments across the Pacific facilities.".to_string(),
+			tags: tags(&[("region", "pacific"), ("tier", "production")]),
+			slack_open_delay: Some(PgDuration(SignedDuration::from_secs(300))),
+		},
+	)
+	.await?;
+
+	let highlands = ServerGroup::create(
+		conn,
+		NewServerGroup {
+			name: "Highlands Cluster".to_string(),
+			notes: "Mixed production + clone for the highlands rollout.".to_string(),
+			tags: tags(&[("region", "highlands")]),
+			slack_open_delay: None,
+		},
+	)
+	.await?;
+
+	let demo = ServerGroup::create(
+		conn,
+		NewServerGroup {
+			name: "Demo & Training".to_string(),
+			notes: "Demo and training environments — noisy, low priority.".to_string(),
+			tags: tags(&[("env", "demo")]),
+			slack_open_delay: Some(PgDuration(SignedDuration::from_secs(1800))),
+		},
+	)
+	.await?;
+
+	let empty = ServerGroup::create(
+		conn,
+		NewServerGroup {
+			name: "Unassigned (empty)".to_string(),
+			notes: "Deliberately empty so adding the first server is testable.".to_string(),
+			tags: TagMap::default(),
+			slack_open_delay: None,
+		},
+	)
+	.await?;
+
+	Ok(SeededGroups {
+		pacific: pacific.id,
+		highlands: highlands.id,
+		demo: demo.id,
+		empty: empty.id,
+	})
+}
+
+/// Handles onto the seeded servers, grouped by the role they play in later
+/// seeding (statuses, issues).
+struct SeededServers {
+	/// Registered, monitored, grouped, healthy production central.
+	healthy_central: Uuid,
+	/// Registered, monitored, grouped — will get an open incident.
+	unhealthy_facility: Uuid,
+	/// Registered, monitored, grouped — "down" (no recent status).
+	down_facility: Uuid,
+	/// Registered, monitored, grouped — warning-level health.
+	warning_facility: Uuid,
+	/// Registered but unmonitored demo server.
+	demo_server: Uuid,
+	/// Ungrouped registered server.
+	ungrouped: Uuid,
+	/// Pending enrollment (registered_at NULL, device_id NULL) — gets a token.
+	pending_with_token: Uuid,
+	/// Pending enrollment, no token yet.
+	pending_no_token: Uuid,
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn seed_servers(
+	conn: &mut AsyncPgConnection,
+	groups: &SeededGroups,
+	devices: &SeededDevices,
+) -> Result<SeededServers> {
+	// Helper to build a fully-specified Server row and insert it via the model.
+	async fn insert(conn: &mut AsyncPgConnection, server: Server) -> Result<Uuid> {
+		let created = Server::create(conn, server).await?;
+		Ok(created.id)
+	}
+
+	fn base(host: &str, kind: ServerKind) -> Server {
+		Server {
+			id: Uuid::new_v4(),
+			name: None,
+			host: Some(url(host)),
+			kind,
+			rank: None,
+			device_id: None,
+			group_id: None,
+			public_name: None,
+			cloud: None,
+			geolocation: None,
+			is_monitored: true,
+			alert_when_down_for: TEN_MINUTES,
+			notes: String::new(),
+			tags: TagMap::default(),
+			deleted_at: None,
+			registered_at: None,
+		}
+	}
+
+	let now = Timestamp::now();
+
+	// Registered, monitored, grouped, healthy production central.
+	let healthy_central = insert(
+		conn,
+		Server {
+			name: Some("Pacific Central".to_string()),
+			rank: Some(ServerRank::Production),
+			device_id: Some(devices.tailscale_server),
+			group_id: Some(groups.pacific),
+			public_name: Some("Pacific Central".to_string()),
+			cloud: Some(true),
+			geolocation: Some(GeoPoint {
+				lat: -18.1416,
+				lon: 178.4419,
+			}),
+			notes: "Primary central server for the Pacific region.".to_string(),
+			tags: tags(&[("owner", "platform-team"), ("hosting", "ec2")]),
+			registered_at: Some(now),
+			..base("https://pacific-central.example.com/", ServerKind::Central)
+		},
+	)
+	.await?;
+
+	// Registered, monitored, grouped facility — will carry an open incident.
+	let unhealthy_facility = insert(
+		conn,
+		Server {
+			name: Some("Suva Facility".to_string()),
+			rank: Some(ServerRank::Production),
+			device_id: Some(devices.mtls_server[0]),
+			group_id: Some(groups.pacific),
+			cloud: Some(false),
+			notes: "On-prem facility server at Suva hospital.".to_string(),
+			tags: tags(&[("site", "suva")]),
+			registered_at: Some(now),
+			..base("https://suva-facility.example.com/", ServerKind::Facility)
+		},
+	)
+	.await?;
+
+	// Registered, monitored, grouped facility that is "down" (no recent status).
+	let down_facility = insert(
+		conn,
+		Server {
+			name: Some("Nadi Facility".to_string()),
+			rank: Some(ServerRank::Production),
+			device_id: Some(devices.mtls_server[1]),
+			group_id: Some(groups.pacific),
+			notes: "Has not reported in a while — exercises the down state.".to_string(),
+			tags: tags(&[("site", "nadi")]),
+			registered_at: Some(now),
+			..base("https://nadi-facility.example.com/", ServerKind::Facility)
+		},
+	)
+	.await?;
+
+	// Registered, monitored, grouped facility with warning-level health.
+	let warning_facility = insert(
+		conn,
+		Server {
+			name: Some("Goroka Facility".to_string()),
+			rank: Some(ServerRank::Clone),
+			device_id: Some(devices.mtls_server[2]),
+			group_id: Some(groups.highlands),
+			notes: "Clone environment in the highlands.".to_string(),
+			tags: tags(&[("site", "goroka")]),
+			registered_at: Some(now),
+			..base("https://goroka-facility.example.com/", ServerKind::Facility)
+		},
+	)
+	.await?;
+
+	// Registered but unmonitored demo server.
+	let demo_server = insert(
+		conn,
+		Server {
+			name: Some("Demo Sandbox".to_string()),
+			rank: Some(ServerRank::Demo),
+			group_id: Some(groups.demo),
+			is_monitored: false,
+			notes: "Demo box — monitoring intentionally off.".to_string(),
+			tags: tags(&[("env", "demo")]),
+			registered_at: Some(now),
+			..base("https://demo-sandbox.example.com/", ServerKind::Central)
+		},
+	)
+	.await?;
+
+	// Ungrouped registered server (test rank).
+	let ungrouped = insert(
+		conn,
+		Server {
+			name: Some("Lab Test Server".to_string()),
+			rank: Some(ServerRank::Test),
+			is_monitored: true,
+			notes: "Ungrouped — appears under the Ungrouped tab.".to_string(),
+			..base("https://lab-test.example.com/", ServerKind::Central)
+		},
+	)
+	.await?;
+
+	// Pending enrollment WITH an active token (registered_at + device_id NULL).
+	let pending_with_token = insert(
+		conn,
+		Server {
+			name: Some("New Lautoka Facility".to_string()),
+			rank: Some(ServerRank::Production),
+			group_id: Some(groups.pacific),
+			notes: "Awaiting first check-in; an enrollment token is outstanding.".to_string(),
+			tags: tags(&[("site", "lautoka")]),
+			..base(
+				"https://lautoka-facility.example.com/",
+				ServerKind::Facility,
+			)
+		},
+	)
+	.await?;
+
+	// Pending enrollment with NO token yet (operator hasn't minted one).
+	let pending_no_token = insert(
+		conn,
+		Server {
+			name: Some("New Mendi Facility".to_string()),
+			rank: Some(ServerRank::Production),
+			group_id: Some(groups.highlands),
+			notes: "Created but no enrollment token minted yet.".to_string(),
+			..base("https://mendi-facility.example.com/", ServerKind::Facility)
+		},
+	)
+	.await?;
+
+	// An ungrouped, unranked pending server (drives the bare "set up" path).
+	insert(
+		conn,
+		Server {
+			notes: "Bare pending server — no name, rank, or group yet.".to_string(),
+			..base("https://unconfigured.example.com/", ServerKind::Central)
+		},
+	)
+	.await?;
+
+	// Archived (soft-deleted) server. Insert it live, then soft_delete so the
+	// real archival path runs (releases device, deactivates keys).
+	let archived = insert(
+		conn,
+		Server {
+			name: Some("Decommissioned Old Central".to_string()),
+			rank: Some(ServerRank::Production),
+			device_id: Some(devices.releaser), // any device; soft_delete releases it
+			group_id: Some(groups.demo),
+			notes: "Archived: kept for history, hidden from live listings.".to_string(),
+			registered_at: Some(now),
+			..base("https://old-central.example.com/", ServerKind::Central)
+		},
+	)
+	.await?;
+	Server::soft_delete(conn, archived).await?;
+
+	// Re-bind the releaser device (soft_delete released it) so the releaser
+	// keeps its role for the device listing. soft_delete untrusts the device;
+	// promote it back to releaser.
+	Device::trust(conn, devices.releaser, DeviceRole::Releaser).await?;
+
+	let _ = (devices.tailscale_admin, devices.untrusted.len());
+
+	Ok(SeededServers {
+		healthy_central,
+		unhealthy_facility,
+		down_facility,
+		warning_facility,
+		demo_server,
+		ungrouped,
+		pending_with_token,
+		pending_no_token,
+	})
+}
+
+/// Mint an active enrollment token for the pending server that should show one
+/// outstanding. The plaintext is discarded (only the hash is stored) — the UI
+/// mints a fresh, usable blob on demand.
+async fn seed_enrollment_tokens(
+	conn: &mut AsyncPgConnection,
+	servers: &SeededServers,
+) -> Result<()> {
+	let (_token, _plaintext) = ServerEnrollmentToken::mint(
+		conn,
+		servers.pending_with_token,
+		SignedDuration::from_hours(48),
+	)
+	.await?;
+	let _ = servers.pending_no_token;
+	Ok(())
+}
+
+/// Insert status rows. Recent (NOW-relative) so they land in the live weekly
+/// partition and drive status dots / version distance / health states. The
+/// "down" facility gets NO recent status (absence = down). Uses a direct
+/// insert of the full `Status` row so we can backdate `created_at` for the
+/// "away"/"blip" short-status cases (still within the current week's partition).
+async fn seed_statuses(
+	conn: &mut AsyncPgConnection,
+	servers: &SeededServers,
+	devices: &SeededDevices,
+	versions: &[VersionStr],
+) -> Result<()> {
+	use database::schema::statuses;
+
+	let now = Timestamp::now();
+	// Latest published version for "up to date"; an older one for "behind".
+	let latest = versions
+		.iter()
+		.find(|v| v.0 == node_semver::Version::new(2, 10, 5))
+		.cloned()
+		.unwrap_or_default();
+	let behind = versions
+		.iter()
+		.find(|v| v.0 == node_semver::Version::new(2, 8, 0))
+		.cloned()
+		.unwrap_or_default();
+
+	fn extra(pg: &str, tamanu: &str, uptime: u64) -> serde_json::Value {
+		serde_json::json!({
+			"pgVersion": pg,
+			"tamanuVersion": tamanu,
+			"bestoolVersion": "2.10.5",
+			"uptimeSecs": uptime,
+		})
+	}
+
+	async fn insert_status(
+		conn: &mut AsyncPgConnection,
+		server_id: Uuid,
+		device_id: Option<Uuid>,
+		created_at: Timestamp,
+		version: Option<VersionStr>,
+		healthy: bool,
+		health: serde_json::Value,
+		extra: serde_json::Value,
+	) -> Result<()> {
+		diesel::insert_into(statuses::table)
+			.values(Status {
+				id: Uuid::new_v4(),
+				created_at,
+				server_id,
+				device_id,
+				version,
+				extra,
+				healthy,
+				health,
+			})
+			.execute(conn)
+			.await?;
+		Ok(())
+	}
+
+	// Healthy central — up to date, fresh, all checks passing.
+	insert_status(
+		conn,
+		servers.healthy_central,
+		Some(devices.tailscale_server),
+		now,
+		Some(latest.clone()),
+		true,
+		serde_json::json!([
+			{"check": "database_connectivity", "healthy": true},
+			{"check": "disk_space", "healthy": true, "free_pct": 62},
+			{"check": "sync_lag", "healthy": true, "lag_seconds": 4},
+		]),
+		extra("PostgreSQL 15.4, compiled by gcc", "2.10.5", 864_000),
+	)
+	.await?;
+
+	// Unhealthy facility — top-level unhealthy, behind on version.
+	insert_status(
+		conn,
+		servers.unhealthy_facility,
+		Some(devices.mtls_server[0]),
+		now,
+		Some(behind.clone()),
+		false,
+		serde_json::json!([
+			{"check": "database_connectivity", "healthy": false, "error": "connection refused"},
+			{"check": "disk_space", "healthy": true, "free_pct": 40},
+		]),
+		extra("PostgreSQL 14.9, compiled by gcc", "2.8.0", 3_600),
+	)
+	.await?;
+
+	// Warning facility — top-level healthy but one check failing.
+	insert_status(
+		conn,
+		servers.warning_facility,
+		Some(devices.mtls_server[2]),
+		now,
+		Some(latest.clone()),
+		true,
+		serde_json::json!([
+			{"check": "database_connectivity", "healthy": true},
+			{"check": "sync_lag", "healthy": false, "lag_seconds": 1800},
+		]),
+		extra("PostgreSQL 15.4, compiled by Visual C++", "2.10.5", 120_000),
+	)
+	.await?;
+
+	// Demo server — healthy but unmonitored; recent.
+	insert_status(
+		conn,
+		servers.demo_server,
+		None,
+		now,
+		Some(latest.clone()),
+		true,
+		serde_json::json!([{"check": "database_connectivity", "healthy": true}]),
+		extra("PostgreSQL 15.4", "2.10.5", 7_200),
+	)
+	.await?;
+
+	// Ungrouped server — last reported ~20 minutes ago → "Away" short status.
+	insert_status(
+		conn,
+		servers.ungrouped,
+		None,
+		now - SignedDuration::from_mins(20),
+		Some(behind.clone()),
+		true,
+		serde_json::json!([{"check": "database_connectivity", "healthy": true}]),
+		extra("PostgreSQL 13.12", "2.8.0", 50_000),
+	)
+	.await?;
+
+	// down_facility: intentionally NO recent status row → "down".
+	let _ = servers.down_facility;
+
+	Ok(())
+}
+
+/// Drive the real issue/event/incident machinery via `NewEvent::save`, then
+/// resolve some so the UI shows open and closed states. Because the unhealthy
+/// servers are grouped + monitored, error/critical issues roll up into
+/// incidents automatically.
+async fn seed_issues_and_incidents(
+	conn: &mut AsyncPgConnection,
+	servers: &SeededServers,
+	admins: &[String],
+) -> Result<()> {
+	let now = Timestamp::now();
+
+	async fn push(
+		conn: &mut AsyncPgConnection,
+		server_id: Uuid,
+		source: &str,
+		r#ref: &str,
+		severity: Severity,
+		description: &str,
+		message: &str,
+		occurred_at: Timestamp,
+	) -> Result<Issue> {
+		NewEvent {
+			source: source.to_string(),
+			r#ref: r#ref.to_string(),
+			severity: Some(severity),
+			description: Some(description.to_string()),
+			message: message.to_string(),
+			active: Some(true),
+			occurred_at: Some(occurred_at),
+		}
+		.save(conn, server_id, None)
+		.await
+	}
+
+	// Critical DB issue on the unhealthy facility (opens an incident on Pacific).
+	let crit = push(
+		conn,
+		servers.unhealthy_facility,
+		"healthcheck",
+		"database_connectivity",
+		Severity::Critical,
+		"Database connection refused",
+		"The server cannot reach its PostgreSQL instance (connection refused). \
+		 Sync and API requests are failing.",
+		now - SignedDuration::from_mins(45),
+	)
+	.await?;
+
+	// Push the same event a couple more times so the event coalescing /
+	// occurrence count is exercised.
+	for _ in 0..2 {
+		push(
+			conn,
+			servers.unhealthy_facility,
+			"healthcheck",
+			"database_connectivity",
+			Severity::Critical,
+			"Database connection refused",
+			"The server cannot reach its PostgreSQL instance (connection refused). \
+			 Sync and API requests are failing.",
+			now - SignedDuration::from_mins(40),
+		)
+		.await?;
+	}
+
+	// A warning issue on the same group's healthy central — joins the open
+	// incident for context but wouldn't open one on its own.
+	push(
+		conn,
+		servers.healthy_central,
+		"healthcheck",
+		"certificate_expiry",
+		Severity::Warning,
+		"TLS certificate expiring soon",
+		"The TLS certificate expires in 9 days.",
+		now - SignedDuration::from_mins(30),
+	)
+	.await?;
+
+	// An error issue on the warning facility (Highlands group) → opens a
+	// second incident on a different group.
+	let highlands_issue = push(
+		conn,
+		servers.warning_facility,
+		"healthcheck",
+		"sync_lag",
+		Severity::Error,
+		"Sync lag exceeds threshold",
+		"Sync lag has been above 30 minutes for the last hour.",
+		now - SignedDuration::from_mins(60),
+	)
+	.await?;
+
+	// A resolved (closed) incident: open an error on the highlands clone, then
+	// resolve the issue, which cascades the incident closed.
+	let transient = push(
+		conn,
+		servers.warning_facility,
+		"healthcheck",
+		"disk_space",
+		Severity::Error,
+		"Disk almost full",
+		"Disk usage crossed 95% earlier; has since recovered.",
+		now - SignedDuration::from_hours(6),
+	)
+	.await?;
+	Issue::resolve(conn, transient.id, &admins[1], ResolvedReason::Fixed).await?;
+
+	// An info-level issue on the ungrouped server (recorded, no incident).
+	push(
+		conn,
+		servers.ungrouped,
+		"app",
+		"slow-query",
+		Severity::Info,
+		"Slow query detected",
+		"A report query took 12s; investigate indexing.",
+		now - SignedDuration::from_hours(2),
+	)
+	.await?;
+
+	// A debug-level issue (never participates in incidents).
+	push(
+		conn,
+		servers.demo_server,
+		"app",
+		"debug-trace",
+		Severity::Debug,
+		"Verbose trace captured",
+		"Captured a debug trace during a demo session.",
+		now - SignedDuration::from_hours(1),
+	)
+	.await?;
+
+	// Snooze the highlands sync_lag issue so the snoozed state is represented.
+	Issue::snooze(
+		conn,
+		highlands_issue.id,
+		now + SignedDuration::from_hours(12),
+	)
+	.await?;
+
+	// Operator notes on the still-open critical issue and its incident.
+	IssueNote::add(
+		conn,
+		crit.id,
+		&admins[0],
+		"Paged the on-call DBA; investigating the connection pool.",
+	)
+	.await?;
+
+	// Annotate every currently-open incident so the incident-notes UI has rows.
+	// We deliberately leave these incidents OPEN (the Pacific critical above is
+	// still active) so the UI shows an in-progress incident; the closed-incident
+	// state is covered by the resolved Highlands disk_space error, which cascaded
+	// its incident shut.
+	let active = Incident::list_active(conn, 50).await?;
+	for incident in &active {
+		IncidentNote::add(
+			conn,
+			incident.id,
+			&admins[0],
+			"Incident acknowledged; bridge call in progress.",
+		)
+		.await?;
+	}
+
+	Ok(())
+}
+
+/// Seed a server-scoped and a group-scoped silence so the silence list UI has
+/// rows, and the incident workflow's "silenced" branch has coverage.
+async fn seed_silences(
+	conn: &mut AsyncPgConnection,
+	servers: &SeededServers,
+	groups: &SeededGroups,
+	admins: &[String],
+) -> Result<()> {
+	ServerSilencedRef::add(
+		conn,
+		servers.demo_server,
+		"app",
+		"debug-trace",
+		Some(&admins[0]),
+	)
+	.await?;
+
+	ServerGroupSilencedRef::add(
+		conn,
+		groups.demo,
+		"healthcheck",
+		"backup_freshness",
+		Some(&admins[0]),
+	)
+	.await?;
+
+	let _ = (groups.empty, groups.pacific, groups.highlands);
+	Ok(())
+}
+
+/// Print row counts for the key tables so the operator can eyeball the result.
+async fn report(conn: &mut AsyncPgConnection) -> Result<()> {
+	#[derive(diesel::QueryableByName)]
+	struct Count {
+		#[diesel(sql_type = diesel::sql_types::Text)]
+		label: String,
+		#[diesel(sql_type = diesel::sql_types::BigInt)]
+		n: i64,
+	}
+
+	let tables = [
+		"admins",
+		"versions",
+		"version_known_issues",
+		"healthcheck_severities",
+		"devices",
+		"device_keys",
+		"device_connections",
+		"server_groups",
+		"servers",
+		"server_enrollment_tokens",
+		"statuses",
+		"issues",
+		"events",
+		"incidents",
+		"incident_issues",
+		"issue_notes",
+		"incident_notes",
+		"slack_outbox",
+		"server_silenced_refs",
+		"server_group_silenced_refs",
+	];
+
+	eprintln!("seed: row counts");
+	for t in tables {
+		let row: Count = diesel::sql_query(format!(
+			"SELECT '{t}' AS label, COUNT(*)::bigint AS n FROM {t}"
+		))
+		.get_result(conn)
+		.await?;
+		eprintln!("  {:<28} {}", row.label, row.n);
+	}
+	Ok(())
+}

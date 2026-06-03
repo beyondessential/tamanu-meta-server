@@ -8,13 +8,15 @@ import {
 	Stack,
 	Typography,
 } from "@mui/material";
+import AddIcon from "@mui/icons-material/Add";
 import EditIcon from "@mui/icons-material/Edit";
+import RestoreIcon from "@mui/icons-material/RestoreFromTrash";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import ServerShorty from "../components/ServerShorty";
 import SilencedRefsSection from "../components/SilencedRefsSection";
 import TimeAgo from "../components/TimeAgo";
-import { useApi } from "../api";
+import { useApi, useApiAction } from "../api";
 import { useIsNotificationHeld } from "../hooks/useIsNotificationHeld";
 import { usePageTitle } from "../hooks/usePageTitle";
 import {
@@ -65,16 +67,34 @@ export default function GroupDetail() {
 					{group.name}
 				</Typography>
 				{admin && (
-					<Button
-						component={RouterLink}
-						to={`/groups/${group.id}/edit`}
-						variant="contained"
-						startIcon={<EditIcon />}
-					>
-						Edit
-					</Button>
+					<Stack direction="row" spacing={1}>
+						<Button
+							component={RouterLink}
+							to={`/groups/${group.id}/servers/new`}
+							variant="contained"
+							startIcon={<AddIcon />}
+						>
+							Add server
+						</Button>
+						<Button
+							component={RouterLink}
+							to={`/groups/${group.id}/edit`}
+							variant="outlined"
+							startIcon={<EditIcon />}
+						>
+							Edit
+						</Button>
+					</Stack>
 				)}
 			</Stack>
+
+			{group.deleted_at && (
+				<ArchivedGroupBanner
+					groupId={group.id}
+					isAdmin={admin}
+					onRestored={detail.reload}
+				/>
+			)}
 
 			{openIncident && <ActiveIncidentCard incident={openIncident} />}
 
@@ -113,8 +133,8 @@ export default function GroupDetail() {
 				</Typography>
 				{servers.length === 0 ? (
 					<Alert severity="info">
-						No servers in this group yet. Edit a server and pick this group
-						from the group selector.
+						No servers in this group yet. Use “Add server” above to enroll
+						one into this group.
 					</Alert>
 				) : (
 					<Stack spacing={2}>
@@ -226,4 +246,45 @@ function groupServersByRank(
 		}
 	}
 	return result;
+}
+
+function ArchivedGroupBanner({
+	groupId,
+	isAdmin,
+	onRestored,
+}: {
+	groupId: string;
+	isAdmin: boolean;
+	onRestored: () => void;
+}) {
+	const action = useApiAction("server_groups", "restore");
+	const onRestore = async () => {
+		try {
+			await action.call({ server_group_id: groupId });
+			onRestored();
+		} catch {
+			/* surfaced via action.error */
+		}
+	};
+	return (
+		<Alert
+			severity="warning"
+			action={
+				isAdmin ? (
+					<Button
+						color="inherit"
+						size="small"
+						startIcon={<RestoreIcon />}
+						onClick={onRestore}
+						disabled={action.pending}
+					>
+						{action.pending ? "Restoring…" : "Restore"}
+					</Button>
+				) : undefined
+			}
+		>
+			This group is archived. Restore it to bring it back to the listings.
+			{action.error && <Box sx={{ mt: 1 }}>{action.error.message}</Box>}
+		</Alert>
+	);
 }

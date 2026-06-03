@@ -14,7 +14,7 @@ use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::fns::Page;
-use crate::fns::servers::{ServerInfo, decorate_with_status, server_to_info};
+use crate::fns::servers::{ServerInfo, decorate_with_status, fill_display_hosts, server_to_info};
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -296,6 +296,7 @@ pub async fn get_servers_for_device(
 	let servers = Server::get_by_device_id(&mut conn, args.device_id).await?;
 	let mut infos: Vec<ServerInfo> = servers.into_iter().map(server_to_info).collect();
 	decorate_with_status(&mut conn, &mut infos).await?;
+	fill_display_hosts(&mut conn, &mut infos).await?;
 	Ok(Json(infos))
 }
 
@@ -318,6 +319,7 @@ pub async fn get_past_server_associations(
 	let servers = Server::get_past_associations_for_device(&mut conn, args.device_id).await?;
 	let mut infos: Vec<ServerInfo> = servers.into_iter().map(server_to_info).collect();
 	decorate_with_status(&mut conn, &mut infos).await?;
+	fill_display_hosts(&mut conn, &mut infos).await?;
 	Ok(Json(infos))
 }
 

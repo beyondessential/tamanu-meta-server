@@ -54,7 +54,6 @@ fn higher_rank(a: ServerRank, b: ServerRank) -> ServerRank {
 	Queryable,
 	Selectable,
 	Insertable,
-	AsChangeset,
 	utoipa::ToSchema,
 )]
 #[diesel(table_name = crate::schema::server_groups)]
@@ -86,6 +85,15 @@ pub struct ServerGroup {
 	/// `statuses` AFTER INSERT trigger (canonical member reports a new version)
 	/// and by [`ServerGroup::recompute_version`] (membership changes).
 	pub effective_version: Option<VersionStr>,
+	/// When set, the group is archived (soft-deleted): hidden from live listings
+	/// but kept (with its archived members) and restorable.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	#[diesel(
+		deserialize_as = jiff_diesel::NullableTimestamp,
+		serialize_as = jiff_diesel::NullableTimestamp,
+		treat_none_as_default_value = false
+	)]
+	pub deleted_at: Option<Timestamp>,
 }
 
 #[derive(Debug, Clone, Deserialize, Insertable, utoipa::ToSchema)]
@@ -138,6 +146,19 @@ impl ServerGroup {
 		use crate::schema::server_groups::dsl;
 		dsl::server_groups
 			.select(Self::as_select())
+			.filter(dsl::deleted_at.is_null())
+			.order(dsl::name.asc())
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// Archived (soft-deleted) groups, newest-first. Powers the Archived view.
+	pub async fn list_archived(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
+		use crate::schema::server_groups::dsl;
+		dsl::server_groups
+			.select(Self::as_select())
+			.filter(dsl::deleted_at.is_not_null())
 			.order(dsl::name.asc())
 			.load(db)
 			.await
@@ -152,6 +173,7 @@ impl ServerGroup {
 		dsl::server_groups
 			.select(Self::as_select())
 			.filter(dsl::id.eq_any(ids))
+			.filter(dsl::deleted_at.is_null())
 			.load(db)
 			.await
 			.map_err(AppError::from)
@@ -171,25 +193,38 @@ impl ServerGroup {
 		Self::get_by_id(db, group_id).await
 	}
 
-	/// Refuses to delete a group that still has servers attached — operators
-	/// should move servers out first. (Postgres' ON DELETE SET NULL on
-	/// `servers.group_id` would happily turn the constraint into a silent
-	/// data drift, so we guard at the application layer.)
-	pub async fn delete(db: &mut AsyncPgConnection, group_id: Uuid) -> Result<()> {
-		use crate::schema::{server_groups, servers};
+	/// Archive (soft-delete) a group: hide it from live listings while keeping
+	/// it (and its archived members) and allowing restore. Refuses if the group
+	/// still has *live* servers attached — operators move those out (or archive
+	/// them) first. Archived members don't block it; they're already hidden.
+	pub async fn soft_delete(db: &mut AsyncPgConnection, group_id: Uuid) -> Result<()> {
+		use crate::schema::{server_groups::dsl, servers};
 
-		let attached: i64 = servers::table
+		let live_members: i64 = servers::table
 			.count()
 			.filter(servers::group_id.eq(group_id))
+			.filter(servers::deleted_at.is_null())
 			.get_result(db)
 			.await?;
-		if attached > 0 {
+		if live_members > 0 {
 			return Err(AppError::Conflict(format!(
-				"group {group_id} still has {attached} server(s); move them out first",
+				"group {group_id} still has {live_members} live server(s); move them out first",
 			)));
 		}
 
-		diesel::delete(server_groups::table.filter(server_groups::id.eq(group_id)))
+		diesel::update(dsl::server_groups.filter(dsl::id.eq(group_id)))
+			.set(dsl::deleted_at.eq(jiff_diesel::NullableTimestamp::from(Some(Timestamp::now()))))
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(())
+	}
+
+	/// Un-archive a group.
+	pub async fn restore(db: &mut AsyncPgConnection, group_id: Uuid) -> Result<()> {
+		use crate::schema::server_groups::dsl;
+		diesel::update(dsl::server_groups.filter(dsl::id.eq(group_id)))
+			.set(dsl::deleted_at.eq(None::<jiff_diesel::Timestamp>))
 			.execute(db)
 			.await
 			.map_err(AppError::from)?;
@@ -201,6 +236,7 @@ impl ServerGroup {
 		dsl::servers
 			.select(Server::as_select())
 			.filter(dsl::group_id.eq(self.id))
+			.filter(dsl::deleted_at.is_null())
 			.order(dsl::name.asc())
 			.load(db)
 			.await
@@ -223,6 +259,7 @@ impl ServerGroup {
 		let rows: Vec<(Uuid, Option<String>)> = dsl::servers
 			.select((dsl::group_id.assume_not_null(), dsl::rank))
 			.filter(dsl::group_id.eq_any(group_ids))
+			.filter(dsl::deleted_at.is_null())
 			.load(db)
 			.await?;
 
@@ -260,6 +297,7 @@ impl ServerGroup {
 			servers_dsl::servers
 				.select(Server::as_select())
 				.filter(servers_dsl::group_id.eq(group_id))
+				.filter(servers_dsl::deleted_at.is_null())
 				.load(db)
 				.await?
 		};
@@ -301,6 +339,7 @@ impl ServerGroup {
 
 		if let Ok(qid) = query.parse::<Uuid>()
 			&& let Ok(group) = Self::get_by_id(db, qid).await
+			&& group.deleted_at.is_none()
 		{
 			return Ok(vec![group]);
 		}
@@ -308,6 +347,7 @@ impl ServerGroup {
 		dsl::server_groups
 			.select(Self::as_select())
 			.filter(dsl::name.ilike(&pattern))
+			.filter(dsl::deleted_at.is_null())
 			.order(dsl::name.asc())
 			.limit(50)
 			.load(db)

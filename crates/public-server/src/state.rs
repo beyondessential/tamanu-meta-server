@@ -21,6 +21,9 @@ pub struct AppState {
 	/// binary's `init()` leaves this `None`, so the tailnet path of
 	/// the device-auth extractor can never fire on the open internet.
 	pub tailnet_directory: Option<TailnetDirectory>,
+	/// In-process rate limiter backing the unauthenticated enrollment
+	/// endpoints (per source IP and per target server).
+	pub rate_limiter: crate::ratelimit::RateLimiter,
 }
 
 impl AppState {
@@ -66,7 +69,14 @@ impl AppState {
 			#[cfg(feature = "ui")]
 			server_versions_secret: std::env::var("SERVER_VERSIONS_SECRET").ok(),
 			tailnet_directory,
+			rate_limiter: crate::ratelimit::RateLimiter::default(),
 		})
+	}
+}
+
+impl FromRef<AppState> for crate::ratelimit::RateLimiter {
+	fn from_ref(state: &AppState) -> Self {
+		state.rate_limiter.clone()
 	}
 }
 

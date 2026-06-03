@@ -1,0 +1,173 @@
+import {
+	Alert,
+	Box,
+	Button,
+	LinearProgress,
+	Link as MuiLink,
+	Paper,
+	Stack,
+	Typography,
+} from "@mui/material";
+import RestoreIcon from "@mui/icons-material/RestoreFromTrash";
+import { Link as RouterLink } from "react-router-dom";
+import ServerShorty, { type ServerInfo } from "../components/ServerShorty";
+import { useApi, useApiAction } from "../api";
+import { usePageTitle } from "../hooks/usePageTitle";
+import { compareServersByRankThenKind } from "../types";
+
+/// Archived (soft-deleted) servers and groups, with Restore. The only place to
+/// find them — every other listing filters archived rows out.
+export default function ArchivedList() {
+	usePageTitle("Archived");
+	const isAdmin = useApi("commons", "is_current_user_admin", {}, []);
+	const admin = isAdmin.status === "ok" && isAdmin.data;
+	const groups = useApi("server_groups", "list_archived", {}, []);
+	const servers = useApi("servers", "list_archived", {}, []);
+
+	if (
+		groups.status === "loading" ||
+		groups.status === "idle" ||
+		servers.status === "loading" ||
+		servers.status === "idle"
+	) {
+		return <LinearProgress />;
+	}
+	if (groups.status === "error")
+		return <Alert severity="error">{groups.error.message}</Alert>;
+	if (servers.status === "error")
+		return <Alert severity="error">{servers.error.message}</Alert>;
+
+	const archivedGroups = groups.data;
+	const archivedServers = [...servers.data].sort(compareServersByRankThenKind);
+
+	if (archivedGroups.length === 0 && archivedServers.length === 0) {
+		return <Alert severity="success">Nothing archived.</Alert>;
+	}
+
+	return (
+		<Stack spacing={3}>
+			{archivedGroups.length > 0 && (
+				<Stack spacing={1}>
+					<Typography variant="subtitle1">Archived groups</Typography>
+					{archivedGroups.map((g) => (
+						<ArchivedGroupRow
+							key={g.id}
+							id={g.id}
+							name={g.name}
+							admin={admin}
+							onRestored={groups.reload}
+						/>
+					))}
+				</Stack>
+			)}
+			{archivedServers.length > 0 && (
+				<Stack spacing={1}>
+					<Typography variant="subtitle1">Archived servers</Typography>
+					{archivedServers.map((s) => (
+						<ArchivedServerRow
+							key={s.id}
+							server={s}
+							admin={admin}
+							onRestored={servers.reload}
+						/>
+					))}
+				</Stack>
+			)}
+		</Stack>
+	);
+}
+
+function RestoreButton({
+	pending,
+	onClick,
+}: {
+	pending: boolean;
+	onClick: () => void;
+}) {
+	return (
+		<Button
+			size="small"
+			startIcon={<RestoreIcon />}
+			onClick={onClick}
+			disabled={pending}
+		>
+			{pending ? "Restoring…" : "Restore"}
+		</Button>
+	);
+}
+
+function ArchivedGroupRow({
+	id,
+	name,
+	admin,
+	onRestored,
+}: {
+	id: string;
+	name: string;
+	admin: boolean;
+	onRestored: () => void;
+}) {
+	const action = useApiAction("server_groups", "restore");
+	const onRestore = async () => {
+		try {
+			await action.call({ server_group_id: id });
+			onRestored();
+		} catch {
+			/* surfaced via action.error */
+		}
+	};
+	return (
+		<Paper
+			variant="outlined"
+			sx={{ p: 1.5, display: "flex", alignItems: "center", gap: 2 }}
+		>
+			<MuiLink
+				component={RouterLink}
+				to={`/groups/${id}`}
+				underline="hover"
+				color="text.primary"
+				sx={{ fontWeight: 500 }}
+			>
+				{name}
+			</MuiLink>
+			<Box sx={{ ml: "auto" }}>
+				{admin && (
+					<RestoreButton pending={action.pending} onClick={onRestore} />
+				)}
+			</Box>
+			{action.error && (
+				<Typography color="error" variant="caption">
+					{action.error.message}
+				</Typography>
+			)}
+		</Paper>
+	);
+}
+
+function ArchivedServerRow({
+	server,
+	admin,
+	onRestored,
+}: {
+	server: ServerInfo;
+	admin: boolean;
+	onRestored: () => void;
+}) {
+	const action = useApiAction("servers", "restore");
+	const onRestore = async () => {
+		try {
+			await action.call({ server_id: server.id });
+			onRestored();
+		} catch {
+			/* surfaced via action.error */
+		}
+	};
+	return (
+		<Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+			<Box sx={{ flex: 1 }}>
+				<ServerShorty server={server} />
+			</Box>
+			{admin && <RestoreButton pending={action.pending} onClick={onRestore} />}
+		</Box>
+	);
+}

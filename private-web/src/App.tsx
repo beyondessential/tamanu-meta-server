@@ -28,8 +28,10 @@ import Healthchecks from "./routes/Healthchecks";
 import IncidentDetail from "./routes/IncidentDetail";
 import Incidents from "./routes/Incidents";
 import Status from "./routes/Status";
+import ServerCreate from "./routes/ServerCreate";
 import ServerDetail from "./routes/ServerDetail";
 import ServerEdit from "./routes/ServerEdit";
+import ArchivedList from "./routes/ArchivedList";
 import Servers from "./routes/Servers";
 import Sql from "./routes/Sql";
 import UngroupedServersList from "./routes/UngroupedServersList";
@@ -180,9 +182,15 @@ export default function App() {
 					<Route path="/servers" element={<Servers />}>
 						<Route index element={<GroupsList />} />
 						<Route path="ungrouped" element={<UngroupedServersList />} />
+						<Route path="archived" element={<ArchivedList />} />
 					</Route>
+					<Route
+						path="/groups/:id/servers/new"
+						element={<ServerCreate />}
+					/>
 					<Route path="/servers/:id" element={<ServerDetail />} />
 					<Route path="/servers/:id/edit" element={<ServerEdit />} />
+					<Route path="/groups/new" element={<GroupEdit />} />
 					<Route path="/groups/:id" element={<GroupDetail />} />
 					<Route path="/groups/:id/edit" element={<GroupEdit />} />
 					<Route path="/devices" element={<Devices />}>

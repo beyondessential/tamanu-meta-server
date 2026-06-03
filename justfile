@@ -106,6 +106,10 @@ migrate:
     DATABASE_URL={{ DATABASE_URL }} diesel migration run
     cargo fmt
 
+# Seed the local dev database with representative fake data (LOCAL DEV ONLY: truncates+repopulates app tables, run `just migrate` first, refuses prod-looking URLs)
+seed:
+    DATABASE_URL={{ DATABASE_URL }} cargo run --bin seed
+
 # Create a new migration
 migration name:
     DATABASE_URL={{ DATABASE_URL }} diesel migration generate {{ name }}

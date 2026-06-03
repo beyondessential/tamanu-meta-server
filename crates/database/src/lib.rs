@@ -13,6 +13,8 @@ pub mod issues;
 pub mod notes;
 pub mod pg_duration;
 pub mod schema;
+pub mod server_enrollment_challenges;
+pub mod server_enrollment_tokens;
 pub mod server_groups;
 pub mod servers;
 pub mod silenced_refs;

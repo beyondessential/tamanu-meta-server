@@ -1,12 +1,11 @@
 use commons_errors::{AppError, Result};
 use commons_types::{
-	device::DeviceRole,
 	geo::GeoPoint,
-	server::{TagMap, kind::ServerKind, rank::ServerRank, ticket::CanopyTicket},
+	server::{TagMap, kind::ServerKind, rank::ServerRank},
 };
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use jiff::SignedDuration;
+use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -33,15 +32,7 @@ async fn recompute_groups(
 }
 
 #[derive(
-	Debug,
-	Clone,
-	Serialize,
-	Deserialize,
-	Queryable,
-	Selectable,
-	Insertable,
-	AsChangeset,
-	utoipa::ToSchema,
+	Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable, utoipa::ToSchema,
 )]
 #[diesel(table_name = crate::schema::servers)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -50,8 +41,12 @@ pub struct Server {
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub name: Option<String>,
 
-	#[diesel(deserialize_as = String, serialize_as = String)]
-	pub host: UrlField,
+	/// The server's URL. Optional: a server may be identified solely by its
+	/// bound device (e.g. a Tailscale node). Not unique. For a display URL that
+	/// falls back to the tailnet hostname, see the API's `display_host`.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	#[diesel(treat_none_as_default_value = false)]
+	pub host: Option<UrlField>,
 
 	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub kind: ServerKind,
@@ -92,6 +87,25 @@ pub struct Server {
 	pub notes: String,
 	#[serde(default)]
 	pub tags: TagMap,
+	/// When set, the server is archived (soft-deleted): hidden from live
+	/// listings and monitoring, its device released, but its history retained.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	#[diesel(
+		deserialize_as = jiff_diesel::NullableTimestamp,
+		serialize_as = jiff_diesel::NullableTimestamp,
+		treat_none_as_default_value = false
+	)]
+	pub deleted_at: Option<Timestamp>,
+	/// Set when a device successfully completes enrollment for this server.
+	/// While `None`, the server is awaiting its first check-in and the UI
+	/// shows setup instructions.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	#[diesel(
+		deserialize_as = jiff_diesel::NullableTimestamp,
+		serialize_as = jiff_diesel::NullableTimestamp,
+		treat_none_as_default_value = false
+	)]
+	pub registered_at: Option<Timestamp>,
 }
 
 impl Server {
@@ -104,6 +118,7 @@ impl Server {
 		let q = servers
 			.select(Self::as_select())
 			.filter(id.ne(Uuid::nil()))
+			.filter(deleted_at.is_null())
 			.order_by((
 				name.is_not_null(),
 				kind.asc(),
@@ -120,6 +135,19 @@ impl Server {
 		.map_err(AppError::from)
 	}
 
+	/// Archived (soft-deleted) servers, for the Archived view.
+	pub async fn list_archived(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
+		use crate::schema::servers::dsl::*;
+		servers
+			.select(Self::as_select())
+			.filter(id.ne(Uuid::nil()))
+			.filter(deleted_at.is_not_null())
+			.order_by((kind.asc(), name.asc(), created_at.desc()))
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	pub async fn list_by_kind(
 		db: &mut AsyncPgConnection,
 		k: ServerKind,
@@ -130,6 +158,7 @@ impl Server {
 		let q = servers
 			.select(Self::as_select())
 			.filter(id.ne(Uuid::nil()).and(kind.eq(k)))
+			.filter(deleted_at.is_null())
 			.order_by((name.is_not_null(), name.asc(), created_at.desc()))
 			.offset(offset.try_into().unwrap_or(i64::MAX));
 
@@ -146,6 +175,7 @@ impl Server {
 		servers
 			.count()
 			.filter(id.ne(Uuid::nil()))
+			.filter(deleted_at.is_null())
 			.get_result(db)
 			.await
 			.map_err(AppError::from)
@@ -157,6 +187,7 @@ impl Server {
 		servers
 			.count()
 			.filter(id.ne(Uuid::nil()).and(kind.eq(k)))
+			.filter(deleted_at.is_null())
 			.get_result(db)
 			.await
 			.map_err(AppError::from)
@@ -178,6 +209,8 @@ impl Server {
 		servers
 			.select(Self::as_select())
 			.filter(device_id.is_null().and(id.ne(Uuid::nil())))
+			.filter(deleted_at.is_null())
+			.filter(host.is_not_null())
 			.load(db)
 			.await
 			.map_err(AppError::from)
@@ -192,6 +225,20 @@ impl Server {
 			.map_err(AppError::from)
 	}
 
+	/// Like [`Server::get_by_id`] but takes a `FOR UPDATE` row lock. A caller
+	/// inside a transaction uses this to serialise against concurrent archival
+	/// (`soft_delete` locks the same row), closing the archive-vs-register
+	/// TOCTOU at enrollment completion.
+	pub async fn get_by_id_for_update(db: &mut AsyncPgConnection, id: Uuid) -> Result<Self> {
+		crate::schema::servers::table
+			.select(Self::as_select())
+			.filter(crate::schema::servers::id.eq(id))
+			.for_update()
+			.first(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	pub async fn get_by_host(db: &mut AsyncPgConnection, host: String) -> Result<Self> {
 		crate::schema::servers::table
 			.select(Self::as_select())
@@ -201,105 +248,144 @@ impl Server {
 			.map_err(AppError::from)
 	}
 
-	/// Find or create the device for a ticket, then upsert the server record.
-	///
-	/// Errors if a server already exists with `ticket.canonical_url` as its host
-	/// but a different ID than `ticket.server_id`. Newly-imported servers are
-	/// **ungrouped** (`group_id IS NULL`); operators assign a group from the
-	/// admin UI after import.
-	pub async fn upsert_from_ticket(
-		db: &mut AsyncPgConnection,
-		ticket: &CanopyTicket,
-		kind: ServerKind,
-		rank: Option<ServerRank>,
-	) -> Result<Self> {
-		let kind = ticket.kind.unwrap_or(kind);
-		let rank = ticket.rank.or(rank);
+	/// Operator-driven insert. The caller pre-builds the row (id, defaults,
+	/// optional URL, optional pre-bound `device_id` for the Tailscale case).
+	/// URLs are no longer unique, so there is no collision check.
+	pub async fn create(db: &mut AsyncPgConnection, server: Server) -> Result<Self> {
 		use crate::schema::servers;
 
-		// Parse the public key bytes we'll use to find/create the device.
-		let key_der = ticket.public_key_der()?;
-
-		// Build the server value, preserving any existing fields where applicable.
-		// Parse the canonical URL *first* so we can canonicalise both the
-		// stored host and the host we look up for conflict-detection — a
-		// difference in trailing slash, port, or case otherwise produces
-		// false "different id" errors.
-		let host = UrlField(
-			ticket
-				.canonical_url
-				.parse()
-				.map_err(|e| AppError::BadRequest(format!("Invalid canonical URL: {e}")))?,
-		);
-		let host_str = host.0.to_string();
-
-		// Conflict check: is there already a server with this host but a different ID?
-		let existing_by_host = Self::get_by_host(db, host_str.clone()).await;
-		match existing_by_host {
-			Ok(existing) if existing.id != ticket.server_id => {
-				return Err(AppError::Conflict(format!(
-					"A server with host '{}' already exists with a different ID ({})",
-					host_str, existing.id,
-				)));
-			}
-			_ => {}
-		}
-
-		// Find or create the device that owns this key. The ticket is
-		// the operator's trust signal — promote a freshly-created (or
-		// previously-Untrusted) device to `Server` so they don't have
-		// to flip it manually after import.
-		let device = if let Some(device) = crate::devices::Device::from_key(db, &key_der).await? {
-			device
-		} else {
-			crate::devices::Device::create(db, key_der).await?
-		};
-		if device.role == DeviceRole::Untrusted {
-			crate::devices::Device::trust(db, device.id, DeviceRole::Server).await?;
-		}
-
-		let cloud = ticket.hosting.as_deref().map(|h| {
-			matches!(
-				h,
-				"ec2" | "azure" | "gce" | "gcp" | "digitalocean" | "oracle" | "cloudstack"
-			)
-		});
-
-		let kind_str = kind.to_string();
-		let rank_str = rank.map(|r| r.to_string());
-
-		// Upsert: insert or update on conflict. Ticket-derived fields
-		// (kind, rank, cloud) re-apply on update; operator-edited state
-		// (public_name, geolocation, alert_when_down_for, group_id, notes,
-		// tags) is preserved.
-		let server: Self = diesel::insert_into(servers::table)
-			.values((
-				servers::id.eq(ticket.server_id),
-				servers::name.eq(&Some(ticket.hostname.clone())),
-				servers::host.eq(&host_str),
-				servers::kind.eq(&kind_str),
-				servers::rank.eq(&rank_str),
-				servers::device_id.eq(Some(device.id)),
-				servers::cloud.eq(cloud),
-			))
-			.on_conflict(servers::id)
-			.do_update()
-			.set((
-				servers::name.eq(&Some(ticket.hostname.clone())),
-				servers::host.eq(&host_str),
-				servers::kind.eq(&kind_str),
-				servers::rank.eq(&rank_str),
-				servers::device_id.eq(Some(device.id)),
-				servers::cloud.eq(cloud),
-			))
+		let created = diesel::insert_into(servers::table)
+			.values(server)
 			.returning(Self::as_select())
 			.get_result(db)
 			.await
 			.map_err(AppError::from)?;
+		// A new member can change the group's canonical version source.
+		recompute_groups(db, [created.group_id]).await?;
+		Ok(created)
+	}
 
-		// kind/rank/membership may have changed, shifting the canonical member.
-		recompute_groups(db, [server.group_id]).await?;
-		Ok(server)
+	/// Archive a server: hide it from live listings and monitoring while
+	/// retaining its history. Releases its device (clears `device_id`,
+	/// demotes to `Untrusted`, deactivates its keys) so the box can only
+	/// return through the gated enrollment flow. Idempotent.
+	pub async fn soft_delete(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<()> {
+		use crate::schema::servers::dsl;
+		use diesel_async::AsyncConnection;
+
+		db.transaction::<_, AppError, _>(async |conn| {
+			let server: Server = dsl::servers
+				.select(Self::as_select())
+				.filter(dsl::id.eq(server_id))
+				.for_update()
+				.first(conn)
+				.await
+				.map_err(AppError::from)?;
+
+			if server.deleted_at.is_some() {
+				return Ok(());
+			}
+
+			if let Some(device_id) = server.device_id {
+				crate::devices::Device::untrust(conn, device_id).await?;
+				crate::devices::Device::deactivate_keys(conn, device_id).await?;
+			}
+
+			diesel::update(dsl::servers.filter(dsl::id.eq(server_id)))
+				.set((
+					dsl::deleted_at
+						.eq(jiff_diesel::NullableTimestamp::from(Some(Timestamp::now()))),
+					dsl::registered_at.eq(None::<jiff_diesel::Timestamp>),
+					dsl::device_id.eq(None::<Uuid>),
+				))
+				.execute(conn)
+				.await
+				.map_err(AppError::from)?;
+
+			// The server just dropped out of its group's live set, so the
+			// group's cached headline version may now belong to someone else.
+			recompute_groups(conn, [server.group_id]).await?;
+			Ok(())
+		})
+		.await
+	}
+
+	/// Un-archive a server. Does not rebind a device — the box must re-enroll.
+	pub async fn restore(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<Self> {
+		use crate::schema::servers::dsl;
+
+		diesel::update(dsl::servers.filter(dsl::id.eq(server_id)))
+			.set(dsl::deleted_at.eq(None::<jiff_diesel::Timestamp>))
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+		let restored = Self::get_by_id(db, server_id).await?;
+		// Back in the live set: the group's canonical member may change.
+		recompute_groups(db, [restored.group_id]).await?;
+		Ok(restored)
+	}
+
+	/// Canonicalise a user-entered URL. A bare host (no scheme) defaults to
+	/// `https://`, so operators can type `foo.example.com` and get
+	/// `https://foo.example.com`.
+	pub fn canonicalize_host(url: &str) -> Result<UrlField> {
+		let url = url.trim();
+		let candidate = if url.contains("://") {
+			url.to_string()
+		} else {
+			format!("https://{url}")
+		};
+		Ok(UrlField(candidate.parse().map_err(|e| {
+			AppError::BadRequest(format!("Invalid URL: {e}"))
+		})?))
+	}
+
+	/// Map a hosting hint to the `cloud` flag.
+	pub fn detect_cloud(hosting: &str) -> bool {
+		matches!(
+			hosting,
+			"ec2" | "azure" | "gce" | "gcp" | "digitalocean" | "oracle" | "cloudstack"
+		)
+	}
+
+	/// Live (non-archived) servers currently bound to this device.
+	pub async fn live_by_device_id(db: &mut AsyncPgConnection, dev_id: Uuid) -> Result<Vec<Self>> {
+		use crate::schema::servers::dsl::*;
+		servers
+			.select(Self::as_select())
+			.filter(device_id.eq(dev_id))
+			.filter(deleted_at.is_null())
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// Bind a device to a server (sets `device_id`).
+	pub async fn bind_device(
+		db: &mut AsyncPgConnection,
+		server_id: Uuid,
+		device_id: Uuid,
+	) -> Result<()> {
+		use crate::schema::servers::dsl;
+		diesel::update(dsl::servers.filter(dsl::id.eq(server_id)))
+			.set(dsl::device_id.eq(Some(device_id)))
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(())
+	}
+
+	/// Mark a server enrolled (sets `registered_at = now()`).
+	pub async fn mark_registered(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<()> {
+		use crate::schema::servers::dsl;
+		diesel::update(dsl::servers.filter(dsl::id.eq(server_id)))
+			.set(
+				dsl::registered_at.eq(jiff_diesel::NullableTimestamp::from(Some(Timestamp::now()))),
+			)
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(())
 	}
 
 	pub async fn get_by_device_id(db: &mut AsyncPgConnection, dev_id: Uuid) -> Result<Vec<Self>> {
@@ -352,6 +438,7 @@ impl Server {
 			.select(Self::as_select())
 			.filter(group_id.eq(gid))
 			.filter(id.ne(self.id))
+			.filter(deleted_at.is_null())
 			.order(name.asc())
 			.load(db)
 			.await
@@ -365,6 +452,7 @@ impl Server {
 			.select(Self::as_select())
 			.filter(group_id.is_null())
 			.filter(id.ne(Uuid::nil()))
+			.filter(deleted_at.is_null())
 			.order(name.asc())
 			.load(db)
 			.await
@@ -377,6 +465,7 @@ impl Server {
 			.count()
 			.filter(group_id.is_null())
 			.filter(id.ne(Uuid::nil()))
+			.filter(deleted_at.is_null())
 			.get_result(db)
 			.await
 			.map_err(AppError::from)
@@ -389,13 +478,13 @@ impl Server {
 	pub async fn names_by_ids(
 		db: &mut AsyncPgConnection,
 		ids: &[Uuid],
-	) -> Result<std::collections::HashMap<Uuid, (Option<String>, String)>> {
+	) -> Result<std::collections::HashMap<Uuid, (Option<String>, Option<String>)>> {
 		use crate::schema::servers::dsl;
 
 		if ids.is_empty() {
 			return Ok(std::collections::HashMap::new());
 		}
-		let rows: Vec<(Uuid, Option<String>, String)> = dsl::servers
+		let rows: Vec<(Uuid, Option<String>, Option<String>)> = dsl::servers
 			.select((dsl::id, dsl::name, dsl::host))
 			.filter(dsl::id.eq_any(ids))
 			.load(db)
@@ -467,6 +556,7 @@ impl Server {
 			.select(Self::as_select())
 			.filter(kind.eq(ServerKind::Central.to_string()))
 			.filter(public_name.is_not_null())
+			.filter(deleted_at.is_null())
 			.into_boxed();
 
 		if let Ok(query_uuid) = query.parse::<Uuid>() {
@@ -560,13 +650,22 @@ impl Server {
 }
 
 #[test]
+fn canonicalize_host_defaults_to_https() {
+	let h = |s: &str| Server::canonicalize_host(s).unwrap().0.to_string();
+	assert_eq!(h("foo.example.com"), "https://foo.example.com/");
+	assert_eq!(h("  bar.example.com  "), "https://bar.example.com/");
+	assert_eq!(h("http://insecure.example"), "http://insecure.example/");
+	assert_eq!(h("https://full.example/path"), "https://full.example/path");
+}
+
+#[test]
 fn test_server_serialization() {
 	let server = Server {
 		id: Uuid::nil(),
 		name: Some("Test Server".to_string()),
 		kind: ServerKind::Central,
 		rank: Some(ServerRank::Production),
-		host: UrlField("https://example.com/".parse().unwrap()),
+		host: Some(UrlField("https://example.com/".parse().unwrap())),
 		device_id: Some(Uuid::nil()),
 		group_id: None,
 		public_name: Some("Test Server".to_string()),
@@ -576,6 +675,8 @@ fn test_server_serialization() {
 		alert_when_down_for: TEN_MINUTES,
 		notes: String::new(),
 		tags: TagMap::default(),
+		deleted_at: None,
+		registered_at: None,
 	};
 
 	let serialized = serde_json::to_string_pretty(&server).unwrap();
@@ -600,7 +701,8 @@ fn test_server_serialization() {
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct NewServer {
 	pub name: Option<String>,
-	pub host: UrlField,
+	#[serde(default)]
+	pub host: Option<UrlField>,
 	pub kind: ServerKind,
 	pub rank: Option<ServerRank>,
 	pub device_id: Option<Uuid>,
@@ -625,6 +727,8 @@ impl From<NewServer> for Server {
 			alert_when_down_for: TEN_MINUTES,
 			notes: String::new(),
 			tags: TagMap::default(),
+			deleted_at: None,
+			registered_at: None,
 		}
 	}
 }
@@ -638,8 +742,8 @@ pub struct PartialServer {
 	pub kind: Option<ServerKind>,
 	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub rank: Option<ServerRank>,
-	#[diesel(deserialize_as = String, serialize_as = String)]
-	pub host: Option<UrlField>,
+	/// `Some(Some(url))` sets the URL, `Some(None)` clears it, `None` leaves it.
+	pub host: Option<Option<UrlField>>,
 	pub device_id: Option<Option<Uuid>>,
 	pub group_id: Option<Option<Uuid>>,
 	pub public_name: Option<Option<String>>,

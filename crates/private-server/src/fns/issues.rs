@@ -162,10 +162,7 @@ pub(crate) async fn enrich_issues(
 	Ok(issues
 		.into_iter()
 		.map(|i| {
-			let (name, host) = names
-				.get(&i.server_id)
-				.cloned()
-				.unwrap_or((None, String::new()));
+			let (name, host) = names.get(&i.server_id).cloned().unwrap_or((None, None));
 			let (group_id, group_name) = group_refs
 				.get(&i.server_id)
 				.cloned()
@@ -180,7 +177,7 @@ pub(crate) async fn enrich_issues(
 				i,
 				IssueEnrichment {
 					server_name: name,
-					server_host: host,
+					server_host: host.unwrap_or_default(),
 					server_group_id: group_id,
 					server_group_name: group_name,
 					users: &users,
@@ -197,9 +194,7 @@ pub(crate) async fn enrich_issue(
 	issue: Issue,
 ) -> Result<IssueData> {
 	let mut names = Server::names_by_ids(conn, &[issue.server_id]).await?;
-	let (name, host) = names
-		.remove(&issue.server_id)
-		.unwrap_or((None, String::new()));
+	let (name, host) = names.remove(&issue.server_id).unwrap_or((None, None));
 	let mut group_refs = Server::group_refs_by_server_ids(conn, &[issue.server_id]).await?;
 	let (group_id, group_name) = group_refs.remove(&issue.server_id).unwrap_or((None, None));
 	let user_logins = collect_user_logins(std::slice::from_ref(&issue));
@@ -215,7 +210,7 @@ pub(crate) async fn enrich_issue(
 		issue,
 		IssueEnrichment {
 			server_name: name,
-			server_host: host,
+			server_host: host.unwrap_or_default(),
 			server_group_id: group_id,
 			server_group_name: group_name,
 			users: &users,

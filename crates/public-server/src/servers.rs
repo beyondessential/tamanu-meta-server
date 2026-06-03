@@ -1,22 +1,44 @@
-use axum::{Json, extract::State};
-use commons_errors::{ProblemDetailsSchema, Result};
-use commons_servers::device_auth::{AdminDevice, ServerDevice};
+use std::time::Duration;
+
+use axum::{Json, extract::State, http::HeaderMap};
+use axum_client_ip::ClientIp;
+use base64::Engine;
+use commons_errors::{AppError, ProblemDetailsSchema, Result};
+use commons_servers::device_auth::{mtls, pop};
+use commons_servers::tailnet_directory::TailnetDirectory;
+
+use crate::ratelimit::RateLimiter;
 use commons_types::server::{kind::ServerKind, rank::ServerRank};
 use database::{
 	Db,
-	servers::{NewServer, PartialServer, Server},
+	devices::{Device, DeviceKey},
+	server_enrollment_challenges::ServerEnrollmentChallenge,
+	server_enrollment_tokens::ServerEnrollmentToken,
+	servers::Server,
 	url_field::UrlField,
 };
-use diesel::{ExpressionMethods as _, QueryDsl as _, SelectableHelper as _};
-use diesel_async::RunQueryDsl as _;
-use serde::Serialize;
+use diesel_async::AsyncConnection;
+use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
+use uuid::Uuid;
 
 use crate::state::AppState;
 
+/// Env var naming the request header the terminating proxy populates with the
+/// TLS exporter (RFC 9266 channel binding). When set, enrollment requires
+/// channel binding; when unset, application-layer proof-of-possession runs
+/// alone.
+const EKM_HEADER_ENV: &str = "CANOPY_ENROLL_EKM_HEADER";
+
+/// Challenge lifetime: short, since the device fetches it and immediately signs.
+const CHALLENGE_TTL: jiff::SignedDuration = jiff::SignedDuration::from_mins(5);
+
 pub fn routes() -> OpenApiRouter<AppState> {
-	OpenApiRouter::new().routes(routes!(list, create, edit, remove))
+	OpenApiRouter::new()
+		.routes(routes!(list))
+		.routes(routes!(register_begin))
+		.routes(routes!(register_complete))
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -52,11 +74,16 @@ pub async fn list(State(db): State<Db>) -> Result<Json<Vec<PublicServer>>> {
 		.await?
 		.into_iter()
 		.filter_map(|s| {
-			s.public_name.map(|name| PublicServer {
-				name,
-				host: s.host,
-				rank: s.rank,
-			})
+			// Only list servers that have both a public name and a URL — the
+			// mobile app needs a reachable host.
+			match (s.public_name, s.host) {
+				(Some(name), Some(host)) => Some(PublicServer {
+					name,
+					host,
+					rank: s.rank,
+				}),
+				_ => None,
+			}
 		})
 		.collect::<Vec<_>>();
 
@@ -69,136 +96,290 @@ pub async fn list(State(db): State<Db>) -> Result<Json<Vec<PublicServer>>> {
 	Ok(Json(servers))
 }
 
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct BeginArgs {
+	pub server_id: Uuid,
+	pub token: String,
+	/// Base64-standard DER SPKI of the device public key. Required on the
+	/// tailnet transport (there is no client cert to read it from); omitted on
+	/// the mTLS path, where the key comes from the presented certificate. The
+	/// challenge is bound to this key, so `complete` must use the same one.
+	#[serde(default)]
+	pub spki: Option<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct BeginResponse {
+	/// Base64 (standard) of the 32-byte challenge nonce.
+	pub nonce: String,
+	/// True iff the server requires the TLS exporter (`EKM`) be folded into the
+	/// signed transcript (channel binding). The client must then append it.
+	pub channel_binding_required: bool,
+}
+
+/// Resolve the device's SPKI for an enrollment request. The source is fixed by
+/// the transport, never chosen by precedence:
+///
+/// - **internet mTLS mount** (`tailnet` false): from the client-cert header the
+///   terminating mTLS proxy sets. The request body's `spki` is ignored, so the
+///   cert can never be skipped via a body field.
+/// - **tailnet `/public` mount** (`tailnet` true): from the request body
+///   (base64-standard DER). `tailscale serve` can't do client-cert mTLS, so the
+///   `mtls-certificate` header is *not* set by a trusted terminator here — it is
+///   attacker-controllable and therefore ignored.
+fn resolve_spki(headers: &HeaderMap, body_spki: Option<&str>, tailnet: bool) -> Result<Vec<u8>> {
+	if tailnet {
+		let b64 = body_spki.ok_or(AppError::EnrollmentFailed)?;
+		base64::engine::general_purpose::STANDARD
+			.decode(b64)
+			.map_err(|_| AppError::EnrollmentFailed)
+	} else {
+		mtls::spki_from_headers(headers)
+			.map_err(|_| AppError::EnrollmentFailed)?
+			.ok_or(AppError::EnrollmentFailed)
+	}
+}
+
+/// The configured EKM header name, if channel binding is enabled.
+fn ekm_header_name() -> Option<String> {
+	std::env::var(EKM_HEADER_ENV).ok().filter(|s| !s.is_empty())
+}
+
+/// Enrollment rate-limit budgets within a 1-minute window. Enrollment is a
+/// rare, human-paced operation, so these are generous for legitimate use but
+/// blunt a token-guesser / griefer hammering the endpoints.
+const RL_WINDOW: Duration = Duration::from_secs(60);
+const RL_PER_IP: u32 = 60;
+const RL_PER_SERVER: u32 = 20;
+
+/// Enforce per-source and per-target rate limits on the enrollment endpoints.
+/// A trip is logged (target `enrollment`) so a log-based alert can fire.
+fn enforce_rate_limit(rl: &RateLimiter, ip: std::net::IpAddr, server_id: uuid::Uuid) -> Result<()> {
+	let ip = ip.to_string();
+	if !rl.check(&format!("ip:{ip}"), RL_PER_IP, RL_WINDOW) {
+		tracing::warn!(target: "enrollment", ip, "enrollment rate limit exceeded (per-ip)");
+		return Err(AppError::RateLimited);
+	}
+	if !rl.check(&format!("srv:{server_id}"), RL_PER_SERVER, RL_WINDOW) {
+		tracing::warn!(target: "enrollment", %server_id, "enrollment rate limit exceeded (per-server)");
+		return Err(AppError::RateLimited);
+	}
+	Ok(())
+}
+
 #[utoipa::path(
 	post,
-	path = "/",
+	path = "/register/begin",
 	tag = "servers",
-	security(("server-device" = [])),
-	request_body = NewServer,
+	request_body = BeginArgs,
 	responses(
-		(status = 200, body = Server),
-		(status = 401, body = ProblemDetailsSchema),
+		(status = 200, body = BeginResponse),
 		(status = 403, body = ProblemDetailsSchema),
 	),
 )]
-pub async fn create(
-	device: ServerDevice,
+pub async fn register_begin(
 	State(db): State<Db>,
-	Json(input): Json<NewServer>,
-) -> Result<Json<Server>> {
+	State(rl): State<RateLimiter>,
+	State(directory): State<Option<TailnetDirectory>>,
+	ClientIp(ip): ClientIp,
+	headers: HeaderMap,
+	Json(args): Json<BeginArgs>,
+) -> Result<Json<BeginResponse>> {
+	enforce_rate_limit(&rl, ip, args.server_id)?;
 	let mut db = db.get().await?;
-	let mut input = Server::from(input);
-	input.device_id = Some(device.0.0.id);
+	// `Some` only on the private-server's `/public` (tailnet) mount; `None` on
+	// the internet binary — see `AppState::tailnet_directory`.
+	let tailnet = directory.is_some();
+	let spki = resolve_spki(&headers, args.spki.as_deref(), tailnet)?;
 
-	let server = diesel::insert_into(database::schema::servers::table)
-		.values(input)
-		.returning(Server::as_select())
-		.get_result(&mut db)
-		.await?;
-
-	// A new member can shift the group's canonical member, so refresh the cache.
-	if let Some(group_id) = server.group_id {
-		database::server_groups::ServerGroup::recompute_version(&mut db, group_id).await?;
+	// Server must exist and be live.
+	let server = Server::get_by_id(&mut db, args.server_id)
+		.await
+		.map_err(|_| AppError::EnrollmentFailed)?;
+	if server.deleted_at.is_some() {
+		return Err(AppError::EnrollmentFailed);
 	}
 
-	Ok(Json(server))
+	// Validate (do not consume) the token, then issue a challenge bound to it
+	// and the presented key.
+	let token = ServerEnrollmentToken::find_active(&mut db, args.server_id, &args.token).await?;
+	let nonce = ServerEnrollmentChallenge::create(
+		&mut db,
+		args.server_id,
+		&token.token_hash,
+		&spki,
+		CHALLENGE_TTL,
+	)
+	.await?;
+
+	Ok(Json(BeginResponse {
+		nonce: base64::engine::general_purpose::STANDARD.encode(&nonce),
+		// Channel binding is an mTLS-path concept (the TLS exporter comes from
+		// the terminating proxy); the tailnet transport has no such exporter.
+		channel_binding_required: !tailnet && ekm_header_name().is_some(),
+	}))
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct CompleteArgs {
+	pub server_id: Uuid,
+	/// Base64 (standard) of the nonce returned by `begin`.
+	pub nonce: String,
+	/// Base64 (standard) of the ASN.1 DER ECDSA-P256-SHA256 signature over the
+	/// transcript `nonce ‖ server_id ‖ spki [‖ ekm]`.
+	pub signature: String,
+	/// Base64-standard DER SPKI of the device public key. Required on the
+	/// tailnet transport; omitted on the mTLS path (key comes from the cert).
+	/// Must match the key used at `begin`.
+	#[serde(default)]
+	pub spki: Option<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct CompleteResponse {
+	pub server_id: Uuid,
+	pub device_id: Uuid,
 }
 
 #[utoipa::path(
-	patch,
-	path = "/",
+	post,
+	path = "/register/complete",
 	tag = "servers",
-	security(("server-device" = [])),
-	request_body = PartialServer,
+	request_body = CompleteArgs,
 	responses(
-		(status = 200, body = Server),
-		(status = 401, body = ProblemDetailsSchema),
-		(status = 403, body = ProblemDetailsSchema),
-		(status = 404, body = ProblemDetailsSchema),
-	),
-)]
-pub async fn edit(
-	device: ServerDevice,
-	State(db): State<Db>,
-	Json(input): Json<PartialServer>,
-) -> Result<Json<Server>> {
-	use database::schema::servers::dsl::*;
-
-	let mut db = db.get().await?;
-	let input_id = input.id;
-	let dev_id = device.0.0.id;
-
-	// Capture the old group before the update: rank/kind/group_id may all
-	// change, so both the old and new group's canonical member can shift.
-	let old_group_id = Server::get_by_id(&mut db, input_id)
-		.await
-		.ok()
-		.and_then(|s| s.group_id);
-
-	// Scope to the calling device's own server: a device may only edit the
-	// server it is bound to, never an arbitrary server id from the body.
-	diesel::update(servers)
-		.filter(id.eq(input_id))
-		.filter(device_id.eq(dev_id))
-		.set(input)
-		.execute(&mut db)
-		.await?;
-
-	let updated: Server = servers
-		.filter(id.eq(input_id))
-		.filter(device_id.eq(dev_id))
-		.select(Server::as_select())
-		.first(&mut db)
-		.await?;
-
-	for gid in [old_group_id, updated.group_id]
-		.into_iter()
-		.flatten()
-		.collect::<std::collections::BTreeSet<_>>()
-	{
-		database::server_groups::ServerGroup::recompute_version(&mut db, gid).await?;
-	}
-
-	Ok(Json(updated))
-}
-
-#[utoipa::path(
-	delete,
-	path = "/",
-	tag = "servers",
-	security(("admin-device" = [])),
-	request_body = PartialServer,
-	responses(
-		(status = 200),
-		(status = 401, body = ProblemDetailsSchema),
+		(status = 200, body = CompleteResponse),
 		(status = 403, body = ProblemDetailsSchema),
 	),
 )]
-pub async fn remove(
-	_device: AdminDevice,
+pub async fn register_complete(
 	State(db): State<Db>,
-	Json(input): Json<PartialServer>,
-) -> Result<()> {
-	use database::schema::servers::dsl::*;
-
+	State(rl): State<RateLimiter>,
+	State(directory): State<Option<TailnetDirectory>>,
+	ClientIp(ip): ClientIp,
+	headers: HeaderMap,
+	Json(args): Json<CompleteArgs>,
+) -> Result<Json<CompleteResponse>> {
+	enforce_rate_limit(&rl, ip, args.server_id)?;
 	let mut db = db.get().await?;
+	let tailnet = directory.is_some();
+	let spki = resolve_spki(&headers, args.spki.as_deref(), tailnet)?;
 
-	// Capture the group before the delete: the FK auto-nulls
-	// `version_server_id`, but we must repopulate the cache from the remaining
-	// members.
-	let removed_group_id = Server::get_by_id(&mut db, input.id)
-		.await
-		.ok()
-		.and_then(|s| s.group_id);
+	let nonce = base64::engine::general_purpose::STANDARD
+		.decode(&args.nonce)
+		.map_err(|_| AppError::EnrollmentFailed)?;
+	let signature = base64::engine::general_purpose::STANDARD
+		.decode(&args.signature)
+		.map_err(|_| AppError::EnrollmentFailed)?;
 
-	diesel::delete(servers)
-		.filter(id.eq(input.id))
-		.execute(&mut db)
-		.await?;
+	// Single-use take: also confirms the key matches the one used at `begin`.
+	let challenge = ServerEnrollmentChallenge::take(&mut db, args.server_id, &nonce, &spki).await?;
 
-	if let Some(gid) = removed_group_id {
-		database::server_groups::ServerGroup::recompute_version(&mut db, gid).await?;
+	// Build the transcript and verify proof-of-possession.
+	let mut transcript = nonce.clone();
+	transcript.extend_from_slice(args.server_id.as_bytes());
+	transcript.extend_from_slice(&spki);
+	if !tailnet && let Some(header_name) = ekm_header_name() {
+		// Channel binding required: fold in the proxy-provided TLS exporter.
+		// mTLS path only — the tailnet transport has no TLS exporter.
+		let ekm = headers
+			.get(&header_name)
+			.and_then(|v| v.to_str().ok())
+			.and_then(|v| base64::engine::general_purpose::STANDARD.decode(v).ok())
+			.ok_or(AppError::EnrollmentFailed)?;
+		transcript.extend_from_slice(&ekm);
+	}
+	if let Err(e) = pop::verify_pop(&spki, &transcript, &signature) {
+		// A valid challenge was presented but the signature doesn't match the
+		// cert's key — either a misbehaving client or an attacker who holds a
+		// token but not the private key. Worth surfacing.
+		tracing::warn!(
+			target: "enrollment",
+			server_id = %args.server_id,
+			"enrollment proof-of-possession signature verification failed",
+		);
+		return Err(e);
 	}
 
-	Ok(())
+	// Bind + promote + burn the token, atomically. The challenge is already
+	// spent; a failure here strands the token (operator reissues) but never
+	// double-binds.
+	let device_id = db
+		.transaction::<_, AppError, _>(async |conn| {
+			// Lock the server row so a concurrent archival can't slip in between
+			// this check and the bind/burn below (it also locks FOR UPDATE).
+			let server = Server::get_by_id_for_update(conn, args.server_id).await?;
+			if server.deleted_at.is_some() {
+				return Err(AppError::EnrollmentFailed);
+			}
+
+			// Refuse to graft this key onto an identity already serving a
+			// different live server.
+			if let Some(existing) = Device::from_key(conn, &spki).await? {
+				if Server::live_by_device_id(conn, existing.id)
+					.await?
+					.iter()
+					.any(|s| s.id != args.server_id)
+				{
+					tracing::warn!(
+						target: "enrollment",
+						server_id = %args.server_id,
+						device_id = %existing.id,
+						"enrollment rejected: presented key is already bound to another live server",
+					);
+					return Err(AppError::EnrollmentFailed);
+				}
+			}
+
+			// Resolve the device to bind. Helper: reuse the box's prior device
+			// row (key may be inactive after archival) or create a fresh one,
+			// then bind it to the server. Never merges.
+			async fn bind_fresh_device(
+				conn: &mut diesel_async::AsyncPgConnection,
+				server_id: uuid::Uuid,
+				spki: &[u8],
+			) -> Result<uuid::Uuid> {
+				let device_id = match Device::from_key_any_state(conn, spki).await? {
+					Some(d) => {
+						Device::add_key(conn, d.id, spki.to_vec()).await?;
+						d.id
+					}
+					None => Device::create(conn, spki.to_vec()).await?.id,
+				};
+				Server::bind_device(conn, server_id, device_id).await?;
+				Ok(device_id)
+			}
+
+			let device_id = match server.device_id {
+				Some(existing_id) => {
+					let active = DeviceKey::find_by_device(conn, existing_id).await?;
+					if active.iter().any(|k| k.key_data == spki) {
+						// Same box re-running — idempotent.
+						existing_id
+					} else if active.is_empty() {
+						// Tailscale-precreated device gaining its first mTLS key.
+						Device::add_key(conn, existing_id, spki.clone()).await?;
+						existing_id
+					} else {
+						// Re-enrollment with a *different* box: replace the device.
+						// The old device kept working until now; release it (so it
+						// can't authenticate as this server) and bind the new one.
+						Device::untrust(conn, existing_id).await?;
+						Device::deactivate_keys(conn, existing_id).await?;
+						bind_fresh_device(conn, args.server_id, &spki).await?
+					}
+				}
+				None => bind_fresh_device(conn, args.server_id, &spki).await?,
+			};
+
+			Device::trust(conn, device_id, commons_types::device::DeviceRole::Server).await?;
+			ServerEnrollmentToken::consume(conn, args.server_id, &challenge.token_hash).await?;
+			Server::mark_registered(conn, args.server_id).await?;
+			Ok(device_id)
+		})
+		.await?;
+
+	Ok(Json(CompleteResponse {
+		server_id: args.server_id,
+		device_id,
+	}))
 }

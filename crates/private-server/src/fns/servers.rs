@@ -1,8 +1,8 @@
 use axum::Json;
 use axum::extract::State;
+use base64::Engine;
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
-use commons_types::server::CanopyTicket;
 use commons_types::{
 	Uuid,
 	geo::GeoPoint,
@@ -11,11 +11,12 @@ use commons_types::{
 	version::VersionStr,
 };
 use database::{
-	devices::{Device, DeviceConnection},
+	devices::{Device, DeviceConnection, TailscaleIdentity},
+	pg_duration::PgDuration,
+	server_enrollment_tokens::ServerEnrollmentToken,
 	server_groups::ServerGroup,
 	servers::{PartialServer, Server},
 	statuses::Status,
-	url_field::UrlField,
 	versions::Version,
 };
 use futures::future::join;
@@ -51,7 +52,12 @@ pub struct ServerInfo {
 	pub name: Option<String>,
 	pub kind: ServerKind,
 	pub rank: Option<ServerRank>,
-	pub host: String,
+	/// The server's stored URL, if any. May be absent for device-only servers.
+	pub host: Option<String>,
+	/// Effective URL for display: the stored `host`, or `https://{tailnet
+	/// hostname}` when the server has no URL but is bound to a Tailscale device,
+	/// else an empty string. Filled by `fill_display_hosts`.
+	pub display_host: String,
 	pub device_id: Option<Uuid>,
 	pub group_id: Option<Uuid>,
 	/// Display name of the group this server belongs to (denormalised so list
@@ -72,6 +78,12 @@ pub struct ServerInfo {
 	pub alert_when_down_for: i64,
 	pub notes: String,
 	pub tags: TagMap,
+	/// Set once a device has completed enrollment for this server. While
+	/// `None`, the UI shows setup instructions.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub registered_at: Option<Timestamp>,
+	/// Whether the server is archived (soft-deleted).
+	pub archived: bool,
 	/// Reachability of the server, derived from the most recent status row.
 	/// `None` when the endpoint that produced this row didn't batch-fetch
 	/// statuses (e.g. the cheap list/get endpoints); a populated value of
@@ -167,7 +179,10 @@ pub(super) fn server_to_info(s: Server) -> ServerInfo {
 		name: s.name,
 		kind: s.kind,
 		rank: s.rank,
-		host: s.host.0.to_string(),
+		host: s.host.as_ref().map(|h| h.0.to_string()),
+		// Default the display host to the raw host; `fill_display_hosts` later
+		// supplies the tailnet fallback for hostless, device-bound servers.
+		display_host: s.host.as_ref().map(|h| h.0.to_string()).unwrap_or_default(),
 		device_id: s.device_id,
 		group_id: s.group_id,
 		group_name: None,
@@ -178,6 +193,8 @@ pub(super) fn server_to_info(s: Server) -> ServerInfo {
 		alert_when_down_for: s.alert_when_down_for.0.as_secs(),
 		notes: s.notes,
 		tags: s.tags,
+		registered_at: s.registered_at,
+		archived: s.deleted_at.is_some(),
 		up: None,
 		health: None,
 	}
@@ -206,6 +223,33 @@ pub(super) async fn decorate_with_status(
 	Ok(())
 }
 
+/// For servers with no stored URL but a bound device, set `display_host` to
+/// `https://{tailnet hostname}`. (Servers with a URL already have
+/// `display_host == host` from `server_to_info`.)
+pub(super) async fn fill_display_hosts(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	infos: &mut [ServerInfo],
+) -> Result<()> {
+	let needy: Vec<Uuid> = infos
+		.iter()
+		.filter(|i| i.host.is_none())
+		.filter_map(|i| i.device_id)
+		.collect();
+	if needy.is_empty() {
+		return Ok(());
+	}
+	let names = Device::tailscale_names_by_ids(conn, &needy).await?;
+	for info in infos.iter_mut() {
+		if info.host.is_none()
+			&& let Some(dev) = info.device_id
+			&& let Some(name) = names.get(&dev)
+		{
+			info.display_host = format!("https://{name}");
+		}
+	}
+	Ok(())
+}
+
 /// Like [`server_to_info`] but populates `group_name` by looking it up from
 /// the supplied map (caller pre-fetches the relevant groups in one batch).
 fn server_to_info_with_group(
@@ -222,11 +266,17 @@ pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
 		.routes(routes!(list_some))
 		.routes(routes!(list_ungrouped))
+		.routes(routes!(list_archived))
 		.routes(routes!(get_name))
 		.routes(routes!(get_info))
 		.routes(routes!(get_detail))
 		.routes(routes!(update))
-		.routes(routes!(import_ticket))
+		.routes(routes!(create))
+		.routes(routes!(delete))
+		.routes(routes!(restore))
+		.routes(routes!(mint_enrollment))
+		.routes(routes!(revoke_enrollment))
+		.routes(routes!(enrollment_status))
 		.routes(routes!(attach_tailscale_device))
 }
 
@@ -262,10 +312,11 @@ pub async fn list_some(
 		Server::get_all(&mut conn, args.offset, args.limit).await?
 	};
 	let group_names = collect_group_names(&mut conn, &servers).await?;
-	let items = servers
+	let mut items: Vec<ServerInfo> = servers
 		.into_iter()
 		.map(|s| server_to_info_with_group(s, &group_names))
 		.collect();
+	fill_display_hosts(&mut conn, &mut items).await?;
 	Ok(Json(Page { items, total }))
 }
 
@@ -290,7 +341,32 @@ pub async fn list_ungrouped(
 	let servers = Server::list_ungrouped(&mut conn).await?;
 	let mut items: Vec<ServerInfo> = servers.into_iter().map(server_to_info).collect();
 	decorate_with_status(&mut conn, &mut items).await?;
+	fill_display_hosts(&mut conn, &mut items).await?;
 	Ok(Json(Page { items, total }))
+}
+
+/// Archived (soft-deleted) servers, for the Archived view. Each carries
+/// `archived: true`; the UI offers Restore.
+#[utoipa::path(
+	post,
+	path = "/list_archived",
+	tag = "servers",
+	security(("tailscale-admin" = [])),
+	responses(
+		(status = 200, body = Vec<ServerInfo>),
+	),
+)]
+pub async fn list_archived(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	_body: Json<serde_json::Value>,
+) -> Result<Json<Vec<ServerInfo>>> {
+	let mut conn = state.db.get().await?;
+	let servers = Server::list_archived(&mut conn).await?;
+	let mut items: Vec<ServerInfo> = servers.into_iter().map(server_to_info).collect();
+	decorate_with_status(&mut conn, &mut items).await?;
+	fill_display_hosts(&mut conn, &mut items).await?;
+	Ok(Json(items))
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -315,7 +391,10 @@ pub async fn get_name(
 	let mut conn = state.db.get().await?;
 	let server = Server::get_by_id(&mut conn, args.server_id).await?;
 	Ok(Json(
-		server.name.unwrap_or_else(|| server.host.0.to_string()),
+		server
+			.name
+			.or_else(|| server.host.as_ref().map(|h| h.0.to_string()))
+			.unwrap_or_else(|| server.id.to_string()),
 	))
 }
 
@@ -343,6 +422,7 @@ pub async fn get_info(
 	};
 	let mut info = server_to_info(server);
 	info.group_name = group_name;
+	fill_display_hosts(&mut conn, std::slice::from_mut(&mut info)).await?;
 	Ok(Json(info))
 }
 
@@ -391,6 +471,7 @@ pub async fn get_detail(
 
 	let mut server_details = server_to_info(server.clone());
 	server_details.group_name = group.as_ref().map(|g| g.name.clone());
+	fill_display_hosts(&mut conn, std::slice::from_mut(&mut server_details)).await?;
 
 	let up = status
 		.as_ref()
@@ -459,6 +540,7 @@ pub async fn get_detail(
 			})
 			.collect();
 		decorate_with_status(&mut conn, &mut infos).await?;
+		fill_display_hosts(&mut conn, &mut infos).await?;
 		infos
 	} else {
 		Vec::new()
@@ -518,12 +600,12 @@ pub async fn update(
 		name: args.data.name,
 		kind: args.data.kind,
 		rank: args.data.rank,
-		host: if let Some(host_str) = args.data.host {
-			Some(UrlField(host_str.parse().map_err(|e| {
-				AppError::custom(format!("Invalid URL: {}", e))
-			})?))
-		} else {
-			None
+		// `Some(Some(url))` sets, `Some(None)` clears, `None` leaves unchanged.
+		// The form always sends `host`; an empty string clears it.
+		host: match args.data.host {
+			Some(s) if s.trim().is_empty() => Some(None),
+			Some(s) => Some(Some(Server::canonicalize_host(&s)?)),
+			None => None,
 		},
 		device_id: args.data.device_id,
 		group_id: new_group_id,
@@ -554,88 +636,327 @@ pub async fn update(
 	Ok(Json(()))
 }
 
+/// Default downtime threshold for newly-created servers (10 minutes).
+const DEFAULT_ALERT_SECS: i64 = 600;
+/// Enrollment token lifetime: 7 days (human operational timescale).
+const ENROLLMENT_TTL: jiff::SignedDuration = jiff::SignedDuration::from_hours(24 * 7);
+
 #[derive(Deserialize, ToSchema)]
-pub struct ImportTicketArgs {
-	pub ticket_b64: String,
+pub struct CreateServerArgs {
+	pub name: Option<String>,
+	#[serde(default)]
+	pub host: Option<String>,
 	pub kind: ServerKind,
 	pub rank: Option<ServerRank>,
+	pub group_id: Option<Uuid>,
+	pub public_name: Option<String>,
+	pub cloud: Option<bool>,
+	pub geolocation: Option<GeoPoint>,
+	pub is_monitored: Option<bool>,
+	pub alert_when_down_for: Option<i64>,
+	pub notes: Option<String>,
+	pub tags: Option<TagMap>,
+	/// Optional Tailscale identity to pre-bind a device to (IP / node id / DNS
+	/// name). When given, a device row is created for that identity now and the
+	/// enrolling box's mTLS key is added to it at register time.
+	pub tailscale_identifier: Option<String>,
 }
 
+/// Operator-driven server creation. Creates the `servers` row (optionally
+/// pre-bound to a Tailscale device), ungrouped or in the supplied group.
 #[utoipa::path(
 	post,
-	path = "/import_ticket",
+	path = "/create",
 	tag = "servers",
 	security(("tailscale-admin" = [])),
-	request_body = ImportTicketArgs,
+	request_body = CreateServerArgs,
 	responses(
 		(status = 200, description = "New server id.", body = Uuid, content_type = "application/json"),
 		(status = 400, body = ProblemDetailsSchema),
+		(status = 409, body = ProblemDetailsSchema),
 	),
 )]
-pub async fn import_ticket(
+pub async fn create(
 	State(state): State<AppState>,
 	_admin: TailscaleAdmin,
-	Json(args): Json<ImportTicketArgs>,
+	Json(args): Json<CreateServerArgs>,
 ) -> Result<Json<Uuid>> {
 	let mut conn = state.db.get().await?;
-	let ticket = CanopyTicket::from_base64(&args.ticket_b64).inspect_err(|e| {
-		tracing::warn!(error = %e, "import_ticket: bad ticket payload");
-	})?;
-	let server = Server::upsert_from_ticket(&mut conn, &ticket, args.kind, args.rank)
-		.await
-		.inspect_err(|e| {
-			tracing::warn!(error = %e, "import_ticket: upsert_from_ticket failed");
-		})?;
 
-	// If the ticket carries a Tailscale identity and we have a directory
-	// configured, try to attach it to the device on a best-effort basis.
-	// Failure here doesn't roll back the import — the operator can attach
-	// manually via the device admin UI.
-	if let Some(device_id) = server.device_id
-		&& let Some(directory) = state.tailnet_directory.as_ref()
-	{
-		let identifier = ticket
-			.tailscale_ip
-			.as_deref()
-			.or(ticket.tailscale_name.as_deref());
-		if let Some(id) = identifier {
-			match directory.resolve_identifier(id).await {
-				Ok(Some(entry)) => {
-					let identity = database::devices::TailscaleIdentity {
+	let host = args
+		.host
+		.as_deref()
+		.filter(|s| !s.trim().is_empty())
+		.map(Server::canonicalize_host)
+		.transpose()?;
+
+	// Optionally pre-bind a Tailscale device.
+	let device_id = if let Some(identifier) = args.tailscale_identifier.as_deref() {
+		let directory = state
+			.tailnet_directory
+			.as_ref()
+			.ok_or(AppError::AuthTailnetDirectoryUnavailable)?;
+		let entry = directory
+			.resolve_identifier(identifier)
+			.await
+			.map_err(|_| AppError::AuthTailnetDirectoryUnavailable)?
+			.ok_or_else(|| {
+				AppError::BadRequest("no tailnet device matches that identifier".into())
+			})?;
+		let device = match Device::from_tailscale_node_id(&mut conn, &entry.node_id).await? {
+			Some(existing) => existing,
+			None => {
+				Device::create_with_tailscale(
+					&mut conn,
+					TailscaleIdentity {
 						node_id: entry.node_id.clone(),
-						node_name: Some(entry.node_name),
-						tailnet: Some(entry.tailnet),
-					};
-					match database::devices::Device::attach_tailscale(
-						&mut conn, device_id, identity,
-					)
-					.await
-					{
-						Ok(()) => tracing::info!(
-							%device_id,
-							node_id = %entry.node_id,
-							"import_ticket: auto-attached tailscale identity from ticket"
-						),
-						Err(e) => tracing::warn!(
-							%device_id,
-							error = %e,
-							"import_ticket: could not auto-attach tailscale identity",
-						),
-					}
-				}
-				Ok(None) => tracing::info!(
-					ticket_id = %id,
-					"import_ticket: ticket's tailscale identifier not found in directory"
-				),
-				Err(e) => tracing::warn!(
-					error = %e,
-					"import_ticket: directory lookup failed"
-				),
+						node_name: Some(entry.node_name.clone()),
+						tailnet: Some(entry.tailnet.clone()),
+					},
+				)
+				.await?
 			}
-		}
+		};
+		Some(device.id)
+	} else {
+		None
+	};
+
+	let server = Server {
+		id: Uuid::new_v4(),
+		name: args.name,
+		host,
+		kind: args.kind,
+		rank: args.rank,
+		device_id,
+		group_id: args.group_id,
+		public_name: args.public_name,
+		cloud: args.cloud,
+		geolocation: args.geolocation,
+		is_monitored: args.is_monitored.unwrap_or(true),
+		alert_when_down_for: PgDuration(jiff::SignedDuration::from_secs(
+			args.alert_when_down_for.unwrap_or(DEFAULT_ALERT_SECS),
+		)),
+		notes: args.notes.unwrap_or_default(),
+		tags: args.tags.unwrap_or_default(),
+		deleted_at: None,
+		registered_at: None,
+	};
+
+	let created = Server::create(&mut conn, server).await?;
+	Ok(Json(created.id))
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct ServerIdOnlyArgs {
+	pub server_id: Uuid,
+}
+
+/// Archive (soft-delete) a server. Releases and demotes its device.
+#[utoipa::path(
+	post,
+	path = "/delete",
+	tag = "servers",
+	security(("tailscale-admin" = [])),
+	request_body = ServerIdOnlyArgs,
+	responses(
+		(status = 200),
+		(status = 400, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn delete(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<ServerIdOnlyArgs>,
+) -> Result<Json<()>> {
+	let mut conn = state.db.get().await?;
+	Server::soft_delete(&mut conn, args.server_id).await?;
+	Ok(Json(()))
+}
+
+/// Un-archive a server. The box must re-enroll to rebind a device.
+#[utoipa::path(
+	post,
+	path = "/restore",
+	tag = "servers",
+	security(("tailscale-admin" = [])),
+	request_body = ServerIdOnlyArgs,
+	responses(
+		(status = 200),
+		(status = 409, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn restore(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<ServerIdOnlyArgs>,
+) -> Result<Json<()>> {
+	let mut conn = state.db.get().await?;
+	Server::restore(&mut conn, args.server_id).await?;
+	Ok(Json(()))
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct EnrollmentTicket {
+	/// Base64 (standard) of the age-encrypted enrollment JSON to feed to
+	/// `bestool canopy register`. Encrypted under `passphrase` (age/scrypt), so
+	/// it is safe to copy around on its own.
+	pub ticket: String,
+	/// Freshly-generated 4-word passphrase that decrypts `ticket`. Share this
+	/// out-of-band (a separate channel from the ticket itself).
+	pub passphrase: String,
+	pub expires_at: Timestamp,
+}
+
+/// Generate a 4-word lowercase, hyphen-separated passphrase from the EFF large
+/// wordlist (~52 bits of entropy), e.g. `correct-horse-battery-staple`.
+fn generate_passphrase() -> String {
+	use chbs::{config::BasicConfig, prelude::*, probability::Probability, word::WordList};
+
+	let config = BasicConfig {
+		words: 4,
+		word_provider: WordList::builtin_eff_large().sampler(),
+		separator: "-".into(),
+		capitalize_first: Probability::Never,
+		capitalize_words: Probability::Never,
+	};
+	config.to_scheme().generate()
+}
+
+/// Mint (or reissue) an enrollment token for a server and return the
+/// passphrase-encrypted ticket the operator runs through bestool, plus the
+/// 4-word passphrase that decrypts it. The plaintext token lives only inside
+/// the encrypted ticket; reissuing invalidates any prior token.
+#[utoipa::path(
+	post,
+	path = "/mint_enrollment",
+	tag = "servers",
+	security(("tailscale-admin" = [])),
+	request_body = ServerIdOnlyArgs,
+	responses(
+		(status = 200, body = EnrollmentTicket),
+		(status = 400, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn mint_enrollment(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<ServerIdOnlyArgs>,
+) -> Result<Json<EnrollmentTicket>> {
+	use algae_cli::{
+		passphrases::{Passphrase, SecretString},
+		streams::encrypt_stream,
+	};
+
+	let mut conn = state.db.get().await?;
+
+	let server = Server::get_by_id(&mut conn, args.server_id).await?;
+	if server.deleted_at.is_some() {
+		return Err(AppError::Conflict("server is archived".into()));
 	}
 
-	Ok(Json(server.id))
+	let api_url = std::env::var("PUBLIC_URL")
+		.map_err(|_| AppError::custom("PUBLIC_URL is not configured"))?;
+
+	let (token, plaintext) =
+		ServerEnrollmentToken::mint(&mut conn, args.server_id, ENROLLMENT_TTL).await?;
+
+	let payload = serde_json::json!({
+		"v": "enroll-1",
+		"api_url": api_url,
+		"server_id": args.server_id,
+		"token": plaintext,
+	});
+	let payload_bytes = serde_json::to_vec(&payload).map_err(AppError::custom)?;
+
+	// Encrypt the payload with a fresh 4-word passphrase (age/scrypt), the same
+	// primitives bestool's `protect`/`reveal` use. The ciphertext is base64'd
+	// for transport; the passphrase travels out-of-band.
+	let passphrase = generate_passphrase();
+	let key = Passphrase::new(SecretString::from(passphrase.clone()));
+
+	let mut encrypted = Vec::new();
+	encrypt_stream(
+		&payload_bytes[..],
+		futures::io::Cursor::new(&mut encrypted),
+		Box::new(key),
+	)
+	.await
+	.map_err(|e| AppError::custom(format!("encrypting enrollment ticket: {e}")))?;
+
+	let ticket = base64::engine::general_purpose::STANDARD.encode(&encrypted);
+
+	Ok(Json(EnrollmentTicket {
+		ticket,
+		passphrase,
+		expires_at: token.expires_at,
+	}))
+}
+
+/// Revoke any outstanding enrollment ticket for a server (e.g. issued by
+/// mistake). The next `enrollment_status` will report no outstanding token.
+#[utoipa::path(
+	post,
+	path = "/revoke_enrollment",
+	tag = "servers",
+	security(("tailscale-admin" = [])),
+	request_body = ServerIdOnlyArgs,
+	responses(
+		(status = 200),
+		(status = 400, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn revoke_enrollment(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<ServerIdOnlyArgs>,
+) -> Result<Json<()>> {
+	let mut conn = state.db.get().await?;
+	ServerEnrollmentToken::revoke(&mut conn, args.server_id).await?;
+	Ok(Json(()))
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct EnrollmentStatus {
+	/// When enrollment completed; `None` while awaiting first check-in.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub registered_at: Option<Timestamp>,
+	/// Expiry of the currently-active enrollment token, if one is outstanding.
+	/// Never reveals the token itself.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub token_expires_at: Option<Timestamp>,
+	/// When the currently-active enrollment token was issued, if one is
+	/// outstanding. Lets the UI show "a ticket was issued on <date>".
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub token_issued_at: Option<Timestamp>,
+}
+
+/// Enrollment state for a server: whether it has registered, and whether an
+/// enrollment token is currently outstanding (expiry only).
+#[utoipa::path(
+	post,
+	path = "/enrollment_status",
+	tag = "servers",
+	security(("tailscale-admin" = [])),
+	request_body = ServerIdOnlyArgs,
+	responses(
+		(status = 200, body = EnrollmentStatus),
+		(status = 400, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn enrollment_status(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<ServerIdOnlyArgs>,
+) -> Result<Json<EnrollmentStatus>> {
+	let mut conn = state.db.get().await?;
+	let server = Server::get_by_id(&mut conn, args.server_id).await?;
+	let active = ServerEnrollmentToken::active_for(&mut conn, args.server_id).await?;
+	Ok(Json(EnrollmentStatus {
+		registered_at: server.registered_at,
+		token_expires_at: active.as_ref().map(|t| t.expires_at),
+		token_issued_at: active.as_ref().map(|t| t.created_at),
+	}))
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -697,9 +1018,10 @@ pub async fn attach_tailscale_device(
 			.await?
 		};
 
-	// Refuse if the device is already attached to a *different* server
-	// — the operator should clear that one first.
-	let other_servers = Server::get_by_device_id(&mut conn, device.id).await?;
+	// Refuse if the device is already attached to a *different* live server
+	// — the operator should clear that one first. Archived servers don't count
+	// (their device is already released), so scope to the live set.
+	let other_servers = Server::live_by_device_id(&mut conn, device.id).await?;
 	if other_servers.iter().any(|s| s.id != args.server_id) {
 		return Err(AppError::Conflict(format!(
 			"device {} is already attached to another server",

@@ -161,10 +161,11 @@ async fn server_versions_page(
 			.select((id, name, host))
 			.filter(
 				rank.eq(ServerRank::Production)
-					.and(kind.eq(ServerKind::Central)),
+					.and(kind.eq(ServerKind::Central))
+					.and(host.is_not_null()),
 			)
 			.order(name.asc())
-			.load::<(Uuid, Option<String>, String)>(&mut conn)
+			.load::<(Uuid, Option<String>, Option<String>)>(&mut conn)
 			.await?
 	};
 
@@ -182,6 +183,7 @@ async fn server_versions_page(
 
 	let mut server_infos: Vec<ServerVersionInfo> = Vec::new();
 	for (id, name, host) in servers {
+		let host = host.unwrap_or_default(); // filtered to non-null above
 		let status = statuses.iter().find(|s| s.server_id == id);
 
 		let version = status.and_then(|s| s.version.clone());

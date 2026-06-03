@@ -54,7 +54,7 @@ function EditForm({ info }: { info: ServerInfo }) {
 	const action = useApiAction("servers", "update");
 
 	const [name, setName] = useState(info.name ?? "");
-	const [host, setHost] = useState(info.host);
+	const [host, setHost] = useState(info.host ?? "");
 	const [kind, setKind] = useState<ServerKind>(info.kind);
 	const [rank, setRank] = useState<ServerRank | "">(info.rank ?? "");
 	const [publicName, setPublicName] = useState<string>(info.public_name ?? "");
@@ -77,8 +77,10 @@ function EditForm({ info }: { info: ServerInfo }) {
 
 	const onSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
+		if (!groupId || !name.trim()) return; // name and group are required
 		const data: Record<string, unknown> = {
-			name: name.trim() === "" ? null : name.trim(),
+			name: name.trim(),
+			// Empty string clears the URL (server identified by its device only).
 			host: host.trim(),
 			kind,
 			rank: rank === "" ? null : rank,
@@ -118,13 +120,13 @@ function EditForm({ info }: { info: ServerInfo }) {
 					value={name}
 					onChange={(e) => setName(e.target.value)}
 					disabled={action.pending}
+					required
 				/>
 				<TextField
 					label="URL"
 					value={host}
 					onChange={(e) => setHost(e.target.value)}
 					disabled={action.pending}
-					required
 				/>
 				<TextField
 					select
@@ -161,6 +163,7 @@ function EditForm({ info }: { info: ServerInfo }) {
 					currentGroupId={groupId}
 					onChange={setGroupId}
 					disabled={action.pending}
+					required
 				/>
 
 				<Stack direction={{ xs: "column", md: "row" }} spacing={2}>
@@ -266,7 +269,7 @@ function EditForm({ info }: { info: ServerInfo }) {
 					<Button
 						type="submit"
 						variant="contained"
-						disabled={action.pending}
+						disabled={action.pending || !groupId || !name.trim()}
 					>
 						{action.pending ? "Saving…" : "Save"}
 					</Button>
@@ -289,10 +292,12 @@ function GroupControl({
 	currentGroupId,
 	onChange,
 	disabled,
+	required = false,
 }: {
 	currentGroupId: string | null;
 	onChange: (groupId: string | null) => void;
 	disabled: boolean;
+	required?: boolean;
 }) {
 	const [query, setQuery] = useState("");
 	const [results, setResults] = useState<ServerGroup[]>([]);
@@ -348,14 +353,23 @@ function GroupControl({
 			getOptionLabel={(g) => g.name}
 			isOptionEqualToValue={(a, b) => a.id === b.id}
 			filterOptions={(x) => x}
-			renderInput={(params) => (
-				<TextField
-					{...params}
-					label="Group"
-					placeholder="Search by name, or pick from the list"
-					helperText="Leave empty to keep this server ungrouped."
-				/>
-			)}
+			renderInput={(params) => {
+				const missing = required && !currentValue;
+				return (
+					<TextField
+						{...params}
+						label="Group"
+						required={required}
+						error={missing}
+						placeholder="Search by name, or pick from the list"
+						helperText={
+							missing
+								? "Required — every server belongs to a group."
+								: "The group this server belongs to."
+						}
+					/>
+				);
+			}}
 			renderOption={(props, group) => (
 				<li {...props} key={group.id}>
 					<Stack>
