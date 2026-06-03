@@ -2,8 +2,10 @@
 //! age/scrypt-encrypted ticket plus the 4-word passphrase; decrypting the
 //! ticket with the passphrase must yield the real, active enrollment token.
 
-use age::secrecy::SecretString;
-use algae_cli::{passphrases::Passphrase, streams::decrypt_stream};
+use algae_cli::{
+	passphrases::{Passphrase, SecretString},
+	streams::decrypt_stream,
+};
 use base64::Engine;
 use database::server_enrollment_tokens::ServerEnrollmentToken;
 use serde_json::{Value, json};

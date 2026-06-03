@@ -818,8 +818,10 @@ pub async fn mint_enrollment(
 	_admin: TailscaleAdmin,
 	Json(args): Json<ServerIdOnlyArgs>,
 ) -> Result<Json<EnrollmentTicket>> {
-	use age::secrecy::SecretString;
-	use algae_cli::{passphrases::Passphrase, streams::encrypt_stream};
+	use algae_cli::{
+		passphrases::{Passphrase, SecretString},
+		streams::encrypt_stream,
+	};
 
 	let mut conn = state.db.get().await?;
 
