@@ -1058,6 +1058,39 @@ impl Issue {
 			.map_err(AppError::from)
 	}
 
+	/// Refs of the server's *active* issues under `source` whose ref
+	/// starts with `prefix`. Used by status ingestion to decide which
+	/// per-check issues to close: deriving closes from what's actually
+	/// open (rather than diffing against the previous status row)
+	/// stays correct across interludes that keep an issue open without
+	/// re-filing it — e.g. failed → broken → passed, where the failure
+	/// issue must close on the `passed` push even though the previous
+	/// push didn't report a failure.
+	pub async fn active_refs_with_prefix(
+		db: &mut AsyncPgConnection,
+		server_id: Uuid,
+		source: &str,
+		prefix: &str,
+	) -> Result<Vec<String>> {
+		use crate::schema::issues::dsl;
+		debug_assert!(
+			!prefix.contains(['%', '_', '\\']),
+			"prefix is used in a LIKE pattern and must not contain wildcards"
+		);
+		dsl::issues
+			.select(dsl::ref_)
+			.filter(
+				dsl::server_id
+					.eq(server_id)
+					.and(dsl::source.eq(source))
+					.and(dsl::ref_.like(format!("{prefix}%")))
+					.and(dsl::active.eq(true)),
+			)
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	/// Bulk lookup of issues that share the same `(source, ref)` across many
 	/// servers. Each `(server_id, source, ref)` is unique, so at most one row
 	/// per server is returned. Used by the canopy reachability sweep.

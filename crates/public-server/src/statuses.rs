@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
 use axum::{
 	Json,
@@ -6,13 +6,13 @@ use axum::{
 };
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::{device_auth::ServerDevice, headers::VersionHeader};
-use commons_types::{device::DeviceRole, issue::Severity};
+use commons_types::{device::DeviceRole, issue::Severity, status::CheckResult};
 use database::{
 	Db,
 	devices::Device,
 	diesel_async::{AsyncConnection, AsyncPgConnection},
 	healthcheck_severities::{EvaluationContext, HealthcheckSeverity},
-	issues::NewEvent,
+	issues::{Issue, NewEvent},
 	servers::Server,
 	statuses::{NewStatus, Status},
 };
@@ -45,15 +45,17 @@ pub struct StatusPayload {
 	pub healthy: Option<bool>,
 
 	/// Per-check breakdown. Each entry must include `check` (non-empty)
-	/// and `healthy`; arbitrary additional fields per check (latency,
-	/// free disk %, certificate expiry, etc.) are passed through
-	/// verbatim and surfaced in the status snapshot UI.
+	/// and exactly one of `result` / `healthy`; arbitrary additional
+	/// fields per check (latency, free disk %, certificate expiry,
+	/// etc.) are passed through verbatim and surfaced in the status
+	/// snapshot UI.
 	///
-	/// Each check name seen — failing or healthy — upserts into
+	/// Each check name seen — whatever its result — upserts into
 	/// `healthcheck_severities` so operators can review and adjust the
-	/// severity assigned to its failures. Failing checks file (or keep
+	/// severity assigned to its failures. Failed checks file (or keep
 	/// active) an issue at `(status, health/<check>)` using the
-	/// catalog's current severity for that check name.
+	/// catalog's current severity for that check name; broken checks
+	/// file at `(status, health-broken/<check>)` at a fixed Warning.
 	pub health: Option<Vec<HealthCheck>>,
 
 	/// Free-form additional data (uptime, postgres version, timezone,
@@ -70,8 +72,15 @@ pub struct HealthCheck {
 	/// the issue's `ref` (`health/<check>`) so the same check
 	/// transitions land on the same issue across pushes.
 	pub check: String,
-	/// Pass/fail for the check.
-	pub healthy: bool,
+	/// Outcome of the check. Exactly one of `result` / `healthy` must
+	/// be present per entry. `failed` files an issue at the catalog
+	/// severity; `broken` (the check itself errored, not the system
+	/// under test) files at a fixed Warning; `skipped` (precondition
+	/// not met) and `passed` file nothing and close prior issues.
+	pub result: Option<CheckResult>,
+	/// Legacy pass/fail for the check: `true` ⇒ `passed`, `false` ⇒
+	/// `failed`. Mutually exclusive with `result`.
+	pub healthy: Option<bool>,
 	/// Arbitrary additional fields specific to the check (rendered in
 	/// the snapshot UI as a key/value block).
 	#[serde(flatten)]
@@ -83,13 +92,19 @@ pub struct HealthCheck {
 /// `canopy` (reachability sweep) so operators can tell apart "we
 /// couldn't reach you" from "you told us you're sick".
 const STATUS_SOURCE: &str = "status";
-/// Prefix for per-check refs. Each failing check is filed at
+/// Prefix for per-check refs. Each failed check is filed at
 /// `(status, health/<check_name>)`. There used to be a roll-up
 /// issue at `(status, health)` driven by bestool's top-level
 /// `healthy` flag — that was retired (see
 /// `docs/plans/healthcheck-severity-catalog.md`); the prefix lives
 /// on for the per-check refs.
 const HEALTH_REF: &str = "health";
+/// Prefix for broken-check refs. A check reporting `result: broken`
+/// files at `(status, health-broken/<check_name>)` — a separate ref
+/// from the check's failure issue, so a known failure can stay open
+/// (unconfirmed either way) while the check itself is broken, and so
+/// operators can silence the two independently.
+const BROKEN_REF: &str = "health-broken";
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new().routes(routes!(create))
@@ -136,16 +151,6 @@ async fn create(
 	let raw = body.map(|j| j.0).unwrap_or(serde_json::Value::Null);
 	let (healthy, health, extra) = split_health_from_extra(raw)?;
 
-	// Read previous-latest BEFORE the write transaction so we can
-	// detect per-check transitions (the close events on recovered
-	// checks need to know which checks were failing last time). The
-	// snapshot is a small read; no need to hold a lock.
-	let prev = Status::latest_for_server(&mut db, server_id).await?;
-	let prev_failing_checks = prev
-		.as_ref()
-		.map(|s| collect_failing_checks(&s.health))
-		.unwrap_or_default();
-
 	// Resolve the server's effective tag map outside the write transaction.
 	// Read-only; shared across every rule evaluation for this push. JSON-
 	// wrapped so the rule evaluator can compare uniformly with extras.
@@ -171,15 +176,7 @@ async fn create(
 			.save(conn)
 			.await?;
 
-			file_health_events(
-				conn,
-				server_id,
-				Some(id),
-				&status,
-				&prev_failing_checks,
-				&tags,
-			)
-			.await?;
+			file_health_events(conn, server_id, Some(id), &status, &tags).await?;
 
 			Ok(status)
 		})
@@ -188,60 +185,79 @@ async fn create(
 	Ok(Json(status))
 }
 
-/// Per-push event filing. Per-check failures land at
-/// `(status, health/<check>)`; recoveries close those issues. The
-/// roll-up issue that used to live at `(status, health)` (driven by
-/// bestool's top-level `healthy` flag) is retired — see
-/// `docs/plans/healthcheck-severity-catalog.md`.
+/// Per-push event filing. Warning/failed checks land at
+/// `(status, health/<check>)`; recoveries close those issues. Broken
+/// checks (`result: broken` — the check itself errored, not the
+/// system under test) land at `(status, health-broken/<check>)` at a
+/// fixed Warning; a broken check neither confirms nor clears a known
+/// failure, so its `health/<check>` issue stays open. Skipped checks
+/// (`result: skipped` — precondition not met) file nothing and close
+/// both refs. The roll-up issue that used to live at
+/// `(status, health)` (driven by bestool's top-level `healthy` flag)
+/// is retired — see `docs/plans/healthcheck-severity-catalog.md`.
 ///
-/// Severity for each failing check comes from the operator-owned
-/// `healthcheck_severities` catalog. Every check seen on a push —
-/// failing or healthy — upserts a default catalog row so new checks
-/// are visible to operators immediately at the default Warning
-/// severity. `status.healthy` is intentionally not consulted: the
-/// catalog is canopy's single source of truth for per-check severity.
+/// Severity for each warning/failed check comes from the
+/// operator-owned `healthcheck_severities` catalog (see
+/// [`HealthcheckSeverity::severity_for`] for the rules/fallback
+/// contract). Every check seen on a push — whatever its result —
+/// upserts a default catalog row so new checks are visible to
+/// operators immediately at the default Warning severity.
+/// `status.healthy` is intentionally not consulted: the catalog is
+/// canopy's single source of truth for per-check severity.
 async fn file_health_events(
 	conn: &mut AsyncPgConnection,
 	server_id: Uuid,
 	device_id: Option<Uuid>,
 	status: &Status,
-	prev_failing_checks: &BTreeSet<String>,
 	tags: &std::collections::HashMap<String, serde_json::Value>,
 ) -> Result<()> {
-	let curr_failing_checks = collect_failing_checks(&status.health);
+	let curr_check_results = collect_check_results(&status.health);
 	let occurred_at = Some(status.created_at);
 
 	// Upsert a catalog row for every check name seen on this push,
-	// failing or healthy. New checks land at default Warning; operators
-	// can review and adjust from the /healthchecks page.
-	for check_name in collect_all_check_names(&status.health) {
-		HealthcheckSeverity::upsert_default(conn, &check_name).await?;
+	// whatever its result. New checks land at default Warning;
+	// operators can review and adjust from the /healthchecks page.
+	for check_name in curr_check_results.keys() {
+		HealthcheckSeverity::upsert_default(conn, check_name).await?;
 	}
 
 	// Status-level extras are shared across every per-check evaluation.
 	let empty_map = serde_json::Map::new();
 	let status_extra = status.extra.as_object().unwrap_or(&empty_map);
 
-	// Per-check opens.
-	for check in &curr_failing_checks {
+	// Per-check opens: warning and failed file on the same ref (one
+	// thread per check; the filed severity is what differs).
+	for (check, result) in curr_check_results
+		.iter()
+		.filter(|(_, r)| matches!(r, CheckResult::Warning | CheckResult::Failed))
+	{
 		let entry = find_health_entry(&status.health, check);
-		// Strip the reserved `check` / `healthy` keys so a rule like
-		// `check.healthy` doesn't shortcut against the trivially-known
-		// failing state; everything else on the entry is operator-visible.
+		// Strip the reserved `check` / `healthy` keys, and replace any
+		// wire-form `result` with the normalised value so rules see a
+		// uniform `check.result` even for legacy (`healthy: bool`)
+		// payloads.
 		let mut check_extra = entry.cloned().unwrap_or_default();
 		check_extra.remove("check");
 		check_extra.remove("healthy");
+		check_extra.insert(
+			"result".into(),
+			serde_json::Value::String(result.to_string()),
+		);
 		let ctx = EvaluationContext {
 			status_extra,
 			check_extra: &check_extra,
 			tags,
 		};
-		let severity = HealthcheckSeverity::severity_for(conn, check, &ctx).await?;
+		let severity = HealthcheckSeverity::severity_for(conn, check, *result, &ctx).await?;
+		let described = match result {
+			CheckResult::Warning => "warned",
+			_ => "failed",
+		};
 		NewEvent {
 			source: STATUS_SOURCE.into(),
 			r#ref: format!("{HEALTH_REF}/{check}"),
 			severity: Some(severity),
-			description: Some(format!("Health check '{check}' failed")),
+			description: Some(format!("Health check '{check}' {described}")),
 			message: per_check_description(entry).unwrap_or_default(),
 			active: Some(true),
 			occurred_at,
@@ -250,17 +266,88 @@ async fn file_health_events(
 		.await?;
 	}
 
-	// Per-check closes: anything that was failing last time but
-	// isn't failing now. Two paths roll into this: the server
-	// explicitly says `healthy: true` for the check, OR the server
-	// stops mentioning the check altogether ("trust the reporter").
-	for check in prev_failing_checks.difference(&curr_failing_checks) {
+	// Broken opens: separate ref, fixed Warning. A broken check is a
+	// monitoring blind spot — actionable (fix the check), but not the
+	// system under test failing, so it doesn't inherit the catalog
+	// severity and can't open incidents.
+	for (check, _) in curr_check_results
+		.iter()
+		.filter(|(_, r)| matches!(r, CheckResult::Broken))
+	{
+		let entry = find_health_entry(&status.health, check);
 		NewEvent {
 			source: STATUS_SOURCE.into(),
-			r#ref: format!("{HEALTH_REF}/{check}"),
+			r#ref: format!("{BROKEN_REF}/{check}"),
+			severity: Some(Severity::Warning),
+			description: Some(format!("Health check '{check}' is broken")),
+			message: per_check_description(entry).unwrap_or_default(),
+			active: Some(true),
+			occurred_at,
+		}
+		.save(conn, server_id, device_id)
+		.await?;
+	}
+
+	// Per-check closes are derived from the issues that are actually
+	// open, not from the previous status row: an issue can stay open
+	// across pushes that don't re-file it (failed → broken keeps the
+	// failure open), so the previous push alone can't tell us what
+	// needs closing.
+
+	// Failure closes: an open `health/<check>` closes when the check
+	// is now passed, skipped, or unmentioned ("trust the reporter").
+	// Broken does NOT close a prior failure — the check can't confirm
+	// the failure either way while it's broken.
+	let health_prefix = format!("{HEALTH_REF}/");
+	for r#ref in
+		Issue::active_refs_with_prefix(conn, server_id, STATUS_SOURCE, &health_prefix).await?
+	{
+		let Some(check) = r#ref.strip_prefix(&health_prefix) else {
+			continue;
+		};
+		let curr = curr_check_results.get(check);
+		if matches!(
+			curr,
+			Some(CheckResult::Warning | CheckResult::Failed | CheckResult::Broken)
+		) {
+			continue;
+		}
+		let message = if matches!(curr, Some(CheckResult::Skipped)) {
+			format!("Health check '{check}' is now skipped")
+		} else {
+			format!("Health check '{check}' recovered")
+		};
+		NewEvent {
+			source: STATUS_SOURCE.into(),
+			r#ref,
 			severity: Some(Severity::Info),
 			description: None,
-			message: format!("Health check '{check}' recovered"),
+			message,
+			active: Some(false),
+			occurred_at,
+		}
+		.save(conn, server_id, device_id)
+		.await?;
+	}
+
+	// Broken closes: any result other than broken (or absence) means
+	// the check itself is no longer broken.
+	let broken_prefix = format!("{BROKEN_REF}/");
+	for r#ref in
+		Issue::active_refs_with_prefix(conn, server_id, STATUS_SOURCE, &broken_prefix).await?
+	{
+		let Some(check) = r#ref.strip_prefix(&broken_prefix) else {
+			continue;
+		};
+		if matches!(curr_check_results.get(check), Some(CheckResult::Broken)) {
+			continue;
+		}
+		NewEvent {
+			source: STATUS_SOURCE.into(),
+			r#ref: format!("{BROKEN_REF}/{check}"),
+			severity: Some(Severity::Info),
+			description: None,
+			message: format!("Health check '{check}' is no longer broken"),
 			active: Some(false),
 			occurred_at,
 		}
@@ -271,43 +358,23 @@ async fn file_health_events(
 	Ok(())
 }
 
-/// Names of checks in a `health[]` blob where `healthy == false`.
-/// Anything malformed (non-object entry, missing/invalid `check`,
-/// missing/invalid `healthy`) is ignored — the public endpoint
-/// validates on the way in, so by the time we read it back from the
-/// DB we're either looking at our own well-formed data or at
-/// historical pre-contract rows where missing means absent.
-fn collect_failing_checks(health: &serde_json::Value) -> BTreeSet<String> {
+/// Normalised result of every well-formed check in a `health[]` blob.
+/// Anything malformed (non-object entry, missing/invalid `check`, no
+/// resolvable result) is ignored — the public endpoint validates on
+/// the way in, so by the time we read it back from the DB we're either
+/// looking at our own well-formed data or at historical pre-contract
+/// rows where missing means absent. Reads both the `result` enum form
+/// and the legacy `healthy: bool` form via [`CheckResult::from_entry`].
+fn collect_check_results(health: &serde_json::Value) -> BTreeMap<String, CheckResult> {
 	let Some(arr) = health.as_array() else {
-		return BTreeSet::new();
+		return BTreeMap::new();
 	};
 	arr.iter()
 		.filter_map(|e| {
 			let obj = e.as_object()?;
-			let healthy = obj.get("healthy")?.as_bool()?;
-			if healthy {
-				return None;
-			}
 			let check = obj.get("check")?.as_str()?;
-			Some(check.to_string())
-		})
-		.collect()
-}
-
-/// Names of every well-formed check in a `health[]` blob, regardless
-/// of pass/fail. Used by ingestion to populate the operator-owned
-/// severity catalog: a check that's passing today might fail tomorrow,
-/// and we want operators to be able to review its mapping in advance.
-fn collect_all_check_names(health: &serde_json::Value) -> BTreeSet<String> {
-	let Some(arr) = health.as_array() else {
-		return BTreeSet::new();
-	};
-	arr.iter()
-		.filter_map(|e| {
-			let obj = e.as_object()?;
-			obj.get("healthy")?.as_bool()?;
-			let check = obj.get("check")?.as_str()?;
-			Some(check.to_string())
+			let result = CheckResult::from_entry(obj)?;
+			Some((check.to_string(), result))
 		})
 		.collect()
 }
@@ -329,7 +396,7 @@ fn per_check_description(
 	let entry = entry?;
 	let mut lines = Vec::new();
 	for (k, v) in entry.iter() {
-		if k == "check" || k == "healthy" {
+		if k == "check" || k == "healthy" || k == "result" {
 			continue;
 		}
 		let rendered = match v {
@@ -350,9 +417,13 @@ fn per_check_description(
 ///   what stops every legacy server from false-positiving unhealthy on
 ///   the day we deploy)
 /// - `healthy` present must be a bool
-/// - `health` if present must be an array of objects, each with at
-///   least `check: non-empty string` and `healthy: bool`. Other fields
-///   on each entry are passed through verbatim.
+/// - `health` if present must be an array of objects, each with
+///   `check: non-empty string` and **exactly one** of
+///   `result: "passed" | "warning" | "failed" | "broken" | "skipped"`
+///   (current bestool) or `healthy: bool` (legacy). An unrecognised
+///   `result` string is a 400 — canopy ships before any bestool that
+///   adds enum values. Other fields on each entry are passed through
+///   verbatim.
 fn split_health_from_extra(
 	raw: serde_json::Value,
 ) -> Result<(bool, serde_json::Value, serde_json::Value)> {
@@ -393,11 +464,33 @@ fn split_health_from_extra(
 				)));
 			}
 		}
-		match entry_obj.get("healthy") {
-			Some(serde_json::Value::Bool(_)) => {}
-			Some(_) | None => {
+		match (entry_obj.get("result"), entry_obj.get("healthy")) {
+			(Some(_), Some(_)) => {
+				return Err(AppError::BadRequest(format!(
+					"`health[{idx}]` must not have both `result` and `healthy`",
+				)));
+			}
+			(Some(serde_json::Value::String(s)), None) => {
+				if s.parse::<CheckResult>().is_err() {
+					return Err(AppError::BadRequest(format!(
+						"`health[{idx}].result` must be one of passed, warning, failed, broken, skipped",
+					)));
+				}
+			}
+			(Some(_), None) => {
+				return Err(AppError::BadRequest(format!(
+					"`health[{idx}].result` must be a string",
+				)));
+			}
+			(None, Some(serde_json::Value::Bool(_))) => {}
+			(None, Some(_)) => {
 				return Err(AppError::BadRequest(format!(
 					"`health[{idx}].healthy` must be a boolean",
+				)));
+			}
+			(None, None) => {
+				return Err(AppError::BadRequest(format!(
+					"`health[{idx}]` must have a `result` (or legacy `healthy`)",
 				)));
 			}
 		}

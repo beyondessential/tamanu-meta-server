@@ -333,40 +333,54 @@ pub async fn snapshot(
 	})))
 }
 
-/// For every unhealthy check on `status`, resolve the catalog + rules
-/// severity given the snapshot's actual extras and the server's
+/// For every warning/failed check on `status`, resolve the catalog +
+/// rules severity given the snapshot's actual extras and the server's
 /// resolved tag map. Mirrors the public-server ingestion path
 /// (`file_health_events`) so the UI displays what *would* be filed.
+/// Broken checks aren't included — they file at a fixed Warning and
+/// the UI renders them from the result directly; passed/skipped file
+/// nothing.
 async fn compute_check_severities(
 	conn: &mut database::diesel_async::AsyncPgConnection,
 	server_id: Uuid,
 	status: &Status,
 ) -> commons_errors::Result<std::collections::HashMap<String, commons_types::issue::Severity>> {
+	use commons_types::status::CheckResult;
 	use database::healthcheck_severities::{EvaluationContext, HealthcheckSeverity};
 	use database::servers::Server as DbServer;
 
 	let Some(arr) = status.health.as_array() else {
 		return Ok(Default::default());
 	};
-	// Walk the health array once, collect (check_name, check_extra) for
-	// every unhealthy entry. Healthy entries don't drive the rules
-	// engine on the ingestion path either, so we skip them.
-	let mut failing: Vec<(String, serde_json::Map<String, serde_json::Value>)> = Vec::new();
+	// Walk the health array once, collect (check_name, result,
+	// check_extra) for every warning/failed entry. Other results don't
+	// drive the rules engine on the ingestion path either, so we skip
+	// them. Like ingestion, the normalised result is injected so rules
+	// see a uniform `check.result` even on legacy stored rows.
+	let mut failing: Vec<(
+		String,
+		CheckResult,
+		serde_json::Map<String, serde_json::Value>,
+	)> = Vec::new();
 	for raw in arr {
 		let Some(obj) = raw.as_object() else { continue };
 		let Some(check_name) = obj.get("check").and_then(|v| v.as_str()) else {
 			continue;
 		};
-		let Some(healthy) = obj.get("healthy").and_then(|v| v.as_bool()) else {
+		let Some(result) = CheckResult::from_entry(obj) else {
 			continue;
 		};
-		if healthy {
+		if !matches!(result, CheckResult::Warning | CheckResult::Failed) {
 			continue;
 		}
 		let mut extra = obj.clone();
 		extra.remove("check");
 		extra.remove("healthy");
-		failing.push((check_name.to_string(), extra));
+		extra.insert(
+			"result".into(),
+			serde_json::Value::String(result.to_string()),
+		);
+		failing.push((check_name.to_string(), result, extra));
 	}
 	if failing.is_empty() {
 		return Ok(Default::default());
@@ -383,13 +397,13 @@ async fn compute_check_severities(
 	let status_extra = status.extra.as_object().unwrap_or(&empty_map);
 
 	let mut out = std::collections::HashMap::with_capacity(failing.len());
-	for (name, check_extra) in failing {
+	for (name, result, check_extra) in failing {
 		let ctx = EvaluationContext {
 			status_extra,
 			check_extra: &check_extra,
 			tags: &tags,
 		};
-		let sev = HealthcheckSeverity::severity_for(conn, &name, &ctx).await?;
+		let sev = HealthcheckSeverity::severity_for(conn, &name, result, &ctx).await?;
 		out.insert(name, sev);
 	}
 	Ok(out)

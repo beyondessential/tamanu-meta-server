@@ -214,6 +214,45 @@ export const SEVERITY_INTENT: Record<Severity, string> = {
 	debug: "Not shown in incidents",
 };
 
+/// Per-check result vocabulary. Hand-written mirror of the Rust
+/// `commons_types::status::CheckResult` (the source of truth) — the
+/// private API ships `health[]` as raw JSON, so this never appears in
+/// the generated schema. Also the UI display order: most to least
+/// urgent.
+export type CheckResult =
+	| "failed"
+	| "warning"
+	| "broken"
+	| "skipped"
+	| "passed";
+
+export const CHECK_RESULT_ORDER: CheckResult[] = [
+	"failed",
+	"warning",
+	"broken",
+	"skipped",
+	"passed",
+];
+
+/// Normalise a raw `health[]` entry to its result. Mirror of the Rust
+/// `CheckResult::from_entry`: prefer a valid `result` string (an
+/// unknown string is null, NOT reinterpreted via `healthy`), else the
+/// legacy `healthy: bool` (true → passed, false → failed), else null
+/// (malformed entry, callers skip it).
+export function checkResultOf(
+	entry: Record<string, unknown>,
+): CheckResult | null {
+	const result = entry.result;
+	if (typeof result === "string") {
+		return (CHECK_RESULT_ORDER as string[]).includes(result)
+			? (result as CheckResult)
+			: null;
+	}
+	const healthy = entry.healthy;
+	if (typeof healthy === "boolean") return healthy ? "passed" : "failed";
+	return null;
+}
+
 export const RESOLVED_REASONS: ResolvedReason[] = [
 	"fixed",
 	"wont_fix",

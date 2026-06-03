@@ -8,6 +8,7 @@ import {
 	Tooltip,
 	Typography,
 } from "@mui/material";
+import BuildCircleIcon from "@mui/icons-material/BuildCircle";
 import CancelIcon from "@mui/icons-material/Cancel";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import CloseIcon from "@mui/icons-material/Close";
@@ -15,6 +16,7 @@ import CircleIcon from "@mui/icons-material/Circle";
 import ErrorIcon from "@mui/icons-material/Error";
 import InfoIcon from "@mui/icons-material/Info";
 import PreviewIcon from "@mui/icons-material/Preview";
+import RemoveCircleOutlinedIcon from "@mui/icons-material/RemoveCircleOutlined";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { Fragment } from "react";
 import { useApi, type ApiState } from "../api";
@@ -22,7 +24,10 @@ import TimeAgo from "./TimeAgo";
 import TimezoneTooltip from "./TimezoneTooltip";
 import VersionIndicator from "./VersionIndicator";
 import {
+	CHECK_RESULT_ORDER,
 	SEVERITY_INTENT,
+	checkResultOf,
+	type CheckResult,
 	type Severity,
 	type StatusSnapshotData,
 } from "../types";
@@ -206,11 +211,14 @@ function ChecksBlock({
 							borderColor: "divider",
 							borderRadius: 1,
 							alignItems: "flex-start",
-							bgcolor: entry.healthy ? undefined : "action.hover",
+							bgcolor:
+								entry.result === "passed" || entry.result === "skipped"
+									? undefined
+									: "action.hover",
 						}}
 					>
 						<CheckIcon
-							healthy={entry.healthy}
+							result={entry.result}
 							severity={severities[entry.check] ?? null}
 						/>
 						<Box sx={{ flex: 1, minWidth: 0 }}>
@@ -285,7 +293,7 @@ function ExtrasBlock({ extra }: { extra: StatusSnapshotData["extra"] }) {
 
 type ParsedCheck = {
 	check: string;
-	healthy: boolean;
+	result: CheckResult;
 	extras: Array<[string, unknown]>;
 };
 
@@ -296,43 +304,69 @@ function parseChecks(health: StatusSnapshotData["health"]): ParsedCheck[] {
 		if (typeof raw !== "object" || raw === null) continue;
 		const obj = raw as Record<string, unknown>;
 		const check = obj.check;
-		const healthy = obj.healthy;
-		if (typeof check !== "string" || typeof healthy !== "boolean") continue;
+		const result = checkResultOf(obj);
+		if (typeof check !== "string" || result === null) continue;
 		const extras: Array<[string, unknown]> = Object.entries(obj).filter(
-			([k]) => k !== "check" && k !== "healthy",
+			([k]) => k !== "check" && k !== "healthy" && k !== "result",
 		);
-		parsed.push({ check, healthy, extras });
+		parsed.push({ check, result, extras });
 	}
 	parsed.sort((a, b) => {
-		if (a.healthy !== b.healthy) return a.healthy ? 1 : -1;
+		if (a.result !== b.result) {
+			return (
+				CHECK_RESULT_ORDER.indexOf(a.result) -
+				CHECK_RESULT_ORDER.indexOf(b.result)
+			);
+		}
 		return a.check.localeCompare(b.check);
 	});
 	return parsed;
 }
 
-/// Per-check status indicator. Healthy checks always render as a green
-/// tick. Unhealthy checks render the icon for the rules engine's
+/// Per-check status indicator. Passed checks render as a green tick;
+/// broken checks (the check itself errored, not the system) as an
+/// orange wrench; skipped checks (precondition not met) as a grey
+/// dash. Warning/failed checks render the icon for the rules engine's
 /// computed severity (debug → grey dot, info → blue i, warning →
 /// yellow triangle, error → red ⊘, critical → red filled exclamation).
 /// Falls back to the warning icon when the severity is absent — the
 /// catalog hasn't been touched for this check yet, so we surface it
 /// at the default level rather than miscolouring it.
 function CheckIcon({
-	healthy,
+	result,
 	severity,
 }: {
-	healthy: boolean;
+	result: CheckResult;
 	severity: Severity | null;
 }) {
-	if (healthy) {
-		return (
-			<Tooltip title="Passing" arrow>
-				<CheckCircleIcon fontSize="small" color="success" />
-			</Tooltip>
-		);
+	switch (result) {
+		case "passed":
+			return (
+				<Tooltip title="Passing" arrow>
+					<CheckCircleIcon fontSize="small" color="success" />
+				</Tooltip>
+			);
+		case "broken":
+			return (
+				<Tooltip
+					title="Broken — the check itself is failing, not the system under test"
+					arrow
+				>
+					<BuildCircleIcon fontSize="small" color="warning" />
+				</Tooltip>
+			);
+		case "skipped":
+			return (
+				<Tooltip title="Skipped — a precondition was not met" arrow>
+					<RemoveCircleOutlinedIcon fontSize="small" color="disabled" />
+				</Tooltip>
+			);
+		case "warning":
+		case "failed":
+			break;
 	}
 	const sev: Severity = severity ?? "warning";
-	const tooltip = `${sev} — ${SEVERITY_INTENT[sev]}`;
+	const tooltip = `${result} at ${sev} — ${SEVERITY_INTENT[sev]}`;
 	switch (sev) {
 		case "critical":
 			return (

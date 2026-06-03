@@ -8,7 +8,7 @@
 //! private-server `/api/healthchecks` endpoints.
 
 use commons_errors::{AppError, Result};
-use commons_types::issue::Severity;
+use commons_types::{issue::Severity, status::CheckResult};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use jiff::Timestamp;
@@ -56,12 +56,17 @@ impl HealthcheckSeverity {
 		Ok(())
 	}
 
-	/// Look up the effective severity for `check_name` given the
-	/// supplied evaluation context. If the row has a `rules` ladder
-	/// it's evaluated against the context first; the first matching
-	/// branch's severity wins. Otherwise (no ladder, no matching
-	/// branch, or malformed JSON) the row's base `severity` column
-	/// is used.
+	/// Look up the effective severity for a `check_name` reporting
+	/// `result` (warning or failed — the only kinds that file at the
+	/// catalog severity), given the supplied evaluation context. If
+	/// the row has a `rules` ladder it's evaluated against the context
+	/// first; the first matching branch's severity wins. Otherwise (no
+	/// ladder, no matching branch, or malformed JSON) the fallback
+	/// depends on the result kind: warning-result checks land at fixed
+	/// [`Severity::Warning`]; failed checks use the row's base
+	/// `severity` column. The catalog column is thus "the severity of
+	/// this check's failures" — warnings only deviate from Warning via
+	/// an explicit rule (which can condition on `check.result`).
 	///
 	/// Falls back to `Severity::Warning` if no row exists yet — in
 	/// practice the status handler upserts before reading, so this
@@ -69,6 +74,7 @@ impl HealthcheckSeverity {
 	pub async fn severity_for(
 		db: &mut AsyncPgConnection,
 		check_name: &str,
+		result: CheckResult,
 		ctx: &EvaluationContext<'_>,
 	) -> Result<Severity> {
 		use crate::schema::healthcheck_severities::dsl;
@@ -98,7 +104,10 @@ impl HealthcheckSeverity {
 				}
 			}
 		}
-		Ok(base)
+		Ok(match result {
+			CheckResult::Warning => Severity::Warning,
+			_ => base,
+		})
 	}
 
 	/// Replace the conditional-rules ladder for a check (or clear it

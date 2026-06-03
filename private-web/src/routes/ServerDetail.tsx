@@ -21,8 +21,10 @@ import {
 	Tooltip,
 	Typography,
 } from "@mui/material";
+import BuildCircleIcon from "@mui/icons-material/BuildCircle";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import CancelIcon from "@mui/icons-material/Cancel";
+import RemoveCircleOutlinedIcon from "@mui/icons-material/RemoveCircleOutlined";
 import ArchiveIcon from "@mui/icons-material/ArchiveOutlined";
 import EditIcon from "@mui/icons-material/Edit";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
@@ -52,8 +54,11 @@ import { usePageTitle } from "../hooks/usePageTitle";
 import { humanSeconds } from "../lib/humanDuration";
 import ServerNameWithGroup from "../components/ServerNameWithGroup";
 import {
+	CHECK_RESULT_ORDER,
 	SERVER_RANK_ORDER,
+	checkResultOf,
 	compareServersByRankThenKind,
+	type CheckResult,
 	type DeviceInfo,
 	type HealthState,
 	type ServerDetailData,
@@ -874,7 +879,7 @@ function ChecksTableBody({
 	serverSilences: ServerSilencedRef[];
 	groupSilences: ServerGroupSilencedRef[];
 }) {
-	const entries = parseChecks(health);
+	const entries = parseChecks(health, overallHealthy);
 	const [expanded, setExpanded] = useState(false);
 	if (entries.length === 0) return null;
 	const HIDE_AFTER = 5;
@@ -900,7 +905,6 @@ function ChecksTableBody({
 						<CheckRow
 							key={entry.check}
 							entry={entry}
-							overallHealthy={overallHealthy}
 							serverId={serverId}
 							groupId={groupId}
 							onSilenced={onSilenced}
@@ -934,30 +938,45 @@ function ChecksTableBody({
 
 type ParsedCheck = {
 	check: string;
-	healthy: boolean;
-	/** Everything other than `check` and `healthy`, preserved in source
-	 * order. */
+	result: CheckResult;
+	/** Everything other than the reserved `check` / `healthy` /
+	 * `result` keys, preserved in source order. */
 	extras: Array<[string, unknown]>;
 };
 
-function parseChecks(health: ServerLastStatusData["health"]): ParsedCheck[] {
+function parseChecks(
+	health: ServerLastStatusData["health"],
+	overallHealthy: boolean,
+): ParsedCheck[] {
 	if (!Array.isArray(health)) return [];
 	const parsed: ParsedCheck[] = [];
 	for (const raw of health as unknown[]) {
 		if (typeof raw !== "object" || raw === null) continue;
 		const obj = raw as Record<string, unknown>;
 		const check = obj.check;
-		const healthy = obj.healthy;
-		if (typeof check !== "string" || typeof healthy !== "boolean") continue;
+		let result = checkResultOf(obj);
+		if (typeof check !== "string" || result === null) continue;
+		// Legacy bestool encoded a per-check warning as `healthy: false`
+		// with top-level `healthy: true` — soften those for display, as
+		// this table did before the result enum existed. New-form pushes
+		// say `result: "warning"` outright and don't need the heuristic.
+		if (typeof obj.result !== "string" && result === "failed" && overallHealthy) {
+			result = "warning";
+		}
 		const extras: Array<[string, unknown]> = Object.entries(obj).filter(
-			([k]) => k !== "check" && k !== "healthy",
+			([k]) => k !== "check" && k !== "healthy" && k !== "result",
 		);
-		parsed.push({ check, healthy, extras });
+		parsed.push({ check, result, extras });
 	}
-	// Failing first, then alphabetical by name. Stable: same input
+	// Most urgent first, then alphabetical by name. Stable: same input
 	// always produces the same visible order.
 	parsed.sort((a, b) => {
-		if (a.healthy !== b.healthy) return a.healthy ? 1 : -1;
+		if (a.result !== b.result) {
+			return (
+				CHECK_RESULT_ORDER.indexOf(a.result) -
+				CHECK_RESULT_ORDER.indexOf(b.result)
+			);
+		}
 		return a.check.localeCompare(b.check);
 	});
 	return parsed;
@@ -965,7 +984,6 @@ function parseChecks(health: ServerLastStatusData["health"]): ParsedCheck[] {
 
 function CheckRow({
 	entry,
-	overallHealthy,
 	serverId,
 	groupId,
 	onSilenced,
@@ -973,7 +991,6 @@ function CheckRow({
 	groupSilence,
 }: {
 	entry: ParsedCheck;
-	overallHealthy: boolean;
 	serverId: string;
 	groupId: string | null;
 	onSilenced: () => void;
@@ -991,16 +1008,13 @@ function CheckRow({
 				borderColor: "divider",
 				borderRadius: 1,
 				alignItems: "flex-start",
-				bgcolor: entry.healthy ? undefined : "action.hover",
+				bgcolor:
+					entry.result === "passed" || entry.result === "skipped"
+						? undefined
+						: "action.hover",
 			}}
 		>
-			{entry.healthy ? (
-				<CheckCircleIcon fontSize="small" color="success" />
-			) : overallHealthy ? (
-				<WarningAmberIcon fontSize="small" color="warning" />
-			) : (
-				<CancelIcon fontSize="small" color="error" />
-			)}
+			<CheckResultIcon result={entry.result} />
 			<Box sx={{ flex: 1, minWidth: 0 }}>
 				<Stack
 					direction="row"
@@ -1057,6 +1071,47 @@ function CheckRow({
 			)}
 		</Stack>
 	);
+}
+
+/** Per-check result icon for the checks table. Unlike the snapshot
+ * panel this table has no computed severity to hand, so failed is a
+ * flat red and warning a flat amber. */
+function CheckResultIcon({ result }: { result: CheckResult }) {
+	switch (result) {
+		case "passed":
+			return (
+				<Tooltip title="Passing" arrow>
+					<CheckCircleIcon fontSize="small" color="success" />
+				</Tooltip>
+			);
+		case "warning":
+			return (
+				<Tooltip title="Warning — degraded but not failing" arrow>
+					<WarningAmberIcon fontSize="small" color="warning" />
+				</Tooltip>
+			);
+		case "failed":
+			return (
+				<Tooltip title="Failing" arrow>
+					<CancelIcon fontSize="small" color="error" />
+				</Tooltip>
+			);
+		case "broken":
+			return (
+				<Tooltip
+					title="Broken — the check itself is failing, not the system under test"
+					arrow
+				>
+					<BuildCircleIcon fontSize="small" color="warning" />
+				</Tooltip>
+			);
+		case "skipped":
+			return (
+				<Tooltip title="Skipped — a precondition was not met" arrow>
+					<RemoveCircleOutlinedIcon fontSize="small" color="disabled" />
+				</Tooltip>
+			);
+	}
 }
 
 /** Inline indicator showing that a check's `(status, health/<check>)` ref

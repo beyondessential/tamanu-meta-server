@@ -1708,3 +1708,451 @@ async fn submit_status_tiered_ladder() {
 	)
 	.await
 }
+
+// -----------------------------------------------------------------
+// `result` enum form (passed / warning / failed / broken / skipped).
+// See docs/plans/healthcheck-result-enum.md.
+// -----------------------------------------------------------------
+
+#[tokio::test(flavor = "multi_thread")]
+async fn submit_status_result_validation() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+
+			// Every recognised value is accepted.
+			for result in ["passed", "warning", "failed", "broken", "skipped"] {
+				post_status(
+					&public,
+					&cert,
+					server_id,
+					serde_json::json!({
+						"health": [ { "check": "db", "result": result } ],
+					}),
+				)
+				.await;
+			}
+
+			// Unknown value → 400 (strict: canopy ships before any
+			// bestool that adds enum values).
+			let response = public
+				.post(&format!("/status/{}", server_id))
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"health": [ { "check": "db", "result": "exploded" } ],
+				}))
+				.await;
+			response.assert_status_bad_request();
+
+			// Non-string result → 400.
+			let response = public
+				.post(&format!("/status/{}", server_id))
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"health": [ { "check": "db", "result": true } ],
+				}))
+				.await;
+			response.assert_status_bad_request();
+
+			// Both forms on one entry → 400.
+			let response = public
+				.post(&format!("/status/{}", server_id))
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"health": [ { "check": "db", "result": "passed", "healthy": true } ],
+				}))
+				.await;
+			response.assert_status_bad_request();
+		},
+	)
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn submit_status_result_failed_uses_catalog_severity() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+			set_check_severity(&mut conn, "db", "error").await;
+
+			post_status(
+				&public,
+				&cert,
+				server_id,
+				serde_json::json!({
+					"health": [ { "check": "db", "result": "failed", "lag_ms": 5000 } ],
+				}),
+			)
+			.await;
+
+			let issue = fetch_issue(&mut conn, server_id, "status", "health/db")
+				.await
+				.expect("per-check issue filed");
+			assert_eq!(issue.severity, "error");
+			assert!(issue.active);
+			assert!(
+				issue
+					.description
+					.as_ref()
+					.is_some_and(|d| d.contains("failed"))
+			);
+			assert!(issue.message.contains("lag_ms"));
+		},
+	)
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn submit_status_result_warning_ignores_catalog_severity() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+			// Even with the catalog at Critical, a warning result lands
+			// at fixed Warning — the catalog column is for failures.
+			set_check_severity(&mut conn, "db", "critical").await;
+
+			post_status(
+				&public,
+				&cert,
+				server_id,
+				serde_json::json!({
+					"health": [ { "check": "db", "result": "warning" } ],
+				}),
+			)
+			.await;
+
+			let issue = fetch_issue(&mut conn, server_id, "status", "health/db")
+				.await
+				.expect("per-check issue filed");
+			assert_eq!(issue.severity, "warning");
+			assert!(issue.active);
+			assert!(
+				issue
+					.description
+					.as_ref()
+					.is_some_and(|d| d.contains("warned"))
+			);
+			assert!(fetch_open_incident(&mut conn, server_id).await.is_none());
+		},
+	)
+	.await
+}
+
+/// Custom rules can condition on the normalised `check.result` — and
+/// they win over both the fixed-Warning default and the catalog base.
+#[tokio::test(flavor = "multi_thread")]
+async fn submit_status_result_rule_on_check_result() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+			set_check_rules(
+				&mut conn,
+				"db",
+				serde_json::json!({"if": [
+					{"==": [{"var": "check.result"}, "warning"]}, "info"
+				]}),
+			)
+			.await;
+
+			post_status(
+				&public,
+				&cert,
+				server_id,
+				serde_json::json!({
+					"health": [ { "check": "db", "result": "warning" } ],
+				}),
+			)
+			.await;
+
+			let issue = fetch_issue(&mut conn, server_id, "status", "health/db")
+				.await
+				.expect("per-check issue filed");
+			assert_eq!(issue.severity, "info", "rule overrides the fixed default");
+		},
+	)
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn submit_status_result_broken_files_separate_ref_at_warning() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+			// Catalog severity is irrelevant to broken checks.
+			set_check_severity(&mut conn, "db", "critical").await;
+
+			post_status(
+				&public,
+				&cert,
+				server_id,
+				serde_json::json!({
+					"health": [ { "check": "db", "result": "broken", "error": "config not found" } ],
+				}),
+			)
+			.await;
+
+			let broken = fetch_issue(&mut conn, server_id, "status", "health-broken/db")
+				.await
+				.expect("broken issue filed");
+			assert_eq!(broken.severity, "warning");
+			assert!(broken.active);
+			assert!(
+				broken
+					.description
+					.as_ref()
+					.is_some_and(|d| d.contains("broken"))
+			);
+			assert!(broken.message.contains("config not found"));
+			// No failure issue, no incident.
+			assert!(
+				fetch_issue(&mut conn, server_id, "status", "health/db")
+					.await
+					.is_none(),
+				"broken must not file at the failure ref"
+			);
+			assert!(fetch_open_incident(&mut conn, server_id).await.is_none());
+
+			// Recovery closes the broken ref.
+			post_status(
+				&public,
+				&cert,
+				server_id,
+				serde_json::json!({
+					"health": [ { "check": "db", "result": "passed" } ],
+				}),
+			)
+			.await;
+			let broken = fetch_issue(&mut conn, server_id, "status", "health-broken/db")
+				.await
+				.expect("broken issue still exists");
+			assert!(!broken.active);
+			assert!(broken.message.contains("no longer broken"));
+		},
+	)
+	.await
+}
+
+/// failed→broken: the failure issue stays open (the broken check can't
+/// confirm the failure either way) while a separate broken issue opens.
+#[tokio::test(flavor = "multi_thread")]
+async fn submit_status_failed_then_broken_keeps_failure_open() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+
+			post_status(
+				&public,
+				&cert,
+				server_id,
+				serde_json::json!({
+					"health": [ { "check": "db", "result": "failed" } ],
+				}),
+			)
+			.await;
+			post_status(
+				&public,
+				&cert,
+				server_id,
+				serde_json::json!({
+					"health": [ { "check": "db", "result": "broken" } ],
+				}),
+			)
+			.await;
+
+			let failure = fetch_issue(&mut conn, server_id, "status", "health/db")
+				.await
+				.expect("failure issue exists");
+			assert!(failure.active, "broken must not close the failure");
+			let broken = fetch_issue(&mut conn, server_id, "status", "health-broken/db")
+				.await
+				.expect("broken issue filed");
+			assert!(broken.active);
+
+			// passed closes both.
+			post_status(
+				&public,
+				&cert,
+				server_id,
+				serde_json::json!({
+					"health": [ { "check": "db", "result": "passed" } ],
+				}),
+			)
+			.await;
+			let failure = fetch_issue(&mut conn, server_id, "status", "health/db")
+				.await
+				.expect("failure issue exists");
+			assert!(!failure.active);
+			let broken = fetch_issue(&mut conn, server_id, "status", "health-broken/db")
+				.await
+				.expect("broken issue exists");
+			assert!(!broken.active);
+		},
+	)
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn submit_status_result_skipped_closes_failure_with_message() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+
+			post_status(
+				&public,
+				&cert,
+				server_id,
+				serde_json::json!({
+					"health": [ { "check": "cert", "result": "failed" } ],
+				}),
+			)
+			.await;
+			post_status(
+				&public,
+				&cert,
+				server_id,
+				serde_json::json!({
+					"health": [ { "check": "cert", "result": "skipped" } ],
+				}),
+			)
+			.await;
+
+			let issue = fetch_issue(&mut conn, server_id, "status", "health/cert")
+				.await
+				.expect("per-check issue exists");
+			assert!(!issue.active, "skipped closes the failure");
+			assert!(
+				issue.message.contains("skipped"),
+				"close message says skipped, not recovered: {}",
+				issue.message
+			);
+
+			// A skipped check on its own files nothing.
+			assert_eq!(count_issues_for_server(&mut conn, server_id).await, 1);
+		},
+	)
+	.await
+}
+
+/// Skipped also closes a prior broken issue — the check is no longer
+/// reporting itself broken.
+#[tokio::test(flavor = "multi_thread")]
+async fn submit_status_result_skipped_closes_broken() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+
+			post_status(
+				&public,
+				&cert,
+				server_id,
+				serde_json::json!({
+					"health": [ { "check": "cert", "result": "broken" } ],
+				}),
+			)
+			.await;
+			post_status(
+				&public,
+				&cert,
+				server_id,
+				serde_json::json!({
+					"health": [ { "check": "cert", "result": "skipped" } ],
+				}),
+			)
+			.await;
+
+			let broken = fetch_issue(&mut conn, server_id, "status", "health-broken/cert")
+				.await
+				.expect("broken issue exists");
+			assert!(!broken.active);
+		},
+	)
+	.await
+}
+
+/// Stored legacy rows and new result-form pushes interoperate: a check
+/// that was failing in the `healthy: bool` form closes when the new
+/// form reports passed.
+#[tokio::test(flavor = "multi_thread")]
+async fn submit_status_legacy_to_result_transition() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+
+			post_status(
+				&public,
+				&cert,
+				server_id,
+				serde_json::json!({
+					"healthy": false,
+					"health": [ { "check": "db", "healthy": false } ],
+				}),
+			)
+			.await;
+			post_status(
+				&public,
+				&cert,
+				server_id,
+				serde_json::json!({
+					"health": [ { "check": "db", "result": "passed" } ],
+				}),
+			)
+			.await;
+
+			let issue = fetch_issue(&mut conn, server_id, "status", "health/db")
+				.await
+				.expect("per-check issue exists");
+			assert!(!issue.active, "result form closes legacy-form failure");
+		},
+	)
+	.await
+}
+
+/// Passed/skipped/broken results still upsert catalog rows: a check
+/// that's passing today might fail tomorrow, and operators should be
+/// able to review its mapping in advance.
+#[tokio::test(flavor = "multi_thread")]
+async fn submit_status_result_all_kinds_upsert_catalog() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+
+			post_status(
+				&public,
+				&cert,
+				server_id,
+				serde_json::json!({
+					"health": [
+						{ "check": "a_passed", "result": "passed" },
+						{ "check": "b_skipped", "result": "skipped" },
+						{ "check": "c_broken", "result": "broken" },
+					],
+				}),
+			)
+			.await;
+
+			#[derive(QueryableByName)]
+			struct NameRow {
+				#[diesel(sql_type = sql_types::Text)]
+				check_name: String,
+			}
+			let rows: Vec<NameRow> =
+				sql_query("SELECT check_name FROM healthcheck_severities ORDER BY check_name")
+					.get_results(&mut conn)
+					.await
+					.expect("list catalog");
+			let names: Vec<&str> = rows.iter().map(|r| r.check_name.as_str()).collect();
+			assert_eq!(names, vec!["a_passed", "b_skipped", "c_broken"]);
+		},
+	)
+	.await
+}
