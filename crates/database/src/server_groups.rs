@@ -339,6 +339,7 @@ impl ServerGroup {
 
 		if let Ok(qid) = query.parse::<Uuid>()
 			&& let Ok(group) = Self::get_by_id(db, qid).await
+			&& group.deleted_at.is_none()
 		{
 			return Ok(vec![group]);
 		}
@@ -346,6 +347,7 @@ impl ServerGroup {
 		dsl::server_groups
 			.select(Self::as_select())
 			.filter(dsl::name.ilike(&pattern))
+			.filter(dsl::deleted_at.is_null())
 			.order(dsl::name.asc())
 			.limit(50)
 			.load(db)
