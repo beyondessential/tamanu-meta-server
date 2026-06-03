@@ -59,10 +59,17 @@ export default function GroupDetail() {
 			? activeIncidents.data[0]
 			: null;
 
+	// A group archives when empty, or when all its members are "gone" (no
+	// recent status) — in which case archiving cascades to those servers.
+	const allGone = servers.every((s) => s.up === "gone");
 	const onArchive = async () => {
+		const cascade =
+			servers.length > 0
+				? ` This also archives its ${servers.length} gone server${servers.length === 1 ? "" : "s"}.`
+				: "";
 		if (
 			!confirm(
-				`Archive group "${group.name}"? It's hidden from listings but can be restored from the Archived tab.`,
+				`Archive group "${group.name}"?${cascade} It's hidden from listings but can be restored from the Archived tab.`,
 			)
 		)
 			return;
@@ -102,7 +109,7 @@ export default function GroupDetail() {
 						>
 							Edit
 						</Button>
-						{servers.length === 0 && !group.deleted_at && (
+						{allGone && !group.deleted_at && (
 							<Button
 								variant="outlined"
 								color="error"
