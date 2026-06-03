@@ -212,6 +212,20 @@ impl Server {
 			.map_err(AppError::from)
 	}
 
+	/// Like [`Server::get_by_id`] but takes a `FOR UPDATE` row lock. A caller
+	/// inside a transaction uses this to serialise against concurrent archival
+	/// (`soft_delete` locks the same row), closing the archive-vs-register
+	/// TOCTOU at enrollment completion.
+	pub async fn get_by_id_for_update(db: &mut AsyncPgConnection, id: Uuid) -> Result<Self> {
+		crate::schema::servers::table
+			.select(Self::as_select())
+			.filter(crate::schema::servers::id.eq(id))
+			.for_update()
+			.first(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	pub async fn get_by_host(db: &mut AsyncPgConnection, host: String) -> Result<Self> {
 		crate::schema::servers::table
 			.select(Self::as_select())

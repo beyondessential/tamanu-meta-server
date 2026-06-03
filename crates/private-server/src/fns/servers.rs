@@ -991,9 +991,10 @@ pub async fn attach_tailscale_device(
 			.await?
 		};
 
-	// Refuse if the device is already attached to a *different* server
-	// — the operator should clear that one first.
-	let other_servers = Server::get_by_device_id(&mut conn, device.id).await?;
+	// Refuse if the device is already attached to a *different* live server
+	// — the operator should clear that one first. Archived servers don't count
+	// (their device is already released), so scope to the live set.
+	let other_servers = Server::live_by_device_id(&mut conn, device.id).await?;
 	if other_servers.iter().any(|s| s.id != args.server_id) {
 		return Err(AppError::Conflict(format!(
 			"device {} is already attached to another server",

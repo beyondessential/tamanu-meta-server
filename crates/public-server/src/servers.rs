@@ -268,7 +268,9 @@ pub async fn register_complete(
 	// double-binds.
 	let device_id = db
 		.transaction::<_, AppError, _>(async |conn| {
-			let server = Server::get_by_id(conn, args.server_id).await?;
+			// Lock the server row so a concurrent archival can't slip in between
+			// this check and the bind/burn below (it also locks FOR UPDATE).
+			let server = Server::get_by_id_for_update(conn, args.server_id).await?;
 			if server.deleted_at.is_some() {
 				return Err(AppError::EnrollmentFailed);
 			}
