@@ -150,6 +150,21 @@ test.describe("archived view", () => {
 		// The archived server is still listed.
 		await expect(page.getByText(/arch-server/)).toBeVisible();
 	});
+
+	test("an empty group can be archived from its detail page", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "empty-grp" });
+		page.on("dialog", (d) => d.accept());
+
+		await page.goto(`/groups/${group.id}`);
+		await page.getByRole("button", { name: "Archive" }).click();
+		// Redirects to the servers list, and the group now shows under Archived.
+		await expect(page).toHaveURL(/\/servers$/);
+		await page.goto("/servers/archived");
+		await expect(page.getByRole("link", { name: "empty-grp" })).toBeVisible();
+	});
 });
 
 test.describe("server create → setup → archive flow", () => {
@@ -184,11 +199,12 @@ test.describe("server create → setup → archive flow", () => {
 		await expect(page.getByText(/hasn't checked in yet/i)).toBeVisible();
 		await expect(page.getByText(/bestool canopy register/)).toBeVisible();
 
-		// Archive — confirm the dialog and return to the servers list.
+		// Archive — confirm the dialog; since the server is in a group, it
+		// redirects to that group's page (not the servers list).
 		await page.getByRole("button", { name: "Archive", exact: true }).click();
 		const dialog = page.getByRole("dialog");
 		await expect(dialog).toBeVisible();
 		await dialog.getByRole("button", { name: "Archive", exact: true }).click();
-		await expect(page).toHaveURL(/\/servers$/);
+		await expect(page).toHaveURL(new RegExp(`/groups/${group.id}$`));
 	});
 });

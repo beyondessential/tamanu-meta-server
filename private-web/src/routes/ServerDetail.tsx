@@ -258,6 +258,7 @@ function Header({
 							<DeleteServerButton
 								serverId={data.server.id}
 								serverName={data.server.name ?? "this server"}
+								groupId={data.server.group_id ?? null}
 								onArchived={onArchived}
 							/>
 						)}
@@ -269,14 +270,16 @@ function Header({
 }
 
 /// Inline admin action: archive (soft-delete) the server behind a confirm
-/// dialog, then navigate back to the servers list.
+/// dialog, then navigate back to its group (if it had one) or the server list.
 function DeleteServerButton({
 	serverId,
 	serverName,
+	groupId,
 	onArchived,
 }: {
 	serverId: string;
 	serverName: string;
+	groupId: string | null;
 	onArchived: () => void;
 }) {
 	const navigate = useNavigate();
@@ -288,7 +291,7 @@ function DeleteServerButton({
 			await action.call({ server_id: serverId });
 			setOpen(false);
 			onArchived();
-			navigate("/servers");
+			navigate(groupId ? `/groups/${groupId}` : "/servers");
 		} catch {
 			/* surfaced via action.error */
 		}
