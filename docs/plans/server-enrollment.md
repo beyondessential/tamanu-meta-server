@@ -665,11 +665,13 @@ back (nothing to alert on).
   `enrollment_status`, or a failed register error.
 - `attach_tailscale_device`'s "already attached" check uses
   `live_by_device_id` (was `get_by_device_id`, which counted archived servers).
-
-**Deferred (not yet done — do not consider the plan complete):**
-
-- A channel-binding (`CANOPY_ENROLL_EKM_HEADER`) test, pending the
-  channel-binding rollout decision below.
+- **Channel-binding tests** (`server_enrollment.rs`): begin advertises the
+  requirement; complete folds the proxy EKM into the transcript and rejects a
+  missing header or an EKM mismatch; the tailnet mount neither advertises nor
+  requires it. These cover Canopy's *logic* only — with no real mTLS terminator
+  the test supplies the EKM on both sides, so they don't prove the EKM matches a
+  live TLS session (real relay-resistance still depends on the proxy emitting a
+  genuine RFC 9266 exporter).
 
 ## Open items / follow-ups (surface, don't drop)
 
@@ -686,3 +688,10 @@ back (nothing to alert on).
   another machine without explicit operator action. Captured in the bestool plan
   as a recommendation; no Canopy-side change needed (Canopy still just verifies
   the signature against the presented SPKI).
+- **Offline / no-connectivity enrollment (deliberately not supported for now):**
+  the old device-first flow let an operator grab a device-generated ticket and
+  register the box while it had no connectivity to Canopy. The operator-first PoP
+  handshake (and its tailnet variant) both need the device to reach Canopy at
+  register time, so that capability is gone. A conscious choice for now — if it's
+  wanted back, the likely shape is an operator-carried signed claim (mint token →
+  device signs offline → operator submits), separate from this work.

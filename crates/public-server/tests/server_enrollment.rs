@@ -1,6 +1,11 @@
 //! End-to-end tests for the operator-first enrollment handshake on the
 //! public server: begin → sign → complete, plus the opaque-error and
 //! token-state behaviours.
+//!
+//! The channel-binding tests set `CANOPY_ENROLL_EKM_HEADER` via
+//! `std::env::set_var`. That's process-global, but safe here because nextest
+//! runs each test in its own process — the same reason the ticket test's
+//! `PUBLIC_URL` set_var is safe. Do not run these under plain `cargo test`.
 
 use base64::Engine;
 use commons_tests::server::{make_signing_certificate, run, run_with_tailnet_device_auth};
@@ -502,6 +507,200 @@ async fn re_enrollment_replaces_the_device() {
 				.is_empty(),
 			"old device's keys were deactivated on replacement",
 		);
+	})
+	.await;
+}
+
+/// Header the test plays the proxy with — must match the value we set
+/// `CANOPY_ENROLL_EKM_HEADER` to in each channel-binding test.
+const EKM_HEADER: &str = "x-tls-exporter";
+
+/// Internet-path begin → sign → complete with channel-binding knobs. The
+/// transcript is signed with `signed_ekm` appended (if `Some`); `header_ekm` is
+/// sent in the EKM header (if `Some`), standing in for the terminating proxy.
+/// Returns the parsed `begin` body and the `complete` response.
+async fn run_cb_handshake(
+	public: &axum_test::TestServer,
+	server_id: Uuid,
+	token: &str,
+	spki: &[u8],
+	cert: &str,
+	signing_key: &ring::signature::EcdsaKeyPair,
+	signed_ekm: Option<&[u8]>,
+	header_ekm: Option<&[u8]>,
+) -> (Value, axum_test::TestResponse) {
+	let begin = public
+		.post("/servers/register/begin")
+		.add_header("mtls-certificate", cert)
+		.json(&json!({"server_id": server_id, "token": token}))
+		.await;
+	begin.assert_status_ok();
+	let begin_body: Value = begin.json();
+	let nonce_b64 = begin_body["nonce"].as_str().unwrap().to_string();
+	let nonce = b64().decode(&nonce_b64).unwrap();
+
+	let mut transcript = nonce.clone();
+	transcript.extend_from_slice(server_id.as_bytes());
+	transcript.extend_from_slice(spki);
+	if let Some(ekm) = signed_ekm {
+		transcript.extend_from_slice(ekm);
+	}
+	let rng = ring::rand::SystemRandom::new();
+	let sig = signing_key.sign(&rng, &transcript).unwrap();
+
+	let mut complete_req = public
+		.post("/servers/register/complete")
+		.add_header("mtls-certificate", cert);
+	if let Some(ekm) = header_ekm {
+		complete_req = complete_req.add_header(EKM_HEADER, b64().encode(ekm));
+	}
+	let complete = complete_req
+		.json(&json!({
+			"server_id": server_id,
+			"nonce": nonce_b64,
+			"signature": b64().encode(sig.as_ref()),
+		}))
+		.await;
+	(begin_body, complete)
+}
+
+// NOTE: these verify Canopy's channel-binding *logic* — that it advertises the
+// requirement, folds the proxy-supplied EKM into the expected transcript, and
+// rejects on absence/mismatch. They do not (and an integration test can't)
+// prove the EKM corresponds to a real TLS session: there's no mTLS terminator
+// here, so the test supplies the EKM on both sides. Real relay-resistance
+// depends on the proxy emitting a genuine RFC 9266 exporter.
+
+#[tokio::test(flavor = "multi_thread")]
+async fn channel_binding_happy_path() {
+	unsafe { std::env::set_var("CANOPY_ENROLL_EKM_HEADER", EKM_HEADER) };
+	run(async |mut conn, public, _private| {
+		let (spki, cert, key) = make_signing_certificate();
+		let server = Server::create(&mut conn, new_server("https://cb.example/"))
+			.await
+			.unwrap();
+		let (_t, token) =
+			ServerEnrollmentToken::mint(&mut conn, server.id, SignedDuration::from_hours(1))
+				.await
+				.unwrap();
+
+		// Same EKM in the signed transcript and the proxy header → bound.
+		let ekm = [7u8; 32];
+		let (begin, complete) =
+			run_cb_handshake(&public, server.id, &token, &spki, &cert, &key, Some(&ekm), Some(&ekm))
+				.await;
+		assert_eq!(
+			begin["channel_binding_required"],
+			json!(true),
+			"begin advertises the requirement when the EKM header env is set",
+		);
+		complete.assert_status_ok();
+		assert!(
+			Server::get_by_id(&mut conn, server.id)
+				.await
+				.unwrap()
+				.registered_at
+				.is_some(),
+			"registered with channel binding",
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn channel_binding_missing_header_is_rejected() {
+	unsafe { std::env::set_var("CANOPY_ENROLL_EKM_HEADER", EKM_HEADER) };
+	run(async |mut conn, public, _private| {
+		let (spki, cert, key) = make_signing_certificate();
+		let server = Server::create(&mut conn, new_server("https://cb-missing.example/"))
+			.await
+			.unwrap();
+		let (_t, token) =
+			ServerEnrollmentToken::mint(&mut conn, server.id, SignedDuration::from_hours(1))
+				.await
+				.unwrap();
+
+		// The device folded the EKM into its signature, but the proxy header is
+		// absent → Canopy has nothing to bind against → rejected, token intact.
+		let ekm = [7u8; 32];
+		let (_begin, complete) =
+			run_cb_handshake(&public, server.id, &token, &spki, &cert, &key, Some(&ekm), None).await;
+		complete.assert_status_forbidden();
+		assert!(
+			ServerEnrollmentToken::find_active(&mut conn, server.id, &token)
+				.await
+				.is_ok(),
+			"token not burned by a failed complete",
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn channel_binding_mismatch_is_rejected() {
+	unsafe { std::env::set_var("CANOPY_ENROLL_EKM_HEADER", EKM_HEADER) };
+	run(async |mut conn, public, _private| {
+		let (spki, cert, key) = make_signing_certificate();
+		let server = Server::create(&mut conn, new_server("https://cb-mismatch.example/"))
+			.await
+			.unwrap();
+		let (_t, token) =
+			ServerEnrollmentToken::mint(&mut conn, server.id, SignedDuration::from_hours(1))
+				.await
+				.unwrap();
+
+		// Header EKM differs from the one signed → expected transcript differs
+		// from the signed one → PoP fails. This is the case that exercises the
+		// binding itself.
+		let (_begin, complete) = run_cb_handshake(
+			&public,
+			server.id,
+			&token,
+			&spki,
+			&cert,
+			&key,
+			Some(&[1u8; 32]),
+			Some(&[2u8; 32]),
+		)
+		.await;
+		complete.assert_status_forbidden();
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tailnet_path_skips_channel_binding() {
+	unsafe { std::env::set_var("CANOPY_ENROLL_EKM_HEADER", EKM_HEADER) };
+	run_with_tailnet_device_auth("server", async |mut conn, fwd_ip, _node, _dev, _public, private| {
+		let (spki, _cert, key) = make_signing_certificate();
+		let server = Server::create(&mut conn, new_server("https://cb-tailnet.example/"))
+			.await
+			.unwrap();
+		let (_t, token) =
+			ServerEnrollmentToken::mint(&mut conn, server.id, SignedDuration::from_hours(1))
+				.await
+				.unwrap();
+
+		// Even with channel binding enabled globally, the tailnet mount has no
+		// TLS exporter, so it neither advertises nor requires it: begin reports
+		// false and complete succeeds with no EKM header and none in the
+		// signature.
+		let fwd = format!("for={fwd_ip}");
+		let begin = private
+			.post("/public/servers/register/begin")
+			.add_header("Forwarded", &fwd)
+			.json(&json!({"server_id": server.id, "token": token, "spki": b64().encode(&spki)}))
+			.await;
+		begin.assert_status_ok();
+		assert_eq!(
+			begin.json::<Value>()["channel_binding_required"],
+			json!(false),
+			"tailnet mount never requires channel binding",
+		);
+
+		run_tailnet_handshake(&private, fwd_ip, server.id, &token, &spki, &key, None)
+			.await
+			.assert_status_ok();
 	})
 	.await;
 }
