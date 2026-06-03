@@ -19,6 +19,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(delete))
 		.routes(routes!(restore))
 		.routes(routes!(list_archived))
+		.routes(routes!(server_counts))
 		.routes(routes!(search))
 }
 
@@ -39,6 +40,41 @@ pub async fn list(
 	let mut conn = state.db.get().await?;
 	let groups = ServerGroup::list_all(&mut conn).await?;
 	Ok(Json(groups))
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct GroupServerCount {
+	pub server_group_id: Uuid,
+	pub server_count: i64,
+}
+
+/// Live (non-archived) server count per group, for the groups list. Groups with
+/// no live members are omitted (the client defaults missing entries to 0).
+#[utoipa::path(
+	post,
+	path = "/server_counts",
+	operation_id = "server_groups_server_counts",
+	tag = "server_groups",
+	security(("tailscale-user" = [])),
+	responses(
+		(status = 200, body = Vec<GroupServerCount>),
+	),
+)]
+pub async fn server_counts(
+	State(state): State<AppState>,
+	_body: Json<serde_json::Value>,
+) -> Result<Json<Vec<GroupServerCount>>> {
+	let mut conn = state.db.get().await?;
+	let counts = ServerGroup::live_server_counts(&mut conn).await?;
+	Ok(Json(
+		counts
+			.into_iter()
+			.map(|(server_group_id, server_count)| GroupServerCount {
+				server_group_id,
+				server_count,
+			})
+			.collect(),
+	))
 }
 
 #[derive(Deserialize, ToSchema)]

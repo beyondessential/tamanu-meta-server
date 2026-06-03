@@ -984,6 +984,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/server_groups/server_counts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Live (non-archived) server count per group, for the groups list. Groups with
+         *     no live members are omitted (the client defaults missing entries to 0).
+         */
+        post: operations["server_groups_server_counts"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/server_groups/update": {
         parameters: {
             query?: never;
@@ -1934,6 +1954,12 @@ export interface components {
             server_group_id: string;
         };
         GroupScopeArgs: {
+            /** Format: uuid */
+            server_group_id: string;
+        };
+        GroupServerCount: {
+            /** Format: int64 */
+            server_count: number;
             /** Format: uuid */
             server_group_id: string;
         };
@@ -4682,6 +4708,29 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ServerGroup"][];
+                };
+            };
+        };
+    };
+    server_groups_server_counts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": unknown;
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupServerCount"][];
                 };
             };
         };

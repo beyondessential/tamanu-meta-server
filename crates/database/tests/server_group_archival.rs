@@ -133,3 +133,21 @@ async fn server_list_archived_only_returns_archived() {
 	})
 	.await
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn live_server_counts_excludes_archived() {
+	TestDb::run(async |mut conn, _| {
+		let group = insert_group(&mut conn, "G").await;
+		insert_server(&mut conn, group, false).await; // live
+		insert_server(&mut conn, group, false).await; // live
+		insert_server(&mut conn, group, true).await; // archived — excluded
+
+		let counts = ServerGroup::live_server_counts(&mut conn).await.unwrap();
+		assert_eq!(
+			counts.get(&group).copied(),
+			Some(2),
+			"counts only live (non-archived) members",
+		);
+	})
+	.await
+}

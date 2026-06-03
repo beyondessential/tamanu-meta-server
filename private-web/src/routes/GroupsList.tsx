@@ -8,6 +8,7 @@ import { usePageTitle } from "../hooks/usePageTitle";
 export default function GroupsList() {
 	usePageTitle("Server groups");
 	const groups = useApi("server_groups", "list", {}, []);
+	const counts = useApi("server_groups", "server_counts", {}, []);
 	const isAdmin = useApi("commons", "is_current_user_admin");
 	const admin = isAdmin.status === "ok" && isAdmin.data;
 
@@ -17,6 +18,13 @@ export default function GroupsList() {
 	if (groups.status === "error") {
 		return <Alert severity="error">{groups.error.message}</Alert>;
 	}
+
+	// Live-member counts keyed by group id. Null until loaded (so no chip
+	// flashes a premature 0); once loaded, groups absent from the map are 0.
+	const countById =
+		counts.status === "ok"
+			? new Map(counts.data.map((c) => [c.server_group_id, c.server_count]))
+			: null;
 
 	return (
 		<Stack spacing={2}>
@@ -40,7 +48,11 @@ export default function GroupsList() {
 			) : (
 				<Stack spacing={1}>
 					{groups.data.map((g) => (
-						<GroupShorty key={g.id} group={g} />
+						<GroupShorty
+							key={g.id}
+							group={g}
+							memberCount={countById ? (countById.get(g.id) ?? 0) : undefined}
+						/>
 					))}
 				</Stack>
 			)}
