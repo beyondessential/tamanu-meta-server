@@ -405,14 +405,20 @@ impl Status {
 			return Ok(Vec::new());
 		}
 
-		// Get the latest status for each server using DISTINCT ON
+		// One LATERAL probe per server rather than DISTINCT ON over the
+		// window: DISTINCT ON can't terminate early, so it reads every
+		// status row in the 7-day window for each server. The LIMIT 1 under
+		// the lateral join reads one row per weekly partition through the
+		// (server_id, created_at DESC) composite index.
 		let query = diesel::sql_query(
-			"SELECT DISTINCT ON (server_id) id, created_at, server_id, device_id, version, extra, healthy, health
-				FROM statuses
-				WHERE server_id = ANY($1)
-				AND created_at >= NOW() - INTERVAL '7 days'
-				AND id != '00000000-0000-0000-0000-000000000000'
-				ORDER BY server_id, created_at DESC",
+			"SELECT st.* FROM unnest($1) AS s(id) \
+			 CROSS JOIN LATERAL ( \
+				SELECT * FROM statuses \
+				WHERE server_id = s.id \
+				AND created_at >= NOW() - INTERVAL '7 days' \
+				AND id != '00000000-0000-0000-0000-000000000000' \
+				ORDER BY created_at DESC LIMIT 1 \
+			 ) st",
 		)
 		.bind::<diesel::sql_types::Array<diesel::sql_types::Uuid>, _>(server_ids);
 
@@ -421,7 +427,6 @@ impl Status {
 
 	pub async fn production_versions(db: &mut AsyncPgConnection) -> Result<Vec<VersionStr>> {
 		use crate::schema::servers::dsl as servers_dsl;
-		use crate::schema::statuses::dsl as statuses_dsl;
 
 		let production_server_ids: Vec<Uuid> = servers_dsl::servers
 			.select(servers_dsl::id)
@@ -429,25 +434,11 @@ impl Status {
 			.load(db)
 			.await?;
 
-		statuses_dsl::statuses
-			.select((statuses_dsl::version,))
-			.filter(
-				statuses_dsl::server_id
-					.eq_any(&production_server_ids)
-					.and(statuses_dsl::created_at.ge(diesel::dsl::sql("NOW() - INTERVAL '7 days'")))
-					.and(statuses_dsl::id.ne(Uuid::nil())),
-			)
-			.order((statuses_dsl::server_id, statuses_dsl::created_at.desc()))
-			.distinct_on(statuses_dsl::server_id)
-			.load::<(Option<VersionStr>,)>(db)
-			.await
-			.map(|results| {
-				results
-					.into_iter()
-					.filter_map(|(version,)| version)
-					.collect()
-			})
-			.map_err(AppError::from)
+		Ok(Self::latest_for_servers(db, &production_server_ids)
+			.await?
+			.into_iter()
+			.filter_map(|s| s.version)
+			.collect())
 	}
 
 	pub fn platform(&self) -> Option<String> {
