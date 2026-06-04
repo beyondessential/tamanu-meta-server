@@ -482,19 +482,32 @@ pub async fn get_detail(
 		.map(|s| s.health_state())
 		.unwrap_or_default();
 
+	let device_with_info = if let Some(device_id) = device_id {
+		Some(Device::get_with_info(&mut conn, device_id).await?)
+	} else {
+		None
+	};
+
 	let last_status = if let Some(st) = status.as_ref() {
-		let device = if let Some(device_id) = st.device_id {
-			DeviceConnection::get_latest_from_device_ids(&mut conn, [device_id].into_iter())
-				.await?
-				.into_iter()
-				.next()
-		} else {
-			None
+		// The status usually comes from the server's own device, whose
+		// latest connection was just fetched — only fall back to a
+		// dedicated lookup when the status was pushed by a different one.
+		let connection = match st.device_id {
+			Some(did) if Some(did) == device_id => device_with_info
+				.as_ref()
+				.and_then(|d| d.latest_connection.clone()),
+			Some(did) => {
+				DeviceConnection::get_latest_from_device_ids(&mut conn, [did].into_iter())
+					.await?
+					.into_iter()
+					.next()
+			}
+			None => None,
 		};
 
 		let platform = st.platform();
 		let postgres = st.postgres_version();
-		let nodejs = device.and_then(|d| d.nodejs_version());
+		let nodejs = connection.and_then(|d| d.nodejs_version());
 		let version_distance = st.distance_from_version(&latest_version);
 		let min_chrome_version = if let Some(ref version) = st.version {
 			compute_min_chrome_version(&mut conn, version).await
@@ -522,11 +535,9 @@ pub async fn get_detail(
 		None
 	};
 
-	let device_info = if let Some(device_id) = device_id {
-		let device_with_info = Device::get_with_info(&mut conn, device_id).await?;
-		Some(super::devices::DeviceInfo::from_db(device_with_info, &state).await)
-	} else {
-		None
+	let device_info = match device_with_info {
+		Some(dwi) => Some(super::devices::DeviceInfo::from_db(dwi, &state).await),
+		None => None,
 	};
 
 	let siblings = if let Some(g) = group.as_ref() {
