@@ -1243,7 +1243,7 @@ impl NewDeviceConnection {
 	}
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Queryable, Selectable)]
+#[derive(Clone, Debug, Serialize, Deserialize, Queryable, QueryableByName, Selectable)]
 #[diesel(table_name = crate::schema::device_connections)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct DeviceConnection {
@@ -1260,23 +1260,31 @@ impl DeviceConnection {
 		db: &mut AsyncPgConnection,
 		device_ids: impl Iterator<Item = Uuid>,
 	) -> Result<Vec<Self>> {
-		use crate::schema::device_connections::dsl as dc;
-
 		let ids: Vec<Uuid> = device_ids.collect();
-		// Bounded by created_at so partition pruning can engage; otherwise every
-		// weekly partition is scanned and sorted to find one row per device.
-		dc::device_connections
-			.select(Self::as_select())
-			.distinct_on(dc::device_id)
-			.filter(
-				dc::device_id
-					.eq_any(ids)
-					.and(dc::created_at.ge(diesel::dsl::sql("NOW() - INTERVAL '90 days'"))),
-			)
-			.order((dc::device_id, dc::created_at.desc()))
-			.load(db)
-			.await
-			.map_err(AppError::from)
+		if ids.is_empty() {
+			return Ok(Vec::new());
+		}
+
+		// One LATERAL probe per device rather than DISTINCT ON over the
+		// window: DISTINCT ON can't terminate early, so it reads every
+		// connection row in the window for each device — and a row is
+		// written per authenticated request, so that's ~all of a healthy
+		// device's traffic for 90 days. The LIMIT 1 under the lateral join
+		// reads one row per partition via the (device_id, created_at DESC)
+		// composite index. Still bounded by created_at so partition pruning
+		// engages.
+		diesel::sql_query(
+			"SELECT dc.* FROM unnest($1) AS d(id) \
+			 CROSS JOIN LATERAL ( \
+				SELECT * FROM device_connections \
+				WHERE device_id = d.id AND created_at >= NOW() - INTERVAL '90 days' \
+				ORDER BY created_at DESC LIMIT 1 \
+			 ) dc",
+		)
+		.bind::<diesel::sql_types::Array<diesel::sql_types::Uuid>, _>(ids)
+		.load(db)
+		.await
+		.map_err(AppError::from)
 	}
 
 	/// Get connection history for a device, newest first, optionally starting
