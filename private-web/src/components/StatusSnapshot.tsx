@@ -19,6 +19,9 @@ import RemoveCircleOutlinedIcon from "@mui/icons-material/RemoveCircleOutlined";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { Fragment } from "react";
 import { useApi, type ApiState } from "../api";
+import ExternalUsersDetails, {
+	parseExternalUserSessions,
+} from "./ExternalUsersDetails";
 import HealthChip from "./HealthChip";
 import TimeAgo from "./TimeAgo";
 import TimezoneTooltip from "./TimezoneTooltip";
@@ -114,7 +117,11 @@ function PanelBody({
 	return (
 		<Stack spacing={2}>
 			<CuratedFields snap={snap} />
-			<ChecksBlock health={snap.health} severities={snap.check_severities} />
+			<ChecksBlock
+				health={snap.health}
+				severities={snap.check_severities}
+				operators={snap.operators}
+			/>
 			<ExtrasBlock extra={snap.extra} />
 		</Stack>
 	);
@@ -181,9 +188,11 @@ function Field({
 function ChecksBlock({
 	health,
 	severities,
+	operators,
 }: {
 	health: StatusSnapshotData["health"];
 	severities: StatusSnapshotData["check_severities"];
+	operators: StatusSnapshotData["operators"];
 }) {
 	const entries = parseChecks(health);
 	if (entries.length === 0) return null;
@@ -193,67 +202,89 @@ function ChecksBlock({
 				Health checks ({entries.length})
 			</Typography>
 			<Stack spacing={1} sx={{ mt: 0.5 }}>
-				{entries.map((entry) => (
-					<Stack
-						key={entry.check}
-						direction="row"
-						spacing={1.5}
-						sx={{
-							p: 1,
-							border: 1,
-							borderColor: "divider",
-							borderRadius: 1,
-							alignItems: "flex-start",
-							bgcolor:
-								entry.result === "passed" || entry.result === "skipped"
-									? undefined
-									: "action.hover",
-						}}
-					>
-						<CheckIcon
-							result={entry.result}
-							severity={severities[entry.check] ?? null}
-						/>
-						<Box sx={{ flex: 1, minWidth: 0 }}>
-							<Typography variant="body2" sx={{ fontFamily: "monospace" }}>
-								{entry.check}
-							</Typography>
-							{entry.extras.length > 0 && (
-								<Box
-									component="dl"
-									sx={{
-										m: 0,
-										mt: 0.5,
-										display: "grid",
-										gridTemplateColumns: "max-content 1fr",
-										columnGap: 1.5,
-										rowGap: 0.25,
-										fontSize: "0.8em",
-									}}
-								>
-									{entry.extras.map(([k, v]) => (
-										<Fragment key={k}>
-											<Box component="dt" sx={{ color: "text.secondary" }}>
-												{k}
-											</Box>
-											<Box
-												component="dd"
-												sx={{
-													m: 0,
-													fontFamily: "monospace",
-													minWidth: 0,
-													overflowWrap: "anywhere",
-												}}
-											>
-												{renderValue(v)}
-											</Box>
-										</Fragment>
-									))}
-								</Box>
-							)}
-						</Box>
-					</Stack>
-				))}
+				{entries.map((entry) => {
+					// Same special-case as the ServerDetail checks table:
+					// formatted session rows for `external_users`, generic
+					// dl fallback when the shape is unexpected. No "right
+					// now" claim here — a snapshot is "as of" its push.
+					const sessions =
+						entry.check === "external_users"
+							? parseExternalUserSessions(entry.extras)
+							: null;
+					const extras =
+						sessions === null
+							? entry.extras
+							: entry.extras.filter(
+									([k]) => k !== "users" && k !== "count",
+								);
+					return (
+						<Stack
+							key={entry.check}
+							direction="row"
+							spacing={1.5}
+							sx={{
+								p: 1,
+								border: 1,
+								borderColor: "divider",
+								borderRadius: 1,
+								alignItems: "flex-start",
+								bgcolor:
+									entry.result === "passed" || entry.result === "skipped"
+										? undefined
+										: "action.hover",
+							}}
+						>
+							<CheckIcon
+								result={entry.result}
+								severity={severities[entry.check] ?? null}
+							/>
+							<Box sx={{ flex: 1, minWidth: 0 }}>
+								<Typography variant="body2" sx={{ fontFamily: "monospace" }}>
+									{entry.check}
+								</Typography>
+								{sessions !== null && (
+									<ExternalUsersDetails
+										sessions={sessions}
+										operators={operators}
+									/>
+								)}
+								{extras.length > 0 && (
+									<Box
+										component="dl"
+										sx={{
+											m: 0,
+											mt: 0.5,
+											display: "grid",
+											gridTemplateColumns: "max-content 1fr",
+											columnGap: 1.5,
+											rowGap: 0.25,
+											fontSize: "0.8em",
+										}}
+									>
+										{extras.map(([k, v]) => (
+											<Fragment key={k}>
+												<Box component="dt" sx={{ color: "text.secondary" }}>
+													{k}
+												</Box>
+												<Box
+													component="dd"
+													sx={{
+														m: 0,
+														fontFamily: "monospace",
+														minWidth: 0,
+														overflowWrap: "anywhere",
+													}}
+												>
+													{renderValue(v)}
+												</Box>
+											</Fragment>
+										))}
+									</Box>
+								)}
+							</Box>
+						</Stack>
+					);
+				})}
 			</Stack>
 		</Box>
 	);
