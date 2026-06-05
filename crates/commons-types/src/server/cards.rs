@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 use crate::{
 	server::{kind::ServerKind, rank::ServerRank},
-	status::{HealthState, ShortStatus},
+	status::{HealthState, OperatorPresence, ShortStatus},
 	version::VersionStr,
 };
 
@@ -13,6 +13,11 @@ pub struct FacilityServerStatus {
 	pub name: String,
 	pub up: ShortStatus,
 	pub health: HealthState,
+	/// Identified humans connected to this server right now, from the
+	/// latest status push's `external_users` check. Empty unless the
+	/// server is actively reporting (up/blip) — a stale push can't claim
+	/// active presence.
+	pub operators: Vec<OperatorPresence>,
 	/// Server's rank, when set. Surfaced so the UI can group dots by
 	/// rank (production first, then clone, demo, …) in a stable order.
 	pub rank: Option<ServerRank>,

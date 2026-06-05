@@ -113,6 +113,11 @@ pub struct ServerLastStatusData {
 	/// Per-check breakdown from this push. `[]` for legacy rows.
 	pub health: JsonValue,
 	pub extra: JsonValue,
+	/// Identified operators connected as of this push, from the
+	/// `external_users` check, with display info filled from the
+	/// `tailscale_users` cache. Freshness gating ("right now" vs stale)
+	/// is the UI's job — it has `up` to hand.
+	pub operators: Vec<commons_types::status::OperatorPresence>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
@@ -514,6 +519,8 @@ pub async fn get_detail(
 		} else {
 			None
 		};
+		let mut operators = st.operators();
+		super::statuses::enrich_operators(&mut conn, operators.iter_mut()).await?;
 
 		Some(ServerLastStatusData {
 			id: st.id,
@@ -530,6 +537,7 @@ pub async fn get_detail(
 			healthy: st.healthy,
 			health: st.health.clone(),
 			extra: st.extra.clone(),
+			operators,
 		})
 	} else {
 		None

@@ -504,6 +504,13 @@ impl Status {
 		state
 	}
 
+	/// Identified operators connected to the server as of this status
+	/// row, from the `external_users` check. Display fields are unfilled;
+	/// see [`commons_types::status::operators_from_health`].
+	pub fn operators(&self) -> Vec<commons_types::status::OperatorPresence> {
+		commons_types::status::operators_from_health(&self.health)
+	}
+
 	pub fn short_status(&self) -> ShortStatus {
 		let since = self.created_at.duration_since(Timestamp::now()).abs();
 		if since > SignedDuration::from_mins(30) {
