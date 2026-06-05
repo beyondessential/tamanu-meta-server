@@ -10,17 +10,25 @@ import {
 	Tooltip,
 	Typography,
 } from "@mui/material";
+import PersonIcon from "@mui/icons-material/Person";
 import { Link as RouterLink } from "react-router-dom";
 import StatusDot from "../components/StatusDot";
 import VersionIndicator from "../components/VersionIndicator";
-import { HealthLegend, StatusLegend, VersionLegend } from "../components/Legends";
+import {
+	HealthLegend,
+	OperatorLegend,
+	StatusLegend,
+	VersionLegend,
+} from "../components/Legends";
 import { useApi } from "../api";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { useReloadInterval } from "../hooks/useReloadInterval";
 import {
+	type AggregatedOperator,
 	type FacilityServerStatus,
 	type ServerGroupCard,
 	SERVER_RANK_ORDER,
+	aggregateOperators,
 	compareServersByRankThenKind,
 } from "../types";
 
@@ -62,6 +70,9 @@ export default function Status() {
 				</Box>
 				<Box sx={{ mt: 1 }}>
 					<HealthLegend />
+				</Box>
+				<Box sx={{ mt: 1 }}>
+					<OperatorLegend />
 				</Box>
 			</Box>
 		</Stack>
@@ -186,6 +197,14 @@ function GroupCardLoader({
 				? "warning.main"
 				: undefined;
 
+	// Active operator presence anywhere in the group tints the card, so
+	// "someone is already on it" reads at a glance — especially useful
+	// next to an incident border. Hover steps the tint up a notch instead
+	// of disappearing into the base shade.
+	const operators =
+		result.status === "ok" ? aggregateOperators(result.data.members) : [];
+	const occupied = operators.length > 0;
+
 	return (
 		<MuiLink
 			component={RouterLink}
@@ -197,7 +216,10 @@ function GroupCardLoader({
 				variant="outlined"
 				sx={{
 					transition: "background-color 150ms",
-					"&:hover": { bgcolor: "action.hover" },
+					bgcolor: occupied ? "action.hover" : undefined,
+					"&:hover": {
+						bgcolor: occupied ? "action.selected" : "action.hover",
+					},
 					...(borderColor && {
 						borderColor,
 						borderWidth: 2,
@@ -214,6 +236,7 @@ function GroupCardLoader({
 					) : (
 						<GroupCard
 							group={result.data}
+							operators={operators}
 							openIncident={openIncident}
 						/>
 					)}
@@ -225,9 +248,11 @@ function GroupCardLoader({
 
 function GroupCard({
 	group,
+	operators,
 	openIncident,
 }: {
 	group: ServerGroupCard;
+	operators: AggregatedOperator[];
 	openIncident: IncidentLoudness | null;
 }) {
 	return (
@@ -263,16 +288,50 @@ function GroupCard({
 				sx={{ alignItems: "center", justifyContent: "space-between" }}
 			>
 				<RankedDotStrip members={group.members} />
-				{openIncident === "loud" && (
-					<Chip label="incident" color="error" size="small" />
-				)}
-				{openIncident === "held" && (
-					<Tooltip title="Open incident; Slack notice is still inside the per-group cooldown window">
-						<Chip label="incident (held)" color="warning" size="small" />
-					</Tooltip>
-				)}
+				<Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
+					{operators.length > 0 && (
+						<OperatorCountChip operators={operators} />
+					)}
+					{openIncident === "loud" && (
+						<Chip label="incident" color="error" size="small" />
+					)}
+					{openIncident === "held" && (
+						<Tooltip title="Open incident; Slack notice is still inside the per-group cooldown window">
+							<Chip label="incident (held)" color="warning" size="small" />
+						</Tooltip>
+					)}
+				</Stack>
 			</Stack>
 		</Stack>
+	);
+}
+
+/// Compact "people are in here" marker on a group card: person icon +
+/// distinct operator count, tooltip naming who's on which server.
+function OperatorCountChip({
+	operators,
+}: {
+	operators: AggregatedOperator[];
+}) {
+	return (
+		<Tooltip
+			title={
+				<Box>
+					{operators.map(({ op, servers }) => (
+						<Box key={op.login}>
+							{op.login} · {servers.join(", ")}
+						</Box>
+					))}
+				</Box>
+			}
+		>
+			<Chip
+				icon={<PersonIcon />}
+				label={operators.length}
+				size="small"
+				variant="outlined"
+			/>
+		</Tooltip>
 	);
 }
 
