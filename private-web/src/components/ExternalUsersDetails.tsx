@@ -1,5 +1,5 @@
 import { Avatar, Stack, Typography } from "@mui/material";
-import PersonOutlineIcon from "@mui/icons-material/PersonOutline";
+import PersonOutlineIcon from "@mui/icons-material/PersonOutlined";
 import { OperatorAvatar, connectedFor } from "./OperatorAvatars";
 import type { OperatorPresence } from "../types";
 

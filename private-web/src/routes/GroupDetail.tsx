@@ -14,6 +14,7 @@ import EditIcon from "@mui/icons-material/Edit";
 import RestoreIcon from "@mui/icons-material/RestoreFromTrash";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
+import { OperatorAvatar, connectedFor } from "../components/OperatorAvatars";
 import ServerShorty from "../components/ServerShorty";
 import SilencedRefsSection from "../components/SilencedRefsSection";
 import TimeAgo from "../components/TimeAgo";
@@ -22,7 +23,9 @@ import { useIsNotificationHeld } from "../hooks/useIsNotificationHeld";
 import { usePageTitle } from "../hooks/usePageTitle";
 import {
 	SERVER_RANK_ORDER,
+	aggregateOperators,
 	compareServersByRankThenKind,
+	type AggregatedOperator,
 	type IncidentData,
 	type ServerInfo,
 	type ServerRank,
@@ -42,6 +45,14 @@ export default function GroupDetail() {
 		{ server_group_id: id, include_closed: false, limit: 1 },
 		[id],
 	);
+	// Same payload the status-page card uses, so the operator list here
+	// always matches the count shown there.
+	const groupStatuses = useApi(
+		"statuses",
+		"group_details",
+		{ server_group_id: id },
+		[id],
+	);
 	usePageTitle(detail.status === "ok" ? detail.data.group.name : "Group");
 
 	if (detail.status === "loading" || detail.status === "idle") {
@@ -54,6 +65,10 @@ export default function GroupDetail() {
 	const { group, servers } = detail.data;
 	const admin = isAdmin.status === "ok" && isAdmin.data;
 	const tagEntries = Object.entries(group.tags ?? {});
+	const operators =
+		groupStatuses.status === "ok"
+			? aggregateOperators(groupStatuses.data.members)
+			: [];
 	const openIncident =
 		activeIncidents.status === "ok" && activeIncidents.data.length > 0
 			? activeIncidents.data[0]
@@ -138,6 +153,8 @@ export default function GroupDetail() {
 
 			{openIncident && <ActiveIncidentCard incident={openIncident} />}
 
+			{operators.length > 0 && <OperatorsSection operators={operators} />}
+
 			{group.notes && (
 				<Paper variant="outlined" sx={{ p: 2 }}>
 					<Typography variant="h6" component="h2" gutterBottom>
@@ -202,6 +219,50 @@ export default function GroupDetail() {
 
 			<SilencedRefsSection scope="group" id={group.id} />
 		</Stack>
+	);
+}
+
+/// Distinct people connected across the group's servers right now (from
+/// each member's `external_users` check, deduped by Tailscale login).
+/// The same aggregate the status-page card chip counts. Hidden entirely
+/// when nobody's connected.
+function OperatorsSection({
+	operators,
+}: {
+	operators: AggregatedOperator[];
+}) {
+	return (
+		<Paper variant="outlined" sx={{ p: 2 }}>
+			<Typography variant="h6" component="h2" gutterBottom>
+				{operators.length} operator{operators.length === 1 ? "" : "s"} in
+				the servers right now
+			</Typography>
+			<Stack spacing={1}>
+				{operators.map(({ op, servers }) => {
+					const dur = connectedFor(op.connected_since);
+					return (
+						<Stack
+							key={op.login}
+							direction="row"
+							spacing={1.5}
+							sx={{ alignItems: "center" }}
+						>
+							<OperatorAvatar op={op} size={32} />
+							<Box>
+								<Typography variant="body2">
+									{op.name ? `${op.name} (${op.login})` : op.login}
+								</Typography>
+								<Typography variant="caption" color="text.secondary">
+									{[dur && `connected ${dur}`, `on ${servers.join(", ")}`]
+										.filter(Boolean)
+										.join(" · ")}
+								</Typography>
+							</Box>
+						</Stack>
+					);
+				})}
+			</Stack>
+		</Paper>
 	);
 }
 
