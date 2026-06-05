@@ -4770,6 +4770,7 @@
           "name",
           "up",
           "health",
+          "operators",
           "kind"
         ],
         "properties": {
@@ -4786,6 +4787,13 @@
           },
           "name": {
             "type": "string"
+          },
+          "operators": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatorPresence"
+            },
+            "description": "Identified humans connected to this server right now, from the\nlatest status push's `external_users` check. Empty unless the\nserver is actively reporting (up/blip) — a stale push can't claim\nactive presence."
           },
           "rank": {
             "oneOf": [
@@ -5808,6 +5816,41 @@
             "items": {
               "$ref": "#/components/schemas/VersionData"
             }
+          }
+        }
+      },
+      "OperatorPresence": {
+        "type": "object",
+        "description": "One identified human connected to a server right now, distilled from\nthe `external_users` health check on a status push.\n\n\"Identified\" means the session's source address resolved to a Tailscale\nlogin via `tailscale whois` on the device — local console or\nnon-Tailscale SSH sessions don't produce one of these. One person with\nseveral concurrent sessions appears once.",
+        "required": [
+          "login"
+        ],
+        "properties": {
+          "connected_since": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Earliest `connected_since` across the person's sessions — how long\nthey've been continuously connected, as tracked by the device."
+          },
+          "login": {
+            "type": "string",
+            "description": "Tailscale login (an email), as reported by the device."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Display name from the `tailscale_users` cache; `None` when this\nlogin has never authenticated against canopy."
+          },
+          "profile_pic": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Profile picture URL from the `tailscale_users` cache."
           }
         }
       },
@@ -6926,7 +6969,8 @@
           "created_at",
           "healthy",
           "health",
-          "extra"
+          "extra",
+          "operators"
         ],
         "properties": {
           "created_at": {
@@ -6961,6 +7005,13 @@
               "string",
               "null"
             ]
+          },
+          "operators": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatorPresence"
+            },
+            "description": "Identified operators connected as of this push, from the\n`external_users` check, with display info filled from the\n`tailscale_users` cache. Freshness gating (\"right now\" vs stale)\nis the UI's job — it has `up` to hand."
           },
           "platform": {
             "type": [
@@ -7231,6 +7282,7 @@
           "health_state",
           "health",
           "extra",
+          "operators",
           "check_severities"
         ],
         "properties": {
@@ -7282,6 +7334,13 @@
               "string",
               "null"
             ]
+          },
+          "operators": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatorPresence"
+            },
+            "description": "Identified operators connected as of this push, from the\n`external_users` check, with display info filled from the\n`tailscale_users` cache. Not freshness-gated — a snapshot is\nexplicitly \"as of\" a point in time."
           },
           "platform": {
             "type": [

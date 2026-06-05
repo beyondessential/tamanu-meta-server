@@ -9,11 +9,12 @@ use commons_types::{
 		cards::{FacilityServerStatus, ServerGroupCard},
 		rank::ServerRank,
 	},
+	status::{OperatorPresence, ShortStatus},
 	version::VersionStr,
 };
 use database::{
 	devices::DeviceConnection, server_groups::ServerGroup, servers::Server, statuses::Status,
-	versions::Version,
+	tailscale_users::TailscaleUser as CachedTailscaleUser, versions::Version,
 };
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -187,20 +188,36 @@ pub async fn group_details(
 		.as_ref()
 		.map(|v| database::statuses::version_distance(&v.0, &latest_version));
 
-	let members = servers
+	let mut members: Vec<FacilityServerStatus> = servers
 		.into_iter()
 		.map(|s| {
 			let st = status_map.get(&s.id);
+			let up = st.map(|s| s.short_status()).unwrap_or_default();
+			// Active presence only: a server that's stopped reporting may
+			// well still have those sessions, but we can't assert "in the
+			// server right now" from a stale push.
+			let operators = match up {
+				ShortStatus::Up | ShortStatus::Blip => {
+					st.map(|s| s.operators()).unwrap_or_default()
+				}
+				_ => Vec::new(),
+			};
 			FacilityServerStatus {
 				id: s.id,
 				name: s.name.clone().unwrap_or_default(),
-				up: st.map(|s| s.short_status()).unwrap_or_default(),
+				up,
 				health: st.map(|s| s.health_state()).unwrap_or_default(),
+				operators,
 				rank: s.rank,
 				kind: s.kind,
 			}
 		})
 		.collect();
+	enrich_operators(
+		&mut conn,
+		members.iter_mut().flat_map(|m| m.operators.iter_mut()),
+	)
+	.await?;
 
 	Ok(Json(ServerGroupCard {
 		id: group.id,
@@ -240,6 +257,11 @@ pub struct StatusSnapshotData {
 	pub health_state: commons_types::status::HealthState,
 	pub health: serde_json::Value,
 	pub extra: serde_json::Value,
+	/// Identified operators connected as of this push, from the
+	/// `external_users` check, with display info filled from the
+	/// `tailscale_users` cache. Not freshness-gated — a snapshot is
+	/// explicitly "as of" a point in time.
+	pub operators: Vec<OperatorPresence>,
 	/// For each unhealthy check on this push, the severity the
 	/// catalog + rules engine would file at. Healthy checks are
 	/// absent; absence on an unhealthy check means the catalog has
@@ -322,6 +344,8 @@ pub async fn snapshot(
 	// renders them with its 'passing' affordance regardless.
 	let check_severities = compute_check_severities(&mut conn, args.server_id, &status).await?;
 	let health_state = status.health_state();
+	let mut operators = status.operators();
+	enrich_operators(&mut conn, operators.iter_mut()).await?;
 
 	Ok(Json(Some(StatusSnapshotData {
 		id: status.id,
@@ -339,8 +363,38 @@ pub async fn snapshot(
 		health_state,
 		health: status.health,
 		extra: status.extra,
+		operators,
 		check_severities,
 	})))
+}
+
+/// Fill `name`/`profile_pic` on operator entries from the
+/// `tailscale_users` cache, in one batch lookup for the lot. Logins that
+/// have never authenticated against canopy stay bare — the UI falls back
+/// to a letter avatar.
+pub(crate) async fn enrich_operators(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	operators: impl Iterator<Item = &mut OperatorPresence>,
+) -> commons_errors::Result<()> {
+	let mut ops: Vec<&mut OperatorPresence> = operators.collect();
+	if ops.is_empty() {
+		return Ok(());
+	}
+	let logins: Vec<String> = ops
+		.iter()
+		.map(|o| o.login.clone())
+		.collect::<std::collections::BTreeSet<_>>()
+		.into_iter()
+		.collect();
+	let login_refs: Vec<&str> = logins.iter().map(String::as_str).collect();
+	let users = CachedTailscaleUser::by_logins(conn, &login_refs).await?;
+	for op in &mut ops {
+		if let Some(u) = users.get(&op.login) {
+			op.name = Some(u.name.clone());
+			op.profile_pic = u.profile_pic.clone();
+		}
+	}
+	Ok(())
 }
 
 /// For every warning/failed check on `status`, resolve the catalog +

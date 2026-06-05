@@ -1,4 +1,5 @@
-import { Stack, Typography } from "@mui/material";
+import { Chip, Stack, Typography } from "@mui/material";
+import PersonIcon from "@mui/icons-material/Person";
 import type { HealthState, ShortStatus } from "../types";
 import StatusDot from "./StatusDot";
 import VersionSquare from "./VersionSquare";
@@ -51,6 +52,17 @@ export function StatusLegend() {
 					</Typography>
 				</Stack>
 			))}
+		</Stack>
+	);
+}
+
+export function OperatorLegend() {
+	return (
+		<Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
+			<Chip icon={<PersonIcon />} label="2" size="small" variant="outlined" />
+			<Typography variant="body2" color="text.secondary">
+				Operators connected over Tailscale right now (card also tinted)
+			</Typography>
 		</Stack>
 	);
 }

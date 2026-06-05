@@ -91,7 +91,9 @@ body, response body, security scheme, or tag. The recipe rebuilds the
 the same. The file also holds UI-only constants (severity ordering, label
 maps, etc.) that don't belong in the wire spec.
 
-End-to-end tests use Playwright. Run with `npm run test:e2e` from `/private-web/`. The fixture (`e2e/fixture.ts`) spawns its own private-server + Vite pair against a freshly-migrated `canopy_e2e_<random>` Postgres database per worker, so the operator does not need to keep `just watch-private-api` running. Build the binaries first with `cargo build --bin private-server --bin migrate`. Override the admin connection used to create/drop the throwaway DB with `CANOPY_E2E_ADMIN_DATABASE_URL` (default `postgres://localhost/postgres`); set `CANOPY_E2E_VERBOSE=1` to stream backend/frontend logs. The first run on a fresh checkout needs `npx playwright install chromium`.
+End-to-end tests use Playwright. Run with `npm run test:e2e` from `/private-web/` (or `just test-e2e`, which also builds the binaries and uses the ramdisk Postgres). The fixture (`e2e/fixture.ts`) spawns its own private-server + Vite pair against a freshly-migrated `canopy_e2e_<random>` Postgres database per worker, so the operator does not need to keep `just watch-private-api` running. Build the binaries first with `cargo build --bin private-server --bin migrate`. Override the admin connection used to create/drop the throwaway DB with `CANOPY_E2E_ADMIN_DATABASE_URL` (default `postgres://localhost/postgres`); set `CANOPY_E2E_VERBOSE=1` to stream backend/frontend logs. The first run on a fresh checkout needs `npx playwright install chromium`.
+
+When adding or changing a UI feature, add Playwright coverage for it in `private-web/e2e/` as part of the same change — seed state with the helpers in `e2e/seed.ts` (extend them when the feature needs new tables) and follow the existing spec patterns. Rust endpoint tests don't cover the rendered behaviour, and typecheck alone doesn't prove the feature works.
 
 ## Development Workflow
 - Always check: `just check` for basic compilation

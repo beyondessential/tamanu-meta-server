@@ -47,7 +47,7 @@ function randomLabel(prefix: string): string {
  * statement with CASCADE. */
 export async function resetSeededTables(sql: Sql): Promise<void> {
 	await sql.query(
-		"TRUNCATE statuses, issues, device_keys, servers, server_groups, devices, versions RESTART IDENTITY CASCADE",
+		"TRUNCATE statuses, issues, device_keys, servers, server_groups, devices, versions, tailscale_users RESTART IDENTITY CASCADE",
 	);
 }
 
@@ -212,7 +212,7 @@ export async function seedStatus(
 		? "NOW()"
 		: useSqlExpr
 			? opts.createdAt
-			: "$7";
+			: "$8";
 	const params: unknown[] = [
 		id,
 		opts.serverId,
@@ -231,6 +231,22 @@ export async function seedStatus(
 		params,
 	);
 	return { id, createdAt: String(rows[0]!.created_at) };
+}
+
+/** Cache row for a Tailscale user's display info, as the auth layer
+ * would have upserted it. Used to test avatar/name enrichment. */
+export async function seedTailscaleUser(
+	sql: Sql,
+	opts: { login: string; name?: string; profilePic?: string | null },
+): Promise<void> {
+	await sql.query(
+		`INSERT INTO tailscale_users (login, name, profile_pic) VALUES ($1, $2, $3)`,
+		[
+			opts.login,
+			opts.name ?? opts.login.split("@")[0]!,
+			opts.profilePic ?? null,
+		],
+	);
 }
 
 export interface SeededIssue {
