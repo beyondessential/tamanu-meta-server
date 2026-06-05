@@ -83,6 +83,7 @@ export type ResolvedReason = Solidify<Schemas["ResolvedReason"]>;
 export type VersionStr = Solidify<Schemas["VersionStr"]>;
 
 export type GeoPoint = Solidify<Schemas["GeoPoint"]>;
+export type OperatorPresence = Solidify<Schemas["OperatorPresence"]>;
 export type FacilityServerStatus = Solidify<Schemas["FacilityServerStatus"]>;
 export type ServerGroupCard = Solidify<Schemas["ServerGroupCard"]>;
 export type ServerGroup = Solidify<Schemas["ServerGroup"]>;
@@ -251,6 +252,46 @@ export function checkResultOf(
 	const healthy = entry.healthy;
 	if (typeof healthy === "boolean") return healthy ? "passed" : "failed";
 	return null;
+}
+
+/// One person connected somewhere in a server group, with the names of
+/// the member servers they're on. Produced by [`aggregateOperators`].
+export type AggregatedOperator = {
+	op: OperatorPresence;
+	servers: string[];
+};
+
+/// Aggregate per-member operator presence into distinct people across the
+/// group: deduped by login, keeping the earliest `connected_since` and
+/// collecting which member servers each person is connected to. Shared by
+/// the status-page group cards and the group detail page so both show the
+/// same numbers.
+export function aggregateOperators(
+	members: FacilityServerStatus[],
+): AggregatedOperator[] {
+	const byLogin = new Map<string, AggregatedOperator>();
+	for (const m of members) {
+		for (const op of m.operators) {
+			const serverName = m.name || "(unnamed)";
+			const existing = byLogin.get(op.login);
+			if (!existing) {
+				byLogin.set(op.login, { op, servers: [serverName] });
+				continue;
+			}
+			if (!existing.servers.includes(serverName)) {
+				existing.servers.push(serverName);
+			}
+			if (
+				op.connected_since &&
+				(!existing.op.connected_since ||
+					Date.parse(op.connected_since) <
+						Date.parse(existing.op.connected_since))
+			) {
+				existing.op = { ...existing.op, connected_since: op.connected_since };
+			}
+		}
+	}
+	return [...byLogin.values()];
 }
 
 export const RESOLVED_REASONS: ResolvedReason[] = [

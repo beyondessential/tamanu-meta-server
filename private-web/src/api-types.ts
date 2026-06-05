@@ -1924,6 +1924,13 @@ export interface components {
              */
             kind: components["schemas"]["ServerKind"];
             name: string;
+            /**
+             * @description Identified humans connected to this server right now, from the
+             *     latest status push's `external_users` check. Empty unless the
+             *     server is actively reporting (up/blip) — a stale push can't claim
+             *     active presence.
+             */
+            operators: components["schemas"]["OperatorPresence"][];
             rank?: null | components["schemas"]["ServerRank"];
             up: components["schemas"]["ShortStatus"];
         };
@@ -2317,6 +2324,32 @@ export interface components {
              */
             ready: boolean;
             versions: components["schemas"]["VersionData"][];
+        };
+        /**
+         * @description One identified human connected to a server right now, distilled from
+         *     the `external_users` health check on a status push.
+         *
+         *     "Identified" means the session's source address resolved to a Tailscale
+         *     login via `tailscale whois` on the device — local console or
+         *     non-Tailscale SSH sessions don't produce one of these. One person with
+         *     several concurrent sessions appears once.
+         */
+        OperatorPresence: {
+            /**
+             * Format: date-time
+             * @description Earliest `connected_since` across the person's sessions — how long
+             *     they've been continuously connected, as tracked by the device.
+             */
+            connected_since?: string | null;
+            /** @description Tailscale login (an email), as reported by the device. */
+            login: string;
+            /**
+             * @description Display name from the `tailscale_users` cache; `None` when this
+             *     login has never authenticated against canopy.
+             */
+            name?: string | null;
+            /** @description Profile picture URL from the `tailscale_users` cache. */
+            profile_pic?: string | null;
         };
         /**
          * @description Standard wrapper for paginated list responses. The total reflects the full
@@ -2737,6 +2770,13 @@ export interface components {
             /** Format: int32 */
             min_chrome_version?: number | null;
             nodejs?: string | null;
+            /**
+             * @description Identified operators connected as of this push, from the
+             *     `external_users` check, with display info filled from the
+             *     `tailscale_users` cache. Freshness gating ("right now" vs stale)
+             *     is the UI's job — it has `up` to hand.
+             */
+            operators: components["schemas"]["OperatorPresence"][];
             platform?: string | null;
             postgres?: string | null;
             timezone?: string | null;
@@ -2874,6 +2914,13 @@ export interface components {
             /** Format: int32 */
             min_chrome_version?: number | null;
             nodejs?: string | null;
+            /**
+             * @description Identified operators connected as of this push, from the
+             *     `external_users` check, with display info filled from the
+             *     `tailscale_users` cache. Not freshness-gated — a snapshot is
+             *     explicitly "as of" a point in time.
+             */
+            operators: components["schemas"]["OperatorPresence"][];
             platform?: string | null;
             postgres?: string | null;
             /** Format: uuid */

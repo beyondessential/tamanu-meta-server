@@ -36,8 +36,12 @@ import NotificationsOffOutlinedIcon from "@mui/icons-material/NotificationsOffOu
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { Fragment, useEffect, useState } from "react";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
+import ExternalUsersDetails, {
+	parseExternalUserSessions,
+} from "../components/ExternalUsersDetails";
 import HealthChip from "../components/HealthChip";
 import IncidentsLink from "../components/IncidentsLink";
+import OperatorAvatars from "../components/OperatorAvatars";
 import ManualEventButton from "../components/ManualEventButton";
 import SilencedRefsSection from "../components/SilencedRefsSection";
 import StatusDot from "../components/StatusDot";
@@ -62,6 +66,7 @@ import {
 	type CheckResult,
 	type DeviceInfo,
 	type HealthState,
+	type OperatorPresence,
 	type ServerDetailData,
 	type ServerGroup,
 	type ServerGroupSilencedRef,
@@ -237,6 +242,7 @@ function Header({
 					/>
 					<ServerNameWithGroup
 						groupName={data.server.group_name}
+						groupId={data.server.group_id}
 						serverName={data.server.name ?? "Unnamed"}
 					/>
 				</Typography>
@@ -703,7 +709,13 @@ function InfoSection({
 }) {
 	return (
 		<Paper variant="outlined" sx={{ p: 2 }}>
-			{status && <HealthIndicator health={health} up={up} />}
+			{status && (
+				<HealthIndicator
+					health={health}
+					up={up}
+					operators={status.operators}
+				/>
+			)}
 			<Stack
 				direction="row"
 				spacing={4}
@@ -736,6 +748,7 @@ function InfoSection({
 				<ChecksTable
 					health={status.health}
 					overallHealthy={status.healthy}
+					operators={status.operators}
 					serverId={server.id}
 					groupId={server.group_id}
 					refreshTick={refreshTick}
@@ -770,19 +783,40 @@ function InfoSection({
  * server's per-check breakdown is shown by `<ChecksTable>` below — this
  * is the "headline" answer to "is the server OK", derived from the
  * `HealthState` rollup rather than the raw top-level `healthy` bool so
- * a failing check can't hide behind a self-reported "healthy". */
+ * a failing check can't hide behind a self-reported "healthy".
+ *
+ * Alongside it, the operator-presence headline: identified humans
+ * connected to the server per the `external_users` check. Only asserted
+ * while the server is actively reporting — a stale push can't claim
+ * anyone is in the server *right now*. */
 function HealthIndicator({
 	health,
 	up,
+	operators,
 }: {
 	health: HealthState;
 	up: ShortStatus;
+	operators: OperatorPresence[];
 }) {
 	const reporting = up === "up" || up === "blip";
 	return (
-		<Box sx={{ mb: 1.5 }}>
+		<Stack
+			direction="row"
+			spacing={2}
+			useFlexGap
+			sx={{ mb: 1.5, alignItems: "center", flexWrap: "wrap" }}
+		>
 			<HealthChip health={health} stale={!reporting} />
-		</Box>
+			{reporting && operators.length > 0 && (
+				<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+					<OperatorAvatars operators={operators} size={24} />
+					<Typography variant="body2">
+						{operators.length} operator
+						{operators.length === 1 ? "" : "s"} in the server right now
+					</Typography>
+				</Stack>
+			)}
+		</Stack>
 	);
 }
 
@@ -799,6 +833,7 @@ function HealthIndicator({
 function ChecksTable(props: {
 	health: ServerLastStatusData["health"];
 	overallHealthy: boolean;
+	operators: OperatorPresence[];
 	serverId: string;
 	groupId: string | null;
 	refreshTick: number;
@@ -833,6 +868,7 @@ function ChecksTable(props: {
 function ChecksTableGrouped(props: {
 	health: ServerLastStatusData["health"];
 	overallHealthy: boolean;
+	operators: OperatorPresence[];
 	serverId: string;
 	groupId: string;
 	refreshTick: number;
@@ -852,6 +888,7 @@ function ChecksTableGrouped(props: {
 function ChecksTableBody({
 	health,
 	overallHealthy,
+	operators,
 	serverId,
 	groupId,
 	onSilenced,
@@ -860,6 +897,7 @@ function ChecksTableBody({
 }: {
 	health: ServerLastStatusData["health"];
 	overallHealthy: boolean;
+	operators: OperatorPresence[];
 	serverId: string;
 	groupId: string | null;
 	onSilenced: () => void;
@@ -892,6 +930,7 @@ function ChecksTableBody({
 						<CheckRow
 							key={entry.check}
 							entry={entry}
+							operators={operators}
 							serverId={serverId}
 							groupId={groupId}
 							onSilenced={onSilenced}
@@ -971,6 +1010,7 @@ function parseChecks(
 
 function CheckRow({
 	entry,
+	operators,
 	serverId,
 	groupId,
 	onSilenced,
@@ -978,6 +1018,7 @@ function CheckRow({
 	groupSilence,
 }: {
 	entry: ParsedCheck;
+	operators: OperatorPresence[];
 	serverId: string;
 	groupId: string | null;
 	onSilenced: () => void;
@@ -985,6 +1026,17 @@ function CheckRow({
 	groupSilence: ServerGroupSilencedRef | null;
 }) {
 	const isAdmin = useIsAdmin() === true;
+	// `external_users` gets a formatted session list instead of the raw
+	// `users` JSON; the headline `count` is subsumed by it too. Falls
+	// through to the generic dl when the payload shape is unexpected.
+	const sessions =
+		entry.check === "external_users"
+			? parseExternalUserSessions(entry.extras)
+			: null;
+	const extras =
+		sessions === null
+			? entry.extras
+			: entry.extras.filter(([k]) => k !== "users" && k !== "count");
 	return (
 		<Stack
 			direction="row"
@@ -1017,7 +1069,13 @@ function CheckRow({
 						groupSilence={groupSilence}
 					/>
 				</Stack>
-				{entry.extras.length > 0 && (
+				{sessions !== null && (
+					<ExternalUsersDetails
+						sessions={sessions}
+						operators={operators}
+					/>
+				)}
+				{extras.length > 0 && (
 					<Box
 						component="dl"
 						sx={{
@@ -1030,7 +1088,7 @@ function CheckRow({
 							fontSize: "0.8em",
 						}}
 					>
-						{entry.extras.map(([k, v]) => (
+						{extras.map(([k, v]) => (
 							<Fragment key={k}>
 								<Box component="dt" sx={{ color: "text.secondary" }}>
 									{k}
