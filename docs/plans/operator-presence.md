@@ -32,7 +32,11 @@ over Tailscale. We surface them in two places:
    raw JSON.
 2. **Status page**: group cards whose members have active operator presence get
    a subtly shaded background and a person icon-chip alongside the incident
-   chip, with a tooltip naming who's on which server.
+   chip, with a tooltip naming who's on which server. The chip shows the
+   *group-aggregated* distinct operator count.
+3. **Group page**: a section displaying the aggregated operators across all the
+   group's servers — the same aggregate the status card summarises, computed by
+   a shared frontend helper over `group_details` members.
 
 ## Semantics
 
@@ -103,6 +107,11 @@ over Tailscale. We surface them in two places:
   of small avatars. Each avatar: `src=profile_pic`, fallback content = first
   letter of `login` uppercased; tooltip `name (login) — connected 3h 12m`
   (duration from `connected_since`, reusing the existing humanize helper).
+- Aggregation helper (in `types.ts` or alongside the component):
+  `aggregateOperators(members: FacilityServerStatus[])` → distinct operators
+  across the group with earliest `connected_since` and the list of member
+  server names each is connected to. Shared by the status card and the group
+  page.
 - `components/ExternalUsersDetails.tsx` (shared by ServerDetail's checks table
   and StatusSnapshot's checks block): formats the check's `users[]` as session
   rows — identity (Tailscale login or OS username), line/source, connected
@@ -123,13 +132,27 @@ over Tailscale. We surface them in two places:
 - `ChecksBlock`: same special-case via `ExternalUsersDetails`, with "as of"
   wording (no "right now" claim for historical snapshots).
 
+### Group page (`routes/GroupDetail.tsx`)
+
+- Fetch `statuses/group_details` (alongside the existing `server_groups/get`)
+  and render an "Operators in servers right now" section from the aggregated
+  operators: avatars + name/login, connected duration, and which member
+  servers each is on. Render nothing when no operators.
+
+### Server detail header nicety (`routes/ServerDetail.tsx`)
+
+- Unrelated-but-adjacent: the group name shown in the server detail page's
+  header becomes a link to the group page (`/groups/<id>`), since that page is
+  now more useful.
+
 ### Status page (`routes/Status.tsx`)
 
-- `GroupCard`/`GroupCardLoader`: members with non-empty `operators` →
+- `GroupCard`/`GroupCardLoader`: when the group aggregate (via
+  `aggregateOperators`) is non-empty →
   - card background gets a subtle tint (composing with the existing hover
     style and incident border),
-  - an icon chip (person icon + operator count) renders alongside the incident
-    chip, tooltip listing `login · server name` lines.
+  - an icon chip (person icon + distinct operator count) renders alongside
+    the incident chip, tooltip listing `login · server name` lines.
 - `components/Legends.tsx`: add an entry explaining the shading/icon.
 
 ### Checks
