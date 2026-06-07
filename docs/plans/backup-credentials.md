@@ -157,6 +157,11 @@ even if the group config is later changed.
 
 ## Endpoint shape
 
+Two endpoints, both `ServerDevice`-authenticated and both resolving the
+device → root → `server_group_backup_config` the same way:
+
+### `POST /backup-credentials` — short-lived creds
+
 ```
 POST /backup-credentials
   Authorization: mTLS via ServerDevice
@@ -171,6 +176,42 @@ POST /backup-credentials
   Response 409: no backup config for this device's group
   Response 502: STS call failed
 ```
+
+### `GET /backup-target` — where to back up to
+
+```
+GET /backup-target
+  Authorization: mTLS via ServerDevice
+  Response 200: {
+    "storage": "s3",
+    "bucket": "...",
+    "prefix": "groups/<root-id>/",
+    "region": "...",
+    "endpoint": "..."         -- optional; for non-AWS S3
+  }
+  Response 409: no backup config for this device's group
+```
+
+This is the piece that keeps the bucket out of device provisioning. The
+`credential_process` output format (above) is **fixed by the AWS SDK** and
+carries only the four credential fields — it cannot carry the bucket,
+prefix, region, or endpoint. Yet the device must know all of those to
+address S3 at all. So rather than baking them into each device's kopia
+config at provision time (which would make "rotating bucket / changing
+prefix" a per-device reconfiguration, not the server-side-only change this
+plan promises), bestool fetches them from Canopy at runtime via this
+endpoint and reconstructs the kopia repository connection from the result.
+
+The only thing a device is ever provisioned with is its Canopy URL, its
+mTLS identity, and "run bestool" — never a bucket name. Canopy is the sole
+owner of backup-target config; changing it is a single-row update with no
+device-side coordination.
+
+(`region`/`endpoint` can be added as columns to `server_group_backup_config`
+when implementing, or derived from a single deployment-wide default if the
+backups bucket always lives in one region. Decide during implementation;
+the audit-log snapshot should capture whatever the device was actually
+told.)
 
 `purpose` is a real capability gate, not just audit metadata:
 
@@ -269,21 +310,36 @@ rejected by S3, not just by kopia.
 
 ## `bestool` changes
 
-A new subcommand:
+A new subcommand for the credential refresh, plumbed as kopia's
+`credential_process`:
 
 ```
 bestool backup-credentials [--purpose backup|restore]   # default: backup
 ```
 
 - Reads the device's mTLS identity from its existing location.
-- POSTs to the Canopy endpoint with the optional purpose.
+- POSTs to `/backup-credentials` with the optional purpose.
 - Writes the response JSON to stdout verbatim.
 - Exits 0 on success, non-zero on any failure (the AWS SDK treats any
   non-zero exit as "creds unavailable").
 
-The device's kopia config (set up once during provisioning) points at
-S3 with `credential_process = bestool backup-credentials`. From then on
-kopia just works.
+And a driver subcommand that owns the kopia invocation so the device
+holds no hardcoded bucket:
+
+```
+bestool backup [--purpose backup|restore]
+```
+
+- `GET /backup-target` to learn `{bucket, prefix, region, endpoint}`.
+- Connects/creates the kopia repository against that target, with
+  `credential_process = bestool backup-credentials` for the creds.
+- Runs the backup (or restore).
+
+The device is provisioned only with its Canopy URL and mTLS identity.
+The bucket, prefix and region are never written to the device's
+persistent config — bestool re-derives the repository connection from
+Canopy on each run, so a server-side config change takes effect on the
+next backup with zero device reconfiguration.
 
 bestool work is in a separate repo; this plan covers the Canopy side
 and the bestool side will be a sibling change there.
