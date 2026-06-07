@@ -18,15 +18,15 @@ clap = "4.6.1"
 diesel = "2.3.9"
 diesel-async = "0.9.0"
 futures = "0.3.32"
-http = "1.4.0"
-jiff = { version = "0.2.24", features = ["serde"] }
+http = "1.4.1"
+jiff = { version = "0.2.28", features = ["serde"] }
 lloggs = "1.4.0"
 miette = "7.6.0"
 mobc = "0.9.0"
 node-semver = "2.2.0"
 problem_details = "0.9.0"
 pulldown-cmark = { version = "0.13.4", features = ["html"] }
-reqwest = { version = "0.13.3", default-features = false, features = ["json", "rustls", "stream"] }
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls", "stream"] }
 serde = "1.0.228"
 tera = "1.20.1"
 timesimp = "1.0.0"
