@@ -486,21 +486,22 @@ enable versioning + Object Lock with the default ≥30-day retention.
 Getting this wrong isn't fixable in place; it means recreating the
 bucket.
 
-Who provisions it is a decision (flagged in open questions), and it
-trades off against privilege:
+**IaC provisions the buckets.** A Terraform module (or equivalent)
+creates each group's bucket — with versioning + Object Lock + default
+retention — when a group is onboarded, following the naming convention
+the IAM patterns key off. Canopy only ever *uses* the bucket; it is never
+granted `CreateBucket` or bucket-config powers, keeping those out of the
+public-server's blast radius. Canopy's role is to *verify*, not create:
+the per-group preflight checks the bucket exists, is reachable, and has
+the expected Object Lock — so a missing or misconfigured bucket (e.g. IaC
+not yet applied for a new group, or the lock dropped) surfaces as an
+alert naming that group, rather than as silent backup failure.
 
-- **Out-of-band (IaC / admin step):** a Terraform module or admin tool
-  creates the bucket with lock when a group is onboarded; Canopy only
-  *uses* it (and the preflight verifies it). Keeps `CreateBucket` and
-  bucket-config powers out of the public-server's blast radius.
-- **Canopy-driven:** Canopy creates the bucket on group-config setup.
-  More "behind the scenes" but hands the control plane bucket-creation
-  authority, a meaningful privilege increase.
-
-Recommend out-of-band provisioning with preflight verification for the
-first cut: bucket creation is rare (once per group) and heavyweight, and
-the preflight already checks the lock is correct — so we get the
-"managed" feel without granting `CreateBucket` to the request path.
+This means group onboarding is a two-step dance — IaC applies the bucket,
+then the `server_group_backup_config` row is inserted — and the ordering
+matters: insert the row before the bucket exists and the group's devices
+get clean preflight/issuance failures (not corruption), which the alert
+makes obvious. Worth noting for the onboarding runbook.
 
 ## `bestool` changes
 
@@ -871,9 +872,11 @@ Surface it loudly; don't take Canopy down over it.
   its Object-Lock'd objects persist independently — they can't be deleted
   until their locks expire (~30 days), so bucket teardown is a deliberate,
   delayed step, not a side effect of removing the config row.
-- **Onboarding a group** — provision its bucket (with Object Lock, see
-  "Per-group buckets"), then insert the `server_group_backup_config` row.
-  Devices in the group start succeeding on their next run.
+- **Onboarding a group** — IaC provisions its bucket (with Object Lock,
+  see "Per-group buckets"), then the `server_group_backup_config` row is
+  inserted. Devices in the group start succeeding on their next run; if
+  the row lands before the bucket, the preflight alerts and issuance
+  fails cleanly rather than corrupting anything.
 - **Changing region or endpoint** — update the
   `server_group_backup_config` row. Each device picks it up on its next
   scheduled `bestool canopy backup` (every-run target fetch); no per-host
@@ -901,11 +904,10 @@ Surface it loudly; don't take Canopy down over it.
 
 None blocking, but flag-and-decide-during-implementation:
 
-- **Bucket provisioning ownership.** Out-of-band (IaC / admin) vs.
-  Canopy-driven `CreateBucket` (see "Per-group buckets"). Recommended
-  out-of-band for the first cut to keep `CreateBucket` out of the request
-  path; decide, and settle the bucket naming convention the IAM patterns
-  key off. Whichever, Object Lock must be enabled at creation.
+- **Bucket naming convention.** IaC provisions the buckets (decided —
+  see "Per-group buckets"); settle the exact name template (e.g.
+  `canopy-backup-<root-id>`) so the IaC module, the IAM role patterns,
+  and Canopy's `bucket` value all agree on it.
 - **Per-device session naming for CloudTrail.** Suggested
   `device-<uuid>`; check max length and allowed chars on
   `RoleSessionName`.
