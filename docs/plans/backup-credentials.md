@@ -37,8 +37,9 @@ directly (no proxy through Canopy).
   see staleness detection — and maintenance/expiry execution is owned by
   Canopy; what's deferred is cost/usage analytics.)
 - Tuning the kopia *retention policy* values (keep N daily / M weekly).
-  Canopy now *executes* retention via maintenance, but the policy values
-  themselves start at a sane default; per-group tuning is later.
+  Canopy now *owns, declares, and enforces* the policy (see "Retention
+  policy ownership") — the mechanism is in scope — but the actual values
+  start at a sane default and per-group tuning is later.
 - WORM immutability is **already in place** (30-day S3 Object Lock on the
   buckets) — not a follow-up. This plan just has to be compatible with it
   (object-lock-aware kopia repos; GC reclaims on a ~30-day lag).
@@ -145,6 +146,7 @@ CREATE TABLE server_group_backup_config (
     region            TEXT,                    -- NULL → deployment default
     endpoint          TEXT,                    -- NULL → AWS; set for non-AWS S3
     expected_interval INTERVAL,                -- NULL → no staleness alerting
+    retention         JSONB NOT NULL,          -- kopia keep-* policy; Canopy asserts it into the repo
     repo_password_ref TEXT NOT NULL,           -- reference to the secret, NOT the secret
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -155,6 +157,12 @@ CREATE TABLE server_group_backup_config (
 `expected_interval` drives staleness detection (below): if a group is
 expected to back up daily, set it to `1 day` and Canopy alerts when a
 device in the group has no recent successful run.
+
+`retention` holds the kopia keep-policy (e.g. `{"keep_daily": 7,
+"keep_weekly": 4, ...}`); Canopy asserts it into the repo at creation and
+each maintenance run — see "Retention policy ownership". The values start
+at a default; the schedule is owned here, not left to drift inside the
+repo.
 
 `repo_password_ref` points at the group's kopia repository password
 (held in a k8s secret / Secrets Manager, not stored here in plaintext —
@@ -590,6 +598,33 @@ for implementation:
   not-yet-collectable garbage on top of live data. Fine, but worth
   noting for capacity/cost.
 
+### Retention policy ownership
+
+"How long backups are kept" is a kopia **policy** (`keep-latest`,
+`keep-daily`, `keep-weekly`, …) stored *in the repository* and applied at
+snapshot + maintenance time. It is distinct from the 30-day Object Lock:
+the lock is an immutability floor on physical deletion; the kopia policy
+is the logical keep/expire schedule. Note the floor means the **effective
+minimum retention is 30 days** no matter what the policy says, since
+nothing can be deleted sooner.
+
+Because Canopy already owns repo creation, the password, and maintenance,
+it also owns the retention policy:
+
+- The intended values live declaratively on `server_group_backup_config`
+  (a `retention` field), not only inside the repo.
+- Canopy sets the kopia policy from that field at repo creation, and
+  **re-asserts it at the start of each maintenance run**, so the
+  declared policy is the source of truth and an in-repo policy that has
+  drifted (or been tampered with by a writer) is corrected rather than
+  silently honoured.
+- This keeps retention answerable from Canopy ("what's group X's policy?"
+  is a DB read) instead of requiring a repo connect to inspect.
+
+The *values themselves* are a product decision and remain deferred (see
+non-goals); what's fixed here is that Canopy declares and enforces them,
+with a sane default applied until tuned.
+
 ### Repository password ownership
 
 This is the new dependency maintenance forces into the open: kopia
@@ -685,6 +720,10 @@ None blocking, but flag-and-decide-during-implementation:
 - **Grace factor for staleness.** `expected_interval × N` before
   alerting — pick N (and whether it's configurable per group) during
   implementation; start simple.
+- **Default retention values.** The keep-* schedule for the `retention`
+  field's default — a product decision, not invented here. Note the
+  effective floor is 30 days regardless (Object Lock), so anything
+  shorter is meaningless; the default should be ≥ that.
 - **Repo password storage.** Canopy owns the per-group kopia password;
   where does the secret actually live (k8s secret vs. Secrets Manager
   vs. ...) and how is it served to devices and injected into Jobs?
