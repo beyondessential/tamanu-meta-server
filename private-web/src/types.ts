@@ -309,3 +309,11 @@ export const RESOLVED_REASON_LABEL: Record<ResolvedReason, string> = {
 	duplicate: "Duplicate",
 	flapping: "Flapping",
 };
+
+// Shown wherever a resolver is named but no operator login is attached: the
+// incident/issue retired because its healthcheck started reporting healthy
+// again. Phrased as the triggering event, not an actor — it describes what
+// canopy observed, and does not imply that nobody intervened. Keep in sync
+// with the Slack `incident_resolve` default in
+// crates/database/src/slack_outbox/vars.rs.
+export const AUTOMATION_RESOLVER_LABEL = "the healthcheck recovering";

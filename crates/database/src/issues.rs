@@ -253,8 +253,8 @@ impl NewEvent {
 				} else {
 					existing.last_seen
 				};
-				// Sentry-style reopen: a device event with `active = true` against a
-				// human-resolved issue clears the resolved_* fields (issue is back
+				// Sentry-style reopen: a device event with `active = true` against an
+				// operator-resolved issue clears the resolved_* fields (issue is back
 				// in unresolved state).
 				let clear_resolved = active && existing.resolved_at.is_some();
 				let issue = diesel::update(issues::table.filter(issues::id.eq(existing.id)))
@@ -397,8 +397,8 @@ impl NewEvent {
 /// human action (e.g. resolving an issue or incident). It's threaded
 /// through so a cascade close caused by that action can attribute the
 /// resulting Slack `incident_resolve` row to the operator rather than
-/// "automation". `None` for device-driven flows (event push with
-/// `active:false`).
+/// "the healthcheck recovering". `None` for device-driven flows (event
+/// push with `active:false`).
 async fn re_evaluate_incident_membership(
 	conn: &mut AsyncPgConnection,
 	issue: &Issue,
@@ -1117,7 +1117,7 @@ impl Issue {
 			.map_err(AppError::from)
 	}
 
-	/// Mark an issue as human-resolved. Triggers incident-membership
+	/// Mark an issue as operator-resolved. Triggers incident-membership
 	/// re-evaluation (typically: leaves the incident).
 	pub async fn resolve(
 		db: &mut AsyncPgConnection,
@@ -1184,9 +1184,9 @@ impl Issue {
 	/// can't open or join incidents. Triggers re-evaluation.
 	///
 	/// Snooze doesn't carry an operator login today, so a cascade close
-	/// triggered by snoozing the last live issue still attributes to
-	/// "automation" in Slack. Worth revisiting if/when snooze records its
-	/// `by`.
+	/// triggered by snoozing the last live issue still attributes the
+	/// Slack resolve to "the healthcheck recovering" rather than the
+	/// operator. Worth revisiting if/when snooze records its `by`.
 	pub async fn snooze(
 		db: &mut AsyncPgConnection,
 		issue_id: Uuid,
@@ -1540,7 +1540,7 @@ impl Incident {
 		Ok((incident, rows))
 	}
 
-	/// Mark an incident as human-resolved. This is metadata only — it does
+	/// Mark an incident as operator-resolved. This is metadata only — it does
 	/// *not* force `closed_at` (that's still driven by auto rules). An
 	/// open incident can be resolved (the cause is dealt with) and a closed
 	/// incident can be resolved retroactively.

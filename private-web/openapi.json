@@ -6426,7 +6426,7 @@
       },
       "ResolvedReason": {
         "type": "string",
-        "description": "Reason an issue or incident was resolved by a human.\n\nStored as text in Postgres, validated as this enum at the API layer.\nCategories follow common operational practice (PagerDuty/Sentry/Opsgenie):\n\n- `Fixed` — the underlying problem was addressed.\n- `WontFix` — won't fix; not worth doing, or not actually a problem.\n- `Expected` — known/expected behaviour (e.g. planned maintenance window).\n- `Duplicate` — a duplicate of another issue.\n- `Flapping` — too noisy; suppressed rather than fixed (often paired with\n  a snooze).",
+        "description": "Reason an issue or incident was resolved by an operator.\n\nStored as text in Postgres, validated as this enum at the API layer.\nCategories follow common operational practice (PagerDuty/Sentry/Opsgenie):\n\n- `Fixed` — the underlying problem was addressed.\n- `WontFix` — won't fix; not worth doing, or not actually a problem.\n- `Expected` — known/expected behaviour (e.g. planned maintenance window).\n- `Duplicate` — a duplicate of another issue.\n- `Flapping` — too noisy; suppressed rather than fixed (often paired with\n  a snooze).",
         "enum": [
           "fixed",
           "wont_fix",

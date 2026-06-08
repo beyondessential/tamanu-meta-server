@@ -2565,7 +2565,7 @@ export interface components {
             matched?: null | components["schemas"]["TailnetLiveInfo"];
         };
         /**
-         * @description Reason an issue or incident was resolved by a human.
+         * @description Reason an issue or incident was resolved by an operator.
          *
          *     Stored as text in Postgres, validated as this enum at the API layer.
          *     Categories follow common operational practice (PagerDuty/Sentry/Opsgenie):

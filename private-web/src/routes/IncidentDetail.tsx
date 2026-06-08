@@ -27,7 +27,7 @@ import { AddNoteButton } from "../components/NotesList";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { useIsNotificationHeld } from "../hooks/useIsNotificationHeld";
 import TimeAgo from "../components/TimeAgo";
-import UserAvatar from "../components/UserAvatar";
+import ResolverAvatar from "../components/ResolverAvatar";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { humanDuration } from "../lib/humanDuration";
 import {
@@ -245,20 +245,13 @@ function Header({
 				</Box>
 				<Box sx={{ flexShrink: 0 }}>
 					{incident.resolved_at && (
-						<Tooltip
-							title={`resolved (${incident.resolved_reason ?? "?"}) by ${
-								incident.resolved_by_name ?? incident.resolved_by ?? "?"
-							}`}
-						>
-							<span>
-								<UserAvatar
-									login={incident.resolved_by}
-									name={incident.resolved_by_name}
-									profilePic={incident.resolved_by_pic}
-									size={36}
-								/>
-							</span>
-						</Tooltip>
+						<ResolverAvatar
+							resolvedBy={incident.resolved_by}
+							resolvedByName={incident.resolved_by_name}
+							resolvedByPic={incident.resolved_by_pic}
+							resolvedReason={incident.resolved_reason}
+							size={36}
+						/>
 					)}
 				</Box>
 			</Stack>

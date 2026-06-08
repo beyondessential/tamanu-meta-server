@@ -8,7 +8,10 @@
 //!
 //! Two workflows, one per outbox kind:
 //! - `incident_open`: variables `server`, `severity`, `source_ref`, `message`, `link`
-//! - `incident_resolve`: variables `server`, `by`, `link`
+//! - `incident_resolve`: variables `server`, `by`, `link`. `by` is either the
+//!   resolving operator's login, or — when the incident retired on its own —
+//!   "the healthcheck recovering" (it describes the event, not an actor: the
+//!   check went healthy again, which does not imply nobody intervened).
 //!
 //! Note: `link` is **not** rendered here. It's pure config (incident_id is
 //! already on the row, and `PRIVATE_URL` is operator-set), so the drainer
@@ -46,6 +49,11 @@ pub fn incident_open(
 pub fn incident_resolve(server_label: &str, by: Option<&str>) -> Value {
 	json!({
 		"server": server_label,
-		"by": by.unwrap_or("automation"),
+		// `None` means no operator was attached to the close: the incident
+		// retired because its healthcheck started reporting healthy again.
+		// Phrase it as the triggering event, not an actor — "automation"
+		// was read as "a bot decided to close this", when in practice an
+		// operator was usually involved; canopy just can't attribute it.
+		"by": by.unwrap_or("the healthcheck recovering"),
 	})
 }
