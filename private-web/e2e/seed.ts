@@ -264,13 +264,21 @@ export async function seedIssue(
 		description?: string | null;
 		active?: boolean;
 		deviceId?: string | null;
+		/** Mark the issue resolved. `resolvedBy` null (with `resolved: true`)
+		 * is the "retired on its own" case — the healthcheck recovered with
+		 * no operator attributed. A login string attributes it to that
+		 * operator (seed a matching tailscale_user for the name lookup). */
+		resolved?: boolean;
+		resolvedBy?: string | null;
+		resolvedReason?: string | null;
 	},
 ): Promise<SeededIssue> {
 	const id = randomUUID();
+	const resolved = opts.resolved ?? false;
 	await sql.query(
 		`INSERT INTO issues
-		 (id, server_id, device_id, source, ref, severity, message, description, active, first_seen, last_seen)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())`,
+		 (id, server_id, device_id, source, ref, severity, message, description, active, first_seen, last_seen, resolved_at, resolved_by, resolved_reason)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW(), $10, $11, $12)`,
 		[
 			id,
 			opts.serverId,
@@ -280,7 +288,10 @@ export async function seedIssue(
 			opts.severity ?? "error",
 			opts.message ?? "Issue message",
 			opts.description ?? null,
-			opts.active ?? true,
+			resolved ? false : (opts.active ?? true),
+			resolved ? new Date().toISOString() : null,
+			resolved ? (opts.resolvedBy ?? null) : null,
+			resolved ? (opts.resolvedReason ?? null) : null,
 		],
 	);
 	return { id };
