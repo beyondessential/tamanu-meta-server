@@ -9,8 +9,10 @@ directly (no proxy through Canopy).
 
 - One credential to manage per device — the existing mTLS identity.
 - No long-lived AWS access keys on servers or in operator hands.
-- Per-group isolation: a device only ever gets access to its own
-  server-group's backup scope.
+- Per-group isolation at the **bucket** boundary: each server-group has
+  its own backups bucket, and a device only ever gets access to its own
+  group's bucket. (Stronger than prefix-sharing inside one bucket — a
+  scoping bug can't even name another group's bucket.)
 - Within-group cross-device restore: every device in a group can
   request read-only creds for the group's scope (`purpose=restore`), so
   restoring onto a freshly-rebuilt sibling is trivial and the restoring
@@ -40,9 +42,12 @@ directly (no proxy through Canopy).
   Canopy now *owns, declares, and enforces* the policy (see "Retention
   policy ownership") — the mechanism is in scope — but the actual values
   start at a sane default and per-group tuning is later.
-- WORM immutability is **already in place** (30-day S3 Object Lock on the
-  buckets) — not a follow-up. This plan just has to be compatible with it
-  (object-lock-aware kopia repos; GC reclaims on a ~30-day lag).
+- WORM immutability is a **required property of every group's bucket**
+  (30-day S3 Object Lock), not a follow-up. Existing buckets already have
+  it; new per-group buckets must enable it at creation (it can't be
+  retrofitted — see "Per-group buckets"). The plan also has to be
+  compatible with it (object-lock-aware kopia repos; GC reclaims on a
+  ~30-day lag).
 - Picking the backup tool. Kopia is the assumed consumer because it
   fits the AWS SDK `credential_process` hook cleanly, but rclone works
   through the same mechanism if it turns out to be preferred.
@@ -89,7 +94,7 @@ Two STS calls per issuance:
 1. The pod's IRSA session is implicit — kubernetes injects it.
 2. From that session, Canopy calls `AssumeRole` on a dedicated
    `canopy-backup-issuer` role, passing a session policy that narrows
-   S3 access to the requesting device's group prefix.
+   S3 access to the requesting device's group bucket.
 
 The resulting temp creds go back to the device verbatim.
 
@@ -114,8 +119,8 @@ The resulting temp creds go back to the device verbatim.
   ```
   `bestool` produces exactly this on stdout and exits.
 - **Session policies are ANDed with the role policy.** The role's
-  policy grants broad S3 access to the backups bucket; the per-call
-  session policy narrows that to the specific prefix. A bug in the
+  policy grants broad S3 access across the bucket pattern; the per-call
+  session policy narrows that to the one group's bucket. A bug in the
   session policy can only ever *over*-restrict, never expand — good
   failure mode.
 
@@ -141,8 +146,8 @@ Reasons not to put it in `private-server`:
 ```sql
 CREATE TABLE server_group_backup_config (
     root_server_id    UUID PRIMARY KEY REFERENCES servers(id) ON DELETE CASCADE,
-    bucket            TEXT NOT NULL,
-    prefix            TEXT NOT NULL,           -- e.g. "groups/<root-id>/"
+    bucket            TEXT NOT NULL,           -- this group's own bucket (one bucket per group)
+    prefix            TEXT NOT NULL DEFAULT '', -- usually empty: the repo lives at the bucket root
     region            TEXT,                    -- NULL → deployment default
     endpoint          TEXT,                    -- NULL → AWS; set for non-AWS S3
     expected_interval INTERVAL,                -- declared cadence: paces devices AND drives staleness; NULL → neither
@@ -152,6 +157,13 @@ CREATE TABLE server_group_backup_config (
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ```
+
+`bucket` is the group's **own** bucket — one bucket per group, not a
+shared bucket with per-group prefixes. Isolation is therefore at the
+bucket boundary, and `prefix` is usually empty (the kopia repo sits at
+the bucket root); it stays in the schema only for the rare case of
+parking a repo under a sub-path. See "Per-group buckets" for naming and
+provisioning.
 
 `region`/`endpoint` are what `GET /backup-target` serves to devices.
 `expected_interval` is the group's **declared backup cadence** and the
@@ -327,11 +339,10 @@ completed", and it is the input to staleness detection below. A device
 that fails to even reach this endpoint shows up as staleness (no recent
 success), so a crashed run is not silent.
 
-(`region`/`endpoint` can be added as columns to `server_group_backup_config`
-when implementing, or derived from a single deployment-wide default if the
-backups bucket always lives in one region. Decide during implementation;
-the audit-log snapshot should capture whatever the device was actually
-told.)
+(`region`/`endpoint` are per-group columns on `server_group_backup_config`
+— each group's bucket can live in its own region, or behind a non-AWS S3
+endpoint. The audit-log snapshot should capture whatever the device was
+actually told.)
 
 `purpose` is a real capability gate, not just audit metadata:
 
@@ -418,11 +429,14 @@ Handler flow:
 }
 ```
 
-The `s3:ListBucket` condition prefix is what kopia needs to enumerate
-its own snapshots; without it the device sees the entire bucket
-listing. The restore variant omits all mutation actions — even an
-explicit attempt to `kopia repository create` over the prefix is
-rejected by S3, not just by kopia.
+With one bucket per group, `<prefix>` is normally empty, so these
+resolve to the whole bucket (`<bucket>/*`) and an unconditioned
+`ListBucket` — which is correct, since the group owns the bucket
+outright. The `s3:prefix` condition only does work in the rare
+sub-path case; it's kept in the template so a non-empty prefix still
+scopes listings. The restore variant omits all mutation actions — even
+an explicit attempt to `kopia repository create` is rejected by S3, not
+just by kopia.
 
 `AbortMultipartUpload` is retained on the backup purpose: it can only
 discard a device's *own in-flight* multipart upload, never a committed
@@ -431,9 +445,10 @@ just lets a failed upload clean up its own parts instead of leaving
 billable orphans.
 
 Dropping `DeleteObject` is defence-in-depth on top of the real backstop:
-**the buckets already have a 30-day S3 Object Lock.** So even a cred that
-*could* delete or overwrite can't destroy a backup object younger than 30
-days — a locked version is retained regardless. The no-delete device
+**every group's bucket has a 30-day S3 Object Lock** (a required property,
+set at creation — see "Per-group buckets"). So even a cred that *could*
+delete or overwrite can't destroy a backup object younger than 30 days —
+a locked version is retained regardless. The no-delete device
 policy still earns its place (it removes the most destructive action
 outright, and avoids accidental client-side expiry), but the guarantee
 "a compromised server cannot destroy recent backups" rests on Object
@@ -442,21 +457,50 @@ interacts with kopia GC.
 
 ## AWS setup (out-of-band of this plan, but documented here for completeness)
 
+Because there's one bucket per group, the roles grant against a **bucket
+naming convention** rather than a single named bucket, and the per-call
+session policy still narrows to the one bucket the call is for.
+
 - `canopy-backup-issuer` role with trust policy allowing the Canopy pod's
   IRSA role to assume it.
-- Role policy grants broad `s3:*` on the backups bucket (broad because
-  the session policy is what actually constrains each call). Note: the
+- Role policy grants broad `s3:*` on the bucket pattern (e.g.
+  `arn:aws:s3:::canopy-backup-*`) — broad because the session policy is
+  what actually constrains each call to the one group's bucket. Note: the
   *device* session policies never grant delete, so even though the role
   could, the creds handed to devices can't.
 - `canopy-backup-maintenance` role (or service account) for the
-  maintenance Jobs, with full S3 incl. `DeleteObject` on the backups
-  bucket. This is the only identity in the system that can delete backup
+  maintenance Jobs, with full S3 incl. `DeleteObject` on the same bucket
+  pattern. This is the only identity in the system that can delete backup
   objects. It is first-party (Canopy-controlled), never handed to a
   device. See "Canopy-owned maintenance" for why it gets its own IRSA
   identity rather than chained creds.
-- The backups bucket is created separately. Single bucket to start;
-  the `bucket` column in `server_group_backup_config` means moving to
-  one-bucket-per-group later is a data migration, not a code change.
+
+### Per-group buckets
+
+Each group gets its own bucket, named by convention (e.g.
+`canopy-backup-<root-id>`) so the role patterns above cover it without
+per-bucket IAM edits. The hard constraint: **S3 Object Lock must be
+enabled at bucket creation** — it cannot be retrofitted onto an existing
+bucket. So provisioning a group's bucket must, atomically at creation,
+enable versioning + Object Lock with the default ≥30-day retention.
+Getting this wrong isn't fixable in place; it means recreating the
+bucket.
+
+Who provisions it is a decision (flagged in open questions), and it
+trades off against privilege:
+
+- **Out-of-band (IaC / admin step):** a Terraform module or admin tool
+  creates the bucket with lock when a group is onboarded; Canopy only
+  *uses* it (and the preflight verifies it). Keeps `CreateBucket` and
+  bucket-config powers out of the public-server's blast radius.
+- **Canopy-driven:** Canopy creates the bucket on group-config setup.
+  More "behind the scenes" but hands the control plane bucket-creation
+  authority, a meaningful privilege increase.
+
+Recommend out-of-band provisioning with preflight verification for the
+first cut: bucket creation is rare (once per group) and heavyweight, and
+the preflight already checks the lock is correct — so we get the
+"managed" feel without granting `CreateBucket` to the request path.
 
 ## `bestool` changes
 
@@ -654,13 +698,13 @@ AssumeRole sessions noted up top: device backups tolerate it because
 exceed an hour, and we don't want it dying mid-rewrite. A direct IRSA
 identity on the Job refreshes transparently with no cap.
 
-Maintenance is first-party Canopy-controlled code, so granting it broad
-bucket access (rather than per-group prefix narrowing via a session
-policy, which would re-introduce the 1-hour cap) is an acceptable
-trade-off. Per-prefix narrowing is what protects against *untrusted*
-device creds; it's not load-bearing for our own maintenance job. (If we
-later want per-group blast-radius limits on maintenance too, one role per
-group is the escape hatch — flagged, not built.)
+Maintenance is first-party Canopy-controlled code, so granting it access
+to the whole bucket pattern (rather than narrowing to the one group's
+bucket via a session policy, which would re-introduce the 1-hour cap) is
+an acceptable trade-off. Per-bucket narrowing is what protects against
+*untrusted* device creds; it's not load-bearing for our own maintenance
+job. (If we later want per-group blast-radius limits on maintenance too,
+one role per bucket is the escape hatch — flagged, not built.)
 
 ### Interaction with the 30-day Object Lock
 
@@ -759,14 +803,12 @@ removed, devices can't get creds and maintenance Jobs fail — and the
 backups stop without any per-device fault to point at. We should learn
 that from Canopy checking itself, not from devices starting to fail.
 
-**It runs per server-group, not fleet-wide.** Each group carries its own
-`bucket`/`prefix`/`region`/`endpoint` (the schema already allows divergent
-buckets, and one-bucket-per-group is a planned data migration), so the
-bucket-level access and the Object Lock config can differ per group —
-and once buckets diverge, even the cred pathway can (e.g. a non-AWS-S3
-`endpoint` isn't reached via AWS STS at all). So a failure is normally
-*scoped to one group*; it's only fleet-wide when the genuinely shared
-piece breaks. The preflight reflects that split:
+**It runs per server-group, not fleet-wide.** Each group has its own
+bucket with its own `region`/`endpoint` and its own Object Lock config,
+so bucket-level access can differ per group — and with a non-AWS-S3
+`endpoint`, the cred pathway differs too (it isn't reached via AWS STS at
+all). So a failure is normally *scoped to one group*; it's only fleet-wide
+when the genuinely shared piece breaks. The preflight reflects that split:
 
 Shared, checked once:
 - **Identity resolves** — `sts:GetCallerIdentity` confirms the pod's IRSA
@@ -825,18 +867,21 @@ Surface it loudly; don't take Canopy down over it.
   mechanism); it can no longer call the endpoint, so it can no longer
   get fresh creds. Already-issued creds expire within an hour.
 - **Decommissioning a group** — delete its `server_group_backup_config`
-  row; devices in that group start getting `409`.
-- **Changing prefix, region, or endpoint** — update the
+  row; devices in that group start getting `409`. The group's bucket and
+  its Object-Lock'd objects persist independently — they can't be deleted
+  until their locks expire (~30 days), so bucket teardown is a deliberate,
+  delayed step, not a side effect of removing the config row.
+- **Onboarding a group** — provision its bucket (with Object Lock, see
+  "Per-group buckets"), then insert the `server_group_backup_config` row.
+  Devices in the group start succeeding on their next run.
+- **Changing region or endpoint** — update the
   `server_group_backup_config` row. Each device picks it up on its next
   scheduled `bestool canopy backup` (every-run target fetch); no per-host
   command, no coordinated cutover. Staleness detection flags any host
-  that fails to roll over.
-- **Rotating the *bucket*** — note this is not a free config flip: a
-  kopia repository lives *in* its bucket, so a new bucket is either a
-  repo data migration or a deliberate start-fresh. The mechanism makes
-  the *config* change propagate automatically, but the operator still
-  owns the migration/cutover decision. (Listed under out-of-scope as
-  per-group bucket migration.)
+  that fails to roll over. (This means pointing at a *different* bucket;
+  since a kopia repo lives in its bucket, that's a repo migration or a
+  start-fresh the operator owns — not a free flip — even though the config
+  change itself propagates automatically.)
 - **A compromised server can't destroy recent backups** — no device cred
   grants `DeleteObject`, and the 30-day Object Lock means even a delete-
   or overwrite-capable cred can't damage backup objects younger than 30
@@ -856,6 +901,11 @@ Surface it loudly; don't take Canopy down over it.
 
 None blocking, but flag-and-decide-during-implementation:
 
+- **Bucket provisioning ownership.** Out-of-band (IaC / admin) vs.
+  Canopy-driven `CreateBucket` (see "Per-group buckets"). Recommended
+  out-of-band for the first cut to keep `CreateBucket` out of the request
+  path; decide, and settle the bucket naming convention the IAM patterns
+  key off. Whichever, Object Lock must be enabled at creation.
 - **Per-device session naming for CloudTrail.** Suggested
   `device-<uuid>`; check max length and allowed chars on
   `RoleSessionName`.
@@ -927,15 +977,14 @@ None blocking, but flag-and-decide-during-implementation:
   silent breakage either (a dead proxy is just as silent). Detection
   does that. Rejected for the first cut; revisit only if we want the
   interposition point for its own sake.
-- Per-group bucket migration (the schema supports it; the operational
-  work is separate).
+- Migrating *existing* shared-bucket data into per-group buckets (if any
+  group is on a shared bucket today). The design is one-bucket-per-group;
+  moving legacy data across is a separate operational task.
 - bestool subcommand implementation (separate repo).
 - **Tuning** retention policy values, encryption-at-rest beyond default
   SSE-S3, S3 lifecycle rules. (Retention *execution* is in scope — Canopy
   maintenance runs it — but the kopia retention values start at a default
   and per-group tuning is later.)
-- Standing up Object Lock — the buckets already have a 30-day lock; this
-  plan consumes it (object-lock-aware repos), it doesn't create it.
 - Operator UI in `private-server` / React for editing
   `server_group_backup_config` (will want it eventually; not in the
   first cut — bootstrap via SQL). This now includes the maintenance
