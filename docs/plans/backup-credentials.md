@@ -39,9 +39,9 @@ directly (no proxy through Canopy).
 - Tuning the kopia *retention policy* values (keep N daily / M weekly).
   Canopy now *executes* retention via maintenance, but the policy values
   themselves start at a sane default; per-group tuning is later.
-- WORM immutability (S3 Object Lock / versioning). Dropping `DeleteObject`
-  from device creds is the first step; full protection against a
-  malicious server overwriting objects is a follow-up.
+- WORM immutability is **already in place** (30-day S3 Object Lock on the
+  buckets) — not a follow-up. This plan just has to be compatible with it
+  (object-lock-aware kopia repos; GC reclaims on a ~30-day lag).
 - Picking the backup tool. Kopia is the assumed consumer because it
   fits the AWS SDK `credential_process` hook cleanly, but rclone works
   through the same mechanism if it turns out to be preferred.
@@ -420,15 +420,15 @@ object, so it doesn't weaken the "can't delete backups" property — it
 just lets a failed upload clean up its own parts instead of leaving
 billable orphans.
 
-What dropping `DeleteObject` does **not** give you is full immutability:
-the backup purpose still has `PutObject`, so a compromised server could
-overwrite or corrupt existing repo objects (kopia content blobs are
-content-addressed, but index/pack/manifest blobs are still
-over-writable). Defeating a *malicious* (not merely accidental) server
-needs S3 Object Lock / versioning (WORM) so even overwrites are
-governed. That's a worthwhile follow-up but out of scope here; removing
-delete is the high-value, low-cost first step (it kills the most
-destructive action — wholesale deletion — outright).
+Dropping `DeleteObject` is defence-in-depth on top of the real backstop:
+**the buckets already have a 30-day S3 Object Lock.** So even a cred that
+*could* delete or overwrite can't destroy a backup object younger than 30
+days — a locked version is retained regardless. The no-delete device
+policy still earns its place (it removes the most destructive action
+outright, and avoids accidental client-side expiry), but the guarantee
+"a compromised server cannot destroy recent backups" rests on Object
+Lock, not on IAM alone. See "Canopy-owned maintenance" for how the lock
+interacts with kopia GC.
 
 ## AWS setup (out-of-band of this plan, but documented here for completeness)
 
@@ -573,6 +573,23 @@ device creds; it's not load-bearing for our own maintenance job. (If we
 later want per-group blast-radius limits on maintenance too, one role per
 group is the escape hatch — flagged, not built.)
 
+### Interaction with the 30-day Object Lock
+
+The buckets have a 30-day S3 Object Lock, which constrains maintenance:
+kopia GC cannot actually delete a pack blob until its lock expires, so
+storage from expired snapshots is reclaimed on a ~30-day lag, not
+immediately. This is expected and is the price of ransomware-proof
+backups — it must not be read as maintenance failing. Two implications
+for implementation:
+
+- The kopia repository must be created **object-lock-aware** (kopia
+  supports this explicitly: it tracks retention and avoids trying to
+  delete still-locked blobs). A repo created oblivious to the lock will
+  throw errors when maintenance attempts deletes that S3 refuses.
+- Budget for the lag: at any time the bucket holds up to ~30 days of
+  not-yet-collectable garbage on top of live data. Fine, but worth
+  noting for capacity/cost.
+
 ### Repository password ownership
 
 This is the new dependency maintenance forces into the open: kopia
@@ -638,9 +655,10 @@ what's fixed is that it's Canopy's responsibility, not a client's.
   the *config* change propagate automatically, but the operator still
   owns the migration/cutover decision. (Listed under out-of-scope as
   per-group bucket migration.)
-- **A compromised server can't delete backups** — no device cred grants
-  `DeleteObject`; only the Canopy maintenance role can. (It can still
-  *overwrite* until WORM lands — see non-goals.)
+- **A compromised server can't destroy recent backups** — no device cred
+  grants `DeleteObject`, and the 30-day Object Lock means even a delete-
+  or overwrite-capable cred can't damage backup objects younger than 30
+  days. IAM removes the action; Object Lock is the hard backstop.
 - **Maintenance just happens** — clients don't run it and don't have the
   rights to; Canopy spawns the Jobs. Repo bloat / unenforced retention
   from a stuck client owner is no longer a failure mode, and
@@ -703,8 +721,8 @@ None blocking, but flag-and-decide-during-implementation:
   SSE-S3, S3 lifecycle rules. (Retention *execution* is in scope — Canopy
   maintenance runs it — but the kopia retention values start at a default
   and per-group tuning is later.)
-- WORM immutability via S3 Object Lock / versioning. Dropping device
-  delete is the first step; governing overwrites is a follow-up.
+- Standing up Object Lock — the buckets already have a 30-day lock; this
+  plan consumes it (object-lock-aware repos), it doesn't create it.
 - Operator UI in `private-server` / React for editing
   `server_group_backup_config` (will want it eventually; not in the
   first cut — bootstrap via SQL). This now includes the maintenance
