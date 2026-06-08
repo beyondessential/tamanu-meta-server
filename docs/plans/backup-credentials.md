@@ -458,11 +458,12 @@ interacts with kopia GC.
 
 ## `bestool` changes
 
-A new subcommand for the credential refresh, plumbed as kopia's
-`credential_process`:
+These hang off bestool's existing `canopy` subcommand, since they're all
+Canopy-mediated. A subcommand for the credential refresh, plumbed as
+kopia's `credential_process`:
 
 ```
-bestool backup-credentials [--purpose backup|restore]   # default: backup
+bestool canopy backup-credentials [--purpose backup|restore]   # default: backup
 ```
 
 - Reads the device's mTLS identity from its existing location.
@@ -475,14 +476,14 @@ And a driver subcommand that owns the kopia invocation so the device
 holds no hardcoded bucket:
 
 ```
-bestool backup [--purpose backup|restore]
+bestool canopy backup [--purpose backup|restore]
 ```
 
 - `GET /backup-target` to learn `{bucket, prefix, region, endpoint}`
   **on every run** — never cached to persistent device config.
 - Reconciles the kopia repository connection against that target (so a
   changed bucket/prefix is picked up here), with
-  `credential_process = bestool backup-credentials` for the creds.
+  `credential_process = bestool canopy backup-credentials` for the creds.
 - Runs the backup (or restore).
 - Reports the run outcome back to Canopy (see "Backup reporting" below),
   so the control plane learns "backup completed", not just "creds
@@ -492,7 +493,7 @@ The device is provisioned only with its Canopy URL and mTLS identity.
 The bucket, prefix and region are never written to the device's
 persistent config — bestool re-derives the repository connection from
 Canopy on *every* run. This is the crux of the "no per-host action"
-property: `bestool backup` is the scheduled job (systemd timer / cron)
+property: `bestool canopy backup` is the scheduled job (systemd timer / cron)
 that already runs on each host on its backup cadence, so a server-side
 config change propagates to the whole fleet automatically on each host's
 next scheduled backup. There is no operator command to run per host and
@@ -681,7 +682,7 @@ what's fixed is that it's Canopy's responsibility, not a client's.
   row; devices in that group start getting `409`.
 - **Changing prefix, region, or endpoint** — update the
   `server_group_backup_config` row. Each device picks it up on its next
-  scheduled `bestool backup` (every-run target fetch); no per-host
+  scheduled `bestool canopy backup` (every-run target fetch); no per-host
   command, no coordinated cutover. Staleness detection flags any host
   that fails to roll over.
 - **Rotating the *bucket*** — note this is not a free config flip: a
