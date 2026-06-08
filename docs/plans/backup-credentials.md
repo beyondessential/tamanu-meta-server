@@ -111,13 +111,21 @@ Reasons not to put it in `private-server`:
 
 ```sql
 CREATE TABLE server_group_backup_config (
-    root_server_id  UUID PRIMARY KEY REFERENCES servers(id) ON DELETE CASCADE,
-    bucket          TEXT NOT NULL,
-    prefix          TEXT NOT NULL,           -- e.g. "groups/<root-id>/"
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+    root_server_id    UUID PRIMARY KEY REFERENCES servers(id) ON DELETE CASCADE,
+    bucket            TEXT NOT NULL,
+    prefix            TEXT NOT NULL,           -- e.g. "groups/<root-id>/"
+    region            TEXT,                    -- NULL → deployment default
+    endpoint          TEXT,                    -- NULL → AWS; set for non-AWS S3
+    expected_interval INTERVAL,                -- NULL → no staleness alerting
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ```
+
+`region`/`endpoint` are what `GET /backup-target` serves to devices.
+`expected_interval` drives staleness detection (below): if a group is
+expected to back up daily, set it to `1 day` and Canopy alerts when a
+device in the group has no recent successful run.
 
 A row is keyed by the root server id (the parentless server that heads
 the group). Devices without a configured root row → `409 Conflict` from
@@ -151,13 +159,38 @@ CREATE INDEX ON backup_credential_issuances (device_id, issued_at DESC);
 CREATE INDEX ON backup_credential_issuances (root_server_id, issued_at DESC);
 ```
 
-This is the audit log that "did device X back up today" queries against.
-We snapshot bucket/prefix at issuance time so the log stays correct
+This is the audit log of credential *issuance*. It answers "was a device
+handed creds" but not "did the backup succeed" — see `backup_runs` for
+that. We snapshot bucket/prefix at issuance time so the log stays correct
 even if the group config is later changed.
+
+### New table: `backup_runs`
+
+```sql
+CREATE TABLE backup_runs (
+    id              BIGSERIAL PRIMARY KEY,
+    device_id       UUID NOT NULL REFERENCES devices(id),
+    root_server_id  UUID NOT NULL REFERENCES servers(id),
+    purpose         TEXT NOT NULL,            -- "backup" | "restore"
+    outcome         TEXT NOT NULL,            -- "success" | "failure"
+    error           TEXT,                     -- populated on failure
+    bytes_uploaded  BIGINT,
+    snapshot_id     TEXT,                     -- kopia snapshot/manifest id
+    reported_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX ON backup_runs (root_server_id, reported_at DESC);
+CREATE INDEX ON backup_runs (device_id, reported_at DESC);
+```
+
+Written by `POST /backup-report`. This is the "a backup actually
+completed" signal that staleness detection reads. Issuance alone is not
+enough: a device can get creds and then crash before uploading anything,
+and that must not read as a healthy backup.
 
 ## Endpoint shape
 
-Two endpoints, both `ServerDevice`-authenticated and both resolving the
+Three endpoints, all `ServerDevice`-authenticated and all resolving the
 device → root → `server_group_backup_config` the same way:
 
 ### `POST /backup-credentials` — short-lived creds
@@ -206,6 +239,27 @@ The only thing a device is ever provisioned with is its Canopy URL, its
 mTLS identity, and "run bestool" — never a bucket name. Canopy is the sole
 owner of backup-target config; changing it is a single-row update with no
 device-side coordination.
+
+### `POST /backup-report` — outcome of a run
+
+```
+POST /backup-report
+  Authorization: mTLS via ServerDevice
+  Body: {
+    "purpose": "backup" | "restore",
+    "outcome": "success" | "failure",
+    "error":          "...",   -- optional, on failure
+    "bytes_uploaded": 12345,   -- optional
+    "snapshot_id":    "..."    -- optional, kopia snapshot/manifest id
+  }
+  Response 204
+```
+
+bestool calls this after the kopia run finishes. It is what turns the
+control plane's signal from "creds were issued" into "a backup actually
+completed", and it is the input to staleness detection below. A device
+that fails to even reach this endpoint shows up as staleness (no recent
+success), so a crashed run is not silent.
 
 (`region`/`endpoint` can be added as columns to `server_group_backup_config`
 when implementing, or derived from a single deployment-wide default if the
@@ -330,35 +384,90 @@ holds no hardcoded bucket:
 bestool backup [--purpose backup|restore]
 ```
 
-- `GET /backup-target` to learn `{bucket, prefix, region, endpoint}`.
-- Connects/creates the kopia repository against that target, with
+- `GET /backup-target` to learn `{bucket, prefix, region, endpoint}`
+  **on every run** — never cached to persistent device config.
+- Reconciles the kopia repository connection against that target (so a
+  changed bucket/prefix is picked up here), with
   `credential_process = bestool backup-credentials` for the creds.
 - Runs the backup (or restore).
+- Reports the run outcome back to Canopy (see "Backup reporting" below),
+  so the control plane learns "backup completed", not just "creds
+  issued".
 
 The device is provisioned only with its Canopy URL and mTLS identity.
 The bucket, prefix and region are never written to the device's
 persistent config — bestool re-derives the repository connection from
-Canopy on each run, so a server-side config change takes effect on the
-next backup with zero device reconfiguration.
+Canopy on *every* run. This is the crux of the "no per-host action"
+property: `bestool backup` is the scheduled job (systemd timer / cron)
+that already runs on each host on its backup cadence, so a server-side
+config change propagates to the whole fleet automatically on each host's
+next scheduled backup. There is no operator command to run per host and
+nothing to "forget to re-run".
 
 bestool work is in a separate repo; this plan covers the Canopy side
 and the bestool side will be a sibling change there.
 
+## Backup reporting and staleness detection
+
+The thing that actually protects against *silently* broken backups is
+not the credential or target delivery mechanism — a backup that simply
+doesn't run is silent regardless of how config reaches the device. The
+protection is Canopy *knowing* each device's backup state and alerting
+when one goes quiet. That detection catches a stale config, a dead
+timer, a crashed run, or a network outage — all the ways a backup can
+fail, not just config drift.
+
+Mechanism:
+1. bestool reports each run via `POST /backup-report`, written to
+   `backup_runs`.
+2. A periodic Canopy job (alongside the existing health/alerting
+   machinery — the same path that surfaces and recovers other device
+   health signals) scans, per group with a non-NULL `expected_interval`:
+   - **Stale**: a device that previously reported successful backups but
+     has no `outcome = 'success'` row newer than `expected_interval`
+     (times a small grace factor) → alert.
+   - **Never backed up**: a device in a configured group that has been
+     present longer than `expected_interval` and has *no* successful
+     `backup_runs` row → alert. (Catches a host that was never wired up,
+     which a "last success" check alone would miss.)
+   - **Recovered**: a previously-stale device reporting success again
+     clears the alert.
+3. Alerts route through the existing operator notification path
+   (Slack/email via `PRIVATE_URL`).
+
+This is the half of "did device X back up today" that the audit log
+alone can't give: `backup_credential_issuances` says creds were handed
+out; `backup_runs` + this job says whether the backup landed and shouts
+when it didn't.
+
+A bucket change therefore can't silently break the fleet: if a host
+fails to pick up the new target or fails to upload, its next expected
+window lapses and Canopy alerts. The propagation itself is automatic
+(every-run target fetch); detection is the backstop for when automatic
+propagation doesn't take.
+
 ## Operational story (what we gain, day-one)
 
-- **"Did device X back up today?"** — query
-  `backup_credential_issuances` for the device, with a recent
-  `issued_at`. Not a perfect proxy (creds issued ≠ bytes uploaded) but
-  it's the cheap version. Real "bytes uploaded" comes from S3
-  inventory / CloudWatch later.
+- **"Did device X back up today?"** — `backup_runs` gives the real
+  answer (a successful run landed), and `backup_credential_issuances`
+  the cheaper "creds were issued" proxy. Byte-level reconciliation
+  against S3 inventory / CloudWatch still comes later.
 - **Decommissioning a device** — revoke its mTLS cert (existing
   mechanism); it can no longer call the endpoint, so it can no longer
   get fresh creds. Already-issued creds expire within an hour.
 - **Decommissioning a group** — delete its `server_group_backup_config`
   row; devices in that group start getting `409`.
-- **Rotating bucket / changing prefix** — update the
-  `server_group_backup_config` row. Existing creds keep working until
-  expiry, then refresh with the new config. No coordinated cutover.
+- **Changing prefix, region, or endpoint** — update the
+  `server_group_backup_config` row. Each device picks it up on its next
+  scheduled `bestool backup` (every-run target fetch); no per-host
+  command, no coordinated cutover. Staleness detection flags any host
+  that fails to roll over.
+- **Rotating the *bucket*** — note this is not a free config flip: a
+  kopia repository lives *in* its bucket, so a new bucket is either a
+  repo data migration or a deliberate start-fresh. The mechanism makes
+  the *config* change propagate automatically, but the operator still
+  owns the migration/cutover decision. (Listed under out-of-scope as
+  per-group bucket migration.)
 
 ## Open questions
 
@@ -373,12 +482,29 @@ None blocking, but flag-and-decide-during-implementation:
   every `Server`-role device has a server association; if not, the
   endpoint returns 409 and we file a separate issue for the
   data-consistency gap.
+- **Staleness "device present" definition.** The "never backed up" check
+  needs a notion of how long a device has existed in a configured group
+  (first-seen / association timestamp) to avoid alerting on a host added
+  minutes ago. Pick the existing timestamp to key off when implementing.
+- **Grace factor for staleness.** `expected_interval × N` before
+  alerting — pick N (and whether it's configurable per group) during
+  implementation; start simple.
 
 ## Out of scope (do not silently fold in)
 
 - Cross-group restore mechanism (explicitly disallowed by product
   decision).
 - Data-plane proxy / Canopy-served S3/WebDAV (explicitly rejected).
+- **Device-local S3 proxy** (kopia → `localhost`, a bestool daemon
+  re-signs and forwards to the real bucket). Considered as an
+  alternative to the every-run target fetch: it maximises decoupling
+  (kopia never knows the bucket) and could be a future interposition
+  point, but it relocates rather than removes the large S3 protocol
+  surface this plan avoids (SigV4 re-signing, streaming multipart, a
+  supervised long-lived daemon), and — crucially — it does **not** solve
+  silent breakage either (a dead proxy is just as silent). Detection
+  does that. Rejected for the first cut; revisit only if we want the
+  interposition point for its own sake.
 - Per-group bucket migration (the schema supports it; the operational
   work is separate).
 - bestool subcommand implementation (separate repo).
