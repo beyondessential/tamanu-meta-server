@@ -538,7 +538,13 @@ when one goes quiet. That detection catches a stale config, a dead
 timer, a crashed run, or a network outage — all the ways a backup can
 fail, not just config drift.
 
-Mechanism:
+There are two independent ways for Canopy to know, and we use both:
+
+### Signal 1 — device reports (timely, self-reported)
+
+This is the cheap, immediate signal: bestool tells Canopy how each run
+went, and a job scans those reports in the database.
+
 1. bestool reports each run via `POST /backup-report`, written to
    `backup_runs`.
 2. A periodic Canopy job (alongside the existing health/alerting
@@ -565,10 +571,49 @@ Mechanism:
 3. Alerts route through the existing operator notification path
    (Slack/email via `PRIVATE_URL`).
 
+The limit of signal 1 is that it's the *device's word*: it scans the
+Canopy database for what devices reported, not for what's actually in the
+bucket. A device that crashes before reporting looks (safely) stale; a
+compromised or buggy device could report success it didn't achieve; a
+snapshot that the device believes it wrote but that never persisted reads
+as healthy. Reports are timely but not authoritative.
+
+### Signal 2 — repository inspection (authoritative, periodic)
+
+Now that maintenance jobs already connect to each group's repository with
+the password, Canopy can read the **ground truth**: the snapshots that
+actually exist. A check — piggybacked on the maintenance job, or a
+dedicated read-only job on the same footing — lists the repo's snapshots
+and records, per source, the latest snapshot time. That's what *actually
+landed in the bucket*, independent of whether any device reported, was
+honest, or is even reachable.
+
+- For this to attribute snapshots to devices, the kopia **source must
+  encode the device** (e.g. fix the snapshot host to the device id) so
+  Canopy can map `user@host:path` back to a device. The backup setup must
+  pin this deterministically — flagged below.
+- Reconciliation against signal 1 is where the value is:
+  - report says success **but** no recent snapshot in the repo → the
+    report is wrong or the upload didn't persist → **alert** (the case
+    signal 1 alone cannot catch).
+  - recent snapshot **but** no report → backups are fine, the reporting
+    path is broken → lower-severity notice.
+  - neither → genuinely stale (agrees with signal 1).
+- It is *not* a replacement for signal 1's timeliness: it only sees the
+  repo as often as the job runs (maintenance cadence), so an hourly-miss
+  won't surface until the next inspection. Reports stay the day-to-day
+  signal; repo inspection is the periodic trust anchor.
+- Trust property: signal 2 depends only on the bucket (Object-Lock
+  protected), not on any device, so it's the signal a compromised server
+  cannot fake into showing a healthy backup.
+
+Both signals feed the same alerting path.
+
 This is the half of "did device X back up today" that the audit log
 alone can't give: `backup_credential_issuances` says creds were handed
-out; `backup_runs` + this job says whether the backup landed and shouts
-when it didn't.
+out; `backup_runs` says what the device *reported*; repository inspection
+says what *actually landed* — and the three together shout when they
+disagree.
 
 A bucket change therefore can't silently break the fleet: if a host
 fails to pick up the new target or fails to upload, its next expected
@@ -766,6 +811,13 @@ None blocking, but flag-and-decide-during-implementation:
   asks Canopy (which already has `backup_runs`). Asking Canopy is
   drift-proof but adds a round-trip; local state is cheaper but can lie
   after a host rebuild. Decide during implementation.
+- **kopia source → device mapping.** Repository inspection (signal 2)
+  needs to attribute each snapshot source back to a device, so the
+  snapshot source must encode the device deterministically (e.g. host =
+  device id). Pin this in the backup setup; settle where the per-source
+  latest-snapshot inventory is stored (extend `backup_maintenance_runs`,
+  or a dedicated table) and the inspection cadence if it's a job
+  separate from maintenance.
 - **Repo password storage.** Canopy owns the per-group kopia password;
   where does the secret actually live (k8s secret vs. Secrets Manager
   vs. ...) and how is it served to devices and injected into Jobs?
