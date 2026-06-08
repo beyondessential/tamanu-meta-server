@@ -543,16 +543,25 @@ Mechanism:
    `backup_runs`.
 2. A periodic Canopy job (alongside the existing health/alerting
    machinery — the same path that surfaces and recovers other device
-   health signals) scans, per group with a non-NULL `expected_interval`:
+   health signals) scans the **devices expected to be backing up** —
+   i.e. every `Server`-role device whose group root has a
+   `server_group_backup_config` with a non-NULL `expected_interval` —
+   and, joining each against its most recent `backup_runs` row,
+   classifies it:
    - **Stale**: a device that previously reported successful backups but
      has no `outcome = 'success'` row newer than `expected_interval`
      (times a small grace factor) → alert.
-   - **Never backed up**: a device in a configured group that has been
+   - **Never backed up**: a device in the scanned set that has been
      present longer than `expected_interval` and has *no* successful
      `backup_runs` row → alert. (Catches a host that was never wired up,
      which a "last success" check alone would miss.)
    - **Recovered**: a previously-stale device reporting success again
      clears the alert.
+
+   The scanned set — "which devices ought to back up" — is the part to
+   pin down in implementation: the natural definition is `Server`-role
+   devices associated with a configured group, but it leans on the same
+   `devices.server_id` / "device present" questions flagged below.
 3. Alerts route through the existing operator notification path
    (Slack/email via `PRIVATE_URL`).
 
