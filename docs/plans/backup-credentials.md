@@ -145,7 +145,7 @@ CREATE TABLE server_group_backup_config (
     prefix            TEXT NOT NULL,           -- e.g. "groups/<root-id>/"
     region            TEXT,                    -- NULL → deployment default
     endpoint          TEXT,                    -- NULL → AWS; set for non-AWS S3
-    expected_interval INTERVAL,                -- NULL → no staleness alerting
+    expected_interval INTERVAL,                -- declared cadence: paces devices AND drives staleness; NULL → neither
     retention         JSONB NOT NULL,          -- kopia keep-* policy; Canopy asserts it into the repo
     repo_password_ref TEXT NOT NULL,           -- reference to the secret, NOT the secret
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -154,9 +154,11 @@ CREATE TABLE server_group_backup_config (
 ```
 
 `region`/`endpoint` are what `GET /backup-target` serves to devices.
-`expected_interval` drives staleness detection (below): if a group is
-expected to back up daily, set it to `1 day` and Canopy alerts when a
-device in the group has no recent successful run.
+`expected_interval` is the group's **declared backup cadence** and the
+single source for it: it both paces the devices (see "Backup cadence")
+and drives staleness detection. Set it to `1 day` and devices aim to
+back up daily *and* Canopy alerts when one hasn't. Because it's one
+value, the schedule and the alert can't drift apart.
 
 `retention` holds the kopia keep-policy (e.g. `{"keep_daily": 7,
 "keep_weekly": 4, ...}`); Canopy asserts it into the repo at creation and
@@ -493,11 +495,35 @@ The device is provisioned only with its Canopy URL and mTLS identity.
 The bucket, prefix and region are never written to the device's
 persistent config — bestool re-derives the repository connection from
 Canopy on *every* run. This is the crux of the "no per-host action"
-property: `bestool canopy backup` is the scheduled job (systemd timer / cron)
-that already runs on each host on its backup cadence, so a server-side
-config change propagates to the whole fleet automatically on each host's
-next scheduled backup. There is no operator command to run per host and
-nothing to "forget to re-run".
+property: a server-side config change propagates to the whole fleet
+automatically on each host's next run. There is no operator command to
+run per host and nothing to "forget to re-run".
+
+### Backup cadence
+
+Who decides *when* `bestool canopy backup` runs is a real question,
+because Canopy is **pull-based** — it has no inbound path to devices (the
+push/proxy direction is explicitly rejected), so it physically cannot
+trigger a backup. A local trigger must exist. The design choice is only
+whether the cadence is hardcoded per host (drifts from Canopy's
+`expected_interval`, and changing the fleet cadence means touching every
+host) or owned by Canopy like everything else.
+
+We own it in Canopy:
+
+- A local systemd timer fires `bestool canopy backup` as a *heartbeat* —
+  frequent enough (say hourly) that it never gates the real cadence, and
+  needing no per-host tuning.
+- Each tick, bestool already fetches the target/creds; it also reads the
+  group's `expected_interval` and backs up only if the last successful
+  run is older than that. So the *effective* schedule is Canopy's
+  declared cadence; the local timer is just "wake up and ask".
+- Staleness alerting reads the same `expected_interval`, so the cadence
+  the fleet targets and the cadence Canopy polices are one number and
+  cannot diverge.
+
+Changing a group's cadence is then the same single-row update as any
+other config — no per-host action.
 
 bestool work is in a separate repo; this plan covers the Canopy side
 and the bestool side will be a sibling change there.
@@ -725,6 +751,12 @@ None blocking, but flag-and-decide-during-implementation:
   field's default — a product decision, not invented here. Note the
   effective floor is 30 days regardless (Object Lock), so anything
   shorter is meaningless; the default should be ≥ that.
+- **Heartbeat interval and last-success source.** The local timer's
+  fixed interval (must be ≤ the smallest `expected_interval` in use),
+  and whether bestool debounces against locally-recorded last-success or
+  asks Canopy (which already has `backup_runs`). Asking Canopy is
+  drift-proof but adds a round-trip; local state is cheaper but can lie
+  after a host rebuild. Decide during implementation.
 - **Repo password storage.** Canopy owns the per-group kopia password;
   where does the secret actually live (k8s secret vs. Secrets Manager
   vs. ...) and how is it served to devices and injected into Jobs?
