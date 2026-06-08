@@ -749,6 +749,55 @@ exact home (private-server, a dedicated worker, or a CronJob that itself
 fans out per-group Jobs) is an implementation detail to settle then;
 what's fixed is that it's Canopy's responsibility, not a client's.
 
+## Upstream access preflight
+
+The device-staleness signals above watch the *devices*. This watches
+**Canopy's own upstream access**, which is a different and higher-stakes
+failure class: if the trust on `canopy-backup-issuer` is edited, the pod's
+IRSA annotation is dropped, a role is deleted, or the bucket's Object Lock
+is removed, the failure is *fleet-wide and instantaneous* — every
+issuance 502s and every maintenance job fails at once. We should learn
+that from Canopy checking itself, not from devices starting to fail.
+
+A periodic preflight (control-plane health machinery, same alerting path
+but flagged at control-plane / fleet-wide severity, distinct from
+per-device staleness):
+
+- **Identity resolves** — `sts:GetCallerIdentity` confirms the pod's IRSA
+  web-identity is mounted and valid.
+- **Issuance chain works** — a dry-run `AssumeRole` on
+  `canopy-backup-issuer` with a harmless session policy, confirming the
+  trust policy + role still admit Canopy. Optionally use the returned
+  creds for a **read-only no-op** against the bucket (e.g. `HeadBucket` /
+  a scoped `ListBucket` on a probe prefix) so the check proves the creds
+  *work*, not merely that `AssumeRole` returned.
+- **Object Lock is in place** — verify the backups bucket still has the
+  expected (≥30-day) Object Lock configuration. The whole "a compromised
+  server can't destroy backups" guarantee rests on this; if someone
+  removes or weakens the lock, the protection silently erodes with no
+  other symptom, so it must be actively checked.
+- **Maintenance path** — either a cheap preflight maintenance Job
+  (connect to a repo + no-op and exit) on its own IRSA, or lean on
+  `backup_maintenance_runs` failures. The former is proactive; the latter
+  only catches it when maintenance next runs. Flagged below.
+
+Prefer **behavioural** checks (try to assume; try a harmless S3 op) over
+IAM/policy *introspection*: behavioural checks test the real path and
+need no extra `iam:Get*` permissions, except the Object Lock check, which
+does need `s3:GetBucketObjectLockConfiguration` — an acceptable read to
+add given how load-bearing the lock is. Consistent with the session-
+policy reasoning earlier: we care that the effect is right, not that a
+described config *looks* right.
+
+Reactively, the live paths are signals too: `/backup-credentials` already
+502s on STS failure and maintenance failures land in
+`backup_maintenance_runs` — track their rates so a regression surfaces
+between preflights, not only at the next scheduled probe.
+
+This should **alert, not gate readiness**: a failing upstream check
+pulling the pod out of rotation would only make a fleet-wide problem
+worse. Surface it loudly; don't take Canopy down over it.
+
 ## Operational story (what we gain, day-one)
 
 - **"Did device X back up today?"** — `backup_runs` gives the real
@@ -780,6 +829,10 @@ what's fixed is that it's Canopy's responsibility, not a client's.
   from a stuck client owner is no longer a failure mode, and
   `backup_maintenance_runs` + staleness alerting catch a stuck *Canopy*
   maintenance instead.
+- **A broken control plane is caught at the source** — the upstream
+  preflight alerts if Canopy loses its issuer access, or the bucket's
+  Object Lock is removed, *before* a single device fails, instead of the
+  fleet discovering it the hard way.
 
 ## Open questions
 
@@ -818,6 +871,12 @@ None blocking, but flag-and-decide-during-implementation:
   latest-snapshot inventory is stored (extend `backup_maintenance_runs`,
   or a dedicated table) and the inspection cadence if it's a job
   separate from maintenance.
+- **Preflight depth and cadence.** How often the upstream preflight runs,
+  and whether it does the deeper checks (S3 read no-op against a probe
+  prefix; `GetBucketObjectLockConfiguration`) or just `GetCallerIdentity`
+  + dry-run `AssumeRole`. Deeper = more confidence, slightly more IAM
+  surface. Also: proactive maintenance preflight Job vs. relying on
+  `backup_maintenance_runs` failures.
 - **Repo password storage.** Canopy owns the per-group kopia password;
   where does the secret actually live (k8s secret vs. Secrets Manager
   vs. ...) and how is it served to devices and injected into Jobs?
