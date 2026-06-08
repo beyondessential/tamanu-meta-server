@@ -18,6 +18,12 @@ directly (no proxy through Canopy).
 - Cross-*group* restore is explicitly **not** supported.
 - Every credential issuance is recorded so we can answer "did device X
   back up today, and when."
+- No device can delete backups: `DeleteObject` is never granted to a
+  device cred, so a compromised server cannot wipe its group's backups.
+- Canopy owns repository maintenance (compaction, GC, retention/expiry),
+  running it as Kubernetes Jobs off the client servers — both to keep
+  that heavy, slow work off the servers and so that delete rights live
+  only in the control plane.
 
 ## Non-goals (for this plan)
 
@@ -26,9 +32,16 @@ directly (no proxy through Canopy).
   of every backup to Canopy uptime, and a much larger protocol surface.
 - Cross-group restore. The endpoint signature can stay minimal because
   this is genuinely out of scope, not "deferred."
-- Retention policy enforcement, cost dashboards, alerting on missed
-  backups. The audit log this plan introduces is the foundation for
-  those, but the features themselves come later.
+- Cost dashboards and byte-level reconciliation against S3
+  inventory / CloudWatch. (Missed-backup alerting *is* in scope now —
+  see staleness detection — and maintenance/expiry execution is owned by
+  Canopy; what's deferred is cost/usage analytics.)
+- Tuning the kopia *retention policy* values (keep N daily / M weekly).
+  Canopy now *executes* retention via maintenance, but the policy values
+  themselves start at a sane default; per-group tuning is later.
+- WORM immutability (S3 Object Lock / versioning). Dropping `DeleteObject`
+  from device creds is the first step; full protection against a
+  malicious server overwriting objects is a follow-up.
 - Picking the backup tool. Kopia is the assumed consumer because it
   fits the AWS SDK `credential_process` hook cleanly, but rclone works
   through the same mechanism if it turns out to be preferred.
@@ -54,6 +67,21 @@ directly (no proxy through Canopy).
 ┌──────────┐
 │    S3    │
 └──────────┘
+
+Maintenance path (Canopy-owned, no device involvement):
+
+┌──────────┐  spawns k8s Job per group   ┌──────────────────┐
+│ Canopy   │ ──────────────────────────► │ maintenance Job  │
+│          │                             │ (kopia image,    │
+└──────────┘                             │  own IRSA → full │
+                                         │  S3 incl delete) │
+                                         └──────────────────┘
+                                                  │
+                                                  │ kopia maintenance
+                                                  ▼
+                                            ┌──────────┐
+                                            │    S3    │
+                                            └──────────┘
 ```
 
 Two STS calls per issuance:
@@ -117,6 +145,7 @@ CREATE TABLE server_group_backup_config (
     region            TEXT,                    -- NULL → deployment default
     endpoint          TEXT,                    -- NULL → AWS; set for non-AWS S3
     expected_interval INTERVAL,                -- NULL → no staleness alerting
+    repo_password_ref TEXT NOT NULL,           -- reference to the secret, NOT the secret
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -126,6 +155,11 @@ CREATE TABLE server_group_backup_config (
 `expected_interval` drives staleness detection (below): if a group is
 expected to back up daily, set it to `1 day` and Canopy alerts when a
 device in the group has no recent successful run.
+
+`repo_password_ref` points at the group's kopia repository password
+(held in a k8s secret / Secrets Manager, not stored here in plaintext —
+see "Repository password ownership"). It's the secret *reference*; the
+column never holds the password itself.
 
 A row is keyed by the root server id (the parentless server that heads
 the group). Devices without a configured root row → `409 Conflict` from
@@ -187,6 +221,28 @@ Written by `POST /backup-report`. This is the "a backup actually
 completed" signal that staleness detection reads. Issuance alone is not
 enough: a device can get creds and then crash before uploading anything,
 and that must not read as a healthy backup.
+
+### New table: `backup_maintenance_runs`
+
+```sql
+CREATE TABLE backup_maintenance_runs (
+    id              BIGSERIAL PRIMARY KEY,
+    root_server_id  UUID NOT NULL REFERENCES servers(id),
+    kind            TEXT NOT NULL,            -- "quick" | "full"
+    started_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    finished_at     TIMESTAMPTZ,
+    outcome         TEXT,                     -- "success" | "failure"; NULL while running
+    error           TEXT,
+    bytes_reclaimed BIGINT                    -- if kopia surfaces it
+);
+
+CREATE INDEX ON backup_maintenance_runs (root_server_id, started_at DESC);
+```
+
+Written by the Canopy maintenance Jobs (see "Canopy-owned maintenance").
+A group whose maintenance silently stops is a slow-motion failure (repo
+bloat, retention not enforced), so this feeds the same staleness
+alerting as `backup_runs`.
 
 ## Endpoint shape
 
@@ -269,12 +325,18 @@ told.)
 
 `purpose` is a real capability gate, not just audit metadata:
 
-- `"backup"` (default): read + write + delete + multipart, scoped to
-  the group's prefix. Kopia needs delete for snapshot expiry.
+- `"backup"` (default): read + write + multipart, **no `DeleteObject`**,
+  scoped to the group's prefix. Snapshot expiry and blob GC are *not*
+  done by the device — Canopy owns maintenance (see "Canopy-owned
+  maintenance" below), so the device never needs delete. A compromised
+  server therefore cannot delete backups.
 - `"restore"`: read-only (Get + ListBucket), scoped to the group's
   prefix. A device with these creds physically cannot mutate the
   bucket, so an accidental `kopia repository create` or similar can't
   damage backups.
+
+No device purpose grants `DeleteObject`. The only identity that can
+delete from the bucket is the Canopy maintenance role.
 
 The choice is the caller's; both purposes are available to every
 `Server`-role device within the group. There's no privilege gradient
@@ -296,7 +358,7 @@ Handler flow:
 
 ### Session policy templates
 
-**`purpose = "backup"`** — read + write + delete:
+**`purpose = "backup"`** — read + write, no delete:
 
 ```json
 {
@@ -305,7 +367,7 @@ Handler flow:
     {
       "Effect": "Allow",
       "Action": [
-        "s3:GetObject", "s3:PutObject", "s3:DeleteObject",
+        "s3:GetObject", "s3:PutObject",
         "s3:AbortMultipartUpload", "s3:ListBucketMultipartUploads",
         "s3:ListMultipartUploadParts"
       ],
@@ -352,12 +414,36 @@ listing. The restore variant omits all mutation actions — even an
 explicit attempt to `kopia repository create` over the prefix is
 rejected by S3, not just by kopia.
 
+`AbortMultipartUpload` is retained on the backup purpose: it can only
+discard a device's *own in-flight* multipart upload, never a committed
+object, so it doesn't weaken the "can't delete backups" property — it
+just lets a failed upload clean up its own parts instead of leaving
+billable orphans.
+
+What dropping `DeleteObject` does **not** give you is full immutability:
+the backup purpose still has `PutObject`, so a compromised server could
+overwrite or corrupt existing repo objects (kopia content blobs are
+content-addressed, but index/pack/manifest blobs are still
+over-writable). Defeating a *malicious* (not merely accidental) server
+needs S3 Object Lock / versioning (WORM) so even overwrites are
+governed. That's a worthwhile follow-up but out of scope here; removing
+delete is the high-value, low-cost first step (it kills the most
+destructive action — wholesale deletion — outright).
+
 ## AWS setup (out-of-band of this plan, but documented here for completeness)
 
 - `canopy-backup-issuer` role with trust policy allowing the Canopy pod's
   IRSA role to assume it.
 - Role policy grants broad `s3:*` on the backups bucket (broad because
-  the session policy is what actually constrains each call).
+  the session policy is what actually constrains each call). Note: the
+  *device* session policies never grant delete, so even though the role
+  could, the creds handed to devices can't.
+- `canopy-backup-maintenance` role (or service account) for the
+  maintenance Jobs, with full S3 incl. `DeleteObject` on the backups
+  bucket. This is the only identity in the system that can delete backup
+  objects. It is first-party (Canopy-controlled), never handed to a
+  device. See "Canopy-owned maintenance" for why it gets its own IRSA
+  identity rather than chained creds.
 - The backups bucket is created separately. Single bucket to start;
   the `bucket` column in `server_group_backup_config` means moving to
   one-bucket-per-group later is a data migration, not a code change.
@@ -446,6 +532,90 @@ window lapses and Canopy alerts. The propagation itself is automatic
 (every-run target fetch); detection is the backstop for when automatic
 propagation doesn't take.
 
+## Canopy-owned maintenance
+
+A kopia repository needs periodic maintenance: index compaction, blob
+garbage collection, and snapshot retention/expiry. In the default kopia
+deployment, one client "owns" the repo and runs this. We don't want that
+here, for two reasons:
+
+- **Load.** Full maintenance walks the whole repo and rewrites packs —
+  it takes a while and is I/O heavy. Putting it on a client server steals
+  resources from the thing that server actually exists to do.
+- **Least privilege.** Maintenance is the *only* operation that needs
+  `DeleteObject`. If a client ran it, every client would need delete, and
+  a compromised server could wipe the group's backups. By moving
+  maintenance to Canopy, no device cred ever needs delete (see the
+  session policies above), so a compromised server cannot delete backups.
+
+So Canopy owns maintenance. Concretely, a scheduled control-plane task
+spawns a **Kubernetes Job per group** that runs `kopia maintenance run`
+(quick on a short cadence, full less often) against that group's prefix,
+then exits. Spawning a Job rather than running kopia in-process keeps the
+heavy, long-running work off the Canopy pod and lets it use the kopia
+image directly.
+
+### Credentials for the maintenance Job
+
+The Job assumes `canopy-backup-maintenance` (full S3 incl. delete on the
+bucket). Crucially it gets this via **its own IRSA service account**, not
+chained creds minted by Canopy. The reason is the 1-hour cap on chained
+AssumeRole sessions noted up top: device backups tolerate it because
+`credential_process` refreshes on demand, but a full-maintenance run can
+exceed an hour, and we don't want it dying mid-rewrite. A direct IRSA
+identity on the Job refreshes transparently with no cap.
+
+Maintenance is first-party Canopy-controlled code, so granting it broad
+bucket access (rather than per-group prefix narrowing via a session
+policy, which would re-introduce the 1-hour cap) is an acceptable
+trade-off. Per-prefix narrowing is what protects against *untrusted*
+device creds; it's not load-bearing for our own maintenance job. (If we
+later want per-group blast-radius limits on maintenance too, one role per
+group is the escape hatch — flagged, not built.)
+
+### Repository password ownership
+
+This is the new dependency maintenance forces into the open: kopia
+repositories are encrypted, and **connecting to one — to back up, to
+restore, or to maintain — requires the repository password.** Today
+nothing in the plan says where that password lives. Maintenance settles
+it: Canopy owns the per-group repository password, because Canopy is the
+one party that must always be able to connect (it runs maintenance) and
+is already the source of truth for backup config.
+
+- Canopy generates the password when a group's backup config is first
+  set up, and serves it to devices (alongside the target) so bestool can
+  `kopia repository connect`, and injects it into maintenance Jobs.
+- This is *not* a new exposure on the device side: any client writing to
+  an encrypted kopia repo inherently holds the password — that's
+  intrinsic to direct-to-S3 backup, not something maintenance adds.
+- Storage of the password on the Canopy side is sensitive. Plaintext in
+  the DB is the easy option but probably wrong; a k8s secret or AWS
+  Secrets Manager reference held by `server_group_backup_config` is more
+  appropriate. **Open question — decide during implementation.**
+- The repo's maintenance *owner* is set to the Canopy maintenance
+  identity, and client-side maintenance is disabled, so clients never
+  attempt the maintenance they no longer have delete rights for.
+
+### Audit
+
+Maintenance runs are logged like device runs — a `backup_maintenance_runs`
+table (root_server_id, kind quick|full, started/finished, outcome, error,
+bytes reclaimed if available). Same value as `backup_runs`: "is
+maintenance actually happening for this group, and did it succeed." A
+group whose maintenance has silently stopped is a slow-motion problem
+(repo bloat, retention not enforced), so it feeds the same staleness
+alerting.
+
+### Where it lives
+
+The device-facing endpoints are on `public-server` (mTLS). Maintenance
+scheduling is internal control-plane work, not device-facing, and needs
+Kubernetes API access (a service account with RBAC to create Jobs). The
+exact home (private-server, a dedicated worker, or a CronJob that itself
+fans out per-group Jobs) is an implementation detail to settle then;
+what's fixed is that it's Canopy's responsibility, not a client's.
+
 ## Operational story (what we gain, day-one)
 
 - **"Did device X back up today?"** — `backup_runs` gives the real
@@ -468,6 +638,14 @@ propagation doesn't take.
   the *config* change propagate automatically, but the operator still
   owns the migration/cutover decision. (Listed under out-of-scope as
   per-group bucket migration.)
+- **A compromised server can't delete backups** — no device cred grants
+  `DeleteObject`; only the Canopy maintenance role can. (It can still
+  *overwrite* until WORM lands — see non-goals.)
+- **Maintenance just happens** — clients don't run it and don't have the
+  rights to; Canopy spawns the Jobs. Repo bloat / unenforced retention
+  from a stuck client owner is no longer a failure mode, and
+  `backup_maintenance_runs` + staleness alerting catch a stuck *Canopy*
+  maintenance instead.
 
 ## Open questions
 
@@ -489,6 +667,19 @@ None blocking, but flag-and-decide-during-implementation:
 - **Grace factor for staleness.** `expected_interval × N` before
   alerting — pick N (and whether it's configurable per group) during
   implementation; start simple.
+- **Repo password storage.** Canopy owns the per-group kopia password;
+  where does the secret actually live (k8s secret vs. Secrets Manager
+  vs. ...) and how is it served to devices and injected into Jobs?
+  `repo_password_ref` is a reference, not the secret — settle the
+  backing store during implementation.
+- **Maintenance cadence.** Quick vs. full intervals — start with
+  deployment-wide defaults; per-group override is a later column if
+  needed. Decide the scheduler home (CronJob fanning out per-group Jobs,
+  a private-server task, or a dedicated worker).
+- **Maintenance Job scoping.** Broad-bucket IRSA (simple, no 1-hour cap)
+  vs. one role per group (tighter blast radius, but per-group narrowing
+  via session policy re-introduces the cap). Recommended: broad for the
+  first cut since maintenance is first-party.
 
 ## Out of scope (do not silently fold in)
 
@@ -508,8 +699,14 @@ None blocking, but flag-and-decide-during-implementation:
 - Per-group bucket migration (the schema supports it; the operational
   work is separate).
 - bestool subcommand implementation (separate repo).
-- Backup retention, encryption-at-rest beyond default SSE-S3, lifecycle
-  policies (separate concerns).
+- **Tuning** retention policy values, encryption-at-rest beyond default
+  SSE-S3, S3 lifecycle rules. (Retention *execution* is in scope — Canopy
+  maintenance runs it — but the kopia retention values start at a default
+  and per-group tuning is later.)
+- WORM immutability via S3 Object Lock / versioning. Dropping device
+  delete is the first step; governing overwrites is a follow-up.
 - Operator UI in `private-server` / React for editing
   `server_group_backup_config` (will want it eventually; not in the
-  first cut — bootstrap via SQL).
+  first cut — bootstrap via SQL). This now includes the maintenance
+  schedule and the repo-password reference, still bootstrapped via SQL /
+  secret tooling for the first cut.
