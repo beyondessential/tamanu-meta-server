@@ -144,8 +144,14 @@ fits cleanly into `public-server`.
 Reasons not to put it in `private-server`:
 - `private-server` is for operator/admin access via Tailscale; devices
   reach Canopy through the internet-facing `public-server` with mTLS.
-- `public-server` already has the right state (DB, AWS clients if we
-  add one), the right auth extractors, and the right deployment shape.
+- `public-server` already has the right state (DB via `State<Db>`), the
+  right auth extractors (`ServerDevice`), and the right deployment shape.
+  **But the AWS client is greenfield:** there is *no* AWS SDK anywhere in
+  the workspace today (only the `aws-lc-rs` crypto backend — not the SDK),
+  and `AppState` has no AWS field. This feature introduces canopy's first
+  AWS SDK usage — net-new `aws-config` + `aws-sdk-{sts,s3,…}` deps, a
+  credential/region provider, a client on `AppState`, and a `FromRef`
+  impl. (Don't pin crate versions without checking the registry.)
 
 ## Database changes
 
@@ -153,7 +159,7 @@ Reasons not to put it in `private-server`:
 
 ```sql
 CREATE TABLE server_group_backup_config (
-    root_server_id    UUID PRIMARY KEY REFERENCES servers(id) ON DELETE CASCADE,
+    group_id          UUID PRIMARY KEY REFERENCES server_groups(id) ON DELETE CASCADE,
     bucket            TEXT NOT NULL,           -- this group's own bucket (one bucket per group)
     prefix            TEXT NOT NULL DEFAULT '', -- usually empty: the repo lives at the bucket root
     target_role_arn   TEXT NOT NULL,           -- per-bucket role Canopy assumes (encodes the account; may be cross-account)
@@ -203,17 +209,18 @@ but is *not* floor-enforced.
 password is Canopy-generated for from-birth repos or operator-supplied for
 imported ones — see "Repository password ownership".
 
-A row is keyed by the root server id (the parentless server that heads
-the group). Devices without a configured root row → `409 Conflict` from
-the credential endpoint with an instructive message.
+A row is keyed by **`group_id`** → `server_groups(id)` (the real grouping;
+`server_groups` is a flat first-class table, and servers carry a nullable
+`group_id` — there is no server hierarchy or "root server"). A device
+whose server has no group, or whose group has no config row, gets
+`409 Conflict` from the credential endpoint. (prod + its clones are
+already one `server_group`, so a shared bucket maps to that single group —
+the 1:1 group→bucket invariant holds; see "Per-group buckets".)
 
-Keeping this in a separate table rather than columns on `servers`
-because:
-- The columns are meaningful only on roots — adding them to `servers`
-  pollutes every row with mostly-NULL fields.
-- More backup-related fields are likely to land here (retention,
-  encryption-key id, monitoring thresholds) and they all naturally
-  co-locate.
+Keeping this in a separate table rather than columns on `server_groups`
+because more backup-related fields are likely to land here (retention,
+encryption-key id, monitoring thresholds) and they all naturally
+co-locate, and most groups won't have backup config.
 
 ### New table: `backup_credential_issuances`
 
@@ -221,7 +228,7 @@ because:
 CREATE TABLE backup_credential_issuances (
     id                  BIGSERIAL PRIMARY KEY,
     device_id           UUID NOT NULL REFERENCES devices(id),
-    root_server_id      UUID NOT NULL REFERENCES servers(id),
+    group_id            UUID NOT NULL REFERENCES server_groups(id),
     issued_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at          TIMESTAMPTZ NOT NULL,
     purpose             TEXT NOT NULL,       -- "backup" | "restore"
@@ -233,7 +240,7 @@ CREATE TABLE backup_credential_issuances (
 );
 
 CREATE INDEX ON backup_credential_issuances (device_id, issued_at DESC);
-CREATE INDEX ON backup_credential_issuances (root_server_id, issued_at DESC);
+CREATE INDEX ON backup_credential_issuances (group_id, issued_at DESC);
 ```
 
 This is the audit log of credential *issuance*. It answers "was a device
@@ -251,7 +258,7 @@ pointer to the `AssumeRole` event itself.
 CREATE TABLE backup_runs (
     id              BIGSERIAL PRIMARY KEY,
     device_id       UUID NOT NULL REFERENCES devices(id),
-    root_server_id  UUID NOT NULL REFERENCES servers(id),
+    group_id        UUID NOT NULL REFERENCES server_groups(id),
     purpose         TEXT NOT NULL,            -- "backup" | "restore"
     outcome         TEXT NOT NULL,            -- "success" | "failure"
     error           TEXT,                     -- populated on failure
@@ -260,7 +267,7 @@ CREATE TABLE backup_runs (
     reported_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX ON backup_runs (root_server_id, reported_at DESC);
+CREATE INDEX ON backup_runs (group_id, reported_at DESC);
 CREATE INDEX ON backup_runs (device_id, reported_at DESC);
 ```
 
@@ -274,7 +281,7 @@ and that must not read as a healthy backup.
 ```sql
 CREATE TABLE backup_maintenance_runs (
     id              BIGSERIAL PRIMARY KEY,
-    root_server_id  UUID NOT NULL REFERENCES servers(id),
+    group_id        UUID NOT NULL REFERENCES server_groups(id),
     kind            TEXT NOT NULL,            -- "quick" | "full"
     started_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     finished_at     TIMESTAMPTZ,
@@ -283,7 +290,7 @@ CREATE TABLE backup_maintenance_runs (
     bytes_reclaimed BIGINT                    -- if kopia surfaces it
 );
 
-CREATE INDEX ON backup_maintenance_runs (root_server_id, started_at DESC);
+CREATE INDEX ON backup_maintenance_runs (group_id, started_at DESC);
 ```
 
 Written by the Canopy maintenance Jobs (see "Canopy-owned maintenance").
@@ -295,12 +302,12 @@ alerting as `backup_runs`.
 
 ```sql
 CREATE TABLE backup_repo_snapshots (
-    root_server_id     UUID NOT NULL REFERENCES servers(id),
+    group_id           UUID NOT NULL REFERENCES server_groups(id),
     source             TEXT NOT NULL,            -- kopia source: canopy@<server-id>:<path>
     server_id          UUID REFERENCES servers(id),  -- parsed from source
     latest_snapshot_at TIMESTAMPTZ,
     observed_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (root_server_id, source)
+    PRIMARY KEY (group_id, source)
 );
 ```
 
@@ -313,7 +320,7 @@ took it lives in the snapshot's tags, not here.
 
 ```sql
 CREATE TABLE backup_repo_stats (
-    root_server_id   UUID PRIMARY KEY REFERENCES servers(id),
+    group_id         UUID PRIMARY KEY REFERENCES server_groups(id),
     snapshot_count   INTEGER,
     source_count     INTEGER,
     logical_bytes    BIGINT,                  -- kopia: pre-dedup size across snapshots
@@ -438,20 +445,25 @@ account just asks for `purpose=restore` and reads the group's backups;
 nothing about the spanning-account topology leaks into the device.
 
 Handler flow:
-1. `ServerDevice` extractor authenticates the caller (existing).
-2. Look up the device's server via `device.server_id` (assumed to
-   exist — verify when implementing; if a device isn't yet associated
-   with a server, return `409`).
-3. `Server::root_id` walks up to the group root.
-4. Read `server_group_backup_config` for that root; `409` if absent. This
-   yields the group's `target_role_arn` (the per-bucket role to assume).
+1. `ServerDevice` extractor authenticates the caller. It yields only a
+   `Device` (`device.0.0`) — server/group resolution is the handler's job
+   (same as `statuses.rs`).
+2. Resolve the device's server via `Server::live_by_device_id` (devices
+   have no `server_id`; servers reference devices). No live server →
+   `409` (the `DeviceHasNoServer` case, as in `events.rs`).
+3. Read that server's `group_id: Option<Uuid>`; `None` (ungrouped) →
+   `409`.
+4. Read `server_group_backup_config` for that `group_id`; `409` if absent.
+   This yields the group's `target_role_arn` (the per-bucket role to
+   assume).
 5. Only for `purpose=restore`: build the read-only session policy
    (template below). The `backup` purpose needs none — the per-bucket
    role's own policy is already correctly scoped.
 6. Cross-account `sts:AssumeRole` on the group's `target_role_arn` (with
-   the restore session policy if applicable), session name like
-   `device-<device-id>`.
-7. Insert into `backup_credential_issuances` (recording the assumed role).
+   the restore session policy if applicable), session name
+   `canopy-<purpose>-<device-id>`.
+7. Insert into `backup_credential_issuances` (recording the assumed role
+   and the issued `access_key_id`).
 8. Return the `credential_process` JSON.
 
 ### Permission templates
@@ -585,11 +597,15 @@ short-lived creds for them instead. The IaC changes are therefore:
 - **Trust Canopy's IRSA**, not (only) EC2: the roles Canopy assumes from
   need `Principal` set to the Canopy pod's IRSA role.
 - **A reduced device-backup action set.** `AWS_S3_BACKUP_ACTIONS` today is
-  `[...multipart, s3:DeleteObject, s3:PutObjectRetention]` — it includes
-  delete because, in the EC2 model, the server ran maintenance. Under this
-  plan the device must *not* delete, so device-backup creds use a new
-  reduced constant (multipart + Get/Put, **no** `DeleteObject`, **no**
-  `PutObjectRetention`). The full set stays on the maintenance role only.
+  `[...AWS_S3_MULTIPART_ACTIONS, s3:DeleteObject, s3:PutObjectRetention]` —
+  it includes delete because, in the EC2 model, the server ran maintenance.
+  Under this plan the device must *not* delete, so device-backup creds use
+  the existing **`AWS_S3_MULTIPART_ACTIONS`** constant directly (already
+  Get/Put + multipart + ListBucket/GetBucketLocation, **no** `DeleteObject`,
+  **no** `PutObjectRetention`) rather than a new list. The full set stays on
+  the maintenance role only. When adding IRSA trust to these roles, preserve
+  the stack's existing optional IAM-Users path and the `.storageconfig`
+  object so they aren't clobbered.
 - **Maintenance role** = the existing full-access role (or a sibling),
   assumed by the maintenance Job's own IRSA (not chained — see
   "Canopy-owned maintenance"). Only this identity can delete. It keeps
@@ -652,6 +668,17 @@ failure.
 The ordering matters: insert the row before the stack is applied and the
 group's devices get clean preflight/issuance failures (not corruption),
 which the alert makes obvious. Worth noting for the onboarding runbook.
+
+**Clones don't break the 1:1 invariant.** The `ops/pulumi` `cloneOf`
+mechanism (in `tamanu/on-linux`) lets a clone stack *re-export* its
+parent's bucket/role instead of provisioning its own — but a prod
+deployment and its clones are **already one `server_group`** in canopy.
+So that shared bucket maps to the *single* group's one config row; it's
+the same within-group, cross-account picture as "pre-prod restores from
+prod backups", not N groups → 1 bucket. The 1:1 *group*→bucket invariant
+holds. (The standalone `backups` stack is strictly 1:1 per stack; the
+`bucketName` config override only renames the bucket, it doesn't share
+one.)
 
 ## `bestool` changes
 
@@ -770,19 +797,32 @@ went, and a job scans those reports in the database.
      breakage, not a blip.)
    - **Never backed up**: present longer than `expected_interval × 2` with
      *no* successful `backup_runs` row → alert. "Present since" is
-     `max(device_server_associations.first_seen, server_group_backup_config.created_at)`
-     — the later of "device joined the server" and "group was authorized"
-     — so neither a freshly-added device nor a freshly-authorized group
-     false-alarms.
+     `max(server-present, group-authorized)` where *group-authorized* is
+     `server_group_backup_config.created_at` and *server-present* is taken
+     from `device_server_associations` — but note `first_seen` there is per
+     `(device_id, server_id)` **pair**, so for a server-centric anchor use
+     `MIN(first_seen)` over that server's rows (earliest any device saw it)
+     rather than treating it as a per-server scalar. This way neither a
+     freshly-present server nor a freshly-authorized group false-alarms.
    - **Recovered**: a previously-stale server reporting success again
      clears the alert.
-3. Alerts route through Canopy's existing incident machinery: raise
-   `Incident::open_for(...)` (and `Incident::resolve(...)` on recovery),
-   which enqueues to `slack_outbox`, drained to Slack by the
-   `slacker_outbox` job. Same path the reachability healthcheck already
-   uses — distinct from the `backup-monitoring` Pulumi stack, which
-   watches the **AWS Backup service** (EBS/RDS) and does not cover
-   kopia-to-S3 backups. This detection is genuinely new.
+3. Alerts go through the existing **issues/events** model, exactly as
+   `reachability` does — *not* a direct "open incident" call (there is no
+   `Incident::open_for`). Construct a `NewEvent { source: "canopy", ref:
+   "backup-staleness", severity, message, active }` and call
+   `NewEvent::save(conn, server_id, device_id)` (mirroring reachability's
+   `source="canopy"`/`ref="reachability"`). Downstream,
+   `re_evaluate_incident_membership → find_or_open_incident →
+   enqueue_slack_open → SlackOutbox::enqueue` opens the incident and queues
+   Slack automatically — but only for a **monitored** server in a group and
+   only when the issue severity satisfies `opens_incident()` (≥ `Error`),
+   so staleness events must be raised at `Error`+. **Recovery** is the same
+   `(source, ref)` event with `active: false` (lower severity), which lets
+   the issue leave the incident and auto-close. The `slacker_outbox` binary
+   drains the queue to Slack. (`Incident::resolve(incident_id, by, reason)`
+   exists but is the operator-driven, UUID-keyed human resolution — not a
+   group recovery call.) Distinct from the `backup-monitoring` Pulumi stack
+   (AWS Backup service), so this detection is genuinely new.
 
 The limit of signal 1 is that it's the *device's word*: it scans the
 Canopy database for what devices reported, not for what's actually in the
@@ -855,12 +895,24 @@ here, for two reasons:
   permission templates above), so a compromised server cannot delete
   backups.
 
-So Canopy owns maintenance. Concretely, a scheduler loop in the `jobs`
-crate (like `reachability`) spawns a **Kubernetes Job per group** that
-runs the maintenance cycle against that group's bucket, then exits.
-Spawning a Job rather than running kopia in-process keeps the heavy,
-long-running work off the Canopy pod and lets it use the kopia image
-directly.
+So Canopy owns maintenance. Concretely, a scheduler loop (a new
+`crates/jobs/src/bin/<name>.rs` following the existing `reachability` /
+`pingtask` `spawn()` + `loop { sleep(60); pool.get; … }` template, with its
+own single-replica Deployment in `ops/pulumi/tamanu/meta/src/jobs.ts`)
+**spawns a Kubernetes Job per group** that runs the maintenance cycle
+against that group's bucket, then exits. Spawning a Job keeps the heavy,
+long-running work off the loop pod and lets it use the kopia image.
+
+**Greenfield infra (net-new to canopy):** the loop pattern matches
+`reachability`, but everything about *spawning k8s Jobs* is new — canopy
+has **no Kubernetes API client** (no `kube`/`k8s-openapi` in the workspace)
+and its pods today carry **no ServiceAccount / IRSA** (the shared
+`spec.ts` injects only env/affinity/tolerations/resources). So this needs:
+a `kube` client dependency, a ServiceAccount plumbed through `spec.ts`
+with RBAC to create Jobs and `get` Secrets, and IRSA wiring (the
+`common/eksServiceAccount.ts` helper exists but isn't used by canopy yet).
+Don't read "like reachability" as "already have the machinery" — that loop
+only does a DB sweep.
 
 The maintenance cycle is **three steps**, not just "run maintenance":
 1. **assert** the group's retention policy into the repo (so the declared
@@ -888,9 +940,17 @@ inspection and per-group preflight too).
 
 Spawned Jobs carry the org's three **billing tags** as pod labels —
 `billing.product` / `billing.stage` / `billing.deployment` — set from the
-group (its `billing.*` tags if present, else `product=tamanu`, `stage=` the
-highest server rank in the group, `deployment=` the group name) so AWS
-split cost allocation attributes the compute to the right deployment.
+group (its `billing.*` tags if present, else `product=tamanu`,
+`deployment=` the group name, and `stage=` derived from the group's
+highest member rank via the existing `ServerGroup::highest_member_ranks`
+/ `rank_priority`). One gotcha to encode: the `ServerRank` Display strings
+(`production`/`clone`/`demo`/`test`/`dev`) **don't all match the stage
+values ops already emits** — ops's `typeGuess` yields `prod` (not
+`production`). So map explicitly (`Production → "prod"`, `Demo → "demo"`,
+…) to match existing CUR tags, and pick a fallback (`prod`, or omit
+`billing.stage`) for groups whose members are all unranked — which
+`highest_member_ranks` omits. So AWS split cost allocation attributes the
+compute to the right deployment.
 
 ### Credentials for the maintenance Job
 
@@ -1000,7 +1060,7 @@ maintenance are all the repo's lifecycle.
 ### Audit
 
 Maintenance runs are logged like device runs — a `backup_maintenance_runs`
-table (root_server_id, kind quick|full, started/finished, outcome, error,
+table (group_id, kind quick|full, started/finished, outcome, error,
 bytes reclaimed if available). Same value as `backup_runs`: "is
 maintenance actually happening for this group, and did it succeed." A
 group whose maintenance has silently stopped is a slow-motion problem
@@ -1189,26 +1249,34 @@ repo-import onboarding mode + Bitwarden escrow (11), repo/bucket stats for
 display (9 + the cost non-goal), `billing.*` tags on Jobs (12),
 hash-jittered scheduling (12).
 
-## Deferred to the "review against current state of the repo" pass
+## Repo-alignment outcomes (applied) + remaining prerequisites
 
-These need reconciling against the real schema/code, not re-deciding:
+A repo-alignment review reconciled the plan against the real `canopy` +
+`ops/pulumi` source. **Applied throughout:** rekeyed everything to
+`group_id` → `server_groups` (flat table; no `root_server_id`/hierarchy);
+device→server via `Server::live_by_device_id` (not `device.server_id`);
+alerting via `NewEvent::save(source="canopy", ref="backup-staleness")` at
+severity ≥ `Error` (not the non-existent `Incident::open_for`); schedulers
+as new `jobs`-crate bins; the `ServerRank::Production`→`"prod"` mapping;
+`first_seen` is per device-server pair (`MIN` over the server); reuse
+`AWS_S3_MULTIPART_ACTIONS` for the device set.
 
-- **Rekey `root_server_id` → `group_id`** (the real `server_groups` table)
-  across the config + audit + new tables, and **fix device→server
-  resolution** (`servers.device_id`, not `device.server_id`; there is no
-  `Server::root_id`/parent hierarchy). The "parentless server heads the
-  group" framing and handler-flow steps 2–3 are historical and must be
-  rewritten.
-- Confirm the **`Incident` API** shape and the **`jobs`-crate scheduler**
-  conventions against the actual code.
-- The **server-rank → billing `stage`** mapping (uses canopy's rank concept).
+**Net-new infrastructure this requires (none exists in canopy today):**
+- The **AWS SDK** — `aws-config` + `aws-sdk-{sts,s3,secretsmanager?}`, a
+  provider, and an `AppState` client (first AWS SDK usage in the workspace).
+- A **Kubernetes API client** (`kube`/`k8s-openapi`) for spawning Jobs.
+- A **ServiceAccount + IRSA** on canopy's pods (plumb through `spec.ts`;
+  the `common/eksServiceAccount.ts` helper exists but is unused), plus RBAC
+  to create Jobs and `get` Secrets, and the OIDC-provider-per-account
+  wiring for cross-account Job web-identity.
+
+**Still open (genuine choices, not gaps):**
 - The **transport** for the cadence signal (how it rides today's
   ~1-minute healthcheck — tailnet poll / device poll / held-open).
 - Whether to expose an **operator "backup now"** action and stats in
   `private-server` now or bootstrap via SQL first.
-
-(Tunable defaults — heartbeat/inspection/maintenance/preflight cadences —
-are chosen as defaults above and adjustable later; not blocking.)
+- Tunable cadence defaults (heartbeat/inspection/maintenance/preflight) —
+  chosen above, adjustable later.
 
 ## Out of scope (do not silently fold in)
 
