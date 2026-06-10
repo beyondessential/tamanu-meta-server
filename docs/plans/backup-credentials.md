@@ -1382,6 +1382,72 @@ This should **alert, not gate readiness**: a failing upstream check
 pulling the pod out of rotation would only make the problem worse.
 Surface it loudly; don't take Canopy down over it.
 
+## External restore consumers + restore-verification (PGRO)
+
+*(Stage: later / additive — depends on the per-bucket roles, repo-password
+ownership, and the issues/events alerting all being in place. Captured here
+so the relationship is designed-for, not bolted on.)*
+
+**PGRO** (`PostgreSQL Restore Operator` — a separate repo, a Rust k8s
+operator) watches a kopia repo and restores Postgres *physical* backups
+into working replicas (data/analytics + DR-testing). Today it authenticates
+with **static long-lived AWS keys + the repo password in a hand-set k8s
+Secret** — the exact long-lived-creds pattern this whole system exists to
+kill. Bringing it in eliminates those static keys and makes Canopy the
+single control plane for *all* backup access. It's a **bidirectional,
+first-party relationship**:
+
+- **Creds out (Canopy → PGRO).** PGRO is a **restore-only** consumer, so it
+  gets short-lived read-only creds + target + repo password from Canopy —
+  reusing the `restore` session policy, the per-bucket role, and the
+  password ownership (canopy-mediated; option (a)). But PGRO is *not* a
+  fleet device and *not* in the group it reads — it's trusted first-party
+  infra, so this needs an **external-restore grant**: an operator-authorized,
+  audited "consumer C may read group X, read-only". That's a deliberate,
+  controlled cousin of the cross-group restore that's banned *for devices*
+  (a different trust class, not a loophole in that rule).
+- **Reports in (PGRO → Canopy) = Signal 3, restore-verification.** PGRO
+  actually restoring a backup *proves it is restorable* — the strongest
+  backup-health signal there is, beyond signal 2's "a snapshot exists". PGRO
+  reports per-replica outcomes (which snapshot, success/failure, replica
+  health) back to Canopy; a failed or stale restorability check is a
+  high-severity **group-level** alert (the server-independent incident path,
+  like poisoning detection). This closes the lifecycle loop end-to-end —
+  *backed up (1) → persisted (2) → restorable (3)* — cross-referenced by
+  snapshot id.
+
+Having **both directions** is why this is canopy-mediated rather than PGRO
+assuming a role directly: one bidirectional first-party relationship (creds
+out, reports in) over a single channel, not two disjoint mechanisms.
+
+**First-party auth path — PGRO runs in a *different* k8s cluster from
+Canopy (so there's no shared cluster / Secret to lean on). Design later;
+two options to weigh:**
+- **Tailscale** — both are on the tailnet, so PGRO can reach Canopy's
+  private API over Tailscale, reusing existing Tailscale identity/gating.
+  Available today, least new machinery.
+- **OIDC trust** — Canopy as an **OIDC relying party**, federating PGRO's
+  cluster OIDC (and others). More general and more extensible: the *same*
+  mechanism would let **GitHub Actions** and other internal automation
+  authenticate to Canopy — a first-party automation auth surface beyond
+  PGRO. Likely the better long-term direction; not designed here.
+
+Either way, the one channel carries both directions.
+
+**New state:** a `backup_restore_checks` record (per group: snapshot
+restored, outcome, replica health, `observed_at`) feeding signal-3
+detection/reconciliation against `backup_repo_snapshots` / `backup_runs`.
+
+**Cross-repo work (additive, later stage):**
+- `pgro`: drop the static `kopia-credentials` Secret; fetch + refresh
+  restore creds from Canopy; the `PostgresPhysicalReplica` CRD references a
+  canopy *group*; report per-replica restore outcomes back.
+- `canopy`: the first-party (non-device) auth surface (Tailscale or OIDC);
+  the external-restore grant + audit; a restore-report endpoint +
+  `backup_restore_checks`; signal-3 detection/alerting.
+- `ops`: the auth plumbing (OIDC trust config or Tailscale exposure) and
+  PGRO's read-only access path.
+
 ## Operational story (what we gain, day-one)
 
 - **"Did device X back up today?"** — three corroborating answers:
