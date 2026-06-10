@@ -1291,10 +1291,13 @@ Surface it loudly; don't take Canopy down over it.
   since a kopia repo lives in its bucket, that's a repo migration or a
   start-fresh the operator owns — not a free flip — even though the config
   change itself propagates automatically.)
-- **A compromised server can't destroy recent backups** — no device cred
-  grants `DeleteObject`, and the 30-day Object Lock means even a delete-
-  or overwrite-capable cred can't damage backup objects younger than 30
-  days. IAM removes the action; Object Lock is the hard backstop.
+- **A compromised server can't *destroy* backups** — no device cred grants
+  `DeleteObject`, so deletion is impossible; and overwrite-poisoning is
+  survivable (versioning + Object Lock preserve the good versions;
+  signal-2 detects the corruption; version-rollback recovers within the
+  lock/lifecycle window). The current restore is broken until recovery —
+  so it's a detectable, recoverable DoS, not data loss. (See "Recovery
+  from poisoning".)
 - **Maintenance just happens** — clients don't run it and don't have the
   rights to; Canopy spawns the Jobs. Repo bloat / unenforced retention
   from a stuck client owner is no longer a failure mode, and
