@@ -355,7 +355,8 @@ POST /backup-credentials
     "SessionToken": "...",
     "Expiration": "..."
   }
-  Response 409: no backup config for this device's group
+  Response 412: device not bound to a live server (DeviceHasNoServer)
+  Response 409: server ungrouped, or no backup config for the group
   Response 502: STS call failed
 ```
 
@@ -371,7 +372,8 @@ GET /backup-target
     "region": "...",
     "endpoint": "..."         -- optional; for non-AWS S3
   }
-  Response 409: no backup config for this device's group
+  Response 412: device not bound to a live server (DeviceHasNoServer)
+  Response 409: server ungrouped, or no backup config for the group
 ```
 
 This is the piece that keeps the bucket out of device provisioning. The
@@ -450,8 +452,12 @@ Handler flow:
    `Device` (`device.0.0`) — server/group resolution is the handler's job
    (same as `statuses.rs`).
 2. Resolve the device's server via `Server::live_by_device_id` (devices
-   have no `server_id`; servers reference devices). No live server →
-   `409` (the `DeviceHasNoServer` case, as in `events.rs`).
+   have no `server_id`; servers reference devices — and the
+   `servers_device_id_unique` partial unique index guarantees at most one
+   server per device, so this is a single server, not a set). No live
+   server → **`412`** via the existing `AppError::DeviceHasNoServer`
+   (which maps to `PRECONDITION_FAILED`, `commons-errors/src/lib.rs:193`;
+   used by `events.rs`).
 3. Read that server's `group_id: Option<Uuid>`; `None` (ungrouped) →
    `409`.
 4. Read `server_group_backup_config` for that `group_id`; `409` if absent.
@@ -1301,10 +1307,13 @@ The original open questions were worked through one by one; outcomes
    event back to the issuance (purpose/device/bucket/time).
 3. **`sts_request_id`** — **keep** (nullable, best-effort via the SDK
    `RequestId` trait); belt-and-suspenders with `access_key_id`.
-4. **Device→server/group resolution** — the **`409` policy is locked**
-   (no server binding / no group / no config → `409`; real gaps filed
-   separately), which gives the **provision-then-authorize** property. The
-   lookup *mechanics* are deferred (see below).
+4. **Device→server/group resolution** — dormant-when-unconfigured is
+   locked: **no live server → `412`** (`DeviceHasNoServer`, the existing
+   code maps it to `PRECONDITION_FAILED`), **ungrouped or no config →
+   `409`**. (Corrected from "single 409" — `DeviceHasNoServer` is 412 in
+   the codebase.) Gives the **provision-then-authorize** property; bestool
+   treats *both* 412 and 409 as benign "dormant, nothing to do". Lookup
+   mechanics resolved in the repo-alignment commit.
 5. **Staleness "present since"** —
    `max(device_server_associations.first_seen, server_group_backup_config.created_at)`.
 6. **Grace factor** — **`×2`**, not per-group configurable yet.
