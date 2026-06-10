@@ -257,7 +257,7 @@ pointer to the `AssumeRole` event itself.
 
 ```sql
 CREATE TABLE backup_runs (
-    id              BIGSERIAL PRIMARY KEY,
+    id              UUID PRIMARY KEY,         -- the run-uuid, minted by bestool at run start
     device_id       UUID NOT NULL REFERENCES devices(id),
     group_id        UUID NOT NULL REFERENCES server_groups(id),
     purpose         TEXT NOT NULL,            -- "backup" | "restore"
@@ -276,6 +276,16 @@ Written by `POST /backup-report`. This is the "a backup actually
 completed" signal that staleness detection reads. Issuance alone is not
 enough: a device can get creds and then crash before uploading anything,
 and that must not read as a healthy backup.
+
+`id` is **not** a serial — it's the **run-uuid bestool mints at run
+start**, so the device can stamp it into the snapshot's tags (`canopy-run`)
+*before* the row exists, and supplies it in `POST /backup-report`. That's
+what makes the `snapshot → run → issuance` join real. A client-supplied
+PK is safe: `device_id`/`group_id` come from the authenticated
+`ServerDevice` context (not the client's claim), so attribution can't be
+forged, and a duplicate `id` just fails *its own* insert (PK violation) —
+it can't overwrite another row. Only `backup_runs` needs this; the other
+audit tables stay Canopy-generated `BIGSERIAL`.
 
 ### New table: `backup_maintenance_runs`
 
@@ -405,6 +415,7 @@ device-side coordination.
 POST /backup-report
   Authorization: mTLS via ServerDevice
   Body: {
+    "run_id":         "...",   -- the run-uuid bestool minted at run start (becomes backup_runs.id)
     "purpose": "backup" | "restore",
     "outcome": "success" | "failure",
     "error":          "...",   -- optional, on failure
@@ -925,8 +936,9 @@ freshness isn't gated by the slow maintenance interval.
   the source is the backup subject and survives device replacement
   (continuous history, no fragmented chain). The *device + run* that
   produced a snapshot live in its **tags** (`canopy-device=<uuid>`,
-  `canopy-run=<run-uuid>`, the run-uuid minted client-side and echoed in
-  `backup_runs`), closing the loop snapshot → run → issuance → CloudTrail.
+  `canopy-run=<run-uuid>`, where the run-uuid is **`backup_runs.id`** —
+  minted by bestool at run start, stamped on the snapshot, then reported),
+  closing the loop snapshot → run → issuance → CloudTrail.
 - Reconciliation against signal 1 is where the value is:
   - report says success **but** no recent snapshot in the repo → the
     report is wrong or the upload didn't persist → **alert** (the case
