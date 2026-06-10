@@ -509,6 +509,15 @@ group's Pulumi stack); the **restore** set is the read-only **session
 policy** Canopy passes when assuming that same role for `purpose=restore`
 (it ANDs down to read-only).
 
+Normativity (to avoid drift): for the **backup role policy**, the existing
+**`AWS_S3_MULTIPART_ACTIONS` constant is the source of truth** (it includes
+`GetObjectAttributes`/`GetObjectTorrent` etc. that the illustrative JSON
+below omits, and is composed as `[...AWS_S3_DELETE_ACTIONS,
+'s3:PutObjectRetention']` minus those — see `constants/external.ts`); the
+JSON below is illustrative. The **restore session-policy JSON is
+normative** — Canopy authors it at assume-time, and it's where the
+`GetBucketLocation`/`s3:prefix` split actually matters.
+
 **`purpose = "backup"`** — read + write, no delete (the role policy):
 
 ```json
@@ -580,11 +589,15 @@ sub-path case. The restore variant omits all mutation actions — even an
 explicit attempt to `kopia repository create` is rejected by S3, not just
 by kopia.
 
-`AbortMultipartUpload` is retained on the backup purpose: it can only
-discard a device's *own in-flight* multipart upload, never a committed
-object, so it doesn't weaken the "can't delete backups" property — it
-just lets a failed upload clean up its own parts instead of leaving
-billable orphans.
+`AbortMultipartUpload` is retained on the backup purpose so a failed
+upload can clean up its own parts instead of leaving billable orphans. To
+be precise (it's resource-scoped to `<bucket>/<prefix>*`, *not*
+upload-owner-scoped, and `ListBucketMultipartUploads` makes sibling upload
+IDs discoverable): a compromised device could abort *any* in-flight
+multipart upload in the group's bucket. That's only a same-group
+backup-disruption DoS — no committed object is at risk — so it doesn't
+weaken the "can't delete backups" property, but it isn't "own uploads
+only".
 
 Dropping `DeleteObject` is defence-in-depth on top of the real backstop:
 **every group's bucket has versioning + a 30-day S3 Object Lock** (both
@@ -717,6 +730,11 @@ short-lived creds for them instead. The IaC changes are therefore:
   `s3:*` (incl. the ability to bypass GOVERNANCE) — that's the accepted
   AWS-level trust boundary, see the threat-boundary note above; the
   protection target here is device compromise, not this first-party role.
+- **Add `s3:GetBucketObjectLockConfiguration`** to the per-bucket role
+  Canopy assumes — the per-group preflight reads it to confirm the lock is
+  still in place, and no existing action set (`AWS_S3_MULTIPART_ACTIONS`
+  etc.) includes it, so it would otherwise surface as a day-one preflight
+  `AccessDenied`. (Read-only; harmless on the device set.)
 
 ### IAM model: per-bucket roles, assumed cross-account
 
@@ -907,11 +925,12 @@ went, and a job scans those reports in the database.
    is the server being protected; the device is the actor recorded in
    `backup_runs`/snapshot tags. A manual-only or unconfigured group is
    simply not in the scanned set, so unauthorized devices never alert.)
-   - **Stale**: previously reported success but no `outcome = 'success'`
-     newer than `expected_interval × 2` → alert. (`×2` = the anti-flap
-     factor from the decisions; not per-group configurable yet. Given the
-     ~1-min trigger retries quickly, two missed intervals signals genuine
-     breakage, not a blip.)
+   - **Stale**: previously reported success but no `purpose = 'backup'`
+     row with `outcome = 'success'` newer than `expected_interval × 2` →
+     alert. (Filter on `purpose='backup'` — a recent successful *restore*
+     must not reset backup staleness. `×2` = the anti-flap factor; not
+     per-group configurable yet. Given the ~1-min trigger retries quickly,
+     two missed intervals signals genuine breakage, not a blip.)
    - **Never backed up**: present longer than `expected_interval × 2` with
      *no* successful `backup_runs` row → alert. "Present since" is
      `max(server-present, group-authorized)` where *group-authorized* is
@@ -928,7 +947,8 @@ went, and a job scans those reports in the database.
    `Incident::open_for`). Construct a `NewEvent { source: "canopy", ref:
    "backup-staleness", severity, message, active }` and call
    `NewEvent::save(conn, server_id, device_id)` (mirroring reachability's
-   `source="canopy"`/`ref="reachability"`). Downstream,
+   `source="canopy"`/`ref="reachability"`; for a server-centric alert pass
+   the server's latest-associated `device_id`). Downstream,
    `re_evaluate_incident_membership → find_or_open_incident →
    enqueue_slack_open → SlackOutbox::enqueue` opens the incident and queues
    Slack automatically — but only for a **monitored** server in a group and
@@ -983,7 +1003,11 @@ size). The S3 `bucket_bytes` billing figure is filled by a **separate
 S3-metrics task** with its own CloudWatch permissions — *not* on these
 read-only creds (see `backup_repo_stats`). It runs on its **own cadence**
 (defaulting to roughly `expected_interval`, tunable), so signal-2 freshness
-isn't gated by the slow maintenance interval.
+isn't gated by the slow maintenance interval — with a **floor (e.g.
+weekly) for manual-only groups** whose `expected_interval` is NULL but
+still hold backups worth inspecting. (Its read-only creds are chained from
+the scheduler's IRSA, so the 1-hour cap applies — fine for a `snapshot
+list` / verify pass.)
 
 - Attribution: the kopia **source encodes the server** — `bestool` overrides
   the kopia hostname to the **server id** (`canopy@<server-id>:<path>`), so
@@ -1378,7 +1402,13 @@ Surface it loudly; don't take Canopy down over it.
   row; devices in that group start getting `409`. The group's bucket and
   its Object-Lock'd objects persist independently — they can't be deleted
   until their locks expire (~30 days), so bucket teardown is a deliberate,
-  delayed step, not a side effect of removing the config row.
+  delayed step, not a side effect of removing the config row. Note: the
+  config row cascades on `server_groups` delete, but the **audit tables
+  (`backup_credential_issuances`/`backup_runs`/`backup_maintenance_runs`)
+  reference `server_groups(id)` without CASCADE on purpose** — so deleting
+  a `server_groups` row that has any audit history fails until it's dealt
+  with. That's intentional audit preservation; the runbook decides
+  (archive vs detach) rather than silently cascading the trail away.
 - **Onboarding a group** — IaC provisions its bucket (with Object Lock,
   see "Per-group buckets"), then the `server_group_backup_config` row is
   inserted. Devices in the group start succeeding on their next run; if
