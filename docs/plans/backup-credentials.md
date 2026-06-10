@@ -840,10 +840,15 @@ rides the existing ~1-minute device↔canopy healthcheck** rather than a
 separate device-side timer. On each tick Canopy answers "back up now /
 nothing to do," and the device launches `bestool canopy backup` as its
 own process when told. This drops responsiveness from a coarse local timer
-to ~1 minute essentially for free (the tick already happens), and a
-held-open bestool connection makes it cheaper still — near-instant if we
-want push. The device holds no schedule of its own; the existing tick *is*
-the trigger.
+to ~1 minute essentially for free (the ~1-minute device report cadence is
+long-established — it predates this plan and already underpins
+`reachability` and the rest of canopy's health tracking — so it's a given,
+not an assumption to validate), and a held-open bestool connection makes
+it cheaper still — near-instant if we want push. The device holds no
+schedule of its own; the existing tick *is* the trigger. (What *is*
+unspecified is the command-channel transport — today's status-POST
+*response* carries no command — which is the deferred item below, not the
+cadence.)
 
 Canopy computes "back up now?" as **"the schedule is due OR an operator
 requested a one-off":**
