@@ -446,62 +446,96 @@ billable orphans.
 
 Dropping `DeleteObject` is defence-in-depth on top of the real backstop:
 **every group's bucket has a 30-day S3 Object Lock** (a required property,
-set at creation — see "Per-group buckets"). So even a cred that *could*
-delete or overwrite can't destroy a backup object younger than 30 days —
-a locked version is retained regardless. The no-delete device
-policy still earns its place (it removes the most destructive action
-outright, and avoids accidental client-side expiry), but the guarantee
-"a compromised server cannot destroy recent backups" rests on Object
-Lock, not on IAM alone. See "Canopy-owned maintenance" for how the lock
-interacts with kopia GC.
+set at creation — see "Per-group buckets"). So a cred without delete
+can't destroy a backup object regardless — a locked version is retained.
+The no-delete device policy still earns its place (it removes the most
+destructive action outright, and avoids accidental client-side expiry),
+but the guarantee "a compromised server cannot destroy recent backups"
+rests on Object Lock, not on IAM alone.
 
-## AWS setup (out-of-band of this plan, but documented here for completeness)
+**Caveat — the lock is `GOVERNANCE`, not `COMPLIANCE`** (per the `backups`
+Pulumi stack: `mode: 'GOVERNANCE', days: 30`). Governance retention can be
+overridden by a principal holding `s3:BypassGovernanceRetention`, and the
+existing full-access role grants `s3:*`, which includes it. So today the
+guarantee holds against *device* creds (no delete at all) but **not**
+against the maintenance / full-access role, which could bypass the lock
+and delete recent objects. To make the guarantee hold against every
+principal we control, either explicitly *deny* `s3:BypassGovernanceRetention`
+on the maintenance role (its GC only ever deletes objects whose lock has
+already expired, so it never legitimately needs bypass) or move the
+buckets to `COMPLIANCE` mode (no principal, not even root, can delete
+early). Flagged in open questions. See "Canopy-owned maintenance" for how
+the lock interacts with kopia GC.
 
-Because there's one bucket per group, the roles grant against a **bucket
-naming convention** rather than a single named bucket, and the per-call
-session policy still narrows to the one bucket the call is for.
+## AWS setup (provisioned by the Pulumi `backups` stack)
 
-- `canopy-backup-issuer` role with trust policy allowing the Canopy pod's
-  IRSA role to assume it.
-- Role policy grants broad `s3:*` on the bucket pattern (e.g.
-  `arn:aws:s3:::canopy-backup-*`) — broad because the session policy is
-  what actually constrains each call to the one group's bucket. Note: the
-  *device* session policies never grant delete, so even though the role
-  could, the creds handed to devices can't.
-- `canopy-backup-maintenance` role (or service account) for the
-  maintenance Jobs, with full S3 incl. `DeleteObject` on the same bucket
-  pattern. This is the only identity in the system that can delete backup
-  objects. It is first-party (Canopy-controlled), never handed to a
-  device. See "Canopy-owned maintenance" for why it gets its own IRSA
-  identity rather than chained creds.
+This already mostly exists. The `backups` stack in `ops/pulumi/backups`
+creates, per Pulumi stack, exactly the one-bucket-per-repo shape this plan
+wants: an S3 bucket with `objectLockEnabled`, versioning, a 30-day
+GOVERNANCE Object Lock, a `DenyInsecureTransport` bucket policy, plus two
+IAM roles — a full-access role (`s3:*`) and a kopia role
+(`AWS_S3_BACKUP_ACTIONS`). What it does *not* yet have is the
+Canopy-mediated path; today those roles are assumed by **EC2** instance
+profiles (`Principal: { Service: ec2.amazonaws.com }`), i.e. the
+AWS-resident model where a server assumes its role directly.
+
+The canopy fleet is the reason the Canopy path exists: those servers are
+remote, authenticated by mTLS, and generally *not* EC2 instances in our
+account, so they can't assume an AWS role directly — Canopy issues
+short-lived creds for them instead. The IaC changes are therefore:
+
+- **Trust Canopy's IRSA**, not (only) EC2: the roles Canopy assumes from
+  need `Principal` set to the Canopy pod's IRSA role.
+- **A reduced device-backup action set.** `AWS_S3_BACKUP_ACTIONS` today is
+  `[...multipart, s3:DeleteObject, s3:PutObjectRetention]` — it includes
+  delete because, in the EC2 model, the server ran maintenance. Under this
+  plan the device must *not* delete, so device-backup creds use a new
+  reduced constant (multipart + Get/Put, **no** `DeleteObject`, **no**
+  `PutObjectRetention`). The full set stays on the maintenance role only.
+- **Maintenance role** = the existing full-access role (or a sibling),
+  assumed by the maintenance Job's own IRSA (not chained — see
+  "Canopy-owned maintenance"). Only this identity can delete, and per the
+  GOVERNANCE caveat above it should additionally *deny*
+  `s3:BypassGovernanceRetention`.
+
+IAM-model choice (now informed by the repo): the existing stack already
+makes **per-bucket roles**, so the natural fit is per-bucket roles that
+trust Canopy's IRSA — Canopy assumes the specific group's role and the
+scoping is *structural* (the role's policy only names its own bucket), so
+no session policy is needed for correctness. The alternative is a single
+central issuer role over a bucket *pattern* with a per-call session policy
+narrowing to the one bucket (what the session-policy templates below
+describe). Per-bucket roles align with the existing per-stack structure
+and give stronger isolation; the session-policy approach means fewer
+roles. **Decide during implementation** — flagged in open questions. The
+permission *sets* in the templates below apply either way (they're either
+the role policy or the session policy).
 
 ### Per-group buckets
 
-Each group gets its own bucket, named by convention (e.g.
-`canopy-backup-<root-id>`) so the role patterns above cover it without
-per-bucket IAM edits. The hard constraint: **S3 Object Lock must be
-enabled at bucket creation** — it cannot be retrofitted onto an existing
-bucket. So provisioning a group's bucket must, atomically at creation,
-enable versioning + Object Lock with the default ≥30-day retention.
-Getting this wrong isn't fixable in place; it means recreating the
-bucket.
+One Pulumi `backups` stack per group → one bucket per group, named by the
+stack's convention (`bes-kopia-backups-<stack>`; README: begin with
+`bes-`, contain `kopia-backups`). The role IAM keys off that convention.
+The hard constraint, already satisfied by the stack but worth stating:
+**S3 Object Lock must be enabled at bucket creation** — it cannot be
+retrofitted. The stack does this (`objectLockEnabled: true` +
+`objectLockConfiguration`), so a group's bucket is correct by
+construction; getting it wrong would mean recreating the bucket.
 
-**IaC provisions the buckets.** A Terraform module (or equivalent)
-creates each group's bucket — with versioning + Object Lock + default
-retention — when a group is onboarded, following the naming convention
-the IAM patterns key off. Canopy only ever *uses* the bucket; it is never
-granted `CreateBucket` or bucket-config powers, keeping those out of the
-public-server's blast radius. Canopy's role is to *verify*, not create:
-the per-group preflight checks the bucket exists, is reachable, and has
-the expected Object Lock — so a missing or misconfigured bucket (e.g. IaC
-not yet applied for a new group, or the lock dropped) surfaces as an
-alert naming that group, rather than as silent backup failure.
+**IaC (Pulumi) provisions the buckets.** Onboarding a group means standing
+up its `backups` stack (bucket + lock + roles) and then inserting the
+`server_group_backup_config` row. Canopy only ever *uses* the bucket; it
+is never granted `CreateBucket` or bucket-config powers, keeping those out
+of the public-server's blast radius. Canopy's role is to *verify*, not
+create: the per-group preflight checks the bucket exists, is reachable,
+and has the expected Object Lock — so a missing or misconfigured bucket
+(e.g. the stack not yet applied for a new group, or the lock weakened)
+surfaces as an alert naming that group, rather than as silent backup
+failure.
 
-This means group onboarding is a two-step dance — IaC applies the bucket,
-then the `server_group_backup_config` row is inserted — and the ordering
-matters: insert the row before the bucket exists and the group's devices
-get clean preflight/issuance failures (not corruption), which the alert
-makes obvious. Worth noting for the onboarding runbook.
+The ordering matters: insert the row before the stack is applied and the
+group's devices get clean preflight/issuance failures (not corruption),
+which the alert makes obvious. Worth noting for the onboarding runbook.
 
 ## `bestool` changes
 
@@ -614,7 +648,11 @@ went, and a job scans those reports in the database.
    devices associated with a configured group, but it leans on the same
    `devices.server_id` / "device present" questions flagged below.
 3. Alerts route through the existing operator notification path
-   (Slack/email via `PRIVATE_URL`).
+   (Slack/email via `PRIVATE_URL`). Note this is Canopy's own app-level
+   alerting — distinct from the `backup-monitoring` Pulumi stack, which
+   watches the **AWS Backup service** (EBS/RDS) via EventBridge→SNS and
+   does not cover kopia-to-S3 backups. This detection is genuinely new;
+   the only thing shared is the precedent of alerting to Slack.
 
 The limit of signal 1 is that it's the *device's word*: it scans the
 Canopy database for what devices reported, not for what's actually in the
@@ -904,10 +942,19 @@ Surface it loudly; don't take Canopy down over it.
 
 None blocking, but flag-and-decide-during-implementation:
 
-- **Bucket naming convention.** IaC provisions the buckets (decided —
-  see "Per-group buckets"); settle the exact name template (e.g.
-  `canopy-backup-<root-id>`) so the IaC module, the IAM role patterns,
-  and Canopy's `bucket` value all agree on it.
+- **IAM model: per-bucket roles vs. central pattern + session policy.**
+  The existing `backups` stack makes per-bucket roles, favouring per-bucket
+  roles that trust Canopy's IRSA (structural scoping, no session policy);
+  the alternative is one central role over a `bes-kopia-backups-*` pattern
+  with session-policy narrowing. Decide and update the `backups` stack
+  accordingly (add the IRSA trust + the reduced device action set either
+  way). See "AWS setup".
+- **GOVERNANCE vs COMPLIANCE / bypass denial.** The lock is GOVERNANCE, so
+  the full-access role can bypass it. Either deny
+  `s3:BypassGovernanceRetention` on the maintenance role or switch buckets
+  to COMPLIANCE, to make "can't destroy recent backups" hold against every
+  principal we control (see the caveat under session policies). A change to
+  the `backups` stack.
 - **Per-device session naming for CloudTrail.** Suggested
   `device-<uuid>`; check max length and allowed chars on
   `RoleSessionName`.
