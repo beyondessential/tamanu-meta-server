@@ -910,6 +910,28 @@ went, and a job scans those reports in the database.
    group recovery call.) Distinct from the `backup-monitoring` Pulumi stack
    (AWS Backup service), so this detection is genuinely new.
 
+   **`is_monitored` is absolute — by design, no backup exception.** Per-
+   server staleness events are always *recorded* (so they show on the
+   server's detail page / status indicator) but open an incident → Slack
+   *only* for monitored servers — exactly the existing gate. We don't
+   override it: some prods are intentionally intermittently-alive, and
+   per-server backup checks on them would be noise. An unmonitored server
+   in a backup-configured group thus has visible-but-non-paging backup
+   staleness. **But group-level checks must still page** (next).
+
+**Group-level checks alert regardless of `is_monitored`.** Whether Canopy
+can mint creds for a group, whether its bucket/Object-Lock is intact
+(preflight), whether maintenance is running, and whether the repo is
+corrupt (poisoning detection) are *group / control-plane* concerns, not
+any one server's — so they must **not** pass through the per-server
+`is_monitored` gate. **Mechanism wrinkle to settle:** the incident model
+is *server-keyed* (membership gates on a server's `is_monitored`), and
+there's no obvious "group-level issue with no server". So group-level
+alerts need a server-independent path — e.g. a group-scoped incident, or
+raising against the group rather than a member. Flagged for
+implementation; do not route these through a per-server `NewEvent`, which
+would inherit the monitored gate.
+
 The limit of signal 1 is that it's the *device's word*: it scans the
 Canopy database for what devices reported, not for what's actually in the
 bucket. A device that crashes before reporting looks (safely) stale; a
