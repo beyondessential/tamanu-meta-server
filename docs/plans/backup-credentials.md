@@ -168,6 +168,7 @@ CREATE TABLE server_group_backup_config (
     expected_interval INTERVAL,                -- NULL → manual-only (no schedule, no staleness); set → scheduled cadence + staleness
     retention         JSONB NOT NULL,          -- kopia keep-* policy; Canopy asserts it into the repo
     repo_password_ref TEXT NOT NULL,           -- reference to the secret, NOT the secret
+    status            TEXT NOT NULL,           -- 'provisioning' | 'escrow_pending' | 'ready'; backups dormant until 'ready'
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -1190,6 +1191,51 @@ exact home (private-server, a dedicated worker, or a CronJob that itself
 fans out per-group Jobs) is an implementation detail to settle then;
 what's fixed is that it's Canopy's responsibility, not a client's.
 
+## Operator workflows & repo provisioning (private-server UI)
+
+Onboarding a group is a real workflow with operator UI shipping **in this
+plan** (private-server React, `TailscaleAdmin`-gated, fitting the existing
+`private-web` SPA/admin pattern), each screen with Playwright e2e coverage
+per AGENTS.md — *not* deferred to SQL bootstrap.
+
+**Repo creation.** "Canopy owns repo creation" is concrete: a one-shot
+Canopy-spawned **init Job** (kopia image) runs `kopia repository create`
++ asserts the initial retention policy, using the **maintenance role's**
+IRSA (creating the format blob needs more than the no-delete device set).
+It is triggered from the onboarding UI, not implicitly on first backup.
+
+**Lifecycle state** (`server_group_backup_config.status`):
+`provisioning` (init Job running) → `escrow_pending` (repo created,
+awaiting escrow ack) → `ready`. Backups stay **dormant (412/409)** until
+`ready`, so "authorized" = config set + repo created + escrow
+acknowledged.
+
+Screens:
+- **Onboarding / config** — set `bucket` / `target_role_arn` / `region` /
+  `expected_interval` / `retention`, and kick off repo creation.
+- **Escrow** — after creation, reveal the generated passphrase **once**
+  with a "saved to Bitwarden" acknowledgment that flips `escrow_pending →
+  ready` (from-birth repos only; imports skip — operator already has it).
+- **One-off "backup now"** — an operator button that enqueues a pending
+  request (see below); the device picks it up on its next ~1-minute tick.
+- **Stats panel** — read-only view of `backup_repo_stats` + recent
+  `backup_runs` per group.
+
+**One-off request state** (so the pending flag has a home):
+
+```sql
+CREATE TABLE backup_requests (
+    server_id    UUID NOT NULL REFERENCES servers(id),
+    purpose      TEXT NOT NULL,            -- "backup" | "restore"
+    requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    requested_by TEXT,                     -- operator identity
+    PRIMARY KEY (server_id, purpose)
+);
+```
+
+A row makes Canopy answer "back up now" on the server's next tick
+(bypassing the cadence debounce); cleared when the run is reported.
+
 ## Upstream access preflight
 
 The device-staleness signals above watch the *devices*. This watches
@@ -1397,10 +1443,12 @@ as new `jobs`-crate bins; the `ServerRank::Production`→`"prod"` mapping;
 **Still open (genuine choices, not gaps):**
 - The **transport** for the cadence signal (how it rides today's
   ~1-minute healthcheck — tailnet poll / device poll / held-open).
-- Whether to expose an **operator "backup now"** action and stats in
-  `private-server` now or bootstrap via SQL first.
 - Tunable cadence defaults (heartbeat/inspection/maintenance/preflight) —
   chosen above, adjustable later.
+
+(The operator UI — onboarding, repo creation, escrow, one-off backup,
+stats — is **decided: ships in-plan**; see "Operator workflows & repo
+provisioning".)
 
 ## Out of scope (do not silently fold in)
 
@@ -1436,8 +1484,7 @@ as new `jobs`-crate bins; the `ServerRank::Production`→`"prod"` mapping;
   + `abortIncompleteMultipartUpload` — are now **in scope**, since they're
   load-bearing for GC on a versioned bucket; see "Interaction with
   versioning + the 30-day Object Lock".)
-- Operator UI in `private-server` / React for editing
-  `server_group_backup_config` (will want it eventually; not in the
-  first cut — bootstrap via SQL). This now includes the maintenance
-  schedule and the repo-password reference, still bootstrapped via SQL /
-  secret tooling for the first cut.
+- (No longer deferred: the operator UI for onboarding, repo creation,
+  escrow, one-off backup, and the stats panel **ships in this plan** — see
+  "Operator workflows & repo provisioning". What's still out is *bulk* /
+  fleet-wide config editing beyond the per-group onboarding screen.)
