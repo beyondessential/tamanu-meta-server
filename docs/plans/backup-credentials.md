@@ -370,11 +370,19 @@ GET /backup-target
     "bucket": "...",
     "prefix": "",             -- normally empty (repo at bucket root); non-empty only for a sub-path
     "region": "...",
-    "endpoint": "..."         -- optional; for non-AWS S3
+    "endpoint": "...",        -- optional; for non-AWS S3
+    "repo_password": "..."    -- the kopia repo passphrase (read from the k8s Secret)
   }
   Response 412: device not bound to a live server (DeviceHasNoServer)
   Response 409: server ungrouped, or no backup config for the group
 ```
+
+(`repo_password` is here because bestool needs it to `kopia repository
+connect`. **Consequence:** `public-server` — the *internet-facing* pod —
+must itself read the group's k8s Secret, so the net-new k8s machinery
+isn't only on the jobs side: `public-server` needs a kube client +
+ServiceAccount with Secret-read RBAC. This widens its blast radius, which
+the stage-1 accepted-risk note and the blind-relay stub both cover.)
 
 This is the piece that keeps the bucket out of device provisioning. The
 `credential_process` output format (above) is **fixed by the AWS SDK** and
@@ -1361,13 +1369,18 @@ as new `jobs`-crate bins; the `ServerRank::Production`→`"prod"` mapping;
 `AWS_S3_MULTIPART_ACTIONS` for the device set.
 
 **Net-new infrastructure this requires (none exists in canopy today):**
-- The **AWS SDK** — `aws-config` + `aws-sdk-{sts,s3,secretsmanager?}`, a
-  provider, and an `AppState` client (first AWS SDK usage in the workspace).
-- A **Kubernetes API client** (`kube`/`k8s-openapi`) for spawning Jobs.
-- A **ServiceAccount + IRSA** on canopy's pods (plumb through `spec.ts`;
-  the `common/eksServiceAccount.ts` helper exists but is unused), plus RBAC
-  to create Jobs and `get` Secrets, and the OIDC-provider-per-account
-  wiring for cross-account Job web-identity.
+- The **AWS SDK** — `aws-config` + `aws-sdk-{sts,s3,…}`, a provider, and an
+  `AppState` client (first AWS SDK usage in the workspace).
+- A **Kubernetes API client** (`kube`/`k8s-openapi`) — for spawning Jobs
+  (jobs side) **and** for `public-server` to read the repo-password Secret
+  it serves on `/backup-target`.
+- A **ServiceAccount + IRSA** on canopy's pods — **including
+  `public-server`**, which today carries none (the shared `spec.ts`
+  injects no ServiceAccount). RBAC: the jobs side needs create-Jobs +
+  `get` Secrets; `public-server` needs `get` Secrets for repo passwords.
+  Plus IRSA wiring (the `common/eksServiceAccount.ts` helper exists but is
+  unused) and the OIDC-provider-per-account wiring for cross-account Job
+  web-identity.
 
 **Still open (genuine choices, not gaps):**
 - The **transport** for the cadence signal (how it rides today's
