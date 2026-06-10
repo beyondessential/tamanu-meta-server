@@ -539,3 +539,20 @@ behaviour Rust tests can't:
    (object-locked). Decide how much of that the UI explains vs. defers to the
    runbook — at minimum a confirm dialog noting "the bucket and its locked
    objects persist; this only stops issuance".
+
+---
+
+## Backup types addendum
+
+Per the plan's "Backup types", the UI is type-aware:
+
+- **Capabilities view** per server: the registered types + an `enabled`
+  toggle (the per-server on/off; seeded from `auto_enable`).
+- **Per-`(group, type)` schedule + retention** editing
+  (`server_group_backup_schedule` overrides; show the inherited type
+  default when no override). Org retention floor enforced in the form.
+- **One-off "backup now"** picks a `(server, type)` (writes
+  `backup_requests` with the type).
+- Stats panel groups by type where useful (latest snapshot per
+  `(server, type)`).
+- (Optional, later) a small admin view of `backup_type_defaults`.

@@ -586,3 +586,23 @@ No frontend/Playwright work in this component (device API, no UI).
    `backup_credential_issuances`, `backup_runs`, the endpoints, and the
    jobs crate. Decide whether they live in `commons-types` (shared) or are
    defined per-crate. Recommend `commons-types` to avoid drift.
+
+---
+
+## Backup types addendum
+
+Per the plan's "Backup types": requests carry a `type`, and there's a new
+registration endpoint.
+
+- **New `POST /backup-capabilities`** (ServerDevice): body
+  `{ "types": [...] }`; resolve device→server; upsert
+  `server_backup_capabilities`, seeding `enabled` from each type's
+  `backup_type_defaults.auto_enable` for newly-seen types (don't clobber an
+  operator-set `enabled`). 204.
+- **`POST /backup-credentials`** body gains `"type"`; **`POST
+  /backup-report`** body gains `"type"`; both record it
+  (`backup_credential_issuances.type`, `backup_runs.type`/`server_id`).
+- Issuance/credentials gating is per `(server, type)`: the capability must
+  be `enabled` and the group `ready`.
+- Add a shared **effective-config resolver** (override ?? type-default,
+  retention floor) — also consumed by the jobs + UI components.

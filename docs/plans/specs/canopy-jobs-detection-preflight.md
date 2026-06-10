@@ -565,3 +565,19 @@ struct ScanRow {
 9. **Signal 3 (`backup_restore_checks` + PGRO ingest)** is explicitly
    later/additive — confirm it stays out of this component's first cut
    (only the group-level routing is built now, ready for it).
+
+---
+
+## Backup types addendum
+
+Per the plan's "Backup types": staleness is per-`(server, type)`.
+
+- The staleness scan iterates **enabled `(server, type)` capabilities whose
+  effective schedule is non-NULL**, comparing each to its most recent
+  `backup_runs` row **for that type** (`type = ?`, `purpose='backup'`,
+  `outcome='success'`). The `×2` grace and `max(MIN(first_seen),
+  schedule-created)` anchor are unchanged, just per-type.
+- Disabled / manual-only / unconfigured `(server, type)` are out of the
+  scanned set.
+- Group-level alerting (corruption, preflight) is unchanged — it's
+  per-group, not per-type.

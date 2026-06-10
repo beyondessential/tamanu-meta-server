@@ -544,3 +544,22 @@ dropping it).
 These are the same net-new pieces the design's "Repo-alignment outcomes" section enumerates; this component owns
 the **jobs-side** kube client + Job-spawning IRSA, while `public-server`'s kube/AWS additions are owned by the
 endpoints component.
+
+---
+
+## Backup types addendum
+
+Per the plan's "Backup types":
+
+- **Retention is per-`(group, type)`.** The maintenance cycle's
+  assert-retention step asserts *each type's* effective keep-policy
+  (`server_group_backup_schedule.retention ?? backup_type_defaults`, org
+  floor applied) as a kopia **per-source/path policy**, so `kopia snapshot
+  expire` honours the right policy per type. The maintenance *run* itself
+  stays per-group (one repo per group, shared by all types).
+- **Scheduling is per-`(group, type)`** — the maintenance/inspection
+  schedulers iterate active `(group, type)` (or per-group for the
+  repo-wide maintenance run; per-type for retention assertion).
+- **Inspection** parses the snapshot's `canopy-type` tag → writes
+  `backup_repo_snapshots.type`; `(server, type)` is one source.
+- `backup_repo_stats` stays per-group (repo is shared; size is repo-level).

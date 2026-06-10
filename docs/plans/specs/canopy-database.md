@@ -537,3 +537,33 @@ no final full-suite run.
    `DISTINCT ON (server)` over `backup_runs` joined through
    `device_server_associations`, a covering index may be wanted — defer until
    the jobs query is concrete, then add in a follow-up migration.
+
+---
+
+## Backup types addendum (supersedes the relevant schema above)
+
+Added after this spec: backups are keyed `(server, type)`, not `(server)`.
+See the plan's "Backup types" section. Concrete deltas:
+
+- **`server_group_backup_config`** drops `expected_interval` and
+  `retention` — it's now repo-level only (`bucket`, `prefix`,
+  `target_role_arn`, `region`, `repo_password_ref`, `status`).
+- **New tables/models:**
+  - `server_backup_capabilities(server_id, type, enabled, registered_at)`
+    PK `(server_id, type)` — bestool-registered; `enabled` **seeded from**
+    `backup_type_defaults.auto_enable` at first registration, then
+    operator-toggleable per server.
+  - `backup_type_defaults(type PK, default_interval, default_retention
+    JSONB, auto_enable BOOL)` — canopy-wide per-type defaults.
+  - `server_group_backup_schedule(group_id, type, expected_interval,
+    retention)` PK `(group_id, type)` — schedule/retention overrides over
+    the type defaults; absent row → defaults.
+- **`type TEXT` column added to** `backup_credential_issuances`,
+  `backup_runs` (+ a `server_id` column for per-server-type staleness),
+  `backup_repo_snapshots`, and `backup_requests` (PK now
+  `(server_id, type, purpose)`). `backup_maintenance_runs` and
+  `backup_repo_stats` stay per-group (repo-level).
+- **New model surface:** capability upsert + per-server toggle; effective
+  schedule/retention resolution (`override ?? type-default`, with the org
+  retention floor enforced); "list active `(server, type)`" for the
+  scheduler/staleness.
