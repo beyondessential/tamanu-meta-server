@@ -164,8 +164,7 @@ CREATE TABLE server_group_backup_config (
     bucket            TEXT NOT NULL,           -- this group's own bucket (one bucket per group)
     prefix            TEXT NOT NULL DEFAULT '', -- usually empty: the repo lives at the bucket root
     target_role_arn   TEXT NOT NULL,           -- per-bucket role Canopy assumes (encodes the account; may be cross-account)
-    region            TEXT,                    -- NULL → deployment default
-    endpoint          TEXT,                    -- NULL → AWS; set for non-AWS S3
+    region            TEXT,                    -- NULL → deployment default (AWS region)
     expected_interval INTERVAL,                -- NULL → manual-only (no schedule, no staleness); set → scheduled cadence + staleness
     retention         JSONB NOT NULL,          -- kopia keep-* policy; Canopy asserts it into the repo
     repo_password_ref TEXT NOT NULL,           -- reference to the secret, NOT the secret
@@ -188,7 +187,7 @@ handling — Canopy just assumes the configured ARN. The group → bucket →
 role relationship is 1:1; what varies N:M (servers spanning accounts,
 groups sharing an account) lives outside this row. See "IAM model".
 
-`region`/`endpoint` are what `GET /backup-target` serves to devices.
+`region` (an AWS region) is what `GET /backup-target` serves to devices.
 `expected_interval` is the group's **declared backup cadence** and the
 single source for it: it both paces the devices (see "Backup cadence")
 and drives staleness detection — so schedule and alert can't drift apart.
@@ -380,7 +379,6 @@ GET /backup-target
     "bucket": "...",
     "prefix": "",             -- normally empty (repo at bucket root); non-empty only for a sub-path
     "region": "...",
-    "endpoint": "...",        -- optional; for non-AWS S3
     "repo_password": "..."    -- the kopia repo passphrase (read from the k8s Secret)
   }
   Response 412: device not bound to a live server (DeviceHasNoServer)
@@ -397,7 +395,7 @@ the stage-1 accepted-risk note and the blind-relay stub both cover.)
 This is the piece that keeps the bucket out of device provisioning. The
 `credential_process` output format (above) is **fixed by the AWS SDK** and
 carries only the four credential fields — it cannot carry the bucket,
-prefix, region, or endpoint. Yet the device must know all of those to
+prefix, or region. Yet the device must know all of those to
 address S3 at all. So rather than baking them into each device's kopia
 config at provision time (which would make "rotating bucket / changing
 prefix" a per-device reconfiguration, not the server-side-only change this
@@ -431,10 +429,10 @@ completed", and it is the input to staleness detection below. A device
 that fails to even reach this endpoint shows up as staleness (no recent
 success), so a crashed run is not silent.
 
-(`region`/`endpoint` are per-group columns on `server_group_backup_config`
-— each group's bucket can live in its own region, or behind a non-AWS S3
-endpoint. They're read from config, not snapshotted; the issuance audit
-log snapshots only `bucket`/`prefix` — see `backup_credential_issuances`.)
+(`region` is a per-group column on `server_group_backup_config` — each
+group's bucket can live in its own AWS region. It's read from config, not
+snapshotted; the issuance audit log snapshots only `bucket`/`prefix` — see
+`backup_credential_issuances`.)
 
 `purpose` is a real capability gate, not just audit metadata:
 
@@ -790,7 +788,7 @@ holds no hardcoded bucket:
 bestool canopy backup [--purpose backup|restore]
 ```
 
-- `GET /backup-target` to learn `{bucket, prefix, region, endpoint}`
+- `GET /backup-target` to learn `{bucket, prefix, region}`
   **on every run** — never cached to persistent device config.
 - Reconciles the kopia repository connection against that target (so a
   changed bucket/prefix is picked up here), with
@@ -1204,11 +1202,10 @@ to point at. We should learn that from Canopy checking itself, not from
 devices starting to fail.
 
 **It runs per server-group, not fleet-wide.** Each group has its own
-bucket with its own `region`/`endpoint` and its own Object Lock config,
-so bucket-level access can differ per group — and with a non-AWS-S3
-`endpoint`, the cred pathway differs too (it isn't reached via AWS STS at
-all). So a failure is normally *scoped to one group*; it's only fleet-wide
-when the genuinely shared piece breaks. The preflight reflects that split:
+bucket (its own account, region, role, and Object Lock config), so
+bucket-level access can differ per group. A failure is therefore normally
+*scoped to one group*; it's only fleet-wide when the genuinely shared
+piece breaks. The preflight reflects that split:
 
 Shared, checked once:
 - **Identity resolves** — `sts:GetCallerIdentity` confirms the pod's IRSA
@@ -1286,7 +1283,7 @@ Surface it loudly; don't take Canopy down over it.
   inserted. Devices in the group start succeeding on their next run; if
   the row lands before the bucket, the preflight alerts and issuance
   fails cleanly rather than corrupting anything.
-- **Changing region or endpoint** — update the
+- **Changing region** — update the
   `server_group_backup_config` row. Each device picks it up on its next
   scheduled `bestool canopy backup` (every-run target fetch); no per-host
   command, no coordinated cutover. Staleness detection flags any host
