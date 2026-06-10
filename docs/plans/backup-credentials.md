@@ -48,11 +48,12 @@ directly (no proxy through Canopy).
   policy ownership") — the mechanism is in scope — but the actual values
   start at a sane default and per-group tuning is later.
 - WORM immutability is a **required property of every group's bucket**
-  (30-day S3 Object Lock), not a follow-up. Existing buckets already have
-  it; new per-group buckets must enable it at creation (it can't be
-  retrofitted — see "Per-group buckets"). The plan also has to be
-  compatible with it (object-lock-aware kopia repos; GC reclaims on a
-  ~30-day lag).
+  (versioning + 30-day S3 Object Lock), not a follow-up. Existing buckets
+  already have it; new per-group buckets must enable it at creation (it
+  can't be retrofitted — see "Per-group buckets"). The plan has to be
+  compatible with it: reclamation is via **S3 lifecycle** on the versioned
+  bucket (in scope — see "Interaction with versioning + the 30-day Object
+  Lock"), not kopia deletes directly.
 - Picking the backup tool. Kopia is the assumed consumer because it
   fits the AWS SDK `credential_process` hook cleanly, but rclone works
   through the same mechanism if it turns out to be preferred.
@@ -692,6 +693,13 @@ retrofitted. The stack does this (`objectLockEnabled: true` +
 `objectLockConfiguration`), so a group's bucket is correct by
 construction; getting it wrong would mean recreating the bucket.
 
+The bucket also needs **lifecycle rules** — `noncurrentVersionExpiration`
+~35 days (≥ the 30-day lock) + a 7-day `abortIncompleteMultipartUpload` —
+since on a versioned bucket they're what actually reclaims space (see
+"Interaction with versioning + the 30-day Object Lock"). The
+`tamanu/on-linux` stack already has these (`kopia.ts`); the standalone
+`backups` stack does **not** and must gain them as part of this work.
+
 **IaC (Pulumi) provisions the buckets.** Onboarding a group means standing
 up its `backups` stack (bucket + lock + roles) and then inserting the
 `server_group_backup_config` row. Canopy only ever *uses* the bucket; it
@@ -1018,22 +1026,40 @@ would re-introduce the 1-hour cap). It's broad *on its own bucket*, not
 across a pattern — so a maintenance bug or compromise is still confined to
 that one group, the same structural isolation the device path gets.
 
-### Interaction with the 30-day Object Lock
+### Interaction with versioning + the 30-day Object Lock
 
-The buckets have a 30-day S3 Object Lock, which constrains maintenance:
-kopia GC cannot actually delete a pack blob until its lock expires, so
-storage from expired snapshots is reclaimed on a ~30-day lag, not
-immediately. This is expected and is the price of ransomware-proof
-backups — it must not be read as maintenance failing. Two implications
-for implementation:
+Object Lock requires **versioning**, so every bucket here is versioned —
+which changes how deletion actually works, and the plan must account for
+it:
 
-- The kopia repository must be created **object-lock-aware** (kopia
-  supports this explicitly: it tracks retention and avoids trying to
-  delete still-locked blobs). A repo created oblivious to the lock will
-  throw errors when maintenance attempts deletes that S3 refuses.
-- Budget for the lag: at any time the bucket holds up to ~30 days of
-  not-yet-collectable garbage on top of live data. Fine, but worth
-  noting for capacity/cost.
+- On a versioned bucket, kopia's `DeleteObject` is **never refused**; it
+  writes a *delete marker* and the prior version becomes *noncurrent*. So
+  maintenance doesn't "throw errors on locked deletes" (an earlier draft
+  said that) — it appears to succeed while **reclaiming nothing**.
+- Physical reclamation therefore happens via **S3 lifecycle**, not kopia's
+  delete: a `noncurrentVersionExpiration` rule expires noncurrent versions
+  (and delete markers), gated by the Object Lock (a version still under
+  retention is not expired until its lock lapses). This is also how kopia's
+  *own* GC reclaims space (kopia "delete" → marker → lifecycle), so the
+  lifecycle rule is **load-bearing for normal operation**, not optional.
+
+**So the lifecycle rules are in scope** for the per-group buckets (see
+"Per-group buckets"): `noncurrentVersionExpiration` ~35 days (≥ the 30-day
+lock, matching the existing `tamanu/on-linux` stack) + a 7-day
+`abortIncompleteMultipartUpload`. The standalone `backups` stack has no
+lifecycle rules today — they must be added.
+
+Consequences:
+- Reclamation lags ~35 days (a version becomes deletable only after both
+  the ~35-day rule *and* its lock have elapsed) — budget for up to ~35
+  days of not-yet-collectable garbage on top of live data.
+- That ~35-day window is also the **recovery deadline** for
+  overwrite-poisoning (see "Recovery from poisoning"): the good noncurrent
+  versions survive exactly until lifecycle reclaims them.
+- We do **not** rely on kopia client-side lock-awareness (extending
+  per-object locks) — that only matters against an AWS-level attacker,
+  which is out of scope; see "AWS setup" for why devices need no
+  `PutObjectRetention`.
 
 ### Retention policy ownership
 
@@ -1351,10 +1377,13 @@ as new `jobs`-crate bins; the `ServerRank::Production`→`"prod"` mapping;
   group is on a shared bucket today). The design is one-bucket-per-group;
   moving legacy data across is a separate operational task.
 - bestool subcommand implementation (separate repo).
-- **Tuning** retention policy values, encryption-at-rest beyond default
-  SSE-S3, S3 lifecycle rules. (Retention *execution* is in scope — Canopy
-  maintenance runs it — but the kopia retention values start at a default
-  and per-group tuning is later.)
+- **Tuning** retention policy values and encryption-at-rest beyond default
+  SSE-S3. (Retention *execution* is in scope — Canopy maintenance runs it —
+  but the kopia retention values start at a default and per-group tuning is
+  later. Note: the *reclamation* lifecycle rules — `noncurrentVersionExpiration`
+  + `abortIncompleteMultipartUpload` — are now **in scope**, since they're
+  load-bearing for GC on a versioned bucket; see "Interaction with
+  versioning + the 30-day Object Lock".)
 - Operator UI in `private-server` / React for editing
   `server_group_backup_config` (will want it eventually; not in the
   first cut — bootstrap via SQL). This now includes the maintenance
