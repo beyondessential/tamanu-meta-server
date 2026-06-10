@@ -154,6 +154,50 @@ Reasons not to put it in `private-server`:
   credential/region provider, a client on `AppState`, and a `FromRef`
   impl. (Don't pin crate versions without checking the registry.)
 
+## Backup types
+
+Backups aren't all "snapshot this path". A Postgres backup, for instance,
+is a *procedure* — quiesce/checkpoint Postgres into a consistent state,
+take a btrfs snapshot, kopia-snapshot the snapshot mount, clean up. That
+"how" is host-specific and belongs **client-side**, in bestool. So the
+system is organised around **backup types**:
+
+- **bestool registers the types it can do.** A type is a named, client-side
+  procedure that ends in a (type-tagged) kopia snapshot into the group's
+  repo. `tamanu-postgres` is the first (it's also what PGRO restores);
+  more will follow. bestool *advertises* its server's capabilities to
+  Canopy (`server_backup_capabilities`); the procedure itself is opaque to
+  Canopy.
+- **Canopy is type-*aware* for scheduling + audit, type-*agnostic* for
+  execution.** It records which types exist, decides *when* each runs
+  (cadence / one-off), issues creds, and tracks outcomes per type — but it
+  never knows the "how". This keeps Canopy generic and the mechanics on the
+  host that owns them.
+- **Well-known types come up enabled; others need approval.** A type name
+  has canopy-wide defaults (`backup_type_defaults`: schedule, retention,
+  `auto_enable`). `auto_enable` seeds the `enabled` flag **when bestool
+  registers the capability**: a `tamanu-postgres` capability is created
+  enabled (and runs at its default schedule/retention), an unknown type is
+  created disabled awaiting operator approval. After that, `enabled` is
+  operator-controlled per server — an operator can turn a type off for a
+  server and it stays off regardless of the default.
+- **Schedule and retention are per-`(group, type)`** (`server_group_backup_schedule`),
+  overriding the per-type defaults (effective = override ?? default; org
+  retention floor still applies). Different types in a group can keep
+  different rhythms and keep-policies. Canopy asserts each type's retention
+  as a kopia **per-source/path policy**, and `kopia snapshot expire` honours
+  it per source.
+- **The repo is shared; the type is a dimension.** One bucket/repo per
+  group holds all types from all the group's servers; a snapshot's source
+  is `canopy@<server-id>` with a `canopy-type=<type>` tag (and the type in
+  the path), so `(server, type)` is one source. Scheduling, the "back up
+  now" trigger, staleness, signal-2 inventory, and PGRO's signal-3 are all
+  per-`(server, type)`; `type` is a column on runs / issuances / requests /
+  repo-snapshots.
+
+So a backup is keyed `(server, type)`, not just `(server)`. The schema and
+sections below thread that through; PGRO consumes a *specific* type.
+
 ## Database changes
 
 ### New table: `server_group_backup_config`
@@ -165,14 +209,17 @@ CREATE TABLE server_group_backup_config (
     prefix            TEXT NOT NULL DEFAULT '', -- usually empty: the repo lives at the bucket root
     target_role_arn   TEXT NOT NULL,           -- per-bucket role Canopy assumes (encodes the account; may be cross-account)
     region            TEXT,                    -- NULL → deployment default (AWS region)
-    expected_interval INTERVAL,                -- NULL → manual-only (no schedule, no staleness); set → scheduled cadence + staleness
-    retention         JSONB NOT NULL,          -- kopia keep-* policy; Canopy asserts it into the repo
     repo_password_ref TEXT NOT NULL,           -- reference to the secret, NOT the secret
     status            TEXT NOT NULL,           -- 'provisioning' | 'escrow_pending' | 'ready'; backups dormant until 'ready'
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ```
+
+This row holds the **repo-level** facts for the group (one repo/bucket per
+group, shared by all backup *types*). **Schedule and retention are no
+longer here** — they're per-`(group, type)` (see "Backup types"), because
+different types in a group want different rhythms and keep-policies.
 
 `bucket` is the group's **own** bucket — one bucket per group, not a
 shared bucket with per-group prefixes. Isolation is therefore at the
@@ -189,21 +236,9 @@ role relationship is 1:1; what varies N:M (servers spanning accounts,
 groups sharing an account) lives outside this row. See "IAM model".
 
 `region` (an AWS region) is what `GET /backup-target` serves to devices.
-`expected_interval` is the group's **declared backup cadence** and the
-single source for it: it both paces the devices (see "Backup cadence")
-and drives staleness detection — so schedule and alert can't drift apart.
-It has three states: **NULL** → manual-only (backups *possible* via
-operator one-off, but no schedule and no staleness alerting); **set** →
-scheduled cadence + staleness. (A *missing config row entirely* is the
-separate "not set up → `409`" case.)
-
-`retention` holds the kopia keep-policy (e.g. `{"keep_daily": 7,
-"keep_weekly": 4, "keep_monthly": 6, "keep_latest": 1}`); Canopy asserts
-it into the repo at creation and each maintenance run — see "Retention
-policy ownership". The org **minimum** (`keep_daily 7, keep_weekly 4,
-keep_monthly 6`) is enforced as a floor in code — a per-group override may
-*raise* the counts but never drop below it; `keep_latest 1` is the default
-but is *not* floor-enforced.
+Schedule (`expected_interval`) and `retention` live per-`(group, type)` in
+`server_group_backup_schedule` with per-type canopy-wide defaults — see
+"Backup types" and "Retention policy ownership".
 
 `repo_password_ref` names the group's kopia repository password, held as a
 **k8s Secret** (the column is the Secret name, never the password). The
@@ -219,9 +254,62 @@ already one `server_group`, so a shared bucket maps to that single group —
 the 1:1 group→bucket invariant holds; see "Per-group buckets".)
 
 Keeping this in a separate table rather than columns on `server_groups`
-because more backup-related fields are likely to land here (retention,
-encryption-key id, monitoring thresholds) and they all naturally
-co-locate, and most groups won't have backup config.
+because more backup-related fields are likely to land here (encryption-key
+id, monitoring thresholds) and they all naturally co-locate, and most
+groups won't have backup config.
+
+### New tables: backup types (registry, defaults, per-(group,type) config)
+
+See "Backup types" for the concept. Three tables carry the type dimension:
+
+```sql
+-- What each server ADVERTISES it can back up (bestool registers these),
+-- and whether it's enabled for that server. `enabled` is SEEDED at
+-- registration from the type's auto_enable default; thereafter it's
+-- operator-controlled state (an operator can turn a type off for a server,
+-- and that sticks regardless of the auto_enable default).
+CREATE TABLE server_backup_capabilities (
+    server_id     UUID NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+    type          TEXT NOT NULL,            -- e.g. "tamanu-postgres"
+    enabled       BOOLEAN NOT NULL,         -- seeded = backup_type_defaults.auto_enable at registration
+    registered_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (server_id, type)
+);
+
+-- Canopy-wide defaults per well-known type. auto_enable only sets the
+-- INITIAL enabled value on a capability at registration; it is not a
+-- perpetual override.
+CREATE TABLE backup_type_defaults (
+    type              TEXT PRIMARY KEY,      -- "tamanu-postgres", ...
+    default_interval  INTERVAL,              -- default schedule (NULL → manual-only)
+    default_retention JSONB NOT NULL,        -- default kopia keep-policy (>= org floor)
+    auto_enable       BOOLEAN NOT NULL DEFAULT false
+);
+
+-- Per-(group,type) schedule/retention OVERRIDES (optional). Effective
+-- value = this row ?? backup_type_defaults; org retention floor still
+-- applies. Absent row → the type defaults apply.
+CREATE TABLE server_group_backup_schedule (
+    group_id          UUID NOT NULL REFERENCES server_groups(id) ON DELETE CASCADE,
+    type              TEXT NOT NULL,
+    expected_interval INTERVAL,              -- NULL → inherit type default; both NULL → manual-only
+    retention         JSONB,                 -- NULL → inherit type default
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (group_id, type)
+);
+```
+
+**Enablement is per-`(server, type)`** on the capability row: when bestool
+registers a capability, Canopy seeds `enabled` from the type's
+`auto_enable` (so `tamanu-postgres` comes up enabled, an unknown type comes
+up disabled awaiting approval), and an operator can flip it per server
+afterwards — that operator choice is durable and not re-overridden by the
+default. A `(server, type)` **runs** when its capability is `enabled`; its
+**schedule/retention** come from `server_group_backup_schedule(group, type)`
+?? the type default (org retention floor always applies). Scheduling,
+staleness, and the "back up now" trigger are per-`(server, type)`; runs and
+snapshots carry the `type`.
 
 ### New table: `backup_credential_issuances`
 
@@ -230,6 +318,7 @@ CREATE TABLE backup_credential_issuances (
     id                  BIGSERIAL PRIMARY KEY,
     device_id           UUID NOT NULL REFERENCES devices(id),
     group_id            UUID NOT NULL REFERENCES server_groups(id),
+    type                TEXT NOT NULL,       -- the backup type these creds were issued for
     issued_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at          TIMESTAMPTZ NOT NULL,
     purpose             TEXT NOT NULL,       -- "backup" | "restore"
@@ -260,6 +349,8 @@ CREATE TABLE backup_runs (
     id              UUID PRIMARY KEY,         -- the run-uuid, minted by bestool at run start
     device_id       UUID NOT NULL REFERENCES devices(id),
     group_id        UUID NOT NULL REFERENCES server_groups(id),
+    server_id       UUID REFERENCES servers(id),  -- the server backed up (staleness is per server+type)
+    type            TEXT NOT NULL,            -- the backup type that ran
     purpose         TEXT NOT NULL,            -- "backup" | "restore"
     outcome         TEXT NOT NULL,            -- "success" | "failure"
     error           TEXT,                     -- populated on failure
@@ -316,6 +407,7 @@ CREATE TABLE backup_repo_snapshots (
     group_id           UUID NOT NULL REFERENCES server_groups(id),
     source             TEXT NOT NULL,            -- kopia source: canopy@<server-id>:<path>
     server_id          UUID REFERENCES servers(id),  -- parsed from source
+    type               TEXT,                     -- backup type, from the canopy-type tag
     latest_snapshot_at TIMESTAMPTZ,
     observed_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (group_id, source)
@@ -324,8 +416,10 @@ CREATE TABLE backup_repo_snapshots (
 
 The ground-truth inventory written by the read-only inspection Job
 (signal 2): the latest snapshot actually present in the repo, per source.
-`source` encodes the **server id** (the backup subject); the device that
-took it lives in the snapshot's tags, not here.
+`source` encodes the **server id** (the backup subject) and the **type**
+(path/`canopy-type` tag), so a `(server, type)` is one source; the device
+that took it lives in the tags, not here. Staleness keys on
+`(server, type)`.
 
 ### New table: `backup_repo_stats`
 
@@ -359,15 +453,30 @@ inspection creds avoids CloudWatch creep on the read-only inspector.
 
 ## Endpoint shape
 
-Three endpoints, all `ServerDevice`-authenticated and all resolving the
-device → root → `server_group_backup_config` the same way:
+Four `ServerDevice`-authenticated endpoints; all device→server→group
+resolution is identical (§ Handler flow).
+
+### `POST /backup-capabilities` — register what this server can back up
+
+```
+POST /backup-capabilities
+  Authorization: mTLS via ServerDevice
+  Body: { "types": ["tamanu-postgres", ...] }   -- the types bestool can run on this server
+  Response 204
+```
+
+bestool calls this to advertise its server's backup types. Canopy upserts
+`server_backup_capabilities` for the resolved server, seeding `enabled`
+from each type's `backup_type_defaults.auto_enable` for newly-registered
+types (existing rows keep their operator-set `enabled`). See "Backup
+types".
 
 ### `POST /backup-credentials` — short-lived creds
 
 ```
 POST /backup-credentials
   Authorization: mTLS via ServerDevice
-  Body: { "purpose": "backup" | "restore" }   -- default "backup"
+  Body: { "type": "tamanu-postgres", "purpose": "backup" | "restore" }   -- purpose default "backup"
   Response 200: {
     "Version": 1,
     "AccessKeyId": "...",
@@ -425,6 +534,7 @@ POST /backup-report
   Authorization: mTLS via ServerDevice
   Body: {
     "run_id":         "...",   -- the run-uuid bestool minted at run start (becomes backup_runs.id)
+    "type":           "...",   -- the backup type that ran
     "purpose": "backup" | "restore",
     "outcome": "success" | "failure",
     "error":          "...",   -- optional, on failure
@@ -868,20 +978,23 @@ unspecified is the command-channel transport — today's status-POST
 *response* carries no command — which is the deferred item below, not the
 cadence.)
 
-Canopy computes "back up now?" as **"the schedule is due OR an operator
-requested a one-off":**
+Canopy computes "back up now?" **per `(server, type)`** — the signal names
+*which type* to run — as **"that type's schedule is due OR an operator
+requested a one-off":** (the effective schedule for a `(group, type)` is
+its `server_group_backup_schedule` override ?? the type default — see
+"Backup types".)
 
-- **Scheduled** (`expected_interval` set): due when the last successful
-  `backup_run` is older than `expected_interval`. One value drives both
-  this and staleness, so they can't drift.
-- **Manual-only** (`expected_interval` NULL): never due on a schedule, no
+- **Scheduled** (effective interval set): due when the last successful
+  `backup_run` *for that type* is older than the interval. One value drives
+  both this and staleness, so they can't drift.
+- **Manual-only** (effective interval NULL): never due on a schedule, no
   staleness alerting — but an operator one-off still fires (see below).
 - **Operator one-off** — a first-class capability: an operator (via Canopy)
-  requests a best-effort-immediate backup; Canopy sets a pending-backup
-  flag for that device/group and emits "back up now" on the next tick
-  (within a minute, or instantly over a held connection), **bypassing the
-  cadence debounce**. Works for *both* manual-only and scheduled groups
-  (out-of-band "back up now"). Cleared when the run is reported.
+  requests a best-effort-immediate backup of a specific `(server, type)`;
+  Canopy writes a `backup_requests` row and emits "back up now" for that
+  type on the next tick (within a minute, or instantly over a held
+  connection), **bypassing the cadence debounce**. Works for both
+  manual-only and scheduled types. Cleared when the run is reported.
 
 This gives **provision-then-authorize**: the device image ships with the
 backup wiring unconditionally and simply gets "nothing to do" (a benign,
@@ -918,13 +1031,14 @@ went, and a job scans those reports in the database.
 1. bestool reports each run via `POST /backup-report`, written to
    `backup_runs`.
 2. A periodic Canopy job (a tokio loop in the `jobs` crate, like
-   `reachability`) scans the **servers expected to be backed up** — those
-   in a group whose `server_group_backup_config` has a non-NULL
-   `expected_interval` — joins each against its most recent `backup_runs`
-   row, and classifies it. (Detection is **server-centric**: the subject
-   is the server being protected; the device is the actor recorded in
-   `backup_runs`/snapshot tags. A manual-only or unconfigured group is
-   simply not in the scanned set, so unauthorized devices never alert.)
+   `reachability`) scans the **`(server, type)` pairs expected to be
+   backed up** — each enabled capability whose effective schedule (per
+   "Backup types") is non-NULL — joins each against its most recent
+   `backup_runs` row *for that type*, and classifies it. (Detection is
+   **server-centric per type**: the subject is the server's backup *of that
+   type*; the device is the actor recorded in `backup_runs`/snapshot tags.
+   A disabled, manual-only, or unconfigured `(server, type)` is simply not
+   in the scanned set.)
    - **Stale**: previously reported success but no `purpose = 'backup'`
      row with `outcome = 'success'` newer than `expected_interval × 2` →
      alert. (Filter on `purpose='backup'` — a recent successful *restore*
@@ -1192,21 +1306,25 @@ minimum retention is 30 days** no matter what the policy says, since
 nothing can be deleted sooner.
 
 Because Canopy already owns repo creation, the password, and maintenance,
-it also owns the retention policy:
+it also owns the retention policy — now **per `(group, type)`** (see
+"Backup types"):
 
-- The intended values live declaratively on `server_group_backup_config`
-  (a `retention` field), not only inside the repo.
-- Canopy sets the kopia policy from that field at repo creation, and
-  **re-asserts it at the start of each maintenance run**, so the
-  declared policy is the source of truth and an in-repo policy that has
-  drifted (or been tampered with by a writer) is corrected rather than
-  silently honoured.
-- This keeps retention answerable from Canopy ("what's group X's policy?"
-  is a DB read) instead of requiring a repo connect to inspect.
+- Retention is declarative in Canopy: the **effective** policy for a
+  `(group, type)` = its `server_group_backup_schedule.retention` override
+  ?? the type's `backup_type_defaults.default_retention`, with the org
+  floor (`keep_daily 7, keep_weekly 4, keep_monthly 6`) enforced in code.
+- Canopy asserts each type's effective policy as a kopia **per-source/path
+  policy** (the type's source), at repo creation and **re-asserted at each
+  maintenance run** — so the declared policy is the source of truth and a
+  drifted/tampered in-repo policy is corrected, and `kopia snapshot expire`
+  applies the right keep-policy per type. Retention stays answerable from a
+  DB read, no repo connect needed.
 
-The *values themselves* are a product decision and remain deferred (see
-non-goals); what's fixed here is that Canopy declares and enforces them,
-with a sane default applied until tuned.
+The default *values per type* are a product call (e.g. `tamanu-postgres` →
+the org-floor schedule); what's fixed is that Canopy declares and enforces
+them per type. The 30-day Object Lock is still an immutability floor
+distinct from the keep-policy (effective minimum retention is 30 days
+regardless).
 
 ### Repository password ownership
 
@@ -1305,15 +1423,17 @@ Screens:
 ```sql
 CREATE TABLE backup_requests (
     server_id    UUID NOT NULL REFERENCES servers(id),
+    type         TEXT NOT NULL,            -- which backup type to run now
     purpose      TEXT NOT NULL,            -- "backup" | "restore"
     requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     requested_by TEXT,                     -- operator identity
-    PRIMARY KEY (server_id, purpose)
+    PRIMARY KEY (server_id, type, purpose)
 );
 ```
 
-A row makes Canopy answer "back up now" on the server's next tick
-(bypassing the cadence debounce); cleared when the run is reported.
+A row makes Canopy answer "back up now" for that `(server, type)` on the
+server's next tick (bypassing the cadence debounce); cleared when the run
+is reported.
 
 ## Upstream access preflight
 
@@ -1397,15 +1517,17 @@ kill. Bringing it in eliminates those static keys and makes Canopy the
 single control plane for *all* backup access. It's a **bidirectional,
 first-party relationship**:
 
-- **Creds out (Canopy → PGRO).** PGRO is a **restore-only** consumer, so it
-  gets short-lived read-only creds + target + repo password from Canopy —
-  reusing the `restore` session policy, the per-bucket role, and the
-  password ownership (canopy-mediated; option (a)). But PGRO is *not* a
-  fleet device and *not* in the group it reads — it's trusted first-party
-  infra, so this needs an **external-restore grant**: an operator-authorized,
-  audited "consumer C may read group X, read-only". That's a deliberate,
-  controlled cousin of the cross-group restore that's banned *for devices*
-  (a different trust class, not a loophole in that rule).
+- **Creds out (Canopy → PGRO).** PGRO is a **restore-only** consumer of a
+  **specific backup type** (`tamanu-postgres` — the same type bestool
+  produces). It gets short-lived read-only creds + target + repo password
+  from Canopy — reusing the `restore` session policy, the per-bucket role,
+  and the password ownership (canopy-mediated; option (a)). But PGRO is
+  *not* a fleet device and *not* in the group it reads — it's trusted
+  first-party infra, so this needs an **external-restore grant**: an
+  operator-authorized, audited "consumer C may read group X's *type T*,
+  read-only". That's a deliberate, controlled cousin of the cross-group
+  restore that's banned *for devices* (a different trust class, not a
+  loophole in that rule).
 - **Reports in (PGRO → Canopy) = Signal 3, restore-verification.** PGRO
   actually restoring a backup *proves it is restorable* — the strongest
   backup-health signal there is, beyond signal 2's "a snapshot exists". PGRO
@@ -1564,6 +1686,15 @@ New capabilities captured along the way: operator one-off backup (8),
 repo-import onboarding mode + Bitwarden escrow (11), repo/bucket stats for
 display (9 + the cost non-goal), `billing.*` tags on Jobs (12),
 hash-jittered scheduling (12).
+
+Added after the spec pass: **backup types** — bestool registers the types
+its server can back up (the "how" is client-side; `tamanu-postgres` first);
+Canopy is type-aware for scheduling/audit, type-agnostic for execution.
+Schedule + retention are per-`(group, type)` over per-type canopy-wide
+defaults; `auto_enable` seeds a capability's `enabled` at registration
+(operator-toggleable per server thereafter); `type` threads through runs /
+issuances / requests / repo-snapshots and the repo `canopy-type` tag; PGRO
+consumes a specific type. See "Backup types".
 
 ## Repo-alignment outcomes (applied) + remaining prerequisites
 
