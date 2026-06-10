@@ -38,10 +38,11 @@ directly (no proxy through Canopy).
   of every backup to Canopy uptime, and a much larger protocol surface.
 - Cross-group restore. The endpoint signature can stay minimal because
   this is genuinely out of scope, not "deferred."
-- Cost dashboards and byte-level reconciliation against S3
-  inventory / CloudWatch. (Missed-backup alerting *is* in scope now —
-  see staleness detection — and maintenance/expiry execution is owned by
-  Canopy; what's deferred is cost/usage analytics.)
+- Cost *dashboards* and byte-level reconciliation against S3 inventory.
+  (A *basic* cached size/stats readout per group — `backup_repo_stats`,
+  including the CloudWatch `BucketSizeBytes` billing basis — *is* in scope
+  for display; missed-backup alerting and maintenance/expiry execution are
+  owned by Canopy. What's deferred is rich cost/usage *analytics*.)
 - Tuning the kopia *retention policy* values (keep N daily / M weekly).
   Canopy now *owns, declares, and enforces* the policy (see "Retention
   policy ownership") — the mechanism is in scope — but the actual values
@@ -158,7 +159,7 @@ CREATE TABLE server_group_backup_config (
     target_role_arn   TEXT NOT NULL,           -- per-bucket role Canopy assumes (encodes the account; may be cross-account)
     region            TEXT,                    -- NULL → deployment default
     endpoint          TEXT,                    -- NULL → AWS; set for non-AWS S3
-    expected_interval INTERVAL,                -- declared cadence: paces devices AND drives staleness; NULL → neither
+    expected_interval INTERVAL,                -- NULL → manual-only (no schedule, no staleness); set → scheduled cadence + staleness
     retention         JSONB NOT NULL,          -- kopia keep-* policy; Canopy asserts it into the repo
     repo_password_ref TEXT NOT NULL,           -- reference to the secret, NOT the secret
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -183,20 +184,24 @@ groups sharing an account) lives outside this row. See "IAM model".
 `region`/`endpoint` are what `GET /backup-target` serves to devices.
 `expected_interval` is the group's **declared backup cadence** and the
 single source for it: it both paces the devices (see "Backup cadence")
-and drives staleness detection. Set it to `1 day` and devices aim to
-back up daily *and* Canopy alerts when one hasn't. Because it's one
-value, the schedule and the alert can't drift apart.
+and drives staleness detection — so schedule and alert can't drift apart.
+It has three states: **NULL** → manual-only (backups *possible* via
+operator one-off, but no schedule and no staleness alerting); **set** →
+scheduled cadence + staleness. (A *missing config row entirely* is the
+separate "not set up → `409`" case.)
 
 `retention` holds the kopia keep-policy (e.g. `{"keep_daily": 7,
-"keep_weekly": 4, ...}`); Canopy asserts it into the repo at creation and
-each maintenance run — see "Retention policy ownership". The values start
-at a default; the schedule is owned here, not left to drift inside the
-repo.
+"keep_weekly": 4, "keep_monthly": 6, "keep_latest": 1}`); Canopy asserts
+it into the repo at creation and each maintenance run — see "Retention
+policy ownership". The org **minimum** (`keep_daily 7, keep_weekly 4,
+keep_monthly 6`) is enforced as a floor in code — a per-group override may
+*raise* the counts but never drop below it; `keep_latest 1` is the default
+but is *not* floor-enforced.
 
-`repo_password_ref` points at the group's kopia repository password
-(held in a k8s secret / Secrets Manager, not stored here in plaintext —
-see "Repository password ownership"). It's the secret *reference*; the
-column never holds the password itself.
+`repo_password_ref` names the group's kopia repository password, held as a
+**k8s Secret** (the column is the Secret name, never the password). The
+password is Canopy-generated for from-birth repos or operator-supplied for
+imported ones — see "Repository password ownership".
 
 A row is keyed by the root server id (the parentless server that heads
 the group). Devices without a configured root row → `409 Conflict` from
@@ -220,8 +225,9 @@ CREATE TABLE backup_credential_issuances (
     issued_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at          TIMESTAMPTZ NOT NULL,
     purpose             TEXT NOT NULL,       -- "backup" | "restore"
-    sts_assumed_role    TEXT NOT NULL,
-    sts_request_id      TEXT,                -- from AssumeRole response, for cross-ref with CloudTrail
+    sts_assumed_role    TEXT NOT NULL,       -- the per-bucket target_role_arn that was assumed
+    sts_request_id      TEXT,                -- from AssumeRole response, best-effort; pointer to the AssumeRole event
+    access_key_id       TEXT,                -- the issued temp AccessKeyId; joins this row to downstream CloudTrail S3 activity
     bucket              TEXT NOT NULL,       -- snapshot of config at issuance time
     prefix              TEXT NOT NULL
 );
@@ -233,7 +239,11 @@ CREATE INDEX ON backup_credential_issuances (root_server_id, issued_at DESC);
 This is the audit log of credential *issuance*. It answers "was a device
 handed creds" but not "did the backup succeed" — see `backup_runs` for
 that. We snapshot bucket/prefix at issuance time so the log stays correct
-even if the group config is later changed.
+even if the group config is later changed. `access_key_id` is the durable
+join key: any CloudTrail S3 event made with these creds carries the same
+`AccessKeyId`, so months later you can map an S3 action back to this row
+(device, purpose, bucket, time). `sts_request_id` is the best-effort
+pointer to the `AssumeRole` event itself.
 
 ### New table: `backup_runs`
 
@@ -280,6 +290,44 @@ Written by the Canopy maintenance Jobs (see "Canopy-owned maintenance").
 A group whose maintenance silently stops is a slow-motion failure (repo
 bloat, retention not enforced), so this feeds the same staleness
 alerting as `backup_runs`.
+
+### New table: `backup_repo_snapshots`
+
+```sql
+CREATE TABLE backup_repo_snapshots (
+    root_server_id     UUID NOT NULL REFERENCES servers(id),
+    source             TEXT NOT NULL,            -- kopia source: canopy@<server-id>:<path>
+    server_id          UUID REFERENCES servers(id),  -- parsed from source
+    latest_snapshot_at TIMESTAMPTZ,
+    observed_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (root_server_id, source)
+);
+```
+
+The ground-truth inventory written by the read-only inspection Job
+(signal 2): the latest snapshot actually present in the repo, per source.
+`source` encodes the **server id** (the backup subject); the device that
+took it lives in the snapshot's tags, not here.
+
+### New table: `backup_repo_stats`
+
+```sql
+CREATE TABLE backup_repo_stats (
+    root_server_id   UUID PRIMARY KEY REFERENCES servers(id),
+    snapshot_count   INTEGER,
+    source_count     INTEGER,
+    logical_bytes    BIGINT,                  -- kopia: pre-dedup size across snapshots
+    physical_bytes   BIGINT,                  -- kopia: deduplicated + compressed repo size
+    bucket_bytes     BIGINT,                  -- S3 actual stored bytes (the billing basis; from CloudWatch)
+    observed_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
+
+Cached repo/bucket stats for operator display, refreshed by the
+inspection cycle. `bucket_bytes` (CloudWatch `BucketSizeBytes`) is the
+real billing basis and runs *ahead* of `physical_bytes` — versioning plus
+the 30-day Object Lock keep expired-but-not-yet-deletable data around, so
+the gap between the two is itself the visible cost of the lock.
 
 ## Endpoint shape
 
@@ -646,31 +694,44 @@ property: a server-side config change propagates to the whole fleet
 automatically on each host's next run. There is no operator command to
 run per host and nothing to "forget to re-run".
 
-### Backup cadence
+### Backup cadence and triggering
 
-Who decides *when* `bestool canopy backup` runs is a real question,
-because Canopy is **pull-based** — it has no inbound path to devices (the
-push/proxy direction is explicitly rejected), so it physically cannot
-trigger a backup. A local trigger must exist. The design choice is only
-whether the cadence is hardcoded per host (drifts from Canopy's
-`expected_interval`, and changing the fleet cadence means touching every
-host) or owned by Canopy like everything else.
+**Canopy is authoritative for *when* a device backs up, and the signal
+rides the existing ~1-minute device↔canopy healthcheck** rather than a
+separate device-side timer. On each tick Canopy answers "back up now /
+nothing to do," and the device launches `bestool canopy backup` as its
+own process when told. This drops responsiveness from a coarse local timer
+to ~1 minute essentially for free (the tick already happens), and a
+held-open bestool connection makes it cheaper still — near-instant if we
+want push. The device holds no schedule of its own; the existing tick *is*
+the trigger.
 
-We own it in Canopy:
+Canopy computes "back up now?" as **"the schedule is due OR an operator
+requested a one-off":**
 
-- A local systemd timer fires `bestool canopy backup` as a *heartbeat* —
-  frequent enough (say hourly) that it never gates the real cadence, and
-  needing no per-host tuning.
-- Each tick, bestool already fetches the target/creds; it also reads the
-  group's `expected_interval` and backs up only if the last successful
-  run is older than that. So the *effective* schedule is Canopy's
-  declared cadence; the local timer is just "wake up and ask".
-- Staleness alerting reads the same `expected_interval`, so the cadence
-  the fleet targets and the cadence Canopy polices are one number and
-  cannot diverge.
+- **Scheduled** (`expected_interval` set): due when the last successful
+  `backup_run` is older than `expected_interval`. One value drives both
+  this and staleness, so they can't drift.
+- **Manual-only** (`expected_interval` NULL): never due on a schedule, no
+  staleness alerting — but an operator one-off still fires (see below).
+- **Operator one-off** — a first-class capability: an operator (via Canopy)
+  requests a best-effort-immediate backup; Canopy sets a pending-backup
+  flag for that device/group and emits "back up now" on the next tick
+  (within a minute, or instantly over a held connection), **bypassing the
+  cadence debounce**. Works for *both* manual-only and scheduled groups
+  (out-of-band "back up now"). Cleared when the run is reported.
 
-Changing a group's cadence is then the same single-row update as any
-other config — no per-host action.
+This gives **provision-then-authorize**: the device image ships with the
+backup wiring unconditionally and simply gets "nothing to do" (a benign,
+non-failure state — `bestool` treats it as dormant, not an error) until an
+operator authorizes/configures the group; backups then begin on the next
+tick with no per-host action.
+
+Changing a group's cadence is a single-row update — no per-host action.
+The transport specifics (how the signal rides today's minute-cadence
+healthcheck — tailnet poll, device poll, or a held-open connection) are an
+implementation detail for the repo-alignment pass; the *model* (Canopy
+authoritative, minute-cadence, schedule-or-manual) is fixed here.
 
 bestool work is in a separate repo; this plan covers the Canopy side
 and the bestool side will be a sibling change there.
@@ -694,33 +755,34 @@ went, and a job scans those reports in the database.
 
 1. bestool reports each run via `POST /backup-report`, written to
    `backup_runs`.
-2. A periodic Canopy job (alongside the existing health/alerting
-   machinery — the same path that surfaces and recovers other device
-   health signals) scans the **devices expected to be backing up** —
-   i.e. every `Server`-role device whose group root has a
-   `server_group_backup_config` with a non-NULL `expected_interval` —
-   and, joining each against its most recent `backup_runs` row,
-   classifies it:
-   - **Stale**: a device that previously reported successful backups but
-     has no `outcome = 'success'` row newer than `expected_interval`
-     (times a small grace factor) → alert.
-   - **Never backed up**: a device in the scanned set that has been
-     present longer than `expected_interval` and has *no* successful
-     `backup_runs` row → alert. (Catches a host that was never wired up,
-     which a "last success" check alone would miss.)
-   - **Recovered**: a previously-stale device reporting success again
+2. A periodic Canopy job (a tokio loop in the `jobs` crate, like
+   `reachability`) scans the **servers expected to be backed up** — those
+   in a group whose `server_group_backup_config` has a non-NULL
+   `expected_interval` — joins each against its most recent `backup_runs`
+   row, and classifies it. (Detection is **server-centric**: the subject
+   is the server being protected; the device is the actor recorded in
+   `backup_runs`/snapshot tags. A manual-only or unconfigured group is
+   simply not in the scanned set, so unauthorized devices never alert.)
+   - **Stale**: previously reported success but no `outcome = 'success'`
+     newer than `expected_interval × 2` → alert. (`×2` = the anti-flap
+     factor from the decisions; not per-group configurable yet. Given the
+     ~1-min trigger retries quickly, two missed intervals signals genuine
+     breakage, not a blip.)
+   - **Never backed up**: present longer than `expected_interval × 2` with
+     *no* successful `backup_runs` row → alert. "Present since" is
+     `max(device_server_associations.first_seen, server_group_backup_config.created_at)`
+     — the later of "device joined the server" and "group was authorized"
+     — so neither a freshly-added device nor a freshly-authorized group
+     false-alarms.
+   - **Recovered**: a previously-stale server reporting success again
      clears the alert.
-
-   The scanned set — "which devices ought to back up" — is the part to
-   pin down in implementation: the natural definition is `Server`-role
-   devices associated with a configured group, but it leans on the same
-   `devices.server_id` / "device present" questions flagged below.
-3. Alerts route through the existing operator notification path
-   (Slack/email via `PRIVATE_URL`). Note this is Canopy's own app-level
-   alerting — distinct from the `backup-monitoring` Pulumi stack, which
-   watches the **AWS Backup service** (EBS/RDS) via EventBridge→SNS and
-   does not cover kopia-to-S3 backups. This detection is genuinely new;
-   the only thing shared is the precedent of alerting to Slack.
+3. Alerts route through Canopy's existing incident machinery: raise
+   `Incident::open_for(...)` (and `Incident::resolve(...)` on recovery),
+   which enqueues to `slack_outbox`, drained to Slack by the
+   `slacker_outbox` job. Same path the reachability healthcheck already
+   uses — distinct from the `backup-monitoring` Pulumi stack, which
+   watches the **AWS Backup service** (EBS/RDS) and does not cover
+   kopia-to-S3 backups. This detection is genuinely new.
 
 The limit of signal 1 is that it's the *device's word*: it scans the
 Canopy database for what devices reported, not for what's actually in the
@@ -731,18 +793,24 @@ as healthy. Reports are timely but not authoritative.
 
 ### Signal 2 — repository inspection (authoritative, periodic)
 
-Now that maintenance jobs already connect to each group's repository with
-the password, Canopy can read the **ground truth**: the snapshots that
-actually exist. A check — piggybacked on the maintenance job, or a
-dedicated read-only job on the same footing — lists the repo's snapshots
-and records, per source, the latest snapshot time. That's what *actually
-landed in the bucket*, independent of whether any device reported, was
-honest, or is even reachable.
+Canopy reads the **ground truth** — the snapshots that actually exist — via
+a **dedicated, read-only inspection Job**, decoupled from maintenance at
+both the job and schedule level. It connects to each group's repo with
+**read-only (restore-level) creds** (never write/delete — smaller blast
+radius than the maintenance Job), runs `kopia snapshot list`, and writes
+`backup_repo_snapshots` (latest snapshot per source) plus `backup_repo_stats`
+(snapshot/source counts, logical & physical repo size, and the S3
+`bucket_bytes` from CloudWatch — the billing basis). It runs on its **own
+cadence** (defaulting to roughly `expected_interval`, tunable), so signal-2
+freshness isn't gated by the slow maintenance interval.
 
-- For this to attribute snapshots to devices, the kopia **source must
-  encode the device** (e.g. fix the snapshot host to the device id) so
-  Canopy can map `user@host:path` back to a device. The backup setup must
-  pin this deterministically — flagged below.
+- Attribution: the kopia **source encodes the server** — `bestool` overrides
+  the kopia hostname to the **server id** (`canopy@<server-id>:<path>`), so
+  the source is the backup subject and survives device replacement
+  (continuous history, no fragmented chain). The *device + run* that
+  produced a snapshot live in its **tags** (`canopy-device=<uuid>`,
+  `canopy-run=<run-uuid>`, the run-uuid minted client-side and echoed in
+  `backup_runs`), closing the loop snapshot → run → issuance → CloudTrail.
 - Reconciliation against signal 1 is where the value is:
   - report says success **but** no recent snapshot in the repo → the
     report is wrong or the upload didn't persist → **alert** (the case
@@ -750,15 +818,13 @@ honest, or is even reachable.
   - recent snapshot **but** no report → backups are fine, the reporting
     path is broken → lower-severity notice.
   - neither → genuinely stale (agrees with signal 1).
-- It is *not* a replacement for signal 1's timeliness: it only sees the
-  repo as often as the job runs (maintenance cadence), so an hourly-miss
-  won't surface until the next inspection. Reports stay the day-to-day
-  signal; repo inspection is the periodic trust anchor.
+- It is *not* a replacement for signal 1's timeliness; reports stay the
+  day-to-day signal, repo inspection is the periodic trust anchor.
 - Trust property: signal 2 depends only on the bucket (Object-Lock
   protected), not on any device, so it's the signal a compromised server
   cannot fake into showing a healthy backup.
 
-Both signals feed the same alerting path.
+Both signals feed the same `Incident` alerting path.
 
 This is the half of "did device X back up today" that the audit log
 alone can't give: `backup_credential_issuances` says creds were handed
@@ -789,12 +855,42 @@ here, for two reasons:
   permission templates above), so a compromised server cannot delete
   backups.
 
-So Canopy owns maintenance. Concretely, a scheduled control-plane task
-spawns a **Kubernetes Job per group** that runs `kopia maintenance run`
-(quick on a short cadence, full less often) against that group's bucket,
-then exits. Spawning a Job rather than running kopia in-process keeps the
-heavy, long-running work off the Canopy pod and lets it use the kopia
-image directly.
+So Canopy owns maintenance. Concretely, a scheduler loop in the `jobs`
+crate (like `reachability`) spawns a **Kubernetes Job per group** that
+runs the maintenance cycle against that group's bucket, then exits.
+Spawning a Job rather than running kopia in-process keeps the heavy,
+long-running work off the Canopy pod and lets it use the kopia image
+directly.
+
+The maintenance cycle is **three steps**, not just "run maintenance":
+1. **assert** the group's retention policy into the repo (so the declared
+   policy, not a drifted in-repo one, governs);
+2. **`kopia snapshot expire`** — apply that policy, dropping snapshots
+   beyond `keep-daily/weekly/monthly`. This step is *required* and easy to
+   miss: because device creds have no delete, **clients can't self-expire
+   at snapshot time**, so without Canopy running expire the retention
+   policy never actually fires and the repo grows unbounded;
+3. **`kopia maintenance run`** (quick or full) — index compaction + content
+   GC of the now-unreferenced blobs.
+
+Cadence: **quick daily, full weekly** (deployment-wide defaults, per-group
+override later). Full more often is largely wasted — the 30-day Object Lock
+means GC can't reclaim younger blobs anyway (the ~30-day reclamation lag),
+and expired manifests are themselves locked, so expire/GC *mark* but
+physical deletion lags. Client-side maintenance *and* expiry stay disabled
+(clients lack delete), with the repo's maintenance owner set to the Canopy
+identity.
+
+**Scheduling is hash-jittered** so the fleet doesn't stampede: each group's
+slot within its cadence window is `hash(group) mod window`, stable per
+group, spreading Job-creation / STS / S3 / compute load evenly (applies to
+inspection and per-group preflight too).
+
+Spawned Jobs carry the org's three **billing tags** as pod labels —
+`billing.product` / `billing.stage` / `billing.deployment` — set from the
+group (its `billing.*` tags if present, else `product=tamanu`, `stage=` the
+highest server rank in the group, `deployment=` the group name) so AWS
+split cost allocation attributes the compute to the right deployment.
 
 ### Credentials for the maintenance Job
 
@@ -868,19 +964,38 @@ it: Canopy owns the per-group repository password, because Canopy is the
 one party that must always be able to connect (it runs maintenance) and
 is already the source of truth for backup config.
 
-- Canopy generates the password when a group's backup config is first
-  set up, and serves it to devices (alongside the target) so bestool can
-  `kopia repository connect`, and injects it into maintenance Jobs.
-- This is *not* a new exposure on the device side: any client writing to
-  an encrypted kopia repo inherently holds the password — that's
-  intrinsic to direct-to-S3 backup, not something maintenance adds.
-- Storage of the password on the Canopy side is sensitive. Plaintext in
-  the DB is the easy option but probably wrong; a k8s secret or AWS
-  Secrets Manager reference held by `server_group_backup_config` is more
-  appropriate. **Open question — decide during implementation.**
+Ownership splits cleanly: **IaC owns the bucket** (container), **Canopy
+owns the repo** — including its encryption key, since key + retention +
+maintenance are all the repo's lifecycle.
+
+- **Storage: a k8s Secret** in Canopy's namespace (canopy is k8s-native;
+  the password is a cluster-side encryption key, not an AWS resource, so
+  it needn't live in the deployment account). `repo_password_ref` is the
+  Secret name. Canopy reads it via the k8s API on demand (service-account
+  RBAC: `get` secrets — handles dynamically-added groups without a pod
+  restart). Maintenance/inspection Jobs **mount it via `secretKeyRef`**
+  (never through env/logs).
+- **Provenance, two modes:** *from-birth* — Canopy generates the password
+  when it sets up a new repo; *import* — for adopting a pre-existing kopia
+  repo, the operator supplies the existing passphrase (or points
+  `repo_password_ref` at an already-created Secret). (Importing an
+  existing repo also brings a pre-existing bucket whose lock/account may
+  not match the from-birth assumptions — broader than the passphrase, and
+  related to the migration concern.)
+- **DR escrow (from-birth only):** the backups survive a Canopy
+  catastrophe (object-locked in the deployment account) but are *useless
+  without the passphrase*, which would die with Canopy's Secrets/DB. So at
+  generation, surface it **once** in the Tailscale-gated admin UI —
+  "copy this into Bitwarden now" — ideally gated on operator
+  acknowledgment before the repo is marked ready. The k8s Secret is the
+  operational copy; Bitwarden is the break-glass copy. (Imported repos
+  skip this; the operator already has the passphrase.)
+- Serving to devices is *not* a new exposure: any client writing to an
+  encrypted kopia repo inherently holds the password (intrinsic to
+  direct-to-S3 backup). Canopy serves it over mTLS on `/backup-target`.
 - The repo's maintenance *owner* is set to the Canopy maintenance
-  identity, and client-side maintenance is disabled, so clients never
-  attempt the maintenance they no longer have delete rights for.
+  identity, and client-side maintenance/expiry is disabled, so clients
+  never attempt operations they lack delete rights for.
 
 ### Audit
 
@@ -924,28 +1039,32 @@ Shared, checked once:
   web-identity is mounted and valid. This is the only genuinely shared
   piece; everything else is per-bucket and therefore per-group.
 
-Per configured group:
-- **Role trust + creds work** — assume *that group's* `target_role_arn`
-  (cross-account), confirming the per-bucket role still exists and its
-  trust still admits Canopy, then do a **read-only no-op** with the
-  returned creds against *that group's* bucket/endpoint (e.g. `HeadBucket`
-  / a scoped `ListBucket`), so the check proves the group's creds actually
-  work, not merely that `AssumeRole` returned. This catches a single
-  group's role/bucket/endpoint being wrong while others are fine.
+Per configured group (deep checks — shallow "did AssumeRole return" isn't
+enough):
+- **Both purposes issue valid creds** — assume *that group's*
+  `target_role_arn` (cross-account) **both ways**: plain (the `backup`
+  path) *and* with the read-only restore session policy (the `restore`
+  path), each followed by a **read-only no-op** against the bucket. This
+  is the issuance path itself, so it proves we can mint *working* creds
+  for *every* purpose — catching a broken restore session policy (the
+  `GetBucketLocation` class of bug) proactively, not at restore time,
+  while plain backup issuance looks fine.
 - **Object Lock is in place** — verify *that group's* bucket still has the
   expected (≥30-day) Object Lock configuration. The whole "a compromised
   server can't destroy backups" guarantee rests on this; if someone
   removes or weakens the lock, the protection silently erodes with no
   other symptom, so it must be actively checked — per bucket, since the
   config is per bucket.
-- **Maintenance path** — that group's maintenance Job already exercises
-  its own pathway; either add a cheap preflight Job (connect + no-op and
-  exit) on its own IRSA, or lean on `backup_maintenance_runs` failures for
-  that group. The former is proactive; the latter only catches it when
-  maintenance next runs. Flagged below.
+- **Maintenance path** — no separate maintenance preflight Job needed: the
+  read-only inspection Job already connects to each group's repo on its
+  cadence (proving reachability + password), and maintenance-specific
+  failures surface via `backup_maintenance_runs`.
 
-Alerts name the affected group(s) and fire at control-plane severity
-(distinct from per-device staleness); a check that fails for *every*
+**Cadence (hash-jittered per group, like maintenance):** the shared
+`GetCallerIdentity` rides the ~1-minute loop (free); the per-group deep
+checks run hourly (cheap at fleet scale, and a broken bucket/lock isn't a
+sub-hour emergency). Alerts name the affected group(s) at control-plane
+severity (distinct from per-device staleness); a check failing for *every*
 group points at the shared IRSA identity rather than any one bucket.
 
 Prefer **behavioural** checks (try to assume; try a harmless S3 op) over
@@ -967,10 +1086,17 @@ Surface it loudly; don't take Canopy down over it.
 
 ## Operational story (what we gain, day-one)
 
-- **"Did device X back up today?"** — `backup_runs` gives the real
-  answer (a successful run landed), and `backup_credential_issuances`
-  the cheaper "creds were issued" proxy. Byte-level reconciliation
-  against S3 inventory / CloudWatch still comes later.
+- **"Did device X back up today?"** — three corroborating answers:
+  `backup_runs` (what the device *reported*), `backup_credential_issuances`
+  (the cheaper "creds were issued" proxy), and `backup_repo_snapshots`
+  (what *actually landed* in the repo). Disagreement is itself a signal.
+- **"How big / how much is this costing?"** — `backup_repo_stats` caches
+  repo size (logical & physical) and the S3 `bucket_bytes` billing basis
+  per group for display, refreshed by the inspection cycle.
+- **One-off / manual backups** — an operator can trigger a best-effort
+  immediate backup for any group (scheduled or manual-only) via Canopy;
+  it fires on the next ~1-minute tick. Useful before risky changes, and
+  the only backup path for manual-only groups.
 - **Decommissioning a device** — revoke its mTLS cert (existing
   mechanism); it can no longer call the endpoint, so it can no longer
   get fresh creds. Already-issued creds expire within an hour.
@@ -1007,75 +1133,82 @@ Surface it loudly; don't take Canopy down over it.
   names the affected group rather than waiting for the fleet to discover
   it the hard way.
 
-## Open questions
+## Decisions (resolved in review)
 
-None blocking, but flag-and-decide-during-implementation:
+The original open questions were worked through one by one; outcomes
+(detail in the body sections):
 
-- **Cross-account assume hardening.** The IAM model is decided (per-bucket
-  roles, assumed cross-account — see "IAM model"); remaining details:
-  whether to use an `ExternalId` on the trust (cheap confused-deputy
-  hygiene even first-party), and confirming the `backups` stack changes
-  (set role trust to Canopy's central principal + the maintenance Job
-  principal; add the reduced device-backup action set; export the role ARN
-  for the config row).
-- **Per-device session naming for CloudTrail.** Suggested
-  `device-<uuid>`; check max length and allowed chars on
-  `RoleSessionName`.
-- **`sts_request_id` storage.** AWS returns it; check the Rust SDK
-  surface for retrieving it cleanly.
-- **`devices.server_id` invariant.** Implementation needs to confirm
-  every `Server`-role device has a server association; if not, the
-  endpoint returns 409 and we file a separate issue for the
-  data-consistency gap.
-- **Staleness "device present" definition.** The "never backed up" check
-  needs a notion of how long a device has existed in a configured group
-  (first-seen / association timestamp) to avoid alerting on a host added
-  minutes ago. Pick the existing timestamp to key off when implementing.
-- **Grace factor for staleness.** `expected_interval × N` before
-  alerting — pick N (and whether it's configurable per group) during
-  implementation; start simple.
-- **Default retention values.** The keep-* schedule for the `retention`
-  field's default — a product decision, not invented here. Note the
-  effective floor is 30 days regardless (Object Lock), so anything
-  shorter is meaningless; the default should be ≥ that.
-- **Heartbeat interval and last-success source.** The local timer's
-  fixed interval (must be ≤ the smallest `expected_interval` in use),
-  and whether bestool debounces against locally-recorded last-success or
-  asks Canopy (which already has `backup_runs`). Asking Canopy is
-  drift-proof but adds a round-trip; local state is cheaper but can lie
-  after a host rebuild. Decide during implementation.
-- **kopia source → device mapping.** Repository inspection (signal 2)
-  needs to attribute each snapshot source back to a device, so the
-  snapshot source must encode the device deterministically (e.g. host =
-  device id). Pin this in the backup setup; settle where the per-source
-  latest-snapshot inventory is stored (extend `backup_maintenance_runs`,
-  or a dedicated table) and the inspection cadence if it's a job
-  separate from maintenance.
-- **Preflight depth, cadence, and per-group cost.** How often the
-  upstream preflight runs, and whether it does the deeper per-group checks
-  (S3 read no-op against a probe prefix; `GetBucketObjectLockConfiguration`)
-  or just the shared `GetCallerIdentity` + dry-run `AssumeRole`. Deeper =
-  more confidence, slightly more IAM surface. The per-group bucket checks
-  scale with group count, so settle a cadence that stays cheap at fleet
-  scale (and whether shared vs. per-group checks run on different
-  cadences). Also: proactive maintenance preflight Job vs. relying on
-  `backup_maintenance_runs` failures.
-- **Repo password storage.** Canopy owns the per-group kopia password;
-  where does the secret actually live (k8s secret vs. Secrets Manager
-  vs. ...) and how is it served to devices and injected into Jobs?
-  `repo_password_ref` is a reference, not the secret — settle the
-  backing store during implementation.
-- **Maintenance cadence.** Quick vs. full intervals — start with
-  deployment-wide defaults; per-group override is a later column if
-  needed. Decide the scheduler home (CronJob fanning out per-group Jobs,
-  a private-server task, or a dedicated worker).
-- **Maintenance Job IRSA wiring.** Scoping is settled by the per-bucket
-  model (the Job assumes the group's per-bucket full-access role — broad
-  on its own bucket, so no session-policy downscope and no 1-hour cap, yet
-  still confined to one group). What's left is the mechanics: registering
-  the cluster's OIDC provider in each deployment account so the Job's
-  service account can assume that account's maintenance role directly
-  (cross-account web-identity, not chained).
+1. **Cross-account hardening** — **no `ExternalId`** (first-party within
+   one Org; the per-bucket role trust already names Canopy's principal).
+   The `backups`-stack changes (IRSA trust, reduced action set, export role
+   ARN) are implementation tasks, not open.
+2. **Session naming + correlation** — `RoleSessionName` =
+   **`canopy-<purpose>-<uuid>`** (the `canopy-` prefix makes provenance
+   unambiguous in CloudTrail; purpose + device inline). Maintenance/
+   inspection sessions: `canopy-maint-<group>`; per-bucket roles get a
+   `canopy-` name too. **Also store the issued `AccessKeyId`** on
+   `backup_credential_issuances` — the durable join from a CloudTrail S3
+   event back to the issuance (purpose/device/bucket/time).
+3. **`sts_request_id`** — **keep** (nullable, best-effort via the SDK
+   `RequestId` trait); belt-and-suspenders with `access_key_id`.
+4. **Device→server/group resolution** — the **`409` policy is locked**
+   (no server binding / no group / no config → `409`; real gaps filed
+   separately), which gives the **provision-then-authorize** property. The
+   lookup *mechanics* are deferred (see below).
+5. **Staleness "present since"** —
+   `max(device_server_associations.first_seen, server_group_backup_config.created_at)`.
+6. **Grace factor** — **`×2`**, not per-group configurable yet.
+7. **Default retention** — `keep-daily 7, keep-weekly 4, keep-monthly 6`
+   (org minimum, **floor-enforced in code**), `keep-latest 1` default (not
+   floored), `keep-annual 0`.
+8. **Cadence / trigger** — **Canopy-authoritative**, signal on the
+   ~1-minute healthcheck; three `expected_interval` states; **operator
+   one-off backup** is a first-class capability; `409` = dormant. Transport
+   deferred.
+9. **Inspection + source mapping** — **dedicated read-only inspection Job
+   on its own schedule** (decoupled from maintenance); kopia source host =
+   **server id**; snapshot **tags** carry device + a client-minted run-uuid
+   (echoed in `backup_runs`); writes `backup_repo_snapshots` +
+   `backup_repo_stats`.
+10. **Preflight** — **deep** checks (S3 no-op + `GetBucketObjectLockConfiguration`),
+    **both purposes** (backup plain + restore with session policy);
+    shared-identity ~every minute, per-group hourly, hash-jittered.
+11. **Repo password** — **k8s Secret** in Canopy's namespace; Canopy
+    generates for from-birth / operator supplies for import; read via k8s
+    API, mounted into Jobs via `secretKeyRef`, served to devices over mTLS;
+    **one-off Bitwarden escrow** for from-birth repos.
+12. **Maintenance** — scheduler loops in the **`jobs` crate**; cycle =
+    **assert-retention → `kopia snapshot expire` → `kopia maintenance run`**;
+    quick-daily / full-weekly; **hash-jittered** per-group scheduling;
+    spawned Jobs carry the three `billing.*` tags.
+13. **Maintenance Job IRSA** — **direct cross-account web-identity** (not
+    chained, so no 1-hour cap); OIDC-provider-per-account wiring is ops/IaC.
+
+New capabilities captured along the way: operator one-off backup (8),
+repo-import onboarding mode + Bitwarden escrow (11), repo/bucket stats for
+display (9 + the cost non-goal), `billing.*` tags on Jobs (12),
+hash-jittered scheduling (12).
+
+## Deferred to the "review against current state of the repo" pass
+
+These need reconciling against the real schema/code, not re-deciding:
+
+- **Rekey `root_server_id` → `group_id`** (the real `server_groups` table)
+  across the config + audit + new tables, and **fix device→server
+  resolution** (`servers.device_id`, not `device.server_id`; there is no
+  `Server::root_id`/parent hierarchy). The "parentless server heads the
+  group" framing and handler-flow steps 2–3 are historical and must be
+  rewritten.
+- Confirm the **`Incident` API** shape and the **`jobs`-crate scheduler**
+  conventions against the actual code.
+- The **server-rank → billing `stage`** mapping (uses canopy's rank concept).
+- The **transport** for the cadence signal (how it rides today's
+  ~1-minute healthcheck — tailnet poll / device poll / held-open).
+- Whether to expose an **operator "backup now"** action and stats in
+  `private-server` now or bootstrap via SQL first.
+
+(Tunable defaults — heartbeat/inspection/maintenance/preflight cadences —
+are chosen as defaults above and adjustable later; not blocking.)
 
 ## Out of scope (do not silently fold in)
 
