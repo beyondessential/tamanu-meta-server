@@ -645,6 +645,22 @@ short-lived creds for them instead. The IaC changes are therefore:
   the maintenance role only. When adding IRSA trust to these roles, preserve
   the stack's existing optional IAM-Users path and the `.storageconfig`
   object so they aren't clobbered.
+
+  *Why dropping `PutObjectRetention` is safe (H3):* the lock is applied by
+  the bucket's **default retention** (the stack's `objectLockConfiguration`
+  GOVERNANCE 30d auto-locks every PUT), so the device needs no permission to
+  set retention itself — and we deliberately do **not** run the repo
+  client-lock-aware (kopia setting/extending per-object locks). Client lock
+  *extension* only buys protection against an AWS-level (delete-capable)
+  attacker, which is out of scope; under device-compromise, versioning +
+  default-retention + lifecycle + the recovery path already cover it.
+  **Verify before finalizing:** confirm kopia's S3 backend writes/maintains
+  fine against a default-retention bucket without client-side
+  `PutObjectRetention` (it deletes by key → markers, doesn't set per-object
+  retention). Fallback if kopia insists: re-grant `PutObjectRetention` to
+  devices — safe, because in GOVERNANCE-without-bypass it can only *lengthen*
+  a lock, never shorten it (minor cost-DoS vector, recoverable via the
+  maintenance role's bypass).
 - **Maintenance role** = the existing full-access role (or a sibling),
   assumed by the maintenance Job's own IRSA (not chained — see
   "Canopy-owned maintenance"). Only this identity can delete. It keeps
@@ -1360,8 +1376,10 @@ as new `jobs`-crate bins; the `ServerRank::Production`→`"prod"` mapping;
   compromised *device*; defending against a compromised AWS principal that
   holds `s3:BypassGovernanceRetention` (e.g. the maintenance role's creds)
   is a separate problem. We stay on GOVERNANCE Object Lock and accept that
-  the first-party maintenance role can bypass it. (COMPLIANCE mode /
-  bypass-denial remain available later if the threat model widens.)
+  the first-party maintenance role can bypass it. (COMPLIANCE mode,
+  bypass-denial, and kopia client-side **lock extension** — which keeps
+  live blobs' locks fresh against a delete-capable attacker — all remain
+  available later if the threat model widens.)
 - Data-plane proxy / Canopy-served S3/WebDAV (explicitly rejected).
 - **Device-local S3 proxy** (kopia → `localhost`, a bestool daemon
   re-signs and forwards to the real bucket). Considered as an
