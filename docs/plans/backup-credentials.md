@@ -341,11 +341,21 @@ CREATE TABLE backup_repo_stats (
 );
 ```
 
-Cached repo/bucket stats for operator display, refreshed by the
-inspection cycle. `bucket_bytes` (CloudWatch `BucketSizeBytes`) is the
-real billing basis and runs *ahead* of `physical_bytes` — versioning plus
-the 30-day Object Lock keep expired-but-not-yet-deletable data around, so
-the gap between the two is itself the visible cost of the lock.
+Cached repo/bucket stats for operator display, written by **two distinct
+tasks**: the read-only kopia **inspection Job** fills the repo-derived
+fields (`snapshot_count`, `source_count`, `logical_bytes`,
+`physical_bytes`), while a **separate S3-metrics task** fills
+`bucket_bytes` from CloudWatch `BucketSizeBytes` (it's the real billing
+basis and runs *ahead* of `physical_bytes` — versioning + the lock keep
+expired-but-not-yet-deletable data around, so the gap is the visible cost
+of the lock). `bucket_bytes` is **best-effort / nullable** — it may lag or
+be absent independently of the kopia stats. The two are split because they
+need different permissions: kopia inspection uses read-only S3 creds, but
+the CloudWatch read needs `cloudwatch:GetMetricStatistics` (and the metric
+lives in the *deployment* account, so it's a cross-account read) — granted
+via a **dedicated least-privilege IRSA role** for the S3-metrics task or
+folded into a canopy-wide IRSA (implementation choice). Keeping it off the
+inspection creds avoids CloudWatch creep on the read-only inspector.
 
 ## Endpoint shape
 
@@ -962,11 +972,13 @@ a **dedicated, read-only inspection Job**, decoupled from maintenance at
 both the job and schedule level. It connects to each group's repo with
 **read-only (restore-level) creds** (never write/delete — smaller blast
 radius than the maintenance Job), runs `kopia snapshot list`, and writes
-`backup_repo_snapshots` (latest snapshot per source) plus `backup_repo_stats`
-(snapshot/source counts, logical & physical repo size, and the S3
-`bucket_bytes` from CloudWatch — the billing basis). It runs on its **own
-cadence** (defaulting to roughly `expected_interval`, tunable), so signal-2
-freshness isn't gated by the slow maintenance interval.
+`backup_repo_snapshots` (latest snapshot per source) plus the repo-derived
+fields of `backup_repo_stats` (snapshot/source counts, logical & physical
+size). The S3 `bucket_bytes` billing figure is filled by a **separate
+S3-metrics task** with its own CloudWatch permissions — *not* on these
+read-only creds (see `backup_repo_stats`). It runs on its **own cadence**
+(defaulting to roughly `expected_interval`, tunable), so signal-2 freshness
+isn't gated by the slow maintenance interval.
 
 - Attribution: the kopia **source encodes the server** — `bestool` overrides
   the kopia hostname to the **server id** (`canopy@<server-id>:<path>`), so
