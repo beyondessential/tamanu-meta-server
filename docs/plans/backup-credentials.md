@@ -453,19 +453,22 @@ destructive action outright, and avoids accidental client-side expiry),
 but the guarantee "a compromised server cannot destroy recent backups"
 rests on Object Lock, not on IAM alone.
 
-**Caveat — the lock is `GOVERNANCE`, not `COMPLIANCE`** (per the `backups`
-Pulumi stack: `mode: 'GOVERNANCE', days: 30`). Governance retention can be
-overridden by a principal holding `s3:BypassGovernanceRetention`, and the
-existing full-access role grants `s3:*`, which includes it. So today the
-guarantee holds against *device* creds (no delete at all) but **not**
-against the maintenance / full-access role, which could bypass the lock
-and delete recent objects. To make the guarantee hold against every
-principal we control, either explicitly *deny* `s3:BypassGovernanceRetention`
-on the maintenance role (its GC only ever deletes objects whose lock has
-already expired, so it never legitimately needs bypass) or move the
-buckets to `COMPLIANCE` mode (no principal, not even root, can delete
-early). Flagged in open questions. See "Canopy-owned maintenance" for how
-the lock interacts with kopia GC.
+**The threat boundary is a compromised device, and that's what this
+defends.** The lock is `GOVERNANCE`, not `COMPLIANCE` (per the `backups`
+Pulumi stack: `mode: 'GOVERNANCE', days: 30`) — and we're keeping it that
+way. A device cred has neither `DeleteObject` nor
+`s3:BypassGovernanceRetention` (the reduced action set grants only
+Get/Put/multipart), so a compromised server physically cannot destroy
+backups, full stop. That is the guarantee.
+
+What GOVERNANCE deliberately leaves open is *AWS-level* compromise: a
+principal holding `s3:BypassGovernanceRetention` — e.g. the full-access /
+maintenance role's AWS credentials — can override the lock. Protecting
+against that (COMPLIANCE mode, or denying bypass on the maintenance role)
+is **explicitly out of scope** for now: defending the AWS account itself
+is a separate problem from defending the fleet of devices. So the
+guarantee is precisely "no device can destroy backups", not "nobody can".
+See "Canopy-owned maintenance" for how the lock interacts with kopia GC.
 
 ## AWS setup (provisioned by the Pulumi `backups` stack)
 
@@ -494,9 +497,10 @@ short-lived creds for them instead. The IaC changes are therefore:
   `PutObjectRetention`). The full set stays on the maintenance role only.
 - **Maintenance role** = the existing full-access role (or a sibling),
   assumed by the maintenance Job's own IRSA (not chained — see
-  "Canopy-owned maintenance"). Only this identity can delete, and per the
-  GOVERNANCE caveat above it should additionally *deny*
-  `s3:BypassGovernanceRetention`.
+  "Canopy-owned maintenance"). Only this identity can delete. It keeps
+  `s3:*` (incl. the ability to bypass GOVERNANCE) — that's the accepted
+  AWS-level trust boundary, see the threat-boundary note above; the
+  protection target here is device compromise, not this first-party role.
 
 IAM-model choice (now informed by the repo): the existing stack already
 makes **per-bucket roles**, so the natural fit is per-bucket roles that
@@ -949,12 +953,6 @@ None blocking, but flag-and-decide-during-implementation:
   with session-policy narrowing. Decide and update the `backups` stack
   accordingly (add the IRSA trust + the reduced device action set either
   way). See "AWS setup".
-- **GOVERNANCE vs COMPLIANCE / bypass denial.** The lock is GOVERNANCE, so
-  the full-access role can bypass it. Either deny
-  `s3:BypassGovernanceRetention` on the maintenance role or switch buckets
-  to COMPLIANCE, to make "can't destroy recent backups" hold against every
-  principal we control (see the caveat under session policies). A change to
-  the `backups` stack.
 - **Per-device session naming for CloudTrail.** Suggested
   `device-<uuid>`; check max length and allowed chars on
   `RoleSessionName`.
@@ -1015,6 +1013,12 @@ None blocking, but flag-and-decide-during-implementation:
 
 - Cross-group restore mechanism (explicitly disallowed by product
   decision).
+- **AWS-level compromise protection.** The threat boundary is a
+  compromised *device*; defending against a compromised AWS principal that
+  holds `s3:BypassGovernanceRetention` (e.g. the maintenance role's creds)
+  is a separate problem. We stay on GOVERNANCE Object Lock and accept that
+  the first-party maintenance role can bypass it. (COMPLIANCE mode /
+  bypass-denial remain available later if the threat model widens.)
 - Data-plane proxy / Canopy-served S3/WebDAV (explicitly rejected).
 - **Device-local S3 proxy** (kopia → `localhost`, a bestool daemon
   re-signs and forwards to the real bucket). Considered as an
