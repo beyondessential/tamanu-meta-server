@@ -13,10 +13,14 @@ directly (no proxy through Canopy).
   its own backups bucket, and a device only ever gets access to its own
   group's bucket. (Stronger than prefix-sharing inside one bucket — a
   scoping bug can't even name another group's bucket.)
-- Within-group cross-device restore: every device in a group can
-  request read-only creds for the group's scope (`purpose=restore`), so
-  restoring onto a freshly-rebuilt sibling is trivial and the restoring
-  device can't accidentally damage the source backups.
+- Within-group cross-device **and cross-account** restore: every device
+  in a group can request read-only creds for the group's scope
+  (`purpose=restore`), so restoring onto a freshly-rebuilt sibling is
+  trivial and the restoring device can't accidentally damage the source
+  backups. This explicitly includes the spanning-account case — e.g. a
+  pre-prod server (in a different account) restoring from the group's
+  prod-account backups — because membership, not the device's account,
+  decides the target.
 - Cross-*group* restore is explicitly **not** supported.
 - Every credential issuance is recorded so we can answer "did device X
   back up today, and when."
@@ -148,6 +152,7 @@ CREATE TABLE server_group_backup_config (
     root_server_id    UUID PRIMARY KEY REFERENCES servers(id) ON DELETE CASCADE,
     bucket            TEXT NOT NULL,           -- this group's own bucket (one bucket per group)
     prefix            TEXT NOT NULL DEFAULT '', -- usually empty: the repo lives at the bucket root
+    target_role_arn   TEXT NOT NULL,           -- per-bucket role Canopy assumes (encodes the account; may be cross-account)
     region            TEXT,                    -- NULL → deployment default
     endpoint          TEXT,                    -- NULL → AWS; set for non-AWS S3
     expected_interval INTERVAL,                -- declared cadence: paces devices AND drives staleness; NULL → neither
@@ -164,6 +169,13 @@ bucket boundary, and `prefix` is usually empty (the kopia repo sits at
 the bucket root); it stays in the schema only for the rare case of
 parking a repo under a sub-path. See "Per-group buckets" for naming and
 provisioning.
+
+`target_role_arn` is the per-bucket role Canopy assumes to mint creds for
+this group; because the ARN names the account, a bucket in a different
+account (or a shared account hosting several groups) needs no special
+handling — Canopy just assumes the configured ARN. The group → bucket →
+role relationship is 1:1; what varies N:M (servers spanning accounts,
+groups sharing an account) lives outside this row. See "IAM model".
 
 `region`/`endpoint` are what `GET /backup-target` serves to devices.
 `expected_interval` is the group's **declared backup cadence** and the
@@ -364,6 +376,16 @@ The choice is the caller's; both purposes are available to every
 ("only some devices can restore") — that was considered and rejected
 because cross-device restore within a group is meant to be cheap.
 
+This is what makes **pre-prod restoring from prod backups** work without
+a special path. The requesting device's own account is irrelevant: Canopy
+resolves device → group → the group's single target (the prod-account
+bucket/role) and assumes that role. The creds it returns are *prod-account
+creds for the prod bucket*, so from S3's point of view the pre-prod device
+is making ordinary same-account read calls — the only cross-account hop is
+Canopy's `AssumeRole`, which it already does. A pre-prod server in another
+account just asks for `purpose=restore` and reads the group's backups;
+nothing about the spanning-account topology leaks into the device.
+
 Handler flow:
 1. `ServerDevice` extractor authenticates the caller (existing).
 2. Look up the device's server via `device.server_id` (assumed to
@@ -502,18 +524,35 @@ short-lived creds for them instead. The IaC changes are therefore:
   AWS-level trust boundary, see the threat-boundary note above; the
   protection target here is device compromise, not this first-party role.
 
-IAM-model choice (now informed by the repo): the existing stack already
-makes **per-bucket roles**, so the natural fit is per-bucket roles that
-trust Canopy's IRSA — Canopy assumes the specific group's role and the
-scoping is *structural* (the role's policy only names its own bucket), so
-no session policy is needed for correctness. The alternative is a single
-central issuer role over a bucket *pattern* with a per-call session policy
-narrowing to the one bucket (what the session-policy templates below
-describe). Per-bucket roles align with the existing per-stack structure
-and give stronger isolation; the session-policy approach means fewer
-roles. **Decide during implementation** — flagged in open questions. The
-permission *sets* in the templates below apply either way (they're either
-the role policy or the session policy).
+### IAM model: per-bucket roles, assumed cross-account
+
+**Decided: one role per bucket (= per group), assumed by Canopy
+cross-account.** The topology forces this and the existing stack already
+fits it:
+
+- Most deployments have their **own AWS account**, so the bucket and its
+  role live in the *deployment's* account while Canopy's pod (IRSA) lives
+  in the central account. Issuing creds is a **cross-account `AssumeRole`**:
+  the deployment-account role trusts Canopy's central principal, Canopy
+  assumes it across the boundary. The group's config stores the **role
+  ARN** (which encodes the account), so same-account, cross-account, and
+  shared-account are one code path.
+- A single central role over a bucket *pattern* (the discarded
+  alternative) can't reach buckets in other accounts without each bucket's
+  policy also granting it — i.e. per-account IaC regardless — so it buys
+  nothing here.
+- Granularity must be the **bucket, not the account**: small deployments
+  now share an account (multiple groups co-tenant), so an account-scoped
+  role would let co-tenant groups reach each other's buckets. A per-bucket
+  role keeps them isolated *structurally* — the role's policy names only
+  its own bucket, so a Canopy bug degrades to "wrong/again no creds",
+  never "another group's bucket".
+
+Scoping is therefore structural; no session policy is needed for
+correctness. The one place a session policy still earns its keep is the
+read-only **restore** downscope on the same per-bucket role (it can only
+narrow). The permission *sets* in the templates below are the role's own
+policy (backup role) plus that restore session policy.
 
 ### Per-group buckets
 
@@ -946,13 +985,13 @@ Surface it loudly; don't take Canopy down over it.
 
 None blocking, but flag-and-decide-during-implementation:
 
-- **IAM model: per-bucket roles vs. central pattern + session policy.**
-  The existing `backups` stack makes per-bucket roles, favouring per-bucket
-  roles that trust Canopy's IRSA (structural scoping, no session policy);
-  the alternative is one central role over a `bes-kopia-backups-*` pattern
-  with session-policy narrowing. Decide and update the `backups` stack
-  accordingly (add the IRSA trust + the reduced device action set either
-  way). See "AWS setup".
+- **Cross-account assume hardening.** The IAM model is decided (per-bucket
+  roles, assumed cross-account — see "IAM model"); remaining details:
+  whether to use an `ExternalId` on the trust (cheap confused-deputy
+  hygiene even first-party), and confirming the `backups` stack changes
+  (set role trust to Canopy's central principal + the maintenance Job
+  principal; add the reduced device-backup action set; export the role ARN
+  for the config row).
 - **Per-device session naming for CloudTrail.** Suggested
   `device-<uuid>`; check max length and allowed chars on
   `RoleSessionName`.
