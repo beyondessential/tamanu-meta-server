@@ -640,6 +640,22 @@ is a separate problem from defending the fleet of devices. So the
 guarantee is precisely "no device can destroy backups", not "nobody can".
 See "Canopy-owned maintenance" for how the lock interacts with kopia GC.
 
+**Accepted stage-1 risk — the issuer's blast radius.** `public-server`
+(internet-facing) holds, fleet-wide: STS-assume on every group's
+per-bucket role (read + **write**, i.e. the poisoning vector) and — since
+it serves the repo password on `/backup-target` — Secret-read for every
+group's repo password (which decrypts everything). So a `public-server`
+RCE yields fleet-wide backup read + poison in one hop. For stage 1 we
+**accept** this (same trust as canopy's other internet surface), relying
+on poisoning detection + recovery to bound the damage. The hardening that
+removes it (a blind-relay issuer) is captured separately in
+[`backup-credentials-blind-relay.md`](./backup-credentials-blind-relay.md).
+Two requirements that hold regardless: **the maintenance role's trust must
+never include the `public-server` principal** (delete/bypass stays
+Job-only, so a `public-server` compromise can't reach the *delete*
+capability), and the issuer rights must not extend beyond per-bucket
+assume.
+
 ## AWS setup (provisioned by the Pulumi `backups` stack)
 
 This already mostly exists. The `backups` stack in `ops/pulumi/backups`
