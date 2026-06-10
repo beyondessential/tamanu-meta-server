@@ -66,8 +66,8 @@ directly (no proxy through Canopy).
      │
      │  POST /backup-credentials  (mTLS, ServerDevice)
      ▼
-┌──────────┐  AssumeRole + session policy        ┌─────────┐
-│  device  │                                     │   STS   │
+┌──────────┐  AssumeRole (group's per-bucket      ┌─────────┐
+│  device  │   role, cross-account)              │   STS   │
 │ (kopia + │ ◄────── creds_process JSON ──────── │         │
 │ bestool) │                                     └─────────┘
 └──────────┘
@@ -96,9 +96,11 @@ Maintenance path (Canopy-owned, no device involvement):
 
 Two STS calls per issuance:
 1. The pod's IRSA session is implicit — kubernetes injects it.
-2. From that session, Canopy calls `AssumeRole` on a dedicated
-   `canopy-backup-issuer` role, passing a session policy that narrows
-   S3 access to the requesting device's group bucket.
+2. From that session, Canopy performs a cross-account `AssumeRole` on the
+   group's configured per-bucket role (`target_role_arn`), whose own
+   policy structurally scopes to that one group's bucket. No session
+   policy is involved for the backup purpose; a session policy is added
+   only to downscope a `restore` to read-only. See "IAM model".
 
 The resulting temp creds go back to the device verbatim.
 
@@ -122,11 +124,12 @@ The resulting temp creds go back to the device verbatim.
   }
   ```
   `bestool` produces exactly this on stdout and exits.
-- **Session policies are ANDed with the role policy.** The role's
-  policy grants broad S3 access across the bucket pattern; the per-call
-  session policy narrows that to the one group's bucket. A bug in the
-  session policy can only ever *over*-restrict, never expand — good
-  failure mode.
+- **Scoping is structural, via the per-bucket role.** Each group's role
+  policy names only that group's bucket, so the bucket scoping doesn't
+  depend on a session policy at all. Session policies enter only for the
+  `restore` downscope (read-only), where the AND semantics mean a bug can
+  only ever *over*-restrict, never expand — good failure mode. See "IAM
+  model".
 
 ## Where it lives in the repo
 
@@ -308,7 +311,7 @@ GET /backup-target
   Response 200: {
     "storage": "s3",
     "bucket": "...",
-    "prefix": "groups/<root-id>/",
+    "prefix": "",             -- normally empty (repo at bucket root); non-empty only for a sub-path
     "region": "...",
     "endpoint": "..."         -- optional; for non-AWS S3
   }
@@ -353,20 +356,20 @@ success), so a crashed run is not silent.
 
 (`region`/`endpoint` are per-group columns on `server_group_backup_config`
 — each group's bucket can live in its own region, or behind a non-AWS S3
-endpoint. The audit-log snapshot should capture whatever the device was
-actually told.)
+endpoint. They're read from config, not snapshotted; the issuance audit
+log snapshots only `bucket`/`prefix` — see `backup_credential_issuances`.)
 
 `purpose` is a real capability gate, not just audit metadata:
 
 - `"backup"` (default): read + write + multipart, **no `DeleteObject`**,
-  scoped to the group's prefix. Snapshot expiry and blob GC are *not*
-  done by the device — Canopy owns maintenance (see "Canopy-owned
-  maintenance" below), so the device never needs delete. A compromised
-  server therefore cannot delete backups.
+  scoped to the group's bucket (prefix normally empty). Snapshot expiry
+  and blob GC are *not* done by the device — Canopy owns maintenance (see
+  "Canopy-owned maintenance" below), so the device never needs delete. A
+  compromised server therefore cannot delete backups.
 - `"restore"`: read-only (Get + ListBucket), scoped to the group's
-  prefix. A device with these creds physically cannot mutate the
-  bucket, so an accidental `kopia repository create` or similar can't
-  damage backups.
+  bucket (prefix normally empty). A device with these creds physically
+  cannot mutate the bucket, so an accidental `kopia repository create` or
+  similar can't damage backups.
 
 No device purpose grants `DeleteObject`. The only identity that can
 delete from the bucket is the Canopy maintenance role.
@@ -392,16 +395,26 @@ Handler flow:
    exist — verify when implementing; if a device isn't yet associated
    with a server, return `409`).
 3. `Server::root_id` walks up to the group root.
-4. Read `server_group_backup_config` for that root; `409` if absent.
-5. Build the session policy (template below).
-6. Call `sts:AssumeRole` on `canopy-backup-issuer` with the session
-   policy and a session name like `device-<device-id>`.
-7. Insert into `backup_credential_issuances`.
+4. Read `server_group_backup_config` for that root; `409` if absent. This
+   yields the group's `target_role_arn` (the per-bucket role to assume).
+5. Only for `purpose=restore`: build the read-only session policy
+   (template below). The `backup` purpose needs none — the per-bucket
+   role's own policy is already correctly scoped.
+6. Cross-account `sts:AssumeRole` on the group's `target_role_arn` (with
+   the restore session policy if applicable), session name like
+   `device-<device-id>`.
+7. Insert into `backup_credential_issuances` (recording the assumed role).
 8. Return the `credential_process` JSON.
 
-### Session policy templates
+### Permission templates
 
-**`purpose = "backup"`** — read + write, no delete:
+These are the permission *sets*. Under the decided IAM model, the
+**backup** set is the per-bucket role's own policy (authored in the
+group's Pulumi stack); the **restore** set is the read-only **session
+policy** Canopy passes when assuming that same role for `purpose=restore`
+(it ANDs down to read-only).
+
+**`purpose = "backup"`** — read + write, no delete (the role policy):
 
 ```json
 {
@@ -418,7 +431,12 @@ Handler flow:
     },
     {
       "Effect": "Allow",
-      "Action": ["s3:ListBucket", "s3:GetBucketLocation"],
+      "Action": ["s3:GetBucketLocation"],
+      "Resource": "arn:aws:s3:::<bucket>"
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["s3:ListBucket"],
       "Resource": "arn:aws:s3:::<bucket>",
       "Condition": {
         "StringLike": { "s3:prefix": ["<prefix>*"] }
@@ -428,7 +446,7 @@ Handler flow:
 }
 ```
 
-**`purpose = "restore"`** — read-only:
+**`purpose = "restore"`** — read-only (the session policy):
 
 ```json
 {
@@ -441,7 +459,12 @@ Handler flow:
     },
     {
       "Effect": "Allow",
-      "Action": ["s3:ListBucket", "s3:GetBucketLocation"],
+      "Action": ["s3:GetBucketLocation"],
+      "Resource": "arn:aws:s3:::<bucket>"
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["s3:ListBucket"],
       "Resource": "arn:aws:s3:::<bucket>",
       "Condition": {
         "StringLike": { "s3:prefix": ["<prefix>*"] }
@@ -451,14 +474,16 @@ Handler flow:
 }
 ```
 
-With one bucket per group, `<prefix>` is normally empty, so these
-resolve to the whole bucket (`<bucket>/*`) and an unconditioned
-`ListBucket` — which is correct, since the group owns the bucket
-outright. The `s3:prefix` condition only does work in the rare
-sub-path case; it's kept in the template so a non-empty prefix still
-scopes listings. The restore variant omits all mutation actions — even
-an explicit attempt to `kopia repository create` is rejected by S3, not
-just by kopia.
+`s3:GetBucketLocation` is a bucket-level op with no prefix notion — the
+`s3:prefix` context key isn't populated for it, so it must be its own
+**unconditioned** statement; folding it under the `s3:prefix` condition
+(as an earlier draft did) would silently deny it. With one bucket per
+group, `<prefix>` is normally empty, so the `ListBucket` condition
+matches everything and the device lists the whole bucket — correct, since
+the group owns it outright; the condition only does work in the rare
+sub-path case. The restore variant omits all mutation actions — even an
+explicit attempt to `kopia repository create` is rejected by S3, not just
+by kopia.
 
 `AbortMultipartUpload` is retained on the backup purpose: it can only
 discard a device's *own in-flight* multipart upload, never a committed
@@ -761,11 +786,12 @@ here, for two reasons:
   `DeleteObject`. If a client ran it, every client would need delete, and
   a compromised server could wipe the group's backups. By moving
   maintenance to Canopy, no device cred ever needs delete (see the
-  session policies above), so a compromised server cannot delete backups.
+  permission templates above), so a compromised server cannot delete
+  backups.
 
 So Canopy owns maintenance. Concretely, a scheduled control-plane task
 spawns a **Kubernetes Job per group** that runs `kopia maintenance run`
-(quick on a short cadence, full less often) against that group's prefix,
+(quick on a short cadence, full less often) against that group's bucket,
 then exits. Spawning a Job rather than running kopia in-process keeps the
 heavy, long-running work off the Canopy pod and lets it use the kopia
 image directly.
@@ -780,13 +806,13 @@ AssumeRole sessions noted up top: device backups tolerate it because
 exceed an hour, and we don't want it dying mid-rewrite. A direct IRSA
 identity on the Job refreshes transparently with no cap.
 
-Maintenance is first-party Canopy-controlled code, so granting it access
-to the whole bucket pattern (rather than narrowing to the one group's
-bucket via a session policy, which would re-introduce the 1-hour cap) is
-an acceptable trade-off. Per-bucket narrowing is what protects against
-*untrusted* device creds; it's not load-bearing for our own maintenance
-job. (If we later want per-group blast-radius limits on maintenance too,
-one role per bucket is the escape hatch — flagged, not built.)
+Like the device path, maintenance uses the **per-bucket** role — the
+group's full-access role (`s3:*` on that one bucket, incl. delete),
+assumed directly by the Job's IRSA. Because the role is already scoped to
+the single bucket, it needs no session-policy downscope (which is what
+would re-introduce the 1-hour cap). It's broad *on its own bucket*, not
+across a pattern — so a maintenance bug or compromise is still confined to
+that one group, the same structural isolation the device path gets.
 
 ### Interaction with the 30-day Object Lock
 
@@ -879,11 +905,12 @@ what's fixed is that it's Canopy's responsibility, not a client's.
 
 The device-staleness signals above watch the *devices*. This watches
 **Canopy's own upstream access**, which is a different and higher-stakes
-failure class: if the trust on the issuer role is edited, the pod's IRSA
-annotation is dropped, a role is deleted, or a bucket's Object Lock is
-removed, devices can't get creds and maintenance Jobs fail — and the
-backups stop without any per-device fault to point at. We should learn
-that from Canopy checking itself, not from devices starting to fail.
+failure class: if the pod's IRSA annotation is dropped (shared), or a
+group's per-bucket role trust is edited / the role deleted / that group's
+bucket Object Lock removed (per-group), devices can't get creds and
+maintenance Jobs fail — and the backups stop without any per-device fault
+to point at. We should learn that from Canopy checking itself, not from
+devices starting to fail.
 
 **It runs per server-group, not fleet-wide.** Each group has its own
 bucket with its own `region`/`endpoint` and its own Object Lock config,
@@ -894,18 +921,17 @@ when the genuinely shared piece breaks. The preflight reflects that split:
 
 Shared, checked once:
 - **Identity resolves** — `sts:GetCallerIdentity` confirms the pod's IRSA
-  web-identity is mounted and valid.
-- **Issuer role admits Canopy** — a dry-run `AssumeRole` on the issuer
-  role with a harmless session policy, confirming trust + role still
-  exist. (When per-bucket roles arrive, this becomes per-pathway.)
+  web-identity is mounted and valid. This is the only genuinely shared
+  piece; everything else is per-bucket and therefore per-group.
 
 Per configured group:
-- **Group creds work** — mint creds scoped to *that group's* bucket/prefix
-  and do a **read-only no-op** against *that group's* bucket/endpoint
-  (e.g. `HeadBucket` / a scoped `ListBucket` on a probe prefix), so the
-  check proves the group's creds actually work, not merely that
-  `AssumeRole` returned. This is the check that catches a single group's
-  bucket/endpoint/policy being wrong while others are fine.
+- **Role trust + creds work** — assume *that group's* `target_role_arn`
+  (cross-account), confirming the per-bucket role still exists and its
+  trust still admits Canopy, then do a **read-only no-op** with the
+  returned creds against *that group's* bucket/endpoint (e.g. `HeadBucket`
+  / a scoped `ListBucket`), so the check proves the group's creds actually
+  work, not merely that `AssumeRole` returned. This catches a single
+  group's role/bucket/endpoint being wrong while others are fine.
 - **Object Lock is in place** — verify *that group's* bucket still has the
   expected (≥30-day) Object Lock configuration. The whole "a compromised
   server can't destroy backups" guarantee rests on this; if someone
@@ -920,7 +946,7 @@ Per configured group:
 
 Alerts name the affected group(s) and fire at control-plane severity
 (distinct from per-device staleness); a check that fails for *every*
-group points at the shared identity/issuer rather than any one bucket.
+group points at the shared IRSA identity rather than any one bucket.
 
 Prefer **behavioural** checks (try to assume; try a harmless S3 op) over
 IAM/policy *introspection*: behavioural checks test the real path and
@@ -1043,10 +1069,13 @@ None blocking, but flag-and-decide-during-implementation:
   deployment-wide defaults; per-group override is a later column if
   needed. Decide the scheduler home (CronJob fanning out per-group Jobs,
   a private-server task, or a dedicated worker).
-- **Maintenance Job scoping.** Broad-bucket IRSA (simple, no 1-hour cap)
-  vs. one role per group (tighter blast radius, but per-group narrowing
-  via session policy re-introduces the cap). Recommended: broad for the
-  first cut since maintenance is first-party.
+- **Maintenance Job IRSA wiring.** Scoping is settled by the per-bucket
+  model (the Job assumes the group's per-bucket full-access role — broad
+  on its own bucket, so no session-policy downscope and no 1-hour cap, yet
+  still confined to one group). What's left is the mechanics: registering
+  the cluster's OIDC provider in each deployment account so the Job's
+  service account can assume that account's maintenance role directly
+  (cross-account web-identity, not chained).
 
 ## Out of scope (do not silently fold in)
 
