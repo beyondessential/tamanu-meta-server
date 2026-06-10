@@ -552,21 +552,59 @@ just lets a failed upload clean up its own parts instead of leaving
 billable orphans.
 
 Dropping `DeleteObject` is defence-in-depth on top of the real backstop:
-**every group's bucket has a 30-day S3 Object Lock** (a required property,
-set at creation — see "Per-group buckets"). So a cred without delete
-can't destroy a backup object regardless — a locked version is retained.
-The no-delete device policy still earns its place (it removes the most
-destructive action outright, and avoids accidental client-side expiry),
-but the guarantee "a compromised server cannot destroy recent backups"
-rests on Object Lock, not on IAM alone.
+**every group's bucket has versioning + a 30-day S3 Object Lock** (both
+required, set at creation — see "Per-group buckets"). A device cred has
+neither `DeleteObject` nor `s3:BypassGovernanceRetention`, so it cannot
+*delete* anything. But it *does* keep `PutObject` on existing keys, so the
+one residual attack is **overwrite-poisoning**: a compromised device
+overwrites live blobs, burying the good versions as *noncurrent*. This is
+survivable, not destruction:
 
-**The threat boundary is a compromised device, and that's what this
-defends.** The lock is `GOVERNANCE`, not `COMPLIANCE` (per the `backups`
-Pulumi stack: `mode: 'GOVERNANCE', days: 30`) — and we're keeping it that
-way. A device cred has neither `DeleteObject` nor
-`s3:BypassGovernanceRetention` (the reduced action set grants only
-Get/Put/multipart), so a compromised server physically cannot destroy
-backups, full stop. That is the guarantee.
+- Versioning preserves the good (noncurrent) versions; the Object Lock
+  keeps them undeletable, and lifecycle can't reclaim them until the
+  lock/lifecycle window elapses (see "Interaction with the 30-day Object
+  Lock").
+- kopia content blobs are **content-addressed and hash-verified**, so
+  poisoning surfaces as *detectable corruption* (signal 2 catches it —
+  see below), not silently-served bad data.
+- Recovery is a version-level rollback driven by the maintenance role
+  (see "Recovery from poisoning"), within the window.
+
+So the precise guarantee: **a compromised device cannot delete backups,
+and cannot *permanently* destroy them** — overwrite-poisoning is a
+bounded, detectable DoS recoverable by version rollback within the
+lock/lifecycle window. (Not "full stop": the current restore would be
+broken until recovery.)
+
+**The threat boundary is a compromised device.** The lock is `GOVERNANCE`,
+not `COMPLIANCE` (per the `backups` Pulumi stack: `mode: 'GOVERNANCE',
+days: 30`) — and we're keeping it that way; AWS-level compromise stays out
+of scope (see non-goals).
+
+### Recovery from poisoning
+
+If signal 2 reports corruption / unreadability for a group's repo (the
+overwrite-poisoning case above), recovery is a **version-level rollback,
+driven by the maintenance role** — which already has `s3:*`, hence
+`GetObjectVersion` / `ListBucketVersions`, in the deployment account. The
+device `restore` creds stay read-only-*current* (no version access);
+recovery is a deliberate operator action, not a device capability.
+
+Runbook (to be written out at implementation):
+1. Stop issuing to the group (so the attacker can't keep overwriting).
+2. Identify the poisoning time from `backup_runs` / `backup_repo_snapshots`
+   / version timestamps.
+3. `kopia repository connect … --point-in-time <before-poisoning>` and
+   restore/roll the repo back past the bad versions (kopia supports PIT
+   reconnect against a versioned, object-locked bucket).
+4. Re-verify, then resume issuance.
+
+The deadline is the **lock/lifecycle window** (~30–35 days from the
+overwrite — see "Interaction with the 30-day Object Lock"); after that
+lifecycle reclaims the good noncurrent versions. Detection latency
+(signal 2, ~daily) is far inside that window, so the window is ample —
+but the runbook and the deadline must be known before an incident, not
+discovered during one.
 
 What GOVERNANCE deliberately leaves open is *AWS-level* compromise: a
 principal holding `s3:BypassGovernanceRetention` — e.g. the full-access /
@@ -863,6 +901,16 @@ freshness isn't gated by the slow maintenance interval.
 - Trust property: signal 2 depends only on the bucket (Object-Lock
   protected), not on any device, so it's the signal a compromised server
   cannot fake into showing a healthy backup.
+- **Poisoning / corruption detection → critical incident.** Inspection
+  also *verifies* the repo (kopia detects content-blob hash mismatches /
+  unreadable index — the overwrite-poisoning signature, see "Recovery from
+  poisoning"). On detected corruption, raise a **`Critical`-severity**
+  event so it opens an incident for immediate investigation (Critical
+  satisfies `opens_incident()`), pointing at the recovery runbook. This is
+  a **group-level** alert — it fires independent of any server's
+  `is_monitored` (see the group-level-checks note under detection), since
+  a corrupt repo endangers the whole group's backups regardless of which
+  servers are monitored.
 
 Both signals feed the same `Incident` alerting path.
 
