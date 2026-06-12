@@ -74,6 +74,15 @@ against the agreed names and the two meet at deploy.
 
 ## The early blocker: kopia-behaviour verification spike
 
+> **Concluded (from kopia docs/source + S3 semantics) — Branch A:** device
+> creds = `AWS_S3_MULTIPART_ACTIONS` (no `PutObjectRetention`/no delete);
+> repo created **non-lock-aware**; rely on the bucket's default GOVERNANCE
+> retention + versioning + lifecycle. `--session-token`,
+> `--override-hostname`, and `--point-in-time` are all supported. Two items
+> still want a **live confirm** (the no-`PutObjectRetention` write path, and
+> PIT on real AWS S3 per issue #4346). Full verdict + test script:
+> [`backup-credentials-kopia-spike.md`](./backup-credentials-kopia-spike.md).
+
 **Do this first, in parallel with stage 0, before committing the ops action-set
 and the bestool kopia wiring.** It's cheap, it's a known unknown, and it
 changes two specs if it comes out the wrong way.
