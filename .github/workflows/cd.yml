@@ -33,7 +33,7 @@ jobs:
     steps:
       - name: Free up space
         run: sudo rm -rf /opt/hostedtoolcache /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup || true
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.0.2
 
       - name: Configure toolchain
         run: |
@@ -41,7 +41,7 @@ jobs:
           rustup default stable
           rustup target add ${{ matrix.target }}
 
-      - uses: taiki-e/install-action@v2.79.0
+      - uses: taiki-e/install-action@v2.81.1
         with:
           tool: just
 
@@ -81,7 +81,7 @@ jobs:
       - name: Login to ghcr.io
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u $ --password-stdin
 
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.0.2
 
       - id: tag
         run: echo "value=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
@@ -120,7 +120,7 @@ jobs:
             org.opencontainers.image.licenses=GPL-3.0-or-later
 
       - name: Build and push
-        uses: docker/build-push-action@v7.1.0
+        uses: docker/build-push-action@v7.2.0
         with:
           context: .github/build-context
           file: .github/Dockerfile.native
@@ -135,7 +135,7 @@ jobs:
     needs: [build-image]
     steps:
       - name: Checkout ops repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.2
         with:
           repository: beyondessential/ops
           ssh-key: ${{ secrets.OPS_SSH }}
