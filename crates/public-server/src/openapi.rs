@@ -16,6 +16,7 @@ use utoipa::{Modify, OpenApi, openapi::security::SecurityScheme};
 	modifiers(&SecuritySchemes),
 	tags(
 		(name = "artifacts", description = "Per-version artifact registration by releaser devices."),
+		(name = "backup", description = "Device backup credential minting, target config, capability registration, and run reporting."),
 		(name = "bestool", description = "Bestool SQL snippet read API."),
 		(name = "events", description = "Device-pushed events; rolled up into issues and incidents server-side."),
 		(name = "servers", description = "Server registry — listing for the public, self-registration for server devices."),
