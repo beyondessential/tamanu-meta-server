@@ -143,7 +143,9 @@ async fn revoke_invalidates_the_active_token() {
 				.is_some()
 		);
 
-		ServerEnrollmentToken::revoke(&mut conn, server.id).await.unwrap();
+		ServerEnrollmentToken::revoke(&mut conn, server.id)
+			.await
+			.unwrap();
 
 		assert!(
 			ServerEnrollmentToken::active_for(&mut conn, server.id)

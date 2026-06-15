@@ -501,12 +501,10 @@ pub async fn get_detail(
 			Some(did) if Some(did) == device_id => device_with_info
 				.as_ref()
 				.and_then(|d| d.latest_connection.clone()),
-			Some(did) => {
-				DeviceConnection::get_latest_from_device_ids(&mut conn, [did].into_iter())
-					.await?
-					.into_iter()
-					.next()
-			}
+			Some(did) => DeviceConnection::get_latest_from_device_ids(&mut conn, [did].into_iter())
+				.await?
+				.into_iter()
+				.next(),
 			None => None,
 		};
 

@@ -22,12 +22,11 @@ async fn registered_at(
 	conn: &mut diesel_async::AsyncPgConnection,
 	server_id: Uuid,
 ) -> Option<jiff::Timestamp> {
-	let row: RegisteredRow =
-		diesel::sql_query("SELECT registered_at FROM servers WHERE id = $1")
-			.bind::<sql_types::Uuid, _>(server_id)
-			.get_result(conn)
-			.await
-			.expect("fetch registered_at");
+	let row: RegisteredRow = diesel::sql_query("SELECT registered_at FROM servers WHERE id = $1")
+		.bind::<sql_types::Uuid, _>(server_id)
+		.get_result(conn)
+		.await
+		.expect("fetch registered_at");
 	row.registered_at.map(Into::into)
 }
 
@@ -40,10 +39,7 @@ struct MatchRow {
 /// True when the server's `registered_at` equals its earliest status
 /// `created_at` (compared in SQL — statuses are seeded relative to
 /// NOW(), so there's no literal to compare against on the Rust side).
-async fn matches_first_status(
-	conn: &mut diesel_async::AsyncPgConnection,
-	server_id: Uuid,
-) -> bool {
+async fn matches_first_status(conn: &mut diesel_async::AsyncPgConnection, server_id: Uuid) -> bool {
 	let row: MatchRow = diesel::sql_query(
 		"SELECT s.registered_at = \
 			(SELECT MIN(st.created_at) FROM statuses st WHERE st.server_id = s.id) AS matches \

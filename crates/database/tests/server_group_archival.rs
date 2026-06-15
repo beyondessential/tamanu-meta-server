@@ -114,14 +114,28 @@ async fn archiving_an_all_gone_group_cascades_and_restore_reverses() {
 			"group archived",
 		);
 		assert!(
-			Server::get_by_id(&mut conn, a).await.unwrap().deleted_at.is_some(),
+			Server::get_by_id(&mut conn, a)
+				.await
+				.unwrap()
+				.deleted_at
+				.is_some(),
 			"member a cascade-archived",
 		);
 		assert!(
-			Server::get_by_id(&mut conn, b).await.unwrap().deleted_at.is_some(),
+			Server::get_by_id(&mut conn, b)
+				.await
+				.unwrap()
+				.deleted_at
+				.is_some(),
 			"member b cascade-archived",
 		);
-		assert!(!ServerGroup::list_all(&mut conn).await.unwrap().iter().any(|g| g.id == group));
+		assert!(
+			!ServerGroup::list_all(&mut conn)
+				.await
+				.unwrap()
+				.iter()
+				.any(|g| g.id == group)
+		);
 
 		// Restore cascades back.
 		ServerGroup::restore(&mut conn, group).await.unwrap();
@@ -134,11 +148,19 @@ async fn archiving_an_all_gone_group_cascades_and_restore_reverses() {
 			"group restored",
 		);
 		assert!(
-			Server::get_by_id(&mut conn, a).await.unwrap().deleted_at.is_none(),
+			Server::get_by_id(&mut conn, a)
+				.await
+				.unwrap()
+				.deleted_at
+				.is_none(),
 			"member a restored",
 		);
 		assert!(
-			Server::get_by_id(&mut conn, b).await.unwrap().deleted_at.is_none(),
+			Server::get_by_id(&mut conn, b)
+				.await
+				.unwrap()
+				.deleted_at
+				.is_none(),
 			"member b restored",
 		);
 	})
@@ -159,7 +181,10 @@ async fn server_list_archived_only_returns_archived() {
 			.map(|s| s.id)
 			.collect();
 		assert!(archived_ids.contains(&archived), "archived server listed");
-		assert!(!archived_ids.contains(&live), "live server not in archived list");
+		assert!(
+			!archived_ids.contains(&live),
+			"live server not in archived list"
+		);
 
 		let live_ids: Vec<Uuid> = Server::get_all(&mut conn, 0, None)
 			.await
@@ -168,7 +193,10 @@ async fn server_list_archived_only_returns_archived() {
 			.map(|s| s.id)
 			.collect();
 		assert!(live_ids.contains(&live), "live server in get_all");
-		assert!(!live_ids.contains(&archived), "archived server excluded from get_all");
+		assert!(
+			!live_ids.contains(&archived),
+			"archived server excluded from get_all"
+		);
 	})
 	.await
 }

@@ -47,14 +47,7 @@ fn higher_rank(a: ServerRank, b: ServerRank) -> ServerRank {
 }
 
 #[derive(
-	Debug,
-	Clone,
-	Serialize,
-	Deserialize,
-	Queryable,
-	Selectable,
-	Insertable,
-	utoipa::ToSchema,
+	Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable, utoipa::ToSchema,
 )]
 #[diesel(table_name = crate::schema::server_groups)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -233,7 +226,8 @@ impl ServerGroup {
 
 			diesel::update(dsl::server_groups.filter(dsl::id.eq(group_id)))
 				.set(
-					dsl::deleted_at.eq(jiff_diesel::NullableTimestamp::from(Some(Timestamp::now()))),
+					dsl::deleted_at
+						.eq(jiff_diesel::NullableTimestamp::from(Some(Timestamp::now()))),
 				)
 				.execute(conn)
 				.await
