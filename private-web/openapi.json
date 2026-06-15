@@ -5296,7 +5296,6 @@
         "type": "object",
         "required": [
           "id",
-          "server_id",
           "server_host",
           "source",
           "ref",
@@ -5406,8 +5405,12 @@
             "type": "string"
           },
           "server_id": {
-            "type": "string",
-            "format": "uuid"
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "`None` for group-scoped issues (backup control-plane alerts that point\nat a group, not a server — see the group-scoped-issues migration)."
           },
           "server_name": {
             "type": [

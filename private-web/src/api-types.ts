@@ -2177,8 +2177,12 @@ export interface components {
              */
             server_group_name?: string | null;
             server_host: string;
-            /** Format: uuid */
-            server_id: string;
+            /**
+             * Format: uuid
+             * @description `None` for group-scoped issues (backup control-plane alerts that point
+             *     at a group, not a server — see the group-scoped-issues migration).
+             */
+            server_id?: string | null;
             /** @description The issue's server name (may be null — fall back to `server_host`). */
             server_name?: string | null;
             severity: components["schemas"]["Severity"];

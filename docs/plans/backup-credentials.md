@@ -200,6 +200,14 @@ sections below thread that through; PGRO consumes a *specific* type.
 
 ## Database changes
 
+> RESOLVED (impl) — **FK semantics are uniform plain `REFERENCES`, NO
+> `ON DELETE` clause anywhere.** The `ON DELETE CASCADE` shown in the DDL
+> blocks below was **not** shipped: `server_groups`/`servers`/`devices` are
+> *archived* (`deleted_at` soft-delete), never hard-deleted, so the
+> cascade-vs-preserve distinction is moot. Read every `ON DELETE CASCADE` /
+> "no-CASCADE on purpose" note in this section as superseded by the uniform
+> archival rule (see also the "Decommissioning a group" note further down).
+
 ### New table: `server_group_backup_config`
 
 ```sql
@@ -1185,13 +1193,21 @@ here, for two reasons:
   permission templates above), so a compromised server cannot delete
   backups.
 
-So Canopy owns maintenance. Concretely, a scheduler loop (a new
-`crates/jobs/src/bin/<name>.rs` following the existing `reachability` /
-`pingtask` `spawn()` + `loop { sleep(60); pool.get; … }` template, with its
-own single-replica Deployment in `ops/pulumi/tamanu/meta/src/jobs.ts`)
-**spawns a Kubernetes Job per group** that runs the maintenance cycle
-against that group's bucket, then exits. Spawning a Job keeps the heavy,
+So Canopy owns maintenance. Concretely, a scheduler loop (following the
+existing `pingtask`/`monitor` `spawn()` + `loop { sleep(60); pool.get; … }`
+template) **spawns a Kubernetes Job per group** that runs the maintenance
+cycle against that group's bucket, then exits. Spawning a Job keeps the heavy,
 long-running work off the loop pod and lets it use the kopia image.
+RESOLVED (impl): the maintenance/inspection/preflight/s3-metrics loops ship as
+**one bin `crates/jobs/src/bin/backups.rs`** (four modules under
+`crates/jobs/src/backup/`, run via `tokio::try_join!`) with a **single**
+`backups` Deployment — not one bin/Deployment each. The DB-only staleness +
+reconcile sweep instead folded into the renamed **`monitor`** bin (formerly
+`reachability`, which now also runs tailnet key-expiry). The **kopia Job image
+now exists in-repo** at `images/kopia-job/` (Dockerfile + entrypoint +
+`CONTRACT.md`), to be moved to `third-party-builds` and built/published by ops;
+config is passed as ENV vars and results return via the pod termination message
+(see the maintenance/inspection spec §5).
 
 **Greenfield infra (net-new to canopy):** the loop pattern matches
 `reachability`, but everything about *spawning k8s Jobs* is new — canopy
@@ -1590,13 +1606,13 @@ detection/reconciliation against `backup_repo_snapshots` / `backup_runs`.
   row; devices in that group start getting `409`. The group's bucket and
   its Object-Lock'd objects persist independently — they can't be deleted
   until their locks expire (~30 days), so bucket teardown is a deliberate,
-  delayed step, not a side effect of removing the config row. Note: the
-  config row cascades on `server_groups` delete, but the **audit tables
-  (`backup_credential_issuances`/`backup_runs`/`backup_maintenance_runs`)
-  reference `server_groups(id)` without CASCADE on purpose** — so deleting
-  a `server_groups` row that has any audit history fails until it's dealt
-  with. That's intentional audit preservation; the runbook decides
-  (archive vs detach) rather than silently cascading the trail away.
+  delayed step, not a side effect of removing the config row.
+  RESOLVED (impl): the earlier "config row cascades / audit tables don't"
+  split was **not** shipped — *all* backup FKs are plain `REFERENCES` (no
+  cascade), and `server_groups` are archived (`deleted_at`), never
+  hard-deleted, so the trail is preserved by the archival model rather than by
+  any per-table cascade choice. Decommissioning deletes the config row to stop
+  issuance; the group is archived, not `DELETE`d.
 - **Onboarding a group** — IaC provisions its bucket (with Object Lock,
   see "Per-group buckets"), then the `server_group_backup_config` row is
   inserted. Devices in the group start succeeding on their next run; if

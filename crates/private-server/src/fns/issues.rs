@@ -25,7 +25,9 @@ const DEFAULT_LIMIT: i64 = 100;
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct IssueData {
 	pub id: Uuid,
-	pub server_id: Uuid,
+	/// `None` for group-scoped issues (backup control-plane alerts that point
+	/// at a group, not a server — see the group-scoped-issues migration).
+	pub server_id: Option<Uuid>,
 	/// The issue's server name (may be null — fall back to `server_host`).
 	pub server_name: Option<String>,
 	pub server_host: String,
@@ -152,7 +154,7 @@ pub(crate) async fn enrich_issues(
 	conn: &mut database::diesel_async::AsyncPgConnection,
 	issues: Vec<Issue>,
 ) -> Result<Vec<IssueData>> {
-	let server_ids: Vec<Uuid> = issues.iter().map(|i| i.server_id).collect();
+	let server_ids: Vec<Uuid> = issues.iter().filter_map(|i| i.server_id).collect();
 	let names = Server::names_by_ids(conn, &server_ids).await?;
 	let group_refs = Server::group_refs_by_server_ids(conn, &server_ids).await?;
 	let user_logins = collect_user_logins(&issues);
@@ -162,10 +164,13 @@ pub(crate) async fn enrich_issues(
 	Ok(issues
 		.into_iter()
 		.map(|i| {
-			let (name, host) = names.get(&i.server_id).cloned().unwrap_or((None, None));
-			let (group_id, group_name) = group_refs
-				.get(&i.server_id)
-				.cloned()
+			let (name, host) = i
+				.server_id
+				.and_then(|sid| names.get(&sid).cloned())
+				.unwrap_or((None, None));
+			let (group_id, group_name) = i
+				.server_id
+				.and_then(|sid| group_refs.get(&sid).cloned())
 				.unwrap_or((None, None));
 			let links = incidents
 				.remove(&i.id)
@@ -193,10 +198,17 @@ pub(crate) async fn enrich_issue(
 	conn: &mut database::diesel_async::AsyncPgConnection,
 	issue: Issue,
 ) -> Result<IssueData> {
-	let mut names = Server::names_by_ids(conn, &[issue.server_id]).await?;
-	let (name, host) = names.remove(&issue.server_id).unwrap_or((None, None));
-	let mut group_refs = Server::group_refs_by_server_ids(conn, &[issue.server_id]).await?;
-	let (group_id, group_name) = group_refs.remove(&issue.server_id).unwrap_or((None, None));
+	let server_ids: Vec<Uuid> = issue.server_id.into_iter().collect();
+	let mut names = Server::names_by_ids(conn, &server_ids).await?;
+	let (name, host) = issue
+		.server_id
+		.and_then(|sid| names.remove(&sid))
+		.unwrap_or((None, None));
+	let mut group_refs = Server::group_refs_by_server_ids(conn, &server_ids).await?;
+	let (group_id, group_name) = issue
+		.server_id
+		.and_then(|sid| group_refs.remove(&sid))
+		.unwrap_or((None, None));
 	let user_logins = collect_user_logins(std::slice::from_ref(&issue));
 	let users = CachedTailscaleUser::by_logins(conn, &user_logins).await?;
 	let mut incidents = Incident::for_issues(conn, &[issue.id]).await?;
