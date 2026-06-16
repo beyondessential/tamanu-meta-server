@@ -47,7 +47,7 @@ function randomLabel(prefix: string): string {
  * statement with CASCADE. */
 export async function resetSeededTables(sql: Sql): Promise<void> {
 	await sql.query(
-		"TRUNCATE statuses, issues, device_keys, servers, server_groups, devices, versions, tailscale_users RESTART IDENTITY CASCADE",
+		"TRUNCATE statuses, issues, device_keys, servers, server_groups, devices, versions, tailscale_users, server_group_backup_config, server_group_backup_schedule, backup_requests, backup_runs, backup_repo_stats, backup_maintenance_runs RESTART IDENTITY CASCADE",
 	);
 }
 
@@ -324,4 +324,153 @@ export async function seedVersion(
 		[id, major, minor, patch, opts.status ?? "published", opts.changelog ?? ""],
 	);
 	return { id, major, minor, patch };
+}
+
+// ── Backup-credentials seeding ──────────────────────────────────────────────
+
+export type BackupConfigStatus = "provisioning" | "escrow_pending" | "ready";
+export type BackupRepoMode = "from_birth" | "import";
+
+/** Seed a `server_group_backup_config` row for a group, optionally with a
+ * `(group, tamanu-postgres)` schedule. */
+export async function seedServerGroupBackupConfig(
+	sql: Sql,
+	opts: {
+		groupId: string;
+		bucket?: string;
+		prefix?: string;
+		targetRoleArn?: string;
+		region?: string | null;
+		repoPasswordRef?: string;
+		status?: BackupConfigStatus;
+		mode?: BackupRepoMode;
+		lastInitError?: string | null;
+		/** Seconds; null = manual-only. Omit to skip seeding a schedule row. */
+		intervalSeconds?: number | null;
+		retention?: Record<string, number>;
+	},
+): Promise<void> {
+	await sql.query(
+		`INSERT INTO server_group_backup_config
+		 (group_id, bucket, prefix, target_role_arn, region, repo_password_ref, status, mode, last_init_error)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		[
+			opts.groupId,
+			opts.bucket ?? "bes-kopia-e2e",
+			opts.prefix ?? "",
+			opts.targetRoleArn ?? "arn:aws:iam::123456789012:role/e2e",
+			opts.region ?? null,
+			opts.repoPasswordRef ?? `backup-repo-${opts.groupId}`,
+			opts.status ?? "ready",
+			opts.mode ?? "from_birth",
+			opts.lastInitError ?? null,
+		],
+	);
+	if (opts.intervalSeconds !== undefined || opts.retention !== undefined) {
+		const retention = opts.retention ?? {
+			keep_latest: 1,
+			keep_daily: 7,
+			keep_weekly: 4,
+			keep_monthly: 6,
+			keep_annual: 0,
+		};
+		if (opts.intervalSeconds == null) {
+			await sql.query(
+				`INSERT INTO server_group_backup_schedule (group_id, type, expected_interval, retention)
+				 VALUES ($1, 'tamanu-postgres', NULL, $2::jsonb)`,
+				[opts.groupId, JSON.stringify(retention)],
+			);
+		} else {
+			await sql.query(
+				`INSERT INTO server_group_backup_schedule (group_id, type, expected_interval, retention)
+				 VALUES ($1, 'tamanu-postgres', make_interval(secs => $2), $3::jsonb)`,
+				[opts.groupId, opts.intervalSeconds, JSON.stringify(retention)],
+			);
+		}
+	}
+}
+
+/** Seed a reported `backup_runs` row. */
+export async function seedBackupRun(
+	sql: Sql,
+	opts: {
+		deviceId: string;
+		groupId: string;
+		serverId?: string | null;
+		type?: string;
+		purpose?: "backup" | "restore";
+		outcome?: "success" | "failure";
+		error?: string | null;
+		bytesUploaded?: number | null;
+		snapshotId?: string | null;
+	},
+): Promise<{ id: string }> {
+	const id = randomUUID();
+	await sql.query(
+		`INSERT INTO backup_runs
+		 (id, device_id, group_id, server_id, type, purpose, outcome, error, bytes_uploaded, snapshot_id)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+		[
+			id,
+			opts.deviceId,
+			opts.groupId,
+			opts.serverId ?? null,
+			opts.type ?? "tamanu-postgres",
+			opts.purpose ?? "backup",
+			opts.outcome ?? "success",
+			opts.error ?? null,
+			opts.bytesUploaded ?? null,
+			opts.snapshotId ?? null,
+		],
+	);
+	return { id };
+}
+
+/** Seed the cached `backup_repo_stats` row for a group. */
+export async function seedBackupRepoStats(
+	sql: Sql,
+	opts: {
+		groupId: string;
+		snapshotCount?: number | null;
+		sourceCount?: number | null;
+		logicalBytes?: number | null;
+		physicalBytes?: number | null;
+		bucketBytes?: number | null;
+	},
+): Promise<void> {
+	await sql.query(
+		`INSERT INTO backup_repo_stats
+		 (group_id, snapshot_count, source_count, logical_bytes, physical_bytes, bucket_bytes)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		[
+			opts.groupId,
+			opts.snapshotCount ?? null,
+			opts.sourceCount ?? null,
+			opts.logicalBytes ?? null,
+			opts.physicalBytes ?? null,
+			opts.bucketBytes ?? null,
+		],
+	);
+}
+
+/** Seed a pending `backup_requests` row (one-off "backup now"). */
+export async function seedBackupRequest(
+	sql: Sql,
+	opts: {
+		serverId: string;
+		type?: string;
+		purpose?: "backup" | "restore";
+		requestedBy?: string | null;
+	},
+): Promise<void> {
+	await sql.query(
+		`INSERT INTO backup_requests (server_id, type, purpose, requested_by)
+		 VALUES ($1, $2, $3, $4)`,
+		[
+			opts.serverId,
+			opts.type ?? "tamanu-postgres",
+			opts.purpose ?? "backup",
+			opts.requestedBy ?? null,
+		],
+	);
 }

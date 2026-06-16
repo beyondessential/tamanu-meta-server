@@ -157,6 +157,595 @@
         ]
       }
     },
+    "/api/backups/ack_escrow": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Acknowledge the Bitwarden escrow: flip `escrow_pending → ready`, stamping\n`escrow_acked_at/by`. 409 unless currently `escrow_pending`.",
+        "operationId": "backups_ack_escrow",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupConfigView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/backups/cancel_request": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Cancel a pending one-off request.",
+        "operationId": "backups_cancel_request",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/backups/create": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Insert a config row (`status='provisioning'`). Does NOT create the repo —\nthat's `create_repo`. 409 if the group already has a config; 404 if the\ngroup is missing.",
+        "operationId": "backups_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBackupConfigArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupConfigView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/backups/create_repo": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Record intent for the init Job: set/keep `provisioning`, clear\n`last_init_error`. Idempotent retry. 409 if already `ready`.",
+        "operationId": "backups_create_repo",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupConfigView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/backups/delete": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Delete a group's config row (decommission). The bucket and its object-locked\nobjects persist; this only stops credential issuance.",
+        "operationId": "backups_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/backups/get": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Full config + lifecycle for a group. `null` (200) when the group has no\nconfig (the zero-state); 404 only when the group itself doesn't exist.",
+        "operationId": "backups_get",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/BackupConfigView"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/backups/list": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "All configured groups (fleet overview).",
+        "operationId": "backups_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BackupConfigSummary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/backups/request_now": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "One-off \"backup now\": upsert a `backup_requests` row keyed\n`(server_id, type, purpose)`. Idempotent (re-request refreshes the row).",
+        "operationId": "backups_request_now",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/backups/reveal_escrow": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Reveal-once passphrase for a from-birth repo. Only valid while\n`escrow_pending`; re-callable until acked. Reads the k8s Secret named by\n`repo_password_ref` (502 on read failure).",
+        "operationId": "backups_reveal_escrow",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevealEscrowResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/backups/set_schedule": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Set (or clear) the per-`(group,type)` schedule + retention. None interval =\nmanual-only; a present retention is floor-validated (400 on violation).",
+        "operationId": "backups_set_schedule",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetScheduleArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupConfigView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/backups/stats": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Stats panel: cached repo stats + recent runs + recent maintenance + pending\none-off requests (across the group's member servers).",
+        "operationId": "backups_stats",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupStatsView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/backups/update": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Edit the non-structural config (region). Structural fields\n(bucket/role/mode) are create-only; interval/retention live on\n`set_schedule`.",
+        "operationId": "backups_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateBackupConfigArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupConfigView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/bestool/delete_snippet": {
       "post": {
         "tags": [
@@ -4223,6 +4812,333 @@
           }
         }
       },
+      "BackupConfigSummary": {
+        "type": "object",
+        "description": "Fleet-overview row for the configured-groups listing.",
+        "required": [
+          "server_group_id",
+          "bucket",
+          "mode",
+          "status"
+        ],
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "last_init_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mode": {
+            "type": "string"
+          },
+          "server_group_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "BackupConfigView": {
+        "type": "object",
+        "description": "Full config + lifecycle for a group. Never includes the passphrase value —\nonly `reveal_escrow` does.",
+        "required": [
+          "server_group_id",
+          "bucket",
+          "prefix",
+          "target_role_arn",
+          "mode",
+          "status",
+          "created_at",
+          "updated_at",
+          "schedules"
+        ],
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "escrow_acked_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "escrow_acked_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_init_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mode": {
+            "type": "string"
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "region": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "schedules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScheduleView"
+            },
+            "description": "Per-`(group,type)` schedule + retention overrides."
+          },
+          "server_group_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string"
+          },
+          "target_role_arn": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "BackupMaintenanceRun": {
+        "type": "object",
+        "required": [
+          "id",
+          "group_id",
+          "kind",
+          "started_at"
+        ],
+        "properties": {
+          "bytes_reclaimed": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "group_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/MaintenanceKind"
+          },
+          "outcome": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RunOutcome",
+                "description": "NULL while running."
+              }
+            ]
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "BackupPurpose": {
+        "type": "string",
+        "description": "Why a credential was issued / a run executed. A real capability gate\non the issued S3 creds, not just audit metadata: `Backup` grants\nwrite-without-delete, `Restore` grants read-only.",
+        "enum": [
+          "backup",
+          "restore"
+        ]
+      },
+      "BackupRepoStats": {
+        "type": "object",
+        "required": [
+          "group_id",
+          "observed_at"
+        ],
+        "properties": {
+          "bucket_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "group_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "logical_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "physical_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "snapshot_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "source_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          }
+        }
+      },
+      "BackupRun": {
+        "type": "object",
+        "required": [
+          "id",
+          "device_id",
+          "group_id",
+          "type",
+          "purpose",
+          "outcome",
+          "reported_at"
+        ],
+        "properties": {
+          "bytes_uploaded": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "device_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "group_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/RunOutcome"
+          },
+          "purpose": {
+            "$ref": "#/components/schemas/BackupPurpose"
+          },
+          "reported_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "server_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "snapshot_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "type": {
+            "type": "string"
+          }
+        }
+      },
+      "BackupStatsView": {
+        "type": "object",
+        "required": [
+          "recent_runs",
+          "recent_maintenance",
+          "pending_requests"
+        ],
+        "properties": {
+          "pending_requests": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PendingRequestRow"
+            }
+          },
+          "recent_maintenance": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BackupMaintenanceRun"
+            }
+          },
+          "recent_runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BackupRun"
+            }
+          },
+          "stats": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/BackupRepoStats"
+              }
+            ]
+          }
+        }
+      },
       "BestoolSnippetDetail": {
         "type": "object",
         "required": [
@@ -4351,6 +5267,46 @@
           "version_id": {
             "type": "string",
             "format": "uuid"
+          }
+        }
+      },
+      "CreateBackupConfigArgs": {
+        "type": "object",
+        "required": [
+          "server_group_id",
+          "bucket",
+          "target_role_arn",
+          "mode"
+        ],
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "region": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "repo_password_ref": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Import mode only: name of a pre-existing k8s Secret holding the\npassphrase. From-birth leaves this None (Canopy generates + names it),\nin which case a placeholder ref keyed on the group is recorded."
+          },
+          "server_group_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "target_role_arn": {
+            "type": "string"
           }
         }
       },
@@ -4847,6 +5803,18 @@
         ],
         "properties": {
           "incident_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "GroupArgs": {
+        "type": "object",
+        "required": [
+          "server_group_id"
+        ],
+        "properties": {
+          "server_group_id": {
             "type": "string",
             "format": "uuid"
           }
@@ -5754,6 +6722,14 @@
           }
         }
       },
+      "MaintenanceKind": {
+        "type": "string",
+        "description": "Which kopia maintenance cycle a Canopy maintenance Job ran.",
+        "enum": [
+          "quick",
+          "full"
+        ]
+      },
       "MergeIntoArgs": {
         "type": "object",
         "required": [
@@ -6292,6 +7268,37 @@
           }
         }
       },
+      "PendingRequestRow": {
+        "type": "object",
+        "required": [
+          "server_id",
+          "type",
+          "purpose",
+          "requested_at"
+        ],
+        "properties": {
+          "purpose": {
+            "type": "string"
+          },
+          "requested_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "requested_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string"
+          }
+        }
+      },
       "ProblemDetailsSchema": {
         "type": "object",
         "description": "Wire-shape mirror of [`problem_details::ProblemDetails`] for OpenAPI.\n\nEvery error response from the servers serializes to this RFC 7807 shape via\n[`AppError`]'s `IntoResponse`. This struct exists so OpenAPI specs can\nreference a concrete schema; nothing actually constructs values of this\ntype at runtime.",
@@ -6350,6 +7357,26 @@
           "patch": {
             "type": "integer",
             "format": "int32"
+          }
+        }
+      },
+      "RequestArgs": {
+        "type": "object",
+        "required": [
+          "server_id",
+          "type",
+          "purpose"
+        ],
+        "properties": {
+          "purpose": {
+            "type": "string"
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string"
           }
         }
       },
@@ -6443,6 +7470,62 @@
           "flapping"
         ]
       },
+      "RetentionPolicy": {
+        "type": "object",
+        "description": "kopia `keep-*` retention policy. Org-minimum floors\n(`keep_daily ≥ 7, keep_weekly ≥ 4, keep_monthly ≥ 6`) are enforced by\n[`RetentionPolicy::validate_floor`] on create/update.",
+        "required": [
+          "keep_daily",
+          "keep_weekly",
+          "keep_monthly"
+        ],
+        "properties": {
+          "keep_annual": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "keep_daily": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "keep_latest": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "keep_monthly": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "keep_weekly": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "RevealEscrowResponse": {
+        "type": "object",
+        "required": [
+          "passphrase",
+          "repo_password_ref"
+        ],
+        "properties": {
+          "passphrase": {
+            "type": "string",
+            "description": "Shown once; the UI must not persist it."
+          },
+          "repo_password_ref": {
+            "type": "string",
+            "description": "The Secret name, for the \"saved where\" note."
+          }
+        }
+      },
+      "RunOutcome": {
+        "type": "string",
+        "description": "Outcome of a reported backup/restore run.",
+        "enum": [
+          "success",
+          "failure"
+        ]
+      },
       "SampleArgs": {
         "type": "object",
         "required": [
@@ -6480,6 +7563,35 @@
             ],
             "format": "uuid",
             "description": "When set, the saved snippet supersedes the snippet with this id (i.e.\nit's an edit). When absent, a fresh snippet is created."
+          }
+        }
+      },
+      "ScheduleView": {
+        "type": "object",
+        "description": "Per-`(group,type)` schedule + retention override. `expected_interval` None =\nmanual-only (distinct from 0). `retention` None = inherit the type default.",
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "expected_interval": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "retention": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RetentionPolicy"
+              }
+            ]
+          },
+          "type": {
+            "type": "string"
           }
         }
       },
@@ -7123,6 +8235,41 @@
           }
         }
       },
+      "SetScheduleArgs": {
+        "type": "object",
+        "required": [
+          "server_group_id",
+          "type"
+        ],
+        "properties": {
+          "expected_interval": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Seconds; None = manual-only (no schedule), distinct from 0."
+          },
+          "retention": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RetentionPolicy",
+                "description": "None = inherit the type default. A present policy is floor-validated."
+              }
+            ]
+          },
+          "server_group_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string"
+          }
+        }
+      },
       "Severity": {
         "type": "string",
         "description": "Canopy's severity vocabulary, narrowed from RFC 5424 to a five-level\nset with operator semantics:\n\n- `Debug`: never participates in incidents (filed for the audit\n  trail / per-server view only).\n- `Info`, `Warning`: join an open incident for context but don't\n  open one or keep one open on their own.\n- `Error`: opens an incident; sits in the per-group `slack_open_delay`\n  holding window before the Slack notification ships.\n- `Critical`: opens an incident and bypasses the holding window —\n  the Slack notification is enqueued for immediate delivery.\n\nStored as text in Postgres; validated as this enum at the API layer.\nDefault is `Error` (the most common severity for a deliberately\nfiled event). The legacy syslog severities `emergency` / `alert` /\n`notice` have been retired — see the\n`2026-05-29-000000-0000_restrict_severities` migration; the\n`FromStr` impl still accepts them as aliases for forward-compat with\nany device that hasn't been updated.",
@@ -7604,6 +8751,25 @@
           }
         }
       },
+      "UpdateBackupConfigArgs": {
+        "type": "object",
+        "required": [
+          "server_group_id"
+        ],
+        "properties": {
+          "region": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "New region (or None to clear). Changing the region is allowed but is\neffectively a repo migration — the UI warns. Structural fields\n(bucket/role/mode) are not editable here."
+          },
+          "server_group_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
       "UpdateChangelogArgs": {
         "type": "object",
         "required": [
@@ -7834,6 +9000,10 @@
     {
       "name": "admins",
       "description": "Admin email allow-list management."
+    },
+    {
+      "name": "backups",
+      "description": "Group backup-repo onboarding, escrow, scheduling, and stats."
     },
     {
       "name": "bestool",

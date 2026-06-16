@@ -13,6 +13,8 @@ import { useApi } from "./api";
 import { AdminProvider } from "./hooks/useIsAdmin";
 import { useReloadInterval } from "./hooks/useReloadInterval";
 import Admins from "./routes/Admins";
+import BackupConfig from "./routes/BackupConfig";
+import BackupPanel from "./routes/BackupPanel";
 import Bestool from "./routes/Bestool";
 import BestoolSnippetDetail from "./routes/BestoolSnippetDetail";
 import BestoolSnippets from "./routes/BestoolSnippets";
@@ -193,6 +195,14 @@ export default function App() {
 					<Route path="/groups/new" element={<GroupEdit />} />
 					<Route path="/groups/:id" element={<GroupDetail />} />
 					<Route path="/groups/:id/edit" element={<GroupEdit />} />
+					<Route
+						path="/groups/:id/backups"
+						element={<BackupPanel />}
+					/>
+					<Route
+						path="/groups/:id/backups/config"
+						element={<BackupConfig />}
+					/>
 					<Route path="/devices" element={<Devices />}>
 						<Route index element={<DevicesSearch />} />
 						<Route
