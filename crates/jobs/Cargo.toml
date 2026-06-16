@@ -11,14 +11,21 @@ authors = [
 ]
 
 [dependencies]
+aws-config.workspace = true
+aws-sdk-cloudwatch.workspace = true
+aws-sdk-s3.workspace = true
+aws-sdk-sts.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
 commons-errors = { path = "../commons-errors" }
 commons-servers = { path = "../commons-servers" }
 commons-types = { path = "../commons-types" }
 database = { path = "../database" }
 diesel-async = { workspace = true, features = ["mobc", "postgres"] }
+futures = { workspace = true }
 hostname = "0.4.2"
 jiff = { workspace = true }
+k8s-openapi.workspace = true
+kube.workspace = true
 lloggs = { workspace = true, features = ["miette-7"] }
 miette = { workspace = true, features = ["fancy"] }
 reqwest = { workspace = true, features = ["json"] }

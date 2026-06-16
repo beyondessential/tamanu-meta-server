@@ -5,7 +5,130 @@
 
 use std::time::Duration;
 
-use commons_types::Uuid;
+use commons_types::{
+	Uuid,
+	server::{rank::ServerRank, tags::TagMap},
+};
+use jiff::{SignedDuration, Timestamp};
+use serde::{Deserialize, Serialize};
+
+/// The kind of per-group backup Job the schedulers spawn. The string form is
+/// the `canopy-backup-kind` label and the `generateName` segment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JobKind {
+	MaintQuick,
+	MaintFull,
+	Inspect,
+	Init,
+}
+
+impl JobKind {
+	pub fn as_str(self) -> &'static str {
+		match self {
+			JobKind::MaintQuick => "maint-quick",
+			JobKind::MaintFull => "maint-full",
+			JobKind::Inspect => "inspect",
+			JobKind::Init => "init",
+		}
+	}
+}
+
+/// A kopia keep-policy, mirroring the `retention` JSONB
+/// (`server_group_backup_config` / `backup_type_defaults`). The org floor
+/// (`keep_daily 7 / weekly 4 / monthly 6`) is enforced in code via
+/// [`enforce_floor`](Self::enforce_floor); `keep_latest` is never floored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RetentionPolicy {
+	#[serde(default = "keep_latest_default")]
+	pub keep_latest: u32,
+	#[serde(default)]
+	pub keep_daily: u32,
+	#[serde(default)]
+	pub keep_weekly: u32,
+	#[serde(default)]
+	pub keep_monthly: u32,
+	#[serde(default)]
+	pub keep_annual: u32,
+}
+
+fn keep_latest_default() -> u32 {
+	1
+}
+
+impl RetentionPolicy {
+	pub const FLOOR_DAILY: u32 = 7;
+	pub const FLOOR_WEEKLY: u32 = 4;
+	pub const FLOOR_MONTHLY: u32 = 6;
+
+	/// Raise any sub-floor keep value up to the org minimum (a per-group value
+	/// may only raise, never lower). `keep_latest`/`keep_annual` untouched.
+	pub fn enforce_floor(mut self) -> Self {
+		self.keep_daily = self.keep_daily.max(Self::FLOOR_DAILY);
+		self.keep_weekly = self.keep_weekly.max(Self::FLOOR_WEEKLY);
+		self.keep_monthly = self.keep_monthly.max(Self::FLOOR_MONTHLY);
+		self
+	}
+}
+
+/// The three `billing.*` pod labels spawned Jobs carry for AWS cost allocation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BillingLabels {
+	pub product: String,
+	pub deployment: String,
+	/// `None` ⇒ omit the `billing.stage` label (group with no ranked members);
+	/// a wrong `prod` would mis-attribute cost.
+	pub stage: Option<String>,
+}
+
+/// Map a [`ServerRank`] to the CUR stage string ops already emits. **Gotcha:**
+/// `Production` maps to `"prod"`, NOT the `Display` form `"production"`; the
+/// others coincide but are mapped explicitly so a `Display` rename can't
+/// silently break CUR tags.
+pub fn stage_for_rank(rank: ServerRank) -> &'static str {
+	match rank {
+		ServerRank::Production => "prod",
+		ServerRank::Clone => "clone",
+		ServerRank::Demo => "demo",
+		ServerRank::Test => "test",
+		ServerRank::Dev => "dev",
+	}
+}
+
+impl BillingLabels {
+	/// Derive labels from a group's tags, name, and highest member rank.
+	/// Explicit `billing.*` tags win; otherwise `product = "tamanu"`,
+	/// `deployment = group name`, `stage = mapped highest rank` (omitted when
+	/// the group has no ranked members).
+	pub fn from_group(tags: &TagMap, group_name: &str, highest_rank: Option<ServerRank>) -> Self {
+		BillingLabels {
+			product: tags
+				.0
+				.get("billing.product")
+				.cloned()
+				.unwrap_or_else(|| "tamanu".to_string()),
+			deployment: tags
+				.0
+				.get("billing.deployment")
+				.cloned()
+				.unwrap_or_else(|| group_name.to_string()),
+			stage: tags
+				.0
+				.get("billing.stage")
+				.cloned()
+				.or_else(|| highest_rank.map(|r| stage_for_rank(r).to_string())),
+		}
+	}
+}
+
+/// Has a full cadence `window` elapsed since this kind of work last ran for a
+/// group? `None` (never run) ⇒ due. Combine with [`slot_is_due`] in the loop so
+/// the spawn lands on the group's stable jittered slot within the window.
+pub fn is_due(window: Duration, last: Option<Timestamp>, now: Timestamp) -> bool {
+	match last {
+		None => true,
+		Some(last) => now.duration_since(last) >= SignedDuration::from_secs(window.as_secs() as i64),
+	}
+}
 
 /// Stable per-group jitter slot: `hash(group_id) mod window`.
 ///
@@ -68,5 +191,70 @@ mod tests {
 		if slot >= 1 {
 			assert!(!slot_is_due(g, window, tick, slot - 1));
 		}
+	}
+
+	#[test]
+	fn retention_floor_raises_below_keeps_above() {
+		let r = RetentionPolicy {
+			keep_latest: 1,
+			keep_daily: 3,
+			keep_weekly: 4,
+			keep_monthly: 99,
+			keep_annual: 0,
+		}
+		.enforce_floor();
+		assert_eq!(r.keep_daily, 7, "raised to floor");
+		assert_eq!(r.keep_weekly, 4, "at floor, unchanged");
+		assert_eq!(r.keep_monthly, 99, "above floor preserved");
+		assert_eq!(r.keep_latest, 1, "keep_latest never floored");
+	}
+
+	#[test]
+	fn retention_json_roundtrip_defaults() {
+		// keep_latest defaults to 1, others to 0, when absent.
+		let r: RetentionPolicy = serde_json::from_str(r#"{"keep_daily":7}"#).unwrap();
+		assert_eq!(r.keep_latest, 1);
+		assert_eq!(r.keep_daily, 7);
+		assert_eq!(r.keep_weekly, 0);
+	}
+
+	#[test]
+	fn stage_mapping_production_is_prod() {
+		assert_eq!(stage_for_rank(ServerRank::Production), "prod");
+		assert_eq!(stage_for_rank(ServerRank::Clone), "clone");
+		assert_eq!(stage_for_rank(ServerRank::Dev), "dev");
+	}
+
+	#[test]
+	fn billing_labels_defaults_and_overrides() {
+		// All-unranked group: no stage label, defaults for the rest.
+		let empty = TagMap::default();
+		let b = BillingLabels::from_group(&empty, "my-group", None);
+		assert_eq!(b.product, "tamanu");
+		assert_eq!(b.deployment, "my-group");
+		assert_eq!(b.stage, None);
+
+		// Highest rank maps in when present.
+		let b = BillingLabels::from_group(&empty, "g", Some(ServerRank::Production));
+		assert_eq!(b.stage.as_deref(), Some("prod"));
+
+		// Explicit billing.* tags win.
+		let mut tags = TagMap::default();
+		tags.0.insert("billing.product".into(), "pgro".into());
+		tags.0.insert("billing.stage".into(), "staging".into());
+		let b = BillingLabels::from_group(&tags, "g", Some(ServerRank::Production));
+		assert_eq!(b.product, "pgro");
+		assert_eq!(b.stage.as_deref(), Some("staging"));
+	}
+
+	#[test]
+	fn is_due_never_run_and_elapsed() {
+		let window = Duration::from_secs(86400);
+		let now: Timestamp = "2026-06-16T12:00:00Z".parse().unwrap();
+		assert!(is_due(window, None, now), "never run is due");
+		let recent: Timestamp = "2026-06-16T06:00:00Z".parse().unwrap();
+		assert!(!is_due(window, Some(recent), now), "6h ago, 24h window: not due");
+		let old: Timestamp = "2026-06-15T06:00:00Z".parse().unwrap();
+		assert!(is_due(window, Some(old), now), "30h ago, 24h window: due");
 	}
 }
