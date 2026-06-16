@@ -47,7 +47,7 @@ function randomLabel(prefix: string): string {
  * statement with CASCADE. */
 export async function resetSeededTables(sql: Sql): Promise<void> {
 	await sql.query(
-		"TRUNCATE statuses, issues, device_keys, servers, server_groups, devices, versions, tailscale_users, server_group_backup_config, server_group_backup_schedule, backup_requests, backup_runs, backup_repo_stats, backup_maintenance_runs RESTART IDENTITY CASCADE",
+		"TRUNCATE statuses, issues, device_keys, servers, server_groups, devices, versions, tailscale_users, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_repo_stats, backup_maintenance_runs RESTART IDENTITY CASCADE",
 	);
 }
 
@@ -256,7 +256,12 @@ export interface SeededIssue {
 export async function seedIssue(
 	sql: Sql,
 	opts: {
-		serverId: string;
+		/** Server-scoped issue. Mutually exclusive with `serverGroupId` — the
+		 * `issues` scope CHECK requires exactly one set. */
+		serverId?: string | null;
+		/** Group-scoped issue (e.g. a backup issue spanning the group). When set,
+		 * leave `serverId` unset so the row satisfies the scope constraint. */
+		serverGroupId?: string | null;
 		source?: string;
 		ref?: string;
 		severity?: string;
@@ -277,11 +282,12 @@ export async function seedIssue(
 	const resolved = opts.resolved ?? false;
 	await sql.query(
 		`INSERT INTO issues
-		 (id, server_id, device_id, source, ref, severity, message, description, active, first_seen, last_seen, resolved_at, resolved_by, resolved_reason)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW(), $10, $11, $12)`,
+		 (id, server_id, server_group_id, device_id, source, ref, severity, message, description, active, first_seen, last_seen, resolved_at, resolved_by, resolved_reason)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW(), $11, $12, $13)`,
 		[
 			id,
-			opts.serverId,
+			opts.serverId ?? null,
+			opts.serverGroupId ?? null,
 			opts.deviceId ?? null,
 			opts.source ?? "status",
 			opts.ref ?? "health",
@@ -450,6 +456,23 @@ export async function seedBackupRepoStats(
 			opts.physicalBytes ?? null,
 			opts.bucketBytes ?? null,
 		],
+	);
+}
+
+/** Seed a `server_backup_capabilities` row (what a server advertises it can
+ * back up, plus the operator-set enabled flag). */
+export async function seedServerBackupCapability(
+	sql: Sql,
+	opts: {
+		serverId: string;
+		type?: string;
+		enabled?: boolean;
+	},
+): Promise<void> {
+	await sql.query(
+		`INSERT INTO server_backup_capabilities (server_id, type, enabled)
+		 VALUES ($1, $2, $3)`,
+		[opts.serverId, opts.type ?? "tamanu-postgres", opts.enabled ?? true],
 	);
 }
 

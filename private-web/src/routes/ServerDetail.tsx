@@ -11,12 +11,14 @@ import {
 	DialogContent,
 	DialogContentText,
 	DialogTitle,
+	Divider,
 	IconButton,
 	LinearProgress,
 	Link as MuiLink,
 	Paper,
 	Popover,
 	Stack,
+	Switch,
 	TextField,
 	Tooltip,
 	Typography,
@@ -67,6 +69,7 @@ import {
 	type DeviceInfo,
 	type HealthState,
 	type OperatorPresence,
+	type ServerBackupCapabilityView,
 	type ServerDetailData,
 	type ServerGroup,
 	type ServerGroupSilencedRef,
@@ -162,6 +165,10 @@ export default function ServerDetail() {
 				refreshTick={refreshTick}
 			/>
 			{data.group && <GroupSection group={data.group} />}
+			<BackupCapabilitiesSection
+				serverId={data.server.id}
+				isAdmin={admin}
+			/>
 			{(data.server.notes || Object.keys(data.server.tags ?? {}).length > 0) && (
 				<NotesAndTagsSection
 					notes={data.server.notes}
@@ -1598,6 +1605,105 @@ function SiblingServers({
 				))}
 			</Stack>
 		</Box>
+	);
+}
+
+/// Per-(server, type) backup capabilities with an admin-only enable toggle.
+/// Reads `backups.capabilities`; the switch calls `backups.set_capability` and
+/// refetches. Capabilities are advertised by bestool, so a server with none yet
+/// renders an explicit empty state rather than disappearing.
+function BackupCapabilitiesSection({
+	serverId,
+	isAdmin,
+}: {
+	serverId: string;
+	isAdmin: boolean;
+}) {
+	const caps = useApi(
+		"backups",
+		"capabilities",
+		{ server_id: serverId },
+		[serverId],
+	);
+	return (
+		<Paper variant="outlined" sx={{ p: 2 }}>
+			<Typography variant="h6" component="h2" gutterBottom>
+				Backups
+			</Typography>
+			{caps.status === "loading" || caps.status === "idle" ? (
+				<LinearProgress />
+			) : caps.status === "error" ? (
+				<Alert severity="error">{caps.error.message}</Alert>
+			) : caps.data.length === 0 ? (
+				<Typography variant="body2" color="text.secondary">
+					No backup types registered for this server.
+				</Typography>
+			) : (
+				<Stack divider={<Divider />}>
+					{caps.data.map((cap) => (
+						<BackupCapabilityRow
+							key={cap.type}
+							serverId={serverId}
+							cap={cap}
+							isAdmin={isAdmin}
+							onChanged={caps.reload}
+						/>
+					))}
+				</Stack>
+			)}
+		</Paper>
+	);
+}
+
+function BackupCapabilityRow({
+	serverId,
+	cap,
+	isAdmin,
+	onChanged,
+}: {
+	serverId: string;
+	cap: ServerBackupCapabilityView;
+	isAdmin: boolean;
+	onChanged: () => void;
+}) {
+	const setCapability = useApiAction("backups", "set_capability");
+	const onToggle = async (enabled: boolean) => {
+		try {
+			await setCapability.call({
+				server_id: serverId,
+				type: cap.type,
+				enabled,
+			});
+			onChanged();
+		} catch {
+			/* surfaced via setCapability.error */
+		}
+	};
+	return (
+		<Stack
+			direction="row"
+			spacing={2}
+			sx={{ alignItems: "center", justifyContent: "space-between", py: 0.5 }}
+		>
+			<Typography variant="body2" sx={{ fontFamily: "monospace" }}>
+				{cap.type}
+			</Typography>
+			<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+				{setCapability.error && (
+					<Typography variant="caption" color="error">
+						{setCapability.error.message}
+					</Typography>
+				)}
+				<Switch
+					checked={cap.enabled}
+					disabled={!isAdmin || setCapability.pending}
+					onChange={(e) => onToggle(e.target.checked)}
+					slotProps={{
+						input: { "aria-label": `Enable ${cap.type} backups` },
+					}}
+				/>
+			</Stack>
+		</Stack>
 	);
 }
 

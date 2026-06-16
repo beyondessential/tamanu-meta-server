@@ -242,6 +242,45 @@
         ]
       }
     },
+    "/api/backups/capabilities": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "A server's registered backup capabilities + their enabled state. Empty when\nthe server has advertised none yet.",
+        "operationId": "backups_capabilities",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ServerBackupCapabilityView"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
     "/api/backups/create": {
       "post": {
         "tags": [
@@ -581,6 +620,45 @@
             }
           },
           "502": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/backups/set_capability": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Operator toggle of a `(server, type)` capability's enabled flag.",
+        "operationId": "backups_set_capability",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetCapabilityArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "404": {
             "description": "",
             "content": {
               "application/json": {
@@ -7606,6 +7684,39 @@
           }
         }
       },
+      "ServerArgs": {
+        "type": "object",
+        "required": [
+          "server_id"
+        ],
+        "properties": {
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "ServerBackupCapabilityView": {
+        "type": "object",
+        "description": "One `(server, type)` backup capability and whether the operator has it\nenabled. `enabled` toggles whether the scheduler issues credentials and\nschedules runs for the pair.",
+        "required": [
+          "server_id",
+          "type",
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string"
+          }
+        }
+      },
       "ServerDataUpdate": {
         "type": "object",
         "properties": {
@@ -8231,6 +8342,26 @@
             "format": "uuid"
           },
           "source": {
+            "type": "string"
+          }
+        }
+      },
+      "SetCapabilityArgs": {
+        "type": "object",
+        "required": [
+          "server_id",
+          "type",
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
             "type": "string"
           }
         }

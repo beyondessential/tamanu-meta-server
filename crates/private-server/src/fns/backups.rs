@@ -23,7 +23,7 @@ use commons_types::{
 use database::pg_duration::PgDuration;
 use database::{
 	BackupMaintenanceRun, BackupRepoStats, BackupRequest, BackupRun, NewServerGroupBackupConfig,
-	NewServerGroupBackupSchedule, RetentionPolicy, ServerGroupBackupConfig,
+	NewServerGroupBackupSchedule, RetentionPolicy, ServerBackupCapability, ServerGroupBackupConfig,
 	ServerGroupBackupSchedule, server_groups::ServerGroup,
 };
 use jiff::Timestamp;
@@ -53,6 +53,8 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(request_now))
 		.routes(routes!(cancel_request))
 		.routes(routes!(stats))
+		.routes(routes!(capabilities))
+		.routes(routes!(set_capability))
 		.routes(routes!(delete))
 }
 
@@ -215,6 +217,32 @@ pub struct BackupStatsView {
 	pub recent_runs: Vec<BackupRun>,
 	pub recent_maintenance: Vec<BackupMaintenanceRun>,
 	pub pending_requests: Vec<PendingRequestRow>,
+}
+
+/// One `(server, type)` backup capability and whether the operator has it
+/// enabled. `enabled` toggles whether the scheduler issues credentials and
+/// schedules runs for the pair.
+#[derive(Serialize, ToSchema)]
+pub struct ServerBackupCapabilityView {
+	pub server_id: Uuid,
+	#[serde(rename = "type")]
+	#[schema(value_type = String)]
+	pub r#type: BackupType,
+	pub enabled: bool,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct ServerArgs {
+	pub server_id: Uuid,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct SetCapabilityArgs {
+	pub server_id: Uuid,
+	#[serde(rename = "type")]
+	#[schema(value_type = String)]
+	pub r#type: BackupType,
+	pub enabled: bool,
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────
@@ -608,6 +636,55 @@ pub async fn stats(
 		recent_maintenance,
 		pending_requests,
 	}))
+}
+
+/// A server's registered backup capabilities + their enabled state. Empty when
+/// the server has advertised none yet.
+#[utoipa::path(
+	post,
+	path = "/capabilities",
+	operation_id = "backups_capabilities",
+	tag = "backups",
+	security(("tailscale-user" = [])),
+	request_body = ServerArgs,
+	responses((status = 200, body = Vec<ServerBackupCapabilityView>)),
+)]
+pub async fn capabilities(
+	State(state): State<AppState>,
+	Json(args): Json<ServerArgs>,
+) -> Result<Json<Vec<ServerBackupCapabilityView>>> {
+	let mut conn = state.db.get().await?;
+	let rows = ServerBackupCapability::list_for_server(&mut conn, args.server_id).await?;
+	Ok(Json(
+		rows.into_iter()
+			.map(|c| ServerBackupCapabilityView {
+				server_id: c.server_id,
+				r#type: c.r#type,
+				enabled: c.enabled,
+			})
+			.collect(),
+	))
+}
+
+/// Operator toggle of a `(server, type)` capability's enabled flag.
+#[utoipa::path(
+	post,
+	path = "/set_capability",
+	operation_id = "backups_set_capability",
+	tag = "backups",
+	security(("tailscale-admin" = [])),
+	request_body = SetCapabilityArgs,
+	responses((status = 200), (status = 404, body = ProblemDetailsSchema)),
+)]
+pub async fn set_capability(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<SetCapabilityArgs>,
+) -> Result<Json<()>> {
+	let mut conn = state.db.get().await?;
+	ServerBackupCapability::set_enabled(&mut conn, args.server_id, &args.r#type, args.enabled)
+		.await?;
+	Ok(Json(()))
 }
 
 /// Delete a group's config row (decommission). The bucket and its object-locked

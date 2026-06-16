@@ -89,6 +89,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backups/capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A server's registered backup capabilities + their enabled state. Empty when
+         *     the server has advertised none yet.
+         */
+        post: operations["backups_capabilities"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backups/create": {
         parameters: {
             query?: never;
@@ -222,6 +242,23 @@ export interface paths {
          *     `repo_password_ref` (502 on read failure).
          */
         post: operations["backups_reveal_escrow"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backups/set_capability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Operator toggle of a `(server, type)` capability's enabled flag. */
+        post: operations["backups_set_capability"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3016,6 +3053,21 @@ export interface components {
         SearchArgs: {
             query: string;
         };
+        ServerArgs: {
+            /** Format: uuid */
+            server_id: string;
+        };
+        /**
+         * @description One `(server, type)` backup capability and whether the operator has it
+         *     enabled. `enabled` toggles whether the scheduler issues credentials and
+         *     schedules runs for the pair.
+         */
+        ServerBackupCapabilityView: {
+            enabled: boolean;
+            /** Format: uuid */
+            server_id: string;
+            type: string;
+        };
         ServerDataUpdate: {
             /** Format: int64 */
             alert_when_down_for?: number | null;
@@ -3225,6 +3277,12 @@ export interface components {
             /** Format: uuid */
             server_id: string;
             source: string;
+        };
+        SetCapabilityArgs: {
+            enabled: boolean;
+            /** Format: uuid */
+            server_id: string;
+            type: string;
         };
         SetScheduleArgs: {
             /**
@@ -3696,6 +3754,29 @@ export interface operations {
             };
         };
     };
+    backups_capabilities: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerBackupCapabilityView"][];
+                };
+            };
+        };
+    };
     backups_create: {
         parameters: {
             query?: never;
@@ -3932,6 +4013,35 @@ export interface operations {
                 };
             };
             502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    backups_set_capability: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetCapabilityArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

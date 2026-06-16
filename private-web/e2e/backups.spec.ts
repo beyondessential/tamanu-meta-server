@@ -5,6 +5,7 @@ import {
 	seedBackupRun,
 	seedDevice,
 	seedServer,
+	seedServerBackupCapability,
 	seedServerGroup,
 	seedServerGroupBackupConfig,
 } from "./seed";
@@ -287,5 +288,62 @@ test.describe("backups ready: stats + backup-now", () => {
 		await expect(
 			page.getByRole("button", { name: /retry repo creation/i }),
 		).toBeVisible();
+	});
+});
+
+test.describe("server backup capabilities", () => {
+	test.beforeEach(async ({ sql }) => {
+		await resetSeededTables(sql);
+	});
+
+	test("server with no capabilities shows the empty state", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "caps-empty-group" });
+		const server = await seedServer(sql, {
+			name: "caps-empty-srv",
+			groupId: group.id,
+		});
+
+		await page.goto(`/servers/${server.id}`);
+		await expect(
+			page.getByText(/no backup types registered for this server/i),
+		).toBeVisible();
+	});
+
+	test("toggling a capability switch flips enabled in the DB", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "caps-group" });
+		const server = await seedServer(sql, {
+			name: "caps-srv",
+			groupId: group.id,
+		});
+		await seedServerBackupCapability(sql, {
+			serverId: server.id,
+			type: "tamanu-postgres",
+			enabled: false,
+		});
+
+		await page.goto(`/servers/${server.id}`);
+		const toggle = page.getByRole("switch", {
+			name: /enable tamanu-postgres backups/i,
+		});
+		await expect(toggle).not.toBeChecked();
+
+		await toggle.click();
+
+		await expect(async () => {
+			const rows = await sql.query<{ enabled: boolean }>(
+				`SELECT enabled FROM server_backup_capabilities
+				 WHERE server_id = $1 AND type = 'tamanu-postgres'`,
+				[server.id],
+			);
+			expect(rows[0]!.enabled).toBe(true);
+		}).toPass();
+
+		await expect(toggle).toBeChecked();
 	});
 });

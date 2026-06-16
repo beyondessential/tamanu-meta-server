@@ -471,10 +471,15 @@ pub async fn get_detail(
 
 		let status_lookup = Status::latest_for_server(&mut conn_status, server.id);
 
+		// A server detail page shouldn't 404 just because no versions are
+		// published yet (e.g. a fresh deployment); treat "no match" as "unknown
+		// latest" so `version_distance` falls back to None.
 		let latest_version_lookup = async {
-			Version::get_latest_matching(&mut conn, "*".parse()?)
-				.await
-				.map(|v| v.as_semver())
+			match Version::get_latest_matching(&mut conn, "*".parse()?).await {
+				Ok(v) => Ok::<_, AppError>(Some(v.as_semver())),
+				Err(AppError::NoMatchingVersions) => Ok(None),
+				Err(e) => Err(e),
+			}
 		};
 
 		let (group_result, status_result) = join(group_lookup, status_lookup).await;
@@ -518,7 +523,9 @@ pub async fn get_detail(
 		let platform = st.platform();
 		let postgres = st.postgres_version();
 		let nodejs = connection.and_then(|d| d.nodejs_version());
-		let version_distance = st.distance_from_version(&latest_version);
+		let version_distance = latest_version
+			.as_ref()
+			.and_then(|lv| st.distance_from_version(lv));
 		let min_chrome_version = if let Some(ref version) = st.version {
 			compute_min_chrome_version(&mut conn, version).await
 		} else {

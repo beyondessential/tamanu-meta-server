@@ -143,6 +143,9 @@ export type BackupRepoStats = Solidify<Schemas["BackupRepoStats"]>;
 export type BackupRun = Solidify<Schemas["BackupRun"]>;
 export type BackupMaintenanceRun = Solidify<Schemas["BackupMaintenanceRun"]>;
 export type PendingRequestRow = Solidify<Schemas["PendingRequestRow"]>;
+export type ServerBackupCapabilityView = Solidify<
+	Schemas["ServerBackupCapabilityView"]
+>;
 
 // `mode`/`status` arrive as plain strings on the wire (the Rust enums use a
 // custom Text serializer, so utoipa emits `string`). Narrow them in the UI so
