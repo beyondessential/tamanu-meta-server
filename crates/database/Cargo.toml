@@ -44,7 +44,7 @@ utoipa.workspace = true
 uuid = { version = "1.23.1", features = ["serde", "v4"] }
 
 bestool-postgres = "1.0.9"
-getrandom = "0.3.4"
+getrandom = "0.4.2"
 
 [dev-dependencies]
 commons-tests = { path = "../commons-tests" }
