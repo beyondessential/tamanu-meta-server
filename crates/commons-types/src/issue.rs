@@ -131,7 +131,7 @@ where
 	}
 }
 
-/// Reason an issue or incident was resolved by a human.
+/// Reason an issue or incident was resolved by an operator.
 ///
 /// Stored as text in Postgres, validated as this enum at the API layer.
 /// Categories follow common operational practice (PagerDuty/Sentry/Opsgenie):

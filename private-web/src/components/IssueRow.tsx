@@ -8,7 +8,6 @@ import {
 	Pagination,
 	Stack,
 	TextField,
-	Tooltip,
 	Typography,
 } from "@mui/material";
 import CheckCircleOutlinedIcon from "@mui/icons-material/CheckCircleOutlined";
@@ -23,11 +22,11 @@ import { useIsAdmin } from "../hooks/useIsAdmin";
 import { humanDuration } from "../lib/humanDuration";
 import MessageView from "./MessageView";
 import NotesList, { AddNoteButton } from "./NotesList";
+import ResolverAvatar from "./ResolverAvatar";
 import ServerNameWithGroup from "./ServerNameWithGroup";
 import SeverityChip from "./SeverityChip";
 import StatusSnapshotPanel, { StatusSnapshotButton } from "./StatusSnapshot";
 import TimeAgo from "./TimeAgo";
-import UserAvatar from "./UserAvatar";
 import {
 	RESOLVED_REASONS,
 	RESOLVED_REASON_LABEL,
@@ -212,7 +211,7 @@ function Header({
 }
 
 /** Header time slot. For closed issues, gives the closure context — reason
- * (human-resolved) or "on its own" (device sent inactive) — plus the
+ * (operator-resolved) or "on its own" (device sent inactive) — plus the
  * lifetime. For still-active issues, falls back to last-seen. */
 function ClosureOrTime({ issue }: { issue: IssueData }) {
 	if (issue.resolved_at) {
@@ -245,19 +244,12 @@ function ClosureOrTime({ issue }: { issue: IssueData }) {
 function HeaderActor({ issue }: { issue: IssueData }) {
 	if (!issue.resolved_at) return null;
 	return (
-		<Tooltip
-			title={`resolved (${issue.resolved_reason ?? "?"}) by ${
-				issue.resolved_by_name ?? issue.resolved_by ?? "?"
-			}`}
-		>
-			<span>
-				<UserAvatar
-					login={issue.resolved_by}
-					name={issue.resolved_by_name}
-					profilePic={issue.resolved_by_pic}
-				/>
-			</span>
-		</Tooltip>
+		<ResolverAvatar
+			resolvedBy={issue.resolved_by}
+			resolvedByName={issue.resolved_by_name}
+			resolvedByPic={issue.resolved_by_pic}
+			resolvedReason={issue.resolved_reason}
+		/>
 	);
 }
 
