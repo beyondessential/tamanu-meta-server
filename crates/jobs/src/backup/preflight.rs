@@ -1,7 +1,5 @@
-//! Upstream-access preflight (component 4, AWS leg). Watches Canopy's *own*
-//! access to each group's bucket/role — not the devices — and alerts (never
-//! gates readiness). See docs/plans/specs/canopy-jobs-detection-preflight.md
-//! ("Upstream preflight").
+//! Upstream-access preflight: watches Canopy's *own* access to each group's
+//! bucket/role — not the devices — and alerts (never gates readiness).
 //!
 //! - Shared, every ~minute: `sts:GetCallerIdentity` (IRSA web-identity valid?).
 //! - Per ready group, hourly (hash-jittered): assume the per-bucket role both

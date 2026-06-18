@@ -1,98 +1,73 @@
-//! Maintenance scheduler (component 3). Per minute tick: poll finished Jobs and
-//! close their `backup_maintenance_runs` rows; then, for each `ready` group due
-//! on its hash-jittered cadence (quick-daily / full-weekly; full subsumes
-//! quick) and not already running, record a run and spawn the kopia maintenance
-//! Job. The three-step cycle (assert-retention → snapshot expire → maintenance
-//! run) executes inside the Job; this loop only schedules + records.
+//! Maintenance scheduler. Per-minute tick: list configs, and for each
+//! `provisioning` group needing init and each `ready` group due on its
+//! hash-jittered cadence (quick-daily / full-weekly; full subsumes quick),
+//! claim a per-group + concurrency slot and **spawn a tokio task** that runs
+//! kopia in-process ([`super::kopia`]) and writes the result inline
+//! ([`super::complete`]).
 //!
-//! Net-new kube/AWS infra: the kube client is built at startup and rebuilt in
-//! the loop on failure (so an API-server blip doesn't kill the pod), mirroring
-//! how `reachability` tolerates a missing tailnet directory.
+//! The in-flight group set ([`super::worker`]) ensures one op per group at a
+//! time across maintenance + inspection + init, and the semaphore caps total
+//! concurrency.
 //!
-//! NOTE (flagged): retention is per-`(group, type)` under the backup-types
-//! addendum; this first cut asserts the org-floor default repo-wide. Resolving
-//! each active type's effective policy is the follow-up. The ops-side
-//! single-replica Deployment + IRSA ServiceAccounts are owned by the ops spec.
+//! Retention is resolved per-`(group, type)` (schedule override → type default →
+//! org floor) and applied per source by the kopia layer. The kopia subprocess
+//! assumes the group's per-bucket role via web-identity directly (refreshing),
+//! and reads `KOPIA_PASSWORD` from the group's k8s Secret.
 
-use std::time::Duration;
+use std::{collections::HashSet, time::Duration};
 
-use crate::backup::{
-	jobspec::{JobParams, build_job},
-	spawn::{JobSpawner, KubeSpawner},
-};
-use commons_servers::backup_jobs::{BillingLabels, JobKind, RetentionPolicy, is_due, slot_is_due};
+use commons_servers::backup_jobs::{JobKind, effective_retention_for_group, is_due, slot_is_due};
 use database::{
 	BackupConfigStatus, BackupMaintenanceRun, MaintenanceKind, RunOutcome, ServerGroupBackupConfig,
-	server_groups::ServerGroup,
 };
 use jiff::Timestamp;
 use tokio::{
 	task::{self, JoinHandle},
 	time::sleep,
 };
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
+
+use super::{
+	complete,
+	kopia::{self, KopiaEnv, RetentionMap},
+	worker::Worker,
+};
 
 const TICK: Duration = Duration::from_secs(60);
 const DAY: Duration = Duration::from_secs(24 * 3600);
 const WEEK: Duration = Duration::from_secs(7 * 24 * 3600);
-
-/// Scheduler config read from the environment (like DATABASE_URL), so one
-/// binary works across stacks.
-struct Cfg {
-	namespace: String,
-	image: String,
-	maintenance_sa: String,
-	password_key: String,
-}
-
-impl Cfg {
-	fn from_env() -> Self {
-		Cfg {
-			namespace: env_or("CANOPY_NAMESPACE", "tamanu-meta"),
-			image: env_or("CANOPY_BACKUP_IMAGE", "kopia-job:latest"),
-			maintenance_sa: env_or("CANOPY_BACKUP_MAINTENANCE_SA", "canopy-maintenance"),
-			password_key: env_or("CANOPY_BACKUP_PASSWORD_KEY", "password"),
-		}
-	}
-}
-
-fn env_or(key: &str, default: &str) -> String {
-	std::env::var(key).unwrap_or_else(|_| default.to_string())
-}
 
 fn secs_into(now: Timestamp, window: Duration) -> u64 {
 	let w = window.as_secs().max(1) as i64;
 	now.as_second().rem_euclid(w) as u64
 }
 
-/// Close out any finished maintenance Jobs, then delete them.
-async fn reconcile_finished(db: &mut diesel_async::AsyncPgConnection, spawner: &KubeSpawner) {
-	let finished = match spawner.finished_jobs().await {
-		Ok(f) => f,
-		Err(e) => {
-			warn!("maintenance: listing finished jobs failed: {e}");
-			return;
-		}
-	};
-	for job in finished {
-		// Only maintenance Jobs carry a run id to close.
-		if let Some(run_id) = job.run_id {
-			let outcome = if job.succeeded {
-				RunOutcome::Success
-			} else {
-				RunOutcome::Failure
-			};
-			if let Err(e) = BackupMaintenanceRun::finish(db, run_id, outcome, None, None).await {
-				error!("maintenance: finishing run {run_id} failed: {e}");
-				continue;
-			}
-		}
-		if let Err(e) = spawner.delete_job(&job.name).await {
-			warn!(
-				"maintenance: deleting finished job {} failed: {e}",
-				job.name
-			);
-		}
+/// Build the `{type → policy}` retention map for a group: the effective
+/// `RetentionPolicy` per enabled backup type, serialised through JSON into the
+/// kopia layer's [`RetentionMap`]. Empty when the group has no enabled types
+/// (the kopia layer falls back to the org floor for the global baseline).
+async fn retention_map_for_group(
+	db: &mut diesel_async::AsyncPgConnection,
+	group_id: uuid::Uuid,
+) -> Result<RetentionMap, String> {
+	let pairs = effective_retention_for_group(db, group_id)
+		.await
+		.map_err(|e| e.to_string())?;
+	let mut map = RetentionMap::new();
+	for (ty, policy) in pairs {
+		let value = serde_json::to_value(policy).map_err(|e| e.to_string())?;
+		let policy: kopia::Policy = serde_json::from_value(value).map_err(|e| e.to_string())?;
+		map.insert(ty.as_str().to_string(), policy);
+	}
+	Ok(map)
+}
+
+/// Build the per-op kopia env from a group's config + its repo password.
+fn kopia_env(config: &ServerGroupBackupConfig, password: String) -> KopiaEnv {
+	KopiaEnv {
+		target_role_arn: config.target_role_arn.clone(),
+		region: config.region.clone(),
+		password,
 	}
 }
 
@@ -113,27 +88,172 @@ fn due_kind(
 	quick_due.then_some(JobKind::MaintQuick)
 }
 
-async fn tick(
-	db: &mut diesel_async::AsyncPgConnection,
-	spawner: &KubeSpawner,
-	cfg: &Cfg,
-) -> Result<(), String> {
-	reconcile_finished(db, spawner).await;
+/// Whether a config needs its init (repo-create) op run this tick. True iff the
+/// row is freshly `provisioning` with no recorded init error and no op already
+/// in-flight for the group. A failed attempt sets `last_init_error`, so we don't
+/// retry until the operator clears it via `mark_provisioning` — this prevents an
+/// infinite per-tick retry loop.
+fn needs_init(config: &ServerGroupBackupConfig, in_flight: &HashSet<uuid::Uuid>) -> bool {
+	config.status == BackupConfigStatus::Provisioning
+		&& config.last_init_error.is_none()
+		&& !in_flight.contains(&config.group_id)
+}
 
-	let ready: Vec<ServerGroupBackupConfig> = ServerGroupBackupConfig::list(db)
+/// Run an init op in a spawned task: read the password, resolve retention, run
+/// `kopia::run_init`, then advance the config (or record the error). The guard
+/// drops on completion, releasing the group + permit.
+fn spawn_init(worker: &Worker, config: ServerGroupBackupConfig) {
+	let Some(guard) = worker.try_claim(config.group_id) else {
+		return;
+	};
+	let worker = worker.clone();
+	task::spawn(async move {
+		let _guard = guard;
+		let group_id = config.group_id;
+		let result = run_init_op(&worker, &config).await;
+
+		let Ok(mut db) = worker.pool.get().await else {
+			error!(group = %group_id, "init: failed to get db connection to record result");
+			return;
+		};
+		match result {
+			Ok(()) => {
+				if let Err(e) = complete::complete_init(&mut db, group_id, true, None).await {
+					error!(group = %group_id, "init: recording success failed: {e}");
+				} else {
+					info!(group = %group_id, "init complete");
+				}
+			}
+			Err(e) => {
+				let msg = format!("{e:#}");
+				error!(group = %group_id, "init failed: {msg}");
+				if let Err(e) = complete::complete_init(&mut db, group_id, false, Some(&msg)).await {
+					error!(group = %group_id, "init: recording failure failed: {e}");
+				}
+			}
+		}
+	});
+}
+
+/// The kopia side of an init op: read the password + retention, run init.
+async fn run_init_op(worker: &Worker, config: &ServerGroupBackupConfig) -> anyhow::Result<()> {
+	let password = worker.read_repo_password(&config.repo_password_ref).await?;
+	let env = kopia_env(config, password);
+	let retention = {
+		let mut db = worker
+			.pool
+			.get()
+			.await
+			.map_err(|e| anyhow::anyhow!("db connection: {e}"))?;
+		retention_map_for_group(&mut db, config.group_id)
+			.await
+			.map_err(|e| anyhow::anyhow!(e))?
+	};
+	let region = config.region.as_deref().unwrap_or_default();
+	kopia::run_init(&env, &config.bucket, &config.prefix, region, &retention).await
+}
+
+/// Run a maintenance op in a spawned task: start the run row, read the password,
+/// resolve retention, run `kopia::run_maintenance`, then close the run row.
+fn spawn_maint(worker: &Worker, config: ServerGroupBackupConfig, kind: MaintenanceKind) {
+	let Some(guard) = worker.try_claim(config.group_id) else {
+		return;
+	};
+	let worker = worker.clone();
+	task::spawn(async move {
+		let _guard = guard;
+		let group_id = config.group_id;
+
+		// Open the run row first so a crash leaves it visibly open.
+		let run_id = {
+			let Ok(mut db) = worker.pool.get().await else {
+				error!(group = %group_id, "maintenance: failed to get db connection");
+				return;
+			};
+			match BackupMaintenanceRun::start(&mut db, group_id, kind).await {
+				Ok(id) => id,
+				Err(e) => {
+					error!(group = %group_id, "maintenance: starting run failed: {e}");
+					return;
+				}
+			}
+		};
+
+		let result = run_maint_op(&worker, &config, kind).await;
+
+		let Ok(mut db) = worker.pool.get().await else {
+			error!(group = %group_id, run_id, "maintenance: failed to get db connection to record result");
+			return;
+		};
+		let recorded = match &result {
+			Ok(outcome) => complete::complete_maint(&mut db, run_id, Some(outcome), None).await,
+			Err(e) => {
+				let msg = format!("{e:#}");
+				error!(group = %group_id, run_id, "maintenance failed: {msg}");
+				complete::complete_maint(&mut db, run_id, None, Some(msg)).await
+			}
+		};
+		match recorded {
+			Ok(()) if result.is_ok() => {
+				info!(group = %group_id, kind = ?kind, run_id, "maintenance complete")
+			}
+			Ok(()) => {}
+			Err(e) => error!(group = %group_id, run_id, "maintenance: recording result failed: {e}"),
+		}
+	});
+}
+
+/// The kopia side of a maintenance op.
+async fn run_maint_op(
+	worker: &Worker,
+	config: &ServerGroupBackupConfig,
+	kind: MaintenanceKind,
+) -> anyhow::Result<kopia::MaintOutcome> {
+	let password = worker.read_repo_password(&config.repo_password_ref).await?;
+	let env = kopia_env(config, password);
+	let retention = {
+		let mut db = worker
+			.pool
+			.get()
+			.await
+			.map_err(|e| anyhow::anyhow!("db connection: {e}"))?;
+		retention_map_for_group(&mut db, config.group_id)
+			.await
+			.map_err(|e| anyhow::anyhow!(e))?
+	};
+	let region = config.region.as_deref().unwrap_or_default();
+	kopia::run_maintenance(&env, &config.bucket, &config.prefix, region, kind, &retention).await
+}
+
+async fn tick(worker: &Worker) -> Result<(), String> {
+	let mut db = worker.pool.get().await.map_err(|e| e.to_string())?;
+	let all: Vec<ServerGroupBackupConfig> = ServerGroupBackupConfig::list(&mut db)
 		.await
-		.map_err(|e| e.to_string())?
-		.into_iter()
-		.filter(|c| c.status == BackupConfigStatus::Ready)
-		.collect();
-	let active = spawner.active_groups().await?;
+		.map_err(|e| e.to_string())?;
 	let now = Timestamp::now();
 
-	for c in &ready {
-		if active.contains(&c.group_id) {
-			continue; // already mid-run
+	// Snapshot the in-flight set once for the cheap skip checks; `try_claim`
+	// re-checks atomically when we actually spawn.
+	let in_flight = worker.in_flight_snapshot();
+
+	// Init pass: create the kopia repo for freshly-provisioned groups.
+	for c in &all {
+		if !needs_init(c, &in_flight) {
+			continue;
 		}
-		let runs = BackupMaintenanceRun::list_for_group(db, c.group_id, 20)
+		spawn_init(worker, c.clone());
+	}
+
+	// Maintenance pass: ready groups due on their jittered cadence.
+	let ready: Vec<&ServerGroupBackupConfig> = all
+		.iter()
+		.filter(|c| c.status == BackupConfigStatus::Ready)
+		.collect();
+	for c in &ready {
+		if in_flight.contains(&c.group_id) {
+			continue; // already mid-op
+		}
+		let runs = BackupMaintenanceRun::list_for_group(&mut db, c.group_id, 20)
 			.await
 			.map_err(|e| e.to_string())?;
 		let succeeded = |k: MaintenanceKind| {
@@ -155,78 +275,16 @@ async fn tick(
 			JobKind::MaintFull => MaintenanceKind::Full,
 			_ => MaintenanceKind::Quick,
 		};
-
-		let run_id = BackupMaintenanceRun::start(db, c.group_id, maint_kind)
-			.await
-			.map_err(|e| e.to_string())?;
-		let highest = ServerGroup::highest_member_ranks(db, &[c.group_id])
-			.await
-			.map_err(|e| e.to_string())?
-			.remove(&c.group_id);
-		let group = ServerGroup::get_by_id(db, c.group_id)
-			.await
-			.map_err(|e| e.to_string())?;
-		let billing = BillingLabels::from_group(&group.tags, &group.name, highest);
-		let retention_json = serde_json::to_string(
-			&RetentionPolicy {
-				keep_latest: 1,
-				keep_daily: 0,
-				keep_weekly: 0,
-				keep_monthly: 0,
-				keep_annual: 0,
-			}
-			.enforce_floor(),
-		)
-		.unwrap_or_else(|_| "{}".to_string());
-
-		let job = build_job(&JobParams {
-			namespace: cfg.namespace.clone(),
-			kind: job_kind,
-			group_id: c.group_id,
-			image: cfg.image.clone(),
-			service_account: cfg.maintenance_sa.clone(),
-			bucket: c.bucket.clone(),
-			prefix: c.prefix.clone(),
-			region: c.region.clone(),
-			target_role_arn: c.target_role_arn.clone(),
-			retention_json,
-			repo_password_secret: c.repo_password_ref.clone(),
-			repo_password_key: cfg.password_key.clone(),
-			billing,
-			run_id: Some(run_id),
-		});
-		match spawner.spawn(job).await {
-			Ok(name) => {
-				info!(group = %c.group_id, kind = job_kind.as_str(), run_id, "spawned maintenance job {name}")
-			}
-			Err(e) => error!(group = %c.group_id, "spawning maintenance job failed: {e}"),
-		}
+		spawn_maint(worker, (*c).clone(), maint_kind);
 	}
 	Ok(())
 }
 
-pub fn spawn() -> JoinHandle<()> {
-	let pool = database::init();
-	let cfg = Cfg::from_env();
+pub fn spawn(worker: Worker) -> JoinHandle<()> {
 	task::spawn(async move {
-		let mut spawner: Option<KubeSpawner> = None;
 		loop {
 			sleep(TICK).await;
-			if spawner.is_none() {
-				match kube::Client::try_default().await {
-					Ok(client) => spawner = Some(KubeSpawner::new(client, &cfg.namespace)),
-					Err(e) => {
-						error!("maintenance: kube client init failed (will retry): {e}");
-						continue;
-					}
-				}
-			}
-			let Some(spawner) = &spawner else { continue };
-			let Ok(mut db) = pool.get().await else {
-				error!("Failed to get database connection");
-				continue;
-			};
-			if let Err(e) = tick(&mut db, spawner, &cfg).await {
+			if let Err(e) = tick(&worker).await {
 				error!("maintenance tick failed: {e}");
 			} else {
 				debug!("maintenance tick ok");
@@ -238,6 +296,58 @@ pub fn spawn() -> JoinHandle<()> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	fn config(
+		group_id: uuid::Uuid,
+		status: BackupConfigStatus,
+		last_init_error: Option<&str>,
+	) -> ServerGroupBackupConfig {
+		let now = Timestamp::now();
+		ServerGroupBackupConfig {
+			group_id,
+			bucket: "b".into(),
+			prefix: String::new(),
+			target_role_arn: "arn".into(),
+			region: None,
+			repo_password_ref: "s".into(),
+			status,
+			created_at: now,
+			updated_at: now,
+			mode: commons_types::backup::BackupRepoMode::FromBirth,
+			last_init_error: last_init_error.map(str::to_string),
+			escrow_acked_at: None,
+			escrow_acked_by: None,
+		}
+	}
+
+	#[test]
+	fn init_selection_logic() {
+		let g = uuid::Uuid::from_u128(7);
+		let empty = HashSet::new();
+		let busy = HashSet::from([g]);
+
+		// Fresh provisioning, no error, not in-flight → run init.
+		assert!(needs_init(
+			&config(g, BackupConfigStatus::Provisioning, None),
+			&empty
+		));
+		// Provisioning but a prior attempt failed → wait for operator retry.
+		assert!(!needs_init(
+			&config(g, BackupConfigStatus::Provisioning, Some("boom")),
+			&empty
+		));
+		// Provisioning but an op is already in-flight for the group → don't
+		// double-run.
+		assert!(!needs_init(
+			&config(g, BackupConfigStatus::Provisioning, None),
+			&busy
+		));
+		// Already past provisioning → not an init candidate.
+		assert!(!needs_init(
+			&config(g, BackupConfigStatus::Ready, None),
+			&empty
+		));
+	}
 
 	#[test]
 	fn maintenance_due_logic() {

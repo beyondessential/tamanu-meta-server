@@ -12,6 +12,7 @@ members = [
 ]
 
 [workspace.dependencies]
+anyhow = "1"
 aws-config = "1.8.18"
 aws-sdk-cloudwatch = "1.116.0"
 aws-sdk-s3 = "1.136.0"

@@ -3511,6 +3511,7 @@ dependencies = [
 name = "jobs"
 version = "6.6.6"
 dependencies = [
+ "anyhow",
  "aws-config",
  "aws-sdk-cloudwatch",
  "aws-sdk-s3",
@@ -3518,8 +3519,10 @@ dependencies = [
  "clap",
  "commons-errors",
  "commons-servers",
+ "commons-tests",
  "commons-types",
  "database",
+ "diesel",
  "diesel-async",
  "futures",
  "hostname",

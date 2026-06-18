@@ -1,3 +1,6 @@
 /.git
+/.jj
 /.github
 /target
+/private-web/node_modules
+/private-web/dist

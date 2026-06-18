@@ -5,12 +5,17 @@
 
 use std::time::Duration;
 
+use commons_errors::Result;
 use commons_types::{
 	Uuid,
+	backup::BackupType,
 	server::{rank::ServerRank, tags::TagMap},
 };
+use database::{BackupTypeDefault, ServerBackupCapability, ServerGroupBackupSchedule};
+use diesel_async::AsyncPgConnection;
 use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// The kind of per-group backup Job the schedulers spawn. The string form is
 /// the `canopy-backup-kind` label and the `generateName` segment.
@@ -68,6 +73,82 @@ impl RetentionPolicy {
 		self.keep_monthly = self.keep_monthly.max(Self::FLOOR_MONTHLY);
 		self
 	}
+
+	/// The org-floor baseline: a zero policy with the floor applied (RetentionPolicy
+	/// has no `Default`, so we build it explicitly here).
+	fn floor_baseline() -> Self {
+		RetentionPolicy {
+			keep_latest: keep_latest_default(),
+			keep_daily: 0,
+			keep_weekly: 0,
+			keep_monthly: 0,
+			keep_annual: 0,
+		}
+		.enforce_floor()
+	}
+}
+
+/// Merge a per-`(group, type)` retention override with the type's default and
+/// the org floor: the schedule override JSON wins; else the type default JSON;
+/// else (or on parse error) the floor baseline. The result always has the floor
+/// enforced. Pure so the precedence/floor logic is unit-testable without a DB.
+fn resolve_policy(override_json: Option<Value>, default_json: Option<Value>) -> RetentionPolicy {
+	let json = override_json.or(default_json);
+	match json.map(serde_json::from_value::<RetentionPolicy>) {
+		Some(Ok(policy)) => policy.enforce_floor(),
+		_ => RetentionPolicy::floor_baseline(),
+	}
+}
+
+/// Resolve the effective retention policy for each backup type enabled in the
+/// group: schedule override → type default → org floor, with the floor always
+/// enforced. Returns one `(type, policy)` pair per enabled type.
+pub async fn effective_retention_for_group(
+	db: &mut AsyncPgConnection,
+	group_id: Uuid,
+) -> Result<Vec<(BackupType, RetentionPolicy)>> {
+	let types = ServerBackupCapability::enabled_types_for_group(db, group_id).await?;
+	let mut out = Vec::with_capacity(types.len());
+	for ty in types {
+		let override_json = ServerGroupBackupSchedule::get(db, group_id, &ty)
+			.await?
+			.and_then(|s| s.retention);
+		let default_json = BackupTypeDefault::get(db, &ty)
+			.await?
+			.map(|d| d.default_retention);
+		out.push((ty, resolve_policy(override_json, default_json)));
+	}
+	Ok(out)
+}
+
+/// Resolve the effective backup interval for the group: per enabled type, the
+/// schedule `expected_interval` else the type `default_interval`; the group's
+/// effective cadence is the MINIMUM across types (the most-frequent type drives
+/// it). `None` when no enabled type has any interval.
+pub async fn effective_interval_for_group(
+	db: &mut AsyncPgConnection,
+	group_id: Uuid,
+) -> Result<Option<Duration>> {
+	let types = ServerBackupCapability::enabled_types_for_group(db, group_id).await?;
+	let mut min: Option<Duration> = None;
+	for ty in types {
+		let schedule_interval = ServerGroupBackupSchedule::get(db, group_id, &ty)
+			.await?
+			.and_then(|s| s.expected_interval);
+		let interval = match schedule_interval {
+			Some(i) => Some(i),
+			None => BackupTypeDefault::get(db, &ty)
+				.await?
+				.and_then(|d| d.default_interval),
+		};
+		if let Some(pg) = interval {
+			// PgDuration wraps a jiff SignedDuration; whole seconds → Duration.
+			let secs = pg.0.as_secs().max(0) as u64;
+			let d = Duration::from_secs(secs);
+			min = Some(min.map_or(d, |m| m.min(d)));
+		}
+	}
+	Ok(min)
 }
 
 /// The three `billing.*` pod labels spawned Jobs carry for AWS cost allocation.
@@ -207,6 +288,37 @@ mod tests {
 		assert_eq!(r.keep_weekly, 4, "at floor, unchanged");
 		assert_eq!(r.keep_monthly, 99, "above floor preserved");
 		assert_eq!(r.keep_latest, 1, "keep_latest never floored");
+	}
+
+	#[test]
+	fn resolve_policy_precedence_and_floor() {
+		// Override wins over default.
+		let p = resolve_policy(
+			Some(serde_json::json!({"keep_daily": 30})),
+			Some(serde_json::json!({"keep_daily": 10})),
+		);
+		assert_eq!(p.keep_daily, 30, "override wins");
+
+		// No override → default applies.
+		let p = resolve_policy(None, Some(serde_json::json!({"keep_monthly": 12})));
+		assert_eq!(p.keep_monthly, 12, "default fallback");
+		assert_eq!(p.keep_daily, 7, "floor still enforced on default");
+
+		// Neither present → floor baseline.
+		let p = resolve_policy(None, None);
+		assert_eq!(p.keep_daily, 7);
+		assert_eq!(p.keep_weekly, 4);
+		assert_eq!(p.keep_monthly, 6);
+		assert_eq!(p.keep_latest, 1);
+
+		// Below-floor override → clamped up to the floor.
+		let p = resolve_policy(Some(serde_json::json!({"keep_daily": 2, "keep_weekly": 1})), None);
+		assert_eq!(p.keep_daily, 7, "clamped up");
+		assert_eq!(p.keep_weekly, 4, "clamped up");
+
+		// Garbage JSON → floor baseline (parse error path).
+		let p = resolve_policy(Some(serde_json::json!("not a policy")), None);
+		assert_eq!(p.keep_daily, 7);
 	}
 
 	#[test]
