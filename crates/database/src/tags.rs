@@ -1,6 +1,20 @@
-use commons_errors::Result;
+use commons_errors::{AppError, Result};
+use commons_types::server::{RESERVED_TAG_PREFIX, TagMap};
 use diesel::{QueryableByName, sql_query, sql_types};
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
+
+/// Reject operator-set tags that intrude on the reserved
+/// [`RESERVED_TAG_PREFIX`] namespace, which is owned by canopy's synthetic
+/// `/tags` entries. Called from every server/group tag write path.
+pub fn reject_reserved_keys(tags: &TagMap) -> Result<()> {
+	match tags.reserved_key() {
+		Some(key) => Err(AppError::BadRequest(format!(
+			"tag key {key:?} uses the reserved `{RESERVED_TAG_PREFIX}` prefix, \
+			 which is reserved for canopy-generated tags"
+		))),
+		None => Ok(()),
+	}
+}
 
 /// Distinct top-level tag keys across all servers and server groups,
 /// sorted. Used by the admin rule editor to populate autocomplete

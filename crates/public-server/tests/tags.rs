@@ -113,7 +113,61 @@ async fn tags_endpoint_returns_server_tags_when_ungrouped() {
 			response.assert_status_ok();
 			let tags: HashMap<String, String> = response.json();
 			assert_eq!(tags.get("role"), Some(&"primary".to_string()));
-			assert_eq!(tags.len(), 1);
+			// Synthetic kind tag is always present; ungrouped, so no group tags.
+			assert_eq!(tags.get("canopy:kind"), Some(&"central".to_string()));
+			assert_eq!(tags.get("canopy:group-id"), None);
+			assert_eq!(tags.get("canopy:group-name"), None);
+			// No rank set on this server, so no synthetic rank tag.
+			assert_eq!(tags.get("canopy:rank"), None);
+			assert_eq!(tags.len(), 2);
+		},
+	)
+	.await
+}
+
+/// The endpoint injects synthetic `canopy:`-prefixed tags describing the
+/// server's kind, rank, and group on top of the stored tags.
+#[tokio::test(flavor = "multi_thread")]
+async fn tags_endpoint_includes_synthetic_server_attributes() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let group_id = Uuid::new_v4();
+			let server_id = Uuid::new_v4();
+			sql_query(
+				"INSERT INTO server_groups (id, name) VALUES ($1, 'synthetic-cluster')",
+			)
+			.bind::<sql_types::Uuid, _>(group_id)
+			.execute(&mut conn)
+			.await
+			.unwrap();
+			sql_query(
+				"INSERT INTO servers (id, host, kind, rank, device_id, group_id) \
+				 VALUES ($1, 'https://s.example.com', 'facility', 'production', $2, $3)",
+			)
+			.bind::<sql_types::Uuid, _>(server_id)
+			.bind::<sql_types::Uuid, _>(device_id)
+			.bind::<sql_types::Uuid, _>(group_id)
+			.execute(&mut conn)
+			.await
+			.unwrap();
+
+			let response = public
+				.get("/tags")
+				.add_header("mtls-certificate", &cert)
+				.await;
+			response.assert_status_ok();
+			let tags: HashMap<String, String> = response.json();
+			assert_eq!(tags.get("canopy:kind"), Some(&"facility".to_string()));
+			assert_eq!(tags.get("canopy:rank"), Some(&"production".to_string()));
+			assert_eq!(
+				tags.get("canopy:group-id"),
+				Some(&group_id.to_string())
+			);
+			assert_eq!(
+				tags.get("canopy:group-name"),
+				Some(&"synthetic-cluster".to_string())
+			);
 		},
 	)
 	.await
