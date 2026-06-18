@@ -115,6 +115,38 @@ test.describe("server edit page", () => {
 		// with an optional trailing asterisk, anchored to exclude the latter.
 		await expect(page.getByLabel(/^Name(\s*\*)?$/i)).toHaveValue(server.name);
 	});
+
+	test("toggling 'Allow legacy status format' on persists to the server", async ({
+		page,
+		sql,
+	}) => {
+		// Saving requires a group, so seed one and put the server in it.
+		const group = await seedServerGroup(sql, { name: "legacy-group" });
+		const server = await seedServer(sql, {
+			name: "legacy-target",
+			groupId: group.id,
+		});
+
+		await page.goto(`/servers/${server.id}/edit`);
+
+		// Off by default for a freshly-seeded server.
+		const toggle = page.getByRole("checkbox", {
+			name: "Allow legacy status format",
+		});
+		await expect(toggle).not.toBeChecked();
+
+		await toggle.check();
+		await page.getByRole("button", { name: /^save$/i }).click();
+
+		// Save navigates to the detail page.
+		await page.waitForURL(`**/servers/${server.id}`);
+
+		const rows = await sql.query<{ allow_legacy_status: boolean }>(
+			"SELECT allow_legacy_status FROM servers WHERE id = $1",
+			[server.id],
+		);
+		expect(rows[0]!.allow_legacy_status).toBe(true);
+	});
 });
 
 test.describe("archived view", () => {

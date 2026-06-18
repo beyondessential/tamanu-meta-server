@@ -2422,6 +2422,12 @@ export interface components {
                  *     is `true`. The default at creation is 600 (10 minutes).
                  */
                 alert_when_down_for: number;
+                /**
+                 * @description Whether this server may use the retired legacy `/status` format (a
+                 *     push with no `health` array). Off by default; when on, such a push
+                 *     only refreshes reachability and carries prior healthchecks forward.
+                 */
+                allow_legacy_status: boolean;
                 /** @description Whether the server is archived (soft-deleted). */
                 archived: boolean;
                 cloud?: boolean | null;
@@ -2599,6 +2605,7 @@ export interface components {
         ServerDataUpdate: {
             /** Format: int64 */
             alert_when_down_for?: number | null;
+            allow_legacy_status?: boolean | null;
             cloud?: boolean | null;
             /** Format: uuid */
             device_id?: string | null;
@@ -2704,6 +2711,12 @@ export interface components {
              *     is `true`. The default at creation is 600 (10 minutes).
              */
             alert_when_down_for: number;
+            /**
+             * @description Whether this server may use the retired legacy `/status` format (a
+             *     push with no `health` array). Off by default; when on, such a push
+             *     only refreshes reachability and carries prior healthchecks forward.
+             */
+            allow_legacy_status: boolean;
             /** @description Whether the server is archived (soft-deleted). */
             archived: boolean;
             cloud?: boolean | null;

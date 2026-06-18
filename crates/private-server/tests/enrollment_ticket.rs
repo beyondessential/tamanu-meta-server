@@ -38,7 +38,9 @@ async fn mint_enrollment_ticket_round_trips_to_active_token() {
 		let words: Vec<&str> = passphrase.split('-').collect();
 		assert_eq!(words.len(), 4, "passphrase is four words: {passphrase}");
 		assert!(
-			words.iter().all(|w| !w.is_empty() && w == &w.to_lowercase()),
+			words
+				.iter()
+				.all(|w| !w.is_empty() && w == &w.to_lowercase()),
 			"passphrase words are non-empty and lowercase: {passphrase}"
 		);
 

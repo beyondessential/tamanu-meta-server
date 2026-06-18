@@ -778,6 +778,131 @@ async fn submit_status_rejects_health_entry_missing_healthy() {
 }
 
 // -----------------------------------------------------------------
+// Legacy format opt-in (`servers.allow_legacy_status`).
+// -----------------------------------------------------------------
+
+async fn enable_legacy_status(conn: &mut diesel_async::AsyncPgConnection, server_id: Uuid) {
+	sql_query("UPDATE servers SET allow_legacy_status = TRUE WHERE id = $1")
+		.bind::<sql_types::Uuid, _>(server_id)
+		.execute(conn)
+		.await
+		.expect("enable legacy status");
+}
+
+/// Default (opt-out): a legacy push — no `health` array — is rejected even
+/// when the rest of the body is valid.
+#[tokio::test(flavor = "multi_thread")]
+async fn submit_status_legacy_rejected_without_optin() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+
+			let response = public
+				.post(&format!("/status/{}", server_id))
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({ "healthy": true, "uptime": 5 }))
+				.await;
+			response.assert_status_bad_request();
+		},
+	)
+	.await
+}
+
+/// With the opt-in on, a legacy push is accepted but does not disturb the
+/// healthchecks: it carries the last real push's `health`/`healthy` forward
+/// and files no events, so a failing check filed by an earlier new-style push
+/// stays open instead of flapping closed.
+#[tokio::test(flavor = "multi_thread")]
+async fn submit_status_legacy_allowed_carries_health_forward() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+			enable_legacy_status(&mut conn, server_id).await;
+
+			// New-style push with a failing check files a per-check issue.
+			post_status(
+				&public,
+				&cert,
+				server_id,
+				serde_json::json!({
+					"health": [ { "check": "disk", "healthy": false, "free_pct": 4 } ],
+				}),
+			)
+			.await;
+			let before = fetch_issue(&mut conn, server_id, "status", "health/disk")
+				.await
+				.expect("per-check issue filed");
+			assert!(before.active);
+			assert_eq!(count_issues_for_server(&mut conn, server_id).await, 1);
+
+			// Legacy push (no `health` array) only refreshes reachability.
+			post_status(
+				&public,
+				&cert,
+				server_id,
+				serde_json::json!({ "healthy": true, "uptime": 99 }),
+			)
+			.await;
+
+			// The disk issue is untouched — not closed by the legacy push.
+			let after = fetch_issue(&mut conn, server_id, "status", "health/disk")
+				.await
+				.expect("per-check issue still present");
+			assert!(after.active, "legacy push must not close the failing check");
+			assert_eq!(
+				count_issues_for_server(&mut conn, server_id).await,
+				1,
+				"legacy push must not file or close any issue"
+			);
+
+			// The newest row carries the prior healthchecks forward (so the
+			// snapshot keeps showing them) while recording the legacy extras.
+			let row = fetch_latest_health(&mut conn, server_id).await;
+			let arr = row.health.as_array().expect("health carried forward");
+			assert_eq!(arr.len(), 1);
+			assert_eq!(arr[0]["check"], "disk");
+			assert_eq!(arr[0]["free_pct"], 4);
+			assert_eq!(row.extra.get("uptime").and_then(|v| v.as_i64()), Some(99));
+		},
+	)
+	.await
+}
+
+/// A server that has only ever spoken the legacy format (no prior row to carry
+/// forward) is accepted and stored with an empty healthcheck set.
+#[tokio::test(flavor = "multi_thread")]
+async fn submit_status_legacy_allowed_without_prior_health() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+			enable_legacy_status(&mut conn, server_id).await;
+
+			post_status(
+				&public,
+				&cert,
+				server_id,
+				serde_json::json!({ "healthy": false, "uptime": 7 }),
+			)
+			.await;
+
+			let row = fetch_latest_health(&mut conn, server_id).await;
+			assert_eq!(row.health, serde_json::json!([]));
+			assert!(row.healthy, "no prior row ⇒ defaults to healthy");
+			assert_eq!(row.extra.get("uptime").and_then(|v| v.as_i64()), Some(7));
+			assert_eq!(
+				count_issues_for_server(&mut conn, server_id).await,
+				0,
+				"legacy push files no issues"
+			);
+		},
+	)
+	.await
+}
+
+// -----------------------------------------------------------------
 // Phase 3 — event filing on healthy transitions.
 // -----------------------------------------------------------------
 

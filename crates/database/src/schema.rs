@@ -265,6 +265,7 @@ diesel::table! {
 		is_monitored -> Bool,
 		deleted_at -> Nullable<Timestamptz>,
 		registered_at -> Nullable<Timestamptz>,
+		allow_legacy_status -> Bool,
 	}
 }
 

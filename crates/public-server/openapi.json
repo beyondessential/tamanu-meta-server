@@ -348,7 +348,7 @@
           }
         ],
         "requestBody": {
-          "description": "Status push. A `health` array is required (it may be empty); a body without it is rejected with 400.",
+          "description": "Status push. A `health` array is required (it may be empty); a body without it is rejected with 400, unless the server has `allow_legacy_status` set, in which case the push refreshes reachability only and carries the last known healthchecks forward.",
           "content": {
             "application/json": {
               "schema": {
@@ -1213,7 +1213,7 @@
                 "items": {
                   "$ref": "#/components/schemas/HealthCheck"
                 },
-                "description": "Per-check breakdown. **Required** — a push without a `health`\narray is rejected with `400`. May be empty (`[]`) for a server\nthat genuinely runs no checks. Each entry must include `check`\n(non-empty) and exactly one of `result` / `healthy`; arbitrary\nadditional fields per check (latency, free disk %, certificate\nexpiry, etc.) are passed through verbatim and surfaced in the\nstatus snapshot UI.\n\nEach check name seen — whatever its result — upserts into\n`healthcheck_severities` so operators can review and adjust the\nseverity assigned to its failures. Failed checks file (or keep\nactive) an issue at `(status, health/<check>)` using the\ncatalog's current severity for that check name; broken checks\nfile at `(status, health-broken/<check>)` at a fixed Warning."
+                "description": "Per-check breakdown. **Required** — a push without a `health`\narray is rejected with `400` (unless the server opts into the\nlegacy format via `allow_legacy_status`, in which case such a push\nonly refreshes reachability and carries prior checks forward). May\nbe empty (`[]`) for a server that genuinely runs no checks. Each\nentry must include `check`\n(non-empty) and exactly one of `result` / `healthy`; arbitrary\nadditional fields per check (latency, free disk %, certificate\nexpiry, etc.) are passed through verbatim and surfaced in the\nstatus snapshot UI.\n\nEach check name seen — whatever its result — upserts into\n`healthcheck_severities` so operators can review and adjust the\nseverity assigned to its failures. Failed checks file (or keep\nactive) an issue at `(status, health/<check>)` using the\ncatalog's current severity for that check name; broken checks\nfile at `(status, health-broken/<check>)` at a fixed Warning."
               },
               "healthy": {
                 "type": [

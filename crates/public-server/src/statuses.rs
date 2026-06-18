@@ -45,8 +45,11 @@ pub struct StatusPayload {
 	pub healthy: Option<bool>,
 
 	/// Per-check breakdown. **Required** — a push without a `health`
-	/// array is rejected with `400`. May be empty (`[]`) for a server
-	/// that genuinely runs no checks. Each entry must include `check`
+	/// array is rejected with `400` (unless the server opts into the
+	/// legacy format via `allow_legacy_status`, in which case such a push
+	/// only refreshes reachability and carries prior checks forward). May
+	/// be empty (`[]`) for a server that genuinely runs no checks. Each
+	/// entry must include `check`
 	/// (non-empty) and exactly one of `result` / `healthy`; arbitrary
 	/// additional fields per check (latency, free disk %, certificate
 	/// expiry, etc.) are passed through verbatim and surfaced in the
@@ -122,7 +125,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 	),
 	request_body(
 		content = StatusPayload,
-		description = "Status push. A `health` array is required (it may be empty); a body without it is rejected with 400.",
+		description = "Status push. A `health` array is required (it may be empty); a body without it is rejected with 400, unless the server has `allow_legacy_status` set, in which case the push refreshes reachability only and carries the last known healthchecks forward.",
 	),
 	responses(
 		(status = 200, body = Status),
@@ -152,6 +155,18 @@ async fn create(
 
 	let raw = body.map(|j| j.0).unwrap_or(serde_json::Value::Null);
 	let (healthy, health, extra) = split_health_from_extra(raw)?;
+
+	let Some(health) = health else {
+		// Legacy format (no `health` array). Off by default — only servers an
+		// operator has explicitly opted in via `allow_legacy_status` may use
+		// it, until their reporter speaks the new format.
+		if !server.allow_legacy_status {
+			return Err(AppError::BadRequest("`health` array is required".into()));
+		}
+		return Ok(Json(
+			create_legacy_status(&mut db, server_id, id, extra, current_version.0).await?,
+		));
+	};
 
 	// Resolve the server's effective tag map outside the write transaction.
 	// Read-only; shared across every rule evaluation for this push. JSON-
@@ -185,6 +200,36 @@ async fn create(
 		.await?;
 
 	Ok(Json(status))
+}
+
+/// Store a legacy-format push (no `health` array) for a server that's opted
+/// into [`Server::allow_legacy_status`]. The push only refreshes reachability:
+/// the new row carries the server's last known `healthy`/`health` forward
+/// (defaulting to "healthy, no checks" if the server has never reported the
+/// new format) rather than wiping them, and no health events are filed. So a
+/// server straddling an old and a new reporter doesn't flap its per-check
+/// issues every time the legacy endpoint pings.
+async fn create_legacy_status(
+	db: &mut AsyncPgConnection,
+	server_id: Uuid,
+	device_id: Uuid,
+	extra: serde_json::Value,
+	version: commons_types::version::VersionStr,
+) -> Result<Status> {
+	let (healthy, health) = match Status::latest_for_server(db, server_id).await? {
+		Some(prior) => (prior.healthy, prior.health),
+		None => (true, serde_json::Value::Array(Vec::new())),
+	};
+	NewStatus {
+		server_id,
+		device_id: Some(device_id),
+		version: Some(version),
+		extra,
+		healthy,
+		health,
+	}
+	.save(db)
+	.await
 }
 
 /// Per-push event filing. Warning/failed checks land at
@@ -428,7 +473,7 @@ fn per_check_description(
 ///   verbatim.
 fn split_health_from_extra(
 	raw: serde_json::Value,
-) -> Result<(bool, serde_json::Value, serde_json::Value)> {
+) -> Result<(bool, Option<serde_json::Value>, serde_json::Value)> {
 	let mut obj = match raw {
 		serde_json::Value::Null => serde_json::Map::new(),
 		serde_json::Value::Object(m) => m,
@@ -445,9 +490,13 @@ fn split_health_from_extra(
 		Some(_) => return Err(AppError::BadRequest("`healthy` must be a boolean".into())),
 	};
 
-	let health_value = obj.remove("health").ok_or_else(|| {
-		AppError::BadRequest("`health` array is required".into())
-	})?;
+	// A push without a `health` key is the retired legacy format. We don't
+	// reject it here — the caller decides, per the server's
+	// `allow_legacy_status` flag, whether to accept it (reachability-only,
+	// carrying prior healthchecks forward) or 400 it.
+	let Some(health_value) = obj.remove("health") else {
+		return Ok((healthy, None, serde_json::Value::Object(obj)));
+	};
 	let health_arr = match health_value {
 		serde_json::Value::Array(a) => a,
 		_ => return Err(AppError::BadRequest("`health` must be an array".into())),
@@ -500,7 +549,7 @@ fn split_health_from_extra(
 
 	Ok((
 		healthy,
-		serde_json::Value::Array(health_arr),
+		Some(serde_json::Value::Array(health_arr)),
 		serde_json::Value::Object(obj),
 	))
 }

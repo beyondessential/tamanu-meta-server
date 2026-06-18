@@ -73,6 +73,14 @@ pub struct Server {
 	/// `alert_when_down_for` is preserved while muted so flipping back on
 	/// doesn't lose the chosen threshold.
 	pub is_monitored: bool,
+	/// Opt-in to the retired legacy `/status` format (a push that carries no
+	/// `health` array). Off by default: the new format is required and a
+	/// legacy push is rejected with 400. When `true`, a legacy push is
+	/// accepted but only refreshes reachability — it carries the server's
+	/// last known healthchecks forward instead of clearing them, so a server
+	/// straddling old and new reporters doesn't flap its health issues. Flip
+	/// off (the default) once the server's reporter speaks the new format.
+	pub allow_legacy_status: bool,
 	/// Per-server downtime threshold: how long a server's status row may
 	/// go un-updated before the canopy reachability sweep files an issue.
 	/// Bump it up for flappy servers, drop it for critical ones that
@@ -716,6 +724,7 @@ fn test_server_serialization() {
 		cloud: None,
 		geolocation: None,
 		is_monitored: true,
+		allow_legacy_status: false,
 		alert_when_down_for: TEN_MINUTES,
 		notes: String::new(),
 		tags: TagMap::default(),
@@ -735,6 +744,7 @@ fn test_server_serialization() {
   "device_id": "00000000-0000-0000-0000-000000000000",
   "public_name": "Test Server",
   "is_monitored": true,
+  "allow_legacy_status": false,
   "alert_when_down_for": 600,
   "notes": "",
   "tags": {}
@@ -768,6 +778,7 @@ impl From<NewServer> for Server {
 			cloud: None,
 			geolocation: None,
 			is_monitored: true,
+			allow_legacy_status: false,
 			alert_when_down_for: TEN_MINUTES,
 			notes: String::new(),
 			tags: TagMap::default(),
@@ -794,6 +805,7 @@ pub struct PartialServer {
 	pub cloud: Option<Option<bool>>,
 	pub geolocation: Option<Option<GeoPoint>>,
 	pub is_monitored: Option<bool>,
+	pub allow_legacy_status: Option<bool>,
 	#[schema(value_type = Option<i64>)]
 	#[diesel(serialize_as = PgDuration)]
 	pub alert_when_down_for: Option<PgDuration>,
