@@ -93,4 +93,42 @@ test.describe("server detail checks table", () => {
 		await expect(page.getByText("hint")).toBeVisible();
 		await expect(page.getByText("free_pct: 2")).toBeVisible();
 	});
+
+	test("sorts skipped checks last, after passing ones", async ({
+		page,
+		sql,
+	}) => {
+		await seedVersion(sql, { major: 1, minor: 0, patch: 0 });
+		const server = await seedServer(sql, {
+			name: "skip-server",
+			kind: "central",
+		});
+		// Names are chosen so alphabetical order is the reverse of the
+		// expected result order: a discriminator proving the sort is by
+		// result, not by name.
+		await seedStatus(sql, {
+			serverId: server.id,
+			healthy: false,
+			health: [
+				{ check: "a-skips", result: "skipped" },
+				{ check: "m-passes", result: "passed" },
+				{ check: "z-fails", result: "failed" },
+			],
+		});
+
+		await page.goto(`/servers/${server.id}`);
+
+		const failed = page.getByText("z-fails");
+		const passed = page.getByText("m-passes");
+		const skipped = page.getByText("a-skips");
+		await expect(failed).toBeVisible();
+		await expect(passed).toBeVisible();
+		await expect(skipped).toBeVisible();
+
+		const failedY = (await failed.boundingBox())!.y;
+		const passedY = (await passed.boundingBox())!.y;
+		const skippedY = (await skipped.boundingBox())!.y;
+		expect(failedY).toBeLessThan(passedY);
+		expect(passedY).toBeLessThan(skippedY);
+	});
 });
