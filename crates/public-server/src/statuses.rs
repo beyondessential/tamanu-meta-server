@@ -44,11 +44,13 @@ pub struct StatusPayload {
 	/// `docs/plans/healthcheck-severity-catalog.md`.
 	pub healthy: Option<bool>,
 
-	/// Per-check breakdown. Each entry must include `check` (non-empty)
-	/// and exactly one of `result` / `healthy`; arbitrary additional
-	/// fields per check (latency, free disk %, certificate expiry,
-	/// etc.) are passed through verbatim and surfaced in the status
-	/// snapshot UI.
+	/// Per-check breakdown. **Required** — a push without a `health`
+	/// array is rejected with `400`. May be empty (`[]`) for a server
+	/// that genuinely runs no checks. Each entry must include `check`
+	/// (non-empty) and exactly one of `result` / `healthy`; arbitrary
+	/// additional fields per check (latency, free disk %, certificate
+	/// expiry, etc.) are passed through verbatim and surfaced in the
+	/// status snapshot UI.
 	///
 	/// Each check name seen — whatever its result — upserts into
 	/// `healthcheck_severities` so operators can review and adjust the
@@ -56,7 +58,7 @@ pub struct StatusPayload {
 	/// active) an issue at `(status, health/<check>)` using the
 	/// catalog's current severity for that check name; broken checks
 	/// file at `(status, health-broken/<check>)` at a fixed Warning.
-	pub health: Option<Vec<HealthCheck>>,
+	pub health: Vec<HealthCheck>,
 
 	/// Free-form additional data (uptime, postgres version, timezone,
 	/// hostname, etc.). Stored verbatim in `statuses.extra` and
@@ -120,7 +122,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 	),
 	request_body(
 		content = StatusPayload,
-		description = "Status push. Empty body or JSON `null` are both treated as `{}` (all fields default).",
+		description = "Status push. A `health` array is required (it may be empty); a body without it is rejected with 400.",
 	),
 	responses(
 		(status = 200, body = Status),
@@ -443,9 +445,9 @@ fn split_health_from_extra(
 		Some(_) => return Err(AppError::BadRequest("`healthy` must be a boolean".into())),
 	};
 
-	let health_value = obj
-		.remove("health")
-		.unwrap_or(serde_json::Value::Array(Default::default()));
+	let health_value = obj.remove("health").ok_or_else(|| {
+		AppError::BadRequest("`health` array is required".into())
+	})?;
 	let health_arr = match health_value {
 		serde_json::Value::Array(a) => a,
 		_ => return Err(AppError::BadRequest("`health` must be an array".into())),
