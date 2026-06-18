@@ -348,7 +348,7 @@
           }
         ],
         "requestBody": {
-          "description": "Status push. Empty body or JSON `null` are both treated as `{}` (all fields default).",
+          "description": "Status push. A `health` array is required (it may be empty); a body without it is rejected with 400.",
           "content": {
             "application/json": {
               "schema": {
@@ -1204,16 +1204,16 @@
           },
           {
             "type": "object",
+            "required": [
+              "health"
+            ],
             "properties": {
               "health": {
-                "type": [
-                  "array",
-                  "null"
-                ],
+                "type": "array",
                 "items": {
                   "$ref": "#/components/schemas/HealthCheck"
                 },
-                "description": "Per-check breakdown. Each entry must include `check` (non-empty)\nand exactly one of `result` / `healthy`; arbitrary additional\nfields per check (latency, free disk %, certificate expiry,\netc.) are passed through verbatim and surfaced in the status\nsnapshot UI.\n\nEach check name seen — whatever its result — upserts into\n`healthcheck_severities` so operators can review and adjust the\nseverity assigned to its failures. Failed checks file (or keep\nactive) an issue at `(status, health/<check>)` using the\ncatalog's current severity for that check name; broken checks\nfile at `(status, health-broken/<check>)` at a fixed Warning."
+                "description": "Per-check breakdown. **Required** — a push without a `health`\narray is rejected with `400`. May be empty (`[]`) for a server\nthat genuinely runs no checks. Each entry must include `check`\n(non-empty) and exactly one of `result` / `healthy`; arbitrary\nadditional fields per check (latency, free disk %, certificate\nexpiry, etc.) are passed through verbatim and surfaced in the\nstatus snapshot UI.\n\nEach check name seen — whatever its result — upserts into\n`healthcheck_severities` so operators can review and adjust the\nseverity assigned to its failures. Failed checks file (or keep\nactive) an issue at `(status, health/<check>)` using the\ncatalog's current severity for that check name; broken checks\nfile at `(status, health-broken/<check>)` at a fixed Warning."
               },
               "healthy": {
                 "type": [

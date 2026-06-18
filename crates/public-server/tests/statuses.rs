@@ -142,7 +142,7 @@ async fn submit_status() {
 			let response = public
 				.post(&format!("/status/{}", server_id))
 				.add_header("mtls-certificate", &cert)
-				.json(&serde_json::json!({ "uptime": 3600 }))
+				.json(&serde_json::json!({ "uptime": 3600, "health": [] }))
 				.await;
 			response.assert_status_ok();
 			response.assert_header("content-type", "application/json");
@@ -208,7 +208,7 @@ async fn submit_status_with_geolocation() {
 			let response = public
 				.post(&format!("/status/{}", server_id))
 				.add_header("mtls-certificate", &cert)
-				.json(&serde_json::json!({ "uptime": 7200, "version": "2.8.1" }))
+				.json(&serde_json::json!({ "uptime": 7200, "version": "2.8.1", "health": [] }))
 				.await;
 			response.assert_status_ok();
 			response.assert_header("content-type", "application/json");
@@ -303,7 +303,7 @@ async fn submit_status_with_cloud() {
 			let response = public
 				.post(&format!("/status/{}", server_id))
 				.add_header("mtls-certificate", &cert)
-				.json(&serde_json::json!({ "uptime": 4800, "platform": "Linux" }))
+				.json(&serde_json::json!({ "uptime": 4800, "platform": "Linux", "health": [] }))
 				.await;
 			response.assert_status_ok();
 			response.assert_header("content-type", "application/json");
@@ -403,7 +403,7 @@ async fn submit_status_with_geolocation_and_cloud() {
 				.post(&format!("/status/{}", server_id))
 				.add_header("mtls-certificate", &cert)
 				.json(
-					&serde_json::json!({ "uptime": 10000, "version": "3.0.0", "timezone": "America/New_York" }),
+					&serde_json::json!({ "uptime": 10000, "version": "3.0.0", "timezone": "America/New_York", "health": [] }),
 				)
 				.await;
 			response.assert_status_ok();
@@ -563,7 +563,7 @@ async fn submit_status_legacy_no_healthy_field() {
 			let response = public
 				.post(&format!("/status/{}", server_id))
 				.add_header("mtls-certificate", &cert)
-				.json(&serde_json::json!({ "uptime": 100 }))
+				.json(&serde_json::json!({ "uptime": 100, "health": [] }))
 				.await;
 			response.assert_status_ok();
 
@@ -590,7 +590,7 @@ async fn submit_status_with_healthy_true_no_checks() {
 			let response = public
 				.post(&format!("/status/{}", server_id))
 				.add_header("mtls-certificate", &cert)
-				.json(&serde_json::json!({ "healthy": true }))
+				.json(&serde_json::json!({ "healthy": true, "health": [] }))
 				.await;
 			response.assert_status_ok();
 
@@ -616,6 +616,7 @@ async fn submit_status_with_healthy_false_persists() {
 				.json(&serde_json::json!({
 					"healthy": false,
 					"uptime": 42,
+					"health": [],
 				}))
 				.await;
 			response.assert_status_ok();
@@ -683,6 +684,34 @@ async fn submit_status_rejects_non_bool_healthy() {
 				.post(&format!("/status/{}", server_id))
 				.add_header("mtls-certificate", &cert)
 				.json(&serde_json::json!({ "healthy": "yes" }))
+				.await;
+			response.assert_status_bad_request();
+		},
+	)
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn submit_status_rejects_missing_health() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+
+			// A push that carries no `health` array at all is rejected
+			// outright — even though `healthy` and other fields are valid.
+			let response = public
+				.post(&format!("/status/{}", server_id))
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({ "healthy": true, "uptime": 1 }))
+				.await;
+			response.assert_status_bad_request();
+
+			// An empty body (⇒ `{}`) is rejected for the same reason.
+			let response = public
+				.post(&format!("/status/{}", server_id))
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({}))
 				.await;
 			response.assert_status_bad_request();
 		},
@@ -777,7 +806,7 @@ async fn submit_status_legacy_files_no_health_issues() {
 				&public,
 				&cert,
 				server_id,
-				serde_json::json!({ "uptime": 1 }),
+				serde_json::json!({ "uptime": 1, "health": [] }),
 			)
 			.await;
 
@@ -905,7 +934,7 @@ async fn submit_status_unhealthy_no_checks_files_nothing() {
 				&public,
 				&cert,
 				server_id,
-				serde_json::json!({ "healthy": false }),
+				serde_json::json!({ "healthy": false, "health": [] }),
 			)
 			.await;
 

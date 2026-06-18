@@ -251,7 +251,7 @@ async fn key_deactivation_works() {
 			let response_before = public
 				.post("/status/77777777-7777-7777-7777-777777777777")
 				.add_header("mtls-certificate", &cert)
-				.json(&serde_json::json!({"uptime": 3600}))
+				.json(&serde_json::json!({"uptime": 3600, "health": []}))
 				.await;
 			response_before.assert_status_ok();
 
@@ -360,7 +360,7 @@ async fn key_rotation_scenario() {
 			let response_initial = public
 				.post("/status/99999999-9999-9999-9999-999999999999")
 				.add_header("mtls-certificate", &cert)
-				.json(&serde_json::json!({"uptime": 1800}))
+				.json(&serde_json::json!({"uptime": 1800, "health": []}))
 				.await;
 			response_initial.assert_status_ok();
 
@@ -379,13 +379,13 @@ async fn key_rotation_scenario() {
 			let response = public
 				.post("/status/99999999-9999-9999-9999-999999999999")
 				.add_header("mtls-certificate", &cert)
-				.json(&serde_json::json!({"uptime": 3600}))
+				.json(&serde_json::json!({"uptime": 3600, "health": []}))
 				.await;
 			response.assert_status_ok();
 			let response = public
 				.post("/status/99999999-9999-9999-9999-999999999999")
 				.add_header("mtls-certificate", &new_cert)
-				.json(&serde_json::json!({"uptime": 5400}))
+				.json(&serde_json::json!({"uptime": 5400, "health": []}))
 				.await;
 			response.assert_status_ok();
 
@@ -406,7 +406,7 @@ async fn key_rotation_scenario() {
 			let response = public
 				.post("/status/99999999-9999-9999-9999-999999999999")
 				.add_header("mtls-certificate", &cert)
-				.json(&serde_json::json!({"uptime": 5400}))
+				.json(&serde_json::json!({"uptime": 5400, "health": []}))
 				.await;
 			response.assert_status_not_ok();
 
@@ -414,7 +414,7 @@ async fn key_rotation_scenario() {
 			let response = public
 				.post("/status/99999999-9999-9999-9999-999999999999")
 				.add_header("mtls-certificate", &new_cert)
-				.json(&serde_json::json!({"uptime": 5400}))
+				.json(&serde_json::json!({"uptime": 5400, "health": []}))
 				.await;
 			response.assert_status_ok();
 		},
