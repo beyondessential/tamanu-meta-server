@@ -116,7 +116,7 @@ test.describe("server edit page", () => {
 		await expect(page.getByLabel(/^Name(\s*\*)?$/i)).toHaveValue(server.name);
 	});
 
-	test("toggling 'Allow legacy status format' on persists to the server", async ({
+	test("toggling 'Allow status from Tamanu' on persists to the server", async ({
 		page,
 		sql,
 	}) => {
@@ -131,7 +131,7 @@ test.describe("server edit page", () => {
 
 		// Off by default for a freshly-seeded server.
 		const toggle = page.getByRole("checkbox", {
-			name: "Allow legacy status format",
+			name: "Allow status from Tamanu",
 		});
 		await expect(toggle).not.toBeChecked();
 
