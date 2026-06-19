@@ -59,13 +59,20 @@ maintenance/inspection/s3-metrics.
 > maintenance role is already complete, so no ops grant change — the device role
 > stays minimal.
 
-## 4. Session duration
+## 4. Session duration — **NO ops change** (MaxSessionDuration ask withdrawn)
 
-Chained AssumeRole caps each session at **1 hour** regardless of the role's
-`MaxSessionDuration` — so **don't bother raising `MaxSessionDuration`** (e.g. to
-43200); it's a no-op for this path. Canopy handles long maintenance runs by
-re-fetching creds just-in-time (kopia `credential_process`), so no ops action
-needed here — informational.
+Disregard the earlier "raise `canopy-jobs` `MaxSessionDuration` to 12h" note —
+**withdrawn.** No `MaxSessionDuration` change is needed on any role.
+
+Why it's moot: we verified (kopia v0.23.1 + minio-go v7.2.0 source) that kopia
+cannot use `credential_process`/a creds file, **and** the `--role` approach
+(which would have needed a long base session) is superseded. The chosen
+mechanism is kopia's **IAM container-credentials endpoint**: canopy runs a tiny
+localhost endpoint that mints a fresh (1h chained) maintenance-role session per
+poll; kopia's minio-go re-polls at ~80% of lifetime, and the Rust SDK keeps the
+pod's IRSA base fresh on its own. So a 90-min (or longer) run just re-polls — no
+session ceiling, no role-duration tuning. Per-bucket roles stay 1h-capped
+(fine); `canopy-jobs`/`canopy-private` need no duration change.
 
 ## 5. `.storageconfig` — informational, likely no change
 
@@ -100,10 +107,20 @@ idempotent upsert. Ops side:
   available as pulumi outputs (they are: `deviceRoleArn` + `maintenanceRoleArn`
   are already exported).
 
+## 6a. Device path note (informational — bestool repo, not pulumi)
+
+Heads-up that the device backup path is changing on the bestool side (TAM-6879),
+not here: bestool will serve a localhost **container-credentials** endpoint that
+kopia polls (fed by public-server creds), because we verified `credential_process`
+doesn't work and ~90-min snapshot jobs make any <1h static-cred path non-viable.
+This may prompt revisiting public-server's device-cred response shape. No pulumi
+action — flagged only so the ops/bestool picture is consistent.
+
 ## 7. Not changing
 
-- Device credential path (public-server / `canopy-issuer` chain-assuming the
-  device role, handing creds to the device over mTLS) — unchanged.
+- Device credential path *trust/roles* (public-server / `canopy-issuer`
+  chain-assuming the device role) — unchanged (only the bestool-side cred
+  *delivery* changes, §6a).
 - The image still bundles kopia.
 
 ## Summary of ops action items
@@ -114,7 +131,30 @@ idempotent upsert. Ops side:
    `maintenanceAssumeRolePolicy` (they take a single ARN today).
 3. Maintenance role perms — already `s3:*` + CloudWatch; nothing to change, just
    confirmed.
-4. (No `MaxSessionDuration` change; no `.storageconfig` change.)
+4. **No `MaxSessionDuration` change (ask withdrawn, §4)** — canopy uses kopia's
+   container-credentials endpoint, which refreshes with no session ceiling. No
+   `.storageconfig` change either.
 5. Plan to call canopy's config-as-a-resource API over the tailnet
    (`TailscaleAdmin`) feeding `deviceRoleArn`+`maintenanceRoleArn`+bucket/prefix/
    region; delete cascades to the Secret. Schema TBD from canopy.
+
+---
+
+## Changelog (append-only — do NOT edit the body above after handoff)
+
+**v1 — the version ops actioned** (everything above as of the first handoff). The
+action items §1–§3, §5 are the source of truth; treat them as done.
+
+**2026-06-20 — delta since v1 (nothing here needs new ops IAM/pulumi work):**
+- **§4 reworded, net zero for ops.** v1 already said "no `MaxSessionDuration`
+  change," and that's still true. The *reason* changed (canopy-internal): kopia
+  now gets creds via a localhost **container-credentials endpoint** (verified
+  against kopia 0.23.1 + minio-go 7.2.0), not `credential_process` and not
+  `--role`+long-session. No role-duration tuning on any role.
+  - ⚠️ **If anyone verbally relayed a "raise `canopy-jobs` `MaxSessionDuration`
+    to 12h" ask (it was never in this doc), it is WITHDRAWN — ignore/revert it.**
+- **§6a added — informational only, no pulumi action.** The device backup path
+  moves to a bestool-served container-credentials endpoint (TAM-6879); may prompt
+  revisiting public-server's device-cred response shape. Flagged for picture
+  consistency only.
+- **§1–§3, §5 unchanged** (byte-identical to v1).

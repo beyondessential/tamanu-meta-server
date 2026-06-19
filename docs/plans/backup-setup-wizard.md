@@ -45,38 +45,60 @@ The current code assuming `target_role_arn` for maintenance / s3-metrics is a
 ### 1.2 Chained AssumeRole everywhere cross-account
 
 The backups pod keeps its own `canopy-jobs` IRSA creds (default credential
-chain). For each group op it needs `sts:AssumeRole(maintenance_role_arn)`. Two
+chain). For each group op it needs to reach `maintenance_role_arn`. Two
 consumers:
 
-- **CloudWatch SDK client (s3-metrics):** in-process Rust `aws-sdk-sts` assume →
-  hand the temp creds to the CloudWatch client (refreshable provider).
-- **kopia subprocess:** instead of baking static temp creds into the env (which
-  expire mid-run, see §1.3), kopia fetches creds **just-in-time via
-  `credential_process`** (§1.3).
+- **CloudWatch SDK client (s3-metrics):** in-process Rust `aws-sdk-sts`
+  `AssumeRole(maintenance_role_arn)` → hand to the SDK client. The Rust SDK's
+  assume-role provider auto-refreshes; the 1h chained cap is a non-issue.
+  (preflight is *not* in this list — it stays on the device role, §preflight.)
+- **kopia subprocess:** see §1.3 — kopia polls a localhost container-credentials
+  endpoint and self-refreshes.
 
 Drop every direct-web-identity-against-deployment-account assumption, and drop
 the old `AWS_ROLE_ARN`-override path in `kopia.rs`.
 
-### 1.3 Just-in-time creds for kopia (`credential_process`) — solves the 1h cap
+### 1.3 kopia creds via a container-credentials endpoint (the 1h-cap solution)
 
-Chaining caps each assumed session at **1 hour** regardless of the role's
-`MaxSessionDuration`, so static env creds would break long maintenance runs.
-kopia uses the AWS SDK, which supports `credential_process`: a profile entry
-naming a helper that prints `{Version:1, AccessKeyId, SecretAccessKey,
-SessionToken, Expiration}` and is **re-invoked on demand** when creds near
-expiry.
+**Verified against kopia v0.23.1 + minio-go v7.2.0 source (do not relitigate).**
+~90-min snapshot/maintenance runs are routine, so **no <1h static-cred path is
+viable**, and:
 
-**Plan:** ship a creds helper as a subcommand of the backups bin (e.g.
-`backups creds --role <maintenance_role_arn> [--region]`) that does
-`sts:AssumeRole` via the pod's default credential chain and prints the
-credential-process JSON. Point each kopia subprocess at it via a generated AWS
-profile (`AWS_CONFIG_FILE`/`AWS_PROFILE` or `AWS_SHARED_CREDENTIALS_FILE` with
-`credential_process = backups creds --role …`). kopia transparently re-invokes
-it past the 1h mark — no static-cred expiry, no re-exec dance. This mirrors the
-just-in-time pattern bestool will use device-side (there it calls canopy because
-the device has no AWS identity; here the helper assumes directly since the pod
-*does* have IRSA). A localhost-endpoint variant is possible but the direct
-helper binary is simpler and needs no server.
+- kopia's S3 chain is hardcoded **Static → EnvAWS → IAM**; it never instantiates
+  minio-go's file/`credential_process` provider → **`credential_process` and "a
+  creds file" do NOT work**. (Dead. No kopia fork.)
+- Static `AWS_*` env creds **never refresh** → break past 1h.
+- kopia's `--role` path *would* self-refresh but is bounded by the base session's
+  lifetime — **superseded** by the endpoint below (simpler ops, no ceiling).
+- minio-go's **IAM provider** *does* support the ECS-style **container-credentials
+  endpoint** (`AWS_CONTAINER_CREDENTIALS_FULL_URI` + `AWS_CONTAINER_AUTHORIZATION_TOKEN`),
+  polls it, and **self-refreshes** (`SetExpiration` → re-GET at ~80% of lifetime).
+
+**Plan:** the `backups` bin runs one tiny **localhost** HTTP creds endpoint. Per
+in-flight op it registers `token → (maintenance_role_arn, region)`, mints that
+group's session via the Rust SDK (`AssumeRole`, base auto-refreshed by IRSA), and
+returns container-creds JSON. Each kopia subprocess is launched pointing at it;
+minio-go re-polls before expiry, so a 90-min+ run just gets fresh creds — **no
+session ceiling, no `MaxSessionDuration` change**.
+
+Verified endpoint contract (minio-go v7.2.0 FULL_URI/ECS path) — implement exactly:
+- Subprocess env: `AWS_CONTAINER_CREDENTIALS_FULL_URI=http://127.0.0.1:<port>/<path>`
+  (use the **`127.0.0.1`** literal — loopback is checked via `LookupHost`; `localhost`
+  can fail; http is fine, no https needed) + `AWS_CONTAINER_AUTHORIZATION_TOKEN=<secret>`
+  (sent **raw** as the `Authorization` header, no `Bearer`).
+- **Env hygiene (critical):** on the kopia subprocess, *unset*
+  `AWS_WEB_IDENTITY_TOKEN_FILE`, `AWS_ROLE_ARN`, `AWS_ACCESS_KEY_ID`/`SECRET`,
+  `AWS_CONTAINER_CREDENTIALS_RELATIVE_URI`, `AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE`
+  — all *precede* the FULL_URI path (IRSA injects the web-identity ones into the
+  pod). Leave kopia's S3 `accessKeyID/secretAccessKey/sessionToken/roleARN` empty
+  (Static/RoleARN bypass the chain).
+- Server returns **HTTP 200** + JSON `{"AccessKeyId","SecretAccessKey","Token","Expiration"}`
+  — field is **`Token`** (not SessionToken); `Expiration` is **RFC3339**, a few
+  minutes out (never omit/zero, or minio-go re-GETs every call). Non-200 = hard
+  failure (no IMDS fallback on this path).
+
+Device side (bestool, TAM-6879) uses the *same* protocol, its endpoint fed by
+public-server. Revisit public-server's device-cred output shape there.
 
 ### 1.4 Device path: unchanged
 
@@ -303,12 +325,16 @@ resource — so operators don't hand-copy ARNs out of pulumi.
 - openapi regen (`just gen-openapi`).
 
 ### jobs (`backup/{kopia,worker,maintenance,inspection,s3_metrics}.rs`, bin)
-- Switch maintenance/inspection/s3-metrics to **chain-assume
-  `maintenance_role_arn`** (fix the device-role bug). CloudWatch client uses the
-  in-process assumed creds.
-- **`credential_process` helper (§1.3):** add a `backups creds --role …`
-  subcommand; generate the per-subprocess AWS profile pointing kopia at it;
-  remove the `AWS_ROLE_ARN`-override path in `kopia.rs`.
+- Switch **s3-metrics** (Rust SDK) to `AssumeRole(maintenance_role_arn)` (the
+  CloudWatch grant lives there); auto-refreshes. **preflight stays on
+  `target_role_arn`** — it validates the *device* path (assumes the device role
+  both ways incl. the restore session policy); a separate maintenance-role
+  preflight check is a follow-up, not this PR.
+- **kopia container-creds endpoint (§1.3):** the bin runs a localhost endpoint
+  (token → `maintenance_role_arn` registry, mints via Rust SDK); each kopia
+  subprocess gets `AWS_CONTAINER_CREDENTIALS_FULL_URI`+`AWS_CONTAINER_AUTHORIZATION_TOKEN`
+  and the env-hygiene scrub (unset web-identity/static/relative-uri vars). Remove
+  the `AWS_ROLE_ARN`-override path in `kopia.rs`. (No `credential_process`/`--role`.)
 - **`.storageconfig` on init (§3.3):** create if absent, never overwrite.
 
 ### frontend (`private-web/`)
@@ -340,8 +366,10 @@ Resolved: dedicated `canopy-private` SA; probe assumes
 `maintenance_role_arn` (+ cheap `target_role_arn` validate); `maintenance_role_arn`
 NOT NULL (no existing rows); passphrase mode straight to `ready` (no escrow);
 `other_content` hard-blocks, Retry-only (Canopy never deletes contents);
-import-by-Secret dropped;
-`credential_process` for kopia; `kopia.repository` marker confirmed.
+import-by-Secret dropped; **kopia creds via a localhost container-credentials
+endpoint** the bin serves (verified: `credential_process`/creds-file/`--role`
+all rejected; minio-go IAM provider polls + self-refreshes, no session ceiling,
+**no `MaxSessionDuration` ops change**); `kopia.repository` marker confirmed.
 
 Also resolved this round: pulumi→private-server auth = `TailscaleAdmin` gate
 (pulumi has tailnet access; machine/tagged-grant auth is a later, out-of-scope
