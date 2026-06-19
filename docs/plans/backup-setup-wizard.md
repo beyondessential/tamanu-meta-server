@@ -232,11 +232,29 @@ only). The `backups` init loop keeps only *reading* the Secret — no change.
 
 ### 3.3 `.storageconfig` (Intelligent-Tiering) on init
 
-On repo init, if `<prefix>.storageconfig` is **absent**, Canopy creates it to
-configure Intelligent-Tiering. **Never overwrite** an existing `.storageconfig`.
-A prefix containing only `.storageconfig` is treated as `empty` by the probe
-(§2.2), so a pre-seeded tiering config doesn't block from_birth. (Verify the
-exact `.storageconfig` schema kopia/S3 expects before writing it.)
+Normally pulumi writes `.storageconfig` at bucket creation
+(`ops/pulumi/tamanu/on-linux/src/backup/kopia.ts` + `ops/pulumi/backups/index.ts`).
+Canopy creates it as a **fallback**: on repo init, if `<prefix>.storageconfig`
+is **absent**, write it; **never overwrite** an existing one. A prefix
+containing only `.storageconfig` is treated as `empty` by the probe (§2.2), so a
+pre-seeded tiering config doesn't block from_birth.
+
+Use the exact schema ops uses (kopia `blobOptions` — data blobs under the `p`
+prefix → Intelligent-Tiering, everything else → Standard so indexes stay in the
+frequent tier), written as pretty JSON, `Content-Type: application/json`:
+
+```json
+{
+  "blobOptions": [
+    { "prefix": "p", "storageClass": "INTELLIGENT_TIERING" },
+    { "storageClass": "STANDARD" }
+  ]
+}
+```
+
+The `p` prefix is relative to the kopia storage root, so the same content is
+correct whether or not the repo lives under a canopy prefix; place the object at
+`<prefix>.storageconfig`.
 
 ---
 
@@ -251,12 +269,12 @@ resource — so operators don't hand-copy ARNs out of pulumi.
   **same server-side access-check/probe** (§2.2) before persisting, so a config
   pushed by pulumi is validated identically — bad creds/role/bucket fail fast.
 - **Resource semantics:** idempotent upsert keyed by group (or bucket+prefix),
-  suitable for a Pulumi dynamic provider / `Command`-style resource. Delete tears
-  down the config (define: does it also delete the Secret? recommend yes for
-  from_birth/passphrase since Canopy owns it — confirm).
-- **Auth (open):** private-server gates on `TailscaleAdmin`. Pulumi/CI needs a
-  machine path — either run on the tailnet, or add a service-token/`TailscaleApi`
-  auth mode for non-interactive callers. **Open decision (§5).**
+  suitable for a Pulumi dynamic provider / `Command`-style resource. **Delete
+  tears down the config *and* deletes the Canopy-owned passphrase Secret** (both
+  modes — Canopy owns it now).
+- **Auth (decided):** gate on `TailscaleAdmin` for now — pulumi has tailnet
+  access. A proper non-interactive machine path (still over Tailscale, via
+  tagged/ACL-grant access) is wanted **later but explicitly out of scope here**.
 
 ---
 
@@ -316,22 +334,20 @@ resource — so operators don't hand-copy ARNs out of pulumi.
 
 ---
 
-## 5. Open decisions (for review)
+## 5. Decisions (all resolved)
 
-Resolved this round: dedicated `canopy-private` SA; probe assumes
+Resolved: dedicated `canopy-private` SA; probe assumes
 `maintenance_role_arn` (+ cheap `target_role_arn` validate); `maintenance_role_arn`
 NOT NULL (no existing rows); passphrase mode straight to `ready` (no escrow);
 `other_content` hard-blocks, Retry-only (Canopy never deletes contents);
 import-by-Secret dropped;
 `credential_process` for kopia; `kopia.repository` marker confirmed.
 
-Still open:
+Also resolved this round: pulumi→private-server auth = `TailscaleAdmin` gate
+(pulumi has tailnet access; machine/tagged-grant auth is a later, out-of-scope
+follow-up); deleting a config also deletes the Canopy-owned Secret;
+`.storageconfig` schema taken verbatim from the ops repo (§3.3); e2e probe is
+stubbed/mocked (whatever's simplest — the e2e AWS/kube clients are `None`, so the
+probe path gets a test seam returning canned `ProbeResult`s; no real S3).
 
-1. **Pulumi → private-server auth** (§3a): run pulumi/CI on the tailnet, or add a
-   service-token / `TailscaleApi` machine-auth mode? Biggest remaining fork.
-2. **Delete semantics** (§3a): does deleting a config also delete the Canopy-owned
-   Secret? Recommend yes. Confirm.
-3. **`.storageconfig` schema** (§3.3): confirm the exact tiering config object to
-   write before coding it.
-4. **e2e probe seam:** inject a fake S3/probe result in the e2e build (kube/AWS
-   are `None` there) — confirm the approach (env-gated stub vs trait injection).
+**Nothing blocking remains** — ready to implement on plan approval.
