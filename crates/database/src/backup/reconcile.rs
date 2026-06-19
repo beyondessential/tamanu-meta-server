@@ -1,0 +1,231 @@
+//! Reconcile device **reports** against repo **inventory**: cross-check what
+//! devices reported (`backup_runs`) against what *actually landed* in the repo
+//! (`backup_repo_snapshots`).
+//!
+//! Per scanned `(server, type)`, resolved against the kopia source recorded in
+//! `backup_repo_snapshots`:
+//!
+//! - **report success but no recent snapshot** → `backup-reconcile-missing`
+//!   (`Error`, group-level, pages regardless of monitored). The case the
+//!   reports alone cannot catch — a device lying about success or data not
+//!   persisting.
+//! - **recent snapshot but no report** → `backup-reconcile-report-gap`
+//!   (`Warning`, per-server, non-paging). The reporting path is broken, not
+//!   the backup.
+//! - **neither** → genuinely stale; the staleness scan already owns it, emit
+//!   nothing.
+//!
+//! Freshness guard: if the repo inventory for the group is itself stale (its
+//! `observed_at` older than [`INVENTORY_STALE_AFTER`]), the "missing" verdict
+//! is skipped — a lagging inspector must not produce false "report lied"
+//! alerts.
+
+use std::collections::HashMap;
+
+use commons_errors::Result;
+use commons_types::{backup::BackupType, issue::Severity};
+use diesel::prelude::*;
+use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use jiff::{SignedDuration, Timestamp};
+use uuid::Uuid;
+
+use crate::{
+	backup::{alerts::raise_group_event, refs, staleness::ScanRow},
+	issues::NewEvent,
+	servers::Server,
+};
+
+/// How old a group's repo snapshot inventory (`observed_at`) may be before
+/// reconciliation refuses to conclude "missing". Tied to the inspection
+/// cadence floor (weekly for manual-only groups) plus a day of grace. If the
+/// inspector hasn't run recently we can't trust "no snapshot landed", so we
+/// defer to the inspection Job's own failure surfacing instead.
+pub const INVENTORY_STALE_AFTER: SignedDuration = SignedDuration::from_hours((7 + 1) * 24);
+
+/// Snapshot freshness + observed-at for one `(server, type)`, from
+/// `backup_repo_snapshots`.
+#[derive(Debug, Clone, Copy)]
+struct SnapInfo {
+	latest_snapshot_at: Option<Timestamp>,
+	observed_at: Timestamp,
+}
+
+/// Reconcile the scanned set against repo snapshots. Reuses the same
+/// [`ScanRow`]s that [`crate::backup::staleness::scan_rows`] produced (the
+/// caller passes them in so the staleness scan and reconciliation share one
+/// pass). Returns the number of events filed.
+pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize> {
+	if rows.is_empty() {
+		return Ok(0);
+	}
+	let now = Timestamp::now();
+
+	// Snapshot info per (server_id, type) across the scanned groups.
+	let group_ids: Vec<Uuid> = {
+		let mut s: std::collections::HashSet<Uuid> = rows.iter().map(|r| r.group_id).collect();
+		s.drain().collect()
+	};
+	let snaps = snapshot_info(db, &group_ids).await?;
+
+	let mut filed = 0usize;
+	for row in rows {
+		let grace = row.expected_interval.saturating_mul(2);
+		let report_fresh = row
+			.last_success_at
+			.is_some_and(|t| now.duration_since(t) <= grace);
+
+		let snap = snaps.get(&(row.server_id, row.r#type.clone()));
+		let snapshot_fresh = snap
+			.and_then(|s| s.latest_snapshot_at)
+			.is_some_and(|t| now.duration_since(t) <= grace);
+		let inventory_fresh =
+			snap.is_some_and(|s| now.duration_since(s.observed_at) <= INVENTORY_STALE_AFTER);
+
+		let missing_ref = format!("{}:{}", refs::RECONCILE_MISSING, row.r#type);
+		let gap_ref = format!("{}:{}", refs::RECONCILE_REPORT_GAP, row.r#type);
+
+		match (report_fresh, snapshot_fresh) {
+			// Report says success but the data didn't land (or its row is
+			// missing). Only conclude this when the repo inventory is fresh
+			// enough.
+			(true, false) if inventory_fresh => {
+				raise_group_event(
+					db,
+					row.group_id,
+					&missing_ref,
+					Severity::Error,
+					None,
+					&format!(
+						"Server {} reported a successful {} backup but no matching repo snapshot landed",
+						row.server_id, row.r#type,
+					),
+					true,
+				)
+				.await?;
+				filed += 1;
+			}
+			// Both agree it's fine → clear any open missing alert.
+			(true, true) => {
+				if open_group_active(db, row.group_id, &missing_ref).await? {
+					raise_group_event(
+						db,
+						row.group_id,
+						&missing_ref,
+						Severity::Info,
+						None,
+						&format!("Server {} backup report and repo snapshot agree again", row.server_id),
+						false,
+					)
+					.await?;
+					filed += 1;
+				}
+				filed += clear_report_gap(db, row, &gap_ref, now).await?;
+			}
+			// Snapshot landed but no recent report → the reporting path is
+			// broken. Per-server Warning (non-paging).
+			(false, true) => {
+				let server = Server::get_by_id(db, row.server_id).await?;
+				NewEvent {
+					source: refs::CANOPY_SOURCE.into(),
+					r#ref: gap_ref,
+					severity: Some(Severity::Warning),
+					description: None,
+					message: format!(
+						"A fresh {} repo snapshot exists for {} but no backup run was reported",
+						row.r#type,
+						server.id,
+					),
+					active: Some(true),
+					occurred_at: Some(now),
+				}
+				.save(db, row.server_id, row.device_id)
+				.await?;
+				filed += 1;
+			}
+			// Neither fresh → the staleness scan owns it; clear stale reconcile
+			// alerts.
+			(false, false) => {
+				filed += clear_report_gap(db, row, &gap_ref, now).await?;
+			}
+			// (true, false) but the repo inventory is stale: skip the missing
+			// verdict.
+			(true, false) => {}
+		}
+	}
+	Ok(filed)
+}
+
+/// Clear an open per-server report-gap issue when the report path is healthy
+/// again (or the pair is genuinely stale and the staleness scan owns it).
+async fn clear_report_gap(
+	db: &mut AsyncPgConnection,
+	row: &ScanRow,
+	gap_ref: &str,
+	now: Timestamp,
+) -> Result<usize> {
+	if !crate::backup::staleness::open_server_issue_active(db, row.server_id, gap_ref).await? {
+		return Ok(0);
+	}
+	NewEvent {
+		source: refs::CANOPY_SOURCE.into(),
+		r#ref: gap_ref.to_string(),
+		severity: Some(Severity::Info),
+		description: None,
+		message: format!("Backup reporting for {} ({}) recovered", row.server_id, row.r#type),
+		active: Some(false),
+		occurred_at: Some(now),
+	}
+	.save(db, row.server_id, row.device_id)
+	.await?;
+	Ok(1)
+}
+
+async fn open_group_active(db: &mut AsyncPgConnection, group_id: Uuid, r#ref: &str) -> Result<bool> {
+	crate::backup::staleness::open_group_issue_active(db, group_id, r#ref).await
+}
+
+/// Latest snapshot + observed-at per `(server_id, type)` for the given groups.
+/// Rows with a NULL `server_id` (sources we can't attribute to a server) are
+/// skipped.
+async fn snapshot_info(
+	db: &mut AsyncPgConnection,
+	group_ids: &[Uuid],
+) -> Result<HashMap<(Uuid, BackupType), SnapInfo>> {
+	use crate::schema::backup_repo_snapshots as s;
+
+	if group_ids.is_empty() {
+		return Ok(HashMap::new());
+	}
+
+	let rows: Vec<(
+		Option<Uuid>,
+		Option<String>,
+		Option<jiff_diesel::Timestamp>,
+		jiff_diesel::Timestamp,
+	)> = s::table
+		.filter(s::group_id.eq_any(group_ids))
+		.filter(s::server_id.is_not_null())
+		.select((s::server_id, s::type_, s::latest_snapshot_at, s::observed_at))
+		.load(db)
+		.await?;
+
+	let mut out: HashMap<(Uuid, BackupType), SnapInfo> = HashMap::new();
+	for (server_id, ty, latest, observed) in rows {
+		let (Some(server_id), Some(ty)) = (server_id, ty) else {
+			continue;
+		};
+		let info = SnapInfo {
+			latest_snapshot_at: latest.map(Timestamp::from),
+			observed_at: Timestamp::from(observed),
+		};
+		out.entry((server_id, BackupType::from(ty)))
+			.and_modify(|e| {
+				// Keep the freshest snapshot row for the pair.
+				if info.observed_at > e.observed_at {
+					*e = info;
+				}
+			})
+			.or_insert(info);
+	}
+	Ok(out)
+}

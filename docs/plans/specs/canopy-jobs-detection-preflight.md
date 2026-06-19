@@ -41,28 +41,41 @@ server-keyed today, so the group-level path needs new plumbing (see
 
 ## Where it lives
 
-New binaries in the **`jobs` crate**, following the
-`reachability`/`pingtask` template (`spawn() -> JoinHandle<()>`, a
-`loop { sleep(…); pool.get(); … }`, `#[tokio::main]` calling
-`spawn().await`):
+RESOLVED (impl) — the bin layout changed from what's sketched below:
 
-- `crates/jobs/src/bin/backup_staleness.rs` — signal-1 + reconciliation
-  scan (DB-only; no AWS). ~1–5 min cadence. Can ride the existing
-  `reachability` minute loop instead of a new pod if we prefer one fewer
-  Deployment — **decision below**.
-- `crates/jobs/src/bin/backup_preflight.rs` — upstream preflight (AWS SDK;
-  STS + S3). Shared `GetCallerIdentity` on a ~minute tick; per-group deep
-  checks hash-jittered hourly.
+- **No separate `backup_staleness` bin.** Open-question 3 resolved →
+  **folded into the renamed `monitor` bin** (formerly `reachability`). The
+  `monitor` bin (`crates/jobs/src/bin/monitor.rs`) now runs the reachability
+  sweep, the backup staleness + reconcile sweep (`database::backup::sweep`),
+  **and** the tailnet key-expiry sweep, all on its one minute loop. The
+  staleness/reconcile *logic* lives in the `database` crate (`database::backup`,
+  see below).
+- **Preflight is not its own bin either** — it's a module
+  (`crates/jobs/src/backup/preflight.rs`) run by the consolidated `backups`
+  bin (see canopy-jobs-maintenance-inspection.md §2/§4 for that single bin).
+
+The original sketch (separate `backup_staleness` + `backup_preflight` bins
+following the `reachability`/`pingtask` template) is kept below for design
+history:
+
+- ~~`crates/jobs/src/bin/backup_staleness.rs`~~ — signal-1 + reconciliation
+  scan (DB-only; no AWS). ~1–5 min cadence. **Folded into `monitor`.**
+- ~~`crates/jobs/src/bin/backup_preflight.rs`~~ — upstream preflight (AWS SDK;
+  STS + S3). **Now a module under the `backups` bin.**
 
 The bulk of the logic lives in the **`database` crate** as model functions
 (like `Status::sweep_reachability`), so it's testable with
-`commons_tests::db::TestDb::run` without standing up a binary:
+`commons_tests::db::TestDb::run` without standing up a binary. As shipped, the
+`database::backup` module (`crates/database/src/backup/`) holds:
 
-- `crates/database/src/backup/staleness.rs` (or extend an existing
-  `backup` module the issuance component creates) — the scan + classify +
-  file-events logic.
-- `crates/database/src/backup/reconcile.rs` — signal 1↔2(↔3)
-  reconciliation.
+- `staleness.rs` — the scan + classify + file-events logic.
+- `reconcile.rs` — signal 1↔2(↔3) reconciliation.
+- `alerts.rs` — `raise_group_event`, the single group-scoped incident
+  entrypoint (bypasses per-server `is_monitored`).
+- `refs.rs` — the `(source, ref)` constants.
+
+`database::backup::sweep` is the top-level entry the `monitor` bin calls each
+tick (runs signal-1 classify + reconciliation).
 - The preflight's AWS calls live in the **binary** (the `database` crate
   must not gain an AWS dependency); the preflight's *alerting* reuses the
   same `NewEvent` helpers. The binary reads config rows via a `database`
@@ -392,27 +405,21 @@ pub fn spawn() -> JoinHandle<()> {
 }
 ```
 
-- **`backup_staleness`**: DB-only, 60 s tick. Runs signal-1 classify +
-  reconciliation each tick. Cheap (a couple of indexed queries + per-server
-  classify). **Decision:** stand up its own single-replica Deployment in
-  `ops/pulumi/tamanu/meta/src/jobs.ts`, *or* fold the scan into the existing
-  `reachability` loop (which already does a minute-cadence DB sweep + the
-  startup `reconcile_open_incidents`). Folding in avoids a new pod; a
-  separate binary keeps concerns isolated and is independently
-  schedulable. Recommend a **separate binary** for blast-radius and testing
-  clarity, matching the plan's "new `crates/jobs/src/bin/<name>.rs`"
-  framing.
-- **`backup_preflight`**: AWS-touching. 60 s tick for `GetCallerIdentity`;
-  per-group deep checks fire only when the tick lands in the group's
-  jittered hourly slot. Needs the AWS client + IRSA (greenfield — the
-  issuance/IaC component introduces the SDK deps, the ServiceAccount, and
-  the IRSA role; this binary reuses them). Its own single-replica
-  Deployment.
+- **staleness + reconcile**: DB-only, 60 s tick. RESOLVED (impl): **folded
+  into the `monitor` bin** (formerly `reachability`), which already does the
+  minute-cadence DB sweep + the startup `reconcile_open_incidents`. No separate
+  Deployment; `database::backup::sweep` runs each tick after the reachability
+  sweep. (The earlier recommendation of a separate binary was reversed — see
+  open question 3.)
+- **preflight**: AWS-touching. 60 s tick for `GetCallerIdentity`; per-group
+  deep checks fire only when the tick lands in the group's jittered hourly slot.
+  RESOLVED (impl): runs as a **module under the consolidated `backups` bin**
+  (alongside maintenance/inspection/s3-metrics via `tokio::try_join!`), not its
+  own Deployment — see canopy-jobs-maintenance-inspection.md.
 
-Hash-jitter helper (shared with maintenance/inspection):
-`fn jitter_slot(group_id: Uuid, window: Duration) -> Duration` →
-`hash(group_id) mod window`, stable per group. Put it in `commons-servers`
-or a shared `backup` util so all schedulers agree.
+Hash-jitter helper (shared with maintenance/inspection): RESOLVED (impl) it
+lives in `commons_servers::backup_jobs` (`jitter_slot(group_id, window)` +
+`slot_is_due(...)`), so all schedulers agree.
 
 ## Interfaces / contracts
 
@@ -477,6 +484,17 @@ struct ScanRow {
 
 ## Testing approach (per AGENTS.md)
 
+UPDATE (shipped): DB-level detection tests exist in
+`crates/database/tests/backup_detection.rs` — covering classify boundaries
+(`classify_boundaries`, `classify_restore_only_history_is_never`),
+staleness/never/reconcile sweeps with the `is_monitored` gate
+(`sweep_files_staleness_*`, `sweep_files_never_*`,
+`unmonitored_staleness_records_issue_but_no_incident_link`,
+`reconcile_files_report_gap_*`, `reconcile_files_missing_*`,
+`reconcile_clears_report_gap_*`), and the headline
+group-level-alert-pages-even-when-all-members-unmonitored case
+(`group_event_pages_even_when_all_members_unmonitored`).
+
 - **Database-level tests** (`commons_tests::db::TestDb::run`) are the
   primary coverage, since the scan/classify/reconcile logic lives in the
   `database` crate as model fns. Use direct model functions, not HTTP.
@@ -539,9 +557,10 @@ struct ScanRow {
    fleet-level if Option B gives us a non-group sentinel cheaply; otherwise
    per-group.
 3. **Separate `backup_staleness` binary vs folding into `reachability`.**
-   Recommend separate binary (isolation, testability, matches plan
-   framing). Folding saves a Deployment. Confirm with the ops/Deployment
-   owner.
+   RESOLVED (impl): **folded** into the bin formerly called `reachability`,
+   now renamed **`monitor`** (it runs reachability + backup
+   staleness/reconcile + tailnet key-expiry on one minute loop). No separate
+   `backup_staleness` Deployment.
 4. **Maintenance-staleness threshold.** Independent of `expected_interval`
    (maintenance cadence is full-weekly). Proposed constant ~`8 days`;
    confirm and make it a named constant, not magic.

@@ -1,17 +1,21 @@
-//! Periodic canopy reachability sweep. Once a minute, look at every
-//! monitored server's latest status row and file (or close) the
-//! `(source=canopy, ref=reachability)` issue. Severity escalates as the
-//! server stays unreported — Notice → Warning at the sub-incident tiers,
-//! then Error (opens an incident) at "Down", then Critical at "Gone".
+//! Canopy monitoring pod: the minute-cadence, DB-only sweeps that detect
+//! problems and file/close incidents. One loop, one deployment — every sweep
+//! here is a cheap read against the same DB, so there's no reason to stand up
+//! a separate pod per check.
 //!
-//! Independent of pingtask: most servers push their own status, so the
-//! sweep operates on the resulting `statuses` rows regardless of which path
-//! produced them.
+//! Sweeps run each tick:
+//! - **reachability** — look at every monitored server's latest status row and
+//!   file (or close) the `(source=canopy, ref=reachability)` issue. Severity
+//!   escalates as the server stays unreported — Notice → Warning at the
+//!   sub-incident tiers, then Error (opens an incident) at "Down", then
+//!   Critical at "Gone". Independent of pingtask: most servers push their own
+//!   status, so the sweep operates on the resulting `statuses` rows regardless
+//!   of which path produced them.
+//! - **backup staleness + reconcile** — `database::backup::sweep`: stale
+//!   reported runs / maintenance, and report-vs-inventory reconciliation.
+//! - **tailnet key-expiry** — when the Tailscale directory is configured.
 //!
-//! The same loop also runs the tailnet key-expiry sweep when the
-//! Tailscale directory is configured — both are minute-cadence reads
-//! against the same DB, so there's no reason to stand up a second
-//! deployment for it.
+//! Plus a startup **incident reconciliation** pass (see below).
 
 use std::time::Duration;
 
@@ -109,6 +113,15 @@ pub fn spawn() -> JoinHandle<()> {
 				Ok(0) => {}
 				Ok(n) => debug!("filed {n} reachability events"),
 				Err(err) => error!("reachability sweep failed: {err}"),
+			}
+
+			// Backup staleness + report-vs-inventory reconciliation: another
+			// minute-cadence DB-only sweep, so it rides this loop rather than a
+			// separate pod.
+			match database::backup::sweep(&mut db).await {
+				Ok(0) => {}
+				Ok(n) => debug!("filed {n} backup staleness/reconcile events"),
+				Err(err) => error!("backup staleness sweep failed: {err}"),
 			}
 
 			if let Some(directory) = &directory {

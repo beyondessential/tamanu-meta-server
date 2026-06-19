@@ -5,6 +5,7 @@ use diesel_async::{
 
 pub mod admins;
 pub mod artifacts;
+pub mod backup;
 pub mod backups;
 pub mod bestool_snippets;
 pub mod chrome_releases;

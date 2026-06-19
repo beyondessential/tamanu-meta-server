@@ -1,0 +1,33 @@
+//! Backup-credentials detection / alerting (DB-driven half of the control
+//! plane). The persistent models live in [`crate::backups`]; this module owns
+//! the periodic *logic*: staleness, report-vs-inventory reconciliation, and
+//! the shared group-level alerting entrypoint.
+//!
+//! - [`refs`] — the stable `(source, ref)` alert keys (a contract).
+//! - [`alerts`] — [`alerts::raise_group_event`], the single group-scoped
+//!   incident entrypoint (bypasses per-server `is_monitored`).
+//! - [`staleness`] — staleness scan over reported runs + maintenance staleness.
+//! - [`reconcile`] — reconcile device reports against repo inventory.
+//!
+//! The preflight (AWS-touching) lives in the `jobs` crate binary, not here —
+//! the `database` crate must not gain an AWS dependency — but its *alerting*
+//! reuses [`alerts::raise_group_event`].
+
+pub mod alerts;
+pub mod reconcile;
+pub mod refs;
+pub mod staleness;
+
+use commons_errors::Result;
+use diesel_async::AsyncPgConnection;
+
+/// Run both DB-driven checks in one pass off a single scan: staleness (+
+/// maintenance staleness) then report-vs-inventory reconciliation. Called each
+/// tick from the `reachability` loop (it already runs minute-cadence DB-only
+/// sweeps). Returns the total number of events filed.
+pub async fn sweep(db: &mut AsyncPgConnection) -> Result<usize> {
+	let rows = staleness::scan_rows(db).await?;
+	let mut filed = staleness::sweep(db, &rows).await?;
+	filed += reconcile::sweep(db, &rows).await?;
+	Ok(filed)
+}
