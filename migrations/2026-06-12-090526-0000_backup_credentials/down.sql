@@ -1,0 +1,10 @@
+DROP TABLE backup_requests;
+DROP TABLE backup_repo_stats;
+DROP TABLE backup_repo_snapshots;
+DROP TABLE backup_maintenance_runs;
+DROP TABLE backup_runs;
+DROP TABLE backup_credential_issuances;
+DROP TABLE server_group_backup_schedule;
+DROP TABLE server_backup_capabilities;
+DROP TABLE backup_type_defaults;
+DROP TABLE server_group_backup_config;

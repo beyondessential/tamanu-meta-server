@@ -5,6 +5,7 @@ use diesel_async::{
 
 pub mod admins;
 pub mod artifacts;
+pub mod backups;
 pub mod bestool_snippets;
 pub mod chrome_releases;
 pub mod devices;
@@ -28,7 +29,16 @@ pub mod version_known_issues;
 pub mod versions;
 pub mod views;
 
+pub use backups::{
+	BackupCredentialIssuance, BackupMaintenanceRun, BackupRepoSnapshot, BackupRepoStats,
+	BackupRequest, BackupRun, BackupTypeDefault, NewBackupCredentialIssuance, NewBackupRun,
+	NewBackupTypeDefault, NewServerGroupBackupConfig, NewServerGroupBackupSchedule,
+	ServerBackupCapability, ServerGroupBackupConfig, ServerGroupBackupSchedule,
+};
 pub use bestool_snippets::{BestoolSnippet, NewBestoolSnippet};
+pub use commons_types::backup::{
+	BackupConfigStatus, BackupPurpose, BackupType, MaintenanceKind, RunOutcome,
+};
 pub use devices::{Device, DeviceConnection, DeviceKey, DeviceWithInfo};
 
 pub type Db = Pool<AsyncPgConnection>;

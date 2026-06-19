@@ -92,7 +92,7 @@ export default function IssueRow({
 				headerSnapshotOpen={headerSnapshotOpen}
 				toggleHeaderSnapshot={() => setHeaderSnapshotOpen((v) => !v)}
 			/>
-			{headerSnapshotOpen && (
+			{headerSnapshotOpen && issue.server_id && (
 				<StatusSnapshotPanel
 					serverId={issue.server_id}
 					at={issue.last_seen}
@@ -147,22 +147,44 @@ function Header({
 					<ExpandMoreIcon fontSize="small" />
 				)}
 			</IconButton>
-			<MuiLink
-				component={RouterLink}
-				to={`/servers/${issue.server_id}`}
-				underline="hover"
-				color="text.primary"
-				sx={{ fontWeight: 500, flexShrink: 0 }}
-			>
-				<ServerNameWithGroup
-					groupName={issue.server_group_name}
-					serverName={
-						issue.server_name && issue.server_name.trim() !== ""
-							? issue.server_name
-							: issue.server_host || "(unknown)"
-					}
-				/>
-			</MuiLink>
+			{issue.server_id != null ? (
+				<MuiLink
+					component={RouterLink}
+					to={`/servers/${issue.server_id}`}
+					underline="hover"
+					color="text.primary"
+					sx={{ fontWeight: 500, flexShrink: 0 }}
+				>
+					<ServerNameWithGroup
+						groupName={issue.server_group_name}
+						serverName={
+							issue.server_name && issue.server_name.trim() !== ""
+								? issue.server_name
+								: issue.server_host || "(unknown)"
+						}
+					/>
+				</MuiLink>
+			) : (
+				// Group-scoped issue (no server): link the group instead of a
+				// bogus `/servers/null`. Falls back to a plain label when the
+				// issue carries no group name.
+				<Box sx={{ fontWeight: 500, flexShrink: 0 }}>
+					{issue.server_group_name ? (
+						<ServerNameWithGroup
+							groupName={issue.server_group_name}
+							groupId={issue.server_group_id ?? undefined}
+							serverName="(group-wide)"
+						/>
+					) : (
+						<Typography
+							component="span"
+							color="text.secondary"
+						>
+							(group-wide)
+						</Typography>
+					)}
+				</Box>
+			)}
 			<Typography
 				variant="body2"
 				sx={{
@@ -291,7 +313,7 @@ function Body({
 					gap: 2,
 				}}
 			>
-				<EventLog issueId={issue.id} serverId={issue.server_id} />
+				<EventLog issueId={issue.id} serverId={issue.server_id ?? undefined} />
 				<NotesList
 					apiModule="issues"
 					parentKey="issue_id"
@@ -486,22 +508,24 @@ function IssueActions({
 						join incidents. Manage and un-silence from the detail page.
 					</Typography>
 					<Stack direction="row" spacing={1}>
-						<Button
-							variant="outlined"
-							size="small"
-							startIcon={<NotificationsOffOutlinedIcon />}
-							onClick={() =>
-								wrap(() =>
-									silenceServer.call({
-										server_id: issue.server_id,
-										source: issue.source,
-										ref: issue.ref,
-									}),
-								).then(() => setSilenceOpen(false))
-							}
-						>
-							For this server
-						</Button>
+						{issue.server_id != null && (
+							<Button
+								variant="outlined"
+								size="small"
+								startIcon={<NotificationsOffOutlinedIcon />}
+								onClick={() =>
+									wrap(() =>
+										silenceServer.call({
+											server_id: issue.server_id,
+											source: issue.source,
+											ref: issue.ref,
+										}),
+									).then(() => setSilenceOpen(false))
+								}
+							>
+								For this server
+							</Button>
+						)}
 						{issue.server_group_id && (
 							<Button
 								variant="outlined"
@@ -617,7 +641,7 @@ function EventLog({
 	serverId,
 }: {
 	issueId: string;
-	serverId: string;
+	serverId?: string;
 }) {
 	const [expanded, setExpanded] = useState(false);
 	const [page, setPage] = useState(0);
@@ -706,7 +730,7 @@ function EventLog({
 						<Box sx={{ minWidth: 0, overflow: "hidden" }}>
 							<MessageView message={e.message} />
 						</Box>
-						{open && (
+						{open && serverId && (
 							<StatusSnapshotPanel
 								serverId={serverId}
 								at={at}

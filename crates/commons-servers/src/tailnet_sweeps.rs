@@ -44,8 +44,12 @@ pub async fn sweep_key_expiry(
 	let server_ids: Vec<Uuid> = pairs.iter().map(|(_, s, _)| *s).collect();
 	let existing =
 		Issue::list_by_source_ref(db, TAILSCALE_SOURCE, KEY_EXPIRY_REF, &server_ids).await?;
-	let issue_map: std::collections::HashMap<Uuid, &Issue> =
-		existing.iter().map(|i| (i.server_id, i)).collect();
+	// `list_by_source_ref` is filtered by `server_ids`, so every row is
+	// server-scoped (`server_id` is `Some`); drop any defensively.
+	let issue_map: std::collections::HashMap<Uuid, &Issue> = existing
+		.iter()
+		.filter_map(|i| i.server_id.map(|sid| (sid, i)))
+		.collect();
 
 	let now = Timestamp::now();
 	let mut filed = 0usize;

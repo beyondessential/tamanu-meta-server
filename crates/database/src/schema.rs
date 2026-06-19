@@ -22,6 +22,99 @@ diesel::table! {
 }
 
 diesel::table! {
+	backup_credential_issuances (id) {
+		id -> Int8,
+		device_id -> Uuid,
+		group_id -> Uuid,
+		#[sql_name = "type"]
+		type_ -> Text,
+		issued_at -> Timestamptz,
+		expires_at -> Timestamptz,
+		purpose -> Text,
+		sts_assumed_role -> Text,
+		sts_request_id -> Nullable<Text>,
+		access_key_id -> Nullable<Text>,
+		bucket -> Text,
+		prefix -> Text,
+	}
+}
+
+diesel::table! {
+	backup_maintenance_runs (id) {
+		id -> Int8,
+		group_id -> Uuid,
+		kind -> Text,
+		started_at -> Timestamptz,
+		finished_at -> Nullable<Timestamptz>,
+		outcome -> Nullable<Text>,
+		error -> Nullable<Text>,
+		bytes_reclaimed -> Nullable<Int8>,
+	}
+}
+
+diesel::table! {
+	backup_repo_snapshots (group_id, source) {
+		group_id -> Uuid,
+		source -> Text,
+		server_id -> Nullable<Uuid>,
+		#[sql_name = "type"]
+		type_ -> Nullable<Text>,
+		latest_snapshot_at -> Nullable<Timestamptz>,
+		observed_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
+	backup_repo_stats (group_id) {
+		group_id -> Uuid,
+		snapshot_count -> Nullable<Int4>,
+		source_count -> Nullable<Int4>,
+		logical_bytes -> Nullable<Int8>,
+		physical_bytes -> Nullable<Int8>,
+		bucket_bytes -> Nullable<Int8>,
+		observed_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
+	backup_requests (server_id, type_, purpose) {
+		server_id -> Uuid,
+		#[sql_name = "type"]
+		type_ -> Text,
+		purpose -> Text,
+		requested_at -> Timestamptz,
+		requested_by -> Nullable<Text>,
+	}
+}
+
+diesel::table! {
+	backup_runs (id) {
+		id -> Uuid,
+		device_id -> Uuid,
+		group_id -> Uuid,
+		server_id -> Nullable<Uuid>,
+		#[sql_name = "type"]
+		type_ -> Text,
+		purpose -> Text,
+		outcome -> Text,
+		error -> Nullable<Text>,
+		bytes_uploaded -> Nullable<Int8>,
+		snapshot_id -> Nullable<Text>,
+		reported_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
+	backup_type_defaults (type_) {
+		#[sql_name = "type"]
+		type_ -> Text,
+		default_interval -> Nullable<Interval>,
+		default_retention -> Jsonb,
+		auto_enable -> Bool,
+	}
+}
+
+diesel::table! {
 	bestool_snippets (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
@@ -166,7 +259,7 @@ diesel::table! {
 		id -> Uuid,
 		created_at -> Timestamptz,
 		updated_at -> Timestamptz,
-		server_id -> Uuid,
+		server_id -> Nullable<Uuid>,
 		device_id -> Nullable<Uuid>,
 		source -> Text,
 		#[sql_name = "ref"]
@@ -181,6 +274,17 @@ diesel::table! {
 		resolved_by -> Nullable<Text>,
 		resolved_reason -> Nullable<Text>,
 		snoozed_until -> Nullable<Timestamptz>,
+		server_group_id -> Nullable<Uuid>,
+	}
+}
+
+diesel::table! {
+	server_backup_capabilities (server_id, type_) {
+		server_id -> Uuid,
+		#[sql_name = "type"]
+		type_ -> Text,
+		enabled -> Bool,
+		registered_at -> Timestamptz,
 	}
 }
 
@@ -205,6 +309,36 @@ diesel::table! {
 		created_at -> Timestamptz,
 		expires_at -> Timestamptz,
 		consumed_at -> Nullable<Timestamptz>,
+	}
+}
+
+diesel::table! {
+	server_group_backup_config (group_id) {
+		group_id -> Uuid,
+		bucket -> Text,
+		prefix -> Text,
+		target_role_arn -> Text,
+		region -> Nullable<Text>,
+		repo_password_ref -> Text,
+		status -> Text,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
+		mode -> Text,
+		last_init_error -> Nullable<Text>,
+		escrow_acked_at -> Nullable<Timestamptz>,
+		escrow_acked_by -> Nullable<Text>,
+	}
+}
+
+diesel::table! {
+	server_group_backup_schedule (group_id, type_) {
+		group_id -> Uuid,
+		#[sql_name = "type"]
+		type_ -> Text,
+		expected_interval -> Nullable<Interval>,
+		retention -> Nullable<Jsonb>,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
 	}
 }
 
@@ -353,6 +487,16 @@ diesel::table! {
 
 diesel::joinable!(artifacts -> devices (device_id));
 diesel::joinable!(artifacts -> versions (version_id));
+diesel::joinable!(backup_credential_issuances -> devices (device_id));
+diesel::joinable!(backup_credential_issuances -> server_groups (group_id));
+diesel::joinable!(backup_maintenance_runs -> server_groups (group_id));
+diesel::joinable!(backup_repo_snapshots -> server_groups (group_id));
+diesel::joinable!(backup_repo_snapshots -> servers (server_id));
+diesel::joinable!(backup_repo_stats -> server_groups (group_id));
+diesel::joinable!(backup_requests -> servers (server_id));
+diesel::joinable!(backup_runs -> devices (device_id));
+diesel::joinable!(backup_runs -> server_groups (group_id));
+diesel::joinable!(backup_runs -> servers (server_id));
 diesel::joinable!(device_connections -> devices (device_id));
 diesel::joinable!(device_keys -> devices (device_id));
 diesel::joinable!(device_server_associations -> devices (device_id));
@@ -364,9 +508,13 @@ diesel::joinable!(incident_notes -> incidents (incident_id));
 diesel::joinable!(incidents -> server_groups (server_group_id));
 diesel::joinable!(issue_notes -> issues (issue_id));
 diesel::joinable!(issues -> devices (device_id));
+diesel::joinable!(issues -> server_groups (server_group_id));
 diesel::joinable!(issues -> servers (server_id));
+diesel::joinable!(server_backup_capabilities -> servers (server_id));
 diesel::joinable!(server_enrollment_challenges -> servers (server_id));
 diesel::joinable!(server_enrollment_tokens -> servers (server_id));
+diesel::joinable!(server_group_backup_config -> server_groups (group_id));
+diesel::joinable!(server_group_backup_schedule -> server_groups (group_id));
 diesel::joinable!(server_group_silenced_refs -> server_groups (server_group_id));
 diesel::joinable!(server_silenced_refs -> servers (server_id));
 diesel::joinable!(servers -> devices (device_id));
@@ -380,6 +528,13 @@ diesel::joinable!(versions -> devices (device_id));
 diesel::allow_tables_to_appear_in_same_query!(
 	admins,
 	artifacts,
+	backup_credential_issuances,
+	backup_maintenance_runs,
+	backup_repo_snapshots,
+	backup_repo_stats,
+	backup_requests,
+	backup_runs,
+	backup_type_defaults,
 	bestool_snippets,
 	chrome_releases,
 	device_connections,
@@ -393,8 +548,11 @@ diesel::allow_tables_to_appear_in_same_query!(
 	incidents,
 	issue_notes,
 	issues,
+	server_backup_capabilities,
 	server_enrollment_challenges,
 	server_enrollment_tokens,
+	server_group_backup_config,
+	server_group_backup_schedule,
 	server_group_silenced_refs,
 	server_groups,
 	server_silenced_refs,

@@ -904,7 +904,6 @@
           "id",
           "created_at",
           "updated_at",
-          "server_id",
           "source",
           "ref",
           "severity",
@@ -974,9 +973,21 @@
             ],
             "description": "Stored as nullable text; validated as `ResolvedReason` at the API layer\n(avoids the diesel orphan-rules dance for nullable enum columns)."
           },
+          "server_group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "`NULL` for an ordinary server-scoped issue; `Some` for a group-scoped\ncontrol-plane issue (backup corruption, preflight, …) raised via\n[`raise_group_event`]. Group-scoped issues bypass the per-server\n`is_monitored` gate."
+          },
           "server_id": {
-            "type": "string",
-            "format": "uuid"
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "`NULL` for a group-scoped issue (see [`server_group_id`](Self::server_group_id)).\nExactly one of `server_id` / `server_group_id` is set (DB CHECK)."
           },
           "severity": {
             "$ref": "#/components/schemas/Severity"

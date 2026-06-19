@@ -232,8 +232,12 @@ impl Status {
 			statuses.into_iter().map(|s| (s.server_id, s)).collect();
 		let existing_issues =
 			Issue::list_by_source_ref(db, CANOPY_SOURCE, REACHABILITY_REF, &server_ids).await?;
-		let issue_map: std::collections::HashMap<Uuid, &Issue> =
-			existing_issues.iter().map(|i| (i.server_id, i)).collect();
+		// `list_by_source_ref` is filtered by `server_ids`, so every row is
+		// server-scoped (`server_id` is `Some`); drop any defensively.
+		let issue_map: std::collections::HashMap<Uuid, &Issue> = existing_issues
+			.iter()
+			.filter_map(|i| i.server_id.map(|sid| (sid, i)))
+			.collect();
 
 		let now = Timestamp::now();
 		let mut filed = 0usize;
