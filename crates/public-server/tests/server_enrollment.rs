@@ -35,6 +35,7 @@ fn new_server(host: &str) -> Server {
 		cloud: None,
 		geolocation: None,
 		is_monitored: true,
+		allow_legacy_status: false,
 		alert_when_down_for: PgDuration(SignedDuration::from_secs(600)),
 		notes: String::new(),
 		tags: TagMap::default(),
@@ -134,34 +135,41 @@ async fn run_tailnet_handshake(
 
 #[tokio::test(flavor = "multi_thread")]
 async fn tailnet_enrollment_happy_path() {
-	run_with_tailnet_device_auth("server", async |mut conn, fwd_ip, _node, _dev, _public, private| {
-		use database::Device;
-		let (spki, _cert, key) = make_signing_certificate();
-		let server = Server::create(&mut conn, new_server("https://ts-enroll.example/"))
-			.await
-			.unwrap();
-		let (_t, token) =
-			ServerEnrollmentToken::mint(&mut conn, server.id, SignedDuration::from_hours(1))
+	run_with_tailnet_device_auth(
+		"server",
+		async |mut conn, fwd_ip, _node, _dev, _public, private| {
+			use database::Device;
+			let (spki, _cert, key) = make_signing_certificate();
+			let server = Server::create(&mut conn, new_server("https://ts-enroll.example/"))
 				.await
 				.unwrap();
+			let (_t, token) =
+				ServerEnrollmentToken::mint(&mut conn, server.id, SignedDuration::from_hours(1))
+					.await
+					.unwrap();
 
-		run_tailnet_handshake(&private, fwd_ip, server.id, &token, &spki, &key, None)
-			.await
-			.assert_status_ok();
-
-		// Registered + bound to a device carrying the body-supplied key; token spent.
-		let after = Server::get_by_id(&mut conn, server.id).await.unwrap();
-		assert!(after.registered_at.is_some(), "registered_at set");
-		assert!(after.device_id.is_some(), "device bound");
-		let bound = Device::from_key(&mut conn, &spki).await.unwrap().unwrap();
-		assert_eq!(bound.id, after.device_id.unwrap(), "body SPKI bound the device");
-		assert!(
-			ServerEnrollmentToken::find_active(&mut conn, server.id, &token)
+			run_tailnet_handshake(&private, fwd_ip, server.id, &token, &spki, &key, None)
 				.await
-				.is_err(),
-			"token consumed",
-		);
-	})
+				.assert_status_ok();
+
+			// Registered + bound to a device carrying the body-supplied key; token spent.
+			let after = Server::get_by_id(&mut conn, server.id).await.unwrap();
+			assert!(after.registered_at.is_some(), "registered_at set");
+			assert!(after.device_id.is_some(), "device bound");
+			let bound = Device::from_key(&mut conn, &spki).await.unwrap().unwrap();
+			assert_eq!(
+				bound.id,
+				after.device_id.unwrap(),
+				"body SPKI bound the device"
+			);
+			assert!(
+				ServerEnrollmentToken::find_active(&mut conn, server.id, &token)
+					.await
+					.is_err(),
+				"token consumed",
+			);
+		},
+	)
 	.await;
 }
 
@@ -194,44 +202,53 @@ async fn internet_path_rejects_body_spki() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn tailnet_ignores_the_mtls_certificate_header() {
-	run_with_tailnet_device_auth("server", async |mut conn, fwd_ip, _node, _dev, _public, private| {
-		use database::Device;
-		// Real device key (carried in the body) and a *different*, attacker-style
-		// cert sent in the (forgeable) mtls-certificate header.
-		let (spki_real, _c, key_real) = make_signing_certificate();
-		let (spki_forged, cert_forged, _k) = make_signing_certificate();
-		let server = Server::create(&mut conn, new_server("https://ts-forge.example/"))
-			.await
-			.unwrap();
-		let (_t, token) =
-			ServerEnrollmentToken::mint(&mut conn, server.id, SignedDuration::from_hours(1))
+	run_with_tailnet_device_auth(
+		"server",
+		async |mut conn, fwd_ip, _node, _dev, _public, private| {
+			use database::Device;
+			// Real device key (carried in the body) and a *different*, attacker-style
+			// cert sent in the (forgeable) mtls-certificate header.
+			let (spki_real, _c, key_real) = make_signing_certificate();
+			let (spki_forged, cert_forged, _k) = make_signing_certificate();
+			let server = Server::create(&mut conn, new_server("https://ts-forge.example/"))
 				.await
 				.unwrap();
+			let (_t, token) =
+				ServerEnrollmentToken::mint(&mut conn, server.id, SignedDuration::from_hours(1))
+					.await
+					.unwrap();
 
-		// Body SPKI = real key; header cert = forged. The tailnet mount must use
-		// the body and ignore the header, so the handshake (signed by the real
-		// key) succeeds and binds the real key — not the forged one.
-		run_tailnet_handshake(
-			&private,
-			fwd_ip,
-			server.id,
-			&token,
-			&spki_real,
-			&key_real,
-			Some(&cert_forged),
-		)
-		.await
-		.assert_status_ok();
+			// Body SPKI = real key; header cert = forged. The tailnet mount must use
+			// the body and ignore the header, so the handshake (signed by the real
+			// key) succeeds and binds the real key — not the forged one.
+			run_tailnet_handshake(
+				&private,
+				fwd_ip,
+				server.id,
+				&token,
+				&spki_real,
+				&key_real,
+				Some(&cert_forged),
+			)
+			.await
+			.assert_status_ok();
 
-		assert!(
-			Device::from_key(&mut conn, &spki_real).await.unwrap().is_some(),
-			"the body-supplied (real) key was bound",
-		);
-		assert!(
-			Device::from_key(&mut conn, &spki_forged).await.unwrap().is_none(),
-			"the forged cert-header key was ignored, never bound",
-		);
-	})
+			assert!(
+				Device::from_key(&mut conn, &spki_real)
+					.await
+					.unwrap()
+					.is_some(),
+				"the body-supplied (real) key was bound",
+			);
+			assert!(
+				Device::from_key(&mut conn, &spki_forged)
+					.await
+					.unwrap()
+					.is_none(),
+				"the forged cert-header key was ignored, never bound",
+			);
+		},
+	)
 	.await;
 }
 
@@ -496,7 +513,11 @@ async fn re_enrollment_replaces_the_device() {
 			.unwrap();
 		assert_ne!(device_b, device_a, "re-enroll bound a new device");
 		assert_eq!(
-			Device::from_key(&mut conn, &spki_b).await.unwrap().unwrap().id,
+			Device::from_key(&mut conn, &spki_b)
+				.await
+				.unwrap()
+				.unwrap()
+				.id,
 			device_b,
 			"new box's key authenticates as the new device",
 		);
@@ -586,9 +607,17 @@ async fn channel_binding_happy_path() {
 
 		// Same EKM in the signed transcript and the proxy header → bound.
 		let ekm = [7u8; 32];
-		let (begin, complete) =
-			run_cb_handshake(&public, server.id, &token, &spki, &cert, &key, Some(&ekm), Some(&ekm))
-				.await;
+		let (begin, complete) = run_cb_handshake(
+			&public,
+			server.id,
+			&token,
+			&spki,
+			&cert,
+			&key,
+			Some(&ekm),
+			Some(&ekm),
+		)
+		.await;
 		assert_eq!(
 			begin["channel_binding_required"],
 			json!(true),
@@ -623,8 +652,17 @@ async fn channel_binding_missing_header_is_rejected() {
 		// The device folded the EKM into its signature, but the proxy header is
 		// absent → Canopy has nothing to bind against → rejected, token intact.
 		let ekm = [7u8; 32];
-		let (_begin, complete) =
-			run_cb_handshake(&public, server.id, &token, &spki, &cert, &key, Some(&ekm), None).await;
+		let (_begin, complete) = run_cb_handshake(
+			&public,
+			server.id,
+			&token,
+			&spki,
+			&cert,
+			&key,
+			Some(&ekm),
+			None,
+		)
+		.await;
 		complete.assert_status_forbidden();
 		assert!(
 			ServerEnrollmentToken::find_active(&mut conn, server.id, &token)
@@ -671,36 +709,39 @@ async fn channel_binding_mismatch_is_rejected() {
 #[tokio::test(flavor = "multi_thread")]
 async fn tailnet_path_skips_channel_binding() {
 	unsafe { std::env::set_var("CANOPY_ENROLL_EKM_HEADER", EKM_HEADER) };
-	run_with_tailnet_device_auth("server", async |mut conn, fwd_ip, _node, _dev, _public, private| {
-		let (spki, _cert, key) = make_signing_certificate();
-		let server = Server::create(&mut conn, new_server("https://cb-tailnet.example/"))
-			.await
-			.unwrap();
-		let (_t, token) =
-			ServerEnrollmentToken::mint(&mut conn, server.id, SignedDuration::from_hours(1))
+	run_with_tailnet_device_auth(
+		"server",
+		async |mut conn, fwd_ip, _node, _dev, _public, private| {
+			let (spki, _cert, key) = make_signing_certificate();
+			let server = Server::create(&mut conn, new_server("https://cb-tailnet.example/"))
 				.await
 				.unwrap();
+			let (_t, token) =
+				ServerEnrollmentToken::mint(&mut conn, server.id, SignedDuration::from_hours(1))
+					.await
+					.unwrap();
 
-		// Even with channel binding enabled globally, the tailnet mount has no
-		// TLS exporter, so it neither advertises nor requires it: begin reports
-		// false and complete succeeds with no EKM header and none in the
-		// signature.
-		let fwd = format!("for={fwd_ip}");
-		let begin = private
-			.post("/public/servers/register/begin")
-			.add_header("Forwarded", &fwd)
-			.json(&json!({"server_id": server.id, "token": token, "spki": b64().encode(&spki)}))
-			.await;
-		begin.assert_status_ok();
-		assert_eq!(
-			begin.json::<Value>()["channel_binding_required"],
-			json!(false),
-			"tailnet mount never requires channel binding",
-		);
+			// Even with channel binding enabled globally, the tailnet mount has no
+			// TLS exporter, so it neither advertises nor requires it: begin reports
+			// false and complete succeeds with no EKM header and none in the
+			// signature.
+			let fwd = format!("for={fwd_ip}");
+			let begin = private
+				.post("/public/servers/register/begin")
+				.add_header("Forwarded", &fwd)
+				.json(&json!({"server_id": server.id, "token": token, "spki": b64().encode(&spki)}))
+				.await;
+			begin.assert_status_ok();
+			assert_eq!(
+				begin.json::<Value>()["channel_binding_required"],
+				json!(false),
+				"tailnet mount never requires channel binding",
+			);
 
-		run_tailnet_handshake(&private, fwd_ip, server.id, &token, &spki, &key, None)
-			.await
-			.assert_status_ok();
-	})
+			run_tailnet_handshake(&private, fwd_ip, server.id, &token, &spki, &key, None)
+				.await
+				.assert_status_ok();
+		},
+	)
 	.await;
 }

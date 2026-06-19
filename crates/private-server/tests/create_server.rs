@@ -13,7 +13,9 @@ async fn create_server_without_url_succeeds() {
 			.await;
 		response.assert_status_ok();
 		let id: String = response.json();
-		let server = Server::get_by_id(&mut conn, id.parse().unwrap()).await.unwrap();
+		let server = Server::get_by_id(&mut conn, id.parse().unwrap())
+			.await
+			.unwrap();
 		assert!(server.host.is_none(), "created without a URL");
 
 		// Explicit whitespace-only string clears the URL too.
@@ -23,7 +25,9 @@ async fn create_server_without_url_succeeds() {
 			.await;
 		response.assert_status_ok();
 		let id: String = response.json();
-		let server = Server::get_by_id(&mut conn, id.parse().unwrap()).await.unwrap();
+		let server = Server::get_by_id(&mut conn, id.parse().unwrap())
+			.await
+			.unwrap();
 		assert!(server.host.is_none(), "empty URL stored as null");
 	})
 	.await
@@ -38,7 +42,9 @@ async fn create_server_defaults_schemeless_url_to_https() {
 			.await;
 		response.assert_status_ok();
 		let id: String = response.json();
-		let server = Server::get_by_id(&mut conn, id.parse().unwrap()).await.unwrap();
+		let server = Server::get_by_id(&mut conn, id.parse().unwrap())
+			.await
+			.unwrap();
 		assert_eq!(
 			server.host.unwrap().0.to_string(),
 			"https://foo.example.com/"

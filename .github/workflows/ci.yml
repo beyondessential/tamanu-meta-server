@@ -67,6 +67,23 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: just lint
 
+  fmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - name: Free up space
+        run: sudo rm -rf /opt/hostedtoolcache /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup || true
+      - uses: actions/checkout@v6.0.2
+      - name: Configure toolchain
+        run: |
+          rustup toolchain install --profile minimal --no-self-update stable
+          rustup default stable
+          rustup component add rustfmt
+      - uses: taiki-e/install-action@v2.81.1
+        with:
+          tool: just
+      - run: just fmt-check
+
   e2e:
     name: Playwright
     runs-on: ubuntu-latest

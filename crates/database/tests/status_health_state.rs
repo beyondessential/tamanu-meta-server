@@ -57,11 +57,7 @@ fn legacy_failing_entry_is_warning() {
 fn result_warning_and_broken_count_toward_warning() {
 	for result in ["warning", "broken"] {
 		assert_eq!(
-			status(
-				true,
-				serde_json::json!([{"check": "a", "result": result}])
-			)
-			.health_state(),
+			status(true, serde_json::json!([{"check": "a", "result": result}])).health_state(),
 			HealthState::Warning,
 			"{result}",
 		);

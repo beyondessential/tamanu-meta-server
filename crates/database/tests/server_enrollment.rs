@@ -21,6 +21,7 @@ fn new_server(host: &str) -> Server {
 		cloud: None,
 		geolocation: None,
 		is_monitored: true,
+		allow_legacy_status: false,
 		alert_when_down_for: PgDuration(SignedDuration::from_secs(600)),
 		notes: String::new(),
 		tags: TagMap::default(),
@@ -143,7 +144,9 @@ async fn revoke_invalidates_the_active_token() {
 				.is_some()
 		);
 
-		ServerEnrollmentToken::revoke(&mut conn, server.id).await.unwrap();
+		ServerEnrollmentToken::revoke(&mut conn, server.id)
+			.await
+			.unwrap();
 
 		assert!(
 			ServerEnrollmentToken::active_for(&mut conn, server.id)
