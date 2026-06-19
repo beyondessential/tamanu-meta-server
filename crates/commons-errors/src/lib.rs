@@ -135,6 +135,14 @@ pub enum AppError {
 	/// per-IP / per-server rate limit). Maps to 429.
 	#[error("rate limit exceeded")]
 	RateLimited,
+
+	/// A dependency Canopy proxies to failed or is not configured — e.g. the
+	/// cross-account STS `AssumeRole` for backup-credentials issuance, or
+	/// reading a repo-password k8s Secret for `/backup-target`. Maps to 502.
+	/// The message is a generic, caller-safe summary; the underlying detail
+	/// (which can name roles/buckets/secrets) is logged server-side only.
+	#[error("upstream dependency failed: {0}")]
+	Upstream(String),
 }
 
 impl AppError {
@@ -202,6 +210,7 @@ impl AppError {
 			Self::Conflict(_) => StatusCode::CONFLICT,
 			Self::EnrollmentFailed => StatusCode::FORBIDDEN,
 			Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
+			Self::Upstream(_) => StatusCode::BAD_GATEWAY,
 			_ => StatusCode::INTERNAL_SERVER_ERROR,
 		}
 	}
@@ -254,6 +263,7 @@ impl AppError {
 						Self::Conflict(_) => "conflict",
 						Self::EnrollmentFailed => "enrollment-failed",
 						Self::RateLimited => "rate-limited",
+						Self::Upstream(_) => "upstream",
 						Self::Problem(_) => unreachable!(),
 					}
 				))

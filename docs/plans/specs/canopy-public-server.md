@@ -1,4 +1,4 @@
-# Spec: canopy-public-server — device backup endpoints (backup-credentials, backup-target, backup-report)
+# Spec: canopy-public-server — device backup endpoints (backup-credentials, backup-target, backup-report, backup-capabilities)
 
 Implementation spec for the `public-server` slice of the
 [backup-credentials](../backup-credentials.md) system. This is **canopy's
@@ -15,7 +15,10 @@ hardening that removes this component's blast radius is
 
 ## Purpose
 
-Add three `ServerDevice`-authenticated device endpoints to `public-server`:
+Add `ServerDevice`-authenticated device endpoints to `public-server`.
+UPDATE (shipped): **four** endpoints — the backup-types addendum added
+`POST /backup-capabilities` (bestool registers the backup types its server can
+run). The original three:
 
 - `POST /backup-credentials` — mint short-lived per-group S3 creds via a
   cross-account `sts:AssumeRole` and return them in `credential_process`
@@ -235,12 +238,13 @@ pub struct CredentialProcessOutput {
 }
 ```
 
-`Version` is the literal `1`; the rename must produce exactly
-`Version/AccessKeyId/SecretAccessKey/SessionToken/Expiration` (the AWS SDK
-treats this format as fixed — see the plan's "AWS quirks"). Verify the
-`PascalCase` rename yields `AccessKeyId` not `AccessKeyId` casing drift;
-if `serde(rename_all)` doesn't produce the exact AWS casing, rename each
-field explicitly.
+`Version` is the literal `1`; the wire output must be exactly
+`Version/AccessKeyId/SecretAccessKey/SessionToken/Expiration` — the AWS
+`credential_process` v1 contract.
+UPDATE (shipped): a single `#[serde(rename_all = "PascalCase")]` on the struct
+does produce the exact casing (`access_key_id → AccessKeyId`, etc.), so no
+per-field renames were needed; the earlier caution about per-field casing drift
+turned out unwarranted.
 
 ### Handler flow (mirrors plan step list)
 

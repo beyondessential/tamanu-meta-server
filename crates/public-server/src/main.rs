@@ -46,7 +46,7 @@ async fn main() -> miette::Result<()> {
 			.merge(public_server::routes())
 			.split_for_parts();
 	let app: Router<()> = api_router
-		.with_state(AppState::init()?)
+		.with_state(AppState::init().await?)
 		.merge(SwaggerUi::new("/api/docs").url("/api/openapi.json", api_spec));
 
 	serve(router(app, args.client_ip_source), addr).await?;

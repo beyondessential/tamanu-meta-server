@@ -106,6 +106,222 @@
         ]
       }
     },
+    "/backup-capabilities": {
+      "post": {
+        "tags": [
+          "backup"
+        ],
+        "operationId": "capabilities",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CapabilitiesArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Capabilities registered."
+          },
+          "409": {
+            "description": "Server is not in a group.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Device is not bound to a live server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "server-device": []
+          }
+        ]
+      }
+    },
+    "/backup-credentials": {
+      "post": {
+        "tags": [
+          "backup"
+        ],
+        "operationId": "credentials",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CredentialsArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialProcessOutput"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Server ungrouped, no ready config, or type not enabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Device is not bound to a live server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "STS issuance failed or is not configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "server-device": []
+          }
+        ]
+      }
+    },
+    "/backup-report": {
+      "post": {
+        "tags": [
+          "backup"
+        ],
+        "operationId": "report",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Run recorded."
+          },
+          "409": {
+            "description": "Server ungrouped, or duplicate run_id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Device is not bound to a live server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "server-device": []
+          }
+        ]
+      }
+    },
+    "/backup-target": {
+      "get": {
+        "tags": [
+          "backup"
+        ],
+        "operationId": "target",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupTarget"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Server ungrouped or no ready config.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Device is not bound to a live server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Repo-password Secret unavailable or kube not configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "server-device": []
+          }
+        ]
+      }
+    },
     "/bestool/snippets": {
       "get": {
         "tags": [
@@ -763,6 +979,45 @@
           }
         }
       },
+      "BackupPurpose": {
+        "type": "string",
+        "description": "Why a credential was issued / a run executed. A real capability gate\non the issued S3 creds, not just audit metadata: `Backup` grants\nwrite-without-delete, `Restore` grants read-only.",
+        "enum": [
+          "backup",
+          "restore"
+        ]
+      },
+      "BackupTarget": {
+        "type": "object",
+        "required": [
+          "storage",
+          "bucket",
+          "prefix",
+          "region",
+          "repo_password"
+        ],
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "prefix": {
+            "type": "string",
+            "description": "Normally empty (the repo lives at the bucket root)."
+          },
+          "region": {
+            "type": "string",
+            "description": "The group config's region, or the deployment default."
+          },
+          "repo_password": {
+            "type": "string",
+            "description": "The kopia repo passphrase, read from the group's k8s Secret."
+          },
+          "storage": {
+            "type": "string",
+            "description": "Always `\"s3\"`."
+          }
+        }
+      },
       "BeginArgs": {
         "type": "object",
         "required": [
@@ -800,6 +1055,21 @@
           "nonce": {
             "type": "string",
             "description": "Base64 (standard) of the 32-byte challenge nonce."
+          }
+        }
+      },
+      "CapabilitiesArgs": {
+        "type": "object",
+        "required": [
+          "types"
+        ],
+        "properties": {
+          "types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The backup types bestool can run on this server."
           }
         }
       },
@@ -857,6 +1127,54 @@
           "server_id": {
             "type": "string",
             "format": "uuid"
+          }
+        }
+      },
+      "CredentialProcessOutput": {
+        "type": "object",
+        "description": "`credential_process` output. Field names are **fixed by the AWS SDK**:\n`Version/AccessKeyId/SecretAccessKey/SessionToken/Expiration` — exactly what\n`rename_all = \"PascalCase\"` produces from these field names.",
+        "required": [
+          "Version",
+          "AccessKeyId",
+          "SecretAccessKey",
+          "SessionToken",
+          "Expiration"
+        ],
+        "properties": {
+          "AccessKeyId": {
+            "type": "string"
+          },
+          "Expiration": {
+            "type": "string",
+            "description": "RFC3339 / ISO8601 `Z` instant."
+          },
+          "SecretAccessKey": {
+            "type": "string"
+          },
+          "SessionToken": {
+            "type": "string"
+          },
+          "Version": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Always the literal `1`.",
+            "minimum": 0
+          }
+        }
+      },
+      "CredentialsArgs": {
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "purpose": {
+            "$ref": "#/components/schemas/BackupPurpose",
+            "description": "`backup` (default) grants write-without-delete; `restore` is downscoped\nread-only via a session policy."
+          },
+          "type": {
+            "type": "string",
+            "description": "The backup type these creds are for. Must be an enabled capability."
           }
         }
       },
@@ -1119,6 +1437,59 @@
           }
         }
       },
+      "ReportArgs": {
+        "type": "object",
+        "required": [
+          "run_id",
+          "type",
+          "purpose",
+          "outcome"
+        ],
+        "properties": {
+          "bytes_uploaded": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/RunOutcome"
+          },
+          "purpose": {
+            "$ref": "#/components/schemas/BackupPurpose"
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The run-uuid bestool minted at run start (becomes `backup_runs.id`)."
+          },
+          "snapshot_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "description": "The backup type that ran."
+          }
+        }
+      },
+      "RunOutcome": {
+        "type": "string",
+        "description": "Outcome of a reported backup/restore run.",
+        "enum": [
+          "success",
+          "failure"
+        ]
+      },
       "ServerRank": {
         "type": "string",
         "enum": [
@@ -1367,6 +1738,10 @@
     {
       "name": "artifacts",
       "description": "Per-version artifact registration by releaser devices."
+    },
+    {
+      "name": "backup",
+      "description": "Device backup credential minting, target config, capability registration, and run reporting."
     },
     {
       "name": "bestool",

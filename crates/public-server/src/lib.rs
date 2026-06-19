@@ -5,6 +5,7 @@ use utoipa_axum::router::OpenApiRouter;
 use crate::state::AppState;
 
 pub mod artifacts;
+pub mod backup;
 pub mod bestool;
 pub mod events;
 pub mod openapi;
@@ -25,6 +26,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 	#[cfg_attr(not(feature = "ui"), expect(unused_mut))]
 	let mut router = OpenApiRouter::new()
 		.merge(events::routes())
+		.merge(backup::routes())
 		.nest("/artifacts", artifacts::routes())
 		.nest("/bestool", bestool::routes())
 		.nest("/servers", servers::routes())

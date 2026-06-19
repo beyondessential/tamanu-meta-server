@@ -160,6 +160,19 @@ are generous for legitimate use; hitting this means an unusual volume of
 or a misbehaving client retrying in a tight loop). Trips are logged under the
 `enrollment` target for alerting. Back off and retry after the window.
 
+## Upstream
+
+Returned (HTTP 502) when a dependency Canopy proxies to on the caller's behalf
+failed or is not configured. This covers the backup-credentials path: the
+cross-account STS `AssumeRole` used to mint short-lived S3 credentials
+(`POST /backup-credentials`) failed or the STS client is not configured on this
+deployment, or reading a group's repo-password k8s Secret for `GET
+/backup-target` failed or the kube client is not configured. The response body
+is a generic, caller-safe summary — the underlying detail (which can name IAM
+roles, buckets, or secret names) is logged server-side only. Retry after a short
+delay; if it persists, the deployment's AWS/IRSA or kube wiring (or the group's
+provisioning) likely needs attention.
+
 ## Other
 
 An unclassified error.
