@@ -142,7 +142,7 @@ impl Drop for CredsLease {
 
 /// The container-credentials JSON minio-go expects (field names case-insensitive
 /// via `encoding/json`; `Token` is the session token, not `SessionToken`).
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "PascalCase")]
 struct CredsResponse {
 	access_key_id: String,
@@ -184,4 +184,60 @@ async fn handler(
 		token: creds.session_token().unwrap_or_default().to_string(),
 		expiration,
 	}))
+}
+
+#[cfg(test)]
+mod tests {
+	use aws_sdk_sts::config::Credentials;
+	use axum::http::HeaderValue;
+
+	use super::*;
+
+	fn registry_with(token: &str, creds: Credentials) -> Registry {
+		let mut map = HashMap::new();
+		map.insert(token.to_string(), SharedCredentialsProvider::new(creds));
+		Arc::new(Mutex::new(map))
+	}
+
+	fn auth(token: &str) -> HeaderMap {
+		let mut h = HeaderMap::new();
+		h.insert(AUTHORIZATION, HeaderValue::from_str(token).unwrap());
+		h
+	}
+
+	#[tokio::test]
+	async fn valid_token_returns_container_creds_json() {
+		let creds = Credentials::new("AKID", "SECRET", Some("SESSION".into()), None, "test");
+		let reg = registry_with("tok-1", creds);
+
+		let body = handler(State(reg), auth("tok-1")).await.expect("200").0;
+
+		assert_eq!(body.access_key_id, "AKID");
+		assert_eq!(body.secret_access_key, "SECRET");
+		// minio-go expects the session token under `Token`, not `SessionToken`.
+		assert_eq!(body.token, "SESSION");
+		// Always present (RFC3339); falls back a few minutes out when the
+		// provider sets no expiry, so minio-go never re-polls every request.
+		assert!(body.expiration.ends_with('Z'), "{}", body.expiration);
+	}
+
+	#[tokio::test]
+	async fn unknown_token_is_forbidden() {
+		let reg: Registry = Arc::new(Mutex::new(HashMap::new()));
+		let err = handler(State(reg), auth("nope")).await.unwrap_err();
+		assert_eq!(err, StatusCode::FORBIDDEN);
+	}
+
+	#[tokio::test]
+	async fn dropping_a_lease_deregisters_its_token() {
+		let reg = registry_with("leased", Credentials::new("A", "S", None, None, "t"));
+		let lease = CredsLease {
+			uri: "http://127.0.0.1:0/creds".into(),
+			token: "leased".into(),
+			registry: reg.clone(),
+		};
+		assert!(reg.lock().unwrap().contains_key("leased"));
+		drop(lease);
+		assert!(!reg.lock().unwrap().contains_key("leased"));
+	}
 }
