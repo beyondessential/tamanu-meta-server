@@ -80,6 +80,7 @@ pub struct BackupConfigView {
 	pub bucket: String,
 	pub prefix: String,
 	pub target_role_arn: String,
+	pub maintenance_role_arn: String,
 	pub region: Option<String>,
 	#[schema(value_type = String)]
 	pub mode: BackupRepoMode,
@@ -113,6 +114,7 @@ impl BackupConfigView {
 			bucket: config.bucket,
 			prefix: config.prefix,
 			target_role_arn: config.target_role_arn,
+			maintenance_role_arn: config.maintenance_role_arn,
 			region: config.region,
 			mode: config.mode,
 			status: config.status,

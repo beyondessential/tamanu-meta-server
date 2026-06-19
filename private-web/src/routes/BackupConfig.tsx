@@ -70,6 +70,9 @@ function ConfigForm({
 	const [bucket, setBucket] = useState(existing?.bucket ?? "");
 	const [prefix, setPrefix] = useState(existing?.prefix ?? "");
 	const [roleArn, setRoleArn] = useState(existing?.target_role_arn ?? "");
+	const [maintenanceRoleArn, setMaintenanceRoleArn] = useState(
+		existing?.maintenance_role_arn ?? "",
+	);
 	const [region, setRegion] = useState(existing?.region ?? "");
 	const [mode, setMode] = useState<BackupRepoMode>(
 		(existing?.mode as BackupRepoMode) ?? "from_birth",
@@ -99,6 +102,7 @@ function ConfigForm({
 					bucket,
 					prefix,
 					target_role_arn: roleArn,
+					maintenance_role_arn: maintenanceRoleArn,
 					region: region.trim() === "" ? null : region,
 					mode,
 					repo_password_ref:
@@ -177,6 +181,18 @@ function ConfigForm({
 					helperText={
 						isCreate
 							? "IAM role Canopy assumes to mint device credentials."
+							: "Changing the role is a repo migration — out of scope here."
+					}
+				/>
+				<TextField
+					label="Maintenance role ARN"
+					value={maintenanceRoleArn}
+					onChange={(e) => setMaintenanceRoleArn(e.target.value)}
+					disabled={pending || !isCreate}
+					required
+					helperText={
+						isCreate
+							? "IAM role the backups pod assumes for maintenance (s3:* + delete + CloudWatch)."
 							: "Changing the role is a repo migration — out of scope here."
 					}
 				/>

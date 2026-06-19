@@ -4929,6 +4929,7 @@
           "bucket",
           "prefix",
           "target_role_arn",
+          "maintenance_role_arn",
           "mode",
           "status",
           "created_at",
@@ -4961,6 +4962,9 @@
               "string",
               "null"
             ]
+          },
+          "maintenance_role_arn": {
+            "type": "string"
           },
           "mode": {
             "type": "string"
@@ -5354,11 +5358,16 @@
           "server_group_id",
           "bucket",
           "target_role_arn",
+          "maintenance_role_arn",
           "mode"
         ],
         "properties": {
           "bucket": {
             "type": "string"
+          },
+          "maintenance_role_arn": {
+            "type": "string",
+            "description": "Maintenance role: the backups pod assumes this for maintenance/inspection/\ns3-metrics (s3:* + delete + CloudWatch)."
           },
           "mode": {
             "type": "string"
@@ -5384,7 +5393,8 @@
             "format": "uuid"
           },
           "target_role_arn": {
-            "type": "string"
+            "type": "string",
+            "description": "Device role: public-server assumes this to mint device creds (no delete)."
           }
         }
       },

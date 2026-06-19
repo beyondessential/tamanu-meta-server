@@ -346,6 +346,7 @@ export async function seedServerGroupBackupConfig(
 		bucket?: string;
 		prefix?: string;
 		targetRoleArn?: string;
+		maintenanceRoleArn?: string;
 		region?: string | null;
 		repoPasswordRef?: string;
 		status?: BackupConfigStatus;
@@ -358,13 +359,14 @@ export async function seedServerGroupBackupConfig(
 ): Promise<void> {
 	await sql.query(
 		`INSERT INTO server_group_backup_config
-		 (group_id, bucket, prefix, target_role_arn, region, repo_password_ref, status, mode, last_init_error)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		 (group_id, bucket, prefix, target_role_arn, maintenance_role_arn, region, repo_password_ref, status, mode, last_init_error)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
 		[
 			opts.groupId,
 			opts.bucket ?? "bes-kopia-e2e",
 			opts.prefix ?? "",
 			opts.targetRoleArn ?? "arn:aws:iam::123456789012:role/e2e",
+			opts.maintenanceRoleArn ?? "arn:aws:iam::123456789012:role/e2e-maint",
 			opts.region ?? null,
 			opts.repoPasswordRef ?? `backup-repo-${opts.groupId}`,
 			opts.status ?? "ready",

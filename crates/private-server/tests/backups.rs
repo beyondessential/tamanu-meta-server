@@ -48,6 +48,7 @@ async fn create_get_zero_state_and_full_view() {
 				"server_group_id": group_id,
 				"bucket": "bes-kopia-test",
 				"target_role_arn": "arn:aws:iam::123:role/x",
+				"maintenance_role_arn": "arn:aws:iam::123:role/x-maint",
 				"mode": "from_birth",
 			}))
 			.await;
@@ -73,6 +74,7 @@ async fn create_get_zero_state_and_full_view() {
 				"server_group_id": group_id,
 				"bucket": "other",
 				"target_role_arn": "arn:aws:iam::123:role/y",
+				"maintenance_role_arn": "arn:aws:iam::123:role/y-maint",
 				"mode": "from_birth",
 			}))
 			.await;
@@ -90,6 +92,7 @@ async fn create_missing_group_is_404() {
 				"server_group_id": Uuid::new_v4(),
 				"bucket": "b",
 				"target_role_arn": "arn",
+				"maintenance_role_arn": "maint-arn",
 				"mode": "from_birth",
 			}))
 			.await;
@@ -108,6 +111,7 @@ async fn import_mode_requires_secret_ref() {
 				"server_group_id": group_id,
 				"bucket": "b",
 				"target_role_arn": "arn",
+				"maintenance_role_arn": "maint-arn",
 				"mode": "import",
 			}))
 			.await;
@@ -126,6 +130,7 @@ async fn set_schedule_floor_rejected_and_accepted() {
 				"server_group_id": group_id,
 				"bucket": "b",
 				"target_role_arn": "arn",
+				"maintenance_role_arn": "maint-arn",
 				"mode": "from_birth",
 			}))
 			.await
@@ -176,6 +181,7 @@ async fn manual_only_interval_is_null() {
 				"server_group_id": group_id,
 				"bucket": "b",
 				"target_role_arn": "arn",
+				"maintenance_role_arn": "maint-arn",
 				"mode": "from_birth",
 			}))
 			.await
@@ -206,6 +212,7 @@ async fn create_repo_clears_error_and_is_idempotent() {
 				"server_group_id": group_id,
 				"bucket": "b",
 				"target_role_arn": "arn",
+				"maintenance_role_arn": "maint-arn",
 				"mode": "from_birth",
 			}))
 			.await
@@ -247,6 +254,7 @@ async fn create_repo_on_ready_is_409() {
 				"server_group_id": group_id,
 				"bucket": "b",
 				"target_role_arn": "arn",
+				"maintenance_role_arn": "maint-arn",
 				"mode": "from_birth",
 			}))
 			.await
@@ -275,6 +283,7 @@ async fn ack_escrow_only_from_escrow_pending() {
 				"server_group_id": group_id,
 				"bucket": "b",
 				"target_role_arn": "arn",
+				"maintenance_role_arn": "maint-arn",
 				"mode": "from_birth",
 			}))
 			.await
@@ -316,6 +325,7 @@ async fn reveal_escrow_409_when_not_escrow_pending() {
 				"server_group_id": group_id,
 				"bucket": "b",
 				"target_role_arn": "arn",
+				"maintenance_role_arn": "maint-arn",
 				"mode": "from_birth",
 			}))
 			.await
@@ -438,6 +448,7 @@ async fn update_region_and_delete() {
 				"server_group_id": group_id,
 				"bucket": "b",
 				"target_role_arn": "arn",
+				"maintenance_role_arn": "maint-arn",
 				"region": "ap-southeast-2",
 				"mode": "from_birth",
 			}))
