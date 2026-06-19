@@ -134,13 +134,11 @@ async fn tags_endpoint_includes_synthetic_server_attributes() {
 		async |mut conn, cert, device_id, public, _| {
 			let group_id = Uuid::new_v4();
 			let server_id = Uuid::new_v4();
-			sql_query(
-				"INSERT INTO server_groups (id, name) VALUES ($1, 'synthetic-cluster')",
-			)
-			.bind::<sql_types::Uuid, _>(group_id)
-			.execute(&mut conn)
-			.await
-			.unwrap();
+			sql_query("INSERT INTO server_groups (id, name) VALUES ($1, 'synthetic-cluster')")
+				.bind::<sql_types::Uuid, _>(group_id)
+				.execute(&mut conn)
+				.await
+				.unwrap();
 			sql_query(
 				"INSERT INTO servers (id, host, kind, rank, device_id, group_id) \
 				 VALUES ($1, 'https://s.example.com', 'facility', 'production', $2, $3)",
@@ -160,10 +158,7 @@ async fn tags_endpoint_includes_synthetic_server_attributes() {
 			let tags: HashMap<String, String> = response.json();
 			assert_eq!(tags.get("canopy:kind"), Some(&"facility".to_string()));
 			assert_eq!(tags.get("canopy:rank"), Some(&"production".to_string()));
-			assert_eq!(
-				tags.get("canopy:group-id"),
-				Some(&group_id.to_string())
-			);
+			assert_eq!(tags.get("canopy:group-id"), Some(&group_id.to_string()));
 			assert_eq!(
 				tags.get("canopy:group-name"),
 				Some(&"synthetic-cluster".to_string())

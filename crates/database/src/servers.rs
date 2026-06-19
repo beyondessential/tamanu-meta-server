@@ -691,10 +691,14 @@ impl Server {
 				.insert(format!("{RESERVED_TAG_PREFIX}rank"), rank.to_string());
 		}
 		if let Some(group) = &group {
-			tags.0
-				.insert(format!("{RESERVED_TAG_PREFIX}group-id"), group.id.to_string());
-			tags.0
-				.insert(format!("{RESERVED_TAG_PREFIX}group-name"), group.name.clone());
+			tags.0.insert(
+				format!("{RESERVED_TAG_PREFIX}group-id"),
+				group.id.to_string(),
+			);
+			tags.0.insert(
+				format!("{RESERVED_TAG_PREFIX}group-name"),
+				group.name.clone(),
+			);
 		}
 
 		Ok(tags)
