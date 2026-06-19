@@ -945,8 +945,15 @@ pub async fn reconcile_open_incidents(db: &mut AsyncPgConnection) -> Result<(usi
 						// Ungrouped servers can't have incidents; nothing to reconcile.
 						continue;
 					};
-					re_evaluate_incident_membership(conn, &issue, gid, server.is_monitored, now, None)
-						.await?;
+					re_evaluate_incident_membership(
+						conn,
+						&issue,
+						gid,
+						server.is_monitored,
+						now,
+						None,
+					)
+					.await?;
 					evaluated += 1;
 				}
 				(None, None) => continue,
@@ -1350,7 +1357,8 @@ impl Issue {
 				.get_result(conn)
 				.await?;
 			if let Some((gid, monitored)) = issue_group_and_monitored(conn, &issue).await? {
-				re_evaluate_incident_membership(conn, &issue, gid, monitored, now, Some(by)).await?;
+				re_evaluate_incident_membership(conn, &issue, gid, monitored, now, Some(by))
+					.await?;
 			}
 			Ok(issue)
 		})
@@ -1802,7 +1810,8 @@ impl Incident {
 					Some(sid) => Server::get_by_id(conn, sid).await?.is_monitored,
 					None => true,
 				};
-				re_evaluate_incident_membership(conn, &issue, gid, monitored, now, Some(by)).await?;
+				re_evaluate_incident_membership(conn, &issue, gid, monitored, now, Some(by))
+					.await?;
 			}
 
 			let incident: Incident =

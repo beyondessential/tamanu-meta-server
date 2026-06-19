@@ -134,8 +134,7 @@ impl Worker {
 	/// the Secret's base64 `data` into raw bytes, so we just read the named key
 	/// and interpret it as UTF-8.
 	pub async fn read_repo_password(&self, secret_name: &str) -> Result<String> {
-		let api: kube::Api<Secret> =
-			kube::Api::namespaced(self.kube.clone(), &self.cfg.namespace);
+		let api: kube::Api<Secret> = kube::Api::namespaced(self.kube.clone(), &self.cfg.namespace);
 		let secret = api
 			.get(secret_name)
 			.await
@@ -144,12 +143,7 @@ impl Worker {
 			.data
 			.as_ref()
 			.and_then(|d| d.get(&self.cfg.password_key))
-			.ok_or_else(|| {
-				anyhow!(
-					"secret {secret_name} has no key {}",
-					self.cfg.password_key
-				)
-			})?;
+			.ok_or_else(|| anyhow!("secret {secret_name} has no key {}", self.cfg.password_key))?;
 		String::from_utf8(data.0.clone())
 			.with_context(|| format!("secret {secret_name} key is not valid UTF-8"))
 	}

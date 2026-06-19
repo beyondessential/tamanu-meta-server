@@ -177,7 +177,8 @@ pub async fn scan_rows(db: &mut AsyncPgConnection) -> Result<Vec<ScanRow>> {
 	};
 	let mut last_success: HashMap<(Uuid, BackupType), Timestamp> = HashMap::new();
 	for gid in group_ids {
-		let runs = crate::backups::BackupRun::latest_success_by_server_type_for_group(db, gid).await?;
+		let runs =
+			crate::backups::BackupRun::latest_success_by_server_type_for_group(db, gid).await?;
 		for ((sid, ty), run) in runs {
 			last_success.insert((sid, ty), run.reported_at);
 		}
@@ -258,7 +259,10 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 					r#ref: staleness_ref,
 					severity: Some(Severity::Info),
 					description: None,
-					message: format!("Server {label} reported a successful {} backup again", row.r#type),
+					message: format!(
+						"Server {label} reported a successful {} backup again",
+						row.r#type
+					),
 					active: Some(false),
 					occurred_at: Some(now),
 				}
@@ -298,7 +302,10 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 						r#ref: never_ref,
 						severity: Some(Severity::Info),
 						description: None,
-						message: format!("Server {label} reported its first successful {} backup", row.r#type),
+						message: format!(
+							"Server {label} reported its first successful {} backup",
+							row.r#type
+						),
 						active: Some(false),
 						occurred_at: Some(now),
 					}

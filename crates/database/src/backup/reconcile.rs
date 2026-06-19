@@ -113,7 +113,10 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 						&missing_ref,
 						Severity::Info,
 						None,
-						&format!("Server {} backup report and repo snapshot agree again", row.server_id),
+						&format!(
+							"Server {} backup report and repo snapshot agree again",
+							row.server_id
+						),
 						false,
 					)
 					.await?;
@@ -132,8 +135,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 					description: None,
 					message: format!(
 						"A fresh {} repo snapshot exists for {} but no backup run was reported",
-						row.r#type,
-						server.id,
+						row.r#type, server.id,
 					),
 					active: Some(true),
 					occurred_at: Some(now),
@@ -171,7 +173,10 @@ async fn clear_report_gap(
 		r#ref: gap_ref.to_string(),
 		severity: Some(Severity::Info),
 		description: None,
-		message: format!("Backup reporting for {} ({}) recovered", row.server_id, row.r#type),
+		message: format!(
+			"Backup reporting for {} ({}) recovered",
+			row.server_id, row.r#type
+		),
 		active: Some(false),
 		occurred_at: Some(now),
 	}
@@ -180,7 +185,11 @@ async fn clear_report_gap(
 	Ok(1)
 }
 
-async fn open_group_active(db: &mut AsyncPgConnection, group_id: Uuid, r#ref: &str) -> Result<bool> {
+async fn open_group_active(
+	db: &mut AsyncPgConnection,
+	group_id: Uuid,
+	r#ref: &str,
+) -> Result<bool> {
 	crate::backup::staleness::open_group_issue_active(db, group_id, r#ref).await
 }
 
@@ -205,7 +214,12 @@ async fn snapshot_info(
 	)> = s::table
 		.filter(s::group_id.eq_any(group_ids))
 		.filter(s::server_id.is_not_null())
-		.select((s::server_id, s::type_, s::latest_snapshot_at, s::observed_at))
+		.select((
+			s::server_id,
+			s::type_,
+			s::latest_snapshot_at,
+			s::observed_at,
+		))
 		.load(db)
 		.await?;
 

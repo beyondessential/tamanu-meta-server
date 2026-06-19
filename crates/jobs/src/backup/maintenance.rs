@@ -127,7 +127,8 @@ fn spawn_init(worker: &Worker, config: ServerGroupBackupConfig) {
 			Err(e) => {
 				let msg = format!("{e:#}");
 				error!(group = %group_id, "init failed: {msg}");
-				if let Err(e) = complete::complete_init(&mut db, group_id, false, Some(&msg)).await {
+				if let Err(e) = complete::complete_init(&mut db, group_id, false, Some(&msg)).await
+				{
 					error!(group = %group_id, "init: recording failure failed: {e}");
 				}
 			}
@@ -198,7 +199,9 @@ fn spawn_maint(worker: &Worker, config: ServerGroupBackupConfig, kind: Maintenan
 				info!(group = %group_id, kind = ?kind, run_id, "maintenance complete")
 			}
 			Ok(()) => {}
-			Err(e) => error!(group = %group_id, run_id, "maintenance: recording result failed: {e}"),
+			Err(e) => {
+				error!(group = %group_id, run_id, "maintenance: recording result failed: {e}")
+			}
 		}
 	});
 }
@@ -222,7 +225,15 @@ async fn run_maint_op(
 			.map_err(|e| anyhow::anyhow!(e))?
 	};
 	let region = config.region.as_deref().unwrap_or_default();
-	kopia::run_maintenance(&env, &config.bucket, &config.prefix, region, kind, &retention).await
+	kopia::run_maintenance(
+		&env,
+		&config.bucket,
+		&config.prefix,
+		region,
+		kind,
+		&retention,
+	)
+	.await
 }
 
 async fn tick(worker: &Worker) -> Result<(), String> {

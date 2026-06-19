@@ -207,7 +207,9 @@ impl BillingLabels {
 pub fn is_due(window: Duration, last: Option<Timestamp>, now: Timestamp) -> bool {
 	match last {
 		None => true,
-		Some(last) => now.duration_since(last) >= SignedDuration::from_secs(window.as_secs() as i64),
+		Some(last) => {
+			now.duration_since(last) >= SignedDuration::from_secs(window.as_secs() as i64)
+		}
 	}
 }
 
@@ -231,7 +233,12 @@ pub fn jitter_slot(group_id: Uuid, window: Duration) -> Duration {
 /// Whether `now` (as a count of seconds into the window) falls in this group's
 /// jittered slot for a tick of length `tick`. Used by the minute-cadence
 /// preflight loop to fire a group's hourly deep check on the right tick.
-pub fn slot_is_due(group_id: Uuid, window: Duration, tick: Duration, secs_into_window: u64) -> bool {
+pub fn slot_is_due(
+	group_id: Uuid,
+	window: Duration,
+	tick: Duration,
+	secs_into_window: u64,
+) -> bool {
 	let slot = jitter_slot(group_id, window).as_secs();
 	let tick_secs = tick.as_secs().max(1);
 	// True when secs_into_window is within [slot, slot + tick).
@@ -312,7 +319,10 @@ mod tests {
 		assert_eq!(p.keep_latest, 1);
 
 		// Below-floor override → clamped up to the floor.
-		let p = resolve_policy(Some(serde_json::json!({"keep_daily": 2, "keep_weekly": 1})), None);
+		let p = resolve_policy(
+			Some(serde_json::json!({"keep_daily": 2, "keep_weekly": 1})),
+			None,
+		);
 		assert_eq!(p.keep_daily, 7, "clamped up");
 		assert_eq!(p.keep_weekly, 4, "clamped up");
 
@@ -365,7 +375,10 @@ mod tests {
 		let now: Timestamp = "2026-06-16T12:00:00Z".parse().unwrap();
 		assert!(is_due(window, None, now), "never run is due");
 		let recent: Timestamp = "2026-06-16T06:00:00Z".parse().unwrap();
-		assert!(!is_due(window, Some(recent), now), "6h ago, 24h window: not due");
+		assert!(
+			!is_due(window, Some(recent), now),
+			"6h ago, 24h window: not due"
+		);
 		let old: Timestamp = "2026-06-15T06:00:00Z".parse().unwrap();
 		assert!(is_due(window, Some(old), now), "30h ago, 24h window: due");
 	}

@@ -222,8 +222,8 @@ async fn target_ready_but_kube_unconfigured_is_502() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn capabilities_registers_and_204() {
-	use database::ServerBackupCapability;
 	use commons_types::backup::BackupType;
+	use database::ServerBackupCapability;
 
 	commons_tests::server::run_with_device_auth(
 		"server",
@@ -298,11 +298,16 @@ async fn report_writes_run_with_context_attribution_and_204() {
 				.await;
 			resp.assert_status(http::StatusCode::NO_CONTENT);
 
-			let runs = BackupRun::list_for_group(&mut conn, group, 10).await.unwrap();
+			let runs = BackupRun::list_for_group(&mut conn, group, 10)
+				.await
+				.unwrap();
 			assert_eq!(runs.len(), 1);
 			let run = &runs[0];
 			assert_eq!(run.id, run_id);
-			assert_eq!(run.group_id, group, "group must come from context, not body");
+			assert_eq!(
+				run.group_id, group,
+				"group must come from context, not body"
+			);
 			assert_eq!(run.device_id, device_id);
 			assert_eq!(run.server_id, Some(server));
 			assert_eq!(run.bytes_uploaded, Some(4096));
@@ -452,9 +457,7 @@ fn assume_role_rule(policy_expectation: Option<&'static str>) -> aws_smithy_mock
 						.access_key_id("AKIATESTKEY")
 						.secret_access_key("test-secret-key")
 						.session_token("test-session-token")
-						.expiration(aws_sdk_sts::primitives::DateTime::from_secs(
-							1_900_000_000,
-						))
+						.expiration(aws_sdk_sts::primitives::DateTime::from_secs(1_900_000_000))
 						.build()
 						.unwrap(),
 				)
@@ -464,8 +467,8 @@ fn assume_role_rule(policy_expectation: Option<&'static str>) -> aws_smithy_mock
 
 #[tokio::test(flavor = "multi_thread")]
 async fn credentials_backup_happy_path_200_and_audit() {
-	use database::BackupCredentialIssuance;
 	use commons_types::backup::BackupPurpose;
+	use database::BackupCredentialIssuance;
 
 	commons_tests::db::TestDb::run(async |mut conn, url| {
 		let (device_id, cert) = seed_device(&mut conn, "server").await;
@@ -508,8 +511,8 @@ async fn credentials_backup_happy_path_200_and_audit() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn credentials_restore_sends_session_policy() {
-	use database::BackupCredentialIssuance;
 	use commons_types::backup::BackupPurpose;
+	use database::BackupCredentialIssuance;
 
 	commons_tests::db::TestDb::run(async |mut conn, url| {
 		let (device_id, cert) = seed_device(&mut conn, "server").await;

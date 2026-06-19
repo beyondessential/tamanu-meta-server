@@ -161,12 +161,14 @@ async fn insert_backup_success_aged(
 	.await
 	.expect("record backup run");
 	let secs = age.as_secs();
-	sql_query("UPDATE backup_runs SET reported_at = NOW() - ($2 || ' seconds')::INTERVAL WHERE id = $1")
-		.bind::<sql_types::Uuid, _>(id)
-		.bind::<sql_types::Text, _>(secs.to_string())
-		.execute(conn)
-		.await
-		.expect("backdate reported_at");
+	sql_query(
+		"UPDATE backup_runs SET reported_at = NOW() - ($2 || ' seconds')::INTERVAL WHERE id = $1",
+	)
+	.bind::<sql_types::Uuid, _>(id)
+	.bind::<sql_types::Text, _>(secs.to_string())
+	.execute(conn)
+	.await
+	.expect("backdate reported_at");
 }
 
 // --- issue / incident assertion helpers -------------------------------------
@@ -181,7 +183,11 @@ struct IssueRow {
 	active: bool,
 }
 
-async fn server_issue(conn: &mut AsyncPgConnection, server_id: Uuid, r#ref: &str) -> Option<IssueRow> {
+async fn server_issue(
+	conn: &mut AsyncPgConnection,
+	server_id: Uuid,
+	r#ref: &str,
+) -> Option<IssueRow> {
 	sql_query(
 		"SELECT severity, active FROM issues \
 		 WHERE server_id = $1 AND source = $2 AND \"ref\" = $3",
@@ -194,7 +200,11 @@ async fn server_issue(conn: &mut AsyncPgConnection, server_id: Uuid, r#ref: &str
 	.ok()
 }
 
-async fn group_issue(conn: &mut AsyncPgConnection, group_id: Uuid, r#ref: &str) -> Option<IssueRow> {
+async fn group_issue(
+	conn: &mut AsyncPgConnection,
+	group_id: Uuid,
+	r#ref: &str,
+) -> Option<IssueRow> {
 	sql_query(
 		"SELECT severity, active FROM issues \
 		 WHERE server_group_id = $1 AND source = $2 AND \"ref\" = $3",
@@ -216,7 +226,11 @@ struct CountRow {
 /// Count open (`left_at IS NULL`) incident links for the issue identified by
 /// `(server_id, ref)`. This isolates one per-server issue's incident
 /// membership from any group-level incident on the same group.
-async fn server_issue_open_links(conn: &mut AsyncPgConnection, server_id: Uuid, r#ref: &str) -> i64 {
+async fn server_issue_open_links(
+	conn: &mut AsyncPgConnection,
+	server_id: Uuid,
+	r#ref: &str,
+) -> i64 {
 	sql_query(
 		"SELECT COUNT(*) AS n FROM incident_issues ii \
 		 JOIN issues i ON i.id = ii.issue_id \
@@ -675,7 +689,10 @@ async fn reconcile_clears_report_gap_when_report_and_snapshot_agree() {
 		let issue = server_issue(&mut conn, server_id, &gref)
 			.await
 			.expect("report-gap still present (now cleared)");
-		assert!(!issue.active, "report-gap cleared once report and snapshot agree");
+		assert!(
+			!issue.active,
+			"report-gap cleared once report and snapshot agree"
+		);
 		assert_eq!(issue.severity, Severity::Info.to_string());
 	})
 	.await;

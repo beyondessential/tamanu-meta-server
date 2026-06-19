@@ -23,10 +23,10 @@ use commons_servers::device_auth::ServerDevice;
 use commons_types::backup::{BackupConfigStatus, BackupPurpose, BackupType, RunOutcome};
 use database::{
 	Db,
+	backups::BackupTypeDefault,
 	backups::{
 		NewBackupCredentialIssuance, NewBackupRun, ServerBackupCapability, ServerGroupBackupConfig,
 	},
-	backups::BackupTypeDefault,
 	servers::Server,
 };
 use jiff::Timestamp;
@@ -263,7 +263,9 @@ async fn credentials(
 
 	let Some(sts) = sts else {
 		tracing::error!(group = %group_id, "backup-credentials: STS client not configured");
-		return Err(AppError::Upstream("credential issuer not configured".into()));
+		return Err(AppError::Upstream(
+			"credential issuer not configured".into(),
+		));
 	};
 
 	let session_name = format!("canopy-{purpose}-{device_id}", purpose = args.purpose);
@@ -507,7 +509,10 @@ mod tests {
 		// No mutation actions anywhere.
 		let blob = policy.to_lowercase();
 		for forbidden in ["putobject", "deleteobject", "abortmultipart"] {
-			assert!(!blob.contains(forbidden), "restore policy must not grant {forbidden}");
+			assert!(
+				!blob.contains(forbidden),
+				"restore policy must not grant {forbidden}"
+			);
 		}
 	}
 

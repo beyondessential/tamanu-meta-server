@@ -235,10 +235,15 @@ mod tests {
 		async fn maint_finish_records_outcome_and_bytes() {
 			TestDb::run(|mut conn, _url| async move {
 				let group_id = insert_group(&mut conn, "g").await;
-				let run_id = BackupMaintenanceRun::start(&mut conn, group_id, MaintenanceKind::Quick)
-					.await
-					.expect("start run");
-				assert!(BackupMaintenanceRun::is_open(&mut conn, run_id).await.unwrap());
+				let run_id =
+					BackupMaintenanceRun::start(&mut conn, group_id, MaintenanceKind::Quick)
+						.await
+						.expect("start run");
+				assert!(
+					BackupMaintenanceRun::is_open(&mut conn, run_id)
+						.await
+						.unwrap()
+				);
 
 				let outcome = MaintOutcome {
 					bytes_reclaimed: Some(4096),
@@ -253,7 +258,11 @@ mod tests {
 				let run = runs.iter().find(|r| r.id == run_id).unwrap();
 				assert_eq!(run.outcome, Some(RunOutcome::Success));
 				assert_eq!(run.bytes_reclaimed, Some(4096));
-				assert!(!BackupMaintenanceRun::is_open(&mut conn, run_id).await.unwrap());
+				assert!(
+					!BackupMaintenanceRun::is_open(&mut conn, run_id)
+						.await
+						.unwrap()
+				);
 			})
 			.await;
 		}
@@ -262,9 +271,10 @@ mod tests {
 		async fn maint_failure_records_failure() {
 			TestDb::run(|mut conn, _url| async move {
 				let group_id = insert_group(&mut conn, "g").await;
-				let run_id = BackupMaintenanceRun::start(&mut conn, group_id, MaintenanceKind::Quick)
-					.await
-					.expect("start run");
+				let run_id =
+					BackupMaintenanceRun::start(&mut conn, group_id, MaintenanceKind::Quick)
+						.await
+						.expect("start run");
 
 				complete_maint(&mut conn, run_id, None, Some("kopia exploded".into()))
 					.await

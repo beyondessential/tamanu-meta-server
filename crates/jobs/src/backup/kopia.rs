@@ -315,7 +315,10 @@ pub async fn run_kopia_ok(env: &KopiaEnv, args: &[&str]) -> Result<Output> {
 }
 
 /// Run `kopia <args...> --json` and serde-parse stdout into `T`.
-pub async fn kopia_json<T: serde::de::DeserializeOwned>(env: &KopiaEnv, args: &[&str]) -> Result<T> {
+pub async fn kopia_json<T: serde::de::DeserializeOwned>(
+	env: &KopiaEnv,
+	args: &[&str],
+) -> Result<T> {
 	let out = run_kopia_ok(env, args).await?;
 	serde_json::from_slice(&out.stdout)
 		.with_context(|| format!("failed to parse JSON from kopia {}", args.join(" ")))
@@ -602,7 +605,10 @@ mod tests {
 			.unwrap();
 		assert_eq!(srv1.server_id.as_deref(), Some("srv-1"));
 		assert_eq!(srv1.type_.as_deref(), Some("tamanu-postgres"));
-		assert_eq!(srv1.latest_snapshot_at.as_deref(), Some("2026-06-18T13:00:00Z"));
+		assert_eq!(
+			srv1.latest_snapshot_at.as_deref(),
+			Some("2026-06-18T13:00:00Z")
+		);
 
 		let srv2 = got
 			.sources
@@ -637,7 +643,10 @@ mod tests {
 
 	#[test]
 	fn type_extraction() {
-		assert_eq!(type_from_path("tamanu-postgres").as_deref(), Some("tamanu-postgres"));
+		assert_eq!(
+			type_from_path("tamanu-postgres").as_deref(),
+			Some("tamanu-postgres")
+		);
 		assert_eq!(type_from_path("files/data").as_deref(), Some("data"));
 		assert_eq!(type_from_path("a/b/my-type").as_deref(), Some("my-type"));
 		// All-digit tail -> not a type.
@@ -721,8 +730,14 @@ mod tests {
 	fn parse_total_bytes_units() {
 		assert_eq!(parse_total_bytes("Total Bytes: 0 B"), Some(0));
 		assert_eq!(parse_total_bytes("Total Bytes: 1.7 KB"), Some(1740)); // 1.7*1024 = 1740.8
-		assert_eq!(parse_total_bytes("Total Bytes: 2 MB"), Some(2 * 1024 * 1024));
-		assert_eq!(parse_total_bytes("Total Bytes: 1 GB"), Some(1024 * 1024 * 1024));
+		assert_eq!(
+			parse_total_bytes("Total Bytes: 2 MB"),
+			Some(2 * 1024 * 1024)
+		);
+		assert_eq!(
+			parse_total_bytes("Total Bytes: 1 GB"),
+			Some(1024 * 1024 * 1024)
+		);
 		assert_eq!(
 			parse_total_bytes("Total Bytes: 1 TB"),
 			Some(1024i64 * 1024 * 1024 * 1024)
