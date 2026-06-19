@@ -14,6 +14,7 @@
 //! spawns all four.
 
 pub mod complete;
+pub mod creds_server;
 pub mod kopia;
 pub mod worker;
 

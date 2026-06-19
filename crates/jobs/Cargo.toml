@@ -16,6 +16,7 @@ aws-config.workspace = true
 aws-sdk-cloudwatch.workspace = true
 aws-sdk-s3.workspace = true
 aws-sdk-sts.workspace = true
+axum.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
 commons-errors = { path = "../commons-errors" }
 commons-servers = { path = "../commons-servers" }
