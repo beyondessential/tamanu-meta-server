@@ -319,6 +319,7 @@ mod tests {
 			bucket: "b".into(),
 			prefix: String::new(),
 			target_role_arn: "arn".into(),
+			maintenance_role_arn: "maint-arn".into(),
 			region: None,
 			repo_password_ref: "s".into(),
 			status,

@@ -48,8 +48,8 @@ async fn make_server(
 async fn make_config(conn: &mut AsyncPgConnection, group_id: Uuid, status: &str) {
 	sql_query(
 		"INSERT INTO server_group_backup_config \
-		 (group_id, bucket, prefix, target_role_arn, region, repo_password_ref, status) \
-		 VALUES ($1, 'grp-bucket', '', 'arn:aws:iam::123456789012:role/grp', 'ap-southeast-2', 'grp-repo-pw', $2)",
+		 (group_id, bucket, prefix, target_role_arn, maintenance_role_arn, region, repo_password_ref, status) \
+		 VALUES ($1, 'grp-bucket', '', 'arn:aws:iam::123456789012:role/grp', 'arn:aws:iam::123456789012:role/grp-maint', 'ap-southeast-2', 'grp-repo-pw', $2)",
 	)
 	.bind::<sql_types::Uuid, _>(group_id)
 	.bind::<sql_types::Text, _>(status)
