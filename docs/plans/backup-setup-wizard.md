@@ -168,7 +168,7 @@ mint.
 |---|---|
 | `empty` | Proceed. Mode: **from_birth** (generate + escrow, recommended) or **passphrase** (type your own). |
 | `kopia_repo` | An existing kopia repo. Only **passphrase** mode (operator provides the existing passphrase) — *not* from_birth (won't create over an existing repo). The verify-probe must return `passphrase_ok` before the operator can continue. |
-| `other_content` | **Block** with a warning + sample of keys. The operator *must* pick one of: a different prefix, a different bucket, or explicitly delete the prefix contents (an explicit destructive action — see §2.5). No "proceed anyway". |
+| `other_content` | **Block** with a warning + sample of keys. Canopy does **not** delete anything — the operator clears the contents themselves (or chooses a different prefix/bucket) and hits **Retry** to re-probe. No "proceed anyway", no Canopy-side delete. |
 | `inaccessible` | Block step 1; show the assume/list error so the operator can fix the role/bucket/region. |
 
 ### 2.4 Already-configured-in-Canopy check
@@ -177,13 +177,12 @@ Before/with the probe, query whether `(bucket, prefix)` (or the group) already
 has a `server_group_backup_config`. If so, surface it (link to the existing
 config) and block creating a duplicate. Pure DB check, no creds needed.
 
-### 2.5 `other_content` delete-contents action
+### 2.5 `other_content` → Retry only (no Canopy-side delete)
 
-To satisfy "require an action" without forcing the operator out to the AWS
-console, offer an explicit, confirmed **delete prefix contents** action (its own
-endpoint, maintenance-role `s3:DeleteObject*`, never auto-triggered, never
-deletes `.storageconfig`-only prefixes since those read as empty). Gated behind a
-type-to-confirm. Otherwise the operator changes prefix/bucket.
+Canopy never deletes bucket contents. On `other_content` the wizard blocks and
+shows a **Retry** button (re-runs the probe); the operator must clear the prefix
+/ pick another prefix or bucket on their own (AWS console, etc.). No delete
+endpoint, no `s3:DeleteObject*` grant needed.
 
 ---
 
@@ -274,8 +273,8 @@ resource — so operators don't hand-copy ARNs out of pulumi.
 
 ### private-server (`fns/backups.rs`, `state.rs`)
 - AWS deps (`aws-sdk-sts`/`aws-sdk-s3`/`aws-config`); `probe` endpoint (inspect +
-  verify phases, §2.2); `already_configured` DB check; `other_content`
-  delete-prefix endpoint (§2.5).
+  verify phases, §2.2); `already_configured` DB check. No delete-contents
+  endpoint — `other_content` is Retry-only (§2.5).
 - Secret creation on `create` for from_birth + passphrase (§3.2); extend the
   kube wrapper with a create op; `create secrets` RBAC.
 - `CreateBackupConfigArgs`: add `maintenance_role_arn`; accept the typed
@@ -299,7 +298,7 @@ resource — so operators don't hand-copy ARNs out of pulumi.
   ARNs + region default `ap-southeast-2`; step 2 probe result + passphrase +
   verify-probe for existing repos; step 3 schedule/retention). Render the
   state→options matrix (§2.3); already-configured; `other_content` blocking with
-  the delete-contents action.
+  a Retry button (no delete).
 - Generated api-types (`just gen-openapi`).
 
 ### tests
@@ -322,7 +321,8 @@ resource — so operators don't hand-copy ARNs out of pulumi.
 Resolved this round: dedicated `canopy-private` SA; probe assumes
 `maintenance_role_arn` (+ cheap `target_role_arn` validate); `maintenance_role_arn`
 NOT NULL (no existing rows); passphrase mode straight to `ready` (no escrow);
-`other_content` hard-blocks with a required action; import-by-Secret dropped;
+`other_content` hard-blocks, Retry-only (Canopy never deletes contents);
+import-by-Secret dropped;
 `credential_process` for kopia; `kopia.repository` marker confirmed.
 
 Still open:
