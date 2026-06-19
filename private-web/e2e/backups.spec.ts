@@ -93,6 +93,19 @@ test.describe("backups zero-state + config", () => {
 		expect(rows).toHaveLength(0);
 	});
 
+	test("retention inputs carry the org minimum as a native min", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "min-attr-group" });
+		await page.goto(`/groups/${group.id}/backups/config`);
+		// The daily/weekly/monthly inputs set min= to the org floor so the
+		// stepper/native validation won't let the user go below it.
+		await expect(page.getByLabel("Daily")).toHaveAttribute("min", "7");
+		await expect(page.getByLabel("Weekly")).toHaveAttribute("min", "4");
+		await expect(page.getByLabel("Monthly")).toHaveAttribute("min", "6");
+	});
+
 	test("manual-only toggle persists a NULL interval", async ({ page, sql }) => {
 		const group = await seedServerGroup(sql, { name: "manual-group" });
 
