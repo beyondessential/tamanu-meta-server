@@ -31,6 +31,22 @@ impl BackupSecrets {
 		Self { client, namespace }
 	}
 
+	/// Build a secret reader from the ambient cluster config (in-cluster the
+	/// pod's service account; locally `~/.kube/config`), reading from the
+	/// `POD_NAMESPACE` namespace (default `canopy`). Returns `None` (logged)
+	/// when no cluster config is available, so callers degrade to 502 rather
+	/// than failing startup. Shared by both the public-server (`/backup-target`)
+	/// and the private-server (admin escrow reveal).
+	pub async fn try_default() -> Option<Self> {
+		match kube::Client::try_default().await {
+			Ok(client) => Some(Self::new(client, namespace_from_env())),
+			Err(err) => {
+				tracing::warn!(error = ?err, "kube client unavailable; backup Secret reads will 502");
+				None
+			}
+		}
+	}
+
 	/// Read one key out of the named Secret in the configured namespace. Maps
 	/// every failure (missing Secret, missing key, non-utf8, API error) to
 	/// [`AppError::Upstream`] so the handler returns 502 with a generic body.
@@ -127,13 +143,7 @@ impl AppState {
 	/// cluster config is available, so `/backup-target` 502s until fixed
 	/// rather than the binary failing to start.
 	async fn init_kube() -> Option<BackupSecrets> {
-		match kube::Client::try_default().await {
-			Ok(client) => Some(BackupSecrets::new(client, namespace_from_env())),
-			Err(err) => {
-				tracing::warn!(error = ?err, "kube client unavailable; /backup-target will 502");
-				None
-			}
-		}
+		BackupSecrets::try_default().await
 	}
 
 	/// Sync constructor with `None` AWS/kube clients — used by the private

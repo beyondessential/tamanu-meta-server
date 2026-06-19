@@ -52,6 +52,280 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backups/ack_escrow": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Acknowledge the Bitwarden escrow: flip `escrow_pending → ready`, stamping
+         *     `escrow_acked_at/by`. 409 unless currently `escrow_pending`.
+         */
+        post: operations["backups_ack_escrow"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backups/cancel_request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel a pending one-off request. */
+        post: operations["backups_cancel_request"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backups/capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A server's registered backup capabilities + their enabled state. Empty when
+         *     the server has advertised none yet.
+         */
+        post: operations["backups_capabilities"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backups/create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Insert a config row (`status='provisioning'`). Does NOT create the repo —
+         *     that's `create_repo`. 409 if the group already has a config; 404 if the
+         *     group is missing.
+         */
+        post: operations["backups_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backups/create_repo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record intent for the init Job: set/keep `provisioning`, clear
+         *     `last_init_error`. Idempotent retry. 409 if already `ready`.
+         */
+        post: operations["backups_create_repo"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backups/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete a group's config row (decommission). The bucket and its object-locked
+         *     objects persist; this only stops credential issuance.
+         */
+        post: operations["backups_delete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backups/get": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Full config + lifecycle for a group. `null` (200) when the group has no
+         *     config (the zero-state); 404 only when the group itself doesn't exist.
+         */
+        post: operations["backups_get"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backups/list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** All configured groups (fleet overview). */
+        post: operations["backups_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backups/request_now": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * One-off "backup now": upsert a `backup_requests` row keyed
+         *     `(server_id, type, purpose)`. Idempotent (re-request refreshes the row).
+         */
+        post: operations["backups_request_now"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backups/reveal_escrow": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reveal-once passphrase for a from-birth repo. Only valid while
+         *     `escrow_pending`; re-callable until acked. Reads the k8s Secret named by
+         *     `repo_password_ref` (502 on read failure).
+         */
+        post: operations["backups_reveal_escrow"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backups/set_capability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Operator toggle of a `(server, type)` capability's enabled flag. */
+        post: operations["backups_set_capability"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backups/set_schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set (or clear) the per-`(group,type)` schedule + retention. None interval =
+         *     manual-only; a present retention is floor-validated (400 on violation).
+         */
+        post: operations["backups_set_schedule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backups/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stats panel: cached repo stats + recent runs + recent maintenance + pending
+         *     one-off requests (across the group's member servers).
+         */
+        post: operations["backups_stats"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backups/update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Edit the non-structural config (region). Structural fields
+         *     (bucket/role/mode) are create-only; interval/retention live on
+         *     `set_schedule`.
+         */
+        post: operations["backups_update"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/bestool/delete_snippet": {
         parameters: {
             query?: never;
@@ -1742,6 +2016,102 @@ export interface components {
             /** Format: uuid */
             server_id: string;
         };
+        /** @description Fleet-overview row for the configured-groups listing. */
+        BackupConfigSummary: {
+            bucket: string;
+            last_init_error?: string | null;
+            mode: string;
+            /** Format: uuid */
+            server_group_id: string;
+            status: string;
+        };
+        /**
+         * @description Full config + lifecycle for a group. Never includes the passphrase value —
+         *     only `reveal_escrow` does.
+         */
+        BackupConfigView: {
+            bucket: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            escrow_acked_at?: string | null;
+            escrow_acked_by?: string | null;
+            last_init_error?: string | null;
+            mode: string;
+            prefix: string;
+            region?: string | null;
+            /** @description Per-`(group,type)` schedule + retention overrides. */
+            schedules: components["schemas"]["ScheduleView"][];
+            /** Format: uuid */
+            server_group_id: string;
+            status: string;
+            target_role_arn: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        BackupMaintenanceRun: {
+            /** Format: int64 */
+            bytes_reclaimed?: number | null;
+            error?: string | null;
+            /** Format: date-time */
+            finished_at?: string | null;
+            /** Format: uuid */
+            group_id: string;
+            /** Format: int64 */
+            id: number;
+            kind: components["schemas"]["MaintenanceKind"];
+            outcome?: null | components["schemas"]["RunOutcome"];
+            /** Format: date-time */
+            started_at: string;
+        };
+        /**
+         * @description Why a credential was issued / a run executed. A real capability gate
+         *     on the issued S3 creds, not just audit metadata: `Backup` grants
+         *     write-without-delete, `Restore` grants read-only.
+         * @enum {string}
+         */
+        BackupPurpose: "backup" | "restore";
+        BackupRepoStats: {
+            /** Format: int64 */
+            bucket_bytes?: number | null;
+            /** Format: uuid */
+            group_id: string;
+            /** Format: int64 */
+            logical_bytes?: number | null;
+            /** Format: date-time */
+            observed_at: string;
+            /** Format: int64 */
+            physical_bytes?: number | null;
+            /** Format: int32 */
+            snapshot_count?: number | null;
+            /** Format: int32 */
+            source_count?: number | null;
+        };
+        BackupRun: {
+            /** Format: int64 */
+            bytes_uploaded?: number | null;
+            /** Format: uuid */
+            device_id: string;
+            error?: string | null;
+            /** Format: uuid */
+            group_id: string;
+            /** Format: uuid */
+            id: string;
+            outcome: components["schemas"]["RunOutcome"];
+            purpose: components["schemas"]["BackupPurpose"];
+            /** Format: date-time */
+            reported_at: string;
+            /** Format: uuid */
+            server_id?: string | null;
+            snapshot_id?: string | null;
+            type: string;
+        };
+        BackupStatsView: {
+            pending_requests: components["schemas"]["PendingRequestRow"][];
+            recent_maintenance: components["schemas"]["BackupMaintenanceRun"][];
+            recent_runs: components["schemas"]["BackupRun"][];
+            stats?: null | components["schemas"]["BackupRepoStats"];
+        };
         BestoolSnippetDetail: {
             description?: string | null;
             editor: string;
@@ -1780,6 +2150,21 @@ export interface components {
             platform: string;
             /** Format: uuid */
             version_id: string;
+        };
+        CreateBackupConfigArgs: {
+            bucket: string;
+            mode: string;
+            prefix?: string;
+            region?: string | null;
+            /**
+             * @description Import mode only: name of a pre-existing k8s Secret holding the
+             *     passphrase. From-birth leaves this None (Canopy generates + names it),
+             *     in which case a placeholder ref keyed on the group is recorded.
+             */
+            repo_password_ref?: string | null;
+            /** Format: uuid */
+            server_group_id: string;
+            target_role_arn: string;
         };
         CreateServerArgs: {
             /** Format: int64 */
@@ -1947,6 +2332,10 @@ export interface components {
         GetIncidentArgs: {
             /** Format: uuid */
             incident_id: string;
+        };
+        GroupArgs: {
+            /** Format: uuid */
+            server_group_id: string;
         };
         GroupDetail: {
             group: components["schemas"]["ServerGroup"];
@@ -2295,6 +2684,11 @@ export interface components {
             max: components["schemas"]["VersionStr"];
             min: components["schemas"]["VersionStr"];
         };
+        /**
+         * @description Which kopia maintenance cycle a Canopy maintenance Job ran.
+         * @enum {string}
+         */
+        MaintenanceKind: "quick" | "full";
         MergeIntoArgs: {
             /**
              * Format: uuid
@@ -2513,6 +2907,15 @@ export interface components {
             slack_open_delay?: number | null;
             tags?: null | components["schemas"]["TagMap"];
         };
+        PendingRequestRow: {
+            purpose: string;
+            /** Format: date-time */
+            requested_at: string;
+            requested_by?: string | null;
+            /** Format: uuid */
+            server_id: string;
+            type: string;
+        };
         /**
          * @description Wire-shape mirror of [`problem_details::ProblemDetails`] for OpenAPI.
          *
@@ -2547,6 +2950,12 @@ export interface components {
             minor: number;
             /** Format: int32 */
             patch: number;
+        };
+        RequestArgs: {
+            purpose: string;
+            /** Format: uuid */
+            server_id: string;
+            type: string;
         };
         ResolveArgs: {
             /** Format: uuid */
@@ -2589,6 +2998,34 @@ export interface components {
          * @enum {string}
          */
         ResolvedReason: "fixed" | "wont_fix" | "expected" | "duplicate" | "flapping";
+        /**
+         * @description kopia `keep-*` retention policy. Org-minimum floors
+         *     (`keep_daily ≥ 7, keep_weekly ≥ 4, keep_monthly ≥ 6`) are enforced by
+         *     [`RetentionPolicy::validate_floor`] on create/update.
+         */
+        RetentionPolicy: {
+            /** Format: int32 */
+            keep_annual?: number;
+            /** Format: int32 */
+            keep_daily: number;
+            /** Format: int32 */
+            keep_latest?: number;
+            /** Format: int32 */
+            keep_monthly: number;
+            /** Format: int32 */
+            keep_weekly: number;
+        };
+        RevealEscrowResponse: {
+            /** @description Shown once; the UI must not persist it. */
+            passphrase: string;
+            /** @description The Secret name, for the "saved where" note. */
+            repo_password_ref: string;
+        };
+        /**
+         * @description Outcome of a reported backup/restore run.
+         * @enum {string}
+         */
+        RunOutcome: "success" | "failure";
         SampleArgs: {
             check_name: string;
         };
@@ -2603,8 +3040,33 @@ export interface components {
              */
             supersedes?: string | null;
         };
+        /**
+         * @description Per-`(group,type)` schedule + retention override. `expected_interval` None =
+         *     manual-only (distinct from 0). `retention` None = inherit the type default.
+         */
+        ScheduleView: {
+            /** Format: int64 */
+            expected_interval?: number | null;
+            retention?: null | components["schemas"]["RetentionPolicy"];
+            type: string;
+        };
         SearchArgs: {
             query: string;
+        };
+        ServerArgs: {
+            /** Format: uuid */
+            server_id: string;
+        };
+        /**
+         * @description One `(server, type)` backup capability and whether the operator has it
+         *     enabled. `enabled` toggles whether the scheduler issues credentials and
+         *     schedules runs for the pair.
+         */
+        ServerBackupCapabilityView: {
+            enabled: boolean;
+            /** Format: uuid */
+            server_id: string;
+            type: string;
         };
         ServerDataUpdate: {
             /** Format: int64 */
@@ -2816,6 +3278,23 @@ export interface components {
             server_id: string;
             source: string;
         };
+        SetCapabilityArgs: {
+            enabled: boolean;
+            /** Format: uuid */
+            server_id: string;
+            type: string;
+        };
+        SetScheduleArgs: {
+            /**
+             * Format: int64
+             * @description Seconds; None = manual-only (no schedule), distinct from 0.
+             */
+            expected_interval?: number | null;
+            retention?: null | components["schemas"]["RetentionPolicy"];
+            /** Format: uuid */
+            server_group_id: string;
+            type: string;
+        };
         /**
          * @description Canopy's severity vocabulary, narrowed from RFC 5424 to a five-level
          *     set with operator semantics:
@@ -3010,6 +3489,16 @@ export interface components {
             download_url: string;
             platform: string;
         };
+        UpdateBackupConfigArgs: {
+            /**
+             * @description New region (or None to clear). Changing the region is allowed but is
+             *     effectively a repo migration — the UI warns. Structural fields
+             *     (bucket/role/mode) are not editable here.
+             */
+            region?: string | null;
+            /** Format: uuid */
+            server_group_id: string;
+        };
         UpdateChangelogArgs: {
             changelog: string;
             version: string;
@@ -3196,6 +3685,464 @@ export interface operations {
                 };
             };
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    backups_ack_escrow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroupArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupConfigView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    backups_cancel_request: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RequestArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    backups_capabilities: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerBackupCapabilityView"][];
+                };
+            };
+        };
+    };
+    backups_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateBackupConfigArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupConfigView"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    backups_create_repo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroupArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupConfigView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    backups_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroupArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    backups_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroupArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": null | components["schemas"]["BackupConfigView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    backups_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": unknown;
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupConfigSummary"][];
+                };
+            };
+        };
+    };
+    backups_request_now: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RequestArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    backups_reveal_escrow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroupArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RevealEscrowResponse"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    backups_set_capability: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetCapabilityArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    backups_set_schedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetScheduleArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupConfigView"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    backups_stats: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroupArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupStatsView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    backups_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateBackupConfigArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupConfigView"];
+                };
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

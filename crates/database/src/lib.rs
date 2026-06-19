@@ -34,11 +34,11 @@ pub use backups::{
 	BackupCredentialIssuance, BackupMaintenanceRun, BackupRepoSnapshot, BackupRepoStats,
 	BackupRequest, BackupRun, BackupTypeDefault, NewBackupCredentialIssuance, NewBackupRun,
 	NewBackupTypeDefault, NewServerGroupBackupConfig, NewServerGroupBackupSchedule,
-	ServerBackupCapability, ServerGroupBackupConfig, ServerGroupBackupSchedule,
+	RetentionPolicy, ServerBackupCapability, ServerGroupBackupConfig, ServerGroupBackupSchedule,
 };
 pub use bestool_snippets::{BestoolSnippet, NewBestoolSnippet};
 pub use commons_types::backup::{
-	BackupConfigStatus, BackupPurpose, BackupType, MaintenanceKind, RunOutcome,
+	BackupConfigStatus, BackupPurpose, BackupRepoMode, BackupType, MaintenanceKind, RunOutcome,
 };
 pub use devices::{Device, DeviceConnection, DeviceKey, DeviceWithInfo};
 

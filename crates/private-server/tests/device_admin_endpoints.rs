@@ -36,6 +36,7 @@ async fn private_with_directory(url: &str, directory: TailnetDirectory) -> TestS
 			db: database::init_to(url),
 			ro_pool: None,
 			tailnet_directory: Some(directory),
+			kube: None,
 		})
 		.unwrap(),
 		ClientIpSource::RightmostForwarded,

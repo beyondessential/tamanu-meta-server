@@ -17,6 +17,7 @@ use utoipa::{
 	modifiers(&SecuritySchemes),
 	tags(
 		(name = "admins", description = "Admin email allow-list management."),
+		(name = "backups", description = "Group backup-repo onboarding, escrow, scheduling, and stats."),
 		(name = "bestool", description = "Bestool SQL snippet library."),
 		(name = "commons", description = "Shared configuration and identity helpers."),
 		(name = "devices", description = "Device registry, trust, and key management."),

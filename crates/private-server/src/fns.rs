@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use utoipa_axum::router::OpenApiRouter;
 
 pub mod admins;
+pub mod backups;
 pub mod bestool;
 pub mod commons;
 pub mod devices;
@@ -29,6 +30,7 @@ pub fn routes() -> OpenApiRouter<crate::state::AppState> {
 		"/api",
 		OpenApiRouter::new()
 			.nest("/admins", admins::routes())
+			.nest("/backups", backups::routes())
 			.nest("/bestool", bestool::routes())
 			.nest("/commons", commons::routes())
 			.nest("/devices", devices::routes())

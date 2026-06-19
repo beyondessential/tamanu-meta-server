@@ -250,7 +250,7 @@ and any other consumer.
 | `backups_get` | user | `{ server_group_id }` | `BackupConfigView \| null` | full config + lifecycle for a group (null = no config) |
 | `backups_list` | user | `{}` | `Vec<BackupConfigSummary>` | all configured groups (fleet overview) |
 | `backups_create` | admin | `CreateBackupConfigArgs` | `BackupConfigView` | insert config row (`status='provisioning'`), validate floor; does **not** create repo |
-| `backups_update` | admin | `UpdateBackupConfigArgs` | `BackupConfigView` | edit non-structural config (region, interval, retention) on a `ready` group |
+| `backups_update` | admin | `UpdateBackupConfigArgs` | `BackupConfigView` | edit config on a `ready` group. RESOLVED (impl): `UpdateBackupConfigArgs` carries **only `region`** — structural fields are inexpressible (no 409 path). (Interval/retention are per-`(group, type)` on the schedule table, edited separately.) |
 | `backups_create_repo` | admin | `{ server_group_id }` | `BackupConfigView` | record intent for the init Job (sets/keeps `provisioning`, clears `last_init_error`); idempotent retry |
 | `backups_reveal_escrow` | admin | `{ server_group_id }` | `RevealEscrowResponse` | reveal-once passphrase (from-birth, `escrow_pending` only); reads the k8s Secret |
 | `backups_ack_escrow` | admin | `{ server_group_id }` | `BackupConfigView` | flip `escrow_pending → ready`, stamp `escrow_acked_at/by` |
@@ -328,9 +328,11 @@ Reuse existing `AppError` variants; map to the documented statuses in
   `commons-errors` variants and **update ERRORS.md** if a new variant is added
   (per AGENTS.md, heading must match the problem type).
 - `409` (`AppError::Conflict`) — `reveal_escrow`/`ack_escrow` called when
-  `status != 'escrow_pending'`, or `create_repo` on an already-ready group, or
-  `update` of structural fields (bucket/role) post-creation (those are a repo
-  migration, out of scope — reject).
+  `status != 'escrow_pending'`, or `create_repo` on an already-ready group.
+  RESOLVED (impl) — the "409 on **structural-field** update" path **does not
+  exist by design**: `UpdateBackupConfigArgs` carries **only `region`**, so a
+  bucket/role/mode edit is simply *inexpressible* over the wire rather than
+  rejected at runtime. Field-omission supersedes the 409.
 - `502` — `reveal_escrow` if the k8s Secret read fails (control-plane error).
 
 ---
@@ -363,6 +365,12 @@ From **other backup-credentials components** (must exist first or be stubbed):
 - **Device path / detection components:** none consumed directly; the UI
   surfaces their *output* (runs, staleness via the existing issues/events
   model already shown on the server/group pages — no new wiring here).
+  UPDATE (shipped): the **group-scoped** issues raised by detection/inspection
+  (nullable `server_id`, see the detection-preflight spec's `raise_group_event`)
+  are rendered — `IssueRow`/the `issues` fn handle a null `server_id` and key
+  off `server_group_id`/`server_group_name` for group-scoped issues (member
+  servers resolved via `Server::group_refs_by_server_ids`), so a corruption /
+  preflight alert with no member server shows correctly.
 
 From **existing canopy code** (already present):
 
@@ -446,8 +454,9 @@ From **existing canopy code** (already present):
     `escrow_acked_at/by`.
   - `request_now` upserts; `cancel_request` deletes; PK `(server_id, purpose)`
     means re-request is a no-op upsert, not an error.
-  - `update` rejects structural-field changes (409) and accepts
-    region/interval/retention.
+  - `update` accepts `region`. RESOLVED (impl): there's no structural-field
+    rejection to test — `UpdateBackupConfigArgs` only carries `region`, so a
+    structural change is inexpressible (no 409 path).
   - Auth: confirm admin-gated fns reject non-admin (the test harness's auth
     posture — match how other admin fns are tested).
   - `reveal_escrow`: since the kube client is net-new, test against a stubbed
@@ -548,6 +557,10 @@ Per the plan's "Backup types", the UI is type-aware:
 
 - **Capabilities view** per server: the registered types + an `enabled`
   toggle (the per-server on/off; seeded from `auto_enable`).
+  RESOLVED (impl) — **the per-server capabilities enable-toggle is shipped**
+  (no longer future/missing): endpoints `backups.capabilities` (read, the
+  server's registered `(type, enabled)` rows) + `backups.set_capability` (admin
+  toggle of `enabled`), with the UI on the **ServerDetail** page.
 - **Per-`(group, type)` schedule + retention** editing
   (`server_group_backup_schedule` overrides; show the inherited type
   default when no override). Org retention floor enforced in the form.

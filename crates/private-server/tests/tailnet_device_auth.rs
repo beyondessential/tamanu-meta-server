@@ -82,6 +82,7 @@ async fn unknown_tailnet_node_auto_creates_untrusted_then_403s_role_gate() {
 				db: database::init_to(&url),
 				ro_pool: None,
 				tailnet_directory: Some(directory),
+				kube: None,
 			})
 			.unwrap(),
 			ClientIpSource::RightmostForwarded,

@@ -10,6 +10,7 @@ import {
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
 import ArchiveIcon from "@mui/icons-material/ArchiveOutlined";
+import BackupIcon from "@mui/icons-material/Backup";
 import EditIcon from "@mui/icons-material/Edit";
 import RestoreIcon from "@mui/icons-material/RestoreFromTrash";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
@@ -22,6 +23,9 @@ import { useApi, useApiAction } from "../api";
 import { useIsNotificationHeld } from "../hooks/useIsNotificationHeld";
 import { usePageTitle } from "../hooks/usePageTitle";
 import {
+	BACKUP_STATUS_INTENT,
+	BACKUP_STATUS_LABEL,
+	type BackupConfigStatus,
 	SERVER_RANK_ORDER,
 	aggregateOperators,
 	compareServersByRankThenKind,
@@ -217,8 +221,83 @@ export default function GroupDetail() {
 				)}
 			</Box>
 
+			<BackupsCard groupId={group.id} isAdmin={admin} />
+
 			<SilencedRefsSection scope="group" id={group.id} />
 		</Stack>
+	);
+}
+
+/// Compact backups summary on the group detail page: a status chip + link to
+/// the full panel, or a "Set up backups" CTA (admin) when no config exists.
+function BackupsCard({
+	groupId,
+	isAdmin,
+}: {
+	groupId: string;
+	isAdmin: boolean;
+}) {
+	const config = useApi(
+		"backups",
+		"get",
+		{ server_group_id: groupId },
+		[groupId],
+	);
+	if (config.status !== "ok") return null;
+
+	return (
+		<Paper variant="outlined" sx={{ p: 2 }}>
+			<Stack
+				direction="row"
+				spacing={2}
+				sx={{ alignItems: "center", justifyContent: "space-between" }}
+			>
+				<Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
+					<Typography variant="h6" component="h2">
+						Backups
+					</Typography>
+					{config.data && (
+						<Chip
+							size="small"
+							label={
+								BACKUP_STATUS_LABEL[
+									config.data.status as BackupConfigStatus
+								]
+							}
+							color={
+								BACKUP_STATUS_INTENT[
+									config.data.status as BackupConfigStatus
+								]
+							}
+						/>
+					)}
+				</Stack>
+				{config.data == null ? (
+					isAdmin ? (
+						<Button
+							component={RouterLink}
+							to={`/groups/${groupId}/backups/config`}
+							variant="outlined"
+							startIcon={<BackupIcon />}
+						>
+							Set up backups
+						</Button>
+					) : (
+						<Typography variant="body2" color="text.secondary">
+							Not set up
+						</Typography>
+					)
+				) : (
+					<Button
+						component={RouterLink}
+						to={`/groups/${groupId}/backups`}
+						variant="outlined"
+					>
+						View backups
+					</Button>
+				)}
+			</Stack>
+		</Paper>
 	);
 }
 
