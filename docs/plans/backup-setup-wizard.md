@@ -1,4 +1,4 @@
-# Backup setup wizard + third repo mode + chained-AssumeRole cred model
+# Backup setup wizard + Canopy-owned passphrases + chained-AssumeRole cred model
 
 Status: **PLAN / for review** (2026-06-20). Supersedes parts of the cred model
 in `backup-credentials.md` (the direct-web-identity scheme) — see §1.
@@ -13,9 +13,9 @@ Two things landed together:
    and reporting whether the prefix is empty, looks like an existing kopia repo,
    holds other (forgotten) content, or is already configured in Canopy — and
    offers next steps based on that. Only once the passphrase situation is
-   settled do we collect schedule/retention. Add a **third repo mode**: type the
-   passphrase directly (vs `from_birth` generate, vs `import` an existing
-   Secret).
+   settled do we collect schedule/retention. Rework repo modes so **Canopy owns
+   every passphrase**: `from_birth` (generate + escrow) or `passphrase` (operator
+   types it); drop the old import-an-existing-Secret mode.
 
 2. **Ops-driven cred-model change:** there is **no deployment-account OIDC
    provider**, so the previous "override `AWS_ROLE_ARN` + reuse the projected
@@ -45,24 +45,38 @@ The current code assuming `target_role_arn` for maintenance / s3-metrics is a
 ### 1.2 Chained AssumeRole everywhere cross-account
 
 The backups pod keeps its own `canopy-jobs` IRSA creds (default credential
-chain) and, per group op, calls `sts:AssumeRole(maintenance_role_arn)`, then:
+chain). For each group op it needs `sts:AssumeRole(maintenance_role_arn)`. Two
+consumers:
 
-- passes the temp creds to the **kopia subprocess** via
-  `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN` (+`AWS_REGION`)
-  — **not** `AWS_ROLE_ARN` + web-identity-token-file;
-- uses the same assumed creds for the **CloudWatch SDK client** (s3-metrics).
+- **CloudWatch SDK client (s3-metrics):** in-process Rust `aws-sdk-sts` assume →
+  hand the temp creds to the CloudWatch client (refreshable provider).
+- **kopia subprocess:** instead of baking static temp creds into the env (which
+  expire mid-run, see §1.3), kopia fetches creds **just-in-time via
+  `credential_process`** (§1.3).
 
-Drop every direct-web-identity-against-deployment-account assumption.
+Drop every direct-web-identity-against-deployment-account assumption, and drop
+the old `AWS_ROLE_ARN`-override path in `kopia.rs`.
 
-### 1.3 1-hour session cap
+### 1.3 Just-in-time creds for kopia (`credential_process`) — solves the 1h cap
 
-Chaining caps the assumed session at **1 hour** regardless of the role's
-`MaxSessionDuration`. Maintenance / inspection runs that can exceed an hour must
-re-assume before expiry. **Recommendation:** assume fresh creds immediately
-before each kopia invocation (most ops are well under 1h); for a single op that
-could run long, write the creds to a file kopia re-reads (kopia S3 storage reads
-standard AWS creds; a refreshable credentials file is the least-invasive path).
-Track as an implementation detail; start with per-op fresh assume.
+Chaining caps each assumed session at **1 hour** regardless of the role's
+`MaxSessionDuration`, so static env creds would break long maintenance runs.
+kopia uses the AWS SDK, which supports `credential_process`: a profile entry
+naming a helper that prints `{Version:1, AccessKeyId, SecretAccessKey,
+SessionToken, Expiration}` and is **re-invoked on demand** when creds near
+expiry.
+
+**Plan:** ship a creds helper as a subcommand of the backups bin (e.g.
+`backups creds --role <maintenance_role_arn> [--region]`) that does
+`sts:AssumeRole` via the pod's default credential chain and prints the
+credential-process JSON. Point each kopia subprocess at it via a generated AWS
+profile (`AWS_CONFIG_FILE`/`AWS_PROFILE` or `AWS_SHARED_CREDENTIALS_FILE` with
+`credential_process = backups creds --role …`). kopia transparently re-invokes
+it past the 1h mark — no static-cred expiry, no re-exec dance. This mirrors the
+just-in-time pattern bestool will use device-side (there it calls canopy because
+the device has no AWS identity; here the helper assumes directly since the pod
+*does* have IRSA). A localhost-endpoint variant is possible but the direct
+helper binary is simpler and needs no server.
 
 ### 1.4 Device path: unchanged
 
@@ -77,11 +91,11 @@ creds to the device over mTLS. No change.
 - Image still bundles kopia.
 
 > **Ops coordination (TAM-6878):** the wizard's synchronous probe runs in
-> **private-server**, which today has no AWS identity. private-server must run
-> under an IRSA SA whose role ARN the per-bucket roles trust (and which carries
-> `sts:AssumeRole`), plus `create secrets` RBAC (§3). Confirm which SA
-> private-server uses — reuse `canopy-jobs`/`canopy-issuer`, or a dedicated
-> `canopy-private` role added to the per-bucket trust policies.
+> **private-server**, which today has no AWS identity. **Decided:** private-server
+> gets a **dedicated `canopy-private` SA + IRSA role** (room to grow more
+> private-server AWS features later), carrying `sts:AssumeRole`; the per-bucket
+> roles' trust policies must include this role ARN, and the SA needs `create
+> secrets` (§3) on top of the existing `get secrets`.
 
 ---
 
@@ -95,8 +109,11 @@ Step 1 — **Identity & target.** Operator enters: bucket, prefix, region (defau
 
 Step 2 — **Probe result & passphrase.** Canopy assumes the role and inspects the
 prefix. Based on the result (§2.3) it presents the right passphrase choice
-(from_birth / type-passphrase / import). Probe also reports if this bucket+prefix
-is already configured in Canopy (DB check, §2.4).
+(from_birth generate vs operator-typed passphrase). Probe also reports if this
+bucket+prefix is already configured in Canopy (DB check, §2.4). For an existing
+repo, once the operator types the passphrase Canopy runs a **second
+(verify) probe** that attempts `kopia repository connect` to confirm the
+passphrase before committing (§2.3).
 
 Step 3 — **Schedule & retention.** Only reached once the passphrase situation is
 settled. Same fields as today (interval + per-type retention with the org
@@ -104,16 +121,22 @@ floors). Then create + provision.
 
 ### 2.2 Probe endpoint
 
-New private-server endpoint, e.g. `POST /api/backups/probe`:
+New private-server endpoint, e.g. `POST /api/backups/probe`. Two phases share it:
+an **inspect** phase (no passphrase) and a **verify** phase (with passphrase, for
+existing repos):
 
 ```
-ProbeArgs { bucket, prefix, region, target_role_arn, maintenance_role_arn }
+ProbeArgs {
+  bucket, prefix, region, target_role_arn, maintenance_role_arn,
+  passphrase: Option<String>,     // present ⇒ also run the connect-verify
+}
 ProbeResult {
   creds_ok: bool,
   error: Option<String>,          // assume/list failure surfaced verbatim-ish
   state: "empty" | "kopia_repo" | "other_content" | "inaccessible",
   object_sample: Vec<String>,     // a few keys, for "other content" context
   already_configured_in_canopy: Option<Uuid>,  // group id if bucket+prefix taken
+  passphrase_ok: Option<bool>,    // set only when a passphrase was supplied
 }
 ```
 
@@ -122,27 +145,30 @@ Implementation: add `aws-sdk-sts` + `aws-sdk-s3` + `aws-config` to private-serve
 Assume the **`maintenance_role_arn`** (full read; it's the path that does the
 heavy lifting, so validating it is the most useful signal), then:
 
-- `ListObjectsV2(bucket, prefix, max-keys=small)` → empty vs non-empty.
-- Probe for a kopia repo marker: `HeadObject`/`GetObject` on
-  `<prefix>kopia.repository` (kopia's format blob). Present ⇒ `kopia_repo`.
-- Non-empty but no marker ⇒ `other_content` (return a sample of keys).
+- `ListObjectsV2(bucket, prefix, max-keys=small)`.
+- Probe for the kopia repo marker `HeadObject`/`GetObject` on
+  `<prefix>kopia.repository` (confirmed: kopia 0.23.1 writes its format blob
+  there). Present ⇒ `kopia_repo`.
+- **`.storageconfig`-only counts as empty:** if the only object(s) under the
+  prefix are `.storageconfig` (and no `kopia.repository`), treat as `empty`.
+- Non-empty (beyond `.storageconfig`) with no marker ⇒ `other_content` (return a
+  sample of keys).
 - Assume/list failure ⇒ `creds_ok=false`, `inaccessible`, surface the error.
+- If `passphrase` supplied and state is `kopia_repo`: attempt `kopia repository
+  connect` with it (using the credential-process helper for S3 creds) →
+  `passphrase_ok`. (Connect leaves no writes.)
 
-(Optionally also cheaply validate `target_role_arn` with `sts:get-caller-identity`
-under the assumed session so a bad device role is caught at setup, not first
-device mint. Recommend: yes, it's cheap.)
-
-> kopia repo-marker key needs a quick verification against the real 0.23.1
-> layout (is it exactly `kopia.repository` at the prefix root?). Confirm before
-> coding the detector.
+Also cheaply validate `target_role_arn` with `sts:get-caller-identity` under the
+assumed session so a bad device role is caught at setup, not at first device
+mint.
 
 ### 2.3 State → offered options
 
 | Probe state | What we show |
 |---|---|
-| `empty` | Proceed normally. Passphrase mode: from_birth (recommended) or type-your-own; import is N/A (nothing to import). |
-| `kopia_repo` | An existing kopia repo is here. Offer **import** (supply/type the passphrase; we verify by connecting) — *not* from_birth (would refuse to create over an existing repo). Verify the passphrase by attempting a `kopia repository connect` before committing. |
-| `other_content` | **Warn**: the prefix holds non-kopia objects (show sample). Require explicit confirmation to proceed (don't clobber); recommend a different prefix. |
+| `empty` | Proceed. Mode: **from_birth** (generate + escrow, recommended) or **passphrase** (type your own). |
+| `kopia_repo` | An existing kopia repo. Only **passphrase** mode (operator provides the existing passphrase) — *not* from_birth (won't create over an existing repo). The verify-probe must return `passphrase_ok` before the operator can continue. |
+| `other_content` | **Block** with a warning + sample of keys. The operator *must* pick one of: a different prefix, a different bucket, or explicitly delete the prefix contents (an explicit destructive action — see §2.5). No "proceed anyway". |
 | `inaccessible` | Block step 1; show the assume/list error so the operator can fix the role/bucket/region. |
 
 ### 2.4 Already-configured-in-Canopy check
@@ -151,111 +177,161 @@ Before/with the probe, query whether `(bucket, prefix)` (or the group) already
 has a `server_group_backup_config`. If so, surface it (link to the existing
 config) and block creating a duplicate. Pure DB check, no creds needed.
 
+### 2.5 `other_content` delete-contents action
+
+To satisfy "require an action" without forcing the operator out to the AWS
+console, offer an explicit, confirmed **delete prefix contents** action (its own
+endpoint, maintenance-role `s3:DeleteObject*`, never auto-triggered, never
+deletes `.storageconfig`-only prefixes since those read as empty). Gated behind a
+type-to-confirm. Otherwise the operator changes prefix/bucket.
+
 ---
 
-## 3. Third repo mode + private-server-owned Secret creation
+## 3. Repo modes + private-server-owned Secret creation
 
-### 3.1 New mode
+### 3.1 Two modes only — drop import-by-Secret
 
-`BackupRepoMode` gains a third variant (commons-types `text_enum!`), e.g.
-`Passphrase = "passphrase"` (operator types the passphrase directly). DB
-migration must extend the `CHECK (mode IN (...))` on
-`server_group_backup_config.mode` to include it.
+**Decision:** **Canopy owns all repo passphrases.** Remove the existing
+`import` (operator-supplies-a-Secret-name) variant entirely. `BackupRepoMode`
+becomes exactly two variants:
 
-Status machine: like `from_birth` it produces a Canopy-held Secret, but it
-**skips escrow** (the operator already knows the passphrase) → goes
-`provisioning → ready` on successful init (same as import), not via
-`escrow_pending`. (Confirm: do we still want a one-time "we stored it"
-confirmation, or straight to ready? Recommend straight to ready.)
+- `from_birth` — Canopy generates the passphrase + escrow flow (reveal-once +
+  ack). Only valid on an `empty` prefix.
+- `passphrase` — operator provides the passphrase; Canopy stores it. **Skips
+  escrow** → `provisioning → ready` on successful init. Covers *both* "set my
+  own on a fresh repo" (empty prefix → create) and "connect to an existing repo"
+  (`kopia_repo` → connect, passphrase pre-verified by the §2.2 verify probe). The
+  repo *state*, not the mode, decides create-vs-connect.
+
+DB migration changes the `CHECK` on `server_group_backup_config.mode` from
+`IN ('from_birth','import')` to `IN ('from_birth','passphrase')`. No existing
+rows (confirmed), so no data migration. Remove `import`-specific handling
+(`repo_password_ref` is no longer a user input — Canopy always names/owns the
+Secret) and the `BackupRepoMode::Import` match arms.
 
 ### 3.2 Secret creation — currently missing
 
 **Gap found:** nothing in the codebase *creates* the passphrase Secret today.
 `from_birth` init only ever *reads* it (`worker.read_repo_password`), and there
-is no passphrase generation. So `from_birth` is not actually wired end-to-end,
-and the new mode needs creation too.
+is no passphrase generation — so `from_birth` is not actually wired end-to-end.
 
-**Decision (confirmed):** private-server owns Secret creation for **both**:
+**Decision (confirmed):** private-server owns Secret creation for both modes,
+at config-create time:
 
 - `from_birth`: generate a strong passphrase, create the k8s Secret
   (`backup-repo-{group_id}`, key `password`), record the ref. Escrow flow
-  unchanged (reveal-once + ack).
-- `passphrase` (new): create the Secret from the operator-typed value, ref
-  recorded, no escrow.
-- `import`: unchanged (operator supplies an existing Secret name).
+  unchanged.
+- `passphrase`: create the Secret from the operator-typed value, ref recorded,
+  no escrow.
 
-This gives private-server `create secrets` RBAC (today it has `get` only). The
-`backups` init loop keeps only *reading* the Secret — no change there. Creating
-the Secret at config-create time (private-server) also means the probe's
-existing-repo "verify by connect" can use the just-supplied passphrase.
+This gives the `canopy-private` SA `create secrets` RBAC (today it has `get`
+only). The `backups` init loop keeps only *reading* the Secret — no change.
 
 > Scope note (rule_no_self_scoping): finishing `from_birth` generate+create is
-> pulled in here because the new mode shares the same missing machinery; calling
+> pulled in here because both modes share the same (missing) machinery; calling
 > it out rather than silently bundling or dropping it.
+
+### 3.3 `.storageconfig` (Intelligent-Tiering) on init
+
+On repo init, if `<prefix>.storageconfig` is **absent**, Canopy creates it to
+configure Intelligent-Tiering. **Never overwrite** an existing `.storageconfig`.
+A prefix containing only `.storageconfig` is treated as `empty` by the probe
+(§2.2), so a pre-seeded tiering config doesn't block from_birth. (Verify the
+exact `.storageconfig` schema kopia/S3 expects before writing it.)
+
+---
+
+## 3a. Machine-facing config-as-a-resource API (ops/pulumi)
+
+Complements the wizard (does **not** replace it). Pulumi creates the bucket +
+device/maintenance roles, then pushes the backup config to Canopy as a managed
+resource — so operators don't hand-copy ARNs out of pulumi.
+
+- **Endpoints:** create / update / delete / get a `server_group_backup_config`
+  (the wizard's create/update reuse the same handlers). Create/update run the
+  **same server-side access-check/probe** (§2.2) before persisting, so a config
+  pushed by pulumi is validated identically — bad creds/role/bucket fail fast.
+- **Resource semantics:** idempotent upsert keyed by group (or bucket+prefix),
+  suitable for a Pulumi dynamic provider / `Command`-style resource. Delete tears
+  down the config (define: does it also delete the Secret? recommend yes for
+  from_birth/passphrase since Canopy owns it — confirm).
+- **Auth (open):** private-server gates on `TailscaleAdmin`. Pulumi/CI needs a
+  machine path — either run on the tailnet, or add a service-token/`TailscaleApi`
+  auth mode for non-interactive callers. **Open decision (§5).**
 
 ---
 
 ## 4. Work breakdown
 
 ### DB (database crate, migration via `just migration`)
-- Add `maintenance_role_arn TEXT` to `server_group_backup_config` (+ model field,
-  re-exports). Backfill/repurpose: existing rows have only `target_role_arn`;
-  decide default (likely NOT NULL with no default → set in a follow-up deploy, or
-  nullable first per the migration-meaning rule — see open Q).
-- Extend `mode` CHECK to include the new variant.
+- Add `maintenance_role_arn TEXT NOT NULL` to `server_group_backup_config` (no
+  existing rows, so NOT NULL is clean) + model field + re-exports.
+- Change `mode` CHECK from `IN ('from_birth','import')` to
+  `IN ('from_birth','passphrase')`.
 
 ### commons-types
-- `BackupRepoMode` third variant.
+- `BackupRepoMode`: replace `Import` with `Passphrase` (`"passphrase"`).
 
 ### private-server (`fns/backups.rs`, `state.rs`)
-- AWS deps; `probe` endpoint (§2.2); `already_configured` DB check.
-- Secret creation on `create` for from_birth + passphrase (§3.2); extend
-  `BackupSecrets` (or a sibling) with a create op; `create secrets` RBAC.
-- `CreateBackupConfigArgs`: add `maintenance_role_arn`, accept typed passphrase
-  for the new mode, keep `repo_password_ref` for import.
-- openapi regen (`just gen-openapi`) for new/changed request+response bodies.
+- AWS deps (`aws-sdk-sts`/`aws-sdk-s3`/`aws-config`); `probe` endpoint (inspect +
+  verify phases, §2.2); `already_configured` DB check; `other_content`
+  delete-prefix endpoint (§2.5).
+- Secret creation on `create` for from_birth + passphrase (§3.2); extend the
+  kube wrapper with a create op; `create secrets` RBAC.
+- `CreateBackupConfigArgs`: add `maintenance_role_arn`; accept the typed
+  passphrase for `passphrase` mode; drop `repo_password_ref` as a user input and
+  the `Import` arms.
+- **Config-as-a-resource API (§3a):** create/update/delete/get usable by
+  pulumi, sharing the access-check; resolve the machine-auth path.
+- openapi regen (`just gen-openapi`).
 
-### jobs (`backup/{kopia,worker,maintenance,inspection,s3_metrics}.rs`)
+### jobs (`backup/{kopia,worker,maintenance,inspection,s3_metrics}.rs`, bin)
 - Switch maintenance/inspection/s3-metrics to **chain-assume
-  `maintenance_role_arn`** via `aws-sdk-sts` and pass temp creds to kopia env
-  (`AWS_ACCESS_KEY_ID/SECRET/SESSION_TOKEN`+`AWS_REGION`) and the CloudWatch
-  client (§1.2). Remove the `AWS_ROLE_ARN`-override path in `kopia.rs`.
-- 1h-cap handling (§1.3): assume fresh per op.
-- Fix the device-role-for-maintenance bug (use `maintenance_role_arn`).
+  `maintenance_role_arn`** (fix the device-role bug). CloudWatch client uses the
+  in-process assumed creds.
+- **`credential_process` helper (§1.3):** add a `backups creds --role …`
+  subcommand; generate the per-subprocess AWS profile pointing kopia at it;
+  remove the `AWS_ROLE_ARN`-override path in `kopia.rs`.
+- **`.storageconfig` on init (§3.3):** create if absent, never overwrite.
 
 ### frontend (`private-web/`)
-- `BackupConfig.tsx` → multi-step wizard (step 1 identity+probe, step 2
-  passphrase/probe-result, step 3 schedule/retention). New role-ARN field;
-  region defaults to `ap-southeast-2`. Wire the probe endpoint; render the
-  state→options matrix (§2.3); show already-configured.
+- `BackupConfig.tsx` → multi-step wizard (step 1 identity+probe with both role
+  ARNs + region default `ap-southeast-2`; step 2 probe result + passphrase +
+  verify-probe for existing repos; step 3 schedule/retention). Render the
+  state→options matrix (§2.3); already-configured; `other_content` blocking with
+  the delete-contents action.
 - Generated api-types (`just gen-openapi`).
 
 ### tests
-- Rust: probe endpoint (mock/seed; assume + list behaviour where feasible),
-  secret-creation path, new-mode status machine, migration.
-- Playwright e2e: wizard steps, region default, probe states (stub the probe
-  response where AWS isn't reachable in e2e — the e2e kube/AWS clients are
-  None today, so probe needs a test seam), new-mode flow.
+- Rust: probe endpoint (inspect + verify; mock/seed S3 where feasible), secret
+  creation, two-mode status machine, migration, the resource API.
+- Playwright e2e: wizard steps, region default, probe states (the e2e kube/AWS
+  clients are `None` today → probe needs a test seam to stub responses),
+  passphrase-mode flow, from_birth escrow flow.
 
 ### cross-repo / ops (TAM-6878 pulumi)
-- private-server IRSA SA + per-bucket trust + `create secrets` RBAC.
-- Confirm `maintenanceRoleArn` is what pulumi emits per group; CloudWatch grant
-  on the maintenance role.
+- New `canopy-private` SA + IRSA role; per-bucket trust includes it; `create
+  secrets` RBAC.
+- `maintenanceRoleArn` per group (CloudWatch + delete grant on it); pulumi calls
+  the new resource API to register configs (§3a).
 
 ---
 
 ## 5. Open decisions (for review)
 
-1. **private-server's SA / trust** (§1.5): reuse `canopy-jobs`/`canopy-issuer`,
-   or a dedicated `canopy-private` role? Drives the pulumi trust-policy change.
-2. **Which role the probe assumes**: recommend `maintenance_role_arn` (full
-   read), + cheap `target_role_arn` validation. OK?
-3. **`maintenance_role_arn` migration shape**: nullable-first then backfill, or
-   NOT NULL with a value supplied at create? (existing rows + the
-   reinterpret-column rule.)
-4. **New-mode status**: straight to `ready` (no escrow), or a one-time "stored"
-   confirmation?
-5. **`other_content` handling**: hard-block vs warn-and-confirm. Recommend
-   warn-and-confirm + suggest a different prefix.
-6. **kopia repo marker key**: confirm `kopia.repository` at prefix root for
-   0.23.1 before building the detector.
+Resolved this round: dedicated `canopy-private` SA; probe assumes
+`maintenance_role_arn` (+ cheap `target_role_arn` validate); `maintenance_role_arn`
+NOT NULL (no existing rows); passphrase mode straight to `ready` (no escrow);
+`other_content` hard-blocks with a required action; import-by-Secret dropped;
+`credential_process` for kopia; `kopia.repository` marker confirmed.
+
+Still open:
+
+1. **Pulumi → private-server auth** (§3a): run pulumi/CI on the tailnet, or add a
+   service-token / `TailscaleApi` machine-auth mode? Biggest remaining fork.
+2. **Delete semantics** (§3a): does deleting a config also delete the Canopy-owned
+   Secret? Recommend yes. Confirm.
+3. **`.storageconfig` schema** (§3.3): confirm the exact tiering config object to
+   write before coding it.
+4. **e2e probe seam:** inject a fake S3/probe result in the e2e build (kube/AWS
+   are `None` there) — confirm the approach (env-gated stub vs trait injection).
