@@ -4,8 +4,9 @@
 //! error, log + continue, never alert.
 //!
 //! The metric lives in the *deployment* account, so we read it with the group's
-//! assumed role (`target_role_arn`), mirroring the assume→creds→client-builder
-//! pattern in [`super::preflight`].
+//! assumed maintenance role (`maintenance_role_arn` — the device role has no
+//! CloudWatch grant), mirroring the assume→creds→client-builder pattern in
+//! [`super::preflight`].
 
 use std::{collections::BTreeSet, time::Duration};
 
@@ -40,11 +41,12 @@ async fn bucket_bytes(
 	cfg: &ServerGroupBackupConfig,
 	now: Timestamp,
 ) -> Result<Option<i64>, String> {
-	// The metric is in the deployment account; assume the group's role to read it.
+	// The metric is in the deployment account; assume the group's maintenance
+	// role to read it (the CloudWatch grant lives there, not on the device role).
 	let resp = aws
 		.sts
 		.assume_role()
-		.role_arn(&cfg.target_role_arn)
+		.role_arn(&cfg.maintenance_role_arn)
 		.role_session_name("canopy-s3-metrics")
 		.send()
 		.await
