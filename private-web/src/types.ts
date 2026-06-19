@@ -219,20 +219,21 @@ export const SEVERITY_INTENT: Record<Severity, string> = {
 /// `commons_types::status::CheckResult` (the source of truth) — the
 /// private API ships `health[]` as raw JSON, so this never appears in
 /// the generated schema. Also the UI display order: most to least
-/// urgent.
+/// urgent, with skipped checks sorted last (a skipped check ran no
+/// assertion, so it's the least interesting to surface).
 export type CheckResult =
 	| "failed"
 	| "warning"
 	| "broken"
-	| "skipped"
-	| "passed";
+	| "passed"
+	| "skipped";
 
 export const CHECK_RESULT_ORDER: CheckResult[] = [
 	"failed",
 	"warning",
 	"broken",
-	"skipped",
 	"passed",
+	"skipped",
 ];
 
 /// Normalise a raw `health[]` entry to its result. Mirror of the Rust
