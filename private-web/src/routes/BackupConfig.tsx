@@ -342,7 +342,7 @@ function RetentionField({
 			disabled={disabled}
 			error={below}
 			helperText={floor != null ? `≥ ${floor}` : undefined}
-			slotProps={{ htmlInput: { min: 0, step: 1 } }}
+			slotProps={{ htmlInput: { min: floor ?? 0, step: 1 } }}
 			sx={{ width: 110 }}
 		/>
 	);
