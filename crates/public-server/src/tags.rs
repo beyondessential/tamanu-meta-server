@@ -18,6 +18,12 @@ pub fn routes() -> OpenApiRouter<AppState> {
 /// group's `tags` (server wins on key collision). For ungrouped servers,
 /// returns just the server's own tags.
 ///
+/// On top of the stored tags we inject synthetic, read-only tags describing
+/// the server under the reserved `canopy:` namespace: `canopy:kind`,
+/// `canopy:rank` (when set), and `canopy:group-id` / `canopy:group-name`
+/// (when grouped). Operator-set tags can't use that prefix, so they never
+/// collide. See [`Server::tags_for_device`].
+///
 /// - **401**: no certificate / cert doesn't match a known device.
 /// - **412**: device is registered but isn't attached to a server yet.
 /// - **409**: device is somehow attached to multiple servers (shouldn't
@@ -47,6 +53,6 @@ pub async fn get_self(device: ServerDevice, State(db): State<Db>) -> Result<Json
 		)));
 	}
 	let server = servers.pop().ok_or(AppError::DeviceHasNoServer)?;
-	let merged = server.tags_merged_with_group(&mut conn).await?;
+	let merged = server.tags_for_device(&mut conn).await?;
 	Ok(Json(merged))
 }

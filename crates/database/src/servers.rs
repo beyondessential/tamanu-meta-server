@@ -1,7 +1,7 @@
 use commons_errors::{AppError, Result};
 use commons_types::{
 	geo::GeoPoint,
-	server::{TagMap, kind::ServerKind, rank::ServerRank},
+	server::{RESERVED_TAG_PREFIX, TagMap, kind::ServerKind, rank::ServerRank},
 };
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -253,6 +253,8 @@ impl Server {
 	/// URLs are no longer unique, so there is no collision check.
 	pub async fn create(db: &mut AsyncPgConnection, server: Server) -> Result<Self> {
 		use crate::schema::servers;
+
+		crate::tags::reject_reserved_keys(&server.tags)?;
 
 		let created = diesel::insert_into(servers::table)
 			.values(server)
@@ -584,6 +586,10 @@ impl Server {
 	) -> Result<Self> {
 		use crate::schema::servers::dsl;
 
+		if let Some(tags) = &updates.tags {
+			crate::tags::reject_reserved_keys(tags)?;
+		}
+
 		// Capture the old group before the update: rank/kind/group_id may all
 		// change, so both the old and new group's canonical member can shift.
 		// Non-fatal: a missing server (or read error) just means "no old group
@@ -646,6 +652,44 @@ impl Server {
 		};
 		let group = crate::server_groups::ServerGroup::get_by_id(db, gid).await?;
 		Ok(self.tags.merged_with(&group.tags))
+	}
+
+	/// Tags served to the device by the public `/tags` endpoint: the merged
+	/// server+group tags (see [`Self::tags_merged_with_group`]) plus synthetic
+	/// read-only tags describing the server itself, under the reserved
+	/// [`RESERVED_TAG_PREFIX`] namespace:
+	///
+	/// - `canopy:kind` — the server's [`ServerKind`] (always present).
+	/// - `canopy:rank` — the server's [`ServerRank`], only when one is set.
+	/// - `canopy:group-id` / `canopy:group-name` — only when grouped.
+	///
+	/// Operator-set tags can't use the `canopy:` prefix (rejected on write),
+	/// so these never collide with stored tags.
+	pub async fn tags_for_device(&self, db: &mut AsyncPgConnection) -> Result<TagMap> {
+		let group = match self.group_id {
+			Some(gid) => Some(crate::server_groups::ServerGroup::get_by_id(db, gid).await?),
+			None => None,
+		};
+
+		let mut tags = match &group {
+			Some(group) => self.tags.merged_with(&group.tags),
+			None => self.tags.clone(),
+		};
+
+		tags.0
+			.insert(format!("{RESERVED_TAG_PREFIX}kind"), self.kind.to_string());
+		if let Some(rank) = self.rank {
+			tags.0
+				.insert(format!("{RESERVED_TAG_PREFIX}rank"), rank.to_string());
+		}
+		if let Some(group) = &group {
+			tags.0
+				.insert(format!("{RESERVED_TAG_PREFIX}group-id"), group.id.to_string());
+			tags.0
+				.insert(format!("{RESERVED_TAG_PREFIX}group-name"), group.name.clone());
+		}
+
+		Ok(tags)
 	}
 }
 

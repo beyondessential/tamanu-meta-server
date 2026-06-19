@@ -22,6 +22,13 @@ use serde::{Deserialize, Serialize};
 #[serde(transparent)]
 pub struct TagMap(pub BTreeMap<String, String>);
 
+/// Reserved tag-key namespace. The public `/tags` endpoint injects
+/// synthetic tags describing the server (rank, kind, group) under this
+/// prefix, so operator-set server/group tags are forbidden from using it —
+/// that way the synthetic tags can never collide with, or be spoofed by,
+/// stored tags. Enforced on every tag write (see [`TagMap::reserved_key`]).
+pub const RESERVED_TAG_PREFIX: &str = "canopy:";
+
 impl TagMap {
 	pub fn new() -> Self {
 		Self(BTreeMap::new())
@@ -29,6 +36,15 @@ impl TagMap {
 
 	pub fn is_empty(&self) -> bool {
 		self.0.is_empty()
+	}
+
+	/// The first key that uses the reserved [`RESERVED_TAG_PREFIX`], if any.
+	/// Operator-driven tag writes are rejected when this returns `Some`.
+	pub fn reserved_key(&self) -> Option<&str> {
+		self.0
+			.keys()
+			.map(String::as_str)
+			.find(|k| k.starts_with(RESERVED_TAG_PREFIX))
 	}
 
 	/// Overlay `self` onto `base` (server overlays group): every key in `self`

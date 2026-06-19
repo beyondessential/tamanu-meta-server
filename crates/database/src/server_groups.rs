@@ -124,6 +124,7 @@ pub struct PartialServerGroup {
 impl ServerGroup {
 	pub async fn create(db: &mut AsyncPgConnection, new: NewServerGroup) -> Result<Self> {
 		use crate::schema::server_groups;
+		crate::tags::reject_reserved_keys(&new.tags)?;
 		diesel::insert_into(server_groups::table)
 			.values(new)
 			.returning(Self::as_select())
@@ -185,6 +186,9 @@ impl ServerGroup {
 		changes: PartialServerGroup,
 	) -> Result<Self> {
 		use crate::schema::server_groups::dsl;
+		if let Some(tags) = &changes.tags {
+			crate::tags::reject_reserved_keys(tags)?;
+		}
 		diesel::update(dsl::server_groups.filter(dsl::id.eq(group_id)))
 			.set(changes)
 			.execute(db)
