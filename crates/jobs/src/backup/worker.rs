@@ -17,9 +17,7 @@ use k8s_openapi::api::core::v1::Secret;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use uuid::Uuid;
 
-/// Default `kopia` web-identity token file: the projected SA token mounted into
-/// EKS pods. Overridable via `AWS_WEB_IDENTITY_TOKEN_FILE`.
-const DEFAULT_TOKEN_FILE: &str = "/var/run/secrets/eks.amazonaws.com/serviceaccount/token";
+use super::creds_server::CredsServer;
 
 /// Default max concurrent kopia ops across both loops.
 const DEFAULT_MAX_CONCURRENCY: usize = 4;
@@ -31,10 +29,6 @@ pub struct Cfg {
 	pub namespace: String,
 	/// Key within each repo-password Secret.
 	pub password_key: String,
-	/// Path of the projected SA token kopia's AWS SDK uses for web-identity.
-	/// kopia inherits it from the pod env; we keep it here only to set
-	/// `AWS_WEB_IDENTITY_TOKEN_FILE` explicitly so the value is deterministic.
-	pub web_identity_token_file: String,
 }
 
 impl Cfg {
@@ -42,7 +36,6 @@ impl Cfg {
 		Cfg {
 			namespace: env_or("CANOPY_NAMESPACE", "tamanu-meta"),
 			password_key: env_or("CANOPY_BACKUP_PASSWORD_KEY", "password"),
-			web_identity_token_file: env_or("AWS_WEB_IDENTITY_TOKEN_FILE", DEFAULT_TOKEN_FILE),
 		}
 	}
 }
@@ -103,10 +96,12 @@ pub struct Worker {
 	pub kube: kube::Client,
 	pub cfg: Arc<Cfg>,
 	pub slots: Slots,
+	/// Loopback endpoint that mints per-op maintenance-role creds for kopia.
+	pub creds: CredsServer,
 }
 
 impl Worker {
-	pub fn new(pool: Db, kube: kube::Client, cfg: Cfg) -> Self {
+	pub fn new(pool: Db, kube: kube::Client, cfg: Cfg, creds: CredsServer) -> Self {
 		let max = std::env::var("CANOPY_BACKUP_MAX_CONCURRENCY")
 			.ok()
 			.and_then(|s| s.parse::<usize>().ok())
@@ -117,6 +112,7 @@ impl Worker {
 			kube,
 			cfg: Arc::new(cfg),
 			slots: Slots::new(max),
+			creds,
 		}
 	}
 

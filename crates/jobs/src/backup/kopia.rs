@@ -11,13 +11,13 @@
 //!
 //! ## Credentials
 //!
-//! The pod runs as the shared `canopy-jobs` IRSA identity. Per kopia subprocess
-//! we override the AWS env so kopia's own AWS SDK assumes the group's per-bucket
-//! role via web-identity *directly* (refreshing, session up to the role's max —
-//! no chained 1h cap): `AWS_ROLE_ARN` = the group's `target_role_arn`,
-//! `AWS_REGION` = the group's region, inheriting the projected
-//! `AWS_WEB_IDENTITY_TOKEN_FILE`. `KOPIA_PASSWORD` is read from the group's k8s
-//! Secret and passed on the env too. See [`KopiaEnv`].
+//! The pod runs as the shared `canopy-jobs` IRSA identity. kopia's S3 backend
+//! gets per-op creds for the group's **maintenance** role by polling the
+//! loopback container-credentials endpoint ([`super::creds_server`]) — minio-go
+//! re-polls before expiry, so a run isn't capped at the 1h chained-session
+//! limit. The per-op env (`AWS_CONTAINER_CREDENTIALS_FULL_URI` + token, with the
+//! pod's web-identity vars scrubbed) plus `KOPIA_PASSWORD` is carried by
+//! [`KopiaEnv`].
 
 use std::collections::BTreeMap;
 use std::process::Output;
@@ -39,15 +39,19 @@ pub const MAINTENANCE_HOST: &str = "canopy-maintenance";
 // Per-op AWS + repo env.
 // ===========================================================================
 
-/// The per-op environment overrides applied to every kopia [`Command`]. The pod
-/// inherits the projected SA token file (`AWS_WEB_IDENTITY_TOKEN_FILE`); we
-/// override `AWS_ROLE_ARN` so kopia's AWS SDK assumes the group's role directly
-/// via web-identity (refreshing), plus the region and the repo password.
+/// The per-op environment applied to every kopia [`Command`]. kopia's S3 backend
+/// (minio-go) gets its AWS creds by polling our loopback container-credentials
+/// endpoint (`AWS_CONTAINER_CREDENTIALS_FULL_URI` + a raw `Authorization` token),
+/// which mints + refreshes the group's maintenance-role session. See
+/// [`super::creds_server`].
 #[derive(Debug, Clone)]
 pub struct KopiaEnv {
-	/// The group's per-bucket role; overrides the pod's IRSA default
-	/// (`AWS_ROLE_ARN`).
-	pub target_role_arn: String,
+	/// `AWS_CONTAINER_CREDENTIALS_FULL_URI` — the loopback creds endpoint
+	/// (`CredsLease::uri`).
+	pub creds_uri: String,
+	/// `AWS_CONTAINER_AUTHORIZATION_TOKEN` — the per-op lease token
+	/// (`CredsLease::token`), sent raw as the `Authorization` header.
+	pub creds_token: String,
 	/// The group's region (`AWS_REGION`), if set.
 	pub region: Option<String>,
 	/// The repo passphrase, read from the group's k8s Secret (`KOPIA_PASSWORD`).
@@ -55,12 +59,26 @@ pub struct KopiaEnv {
 }
 
 impl KopiaEnv {
-	/// Apply the per-op env to a `kopia` Command. The web-identity token file is
-	/// inherited from the pod env (the projected SA token), so we don't set it
-	/// here — only the role/region/password overrides.
+	/// Apply the per-op env to a `kopia` Command: point minio-go at the
+	/// container-creds endpoint and **scrub** every credential source that
+	/// precedes it in minio-go's IAM chain — the pod injects
+	/// `AWS_WEB_IDENTITY_TOKEN_FILE` (IRSA) and would otherwise shadow the
+	/// endpoint. (Verified ordering, kopia 0.23.1 + minio-go 7.2.0.)
 	fn apply(&self, cmd: &mut Command) {
-		cmd.env("AWS_ROLE_ARN", &self.target_role_arn);
 		cmd.env("KOPIA_PASSWORD", &self.password);
+		cmd.env("AWS_CONTAINER_CREDENTIALS_FULL_URI", &self.creds_uri);
+		cmd.env("AWS_CONTAINER_AUTHORIZATION_TOKEN", &self.creds_token);
+		for shadowing in [
+			"AWS_WEB_IDENTITY_TOKEN_FILE",
+			"AWS_ROLE_ARN",
+			"AWS_ACCESS_KEY_ID",
+			"AWS_SECRET_ACCESS_KEY",
+			"AWS_SESSION_TOKEN",
+			"AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+			"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
+		] {
+			cmd.env_remove(shadowing);
+		}
 		if let Some(region) = &self.region {
 			cmd.env("AWS_REGION", region);
 			cmd.env("AWS_DEFAULT_REGION", region);
