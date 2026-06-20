@@ -170,7 +170,17 @@ async fn run_init_op(worker: &Worker, config: &ServerGroupBackupConfig) -> anyho
 		&retention,
 		create_new,
 	)
-	.await
+	.await?;
+
+	// Import: Canopy never persists the operator's passphrase — immediately
+	// rotate it to a generated one (a Canopy import is a hard break for any
+	// existing consumers, which is intended).
+	if matches!(config.mode, BackupRepoMode::Passphrase) {
+		super::rotation::rotate(worker, config).await.map_err(|e| {
+			anyhow::anyhow!("import: rotating to a canopy-generated passphrase: {e}")
+		})?;
+	}
+	Ok(())
 }
 
 /// Run a maintenance op in a spawned task: start the run row, read the password,

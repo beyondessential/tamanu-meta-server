@@ -58,8 +58,9 @@ async fn main() -> miette::Result<()> {
 
 	let preflight = jobs::backup::preflight::spawn();
 	let maintenance = jobs::backup::maintenance::spawn(worker.clone());
-	let inspection = jobs::backup::inspection::spawn(worker);
+	let inspection = jobs::backup::inspection::spawn(worker.clone());
+	let rotation = jobs::backup::rotation::spawn(worker);
 	let s3_metrics = jobs::backup::s3_metrics::spawn();
-	tokio::try_join!(preflight, maintenance, inspection, s3_metrics).into_diagnostic()?;
+	tokio::try_join!(preflight, maintenance, inspection, rotation, s3_metrics).into_diagnostic()?;
 	Ok(())
 }

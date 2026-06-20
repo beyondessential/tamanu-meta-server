@@ -13,11 +13,17 @@
 //! `commons_servers::backup_secrets`) and the recovery decision
 //! ([`reconcile_decision`]) — are.
 
+use std::{collections::BTreeMap, time::Duration};
+
 use anyhow::{Result, anyhow, bail};
-use commons_servers::backup_secrets::generate_passphrase;
-use database::ServerGroupBackupConfig;
-use std::collections::BTreeMap;
-use tracing::warn;
+use commons_servers::{backup_jobs::slot_is_due, backup_secrets::generate_passphrase};
+use database::{BackupConfigStatus, ServerGroupBackupConfig};
+use jiff::Timestamp;
+use tokio::{
+	task::{self, JoinHandle},
+	time::sleep,
+};
+use tracing::{debug, error, info, warn};
 
 use super::{
 	creds_server::CredsLease,
@@ -198,6 +204,82 @@ pub async fn reconcile(worker: &Worker, config: &ServerGroupBackupConfig) -> Res
 			)
 		}
 	}
+}
+
+// ===========================================================================
+// Background rotation scheduler.
+// ===========================================================================
+
+/// Loop tick interval.
+const TICK: Duration = Duration::from_secs(60);
+/// Default rotation period (forward-protection cadence). Overridable via
+/// `CANOPY_BACKUP_ROTATION_DAYS`; the design targets pushing this toward daily.
+const DEFAULT_ROTATION_DAYS: u64 = 7;
+
+fn rotation_period() -> Duration {
+	let days = std::env::var("CANOPY_BACKUP_ROTATION_DAYS")
+		.ok()
+		.and_then(|s| s.parse::<u64>().ok())
+		.filter(|d| *d > 0)
+		.unwrap_or(DEFAULT_ROTATION_DAYS);
+	Duration::from_secs(days * 24 * 3600)
+}
+
+fn secs_into(now: Timestamp, window: Duration) -> u64 {
+	let w = window.as_secs().max(1) as i64;
+	now.as_second().rem_euclid(w) as u64
+}
+
+/// Spawn a rotation op for a group (claims the shared per-group slot so it never
+/// races maintenance/inspection/init for the same group).
+fn spawn_rotate(worker: &Worker, config: ServerGroupBackupConfig) {
+	let Some(guard) = worker.try_claim(config.group_id) else {
+		return;
+	};
+	let worker = worker.clone();
+	task::spawn(async move {
+		let _guard = guard;
+		match rotate(&worker, &config).await {
+			Ok(()) => info!(group = %config.group_id, "passphrase rotated"),
+			Err(e) => error!(group = %config.group_id, "passphrase rotation failed: {e:#}"),
+		}
+	});
+}
+
+async fn tick(worker: &Worker) -> Result<(), String> {
+	let mut db = worker.pool.get().await.map_err(|e| e.to_string())?;
+	let all = ServerGroupBackupConfig::list(&mut db)
+		.await
+		.map_err(|e| e.to_string())?;
+	let now = Timestamp::now();
+	let period = rotation_period();
+	let in_flight = worker.in_flight_snapshot();
+
+	for c in &all {
+		if c.status != BackupConfigStatus::Ready || in_flight.contains(&c.group_id) {
+			continue;
+		}
+		// Deterministic per-group slot within the period (hash-jittered), so the
+		// fleet's rotations spread out and each group rotates ~once per period.
+		if slot_is_due(c.group_id, period, TICK, secs_into(now, period)) {
+			spawn_rotate(worker, c.clone());
+		}
+	}
+	Ok(())
+}
+
+/// Run the background rotation scheduler (one tick/minute).
+pub fn spawn(worker: Worker) -> JoinHandle<()> {
+	task::spawn(async move {
+		loop {
+			sleep(TICK).await;
+			if let Err(e) = tick(&worker).await {
+				error!("rotation tick failed: {e}");
+			} else {
+				debug!("rotation tick ok");
+			}
+		}
+	})
 }
 
 #[cfg(test)]
