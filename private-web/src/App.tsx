@@ -14,6 +14,7 @@ import { AdminProvider } from "./hooks/useIsAdmin";
 import { useReloadInterval } from "./hooks/useReloadInterval";
 import Admins from "./routes/Admins";
 import BackupConfig from "./routes/BackupConfig";
+import RecoveryVault from "./routes/RecoveryVault";
 import BackupPanel from "./routes/BackupPanel";
 import Bestool from "./routes/Bestool";
 import BestoolSnippetDetail from "./routes/BestoolSnippetDetail";
@@ -53,6 +54,7 @@ const BASE_NAV: NavItem[] = [
 	{ label: "Versions", to: "/versions" },
 	{ label: "Devices", to: "/devices" },
 	{ label: "Bestool", to: "/bestool" },
+	{ label: "Recovery vault", to: "/backups/recovery" },
 	{ label: "Admins", to: "/admins" },
 ];
 
@@ -203,6 +205,7 @@ export default function App() {
 						path="/groups/:id/backups/config"
 						element={<BackupConfig />}
 					/>
+					<Route path="/backups/recovery" element={<RecoveryVault />} />
 					<Route path="/devices" element={<Devices />}>
 						<Route index element={<DevicesSearch />} />
 						<Route

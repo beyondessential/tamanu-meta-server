@@ -4477,6 +4477,7 @@ dependencies = [
 name = "private-server"
 version = "6.6.6"
 dependencies = [
+ "age",
  "algae-cli",
  "aws-config",
  "aws-sdk-s3",

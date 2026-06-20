@@ -40,6 +40,14 @@ diesel::table! {
 }
 
 diesel::table! {
+	backup_recovery_verifications (id) {
+		id -> Int8,
+		verified_at -> Timestamptz,
+		recipients -> Jsonb,
+	}
+}
+
+diesel::table! {
 	backup_maintenance_runs (id) {
 		id -> Int8,
 		group_id -> Uuid,
@@ -528,6 +536,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 	admins,
 	artifacts,
 	backup_credential_issuances,
+	backup_recovery_verifications,
 	backup_maintenance_runs,
 	backup_repo_snapshots,
 	backup_repo_stats,
