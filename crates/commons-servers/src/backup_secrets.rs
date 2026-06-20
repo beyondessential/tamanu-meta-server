@@ -2,8 +2,9 @@
 //!
 //! Canopy owns every repo passphrase Secret. This narrow store exposes exactly
 //! what the components need: read one key (public-server `/backup-target`,
-//! jobs maintenance), create one Secret (private-server onboarding), and
-//! create-or-replace one (the jobs rotation loop). Real deployments use the
+//! jobs maintenance), create one Secret (private-server onboarding),
+//! create-or-replace one (the jobs rotation loop), and delete one (private-server
+//! config decommission). Real deployments use the
 //! `Kube` variant; tests and the e2e binary use the in-memory `Memory` store
 //! (gated by `CANOPY_BACKUP_SECRETS_MEMORY`) so these paths are exercised
 //! without a cluster.
@@ -156,6 +157,30 @@ impl BackupSecrets {
 		}
 	}
 
+	/// Delete the named Secret — used when a config is decommissioned (the
+	/// Canopy-owned passphrase should not outlive its config). Idempotent: an
+	/// already-absent Secret is a success.
+	pub async fn delete_password(&self, secret_name: &str) -> Result<()> {
+		match self {
+			Self::Kube { client, namespace } => {
+				use k8s_openapi::api::core::v1::Secret;
+				use kube::{Api, api::DeleteParams};
+
+				let api: Api<Secret> = Api::namespaced(client.clone(), namespace);
+				match api.delete(secret_name, &DeleteParams::default()).await {
+					Ok(_) => Ok(()),
+					// Already gone — decommission is idempotent.
+					Err(kube::Error::Api(e)) if e.code == 404 => Ok(()),
+					Err(e) => Err(AppError::Upstream(format!("secret delete failed: {e}"))),
+				}
+			}
+			Self::Memory(store) => {
+				store.lock().unwrap().remove(secret_name);
+				Ok(())
+			}
+		}
+	}
+
 	/// Read all string keys of the named Secret — for the rotation dual-key state
 	/// machine (`password` + `password_next`). Missing Secret → Err; absent keys
 	/// are simply not in the map.
@@ -250,6 +275,39 @@ fn secret_object(secret_name: &str, key: &str, value: &str) -> k8s_openapi::api:
 /// downward API), defaulting to `canopy`.
 fn namespace_from_env() -> String {
 	std::env::var("POD_NAMESPACE").unwrap_or_else(|_| "canopy".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[tokio::test]
+	async fn memory_create_read_delete_roundtrip() {
+		let secrets = BackupSecrets::memory();
+		secrets
+			.create_password("backup-repo-x", "password", "hunter2")
+			.await
+			.unwrap();
+		assert_eq!(
+			secrets
+				.read_password("backup-repo-x", "password")
+				.await
+				.unwrap(),
+			"hunter2"
+		);
+
+		// Decommission removes the Secret entirely.
+		secrets.delete_password("backup-repo-x").await.unwrap();
+		assert!(
+			secrets
+				.read_password("backup-repo-x", "password")
+				.await
+				.is_err()
+		);
+
+		// Deleting an already-absent Secret is a no-op success.
+		secrets.delete_password("backup-repo-x").await.unwrap();
+	}
 }
 
 /// Generate a strong repo passphrase: 8 words from the EFF large wordlist

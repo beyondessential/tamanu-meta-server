@@ -238,6 +238,31 @@ impl ServerGroupBackupConfig {
 			.map_err(AppError::from)
 	}
 
+	/// Update the mutable structural fields for the machine config-as-a-resource
+	/// upsert: the two role ARNs + region. Bucket/prefix/mode stay immutable (the
+	/// handler rejects changes to those before calling here).
+	pub async fn update_roles_region(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+		target_role_arn: &str,
+		maintenance_role_arn: &str,
+		region: Option<&str>,
+	) -> Result<Self> {
+		use crate::schema::server_group_backup_config::dsl;
+
+		diesel::update(dsl::server_group_backup_config.filter(dsl::group_id.eq(group_id)))
+			.set((
+				dsl::target_role_arn.eq(target_role_arn),
+				dsl::maintenance_role_arn.eq(maintenance_role_arn),
+				dsl::region.eq(region),
+				dsl::updated_at.eq(now),
+			))
+			.returning(Self::as_select())
+			.get_result(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	/// Advance (or reset) the lifecycle status (repo-init flow).
 	pub async fn set_status(
 		db: &mut AsyncPgConnection,

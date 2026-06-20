@@ -42,6 +42,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(get))
 		.routes(routes!(list))
 		.routes(routes!(create))
+		.routes(routes!(upsert))
 		.routes(routes!(probe))
 		.routes(routes!(update))
 		.routes(routes!(set_schedule))
@@ -153,6 +154,38 @@ pub struct CreateBackupConfigArgs {
 	/// Passphrase mode only: the operator-supplied repo passphrase Canopy stores.
 	/// From-birth ignores this (Canopy generates one).
 	pub passphrase: Option<String>,
+}
+
+/// Machine-facing config-as-a-resource upsert (ops/pulumi). `mode` is implicit
+/// — always from-birth — so the bucket must be empty and no passphrase is
+/// supplied (importing an existing repo stays an interactive operator action).
+/// `bucket`/`prefix` are the identity and immutable on re-apply; role ARNs,
+/// region, schedule and retention are reconciled to the request each time.
+#[derive(Deserialize, ToSchema)]
+pub struct UpsertBackupConfigArgs {
+	pub server_group_id: Uuid,
+	pub bucket: String,
+	#[serde(default)]
+	pub prefix: String,
+	/// Device role: public-server assumes this to mint device creds (no delete).
+	pub target_role_arn: String,
+	/// Maintenance role: the backups pod assumes this for maintenance/inspection/
+	/// s3-metrics (s3:* + delete + CloudWatch).
+	pub maintenance_role_arn: String,
+	pub region: Option<String>,
+	/// Schedule type to reconcile (defaults to `tamanu-postgres`).
+	#[serde(rename = "type", default = "default_backup_type")]
+	#[schema(value_type = String)]
+	pub r#type: BackupType,
+	/// Seconds between scheduled runs; None = manual-only (no schedule).
+	#[schema(value_type = Option<i64>, format = "int64")]
+	pub expected_interval: Option<PgDuration>,
+	/// None = inherit the type default. A present policy is floor-validated.
+	pub retention: Option<RetentionPolicy>,
+}
+
+fn default_backup_type() -> BackupType {
+	BackupType::TamanuPostgres
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -359,6 +392,154 @@ pub async fn create(
 	kube.create_password(&repo_password_ref, REPO_PASSWORD_SECRET_KEY, &passphrase)
 		.await?;
 
+	Ok(Json(BackupConfigView::build(&mut conn, config).await?))
+}
+
+/// Machine-facing config-as-a-resource upsert for ops/pulumi: declaratively
+/// register/converge a group's backup config in one idempotent call (config +
+/// generated passphrase Secret + schedule/retention + auto-provision). Creating
+/// is from-birth onto an empty bucket only — a non-empty/existing-repo/
+/// inaccessible bucket is rejected. Re-applying reconciles the role ARNs,
+/// region, schedule and retention; `bucket`/`prefix` are immutable.
+#[utoipa::path(
+	post,
+	path = "/upsert",
+	operation_id = "backups_upsert",
+	tag = "backups",
+	security(("tailscale-admin" = [])),
+	request_body = UpsertBackupConfigArgs,
+	responses(
+		(status = 200, body = BackupConfigView),
+		(status = 400, body = ProblemDetailsSchema),
+		(status = 404, body = ProblemDetailsSchema),
+		(status = 409, body = ProblemDetailsSchema),
+		(status = 502, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn upsert(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<UpsertBackupConfigArgs>,
+) -> Result<Json<BackupConfigView>> {
+	use crate::backup_probe::ProbeState;
+
+	let mut conn = state.db.get().await?;
+	ServerGroup::get_by_id(&mut conn, args.server_group_id).await?;
+
+	if let Some(policy) = &args.retention {
+		policy.validate_floor()?;
+	}
+
+	match ServerGroupBackupConfig::get(&mut conn, args.server_group_id).await? {
+		// Update path: reconcile the mutable fields; bucket/prefix are immutable.
+		Some(existing) => {
+			if existing.bucket != args.bucket || existing.prefix != args.prefix {
+				return Err(AppError::Conflict(
+					"bucket and prefix are immutable; delete the config and recreate it to change them"
+						.into(),
+				));
+			}
+			ServerGroupBackupConfig::update_roles_region(
+				&mut conn,
+				args.server_group_id,
+				&args.target_role_arn,
+				&args.maintenance_role_arn,
+				args.region.as_deref(),
+			)
+			.await?;
+			// Re-apply retries an incomplete/failed provision; a ready repo is
+			// left untouched.
+			let cfg = require_config(&mut conn, args.server_group_id).await?;
+			if cfg.status != BackupConfigStatus::Ready {
+				ServerGroupBackupConfig::mark_provisioning(&mut conn, args.server_group_id).await?;
+			}
+		}
+		// Create path: from-birth onto an empty, unclaimed bucket only.
+		None => {
+			let probe = state
+				.prober
+				.probe(
+					&args.bucket,
+					&args.prefix,
+					args.region.as_deref(),
+					&args.maintenance_role_arn,
+				)
+				.await?;
+			match probe.state {
+				ProbeState::Empty => {}
+				ProbeState::KopiaRepo => {
+					return Err(AppError::Conflict(
+						"an existing kopia repository is here; import it with the interactive setup wizard, not the machine API"
+							.into(),
+					));
+				}
+				ProbeState::OtherContent => {
+					return Err(AppError::Conflict(
+						"bucket/prefix holds other (non-kopia) content; Canopy won't write over it"
+							.into(),
+					));
+				}
+				ProbeState::Inaccessible => {
+					return Err(AppError::Upstream(format!(
+						"cannot access the bucket: {}",
+						probe.error.unwrap_or_else(|| "unknown error".into())
+					)));
+				}
+			}
+			if let Some(other) = ServerGroupBackupConfig::list(&mut conn)
+				.await?
+				.into_iter()
+				.find(|c| c.bucket == args.bucket && c.prefix == args.prefix)
+			{
+				return Err(AppError::Conflict(format!(
+					"bucket/prefix already configured for group {}",
+					other.group_id
+				)));
+			}
+
+			let kube = state.kube.as_ref().ok_or_else(|| {
+				AppError::Upstream(
+					"secret store not configured; cannot create repo passphrase".into(),
+				)
+			})?;
+			let repo_password_ref = format!("backup-repo-{}", args.server_group_id);
+			ServerGroupBackupConfig::insert(
+				&mut conn,
+				NewServerGroupBackupConfig {
+					group_id: args.server_group_id,
+					bucket: args.bucket.clone(),
+					prefix: args.prefix.clone(),
+					target_role_arn: args.target_role_arn.clone(),
+					maintenance_role_arn: args.maintenance_role_arn.clone(),
+					region: args.region.clone(),
+					repo_password_ref: repo_password_ref.clone(),
+					status: BackupConfigStatus::Provisioning,
+					mode: BackupRepoMode::FromBirth,
+				},
+			)
+			.await?;
+			kube.create_password(
+				&repo_password_ref,
+				REPO_PASSWORD_SECRET_KEY,
+				&commons_servers::backup_secrets::generate_passphrase(),
+			)
+			.await?;
+		}
+	}
+
+	// Reconcile the schedule/retention in both paths.
+	ServerGroupBackupSchedule::upsert(
+		&mut conn,
+		NewServerGroupBackupSchedule {
+			group_id: args.server_group_id,
+			r#type: args.r#type,
+			expected_interval: args.expected_interval,
+			retention: args.retention.map(|r| r.to_json()),
+		},
+	)
+	.await?;
+
+	let config = require_config(&mut conn, args.server_group_id).await?;
 	Ok(Json(BackupConfigView::build(&mut conn, config).await?))
 }
 
@@ -678,7 +859,8 @@ pub async fn set_capability(
 }
 
 /// Delete a group's config row (decommission). The bucket and its object-locked
-/// objects persist; this only stops credential issuance.
+/// objects persist; this only stops credential issuance and removes the
+/// Canopy-owned passphrase Secret (which must not outlive its config).
 #[utoipa::path(
 	post,
 	path = "/delete",
@@ -694,8 +876,12 @@ pub async fn delete(
 	Json(args): Json<GroupArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
-	require_config(&mut conn, args.server_group_id).await?;
+	let config = require_config(&mut conn, args.server_group_id).await?;
 	ServerGroupBackupConfig::delete(&mut conn, args.server_group_id).await?;
+	// The Canopy-owned passphrase Secret should not outlive its config.
+	if let Some(kube) = state.kube.as_ref() {
+		kube.delete_password(&config.repo_password_ref).await?;
+	}
 	Ok(Json(()))
 }
 

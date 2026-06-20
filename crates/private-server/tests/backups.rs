@@ -478,3 +478,89 @@ async fn update_region_and_delete() {
 	})
 	.await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn upsert_creates_then_reapplies_idempotently() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group_id = seed_group(&mut conn).await;
+
+		// First apply → creates from-birth (the fake prober reports empty),
+		// provisions, and sets the schedule.
+		let resp = private
+			.post("/api/backups/upsert")
+			.json(&serde_json::json!({
+				"server_group_id": group_id,
+				"bucket": "bes-iac",
+				"prefix": "p/",
+				"target_role_arn": "arn:aws:iam::123:role/dev",
+				"maintenance_role_arn": "arn:aws:iam::123:role/maint",
+				"region": "ap-southeast-2",
+				"expected_interval": 3600,
+				"retention": retention_json(),
+			}))
+			.await;
+		resp.assert_status_ok();
+		let body: serde_json::Value = resp.json();
+		assert_eq!(body["status"], "provisioning");
+		assert_eq!(body["mode"], "from_birth");
+		assert_eq!(body["maintenance_role_arn"], "arn:aws:iam::123:role/maint");
+		let schedule = &body["schedules"][0];
+		assert_eq!(schedule["type"], "tamanu-postgres");
+		assert_eq!(schedule["expected_interval"], 3600);
+
+		// Re-apply with changed mutable fields → updates in place, no duplicate.
+		let resp = private
+			.post("/api/backups/upsert")
+			.json(&serde_json::json!({
+				"server_group_id": group_id,
+				"bucket": "bes-iac",
+				"prefix": "p/",
+				"target_role_arn": "arn:aws:iam::123:role/dev2",
+				"maintenance_role_arn": "arn:aws:iam::123:role/maint2",
+				"region": "us-east-1",
+				"expected_interval": null,
+				"retention": retention_json(),
+			}))
+			.await;
+		resp.assert_status_ok();
+		let body: serde_json::Value = resp.json();
+		assert_eq!(body["maintenance_role_arn"], "arn:aws:iam::123:role/maint2");
+		assert_eq!(body["target_role_arn"], "arn:aws:iam::123:role/dev2");
+		assert_eq!(body["region"], "us-east-1");
+		// Manual-only now. (That this second apply returns 200 with updated
+		// fields — rather than the 409 a duplicate create would — is what proves
+		// it took the in-place update path, i.e. no duplicate row.)
+		assert!(body["schedules"][0]["expected_interval"].is_null());
+
+		// Changing the bucket (identity) is rejected.
+		let resp = private
+			.post("/api/backups/upsert")
+			.json(&serde_json::json!({
+				"server_group_id": group_id,
+				"bucket": "bes-iac-moved",
+				"prefix": "p/",
+				"target_role_arn": "arn:aws:iam::123:role/dev2",
+				"maintenance_role_arn": "arn:aws:iam::123:role/maint2",
+			}))
+			.await;
+		resp.assert_status_conflict();
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn upsert_missing_group_is_404() {
+	commons_tests::server::run(async |_conn, _public, private| {
+		let resp = private
+			.post("/api/backups/upsert")
+			.json(&serde_json::json!({
+				"server_group_id": Uuid::new_v4(),
+				"bucket": "b",
+				"target_role_arn": "arn",
+				"maintenance_role_arn": "maint-arn",
+			}))
+			.await;
+		resp.assert_status_not_found();
+	})
+	.await;
+}

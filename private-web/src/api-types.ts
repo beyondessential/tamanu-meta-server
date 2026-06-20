@@ -141,7 +141,8 @@ export interface paths {
         put?: never;
         /**
          * Delete a group's config row (decommission). The bucket and its object-locked
-         *     objects persist; this only stops credential issuance.
+         *     objects persist; this only stops credential issuance and removes the
+         *     Canopy-owned passphrase Secret (which must not outlive its config).
          */
         post: operations["backups_delete"];
         delete?: never;
@@ -300,6 +301,30 @@ export interface paths {
          *     `set_schedule`.
          */
         post: operations["backups_update"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backups/upsert": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Machine-facing config-as-a-resource upsert for ops/pulumi: declaratively
+         *     register/converge a group's backup config in one idempotent call (config +
+         *     generated passphrase Secret + schedule/retention + auto-provision). Creating
+         *     is from-birth onto an empty bucket only — a non-empty/existing-repo/
+         *     inaccessible bucket is rejected. Re-applying reconciles the role ARNs,
+         *     region, schedule and retention; `bucket`/`prefix` are immutable.
+         */
+        post: operations["backups_upsert"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3518,6 +3543,35 @@ export interface components {
             status: string;
             version: string;
         };
+        /**
+         * @description Machine-facing config-as-a-resource upsert (ops/pulumi). `mode` is implicit
+         *     — always from-birth — so the bucket must be empty and no passphrase is
+         *     supplied (importing an existing repo stays an interactive operator action).
+         *     `bucket`/`prefix` are the identity and immutable on re-apply; role ARNs,
+         *     region, schedule and retention are reconciled to the request each time.
+         */
+        UpsertBackupConfigArgs: {
+            bucket: string;
+            /**
+             * Format: int64
+             * @description Seconds between scheduled runs; None = manual-only (no schedule).
+             */
+            expected_interval?: number | null;
+            /**
+             * @description Maintenance role: the backups pod assumes this for maintenance/inspection/
+             *     s3-metrics (s3:* + delete + CloudWatch).
+             */
+            maintenance_role_arn: string;
+            prefix?: string;
+            region?: string | null;
+            retention?: null | components["schemas"]["RetentionPolicy"];
+            /** Format: uuid */
+            server_group_id: string;
+            /** @description Device role: public-server assumes this to mint device creds (no delete). */
+            target_role_arn: string;
+            /** @description Schedule type to reconcile (defaults to `tamanu-postgres`). */
+            type?: string;
+        };
         Value: unknown;
         VersionData: {
             /** Format: date-time */
@@ -4077,6 +4131,61 @@ export interface operations {
                 };
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    backups_upsert: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpsertBackupConfigArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupConfigView"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };
