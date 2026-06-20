@@ -5381,13 +5381,6 @@
               "null"
             ]
           },
-          "repo_password_ref": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Import mode only: name of a pre-existing k8s Secret holding the\npassphrase. From-birth leaves this None (Canopy generates + names it),\nin which case a placeholder ref keyed on the group is recorded."
-          },
           "server_group_id": {
             "type": "string",
             "format": "uuid"

@@ -2162,12 +2162,6 @@ export interface components {
             mode: string;
             prefix?: string;
             region?: string | null;
-            /**
-             * @description Import mode only: name of a pre-existing k8s Secret holding the
-             *     passphrase. From-birth leaves this None (Canopy generates + names it),
-             *     in which case a placeholder ref keyed on the group is recorded.
-             */
-            repo_password_ref?: string | null;
             /** Format: uuid */
             server_group_id: string;
             /** @description Device role: public-server assumes this to mint device creds (no delete). */

@@ -102,25 +102,6 @@ async fn create_missing_group_is_404() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn import_mode_requires_secret_ref() {
-	commons_tests::server::run(async |mut conn, _public, private| {
-		let group_id = seed_group(&mut conn).await;
-		let resp = private
-			.post("/api/backups/create")
-			.json(&serde_json::json!({
-				"server_group_id": group_id,
-				"bucket": "b",
-				"target_role_arn": "arn",
-				"maintenance_role_arn": "maint-arn",
-				"mode": "import",
-			}))
-			.await;
-		resp.assert_status_bad_request();
-	})
-	.await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn set_schedule_floor_rejected_and_accepted() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let group_id = seed_group(&mut conn).await;

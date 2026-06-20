@@ -77,7 +77,6 @@ function ConfigForm({
 	const [mode, setMode] = useState<BackupRepoMode>(
 		(existing?.mode as BackupRepoMode) ?? "from_birth",
 	);
-	const [secretRef, setSecretRef] = useState("");
 	const [scheduled, setScheduled] = useState(
 		wellKnown ? wellKnown.expected_interval != null : true,
 	);
@@ -105,8 +104,6 @@ function ConfigForm({
 					maintenance_role_arn: maintenanceRoleArn,
 					region: region.trim() === "" ? null : region,
 					mode,
-					repo_password_ref:
-						mode === "import" ? secretRef : null,
 				});
 			} else {
 				await update.call({
@@ -123,8 +120,8 @@ function ConfigForm({
 				retention,
 			});
 			if (isCreate) {
-				// From-birth flows straight into provisioning → escrow; import
-				// also kicks the init Job (which moves it to ready on connect).
+				// From-birth provisions → escrow; passphrase provisions → ready
+				// (no escrow). Either way this kicks repo init.
 				await createRepo.call({ server_group_id: groupId });
 			}
 			navigate(`/groups/${groupId}/backups`);
@@ -212,26 +209,17 @@ function ConfigForm({
 					disabled={pending || !isCreate}
 					helperText={
 						isCreate
-							? "From-birth: Canopy generates the passphrase (escrow flow). Import: you supply an existing Secret."
+							? "From-birth: Canopy generates the passphrase (escrow flow). Passphrase: you supply it; Canopy stores it."
 							: "Mode is fixed after creation."
 					}
 				>
 					<MenuItem value="from_birth">
 						{BACKUP_MODE_LABEL.from_birth}
 					</MenuItem>
-					<MenuItem value="import">{BACKUP_MODE_LABEL.import}</MenuItem>
+					<MenuItem value="passphrase">
+						{BACKUP_MODE_LABEL.passphrase}
+					</MenuItem>
 				</TextField>
-
-				{isCreate && mode === "import" && (
-					<TextField
-						label="Existing passphrase Secret name"
-						value={secretRef}
-						onChange={(e) => setSecretRef(e.target.value)}
-						disabled={pending}
-						required
-						helperText="k8s Secret holding the repo passphrase you already own."
-					/>
-				)}
 
 				<Divider />
 

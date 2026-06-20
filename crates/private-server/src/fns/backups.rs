@@ -159,10 +159,6 @@ pub struct CreateBackupConfigArgs {
 	pub region: Option<String>,
 	#[schema(value_type = String)]
 	pub mode: BackupRepoMode,
-	/// Import mode only: name of a pre-existing k8s Secret holding the
-	/// passphrase. From-birth leaves this None (Canopy generates + names it),
-	/// in which case a placeholder ref keyed on the group is recorded.
-	pub repo_password_ref: Option<String>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -335,18 +331,9 @@ pub async fn create(
 	let mut conn = state.db.get().await?;
 	ServerGroup::get_by_id(&mut conn, args.server_group_id).await?;
 
-	// Import mode must supply the existing Secret name. From-birth records a
-	// deterministic placeholder ref the init Job is expected to create.
-	let repo_password_ref = match args.mode {
-		BackupRepoMode::Import => args
-			.repo_password_ref
-			.clone()
-			.ok_or_else(|| AppError::BadRequest("import mode requires repo_password_ref".into()))?,
-		BackupRepoMode::FromBirth => args
-			.repo_password_ref
-			.clone()
-			.unwrap_or_else(|| format!("backup-repo-{}", args.server_group_id)),
-	};
+	// Canopy owns the passphrase Secret for both modes; it's stored under a
+	// deterministic, group-keyed name.
+	let repo_password_ref = format!("backup-repo-{}", args.server_group_id);
 
 	let config = ServerGroupBackupConfig::insert(
 		&mut conn,
