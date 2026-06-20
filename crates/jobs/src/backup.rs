@@ -23,3 +23,4 @@ pub mod maintenance;
 pub mod preflight;
 pub mod rotation;
 pub mod s3_metrics;
+pub mod storageconfig;
