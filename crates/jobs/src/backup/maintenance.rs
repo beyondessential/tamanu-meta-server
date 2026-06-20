@@ -29,6 +29,7 @@ use tracing::{debug, error, info};
 
 use super::{
 	complete,
+	creds_server::CredsLease,
 	kopia::{self, KopiaEnv, RetentionMap},
 	worker::Worker,
 };
@@ -62,10 +63,12 @@ async fn retention_map_for_group(
 	Ok(map)
 }
 
-/// Build the per-op kopia env from a group's config + its repo password.
-fn kopia_env(config: &ServerGroupBackupConfig, password: String) -> KopiaEnv {
+/// Build the per-op kopia env from a creds lease, the group's region, and its
+/// repo password. The `lease` must outlive every kopia invocation in the op.
+fn kopia_env(lease: &CredsLease, config: &ServerGroupBackupConfig, password: String) -> KopiaEnv {
 	KopiaEnv {
-		target_role_arn: config.target_role_arn.clone(),
+		creds_uri: lease.uri().to_string(),
+		creds_token: lease.token().to_string(),
 		region: config.region.clone(),
 		password,
 	}
@@ -139,7 +142,11 @@ fn spawn_init(worker: &Worker, config: ServerGroupBackupConfig) {
 /// The kopia side of an init op: read the password + retention, run init.
 async fn run_init_op(worker: &Worker, config: &ServerGroupBackupConfig) -> anyhow::Result<()> {
 	let password = worker.read_repo_password(&config.repo_password_ref).await?;
-	let env = kopia_env(config, password);
+	let lease = worker
+		.creds
+		.lease(&config.maintenance_role_arn, config.region.as_deref())
+		.await?;
+	let env = kopia_env(&lease, config, password);
 	let retention = {
 		let mut db = worker
 			.pool
@@ -213,7 +220,11 @@ async fn run_maint_op(
 	kind: MaintenanceKind,
 ) -> anyhow::Result<kopia::MaintOutcome> {
 	let password = worker.read_repo_password(&config.repo_password_ref).await?;
-	let env = kopia_env(config, password);
+	let lease = worker
+		.creds
+		.lease(&config.maintenance_role_arn, config.region.as_deref())
+		.await?;
+	let env = kopia_env(&lease, config, password);
 	let retention = {
 		let mut db = worker
 			.pool
@@ -319,6 +330,7 @@ mod tests {
 			bucket: "b".into(),
 			prefix: String::new(),
 			target_role_arn: "arn".into(),
+			maintenance_role_arn: "maint-arn".into(),
 			region: None,
 			repo_password_ref: "s".into(),
 			status,

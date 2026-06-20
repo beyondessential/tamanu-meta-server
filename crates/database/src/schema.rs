@@ -318,6 +318,7 @@ diesel::table! {
 		bucket -> Text,
 		prefix -> Text,
 		target_role_arn -> Text,
+		maintenance_role_arn -> Text,
 		region -> Nullable<Text>,
 		repo_password_ref -> Text,
 		status -> Text,

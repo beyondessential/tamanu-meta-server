@@ -2037,6 +2037,7 @@ export interface components {
             escrow_acked_at?: string | null;
             escrow_acked_by?: string | null;
             last_init_error?: string | null;
+            maintenance_role_arn: string;
             mode: string;
             prefix: string;
             region?: string | null;
@@ -2153,6 +2154,11 @@ export interface components {
         };
         CreateBackupConfigArgs: {
             bucket: string;
+            /**
+             * @description Maintenance role: the backups pod assumes this for maintenance/inspection/
+             *     s3-metrics (s3:* + delete + CloudWatch).
+             */
+            maintenance_role_arn: string;
             mode: string;
             prefix?: string;
             region?: string | null;
@@ -2164,6 +2170,7 @@ export interface components {
             repo_password_ref?: string | null;
             /** Format: uuid */
             server_group_id: string;
+            /** @description Device role: public-server assumes this to mint device creds (no delete). */
             target_role_arn: string;
         };
         CreateServerArgs: {

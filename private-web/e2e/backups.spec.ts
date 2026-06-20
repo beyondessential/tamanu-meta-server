@@ -47,6 +47,9 @@ test.describe("backups zero-state + config", () => {
 		await page
 			.getByLabel("Target role ARN")
 			.fill("arn:aws:iam::999:role/created");
+		await page
+			.getByLabel("Maintenance role ARN")
+			.fill("arn:aws:iam::999:role/created-maint");
 		// Default schedule is on at 60 minutes; default retention meets floors.
 		await page.getByRole("button", { name: /create & provision/i }).click();
 
@@ -55,10 +58,11 @@ test.describe("backups zero-state + config", () => {
 		const rows = await sql.query<{
 			status: string;
 			bucket: string;
+			maintenance_role_arn: string;
 			secs: string | null;
 			retention: { keep_daily: number };
 		}>(
-			`SELECT c.status, c.bucket,
+			`SELECT c.status, c.bucket, c.maintenance_role_arn,
 			        EXTRACT(EPOCH FROM s.expected_interval)::text AS secs,
 			        s.retention
 			 FROM server_group_backup_config c
@@ -69,6 +73,9 @@ test.describe("backups zero-state + config", () => {
 		expect(rows).toHaveLength(1);
 		expect(rows[0]!.status).toBe("provisioning");
 		expect(rows[0]!.bucket).toBe("bes-kopia-created");
+		expect(rows[0]!.maintenance_role_arn).toBe(
+			"arn:aws:iam::999:role/created-maint",
+		);
 		expect(Number(rows[0]!.secs)).toBe(3600);
 		expect(rows[0]!.retention.keep_daily).toBe(7);
 	});
@@ -112,6 +119,7 @@ test.describe("backups zero-state + config", () => {
 		await page.goto(`/groups/${group.id}/backups/config`);
 		await page.getByLabel("Bucket").fill("b");
 		await page.getByLabel("Target role ARN").fill("arn");
+		await page.getByLabel("Maintenance role ARN").fill("maint-arn");
 		// Toggle the schedule switch off → manual only. MUI Switch exposes a
 		// checkbox role; click the "Scheduled" label to flip it.
 		await page.getByText("Scheduled", { exact: true }).click();

@@ -63,6 +63,7 @@ fn new_config(group_id: Uuid, region: Option<&str>) -> NewServerGroupBackupConfi
 		bucket: "bes-kopia-backups-test".into(),
 		prefix: String::new(),
 		target_role_arn: "arn:aws:iam::123456789012:role/canopy-backups-test".into(),
+		maintenance_role_arn: "arn:aws:iam::123456789012:role/canopy-maint-test".into(),
 		region: region.map(Into::into),
 		repo_password_ref: "kopia-repo-pw-test".into(),
 		status: BackupConfigStatus::Provisioning,

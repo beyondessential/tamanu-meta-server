@@ -80,6 +80,7 @@ pub struct BackupConfigView {
 	pub bucket: String,
 	pub prefix: String,
 	pub target_role_arn: String,
+	pub maintenance_role_arn: String,
 	pub region: Option<String>,
 	#[schema(value_type = String)]
 	pub mode: BackupRepoMode,
@@ -113,6 +114,7 @@ impl BackupConfigView {
 			bucket: config.bucket,
 			prefix: config.prefix,
 			target_role_arn: config.target_role_arn,
+			maintenance_role_arn: config.maintenance_role_arn,
 			region: config.region,
 			mode: config.mode,
 			status: config.status,
@@ -149,7 +151,11 @@ pub struct CreateBackupConfigArgs {
 	pub bucket: String,
 	#[serde(default)]
 	pub prefix: String,
+	/// Device role: public-server assumes this to mint device creds (no delete).
 	pub target_role_arn: String,
+	/// Maintenance role: the backups pod assumes this for maintenance/inspection/
+	/// s3-metrics (s3:* + delete + CloudWatch).
+	pub maintenance_role_arn: String,
 	pub region: Option<String>,
 	#[schema(value_type = String)]
 	pub mode: BackupRepoMode,
@@ -349,6 +355,7 @@ pub async fn create(
 			bucket: args.bucket,
 			prefix: args.prefix,
 			target_role_arn: args.target_role_arn,
+			maintenance_role_arn: args.maintenance_role_arn,
 			region: args.region,
 			repo_password_ref,
 			status: BackupConfigStatus::Provisioning,

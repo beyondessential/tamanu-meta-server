@@ -10,11 +10,12 @@
 //! The maintenance + inspection loops run kopia **in-process** (subprocesses)
 //! rather than spawning Kubernetes Jobs; they share a [`jobs::backup::worker::Worker`]
 //! (DB pool, kube client for Secret reads, concurrency semaphore, in-flight
-//! group set), built once here. Preflight and s3-metrics keep building their own
-//! pool + AWS clients.
+//! group set, and the container-creds endpoint), built once here. Preflight and
+//! s3-metrics keep building their own pool + AWS clients.
 //!
-//! Each kopia subprocess assumes its group's per-bucket role via web-identity
-//! directly (refreshing), overriding the pod's shared `canopy-jobs` IRSA
+//! Each kopia subprocess gets its group's maintenance-role creds by polling the
+//! loopback container-credentials endpoint ([`jobs::backup::creds_server`]),
+//! which mints + refreshes them from the pod's shared `canopy-jobs` IRSA
 //! identity.
 
 use clap::Parser;
@@ -22,6 +23,7 @@ use lloggs::{LoggingArgs, PreArgs};
 use miette::{IntoDiagnostic, miette};
 use tracing::info;
 
+use jobs::backup::creds_server::CredsServer;
 use jobs::backup::worker::{Cfg, Worker};
 
 #[derive(Debug, Parser)]
@@ -48,7 +50,10 @@ async fn main() -> miette::Result<()> {
 	let kube = kube::Client::try_default()
 		.await
 		.map_err(|e| miette!("kube client init failed: {e}"))?;
-	let worker = Worker::new(pool, kube, Cfg::from_env());
+	let creds = CredsServer::start()
+		.await
+		.map_err(|e| miette!("container-creds endpoint init failed: {e}"))?;
+	let worker = Worker::new(pool, kube, Cfg::from_env(), creds);
 
 	let preflight = jobs::backup::preflight::spawn();
 	let maintenance = jobs::backup::maintenance::spawn(worker.clone());
