@@ -323,7 +323,7 @@ pub async fn create(
 	// Canopy owns the passphrase Secret for both modes: generate one for
 	// from-birth, take the operator's for passphrase mode.
 	let passphrase = match args.mode {
-		BackupRepoMode::FromBirth => generate_repo_passphrase(),
+		BackupRepoMode::FromBirth => commons_servers::backup_secrets::generate_passphrase(),
 		BackupRepoMode::Passphrase => {
 			let p = args.passphrase.clone().unwrap_or_default();
 			if p.is_empty() {
@@ -359,22 +359,6 @@ pub async fn create(
 		.await?;
 
 	Ok(Json(BackupConfigView::build(&mut conn, config).await?))
-}
-
-/// Generate a strong from-birth repo passphrase: 8 words from the EFF large
-/// wordlist (~103 bits), hyphen-separated. Canopy owns it (no human copy) and
-/// rotates it regularly.
-fn generate_repo_passphrase() -> String {
-	use chbs::{config::BasicConfig, prelude::*, probability::Probability, word::WordList};
-
-	let config = BasicConfig {
-		words: 8,
-		word_provider: WordList::builtin_eff_large().sampler(),
-		separator: "-".into(),
-		capitalize_first: Probability::Never,
-		capitalize_words: Probability::Never,
-	};
-	config.to_scheme().generate()
 }
 
 /// Edit the non-structural config (region). Structural fields

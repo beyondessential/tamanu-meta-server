@@ -251,3 +251,19 @@ fn secret_object(secret_name: &str, key: &str, value: &str) -> k8s_openapi::api:
 fn namespace_from_env() -> String {
 	std::env::var("POD_NAMESPACE").unwrap_or_else(|_| "canopy".to_string())
 }
+
+/// Generate a strong repo passphrase: 8 words from the EFF large wordlist
+/// (~103 bits), hyphen-separated. Canopy owns it (no human copy) and rotates it
+/// regularly; used by onboarding (from-birth) and the rotation loop.
+pub fn generate_passphrase() -> String {
+	use chbs::{config::BasicConfig, prelude::*, probability::Probability, word::WordList};
+
+	let config = BasicConfig {
+		words: 8,
+		word_provider: WordList::builtin_eff_large().sampler(),
+		separator: "-".into(),
+		capitalize_first: Probability::Never,
+		capitalize_words: Probability::Never,
+	};
+	config.to_scheme().generate()
+}
