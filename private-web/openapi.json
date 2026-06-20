@@ -157,62 +157,6 @@
         ]
       }
     },
-    "/api/backups/ack_escrow": {
-      "post": {
-        "tags": [
-          "backups"
-        ],
-        "summary": "Acknowledge the Bitwarden escrow: flip `escrow_pending → ready`, stamping\n`escrow_acked_at/by`. 409 unless currently `escrow_pending`.",
-        "operationId": "backups_ack_escrow",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GroupArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BackupConfigView"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
     "/api/backups/cancel_request": {
       "post": {
         "tags": [
@@ -554,72 +498,6 @@
             "description": ""
           },
           "404": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
-    "/api/backups/reveal_escrow": {
-      "post": {
-        "tags": [
-          "backups"
-        ],
-        "summary": "Reveal-once passphrase for a from-birth repo. Only valid while\n`escrow_pending`; re-callable until acked. Reads the k8s Secret named by\n`repo_password_ref` (502 on read failure).",
-        "operationId": "backups_reveal_escrow",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GroupArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RevealEscrowResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          },
-          "502": {
             "description": "",
             "content": {
               "application/json": {
@@ -4923,7 +4801,7 @@
       },
       "BackupConfigView": {
         "type": "object",
-        "description": "Full config + lifecycle for a group. Never includes the passphrase value —\nonly `reveal_escrow` does.",
+        "description": "Full config + lifecycle for a group. Never includes the passphrase value.",
         "required": [
           "server_group_id",
           "bucket",
@@ -4943,19 +4821,6 @@
           "created_at": {
             "type": "string",
             "format": "date-time"
-          },
-          "escrow_acked_at": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time"
-          },
-          "escrow_acked_by": {
-            "type": [
-              "string",
-              "null"
-            ]
           },
           "last_init_error": {
             "type": [
@@ -7589,23 +7454,6 @@
           }
         }
       },
-      "RevealEscrowResponse": {
-        "type": "object",
-        "required": [
-          "passphrase",
-          "repo_password_ref"
-        ],
-        "properties": {
-          "passphrase": {
-            "type": "string",
-            "description": "Shown once; the UI must not persist it."
-          },
-          "repo_password_ref": {
-            "type": "string",
-            "description": "The Secret name, for the \"saved where\" note."
-          }
-        }
-      },
       "RunOutcome": {
         "type": "string",
         "description": "Outcome of a reported backup/restore run.",
@@ -9144,7 +8992,7 @@
     },
     {
       "name": "backups",
-      "description": "Group backup-repo onboarding, escrow, scheduling, and stats."
+      "description": "Group backup-repo onboarding, scheduling, and stats."
     },
     {
       "name": "bestool",

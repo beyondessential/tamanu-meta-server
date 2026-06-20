@@ -350,8 +350,6 @@ mod tests {
 			updated_at: now,
 			mode: commons_types::backup::BackupRepoMode::FromBirth,
 			last_init_error: last_init_error.map(str::to_string),
-			escrow_acked_at: None,
-			escrow_acked_by: None,
 		}
 	}
 

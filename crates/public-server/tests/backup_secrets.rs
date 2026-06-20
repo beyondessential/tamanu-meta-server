@@ -1,5 +1,5 @@
 //! The in-memory [`BackupSecrets`] store backs onboarding Secret creation +
-//! escrow reveal in tests and the e2e binary, so cover its round-trip + the
+//! reads in tests and the e2e binary, so cover its round-trip + the
 //! missing-secret error path here (the Kube variant needs a live cluster).
 
 use public_server::state::BackupSecrets;

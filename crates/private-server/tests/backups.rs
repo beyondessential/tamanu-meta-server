@@ -1,8 +1,8 @@
 //! Endpoint tests for the operator-facing `/api/backups/*` fns.
 //!
 //! The test harness uses the in-memory backup Secret store, so onboarding
-//! (Canopy generating/storing the repo passphrase) and the escrow reveal are
-//! exercised end-to-end without a cluster.
+//! (Canopy generating/storing the repo passphrase) is exercised without a
+//! cluster.
 
 use commons_tests::diesel_async::SimpleAsyncConnection;
 use uuid::Uuid;
@@ -255,110 +255,6 @@ async fn create_repo_on_ready_is_409() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn ack_escrow_only_from_escrow_pending() {
-	commons_tests::server::run(async |mut conn, _public, private| {
-		let group_id = seed_group(&mut conn).await;
-		private
-			.post("/api/backups/create")
-			.json(&serde_json::json!({
-				"server_group_id": group_id,
-				"bucket": "b",
-				"target_role_arn": "arn",
-				"maintenance_role_arn": "maint-arn",
-				"mode": "from_birth",
-			}))
-			.await
-			.assert_status_ok();
-
-		// From provisioning → 409.
-		private
-			.post("/api/backups/ack_escrow")
-			.json(&serde_json::json!({ "server_group_id": group_id }))
-			.await
-			.assert_status_conflict();
-
-		// Move to escrow_pending then ack → ready + stamps.
-		conn.batch_execute(&format!(
-			"UPDATE server_group_backup_config SET status = 'escrow_pending' WHERE group_id = '{group_id}';"
-		))
-		.await
-		.expect("escrow_pending");
-		let resp = private
-			.post("/api/backups/ack_escrow")
-			.json(&serde_json::json!({ "server_group_id": group_id }))
-			.await;
-		resp.assert_status_ok();
-		let body: serde_json::Value = resp.json();
-		assert_eq!(body["status"], "ready");
-		assert!(!body["escrow_acked_at"].is_null());
-		assert_eq!(body["escrow_acked_by"], "admin@localhost");
-	})
-	.await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn reveal_escrow_409_when_not_escrow_pending() {
-	commons_tests::server::run(async |mut conn, _public, private| {
-		let group_id = seed_group(&mut conn).await;
-		private
-			.post("/api/backups/create")
-			.json(&serde_json::json!({
-				"server_group_id": group_id,
-				"bucket": "b",
-				"target_role_arn": "arn",
-				"maintenance_role_arn": "maint-arn",
-				"mode": "from_birth",
-			}))
-			.await
-			.assert_status_ok();
-		// status is provisioning → 409 before any Secret read is attempted.
-		let resp = private
-			.post("/api/backups/reveal_escrow")
-			.json(&serde_json::json!({ "server_group_id": group_id }))
-			.await;
-		resp.assert_status_conflict();
-	})
-	.await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn from_birth_create_generates_a_revealable_passphrase() {
-	commons_tests::server::run(async |mut conn, _public, private| {
-		let group_id = seed_group(&mut conn).await;
-		private
-			.post("/api/backups/create")
-			.json(&serde_json::json!({
-				"server_group_id": group_id,
-				"bucket": "b",
-				"target_role_arn": "arn",
-				"maintenance_role_arn": "maint-arn",
-				"mode": "from_birth",
-			}))
-			.await
-			.assert_status_ok();
-
-		// Move to escrow_pending so reveal is allowed, then reveal the
-		// canopy-generated passphrase from the (in-memory) Secret store.
-		conn.batch_execute(&format!(
-			"UPDATE server_group_backup_config SET status = 'escrow_pending' WHERE group_id = '{group_id}';"
-		))
-		.await
-		.expect("escrow_pending");
-		let resp = private
-			.post("/api/backups/reveal_escrow")
-			.json(&serde_json::json!({ "server_group_id": group_id }))
-			.await;
-		resp.assert_status_ok();
-		let body: serde_json::Value = resp.json();
-		assert!(
-			!body["passphrase"].as_str().unwrap_or_default().is_empty(),
-			"a non-empty generated passphrase is revealed"
-		);
-	})
-	.await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn passphrase_mode_requires_a_passphrase() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let group_id = seed_group(&mut conn).await;
@@ -375,7 +271,7 @@ async fn passphrase_mode_requires_a_passphrase() {
 			.await
 			.assert_status_bad_request();
 
-		// With a passphrase → created (skips escrow; provisioning until init).
+		// With a passphrase → created (no escrow; provisioning until init → ready).
 		let resp = private
 			.post("/api/backups/create")
 			.json(&serde_json::json!({

@@ -334,7 +334,7 @@ export async function seedVersion(
 
 // ── Backup-credentials seeding ──────────────────────────────────────────────
 
-export type BackupConfigStatus = "provisioning" | "escrow_pending" | "ready";
+export type BackupConfigStatus = "provisioning" | "ready";
 export type BackupRepoMode = "from_birth" | "passphrase";
 
 /** Seed a `server_group_backup_config` row for a group, optionally with a

@@ -20,9 +20,9 @@ type MemoryStore = Arc<Mutex<BTreeMap<String, BTreeMap<String, String>>>>;
 /// Reader/writer for the per-group repo-password Secrets. The surface is
 /// deliberately narrow: read one key, create one Secret. Real deployments use
 /// `Kube` (a namespaced [`kube::Client`]); tests and the e2e binary use the
-/// in-memory `Memory` store so the create + escrow-reveal paths are exercised
-/// without a cluster. Shared by the public-server (`/backup-target`) and the
-/// private-server (escrow reveal + onboarding Secret creation).
+/// in-memory `Memory` store so the create + read paths are exercised without a
+/// cluster. Shared by the public-server (`/backup-target` reads) and the
+/// private-server (onboarding Secret creation).
 #[derive(Clone)]
 pub enum BackupSecrets {
 	Kube {
