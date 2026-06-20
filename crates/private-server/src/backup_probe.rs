@@ -56,11 +56,13 @@ impl ProbeResult {
 }
 
 /// Bucket prober. `Aws` assumes the role + inspects S3; `Fake` returns a canned
-/// result for tests / the e2e binary.
+/// result for tests / the e2e binary. `Fake(Some(state))` is a fixed result
+/// (Rust unit tests); `Fake(None)` derives the state from the bucket name (e2e,
+/// so one binary can exercise every wizard branch — see [`fake_state_for`]).
 #[derive(Clone)]
 pub enum BucketProber {
 	Aws(aws_config::SdkConfig),
-	Fake(ProbeState),
+	Fake(Option<ProbeState>),
 }
 
 impl std::fmt::Debug for BucketProber {
@@ -73,18 +75,33 @@ impl std::fmt::Debug for BucketProber {
 }
 
 impl BucketProber {
-	/// Build from the ambient AWS config, or the fake prober if `FAKE_ENV` is set.
+	/// Build from the ambient AWS config, or the bucket-name-derived fake prober
+	/// if `FAKE_ENV` is set (for the e2e binary).
 	pub async fn try_default() -> Self {
 		if std::env::var_os(FAKE_ENV).is_some() {
-			tracing::warn!("{FAKE_ENV} set; using fake bucket prober (always empty)");
-			return Self::Fake(ProbeState::Empty);
+			// Debug-only (tests, e2e, local dev). The fake prober can't be
+			// constructed in release builds (attribute-`cfg`), so canned probe
+			// results can't be swapped in by accident in production — where they'd
+			// let onboarding write over a non-empty bucket.
+			#[cfg(debug_assertions)]
+			{
+				tracing::warn!("{FAKE_ENV} set; using fake bucket prober (state from bucket name)");
+				return Self::Fake(None);
+			}
+			#[cfg(not(debug_assertions))]
+			tracing::error!(
+				"{FAKE_ENV} is set but IGNORED: the fake bucket prober is debug-only and is never used in release builds"
+			);
 		}
 		Self::Aws(aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await)
 	}
 
-	/// A fake prober returning `state` (for tests).
+	/// A fake prober returning a fixed `state` (for Rust unit tests). **Debug-only**:
+	/// the constructor doesn't exist in release builds, so a canned prober can't be
+	/// swapped in in production.
+	#[cfg(debug_assertions)]
 	pub fn fake(state: ProbeState) -> Self {
-		Self::Fake(state)
+		Self::Fake(Some(state))
 	}
 
 	/// Inspect `bucket/prefix` by assuming `maintenance_role_arn`. Never errors
@@ -97,11 +114,26 @@ impl BucketProber {
 		maintenance_role_arn: &str,
 	) -> Result<ProbeResult> {
 		match self {
-			Self::Fake(state) => Ok(ProbeResult::state(*state)),
+			Self::Fake(Some(state)) => Ok(ProbeResult::state(*state)),
+			Self::Fake(None) => Ok(ProbeResult::state(fake_state_for(bucket))),
 			Self::Aws(sdk) => {
 				Ok(probe_aws(sdk, bucket, prefix, region, maintenance_role_arn).await)
 			}
 		}
+	}
+}
+
+/// Bucket-name → fake state, so the e2e suite can drive each wizard branch by
+/// naming its bucket (e.g. `…existing…` → an existing repo). Default: `Empty`.
+fn fake_state_for(bucket: &str) -> ProbeState {
+	if bucket.contains("existing") {
+		ProbeState::KopiaRepo
+	} else if bucket.contains("other") {
+		ProbeState::OtherContent
+	} else if bucket.contains("denied") {
+		ProbeState::Inaccessible
+	} else {
+		ProbeState::Empty
 	}
 }
 
