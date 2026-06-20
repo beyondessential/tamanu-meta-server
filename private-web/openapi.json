@@ -5372,6 +5372,13 @@
           "mode": {
             "type": "string"
           },
+          "passphrase": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Passphrase mode only: the operator-supplied repo passphrase Canopy stores.\nFrom-birth ignores this (Canopy generates one)."
+          },
           "prefix": {
             "type": "string"
           },

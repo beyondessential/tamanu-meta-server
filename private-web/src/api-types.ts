@@ -2160,6 +2160,11 @@ export interface components {
              */
             maintenance_role_arn: string;
             mode: string;
+            /**
+             * @description Passphrase mode only: the operator-supplied repo passphrase Canopy stores.
+             *     From-birth ignores this (Canopy generates one).
+             */
+            passphrase?: string | null;
             prefix?: string;
             region?: string | null;
             /** Format: uuid */

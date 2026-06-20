@@ -368,7 +368,7 @@ export const BACKUP_STATUS_HELP: Record<BackupConfigStatus, string> = {
 
 export const BACKUP_MODE_LABEL: Record<BackupRepoMode, string> = {
 	from_birth: "From birth (Canopy generates the passphrase)",
-	passphrase: "Passphrase (you supply it; Canopy stores it)",
+	passphrase: "Existing repository (connect with its passphrase)",
 };
 
 /// Org-minimum retention floors, enforced server-side and mirrored client-side

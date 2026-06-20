@@ -77,6 +77,7 @@ function ConfigForm({
 	const [mode, setMode] = useState<BackupRepoMode>(
 		(existing?.mode as BackupRepoMode) ?? "from_birth",
 	);
+	const [passphrase, setPassphrase] = useState("");
 	const [scheduled, setScheduled] = useState(
 		wellKnown ? wellKnown.expected_interval != null : true,
 	);
@@ -104,6 +105,7 @@ function ConfigForm({
 					maintenance_role_arn: maintenanceRoleArn,
 					region: region.trim() === "" ? null : region,
 					mode,
+					passphrase: mode === "passphrase" ? passphrase : null,
 				});
 			} else {
 				await update.call({
@@ -209,7 +211,7 @@ function ConfigForm({
 					disabled={pending || !isCreate}
 					helperText={
 						isCreate
-							? "From-birth: Canopy generates the passphrase (escrow flow). Passphrase: you supply it; Canopy stores it."
+							? "From birth: Canopy generates the passphrase for a new repo (escrow flow). Existing repository: connect by supplying its passphrase."
 							: "Mode is fixed after creation."
 					}
 				>
@@ -220,6 +222,18 @@ function ConfigForm({
 						{BACKUP_MODE_LABEL.passphrase}
 					</MenuItem>
 				</TextField>
+
+				{isCreate && mode === "passphrase" && (
+					<TextField
+						label="Existing repository passphrase"
+						type="password"
+						value={passphrase}
+						onChange={(e) => setPassphrase(e.target.value)}
+						disabled={pending}
+						required
+						helperText="Connect to an existing kopia repository by supplying its passphrase. New repositories use “From birth” (Canopy generates the passphrase)."
+					/>
+				)}
 
 				<Divider />
 

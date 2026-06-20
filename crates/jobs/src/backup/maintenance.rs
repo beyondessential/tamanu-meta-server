@@ -18,7 +18,8 @@ use std::{collections::HashSet, time::Duration};
 
 use commons_servers::backup_jobs::{JobKind, effective_retention_for_group, is_due, slot_is_due};
 use database::{
-	BackupConfigStatus, BackupMaintenanceRun, MaintenanceKind, RunOutcome, ServerGroupBackupConfig,
+	BackupConfigStatus, BackupMaintenanceRun, BackupRepoMode, MaintenanceKind, RunOutcome,
+	ServerGroupBackupConfig,
 };
 use jiff::Timestamp;
 use tokio::{
@@ -158,7 +159,18 @@ async fn run_init_op(worker: &Worker, config: &ServerGroupBackupConfig) -> anyho
 			.map_err(|e| anyhow::anyhow!(e))?
 	};
 	let region = config.region.as_deref().unwrap_or_default();
-	kopia::run_init(&env, &config.bucket, &config.prefix, region, &retention).await
+	// from-birth creates the repo; passphrase mode connects to an existing one
+	// only (Canopy never creates a repo under an operator-chosen passphrase).
+	let create_new = matches!(config.mode, BackupRepoMode::FromBirth);
+	kopia::run_init(
+		&env,
+		&config.bucket,
+		&config.prefix,
+		region,
+		&retention,
+		create_new,
+	)
+	.await
 }
 
 /// Run a maintenance op in a spawned task: start the run row, read the password,

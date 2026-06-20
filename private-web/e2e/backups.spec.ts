@@ -80,6 +80,38 @@ test.describe("backups zero-state + config", () => {
 		expect(rows[0]!.retention.keep_daily).toBe(7);
 	});
 
+	test("passphrase mode requires a passphrase and persists mode", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "passphrase-group" });
+		await page.goto(`/groups/${group.id}/backups/config`);
+		await page.getByLabel("Bucket").fill("bes-kopia-existing");
+		await page.getByLabel("Target role ARN").fill("arn:aws:iam::999:role/dev");
+		await page
+			.getByLabel("Maintenance role ARN")
+			.fill("arn:aws:iam::999:role/maint");
+
+		// Switch to "Existing repository" (passphrase) mode.
+		await page.getByLabel("Repository mode").click();
+		await page
+			.getByRole("option", { name: /existing repository/i })
+			.click();
+
+		// The passphrase field is required: submit is blocked until it's filled.
+		await page
+			.getByLabel("Existing repository passphrase")
+			.fill("an-existing-repo-passphrase");
+		await page.getByRole("button", { name: /create & provision/i }).click();
+
+		await expect(page).toHaveURL(new RegExp(`/groups/${group.id}/backups$`));
+		const rows = await sql.query<{ mode: string }>(
+			`SELECT mode FROM server_group_backup_config WHERE group_id = $1`,
+			[group.id],
+		);
+		expect(rows[0]!.mode).toBe("passphrase");
+	});
+
 	test("retention floor violation blocks submit", async ({ page, sql }) => {
 		const group = await seedServerGroup(sql, { name: "floor-group" });
 

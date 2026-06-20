@@ -1,8 +1,8 @@
 //! Endpoint tests for the operator-facing `/api/backups/*` fns.
 //!
-//! The kube client is `None` in the test harness, so `reveal_escrow` can only
-//! be exercised on its `409-when-not-escrow_pending` branch (which needs no
-//! Secret read). The escrow *ack* transition is covered directly.
+//! The test harness uses the in-memory backup Secret store, so onboarding
+//! (Canopy generating/storing the repo passphrase) and the escrow reveal are
+//! exercised end-to-end without a cluster.
 
 use commons_tests::diesel_async::SimpleAsyncConnection;
 use uuid::Uuid;
@@ -317,6 +317,78 @@ async fn reveal_escrow_409_when_not_escrow_pending() {
 			.json(&serde_json::json!({ "server_group_id": group_id }))
 			.await;
 		resp.assert_status_conflict();
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn from_birth_create_generates_a_revealable_passphrase() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group_id = seed_group(&mut conn).await;
+		private
+			.post("/api/backups/create")
+			.json(&serde_json::json!({
+				"server_group_id": group_id,
+				"bucket": "b",
+				"target_role_arn": "arn",
+				"maintenance_role_arn": "maint-arn",
+				"mode": "from_birth",
+			}))
+			.await
+			.assert_status_ok();
+
+		// Move to escrow_pending so reveal is allowed, then reveal the
+		// canopy-generated passphrase from the (in-memory) Secret store.
+		conn.batch_execute(&format!(
+			"UPDATE server_group_backup_config SET status = 'escrow_pending' WHERE group_id = '{group_id}';"
+		))
+		.await
+		.expect("escrow_pending");
+		let resp = private
+			.post("/api/backups/reveal_escrow")
+			.json(&serde_json::json!({ "server_group_id": group_id }))
+			.await;
+		resp.assert_status_ok();
+		let body: serde_json::Value = resp.json();
+		assert!(
+			!body["passphrase"].as_str().unwrap_or_default().is_empty(),
+			"a non-empty generated passphrase is revealed"
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn passphrase_mode_requires_a_passphrase() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group_id = seed_group(&mut conn).await;
+		// No passphrase supplied → 400.
+		private
+			.post("/api/backups/create")
+			.json(&serde_json::json!({
+				"server_group_id": group_id,
+				"bucket": "b",
+				"target_role_arn": "arn",
+				"maintenance_role_arn": "maint-arn",
+				"mode": "passphrase",
+			}))
+			.await
+			.assert_status_bad_request();
+
+		// With a passphrase → created (skips escrow; provisioning until init).
+		let resp = private
+			.post("/api/backups/create")
+			.json(&serde_json::json!({
+				"server_group_id": group_id,
+				"bucket": "b",
+				"target_role_arn": "arn",
+				"maintenance_role_arn": "maint-arn",
+				"mode": "passphrase",
+				"passphrase": "an-existing-repo-passphrase",
+			}))
+			.await;
+		resp.assert_status_ok();
+		assert_eq!(resp.json::<serde_json::Value>()["mode"], "passphrase");
 	})
 	.await;
 }
