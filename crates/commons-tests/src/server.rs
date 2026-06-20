@@ -232,6 +232,9 @@ where
 				ro_pool: None,
 				tailnet_directory: Some(directory),
 				kube: Some(public_server::state::BackupSecrets::memory()),
+				prober: private_server::backup_probe::BucketProber::fake(
+					private_server::backup_probe::ProbeState::Empty,
+				),
 			})
 			.unwrap(),
 			ClientIpSource::RightmostForwarded,

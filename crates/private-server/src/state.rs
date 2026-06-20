@@ -5,6 +5,8 @@ use commons_servers::tailnet_directory::{TailnetDirectory, TailnetDirectoryConfi
 use database::Db;
 use public_server::state::BackupSecrets;
 
+use crate::backup_probe::BucketProber;
+
 #[derive(Clone, Debug, FromRef)]
 pub struct AppState {
 	pub db: Db,
@@ -14,6 +16,9 @@ pub struct AppState {
 	/// them here). `None` in non-cluster runs ⇒ onboarding returns 502. Reuses
 	/// the public-server's `BackupSecrets` (kube or in-memory).
 	pub kube: Option<BackupSecrets>,
+	/// Bucket prober for the setup wizard (assume role + inspect S3). `Aws` in
+	/// prod; a `Fake` canned result in tests / the e2e binary.
+	pub prober: BucketProber,
 }
 
 impl AppState {
@@ -30,12 +35,14 @@ impl AppState {
 		};
 
 		let kube = BackupSecrets::try_default().await;
+		let prober = BucketProber::try_default().await;
 
 		Ok(Self {
 			db: database::init(),
 			ro_pool,
 			tailnet_directory,
 			kube,
+			prober,
 		})
 	}
 
@@ -51,6 +58,8 @@ impl AppState {
 			// In-memory secret store so onboarding (Secret creation) is exercised
 			// in tests without a cluster.
 			kube: Some(BackupSecrets::memory()),
+			// Fake prober (default empty) so the wizard probe works in tests.
+			prober: BucketProber::fake(crate::backup_probe::ProbeState::Empty),
 		})
 	}
 }

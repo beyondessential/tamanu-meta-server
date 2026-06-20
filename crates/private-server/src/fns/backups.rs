@@ -42,6 +42,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(get))
 		.routes(routes!(list))
 		.routes(routes!(create))
+		.routes(routes!(probe))
 		.routes(routes!(update))
 		.routes(routes!(set_schedule))
 		.routes(routes!(create_repo))
@@ -359,6 +360,72 @@ pub async fn create(
 		.await?;
 
 	Ok(Json(BackupConfigView::build(&mut conn, config).await?))
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct ProbeArgs {
+	pub bucket: String,
+	#[serde(default)]
+	pub prefix: String,
+	pub region: Option<String>,
+	/// Maintenance role to assume for the inspect (full read).
+	pub maintenance_role_arn: String,
+}
+
+/// Inspect-probe result for the wizard: what's at `bucket/prefix`, plus whether
+/// Canopy already has a config for it.
+#[derive(Serialize, ToSchema)]
+pub struct ProbeResponse {
+	#[schema(value_type = String)]
+	pub state: crate::backup_probe::ProbeState,
+	/// Present for `inaccessible`: the assume/list failure.
+	pub error: Option<String>,
+	/// A few keys, for the `other_content` warning.
+	pub object_sample: Vec<String>,
+	/// Group id if a config already exists for this exact bucket+prefix.
+	pub already_configured: Option<Uuid>,
+}
+
+/// Synchronous setup-wizard probe: assume the maintenance role and inspect the
+/// bucket/prefix (empty / kopia_repo / other_content / inaccessible), and report
+/// whether Canopy already has a config for it. Read-only; never mutates.
+#[utoipa::path(
+	post,
+	path = "/probe",
+	operation_id = "backups_probe",
+	tag = "backups",
+	security(("tailscale-admin" = [])),
+	request_body = ProbeArgs,
+	responses((status = 200, body = ProbeResponse)),
+)]
+pub async fn probe(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<ProbeArgs>,
+) -> Result<Json<ProbeResponse>> {
+	let result = state
+		.prober
+		.probe(
+			&args.bucket,
+			&args.prefix,
+			args.region.as_deref(),
+			&args.maintenance_role_arn,
+		)
+		.await?;
+
+	let mut conn = state.db.get().await?;
+	let already_configured = ServerGroupBackupConfig::list(&mut conn)
+		.await?
+		.into_iter()
+		.find(|c| c.bucket == args.bucket && c.prefix == args.prefix)
+		.map(|c| c.group_id);
+
+	Ok(Json(ProbeResponse {
+		state: result.state,
+		error: result.error,
+		object_sample: result.object_sample,
+		already_configured,
+	}))
 }
 
 /// Edit the non-structural config (region). Structural fields

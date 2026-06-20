@@ -4477,6 +4477,9 @@ name = "private-server"
 version = "6.6.6"
 dependencies = [
  "algae-cli",
+ "aws-config",
+ "aws-sdk-s3",
+ "aws-sdk-sts",
  "axum",
  "axum-client-ip",
  "axum-server-timing",

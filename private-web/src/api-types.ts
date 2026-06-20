@@ -187,6 +187,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backups/probe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Synchronous setup-wizard probe: assume the maintenance role and inspect the
+         *     bucket/prefix (empty / kopia_repo / other_content / inaccessible), and report
+         *     whether Canopy already has a config for it. Read-only; never mutates.
+         */
+        post: operations["backups_probe"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backups/request_now": {
         parameters: {
             query?: never;
@@ -2875,6 +2896,29 @@ export interface components {
             server_id: string;
             type: string;
         };
+        ProbeArgs: {
+            bucket: string;
+            /** @description Maintenance role to assume for the inspect (full read). */
+            maintenance_role_arn: string;
+            prefix?: string;
+            region?: string | null;
+        };
+        /**
+         * @description Inspect-probe result for the wizard: what's at `bucket/prefix`, plus whether
+         *     Canopy already has a config for it.
+         */
+        ProbeResponse: {
+            /**
+             * Format: uuid
+             * @description Group id if a config already exists for this exact bucket+prefix.
+             */
+            already_configured?: string | null;
+            /** @description Present for `inaccessible`: the assume/list failure. */
+            error?: string | null;
+            /** @description A few keys, for the `other_content` warning. */
+            object_sample: string[];
+            state: string;
+        };
         /**
          * @description Wire-shape mirror of [`problem_details::ProblemDetails`] for OpenAPI.
          *
@@ -3856,6 +3900,29 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BackupConfigSummary"][];
+                };
+            };
+        };
+    };
+    backups_probe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProbeArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProbeResponse"];
                 };
             };
         };

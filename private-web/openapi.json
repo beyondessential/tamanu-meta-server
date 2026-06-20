@@ -476,6 +476,42 @@
         ]
       }
     },
+    "/api/backups/probe": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Synchronous setup-wizard probe: assume the maintenance role and inspect the\nbucket/prefix (empty / kopia_repo / other_content / inaccessible), and report\nwhether Canopy already has a config for it. Read-only; never mutates.",
+        "operationId": "backups_probe",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProbeArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProbeResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/backups/request_now": {
       "post": {
         "tags": [
@@ -7248,6 +7284,66 @@
             "format": "uuid"
           },
           "type": {
+            "type": "string"
+          }
+        }
+      },
+      "ProbeArgs": {
+        "type": "object",
+        "required": [
+          "bucket",
+          "maintenance_role_arn"
+        ],
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "maintenance_role_arn": {
+            "type": "string",
+            "description": "Maintenance role to assume for the inspect (full read)."
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "region": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "ProbeResponse": {
+        "type": "object",
+        "description": "Inspect-probe result for the wizard: what's at `bucket/prefix`, plus whether\nCanopy already has a config for it.",
+        "required": [
+          "state",
+          "object_sample"
+        ],
+        "properties": {
+          "already_configured": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Group id if a config already exists for this exact bucket+prefix."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Present for `inaccessible`: the assume/list failure."
+          },
+          "object_sample": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "A few keys, for the `other_content` warning."
+          },
+          "state": {
             "type": "string"
           }
         }
