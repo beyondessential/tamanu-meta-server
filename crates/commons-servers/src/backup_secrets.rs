@@ -156,23 +156,65 @@ impl BackupSecrets {
 		}
 	}
 
-	/// Create-or-replace the named Secret's `key` with `value` (server-side
-	/// apply). Used by the jobs rotation loop to publish a rotated passphrase
-	/// over the existing Secret.
-	pub async fn put_password(&self, secret_name: &str, key: &str, value: &str) -> Result<()> {
+	/// Read all string keys of the named Secret — for the rotation dual-key state
+	/// machine (`password` + `password_next`). Missing Secret → Err; absent keys
+	/// are simply not in the map.
+	pub async fn read_keys(&self, secret_name: &str) -> Result<BTreeMap<String, String>> {
 		match self {
 			Self::Kube { client, namespace } => {
 				use k8s_openapi::api::core::v1::Secret;
+				use kube::Api;
+
+				let api: Api<Secret> = Api::namespaced(client.clone(), namespace);
+				let secret = api
+					.get(secret_name)
+					.await
+					.map_err(|e| AppError::Upstream(format!("secret get failed: {e}")))?;
+				let mut out = BTreeMap::new();
+				for (k, v) in secret.data.unwrap_or_default() {
+					let s = String::from_utf8(v.0).map_err(|_| {
+						AppError::Upstream(format!("secret {secret_name} key {k} not utf-8"))
+					})?;
+					out.insert(k, s);
+				}
+				Ok(out)
+			}
+			Self::Memory(store) => store
+				.lock()
+				.unwrap()
+				.get(secret_name)
+				.cloned()
+				.ok_or_else(|| AppError::Upstream(format!("secret get failed: {secret_name}"))),
+		}
+	}
+
+	/// Create-or-replace the named Secret to hold **exactly** `keys` (server-side
+	/// apply with force). Keys this manager owns but that are omitted from `keys`
+	/// are removed — so a rotation "promote" that writes only `{password}` cleans
+	/// up the leftover `password_next`. Used by the rotation dual-key dance.
+	pub async fn put_keys(&self, secret_name: &str, keys: &BTreeMap<String, String>) -> Result<()> {
+		match self {
+			Self::Kube { client, namespace } => {
+				use k8s_openapi::api::core::v1::Secret;
+				use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 				use kube::{
 					Api,
 					api::{Patch, PatchParams},
 				};
 
 				let api: Api<Secret> = Api::namespaced(client.clone(), namespace);
+				let secret = Secret {
+					metadata: ObjectMeta {
+						name: Some(secret_name.to_string()),
+						..Default::default()
+					},
+					string_data: Some(keys.clone()),
+					..Default::default()
+				};
 				api.patch(
 					secret_name,
 					&PatchParams::apply("canopy-backups").force(),
-					&Patch::Apply(secret_object(secret_name, key, value)),
+					&Patch::Apply(secret),
 				)
 				.await
 				.map_err(|e| AppError::Upstream(format!("secret apply failed: {e}")))?;
@@ -182,9 +224,7 @@ impl BackupSecrets {
 				store
 					.lock()
 					.unwrap()
-					.entry(secret_name.to_string())
-					.or_default()
-					.insert(key.to_string(), value.to_string());
+					.insert(secret_name.to_string(), keys.clone());
 				Ok(())
 			}
 		}

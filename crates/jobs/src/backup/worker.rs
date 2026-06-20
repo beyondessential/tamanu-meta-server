@@ -133,15 +133,6 @@ impl Worker {
 			.await
 			.map_err(|e| anyhow!("reading secret {secret_name}: {e}"))
 	}
-
-	/// Create-or-replace a group's repo passphrase Secret (the rotation loop
-	/// publishes a rotated passphrase here after a successful `change-password`).
-	pub async fn write_repo_password(&self, secret_name: &str, value: &str) -> Result<()> {
-		self.secrets
-			.put_password(secret_name, &self.cfg.password_key, value)
-			.await
-			.map_err(|e| anyhow!("writing secret {secret_name}: {e}"))
-	}
 }
 
 /// Releases a group's in-flight claim (and the concurrency permit) on drop.
