@@ -39,6 +39,10 @@ impl AppState {
 		})
 	}
 
+	/// Test/e2e-only AppState builder. Debug-only because it constructs the
+	/// debug-only in-memory Secret store and fake prober (`BackupSecrets::memory`
+	/// / `BucketProber::fake`), which don't exist in release builds.
+	#[cfg(debug_assertions)]
 	pub async fn from_db_url(url: &str) -> Result<Self> {
 		Ok(Self {
 			db: database::init_to(url),

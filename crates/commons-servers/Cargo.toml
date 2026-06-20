@@ -26,6 +26,8 @@ diesel = { workspace = true, features = [
 diesel-async.workspace = true
 http.workspace = true
 jiff.workspace = true
+k8s-openapi.workspace = true
+kube.workspace = true
 node-semver.workspace = true
 percent-encoding = "2.3.2"
 rcgen = "0.14.8"

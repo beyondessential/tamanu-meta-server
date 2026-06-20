@@ -1528,6 +1528,8 @@ dependencies = [
  "diesel-async",
  "http 1.4.2",
  "jiff",
+ "k8s-openapi",
+ "kube",
  "node-semver",
  "percent-encoding",
  "rcgen",
