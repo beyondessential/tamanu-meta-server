@@ -28,6 +28,22 @@ fn retention_json() -> serde_json::Value {
 	})
 }
 
+/// Assert a group has no backup config — a rejected upsert must not partially
+/// write. (A macro, not a fn, to avoid naming `axum_test::TestServer`.)
+macro_rules! assert_no_config {
+	($private:expr, $group:expr) => {{
+		let resp = $private
+			.post("/api/backups/get")
+			.json(&serde_json::json!({ "server_group_id": $group }))
+			.await;
+		resp.assert_status_ok();
+		assert!(
+			resp.json::<serde_json::Value>().is_null(),
+			"expected no config to be written"
+		);
+	}};
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn create_get_zero_state_and_full_view() {
 	commons_tests::server::run(async |mut conn, _public, private| {
@@ -294,7 +310,8 @@ async fn probe_reports_state_and_already_configured() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let group_id = seed_group(&mut conn).await;
 
-		// The test harness uses the fake prober (always Empty).
+		// The harness uses the bucket-name-derived fake prober; "fresh" has no
+		// marker, so it reads empty.
 		let resp = private
 			.post("/api/backups/probe")
 			.json(&serde_json::json!({
@@ -561,6 +578,152 @@ async fn upsert_missing_group_is_404() {
 			}))
 			.await;
 		resp.assert_status_not_found();
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn upsert_rejects_below_floor_retention() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group_id = seed_group(&mut conn).await;
+		let resp = private
+			.post("/api/backups/upsert")
+			.json(&serde_json::json!({
+				"server_group_id": group_id,
+				"bucket": "bes-iac",
+				"target_role_arn": "arn",
+				"maintenance_role_arn": "maint",
+				"retention": {
+					"keep_latest": 1, "keep_daily": 1, "keep_weekly": 1,
+					"keep_monthly": 1, "keep_annual": 0
+				},
+			}))
+			.await;
+		resp.assert_status_bad_request();
+		// Floor is checked before anything is written.
+		assert_no_config!(private, group_id);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn upsert_rejects_prefix_change() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group_id = seed_group(&mut conn).await;
+		let base = serde_json::json!({
+			"server_group_id": group_id,
+			"bucket": "bes-iac",
+			"prefix": "a/",
+			"target_role_arn": "arn",
+			"maintenance_role_arn": "maint",
+		});
+		private
+			.post("/api/backups/upsert")
+			.json(&base)
+			.await
+			.assert_status_ok();
+
+		// Same bucket, different prefix → prefix is part of the immutable identity.
+		let mut moved = base.clone();
+		moved["prefix"] = serde_json::json!("b/");
+		private
+			.post("/api/backups/upsert")
+			.json(&moved)
+			.await
+			.assert_status_conflict();
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn upsert_rejects_existing_repo() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group_id = seed_group(&mut conn).await;
+		// `…existing…` → the fake prober reports an existing kopia repo. The
+		// machine API never imports; that's an interactive wizard action.
+		let resp = private
+			.post("/api/backups/upsert")
+			.json(&serde_json::json!({
+				"server_group_id": group_id,
+				"bucket": "bes-existing-repo",
+				"target_role_arn": "arn",
+				"maintenance_role_arn": "maint",
+			}))
+			.await;
+		resp.assert_status_conflict();
+		assert_no_config!(private, group_id);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn upsert_rejects_other_content() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group_id = seed_group(&mut conn).await;
+		let resp = private
+			.post("/api/backups/upsert")
+			.json(&serde_json::json!({
+				"server_group_id": group_id,
+				"bucket": "bes-other-stuff",
+				"target_role_arn": "arn",
+				"maintenance_role_arn": "maint",
+			}))
+			.await;
+		resp.assert_status_conflict();
+		assert_no_config!(private, group_id);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn upsert_rejects_inaccessible_bucket() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group_id = seed_group(&mut conn).await;
+		let resp = private
+			.post("/api/backups/upsert")
+			.json(&serde_json::json!({
+				"server_group_id": group_id,
+				"bucket": "bes-denied",
+				"target_role_arn": "arn",
+				"maintenance_role_arn": "maint",
+			}))
+			.await;
+		// Inaccessible → AppError::Upstream → 502.
+		assert_eq!(resp.status_code().as_u16(), 502);
+		assert_no_config!(private, group_id);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn upsert_rejects_bucket_already_configured_for_another_group() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group_a = seed_group(&mut conn).await;
+		let group_b = seed_group(&mut conn).await;
+
+		private
+			.post("/api/backups/upsert")
+			.json(&serde_json::json!({
+				"server_group_id": group_a,
+				"bucket": "bes-shared",
+				"target_role_arn": "arn",
+				"maintenance_role_arn": "maint",
+			}))
+			.await
+			.assert_status_ok();
+
+		// A different group can't claim the same bucket/prefix.
+		let resp = private
+			.post("/api/backups/upsert")
+			.json(&serde_json::json!({
+				"server_group_id": group_b,
+				"bucket": "bes-shared",
+				"target_role_arn": "arn",
+				"maintenance_role_arn": "maint",
+			}))
+			.await;
+		resp.assert_status_conflict();
+		assert_no_config!(private, group_b);
 	})
 	.await;
 }
