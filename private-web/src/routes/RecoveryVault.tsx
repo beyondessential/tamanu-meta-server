@@ -64,11 +64,8 @@ export default function RecoveryVault() {
 
 			{!s.configured && (
 				<Alert severity="warning">
-					This server doesn't have the recovery recipient keys (
-					<code>CANOPY_RECOVERY_VAULT_KEYS</code>) configured, so the
-					verification ceremony can't run here. They're public keys — set the
-					same ones the backups pod uses. (The backups pod keeps its own copy;
-					this doesn't affect whether it's running.)
+					<code>CANOPY_RECOVERY_VAULT_KEYS</code> is not set on this server —
+					it's required on both the backups pod and private-server.
 				</Alert>
 			)}
 
