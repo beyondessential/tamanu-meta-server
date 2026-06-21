@@ -172,6 +172,20 @@ async fn run_init_op(worker: &Worker, config: &ServerGroupBackupConfig) -> anyho
 	)
 	.await?;
 
+	// Ensure the bucket's Intelligent-Tiering .storageconfig exists (pulumi
+	// normally writes it; create as a fallback, never overwrite). Best-effort —
+	// it only affects S3 tiering, not backup correctness.
+	if let Err(e) = super::storageconfig::ensure(
+		&config.maintenance_role_arn,
+		&config.bucket,
+		&config.prefix,
+		config.region.as_deref(),
+	)
+	.await
+	{
+		tracing::warn!(group = %config.group_id, ".storageconfig ensure failed (non-fatal): {e:#}");
+	}
+
 	// Import: Canopy never persists the operator's passphrase — immediately
 	// rotate it to a generated one (a Canopy import is a hard break for any
 	// existing consumers, which is intended).

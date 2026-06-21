@@ -190,6 +190,10 @@ export async function startStack(opts: StartOptions = {}): Promise<StackHandle> 
 				// No cluster in e2e: use the in-memory backup Secret store so
 				// onboarding (Secret creation) works against the real binary.
 				CANOPY_BACKUP_SECRETS_MEMORY: "1",
+				// No AWS in e2e: fake bucket prober — wizard state is derived from
+				// the bucket name (…existing… → kopia repo, …other… → other content,
+				// …denied… → inaccessible, else empty).
+				CANOPY_BACKUP_PROBER_FAKE: "1",
 				// Needed by mint_enrollment to build the ticket's api_url; the
 				// setup-instructions flow auto-mints on an unregistered server.
 				PUBLIC_URL: process.env.PUBLIC_URL ?? "https://api.e2e.invalid",

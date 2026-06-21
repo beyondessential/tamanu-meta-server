@@ -1,3 +1,4 @@
+pub mod backup_probe;
 pub mod fns;
 pub mod openapi;
 pub mod spa;

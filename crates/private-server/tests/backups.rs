@@ -290,6 +290,54 @@ async fn passphrase_mode_requires_a_passphrase() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn probe_reports_state_and_already_configured() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group_id = seed_group(&mut conn).await;
+
+		// The test harness uses the fake prober (always Empty).
+		let resp = private
+			.post("/api/backups/probe")
+			.json(&serde_json::json!({
+				"bucket": "fresh",
+				"prefix": "",
+				"maintenance_role_arn": "maint",
+			}))
+			.await;
+		resp.assert_status_ok();
+		let body: serde_json::Value = resp.json();
+		assert_eq!(body["state"], "empty");
+		assert!(body["already_configured"].is_null());
+
+		// A config for this bucket+prefix → the probe reports its group.
+		private
+			.post("/api/backups/create")
+			.json(&serde_json::json!({
+				"server_group_id": group_id,
+				"bucket": "taken",
+				"target_role_arn": "arn",
+				"maintenance_role_arn": "maint-arn",
+				"mode": "from_birth",
+			}))
+			.await
+			.assert_status_ok();
+		let resp = private
+			.post("/api/backups/probe")
+			.json(&serde_json::json!({
+				"bucket": "taken",
+				"prefix": "",
+				"maintenance_role_arn": "maint",
+			}))
+			.await;
+		resp.assert_status_ok();
+		assert_eq!(
+			resp.json::<serde_json::Value>()["already_configured"],
+			group_id.to_string()
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn request_now_upserts_and_cancel_deletes() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		// Server in a group so we can read the pending request back via stats.

@@ -37,6 +37,9 @@ async fn private_with_directory(url: &str, directory: TailnetDirectory) -> TestS
 			ro_pool: None,
 			tailnet_directory: Some(directory),
 			kube: None,
+			prober: private_server::backup_probe::BucketProber::fake(
+				private_server::backup_probe::ProbeState::Empty,
+			),
 		})
 		.unwrap(),
 		ClientIpSource::RightmostForwarded,
