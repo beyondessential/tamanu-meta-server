@@ -137,7 +137,6 @@ export type BackupConfigView = Solidify<Schemas["BackupConfigView"]>;
 export type BackupConfigSummary = Solidify<Schemas["BackupConfigSummary"]>;
 export type ScheduleView = Solidify<Schemas["ScheduleView"]>;
 export type RetentionPolicy = Solidify<Schemas["RetentionPolicy"]>;
-export type RevealEscrowResponse = Solidify<Schemas["RevealEscrowResponse"]>;
 export type BackupStatsView = Solidify<Schemas["BackupStatsView"]>;
 export type BackupRepoStats = Solidify<Schemas["BackupRepoStats"]>;
 export type BackupRun = Solidify<Schemas["BackupRun"]>;
@@ -151,7 +150,7 @@ export type ServerBackupCapabilityView = Solidify<
 // custom Text serializer, so utoipa emits `string`). Narrow them in the UI so
 // switch/label maps are exhaustive.
 export type BackupRepoMode = "from_birth" | "passphrase";
-export type BackupConfigStatus = "provisioning" | "escrow_pending" | "ready";
+export type BackupConfigStatus = "provisioning" | "ready";
 
 // ── Pagination wrapper ─────────────────────────────────────────────────────
 //
@@ -344,7 +343,6 @@ export const AUTOMATION_RESOLVER_LABEL = "the healthcheck recovering";
 /// Display label per backup-repo lifecycle status.
 export const BACKUP_STATUS_LABEL: Record<BackupConfigStatus, string> = {
 	provisioning: "Provisioning",
-	escrow_pending: "Escrow pending",
 	ready: "Ready",
 };
 
@@ -354,15 +352,12 @@ export const BACKUP_STATUS_INTENT: Record<
 	"info" | "warning" | "success"
 > = {
 	provisioning: "info",
-	escrow_pending: "warning",
 	ready: "success",
 };
 
 /// One-line explanation of what each status means for the operator.
 export const BACKUP_STATUS_HELP: Record<BackupConfigStatus, string> = {
 	provisioning: "Repository is being created; backups are dormant until ready.",
-	escrow_pending:
-		"Repository created. Reveal the passphrase and save it to Bitwarden to activate backups.",
 	ready: "Backups are active for this group.",
 };
 

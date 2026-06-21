@@ -14,6 +14,7 @@ authors = [
 axum = { workspace = true, features = ["json", "macros"] }
 axum-client-ip = { version = "1.3.1", features = ["forwarded-header"] }
 axum-server-timing = "3.0.1"
+chbs = "0.1.1"
 commons-errors = { path = "../commons-errors" }
 commons-types = { path = "../commons-types" }
 database = { path = "../database" }
@@ -26,6 +27,8 @@ diesel = { workspace = true, features = [
 diesel-async.workspace = true
 http.workspace = true
 jiff.workspace = true
+k8s-openapi.workspace = true
+kube.workspace = true
 node-semver.workspace = true
 percent-encoding = "2.3.2"
 rcgen = "0.14.8"

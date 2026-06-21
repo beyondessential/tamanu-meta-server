@@ -52,26 +52,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/backups/ack_escrow": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Acknowledge the Bitwarden escrow: flip `escrow_pending → ready`, stamping
-         *     `escrow_acked_at/by`. 409 unless currently `escrow_pending`.
-         */
-        post: operations["backups_ack_escrow"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/backups/cancel_request": {
         parameters: {
             query?: never;
@@ -221,27 +201,6 @@ export interface paths {
          *     `(server_id, type, purpose)`. Idempotent (re-request refreshes the row).
          */
         post: operations["backups_request_now"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/backups/reveal_escrow": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Reveal-once passphrase for a from-birth repo. Only valid while
-         *     `escrow_pending`; re-callable until acked. Reads the k8s Secret named by
-         *     `repo_password_ref` (502 on read failure).
-         */
-        post: operations["backups_reveal_escrow"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2025,17 +1984,11 @@ export interface components {
             server_group_id: string;
             status: string;
         };
-        /**
-         * @description Full config + lifecycle for a group. Never includes the passphrase value —
-         *     only `reveal_escrow` does.
-         */
+        /** @description Full config + lifecycle for a group. Never includes the passphrase value. */
         BackupConfigView: {
             bucket: string;
             /** Format: date-time */
             created_at: string;
-            /** Format: date-time */
-            escrow_acked_at?: string | null;
-            escrow_acked_by?: string | null;
             last_init_error?: string | null;
             maintenance_role_arn: string;
             mode: string;
@@ -3021,12 +2974,6 @@ export interface components {
             /** Format: int32 */
             keep_weekly: number;
         };
-        RevealEscrowResponse: {
-            /** @description Shown once; the UI must not persist it. */
-            passphrase: string;
-            /** @description The Secret name, for the "saved where" note. */
-            repo_password_ref: string;
-        };
         /**
          * @description Outcome of a reported backup/restore run.
          * @enum {string}
@@ -3700,45 +3647,6 @@ export interface operations {
             };
         };
     };
-    backups_ack_escrow: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["GroupArgs"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BackupConfigView"];
-                };
-            };
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-        };
-    };
     backups_cancel_request: {
         parameters: {
             query?: never;
@@ -3972,53 +3880,6 @@ export interface operations {
                 content?: never;
             };
             404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-        };
-    };
-    backups_reveal_escrow: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["GroupArgs"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RevealEscrowResponse"];
-                };
-            };
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-            502: {
                 headers: {
                     [name: string]: unknown;
                 };

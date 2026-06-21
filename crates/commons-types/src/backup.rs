@@ -136,13 +136,13 @@ text_enum! {
 }
 
 text_enum! {
-	/// How a group's repo passphrase is sourced. Canopy owns every passphrase
-	/// Secret either way. `FromBirth` means Canopy generates the passphrase for a
-	/// *new* repo, then the operator escrows it via the reveal-once flow
-	/// (`escrow_pending`). `Passphrase` means the operator supplies the passphrase
-	/// of an *existing* repo to connect to it; Canopy stores it and skips escrow
-	/// (straight to `Ready`). Canopy never lets the operator choose the passphrase
-	/// for a repo it creates — that is always from-birth.
+	/// How a group's repo passphrase is sourced. Canopy owns + rotates every
+	/// passphrase Secret either way (no human copy, no escrow). `FromBirth` means
+	/// Canopy generates the passphrase for a *new* repo. `Passphrase` means the
+	/// operator supplies the passphrase of an *existing* repo to connect to it,
+	/// after which Canopy rotates it to a generated one. Canopy never lets the
+	/// operator choose the passphrase for a repo it creates — that is always
+	/// from-birth.
 	pub enum BackupRepoMode {
 		FromBirth = "from_birth",
 		Passphrase = "passphrase",
@@ -155,15 +155,14 @@ text_enum! {
 	/// Lifecycle state of a group's backup repo. Backups stay dormant (the
 	/// endpoints 412/409) until `Ready`.
 	pub enum BackupConfigStatus {
-		/// Init Job running.
+		/// Repo init running.
 		Provisioning = "provisioning",
-		/// Repo created, awaiting the operator's Bitwarden-escrow ack.
-		EscrowPending = "escrow_pending",
-		/// Authorized: config set + repo created + escrow acknowledged.
+		/// Authorized: config set + repo created. (No escrow step — Canopy owns +
+		/// rotates the passphrase; nobody holds a copy.)
 		Ready = "ready",
 	}
 	default = Provisioning;
-	error BackupConfigStatusFromStringError = "invalid backup config status; expected one of: provisioning, escrow_pending, ready";
+	error BackupConfigStatusFromStringError = "invalid backup config status; expected one of: provisioning, ready";
 }
 
 /// A named, client-side backup procedure that ends in a type-tagged kopia
@@ -277,10 +276,7 @@ mod tests {
 			"restore".parse::<BackupPurpose>().unwrap(),
 			BackupPurpose::Restore
 		);
-		assert_eq!(
-			BackupConfigStatus::EscrowPending.to_string(),
-			"escrow_pending"
-		);
+		assert_eq!(BackupConfigStatus::Ready.to_string(), "ready");
 		assert!("nope".parse::<RunOutcome>().is_err());
 	}
 

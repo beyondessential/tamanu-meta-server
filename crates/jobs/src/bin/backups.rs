@@ -23,6 +23,7 @@ use lloggs::{LoggingArgs, PreArgs};
 use miette::{IntoDiagnostic, miette};
 use tracing::info;
 
+use commons_servers::backup_secrets::BackupSecrets;
 use jobs::backup::creds_server::CredsServer;
 use jobs::backup::worker::{Cfg, Worker};
 
@@ -47,18 +48,19 @@ async fn main() -> miette::Result<()> {
 
 	// Shared worker state for the in-process kopia loops, built once.
 	let pool = database::init();
-	let kube = kube::Client::try_default()
+	let secrets = BackupSecrets::try_default()
 		.await
-		.map_err(|e| miette!("kube client init failed: {e}"))?;
+		.ok_or_else(|| miette!("secret store unavailable; cannot read/rotate repo passphrases"))?;
 	let creds = CredsServer::start()
 		.await
 		.map_err(|e| miette!("container-creds endpoint init failed: {e}"))?;
-	let worker = Worker::new(pool, kube, Cfg::from_env(), creds);
+	let worker = Worker::new(pool, secrets, Cfg::from_env(), creds);
 
 	let preflight = jobs::backup::preflight::spawn();
 	let maintenance = jobs::backup::maintenance::spawn(worker.clone());
-	let inspection = jobs::backup::inspection::spawn(worker);
+	let inspection = jobs::backup::inspection::spawn(worker.clone());
+	let rotation = jobs::backup::rotation::spawn(worker);
 	let s3_metrics = jobs::backup::s3_metrics::spawn();
-	tokio::try_join!(preflight, maintenance, inspection, s3_metrics).into_diagnostic()?;
+	tokio::try_join!(preflight, maintenance, inspection, rotation, s3_metrics).into_diagnostic()?;
 	Ok(())
 }

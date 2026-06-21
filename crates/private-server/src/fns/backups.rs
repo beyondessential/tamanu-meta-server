@@ -1,16 +1,14 @@
 //! Operator-facing backup-credentials endpoints (private-server, admin SPA).
 //!
 //! These are thin wrappers over the `database::backups` models. They drive the
-//! group backup lifecycle (`provisioning → escrow_pending → ready`), the
-//! reveal-once Bitwarden escrow, per-`(group,type)` schedule/retention editing,
+//! group backup lifecycle (`provisioning → ready` — no escrow step; Canopy owns
+//! and rotates the passphrase), per-`(group,type)` schedule/retention editing,
 //! the one-off "backup now" request, and the read-only stats panel.
 //!
-//! This component owns ONLY the operator surface: it never talks to AWS, kopia,
-//! or k8s to *create* a repo. `create_repo` records intent (`provisioning`) for
-//! the jobs-side init Job, which is the writer of the observable
-//! `status`/`last_init_error` transitions. The one exception is `reveal_escrow`,
-//! which reads (never writes) the repo-password Secret via the kube client on
-//! `AppState`.
+//! At onboarding Canopy creates the repo-passphrase Secret via the kube client
+//! on `AppState` (generated for from-birth, operator-supplied for passphrase
+//! mode). The jobs-side init op then creates/connects the kopia repo and is the
+//! writer of the observable `status`/`last_init_error` transitions.
 
 use axum::Json;
 use axum::extract::State;
@@ -27,7 +25,6 @@ use database::{
 	ServerGroupBackupSchedule, server_groups::ServerGroup,
 };
 use jiff::Timestamp;
-use public_server::state::BackupSecrets;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
@@ -48,8 +45,6 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(update))
 		.routes(routes!(set_schedule))
 		.routes(routes!(create_repo))
-		.routes(routes!(reveal_escrow))
-		.routes(routes!(ack_escrow))
 		.routes(routes!(request_now))
 		.routes(routes!(cancel_request))
 		.routes(routes!(stats))
@@ -72,8 +67,7 @@ pub struct ScheduleView {
 	pub retention: Option<RetentionPolicy>,
 }
 
-/// Full config + lifecycle for a group. Never includes the passphrase value —
-/// only `reveal_escrow` does.
+/// Full config + lifecycle for a group. Never includes the passphrase value.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct BackupConfigView {
 	pub server_group_id: Uuid,
@@ -87,8 +81,6 @@ pub struct BackupConfigView {
 	#[schema(value_type = String)]
 	pub status: BackupConfigStatus,
 	pub last_init_error: Option<String>,
-	pub escrow_acked_at: Option<Timestamp>,
-	pub escrow_acked_by: Option<String>,
 	pub created_at: Timestamp,
 	pub updated_at: Timestamp,
 	/// Per-`(group,type)` schedule + retention overrides.
@@ -119,8 +111,6 @@ impl BackupConfigView {
 			mode: config.mode,
 			status: config.status,
 			last_init_error: config.last_init_error,
-			escrow_acked_at: config.escrow_acked_at,
-			escrow_acked_by: config.escrow_acked_by,
 			created_at: config.created_at,
 			updated_at: config.updated_at,
 			schedules,
@@ -184,14 +174,6 @@ pub struct SetScheduleArgs {
 	pub expected_interval: Option<PgDuration>,
 	/// None = inherit the type default. A present policy is floor-validated.
 	pub retention: Option<RetentionPolicy>,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct RevealEscrowResponse {
-	/// Shown once; the UI must not persist it.
-	pub passphrase: String,
-	/// The Secret name, for the "saved where" note.
-	pub repo_password_ref: String,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -341,7 +323,7 @@ pub async fn create(
 	// Canopy owns the passphrase Secret for both modes: generate one for
 	// from-birth, take the operator's for passphrase mode.
 	let passphrase = match args.mode {
-		BackupRepoMode::FromBirth => generate_repo_passphrase(),
+		BackupRepoMode::FromBirth => commons_servers::backup_secrets::generate_passphrase(),
 		BackupRepoMode::Passphrase => {
 			let p = args.passphrase.clone().unwrap_or_default();
 			if p.is_empty() {
@@ -377,22 +359,6 @@ pub async fn create(
 		.await?;
 
 	Ok(Json(BackupConfigView::build(&mut conn, config).await?))
-}
-
-/// Generate a strong from-birth repo passphrase: 8 words from the EFF large
-/// wordlist (~103 bits), hyphen-separated — high entropy but still transcribable
-/// for the operator to escrow (reveal-once → Bitwarden).
-fn generate_repo_passphrase() -> String {
-	use chbs::{config::BasicConfig, prelude::*, probability::Probability, word::WordList};
-
-	let config = BasicConfig {
-		words: 8,
-		word_provider: WordList::builtin_eff_large().sampler(),
-		separator: "-".into(),
-		capitalize_first: Probability::Never,
-		capitalize_words: Probability::Never,
-	};
-	config.to_scheme().generate()
 }
 
 /// Edit the non-structural config (region). Structural fields
@@ -494,85 +460,6 @@ pub async fn create_repo(
 	}
 	let config =
 		ServerGroupBackupConfig::mark_provisioning(&mut conn, args.server_group_id).await?;
-	Ok(Json(BackupConfigView::build(&mut conn, config).await?))
-}
-
-/// Reveal-once passphrase for a from-birth repo. Only valid while
-/// `escrow_pending`; re-callable until acked. Reads the k8s Secret named by
-/// `repo_password_ref` (502 on read failure).
-#[utoipa::path(
-	post,
-	path = "/reveal_escrow",
-	operation_id = "backups_reveal_escrow",
-	tag = "backups",
-	security(("tailscale-admin" = [])),
-	request_body = GroupArgs,
-	responses(
-		(status = 200, body = RevealEscrowResponse),
-		(status = 404, body = ProblemDetailsSchema),
-		(status = 409, body = ProblemDetailsSchema),
-		(status = 502, body = ProblemDetailsSchema),
-	),
-)]
-pub async fn reveal_escrow(
-	State(state): State<AppState>,
-	_admin: TailscaleAdmin,
-	Json(args): Json<GroupArgs>,
-) -> Result<Json<RevealEscrowResponse>> {
-	let mut conn = state.db.get().await?;
-	let config = require_config(&mut conn, args.server_group_id).await?;
-	if config.mode != BackupRepoMode::FromBirth {
-		return Err(AppError::Conflict(
-			"escrow reveal only applies to from-birth repos".into(),
-		));
-	}
-	if config.status != BackupConfigStatus::EscrowPending {
-		return Err(AppError::Conflict(
-			"escrow reveal only available while escrow_pending".into(),
-		));
-	}
-	let kube: Option<BackupSecrets> = state.kube.clone();
-	let kube = kube.ok_or_else(|| {
-		AppError::Upstream("kube client not configured; cannot read escrow Secret".into())
-	})?;
-	let passphrase = kube
-		.read_password(&config.repo_password_ref, REPO_PASSWORD_SECRET_KEY)
-		.await?;
-	Ok(Json(RevealEscrowResponse {
-		passphrase,
-		repo_password_ref: config.repo_password_ref,
-	}))
-}
-
-/// Acknowledge the Bitwarden escrow: flip `escrow_pending → ready`, stamping
-/// `escrow_acked_at/by`. 409 unless currently `escrow_pending`.
-#[utoipa::path(
-	post,
-	path = "/ack_escrow",
-	operation_id = "backups_ack_escrow",
-	tag = "backups",
-	security(("tailscale-admin" = [])),
-	request_body = GroupArgs,
-	responses(
-		(status = 200, body = BackupConfigView),
-		(status = 404, body = ProblemDetailsSchema),
-		(status = 409, body = ProblemDetailsSchema),
-	),
-)]
-pub async fn ack_escrow(
-	State(state): State<AppState>,
-	TailscaleAdmin(admin): TailscaleAdmin,
-	Json(args): Json<GroupArgs>,
-) -> Result<Json<BackupConfigView>> {
-	let mut conn = state.db.get().await?;
-	let config = require_config(&mut conn, args.server_group_id).await?;
-	if config.status != BackupConfigStatus::EscrowPending {
-		return Err(AppError::Conflict(
-			"escrow can only be acknowledged while escrow_pending".into(),
-		));
-	}
-	let config =
-		ServerGroupBackupConfig::ack_escrow(&mut conn, args.server_group_id, &admin.login).await?;
 	Ok(Json(BackupConfigView::build(&mut conn, config).await?))
 }
 

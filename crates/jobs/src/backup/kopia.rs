@@ -377,6 +377,55 @@ pub async fn connect(env: &KopiaEnv, bucket: &str, prefix: &str, region: &str) -
 	Ok(())
 }
 
+/// Rotate the repo passphrase to `new_password`. kopia `change-password` is an
+/// O(1) metadata op (it re-wraps the `kopia.repository` format blob around the
+/// unchanged master key — no content is re-encrypted), so this is cheap enough
+/// to run frequently. `env.password` must be the *current* passphrase; the new
+/// one is passed via `KOPIA_NEW_PASSWORD` (not argv, to keep it out of the
+/// process list).
+///
+/// We verify by reconnecting with the new passphrase before returning Ok. The
+/// two format-blob writes aren't atomic (kopia #3049): a failure between them
+/// can leave the repo openable by *neither* passphrase, so the caller MUST keep
+/// the old passphrase recorded and only publish the new one to the Secret once
+/// this returns Ok.
+pub async fn change_password(
+	env: &KopiaEnv,
+	bucket: &str,
+	prefix: &str,
+	region: &str,
+	new_password: &str,
+) -> Result<()> {
+	connect(env, bucket, prefix, region)
+		.await
+		.context("change-password: connect with current passphrase failed")?;
+
+	let mut cmd = Command::new("kopia");
+	cmd.args(["repository", "change-password"]);
+	env.apply(&mut cmd);
+	cmd.env("KOPIA_NEW_PASSWORD", new_password);
+	let out = cmd
+		.output()
+		.await
+		.context("failed to spawn kopia repository change-password")?;
+	if !out.status.success() {
+		bail!(
+			"kopia repository change-password failed: {}",
+			short_stderr(&out.stderr)
+		);
+	}
+
+	// Verify the rotation took: reconnect with the NEW passphrase.
+	let verify_env = KopiaEnv {
+		password: new_password.to_string(),
+		..env.clone()
+	};
+	connect(&verify_env, bucket, prefix, region)
+		.await
+		.context("change-password: verify reconnect with the new passphrase failed")?;
+	Ok(())
+}
+
 /// Apply a retention policy to a kopia policy target (`--global` or a source).
 async fn apply_policy(env: &KopiaEnv, target: &str, policy: &Policy) -> Result<()> {
 	let flags = policy.flags();

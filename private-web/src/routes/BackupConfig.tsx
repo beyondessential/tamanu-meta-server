@@ -122,8 +122,8 @@ function ConfigForm({
 				retention,
 			});
 			if (isCreate) {
-				// From-birth provisions → escrow; passphrase provisions → ready
-				// (no escrow). Either way this kicks repo init.
+				// Kick repo init (provisioning → ready). Canopy owns + rotates the
+				// passphrase, so there's no escrow step either way.
 				await createRepo.call({ server_group_id: groupId });
 			}
 			navigate(`/groups/${groupId}/backups`);
@@ -211,7 +211,7 @@ function ConfigForm({
 					disabled={pending || !isCreate}
 					helperText={
 						isCreate
-							? "From birth: Canopy generates the passphrase for a new repo (escrow flow). Existing repository: connect by supplying its passphrase."
+							? "From birth: Canopy generates the passphrase for a new repo. Existing repository: connect by supplying its passphrase."
 							: "Mode is fixed after creation."
 					}
 				>

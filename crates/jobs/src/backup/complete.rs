@@ -34,27 +34,17 @@ pub(crate) async fn complete_maint(
 }
 
 /// Advance a group's backup config after its init op finishes. On success the
-/// next status depends on how the passphrase is sourced: `from_birth` repos
-/// still need the operator to escrow the canopy-generated passphrase
-/// (`escrow_pending`), whereas `passphrase` repos (operator-supplied) skip
-/// escrow and go straight to `ready`. On failure we surface the error and leave
-/// the row in `provisioning`.
+/// repo goes straight to `ready` (Canopy owns + rotates the passphrase — there
+/// is no operator escrow step for either mode). On failure we surface the error
+/// and leave the row in `provisioning`.
 pub(crate) async fn complete_init(
 	db: &mut AsyncPgConnection,
 	group_id: Uuid,
 	ok: bool,
 	error: Option<&str>,
 ) -> Result<(), String> {
-	use commons_types::backup::BackupRepoMode;
 	if ok {
-		let config = ServerGroupBackupConfig::get_required(db, group_id)
-			.await
-			.map_err(|e| e.to_string())?;
-		let next = match config.mode {
-			BackupRepoMode::FromBirth => BackupConfigStatus::EscrowPending,
-			BackupRepoMode::Passphrase => BackupConfigStatus::Ready,
-		};
-		ServerGroupBackupConfig::set_status(db, group_id, next)
+		ServerGroupBackupConfig::set_status(db, group_id, BackupConfigStatus::Ready)
 			.await
 			.map_err(|e| e.to_string())?;
 	} else {
@@ -204,11 +194,11 @@ mod tests {
 					.await
 					.expect("complete_init ok");
 
-				// from_birth → escrow_pending.
+				// init success → ready (no escrow step).
 				let config = ServerGroupBackupConfig::get_required(&mut conn, group_id)
 					.await
 					.unwrap();
-				assert_eq!(config.status, BackupConfigStatus::EscrowPending);
+				assert_eq!(config.status, BackupConfigStatus::Ready);
 				assert!(config.last_init_error.is_none());
 			})
 			.await;

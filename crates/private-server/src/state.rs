@@ -10,9 +10,9 @@ pub struct AppState {
 	pub db: Db,
 	pub ro_pool: Option<PgPool>,
 	pub tailnet_directory: Option<TailnetDirectory>,
-	/// Kube-backed reader for the per-group repo-password Secrets. `None` in
-	/// tests / non-cluster runs ⇒ the admin escrow-reveal endpoint returns 502.
-	/// Reuses the public-server's narrow Secret-read wrapper.
+	/// Secret store for the per-group repo-password Secrets (onboarding creates
+	/// them here). `None` in non-cluster runs ⇒ onboarding returns 502. Reuses
+	/// the public-server's `BackupSecrets` (kube or in-memory).
 	pub kube: Option<BackupSecrets>,
 }
 
@@ -39,13 +39,17 @@ impl AppState {
 		})
 	}
 
+	/// Test/e2e-only AppState builder. Debug-only because it constructs the
+	/// debug-only in-memory Secret store and fake prober (`BackupSecrets::memory`
+	/// / `BucketProber::fake`), which don't exist in release builds.
+	#[cfg(debug_assertions)]
 	pub async fn from_db_url(url: &str) -> Result<Self> {
 		Ok(Self {
 			db: database::init_to(url),
 			ro_pool: None,
 			tailnet_directory: None,
-			// In-memory secret store so onboarding (Secret creation) + escrow
-			// reveal are exercised in tests without a cluster.
+			// In-memory secret store so onboarding (Secret creation) is exercised
+			// in tests without a cluster.
 			kube: Some(BackupSecrets::memory()),
 		})
 	}

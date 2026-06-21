@@ -158,3 +158,13 @@ action items §1–§3, §5 are the source of truth; treat them as done.
   revisiting public-server's device-cred response shape. Flagged for picture
   consistency only.
 - **§1–§3, §5 unchanged** (byte-identical to v1).
+
+**2026-06-20 — NEW ops action (passphrase rotation):**
+- ⚠️ **`canopy-jobs` SA now needs WRITE on secrets** (`create`/`update`/`patch`,
+  on top of the existing `get`). Why: the backups pod rotates each repo's
+  passphrase regularly (forward protection) — after `kopia change-password` it
+  writes the new passphrase back to the group's k8s Secret (dual-key
+  `password`/`password_next`, server-side apply, field-manager `canopy-backups`).
+  Read-only `get secrets` no longer covers the rotation path.
+- No other ops change; rotation cadence is a canopy env
+  (`CANOPY_BACKUP_ROTATION_DAYS`, default 7).

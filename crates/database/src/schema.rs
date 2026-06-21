@@ -326,8 +326,6 @@ diesel::table! {
 		updated_at -> Timestamptz,
 		mode -> Text,
 		last_init_error -> Nullable<Text>,
-		escrow_acked_at -> Nullable<Timestamptz>,
-		escrow_acked_by -> Nullable<Text>,
 	}
 }
 
