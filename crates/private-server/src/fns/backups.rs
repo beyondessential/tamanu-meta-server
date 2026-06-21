@@ -392,8 +392,16 @@ pub async fn create(
 		},
 	)
 	.await?;
-	kube.create_password(&repo_password_ref, REPO_PASSWORD_SECRET_KEY, &passphrase)
-		.await?;
+	// Roll back the config row if the Secret can't be created, so onboarding is
+	// all-or-nothing — a failed Secret create must not leave a half-created config
+	// stuck in `provisioning` with no passphrase.
+	if let Err(e) = kube
+		.create_password(&repo_password_ref, REPO_PASSWORD_SECRET_KEY, &passphrase)
+		.await
+	{
+		let _ = ServerGroupBackupConfig::delete(&mut conn, args.server_group_id).await;
+		return Err(e);
+	}
 
 	Ok(Json(BackupConfigView::build(&mut conn, config).await?))
 }
