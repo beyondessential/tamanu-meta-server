@@ -267,6 +267,29 @@ test.describe("backups ready: stats + backup-now", () => {
 			page.getByRole("button", { name: /retry repo creation/i }),
 		).toBeVisible();
 	});
+
+	test("admin can delete (decommission) the config", async ({ page, sql }) => {
+		const group = await seedServerGroup(sql, { name: "del-group" });
+		await seedServerGroupBackupConfig(sql, {
+			groupId: group.id,
+			status: "ready",
+		});
+
+		await page.goto(`/groups/${group.id}/backups`);
+		// Header delete → confirm dialog → confirm.
+		await page.getByRole("button", { name: /^delete$/i }).click();
+		const dialog = page.getByRole("dialog");
+		await expect(dialog).toBeVisible();
+		await dialog.getByRole("button", { name: /^delete$/i }).click();
+
+		// Config is gone → back to the zero-state.
+		await expect(page.getByText(/backups not set up/i)).toBeVisible();
+		const rows = await sql.query(
+			`SELECT 1 FROM server_group_backup_config WHERE group_id = $1`,
+			[group.id],
+		);
+		expect(rows).toHaveLength(0);
+	});
 });
 
 test.describe("server backup capabilities", () => {
