@@ -36,6 +36,7 @@ import ServerDetail from "./routes/ServerDetail";
 import ServerEdit from "./routes/ServerEdit";
 import ArchivedList from "./routes/ArchivedList";
 import Servers from "./routes/Servers";
+import Settings from "./routes/Settings";
 import Sql from "./routes/Sql";
 import UngroupedServersList from "./routes/UngroupedServersList";
 import VersionDetail from "./routes/VersionDetail";
@@ -54,8 +55,7 @@ const BASE_NAV: NavItem[] = [
 	{ label: "Versions", to: "/versions" },
 	{ label: "Devices", to: "/devices" },
 	{ label: "Bestool", to: "/bestool" },
-	{ label: "Recovery vault", to: "/backups/recovery" },
-	{ label: "Admins", to: "/admins" },
+	{ label: "Settings", to: "/settings" },
 ];
 
 export default function App() {
@@ -180,7 +180,6 @@ export default function App() {
 					<Route path="/incidents/:id" element={<IncidentDetail />} />
 					<Route path="/healthchecks" element={<Healthchecks />} />
 					<Route path="/healthchecks/:checkName" element={<HealthcheckDetail />} />
-					<Route path="/admins" element={<Admins />} />
 					<Route path="/versions" element={<Versions />} />
 					<Route path="/versions/:version" element={<VersionDetail />} />
 					<Route path="/servers" element={<Servers />}>
@@ -205,7 +204,14 @@ export default function App() {
 						path="/groups/:id/backups/config"
 						element={<BackupConfig />}
 					/>
-					<Route path="/backups/recovery" element={<RecoveryVault />} />
+					<Route path="/settings" element={<Settings />}>
+						<Route
+							index
+							element={<Navigate to="/settings/admins" replace />}
+						/>
+						<Route path="admins" element={<Admins />} />
+						<Route path="recovery" element={<RecoveryVault />} />
+					</Route>
 					<Route path="/devices" element={<Devices />}>
 						<Route index element={<DevicesSearch />} />
 						<Route

@@ -12,7 +12,7 @@ test.describe("Recovery vault ceremony", () => {
 	test("shows status, lists the recipient, and runs a challenge", async ({
 		page,
 	}) => {
-		await page.goto("/backups/recovery");
+		await page.goto("/settings/recovery");
 
 		await expect(
 			page.getByRole("heading", { name: /recovery vault/i }),
