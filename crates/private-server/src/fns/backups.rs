@@ -1,16 +1,14 @@
 //! Operator-facing backup-credentials endpoints (private-server, admin SPA).
 //!
 //! These are thin wrappers over the `database::backups` models. They drive the
-//! group backup lifecycle (`provisioning → escrow_pending → ready`), the
-//! reveal-once Bitwarden escrow, per-`(group,type)` schedule/retention editing,
+//! group backup lifecycle (`provisioning → ready` — no escrow step; Canopy owns
+//! and rotates the passphrase), per-`(group,type)` schedule/retention editing,
 //! the one-off "backup now" request, and the read-only stats panel.
 //!
-//! This component owns ONLY the operator surface: it never talks to AWS, kopia,
-//! or k8s to *create* a repo. `create_repo` records intent (`provisioning`) for
-//! the jobs-side init Job, which is the writer of the observable
-//! `status`/`last_init_error` transitions. The one exception is `reveal_escrow`,
-//! which reads (never writes) the repo-password Secret via the kube client on
-//! `AppState`.
+//! At onboarding Canopy creates the repo-passphrase Secret via the kube client
+//! on `AppState` (generated for from-birth, operator-supplied for passphrase
+//! mode). The jobs-side init op then creates/connects the kopia repo and is the
+//! writer of the observable `status`/`last_init_error` transitions.
 
 use axum::Json;
 use axum::extract::State;
@@ -22,20 +20,26 @@ use commons_types::{
 };
 use database::pg_duration::PgDuration;
 use database::{
-	BackupMaintenanceRun, BackupRepoStats, BackupRequest, BackupRun, NewServerGroupBackupConfig,
-	NewServerGroupBackupSchedule, RetentionPolicy, ServerBackupCapability, ServerGroupBackupConfig,
-	ServerGroupBackupSchedule, server_groups::ServerGroup,
+	BackupMaintenanceRun, BackupRecoveryVerification, BackupRepoStats, BackupRequest, BackupRun,
+	NewServerGroupBackupConfig, NewServerGroupBackupSchedule, RetentionPolicy,
+	ServerBackupCapability, ServerGroupBackupConfig, ServerGroupBackupSchedule,
+	server_groups::ServerGroup,
 };
 use jiff::Timestamp;
-use public_server::state::BackupSecrets;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
-use crate::state::AppState;
+use crate::state::{AppState, RecoveryChallenge};
 
 /// Secret key the from-birth init Job writes the generated passphrase under.
 const REPO_PASSWORD_SECRET_KEY: &str = "password";
+
+/// The recovery verification ceremony is due if the last one is older than this.
+const RECOVERY_VERIFICATION_MAX_AGE_SECS: i64 = 365 * 24 * 3600;
+
+/// A challenge older than this is stale (operator must request a fresh one).
+const RECOVERY_CHALLENGE_TTL_SECS: i64 = 3600;
 
 /// Cap on the recent-runs / maintenance lists in the stats panel.
 const RECENT_LIMIT: i64 = 20;
@@ -45,17 +49,20 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(get))
 		.routes(routes!(list))
 		.routes(routes!(create))
+		.routes(routes!(upsert))
+		.routes(routes!(probe))
 		.routes(routes!(update))
 		.routes(routes!(set_schedule))
 		.routes(routes!(create_repo))
-		.routes(routes!(reveal_escrow))
-		.routes(routes!(ack_escrow))
 		.routes(routes!(request_now))
 		.routes(routes!(cancel_request))
 		.routes(routes!(stats))
 		.routes(routes!(capabilities))
 		.routes(routes!(set_capability))
 		.routes(routes!(delete))
+		.routes(routes!(recovery_status))
+		.routes(routes!(recovery_challenge))
+		.routes(routes!(recovery_verify))
 }
 
 // ── Wire types ──────────────────────────────────────────────────────────────
@@ -72,8 +79,7 @@ pub struct ScheduleView {
 	pub retention: Option<RetentionPolicy>,
 }
 
-/// Full config + lifecycle for a group. Never includes the passphrase value —
-/// only `reveal_escrow` does.
+/// Full config + lifecycle for a group. Never includes the passphrase value.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct BackupConfigView {
 	pub server_group_id: Uuid,
@@ -87,8 +93,6 @@ pub struct BackupConfigView {
 	#[schema(value_type = String)]
 	pub status: BackupConfigStatus,
 	pub last_init_error: Option<String>,
-	pub escrow_acked_at: Option<Timestamp>,
-	pub escrow_acked_by: Option<String>,
 	pub created_at: Timestamp,
 	pub updated_at: Timestamp,
 	/// Per-`(group,type)` schedule + retention overrides.
@@ -119,8 +123,6 @@ impl BackupConfigView {
 			mode: config.mode,
 			status: config.status,
 			last_init_error: config.last_init_error,
-			escrow_acked_at: config.escrow_acked_at,
-			escrow_acked_by: config.escrow_acked_by,
 			created_at: config.created_at,
 			updated_at: config.updated_at,
 			schedules,
@@ -159,10 +161,41 @@ pub struct CreateBackupConfigArgs {
 	pub region: Option<String>,
 	#[schema(value_type = String)]
 	pub mode: BackupRepoMode,
-	/// Import mode only: name of a pre-existing k8s Secret holding the
-	/// passphrase. From-birth leaves this None (Canopy generates + names it),
-	/// in which case a placeholder ref keyed on the group is recorded.
-	pub repo_password_ref: Option<String>,
+	/// Passphrase mode only: the operator-supplied repo passphrase Canopy stores.
+	/// From-birth ignores this (Canopy generates one).
+	pub passphrase: Option<String>,
+}
+
+/// Machine-facing config-as-a-resource upsert (ops/pulumi). `mode` is implicit
+/// — always from-birth — so the bucket must be empty and no passphrase is
+/// supplied (importing an existing repo stays an interactive operator action).
+/// `bucket`/`prefix` are the identity and immutable on re-apply; role ARNs,
+/// region, schedule and retention are reconciled to the request each time.
+#[derive(Deserialize, ToSchema)]
+pub struct UpsertBackupConfigArgs {
+	pub server_group_id: Uuid,
+	pub bucket: String,
+	#[serde(default)]
+	pub prefix: String,
+	/// Device role: public-server assumes this to mint device creds (no delete).
+	pub target_role_arn: String,
+	/// Maintenance role: the backups pod assumes this for maintenance/inspection/
+	/// s3-metrics (s3:* + delete + CloudWatch).
+	pub maintenance_role_arn: String,
+	pub region: Option<String>,
+	/// Schedule type to reconcile (defaults to `tamanu-postgres`).
+	#[serde(rename = "type", default = "default_backup_type")]
+	#[schema(value_type = String)]
+	pub r#type: BackupType,
+	/// Seconds between scheduled runs; None = manual-only (no schedule).
+	#[schema(value_type = Option<i64>, format = "int64")]
+	pub expected_interval: Option<PgDuration>,
+	/// None = inherit the type default. A present policy is floor-validated.
+	pub retention: Option<RetentionPolicy>,
+}
+
+fn default_backup_type() -> BackupType {
+	BackupType::TamanuPostgres
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -185,14 +218,6 @@ pub struct SetScheduleArgs {
 	pub expected_interval: Option<PgDuration>,
 	/// None = inherit the type default. A present policy is floor-validated.
 	pub retention: Option<RetentionPolicy>,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct RevealEscrowResponse {
-	/// Shown once; the UI must not persist it.
-	pub passphrase: String,
-	/// The Secret name, for the "saved where" note.
-	pub repo_password_ref: String,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -335,19 +360,30 @@ pub async fn create(
 	let mut conn = state.db.get().await?;
 	ServerGroup::get_by_id(&mut conn, args.server_group_id).await?;
 
-	// Import mode must supply the existing Secret name. From-birth records a
-	// deterministic placeholder ref the init Job is expected to create.
-	let repo_password_ref = match args.mode {
-		BackupRepoMode::Import => args
-			.repo_password_ref
-			.clone()
-			.ok_or_else(|| AppError::BadRequest("import mode requires repo_password_ref".into()))?,
-		BackupRepoMode::FromBirth => args
-			.repo_password_ref
-			.clone()
-			.unwrap_or_else(|| format!("backup-repo-{}", args.server_group_id)),
+	let kube = state.kube.as_ref().ok_or_else(|| {
+		AppError::Upstream("secret store not configured; cannot create repo passphrase".into())
+	})?;
+
+	// Canopy owns the passphrase Secret for both modes: generate one for
+	// from-birth, take the operator's for passphrase mode.
+	let passphrase = match args.mode {
+		BackupRepoMode::FromBirth => commons_servers::backup_secrets::generate_passphrase(),
+		BackupRepoMode::Passphrase => {
+			let p = args.passphrase.clone().unwrap_or_default();
+			if p.is_empty() {
+				return Err(AppError::BadRequest(
+					"passphrase mode requires a passphrase".into(),
+				));
+			}
+			p
+		}
 	};
 
+	// Stored under a deterministic, group-keyed Secret name.
+	let repo_password_ref = format!("backup-repo-{}", args.server_group_id);
+
+	// Insert the config first (PK-guards a duplicate create → 409), then store
+	// the passphrase Secret Canopy owns.
 	let config = ServerGroupBackupConfig::insert(
 		&mut conn,
 		NewServerGroupBackupConfig {
@@ -357,13 +393,230 @@ pub async fn create(
 			target_role_arn: args.target_role_arn,
 			maintenance_role_arn: args.maintenance_role_arn,
 			region: args.region,
-			repo_password_ref,
+			repo_password_ref: repo_password_ref.clone(),
 			status: BackupConfigStatus::Provisioning,
 			mode: args.mode,
 		},
 	)
 	.await?;
+	kube.create_password(&repo_password_ref, REPO_PASSWORD_SECRET_KEY, &passphrase)
+		.await?;
+
 	Ok(Json(BackupConfigView::build(&mut conn, config).await?))
+}
+
+/// Machine-facing config-as-a-resource upsert for ops/pulumi: declaratively
+/// register/converge a group's backup config in one idempotent call (config +
+/// generated passphrase Secret + schedule/retention + auto-provision). Creating
+/// is from-birth onto an empty bucket only — a non-empty/existing-repo/
+/// inaccessible bucket is rejected. Re-applying reconciles the role ARNs,
+/// region, schedule and retention; `bucket`/`prefix` are immutable.
+#[utoipa::path(
+	post,
+	path = "/upsert",
+	operation_id = "backups_upsert",
+	tag = "backups",
+	security(("tailscale-admin" = [])),
+	request_body = UpsertBackupConfigArgs,
+	responses(
+		(status = 200, body = BackupConfigView),
+		(status = 400, body = ProblemDetailsSchema),
+		(status = 404, body = ProblemDetailsSchema),
+		(status = 409, body = ProblemDetailsSchema),
+		(status = 502, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn upsert(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<UpsertBackupConfigArgs>,
+) -> Result<Json<BackupConfigView>> {
+	use crate::backup_probe::ProbeState;
+
+	let mut conn = state.db.get().await?;
+	ServerGroup::get_by_id(&mut conn, args.server_group_id).await?;
+
+	if let Some(policy) = &args.retention {
+		policy.validate_floor()?;
+	}
+
+	match ServerGroupBackupConfig::get(&mut conn, args.server_group_id).await? {
+		// Update path: reconcile the mutable fields; bucket/prefix are immutable.
+		Some(existing) => {
+			if existing.bucket != args.bucket || existing.prefix != args.prefix {
+				return Err(AppError::Conflict(
+					"bucket and prefix are immutable; delete the config and recreate it to change them"
+						.into(),
+				));
+			}
+			ServerGroupBackupConfig::update_roles_region(
+				&mut conn,
+				args.server_group_id,
+				&args.target_role_arn,
+				&args.maintenance_role_arn,
+				args.region.as_deref(),
+			)
+			.await?;
+			// Re-apply retries an incomplete/failed provision; a ready repo is
+			// left untouched.
+			let cfg = require_config(&mut conn, args.server_group_id).await?;
+			if cfg.status != BackupConfigStatus::Ready {
+				ServerGroupBackupConfig::mark_provisioning(&mut conn, args.server_group_id).await?;
+			}
+		}
+		// Create path: from-birth onto an empty, unclaimed bucket only.
+		None => {
+			let probe = state
+				.prober
+				.probe(
+					&args.bucket,
+					&args.prefix,
+					args.region.as_deref(),
+					&args.maintenance_role_arn,
+				)
+				.await?;
+			match probe.state {
+				ProbeState::Empty => {}
+				ProbeState::KopiaRepo => {
+					return Err(AppError::Conflict(
+						"an existing kopia repository is here; import it with the interactive setup wizard, not the machine API"
+							.into(),
+					));
+				}
+				ProbeState::OtherContent => {
+					return Err(AppError::Conflict(
+						"bucket/prefix holds other (non-kopia) content; Canopy won't write over it"
+							.into(),
+					));
+				}
+				ProbeState::Inaccessible => {
+					return Err(AppError::Upstream(format!(
+						"cannot access the bucket: {}",
+						probe.error.unwrap_or_else(|| "unknown error".into())
+					)));
+				}
+			}
+			if let Some(other) = ServerGroupBackupConfig::list(&mut conn)
+				.await?
+				.into_iter()
+				.find(|c| c.bucket == args.bucket && c.prefix == args.prefix)
+			{
+				return Err(AppError::Conflict(format!(
+					"bucket/prefix already configured for group {}",
+					other.group_id
+				)));
+			}
+
+			let kube = state.kube.as_ref().ok_or_else(|| {
+				AppError::Upstream(
+					"secret store not configured; cannot create repo passphrase".into(),
+				)
+			})?;
+			let repo_password_ref = format!("backup-repo-{}", args.server_group_id);
+			ServerGroupBackupConfig::insert(
+				&mut conn,
+				NewServerGroupBackupConfig {
+					group_id: args.server_group_id,
+					bucket: args.bucket.clone(),
+					prefix: args.prefix.clone(),
+					target_role_arn: args.target_role_arn.clone(),
+					maintenance_role_arn: args.maintenance_role_arn.clone(),
+					region: args.region.clone(),
+					repo_password_ref: repo_password_ref.clone(),
+					status: BackupConfigStatus::Provisioning,
+					mode: BackupRepoMode::FromBirth,
+				},
+			)
+			.await?;
+			kube.create_password(
+				&repo_password_ref,
+				REPO_PASSWORD_SECRET_KEY,
+				&commons_servers::backup_secrets::generate_passphrase(),
+			)
+			.await?;
+		}
+	}
+
+	// Reconcile the schedule/retention in both paths.
+	ServerGroupBackupSchedule::upsert(
+		&mut conn,
+		NewServerGroupBackupSchedule {
+			group_id: args.server_group_id,
+			r#type: args.r#type,
+			expected_interval: args.expected_interval,
+			retention: args.retention.map(|r| r.to_json()),
+		},
+	)
+	.await?;
+
+	let config = require_config(&mut conn, args.server_group_id).await?;
+	Ok(Json(BackupConfigView::build(&mut conn, config).await?))
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct ProbeArgs {
+	pub bucket: String,
+	#[serde(default)]
+	pub prefix: String,
+	pub region: Option<String>,
+	/// Maintenance role to assume for the inspect (full read).
+	pub maintenance_role_arn: String,
+}
+
+/// Inspect-probe result for the wizard: what's at `bucket/prefix`, plus whether
+/// Canopy already has a config for it.
+#[derive(Serialize, ToSchema)]
+pub struct ProbeResponse {
+	#[schema(value_type = String)]
+	pub state: crate::backup_probe::ProbeState,
+	/// Present for `inaccessible`: the assume/list failure.
+	pub error: Option<String>,
+	/// A few keys, for the `other_content` warning.
+	pub object_sample: Vec<String>,
+	/// Group id if a config already exists for this exact bucket+prefix.
+	pub already_configured: Option<Uuid>,
+}
+
+/// Synchronous setup-wizard probe: assume the maintenance role and inspect the
+/// bucket/prefix (empty / kopia_repo / other_content / inaccessible), and report
+/// whether Canopy already has a config for it. Read-only; never mutates.
+#[utoipa::path(
+	post,
+	path = "/probe",
+	operation_id = "backups_probe",
+	tag = "backups",
+	security(("tailscale-admin" = [])),
+	request_body = ProbeArgs,
+	responses((status = 200, body = ProbeResponse)),
+)]
+pub async fn probe(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<ProbeArgs>,
+) -> Result<Json<ProbeResponse>> {
+	let result = state
+		.prober
+		.probe(
+			&args.bucket,
+			&args.prefix,
+			args.region.as_deref(),
+			&args.maintenance_role_arn,
+		)
+		.await?;
+
+	let mut conn = state.db.get().await?;
+	let already_configured = ServerGroupBackupConfig::list(&mut conn)
+		.await?
+		.into_iter()
+		.find(|c| c.bucket == args.bucket && c.prefix == args.prefix)
+		.map(|c| c.group_id);
+
+	Ok(Json(ProbeResponse {
+		state: result.state,
+		error: result.error,
+		object_sample: result.object_sample,
+		already_configured,
+	}))
 }
 
 /// Edit the non-structural config (region). Structural fields
@@ -465,85 +718,6 @@ pub async fn create_repo(
 	}
 	let config =
 		ServerGroupBackupConfig::mark_provisioning(&mut conn, args.server_group_id).await?;
-	Ok(Json(BackupConfigView::build(&mut conn, config).await?))
-}
-
-/// Reveal-once passphrase for a from-birth repo. Only valid while
-/// `escrow_pending`; re-callable until acked. Reads the k8s Secret named by
-/// `repo_password_ref` (502 on read failure).
-#[utoipa::path(
-	post,
-	path = "/reveal_escrow",
-	operation_id = "backups_reveal_escrow",
-	tag = "backups",
-	security(("tailscale-admin" = [])),
-	request_body = GroupArgs,
-	responses(
-		(status = 200, body = RevealEscrowResponse),
-		(status = 404, body = ProblemDetailsSchema),
-		(status = 409, body = ProblemDetailsSchema),
-		(status = 502, body = ProblemDetailsSchema),
-	),
-)]
-pub async fn reveal_escrow(
-	State(state): State<AppState>,
-	_admin: TailscaleAdmin,
-	Json(args): Json<GroupArgs>,
-) -> Result<Json<RevealEscrowResponse>> {
-	let mut conn = state.db.get().await?;
-	let config = require_config(&mut conn, args.server_group_id).await?;
-	if config.mode != BackupRepoMode::FromBirth {
-		return Err(AppError::Conflict(
-			"escrow reveal only applies to from-birth repos".into(),
-		));
-	}
-	if config.status != BackupConfigStatus::EscrowPending {
-		return Err(AppError::Conflict(
-			"escrow reveal only available while escrow_pending".into(),
-		));
-	}
-	let kube: Option<BackupSecrets> = state.kube.clone();
-	let kube = kube.ok_or_else(|| {
-		AppError::Upstream("kube client not configured; cannot read escrow Secret".into())
-	})?;
-	let passphrase = kube
-		.read_password(&config.repo_password_ref, REPO_PASSWORD_SECRET_KEY)
-		.await?;
-	Ok(Json(RevealEscrowResponse {
-		passphrase,
-		repo_password_ref: config.repo_password_ref,
-	}))
-}
-
-/// Acknowledge the Bitwarden escrow: flip `escrow_pending → ready`, stamping
-/// `escrow_acked_at/by`. 409 unless currently `escrow_pending`.
-#[utoipa::path(
-	post,
-	path = "/ack_escrow",
-	operation_id = "backups_ack_escrow",
-	tag = "backups",
-	security(("tailscale-admin" = [])),
-	request_body = GroupArgs,
-	responses(
-		(status = 200, body = BackupConfigView),
-		(status = 404, body = ProblemDetailsSchema),
-		(status = 409, body = ProblemDetailsSchema),
-	),
-)]
-pub async fn ack_escrow(
-	State(state): State<AppState>,
-	TailscaleAdmin(admin): TailscaleAdmin,
-	Json(args): Json<GroupArgs>,
-) -> Result<Json<BackupConfigView>> {
-	let mut conn = state.db.get().await?;
-	let config = require_config(&mut conn, args.server_group_id).await?;
-	if config.status != BackupConfigStatus::EscrowPending {
-		return Err(AppError::Conflict(
-			"escrow can only be acknowledged while escrow_pending".into(),
-		));
-	}
-	let config =
-		ServerGroupBackupConfig::ack_escrow(&mut conn, args.server_group_id, &admin.login).await?;
 	Ok(Json(BackupConfigView::build(&mut conn, config).await?))
 }
 
@@ -695,7 +869,8 @@ pub async fn set_capability(
 }
 
 /// Delete a group's config row (decommission). The bucket and its object-locked
-/// objects persist; this only stops credential issuance.
+/// objects persist; this only stops credential issuance and removes the
+/// Canopy-owned passphrase Secret (which must not outlive its config).
 #[utoipa::path(
 	post,
 	path = "/delete",
@@ -711,9 +886,237 @@ pub async fn delete(
 	Json(args): Json<GroupArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
-	require_config(&mut conn, args.server_group_id).await?;
+	let config = require_config(&mut conn, args.server_group_id).await?;
 	ServerGroupBackupConfig::delete(&mut conn, args.server_group_id).await?;
+	// The Canopy-owned passphrase Secret should not outlive its config.
+	if let Some(kube) = state.kube.as_ref() {
+		kube.delete_password(&config.repo_password_ref).await?;
+	}
 	Ok(Json(()))
+}
+
+// ── recovery vault verification ceremony ───────────────────────────────────────────
+
+/// Status of the recovery vault verification ceremony.
+#[derive(Serialize, ToSchema)]
+pub struct RecoveryStatusResponse {
+	/// Whether recovery recipients are configured on this server at all.
+	pub configured: bool,
+	/// The live recipient fingerprints (`age1…`).
+	pub recipients: Vec<String>,
+	pub last_verified_at: Option<Timestamp>,
+	/// The recipient set the last verification covered.
+	pub last_verified_recipients: Vec<String>,
+	/// Whether a (fresh) ceremony is due.
+	pub due: bool,
+	/// Human-readable reason for the `due` value.
+	pub reason: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct RecoveryChallengeResponse {
+	/// The challenge ciphertext (`age` to the recipients), base64-encoded. The
+	/// operator decrypts it offline with a held private key (`bestool crypto
+	/// decrypt` / `age`) and submits the plaintext to `recovery_verify`.
+	pub ciphertext_base64: String,
+	/// The recipients this challenge was encrypted to.
+	pub recipients: Vec<String>,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct RecoveryVerifyArgs {
+	/// The decrypted challenge plaintext.
+	pub answer: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct RecoveryVerifyResponse {
+	pub verified_at: Timestamp,
+}
+
+/// Compute whether the ceremony is due: never run, last run > 1 year ago, or the
+/// recipient set changed since the last verification.
+fn recovery_due(
+	latest: Option<&BackupRecoveryVerification>,
+	current: &[String],
+	now: Timestamp,
+) -> (bool, String) {
+	let Some(latest) = latest else {
+		return (true, "never verified".into());
+	};
+	if now.as_second() - latest.verified_at.as_second() > RECOVERY_VERIFICATION_MAX_AGE_SECS {
+		return (true, "last verification was over a year ago".into());
+	}
+	let mut prev = latest.recipient_list();
+	prev.sort();
+	let mut cur = current.to_vec();
+	cur.sort();
+	if prev != cur {
+		return (
+			true,
+			"the recipient set changed since the last verification".into(),
+		);
+	}
+	(
+		false,
+		"verified within the last year for the current recipients".into(),
+	)
+}
+
+/// Report the recovery vault verification status (recipients, last verification, and
+/// whether a ceremony is due).
+#[utoipa::path(
+	post,
+	path = "/recovery_status",
+	operation_id = "backups_recovery_status",
+	tag = "backups",
+	security(("tailscale-admin" = [])),
+	responses((status = 200, body = RecoveryStatusResponse)),
+)]
+pub async fn recovery_status(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	_body: Json<serde_json::Value>,
+) -> Result<Json<RecoveryStatusResponse>> {
+	let recipients = state
+		.recovery_recipients
+		.as_ref()
+		.map(|r| r.fingerprints().to_vec())
+		.unwrap_or_default();
+	let mut conn = state.db.get().await?;
+	let latest = BackupRecoveryVerification::latest(&mut conn).await?;
+	let (due, reason) = recovery_due(latest.as_ref(), &recipients, Timestamp::now());
+	Ok(Json(RecoveryStatusResponse {
+		configured: state.recovery_recipients.is_some(),
+		recipients,
+		last_verified_at: latest.as_ref().map(|v| v.verified_at),
+		last_verified_recipients: latest.map(|v| v.recipient_list()).unwrap_or_default(),
+		due,
+		reason,
+	}))
+}
+
+/// Issue a verification challenge: a fresh nonce encrypted to the recovery recipients.
+/// The operator decrypts it offline (proving a private key is genuinely held) and
+/// posts the plaintext back to `recovery_verify`.
+#[utoipa::path(
+	post,
+	path = "/recovery_challenge",
+	operation_id = "backups_recovery_challenge",
+	tag = "backups",
+	security(("tailscale-admin" = [])),
+	responses(
+		(status = 200, body = RecoveryChallengeResponse),
+		(status = 502, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn recovery_challenge(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	_body: Json<serde_json::Value>,
+) -> Result<Json<RecoveryChallengeResponse>> {
+	use base64::prelude::*;
+
+	let recipients = state.recovery_recipients.as_ref().ok_or_else(|| {
+		AppError::Upstream("recovery recipients are not configured on this server".into())
+	})?;
+
+	let nonce = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+	let ciphertext = recipients.encrypt(nonce.as_bytes())?;
+
+	*state.recovery_challenge.lock().unwrap() = Some(RecoveryChallenge {
+		nonce,
+		issued_at: Timestamp::now(),
+	});
+
+	Ok(Json(RecoveryChallengeResponse {
+		ciphertext_base64: BASE64_STANDARD.encode(ciphertext),
+		recipients: recipients.fingerprints().to_vec(),
+	}))
+}
+
+/// Complete the ceremony: verify the operator's decrypted answer matches the
+/// outstanding challenge, then record the verification against the current
+/// recipient set.
+#[utoipa::path(
+	post,
+	path = "/recovery_verify",
+	operation_id = "backups_recovery_verify",
+	tag = "backups",
+	security(("tailscale-admin" = [])),
+	request_body = RecoveryVerifyArgs,
+	responses(
+		(status = 200, body = RecoveryVerifyResponse),
+		(status = 400, body = ProblemDetailsSchema),
+		(status = 502, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn recovery_verify(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<RecoveryVerifyArgs>,
+) -> Result<Json<RecoveryVerifyResponse>> {
+	let recipients = state.recovery_recipients.as_ref().ok_or_else(|| {
+		AppError::Upstream("recovery recipients are not configured on this server".into())
+	})?;
+
+	// Take (consume) the pending challenge: success or failure, it's single-use.
+	let pending = state.recovery_challenge.lock().unwrap().take();
+	let Some(pending) = pending else {
+		return Err(AppError::BadRequest(
+			"no outstanding challenge; request one first".into(),
+		));
+	};
+	if Timestamp::now().as_second() - pending.issued_at.as_second() > RECOVERY_CHALLENGE_TTL_SECS {
+		return Err(AppError::BadRequest(
+			"challenge expired; request a fresh one".into(),
+		));
+	}
+	if args.answer.trim() != pending.nonce {
+		return Err(AppError::BadRequest(
+			"answer does not match the challenge".into(),
+		));
+	}
+
+	let mut conn = state.db.get().await?;
+	let recorded = BackupRecoveryVerification::record(&mut conn, recipients.fingerprints()).await?;
+	Ok(Json(RecoveryVerifyResponse {
+		verified_at: recorded.verified_at,
+	}))
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn verification(verified_at_secs: i64, recipients: &[&str]) -> BackupRecoveryVerification {
+		BackupRecoveryVerification {
+			id: 1,
+			verified_at: Timestamp::from_second(verified_at_secs).unwrap(),
+			recipients: serde_json::json!(recipients),
+		}
+	}
+
+	#[test]
+	fn recovery_due_logic() {
+		let now = Timestamp::from_second(2_000_000_000).unwrap();
+		let recips = ["age1aaa".to_string(), "age1bbb".to_string()];
+
+		// Never verified.
+		assert!(recovery_due(None, &recips, now).0);
+
+		// Fresh + same set (order-insensitive) → not due.
+		let fresh = verification(now.as_second() - 10, &["age1bbb", "age1aaa"]);
+		assert!(!recovery_due(Some(&fresh), &recips, now).0);
+
+		// Over a year old → due.
+		let old = verification(now.as_second() - (366 * 24 * 3600), &["age1aaa", "age1bbb"]);
+		assert!(recovery_due(Some(&old), &recips, now).0);
+
+		// Recent but recipient set changed → due.
+		let changed = verification(now.as_second() - 10, &["age1aaa"]);
+		assert!(recovery_due(Some(&changed), &recips, now).0);
+	}
 }
 
 /// Fetch a group's config or 404 — used by the mutation handlers that require

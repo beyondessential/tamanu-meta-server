@@ -16,9 +16,12 @@
 pub mod complete;
 pub mod creds_server;
 pub mod kopia;
+pub mod recovery_snapshot;
 pub mod worker;
 
 pub mod inspection;
 pub mod maintenance;
 pub mod preflight;
+pub mod rotation;
 pub mod s3_metrics;
+pub mod storageconfig;

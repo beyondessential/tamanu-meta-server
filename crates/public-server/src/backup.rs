@@ -37,9 +37,9 @@ use uuid::Uuid;
 
 use crate::state::{AppState, BackupSecrets};
 
-/// The data key inside the repo-password k8s Secret. The onboarding/escrow
-/// component that *creates* the Secret must store the kopia passphrase under
-/// this key. Single source of truth for the key name.
+/// The data key inside the repo-password k8s Secret. The onboarding component
+/// that *creates* the Secret must store the kopia passphrase under this key.
+/// Single source of truth for the key name.
 pub const REPO_PASSWORD_SECRET_KEY: &str = "password";
 
 /// Fallback AWS region served by `GET /backup-target` when the group config's

@@ -117,9 +117,6 @@ pub struct ServerGroupBackupConfig {
 	#[schema(value_type = String)]
 	pub mode: BackupRepoMode,
 	pub last_init_error: Option<String>,
-	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
-	pub escrow_acked_at: Option<Timestamp>,
-	pub escrow_acked_by: Option<String>,
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -241,7 +238,32 @@ impl ServerGroupBackupConfig {
 			.map_err(AppError::from)
 	}
 
-	/// Advance (or reset) the lifecycle status (repo-init / escrow flow).
+	/// Update the mutable structural fields for the machine config-as-a-resource
+	/// upsert: the two role ARNs + region. Bucket/prefix/mode stay immutable (the
+	/// handler rejects changes to those before calling here).
+	pub async fn update_roles_region(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+		target_role_arn: &str,
+		maintenance_role_arn: &str,
+		region: Option<&str>,
+	) -> Result<Self> {
+		use crate::schema::server_group_backup_config::dsl;
+
+		diesel::update(dsl::server_group_backup_config.filter(dsl::group_id.eq(group_id)))
+			.set((
+				dsl::target_role_arn.eq(target_role_arn),
+				dsl::maintenance_role_arn.eq(maintenance_role_arn),
+				dsl::region.eq(region),
+				dsl::updated_at.eq(now),
+			))
+			.returning(Self::as_select())
+			.get_result(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// Advance (or reset) the lifecycle status (repo-init flow).
 	pub async fn set_status(
 		db: &mut AsyncPgConnection,
 		group_id: Uuid,
@@ -259,8 +281,8 @@ impl ServerGroupBackupConfig {
 
 	/// Record intent for the init Job: set `status='provisioning'` and clear
 	/// any prior `last_init_error`. Idempotent — re-running it on an already-
-	/// provisioning row is a no-op retry. The jobs-side init Job observes the
-	/// `provisioning` status and drives the row to `escrow_pending`/`ready`.
+	/// provisioning row is a no-op retry. The jobs-side init op observes the
+	/// `provisioning` status and drives the row to `ready`.
 	pub async fn mark_provisioning(db: &mut AsyncPgConnection, group_id: Uuid) -> Result<Self> {
 		use crate::schema::server_group_backup_config::dsl;
 
@@ -290,29 +312,6 @@ impl ServerGroupBackupConfig {
 			.set((
 				dsl::status.eq(BackupConfigStatus::Provisioning),
 				dsl::last_init_error.eq(Some(error)),
-				dsl::updated_at.eq(now),
-			))
-			.returning(Self::as_select())
-			.get_result(db)
-			.await
-			.map_err(AppError::from)
-	}
-
-	/// Flip `escrow_pending → ready`, stamping who acknowledged the Bitwarden
-	/// escrow and when. The handler guards that the row is in `escrow_pending`
-	/// before calling.
-	pub async fn ack_escrow(
-		db: &mut AsyncPgConnection,
-		group_id: Uuid,
-		acked_by: &str,
-	) -> Result<Self> {
-		use crate::schema::server_group_backup_config::dsl;
-
-		diesel::update(dsl::server_group_backup_config.filter(dsl::group_id.eq(group_id)))
-			.set((
-				dsl::status.eq(BackupConfigStatus::Ready),
-				dsl::escrow_acked_at.eq(now),
-				dsl::escrow_acked_by.eq(Some(acked_by)),
 				dsl::updated_at.eq(now),
 			))
 			.returning(Self::as_select())
@@ -1181,5 +1180,55 @@ impl BackupRequest {
 			.load(db)
 			.await
 			.map_err(AppError::from)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// backup_recovery_verifications — the recovery vault verification-ceremony log
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Queryable, Selectable)]
+#[diesel(table_name = crate::schema::backup_recovery_verifications)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct BackupRecoveryVerification {
+	pub id: i64,
+	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
+	pub verified_at: Timestamp,
+	/// The recipient fingerprints (age1… keys) this ceremony covered, as a JSON
+	/// array of strings.
+	pub recipients: JsonValue,
+}
+
+impl BackupRecoveryVerification {
+	/// Record a successful ceremony against the given recipient fingerprints.
+	pub async fn record(db: &mut AsyncPgConnection, recipients: &[String]) -> Result<Self> {
+		use crate::schema::backup_recovery_verifications::dsl;
+
+		let recipients =
+			serde_json::to_value(recipients).unwrap_or_else(|_| JsonValue::Array(vec![]));
+		diesel::insert_into(dsl::backup_recovery_verifications)
+			.values(dsl::recipients.eq(recipients))
+			.returning(Self::as_select())
+			.get_result(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// The most recent verification, if any.
+	pub async fn latest(db: &mut AsyncPgConnection) -> Result<Option<Self>> {
+		use crate::schema::backup_recovery_verifications::dsl;
+
+		dsl::backup_recovery_verifications
+			.order(dsl::verified_at.desc())
+			.select(Self::as_select())
+			.first(db)
+			.await
+			.optional()
+			.map_err(AppError::from)
+	}
+
+	/// The recipient fingerprints this verification covered.
+	pub fn recipient_list(&self) -> Vec<String> {
+		serde_json::from_value(self.recipients.clone()).unwrap_or_default()
 	}
 }

@@ -2,74 +2,16 @@
 use std::sync::Arc;
 
 use axum::extract::FromRef;
-use commons_errors::{AppError, Result};
+use commons_errors::Result;
 use commons_servers::tailnet_directory::TailnetDirectory;
 use database::Db;
 #[cfg(feature = "ui")]
 use tera::Tera;
 
-/// Narrow wrapper over a [`kube::Client`] + the namespace to read from. The
-/// only operation it exposes is `get` on a single named Secret, pulling one
-/// key out — the minimal surface `GET /backup-target` needs. It never lists or
-/// mutates Secrets.
-#[derive(Clone)]
-pub struct BackupSecrets {
-	client: kube::Client,
-	namespace: String,
-}
-
-impl std::fmt::Debug for BackupSecrets {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		f.debug_struct("BackupSecrets")
-			.field("namespace", &self.namespace)
-			.finish_non_exhaustive()
-	}
-}
-
-impl BackupSecrets {
-	pub fn new(client: kube::Client, namespace: String) -> Self {
-		Self { client, namespace }
-	}
-
-	/// Build a secret reader from the ambient cluster config (in-cluster the
-	/// pod's service account; locally `~/.kube/config`), reading from the
-	/// `POD_NAMESPACE` namespace (default `canopy`). Returns `None` (logged)
-	/// when no cluster config is available, so callers degrade to 502 rather
-	/// than failing startup. Shared by both the public-server (`/backup-target`)
-	/// and the private-server (admin escrow reveal).
-	pub async fn try_default() -> Option<Self> {
-		match kube::Client::try_default().await {
-			Ok(client) => Some(Self::new(client, namespace_from_env())),
-			Err(err) => {
-				tracing::warn!(error = ?err, "kube client unavailable; backup Secret reads will 502");
-				None
-			}
-		}
-	}
-
-	/// Read one key out of the named Secret in the configured namespace. Maps
-	/// every failure (missing Secret, missing key, non-utf8, API error) to
-	/// [`AppError::Upstream`] so the handler returns 502 with a generic body.
-	pub async fn read_password(&self, secret_name: &str, key: &str) -> Result<String> {
-		use k8s_openapi::api::core::v1::Secret;
-		use kube::Api;
-
-		let api: Api<Secret> = Api::namespaced(self.client.clone(), &self.namespace);
-		let secret = api
-			.get(secret_name)
-			.await
-			.map_err(|e| AppError::Upstream(format!("secret get failed: {e}")))?;
-
-		let data = secret
-			.data
-			.ok_or_else(|| AppError::Upstream("secret has no data".into()))?;
-		let bytes = data
-			.get(key)
-			.ok_or_else(|| AppError::Upstream(format!("secret has no key {key}")))?;
-		String::from_utf8(bytes.0.clone())
-			.map_err(|_| AppError::Upstream("secret value is not valid utf-8".into()))
-	}
-}
+/// The per-group repo-password Secret store now lives in `commons-servers`;
+/// re-exported so existing `public_server::state::BackupSecrets` consumers (and
+/// the `AppState.kube` field) keep working.
+pub use commons_servers::backup_secrets::BackupSecrets;
 
 #[derive(Clone, Debug)]
 pub struct AppState {
@@ -169,12 +111,6 @@ impl AppState {
 			kube: None,
 		})
 	}
-}
-
-/// The k8s namespace whose repo-password Secrets `/backup-target` reads, from
-/// `POD_NAMESPACE` (inject via the downward API), defaulting to `canopy`.
-fn namespace_from_env() -> String {
-	std::env::var("POD_NAMESPACE").unwrap_or_else(|_| "canopy".to_string())
 }
 
 impl FromRef<AppState> for crate::ratelimit::RateLimiter {

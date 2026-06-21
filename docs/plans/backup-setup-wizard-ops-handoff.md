@@ -158,3 +158,45 @@ action items §1–§3, §5 are the source of truth; treat them as done.
   revisiting public-server's device-cred response shape. Flagged for picture
   consistency only.
 - **§1–§3, §5 unchanged** (byte-identical to v1).
+
+**2026-06-20 — NEW ops action (passphrase rotation):**
+- ⚠️ **`canopy-jobs` SA now needs WRITE on secrets** (`create`/`update`/`patch`,
+  on top of the existing `get`). Why: the backups pod rotates each repo's
+  passphrase regularly (forward protection) — after `kopia change-password` it
+  writes the new passphrase back to the group's k8s Secret (dual-key
+  `password`/`password_next`, server-side apply, field-manager `canopy-backups`).
+  Read-only `get secrets` no longer covers the rotation path.
+- No other ops change; rotation cadence is a canopy env
+  (`CANOPY_BACKUP_ROTATION_DAYS`, default 7).
+
+**2026-06-21 — NEW ops action (recovery vault):**
+- ⚠️ **A new object-locked S3 bucket for the recovery vault, in a SEPARATE account**
+  from both the canopy cluster account and the per-tenant backup accounts.
+  Requirements:
+  - **Object Lock = COMPLIANCE** + **versioning** on (so a Canopy compromise
+    can't delete history; each daily write is a new immutable version of the
+    same key). Pick a retention period (with a lifecycle expiry so it doesn't
+    grow forever). SSE on.
+  - A **writer role** the `canopy-jobs` SA assumes (chained AssumeRole), granted
+    **`s3:PutObject` ONLY** on that bucket — **no delete, no get** (Canopy never
+    reads the vault back; the blob is asymmetrically encrypted so it couldn't
+    read it anyway).
+- ⚠️ **age recipient keypairs (recovery-key custody).** Generate **multiple** age
+  keypairs (e.g. one per recovery officer; `bestool crypto keygen`). The
+  **public** keys go to Canopy via `CANOPY_RECOVERY_VAULT_KEYS` (space/comma-
+  separated `age1…`); the **private** keys are held **offline, out-of-band**
+  (any one can recover). Custody is an ops runbook — Canopy never sees a private
+  key.
+- **Canopy env (backups pod):** `CANOPY_RECOVERY_VAULT_KEYS` (**mandatory** — the
+  pod refuses to start without it), `CANOPY_RECOVERY_VAULT_BUCKET` (**mandatory**),
+  `CANOPY_RECOVERY_VAULT_REGION`, `CANOPY_RECOVERY_VAULT_ROLE_ARN` (the writer role),
+  `CANOPY_RECOVERY_VAULT_SNAPSHOT_HOURS` (default 24). The object key/path within
+  the bucket is not configurable (fixed at `canopy-recovery/state.age`). These
+  must be provisioned **before** the backups pod is deployed with this build, or
+  it will crash-loop on the mandatory check.
+- **Verification ceremony (runbook):** operators run a yearly (and on-key-change)
+  ceremony in the canopy admin UI (recovery vault page): Canopy issues an age-encrypted
+  challenge, the operator decrypts it offline with a held private key
+  (`bestool crypto decrypt`) and pastes it back. The vault blob itself is plain
+  `age` v1 (decryptable with `bestool crypto decrypt` / `age` / `rage`).
+- No k8s RBAC change (the vault is S3, not a Secret).

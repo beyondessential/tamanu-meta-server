@@ -1,8 +1,8 @@
 //! Endpoint tests for the operator-facing `/api/backups/*` fns.
 //!
-//! The kube client is `None` in the test harness, so `reveal_escrow` can only
-//! be exercised on its `409-when-not-escrow_pending` branch (which needs no
-//! Secret read). The escrow *ack* transition is covered directly.
+//! The test harness uses the in-memory backup Secret store, so onboarding
+//! (Canopy generating/storing the repo passphrase) is exercised without a
+//! cluster.
 
 use commons_tests::diesel_async::SimpleAsyncConnection;
 use uuid::Uuid;
@@ -26,6 +26,22 @@ fn retention_json() -> serde_json::Value {
 		"keep_monthly": 6,
 		"keep_annual": 0
 	})
+}
+
+/// Assert a group has no backup config — a rejected upsert must not partially
+/// write. (A macro, not a fn, to avoid naming `axum_test::TestServer`.)
+macro_rules! assert_no_config {
+	($private:expr, $group:expr) => {{
+		let resp = $private
+			.post("/api/backups/get")
+			.json(&serde_json::json!({ "server_group_id": $group }))
+			.await;
+		resp.assert_status_ok();
+		assert!(
+			resp.json::<serde_json::Value>().is_null(),
+			"expected no config to be written"
+		);
+	}};
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -97,25 +113,6 @@ async fn create_missing_group_is_404() {
 			}))
 			.await;
 		resp.assert_status_not_found();
-	})
-	.await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn import_mode_requires_secret_ref() {
-	commons_tests::server::run(async |mut conn, _public, private| {
-		let group_id = seed_group(&mut conn).await;
-		let resp = private
-			.post("/api/backups/create")
-			.json(&serde_json::json!({
-				"server_group_id": group_id,
-				"bucket": "b",
-				"target_role_arn": "arn",
-				"maintenance_role_arn": "maint-arn",
-				"mode": "import",
-			}))
-			.await;
-		resp.assert_status_bad_request();
 	})
 	.await;
 }
@@ -274,9 +271,10 @@ async fn create_repo_on_ready_is_409() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn ack_escrow_only_from_escrow_pending() {
+async fn passphrase_mode_requires_a_passphrase() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let group_id = seed_group(&mut conn).await;
+		// No passphrase supplied → 400.
 		private
 			.post("/api/backups/create")
 			.json(&serde_json::json!({
@@ -284,58 +282,74 @@ async fn ack_escrow_only_from_escrow_pending() {
 				"bucket": "b",
 				"target_role_arn": "arn",
 				"maintenance_role_arn": "maint-arn",
-				"mode": "from_birth",
+				"mode": "passphrase",
 			}))
 			.await
-			.assert_status_ok();
+			.assert_status_bad_request();
 
-		// From provisioning → 409.
-		private
-			.post("/api/backups/ack_escrow")
-			.json(&serde_json::json!({ "server_group_id": group_id }))
-			.await
-			.assert_status_conflict();
-
-		// Move to escrow_pending then ack → ready + stamps.
-		conn.batch_execute(&format!(
-			"UPDATE server_group_backup_config SET status = 'escrow_pending' WHERE group_id = '{group_id}';"
-		))
-		.await
-		.expect("escrow_pending");
+		// With a passphrase → created (no escrow; provisioning until init → ready).
 		let resp = private
-			.post("/api/backups/ack_escrow")
-			.json(&serde_json::json!({ "server_group_id": group_id }))
+			.post("/api/backups/create")
+			.json(&serde_json::json!({
+				"server_group_id": group_id,
+				"bucket": "b",
+				"target_role_arn": "arn",
+				"maintenance_role_arn": "maint-arn",
+				"mode": "passphrase",
+				"passphrase": "an-existing-repo-passphrase",
+			}))
 			.await;
 		resp.assert_status_ok();
-		let body: serde_json::Value = resp.json();
-		assert_eq!(body["status"], "ready");
-		assert!(!body["escrow_acked_at"].is_null());
-		assert_eq!(body["escrow_acked_by"], "admin@localhost");
+		assert_eq!(resp.json::<serde_json::Value>()["mode"], "passphrase");
 	})
 	.await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn reveal_escrow_409_when_not_escrow_pending() {
+async fn probe_reports_state_and_already_configured() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let group_id = seed_group(&mut conn).await;
+
+		// The harness uses the bucket-name-derived fake prober; "fresh" has no
+		// marker, so it reads empty.
+		let resp = private
+			.post("/api/backups/probe")
+			.json(&serde_json::json!({
+				"bucket": "fresh",
+				"prefix": "",
+				"maintenance_role_arn": "maint",
+			}))
+			.await;
+		resp.assert_status_ok();
+		let body: serde_json::Value = resp.json();
+		assert_eq!(body["state"], "empty");
+		assert!(body["already_configured"].is_null());
+
+		// A config for this bucket+prefix → the probe reports its group.
 		private
 			.post("/api/backups/create")
 			.json(&serde_json::json!({
 				"server_group_id": group_id,
-				"bucket": "b",
+				"bucket": "taken",
 				"target_role_arn": "arn",
 				"maintenance_role_arn": "maint-arn",
 				"mode": "from_birth",
 			}))
 			.await
 			.assert_status_ok();
-		// status is provisioning → 409 before any Secret read is attempted.
 		let resp = private
-			.post("/api/backups/reveal_escrow")
-			.json(&serde_json::json!({ "server_group_id": group_id }))
+			.post("/api/backups/probe")
+			.json(&serde_json::json!({
+				"bucket": "taken",
+				"prefix": "",
+				"maintenance_role_arn": "maint",
+			}))
 			.await;
-		resp.assert_status_conflict();
+		resp.assert_status_ok();
+		assert_eq!(
+			resp.json::<serde_json::Value>()["already_configured"],
+			group_id.to_string()
+		);
 	})
 	.await;
 }
@@ -478,6 +492,350 @@ async fn update_region_and_delete() {
 			.await;
 		resp.assert_status_ok();
 		assert!(resp.json::<serde_json::Value>().is_null());
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn upsert_creates_then_reapplies_idempotently() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group_id = seed_group(&mut conn).await;
+
+		// First apply → creates from-birth (the fake prober reports empty),
+		// provisions, and sets the schedule.
+		let resp = private
+			.post("/api/backups/upsert")
+			.json(&serde_json::json!({
+				"server_group_id": group_id,
+				"bucket": "bes-iac",
+				"prefix": "p/",
+				"target_role_arn": "arn:aws:iam::123:role/dev",
+				"maintenance_role_arn": "arn:aws:iam::123:role/maint",
+				"region": "ap-southeast-2",
+				"expected_interval": 3600,
+				"retention": retention_json(),
+			}))
+			.await;
+		resp.assert_status_ok();
+		let body: serde_json::Value = resp.json();
+		assert_eq!(body["status"], "provisioning");
+		assert_eq!(body["mode"], "from_birth");
+		assert_eq!(body["maintenance_role_arn"], "arn:aws:iam::123:role/maint");
+		let schedule = &body["schedules"][0];
+		assert_eq!(schedule["type"], "tamanu-postgres");
+		assert_eq!(schedule["expected_interval"], 3600);
+
+		// Re-apply with changed mutable fields → updates in place, no duplicate.
+		let resp = private
+			.post("/api/backups/upsert")
+			.json(&serde_json::json!({
+				"server_group_id": group_id,
+				"bucket": "bes-iac",
+				"prefix": "p/",
+				"target_role_arn": "arn:aws:iam::123:role/dev2",
+				"maintenance_role_arn": "arn:aws:iam::123:role/maint2",
+				"region": "us-east-1",
+				"expected_interval": null,
+				"retention": retention_json(),
+			}))
+			.await;
+		resp.assert_status_ok();
+		let body: serde_json::Value = resp.json();
+		assert_eq!(body["maintenance_role_arn"], "arn:aws:iam::123:role/maint2");
+		assert_eq!(body["target_role_arn"], "arn:aws:iam::123:role/dev2");
+		assert_eq!(body["region"], "us-east-1");
+		// Manual-only now. (That this second apply returns 200 with updated
+		// fields — rather than the 409 a duplicate create would — is what proves
+		// it took the in-place update path, i.e. no duplicate row.)
+		assert!(body["schedules"][0]["expected_interval"].is_null());
+
+		// Changing the bucket (identity) is rejected.
+		let resp = private
+			.post("/api/backups/upsert")
+			.json(&serde_json::json!({
+				"server_group_id": group_id,
+				"bucket": "bes-iac-moved",
+				"prefix": "p/",
+				"target_role_arn": "arn:aws:iam::123:role/dev2",
+				"maintenance_role_arn": "arn:aws:iam::123:role/maint2",
+			}))
+			.await;
+		resp.assert_status_conflict();
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn upsert_missing_group_is_404() {
+	commons_tests::server::run(async |_conn, _public, private| {
+		let resp = private
+			.post("/api/backups/upsert")
+			.json(&serde_json::json!({
+				"server_group_id": Uuid::new_v4(),
+				"bucket": "b",
+				"target_role_arn": "arn",
+				"maintenance_role_arn": "maint-arn",
+			}))
+			.await;
+		resp.assert_status_not_found();
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn upsert_rejects_below_floor_retention() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group_id = seed_group(&mut conn).await;
+		let resp = private
+			.post("/api/backups/upsert")
+			.json(&serde_json::json!({
+				"server_group_id": group_id,
+				"bucket": "bes-iac",
+				"target_role_arn": "arn",
+				"maintenance_role_arn": "maint",
+				"retention": {
+					"keep_latest": 1, "keep_daily": 1, "keep_weekly": 1,
+					"keep_monthly": 1, "keep_annual": 0
+				},
+			}))
+			.await;
+		resp.assert_status_bad_request();
+		// Floor is checked before anything is written.
+		assert_no_config!(private, group_id);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn upsert_rejects_prefix_change() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group_id = seed_group(&mut conn).await;
+		let base = serde_json::json!({
+			"server_group_id": group_id,
+			"bucket": "bes-iac",
+			"prefix": "a/",
+			"target_role_arn": "arn",
+			"maintenance_role_arn": "maint",
+		});
+		private
+			.post("/api/backups/upsert")
+			.json(&base)
+			.await
+			.assert_status_ok();
+
+		// Same bucket, different prefix → prefix is part of the immutable identity.
+		let mut moved = base.clone();
+		moved["prefix"] = serde_json::json!("b/");
+		private
+			.post("/api/backups/upsert")
+			.json(&moved)
+			.await
+			.assert_status_conflict();
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn upsert_rejects_existing_repo() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group_id = seed_group(&mut conn).await;
+		// `…existing…` → the fake prober reports an existing kopia repo. The
+		// machine API never imports; that's an interactive wizard action.
+		let resp = private
+			.post("/api/backups/upsert")
+			.json(&serde_json::json!({
+				"server_group_id": group_id,
+				"bucket": "bes-existing-repo",
+				"target_role_arn": "arn",
+				"maintenance_role_arn": "maint",
+			}))
+			.await;
+		resp.assert_status_conflict();
+		assert_no_config!(private, group_id);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn upsert_rejects_other_content() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group_id = seed_group(&mut conn).await;
+		let resp = private
+			.post("/api/backups/upsert")
+			.json(&serde_json::json!({
+				"server_group_id": group_id,
+				"bucket": "bes-other-stuff",
+				"target_role_arn": "arn",
+				"maintenance_role_arn": "maint",
+			}))
+			.await;
+		resp.assert_status_conflict();
+		assert_no_config!(private, group_id);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn upsert_rejects_inaccessible_bucket() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group_id = seed_group(&mut conn).await;
+		let resp = private
+			.post("/api/backups/upsert")
+			.json(&serde_json::json!({
+				"server_group_id": group_id,
+				"bucket": "bes-denied",
+				"target_role_arn": "arn",
+				"maintenance_role_arn": "maint",
+			}))
+			.await;
+		// Inaccessible → AppError::Upstream → 502.
+		assert_eq!(resp.status_code().as_u16(), 502);
+		assert_no_config!(private, group_id);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn upsert_rejects_bucket_already_configured_for_another_group() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group_a = seed_group(&mut conn).await;
+		let group_b = seed_group(&mut conn).await;
+
+		private
+			.post("/api/backups/upsert")
+			.json(&serde_json::json!({
+				"server_group_id": group_a,
+				"bucket": "bes-shared",
+				"target_role_arn": "arn",
+				"maintenance_role_arn": "maint",
+			}))
+			.await
+			.assert_status_ok();
+
+		// A different group can't claim the same bucket/prefix.
+		let resp = private
+			.post("/api/backups/upsert")
+			.json(&serde_json::json!({
+				"server_group_id": group_b,
+				"bucket": "bes-shared",
+				"target_role_arn": "arn",
+				"maintenance_role_arn": "maint",
+			}))
+			.await;
+		resp.assert_status_conflict();
+		assert_no_config!(private, group_b);
+	})
+	.await;
+}
+
+/// Decrypt an `age` ciphertext with the given identity (test-side, proving the
+/// vault format is standard and the ceremony round-trips).
+fn age_decrypt(ciphertext: &[u8], identity: &age::x25519::Identity) -> Vec<u8> {
+	use std::io::Read;
+	let decryptor = age::Decryptor::new_buffered(ciphertext).unwrap();
+	let mut reader = decryptor
+		.decrypt(std::iter::once(identity as &dyn age::Identity))
+		.unwrap();
+	let mut out = Vec::new();
+	reader.read_to_end(&mut out).unwrap();
+	out
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn recovery_ceremony_roundtrip() {
+	use base64::prelude::*;
+
+	// Each nextest test runs in its own process, so this env set is isolated.
+	let identity = age::x25519::Identity::generate();
+	unsafe {
+		std::env::set_var(
+			"CANOPY_RECOVERY_VAULT_KEYS",
+			identity.to_public().to_string(),
+		);
+	}
+
+	commons_tests::server::run(async move |_conn, _public, private| {
+		// Status: configured but never verified → due.
+		let resp = private
+			.post("/api/backups/recovery_status")
+			.json(&serde_json::json!({}))
+			.await;
+		resp.assert_status_ok();
+		let body: serde_json::Value = resp.json();
+		assert_eq!(body["configured"], true);
+		assert_eq!(body["due"], true);
+		assert!(body["last_verified_at"].is_null());
+
+		// Challenge → decrypt offline → verify.
+		let resp = private
+			.post("/api/backups/recovery_challenge")
+			.json(&serde_json::json!({}))
+			.await;
+		resp.assert_status_ok();
+		let ct_b64 = resp.json::<serde_json::Value>()["ciphertext_base64"]
+			.as_str()
+			.unwrap()
+			.to_string();
+		let plaintext = age_decrypt(&BASE64_STANDARD.decode(ct_b64).unwrap(), &identity);
+		let answer = String::from_utf8(plaintext).unwrap();
+
+		let resp = private
+			.post("/api/backups/recovery_verify")
+			.json(&serde_json::json!({ "answer": answer }))
+			.await;
+		resp.assert_status_ok();
+
+		// Status now reports verified (not due) for the current recipients.
+		let resp = private
+			.post("/api/backups/recovery_status")
+			.json(&serde_json::json!({}))
+			.await;
+		let body: serde_json::Value = resp.json();
+		assert_eq!(body["due"], false);
+		assert!(!body["last_verified_at"].is_null());
+		assert_eq!(
+			body["last_verified_recipients"][0],
+			identity.to_public().to_string()
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn recovery_verify_rejects_wrong_and_missing() {
+	let identity = age::x25519::Identity::generate();
+	unsafe {
+		std::env::set_var(
+			"CANOPY_RECOVERY_VAULT_KEYS",
+			identity.to_public().to_string(),
+		);
+	}
+
+	commons_tests::server::run(async move |_conn, _public, private| {
+		// No outstanding challenge → 400.
+		private
+			.post("/api/backups/recovery_verify")
+			.json(&serde_json::json!({ "answer": "anything" }))
+			.await
+			.assert_status_bad_request();
+
+		// Issue a challenge, then answer wrong → 400 (and the challenge is spent).
+		private
+			.post("/api/backups/recovery_challenge")
+			.json(&serde_json::json!({}))
+			.await
+			.assert_status_ok();
+		private
+			.post("/api/backups/recovery_verify")
+			.json(&serde_json::json!({ "answer": "not-the-nonce" }))
+			.await
+			.assert_status_bad_request();
+		// Spent: a second verify with no fresh challenge → 400.
+		private
+			.post("/api/backups/recovery_verify")
+			.json(&serde_json::json!({ "answer": "not-the-nonce" }))
+			.await
+			.assert_status_bad_request();
 	})
 	.await;
 }
