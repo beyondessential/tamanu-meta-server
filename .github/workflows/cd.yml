@@ -171,7 +171,7 @@ jobs:
         uses: pulumi/actions@v7
 
       - name: Authenticate to Pulumi Cloud
-        uses: pulumi/auth-actions@v1.0.1
+        uses: pulumi/auth-actions@v2.1.0
         with:
           organization: bes
           requested-token-type: urn:pulumi:token-type:access_token:organization
