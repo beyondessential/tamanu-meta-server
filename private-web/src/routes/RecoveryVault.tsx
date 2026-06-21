@@ -17,6 +17,23 @@ import { useState } from "react";
 import { useApi, useApiAction } from "../api";
 import { usePageTitle } from "../hooks/usePageTitle";
 
+/// Decode the base64 age ciphertext and download it as a `.age` file the
+/// operator decrypts offline with `bestool crypto decrypt` (which reads a file
+/// path, not stdin).
+function downloadChallenge(ciphertextBase64: string) {
+	const bytes = Uint8Array.from(atob(ciphertextBase64), (c) => c.charCodeAt(0));
+	const url = URL.createObjectURL(
+		new Blob([bytes], { type: "application/octet-stream" }),
+	);
+	const a = document.createElement("a");
+	a.href = url;
+	// `.txt.age` so it decrypts to `recovery-challenge.txt` — openable as text
+	// (e.g. double-click on Windows) without renaming.
+	a.download = "recovery-challenge.txt.age";
+	a.click();
+	URL.revokeObjectURL(url);
+}
+
 /// Server-wide recovery vault status + verification ceremony.
 ///
 /// Canopy backs up its recovery-critical state (every repo passphrase + repo
@@ -119,11 +136,9 @@ export default function RecoveryVault() {
 						Run the verification ceremony
 					</Typography>
 					<Typography variant="body2" color="text.secondary">
-						Canopy issues a challenge encrypted to the recipients above. Decrypt
-						it offline with one of the held private keys — e.g.{" "}
-						<code>base64 -d | bestool crypto decrypt --key-path identity</code>{" "}
-						(or <code>age -d</code>) — and paste the result back to confirm a
-						key is genuinely held and the vault decrypts.
+						Issue a challenge, download the file, decrypt it offline with one of
+						the held private keys, and paste the result back — confirming a key
+						is genuinely held and the vault decrypts.
 					</Typography>
 
 					<Stack direction="row" spacing={1}>
@@ -141,24 +156,22 @@ export default function RecoveryVault() {
 
 					{ciphertext && (
 						<>
-							<TextField
-								label="Challenge (base64 age ciphertext)"
-								value={ciphertext}
-								multiline
-								minRows={3}
-								slotProps={{ htmlInput: { readOnly: true } }}
-								sx={{ "& textarea": { fontFamily: "monospace", fontSize: 12 } }}
-							/>
 							<Button
-								size="small"
-								onClick={() => {
-									navigator.clipboard?.writeText(ciphertext);
-									setToast("Copied");
-								}}
+								variant="outlined"
+								onClick={() => downloadChallenge(ciphertext)}
 								sx={{ alignSelf: "flex-start" }}
 							>
-								Copy challenge
+								Download challenge (recovery-challenge.txt.age)
 							</Button>
+							<Typography variant="body2" color="text.secondary">
+								Decrypt it with a held private key:{" "}
+								<code>
+									bestool crypto decrypt recovery-challenge.txt.age --key-path
+									&lt;identity&gt;
+								</code>{" "}
+								— that writes <code>recovery-challenge.txt</code> next to it;
+								paste its contents below.
+							</Typography>
 							<TextField
 								label="Decrypted answer"
 								value={answer}
