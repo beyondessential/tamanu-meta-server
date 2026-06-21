@@ -825,7 +825,7 @@ async fn type_defaults_list_and_set_roundtrip() {
 			.find(|d| d["type"] == "tamanu-postgres")
 			.expect("seeded default present");
 		assert_eq!(td["default_interval"], 21600); // 6h
-		assert_eq!(td["auto_enable"], true);
+		assert_eq!(td["auto_enable"], false); // capabilities stay opt-in
 
 		// Update it.
 		private
