@@ -4,6 +4,11 @@ import {
 	Button,
 	Chip,
 	CircularProgress,
+	Dialog,
+	DialogActions,
+	DialogContent,
+	DialogContentText,
+	DialogTitle,
 	Divider,
 	FormControlLabel,
 	LinearProgress,
@@ -20,6 +25,7 @@ import {
 } from "@mui/material";
 import { useState } from "react";
 import BackupIcon from "@mui/icons-material/Backup";
+import DeleteIcon from "@mui/icons-material/Delete";
 import EditIcon from "@mui/icons-material/Edit";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import { Link as RouterLink, useParams } from "react-router-dom";
@@ -126,14 +132,17 @@ export default function BackupPanel() {
 					/>
 				</Stack>
 				{isAdmin && (
-					<Button
-						component={RouterLink}
-						to={`/groups/${id}/backups/config`}
-						variant="outlined"
-						startIcon={<EditIcon />}
-					>
-						Edit config
-					</Button>
+					<Stack direction="row" spacing={1}>
+						<Button
+							component={RouterLink}
+							to={`/groups/${id}/backups/config`}
+							variant="outlined"
+							startIcon={<EditIcon />}
+						>
+							Edit config
+						</Button>
+						<DeleteConfigButton groupId={id} onDeleted={configForTick.reload} />
+					</Stack>
 				)}
 			</Stack>
 
@@ -163,6 +172,71 @@ export default function BackupPanel() {
 				</>
 			)}
 		</Stack>
+	);
+}
+
+/// Decommission a group's backup config (admin). Deletes the config row + the
+/// Canopy-owned passphrase Secret; the bucket and its object-locked backups are
+/// untouched. Confirms first since it stops credential issuance for the group.
+function DeleteConfigButton({
+	groupId,
+	onDeleted,
+}: {
+	groupId: string;
+	onDeleted: () => void;
+}) {
+	const [open, setOpen] = useState(false);
+	const del = useApiAction("backups", "delete");
+
+	const onConfirm = async () => {
+		try {
+			await del.call({ server_group_id: groupId });
+			setOpen(false);
+			onDeleted();
+		} catch {
+			/* surfaced via del.error */
+		}
+	};
+
+	return (
+		<>
+			<Button
+				variant="outlined"
+				color="error"
+				startIcon={<DeleteIcon />}
+				onClick={() => setOpen(true)}
+			>
+				Delete
+			</Button>
+			<Dialog open={open} onClose={() => !del.pending && setOpen(false)}>
+				<DialogTitle>Delete backup config?</DialogTitle>
+				<DialogContent>
+					<DialogContentText>
+						This stops credential issuance for the group and deletes the
+						Canopy-owned repository passphrase. The bucket and its (object-locked)
+						backups are left untouched — you can set backups up again afterwards.
+					</DialogContentText>
+					{del.error && (
+						<Alert severity="error" sx={{ mt: 2 }}>
+							{del.error.message}
+						</Alert>
+					)}
+				</DialogContent>
+				<DialogActions>
+					<Button onClick={() => setOpen(false)} disabled={del.pending}>
+						Cancel
+					</Button>
+					<Button
+						color="error"
+						variant="contained"
+						onClick={onConfirm}
+						disabled={del.pending}
+					>
+						{del.pending ? "Deleting…" : "Delete"}
+					</Button>
+				</DialogActions>
+			</Dialog>
+		</>
 	);
 }
 
