@@ -4,9 +4,16 @@
 
 Canopy provides:
 - a server discovery service for the Tamanu mobile app
-- a server list and health check page
-- a range of active versions
+- the full list of available versions of Tamanu
 - download URLs to available artifacts for active versions
+
+and, internally:
+- a global view of server status and healthchecks
+- backup management
+- associated tooling (bestool)
+
+This is not expected to be usefully run by any other organisation; as a public-interest
+non-profit, BES International publishes almost all of its software as open-source.
 
 ## Get
 

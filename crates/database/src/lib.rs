@@ -31,9 +31,9 @@ pub mod versions;
 pub mod views;
 
 pub use backups::{
-	BackupCredentialIssuance, BackupMaintenanceRun, BackupRepoSnapshot, BackupRepoStats,
-	BackupRequest, BackupRun, BackupTypeDefault, NewBackupCredentialIssuance, NewBackupRun,
-	NewBackupTypeDefault, NewServerGroupBackupConfig, NewServerGroupBackupSchedule,
+	BackupCredentialIssuance, BackupMaintenanceRun, BackupRecoveryVerification, BackupRepoSnapshot,
+	BackupRepoStats, BackupRequest, BackupRun, BackupTypeDefault, NewBackupCredentialIssuance,
+	NewBackupRun, NewBackupTypeDefault, NewServerGroupBackupConfig, NewServerGroupBackupSchedule,
 	RetentionPolicy, ServerBackupCapability, ServerGroupBackupConfig, ServerGroupBackupSchedule,
 };
 pub use bestool_snippets::{BestoolSnippet, NewBestoolSnippet};

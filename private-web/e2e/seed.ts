@@ -334,8 +334,8 @@ export async function seedVersion(
 
 // ── Backup-credentials seeding ──────────────────────────────────────────────
 
-export type BackupConfigStatus = "provisioning" | "escrow_pending" | "ready";
-export type BackupRepoMode = "from_birth" | "import";
+export type BackupConfigStatus = "provisioning" | "ready";
+export type BackupRepoMode = "from_birth" | "passphrase";
 
 /** Seed a `server_group_backup_config` row for a group, optionally with a
  * `(group, tamanu-postgres)` schedule. */

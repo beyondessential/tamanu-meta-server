@@ -13,9 +13,11 @@ use tower_http::{
 use tracing::Span;
 
 pub mod backup_jobs;
+pub mod backup_secrets;
 pub mod device_auth;
 pub mod headers;
 pub mod health;
+pub mod recovery_vault;
 pub mod tailnet_directory;
 pub mod tailnet_guard;
 pub mod tailnet_sweeps;

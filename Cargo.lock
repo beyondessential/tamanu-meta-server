@@ -1518,9 +1518,11 @@ dependencies = [
 name = "commons-servers"
 version = "6.6.6"
 dependencies = [
+ "age",
  "axum",
  "axum-client-ip",
  "axum-server-timing",
+ "chbs",
  "commons-errors",
  "commons-types",
  "database",
@@ -1528,6 +1530,8 @@ dependencies = [
  "diesel-async",
  "http 1.4.2",
  "jiff",
+ "k8s-openapi",
+ "kube",
  "node-semver",
  "percent-encoding",
  "rcgen",
@@ -4473,7 +4477,11 @@ dependencies = [
 name = "private-server"
 version = "6.6.6"
 dependencies = [
+ "age",
  "algae-cli",
+ "aws-config",
+ "aws-sdk-s3",
+ "aws-sdk-sts",
  "axum",
  "axum-client-ip",
  "axum-server-timing",

@@ -1,19 +1,20 @@
 //! Shared worker state for the in-process backup loops.
 //!
 //! [`Worker`] is built once in the `backups` bin and shared by the maintenance
-//! and inspection loops. It holds the DB pool, a `kube::Client` (for reading the
-//! per-group repo-password Secret), the [`Cfg`], a concurrency [`Semaphore`],
-//! and the in-flight group set — so the same group isn't worked by two ops at
-//! once (one op per group at a time across maintenance + inspection + init).
+//! and inspection loops. It holds the DB pool, a [`BackupSecrets`] store (read +
+//! write the per-group repo-password Secret), the [`Cfg`], a concurrency
+//! [`Semaphore`], and the in-flight group set — so the same group isn't worked
+//! by two ops at once (one op per group at a time across maintenance +
+//! inspection + init).
 
 use std::{
 	collections::HashSet,
 	sync::{Arc, Mutex},
 };
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Result, anyhow};
+use commons_servers::backup_secrets::BackupSecrets;
 use database::Db;
-use k8s_openapi::api::core::v1::Secret;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use uuid::Uuid;
 
@@ -25,16 +26,14 @@ const DEFAULT_MAX_CONCURRENCY: usize = 4;
 /// Scheduler config read from the environment, so one binary works across
 /// stacks.
 pub struct Cfg {
-	/// k8s namespace the repo-password Secrets live in.
-	pub namespace: String,
-	/// Key within each repo-password Secret.
+	/// Key within each repo-password Secret. (The namespace is handled by
+	/// [`BackupSecrets`] via `POD_NAMESPACE`.)
 	pub password_key: String,
 }
 
 impl Cfg {
 	pub fn from_env() -> Self {
 		Cfg {
-			namespace: env_or("CANOPY_NAMESPACE", "tamanu-meta"),
 			password_key: env_or("CANOPY_BACKUP_PASSWORD_KEY", "password"),
 		}
 	}
@@ -93,7 +92,8 @@ impl Slots {
 #[derive(Clone)]
 pub struct Worker {
 	pub pool: Db,
-	pub kube: kube::Client,
+	/// Read/write the per-group repo-password Secret.
+	pub secrets: BackupSecrets,
 	pub cfg: Arc<Cfg>,
 	pub slots: Slots,
 	/// Loopback endpoint that mints per-op maintenance-role creds for kopia.
@@ -101,7 +101,7 @@ pub struct Worker {
 }
 
 impl Worker {
-	pub fn new(pool: Db, kube: kube::Client, cfg: Cfg, creds: CredsServer) -> Self {
+	pub fn new(pool: Db, secrets: BackupSecrets, cfg: Cfg, creds: CredsServer) -> Self {
 		let max = std::env::var("CANOPY_BACKUP_MAX_CONCURRENCY")
 			.ok()
 			.and_then(|s| s.parse::<usize>().ok())
@@ -109,7 +109,7 @@ impl Worker {
 			.unwrap_or(DEFAULT_MAX_CONCURRENCY);
 		Worker {
 			pool,
-			kube,
+			secrets,
 			cfg: Arc::new(cfg),
 			slots: Slots::new(max),
 			creds,
@@ -126,22 +126,12 @@ impl Worker {
 		self.slots.try_claim(group_id)
 	}
 
-	/// Read the repo passphrase from a group's k8s Secret. `k8s-openapi` decodes
-	/// the Secret's base64 `data` into raw bytes, so we just read the named key
-	/// and interpret it as UTF-8.
+	/// Read the repo passphrase from a group's k8s Secret.
 	pub async fn read_repo_password(&self, secret_name: &str) -> Result<String> {
-		let api: kube::Api<Secret> = kube::Api::namespaced(self.kube.clone(), &self.cfg.namespace);
-		let secret = api
-			.get(secret_name)
+		self.secrets
+			.read_password(secret_name, &self.cfg.password_key)
 			.await
-			.with_context(|| format!("reading secret {secret_name}"))?;
-		let data = secret
-			.data
-			.as_ref()
-			.and_then(|d| d.get(&self.cfg.password_key))
-			.ok_or_else(|| anyhow!("secret {secret_name} has no key {}", self.cfg.password_key))?;
-		String::from_utf8(data.0.clone())
-			.with_context(|| format!("secret {secret_name} key is not valid UTF-8"))
+			.map_err(|e| anyhow!("reading secret {secret_name}: {e}"))
 	}
 }
 
