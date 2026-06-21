@@ -22,11 +22,11 @@ test.describe("Recovery vault ceremony", () => {
 		// The configured recipient is listed.
 		await expect(page.getByText(RECIPIENT)).toBeVisible();
 
-		// Issue a challenge → the ciphertext field appears, non-empty.
+		// Issue a challenge → the download button appears.
 		await page.getByRole("button", { name: /issue challenge/i }).click();
-		const challenge = page.getByLabel("Challenge (base64 age ciphertext)");
-		await expect(challenge).toBeVisible();
-		await expect(challenge).not.toHaveValue("");
+		await expect(
+			page.getByRole("button", { name: /download challenge/i }),
+		).toBeVisible();
 
 		// A wrong answer is rejected.
 		await page.getByLabel("Decrypted answer").fill("not-the-nonce");
