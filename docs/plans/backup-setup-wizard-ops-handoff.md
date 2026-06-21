@@ -222,3 +222,20 @@ action items §1–§3, §5 are the source of truth; treat them as done.
   `update`/`patch` secrets, for rotation) — in whatever namespace the pods run
   (e.g. `tamanu-meta-prod`), which is the standard same-namespace grant. If those
   Role/RoleBindings were created in `canopy`, move them to the pods' namespace.
+
+**2026-06-22 — fix (kopia is now bundled in the canopy image):**
+- The backups pod drives kopia as in-process subprocesses, but kopia was **not**
+  in the image it ran: CI only ever built `ghcr.io/beyondessential/canopy` (a
+  busybox base with the canopy binaries, no kopia), and the standalone
+  `images/backups/` Dockerfile that bundled kopia was never wired into CI. So in
+  prod every repo-init/maintenance kopia spawn failed with
+  `failed to spawn kopia … No such file or directory (os error 2)`.
+- Fix: the (static) kopia binary is now copied into the single shipped
+  `ghcr.io/beyondessential/canopy` image (`.github/Dockerfile.native`, from
+  `kopia/kopia:0.23.1`). **The backups pod uses the same image as every other
+  component** — there is no separate backups image. The orphaned `images/backups/`
+  dir was removed.
+- ⚠️ **Ops action: ensure the backups Deployment references
+  `ghcr.io/beyondessential/canopy` (the standard image), not a separate
+  `canopy-backups`/kopia image** — none is published. Once deployed on this
+  build, kopia resolves on `PATH` and repo creation works.
