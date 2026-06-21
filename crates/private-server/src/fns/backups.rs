@@ -159,10 +159,9 @@ pub struct CreateBackupConfigArgs {
 	pub region: Option<String>,
 	#[schema(value_type = String)]
 	pub mode: BackupRepoMode,
-	/// Import mode only: name of a pre-existing k8s Secret holding the
-	/// passphrase. From-birth leaves this None (Canopy generates + names it),
-	/// in which case a placeholder ref keyed on the group is recorded.
-	pub repo_password_ref: Option<String>,
+	/// Passphrase mode only: the operator-supplied repo passphrase Canopy stores.
+	/// From-birth ignores this (Canopy generates one).
+	pub passphrase: Option<String>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -335,19 +334,30 @@ pub async fn create(
 	let mut conn = state.db.get().await?;
 	ServerGroup::get_by_id(&mut conn, args.server_group_id).await?;
 
-	// Import mode must supply the existing Secret name. From-birth records a
-	// deterministic placeholder ref the init Job is expected to create.
-	let repo_password_ref = match args.mode {
-		BackupRepoMode::Import => args
-			.repo_password_ref
-			.clone()
-			.ok_or_else(|| AppError::BadRequest("import mode requires repo_password_ref".into()))?,
-		BackupRepoMode::FromBirth => args
-			.repo_password_ref
-			.clone()
-			.unwrap_or_else(|| format!("backup-repo-{}", args.server_group_id)),
+	let kube = state.kube.as_ref().ok_or_else(|| {
+		AppError::Upstream("secret store not configured; cannot create repo passphrase".into())
+	})?;
+
+	// Canopy owns the passphrase Secret for both modes: generate one for
+	// from-birth, take the operator's for passphrase mode.
+	let passphrase = match args.mode {
+		BackupRepoMode::FromBirth => generate_repo_passphrase(),
+		BackupRepoMode::Passphrase => {
+			let p = args.passphrase.clone().unwrap_or_default();
+			if p.is_empty() {
+				return Err(AppError::BadRequest(
+					"passphrase mode requires a passphrase".into(),
+				));
+			}
+			p
+		}
 	};
 
+	// Stored under a deterministic, group-keyed Secret name.
+	let repo_password_ref = format!("backup-repo-{}", args.server_group_id);
+
+	// Insert the config first (PK-guards a duplicate create → 409), then store
+	// the passphrase Secret Canopy owns.
 	let config = ServerGroupBackupConfig::insert(
 		&mut conn,
 		NewServerGroupBackupConfig {
@@ -357,13 +367,32 @@ pub async fn create(
 			target_role_arn: args.target_role_arn,
 			maintenance_role_arn: args.maintenance_role_arn,
 			region: args.region,
-			repo_password_ref,
+			repo_password_ref: repo_password_ref.clone(),
 			status: BackupConfigStatus::Provisioning,
 			mode: args.mode,
 		},
 	)
 	.await?;
+	kube.create_password(&repo_password_ref, REPO_PASSWORD_SECRET_KEY, &passphrase)
+		.await?;
+
 	Ok(Json(BackupConfigView::build(&mut conn, config).await?))
+}
+
+/// Generate a strong from-birth repo passphrase: 8 words from the EFF large
+/// wordlist (~103 bits), hyphen-separated — high entropy but still transcribable
+/// for the operator to escrow (reveal-once → Bitwarden).
+fn generate_repo_passphrase() -> String {
+	use chbs::{config::BasicConfig, prelude::*, probability::Probability, word::WordList};
+
+	let config = BasicConfig {
+		words: 8,
+		word_provider: WordList::builtin_eff_large().sampler(),
+		separator: "-".into(),
+		capitalize_first: Probability::Never,
+		capitalize_words: Probability::Never,
+	};
+	config.to_scheme().generate()
 }
 
 /// Edit the non-structural config (region). Structural fields

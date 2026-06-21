@@ -36,8 +36,9 @@ pub(crate) async fn complete_maint(
 /// Advance a group's backup config after its init op finishes. On success the
 /// next status depends on how the passphrase is sourced: `from_birth` repos
 /// still need the operator to escrow the canopy-generated passphrase
-/// (`escrow_pending`), whereas `import` repos already hold it (`ready`). On
-/// failure we surface the error and leave the row in `provisioning`.
+/// (`escrow_pending`), whereas `passphrase` repos (operator-supplied) skip
+/// escrow and go straight to `ready`. On failure we surface the error and leave
+/// the row in `provisioning`.
 pub(crate) async fn complete_init(
 	db: &mut AsyncPgConnection,
 	group_id: Uuid,
@@ -51,7 +52,7 @@ pub(crate) async fn complete_init(
 			.map_err(|e| e.to_string())?;
 		let next = match config.mode {
 			BackupRepoMode::FromBirth => BackupConfigStatus::EscrowPending,
-			BackupRepoMode::Import => BackupConfigStatus::Ready,
+			BackupRepoMode::Passphrase => BackupConfigStatus::Ready,
 		};
 		ServerGroupBackupConfig::set_status(db, group_id, next)
 			.await

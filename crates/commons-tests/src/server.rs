@@ -231,7 +231,7 @@ where
 				db: database::init_to(&url),
 				ro_pool: None,
 				tailnet_directory: Some(directory),
-				kube: None,
+				kube: Some(public_server::state::BackupSecrets::memory()),
 			})
 			.unwrap(),
 			ClientIpSource::RightmostForwarded,

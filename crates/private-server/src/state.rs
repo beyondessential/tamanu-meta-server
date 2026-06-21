@@ -44,7 +44,9 @@ impl AppState {
 			db: database::init_to(url),
 			ro_pool: None,
 			tailnet_directory: None,
-			kube: None,
+			// In-memory secret store so onboarding (Secret creation) + escrow
+			// reveal are exercised in tests without a cluster.
+			kube: Some(BackupSecrets::memory()),
 		})
 	}
 }

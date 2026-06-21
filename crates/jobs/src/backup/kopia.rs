@@ -395,37 +395,49 @@ async fn apply_policy(env: &KopiaEnv, target: &str, policy: &Policy) -> Result<(
 // Per-kind orchestration.
 // ===========================================================================
 
-/// Create (or connect to an existing) repo and set the canopy maintenance
-/// identity + global baseline policy.
+/// Initialise a group's repo and set the canopy maintenance identity + global
+/// baseline policy.
 ///
-/// `repository create` exits non-zero when the repo already exists; we fall back
-/// to connect and treat that as success.
+/// `create_new` is true for from-birth (Canopy generates the passphrase for a
+/// *new* repo): `repository create` runs, falling back to connect if the repo
+/// already exists (idempotent retry). It is false for passphrase mode (connect
+/// to an *existing* repo with the operator's passphrase): we **never** create —
+/// Canopy must not mint a repo under an operator-chosen passphrase, so a missing
+/// repo or wrong passphrase surfaces as an init failure.
 pub async fn run_init(
 	env: &KopiaEnv,
 	bucket: &str,
 	prefix: &str,
 	region: &str,
 	retention: &RetentionMap,
+	create_new: bool,
 ) -> Result<()> {
-	let create = run_kopia(
-		env,
-		&[
-			"repository",
-			"create",
-			"s3",
-			"--bucket",
-			bucket,
-			"--prefix",
-			prefix,
-			"--region",
-			region,
-		],
-	)
-	.await?;
-	if !create.status.success() {
-		connect(env, bucket, prefix, region)
-			.await
-			.context("repository create failed and connect fallback failed")?;
+	if create_new {
+		let create = run_kopia(
+			env,
+			&[
+				"repository",
+				"create",
+				"s3",
+				"--bucket",
+				bucket,
+				"--prefix",
+				prefix,
+				"--region",
+				region,
+			],
+		)
+		.await?;
+		if !create.status.success() {
+			connect(env, bucket, prefix, region)
+				.await
+				.context("repository create failed and connect fallback failed")?;
+		}
+	} else {
+		// Passphrase mode: connect to the existing repo only — never create.
+		connect(env, bucket, prefix, region).await.context(
+			"connect to existing repository failed (passphrase mode never creates a repo)",
+		)?;
 	}
 
 	// Connect with the fixed canopy identity (create leaves us connected, but be

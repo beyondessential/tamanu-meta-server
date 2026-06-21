@@ -136,17 +136,19 @@ text_enum! {
 }
 
 text_enum! {
-	/// How a group's repo passphrase is sourced. `FromBirth` means Canopy
-	/// generates the passphrase + names the Secret (operator must escrow it →
-	/// the reveal-once flow); `Import` means the operator already holds the
-	/// passphrase and points `repo_password_ref` at a pre-existing Secret (skips
-	/// escrow, goes straight to `Ready`).
+	/// How a group's repo passphrase is sourced. Canopy owns every passphrase
+	/// Secret either way. `FromBirth` means Canopy generates the passphrase for a
+	/// *new* repo, then the operator escrows it via the reveal-once flow
+	/// (`escrow_pending`). `Passphrase` means the operator supplies the passphrase
+	/// of an *existing* repo to connect to it; Canopy stores it and skips escrow
+	/// (straight to `Ready`). Canopy never lets the operator choose the passphrase
+	/// for a repo it creates — that is always from-birth.
 	pub enum BackupRepoMode {
 		FromBirth = "from_birth",
-		Import = "import",
+		Passphrase = "passphrase",
 	}
 	default = FromBirth;
-	error BackupRepoModeFromStringError = "invalid backup repo mode; expected one of: from_birth, import";
+	error BackupRepoModeFromStringError = "invalid backup repo mode; expected one of: from_birth, passphrase";
 }
 
 text_enum! {

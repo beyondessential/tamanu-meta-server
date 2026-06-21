@@ -5372,6 +5372,13 @@
           "mode": {
             "type": "string"
           },
+          "passphrase": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Passphrase mode only: the operator-supplied repo passphrase Canopy stores.\nFrom-birth ignores this (Canopy generates one)."
+          },
           "prefix": {
             "type": "string"
           },
@@ -5380,13 +5387,6 @@
               "string",
               "null"
             ]
-          },
-          "repo_password_ref": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Import mode only: name of a pre-existing k8s Secret holding the\npassphrase. From-birth leaves this None (Canopy generates + names it),\nin which case a placeholder ref keyed on the group is recorded."
           },
           "server_group_id": {
             "type": "string",

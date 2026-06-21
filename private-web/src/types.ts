@@ -150,7 +150,7 @@ export type ServerBackupCapabilityView = Solidify<
 // `mode`/`status` arrive as plain strings on the wire (the Rust enums use a
 // custom Text serializer, so utoipa emits `string`). Narrow them in the UI so
 // switch/label maps are exhaustive.
-export type BackupRepoMode = "from_birth" | "import";
+export type BackupRepoMode = "from_birth" | "passphrase";
 export type BackupConfigStatus = "provisioning" | "escrow_pending" | "ready";
 
 // ── Pagination wrapper ─────────────────────────────────────────────────────
@@ -368,7 +368,7 @@ export const BACKUP_STATUS_HELP: Record<BackupConfigStatus, string> = {
 
 export const BACKUP_MODE_LABEL: Record<BackupRepoMode, string> = {
 	from_birth: "From birth (Canopy generates the passphrase)",
-	import: "Import (operator-supplied passphrase)",
+	passphrase: "Existing repository (connect with its passphrase)",
 };
 
 /// Org-minimum retention floors, enforced server-side and mirrored client-side
