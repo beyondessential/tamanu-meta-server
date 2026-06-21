@@ -231,7 +231,12 @@ where
 				db: database::init_to(&url),
 				ro_pool: None,
 				tailnet_directory: Some(directory),
-				kube: None,
+				kube: Some(public_server::state::BackupSecrets::memory()),
+				prober: private_server::backup_probe::BucketProber::fake(
+					private_server::backup_probe::ProbeState::Empty,
+				),
+				recovery_recipients: None,
+				recovery_challenge: std::sync::Arc::new(std::sync::Mutex::new(None)),
 			})
 			.unwrap(),
 			ClientIpSource::RightmostForwarded,

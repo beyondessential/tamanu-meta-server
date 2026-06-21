@@ -36,7 +36,22 @@ test.describe("backups zero-state + config", () => {
 		await expect(page.getByText(/backups not set up/i)).toBeVisible();
 	});
 
-	test("create writes config row with interval, retention and provisioning status", async ({
+	// Walk the wizard's step 0 (target) → step 2 (schedule) for an empty bucket
+	// (the fake prober reports `empty` for buckets without a marker). Leaves the
+	// page on the schedule/retention step.
+	async function emptyBucketToSchedule(
+		page: import("@playwright/test").Page,
+		bucket = "bes-empty",
+	) {
+		await page.getByLabel("Bucket").fill(bucket);
+		await page.getByLabel("Target role ARN").fill("arn");
+		await page.getByLabel("Maintenance role ARN").fill("maint-arn");
+		await page.getByRole("button", { name: /check bucket/i }).click();
+		await expect(page.getByText(/empty bucket/i)).toBeVisible();
+		await page.getByRole("button", { name: /^continue$/i }).click();
+	}
+
+	test("wizard create (empty bucket) writes a from-birth config row", async ({
 		page,
 		sql,
 	}) => {
@@ -50,7 +65,10 @@ test.describe("backups zero-state + config", () => {
 		await page
 			.getByLabel("Maintenance role ARN")
 			.fill("arn:aws:iam::999:role/created-maint");
-		// Default schedule is on at 60 minutes; default retention meets floors.
+		await page.getByRole("button", { name: /check bucket/i }).click();
+		await expect(page.getByText(/empty bucket/i)).toBeVisible();
+		await page.getByRole("button", { name: /^continue$/i }).click();
+		// Step 2: defaults (schedule on at 60m, retention meets floors).
 		await page.getByRole("button", { name: /create & provision/i }).click();
 
 		await expect(page).toHaveURL(new RegExp(`/groups/${group.id}/backups$`));
@@ -58,11 +76,12 @@ test.describe("backups zero-state + config", () => {
 		const rows = await sql.query<{
 			status: string;
 			bucket: string;
+			mode: string;
 			maintenance_role_arn: string;
 			secs: string | null;
 			retention: { keep_daily: number };
 		}>(
-			`SELECT c.status, c.bucket, c.maintenance_role_arn,
+			`SELECT c.status, c.bucket, c.mode, c.maintenance_role_arn,
 			        EXTRACT(EPOCH FROM s.expected_interval)::text AS secs,
 			        s.retention
 			 FROM server_group_backup_config c
@@ -72,7 +91,7 @@ test.describe("backups zero-state + config", () => {
 		);
 		expect(rows).toHaveLength(1);
 		expect(rows[0]!.status).toBe("provisioning");
-		expect(rows[0]!.bucket).toBe("bes-kopia-created");
+		expect(rows[0]!.mode).toBe("from_birth");
 		expect(rows[0]!.maintenance_role_arn).toBe(
 			"arn:aws:iam::999:role/created-maint",
 		);
@@ -80,12 +99,60 @@ test.describe("backups zero-state + config", () => {
 		expect(rows[0]!.retention.keep_daily).toBe(7);
 	});
 
+	test("wizard create (existing repo) requires a passphrase and persists passphrase mode", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "passphrase-group" });
+		await page.goto(`/groups/${group.id}/backups/config`);
+		// `…existing…` → the fake prober reports an existing kopia repo.
+		await page.getByLabel("Bucket").fill("bes-existing-repo");
+		await page.getByLabel("Target role ARN").fill("arn:aws:iam::999:role/dev");
+		await page
+			.getByLabel("Maintenance role ARN")
+			.fill("arn:aws:iam::999:role/maint");
+		await page.getByRole("button", { name: /check bucket/i }).click();
+
+		await expect(page.getByText(/existing kopia repository/i)).toBeVisible();
+		// Continue is gated on the passphrase.
+		await expect(
+			page.getByRole("button", { name: /^continue$/i }),
+		).toBeDisabled();
+		await page
+			.getByLabel("Existing repository passphrase")
+			.fill("an-existing-repo-passphrase");
+		await page.getByRole("button", { name: /^continue$/i }).click();
+		await page.getByRole("button", { name: /create & provision/i }).click();
+
+		await expect(page).toHaveURL(new RegExp(`/groups/${group.id}/backups$`));
+		const rows = await sql.query<{ mode: string }>(
+			`SELECT mode FROM server_group_backup_config WHERE group_id = $1`,
+			[group.id],
+		);
+		expect(rows[0]!.mode).toBe("passphrase");
+	});
+
+	test("wizard blocks other (non-kopia) content", async ({ page, sql }) => {
+		const group = await seedServerGroup(sql, { name: "other-group" });
+		await page.goto(`/groups/${group.id}/backups/config`);
+		// `…other…` → the fake prober reports non-kopia content.
+		await page.getByLabel("Bucket").fill("bes-other-stuff");
+		await page.getByLabel("Target role ARN").fill("arn");
+		await page.getByLabel("Maintenance role ARN").fill("maint-arn");
+		await page.getByRole("button", { name: /check bucket/i }).click();
+
+		await expect(page.getByText(/other \(non-kopia\) content/i)).toBeVisible();
+		// No proceeding: Continue is disabled, Re-check is offered.
+		await expect(
+			page.getByRole("button", { name: /^continue$/i }),
+		).toBeDisabled();
+		await expect(page.getByRole("button", { name: /re-check/i })).toBeVisible();
+	});
+
 	test("retention floor violation blocks submit", async ({ page, sql }) => {
 		const group = await seedServerGroup(sql, { name: "floor-group" });
-
 		await page.goto(`/groups/${group.id}/backups/config`);
-		await page.getByLabel("Bucket").fill("b");
-		await page.getByLabel("Target role ARN").fill("arn");
+		await emptyBucketToSchedule(page);
 		await page.getByLabel("Daily").fill("2"); // below floor of 7
 
 		const submit = page.getByRole("button", { name: /create & provision/i });
@@ -106,8 +173,8 @@ test.describe("backups zero-state + config", () => {
 	}) => {
 		const group = await seedServerGroup(sql, { name: "min-attr-group" });
 		await page.goto(`/groups/${group.id}/backups/config`);
-		// The daily/weekly/monthly inputs set min= to the org floor so the
-		// stepper/native validation won't let the user go below it.
+		await emptyBucketToSchedule(page);
+		// The daily/weekly/monthly inputs set min= to the org floor.
 		await expect(page.getByLabel("Daily")).toHaveAttribute("min", "7");
 		await expect(page.getByLabel("Weekly")).toHaveAttribute("min", "4");
 		await expect(page.getByLabel("Monthly")).toHaveAttribute("min", "6");
@@ -115,13 +182,9 @@ test.describe("backups zero-state + config", () => {
 
 	test("manual-only toggle persists a NULL interval", async ({ page, sql }) => {
 		const group = await seedServerGroup(sql, { name: "manual-group" });
-
 		await page.goto(`/groups/${group.id}/backups/config`);
-		await page.getByLabel("Bucket").fill("b");
-		await page.getByLabel("Target role ARN").fill("arn");
-		await page.getByLabel("Maintenance role ARN").fill("maint-arn");
-		// Toggle the schedule switch off → manual only. MUI Switch exposes a
-		// checkbox role; click the "Scheduled" label to flip it.
+		await emptyBucketToSchedule(page);
+		// Toggle the schedule switch off → manual only.
 		await page.getByText("Scheduled", { exact: true }).click();
 		await page.getByRole("button", { name: /create & provision/i }).click();
 
@@ -133,78 +196,6 @@ test.describe("backups zero-state + config", () => {
 		);
 		expect(rows).toHaveLength(1);
 		expect(rows[0]!.expected_interval).toBeNull();
-	});
-});
-
-test.describe("backups escrow", () => {
-	test.beforeEach(async ({ sql }) => {
-		await resetSeededTables(sql);
-	});
-
-	test("ack flips escrow_pending → ready and stamps acked_at", async ({
-		page,
-		sql,
-	}) => {
-		const group = await seedServerGroup(sql, { name: "escrow-group" });
-		await seedServerGroupBackupConfig(sql, {
-			groupId: group.id,
-			status: "escrow_pending",
-			mode: "from_birth",
-		});
-
-		await page.goto(`/groups/${group.id}/backups`);
-		await expect(
-			page.getByRole("heading", { name: /escrow the repository passphrase/i }),
-		).toBeVisible();
-
-		// The kube client is None in e2e, so revealing the Secret 502s. We seed
-		// the escrow_pending state and drive a pre-revealed ack: the reveal
-		// button surfaces the upstream error rather than a passphrase.
-		await page.getByRole("button", { name: /reveal passphrase/i }).click();
-		// Either an error alert (no kube) appears; the ack path is what we assert
-		// transitions the DB, so we ack via the panel after seeding a reveal.
-		// Since the checkbox only appears after a successful reveal, drive the
-		// transition through the row directly is not the point — instead assert
-		// the reveal attempt surfaced an error (control-plane unavailable).
-		await expect(
-			page.getByText(/secret get failed|kube client not configured|cannot read/i),
-		).toBeVisible();
-	});
-
-	test("acking from a revealed state activates backups", async ({
-		page,
-		sql,
-		stack,
-	}) => {
-		// Drive the ack directly via the API (admin), then assert the DB row
-		// flipped — this covers the escrow_pending → ready transition without a
-		// live kube Secret. The UI ack button calls the same endpoint.
-		const group = await seedServerGroup(sql, { name: "ack-group" });
-		await seedServerGroupBackupConfig(sql, {
-			groupId: group.id,
-			status: "escrow_pending",
-			mode: "from_birth",
-		});
-
-		const res = await page.request.post(
-			`${stack.baseUrl}/api/backups/ack_escrow`,
-			{ data: { server_group_id: group.id } },
-		);
-		expect(res.ok()).toBeTruthy();
-
-		const rows = await sql.query<{
-			status: string;
-			escrow_acked_at: string | null;
-		}>(
-			`SELECT status, escrow_acked_at FROM server_group_backup_config WHERE group_id = $1`,
-			[group.id],
-		);
-		expect(rows[0]!.status).toBe("ready");
-		expect(rows[0]!.escrow_acked_at).not.toBeNull();
-
-		// And the panel now shows the ready state.
-		await page.goto(`/groups/${group.id}/backups`);
-		await expect(page.getByText(/backups are active/i)).toBeVisible();
 	});
 });
 

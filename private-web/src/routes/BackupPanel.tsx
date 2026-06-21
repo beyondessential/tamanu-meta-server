@@ -25,7 +25,6 @@ import { useIsAdmin } from "../hooks/useIsAdmin";
 import { humanSeconds } from "../lib/humanDuration";
 import { usePageTitle } from "../hooks/usePageTitle";
 import TimeAgo from "../components/TimeAgo";
-import BackupEscrow from "./BackupEscrow";
 import {
 	BACKUP_STATUS_HELP,
 	BACKUP_STATUS_INTENT,
@@ -146,10 +145,6 @@ export default function BackupPanel() {
 					isAdmin={isAdmin}
 					onRetried={configForTick.reload}
 				/>
-			)}
-
-			{status === "escrow_pending" && (
-				<BackupEscrow config={data} onAcked={configForTick.reload} />
 			)}
 
 			{status === "ready" && (

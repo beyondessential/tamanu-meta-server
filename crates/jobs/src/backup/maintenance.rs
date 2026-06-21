@@ -18,7 +18,8 @@ use std::{collections::HashSet, time::Duration};
 
 use commons_servers::backup_jobs::{JobKind, effective_retention_for_group, is_due, slot_is_due};
 use database::{
-	BackupConfigStatus, BackupMaintenanceRun, MaintenanceKind, RunOutcome, ServerGroupBackupConfig,
+	BackupConfigStatus, BackupMaintenanceRun, BackupRepoMode, MaintenanceKind, RunOutcome,
+	ServerGroupBackupConfig,
 };
 use jiff::Timestamp;
 use tokio::{
@@ -158,7 +159,42 @@ async fn run_init_op(worker: &Worker, config: &ServerGroupBackupConfig) -> anyho
 			.map_err(|e| anyhow::anyhow!(e))?
 	};
 	let region = config.region.as_deref().unwrap_or_default();
-	kopia::run_init(&env, &config.bucket, &config.prefix, region, &retention).await
+	// from-birth creates the repo; passphrase mode connects to an existing one
+	// only (Canopy never creates a repo under an operator-chosen passphrase).
+	let create_new = matches!(config.mode, BackupRepoMode::FromBirth);
+	kopia::run_init(
+		&env,
+		&config.bucket,
+		&config.prefix,
+		region,
+		&retention,
+		create_new,
+	)
+	.await?;
+
+	// Ensure the bucket's Intelligent-Tiering .storageconfig exists (pulumi
+	// normally writes it; create as a fallback, never overwrite). Best-effort —
+	// it only affects S3 tiering, not backup correctness.
+	if let Err(e) = super::storageconfig::ensure(
+		&config.maintenance_role_arn,
+		&config.bucket,
+		&config.prefix,
+		config.region.as_deref(),
+	)
+	.await
+	{
+		tracing::warn!(group = %config.group_id, ".storageconfig ensure failed (non-fatal): {e:#}");
+	}
+
+	// Import: Canopy never persists the operator's passphrase — immediately
+	// rotate it to a generated one (a Canopy import is a hard break for any
+	// existing consumers, which is intended).
+	if matches!(config.mode, BackupRepoMode::Passphrase) {
+		super::rotation::rotate(worker, config).await.map_err(|e| {
+			anyhow::anyhow!("import: rotating to a canopy-generated passphrase: {e}")
+		})?;
+	}
+	Ok(())
 }
 
 /// Run a maintenance op in a spawned task: start the run row, read the password,
@@ -338,8 +374,6 @@ mod tests {
 			updated_at: now,
 			mode: commons_types::backup::BackupRepoMode::FromBirth,
 			last_init_error: last_init_error.map(str::to_string),
-			escrow_acked_at: None,
-			escrow_acked_by: None,
 		}
 	}
 

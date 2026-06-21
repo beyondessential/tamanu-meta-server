@@ -52,26 +52,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/backups/ack_escrow": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Acknowledge the Bitwarden escrow: flip `escrow_pending → ready`, stamping
-         *     `escrow_acked_at/by`. 409 unless currently `escrow_pending`.
-         */
-        post: operations["backups_ack_escrow"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/backups/cancel_request": {
         parameters: {
             query?: never;
@@ -161,7 +141,8 @@ export interface paths {
         put?: never;
         /**
          * Delete a group's config row (decommission). The bucket and its object-locked
-         *     objects persist; this only stops credential issuance.
+         *     objects persist; this only stops credential issuance and removes the
+         *     Canopy-owned passphrase Secret (which must not outlive its config).
          */
         post: operations["backups_delete"];
         delete?: never;
@@ -207,6 +188,89 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backups/probe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Synchronous setup-wizard probe: assume the maintenance role and inspect the
+         *     bucket/prefix (empty / kopia_repo / other_content / inaccessible), and report
+         *     whether Canopy already has a config for it. Read-only; never mutates.
+         */
+        post: operations["backups_probe"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backups/recovery_challenge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Issue a verification challenge: a fresh nonce encrypted to the recovery recipients.
+         *     The operator decrypts it offline (proving a private key is genuinely held) and
+         *     posts the plaintext back to `recovery_verify`.
+         */
+        post: operations["backups_recovery_challenge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backups/recovery_status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report the recovery vault verification status (recipients, last verification, and
+         *     whether a ceremony is due).
+         */
+        post: operations["backups_recovery_status"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backups/recovery_verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Complete the ceremony: verify the operator's decrypted answer matches the
+         *     outstanding challenge, then record the verification against the current
+         *     recipient set.
+         */
+        post: operations["backups_recovery_verify"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backups/request_now": {
         parameters: {
             query?: never;
@@ -221,27 +285,6 @@ export interface paths {
          *     `(server_id, type, purpose)`. Idempotent (re-request refreshes the row).
          */
         post: operations["backups_request_now"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/backups/reveal_escrow": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Reveal-once passphrase for a from-birth repo. Only valid while
-         *     `escrow_pending`; re-callable until acked. Reads the k8s Secret named by
-         *     `repo_password_ref` (502 on read failure).
-         */
-        post: operations["backups_reveal_escrow"];
         delete?: never;
         options?: never;
         head?: never;
@@ -320,6 +363,30 @@ export interface paths {
          *     `set_schedule`.
          */
         post: operations["backups_update"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backups/upsert": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Machine-facing config-as-a-resource upsert for ops/pulumi: declaratively
+         *     register/converge a group's backup config in one idempotent call (config +
+         *     generated passphrase Secret + schedule/retention + auto-provision). Creating
+         *     is from-birth onto an empty bucket only — a non-empty/existing-repo/
+         *     inaccessible bucket is rejected. Re-applying reconciles the role ARNs,
+         *     region, schedule and retention; `bucket`/`prefix` are immutable.
+         */
+        post: operations["backups_upsert"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2025,17 +2092,11 @@ export interface components {
             server_group_id: string;
             status: string;
         };
-        /**
-         * @description Full config + lifecycle for a group. Never includes the passphrase value —
-         *     only `reveal_escrow` does.
-         */
+        /** @description Full config + lifecycle for a group. Never includes the passphrase value. */
         BackupConfigView: {
             bucket: string;
             /** Format: date-time */
             created_at: string;
-            /** Format: date-time */
-            escrow_acked_at?: string | null;
-            escrow_acked_by?: string | null;
             last_init_error?: string | null;
             maintenance_role_arn: string;
             mode: string;
@@ -2160,14 +2221,13 @@ export interface components {
              */
             maintenance_role_arn: string;
             mode: string;
+            /**
+             * @description Passphrase mode only: the operator-supplied repo passphrase Canopy stores.
+             *     From-birth ignores this (Canopy generates one).
+             */
+            passphrase?: string | null;
             prefix?: string;
             region?: string | null;
-            /**
-             * @description Import mode only: name of a pre-existing k8s Secret holding the
-             *     passphrase. From-birth leaves this None (Canopy generates + names it),
-             *     in which case a placeholder ref keyed on the group is recorded.
-             */
-            repo_password_ref?: string | null;
             /** Format: uuid */
             server_group_id: string;
             /** @description Device role: public-server assumes this to mint device creds (no delete). */
@@ -2923,6 +2983,29 @@ export interface components {
             server_id: string;
             type: string;
         };
+        ProbeArgs: {
+            bucket: string;
+            /** @description Maintenance role to assume for the inspect (full read). */
+            maintenance_role_arn: string;
+            prefix?: string;
+            region?: string | null;
+        };
+        /**
+         * @description Inspect-probe result for the wizard: what's at `bucket/prefix`, plus whether
+         *     Canopy already has a config for it.
+         */
+        ProbeResponse: {
+            /**
+             * Format: uuid
+             * @description Group id if a config already exists for this exact bucket+prefix.
+             */
+            already_configured?: string | null;
+            /** @description Present for `inaccessible`: the assume/list failure. */
+            error?: string | null;
+            /** @description A few keys, for the `other_content` warning. */
+            object_sample: string[];
+            state: string;
+        };
         /**
          * @description Wire-shape mirror of [`problem_details::ProblemDetails`] for OpenAPI.
          *
@@ -2948,6 +3031,39 @@ export interface components {
              * @example /errors/resource-not-found
              */
             type: string;
+        };
+        RecoveryChallengeResponse: {
+            /**
+             * @description The challenge ciphertext (`age` to the recipients), base64-encoded. The
+             *     operator decrypts it offline with a held private key (`bestool crypto
+             *     decrypt` / `age`) and submits the plaintext to `recovery_verify`.
+             */
+            ciphertext_base64: string;
+            /** @description The recipients this challenge was encrypted to. */
+            recipients: string[];
+        };
+        /** @description Status of the recovery vault verification ceremony. */
+        RecoveryStatusResponse: {
+            /** @description Whether recovery recipients are configured on this server at all. */
+            configured: boolean;
+            /** @description Whether a (fresh) ceremony is due. */
+            due: boolean;
+            /** Format: date-time */
+            last_verified_at?: string | null;
+            /** @description The recipient set the last verification covered. */
+            last_verified_recipients: string[];
+            /** @description Human-readable reason for the `due` value. */
+            reason: string;
+            /** @description The live recipient fingerprints (`age1…`). */
+            recipients: string[];
+        };
+        RecoveryVerifyArgs: {
+            /** @description The decrypted challenge plaintext. */
+            answer: string;
+        };
+        RecoveryVerifyResponse: {
+            /** Format: date-time */
+            verified_at: string;
         };
         RelatedVersionData: {
             changelog: string;
@@ -3021,12 +3137,6 @@ export interface components {
             keep_monthly: number;
             /** Format: int32 */
             keep_weekly: number;
-        };
-        RevealEscrowResponse: {
-            /** @description Shown once; the UI must not persist it. */
-            passphrase: string;
-            /** @description The Secret name, for the "saved where" note. */
-            repo_password_ref: string;
         };
         /**
          * @description Outcome of a reported backup/restore run.
@@ -3528,6 +3638,35 @@ export interface components {
             status: string;
             version: string;
         };
+        /**
+         * @description Machine-facing config-as-a-resource upsert (ops/pulumi). `mode` is implicit
+         *     — always from-birth — so the bucket must be empty and no passphrase is
+         *     supplied (importing an existing repo stays an interactive operator action).
+         *     `bucket`/`prefix` are the identity and immutable on re-apply; role ARNs,
+         *     region, schedule and retention are reconciled to the request each time.
+         */
+        UpsertBackupConfigArgs: {
+            bucket: string;
+            /**
+             * Format: int64
+             * @description Seconds between scheduled runs; None = manual-only (no schedule).
+             */
+            expected_interval?: number | null;
+            /**
+             * @description Maintenance role: the backups pod assumes this for maintenance/inspection/
+             *     s3-metrics (s3:* + delete + CloudWatch).
+             */
+            maintenance_role_arn: string;
+            prefix?: string;
+            region?: string | null;
+            retention?: null | components["schemas"]["RetentionPolicy"];
+            /** Format: uuid */
+            server_group_id: string;
+            /** @description Device role: public-server assumes this to mint device creds (no delete). */
+            target_role_arn: string;
+            /** @description Schedule type to reconcile (defaults to `tamanu-postgres`). */
+            type?: string;
+        };
         Value: unknown;
         VersionData: {
             /** Format: date-time */
@@ -3692,45 +3831,6 @@ export interface operations {
                 };
             };
             403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-        };
-    };
-    backups_ack_escrow: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["GroupArgs"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BackupConfigView"];
-                };
-            };
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3953,6 +4053,122 @@ export interface operations {
             };
         };
     };
+    backups_probe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProbeArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProbeResponse"];
+                };
+            };
+        };
+    };
+    backups_recovery_challenge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": unknown;
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecoveryChallengeResponse"];
+                };
+            };
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    backups_recovery_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": unknown;
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecoveryStatusResponse"];
+                };
+            };
+        };
+    };
+    backups_recovery_verify: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecoveryVerifyArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecoveryVerifyResponse"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
     backups_request_now: {
         parameters: {
             query?: never;
@@ -3973,53 +4189,6 @@ export interface operations {
                 content?: never;
             };
             404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-        };
-    };
-    backups_reveal_escrow: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["GroupArgs"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RevealEscrowResponse"];
-                };
-            };
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-            502: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4150,6 +4319,61 @@ export interface operations {
                 };
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    backups_upsert: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpsertBackupConfigArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupConfigView"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };
