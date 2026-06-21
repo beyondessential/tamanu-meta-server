@@ -225,6 +225,52 @@
         ]
       }
     },
+    "/api/backups/clear_schedule": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Remove a per-`(group,type)` schedule override → revert that type to inheriting\nthe canopy-wide default.",
+        "operationId": "backups_clear_schedule",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClearScheduleArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupConfigView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/backups/create": {
       "post": {
         "tags": [
@@ -427,6 +473,45 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/backups/group_schedules": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Per enabled backup type, the group's effective schedule/retention (override\nor inherited default) — drives the per-type editor in the group panel.",
+        "operationId": "backups_group_schedules",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/GroupTypeScheduleView"
+                  }
                 }
               }
             }
@@ -780,6 +865,45 @@
         ]
       }
     },
+    "/api/backups/set_type_default": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Set the canopy-wide default schedule/retention for a backup type\n(floor-validated). Operators tune these in Settings → Backup defaults.",
+        "operationId": "backups_set_type_default",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetTypeDefaultArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/backups/stats": {
       "post": {
         "tags": [
@@ -814,6 +938,43 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/backups/type_defaults": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "List the canopy-wide per-type defaults (the \"global\" schedule/retention each\ngroup inherits unless it overrides a type).",
+        "operationId": "backups_type_defaults",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TypeDefaultView"
+                  }
                 }
               }
             }
@@ -5384,6 +5545,22 @@
           }
         }
       },
+      "ClearScheduleArgs": {
+        "type": "object",
+        "required": [
+          "server_group_id",
+          "type"
+        ],
+        "properties": {
+          "server_group_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string"
+          }
+        }
+      },
       "ConnectionHistoryArgs": {
         "type": "object",
         "required": [
@@ -6087,6 +6264,34 @@
           "server_group_id": {
             "type": "string",
             "format": "uuid"
+          }
+        }
+      },
+      "GroupTypeScheduleView": {
+        "type": "object",
+        "description": "Effective schedule/retention for one enabled backup type of a group: the\nper-`(group,type)` override if present, else the canopy-wide default.\n`has_override` tells the UI whether it's inheriting or overriding.",
+        "required": [
+          "type",
+          "effective_retention",
+          "has_override"
+        ],
+        "properties": {
+          "effective_interval": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Seconds between scheduled runs; null = manual-only (no scheduled interval)."
+          },
+          "effective_retention": {
+            "$ref": "#/components/schemas/RetentionPolicy"
+          },
+          "has_override": {
+            "type": "boolean"
+          },
+          "type": {
+            "type": "string"
           }
         }
       },
@@ -8655,6 +8860,32 @@
           }
         }
       },
+      "SetTypeDefaultArgs": {
+        "type": "object",
+        "required": [
+          "type",
+          "default_retention"
+        ],
+        "properties": {
+          "auto_enable": {
+            "type": "boolean"
+          },
+          "default_interval": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Seconds between scheduled runs; null = manual-only."
+          },
+          "default_retention": {
+            "$ref": "#/components/schemas/RetentionPolicy"
+          },
+          "type": {
+            "type": "string"
+          }
+        }
+      },
       "Severity": {
         "type": "string",
         "description": "Canopy's severity vocabulary, narrowed from RFC 5424 to a five-level\nset with operator semantics:\n\n- `Debug`: never participates in incidents (filed for the audit\n  trail / per-server view only).\n- `Info`, `Warning`: join an open incident for context but don't\n  open one or keep one open on their own.\n- `Error`: opens an incident; sits in the per-group `slack_open_delay`\n  holding window before the Slack notification ships.\n- `Critical`: opens an incident and bypasses the holding window —\n  the Slack notification is enqueued for immediate delivery.\n\nStored as text in Postgres; validated as this enum at the API layer.\nDefault is `Error` (the most common severity for a deliberately\nfiled event). The legacy syslog severities `emergency` / `alert` /\n`notice` have been retired — see the\n`2026-05-29-000000-0000_restrict_severities` migration; the\n`FromStr` impl still accepts them as aliases for forward-compat with\nany device that hasn't been updated.",
@@ -9090,6 +9321,40 @@
           }
         }
       },
+      "TypeDefaultView": {
+        "type": "object",
+        "description": "Canopy-wide default schedule/retention for a backup type.",
+        "required": [
+          "type",
+          "auto_enable"
+        ],
+        "properties": {
+          "auto_enable": {
+            "type": "boolean"
+          },
+          "default_interval": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Seconds between scheduled runs; null = manual-only."
+          },
+          "default_retention": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RetentionPolicy"
+              }
+            ]
+          },
+          "type": {
+            "type": "string"
+          }
+        }
+      },
       "UpdateArgs": {
         "type": "object",
         "required": [
@@ -9219,7 +9484,7 @@
       },
       "UpsertBackupConfigArgs": {
         "type": "object",
-        "description": "Machine-facing config-as-a-resource upsert (ops/pulumi). `mode` is implicit\n— always from-birth — so the bucket must be empty and no passphrase is\nsupplied (importing an existing repo stays an interactive operator action).\n`bucket`/`prefix` are the identity and immutable on re-apply; role ARNs,\nregion, schedule and retention are reconciled to the request each time.",
+        "description": "Machine-facing config-as-a-resource upsert (ops/pulumi). `mode` is implicit\n— always from-birth — so the bucket must be empty and no passphrase is\nsupplied (importing an existing repo stays an interactive operator action).\n`bucket`/`prefix` are the identity and immutable on re-apply; the role ARNs\nand region are reconciled to the request each time. **Schedule and retention\nare intentionally NOT part of this API** — they're per-`(group, type)` and\nmanaged through the operator UI (inheriting the canopy-wide type defaults).",
         "required": [
           "server_group_id",
           "bucket",
@@ -9229,14 +9494,6 @@
         "properties": {
           "bucket": {
             "type": "string"
-          },
-          "expected_interval": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "Seconds between scheduled runs; None = manual-only (no schedule)."
           },
           "maintenance_role_arn": {
             "type": "string",
@@ -9251,17 +9508,6 @@
               "null"
             ]
           },
-          "retention": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/RetentionPolicy",
-                "description": "None = inherit the type default. A present policy is floor-validated."
-              }
-            ]
-          },
           "server_group_id": {
             "type": "string",
             "format": "uuid"
@@ -9269,10 +9515,6 @@
           "target_role_arn": {
             "type": "string",
             "description": "Device role: public-server assumes this to mint device creds (no delete)."
-          },
-          "type": {
-            "type": "string",
-            "description": "Schedule type to reconcile (defaults to `tamanu-postgres`)."
           }
         }
       },

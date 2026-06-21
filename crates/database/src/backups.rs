@@ -605,6 +605,26 @@ impl ServerGroupBackupSchedule {
 			.await
 			.map_err(AppError::from)
 	}
+
+	/// Remove a group's per-`(group,type)` schedule override so the type reverts
+	/// to inheriting the canopy-wide default. No-op if there was no override.
+	pub async fn delete(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+		r#type: &BackupType,
+	) -> Result<()> {
+		use crate::schema::server_group_backup_schedule::dsl;
+
+		diesel::delete(
+			dsl::server_group_backup_schedule
+				.filter(dsl::group_id.eq(group_id))
+				.filter(dsl::type_.eq(r#type.as_str())),
+		)
+		.execute(db)
+		.await
+		.map_err(AppError::from)?;
+		Ok(())
+	}
 }
 
 // ---------------------------------------------------------------------------

@@ -36,21 +36,6 @@ test.describe("backups zero-state + config", () => {
 		await expect(page.getByText(/backups not set up/i)).toBeVisible();
 	});
 
-	// Walk the wizard's step 0 (target) → step 2 (schedule) for an empty bucket
-	// (the fake prober reports `empty` for buckets without a marker). Leaves the
-	// page on the schedule/retention step.
-	async function emptyBucketToSchedule(
-		page: import("@playwright/test").Page,
-		bucket = "bes-empty",
-	) {
-		await page.getByLabel("Bucket").fill(bucket);
-		await page.getByLabel("Target role ARN").fill("arn");
-		await page.getByLabel("Maintenance role ARN").fill("maint-arn");
-		await page.getByRole("button", { name: /check bucket/i }).click();
-		await expect(page.getByText(/empty bucket/i)).toBeVisible();
-		await page.getByRole("button", { name: /^continue$/i }).click();
-	}
-
 	test("wizard create (empty bucket) writes a from-birth config row", async ({
 		page,
 		sql,
@@ -67,26 +52,18 @@ test.describe("backups zero-state + config", () => {
 			.fill("arn:aws:iam::999:role/created-maint");
 		await page.getByRole("button", { name: /check bucket/i }).click();
 		await expect(page.getByText(/empty bucket/i)).toBeVisible();
-		await page.getByRole("button", { name: /^continue$/i }).click();
-		// Step 2: defaults (schedule on at 60m, retention meets floors).
+		// No schedule step — schedule/retention inherit the per-type defaults.
 		await page.getByRole("button", { name: /create & provision/i }).click();
 
 		await expect(page).toHaveURL(new RegExp(`/groups/${group.id}/backups$`));
 
 		const rows = await sql.query<{
 			status: string;
-			bucket: string;
 			mode: string;
 			maintenance_role_arn: string;
-			secs: string | null;
-			retention: { keep_daily: number };
 		}>(
-			`SELECT c.status, c.bucket, c.mode, c.maintenance_role_arn,
-			        EXTRACT(EPOCH FROM s.expected_interval)::text AS secs,
-			        s.retention
-			 FROM server_group_backup_config c
-			 LEFT JOIN server_group_backup_schedule s ON s.group_id = c.group_id
-			 WHERE c.group_id = $1`,
+			`SELECT status, mode, maintenance_role_arn
+			 FROM server_group_backup_config WHERE group_id = $1`,
 			[group.id],
 		);
 		expect(rows).toHaveLength(1);
@@ -95,8 +72,12 @@ test.describe("backups zero-state + config", () => {
 		expect(rows[0]!.maintenance_role_arn).toBe(
 			"arn:aws:iam::999:role/created-maint",
 		);
-		expect(Number(rows[0]!.secs)).toBe(3600);
-		expect(rows[0]!.retention.keep_daily).toBe(7);
+		// The wizard writes no per-(group,type) schedule override.
+		const sched = await sql.query(
+			`SELECT 1 FROM server_group_backup_schedule WHERE group_id = $1`,
+			[group.id],
+		);
+		expect(sched).toHaveLength(0);
 	});
 
 	test("wizard create (existing repo) requires a passphrase and persists passphrase mode", async ({
@@ -114,14 +95,13 @@ test.describe("backups zero-state + config", () => {
 		await page.getByRole("button", { name: /check bucket/i }).click();
 
 		await expect(page.getByText(/existing kopia repository/i)).toBeVisible();
-		// Continue is gated on the passphrase.
+		// Provisioning is gated on the passphrase.
 		await expect(
-			page.getByRole("button", { name: /^continue$/i }),
+			page.getByRole("button", { name: /create & provision/i }),
 		).toBeDisabled();
 		await page
 			.getByLabel("Existing repository passphrase")
 			.fill("an-existing-repo-passphrase");
-		await page.getByRole("button", { name: /^continue$/i }).click();
 		await page.getByRole("button", { name: /create & provision/i }).click();
 
 		await expect(page).toHaveURL(new RegExp(`/groups/${group.id}/backups$`));
@@ -142,66 +122,52 @@ test.describe("backups zero-state + config", () => {
 		await page.getByRole("button", { name: /check bucket/i }).click();
 
 		await expect(page.getByText(/other \(non-kopia\) content/i)).toBeVisible();
-		// No proceeding: Continue is disabled, Re-check is offered.
+		// No proceeding: Create & provision disabled, Re-check offered.
 		await expect(
-			page.getByRole("button", { name: /^continue$/i }),
+			page.getByRole("button", { name: /create & provision/i }),
 		).toBeDisabled();
 		await expect(page.getByRole("button", { name: /re-check/i })).toBeVisible();
-	});
-
-	test("retention floor violation blocks submit", async ({ page, sql }) => {
-		const group = await seedServerGroup(sql, { name: "floor-group" });
-		await page.goto(`/groups/${group.id}/backups/config`);
-		await emptyBucketToSchedule(page);
-		await page.getByLabel("Daily").fill("2"); // below floor of 7
-
-		const submit = page.getByRole("button", { name: /create & provision/i });
-		await expect(submit).toBeDisabled();
-		await expect(page.getByText(/keep_daily must be ≥ 7/i)).toBeVisible();
-
-		// No row was written.
-		const rows = await sql.query(
-			`SELECT 1 FROM server_group_backup_config WHERE group_id = $1`,
-			[group.id],
-		);
-		expect(rows).toHaveLength(0);
-	});
-
-	test("retention inputs carry the org minimum as a native min", async ({
-		page,
-		sql,
-	}) => {
-		const group = await seedServerGroup(sql, { name: "min-attr-group" });
-		await page.goto(`/groups/${group.id}/backups/config`);
-		await emptyBucketToSchedule(page);
-		// The daily/weekly/monthly inputs set min= to the org floor.
-		await expect(page.getByLabel("Daily")).toHaveAttribute("min", "7");
-		await expect(page.getByLabel("Weekly")).toHaveAttribute("min", "4");
-		await expect(page.getByLabel("Monthly")).toHaveAttribute("min", "6");
-	});
-
-	test("manual-only toggle persists a NULL interval", async ({ page, sql }) => {
-		const group = await seedServerGroup(sql, { name: "manual-group" });
-		await page.goto(`/groups/${group.id}/backups/config`);
-		await emptyBucketToSchedule(page);
-		// Toggle the schedule switch off → manual only.
-		await page.getByText("Scheduled", { exact: true }).click();
-		await page.getByRole("button", { name: /create & provision/i }).click();
-
-		await expect(page).toHaveURL(new RegExp(`/groups/${group.id}/backups$`));
-
-		const rows = await sql.query<{ expected_interval: string | null }>(
-			`SELECT expected_interval FROM server_group_backup_schedule WHERE group_id = $1`,
-			[group.id],
-		);
-		expect(rows).toHaveLength(1);
-		expect(rows[0]!.expected_interval).toBeNull();
 	});
 });
 
 test.describe("backups ready: stats + backup-now", () => {
 	test.beforeEach(async ({ sql }) => {
 		await resetSeededTables(sql);
+	});
+
+	test("per-type schedule inherits the default and saves an override", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "sched-group" });
+		const server = await seedServer(sql, { groupId: group.id });
+		// An enabled tamanu-postgres capability makes the type appear in the panel.
+		await seedServerBackupCapability(sql, { serverId: server.id });
+		await seedServerGroupBackupConfig(sql, {
+			groupId: group.id,
+			status: "ready",
+		});
+
+		await page.goto(`/groups/${group.id}/backups`);
+
+		// No override yet → inherits the seeded canopy-wide default.
+		await expect(page.getByText("tamanu-postgres")).toBeVisible();
+		await expect(page.getByText("Inherited default")).toBeVisible();
+
+		// Override the interval to 12h.
+		await page.getByRole("button", { name: /^override$/i }).click();
+		await page.getByLabel("Back up every (hours)").fill("12");
+		await page.getByRole("button", { name: /save override/i }).click();
+
+		await expect(page.getByText("Override", { exact: true })).toBeVisible();
+		const rows = await sql.query<{ secs: string }>(
+			`SELECT EXTRACT(EPOCH FROM expected_interval)::text AS secs
+			 FROM server_group_backup_schedule
+			 WHERE group_id = $1 AND type = 'tamanu-postgres'`,
+			[group.id],
+		);
+		expect(rows).toHaveLength(1);
+		expect(Number(rows[0]!.secs)).toBe(43200);
 	});
 
 	test("stats render with unknown bucket bytes and recent runs", async ({
