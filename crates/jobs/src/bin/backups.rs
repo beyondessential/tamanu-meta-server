@@ -5,7 +5,11 @@
 //! - upstream preflight ([`jobs::backup::preflight`]),
 //! - kopia maintenance scheduler ([`jobs::backup::maintenance`]),
 //! - read-only inspection scheduler ([`jobs::backup::inspection`]),
-//! - S3 CloudWatch metrics task ([`jobs::backup::s3_metrics`]).
+//! - passphrase rotation loop ([`jobs::backup::rotation`]),
+//! - S3 CloudWatch metrics task ([`jobs::backup::s3_metrics`]),
+//! - recovery vault writer ([`jobs::backup::recovery_snapshot`]) — encrypts a state snapshot
+//!   to `age` recipients and writes it to object-locked S3. Its recipients are
+//!   mandatory, so the pod refuses to start if they're unset.
 //!
 //! The maintenance + inspection loops run kopia **in-process** (subprocesses)
 //! rather than spawning Kubernetes Jobs; they share a [`jobs::backup::worker::Worker`]
@@ -56,11 +60,25 @@ async fn main() -> miette::Result<()> {
 		.map_err(|e| miette!("container-creds endpoint init failed: {e}"))?;
 	let worker = Worker::new(pool, secrets, Cfg::from_env(), creds);
 
+	// recovery vault recipients are MANDATORY — refuse to start without them so there's
+	// never a silent recovery gap (Canopy owns every passphrase).
+	let recovery_config = jobs::backup::recovery_snapshot::RecoveryVaultConfig::from_env()
+		.map_err(|e| miette!("recovery vault misconfigured: {e}"))?;
+
 	let preflight = jobs::backup::preflight::spawn();
 	let maintenance = jobs::backup::maintenance::spawn(worker.clone());
 	let inspection = jobs::backup::inspection::spawn(worker.clone());
-	let rotation = jobs::backup::rotation::spawn(worker);
+	let rotation = jobs::backup::rotation::spawn(worker.clone());
 	let s3_metrics = jobs::backup::s3_metrics::spawn();
-	tokio::try_join!(preflight, maintenance, inspection, rotation, s3_metrics).into_diagnostic()?;
+	let recovery_snapshot = jobs::backup::recovery_snapshot::spawn(worker, recovery_config);
+	tokio::try_join!(
+		preflight,
+		maintenance,
+		inspection,
+		rotation,
+		s3_metrics,
+		recovery_snapshot
+	)
+	.into_diagnostic()?;
 	Ok(())
 }

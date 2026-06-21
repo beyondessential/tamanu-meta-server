@@ -16,6 +16,7 @@
 pub mod complete;
 pub mod creds_server;
 pub mod kopia;
+pub mod recovery_snapshot;
 pub mod worker;
 
 pub mod inspection;
