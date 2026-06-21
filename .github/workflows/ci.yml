@@ -18,6 +18,9 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        partition: [1, 2, 3]
     steps:
       - name: Free up space
         run: sudo rm -rf /opt/hostedtoolcache /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup || true
@@ -47,7 +50,7 @@ jobs:
       # scripts/ramdisk-pg.sh spins up with the runner's own initdb/pg_ctl
       # (preinstalled on ubuntu-latest), so no system Postgres service or
       # role/db setup is needed here — same path developers run locally.
-      - run: just test
+      - run: just test --partition hash:${{ matrix.partition }}/2
 
   clippy:
     name: Clippy
