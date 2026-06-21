@@ -209,3 +209,16 @@ action items §1–§3, §5 are the source of truth; treat them as done.
   ceremony as unavailable. private-server does **not** hard-require them (it
   starts fine without; only the ceremony page is degraded) — unlike the backups
   pod, which won't start without them. Nothing else on private-server needs it.
+
+**2026-06-22 — fix (repo-password Secret namespace):**
+- Canopy now reads/creates the repo-password Secrets in the **pod's own
+  namespace** (the ServiceAccount's namespace from the in-cluster config), not a
+  hardcoded `canopy`. So in `tamanu-meta-prod` the Secrets live in
+  `tamanu-meta-prod`. **No `POD_NAMESPACE` env needed** (it's still honored as an
+  override if set). Earlier the default `canopy` caused `canopy-jobs` (in
+  `tamanu-meta-prod`) to hit `403 Forbidden` reading `backup-repo-*` in `canopy`.
+- ⚠️ **Ensure both SAs have secret RBAC in the deployment namespace:**
+  `canopy-private` (`get`+`create` secrets) and `canopy-jobs` (`get`+`create`/
+  `update`/`patch` secrets, for rotation) — in whatever namespace the pods run
+  (e.g. `tamanu-meta-prod`), which is the standard same-namespace grant. If those
+  Role/RoleBindings were created in `canopy`, move them to the pods' namespace.
