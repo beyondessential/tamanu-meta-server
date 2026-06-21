@@ -58,8 +58,10 @@ impl AppState {
 			// In-memory secret store so onboarding (Secret creation) is exercised
 			// in tests without a cluster.
 			kube: Some(BackupSecrets::memory()),
-			// Fake prober (default empty) so the wizard probe works in tests.
-			prober: BucketProber::fake(crate::backup_probe::ProbeState::Empty),
+			// Bucket-name-derived fake prober (matches the e2e fixture): a test
+			// drives each probe state by naming the bucket — `…existing…` → kopia
+			// repo, `…other…` → other content, `…denied…` → inaccessible, else empty.
+			prober: BucketProber::Fake(None),
 		})
 	}
 }

@@ -352,7 +352,7 @@
         "tags": [
           "backups"
         ],
-        "summary": "Delete a group's config row (decommission). The bucket and its object-locked\nobjects persist; this only stops credential issuance.",
+        "summary": "Delete a group's config row (decommission). The bucket and its object-locked\nobjects persist; this only stops credential issuance and removes the\nCanopy-owned passphrase Secret (which must not outlive its config).",
         "operationId": "backups_delete",
         "requestBody": {
           "content": {
@@ -721,6 +721,82 @@
             }
           },
           "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/backups/upsert": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Machine-facing config-as-a-resource upsert for ops/pulumi: declaratively\nregister/converge a group's backup config in one idempotent call (config +\ngenerated passphrase Secret + schedule/retention + auto-provision). Creating\nis from-birth onto an empty bucket only — a non-empty/existing-repo/\ninaccessible bucket is rejected. Re-applying reconciles the role ARNs,\nregion, schedule and retention; `bucket`/`prefix` are immutable.",
+        "operationId": "backups_upsert",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertBackupConfigArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupConfigView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "502": {
             "description": "",
             "content": {
               "application/json": {
@@ -8914,6 +8990,65 @@
           },
           "version": {
             "type": "string"
+          }
+        }
+      },
+      "UpsertBackupConfigArgs": {
+        "type": "object",
+        "description": "Machine-facing config-as-a-resource upsert (ops/pulumi). `mode` is implicit\n— always from-birth — so the bucket must be empty and no passphrase is\nsupplied (importing an existing repo stays an interactive operator action).\n`bucket`/`prefix` are the identity and immutable on re-apply; role ARNs,\nregion, schedule and retention are reconciled to the request each time.",
+        "required": [
+          "server_group_id",
+          "bucket",
+          "target_role_arn",
+          "maintenance_role_arn"
+        ],
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "expected_interval": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Seconds between scheduled runs; None = manual-only (no schedule)."
+          },
+          "maintenance_role_arn": {
+            "type": "string",
+            "description": "Maintenance role: the backups pod assumes this for maintenance/inspection/\ns3-metrics (s3:* + delete + CloudWatch)."
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "region": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "retention": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RetentionPolicy",
+                "description": "None = inherit the type default. A present policy is floor-validated."
+              }
+            ]
+          },
+          "server_group_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "target_role_arn": {
+            "type": "string",
+            "description": "Device role: public-server assumes this to mint device creds (no delete)."
+          },
+          "type": {
+            "type": "string",
+            "description": "Schedule type to reconcile (defaults to `tamanu-postgres`)."
           }
         }
       },
