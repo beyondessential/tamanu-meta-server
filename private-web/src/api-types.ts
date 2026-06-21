@@ -209,6 +209,68 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backups/recovery_challenge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Issue a verification challenge: a fresh nonce encrypted to the recovery recipients.
+         *     The operator decrypts it offline (proving a private key is genuinely held) and
+         *     posts the plaintext back to `recovery_verify`.
+         */
+        post: operations["backups_recovery_challenge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backups/recovery_status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report the recovery vault verification status (recipients, last verification, and
+         *     whether a ceremony is due).
+         */
+        post: operations["backups_recovery_status"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backups/recovery_verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Complete the ceremony: verify the operator's decrypted answer matches the
+         *     outstanding challenge, then record the verification against the current
+         *     recipient set.
+         */
+        post: operations["backups_recovery_verify"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backups/request_now": {
         parameters: {
             query?: never;
@@ -2970,6 +3032,39 @@ export interface components {
              */
             type: string;
         };
+        RecoveryChallengeResponse: {
+            /**
+             * @description The challenge ciphertext (`age` to the recipients), base64-encoded. The
+             *     operator decrypts it offline with a held private key (`bestool crypto
+             *     decrypt` / `age`) and submits the plaintext to `recovery_verify`.
+             */
+            ciphertext_base64: string;
+            /** @description The recipients this challenge was encrypted to. */
+            recipients: string[];
+        };
+        /** @description Status of the recovery vault verification ceremony. */
+        RecoveryStatusResponse: {
+            /** @description Whether recovery recipients are configured on this server at all. */
+            configured: boolean;
+            /** @description Whether a (fresh) ceremony is due. */
+            due: boolean;
+            /** Format: date-time */
+            last_verified_at?: string | null;
+            /** @description The recipient set the last verification covered. */
+            last_verified_recipients: string[];
+            /** @description Human-readable reason for the `due` value. */
+            reason: string;
+            /** @description The live recipient fingerprints (`age1…`). */
+            recipients: string[];
+        };
+        RecoveryVerifyArgs: {
+            /** @description The decrypted challenge plaintext. */
+            answer: string;
+        };
+        RecoveryVerifyResponse: {
+            /** Format: date-time */
+            verified_at: string;
+        };
         RelatedVersionData: {
             changelog: string;
             /** Format: int32 */
@@ -3977,6 +4072,99 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProbeResponse"];
+                };
+            };
+        };
+    };
+    backups_recovery_challenge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": unknown;
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecoveryChallengeResponse"];
+                };
+            };
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    backups_recovery_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": unknown;
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecoveryStatusResponse"];
+                };
+            };
+        };
+    };
+    backups_recovery_verify: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecoveryVerifyArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecoveryVerifyResponse"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
         };

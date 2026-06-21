@@ -235,6 +235,8 @@ where
 				prober: private_server::backup_probe::BucketProber::fake(
 					private_server::backup_probe::ProbeState::Empty,
 				),
+				recovery_recipients: None,
+				recovery_challenge: std::sync::Arc::new(std::sync::Mutex::new(None)),
 			})
 			.unwrap(),
 			ClientIpSource::RightmostForwarded,

@@ -1182,3 +1182,53 @@ impl BackupRequest {
 			.map_err(AppError::from)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// backup_recovery_verifications — the recovery vault verification-ceremony log
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Queryable, Selectable)]
+#[diesel(table_name = crate::schema::backup_recovery_verifications)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct BackupRecoveryVerification {
+	pub id: i64,
+	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
+	pub verified_at: Timestamp,
+	/// The recipient fingerprints (age1… keys) this ceremony covered, as a JSON
+	/// array of strings.
+	pub recipients: JsonValue,
+}
+
+impl BackupRecoveryVerification {
+	/// Record a successful ceremony against the given recipient fingerprints.
+	pub async fn record(db: &mut AsyncPgConnection, recipients: &[String]) -> Result<Self> {
+		use crate::schema::backup_recovery_verifications::dsl;
+
+		let recipients =
+			serde_json::to_value(recipients).unwrap_or_else(|_| JsonValue::Array(vec![]));
+		diesel::insert_into(dsl::backup_recovery_verifications)
+			.values(dsl::recipients.eq(recipients))
+			.returning(Self::as_select())
+			.get_result(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// The most recent verification, if any.
+	pub async fn latest(db: &mut AsyncPgConnection) -> Result<Option<Self>> {
+		use crate::schema::backup_recovery_verifications::dsl;
+
+		dsl::backup_recovery_verifications
+			.order(dsl::verified_at.desc())
+			.select(Self::as_select())
+			.first(db)
+			.await
+			.optional()
+			.map_err(AppError::from)
+	}
+
+	/// The recipient fingerprints this verification covered.
+	pub fn recipient_list(&self) -> Vec<String> {
+		serde_json::from_value(self.recipients.clone()).unwrap_or_default()
+	}
+}

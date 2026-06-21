@@ -727,3 +727,115 @@ async fn upsert_rejects_bucket_already_configured_for_another_group() {
 	})
 	.await;
 }
+
+/// Decrypt an `age` ciphertext with the given identity (test-side, proving the
+/// vault format is standard and the ceremony round-trips).
+fn age_decrypt(ciphertext: &[u8], identity: &age::x25519::Identity) -> Vec<u8> {
+	use std::io::Read;
+	let decryptor = age::Decryptor::new_buffered(ciphertext).unwrap();
+	let mut reader = decryptor
+		.decrypt(std::iter::once(identity as &dyn age::Identity))
+		.unwrap();
+	let mut out = Vec::new();
+	reader.read_to_end(&mut out).unwrap();
+	out
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn recovery_ceremony_roundtrip() {
+	use base64::prelude::*;
+
+	// Each nextest test runs in its own process, so this env set is isolated.
+	let identity = age::x25519::Identity::generate();
+	unsafe {
+		std::env::set_var(
+			"CANOPY_RECOVERY_VAULT_KEYS",
+			identity.to_public().to_string(),
+		);
+	}
+
+	commons_tests::server::run(async move |_conn, _public, private| {
+		// Status: configured but never verified → due.
+		let resp = private
+			.post("/api/backups/recovery_status")
+			.json(&serde_json::json!({}))
+			.await;
+		resp.assert_status_ok();
+		let body: serde_json::Value = resp.json();
+		assert_eq!(body["configured"], true);
+		assert_eq!(body["due"], true);
+		assert!(body["last_verified_at"].is_null());
+
+		// Challenge → decrypt offline → verify.
+		let resp = private
+			.post("/api/backups/recovery_challenge")
+			.json(&serde_json::json!({}))
+			.await;
+		resp.assert_status_ok();
+		let ct_b64 = resp.json::<serde_json::Value>()["ciphertext_base64"]
+			.as_str()
+			.unwrap()
+			.to_string();
+		let plaintext = age_decrypt(&BASE64_STANDARD.decode(ct_b64).unwrap(), &identity);
+		let answer = String::from_utf8(plaintext).unwrap();
+
+		let resp = private
+			.post("/api/backups/recovery_verify")
+			.json(&serde_json::json!({ "answer": answer }))
+			.await;
+		resp.assert_status_ok();
+
+		// Status now reports verified (not due) for the current recipients.
+		let resp = private
+			.post("/api/backups/recovery_status")
+			.json(&serde_json::json!({}))
+			.await;
+		let body: serde_json::Value = resp.json();
+		assert_eq!(body["due"], false);
+		assert!(!body["last_verified_at"].is_null());
+		assert_eq!(
+			body["last_verified_recipients"][0],
+			identity.to_public().to_string()
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn recovery_verify_rejects_wrong_and_missing() {
+	let identity = age::x25519::Identity::generate();
+	unsafe {
+		std::env::set_var(
+			"CANOPY_RECOVERY_VAULT_KEYS",
+			identity.to_public().to_string(),
+		);
+	}
+
+	commons_tests::server::run(async move |_conn, _public, private| {
+		// No outstanding challenge → 400.
+		private
+			.post("/api/backups/recovery_verify")
+			.json(&serde_json::json!({ "answer": "anything" }))
+			.await
+			.assert_status_bad_request();
+
+		// Issue a challenge, then answer wrong → 400 (and the challenge is spent).
+		private
+			.post("/api/backups/recovery_challenge")
+			.json(&serde_json::json!({}))
+			.await
+			.assert_status_ok();
+		private
+			.post("/api/backups/recovery_verify")
+			.json(&serde_json::json!({ "answer": "not-the-nonce" }))
+			.await
+			.assert_status_bad_request();
+		// Spent: a second verify with no fresh challenge → 400.
+		private
+			.post("/api/backups/recovery_verify")
+			.json(&serde_json::json!({ "answer": "not-the-nonce" }))
+			.await
+			.assert_status_bad_request();
+	})
+	.await;
+}

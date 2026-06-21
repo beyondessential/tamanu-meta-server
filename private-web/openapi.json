@@ -512,6 +512,140 @@
         ]
       }
     },
+    "/api/backups/recovery_challenge": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Issue a verification challenge: a fresh nonce encrypted to the recovery recipients.\nThe operator decrypts it offline (proving a private key is genuinely held) and\nposts the plaintext back to `recovery_verify`.",
+        "operationId": "backups_recovery_challenge",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryChallengeResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/backups/recovery_status": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Report the recovery vault verification status (recipients, last verification, and\nwhether a ceremony is due).",
+        "operationId": "backups_recovery_status",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryStatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/backups/recovery_verify": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Complete the ceremony: verify the operator's decrypted answer matches the\noutstanding challenge, then record the verification against the current\nrecipient set.",
+        "operationId": "backups_recovery_verify",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecoveryVerifyArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryVerifyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/backups/request_now": {
       "post": {
         "tags": [
@@ -7456,6 +7590,96 @@
             "format": "uri",
             "description": "A URI reference identifying the problem type.",
             "example": "/errors/resource-not-found"
+          }
+        }
+      },
+      "RecoveryChallengeResponse": {
+        "type": "object",
+        "required": [
+          "ciphertext_base64",
+          "recipients"
+        ],
+        "properties": {
+          "ciphertext_base64": {
+            "type": "string",
+            "description": "The challenge ciphertext (`age` to the recipients), base64-encoded. The\noperator decrypts it offline with a held private key (`bestool crypto\ndecrypt` / `age`) and submits the plaintext to `recovery_verify`."
+          },
+          "recipients": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The recipients this challenge was encrypted to."
+          }
+        }
+      },
+      "RecoveryStatusResponse": {
+        "type": "object",
+        "description": "Status of the recovery vault verification ceremony.",
+        "required": [
+          "configured",
+          "recipients",
+          "last_verified_recipients",
+          "due",
+          "reason"
+        ],
+        "properties": {
+          "configured": {
+            "type": "boolean",
+            "description": "Whether recovery recipients are configured on this server at all."
+          },
+          "due": {
+            "type": "boolean",
+            "description": "Whether a (fresh) ceremony is due."
+          },
+          "last_verified_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "last_verified_recipients": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The recipient set the last verification covered."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Human-readable reason for the `due` value."
+          },
+          "recipients": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The live recipient fingerprints (`age1…`)."
+          }
+        }
+      },
+      "RecoveryVerifyArgs": {
+        "type": "object",
+        "required": [
+          "answer"
+        ],
+        "properties": {
+          "answer": {
+            "type": "string",
+            "description": "The decrypted challenge plaintext."
+          }
+        }
+      },
+      "RecoveryVerifyResponse": {
+        "type": "object",
+        "required": [
+          "verified_at"
+        ],
+        "properties": {
+          "verified_at": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },

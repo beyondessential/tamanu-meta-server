@@ -194,6 +194,12 @@ export async function startStack(opts: StartOptions = {}): Promise<StackHandle> 
 				// the bucket name (…existing… → kopia repo, …other… → other content,
 				// …denied… → inaccessible, else empty).
 				CANOPY_BACKUP_PROBER_FAKE: "1",
+				// A throwaway age recipient (bestool-generated) so the recovery vault
+				// ceremony page reports as configured. The matching private key isn't
+				// needed: the e2e exercises status + challenge + wrong-answer, and the
+				// full decrypt round-trip is covered by the Rust endpoint tests.
+				CANOPY_RECOVERY_VAULT_KEYS:
+					"age1uy3nqmdxf4lc3sc4p32c2cp9dlqwk868gjh002gysullrgvp0cjsdg03dn",
 				// Needed by mint_enrollment to build the ticket's api_url; the
 				// setup-instructions flow auto-mints on an unregistered server.
 				PUBLIC_URL: process.env.PUBLIC_URL ?? "https://api.e2e.invalid",

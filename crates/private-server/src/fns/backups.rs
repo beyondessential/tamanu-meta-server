@@ -20,19 +20,26 @@ use commons_types::{
 };
 use database::pg_duration::PgDuration;
 use database::{
-	BackupMaintenanceRun, BackupRepoStats, BackupRequest, BackupRun, NewServerGroupBackupConfig,
-	NewServerGroupBackupSchedule, RetentionPolicy, ServerBackupCapability, ServerGroupBackupConfig,
-	ServerGroupBackupSchedule, server_groups::ServerGroup,
+	BackupMaintenanceRun, BackupRecoveryVerification, BackupRepoStats, BackupRequest, BackupRun,
+	NewServerGroupBackupConfig, NewServerGroupBackupSchedule, RetentionPolicy,
+	ServerBackupCapability, ServerGroupBackupConfig, ServerGroupBackupSchedule,
+	server_groups::ServerGroup,
 };
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
-use crate::state::AppState;
+use crate::state::{AppState, RecoveryChallenge};
 
 /// Secret key the from-birth init Job writes the generated passphrase under.
 const REPO_PASSWORD_SECRET_KEY: &str = "password";
+
+/// The recovery verification ceremony is due if the last one is older than this.
+const RECOVERY_VERIFICATION_MAX_AGE_SECS: i64 = 365 * 24 * 3600;
+
+/// A challenge older than this is stale (operator must request a fresh one).
+const RECOVERY_CHALLENGE_TTL_SECS: i64 = 3600;
 
 /// Cap on the recent-runs / maintenance lists in the stats panel.
 const RECENT_LIMIT: i64 = 20;
@@ -53,6 +60,9 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(capabilities))
 		.routes(routes!(set_capability))
 		.routes(routes!(delete))
+		.routes(routes!(recovery_status))
+		.routes(routes!(recovery_challenge))
+		.routes(routes!(recovery_verify))
 }
 
 // ── Wire types ──────────────────────────────────────────────────────────────
@@ -883,6 +893,230 @@ pub async fn delete(
 		kube.delete_password(&config.repo_password_ref).await?;
 	}
 	Ok(Json(()))
+}
+
+// ── recovery vault verification ceremony ───────────────────────────────────────────
+
+/// Status of the recovery vault verification ceremony.
+#[derive(Serialize, ToSchema)]
+pub struct RecoveryStatusResponse {
+	/// Whether recovery recipients are configured on this server at all.
+	pub configured: bool,
+	/// The live recipient fingerprints (`age1…`).
+	pub recipients: Vec<String>,
+	pub last_verified_at: Option<Timestamp>,
+	/// The recipient set the last verification covered.
+	pub last_verified_recipients: Vec<String>,
+	/// Whether a (fresh) ceremony is due.
+	pub due: bool,
+	/// Human-readable reason for the `due` value.
+	pub reason: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct RecoveryChallengeResponse {
+	/// The challenge ciphertext (`age` to the recipients), base64-encoded. The
+	/// operator decrypts it offline with a held private key (`bestool crypto
+	/// decrypt` / `age`) and submits the plaintext to `recovery_verify`.
+	pub ciphertext_base64: String,
+	/// The recipients this challenge was encrypted to.
+	pub recipients: Vec<String>,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct RecoveryVerifyArgs {
+	/// The decrypted challenge plaintext.
+	pub answer: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct RecoveryVerifyResponse {
+	pub verified_at: Timestamp,
+}
+
+/// Compute whether the ceremony is due: never run, last run > 1 year ago, or the
+/// recipient set changed since the last verification.
+fn recovery_due(
+	latest: Option<&BackupRecoveryVerification>,
+	current: &[String],
+	now: Timestamp,
+) -> (bool, String) {
+	let Some(latest) = latest else {
+		return (true, "never verified".into());
+	};
+	if now.as_second() - latest.verified_at.as_second() > RECOVERY_VERIFICATION_MAX_AGE_SECS {
+		return (true, "last verification was over a year ago".into());
+	}
+	let mut prev = latest.recipient_list();
+	prev.sort();
+	let mut cur = current.to_vec();
+	cur.sort();
+	if prev != cur {
+		return (
+			true,
+			"the recipient set changed since the last verification".into(),
+		);
+	}
+	(
+		false,
+		"verified within the last year for the current recipients".into(),
+	)
+}
+
+/// Report the recovery vault verification status (recipients, last verification, and
+/// whether a ceremony is due).
+#[utoipa::path(
+	post,
+	path = "/recovery_status",
+	operation_id = "backups_recovery_status",
+	tag = "backups",
+	security(("tailscale-admin" = [])),
+	responses((status = 200, body = RecoveryStatusResponse)),
+)]
+pub async fn recovery_status(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	_body: Json<serde_json::Value>,
+) -> Result<Json<RecoveryStatusResponse>> {
+	let recipients = state
+		.recovery_recipients
+		.as_ref()
+		.map(|r| r.fingerprints().to_vec())
+		.unwrap_or_default();
+	let mut conn = state.db.get().await?;
+	let latest = BackupRecoveryVerification::latest(&mut conn).await?;
+	let (due, reason) = recovery_due(latest.as_ref(), &recipients, Timestamp::now());
+	Ok(Json(RecoveryStatusResponse {
+		configured: state.recovery_recipients.is_some(),
+		recipients,
+		last_verified_at: latest.as_ref().map(|v| v.verified_at),
+		last_verified_recipients: latest.map(|v| v.recipient_list()).unwrap_or_default(),
+		due,
+		reason,
+	}))
+}
+
+/// Issue a verification challenge: a fresh nonce encrypted to the recovery recipients.
+/// The operator decrypts it offline (proving a private key is genuinely held) and
+/// posts the plaintext back to `recovery_verify`.
+#[utoipa::path(
+	post,
+	path = "/recovery_challenge",
+	operation_id = "backups_recovery_challenge",
+	tag = "backups",
+	security(("tailscale-admin" = [])),
+	responses(
+		(status = 200, body = RecoveryChallengeResponse),
+		(status = 502, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn recovery_challenge(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	_body: Json<serde_json::Value>,
+) -> Result<Json<RecoveryChallengeResponse>> {
+	use base64::prelude::*;
+
+	let recipients = state.recovery_recipients.as_ref().ok_or_else(|| {
+		AppError::Upstream("recovery recipients are not configured on this server".into())
+	})?;
+
+	let nonce = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+	let ciphertext = recipients.encrypt(nonce.as_bytes())?;
+
+	*state.recovery_challenge.lock().unwrap() = Some(RecoveryChallenge {
+		nonce,
+		issued_at: Timestamp::now(),
+	});
+
+	Ok(Json(RecoveryChallengeResponse {
+		ciphertext_base64: BASE64_STANDARD.encode(ciphertext),
+		recipients: recipients.fingerprints().to_vec(),
+	}))
+}
+
+/// Complete the ceremony: verify the operator's decrypted answer matches the
+/// outstanding challenge, then record the verification against the current
+/// recipient set.
+#[utoipa::path(
+	post,
+	path = "/recovery_verify",
+	operation_id = "backups_recovery_verify",
+	tag = "backups",
+	security(("tailscale-admin" = [])),
+	request_body = RecoveryVerifyArgs,
+	responses(
+		(status = 200, body = RecoveryVerifyResponse),
+		(status = 400, body = ProblemDetailsSchema),
+		(status = 502, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn recovery_verify(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<RecoveryVerifyArgs>,
+) -> Result<Json<RecoveryVerifyResponse>> {
+	let recipients = state.recovery_recipients.as_ref().ok_or_else(|| {
+		AppError::Upstream("recovery recipients are not configured on this server".into())
+	})?;
+
+	// Take (consume) the pending challenge: success or failure, it's single-use.
+	let pending = state.recovery_challenge.lock().unwrap().take();
+	let Some(pending) = pending else {
+		return Err(AppError::BadRequest(
+			"no outstanding challenge; request one first".into(),
+		));
+	};
+	if Timestamp::now().as_second() - pending.issued_at.as_second() > RECOVERY_CHALLENGE_TTL_SECS {
+		return Err(AppError::BadRequest(
+			"challenge expired; request a fresh one".into(),
+		));
+	}
+	if args.answer.trim() != pending.nonce {
+		return Err(AppError::BadRequest(
+			"answer does not match the challenge".into(),
+		));
+	}
+
+	let mut conn = state.db.get().await?;
+	let recorded = BackupRecoveryVerification::record(&mut conn, recipients.fingerprints()).await?;
+	Ok(Json(RecoveryVerifyResponse {
+		verified_at: recorded.verified_at,
+	}))
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn verification(verified_at_secs: i64, recipients: &[&str]) -> BackupRecoveryVerification {
+		BackupRecoveryVerification {
+			id: 1,
+			verified_at: Timestamp::from_second(verified_at_secs).unwrap(),
+			recipients: serde_json::json!(recipients),
+		}
+	}
+
+	#[test]
+	fn recovery_due_logic() {
+		let now = Timestamp::from_second(2_000_000_000).unwrap();
+		let recips = ["age1aaa".to_string(), "age1bbb".to_string()];
+
+		// Never verified.
+		assert!(recovery_due(None, &recips, now).0);
+
+		// Fresh + same set (order-insensitive) → not due.
+		let fresh = verification(now.as_second() - 10, &["age1bbb", "age1aaa"]);
+		assert!(!recovery_due(Some(&fresh), &recips, now).0);
+
+		// Over a year old → due.
+		let old = verification(now.as_second() - (366 * 24 * 3600), &["age1aaa", "age1bbb"]);
+		assert!(recovery_due(Some(&old), &recips, now).0);
+
+		// Recent but recipient set changed → due.
+		let changed = verification(now.as_second() - 10, &["age1aaa"]);
+		assert!(recovery_due(Some(&changed), &recips, now).0);
+	}
 }
 
 /// Fetch a group's config or 404 — used by the mutation handlers that require
