@@ -21,12 +21,12 @@ jobs:
     steps:
       - name: Free up space
         run: sudo rm -rf /opt/hostedtoolcache /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup || true
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v6.0.3
       - name: Configure toolchain
         run: |
           rustup toolchain install --profile minimal --no-self-update stable
           rustup default stable
-      - uses: taiki-e/install-action@v2.81.1
+      - uses: taiki-e/install-action@v2.81.7
         with:
           tool: cargo-nextest,just
       - uses: Swatinem/rust-cache@v2
@@ -55,13 +55,13 @@ jobs:
     steps:
       - name: Free up space
         run: sudo rm -rf /opt/hostedtoolcache /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup || true
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v6.0.3
       - name: Configure toolchain
         run: |
           rustup toolchain install --profile minimal --no-self-update stable
           rustup default stable
           rustup component add clippy
-      - uses: taiki-e/install-action@v2.81.1
+      - uses: taiki-e/install-action@v2.81.7
         with:
           tool: just
       - uses: Swatinem/rust-cache@v2
@@ -73,13 +73,13 @@ jobs:
     steps:
       - name: Free up space
         run: sudo rm -rf /opt/hostedtoolcache /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup || true
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v6.0.3
       - name: Configure toolchain
         run: |
           rustup toolchain install --profile minimal --no-self-update stable
           rustup default stable
           rustup component add rustfmt
-      - uses: taiki-e/install-action@v2.81.1
+      - uses: taiki-e/install-action@v2.81.7
         with:
           tool: just
       - run: just fmt-check
@@ -94,7 +94,7 @@ jobs:
     steps:
       - name: Free up space
         run: sudo rm -rf /opt/hostedtoolcache /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup || true
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v6.0.3
       - name: Configure toolchain
         run: |
           rustup toolchain install --profile minimal --no-self-update stable
