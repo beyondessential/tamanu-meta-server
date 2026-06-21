@@ -89,6 +89,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backups/clear_schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove a per-`(group,type)` schedule override → revert that type to inheriting
+         *     the canopy-wide default.
+         */
+        post: operations["backups_clear_schedule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backups/create": {
         parameters: {
             query?: never;
@@ -165,6 +185,26 @@ export interface paths {
          *     config (the zero-state); 404 only when the group itself doesn't exist.
          */
         post: operations["backups_get"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backups/group_schedules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Per enabled backup type, the group's effective schedule/retention (override
+         *     or inherited default) — drives the per-type editor in the group panel.
+         */
+        post: operations["backups_group_schedules"];
         delete?: never;
         options?: never;
         head?: never;
@@ -328,6 +368,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backups/set_type_default": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set the canopy-wide default schedule/retention for a backup type
+         *     (floor-validated). Operators tune these in Settings → Backup defaults.
+         */
+        post: operations["backups_set_type_default"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backups/stats": {
         parameters: {
             query?: never;
@@ -342,6 +402,26 @@ export interface paths {
          *     one-off requests (across the group's member servers).
          */
         post: operations["backups_stats"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backups/type_defaults": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List the canopy-wide per-type defaults (the "global" schedule/retention each
+         *     group inherits unless it overrides a type).
+         */
+        post: operations["backups_type_defaults"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2188,6 +2268,11 @@ export interface components {
             id: string;
             name: string;
         };
+        ClearScheduleArgs: {
+            /** Format: uuid */
+            server_group_id: string;
+            type: string;
+        };
         ConnectionHistoryArgs: {
             before?: null | components["schemas"]["HistoryCursor"];
             /** Format: uuid */
@@ -2425,6 +2510,21 @@ export interface components {
             server_count: number;
             /** Format: uuid */
             server_group_id: string;
+        };
+        /**
+         * @description Effective schedule/retention for one enabled backup type of a group: the
+         *     per-`(group,type)` override if present, else the canopy-wide default.
+         *     `has_override` tells the UI whether it's inheriting or overriding.
+         */
+        GroupTypeScheduleView: {
+            /**
+             * Format: int64
+             * @description Seconds between scheduled runs; null = manual-only (no scheduled interval).
+             */
+            effective_interval?: number | null;
+            effective_retention: components["schemas"]["RetentionPolicy"];
+            has_override: boolean;
+            type: string;
         };
         /**
          * @description Server's self-reported health state, derived from the most
@@ -3412,6 +3512,16 @@ export interface components {
             server_group_id: string;
             type: string;
         };
+        SetTypeDefaultArgs: {
+            auto_enable?: boolean;
+            /**
+             * Format: int64
+             * @description Seconds between scheduled runs; null = manual-only.
+             */
+            default_interval?: number | null;
+            default_retention: components["schemas"]["RetentionPolicy"];
+            type: string;
+        };
         /**
          * @description Canopy's severity vocabulary, narrowed from RFC 5424 to a five-level
          *     set with operator semantics:
@@ -3589,6 +3699,17 @@ export interface components {
             device_id: string;
             role: components["schemas"]["DeviceRole"];
         };
+        /** @description Canopy-wide default schedule/retention for a backup type. */
+        TypeDefaultView: {
+            auto_enable: boolean;
+            /**
+             * Format: int64
+             * @description Seconds between scheduled runs; null = manual-only.
+             */
+            default_interval?: number | null;
+            default_retention?: null | components["schemas"]["RetentionPolicy"];
+            type: string;
+        };
         UpdateArgs: {
             check_name: string;
             /**
@@ -3642,16 +3763,13 @@ export interface components {
          * @description Machine-facing config-as-a-resource upsert (ops/pulumi). `mode` is implicit
          *     — always from-birth — so the bucket must be empty and no passphrase is
          *     supplied (importing an existing repo stays an interactive operator action).
-         *     `bucket`/`prefix` are the identity and immutable on re-apply; role ARNs,
-         *     region, schedule and retention are reconciled to the request each time.
+         *     `bucket`/`prefix` are the identity and immutable on re-apply; the role ARNs
+         *     and region are reconciled to the request each time. **Schedule and retention
+         *     are intentionally NOT part of this API** — they're per-`(group, type)` and
+         *     managed through the operator UI (inheriting the canopy-wide type defaults).
          */
         UpsertBackupConfigArgs: {
             bucket: string;
-            /**
-             * Format: int64
-             * @description Seconds between scheduled runs; None = manual-only (no schedule).
-             */
-            expected_interval?: number | null;
             /**
              * @description Maintenance role: the backups pod assumes this for maintenance/inspection/
              *     s3-metrics (s3:* + delete + CloudWatch).
@@ -3659,13 +3777,10 @@ export interface components {
             maintenance_role_arn: string;
             prefix?: string;
             region?: string | null;
-            retention?: null | components["schemas"]["RetentionPolicy"];
             /** Format: uuid */
             server_group_id: string;
             /** @description Device role: public-server assumes this to mint device creds (no delete). */
             target_role_arn: string;
-            /** @description Schedule type to reconcile (defaults to `tamanu-postgres`). */
-            type?: string;
         };
         Value: unknown;
         VersionData: {
@@ -3884,6 +3999,37 @@ export interface operations {
             };
         };
     };
+    backups_clear_schedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClearScheduleArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupConfigView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
     backups_create: {
         parameters: {
             query?: never;
@@ -4026,6 +4172,29 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    backups_group_schedules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroupArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupTypeScheduleView"][];
                 };
             };
         };
@@ -4266,6 +4435,35 @@ export interface operations {
             };
         };
     };
+    backups_set_type_default: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetTypeDefaultArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
     backups_stats: {
         parameters: {
             query?: never;
@@ -4293,6 +4491,29 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    backups_type_defaults: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": unknown;
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TypeDefaultView"][];
                 };
             };
         };

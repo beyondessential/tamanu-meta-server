@@ -21,9 +21,9 @@ use commons_types::{
 use database::pg_duration::PgDuration;
 use database::{
 	BackupMaintenanceRun, BackupRecoveryVerification, BackupRepoStats, BackupRequest, BackupRun,
-	NewServerGroupBackupConfig, NewServerGroupBackupSchedule, RetentionPolicy,
-	ServerBackupCapability, ServerGroupBackupConfig, ServerGroupBackupSchedule,
-	server_groups::ServerGroup,
+	BackupTypeDefault, NewBackupTypeDefault, NewServerGroupBackupConfig,
+	NewServerGroupBackupSchedule, RetentionPolicy, ServerBackupCapability, ServerGroupBackupConfig,
+	ServerGroupBackupSchedule, server_groups::ServerGroup,
 };
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -53,6 +53,10 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(probe))
 		.routes(routes!(update))
 		.routes(routes!(set_schedule))
+		.routes(routes!(clear_schedule))
+		.routes(routes!(group_schedules))
+		.routes(routes!(type_defaults))
+		.routes(routes!(set_type_default))
 		.routes(routes!(create_repo))
 		.routes(routes!(request_now))
 		.routes(routes!(cancel_request))
@@ -169,8 +173,10 @@ pub struct CreateBackupConfigArgs {
 /// Machine-facing config-as-a-resource upsert (ops/pulumi). `mode` is implicit
 /// — always from-birth — so the bucket must be empty and no passphrase is
 /// supplied (importing an existing repo stays an interactive operator action).
-/// `bucket`/`prefix` are the identity and immutable on re-apply; role ARNs,
-/// region, schedule and retention are reconciled to the request each time.
+/// `bucket`/`prefix` are the identity and immutable on re-apply; the role ARNs
+/// and region are reconciled to the request each time. **Schedule and retention
+/// are intentionally NOT part of this API** — they're per-`(group, type)` and
+/// managed through the operator UI (inheriting the canopy-wide type defaults).
 #[derive(Deserialize, ToSchema)]
 pub struct UpsertBackupConfigArgs {
 	pub server_group_id: Uuid,
@@ -183,19 +189,6 @@ pub struct UpsertBackupConfigArgs {
 	/// s3-metrics (s3:* + delete + CloudWatch).
 	pub maintenance_role_arn: String,
 	pub region: Option<String>,
-	/// Schedule type to reconcile (defaults to `tamanu-postgres`).
-	#[serde(rename = "type", default = "default_backup_type")]
-	#[schema(value_type = String)]
-	pub r#type: BackupType,
-	/// Seconds between scheduled runs; None = manual-only (no schedule).
-	#[schema(value_type = Option<i64>, format = "int64")]
-	pub expected_interval: Option<PgDuration>,
-	/// None = inherit the type default. A present policy is floor-validated.
-	pub retention: Option<RetentionPolicy>,
-}
-
-fn default_backup_type() -> BackupType {
-	BackupType::TamanuPostgres
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -436,10 +429,6 @@ pub async fn upsert(
 	let mut conn = state.db.get().await?;
 	ServerGroup::get_by_id(&mut conn, args.server_group_id).await?;
 
-	if let Some(policy) = &args.retention {
-		policy.validate_floor()?;
-	}
-
 	match ServerGroupBackupConfig::get(&mut conn, args.server_group_id).await? {
 		// Update path: reconcile the mutable fields; bucket/prefix are immutable.
 		Some(existing) => {
@@ -536,18 +525,6 @@ pub async fn upsert(
 			.await?;
 		}
 	}
-
-	// Reconcile the schedule/retention in both paths.
-	ServerGroupBackupSchedule::upsert(
-		&mut conn,
-		NewServerGroupBackupSchedule {
-			group_id: args.server_group_id,
-			r#type: args.r#type,
-			expected_interval: args.expected_interval,
-			retention: args.retention.map(|r| r.to_json()),
-		},
-	)
-	.await?;
 
 	let config = require_config(&mut conn, args.server_group_id).await?;
 	Ok(Json(BackupConfigView::build(&mut conn, config).await?))
@@ -687,6 +664,196 @@ pub async fn set_schedule(
 	.await?;
 	let config = require_config(&mut conn, args.server_group_id).await?;
 	Ok(Json(BackupConfigView::build(&mut conn, config).await?))
+}
+
+// ── Per-type schedule/retention: canopy-wide defaults + per-group overrides ───
+
+/// Org-floor baseline retention, used when a type has neither an override nor a
+/// canopy-wide default (writes are floor-validated, so this only fills display).
+const FLOOR_RETENTION: RetentionPolicy = RetentionPolicy {
+	keep_latest: 1,
+	keep_daily: RetentionPolicy::FLOOR_DAILY,
+	keep_weekly: RetentionPolicy::FLOOR_WEEKLY,
+	keep_monthly: RetentionPolicy::FLOOR_MONTHLY,
+	keep_annual: 0,
+};
+
+#[derive(Deserialize, ToSchema)]
+pub struct ClearScheduleArgs {
+	pub server_group_id: Uuid,
+	#[serde(rename = "type")]
+	#[schema(value_type = String)]
+	pub r#type: BackupType,
+}
+
+/// Remove a per-`(group,type)` schedule override → revert that type to inheriting
+/// the canopy-wide default.
+#[utoipa::path(
+	post,
+	path = "/clear_schedule",
+	operation_id = "backups_clear_schedule",
+	tag = "backups",
+	security(("tailscale-admin" = [])),
+	request_body = ClearScheduleArgs,
+	responses(
+		(status = 200, body = BackupConfigView),
+		(status = 404, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn clear_schedule(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<ClearScheduleArgs>,
+) -> Result<Json<BackupConfigView>> {
+	let mut conn = state.db.get().await?;
+	require_config(&mut conn, args.server_group_id).await?;
+	ServerGroupBackupSchedule::delete(&mut conn, args.server_group_id, &args.r#type).await?;
+	let config = require_config(&mut conn, args.server_group_id).await?;
+	Ok(Json(BackupConfigView::build(&mut conn, config).await?))
+}
+
+/// Effective schedule/retention for one enabled backup type of a group: the
+/// per-`(group,type)` override if present, else the canopy-wide default.
+/// `has_override` tells the UI whether it's inheriting or overriding.
+#[derive(Serialize, ToSchema)]
+pub struct GroupTypeScheduleView {
+	#[serde(rename = "type")]
+	#[schema(value_type = String)]
+	pub r#type: BackupType,
+	/// Seconds between scheduled runs; null = manual-only (no scheduled interval).
+	pub effective_interval: Option<i64>,
+	pub effective_retention: RetentionPolicy,
+	pub has_override: bool,
+}
+
+/// Per enabled backup type, the group's effective schedule/retention (override
+/// or inherited default) — drives the per-type editor in the group panel.
+#[utoipa::path(
+	post,
+	path = "/group_schedules",
+	operation_id = "backups_group_schedules",
+	tag = "backups",
+	security(("tailscale-user" = [])),
+	request_body = GroupArgs,
+	responses((status = 200, body = Vec<GroupTypeScheduleView>)),
+)]
+pub async fn group_schedules(
+	State(state): State<AppState>,
+	Json(args): Json<GroupArgs>,
+) -> Result<Json<Vec<GroupTypeScheduleView>>> {
+	let mut conn = state.db.get().await?;
+	let types =
+		ServerBackupCapability::enabled_types_for_group(&mut conn, args.server_group_id).await?;
+	let mut out = Vec::with_capacity(types.len());
+	for ty in types {
+		let over = ServerGroupBackupSchedule::get(&mut conn, args.server_group_id, &ty).await?;
+		let def = BackupTypeDefault::get(&mut conn, &ty).await?;
+		let effective_interval = over
+			.as_ref()
+			.and_then(|s| s.expected_interval)
+			.or_else(|| def.as_ref().and_then(|d| d.default_interval))
+			.map(|pg| pg.0.as_secs());
+		let effective_retention = over
+			.as_ref()
+			.and_then(|s| s.retention.as_ref())
+			.and_then(RetentionPolicy::from_json)
+			.or_else(|| {
+				def.as_ref()
+					.and_then(|d| RetentionPolicy::from_json(&d.default_retention))
+			})
+			.unwrap_or(FLOOR_RETENTION);
+		out.push(GroupTypeScheduleView {
+			r#type: ty,
+			effective_interval,
+			effective_retention,
+			has_override: over.is_some(),
+		});
+	}
+	Ok(Json(out))
+}
+
+/// Canopy-wide default schedule/retention for a backup type.
+#[derive(Serialize, ToSchema)]
+pub struct TypeDefaultView {
+	#[serde(rename = "type")]
+	#[schema(value_type = String)]
+	pub r#type: BackupType,
+	/// Seconds between scheduled runs; null = manual-only.
+	pub default_interval: Option<i64>,
+	pub default_retention: Option<RetentionPolicy>,
+	pub auto_enable: bool,
+}
+
+/// List the canopy-wide per-type defaults (the "global" schedule/retention each
+/// group inherits unless it overrides a type).
+#[utoipa::path(
+	post,
+	path = "/type_defaults",
+	operation_id = "backups_type_defaults",
+	tag = "backups",
+	security(("tailscale-user" = [])),
+	responses((status = 200, body = Vec<TypeDefaultView>)),
+)]
+pub async fn type_defaults(
+	State(state): State<AppState>,
+	_body: Json<serde_json::Value>,
+) -> Result<Json<Vec<TypeDefaultView>>> {
+	let mut conn = state.db.get().await?;
+	let rows = BackupTypeDefault::list(&mut conn).await?;
+	Ok(Json(
+		rows.into_iter()
+			.map(|d| TypeDefaultView {
+				r#type: d.r#type,
+				default_interval: d.default_interval.map(|pg| pg.0.as_secs()),
+				default_retention: RetentionPolicy::from_json(&d.default_retention),
+				auto_enable: d.auto_enable,
+			})
+			.collect(),
+	))
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct SetTypeDefaultArgs {
+	#[serde(rename = "type")]
+	#[schema(value_type = String)]
+	pub r#type: BackupType,
+	/// Seconds between scheduled runs; null = manual-only.
+	#[schema(value_type = Option<i64>, format = "int64")]
+	pub default_interval: Option<PgDuration>,
+	pub default_retention: RetentionPolicy,
+	#[serde(default)]
+	pub auto_enable: bool,
+}
+
+/// Set the canopy-wide default schedule/retention for a backup type
+/// (floor-validated). Operators tune these in Settings → Backup defaults.
+#[utoipa::path(
+	post,
+	path = "/set_type_default",
+	operation_id = "backups_set_type_default",
+	tag = "backups",
+	security(("tailscale-admin" = [])),
+	request_body = SetTypeDefaultArgs,
+	responses((status = 200), (status = 400, body = ProblemDetailsSchema)),
+)]
+pub async fn set_type_default(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<SetTypeDefaultArgs>,
+) -> Result<Json<()>> {
+	args.default_retention.validate_floor()?;
+	let mut conn = state.db.get().await?;
+	BackupTypeDefault::upsert(
+		&mut conn,
+		NewBackupTypeDefault {
+			r#type: args.r#type,
+			default_interval: args.default_interval,
+			default_retention: args.default_retention.to_json(),
+			auto_enable: args.auto_enable,
+		},
+	)
+	.await?;
+	Ok(Json(()))
 }
 
 /// Record intent for the init Job: set/keep `provisioning`, clear

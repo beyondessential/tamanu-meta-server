@@ -5,11 +5,17 @@ import { Outlet, useLocation, useNavigate } from "react-router-dom";
 /// vault) under one top-level nav item so they don't each hold space in the bar.
 const TABS: Array<{ value: string; label: string; to: string }> = [
 	{ value: "admins", label: "Admins", to: "/settings/admins" },
+	{
+		value: "backup-defaults",
+		label: "Backup defaults",
+		to: "/settings/backup-defaults",
+	},
 	{ value: "recovery", label: "Recovery vault", to: "/settings/recovery" },
 ];
 
 function valueFromPath(pathname: string): string {
 	if (pathname.startsWith("/settings/recovery")) return "recovery";
+	if (pathname.startsWith("/settings/backup-defaults")) return "backup-defaults";
 	if (pathname.startsWith("/settings/admins")) return "admins";
 	return "";
 }

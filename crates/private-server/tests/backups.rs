@@ -501,8 +501,9 @@ async fn upsert_creates_then_reapplies_idempotently() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let group_id = seed_group(&mut conn).await;
 
-		// First apply → creates from-birth (the fake prober reports empty),
-		// provisions, and sets the schedule.
+		// First apply → creates from-birth (the fake prober reports empty) and
+		// provisions. Schedule/retention are NOT part of this API — they inherit
+		// the canopy-wide type defaults and are UI-managed.
 		let resp = private
 			.post("/api/backups/upsert")
 			.json(&serde_json::json!({
@@ -512,8 +513,6 @@ async fn upsert_creates_then_reapplies_idempotently() {
 				"target_role_arn": "arn:aws:iam::123:role/dev",
 				"maintenance_role_arn": "arn:aws:iam::123:role/maint",
 				"region": "ap-southeast-2",
-				"expected_interval": 3600,
-				"retention": retention_json(),
 			}))
 			.await;
 		resp.assert_status_ok();
@@ -521,9 +520,8 @@ async fn upsert_creates_then_reapplies_idempotently() {
 		assert_eq!(body["status"], "provisioning");
 		assert_eq!(body["mode"], "from_birth");
 		assert_eq!(body["maintenance_role_arn"], "arn:aws:iam::123:role/maint");
-		let schedule = &body["schedules"][0];
-		assert_eq!(schedule["type"], "tamanu-postgres");
-		assert_eq!(schedule["expected_interval"], 3600);
+		// No per-(group,type) schedule override is written by upsert.
+		assert_eq!(body["schedules"].as_array().unwrap().len(), 0);
 
 		// Re-apply with changed mutable fields → updates in place, no duplicate.
 		let resp = private
@@ -535,8 +533,6 @@ async fn upsert_creates_then_reapplies_idempotently() {
 				"target_role_arn": "arn:aws:iam::123:role/dev2",
 				"maintenance_role_arn": "arn:aws:iam::123:role/maint2",
 				"region": "us-east-1",
-				"expected_interval": null,
-				"retention": retention_json(),
 			}))
 			.await;
 		resp.assert_status_ok();
@@ -544,10 +540,6 @@ async fn upsert_creates_then_reapplies_idempotently() {
 		assert_eq!(body["maintenance_role_arn"], "arn:aws:iam::123:role/maint2");
 		assert_eq!(body["target_role_arn"], "arn:aws:iam::123:role/dev2");
 		assert_eq!(body["region"], "us-east-1");
-		// Manual-only now. (That this second apply returns 200 with updated
-		// fields — rather than the 409 a duplicate create would — is what proves
-		// it took the in-place update path, i.e. no duplicate row.)
-		assert!(body["schedules"][0]["expected_interval"].is_null());
 
 		// Changing the bucket (identity) is rejected.
 		let resp = private
@@ -578,30 +570,6 @@ async fn upsert_missing_group_is_404() {
 			}))
 			.await;
 		resp.assert_status_not_found();
-	})
-	.await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn upsert_rejects_below_floor_retention() {
-	commons_tests::server::run(async |mut conn, _public, private| {
-		let group_id = seed_group(&mut conn).await;
-		let resp = private
-			.post("/api/backups/upsert")
-			.json(&serde_json::json!({
-				"server_group_id": group_id,
-				"bucket": "bes-iac",
-				"target_role_arn": "arn",
-				"maintenance_role_arn": "maint",
-				"retention": {
-					"keep_latest": 1, "keep_daily": 1, "keep_weekly": 1,
-					"keep_monthly": 1, "keep_annual": 0
-				},
-			}))
-			.await;
-		resp.assert_status_bad_request();
-		// Floor is checked before anything is written.
-		assert_no_config!(private, group_id);
 	})
 	.await;
 }
@@ -836,6 +804,130 @@ async fn recovery_verify_rejects_wrong_and_missing() {
 			.json(&serde_json::json!({ "answer": "not-the-nonce" }))
 			.await
 			.assert_status_bad_request();
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn type_defaults_list_and_set_roundtrip() {
+	commons_tests::server::run(async |_conn, _public, private| {
+		// The migration seeds the tamanu-postgres default at 6h.
+		let resp = private
+			.post("/api/backups/type_defaults")
+			.json(&serde_json::json!({}))
+			.await;
+		resp.assert_status_ok();
+		let body: serde_json::Value = resp.json();
+		let td = body
+			.as_array()
+			.unwrap()
+			.iter()
+			.find(|d| d["type"] == "tamanu-postgres")
+			.expect("seeded default present");
+		assert_eq!(td["default_interval"], 21600); // 6h
+		assert_eq!(td["auto_enable"], false); // capabilities stay opt-in
+
+		// Update it.
+		private
+			.post("/api/backups/set_type_default")
+			.json(&serde_json::json!({
+				"type": "tamanu-postgres",
+				"default_interval": 7200,
+				"default_retention": retention_json(),
+				"auto_enable": false,
+			}))
+			.await
+			.assert_status_ok();
+		let resp = private
+			.post("/api/backups/type_defaults")
+			.json(&serde_json::json!({}))
+			.await;
+		let body: serde_json::Value = resp.json();
+		let td = body
+			.as_array()
+			.unwrap()
+			.iter()
+			.find(|d| d["type"] == "tamanu-postgres")
+			.unwrap();
+		assert_eq!(td["default_interval"], 7200);
+		assert_eq!(td["auto_enable"], false);
+
+		// Below-floor retention → 400.
+		private
+			.post("/api/backups/set_type_default")
+			.json(&serde_json::json!({
+				"type": "tamanu-postgres",
+				"default_interval": null,
+				"default_retention": {
+					"keep_latest": 1, "keep_daily": 1, "keep_weekly": 1,
+					"keep_monthly": 1, "keep_annual": 0
+				},
+			}))
+			.await
+			.assert_status_bad_request();
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn clear_schedule_removes_override() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group_id = seed_group(&mut conn).await;
+		private
+			.post("/api/backups/create")
+			.json(&serde_json::json!({
+				"server_group_id": group_id,
+				"bucket": "b",
+				"target_role_arn": "arn",
+				"maintenance_role_arn": "maint",
+				"mode": "from_birth",
+			}))
+			.await
+			.assert_status_ok();
+
+		// Set a per-(group,type) override → appears in the config view.
+		private
+			.post("/api/backups/set_schedule")
+			.json(&serde_json::json!({
+				"server_group_id": group_id,
+				"type": "tamanu-postgres",
+				"expected_interval": 3600,
+				"retention": retention_json(),
+			}))
+			.await
+			.assert_status_ok();
+		let resp = private
+			.post("/api/backups/get")
+			.json(&serde_json::json!({ "server_group_id": group_id }))
+			.await;
+		assert_eq!(
+			resp.json::<serde_json::Value>()["schedules"]
+				.as_array()
+				.unwrap()
+				.len(),
+			1
+		);
+
+		// Clear it → back to inheriting the default (no override row).
+		private
+			.post("/api/backups/clear_schedule")
+			.json(&serde_json::json!({
+				"server_group_id": group_id,
+				"type": "tamanu-postgres",
+			}))
+			.await
+			.assert_status_ok();
+		let resp = private
+			.post("/api/backups/get")
+			.json(&serde_json::json!({ "server_group_id": group_id }))
+			.await;
+		assert_eq!(
+			resp.json::<serde_json::Value>()["schedules"]
+				.as_array()
+				.unwrap()
+				.len(),
+			0
+		);
 	})
 	.await;
 }
