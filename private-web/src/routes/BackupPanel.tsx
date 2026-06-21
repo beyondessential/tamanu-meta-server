@@ -5,16 +5,20 @@ import {
 	Chip,
 	CircularProgress,
 	Divider,
+	FormControlLabel,
 	LinearProgress,
 	Paper,
 	Stack,
+	Switch,
 	Table,
 	TableBody,
 	TableCell,
 	TableHead,
 	TableRow,
+	TextField,
 	Typography,
 } from "@mui/material";
+import { useState } from "react";
 import BackupIcon from "@mui/icons-material/Backup";
 import EditIcon from "@mui/icons-material/Edit";
 import RefreshIcon from "@mui/icons-material/Refresh";
@@ -149,6 +153,7 @@ export default function BackupPanel() {
 
 			{status === "ready" && (
 				<>
+					<SchedulesPanel groupId={id} isAdmin={isAdmin} />
 					<StatsPanel groupId={id} />
 					<RunsAndRequests
 						groupId={id}
@@ -162,8 +167,6 @@ export default function BackupPanel() {
 }
 
 function ConfigSummary({ config }: { config: BackupConfigView }) {
-	const sched = config.schedules.find((s) => s.type === WELL_KNOWN_TYPE);
-	const interval = sched?.expected_interval;
 	return (
 		<Paper variant="outlined" sx={{ p: 2 }}>
 			<Stack spacing={0.5}>
@@ -174,23 +177,256 @@ function ConfigSummary({ config }: { config: BackupConfigView }) {
 				<Typography variant="body2">
 					<strong>Region:</strong> {config.region ?? "default"}
 				</Typography>
-				<Typography variant="body2">
-					<strong>Schedule:</strong>{" "}
-					{interval != null
-						? `every ${humanSeconds(interval)}`
-						: "Manual only"}
-				</Typography>
-				{sched?.retention && (
-					<Typography variant="body2">
-						<strong>Retention:</strong> latest {sched.retention.keep_latest},
-						daily {sched.retention.keep_daily}, weekly{" "}
-						{sched.retention.keep_weekly}, monthly{" "}
-						{sched.retention.keep_monthly}, annual{" "}
-						{sched.retention.keep_annual}
-					</Typography>
-				)}
 			</Stack>
 		</Paper>
+	);
+}
+
+/// Per backup type, the group's effective schedule + retention (inherited from
+/// the canopy-wide default, or a per-group override). Admins can override a type
+/// or reset it back to the default.
+function SchedulesPanel({
+	groupId,
+	isAdmin,
+}: {
+	groupId: string;
+	isAdmin: boolean;
+}) {
+	const schedules = useApi(
+		"backups",
+		"group_schedules",
+		{ server_group_id: groupId },
+		[groupId],
+	);
+
+	return (
+		<Paper variant="outlined" sx={{ p: 2 }}>
+			<Typography variant="h6" component="h2" gutterBottom>
+				Schedule &amp; retention
+			</Typography>
+			{schedules.status === "loading" || schedules.status === "idle" ? (
+				<LinearProgress />
+			) : schedules.status === "error" ? (
+				<Alert severity="error">{schedules.error.message}</Alert>
+			) : schedules.data.length === 0 ? (
+				<Alert severity="info">
+					No backup types are enabled for this group's servers yet. Each type
+					inherits the canopy-wide default until a server advertises it.
+				</Alert>
+			) : (
+				<Stack spacing={2}>
+					{schedules.data.map((s) => (
+						<TypeSchedule
+							key={s.type}
+							groupId={groupId}
+							schedule={s}
+							isAdmin={isAdmin}
+							onChanged={schedules.reload}
+						/>
+					))}
+				</Stack>
+			)}
+		</Paper>
+	);
+}
+
+type GroupTypeSchedule = {
+	type: string;
+	effective_interval: number | null;
+	effective_retention: {
+		keep_latest: number;
+		keep_daily: number;
+		keep_weekly: number;
+		keep_monthly: number;
+		keep_annual: number;
+	};
+	has_override: boolean;
+};
+
+function TypeSchedule({
+	groupId,
+	schedule,
+	isAdmin,
+	onChanged,
+}: {
+	groupId: string;
+	schedule: GroupTypeSchedule;
+	isAdmin: boolean;
+	onChanged: () => void;
+}) {
+	const [editing, setEditing] = useState(false);
+	const r = schedule.effective_retention;
+
+	return (
+		<Box sx={{ borderTop: 1, borderColor: "divider", pt: 1.5 }}>
+			<Stack
+				direction="row"
+				spacing={1}
+				sx={{ alignItems: "center", flexWrap: "wrap" }}
+			>
+				<Typography sx={{ fontFamily: "monospace" }}>{schedule.type}</Typography>
+				<Chip
+					size="small"
+					label={schedule.has_override ? "Override" : "Inherited default"}
+					color={schedule.has_override ? "secondary" : "default"}
+					variant={schedule.has_override ? "filled" : "outlined"}
+				/>
+				<Box sx={{ flex: 1 }} />
+				{isAdmin && !editing && (
+					<Button size="small" onClick={() => setEditing(true)}>
+						{schedule.has_override ? "Edit override" : "Override"}
+					</Button>
+				)}
+			</Stack>
+			<Typography variant="body2" color="text.secondary">
+				{schedule.effective_interval != null
+					? `Every ${humanSeconds(schedule.effective_interval)}`
+					: "Manual only (no scheduled interval)"}{" "}
+				· retention latest {r.keep_latest}, daily {r.keep_daily}, weekly{" "}
+				{r.keep_weekly}, monthly {r.keep_monthly}, annual {r.keep_annual}
+			</Typography>
+			{editing && (
+				<OverrideEditor
+					groupId={groupId}
+					schedule={schedule}
+					onDone={() => {
+						setEditing(false);
+						onChanged();
+					}}
+					onCancel={() => setEditing(false)}
+				/>
+			)}
+		</Box>
+	);
+}
+
+const RETENTION_FIELDS: Array<{
+	key: keyof GroupTypeSchedule["effective_retention"];
+	label: string;
+	floor?: number;
+}> = [
+	{ key: "keep_latest", label: "Latest" },
+	{ key: "keep_daily", label: "Daily", floor: 7 },
+	{ key: "keep_weekly", label: "Weekly", floor: 4 },
+	{ key: "keep_monthly", label: "Monthly", floor: 6 },
+	{ key: "keep_annual", label: "Annual" },
+];
+
+function OverrideEditor({
+	groupId,
+	schedule,
+	onDone,
+	onCancel,
+}: {
+	groupId: string;
+	schedule: GroupTypeSchedule;
+	onDone: () => void;
+	onCancel: () => void;
+}) {
+	const setSchedule = useApiAction("backups", "set_schedule");
+	const clearSchedule = useApiAction("backups", "clear_schedule");
+	const [scheduled, setScheduled] = useState(
+		schedule.effective_interval != null,
+	);
+	const [hours, setHours] = useState(
+		schedule.effective_interval != null
+			? String(Math.max(1, Math.round(schedule.effective_interval / 3600)))
+			: "6",
+	);
+	const [retention, setRetention] = useState(schedule.effective_retention);
+
+	const floorError = RETENTION_FIELDS.filter(
+		(f) => f.floor != null && retention[f.key] < f.floor,
+	).map((f) => `${f.label} must be ≥ ${f.floor}`);
+
+	const save = async () => {
+		await setSchedule.call({
+			server_group_id: groupId,
+			type: schedule.type,
+			expected_interval: scheduled ? Math.max(1, Number(hours)) * 3600 : null,
+			retention,
+		});
+		onDone();
+	};
+	const reset = async () => {
+		await clearSchedule.call({ server_group_id: groupId, type: schedule.type });
+		onDone();
+	};
+
+	const pending = setSchedule.pending || clearSchedule.pending;
+	const error = setSchedule.error || clearSchedule.error;
+
+	return (
+		<Stack spacing={1.5} sx={{ mt: 1.5 }}>
+			<FormControlLabel
+				control={
+					<Switch
+						checked={scheduled}
+						onChange={(e) => setScheduled(e.target.checked)}
+						disabled={pending}
+					/>
+				}
+				label={scheduled ? "Scheduled" : "Manual only"}
+			/>
+			{scheduled && (
+				<TextField
+					label="Back up every (hours)"
+					type="number"
+					size="small"
+					value={hours}
+					onChange={(e) => setHours(e.target.value)}
+					disabled={pending}
+					slotProps={{ htmlInput: { min: 1, step: 1 } }}
+					sx={{ width: 200 }}
+				/>
+			)}
+			<Stack direction={{ xs: "column", md: "row" }} spacing={1}>
+				{RETENTION_FIELDS.map((f) => (
+					<TextField
+						key={f.key}
+						label={f.label}
+						type="number"
+						size="small"
+						value={retention[f.key]}
+						onChange={(e) =>
+							setRetention({ ...retention, [f.key]: Number(e.target.value) })
+						}
+						disabled={pending}
+						error={f.floor != null && retention[f.key] < f.floor}
+						helperText={f.floor != null ? `≥ ${f.floor}` : undefined}
+						slotProps={{ htmlInput: { min: f.floor ?? 0, step: 1 } }}
+						sx={{ width: 100 }}
+					/>
+				))}
+			</Stack>
+			{floorError.length > 0 && (
+				<Alert severity="warning">{floorError.join("; ")}</Alert>
+			)}
+			{error && <Alert severity="error">{error.message}</Alert>}
+			<Stack direction="row" spacing={1}>
+				<Button
+					variant="contained"
+					size="small"
+					onClick={save}
+					disabled={pending || floorError.length > 0}
+				>
+					{pending ? "Saving…" : "Save override"}
+				</Button>
+				{schedule.has_override && (
+					<Button
+						size="small"
+						color="warning"
+						onClick={reset}
+						disabled={pending}
+					>
+						Reset to default
+					</Button>
+				)}
+				<Button size="small" onClick={onCancel} disabled={pending}>
+					Cancel
+				</Button>
+			</Stack>
+		</Stack>
 	);
 }
 

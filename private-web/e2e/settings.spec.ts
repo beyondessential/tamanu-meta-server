@@ -17,4 +17,26 @@ test.describe("Settings", () => {
 			page.getByRole("heading", { name: /recovery vault/i }),
 		).toBeVisible();
 	});
+
+	test("backup defaults editor edits the canopy-wide per-type default", async ({
+		page,
+		sql,
+	}) => {
+		await page.goto("/settings/backup-defaults");
+		// The seeded tamanu-postgres default is shown.
+		await expect(page.getByText("tamanu-postgres")).toBeVisible();
+
+		await page.getByLabel("Back up every (hours)").fill("8");
+		await page.getByRole("button", { name: /^save$/i }).click();
+
+		await expect
+			.poll(async () => {
+				const rows = await sql.query<{ secs: string }>(
+					`SELECT EXTRACT(EPOCH FROM default_interval)::text AS secs
+					 FROM backup_type_defaults WHERE type = 'tamanu-postgres'`,
+				);
+				return rows[0] ? Number(rows[0].secs) : null;
+			})
+			.toBe(28800);
+	});
 });

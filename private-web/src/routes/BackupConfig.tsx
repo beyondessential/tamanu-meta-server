@@ -1,8 +1,6 @@
 import {
 	Alert,
 	Button,
-	Divider,
-	FormControlLabel,
 	LinearProgress,
 	Link as MuiLink,
 	Paper,
@@ -10,7 +8,6 @@ import {
 	Step,
 	StepLabel,
 	Stepper,
-	Switch,
 	TextField,
 	Typography,
 } from "@mui/material";
@@ -18,24 +15,10 @@ import { useState } from "react";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import { usePageTitle } from "../hooks/usePageTitle";
-import {
-	RETENTION_FLOORS,
-	type BackupConfigView,
-	type BackupRepoMode,
-	type RetentionPolicy,
-} from "../types";
-
-const DEFAULT_RETENTION: RetentionPolicy = {
-	keep_latest: 1,
-	keep_daily: 7,
-	keep_weekly: 4,
-	keep_monthly: 6,
-	keep_annual: 0,
-};
+import { type BackupConfigView, type BackupRepoMode } from "../types";
 
 /// Most buckets live here, so default the region to it.
 const DEFAULT_REGION = "ap-southeast-2";
-const WELL_KNOWN_TYPE = "tamanu-postgres";
 
 /// Probe response shape (wire type is generated; this is the UI-facing subset).
 type ProbeResult = {
@@ -49,7 +32,9 @@ type ProbeResult = {
 /// probe-driven wizard: enter the bucket + roles, Canopy inspects it, and the
 /// repo mode is derived from what's there (empty → from-birth; existing kopia
 /// repo → import by passphrase; other content / inaccessible → blocked). Edit is
-/// a flat form (structural fields are create-only).
+/// a flat form (structural fields are create-only). Schedule + retention are NOT
+/// set here — they're per-`(group, type)`, inherit the canopy-wide type defaults,
+/// and are tuned per type on the group's backup page.
 export default function BackupConfig() {
 	const { id = "" } = useParams<{ id: string }>();
 	const existing = useApi("backups", "get", { server_group_id: id }, [id]);
@@ -75,11 +60,8 @@ function ConfigForm({
 	const isCreate = existing == null;
 	const create = useApiAction("backups", "create");
 	const update = useApiAction("backups", "update");
-	const setSchedule = useApiAction("backups", "set_schedule");
 	const createRepo = useApiAction("backups", "create_repo");
 	const probeAction = useApiAction("backups", "probe");
-
-	const wellKnown = existing?.schedules.find((s) => s.type === WELL_KNOWN_TYPE);
 
 	const [bucket, setBucket] = useState(existing?.bucket ?? "");
 	const [prefix, setPrefix] = useState(existing?.prefix ?? "");
@@ -89,23 +71,10 @@ function ConfigForm({
 	);
 	const [region, setRegion] = useState(existing?.region ?? DEFAULT_REGION);
 	const [passphrase, setPassphrase] = useState("");
-	const [scheduled, setScheduled] = useState(
-		wellKnown ? wellKnown.expected_interval != null : true,
-	);
-	const [intervalMinutes, setIntervalMinutes] = useState<string>(
-		wellKnown?.expected_interval != null
-			? Math.max(1, Math.round(wellKnown.expected_interval / 60)).toString()
-			: "60",
-	);
-	const initialRetention = wellKnown?.retention ?? DEFAULT_RETENTION;
-	const [retention, setRetention] = useState<RetentionPolicy>(initialRetention);
 
 	// Wizard state (create only).
 	const [step, setStep] = useState(0);
 	const [probe, setProbe] = useState<ProbeResult | null>(null);
-
-	const floorErrors = retentionFloorErrors(retention);
-	const hasFloorError = floorErrors.length > 0;
 
 	// Probe-derived repo mode: an existing kopia repo is imported by passphrase;
 	// an empty bucket is created from-birth. (Canopy never lets the operator pick
@@ -113,13 +82,8 @@ function ConfigForm({
 	const mode: BackupRepoMode =
 		probe?.state === "kopia_repo" ? "passphrase" : "from_birth";
 
-	const pending =
-		create.pending ||
-		update.pending ||
-		setSchedule.pending ||
-		createRepo.pending;
-	const error =
-		create.error || update.error || setSchedule.error || createRepo.error;
+	const pending = create.pending || update.pending || createRepo.pending;
+	const error = create.error || update.error || createRepo.error;
 
 	const runProbe = async () => {
 		try {
@@ -149,103 +113,18 @@ function ConfigForm({
 					mode,
 					passphrase: mode === "passphrase" ? passphrase : null,
 				});
+				await createRepo.call({ server_group_id: groupId });
 			} else {
 				await update.call({
 					server_group_id: groupId,
 					region: region.trim() === "" ? null : region,
 				});
 			}
-			await setSchedule.call({
-				server_group_id: groupId,
-				type: WELL_KNOWN_TYPE,
-				expected_interval: scheduled
-					? Math.max(60, Math.round(Number(intervalMinutes) * 60))
-					: null,
-				retention,
-			});
-			if (isCreate) {
-				await createRepo.call({ server_group_id: groupId });
-			}
 			navigate(`/groups/${groupId}/backups`);
 		} catch {
 			/* surfaced via the action errors */
 		}
 	};
-
-	const scheduleAndRetention = (
-		<>
-			<Typography variant="subtitle1">Schedule</Typography>
-			<FormControlLabel
-				control={
-					<Switch
-						checked={scheduled}
-						onChange={(e) => setScheduled(e.target.checked)}
-						disabled={pending}
-					/>
-				}
-				label={scheduled ? "Scheduled" : "Manual only (no schedule)"}
-			/>
-			{scheduled && (
-				<TextField
-					label="Back up every (minutes)"
-					type="number"
-					value={intervalMinutes}
-					onChange={(e) => setIntervalMinutes(e.target.value)}
-					disabled={pending}
-					slotProps={{ htmlInput: { min: 1, step: 1 } }}
-					sx={{ width: 220 }}
-				/>
-			)}
-
-			<Divider />
-
-			<Typography variant="subtitle1">Retention</Typography>
-			<Typography variant="caption" color="text.secondary">
-				kopia keep-* policy. Org minimums: keep_daily ≥{" "}
-				{RETENTION_FLOORS.keep_daily}, keep_weekly ≥{" "}
-				{RETENTION_FLOORS.keep_weekly}, keep_monthly ≥{" "}
-				{RETENTION_FLOORS.keep_monthly}.
-			</Typography>
-			<Stack direction={{ xs: "column", md: "row" }} spacing={2}>
-				<RetentionField
-					label="Latest"
-					value={retention.keep_latest}
-					onChange={(v) => setRetention({ ...retention, keep_latest: v })}
-					disabled={pending}
-				/>
-				<RetentionField
-					label="Daily"
-					value={retention.keep_daily}
-					onChange={(v) => setRetention({ ...retention, keep_daily: v })}
-					disabled={pending}
-					floor={RETENTION_FLOORS.keep_daily}
-				/>
-				<RetentionField
-					label="Weekly"
-					value={retention.keep_weekly}
-					onChange={(v) => setRetention({ ...retention, keep_weekly: v })}
-					disabled={pending}
-					floor={RETENTION_FLOORS.keep_weekly}
-				/>
-				<RetentionField
-					label="Monthly"
-					value={retention.keep_monthly}
-					onChange={(v) => setRetention({ ...retention, keep_monthly: v })}
-					disabled={pending}
-					floor={RETENTION_FLOORS.keep_monthly}
-				/>
-				<RetentionField
-					label="Annual"
-					value={retention.keep_annual}
-					onChange={(v) => setRetention({ ...retention, keep_annual: v })}
-					disabled={pending}
-				/>
-			</Stack>
-			{hasFloorError && (
-				<Alert severity="warning">{floorErrors.join("; ")}</Alert>
-			)}
-		</>
-	);
 
 	// ── Edit mode: flat form (structural fields are create-only) ───────────────
 	if (!isCreate) {
@@ -269,15 +148,13 @@ function ConfigForm({
 						disabled={pending}
 						helperText="Changing region typically implies a different bucket — change with care."
 					/>
-					<Divider />
-					{scheduleAndRetention}
+					<Typography variant="caption" color="text.secondary">
+						Schedule and retention are managed per backup type on the group's
+						backup page.
+					</Typography>
 					{error && <Alert severity="error">{error.message}</Alert>}
 					<Stack direction="row" spacing={1}>
-						<Button
-							variant="contained"
-							onClick={persist}
-							disabled={pending || hasFloorError}
-						>
+						<Button variant="contained" onClick={persist} disabled={pending}>
 							{pending ? "Saving…" : "Save"}
 						</Button>
 						<Button
@@ -299,7 +176,7 @@ function ConfigForm({
 		bucket.trim() !== "" &&
 		roleArn.trim() !== "" &&
 		maintenanceRoleArn.trim() !== "";
-	const canContinueReview =
+	const canProvision =
 		probe != null &&
 		probe.already_configured == null &&
 		(probe.state === "empty" ||
@@ -316,10 +193,7 @@ function ConfigForm({
 						<StepLabel>Target bucket</StepLabel>
 					</Step>
 					<Step>
-						<StepLabel>Review</StepLabel>
-					</Step>
-					<Step>
-						<StepLabel>Schedule &amp; retention</StepLabel>
+						<StepLabel>Review &amp; create</StepLabel>
 					</Step>
 				</Stepper>
 
@@ -394,6 +268,14 @@ function ConfigForm({
 							passphrase={passphrase}
 							setPassphrase={setPassphrase}
 						/>
+						{canProvision && (
+							<Typography variant="caption" color="text.secondary">
+								Schedule &amp; retention inherit the canopy-wide per-type
+								defaults — tune them per type on the group's backup page after
+								setup.
+							</Typography>
+						)}
+						{error && <Alert severity="error">{error.message}</Alert>}
 						<Stack direction="row" spacing={1}>
 							<Button variant="outlined" onClick={() => setStep(0)}>
 								Back
@@ -406,33 +288,10 @@ function ConfigForm({
 							)}
 							<Button
 								variant="contained"
-								onClick={() => setStep(2)}
-								disabled={!canContinueReview}
-							>
-								Continue
-							</Button>
-						</Stack>
-					</Stack>
-				)}
-
-				{step === 2 && (
-					<Stack spacing={2}>
-						{scheduleAndRetention}
-						{error && <Alert severity="error">{error.message}</Alert>}
-						<Stack direction="row" spacing={1}>
-							<Button
-								variant="outlined"
-								onClick={() => setStep(1)}
-								disabled={pending}
-							>
-								Back
-							</Button>
-							<Button
-								variant="contained"
 								onClick={persist}
-								disabled={pending || hasFloorError}
+								disabled={!canProvision || pending}
 							>
-								{pending ? "Saving…" : "Create & provision"}
+								{pending ? "Creating…" : "Create & provision"}
 							</Button>
 						</Stack>
 					</Stack>
@@ -442,7 +301,7 @@ function ConfigForm({
 	);
 }
 
-/// Step-2 review: explain what the probe found and gate the next action.
+/// Review step: explain what the probe found and gate provisioning.
 function ProbeReview({
 	probe,
 	groupId,
@@ -515,44 +374,4 @@ function ProbeReview({
 				</Stack>
 			);
 	}
-}
-
-function RetentionField({
-	label,
-	value,
-	onChange,
-	disabled,
-	floor,
-}: {
-	label: string;
-	value: number;
-	onChange: (v: number) => void;
-	disabled: boolean;
-	floor?: number;
-}) {
-	const below = floor != null && value < floor;
-	return (
-		<TextField
-			label={label}
-			type="number"
-			value={value}
-			onChange={(e) => onChange(Number(e.target.value))}
-			disabled={disabled}
-			error={below}
-			helperText={floor != null ? `≥ ${floor}` : undefined}
-			slotProps={{ htmlInput: { min: floor ?? 0, step: 1 } }}
-			sx={{ width: 110 }}
-		/>
-	);
-}
-
-function retentionFloorErrors(r: RetentionPolicy): string[] {
-	const errs: string[] = [];
-	if (r.keep_daily < RETENTION_FLOORS.keep_daily)
-		errs.push(`keep_daily must be ≥ ${RETENTION_FLOORS.keep_daily}`);
-	if (r.keep_weekly < RETENTION_FLOORS.keep_weekly)
-		errs.push(`keep_weekly must be ≥ ${RETENTION_FLOORS.keep_weekly}`);
-	if (r.keep_monthly < RETENTION_FLOORS.keep_monthly)
-		errs.push(`keep_monthly must be ≥ ${RETENTION_FLOORS.keep_monthly}`);
-	return errs;
 }

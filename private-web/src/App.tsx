@@ -14,6 +14,7 @@ import { AdminProvider } from "./hooks/useIsAdmin";
 import { useReloadInterval } from "./hooks/useReloadInterval";
 import Admins from "./routes/Admins";
 import BackupConfig from "./routes/BackupConfig";
+import BackupDefaults from "./routes/BackupDefaults";
 import RecoveryVault from "./routes/RecoveryVault";
 import BackupPanel from "./routes/BackupPanel";
 import Bestool from "./routes/Bestool";
@@ -210,6 +211,7 @@ export default function App() {
 							element={<Navigate to="/settings/admins" replace />}
 						/>
 						<Route path="admins" element={<Admins />} />
+						<Route path="backup-defaults" element={<BackupDefaults />} />
 						<Route path="recovery" element={<RecoveryVault />} />
 					</Route>
 					<Route path="/devices" element={<Devices />}>
