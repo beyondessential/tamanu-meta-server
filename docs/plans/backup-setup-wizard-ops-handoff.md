@@ -200,3 +200,12 @@ action items §1–§3, §5 are the source of truth; treat them as done.
   (`bestool crypto decrypt`) and pastes it back. The vault blob itself is plain
   `age` v1 (decryptable with `bestool crypto decrypt` / `age` / `rage`).
 - No k8s RBAC change (the vault is S3, not a Secret).
+
+**2026-06-22 — clarification (private-server also needs the recipients):**
+- ⚠️ **Set `CANOPY_RECOVERY_VAULT_KEYS` on private-server too**, not just the
+  backups pod. They're **public** keys (non-secret), so use the same value. The
+  private-server needs them to run the verification ceremony (issue the
+  age-encrypted challenge); without them the recovery-vault page reports the
+  ceremony as unavailable. private-server does **not** hard-require them (it
+  starts fine without; only the ceremony page is degraded) — unlike the backups
+  pod, which won't start without them. Nothing else on private-server needs it.

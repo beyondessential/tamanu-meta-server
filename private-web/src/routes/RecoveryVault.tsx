@@ -64,10 +64,8 @@ export default function RecoveryVault() {
 
 			{!s.configured && (
 				<Alert severity="warning">
-					No recovery recipients are configured on this server (
-					<code>CANOPY_RECOVERY_VAULT_KEYS</code>). The backups pod requires them
-					and won't run without them — set them in ops before relying on the
-					vault.
+					<code>CANOPY_RECOVERY_VAULT_KEYS</code> is not set on this server —
+					it's required on both the backups pod and private-server.
 				</Alert>
 			)}
 
