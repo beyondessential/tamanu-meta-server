@@ -61,11 +61,10 @@ impl BackupSecrets {
 	}
 
 	/// Build a secret store from the ambient cluster config (in-cluster the pod's
-	/// service account; locally `~/.kube/config`), reading from the
-	/// `POD_NAMESPACE` namespace (default `canopy`). If `MEMORY_ENV` is set,
-	/// returns the in-memory store instead. Returns `None` (logged) when no
-	/// cluster config is available, so callers degrade to 502 rather than failing
-	/// startup.
+	/// service account; locally `~/.kube/config`), reading from the pod's own
+	/// namespace (see [`pod_namespace`]). If `MEMORY_ENV` is set, returns the
+	/// in-memory store instead. Returns `None` (logged) when no cluster config is
+	/// available, so callers degrade to 502 rather than failing startup.
 	pub async fn try_default() -> Option<Self> {
 		if std::env::var_os(MEMORY_ENV).is_some() {
 			// The in-memory store is debug-only (tests, e2e, local dev). `memory()`
@@ -84,10 +83,10 @@ impl BackupSecrets {
 			);
 		}
 		match kube::Client::try_default().await {
-			Ok(client) => Some(Self::Kube {
-				client,
-				namespace: namespace_from_env(),
-			}),
+			Ok(client) => {
+				let namespace = pod_namespace(&client);
+				Some(Self::Kube { client, namespace })
+			}
 			Err(err) => {
 				tracing::warn!(error = ?err, "kube client unavailable; backup Secret ops will 502");
 				None
@@ -271,10 +270,15 @@ fn secret_object(secret_name: &str, key: &str, value: &str) -> k8s_openapi::api:
 	}
 }
 
-/// Namespace the repo-password Secrets live in: `POD_NAMESPACE` (inject via the
-/// downward API), defaulting to `canopy`.
-fn namespace_from_env() -> String {
-	std::env::var("POD_NAMESPACE").unwrap_or_else(|_| "canopy".to_string())
+/// Namespace the repo-password Secrets live in. `POD_NAMESPACE` (injected via the
+/// downward API) wins if set; otherwise the pod's **own** namespace from the
+/// in-cluster config — i.e. the ServiceAccount's namespace. Never a hardcoded
+/// guess: defaulting to `canopy` meant a pod deployed elsewhere (e.g.
+/// `tamanu-meta-prod`) read/created Secrets in `canopy`, where its SA has no RBAC
+/// (403 Forbidden), so onboarding's Secret and the backups pod's read landed in
+/// different namespaces than the grants.
+fn pod_namespace(client: &kube::Client) -> String {
+	std::env::var("POD_NAMESPACE").unwrap_or_else(|_| client.default_namespace().to_string())
 }
 
 #[cfg(test)]
