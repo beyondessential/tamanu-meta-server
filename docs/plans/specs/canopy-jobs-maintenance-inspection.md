@@ -62,8 +62,9 @@ Out of scope here (other specs/components own them): the public-server device en
 `AppState`, staleness detection over `backup_runs` (signal 1), the per-group upstream **preflight**, the
 operator UI, and all Pulumi `backups`-stack bucket/role changes. Where this component *depends on* those, it is
 called out in §6/§7. UPDATE (shipped): kopia is a **bundled subprocess** of the
-`backups` bin (the image is `images/backups/`, `FROM kopia/kopia:0.23.1` + the
-compiled `backups` binary), so there is no separate job-pod image and no
+`backups` bin. The kopia binary is copied into the single shipped
+`ghcr.io/beyondessential/canopy` image (`.github/Dockerfile.native`), so the
+backups pod runs that same image — there is no separate job-pod image and no
 inter-process contract — §5 now documents how the bin invokes the kopia CLI
 directly.
 
@@ -472,9 +473,10 @@ Owned jointly with the ops/IaC spec; the canopy-jobs-relevant pieces:
     per-bucket role trust + action set + `s3:GetBucketObjectLockConfiguration` are **`backups`-stack** changes
     owned by the ops spec.
   - **OIDC-provider-per-account** wiring so the pod's web-identity can assume cross-account (ops/IaC).
-- **The `images/backups` image** must be published and referenceable (ops). UPDATE (shipped): it bundles kopia
-  (`FROM kopia/kopia:0.23.1` + the compiled `backups` binary) — there is no separate kopia-job image, and there
-  is **no `CANOPY_BACKUP_IMAGE` env** (no Job image to reference). See §5.
+- **The shipped `ghcr.io/beyondessential/canopy` image** bundles kopia (the kopia binary is copied into
+  `.github/Dockerfile.native` from `kopia/kopia:0.23.1`), so the backups pod runs the same image as the other
+  components — there is no separate kopia-job image, and there is **no `CANOPY_BACKUP_IMAGE` env** (no Job image
+  to reference). See §5.
 - UPDATE (shipped): **no** report Service/Secret (`CANOPY_BACKUP_REPORT_*` / bearer token) — there is no
   `/job-report` endpoint. The k8s RBAC is a least-privilege namespace `Role`/`RoleBinding` granting only
   `get secrets`.
@@ -673,8 +675,8 @@ dropping it).
    (`database::backup::sweep`, run by the `monitor` bin); this component writes
    `backup_maintenance_runs` and raises only the corruption alert.
 5. **kopia image** — RESOLVED (impl): there is no separate kopia-job image and no entrypoint contract. kopia is
-   **bundled** into the canopy-specific `images/backups` image (`FROM kopia/kopia:0.23.1` + the compiled
-   `backups` binary, multi-stage, build context = repo root) and invoked in-process; no `CANOPY_BACKUP_IMAGE`
+   **bundled** into the single shipped `ghcr.io/beyondessential/canopy` image (the kopia binary is copied into
+   `.github/Dockerfile.native` from `kopia/kopia:0.23.1`) and invoked in-process; no `CANOPY_BACKUP_IMAGE`
    env. (§5.)
 6. **S3-metrics cross-account read** — RESOLVED (impl): assume the group's `target_role_arn` and read CloudWatch
    with those creds (no dedicated canopy CloudWatch IRSA); per-bucket role grants `cloudwatch:GetMetricStatistics`
@@ -704,8 +706,8 @@ long-lived Deployment that runs bundled kopia in-process":
   No per-Job/per-kind SAs, no chained read-only path.
 - **AWS SDK** (`aws-config` + `aws-sdk-cloudwatch` + `aws-sdk-s3` + `aws-sdk-sts`) on the `backups` bin for
   **preflight** + **s3-metrics**. kopia's own bundled AWS SDK handles the S3 repo I/O.
-- **The `images/backups` image** — canopy-specific, `FROM kopia/kopia:0.23.1` + the compiled `backups` binary
-  (multi-stage; build context = repo root). Bundles kopia; no separate kopia-job image, no ENV-config/POST
+- **The shipped `ghcr.io/beyondessential/canopy` image** bundles kopia (its binary is copied into
+  `.github/Dockerfile.native` from `kopia/kopia:0.23.1`). No separate kopia-job image, no ENV-config/POST
   contract.
 - **OIDC-provider-per-account** wiring for cross-account web-identity (ops/IaC).
 

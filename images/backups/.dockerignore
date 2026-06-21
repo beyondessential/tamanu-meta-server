@@ -1,7 +1,0 @@
-# Build context is the repository root; keep it lean so the cargo build doesn't
-# ship the whole working tree into the build.
-target/
-.git
-.jj
-private-web/node_modules
-private-web/dist
