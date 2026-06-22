@@ -580,7 +580,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Status"
+                  "$ref": "#/components/schemas/StatusResponse"
                 }
               }
             }
@@ -1608,6 +1608,29 @@
           }
         ],
         "description": "Status payload contract — documents the wire shape only. The\nhandler actually receives `serde_json::Value` and runs its own\nvalidation so arbitrary additional fields flow through into\n`statuses.extra` unchanged.\n\nSchema is reproduced here so the openapi spec describes the\n`healthy` and `health` keys explicitly; otherwise consumers have\nto read the prose to know they exist."
+      },
+      "StatusResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Status"
+          },
+          {
+            "type": "object",
+            "required": [
+              "backup_now"
+            ],
+            "properties": {
+              "backup_now": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Backup types due/requested for this server now. Each serializes as a\nplain string (e.g. `\"tamanu-postgres\"`)."
+              }
+            }
+          }
+        ],
+        "description": "The status-push response: the persisted [`Status`] plus `backup_now`, the\nbackup types this server should back up *right now* (operator one-offs +\nschedule-due; see [`backups_due_now_for_server`]). The device runs each; an\nempty list means \"nothing to do\". The `Status` fields are flattened so they\nstay top-level for clients that predate `backup_now` and ignore it."
       },
       "TagMap": {
         "type": "object",

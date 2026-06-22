@@ -2310,3 +2310,199 @@ async fn submit_status_result_all_kinds_upsert_catalog() {
 	)
 	.await
 }
+
+// --- backup_now signal on the status response -------------------------------
+
+async fn seed_server_in_group(
+	conn: &mut diesel_async::AsyncPgConnection,
+	device_id: Uuid,
+) -> (Uuid, Uuid) {
+	let group_id = Uuid::new_v4();
+	sql_query("INSERT INTO server_groups (id, name) VALUES ($1, 'backup-now-test')")
+		.bind::<sql_types::Uuid, _>(group_id)
+		.execute(conn)
+		.await
+		.expect("insert group");
+	let server_id = Uuid::new_v4();
+	sql_query(
+		"INSERT INTO servers (id, host, kind, device_id, group_id) \
+		 VALUES ($1, 'https://srv.example.com', 'central', $2, $3)",
+	)
+	.bind::<sql_types::Uuid, _>(server_id)
+	.bind::<sql_types::Nullable<sql_types::Uuid>, _>(Some(device_id))
+	.bind::<sql_types::Nullable<sql_types::Uuid>, _>(Some(group_id))
+	.execute(conn)
+	.await
+	.expect("insert server");
+	(server_id, group_id)
+}
+
+async fn seed_backup_config(
+	conn: &mut diesel_async::AsyncPgConnection,
+	group_id: Uuid,
+	status: &str,
+) {
+	sql_query(
+		"INSERT INTO server_group_backup_config \
+		 (group_id, bucket, prefix, target_role_arn, maintenance_role_arn, region, repo_password_ref, status) \
+		 VALUES ($1, 'grp-bucket', '', 'arn:aws:iam::123456789012:role/grp', 'arn:aws:iam::123456789012:role/grp-maint', 'ap-southeast-2', 'grp-repo-pw', $2)",
+	)
+	.bind::<sql_types::Uuid, _>(group_id)
+	.bind::<sql_types::Text, _>(status)
+	.execute(conn)
+	.await
+	.expect("insert config");
+}
+
+async fn enable_backup_capability(
+	conn: &mut diesel_async::AsyncPgConnection,
+	server_id: Uuid,
+	r#type: &str,
+) {
+	sql_query(
+		"INSERT INTO server_backup_capabilities (server_id, type, enabled) VALUES ($1, $2, true)",
+	)
+	.bind::<sql_types::Uuid, _>(server_id)
+	.bind::<sql_types::Text, _>(r#type)
+	.execute(conn)
+	.await
+	.expect("insert capability");
+}
+
+fn backup_now(body: &serde_json::Value) -> Vec<String> {
+	body["backup_now"]
+		.as_array()
+		.expect("backup_now array")
+		.iter()
+		.map(|v| v.as_str().expect("type string").to_string())
+		.collect()
+}
+
+/// An enabled type with no prior successful run is schedule-due (the seeded
+/// 6h `tamanu-postgres` default applies), so the heartbeat names it.
+#[tokio::test(flavor = "multi_thread")]
+async fn status_signals_backup_now_for_due_schedule() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let (server_id, group_id) = seed_server_in_group(&mut conn, device_id).await;
+			seed_backup_config(&mut conn, group_id, "ready").await;
+			enable_backup_capability(&mut conn, server_id, "tamanu-postgres").await;
+
+			let resp = public
+				.post(&format!("/status/{server_id}"))
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({ "health": [] }))
+				.await;
+			resp.assert_status_ok();
+			assert_eq!(backup_now(&resp.json()), vec!["tamanu-postgres"]);
+		},
+	)
+	.await
+}
+
+/// A recent successful backup is within the interval ⇒ not due ⇒ no signal.
+#[tokio::test(flavor = "multi_thread")]
+async fn status_no_backup_now_when_recent_success() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let (server_id, group_id) = seed_server_in_group(&mut conn, device_id).await;
+			seed_backup_config(&mut conn, group_id, "ready").await;
+			enable_backup_capability(&mut conn, server_id, "tamanu-postgres").await;
+			sql_query(
+				"INSERT INTO backup_runs (id, device_id, group_id, server_id, type, purpose, outcome, reported_at) \
+				 VALUES ($1, $2, $3, $4, 'tamanu-postgres', 'backup', 'success', now())",
+			)
+			.bind::<sql_types::Uuid, _>(Uuid::new_v4())
+			.bind::<sql_types::Uuid, _>(device_id)
+			.bind::<sql_types::Uuid, _>(group_id)
+			.bind::<sql_types::Nullable<sql_types::Uuid>, _>(Some(server_id))
+			.execute(&mut conn)
+			.await
+			.expect("insert run");
+
+			let resp = public
+				.post(&format!("/status/{server_id}"))
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({ "health": [] }))
+				.await;
+			resp.assert_status_ok();
+			assert!(backup_now(&resp.json()).is_empty());
+		},
+	)
+	.await
+}
+
+/// The signal is gated on a `ready` config — a provisioning group emits nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn status_no_backup_now_until_config_ready() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let (server_id, group_id) = seed_server_in_group(&mut conn, device_id).await;
+			seed_backup_config(&mut conn, group_id, "provisioning").await;
+			enable_backup_capability(&mut conn, server_id, "tamanu-postgres").await;
+
+			let resp = public
+				.post(&format!("/status/{server_id}"))
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({ "health": [] }))
+				.await;
+			resp.assert_status_ok();
+			assert!(backup_now(&resp.json()).is_empty());
+		},
+	)
+	.await
+}
+
+/// An operator one-off is surfaced, then cleared by `/backup-report` so the next
+/// heartbeat stops naming it.
+#[tokio::test(flavor = "multi_thread")]
+async fn status_one_off_request_surfaced_then_cleared_by_report() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let (server_id, group_id) = seed_server_in_group(&mut conn, device_id).await;
+			seed_backup_config(&mut conn, group_id, "ready").await;
+			// No enabled capability: the type appears only via the explicit request,
+			// so clearing it (not a due schedule) is what empties the signal.
+			sql_query(
+				"INSERT INTO backup_requests (server_id, type, purpose) VALUES ($1, 'tamanu-postgres', 'backup')",
+			)
+			.bind::<sql_types::Uuid, _>(server_id)
+			.execute(&mut conn)
+			.await
+			.expect("enqueue request");
+
+			let resp = public
+				.post(&format!("/status/{server_id}"))
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({ "health": [] }))
+				.await;
+			resp.assert_status_ok();
+			assert_eq!(backup_now(&resp.json()), vec!["tamanu-postgres"]);
+
+			let report = public
+				.post("/backup-report")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"run_id": Uuid::new_v4(),
+					"type": "tamanu-postgres",
+					"purpose": "backup",
+					"outcome": "success",
+				}))
+				.await;
+			report.assert_status(http::StatusCode::NO_CONTENT);
+
+			let resp = public
+				.post(&format!("/status/{server_id}"))
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({ "health": [] }))
+				.await;
+			resp.assert_status_ok();
+			assert!(backup_now(&resp.json()).is_empty());
+		},
+	)
+	.await
+}

@@ -25,7 +25,8 @@ use database::{
 	Db,
 	backups::BackupTypeDefault,
 	backups::{
-		NewBackupCredentialIssuance, NewBackupRun, ServerBackupCapability, ServerGroupBackupConfig,
+		BackupRequest, NewBackupCredentialIssuance, NewBackupRun, ServerBackupCapability,
+		ServerGroupBackupConfig,
 	},
 	servers::Server,
 };
@@ -456,7 +457,7 @@ async fn report(
 			device_id,
 			group_id,
 			server_id: Some(server.id),
-			r#type: rep.r#type,
+			r#type: rep.r#type.clone(),
 			purpose: rep.purpose,
 			outcome: rep.outcome,
 			error: rep.error,
@@ -465,6 +466,12 @@ async fn report(
 		},
 	)
 	.await?;
+
+	// Clear any matching operator one-off so the heartbeat stops re-emitting
+	// "back up now" for it — regardless of outcome (the operator asked for one
+	// attempt; they can re-request). A scheduled-due signal self-clears once the
+	// successful run advances the staleness anchor, so it needs no clearing here.
+	BackupRequest::clear(&mut conn, server.id, &rep.r#type, rep.purpose).await?;
 
 	Ok(StatusCode::NO_CONTENT)
 }

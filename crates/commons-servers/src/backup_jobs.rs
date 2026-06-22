@@ -8,10 +8,13 @@ use std::time::Duration;
 use commons_errors::Result;
 use commons_types::{
 	Uuid,
-	backup::BackupType,
+	backup::{BackupConfigStatus, BackupPurpose, BackupType},
 	server::{rank::ServerRank, tags::TagMap},
 };
-use database::{BackupTypeDefault, ServerBackupCapability, ServerGroupBackupSchedule};
+use database::{
+	BackupRequest, BackupRun, BackupTypeDefault, ServerBackupCapability, ServerGroupBackupConfig,
+	ServerGroupBackupSchedule,
+};
 use diesel_async::AsyncPgConnection;
 use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
@@ -121,6 +124,27 @@ pub async fn effective_retention_for_group(
 	Ok(out)
 }
 
+/// Resolve the effective backup interval for one `(group, type)`: the schedule
+/// `expected_interval` override, else the type's `default_interval`. `None` ⇒
+/// manual-only (no scheduled cadence).
+async fn effective_interval_for_type(
+	db: &mut AsyncPgConnection,
+	group_id: Uuid,
+	ty: &BackupType,
+) -> Result<Option<Duration>> {
+	let interval = match ServerGroupBackupSchedule::get(db, group_id, ty)
+		.await?
+		.and_then(|s| s.expected_interval)
+	{
+		Some(i) => Some(i),
+		None => BackupTypeDefault::get(db, ty)
+			.await?
+			.and_then(|d| d.default_interval),
+	};
+	// PgDuration wraps a jiff SignedDuration; whole seconds → Duration.
+	Ok(interval.map(|pg| Duration::from_secs(pg.0.as_secs().max(0) as u64)))
+}
+
 /// Resolve the effective backup interval for the group: per enabled type, the
 /// schedule `expected_interval` else the type `default_interval`; the group's
 /// effective cadence is the MINIMUM across types (the most-frequent type drives
@@ -132,23 +156,64 @@ pub async fn effective_interval_for_group(
 	let types = ServerBackupCapability::enabled_types_for_group(db, group_id).await?;
 	let mut min: Option<Duration> = None;
 	for ty in types {
-		let schedule_interval = ServerGroupBackupSchedule::get(db, group_id, &ty)
-			.await?
-			.and_then(|s| s.expected_interval);
-		let interval = match schedule_interval {
-			Some(i) => Some(i),
-			None => BackupTypeDefault::get(db, &ty)
-				.await?
-				.and_then(|d| d.default_interval),
-		};
-		if let Some(pg) = interval {
-			// PgDuration wraps a jiff SignedDuration; whole seconds → Duration.
-			let secs = pg.0.as_secs().max(0) as u64;
-			let d = Duration::from_secs(secs);
+		if let Some(d) = effective_interval_for_type(db, group_id, &ty).await? {
 			min = Some(min.map_or(d, |m| m.min(d)));
 		}
 	}
 	Ok(min)
+}
+
+/// The backup types a server should back up *now*: every enabled `(server,
+/// type)` whose effective interval has elapsed since its last successful backup
+/// (schedule-due), unioned with operator one-off [`BackupRequest`]s
+/// (`purpose = backup` only — restore is operator-directed, not delivered over
+/// the heartbeat). Manual-only types (no effective interval) appear only when
+/// explicitly requested. Sorted by type name for a stable wire order.
+///
+/// Emitted idempotently each tick: a due type keeps appearing until a
+/// successful run reports (advancing the staleness anchor), and a one-off until
+/// the run is reported (which clears the request). The device is responsible
+/// for not starting a second run while one is already in flight.
+pub async fn backups_due_now_for_server(
+	db: &mut AsyncPgConnection,
+	server_id: Uuid,
+	group_id: Uuid,
+	now: Timestamp,
+) -> Result<Vec<BackupType>> {
+	// Nothing to back up to unless the group's repo is ready — a request or a
+	// due schedule against a still-provisioning config would only bounce off the
+	// device's `/backup-target` (dormant). Gate the whole signal on readiness.
+	match ServerGroupBackupConfig::get(db, group_id).await? {
+		Some(cfg) if cfg.status == BackupConfigStatus::Ready => {}
+		_ => return Ok(Vec::new()),
+	}
+
+	let mut due: std::collections::HashSet<BackupType> = std::collections::HashSet::new();
+
+	for req in BackupRequest::pending_for_server(db, server_id).await? {
+		if req.purpose == BackupPurpose::Backup {
+			due.insert(req.r#type);
+		}
+	}
+
+	for cap in ServerBackupCapability::list_for_server(db, server_id).await? {
+		if !cap.enabled {
+			continue;
+		}
+		let Some(interval) = effective_interval_for_type(db, group_id, &cap.r#type).await? else {
+			continue;
+		};
+		let last = BackupRun::latest_success_for_server(db, server_id, &cap.r#type)
+			.await?
+			.map(|r| r.reported_at);
+		if is_due(interval, last, now) {
+			due.insert(cap.r#type);
+		}
+	}
+
+	let mut out: Vec<BackupType> = due.into_iter().collect();
+	out.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+	Ok(out)
 }
 
 /// The three `billing.*` pod labels spawned Jobs carry for AWS cost allocation.

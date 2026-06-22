@@ -5,8 +5,10 @@ use axum::{
 	extract::{Path, State},
 };
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
-use commons_servers::{device_auth::ServerDevice, headers::VersionHeader};
-use commons_types::{device::DeviceRole, issue::Severity, status::CheckResult};
+use commons_servers::{
+	backup_jobs::backups_due_now_for_server, device_auth::ServerDevice, headers::VersionHeader,
+};
+use commons_types::{backup::BackupType, device::DeviceRole, issue::Severity, status::CheckResult};
 use database::{
 	Db,
 	devices::Device,
@@ -16,7 +18,8 @@ use database::{
 	servers::Server,
 	statuses::{NewStatus, Status},
 };
-use serde::Deserialize;
+use jiff::Timestamp;
+use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
 use uuid::Uuid;
@@ -111,6 +114,21 @@ const HEALTH_REF: &str = "health";
 /// operators can silence the two independently.
 const BROKEN_REF: &str = "health-broken";
 
+/// The status-push response: the persisted [`Status`] plus `backup_now`, the
+/// backup types this server should back up *right now* (operator one-offs +
+/// schedule-due; see [`backups_due_now_for_server`]). The device runs each; an
+/// empty list means "nothing to do". The `Status` fields are flattened so they
+/// stay top-level for clients that predate `backup_now` and ignore it.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct StatusResponse {
+	#[serde(flatten)]
+	pub status: Status,
+	/// Backup types due/requested for this server now. Each serializes as a
+	/// plain string (e.g. `"tamanu-postgres"`).
+	#[schema(value_type = Vec<String>)]
+	pub backup_now: Vec<BackupType>,
+}
+
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new().routes(routes!(create))
 }
@@ -128,7 +146,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		description = "Status push. A `health` array is required (it may be empty); a body without it is rejected with 400, unless the server has `allow_legacy_status` set, in which case the push refreshes reachability only and carries the last known healthchecks forward.",
 	),
 	responses(
-		(status = 200, body = Status),
+		(status = 200, body = StatusResponse),
 		(status = 400, body = ProblemDetailsSchema),
 		(status = 401, body = ProblemDetailsSchema),
 		(status = 403, body = ProblemDetailsSchema),
@@ -140,7 +158,7 @@ async fn create(
 	device: ServerDevice,
 	current_version: VersionHeader,
 	body: Option<Json<serde_json::Value>>,
-) -> Result<Json<Status>> {
+) -> Result<Json<StatusResponse>> {
 	let mut db = db.get().await?;
 	let Device { role, id, .. } = device.0.0;
 
@@ -153,6 +171,16 @@ async fn create(
 		));
 	}
 
+	// Tell the device which backup types to run now (operator one-offs +
+	// schedule-due), riding the heartbeat response. Empty for an ungrouped
+	// server or one whose group has no `ready` backup config.
+	let backup_now = match server.group_id {
+		Some(group_id) => {
+			backups_due_now_for_server(&mut db, server_id, group_id, Timestamp::now()).await?
+		}
+		None => Vec::new(),
+	};
+
 	let raw = body.map(|j| j.0).unwrap_or(serde_json::Value::Null);
 	let (healthy, health, extra) = split_health_from_extra(raw)?;
 
@@ -163,9 +191,8 @@ async fn create(
 		if !server.allow_legacy_status {
 			return Err(AppError::BadRequest("`health` array is required".into()));
 		}
-		return Ok(Json(
-			create_legacy_status(&mut db, server_id, id, extra, current_version.0).await?,
-		));
+		let status = create_legacy_status(&mut db, server_id, id, extra, current_version.0).await?;
+		return Ok(Json(StatusResponse { status, backup_now }));
 	};
 
 	// Resolve the server's effective tag map outside the write transaction.
@@ -199,7 +226,7 @@ async fn create(
 		})
 		.await?;
 
-	Ok(Json(status))
+	Ok(Json(StatusResponse { status, backup_now }))
 }
 
 /// Store a legacy-format push (no `health` array) for a server that's opted
