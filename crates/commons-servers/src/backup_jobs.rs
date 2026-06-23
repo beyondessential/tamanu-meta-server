@@ -343,6 +343,28 @@ pub fn shared_bucket_name(group_name: &str, random: &str) -> String {
 	}
 }
 
+/// Billing tags for a canopy backup bucket: `billing.product=backups` (fixed —
+/// distinguishes backup spend from the deployment's `tamanu` product),
+/// `billing.deployment=<group name>`, and `billing.stage=<highest member rank>`
+/// (mapped via [`stage_for_rank`]; omitted when the group has no ranked members).
+/// Applied at provision time and re-applied by the reconcile pass on drift.
+pub fn backup_bucket_billing_tags(
+	group_name: &str,
+	highest_rank: Option<ServerRank>,
+) -> Vec<(String, String)> {
+	let mut tags = vec![
+		("billing.product".to_string(), "backups".to_string()),
+		("billing.deployment".to_string(), group_name.to_string()),
+	];
+	if let Some(rank) = highest_rank {
+		tags.push((
+			"billing.stage".to_string(),
+			stage_for_rank(rank).to_string(),
+		));
+	}
+	tags
+}
+
 /// Has a full cadence `window` elapsed since this kind of work last ran for a
 /// group? `None` (never run) ⇒ due. Combine with [`slot_is_due`] in the loop so
 /// the spawn lands on the group's stable jittered slot within the window.
@@ -566,5 +588,20 @@ mod tests {
 	fn shared_bucket_name_empty_group_drops_segment() {
 		let n = shared_bucket_name("!!!", "deadbeef");
 		assert_eq!(n, "bes-canopy-backup-deadbeef");
+	}
+
+	#[test]
+	fn billing_tags_fixed_product_and_deployment() {
+		let t = backup_bucket_billing_tags("Acme Prod", Some(ServerRank::Production));
+		assert!(t.contains(&("billing.product".to_string(), "backups".to_string())));
+		assert!(t.contains(&("billing.deployment".to_string(), "Acme Prod".to_string())));
+		// Production maps to "prod", not the Display "production".
+		assert!(t.contains(&("billing.stage".to_string(), "prod".to_string())));
+	}
+
+	#[test]
+	fn billing_tags_omit_stage_when_unranked() {
+		let t = backup_bucket_billing_tags("g", None);
+		assert!(!t.iter().any(|(k, _)| k == "billing.stage"));
 	}
 }

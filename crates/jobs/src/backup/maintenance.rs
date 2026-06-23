@@ -16,10 +16,13 @@
 
 use std::{collections::HashSet, time::Duration};
 
-use commons_servers::backup_jobs::{JobKind, effective_retention_for_group, is_due, slot_is_due};
+use commons_servers::backup_jobs::{
+	JobKind, backup_bucket_billing_tags, effective_retention_for_group, is_due, slot_is_due,
+};
+use commons_types::backup::BackupPlacement;
 use database::{
 	BackupConfigStatus, BackupMaintenanceRun, BackupRepoMode, MaintenanceKind, RunOutcome,
-	ServerGroupBackupConfig,
+	ServerGroupBackupConfig, server_groups::ServerGroup,
 };
 use jiff::Timestamp;
 use tokio::{
@@ -142,6 +145,12 @@ fn spawn_init(worker: &Worker, config: ServerGroupBackupConfig) {
 
 /// The kopia side of an init op: read the password + retention, run init.
 async fn run_init_op(worker: &Worker, config: &ServerGroupBackupConfig) -> anyhow::Result<()> {
+	// Shared-account configs: Canopy owns the bucket — create + configure it
+	// (idempotent) before kopia connects. BYO (`external`) buckets already exist.
+	if config.placement == BackupPlacement::Shared {
+		provision_shared_bucket(worker, config).await?;
+	}
+
 	let password = worker.read_repo_password(&config.repo_password_ref).await?;
 	let lease = worker
 		.creds
@@ -195,6 +204,44 @@ async fn run_init_op(worker: &Worker, config: &ServerGroupBackupConfig) -> anyho
 		})?;
 	}
 	Ok(())
+}
+
+/// Create + configure the shared-account bucket for a `placement=shared` config,
+/// tagged with the group's current billing tags. The provisioner role comes from
+/// `CANOPY_SHARED_BACKUP_PROVISIONER_ROLE_ARN` (required when any shared config
+/// reaches init). Idempotent — see [`super::provision`].
+async fn provision_shared_bucket(
+	worker: &Worker,
+	config: &ServerGroupBackupConfig,
+) -> anyhow::Result<()> {
+	let provisioner_role_arn = std::env::var("CANOPY_SHARED_BACKUP_PROVISIONER_ROLE_ARN")
+		.ok()
+		.filter(|v| !v.trim().is_empty())
+		.ok_or_else(|| {
+			anyhow::anyhow!("placement=shared but CANOPY_SHARED_BACKUP_PROVISIONER_ROLE_ARN is unset")
+		})?;
+
+	let (group_name, highest_rank) = {
+		let mut db = worker
+			.pool
+			.get()
+			.await
+			.map_err(|e| anyhow::anyhow!("db connection: {e}"))?;
+		let name = ServerGroup::get_by_id(&mut db, config.group_id)
+			.await
+			.map_err(|e| anyhow::anyhow!(e))?
+			.name;
+		let rank = ServerGroup::highest_member_ranks(&mut db, &[config.group_id])
+			.await
+			.map_err(|e| anyhow::anyhow!(e))?
+			.get(&config.group_id)
+			.copied();
+		(name, rank)
+	};
+
+	let tags = backup_bucket_billing_tags(&group_name, highest_rank);
+	let region = config.region.as_deref().unwrap_or("us-east-1");
+	super::provision::ensure_bucket(&provisioner_role_arn, &config.bucket, region, &tags).await
 }
 
 /// Run a maintenance op in a spawned task: start the run row, read the password,
