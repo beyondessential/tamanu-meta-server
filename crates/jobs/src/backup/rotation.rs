@@ -26,7 +26,7 @@ use tokio::{
 use tracing::{debug, error, info, warn};
 
 use super::{
-	creds_server::CredsLease,
+	creds_server::ResolvedCreds,
 	kopia::{self, KopiaEnv},
 	worker::Worker,
 };
@@ -36,11 +36,17 @@ const KEY_CURRENT: &str = "password";
 /// In-flight rotation candidate key.
 const KEY_NEXT: &str = "password_next";
 
-/// Build a [`KopiaEnv`] for `password` from a creds lease + the group's config.
-fn kopia_env(lease: &CredsLease, config: &ServerGroupBackupConfig, password: String) -> KopiaEnv {
+/// Build a [`KopiaEnv`] for `password` from the assumed-role static creds + the
+/// group's config.
+fn kopia_env(
+	creds: &ResolvedCreds,
+	config: &ServerGroupBackupConfig,
+	password: String,
+) -> KopiaEnv {
 	KopiaEnv {
-		creds_uri: lease.uri().to_string(),
-		creds_token: lease.token().to_string(),
+		access_key_id: creds.access_key_id.clone(),
+		secret_access_key: creds.secret_access_key.clone(),
+		session_token: creds.session_token.clone(),
 		region: config.region.clone(),
 		password,
 	}
@@ -87,9 +93,9 @@ pub async fn rotate_to(
 	new: &str,
 ) -> Result<()> {
 	let secret_ref = &config.repo_password_ref;
-	let lease = worker
+	let creds = worker
 		.creds
-		.lease(&config.maintenance_role_arn, config.region.as_deref())
+		.resolve(&config.maintenance_role_arn, config.region.as_deref())
 		.await?;
 	let region = config.region.as_deref().unwrap_or_default();
 
@@ -102,7 +108,7 @@ pub async fn rotate_to(
 	.await?;
 	// 2. Rotate the repo (change_password verifies by reconnecting with `new`).
 	kopia::change_password(
-		&kopia_env(&lease, config, current.to_string()),
+		&kopia_env(&creds, config, current.to_string()),
 		&config.bucket,
 		&config.prefix,
 		region,
@@ -168,19 +174,19 @@ pub async fn reconcile(worker: &Worker, config: &ServerGroupBackupConfig) -> Res
 		return Ok(());
 	}
 
-	let lease = worker
+	let creds = worker
 		.creds
-		.lease(&config.maintenance_role_arn, config.region.as_deref())
+		.resolve(&config.maintenance_role_arn, config.region.as_deref())
 		.await?;
 	let region = config.region.as_deref().unwrap_or_default();
-	let env_current = kopia_env(&lease, config, current.clone());
+	let env_current = kopia_env(&creds, config, current.clone());
 	let current_ok = kopia::connect(&env_current, &config.bucket, &config.prefix, region)
 		.await
 		.is_ok();
 	let next_ok = if current_ok {
 		false
 	} else {
-		let env_next = kopia_env(&lease, config, next.clone());
+		let env_next = kopia_env(&creds, config, next.clone());
 		kopia::connect(&env_next, &config.bucket, &config.prefix, region)
 			.await
 			.is_ok()

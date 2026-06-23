@@ -10,9 +10,10 @@
 //! concurrency.
 //!
 //! Retention is resolved per-`(group, type)` (schedule override → type default →
-//! org floor) and applied per source by the kopia layer. The kopia subprocess
-//! assumes the group's per-bucket role via web-identity directly (refreshing),
-//! and reads `KOPIA_PASSWORD` from the group's k8s Secret.
+//! org floor) and applied per source by the kopia layer. Canopy assumes the
+//! group's role and passes the resulting (static, ~1h) credentials to the kopia
+//! subprocess via `AWS_*` env (kopia's S3 connector requires real keys); it reads
+//! `KOPIA_PASSWORD` from the group's k8s Secret.
 
 use std::{collections::HashSet, time::Duration};
 
@@ -34,7 +35,7 @@ use tracing::{debug, error, info};
 
 use super::{
 	complete,
-	creds_server::CredsLease,
+	creds_server::ResolvedCreds,
 	kopia::{self, KopiaEnv, RetentionMap},
 	worker::Worker,
 };
@@ -68,12 +69,17 @@ async fn retention_map_for_group(
 	Ok(map)
 }
 
-/// Build the per-op kopia env from a creds lease, the group's region, and its
-/// repo password. The `lease` must outlive every kopia invocation in the op.
-fn kopia_env(lease: &CredsLease, config: &ServerGroupBackupConfig, password: String) -> KopiaEnv {
+/// Build the per-op kopia env from the assumed-role static creds, the group's
+/// region, and its repo password.
+fn kopia_env(
+	creds: &ResolvedCreds,
+	config: &ServerGroupBackupConfig,
+	password: String,
+) -> KopiaEnv {
 	KopiaEnv {
-		creds_uri: lease.uri().to_string(),
-		creds_token: lease.token().to_string(),
+		access_key_id: creds.access_key_id.clone(),
+		secret_access_key: creds.secret_access_key.clone(),
+		session_token: creds.session_token.clone(),
 		region: config.region.clone(),
 		password,
 	}
@@ -158,11 +164,11 @@ async fn run_init_op(worker: &Worker, config: &ServerGroupBackupConfig) -> anyho
 	let config = &config;
 
 	let password = worker.read_repo_password(&config.repo_password_ref).await?;
-	let lease = worker
+	let creds = worker
 		.creds
-		.lease(&config.maintenance_role_arn, config.region.as_deref())
+		.resolve(&config.maintenance_role_arn, config.region.as_deref())
 		.await?;
-	let env = kopia_env(&lease, config, password);
+	let env = kopia_env(&creds, config, password);
 	let retention = {
 		let mut db = worker
 			.pool
@@ -327,11 +333,11 @@ async fn run_maint_op(
 	kind: MaintenanceKind,
 ) -> anyhow::Result<kopia::MaintOutcome> {
 	let password = worker.read_repo_password(&config.repo_password_ref).await?;
-	let lease = worker
+	let creds = worker
 		.creds
-		.lease(&config.maintenance_role_arn, config.region.as_deref())
+		.resolve(&config.maintenance_role_arn, config.region.as_deref())
 		.await?;
-	let env = kopia_env(&lease, config, password);
+	let env = kopia_env(&creds, config, password);
 	let retention = {
 		let mut db = worker
 			.pool
