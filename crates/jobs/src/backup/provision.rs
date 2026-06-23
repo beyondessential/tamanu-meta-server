@@ -9,7 +9,10 @@
 //! re-running adopts the already-owned bucket and re-applies the (idempotent)
 //! config, so a retried init is safe.
 
+use std::collections::BTreeMap;
+
 use anyhow::{Context, Result};
+use aws_sdk_s3::error::ProvideErrorMetadata;
 use aws_sdk_s3::operation::create_bucket::CreateBucketError;
 use aws_sdk_s3::types::{
 	AbortIncompleteMultipartUpload, BucketLifecycleConfiguration, BucketLocationConstraint,
@@ -32,15 +35,36 @@ pub async fn ensure_bucket(
 	region: &str,
 	tags: &[(String, String)],
 ) -> Result<()> {
+	let s3 = s3_client_for(provisioner_role_arn, region).await?;
+	apply_recipe(&s3, bucket, region, tags).await
+}
+
+/// Re-apply `tags` (the billing tags) to an existing bucket, **preserving** any
+/// non-billing tags, and only writing when they've actually drifted. Returns
+/// whether a change was applied. `role_arn` is the provisioner role for shared
+/// buckets, or the group's maintenance role for external (BYO) buckets. Used by
+/// the [`super::tag_reconcile`] loop.
+pub async fn reconcile_bucket_tags(
+	role_arn: &str,
+	bucket: &str,
+	region: &str,
+	tags: &[(String, String)],
+) -> Result<bool> {
+	let s3 = s3_client_for(role_arn, region).await?;
+	reconcile_tags(&s3, bucket, tags).await
+}
+
+/// Assume `role_arn` and build an S3 client scoped to `region`.
+async fn s3_client_for(role_arn: &str, region: &str) -> Result<aws_sdk_s3::Client> {
 	let sdk = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
 	let sts = aws_sdk_sts::Client::new(&sdk);
 	let assumed = sts
 		.assume_role()
-		.role_arn(provisioner_role_arn)
+		.role_arn(role_arn)
 		.role_session_name("canopy-provision")
 		.send()
 		.await
-		.context("assume provisioner role")?;
+		.context("assume role")?;
 	let c = assumed
 		.credentials()
 		.context("AssumeRole returned no credentials")?;
@@ -51,13 +75,12 @@ pub async fn ensure_bucket(
 		None,
 		"canopy-provision",
 	);
-	let s3 = aws_sdk_s3::Client::from_conf(
+	Ok(aws_sdk_s3::Client::from_conf(
 		aws_sdk_s3::config::Builder::from(&sdk)
 			.credentials_provider(creds)
 			.region(aws_sdk_s3::config::Region::new(region.to_string()))
 			.build(),
-	);
-	apply_recipe(&s3, bucket, region, tags).await
+	))
 }
 
 /// The idempotent create + config sequence. Separated from credential assembly
@@ -200,6 +223,55 @@ fn lifecycle() -> Result<BucketLifecycleConfiguration> {
 		.context("build lifecycle configuration")
 }
 
+/// Merge `desired` (the billing tags) over the bucket's current tags —
+/// preserving any non-billing tags — and `PutBucketTagging` only if anything
+/// changed. `PutBucketTagging` replaces the whole set, hence the read-merge.
+async fn reconcile_tags(
+	s3: &aws_sdk_s3::Client,
+	bucket: &str,
+	desired: &[(String, String)],
+) -> Result<bool> {
+	let mut merged: BTreeMap<String, String> = current_tags(s3, bucket).await?.into_iter().collect();
+	let mut changed = false;
+	for (k, v) in desired {
+		if merged.get(k).map(String::as_str) != Some(v.as_str()) {
+			merged.insert(k.clone(), v.clone());
+			changed = true;
+		}
+	}
+	if !changed {
+		return Ok(false);
+	}
+	let tag_set = merged
+		.iter()
+		.map(|(k, v)| Tag::builder().key(k).value(v).build())
+		.collect::<std::result::Result<Vec<_>, _>>()
+		.context("build tag")?;
+	s3.put_bucket_tagging()
+		.bucket(bucket)
+		.tagging(Tagging::builder().set_tag_set(Some(tag_set)).build()?)
+		.send()
+		.await
+		.context("put_bucket_tagging")?;
+	Ok(true)
+}
+
+/// Current bucket tags. An untagged bucket returns `NoSuchTagSet`, which is an
+/// empty set, not an error.
+async fn current_tags(s3: &aws_sdk_s3::Client, bucket: &str) -> Result<Vec<(String, String)>> {
+	match s3.get_bucket_tagging().bucket(bucket).send().await {
+		Ok(out) => Ok(out
+			.tag_set()
+			.iter()
+			.map(|t| (t.key().to_string(), t.value().to_string()))
+			.collect()),
+		Err(e) if e.as_service_error().and_then(|se| se.code()) == Some("NoSuchTagSet") => {
+			Ok(Vec::new())
+		}
+		Err(e) => Err(e).context("get_bucket_tagging"),
+	}
+}
+
 /// Deny any non-TLS access to the bucket.
 fn tls_only_policy(bucket: &str) -> String {
 	serde_json::json!({
@@ -305,5 +377,57 @@ mod tests {
 		apply_recipe(&s3, "bes-canopy-backup-x", "ap-southeast-2", &[])
 			.await
 			.expect("already-owned is idempotent");
+	}
+
+	use aws_sdk_s3::operation::get_bucket_tagging::GetBucketTaggingOutput;
+
+	#[tokio::test]
+	async fn reconcile_writes_when_billing_tags_missing_and_preserves_others() {
+		// Bucket has an unrelated tag but not the billing ones → a PutBucketTagging
+		// is required (and the mock only matches if put is actually called).
+		let get = mock!(aws_sdk_s3::Client::get_bucket_tagging).then_output(|| {
+			GetBucketTaggingOutput::builder()
+				.tag_set(Tag::builder().key("team").value("keep").build().unwrap())
+				.build()
+				.unwrap()
+		});
+		let put = mock!(aws_sdk_s3::Client::put_bucket_tagging)
+			.then_output(|| PutBucketTaggingOutput::builder().build());
+		let s3 = mock_client!(aws_sdk_s3, RuleMode::MatchAny, [&get, &put]);
+		let changed = reconcile_tags(
+			&s3,
+			"bes-canopy-backup-x",
+			&[("billing.product".to_string(), "backups".to_string())],
+		)
+		.await
+		.expect("reconcile ok");
+		assert!(changed, "should write when a billing tag is missing");
+	}
+
+	#[tokio::test]
+	async fn reconcile_is_noop_when_tags_already_match() {
+		// No put rule: if reconcile tried to write, the mock would have no match
+		// and fail — so this also asserts it does NOT write.
+		let get = mock!(aws_sdk_s3::Client::get_bucket_tagging).then_output(|| {
+			GetBucketTaggingOutput::builder()
+				.tag_set(
+					Tag::builder()
+						.key("billing.product")
+						.value("backups")
+						.build()
+						.unwrap(),
+				)
+				.build()
+				.unwrap()
+		});
+		let s3 = mock_client!(aws_sdk_s3, RuleMode::MatchAny, [&get]);
+		let changed = reconcile_tags(
+			&s3,
+			"bes-canopy-backup-x",
+			&[("billing.product".to_string(), "backups".to_string())],
+		)
+		.await
+		.expect("reconcile ok");
+		assert!(!changed, "no write when tags already match");
 	}
 }

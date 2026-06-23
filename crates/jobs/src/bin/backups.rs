@@ -70,6 +70,7 @@ async fn main() -> miette::Result<()> {
 	let inspection = jobs::backup::inspection::spawn(worker.clone());
 	let rotation = jobs::backup::rotation::spawn(worker.clone());
 	let s3_metrics = jobs::backup::s3_metrics::spawn();
+	let tag_reconcile = jobs::backup::tag_reconcile::spawn();
 	let recovery_snapshot = jobs::backup::recovery_snapshot::spawn(worker, recovery_config);
 	tokio::try_join!(
 		preflight,
@@ -77,6 +78,7 @@ async fn main() -> miette::Result<()> {
 		inspection,
 		rotation,
 		s3_metrics,
+		tag_reconcile,
 		recovery_snapshot
 	)
 	.into_diagnostic()?;
