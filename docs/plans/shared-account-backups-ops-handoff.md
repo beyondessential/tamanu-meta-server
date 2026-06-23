@@ -131,10 +131,10 @@ by canopy at onboarding; the env vars are the source canopy fills them from.)
 7. No buckets, object-lock, lifecycle, or `.storageconfig` to create — canopy
    does all of that at provisioning time. Ops only provides the account + roles +
    quota.
-8. **(Existing BYO deployments — separate from the shared account.)** To let
-   canopy reconcile billing tags on the **existing per-deployment** buckets too,
-   add `s3:GetBucketTagging` + `s3:PutBucketTagging` to the per-deployment
-   **maintenance** roles (the `backups` stack, across deployments). Optional /
-   incremental: until a given account has it, canopy logs and skips that bucket's
-   tag reconcile — no failure. Without it, only shared-account buckets get the
-   reconciled `billing.*` tags.
+8. **Required — add tagging to the existing per-deployment maintenance roles.**
+   Add `s3:GetBucketTagging` + `s3:PutBucketTagging` to **every** per-deployment
+   **maintenance** role (the existing `backups` stack, across all deployments), so
+   canopy reconciles the `billing.*` tags on the existing BYO buckets too. Canopy
+   degrades gracefully (logs + skips a bucket whose role lacks the perm) — but
+   that's a **safety net, not a reason to defer**: a skipped account silently
+   misses its billing tags. Roll it out to all deployments.
