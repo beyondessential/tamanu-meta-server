@@ -66,9 +66,10 @@ function ConfigForm({
 	const createRepo = useApiAction("backups", "create_repo");
 	const probeAction = useApiAction("backups", "probe");
 
-	// Create-mode placement choice: BYO AWS account (the probe-driven wizard) or
-	// shared-account backups (canopy provisions the bucket; no AWS account needed).
-	const [placement, setPlacement] = useState<"external" | "shared">("external");
+	// Create-mode placement choice. Defaults to shared-account backups (canopy
+	// provisions the bucket; no AWS account needed) — the dedicated-account path is
+	// most often driven by pulumi's config API, not this UI.
+	const [placement, setPlacement] = useState<"external" | "shared">("shared");
 
 	const [bucket, setBucket] = useState(existing?.bucket ?? "");
 	const [prefix, setPrefix] = useState(existing?.prefix ?? "");
@@ -202,7 +203,7 @@ function ConfigForm({
 			onChange={(_, v) => v && setPlacement(v)}
 			sx={{ alignSelf: "flex-start" }}
 		>
-			<ToggleButton value="external">My AWS account</ToggleButton>
+			<ToggleButton value="external">Dedicated AWS account</ToggleButton>
 			<ToggleButton value="shared">Shared backups</ToggleButton>
 		</ToggleButtonGroup>
 	);
