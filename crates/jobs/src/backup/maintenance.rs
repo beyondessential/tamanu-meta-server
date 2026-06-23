@@ -218,7 +218,9 @@ async fn provision_shared_bucket(
 		.ok()
 		.filter(|v| !v.trim().is_empty())
 		.ok_or_else(|| {
-			anyhow::anyhow!("placement=shared but CANOPY_SHARED_BACKUP_PROVISIONER_ROLE_ARN is unset")
+			anyhow::anyhow!(
+				"placement=shared but CANOPY_SHARED_BACKUP_PROVISIONER_ROLE_ARN is unset"
+			)
 		})?;
 
 	let (group_name, highest_rank) = {

@@ -231,7 +231,8 @@ async fn reconcile_tags(
 	bucket: &str,
 	desired: &[(String, String)],
 ) -> Result<bool> {
-	let mut merged: BTreeMap<String, String> = current_tags(s3, bucket).await?.into_iter().collect();
+	let mut merged: BTreeMap<String, String> =
+		current_tags(s3, bucket).await?.into_iter().collect();
 	let mut changed = false;
 	for (k, v) in desired {
 		if merged.get(k).map(String::as_str) != Some(v.as_str()) {
@@ -297,7 +298,8 @@ mod tests {
 
 	#[test]
 	fn tls_only_policy_denies_insecure_transport_for_bucket_and_objects() {
-		let p: serde_json::Value = serde_json::from_str(&tls_only_policy("bes-canopy-backup-x")).unwrap();
+		let p: serde_json::Value =
+			serde_json::from_str(&tls_only_policy("bes-canopy-backup-x")).unwrap();
 		let stmt = &p["Statement"][0];
 		assert_eq!(stmt["Effect"], "Deny");
 		assert_eq!(stmt["Condition"]["Bool"]["aws:SecureTransport"], "false");

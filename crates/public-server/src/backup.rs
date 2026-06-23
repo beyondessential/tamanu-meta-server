@@ -602,7 +602,10 @@ mod tests {
 		// The device must never be able to delete or shorten locks.
 		let blob = policy.to_lowercase();
 		for forbidden in ["deleteobject", "putobjectretention", "putbucketobjectlock"] {
-			assert!(!blob.contains(forbidden), "backup policy must not grant {forbidden}");
+			assert!(
+				!blob.contains(forbidden),
+				"backup policy must not grant {forbidden}"
+			);
 		}
 	}
 
