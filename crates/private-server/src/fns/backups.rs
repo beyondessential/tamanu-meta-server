@@ -49,6 +49,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(get))
 		.routes(routes!(list))
 		.routes(routes!(create))
+		.routes(routes!(create_shared))
 		.routes(routes!(upsert))
 		.routes(routes!(probe))
 		.routes(routes!(update))
@@ -96,6 +97,10 @@ pub struct BackupConfigView {
 	pub mode: BackupRepoMode,
 	#[schema(value_type = String)]
 	pub status: BackupConfigStatus,
+	/// `external` (BYO account) or `shared` (canopy-provisioned in the shared
+	/// account). Lets the UI distinguish the two onboarding paths.
+	#[schema(value_type = String)]
+	pub placement: BackupPlacement,
 	pub last_init_error: Option<String>,
 	pub created_at: Timestamp,
 	pub updated_at: Timestamp,
@@ -126,6 +131,7 @@ impl BackupConfigView {
 			region: config.region,
 			mode: config.mode,
 			status: config.status,
+			placement: config.placement,
 			last_init_error: config.last_init_error,
 			created_at: config.created_at,
 			updated_at: config.updated_at,
@@ -396,6 +402,90 @@ pub async fn create(
 	// Roll back the config row if the Secret can't be created, so onboarding is
 	// all-or-nothing — a failed Secret create must not leave a half-created config
 	// stuck in `provisioning` with no passphrase.
+	if let Err(e) = kube
+		.create_password(&repo_password_ref, REPO_PASSWORD_SECRET_KEY, &passphrase)
+		.await
+	{
+		let _ = ServerGroupBackupConfig::delete(&mut conn, args.server_group_id).await;
+		return Err(e);
+	}
+
+	Ok(Json(BackupConfigView::build(&mut conn, config).await?))
+}
+
+/// Args for [`create_shared`]: just the group (+ optional region override).
+/// Canopy fills the bucket name and the shared role ARNs itself.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct CreateSharedBackupConfigArgs {
+	pub server_group_id: Uuid,
+	/// Region override; defaults to the shared-account default region.
+	#[serde(default)]
+	pub region: Option<String>,
+}
+
+/// Onboard a group onto **shared-account** backups — for deployments with no AWS
+/// account of their own. Canopy auto-names a bucket
+/// (`bes-canopy-backup-<group>-<random>`) in the shared account, uses the shared
+/// device/maintenance roles, generates + stores the passphrase, and marks the
+/// config `provisioning`/`placement=shared`; the backups pod creates the bucket
+/// at init. Unlike `create`/`upsert` (BYO), there is no caller-supplied
+/// bucket/roles and no probe (the bucket doesn't exist yet). 502 if shared-account
+/// backups (`CANOPY_SHARED_BACKUP_*`) or the secret store aren't configured.
+#[utoipa::path(
+	post,
+	path = "/create_shared",
+	operation_id = "backups_create_shared",
+	tag = "backups",
+	security(("tailscale-admin" = [])),
+	request_body = CreateSharedBackupConfigArgs,
+	responses(
+		(status = 200, body = BackupConfigView),
+		(status = 404, body = ProblemDetailsSchema),
+		(status = 409, body = ProblemDetailsSchema),
+		(status = 502, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn create_shared(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<CreateSharedBackupConfigArgs>,
+) -> Result<Json<BackupConfigView>> {
+	let mut conn = state.db.get().await?;
+	let group = ServerGroup::get_by_id(&mut conn, args.server_group_id).await?;
+
+	let shared = state.shared_backups.as_ref().ok_or_else(|| {
+		AppError::Upstream("shared-account backups are not configured on this server".into())
+	})?;
+	let kube = state.kube.as_ref().ok_or_else(|| {
+		AppError::Upstream("secret store not configured; cannot create repo passphrase".into())
+	})?;
+
+	// Auto-name the bucket from the group name + a random suffix (whole name ≤ 63).
+	let random = uuid::Uuid::new_v4().simple().to_string();
+	let bucket = commons_servers::backup_jobs::shared_bucket_name(&group.name, &random[..8]);
+
+	let passphrase = commons_servers::backup_secrets::generate_passphrase();
+	let repo_password_ref = format!("backup-repo-{}", args.server_group_id);
+
+	let config = ServerGroupBackupConfig::insert(
+		&mut conn,
+		NewServerGroupBackupConfig {
+			group_id: args.server_group_id,
+			bucket,
+			prefix: String::new(),
+			target_role_arn: shared.device_role_arn.clone(),
+			maintenance_role_arn: shared.maintenance_role_arn.clone(),
+			region: Some(args.region.clone().unwrap_or_else(|| shared.region.clone())),
+			repo_password_ref: repo_password_ref.clone(),
+			status: BackupConfigStatus::Provisioning,
+			mode: BackupRepoMode::FromBirth,
+			placement: BackupPlacement::Shared,
+		},
+	)
+	.await?;
+
+	// Same all-or-nothing rollback as `create`: a failed Secret create must not
+	// leave a half-created `provisioning` config with no passphrase.
 	if let Err(e) = kube
 		.create_password(&repo_password_ref, REPO_PASSWORD_SECRET_KEY, &passphrase)
 		.await

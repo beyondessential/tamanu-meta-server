@@ -266,6 +266,83 @@ impl BillingLabels {
 	}
 }
 
+// ===========================================================================
+// Shared-account backups: config from env + bucket naming.
+// ===========================================================================
+
+fn env_nonempty(key: &str) -> Option<String> {
+	std::env::var(key).ok().filter(|v| !v.trim().is_empty())
+}
+
+/// Shared-account backup settings from the `CANOPY_SHARED_BACKUP_*` env vars.
+/// `Some` only when the feature is configured. `region`/`device_role_arn`/
+/// `maintenance_role_arn` are required (private-server writes the role ARNs into
+/// each shared config; public-server assumes the device role). `provisioner_role_arn`
+/// is only used by the backups pod at provision time and is empty when unset —
+/// the provision path checks it then.
+#[derive(Clone, Debug)]
+pub struct SharedBackupConfig {
+	pub region: String,
+	pub device_role_arn: String,
+	pub maintenance_role_arn: String,
+	pub provisioner_role_arn: String,
+}
+
+impl SharedBackupConfig {
+	pub fn from_env() -> Option<Self> {
+		Some(Self {
+			region: env_nonempty("CANOPY_SHARED_BACKUP_REGION")?,
+			device_role_arn: env_nonempty("CANOPY_SHARED_BACKUP_DEVICE_ROLE_ARN")?,
+			maintenance_role_arn: env_nonempty("CANOPY_SHARED_BACKUP_MAINTENANCE_ROLE_ARN")?,
+			provisioner_role_arn: env_nonempty("CANOPY_SHARED_BACKUP_PROVISIONER_ROLE_ARN")
+				.unwrap_or_default(),
+		})
+	}
+}
+
+/// The fixed prefix of a canopy-provisioned shared bucket name.
+pub const SHARED_BUCKET_PREFIX: &str = "bes-canopy-backup-";
+const S3_BUCKET_MAX: usize = 63;
+
+/// Sanitize an arbitrary string into an S3-bucket-name-safe segment, truncated to
+/// `max_len`: lowercased, every non-`[a-z0-9]` run collapsed to a single `-`,
+/// leading/trailing `-` trimmed (also after truncation). May return empty.
+fn sanitize_bucket_segment(s: &str, max_len: usize) -> String {
+	let mut out = String::new();
+	let mut prev_dash = false;
+	for c in s.chars() {
+		let lc = c.to_ascii_lowercase();
+		if lc.is_ascii_lowercase() || lc.is_ascii_digit() {
+			out.push(lc);
+			prev_dash = false;
+		} else if !prev_dash {
+			out.push('-');
+			prev_dash = true;
+		}
+	}
+	let trimmed = out.trim_matches('-');
+	let mut seg: String = trimmed.chars().take(max_len).collect();
+	while seg.ends_with('-') {
+		seg.pop();
+	}
+	seg
+}
+
+/// Build a canopy-provisioned shared bucket name
+/// `bes-canopy-backup-<group>-<random>`, total ≤ 63. Only the group segment is
+/// truncated, to the budget left by the fixed prefix + `-<random>`. `random` is
+/// the caller-supplied unique suffix (assumed already S3-safe, e.g. hex). When
+/// the group name sanitizes to empty, the segment (and its `-`) is dropped.
+pub fn shared_bucket_name(group_name: &str, random: &str) -> String {
+	let budget = S3_BUCKET_MAX.saturating_sub(SHARED_BUCKET_PREFIX.len() + 1 + random.len());
+	let seg = sanitize_bucket_segment(group_name, budget);
+	if seg.is_empty() {
+		format!("{SHARED_BUCKET_PREFIX}{random}")
+	} else {
+		format!("{SHARED_BUCKET_PREFIX}{seg}-{random}")
+	}
+}
+
 /// Has a full cadence `window` elapsed since this kind of work last ran for a
 /// group? `None` (never run) ⇒ due. Combine with [`slot_is_due`] in the loop so
 /// the spawn lands on the group's stable jittered slot within the window.
@@ -446,5 +523,48 @@ mod tests {
 		);
 		let old: Timestamp = "2026-06-15T06:00:00Z".parse().unwrap();
 		assert!(is_due(window, Some(old), now), "30h ago, 24h window: due");
+	}
+
+	#[test]
+	fn shared_bucket_name_basic() {
+		let n = shared_bucket_name("Acme Prod", "deadbeef");
+		assert_eq!(n, "bes-canopy-backup-acme-prod-deadbeef");
+		assert!(n.len() <= 63);
+	}
+
+	#[test]
+	fn shared_bucket_name_sanitizes_and_collapses() {
+		// Mixed case, spaces, underscores, dots, and runs of junk → single dashes.
+		let n = shared_bucket_name("Foo__Bar.Baz  / qux", "abc123");
+		assert_eq!(n, "bes-canopy-backup-foo-bar-baz-qux-abc123");
+	}
+
+	#[test]
+	fn shared_bucket_name_truncates_to_63_without_trailing_dash() {
+		let long = "x".repeat(100);
+		let n = shared_bucket_name(&long, "abcd1234");
+		assert!(n.len() <= 63, "len {} > 63", n.len());
+		assert!(n.starts_with("bes-canopy-backup-"));
+		assert!(n.ends_with("-abcd1234"));
+		assert!(!n.contains("--"), "no doubled dash from truncation");
+	}
+
+	#[test]
+	fn shared_bucket_name_truncation_does_not_leave_trailing_dash() {
+		// A name that, sanitized, would land a '-' exactly at the truncation edge.
+		let name = format!("{}{}", "a".repeat(20), " z"); // budget pushes the split near the space
+		let n = shared_bucket_name(&name, "abcd1234");
+		let seg = n
+			.strip_prefix(SHARED_BUCKET_PREFIX)
+			.unwrap()
+			.strip_suffix("-abcd1234")
+			.unwrap();
+		assert!(!seg.ends_with('-') && !seg.starts_with('-'));
+	}
+
+	#[test]
+	fn shared_bucket_name_empty_group_drops_segment() {
+		let n = shared_bucket_name("!!!", "deadbeef");
+		assert_eq!(n, "bes-canopy-backup-deadbeef");
 	}
 }

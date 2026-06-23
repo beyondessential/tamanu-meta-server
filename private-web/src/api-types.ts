@@ -150,6 +150,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backups/create_shared": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Onboard a group onto **shared-account** backups — for deployments with no AWS
+         *     account of their own. Canopy auto-names a bucket
+         *     (`bes-canopy-backup-<group>-<random>`) in the shared account, uses the shared
+         *     device/maintenance roles, generates + stores the passphrase, and marks the
+         *     config `provisioning`/`placement=shared`; the backups pod creates the bucket
+         *     at init. Unlike `create`/`upsert` (BYO), there is no caller-supplied
+         *     bucket/roles and no probe (the bucket doesn't exist yet). 502 if shared-account
+         *     backups (`CANOPY_SHARED_BACKUP_*`) or the secret store aren't configured.
+         */
+        post: operations["backups_create_shared"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backups/delete": {
         parameters: {
             query?: never;
@@ -2180,6 +2206,11 @@ export interface components {
             last_init_error?: string | null;
             maintenance_role_arn: string;
             mode: string;
+            /**
+             * @description `external` (BYO account) or `shared` (canopy-provisioned in the shared
+             *     account). Lets the UI distinguish the two onboarding paths.
+             */
+            placement: string;
             prefix: string;
             region?: string | null;
             /** @description Per-`(group,type)` schedule + retention overrides. */
@@ -2339,6 +2370,16 @@ export interface components {
              *     enrolling box's mTLS key is added to it at register time.
              */
             tailscale_identifier?: string | null;
+        };
+        /**
+         * @description Args for [`create_shared`]: just the group (+ optional region override).
+         *     Canopy fills the bucket name and the shared role ARNs itself.
+         */
+        CreateSharedBackupConfigArgs: {
+            /** @description Region override; defaults to the shared-account default region. */
+            region?: string | null;
+            /** Format: uuid */
+            server_group_id: string;
         };
         DeleteArgs: {
             email: string;
@@ -4107,6 +4148,53 @@ export interface operations {
                 };
             };
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    backups_create_shared: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateSharedBackupConfigArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupConfigView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };
