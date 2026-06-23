@@ -128,6 +128,37 @@ test.describe("backups zero-state + config", () => {
 		).toBeDisabled();
 		await expect(page.getByRole("button", { name: /re-check/i })).toBeVisible();
 	});
+
+	test("'shared backups' option provisions a canopy-managed bucket (no AWS account)", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "Acme Prod" });
+
+		await page.goto(`/groups/${group.id}/backups/config`);
+		// Pick shared-account backups — no bucket/roles to enter, no probe step.
+		await page.getByRole("button", { name: /shared backups/i }).click();
+		await page.getByRole("button", { name: /create & provision/i }).click();
+
+		await expect(page).toHaveURL(new RegExp(`/groups/${group.id}/backups$`));
+
+		const rows = await sql.query<{
+			status: string;
+			mode: string;
+			placement: string;
+			bucket: string;
+		}>(
+			`SELECT status, mode, placement, bucket
+			 FROM server_group_backup_config WHERE group_id = $1`,
+			[group.id],
+		);
+		expect(rows).toHaveLength(1);
+		expect(rows[0]!.placement).toBe("shared");
+		expect(rows[0]!.mode).toBe("from_birth");
+		expect(rows[0]!.status).toBe("provisioning");
+		// Auto-named from the group name + a random suffix.
+		expect(rows[0]!.bucket.startsWith("bes-canopy-backup-acme-prod-")).toBe(true);
+	});
 });
 
 test.describe("backups ready: stats + backup-now", () => {

@@ -200,6 +200,14 @@ export async function startStack(opts: StartOptions = {}): Promise<StackHandle> 
 				// full decrypt round-trip is covered by the Rust endpoint tests.
 				CANOPY_RECOVERY_VAULT_KEYS:
 					"age1uy3nqmdxf4lc3sc4p32c2cp9dlqwk868gjh002gysullrgvp0cjsdg03dn",
+				// Shared-account backups configured (placeholder ARNs/region) so the
+				// "Shared backups" wizard option + create_shared endpoint work. The
+				// bucket isn't actually created in e2e (the backups pod isn't running).
+				CANOPY_SHARED_BACKUP_REGION: "ap-southeast-2",
+				CANOPY_SHARED_BACKUP_DEVICE_ROLE_ARN:
+					"arn:aws:iam::123456789012:role/canopy-shared-device",
+				CANOPY_SHARED_BACKUP_MAINTENANCE_ROLE_ARN:
+					"arn:aws:iam::123456789012:role/canopy-shared-maint",
 				// Needed by mint_enrollment to build the ticket's api_url; the
 				// setup-instructions flow auto-mints on an unregistered server.
 				PUBLIC_URL: process.env.PUBLIC_URL ?? "https://api.e2e.invalid",

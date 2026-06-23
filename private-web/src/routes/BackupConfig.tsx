@@ -9,6 +9,8 @@ import {
 	StepLabel,
 	Stepper,
 	TextField,
+	ToggleButton,
+	ToggleButtonGroup,
 	Typography,
 } from "@mui/material";
 import { useState } from "react";
@@ -59,9 +61,14 @@ function ConfigForm({
 	const navigate = useNavigate();
 	const isCreate = existing == null;
 	const create = useApiAction("backups", "create");
+	const createShared = useApiAction("backups", "create_shared");
 	const update = useApiAction("backups", "update");
 	const createRepo = useApiAction("backups", "create_repo");
 	const probeAction = useApiAction("backups", "probe");
+
+	// Create-mode placement choice: BYO AWS account (the probe-driven wizard) or
+	// shared-account backups (canopy provisions the bucket; no AWS account needed).
+	const [placement, setPlacement] = useState<"external" | "shared">("external");
 
 	const [bucket, setBucket] = useState(existing?.bucket ?? "");
 	const [prefix, setPrefix] = useState(existing?.prefix ?? "");
@@ -126,6 +133,20 @@ function ConfigForm({
 		}
 	};
 
+	// Shared-account onboarding: canopy auto-names + creates the bucket and uses
+	// the shared roles, so there's no bucket/roles to supply and no probe.
+	const persistShared = async () => {
+		try {
+			await createShared.call({
+				server_group_id: groupId,
+				region: region.trim() === "" ? null : region,
+			});
+			navigate(`/groups/${groupId}/backups`);
+		} catch {
+			/* surfaced via createShared.error */
+		}
+	};
+
 	// ── Edit mode: flat form (structural fields are create-only) ───────────────
 	if (!isCreate) {
 		return (
@@ -171,6 +192,68 @@ function ConfigForm({
 		);
 	}
 
+	// Placement choice (create mode): BYO AWS account vs shared-account backups.
+	const placementToggle = (
+		<ToggleButtonGroup
+			exclusive
+			color="primary"
+			size="small"
+			value={placement}
+			onChange={(_, v) => v && setPlacement(v)}
+			sx={{ alignSelf: "flex-start" }}
+		>
+			<ToggleButton value="external">My AWS account</ToggleButton>
+			<ToggleButton value="shared">Shared backups</ToggleButton>
+		</ToggleButtonGroup>
+	);
+
+	// Shared-account placement: canopy provisions + manages the bucket, so there's
+	// no bucket/roles to supply and no probe — just confirm (optionally set region).
+	if (placement === "shared") {
+		return (
+			<Paper variant="outlined" sx={{ p: 3 }}>
+				<Stack spacing={3}>
+					<Typography variant="h5" component="h1">
+						Set up backups
+					</Typography>
+					{placementToggle}
+					<Alert severity="info">
+						No AWS account needed — Canopy creates and manages a bucket for this
+						group in the shared backups account and rotates its passphrase.
+						Schedule &amp; retention inherit the per-type defaults.
+					</Alert>
+					<TextField
+						label="Region"
+						value={region}
+						onChange={(e) => setRegion(e.target.value)}
+						disabled={createShared.pending}
+						helperText="Defaults to ap-southeast-2."
+					/>
+					{createShared.error && (
+						<Alert severity="error">{createShared.error.message}</Alert>
+					)}
+					<Stack direction="row" spacing={1}>
+						<Button
+							variant="contained"
+							onClick={persistShared}
+							disabled={createShared.pending}
+						>
+							{createShared.pending ? "Creating…" : "Create & provision"}
+						</Button>
+						<Button
+							variant="outlined"
+							color="error"
+							onClick={() => navigate(`/groups/${groupId}/backups`)}
+							disabled={createShared.pending}
+						>
+							Cancel
+						</Button>
+					</Stack>
+				</Stack>
+			</Paper>
+		);
+	}
+
 	// ── Create mode: probe-driven wizard ───────────────────────────────────────
 	const canCheck =
 		bucket.trim() !== "" &&
@@ -188,6 +271,7 @@ function ConfigForm({
 				<Typography variant="h5" component="h1">
 					Set up backups
 				</Typography>
+				{placementToggle}
 				<Stepper activeStep={step}>
 					<Step>
 						<StepLabel>Target bucket</StepLabel>

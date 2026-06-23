@@ -993,3 +993,47 @@ async fn create_shared_missing_group_is_404() {
 	})
 	.await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn upsert_refuses_a_shared_placement_group() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group_id = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'shared-grp');"
+		))
+		.await
+		.expect("seed group");
+
+		// Onboard onto shared-account backups, and learn the auto-named bucket.
+		let resp = private
+			.post("/api/backups/create_shared")
+			.json(&serde_json::json!({ "server_group_id": group_id }))
+			.await;
+		resp.assert_status_ok();
+		let shared_bucket = resp.json::<serde_json::Value>()["bucket"]
+			.as_str()
+			.expect("bucket")
+			.to_string();
+
+		// A pulumi upsert for the same group — using the *same* bucket, so the
+		// bucket-immutability check would pass and (without the placement guard)
+		// it would silently overwrite the shared roles. The guard makes it 409.
+		let resp = private
+			.post("/api/backups/upsert")
+			.json(&serde_json::json!({
+				"server_group_id": group_id,
+				"bucket": shared_bucket,
+				"prefix": "",
+				"target_role_arn": "arn:aws:iam::123456789012:role/byo",
+				"maintenance_role_arn": "arn:aws:iam::123456789012:role/byo-maint",
+			}))
+			.await;
+		resp.assert_status_conflict();
+		assert!(
+			resp.text().contains("shared-account"),
+			"expected the placement-guard message, got: {}",
+			resp.text()
+		);
+	})
+	.await;
+}

@@ -531,6 +531,18 @@ pub async fn upsert(
 	match ServerGroupBackupConfig::get(&mut conn, args.server_group_id).await? {
 		// Update path: reconcile the mutable fields; bucket/prefix are immutable.
 		Some(existing) => {
+			// The pulumi config API is the BYO (`external`) path only. A
+			// shared-account config is canopy-managed (its bucket + roles are
+			// canopy's, not pulumi's) — refuse to reconcile it here so a stray
+			// pulumi upsert can't overwrite the shared roles while leaving
+			// `placement=shared` (an inconsistent row). Manage shared configs via
+			// shared onboarding + delete/recreate instead.
+			if existing.placement == BackupPlacement::Shared {
+				return Err(AppError::Conflict(
+					"this group is on shared-account backups (canopy-managed); manage it via shared-account onboarding (delete + recreate), not the pulumi config API"
+						.into(),
+				));
+			}
 			if existing.bucket != args.bucket || existing.prefix != args.prefix {
 				return Err(AppError::Conflict(
 					"bucket and prefix are immutable; delete the config and recreate it to change them"
