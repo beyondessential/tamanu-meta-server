@@ -48,8 +48,13 @@ second shared account before giving up per-bucket isolation.
 
 1. **Config model + migration** — add `placement` (`external` | `shared`;
    commons-types enum mirroring `BackupRepoMode`, with the diesel Text mapping).
-   Shared rows store `bucket` = canopy-generated `bes-canopy-backup-<random>`
-   (random suffix for global uniqueness + anti-enumeration),
+   Shared rows store `bucket` = canopy-generated
+   `bes-canopy-backup-<group-name>-<random>` (group name **sanitized** for S3:
+   lowercased, non-`[a-z0-9-]` → `-`, collapsed, trimmed, and truncated so the
+   whole name stays ≤ 63 chars; random suffix for global uniqueness +
+   anti-enumeration). The group name is for **AWS-side discoverability only** —
+   the bucket name is fixed at creation and does **not** follow a later group
+   rename (the billing tags do; see reconcile below).
    `target_role_arn`/`maintenance_role_arn` = the shared roles (from env/config),
    `region` = shared default, `mode = from_birth`.
 
@@ -73,7 +78,8 @@ second shared account before giving up per-bucket isolation.
      abort-incomplete-multipart.
    - Public Access Block (all on); TLS-only bucket policy.
    - Intelligent-Tiering (consistent with the `.storageconfig` pack-blob routing).
-   - Billing tags (product / deployment / stage).
+   - **Billing tags** (see below): `billing.product=backups`,
+     `billing.deployment=<group name>`, `billing.stage=<highest member rank>`.
    Then the existing `from_birth` kopia create path runs unchanged.
 
 4. **Always session-scope device backup creds** — `public-server`'s
@@ -85,6 +91,29 @@ second shared account before giving up per-bucket isolation.
    creds that can only touch that group's bucket). This is the linchpin of
    shared-account isolation and reuses the `restore_session_policy` mechanism.
 
+5. **Billing-tag reconcile** — a periodic pass in the backups pod (a slot-jittered
+   step like s3-metrics) that, for **every** backup config (both `shared` and
+   `external`), computes the desired billing tags and `PutBucketTagging` only when
+   they've drifted (compare via `GetBucketTagging`). Catches group renames /
+   rank changes (the bucket name can't follow a rename, but the
+   `billing.deployment` tag does). Per-bucket creds: shared → provisioner role;
+   external → the per-deployment maintenance role (needs the tagging perms — ops
+   item below). **Graceful**: if the role lacks `PutBucketTagging` (e.g. an
+   external account not yet updated), log and skip — never fail the loop.
+
+### Billing tags
+
+- `billing.product` = `backups` (fixed — distinguishes the backup bucket from the
+  deployment's `tamanu` product spend).
+- `billing.deployment` = the group **name** (the live name; reconciled on change).
+- `billing.stage` = the group's **highest member rank** mapped via
+  `stage_for_rank` (`Production` → `prod`); **omitted** when the group has no
+  ranked members.
+
+Building blocks already exist: `ServerGroup::highest_member_ranks`,
+`commons_servers::backup_jobs::stage_for_rank`, and the `BillingLabels` shape
+(currently unused — repurpose it, with `product` fixed to `backups`).
+
 ## IAM / account model (ops/pulumi — new `backups-shared` stack)
 
 The shared backups AWS account (id supplied via ops config + the role-ARN env
@@ -92,16 +121,24 @@ vars; **not** hardcoded in this open-source repo). Three roles, each trusting
 canopy's existing identities via cross-account `AssumeRole` (same pattern as
 today's BYO per-bucket roles):
 
-- **provisioner role** — `s3:CreateBucket` + `PutBucket*` / lifecycle / tagging /
-  policy, conditioned to bucket-name pattern `bes-canopy-backup-*`. Assumed by
-  the backups pod only at init. ARN via env on the backups pod
-  (`CANOPY_SHARED_BACKUP_PROVISIONER_ROLE_ARN`).
+- **provisioner role** — `s3:CreateBucket`, `PutBucketVersioning`,
+  `PutBucketObjectLockConfiguration`, `PutLifecycleConfiguration`,
+  `PutBucketPublicAccessBlock`, `PutBucketPolicy`, **`GetBucketTagging` +
+  `PutBucketTagging`** (provision + reconcile), conditioned to bucket-name pattern
+  `bes-canopy-backup-*`. Assumed by the backups pod. ARN via env on the backups
+  pod (`CANOPY_SHARED_BACKUP_PROVISIONER_ROLE_ARN`).
 - **shared device role** — `AWS_S3_MULTIPART_ACTIONS` over
   `arn:aws:s3:::bes-canopy-backup-*/*`; only ever used via bucket-scoped session
   creds. ARN goes into each shared config's `target_role_arn`.
 - **shared maintenance role** — data-plane incl. delete over the pattern; into
   `maintenance_role_arn`. Used by the backups pod for kopia maintenance /
   inspection.
+
+**External (BYO) accounts:** the billing-tag reconcile also wants to tag existing
+external buckets, which means the **per-deployment maintenance roles** (pulumi)
+need `s3:GetBucketTagging` + `s3:PutBucketTagging` added. This is an ops change
+across deployments; until a given account has it, canopy logs and skips that
+bucket's tag reconcile (no failure).
 
 Other shared env on canopy: `CANOPY_SHARED_BACKUP_REGION` (default region),
 bucket-name prefix, default retention.
@@ -124,9 +161,15 @@ bucket-name prefix, default retention.
 ## Test coverage
 
 - DB/migration: `placement` defaults to `external` on existing rows.
-- private-server: the new endpoint auto-names the bucket, writes the shared role
+- private-server: the new endpoint auto-names the bucket
+  (`bes-canopy-backup-<group>-<random>`, sanitized + ≤ 63), writes the shared role
   ARNs, a `provisioning`/`placement=shared` row, and the passphrase Secret.
-- jobs: the bucket-provision step is idempotent (create-then-skip).
+- bucket-name sanitization (pure): odd group names → valid S3 names, length cap,
+  no leading/trailing/double hyphens.
+- billing-tag computation (pure): product/deployment/stage from a group name +
+  highest rank (incl. `Production`→`prod`, omit stage when no ranked members).
+- jobs: the bucket-provision step is idempotent (create-then-skip); the tag
+  reconcile applies on drift and is a no-op when tags already match.
 - public-server: the backup session policy is attached and scopes to the bucket.
 - e2e: the "shared account" wizard option.
 

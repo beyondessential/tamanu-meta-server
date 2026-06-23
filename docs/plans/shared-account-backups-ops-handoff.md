@@ -54,12 +54,19 @@ and maintenance roles (see
   - `s3:PutBucketVersioning`
   - `s3:PutBucketObjectLockConfiguration`
   - `s3:PutLifecycleConfiguration`
-  - `s3:PutBucketTagging`
+  - `s3:GetBucketTagging` + `s3:PutBucketTagging` (provision **and** the ongoing
+    billing-tag reconcile)
   - `s3:PutBucketPublicAccessBlock`
   - `s3:PutBucketPolicy`
   - `s3:PutObject` (only to seed the initial `.storageconfig`) on
     `arn:aws:s3:::bes-canopy-backup-*/*`
 - **Not** data-plane (no read/delete of backup objects) — least privilege.
+
+Canopy names buckets `bes-canopy-backup-<group-name>-<random>` (group name
+sanitized for S3) and tags every bucket with `billing.product=backups`,
+`billing.deployment=<group name>`, `billing.stage=<highest member rank>`
+(`Production`→`prod`). It re-applies these tags on a periodic reconcile (group
+renames / rank changes), hence the provisioner role's tagging perms above.
 
 ### 2. Shared device role — write-without-delete
 - **Trusted by:** the canopy device-credential issuer (the same identity that
@@ -124,3 +131,10 @@ by canopy at onboarding; the env vars are the source canopy fills them from.)
 7. No buckets, object-lock, lifecycle, or `.storageconfig` to create — canopy
    does all of that at provisioning time. Ops only provides the account + roles +
    quota.
+8. **(Existing BYO deployments — separate from the shared account.)** To let
+   canopy reconcile billing tags on the **existing per-deployment** buckets too,
+   add `s3:GetBucketTagging` + `s3:PutBucketTagging` to the per-deployment
+   **maintenance** roles (the `backups` stack, across deployments). Optional /
+   incremental: until a given account has it, canopy logs and skips that bucket's
+   tag reconcile — no failure. Without it, only shared-account buckets get the
+   reconciled `billing.*` tags.
