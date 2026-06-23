@@ -7,9 +7,9 @@ drives kopia against it. This handoff is everything ops needs to stand up the
 AWS side; the canopy code is a parallel track and the two meet at first
 provisioning.
 
-Design rationale + the canopy-side changes are in
-[`shared-account-backup-buckets.md`](./shared-account-backup-buckets.md). This
-doc is the **AWS / pulumi build sheet**.
+Design rationale + the canopy-side changes shipped in PR #251 (the
+implementation plan that drove it has been removed now that it's done). This doc
+is the **AWS / pulumi build sheet**.
 
 ## Target account
 
