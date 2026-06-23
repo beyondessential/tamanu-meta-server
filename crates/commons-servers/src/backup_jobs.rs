@@ -242,9 +242,10 @@ pub fn stage_for_rank(rank: ServerRank) -> &'static str {
 
 impl BillingLabels {
 	/// Derive labels from a group's tags, name, and highest member rank.
-	/// Explicit `billing.*` tags win; otherwise `product = "tamanu"`,
-	/// `deployment = group name`, `stage = mapped highest rank` (omitted when
-	/// the group has no ranked members).
+	/// Explicit `billing.*` tags are honored **verbatim**; computed fallbacks are
+	/// lower-kebab-cased — `product = "tamanu"`, `deployment = lower_kebab(group
+	/// name)`, `stage = mapped highest rank` (omitted when the group has no ranked
+	/// members).
 	pub fn from_group(tags: &TagMap, group_name: &str, highest_rank: Option<ServerRank>) -> Self {
 		BillingLabels {
 			product: tags
@@ -256,7 +257,7 @@ impl BillingLabels {
 				.0
 				.get("billing.deployment")
 				.cloned()
-				.unwrap_or_else(|| group_name.to_string()),
+				.unwrap_or_else(|| lower_kebab(group_name)),
 			stage: tags
 				.0
 				.get("billing.stage")
@@ -325,10 +326,9 @@ impl SharedBackupConfig {
 pub const SHARED_BUCKET_PREFIX: &str = "bes-canopy-backup-";
 const S3_BUCKET_MAX: usize = 63;
 
-/// Sanitize an arbitrary string into an S3-bucket-name-safe segment, truncated to
-/// `max_len`: lowercased, every non-`[a-z0-9]` run collapsed to a single `-`,
-/// leading/trailing `-` trimmed (also after truncation). May return empty.
-fn sanitize_bucket_segment(s: &str, max_len: usize) -> String {
+/// Lower-kebab-case a free-form string: lowercased, every run of non-`[a-z0-9]`
+/// collapsed to a single `-`, leading/trailing `-` trimmed. May return empty.
+fn lower_kebab(s: &str) -> String {
 	let mut out = String::new();
 	let mut prev_dash = false;
 	for c in s.chars() {
@@ -341,8 +341,14 @@ fn sanitize_bucket_segment(s: &str, max_len: usize) -> String {
 			prev_dash = true;
 		}
 	}
-	let trimmed = out.trim_matches('-');
-	let mut seg: String = trimmed.chars().take(max_len).collect();
+	out.trim_matches('-').to_string()
+}
+
+/// Sanitize an arbitrary string into an S3-bucket-name-safe segment:
+/// [`lower_kebab`], then truncated to `max_len` (re-trimming any trailing `-`
+/// left by truncation). May return empty.
+fn sanitize_bucket_segment(s: &str, max_len: usize) -> String {
+	let mut seg: String = lower_kebab(s).chars().take(max_len).collect();
 	while seg.ends_with('-') {
 		seg.pop();
 	}
@@ -536,6 +542,17 @@ mod tests {
 		assert_eq!(b.deployment, "my-group");
 		assert_eq!(b.stage, None);
 
+		// A computed deployment (group name) is lower-kebab-cased.
+		let b = BillingLabels::from_group(&empty, "Acme Prod", None);
+		assert_eq!(b.deployment, "acme-prod");
+
+		// An explicit billing.deployment tag is honored verbatim (not kebab'd).
+		let mut dep = TagMap::default();
+		dep.0
+			.insert("billing.deployment".into(), "Acme Prod".into());
+		let b = BillingLabels::from_group(&dep, "ignored", None);
+		assert_eq!(b.deployment, "Acme Prod");
+
 		// Highest rank maps in when present.
 		let b = BillingLabels::from_group(&empty, "g", Some(ServerRank::Production));
 		assert_eq!(b.stage.as_deref(), Some("prod"));
@@ -614,7 +631,8 @@ mod tests {
 			Some(ServerRank::Production),
 		);
 		assert!(t.contains(&("billing.product".to_string(), "backups".to_string())));
-		assert!(t.contains(&("billing.deployment".to_string(), "Acme Prod".to_string())));
+		// Computed deployment (group name) is lower-kebab-cased.
+		assert!(t.contains(&("billing.deployment".to_string(), "acme-prod".to_string())));
 		// Production maps to "prod", not the Display "production".
 		assert!(t.contains(&("billing.stage".to_string(), "prod".to_string())));
 	}
