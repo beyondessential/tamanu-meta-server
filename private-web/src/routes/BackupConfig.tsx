@@ -203,8 +203,8 @@ function ConfigForm({
 			onChange={(_, v) => v && setPlacement(v)}
 			sx={{ alignSelf: "flex-start" }}
 		>
-			<ToggleButton value="external">Dedicated AWS account</ToggleButton>
-			<ToggleButton value="shared">Shared backups</ToggleButton>
+			<ToggleButton value="shared">Create a bucket</ToggleButton>
+			<ToggleButton value="external">Use an existing bucket</ToggleButton>
 		</ToggleButtonGroup>
 	);
 

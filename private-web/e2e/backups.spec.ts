@@ -43,7 +43,7 @@ test.describe("backups zero-state + config", () => {
 		const group = await seedServerGroup(sql, { name: "cfg-group" });
 
 		await page.goto(`/groups/${group.id}/backups/config`);
-		await page.getByRole("button", { name: /dedicated aws account/i }).click();
+		await page.getByRole("button", { name: /use an existing bucket/i }).click();
 		await page.getByLabel("Bucket").fill("bes-kopia-created");
 		await page
 			.getByLabel("Target role ARN")
@@ -87,7 +87,7 @@ test.describe("backups zero-state + config", () => {
 	}) => {
 		const group = await seedServerGroup(sql, { name: "passphrase-group" });
 		await page.goto(`/groups/${group.id}/backups/config`);
-		await page.getByRole("button", { name: /dedicated aws account/i }).click();
+		await page.getByRole("button", { name: /use an existing bucket/i }).click();
 		// `…existing…` → the fake prober reports an existing kopia repo.
 		await page.getByLabel("Bucket").fill("bes-existing-repo");
 		await page.getByLabel("Target role ARN").fill("arn:aws:iam::999:role/dev");
@@ -117,7 +117,7 @@ test.describe("backups zero-state + config", () => {
 	test("wizard blocks other (non-kopia) content", async ({ page, sql }) => {
 		const group = await seedServerGroup(sql, { name: "other-group" });
 		await page.goto(`/groups/${group.id}/backups/config`);
-		await page.getByRole("button", { name: /dedicated aws account/i }).click();
+		await page.getByRole("button", { name: /use an existing bucket/i }).click();
 		// `…other…` → the fake prober reports non-kopia content.
 		await page.getByLabel("Bucket").fill("bes-other-stuff");
 		await page.getByLabel("Target role ARN").fill("arn");
@@ -139,8 +139,8 @@ test.describe("backups zero-state + config", () => {
 		const group = await seedServerGroup(sql, { name: "Acme Prod" });
 
 		await page.goto(`/groups/${group.id}/backups/config`);
-		// Pick shared-account backups — no bucket/roles to enter, no probe step.
-		await page.getByRole("button", { name: /shared backups/i }).click();
+		// "Create a bucket" = shared-account backups — no bucket/roles, no probe.
+		await page.getByRole("button", { name: /create a bucket/i }).click();
 		await page.getByRole("button", { name: /create & provision/i }).click();
 
 		await expect(page).toHaveURL(new RegExp(`/groups/${group.id}/backups$`));
