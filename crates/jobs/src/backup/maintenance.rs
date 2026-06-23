@@ -374,6 +374,7 @@ mod tests {
 			updated_at: now,
 			mode: commons_types::backup::BackupRepoMode::FromBirth,
 			last_init_error: last_init_error.map(str::to_string),
+			placement: commons_types::backup::BackupPlacement::External,
 		}
 	}
 

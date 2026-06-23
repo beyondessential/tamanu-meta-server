@@ -16,7 +16,7 @@ use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
 use commons_types::{
 	Uuid,
-	backup::{BackupConfigStatus, BackupPurpose, BackupRepoMode, BackupType},
+	backup::{BackupConfigStatus, BackupPlacement, BackupPurpose, BackupRepoMode, BackupType},
 };
 use database::pg_duration::PgDuration;
 use database::{
@@ -389,6 +389,7 @@ pub async fn create(
 			repo_password_ref: repo_password_ref.clone(),
 			status: BackupConfigStatus::Provisioning,
 			mode: args.mode,
+			placement: BackupPlacement::External,
 		},
 	)
 	.await?;
@@ -522,6 +523,7 @@ pub async fn upsert(
 					repo_password_ref: repo_password_ref.clone(),
 					status: BackupConfigStatus::Provisioning,
 					mode: BackupRepoMode::FromBirth,
+					placement: BackupPlacement::External,
 				},
 			)
 			.await?;
