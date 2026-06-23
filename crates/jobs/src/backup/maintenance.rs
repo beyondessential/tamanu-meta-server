@@ -10,9 +10,10 @@
 //! concurrency.
 //!
 //! Retention is resolved per-`(group, type)` (schedule override → type default →
-//! org floor) and applied per source by the kopia layer. The kopia subprocess
-//! assumes the group's per-bucket role via web-identity directly (refreshing),
-//! and reads `KOPIA_PASSWORD` from the group's k8s Secret.
+//! org floor) and applied per source by the kopia layer. Canopy assumes the
+//! group's role and passes the resulting (static, ~1h) credentials to the kopia
+//! subprocess via `AWS_*` env (kopia's S3 connector requires real keys); it reads
+//! `KOPIA_PASSWORD` from the group's k8s Secret.
 
 use std::{collections::HashSet, time::Duration};
 
