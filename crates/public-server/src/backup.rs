@@ -230,6 +230,46 @@ pub fn restore_session_policy(bucket: &str, prefix: &str) -> String {
 	.to_string()
 }
 
+/// Build the write-without-delete **backup** session policy for a bucket/prefix.
+/// Grants exactly the kopia `AWS_S3_MULTIPART_ACTIONS` set — **no**
+/// `DeleteObject`, **no** `PutObjectRetention` (the bucket's default Object Lock
+/// retention applies server-side) — scoped to this one bucket. Attached to every
+/// backup issuance: redundant for a dedicated per-bucket role (external), but the
+/// linchpin of shared-account isolation (the shared device role is broad over
+/// `bes-canopy-backup-*`, so the session policy is what confines a device's creds
+/// to its own bucket). `GetBucketLocation`/`ListBucketMultipartUploads` are
+/// unconditioned bucket-level; `ListBucket` is prefix-conditioned (the
+/// `s3:prefix` key isn't populated for the others).
+pub fn backup_session_policy(bucket: &str, prefix: &str) -> String {
+	serde_json::json!({
+		"Version": "2012-10-17",
+		"Statement": [
+			{
+				"Effect": "Allow",
+				"Action": [
+					"s3:GetObject",
+					"s3:PutObject",
+					"s3:AbortMultipartUpload",
+					"s3:ListMultipartUploadParts",
+				],
+				"Resource": format!("arn:aws:s3:::{bucket}/{prefix}*"),
+			},
+			{
+				"Effect": "Allow",
+				"Action": ["s3:GetBucketLocation", "s3:ListBucketMultipartUploads"],
+				"Resource": format!("arn:aws:s3:::{bucket}"),
+			},
+			{
+				"Effect": "Allow",
+				"Action": ["s3:ListBucket"],
+				"Resource": format!("arn:aws:s3:::{bucket}"),
+				"Condition": { "StringLike": { "s3:prefix": [format!("{prefix}*")] } },
+			},
+		],
+	})
+	.to_string()
+}
+
 #[utoipa::path(
 	post,
 	path = "/backup-credentials",
@@ -257,9 +297,12 @@ async fn credentials(
 	let cfg = require_ready_config(&mut conn, group_id).await?;
 	require_enabled_capability(&mut conn, server.id, &args.r#type).await?;
 
-	let restore_policy = match args.purpose {
-		BackupPurpose::Restore => Some(restore_session_policy(&cfg.bucket, &cfg.prefix)),
-		BackupPurpose::Backup => None,
+	// Always attach a bucket-scoped session policy so the issued creds can only
+	// reach this group's bucket — redundant for a dedicated per-bucket role
+	// (external placement), essential for the shared device role (shared).
+	let session_policy = match args.purpose {
+		BackupPurpose::Restore => restore_session_policy(&cfg.bucket, &cfg.prefix),
+		BackupPurpose::Backup => backup_session_policy(&cfg.bucket, &cfg.prefix),
 	};
 
 	let Some(sts) = sts else {
@@ -275,7 +318,7 @@ async fn credentials(
 		.assume_role()
 		.role_arn(&cfg.target_role_arn)
 		.role_session_name(session_name)
-		.set_policy(restore_policy)
+		.policy(session_policy)
 		// Chained sessions cap at 1h regardless; ask for the max.
 		.duration_seconds(3600)
 		.send()
@@ -533,6 +576,34 @@ mod tests {
 			stmts[2]["Condition"]["StringLike"]["s3:prefix"],
 			serde_json::json!(["repo/*"]),
 		);
+	}
+
+	#[test]
+	fn backup_policy_grants_write_without_delete_scoped_to_bucket() {
+		let policy = backup_session_policy("my-bucket", "");
+		let v: serde_json::Value = serde_json::from_str(&policy).unwrap();
+		let stmts = v["Statement"].as_array().unwrap();
+
+		// Object-level write set, scoped to the bucket.
+		assert_eq!(stmts[0]["Resource"], "arn:aws:s3:::my-bucket/*");
+		let obj_actions = stmts[0]["Action"].as_array().unwrap();
+		for needed in ["s3:GetObject", "s3:PutObject", "s3:AbortMultipartUpload"] {
+			assert!(
+				obj_actions.contains(&serde_json::json!(needed)),
+				"missing {needed}"
+			);
+		}
+		// ListBucket is prefix-conditioned.
+		assert_eq!(
+			stmts[2]["Condition"]["StringLike"]["s3:prefix"],
+			serde_json::json!(["*"]),
+		);
+
+		// The device must never be able to delete or shorten locks.
+		let blob = policy.to_lowercase();
+		for forbidden in ["deleteobject", "putobjectretention", "putbucketobjectlock"] {
+			assert!(!blob.contains(forbidden), "backup policy must not grant {forbidden}");
+		}
 	}
 
 	#[test]
