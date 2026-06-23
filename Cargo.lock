@@ -3509,6 +3509,7 @@ dependencies = [
  "aws-sdk-cloudwatch",
  "aws-sdk-s3",
  "aws-sdk-sts",
+ "aws-smithy-mocks",
  "axum",
  "clap",
  "commons-errors",

@@ -22,6 +22,8 @@ pub mod worker;
 pub mod inspection;
 pub mod maintenance;
 pub mod preflight;
+pub mod provision;
 pub mod rotation;
 pub mod s3_metrics;
 pub mod storageconfig;
+pub mod tag_reconcile;

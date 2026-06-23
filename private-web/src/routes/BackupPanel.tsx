@@ -251,6 +251,12 @@ function ConfigSummary({ config }: { config: BackupConfigView }) {
 				<Typography variant="body2">
 					<strong>Region:</strong> {config.region ?? "default"}
 				</Typography>
+				<Typography variant="body2">
+					<strong>Placement:</strong>{" "}
+					{config.placement === "shared"
+						? "canopy-created bucket in the shared account"
+						: "existing bucket in a dedicated account"}
+				</Typography>
 			</Stack>
 		</Paper>
 	);

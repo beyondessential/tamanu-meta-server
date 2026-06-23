@@ -68,6 +68,7 @@ fn new_config(group_id: Uuid, region: Option<&str>) -> NewServerGroupBackupConfi
 		repo_password_ref: "kopia-repo-pw-test".into(),
 		status: BackupConfigStatus::Provisioning,
 		mode: commons_types::backup::BackupRepoMode::FromBirth,
+		placement: commons_types::backup::BackupPlacement::External,
 	}
 }
 

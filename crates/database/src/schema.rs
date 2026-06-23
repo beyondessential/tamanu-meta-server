@@ -334,6 +334,7 @@ diesel::table! {
 		updated_at -> Timestamptz,
 		mode -> Text,
 		last_init_error -> Nullable<Text>,
+		placement -> Text,
 	}
 }
 

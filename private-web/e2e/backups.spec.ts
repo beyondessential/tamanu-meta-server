@@ -43,6 +43,7 @@ test.describe("backups zero-state + config", () => {
 		const group = await seedServerGroup(sql, { name: "cfg-group" });
 
 		await page.goto(`/groups/${group.id}/backups/config`);
+		await page.getByRole("button", { name: /use an existing bucket/i }).click();
 		await page.getByLabel("Bucket").fill("bes-kopia-created");
 		await page
 			.getByLabel("Target role ARN")
@@ -86,6 +87,7 @@ test.describe("backups zero-state + config", () => {
 	}) => {
 		const group = await seedServerGroup(sql, { name: "passphrase-group" });
 		await page.goto(`/groups/${group.id}/backups/config`);
+		await page.getByRole("button", { name: /use an existing bucket/i }).click();
 		// `…existing…` → the fake prober reports an existing kopia repo.
 		await page.getByLabel("Bucket").fill("bes-existing-repo");
 		await page.getByLabel("Target role ARN").fill("arn:aws:iam::999:role/dev");
@@ -115,6 +117,7 @@ test.describe("backups zero-state + config", () => {
 	test("wizard blocks other (non-kopia) content", async ({ page, sql }) => {
 		const group = await seedServerGroup(sql, { name: "other-group" });
 		await page.goto(`/groups/${group.id}/backups/config`);
+		await page.getByRole("button", { name: /use an existing bucket/i }).click();
 		// `…other…` → the fake prober reports non-kopia content.
 		await page.getByLabel("Bucket").fill("bes-other-stuff");
 		await page.getByLabel("Target role ARN").fill("arn");
@@ -127,6 +130,39 @@ test.describe("backups zero-state + config", () => {
 			page.getByRole("button", { name: /create & provision/i }),
 		).toBeDisabled();
 		await expect(page.getByRole("button", { name: /re-check/i })).toBeVisible();
+	});
+
+	test("'shared backups' option provisions a canopy-managed bucket (no AWS account)", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "Acme Prod" });
+
+		await page.goto(`/groups/${group.id}/backups/config`);
+		// "Create a bucket" = shared-account backups — no bucket/roles, no probe.
+		await page.getByRole("button", { name: /create a bucket/i }).click();
+		await page.getByRole("button", { name: /create & provision/i }).click();
+
+		await expect(page).toHaveURL(new RegExp(`/groups/${group.id}/backups$`));
+		// The panel shows which placement was used.
+		await expect(page.getByText(/shared account/i)).toBeVisible();
+
+		const rows = await sql.query<{
+			status: string;
+			mode: string;
+			placement: string;
+			bucket: string;
+		}>(
+			`SELECT status, mode, placement, bucket
+			 FROM server_group_backup_config WHERE group_id = $1`,
+			[group.id],
+		);
+		expect(rows).toHaveLength(1);
+		expect(rows[0]!.placement).toBe("shared");
+		expect(rows[0]!.mode).toBe("from_birth");
+		expect(rows[0]!.status).toBe("provisioning");
+		// Auto-named from the group name + a random suffix.
+		expect(rows[0]!.bucket.startsWith("bes-canopy-backup-acme-prod-")).toBe(true);
 	});
 });
 

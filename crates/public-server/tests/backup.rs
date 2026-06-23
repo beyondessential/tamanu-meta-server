@@ -445,9 +445,9 @@ async fn seed_device(conn: &mut AsyncPgConnection, role: &str) -> (Uuid, String)
 fn assume_role_rule(policy_expectation: Option<&'static str>) -> aws_smithy_mocks::Rule {
 	mock!(aws_sdk_sts::Client::assume_role)
 		.match_requests(move |req| match policy_expectation {
-			// Backup: no session policy.
+			// No session policy expected.
 			None => req.policy().is_none(),
-			// Restore: the read-only session policy ANDs down access.
+			// A session policy that names `needle` (the bucket) was sent.
 			Some(needle) => req.policy().map(|p| p.contains(needle)).unwrap_or(false),
 		})
 		.then_output(|| {
@@ -477,7 +477,8 @@ async fn credentials_backup_happy_path_200_and_audit() {
 		make_config(&mut conn, group, "ready").await;
 		enable_capability(&mut conn, server, "tamanu-postgres").await;
 
-		let rule = assume_role_rule(None);
+		// Backup now also sends a bucket-scoped session policy (write-without-delete).
+		let rule = assume_role_rule(Some("arn:aws:s3:::grp-bucket"));
 		let sts = aws_smithy_mocks::mock_client!(aws_sdk_sts, RuleMode::MatchAny, [&rule]);
 		let public = public_server_with_sts(&url, sts);
 

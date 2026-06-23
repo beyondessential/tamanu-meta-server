@@ -12,7 +12,8 @@ use std::collections::HashMap;
 
 use commons_errors::{AppError, Result};
 use commons_types::backup::{
-	BackupConfigStatus, BackupPurpose, BackupRepoMode, BackupType, MaintenanceKind, RunOutcome,
+	BackupConfigStatus, BackupPlacement, BackupPurpose, BackupRepoMode, BackupType,
+	MaintenanceKind, RunOutcome,
 };
 use diesel::{
 	dsl::now,
@@ -117,6 +118,8 @@ pub struct ServerGroupBackupConfig {
 	#[schema(value_type = String)]
 	pub mode: BackupRepoMode,
 	pub last_init_error: Option<String>,
+	#[schema(value_type = String)]
+	pub placement: BackupPlacement,
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -132,6 +135,7 @@ pub struct NewServerGroupBackupConfig {
 	pub repo_password_ref: String,
 	pub status: BackupConfigStatus,
 	pub mode: BackupRepoMode,
+	pub placement: BackupPlacement,
 }
 
 impl ServerGroupBackupConfig {

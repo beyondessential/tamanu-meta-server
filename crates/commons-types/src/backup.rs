@@ -152,6 +152,21 @@ text_enum! {
 }
 
 text_enum! {
+	/// Where a group's backup bucket lives and who provisioned it. `External`
+	/// (the default): the bucket + dedicated IAM roles are created by ops/pulumi
+	/// in the deployment's own AWS account; canopy only connects. `Shared`:
+	/// canopy auto-creates the bucket in the shared backups account and uses
+	/// shared device/maintenance roles, with per-group session-scoped creds for
+	/// isolation. Invisible to the device either way.
+	pub enum BackupPlacement {
+		External = "external",
+		Shared = "shared",
+	}
+	default = External;
+	error BackupPlacementFromStringError = "invalid backup placement; expected one of: external, shared";
+}
+
+text_enum! {
 	/// Lifecycle state of a group's backup repo. Backups stay dormant (the
 	/// endpoints 412/409) until `Ready`.
 	pub enum BackupConfigStatus {

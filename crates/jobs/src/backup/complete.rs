@@ -146,7 +146,7 @@ mod tests {
 		use super::super::*;
 		use crate::backup::kopia::{InspectOutcome, MaintOutcome, SourceEntry};
 		use commons_tests::db::TestDb;
-		use commons_types::backup::{BackupRepoMode, MaintenanceKind};
+		use commons_types::backup::{BackupPlacement, BackupRepoMode, MaintenanceKind};
 		use database::diesel_async::AsyncPgConnection;
 		use diesel::{sql_query, sql_types};
 		use diesel_async::RunQueryDsl;
@@ -178,6 +178,7 @@ mod tests {
 					repo_password_ref: "s".into(),
 					status: BackupConfigStatus::Provisioning,
 					mode: BackupRepoMode::FromBirth,
+					placement: BackupPlacement::External,
 				},
 			)
 			.await

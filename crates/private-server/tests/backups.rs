@@ -931,3 +931,109 @@ async fn clear_schedule_removes_override() {
 	})
 	.await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn create_shared_auto_names_bucket_and_uses_shared_roles() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		// Custom group name so its sanitized form lands in the auto bucket name.
+		let group_id = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'Acme Prod');"
+		))
+		.await
+		.expect("seed group");
+
+		let resp = private
+			.post("/api/backups/create_shared")
+			.json(&serde_json::json!({ "server_group_id": group_id }))
+			.await;
+		resp.assert_status_ok();
+		let body: serde_json::Value = resp.json();
+
+		assert_eq!(body["placement"], "shared");
+		assert_eq!(body["status"], "provisioning");
+		assert_eq!(body["mode"], "from_birth");
+		// Shared roles + region come from the harness's canned SharedBackupConfig,
+		// not from the caller — proving the shared path (not BYO `create`) ran.
+		assert_eq!(
+			body["target_role_arn"],
+			"arn:aws:iam::123456789012:role/canopy-shared-device"
+		);
+		assert_eq!(
+			body["maintenance_role_arn"],
+			"arn:aws:iam::123456789012:role/canopy-shared-maint"
+		);
+		assert_eq!(body["region"], "ap-southeast-2");
+		// Auto-named from the group name + random suffix, whole name ≤ 63.
+		let bucket = body["bucket"].as_str().expect("bucket string");
+		assert!(
+			bucket.starts_with("bes-canopy-backup-acme-prod-"),
+			"unexpected bucket name: {bucket}"
+		);
+		assert!(bucket.len() <= 63, "bucket too long: {bucket}");
+
+		// Duplicate onboarding for the same group → 409.
+		let resp = private
+			.post("/api/backups/create_shared")
+			.json(&serde_json::json!({ "server_group_id": group_id }))
+			.await;
+		resp.assert_status_conflict();
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn create_shared_missing_group_is_404() {
+	commons_tests::server::run(async |_conn, _public, private| {
+		let resp = private
+			.post("/api/backups/create_shared")
+			.json(&serde_json::json!({ "server_group_id": Uuid::new_v4() }))
+			.await;
+		resp.assert_status_not_found();
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn upsert_refuses_a_shared_placement_group() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group_id = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'shared-grp');"
+		))
+		.await
+		.expect("seed group");
+
+		// Onboard onto shared-account backups, and learn the auto-named bucket.
+		let resp = private
+			.post("/api/backups/create_shared")
+			.json(&serde_json::json!({ "server_group_id": group_id }))
+			.await;
+		resp.assert_status_ok();
+		let shared_bucket = resp.json::<serde_json::Value>()["bucket"]
+			.as_str()
+			.expect("bucket")
+			.to_string();
+
+		// A pulumi upsert for the same group — using the *same* bucket, so the
+		// bucket-immutability check would pass and (without the placement guard)
+		// it would silently overwrite the shared roles. The guard makes it 409.
+		let resp = private
+			.post("/api/backups/upsert")
+			.json(&serde_json::json!({
+				"server_group_id": group_id,
+				"bucket": shared_bucket,
+				"prefix": "",
+				"target_role_arn": "arn:aws:iam::123456789012:role/byo",
+				"maintenance_role_arn": "arn:aws:iam::123456789012:role/byo-maint",
+			}))
+			.await;
+		resp.assert_status_conflict();
+		assert!(
+			resp.text().contains("shared-account"),
+			"expected the placement-guard message, got: {}",
+			resp.text()
+		);
+	})
+	.await;
+}
