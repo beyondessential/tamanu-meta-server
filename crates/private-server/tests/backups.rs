@@ -432,7 +432,9 @@ async fn stats_includes_runs_and_pending_requests() {
 			 INSERT INTO backup_runs (id, device_id, group_id, server_id, type, purpose, outcome, bytes_uploaded) \
 				VALUES ('{run_id}', '{device_id}', '{group_id}', '{server_id}', 'tamanu-postgres', 'backup', 'success', 500);
 			 INSERT INTO backup_requests (server_id, type, purpose) VALUES \
-				('{server_id}', 'tamanu-postgres', 'backup');"
+				('{server_id}', 'tamanu-postgres', 'backup');
+			 INSERT INTO server_backup_capabilities (server_id, type, enabled) VALUES \
+				('{server_id}', 'tamanu-postgres', true);"
 		))
 		.await
 		.expect("seed stats");
@@ -448,6 +450,12 @@ async fn stats_includes_runs_and_pending_requests() {
 		assert_eq!(body["recent_runs"][0]["outcome"], "success");
 		assert_eq!(body["pending_requests"].as_array().unwrap().len(), 1);
 		assert_eq!(body["pending_requests"][0]["purpose"], "backup");
+		// The member's declared capabilities ride along so the "back up now"
+		// panel knows which types to offer per server.
+		assert_eq!(body["capabilities"].as_array().unwrap().len(), 1);
+		assert_eq!(body["capabilities"][0]["server_id"], server_id.to_string());
+		assert_eq!(body["capabilities"][0]["type"], "tamanu-postgres");
+		assert_eq!(body["capabilities"][0]["enabled"], true);
 	})
 	.await;
 }

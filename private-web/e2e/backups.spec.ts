@@ -263,16 +263,22 @@ test.describe("backups ready: stats + backup-now", () => {
 			status: "ready",
 			intervalSeconds: 3600,
 		});
+		// A declared type is what enables the button (and names which type runs).
+		await seedServerBackupCapability(sql, {
+			serverId: server.id,
+			type: "tamanu-postgres",
+		});
 
 		await page.goto(`/groups/${group.id}/backups`);
 		await page.getByRole("button", { name: /backup now/i }).click();
 
 		await expect(async () => {
-			const rows = await sql.query(
-				`SELECT 1 FROM backup_requests WHERE server_id = $1 AND purpose = 'backup'`,
+			const rows = await sql.query<{ type: string }>(
+				`SELECT type FROM backup_requests WHERE server_id = $1 AND purpose = 'backup'`,
 				[server.id],
 			);
 			expect(rows).toHaveLength(1);
+			expect(rows[0]!.type).toBe("tamanu-postgres");
 		}).toPass();
 
 		await expect(page.getByText(/requested/i)).toBeVisible();
@@ -284,6 +290,78 @@ test.describe("backups ready: stats + backup-now", () => {
 				[server.id],
 			);
 			expect(rows).toHaveLength(0);
+		}).toPass();
+	});
+
+	test("a server with no declared types has a disabled backup-now button", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "no-types-group" });
+		await seedServer(sql, { name: "no-types-srv", groupId: group.id });
+		await seedServerGroupBackupConfig(sql, {
+			groupId: group.id,
+			status: "ready",
+		});
+
+		await page.goto(`/groups/${group.id}/backups`);
+		// The server appears in the "Back up now" panel, but its button is greyed
+		// out because it has registered no backup types.
+		await expect(page.getByText("no-types-srv")).toBeVisible();
+		await expect(
+			page.getByRole("button", { name: /backup now/i }),
+		).toBeDisabled();
+	});
+
+	test("a server declaring multiple types offers a backup-now per type", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "multi-type-group" });
+		const server = await seedServer(sql, {
+			name: "multi-srv",
+			groupId: group.id,
+		});
+		await seedServerGroupBackupConfig(sql, {
+			groupId: group.id,
+			status: "ready",
+		});
+		await seedServerBackupCapability(sql, {
+			serverId: server.id,
+			type: "tamanu-postgres",
+		});
+		await seedServerBackupCapability(sql, {
+			serverId: server.id,
+			type: "files",
+			enabled: false,
+		});
+
+		await page.goto(`/groups/${group.id}/backups`);
+
+		// Both declared types are listed (the disabled-for-schedule one too, since
+		// a one-off backup-now overrides the enabled gate), each with its own button.
+		const panel = page
+			.getByRole("heading", { name: /back up now/i })
+			.locator("..");
+		await expect(panel.getByText("tamanu-postgres")).toBeVisible();
+		await expect(panel.getByText("files")).toBeVisible();
+		await expect(
+			panel.getByRole("button", { name: /backup now/i }),
+		).toHaveCount(2);
+
+		// Backing up the non-default type writes a request for exactly that type.
+		await panel
+			.getByText("files")
+			.locator("..")
+			.getByRole("button", { name: /backup now/i })
+			.click();
+		await expect(async () => {
+			const rows = await sql.query<{ type: string }>(
+				`SELECT type FROM backup_requests WHERE server_id = $1 AND purpose = 'backup'`,
+				[server.id],
+			);
+			expect(rows).toHaveLength(1);
+			expect(rows[0]!.type).toBe("files");
 		}).toPass();
 	});
 

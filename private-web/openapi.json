@@ -5531,9 +5531,17 @@
         "required": [
           "recent_runs",
           "recent_maintenance",
-          "pending_requests"
+          "pending_requests",
+          "capabilities"
         ],
         "properties": {
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServerBackupCapabilityView"
+            },
+            "description": "Backup types each member server has advertised it can run (with their\nenabled state), so the \"back up now\" panel can offer the right types per\nserver and grey out servers that have declared none."
+          },
           "pending_requests": {
             "type": "array",
             "items": {
