@@ -144,6 +144,8 @@ test.describe("backups zero-state + config", () => {
 		await page.getByRole("button", { name: /create & provision/i }).click();
 
 		await expect(page).toHaveURL(new RegExp(`/groups/${group.id}/backups$`));
+		// The panel shows which placement was used.
+		await expect(page.getByText(/shared account/i)).toBeVisible();
 
 		const rows = await sql.query<{
 			status: string;
