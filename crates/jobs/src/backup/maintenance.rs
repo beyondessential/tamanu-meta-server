@@ -223,25 +223,24 @@ async fn provision_shared_bucket(
 			)
 		})?;
 
-	let (group_name, highest_rank) = {
+	let (group, highest_rank) = {
 		let mut db = worker
 			.pool
 			.get()
 			.await
 			.map_err(|e| anyhow::anyhow!("db connection: {e}"))?;
-		let name = ServerGroup::get_by_id(&mut db, config.group_id)
+		let group = ServerGroup::get_by_id(&mut db, config.group_id)
 			.await
-			.map_err(|e| anyhow::anyhow!(e))?
-			.name;
+			.map_err(|e| anyhow::anyhow!(e))?;
 		let rank = ServerGroup::highest_member_ranks(&mut db, &[config.group_id])
 			.await
 			.map_err(|e| anyhow::anyhow!(e))?
 			.get(&config.group_id)
 			.copied();
-		(name, rank)
+		(group, rank)
 	};
 
-	let tags = backup_bucket_billing_tags(&group_name, highest_rank);
+	let tags = backup_bucket_billing_tags(&group.tags, &group.name, highest_rank);
 	let region = config.region.as_deref().unwrap_or("us-east-1");
 	super::provision::ensure_bucket(&provisioner_role_arn, &config.bucket, region, &tags).await
 }

@@ -69,7 +69,8 @@ async fn tick(db: &mut diesel_async::AsyncPgConnection) -> Result<(), String> {
 			},
 			BackupPlacement::External => c.maintenance_role_arn.clone(),
 		};
-		let tags = backup_bucket_billing_tags(&group.name, ranks.get(&c.group_id).copied());
+		let tags =
+			backup_bucket_billing_tags(&group.tags, &group.name, ranks.get(&c.group_id).copied());
 		let region = c.region.as_deref().unwrap_or("us-east-1");
 		match super::provision::reconcile_bucket_tags(&role_arn, &c.bucket, region, &tags).await {
 			Ok(true) => debug!(group = %c.group_id, "tag-reconcile: applied billing tags"),

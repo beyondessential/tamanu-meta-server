@@ -264,6 +264,27 @@ impl BillingLabels {
 				.or_else(|| highest_rank.map(|r| stage_for_rank(r).to_string())),
 		}
 	}
+
+	/// Override the `product` label — e.g. `"backups"` for a backup bucket, which
+	/// should attribute to the backups product regardless of the group's own
+	/// `billing.product`. (Reusable for other canopy-owned resources later.)
+	pub fn with_product(mut self, product: impl Into<String>) -> Self {
+		self.product = product.into();
+		self
+	}
+
+	/// Render as AWS `billing.*` resource tags. `billing.stage` is omitted when
+	/// the group has no ranked members (no stage to attribute to).
+	pub fn into_tags(self) -> Vec<(String, String)> {
+		let mut tags = vec![
+			("billing.product".to_string(), self.product),
+			("billing.deployment".to_string(), self.deployment),
+		];
+		if let Some(stage) = self.stage {
+			tags.push(("billing.stage".to_string(), stage));
+		}
+		tags
+	}
 }
 
 // ===========================================================================
@@ -343,26 +364,21 @@ pub fn shared_bucket_name(group_name: &str, random: &str) -> String {
 	}
 }
 
-/// Billing tags for a canopy backup bucket: `billing.product=backups` (fixed —
-/// distinguishes backup spend from the deployment's `tamanu` product),
-/// `billing.deployment=<group name>`, and `billing.stage=<highest member rank>`
-/// (mapped via [`stage_for_rank`]; omitted when the group has no ranked members).
-/// Applied at provision time and re-applied by the reconcile pass on drift.
+/// Billing tags for a canopy backup bucket. Built from the group's
+/// [`BillingLabels`] — so a group's explicit `billing.deployment` /
+/// `billing.stage` overrides are honored (keeping the bucket's cost attribution
+/// consistent with the deployment's other resources) — with `billing.product`
+/// **forced to `backups`** (backup spend attributes to the backups product
+/// regardless of the group's own product). Applied at provision time and
+/// re-applied by the reconcile pass on drift.
 pub fn backup_bucket_billing_tags(
+	group_tags: &TagMap,
 	group_name: &str,
 	highest_rank: Option<ServerRank>,
 ) -> Vec<(String, String)> {
-	let mut tags = vec![
-		("billing.product".to_string(), "backups".to_string()),
-		("billing.deployment".to_string(), group_name.to_string()),
-	];
-	if let Some(rank) = highest_rank {
-		tags.push((
-			"billing.stage".to_string(),
-			stage_for_rank(rank).to_string(),
-		));
-	}
-	tags
+	BillingLabels::from_group(group_tags, group_name, highest_rank)
+		.with_product("backups")
+		.into_tags()
 }
 
 /// Has a full cadence `window` elapsed since this kind of work last ran for a
@@ -591,8 +607,12 @@ mod tests {
 	}
 
 	#[test]
-	fn billing_tags_fixed_product_and_deployment() {
-		let t = backup_bucket_billing_tags("Acme Prod", Some(ServerRank::Production));
+	fn billing_tags_default_product_deployment_stage() {
+		let t = backup_bucket_billing_tags(
+			&TagMap::default(),
+			"Acme Prod",
+			Some(ServerRank::Production),
+		);
 		assert!(t.contains(&("billing.product".to_string(), "backups".to_string())));
 		assert!(t.contains(&("billing.deployment".to_string(), "Acme Prod".to_string())));
 		// Production maps to "prod", not the Display "production".
@@ -601,7 +621,23 @@ mod tests {
 
 	#[test]
 	fn billing_tags_omit_stage_when_unranked() {
-		let t = backup_bucket_billing_tags("g", None);
+		let t = backup_bucket_billing_tags(&TagMap::default(), "g", None);
 		assert!(!t.iter().any(|(k, _)| k == "billing.stage"));
+	}
+
+	#[test]
+	fn billing_tags_honor_group_overrides_but_force_product() {
+		let mut tags = TagMap::default();
+		tags.0
+			.insert("billing.deployment".into(), "custom-dep".into());
+		tags.0.insert("billing.stage".into(), "staging".into());
+		// A group billing.product override is deliberately ignored for buckets.
+		tags.0.insert("billing.product".into(), "tamanu".into());
+		let t = backup_bucket_billing_tags(&tags, "ignored-name", Some(ServerRank::Dev));
+		// product is forced to backups despite the group's billing.product=tamanu.
+		assert!(t.contains(&("billing.product".to_string(), "backups".to_string())));
+		// deployment + stage honor the group's explicit overrides.
+		assert!(t.contains(&("billing.deployment".to_string(), "custom-dep".to_string())));
+		assert!(t.contains(&("billing.stage".to_string(), "staging".to_string())));
 	}
 }
