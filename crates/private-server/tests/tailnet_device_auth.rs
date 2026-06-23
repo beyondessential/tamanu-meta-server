@@ -88,7 +88,6 @@ async fn unknown_tailnet_node_auto_creates_untrusted_then_403s_role_gate() {
 				),
 				recovery_recipients: None,
 				recovery_challenge: std::sync::Arc::new(std::sync::Mutex::new(None)),
-				shared_backups: None,
 			})
 			.unwrap(),
 			ClientIpSource::RightmostForwarded,

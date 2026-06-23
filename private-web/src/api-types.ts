@@ -162,12 +162,14 @@ export interface paths {
         /**
          * Onboard a group onto **shared-account** backups — for deployments with no AWS
          *     account of their own. Canopy auto-names a bucket
-         *     (`bes-canopy-backup-<group>-<random>`) in the shared account, uses the shared
-         *     device/maintenance roles, generates + stores the passphrase, and marks the
-         *     config `provisioning`/`placement=shared`; the backups pod creates the bucket
-         *     at init. Unlike `create`/`upsert` (BYO), there is no caller-supplied
-         *     bucket/roles and no probe (the bucket doesn't exist yet). 502 if shared-account
-         *     backups (`CANOPY_SHARED_BACKUP_*`) or the secret store aren't configured.
+         *     (`bes-canopy-backup-<group>-<random>`), generates + stores the passphrase, and
+         *     marks the config `provisioning`/`placement=shared` with **blank** role ARNs.
+         *     The backups pod stamps the shared device/maintenance role ARNs + region (from
+         *     its own `CANOPY_SHARED_BACKUP_*` env) and creates the bucket at init — so this
+         *     endpoint needs no shared-account env (a missing pod env surfaces as
+         *     `last_init_error`, not here). Unlike `create`/`upsert` (BYO), there's no
+         *     caller-supplied bucket/roles and no probe. 502 only if the secret store
+         *     (passphrase Secret) isn't configured.
          */
         post: operations["backups_create_shared"];
         delete?: never;
