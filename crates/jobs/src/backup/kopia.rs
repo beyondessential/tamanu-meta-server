@@ -46,12 +46,13 @@ pub const MAINTENANCE_HOST: &str = "canopy-maintenance";
 /// [`super::creds_server`].
 #[derive(Debug, Clone)]
 pub struct KopiaEnv {
-	/// `AWS_CONTAINER_CREDENTIALS_FULL_URI` — the loopback creds endpoint
-	/// (`CredsLease::uri`).
-	pub creds_uri: String,
-	/// `AWS_CONTAINER_AUTHORIZATION_TOKEN` — the per-op lease token
-	/// (`CredsLease::token`), sent raw as the `Authorization` header.
-	pub creds_token: String,
+	/// `AWS_ACCESS_KEY_ID` — assumed-role static creds (kopia's S3 connector
+	/// requires real keys; it can't use the container-creds endpoint).
+	pub access_key_id: String,
+	/// `AWS_SECRET_ACCESS_KEY`.
+	pub secret_access_key: String,
+	/// `AWS_SESSION_TOKEN` (assumed-role creds are always session creds).
+	pub session_token: String,
 	/// The group's region (`AWS_REGION`), if set.
 	pub region: Option<String>,
 	/// The repo passphrase, read from the group's k8s Secret (`KOPIA_PASSWORD`).
@@ -59,21 +60,22 @@ pub struct KopiaEnv {
 }
 
 impl KopiaEnv {
-	/// Apply the per-op env to a `kopia` Command: point minio-go at the
-	/// container-creds endpoint and **scrub** every credential source that
-	/// precedes it in minio-go's IAM chain — the pod injects
-	/// `AWS_WEB_IDENTITY_TOKEN_FILE` (IRSA) and would otherwise shadow the
-	/// endpoint. (Verified ordering, kopia 0.23.1 + minio-go 7.2.0.)
+	/// Apply the per-op env to a `kopia` Command. kopia 0.23.1's `s3` connector
+	/// requires real credentials (its CLI demands `--access-key`, defaulting from
+	/// `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_SESSION_TOKEN`) — it does
+	/// **not** honor `AWS_CONTAINER_CREDENTIALS_FULL_URI`. So pass the assumed-role
+	/// static creds via those env vars, and **scrub** the IRSA / container-creds
+	/// sources the pod injects so they can't shadow them in minio-go's chain.
 	fn apply(&self, cmd: &mut Command) {
 		cmd.env("KOPIA_PASSWORD", &self.password);
-		cmd.env("AWS_CONTAINER_CREDENTIALS_FULL_URI", &self.creds_uri);
-		cmd.env("AWS_CONTAINER_AUTHORIZATION_TOKEN", &self.creds_token);
+		cmd.env("AWS_ACCESS_KEY_ID", &self.access_key_id);
+		cmd.env("AWS_SECRET_ACCESS_KEY", &self.secret_access_key);
+		cmd.env("AWS_SESSION_TOKEN", &self.session_token);
 		for shadowing in [
 			"AWS_WEB_IDENTITY_TOKEN_FILE",
 			"AWS_ROLE_ARN",
-			"AWS_ACCESS_KEY_ID",
-			"AWS_SECRET_ACCESS_KEY",
-			"AWS_SESSION_TOKEN",
+			"AWS_CONTAINER_CREDENTIALS_FULL_URI",
+			"AWS_CONTAINER_AUTHORIZATION_TOKEN",
 			"AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
 			"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
 		] {

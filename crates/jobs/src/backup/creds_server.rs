@@ -110,6 +110,40 @@ impl CredsServer {
 			registry: self.registry.clone(),
 		})
 	}
+
+	/// Assume `role_arn` and return its current **static** credentials, for the
+	/// kopia subprocess's `AWS_*` env. kopia's S3 connector requires real keys
+	/// (it can't use the loopback endpoint — its CLI demands `--access-key` at
+	/// parse time), so short kopia ops (init / stats / inspection) take static
+	/// assumed-role creds. These are ~1h-lived; long ops (maintenance) must use a
+	/// refreshing sigv4 proxy instead, not this.
+	pub async fn resolve(&self, role_arn: &str, region: Option<&str>) -> Result<ResolvedCreds> {
+		let mut builder = AssumeRoleProvider::builder(role_arn)
+			.session_name("canopy-kopia")
+			.configure(&self.sdk_config);
+		if let Some(r) = region {
+			builder = builder.region(Region::new(r.to_string()));
+		}
+		let creds = builder
+			.build()
+			.await
+			.provide_credentials()
+			.await
+			.context("assume role for kopia static credentials")?;
+		Ok(ResolvedCreds {
+			access_key_id: creds.access_key_id().to_string(),
+			secret_access_key: creds.secret_access_key().to_string(),
+			session_token: creds.session_token().unwrap_or_default().to_string(),
+		})
+	}
+}
+
+/// Static credentials resolved from an assumed role, for a kopia subprocess's
+/// `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN` env.
+pub struct ResolvedCreds {
+	pub access_key_id: String,
+	pub secret_access_key: String,
+	pub session_token: String,
 }
 
 /// An active credentials lease. Deregisters its token on drop, so a leaked token
