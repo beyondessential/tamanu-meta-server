@@ -242,9 +242,10 @@ pub fn stage_for_rank(rank: ServerRank) -> &'static str {
 
 impl BillingLabels {
 	/// Derive labels from a group's tags, name, and highest member rank.
-	/// Explicit `billing.*` tags win; otherwise `product = "tamanu"`,
-	/// `deployment = group name`, `stage = mapped highest rank` (omitted when
-	/// the group has no ranked members).
+	/// Explicit `billing.*` tags are honored **verbatim**; computed fallbacks are
+	/// lower-kebab-cased — `product = "tamanu"`, `deployment = lower_kebab(group
+	/// name)`, `stage = mapped highest rank` (omitted when the group has no ranked
+	/// members).
 	pub fn from_group(tags: &TagMap, group_name: &str, highest_rank: Option<ServerRank>) -> Self {
 		BillingLabels {
 			product: tags
@@ -256,13 +257,34 @@ impl BillingLabels {
 				.0
 				.get("billing.deployment")
 				.cloned()
-				.unwrap_or_else(|| group_name.to_string()),
+				.unwrap_or_else(|| lower_kebab(group_name)),
 			stage: tags
 				.0
 				.get("billing.stage")
 				.cloned()
 				.or_else(|| highest_rank.map(|r| stage_for_rank(r).to_string())),
 		}
+	}
+
+	/// Override the `product` label — e.g. `"backups"` for a backup bucket, which
+	/// should attribute to the backups product regardless of the group's own
+	/// `billing.product`. (Reusable for other canopy-owned resources later.)
+	pub fn with_product(mut self, product: impl Into<String>) -> Self {
+		self.product = product.into();
+		self
+	}
+
+	/// Render as AWS `billing.*` resource tags. `billing.stage` is omitted when
+	/// the group has no ranked members (no stage to attribute to).
+	pub fn into_tags(self) -> Vec<(String, String)> {
+		let mut tags = vec![
+			("billing.product".to_string(), self.product),
+			("billing.deployment".to_string(), self.deployment),
+		];
+		if let Some(stage) = self.stage {
+			tags.push(("billing.stage".to_string(), stage));
+		}
+		tags
 	}
 }
 
@@ -304,10 +326,9 @@ impl SharedBackupConfig {
 pub const SHARED_BUCKET_PREFIX: &str = "bes-canopy-backup-";
 const S3_BUCKET_MAX: usize = 63;
 
-/// Sanitize an arbitrary string into an S3-bucket-name-safe segment, truncated to
-/// `max_len`: lowercased, every non-`[a-z0-9]` run collapsed to a single `-`,
-/// leading/trailing `-` trimmed (also after truncation). May return empty.
-fn sanitize_bucket_segment(s: &str, max_len: usize) -> String {
+/// Lower-kebab-case a free-form string: lowercased, every run of non-`[a-z0-9]`
+/// collapsed to a single `-`, leading/trailing `-` trimmed. May return empty.
+fn lower_kebab(s: &str) -> String {
 	let mut out = String::new();
 	let mut prev_dash = false;
 	for c in s.chars() {
@@ -320,8 +341,14 @@ fn sanitize_bucket_segment(s: &str, max_len: usize) -> String {
 			prev_dash = true;
 		}
 	}
-	let trimmed = out.trim_matches('-');
-	let mut seg: String = trimmed.chars().take(max_len).collect();
+	out.trim_matches('-').to_string()
+}
+
+/// Sanitize an arbitrary string into an S3-bucket-name-safe segment:
+/// [`lower_kebab`], then truncated to `max_len` (re-trimming any trailing `-`
+/// left by truncation). May return empty.
+fn sanitize_bucket_segment(s: &str, max_len: usize) -> String {
+	let mut seg: String = lower_kebab(s).chars().take(max_len).collect();
 	while seg.ends_with('-') {
 		seg.pop();
 	}
@@ -343,26 +370,21 @@ pub fn shared_bucket_name(group_name: &str, random: &str) -> String {
 	}
 }
 
-/// Billing tags for a canopy backup bucket: `billing.product=backups` (fixed —
-/// distinguishes backup spend from the deployment's `tamanu` product),
-/// `billing.deployment=<group name>`, and `billing.stage=<highest member rank>`
-/// (mapped via [`stage_for_rank`]; omitted when the group has no ranked members).
-/// Applied at provision time and re-applied by the reconcile pass on drift.
+/// Billing tags for a canopy backup bucket. Built from the group's
+/// [`BillingLabels`] — so a group's explicit `billing.deployment` /
+/// `billing.stage` overrides are honored (keeping the bucket's cost attribution
+/// consistent with the deployment's other resources) — with `billing.product`
+/// **forced to `backups`** (backup spend attributes to the backups product
+/// regardless of the group's own product). Applied at provision time and
+/// re-applied by the reconcile pass on drift.
 pub fn backup_bucket_billing_tags(
+	group_tags: &TagMap,
 	group_name: &str,
 	highest_rank: Option<ServerRank>,
 ) -> Vec<(String, String)> {
-	let mut tags = vec![
-		("billing.product".to_string(), "backups".to_string()),
-		("billing.deployment".to_string(), group_name.to_string()),
-	];
-	if let Some(rank) = highest_rank {
-		tags.push((
-			"billing.stage".to_string(),
-			stage_for_rank(rank).to_string(),
-		));
-	}
-	tags
+	BillingLabels::from_group(group_tags, group_name, highest_rank)
+		.with_product("backups")
+		.into_tags()
 }
 
 /// Has a full cadence `window` elapsed since this kind of work last ran for a
@@ -520,6 +542,17 @@ mod tests {
 		assert_eq!(b.deployment, "my-group");
 		assert_eq!(b.stage, None);
 
+		// A computed deployment (group name) is lower-kebab-cased.
+		let b = BillingLabels::from_group(&empty, "Acme Prod", None);
+		assert_eq!(b.deployment, "acme-prod");
+
+		// An explicit billing.deployment tag is honored verbatim (not kebab'd).
+		let mut dep = TagMap::default();
+		dep.0
+			.insert("billing.deployment".into(), "Acme Prod".into());
+		let b = BillingLabels::from_group(&dep, "ignored", None);
+		assert_eq!(b.deployment, "Acme Prod");
+
 		// Highest rank maps in when present.
 		let b = BillingLabels::from_group(&empty, "g", Some(ServerRank::Production));
 		assert_eq!(b.stage.as_deref(), Some("prod"));
@@ -591,17 +624,38 @@ mod tests {
 	}
 
 	#[test]
-	fn billing_tags_fixed_product_and_deployment() {
-		let t = backup_bucket_billing_tags("Acme Prod", Some(ServerRank::Production));
+	fn billing_tags_default_product_deployment_stage() {
+		let t = backup_bucket_billing_tags(
+			&TagMap::default(),
+			"Acme Prod",
+			Some(ServerRank::Production),
+		);
 		assert!(t.contains(&("billing.product".to_string(), "backups".to_string())));
-		assert!(t.contains(&("billing.deployment".to_string(), "Acme Prod".to_string())));
+		// Computed deployment (group name) is lower-kebab-cased.
+		assert!(t.contains(&("billing.deployment".to_string(), "acme-prod".to_string())));
 		// Production maps to "prod", not the Display "production".
 		assert!(t.contains(&("billing.stage".to_string(), "prod".to_string())));
 	}
 
 	#[test]
 	fn billing_tags_omit_stage_when_unranked() {
-		let t = backup_bucket_billing_tags("g", None);
+		let t = backup_bucket_billing_tags(&TagMap::default(), "g", None);
 		assert!(!t.iter().any(|(k, _)| k == "billing.stage"));
+	}
+
+	#[test]
+	fn billing_tags_honor_group_overrides_but_force_product() {
+		let mut tags = TagMap::default();
+		tags.0
+			.insert("billing.deployment".into(), "custom-dep".into());
+		tags.0.insert("billing.stage".into(), "staging".into());
+		// A group billing.product override is deliberately ignored for buckets.
+		tags.0.insert("billing.product".into(), "tamanu".into());
+		let t = backup_bucket_billing_tags(&tags, "ignored-name", Some(ServerRank::Dev));
+		// product is forced to backups despite the group's billing.product=tamanu.
+		assert!(t.contains(&("billing.product".to_string(), "backups".to_string())));
+		// deployment + stage honor the group's explicit overrides.
+		assert!(t.contains(&("billing.deployment".to_string(), "custom-dep".to_string())));
+		assert!(t.contains(&("billing.stage".to_string(), "staging".to_string())));
 	}
 }

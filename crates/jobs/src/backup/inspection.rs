@@ -79,13 +79,14 @@ async fn run_inspect_op(
 	config: &ServerGroupBackupConfig,
 ) -> anyhow::Result<kopia::InspectOutcome> {
 	let password = worker.read_repo_password(&config.repo_password_ref).await?;
-	let lease = worker
+	let creds = worker
 		.creds
-		.lease(&config.maintenance_role_arn, config.region.as_deref())
+		.resolve(&config.maintenance_role_arn, config.region.as_deref())
 		.await?;
 	let env = KopiaEnv {
-		creds_uri: lease.uri().to_string(),
-		creds_token: lease.token().to_string(),
+		access_key_id: creds.access_key_id,
+		secret_access_key: creds.secret_access_key,
+		session_token: creds.session_token,
 		region: config.region.clone(),
 		password,
 	};

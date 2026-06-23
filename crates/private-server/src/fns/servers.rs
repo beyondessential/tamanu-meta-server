@@ -44,6 +44,9 @@ pub struct ServerDetailData {
 	/// server is ungrouped or alone in its group. Each entry carries its
 	/// own `up` / `health` so the UI can render a status dot per sibling.
 	pub siblings: Vec<ServerInfo>,
+	/// The server's effective `billing.*` labels — i.e. its group's
+	/// (product/deployment/stage). Empty when the server is ungrouped.
+	pub billing_labels: Vec<super::server_groups::BillingTag>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -577,6 +580,11 @@ pub async fn get_detail(
 		Vec::new()
 	};
 
+	let billing_labels = match group.as_ref() {
+		Some(g) => super::server_groups::group_billing_labels(&mut conn, g).await?,
+		None => Vec::new(),
+	};
+
 	Ok(Json(ServerDetailData {
 		server: server_details,
 		device_info,
@@ -585,6 +593,7 @@ pub async fn get_detail(
 		health,
 		group,
 		siblings,
+		billing_labels,
 	}))
 }
 

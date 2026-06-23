@@ -933,7 +933,7 @@ async fn clear_schedule_removes_override() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn create_shared_auto_names_bucket_and_uses_shared_roles() {
+async fn create_shared_auto_names_bucket_with_blank_roles() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		// Custom group name so its sanitized form lands in the auto bucket name.
 		let group_id = Uuid::new_v4();
@@ -953,17 +953,11 @@ async fn create_shared_auto_names_bucket_and_uses_shared_roles() {
 		assert_eq!(body["placement"], "shared");
 		assert_eq!(body["status"], "provisioning");
 		assert_eq!(body["mode"], "from_birth");
-		// Shared roles + region come from the harness's canned SharedBackupConfig,
-		// not from the caller — proving the shared path (not BYO `create`) ran.
-		assert_eq!(
-			body["target_role_arn"],
-			"arn:aws:iam::123456789012:role/canopy-shared-device"
-		);
-		assert_eq!(
-			body["maintenance_role_arn"],
-			"arn:aws:iam::123456789012:role/canopy-shared-maint"
-		);
-		assert_eq!(body["region"], "ap-southeast-2");
+		// The role ARNs + region are left blank: the backups pod stamps them at
+		// provision time from its own env, so private-server needs no shared config.
+		assert_eq!(body["target_role_arn"], "");
+		assert_eq!(body["maintenance_role_arn"], "");
+		assert!(body["region"].is_null());
 		// Auto-named from the group name + random suffix, whole name ≤ 63.
 		let bucket = body["bucket"].as_str().expect("bucket string");
 		assert!(

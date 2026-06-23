@@ -398,7 +398,7 @@
         "tags": [
           "backups"
         ],
-        "summary": "Onboard a group onto **shared-account** backups — for deployments with no AWS\naccount of their own. Canopy auto-names a bucket\n(`bes-canopy-backup-<group>-<random>`) in the shared account, uses the shared\ndevice/maintenance roles, generates + stores the passphrase, and marks the\nconfig `provisioning`/`placement=shared`; the backups pod creates the bucket\nat init. Unlike `create`/`upsert` (BYO), there is no caller-supplied\nbucket/roles and no probe (the bucket doesn't exist yet). 502 if shared-account\nbackups (`CANOPY_SHARED_BACKUP_*`) or the secret store aren't configured.",
+        "summary": "Onboard a group onto **shared-account** backups — for deployments with no AWS\naccount of their own. Canopy auto-names a bucket\n(`bes-canopy-backup-<group>-<random>`), generates + stores the passphrase, and\nmarks the config `provisioning`/`placement=shared` with **blank** role ARNs.\nThe backups pod stamps the shared device/maintenance role ARNs + region (from\nits own `CANOPY_SHARED_BACKUP_*` env) and creates the bucket at init — so this\nendpoint needs no shared-account env (a missing pod env surfaces as\n`last_init_error`, not here). Unlike `create`/`upsert` (BYO), there's no\ncaller-supplied bucket/roles and no probe. 502 only if the secret store\n(passphrase Secret) isn't configured.",
         "operationId": "backups_create_shared",
         "requestBody": {
           "content": {
@@ -5616,6 +5616,22 @@
           }
         }
       },
+      "BillingTag": {
+        "type": "object",
+        "description": "One effective `billing.*` label canopy attributes a group's AWS resources\nunder (computed: explicit `billing.*` group tags honored verbatim, else\nproduct `tamanu`, deployment = lower-kebab group name, stage = highest rank).",
+        "required": [
+          "key",
+          "value"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        }
+      },
       "ClearScheduleArgs": {
         "type": "object",
         "required": [
@@ -6291,9 +6307,17 @@
         "type": "object",
         "required": [
           "group",
-          "servers"
+          "servers",
+          "billing_labels"
         ],
         "properties": {
+          "billing_labels": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BillingTag"
+            },
+            "description": "The group's effective `billing.*` labels (product/deployment/stage)."
+          },
           "group": {
             "$ref": "#/components/schemas/ServerGroup"
           },
@@ -8381,9 +8405,17 @@
           "server",
           "up",
           "health",
-          "siblings"
+          "siblings",
+          "billing_labels"
         ],
         "properties": {
+          "billing_labels": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BillingTag"
+            },
+            "description": "The server's effective `billing.*` labels — i.e. its group's\n(product/deployment/stage). Empty when the server is ungrouped."
+          },
           "device_info": {
             "oneOf": [
               {

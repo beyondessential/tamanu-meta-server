@@ -66,7 +66,7 @@ export default function GroupDetail() {
 		return <Alert severity="error">{detail.error.message}</Alert>;
 	}
 
-	const { group, servers } = detail.data;
+	const { group, servers, billing_labels } = detail.data;
 	const admin = isAdmin.status === "ok" && isAdmin.data;
 	const tagEntries = Object.entries(group.tags ?? {});
 	const operators =
@@ -183,6 +183,22 @@ export default function GroupDetail() {
 								variant="outlined"
 								label={`${k}=${v}`}
 							/>
+						))}
+					</Box>
+				</Paper>
+			)}
+
+			{billing_labels.length > 0 && (
+				<Paper variant="outlined" sx={{ p: 2 }}>
+					<Typography variant="h6" component="h2" gutterBottom>
+						Billing labels
+					</Typography>
+					<Typography variant="body2" color="text.secondary" gutterBottom>
+						Effective AWS cost-allocation tags for this group's resources.
+					</Typography>
+					<Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+						{billing_labels.map((t) => (
+							<Chip key={t.key} size="small" label={`${t.key}=${t.value}`} />
 						))}
 					</Box>
 				</Paper>

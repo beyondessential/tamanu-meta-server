@@ -86,6 +86,11 @@ test.describe("server detail page", () => {
 		).toBeVisible();
 		const hostLink = page.getByRole("link", { name: new RegExp(server.host) });
 		await expect(hostLink).toBeVisible();
+
+		// The server's Group section shows the group's effective billing labels.
+		await expect(page.getByText("Billing labels")).toBeVisible();
+		await expect(page.getByText("billing.product=tamanu")).toBeVisible();
+		await expect(page.getByText("billing.deployment=host-group")).toBeVisible();
 	});
 
 	test("nonexistent UUID surfaces an error alert", async ({ page }) => {

@@ -164,7 +164,9 @@ export default function ServerDetail() {
 				up={data.up}
 				refreshTick={refreshTick}
 			/>
-			{data.group && <GroupSection group={data.group} />}
+			{data.group && (
+				<GroupSection group={data.group} billingLabels={data.billing_labels} />
+			)}
 			<BackupCapabilitiesSection
 				serverId={data.server.id}
 				isAdmin={admin}
@@ -1707,7 +1709,13 @@ function BackupCapabilityRow({
 	);
 }
 
-function GroupSection({ group }: { group: ServerGroup }) {
+function GroupSection({
+	group,
+	billingLabels,
+}: {
+	group: ServerGroup;
+	billingLabels: ServerDetailData["billing_labels"];
+}) {
 	const tagEntries = Object.entries(group.tags ?? {});
 	return (
 		<Paper variant="outlined" sx={{ p: 2 }}>
@@ -1745,6 +1753,22 @@ function GroupSection({ group }: { group: ServerGroup }) {
 						/>
 					))}
 				</Stack>
+			)}
+			{billingLabels.length > 0 && (
+				<>
+					<Typography
+						variant="caption"
+						color="text.secondary"
+						sx={{ display: "block", mt: 1 }}
+					>
+						Billing labels
+					</Typography>
+					<Stack direction="row" sx={{ flexWrap: "wrap", gap: 0.5 }}>
+						{billingLabels.map((t) => (
+							<Chip key={t.key} size="small" label={`${t.key}=${t.value}`} />
+						))}
+					</Stack>
+				</>
 			)}
 		</Paper>
 	);

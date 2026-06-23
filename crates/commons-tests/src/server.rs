@@ -237,7 +237,6 @@ where
 				),
 				recovery_recipients: None,
 				recovery_challenge: std::sync::Arc::new(std::sync::Mutex::new(None)),
-				shared_backups: None,
 			})
 			.unwrap(),
 			ClientIpSource::RightmostForwarded,

@@ -425,12 +425,14 @@ pub struct CreateSharedBackupConfigArgs {
 
 /// Onboard a group onto **shared-account** backups — for deployments with no AWS
 /// account of their own. Canopy auto-names a bucket
-/// (`bes-canopy-backup-<group>-<random>`) in the shared account, uses the shared
-/// device/maintenance roles, generates + stores the passphrase, and marks the
-/// config `provisioning`/`placement=shared`; the backups pod creates the bucket
-/// at init. Unlike `create`/`upsert` (BYO), there is no caller-supplied
-/// bucket/roles and no probe (the bucket doesn't exist yet). 502 if shared-account
-/// backups (`CANOPY_SHARED_BACKUP_*`) or the secret store aren't configured.
+/// (`bes-canopy-backup-<group>-<random>`), generates + stores the passphrase, and
+/// marks the config `provisioning`/`placement=shared` with **blank** role ARNs.
+/// The backups pod stamps the shared device/maintenance role ARNs + region (from
+/// its own `CANOPY_SHARED_BACKUP_*` env) and creates the bucket at init — so this
+/// endpoint needs no shared-account env (a missing pod env surfaces as
+/// `last_init_error`, not here). Unlike `create`/`upsert` (BYO), there's no
+/// caller-supplied bucket/roles and no probe. 502 only if the secret store
+/// (passphrase Secret) isn't configured.
 #[utoipa::path(
 	post,
 	path = "/create_shared",
@@ -453,9 +455,6 @@ pub async fn create_shared(
 	let mut conn = state.db.get().await?;
 	let group = ServerGroup::get_by_id(&mut conn, args.server_group_id).await?;
 
-	let shared = state.shared_backups.as_ref().ok_or_else(|| {
-		AppError::Upstream("shared-account backups are not configured on this server".into())
-	})?;
 	let kube = state.kube.as_ref().ok_or_else(|| {
 		AppError::Upstream("secret store not configured; cannot create repo passphrase".into())
 	})?;
@@ -467,15 +466,20 @@ pub async fn create_shared(
 	let passphrase = commons_servers::backup_secrets::generate_passphrase();
 	let repo_password_ref = format!("backup-repo-{}", args.server_group_id);
 
+	// The shared role ARNs + default region are the backups pod's concern (it has
+	// `CANOPY_SHARED_BACKUP_*`): it stamps them into this row and provisions the
+	// bucket at init. Private-server only marks the group `placement=shared` and
+	// owns the passphrase Secret — so it needs no shared-account env. An
+	// operator-supplied region is kept; otherwise the pod fills it.
 	let config = ServerGroupBackupConfig::insert(
 		&mut conn,
 		NewServerGroupBackupConfig {
 			group_id: args.server_group_id,
 			bucket,
 			prefix: String::new(),
-			target_role_arn: shared.device_role_arn.clone(),
-			maintenance_role_arn: shared.maintenance_role_arn.clone(),
-			region: Some(args.region.clone().unwrap_or_else(|| shared.region.clone())),
+			target_role_arn: String::new(),
+			maintenance_role_arn: String::new(),
+			region: args.region.clone(),
 			repo_password_ref: repo_password_ref.clone(),
 			status: BackupConfigStatus::Provisioning,
 			mode: BackupRepoMode::FromBirth,

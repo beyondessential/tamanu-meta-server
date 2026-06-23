@@ -3,7 +3,6 @@ use std::sync::{Arc, Mutex};
 use axum::extract::FromRef;
 use bestool_postgres::pool::PgPool;
 use commons_errors::Result;
-use commons_servers::backup_jobs::SharedBackupConfig;
 use commons_servers::recovery_vault::Recipients;
 use commons_servers::tailnet_directory::{TailnetDirectory, TailnetDirectoryConfig};
 use database::Db;
@@ -41,10 +40,6 @@ pub struct AppState {
 	pub recovery_recipients: Option<Recipients>,
 	/// The single in-flight recovery verification challenge, if any.
 	pub recovery_challenge: RecoveryChallengeStore,
-	/// Shared-account backup settings (`CANOPY_SHARED_BACKUP_*`). `None` ⇒ the
-	/// shared-account onboarding endpoint 502s; BYO (`external`) onboarding is
-	/// unaffected.
-	pub shared_backups: Option<SharedBackupConfig>,
 }
 
 /// Read the recovery recipients from the environment, logging (not failing) a malformed
@@ -87,7 +82,6 @@ impl AppState {
 			prober,
 			recovery_recipients: recovery_recipients_from_env(),
 			recovery_challenge: Arc::new(Mutex::new(None)),
-			shared_backups: SharedBackupConfig::from_env(),
 		})
 	}
 
@@ -110,16 +104,6 @@ impl AppState {
 			// Read from env so the e2e fixture can exercise the recovery ceremony.
 			recovery_recipients: recovery_recipients_from_env(),
 			recovery_challenge: Arc::new(Mutex::new(None)),
-			// A canned shared-account config so the shared-onboarding endpoint is
-			// exercisable in tests/e2e without real AWS. Placeholder account id.
-			shared_backups: Some(SharedBackupConfig {
-				region: "ap-southeast-2".to_string(),
-				device_role_arn: "arn:aws:iam::123456789012:role/canopy-shared-device".to_string(),
-				maintenance_role_arn: "arn:aws:iam::123456789012:role/canopy-shared-maint"
-					.to_string(),
-				provisioner_role_arn: "arn:aws:iam::123456789012:role/canopy-shared-provisioner"
-					.to_string(),
-			}),
 		})
 	}
 }
