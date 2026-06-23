@@ -49,10 +49,14 @@ second shared account before giving up per-bucket isolation.
 1. **Config model + migration** — add `placement` (`external` | `shared`;
    commons-types enum mirroring `BackupRepoMode`, with the diesel Text mapping).
    Shared rows store `bucket` = canopy-generated
-   `bes-canopy-backup-<group-name>-<random>` (group name **sanitized** for S3:
-   lowercased, non-`[a-z0-9-]` → `-`, collapsed, trimmed, and truncated so the
-   whole name stays ≤ 63 chars; random suffix for global uniqueness +
-   anti-enumeration). The group name is for **AWS-side discoverability only** —
+   `bes-canopy-backup-<group-name>-<random>`. **Total length ≤ 63 (the S3 limit)**,
+   so only the group portion is truncated to fit the budget left by the fixed
+   parts: `63 − len("bes-canopy-backup-") (18) − len("-<random>")`. With an
+   8-char random suffix that leaves **≤ 36** chars for the sanitized group name.
+   Group name **sanitized** for S3: lowercased, non-`[a-z0-9-]` → `-`, collapsed,
+   leading/trailing hyphens trimmed, then truncated to the budget (re-trim any
+   trailing hyphen left by truncation); random suffix for global uniqueness +
+   anti-enumeration. The group name is for **AWS-side discoverability only** —
    the bucket name is fixed at creation and does **not** follow a later group
    rename (the billing tags do; see reconcile below).
    `target_role_arn`/`maintenance_role_arn` = the shared roles (from env/config),
