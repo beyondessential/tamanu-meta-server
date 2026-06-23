@@ -32,6 +32,13 @@ test.describe("group detail page", () => {
 		await expect(page.getByText("ops handover note")).toBeVisible();
 		await expect(page.getByText("env=prod")).toBeVisible();
 		await expect(page.getByText("tier=1")).toBeVisible();
+		// Effective billing labels: product defaults to tamanu, deployment is the
+		// lower-kebab group name (no explicit billing.* tags on this group).
+		await expect(page.getByText("Billing labels")).toBeVisible();
+		await expect(page.getByText("billing.product=tamanu")).toBeVisible();
+		await expect(
+			page.getByText("billing.deployment=watched-cluster"),
+		).toBeVisible();
 		await expect(
 			page.getByRole("link", { name: new RegExp(memberA.name) }),
 		).toBeVisible();

@@ -1,7 +1,7 @@
 use axum::Json;
 use axum::extract::State;
 use commons_errors::{ProblemDetailsSchema, Result};
-use commons_servers::tailscale_auth::TailscaleAdmin;
+use commons_servers::{backup_jobs::BillingLabels, tailscale_auth::TailscaleAdmin};
 use commons_types::{Uuid, server::TagMap};
 use database::server_groups::{NewServerGroup, PartialServerGroup, ServerGroup};
 use serde::{Deserialize, Serialize};
@@ -82,10 +82,39 @@ pub struct GroupIdArgs {
 	pub server_group_id: Uuid,
 }
 
+/// One effective `billing.*` label canopy attributes a group's AWS resources
+/// under (computed: explicit `billing.*` group tags honored verbatim, else
+/// product `tamanu`, deployment = lower-kebab group name, stage = highest rank).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct BillingTag {
+	pub key: String,
+	pub value: String,
+}
+
+/// A group's effective billing labels, for display on the group + server views.
+pub(crate) async fn group_billing_labels(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	group: &ServerGroup,
+) -> Result<Vec<BillingTag>> {
+	let highest_rank = ServerGroup::highest_member_ranks(conn, &[group.id])
+		.await?
+		.get(&group.id)
+		.copied();
+	Ok(
+		BillingLabels::from_group(&group.tags, &group.name, highest_rank)
+			.into_tags()
+			.into_iter()
+			.map(|(key, value)| BillingTag { key, value })
+			.collect(),
+	)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct GroupDetail {
 	pub group: ServerGroup,
 	pub servers: Vec<super::servers::ServerInfo>,
+	/// The group's effective `billing.*` labels (product/deployment/stage).
+	pub billing_labels: Vec<BillingTag>,
 }
 
 #[utoipa::path(
@@ -124,7 +153,12 @@ pub async fn get(
 	});
 	super::servers::decorate_with_status(&mut conn, &mut servers).await?;
 	super::servers::fill_display_hosts(&mut conn, &mut servers).await?;
-	Ok(Json(GroupDetail { group, servers }))
+	let billing_labels = group_billing_labels(&mut conn, &group).await?;
+	Ok(Json(GroupDetail {
+		group,
+		servers,
+		billing_labels,
+	}))
 }
 
 #[derive(Deserialize, ToSchema)]

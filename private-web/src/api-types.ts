@@ -2299,6 +2299,15 @@ export interface components {
             id: string;
             name: string;
         };
+        /**
+         * @description One effective `billing.*` label canopy attributes a group's AWS resources
+         *     under (computed: explicit `billing.*` group tags honored verbatim, else
+         *     product `tamanu`, deployment = lower-kebab group name, stage = highest rank).
+         */
+        BillingTag: {
+            key: string;
+            value: string;
+        };
         ClearScheduleArgs: {
             /** Format: uuid */
             server_group_id: string;
@@ -2531,6 +2540,8 @@ export interface components {
             server_group_id: string;
         };
         GroupDetail: {
+            /** @description The group's effective `billing.*` labels (product/deployment/stage). */
+            billing_labels: components["schemas"]["BillingTag"][];
             group: components["schemas"]["ServerGroup"];
             servers: components["schemas"]["ServerInfo"][];
         };
@@ -3346,6 +3357,11 @@ export interface components {
             tags?: null | components["schemas"]["TagMap"];
         };
         ServerDetailData: {
+            /**
+             * @description The server's effective `billing.*` labels — i.e. its group's
+             *     (product/deployment/stage). Empty when the server is ungrouped.
+             */
+            billing_labels: components["schemas"]["BillingTag"][];
             device_info?: null | components["schemas"]["DeviceInfo"];
             group?: null | components["schemas"]["ServerGroup"];
             health: components["schemas"]["HealthState"];

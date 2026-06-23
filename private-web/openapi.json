@@ -5616,6 +5616,22 @@
           }
         }
       },
+      "BillingTag": {
+        "type": "object",
+        "description": "One effective `billing.*` label canopy attributes a group's AWS resources\nunder (computed: explicit `billing.*` group tags honored verbatim, else\nproduct `tamanu`, deployment = lower-kebab group name, stage = highest rank).",
+        "required": [
+          "key",
+          "value"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        }
+      },
       "ClearScheduleArgs": {
         "type": "object",
         "required": [
@@ -6291,9 +6307,17 @@
         "type": "object",
         "required": [
           "group",
-          "servers"
+          "servers",
+          "billing_labels"
         ],
         "properties": {
+          "billing_labels": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BillingTag"
+            },
+            "description": "The group's effective `billing.*` labels (product/deployment/stage)."
+          },
           "group": {
             "$ref": "#/components/schemas/ServerGroup"
           },
@@ -8381,9 +8405,17 @@
           "server",
           "up",
           "health",
-          "siblings"
+          "siblings",
+          "billing_labels"
         ],
         "properties": {
+          "billing_labels": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BillingTag"
+            },
+            "description": "The server's effective `billing.*` labels — i.e. its group's\n(product/deployment/stage). Empty when the server is ungrouped."
+          },
           "device_info": {
             "oneOf": [
               {
