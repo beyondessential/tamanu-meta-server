@@ -21,6 +21,7 @@ import {
 	TableHead,
 	TableRow,
 	TextField,
+	Tooltip,
 	Typography,
 } from "@mui/material";
 import { useState } from "react";
@@ -43,8 +44,6 @@ import {
 	type BackupConfigView,
 	type ServerInfo,
 } from "../types";
-
-const WELL_KNOWN_TYPE = "tamanu-postgres";
 
 export default function BackupPanel() {
 	const { id = "" } = useParams<{ id: string }>();
@@ -661,17 +660,37 @@ function RunsAndRequests({
 
 	const pending =
 		stats.status === "ok" ? stats.data.pending_requests : [];
+	const capabilities =
+		stats.status === "ok" ? stats.data.capabilities : [];
 
-	const isPending = (serverId: string) =>
+	// The backup types to offer per server: the ones it has declared it can run
+	// (bestool fails fast on a type it has no definition for), unioned with any
+	// type that already has a pending backup request — so a request can always be
+	// cancelled even if the server later stops declaring that type.
+	const typesForServer = (serverId: string): string[] => {
+		const set = new Set<string>();
+		for (const c of capabilities) {
+			if (c.server_id === serverId) set.add(c.type);
+		}
+		for (const p of pending) {
+			if (p.server_id === serverId && p.purpose === "backup") set.add(p.type);
+		}
+		return [...set].sort();
+	};
+
+	const pendingFor = (serverId: string, type: string) =>
 		pending.find(
-			(p) => p.server_id === serverId && p.purpose === "backup",
+			(p) =>
+				p.server_id === serverId &&
+				p.type === type &&
+				p.purpose === "backup",
 		);
 
-	const onRequest = async (serverId: string) => {
+	const onRequest = async (serverId: string, type: string) => {
 		try {
 			await requestNow.call({
 				server_id: serverId,
-				type: WELL_KNOWN_TYPE,
+				type,
 				purpose: "backup",
 			});
 			stats.reload();
@@ -679,11 +698,11 @@ function RunsAndRequests({
 			/* surfaced via requestNow.error */
 		}
 	};
-	const onCancel = async (serverId: string) => {
+	const onCancel = async (serverId: string, type: string) => {
 		try {
 			await cancel.call({
 				server_id: serverId,
-				type: WELL_KNOWN_TYPE,
+				type,
 				purpose: "backup",
 			});
 			stats.reload();
@@ -704,55 +723,91 @@ function RunsAndRequests({
 			) : (
 				<Stack spacing={1} divider={<Divider />}>
 					{members.map((m) => {
-						const req = isPending(m.id);
+						const types = typesForServer(m.id);
 						return (
 							<Stack
 								key={m.id}
 								direction="row"
 								spacing={2}
-								sx={{ alignItems: "center", justifyContent: "space-between" }}
+								sx={{
+									alignItems: "flex-start",
+									justifyContent: "space-between",
+								}}
 							>
-								<Typography variant="body2">
+								<Typography variant="body2" sx={{ pt: 0.75 }}>
 									{m.name ?? m.id.slice(0, 8)}
 								</Typography>
-								{req ? (
-									<Stack
-										direction="row"
-										spacing={1}
-										sx={{ alignItems: "center" }}
-									>
-										<Chip
-											size="small"
-											color="info"
-											label={
-												<>
-													requested <TimeAgo timestamp={req.requested_at} />
-												</>
-											}
-										/>
-										{isAdmin && (
+								{types.length === 0 ? (
+									<Tooltip title="This server hasn't registered any backup types yet.">
+										{/* span so the tooltip works on the disabled button */}
+										<span>
 											<Button
 												size="small"
-												color="error"
-												onClick={() => onCancel(m.id)}
-												disabled={cancel.pending}
+												variant="outlined"
+												startIcon={<BackupIcon />}
+												disabled
 											>
-												Cancel
+												Backup now
 											</Button>
-										)}
-									</Stack>
+										</span>
+									</Tooltip>
 								) : (
-									isAdmin && (
-										<Button
-											size="small"
-											variant="outlined"
-											startIcon={<BackupIcon />}
-											onClick={() => onRequest(m.id)}
-											disabled={requestNow.pending}
-										>
-											Backup now
-										</Button>
-									)
+									<Stack spacing={0.5} sx={{ alignItems: "flex-end" }}>
+										{types.map((t) => {
+											const req = pendingFor(m.id, t);
+											return (
+												<Stack
+													key={t}
+													direction="row"
+													spacing={1}
+													sx={{ alignItems: "center" }}
+												>
+													<Typography
+														variant="body2"
+														sx={{ fontFamily: "monospace" }}
+													>
+														{t}
+													</Typography>
+													{req ? (
+														<>
+															<Chip
+																size="small"
+																color="info"
+																label={
+																	<>
+																		requested{" "}
+																		<TimeAgo timestamp={req.requested_at} />
+																	</>
+																}
+															/>
+															{isAdmin && (
+																<Button
+																	size="small"
+																	color="error"
+																	onClick={() => onCancel(m.id, t)}
+																	disabled={cancel.pending}
+																>
+																	Cancel
+																</Button>
+															)}
+														</>
+													) : (
+														isAdmin && (
+															<Button
+																size="small"
+																variant="outlined"
+																startIcon={<BackupIcon />}
+																onClick={() => onRequest(m.id, t)}
+																disabled={requestNow.pending}
+															>
+																Backup now
+															</Button>
+														)
+													)}
+												</Stack>
+											);
+										})}
+									</Stack>
 								)}
 							</Stack>
 						);

@@ -2282,6 +2282,12 @@ export interface components {
             type: string;
         };
         BackupStatsView: {
+            /**
+             * @description Backup types each member server has advertised it can run (with their
+             *     enabled state), so the "back up now" panel can offer the right types per
+             *     server and grey out servers that have declared none.
+             */
+            capabilities: components["schemas"]["ServerBackupCapabilityView"][];
             pending_requests: components["schemas"]["PendingRequestRow"][];
             recent_maintenance: components["schemas"]["BackupMaintenanceRun"][];
             recent_runs: components["schemas"]["BackupRun"][];

@@ -247,6 +247,10 @@ pub struct BackupStatsView {
 	pub recent_runs: Vec<BackupRun>,
 	pub recent_maintenance: Vec<BackupMaintenanceRun>,
 	pub pending_requests: Vec<PendingRequestRow>,
+	/// Backup types each member server has advertised it can run (with their
+	/// enabled state), so the "back up now" panel can offer the right types per
+	/// server and grey out servers that have declared none.
+	pub capabilities: Vec<ServerBackupCapabilityView>,
 }
 
 /// One `(server, type)` backup capability and whether the operator has it
@@ -1079,9 +1083,10 @@ pub async fn stats(
 	let recent_maintenance =
 		BackupMaintenanceRun::list_for_group(&mut conn, args.server_group_id, RECENT_LIMIT).await?;
 
-	// Pending requests across the group's member servers.
+	// Pending requests + declared capabilities across the group's member servers.
 	let members = group.list_servers(&mut conn).await?;
 	let mut pending_requests = Vec::new();
+	let mut capabilities = Vec::new();
 	for server in &members {
 		for req in BackupRequest::pending_for_server(&mut conn, server.id).await? {
 			pending_requests.push(PendingRequestRow {
@@ -1092,6 +1097,13 @@ pub async fn stats(
 				requested_by: req.requested_by,
 			});
 		}
+		for cap in ServerBackupCapability::list_for_server(&mut conn, server.id).await? {
+			capabilities.push(ServerBackupCapabilityView {
+				server_id: cap.server_id,
+				r#type: cap.r#type,
+				enabled: cap.enabled,
+			});
+		}
 	}
 
 	Ok(Json(BackupStatsView {
@@ -1099,6 +1111,7 @@ pub async fn stats(
 		recent_runs,
 		recent_maintenance,
 		pending_requests,
+		capabilities,
 	}))
 }
 
