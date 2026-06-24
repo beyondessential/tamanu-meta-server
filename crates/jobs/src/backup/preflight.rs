@@ -2,15 +2,19 @@
 //! bucket/role — not the devices — and alerts (never gates readiness).
 //!
 //! - Shared, every ~minute: `sts:GetCallerIdentity` (IRSA web-identity valid?).
-//! - Per ready group, hourly (hash-jittered): assume the per-bucket role both
-//!   ways (plain backup + read-only restore session policy), each followed by a
-//!   read-only S3 no-op; and verify the bucket's Object-Lock is still ≥30-day
-//!   GOVERNANCE.
+//! - Per ready group, hourly (hash-jittered): assume the **maintenance** role
+//!   (what the backups pod actually uses) followed by a read-only S3 no-op, and
+//!   verify the bucket's Object-Lock is still ≥30-day GOVERNANCE.
+//!
+//! This runs as the pod's `canopy-jobs` identity, which the maintenance role
+//! trusts but the **device** role deliberately does not (the device role is
+//! reachable only from `canopy-issuer`/`canopy-private`). So the device-role
+//! (issuance) path is validated at onboarding by private-server's probe, not
+//! here; later drift surfaces as real device backups failing.
 //!
 //! Alerts go through the group-level path (`database::backup::alerts`), which
 //! bypasses per-server `is_monitored`. AWS calls are not unit-tested here (no
-//! live AWS in CI); the pure logic — the restore session policy and the
-//! Object-Lock assertion — is.
+//! live AWS in CI); the pure logic — the Object-Lock assertion — is.
 
 use std::time::Duration;
 
@@ -33,29 +37,6 @@ use tracing::{debug, error, warn};
 const TICK: Duration = Duration::from_secs(60);
 const DEEP_WINDOW: Duration = Duration::from_secs(3600);
 const MIN_LOCK_DAYS: i32 = 30;
-
-/// Build the read-only **restore** session policy (normative JSON from the
-/// plan): `GetObject` on the prefix, an *unconditioned* `GetBucketLocation`
-/// (the `s3:prefix` key isn't populated for it, so folding it under the prefix
-/// condition would silently deny it), and a prefix-conditioned `ListBucket`.
-fn restore_session_policy(bucket: &str, prefix: &str) -> String {
-	let object_arn = format!("arn:aws:s3:::{bucket}/{prefix}*");
-	let bucket_arn = format!("arn:aws:s3:::{bucket}");
-	serde_json::json!({
-		"Version": "2012-10-17",
-		"Statement": [
-			{ "Effect": "Allow", "Action": ["s3:GetObject"], "Resource": object_arn },
-			{ "Effect": "Allow", "Action": ["s3:GetBucketLocation"], "Resource": bucket_arn },
-			{
-				"Effect": "Allow",
-				"Action": ["s3:ListBucket"],
-				"Resource": bucket_arn,
-				"Condition": { "StringLike": { "s3:prefix": [format!("{prefix}*")] } }
-			}
-		]
-	})
-	.to_string()
-}
 
 /// Verdict of the Object-Lock check, given what `GetBucketObjectLockConfiguration`
 /// returned. `Ok(())` only when an enabled GOVERNANCE (or COMPLIANCE) lock with
@@ -113,53 +94,49 @@ where
 }
 
 async fn run_deep_check(aws: &Aws, cfg: &ServerGroupBackupConfig) -> Result<(), String> {
-	// Both purposes must mint working creds + pass a read-only no-op.
-	for restore in [false, true] {
-		let leg = if restore { "restore" } else { "backup" };
-		let mut assume = aws
-			.sts
-			.assume_role()
-			.role_arn(&cfg.target_role_arn)
-			.role_session_name(format!("canopy-preflight-{leg}"));
-		if restore {
-			assume = assume.policy(restore_session_policy(&cfg.bucket, &cfg.prefix));
-		}
-		let resp = assume
-			.send()
-			.await
-			.map_err(|e| format!("{leg}: AssumeRole failed: {}", aws_detail(&e)))?;
-		let c = resp
-			.credentials()
-			.ok_or_else(|| format!("{leg}: AssumeRole returned no credentials"))?;
-		let creds = aws_sdk_s3::config::Credentials::new(
-			c.access_key_id(),
-			c.secret_access_key(),
-			Some(c.session_token().to_string()),
-			None,
-			"canopy-preflight",
-		);
-		let mut s3b = aws_sdk_s3::config::Builder::from(&aws.config).credentials_provider(creds);
-		if let Some(region) = &cfg.region {
-			s3b = s3b.region(aws_sdk_s3::config::Region::new(region.clone()));
-		}
-		let s3 = aws_sdk_s3::Client::from_conf(s3b.build());
-
-		// Read-only no-op proving the creds work for this leg.
-		s3.get_bucket_location()
-			.bucket(&cfg.bucket)
-			.send()
-			.await
-			.map_err(|e| format!("{leg}: GetBucketLocation no-op failed: {}", aws_detail(&e)))?;
+	// Validate the pod's own (maintenance-role) access: assume it and pass a
+	// read-only S3 no-op. The device/issuance role is validated at onboarding by
+	// private-server — the pod's canopy-jobs identity can't assume it by design.
+	let resp = aws
+		.sts
+		.assume_role()
+		.role_arn(&cfg.maintenance_role_arn)
+		.role_session_name("canopy-preflight-maintenance")
+		.send()
+		.await
+		.map_err(|e| format!("AssumeRole (maintenance) failed: {}", aws_detail(&e)))?;
+	let c = resp
+		.credentials()
+		.ok_or_else(|| "AssumeRole returned no credentials".to_string())?;
+	let creds = aws_sdk_s3::config::Credentials::new(
+		c.access_key_id(),
+		c.secret_access_key(),
+		Some(c.session_token().to_string()),
+		None,
+		"canopy-preflight",
+	);
+	let mut s3b = aws_sdk_s3::config::Builder::from(&aws.config).credentials_provider(creds);
+	if let Some(region) = &cfg.region {
+		s3b = s3b.region(aws_sdk_s3::config::Region::new(region.clone()));
 	}
+	let s3 = aws_sdk_s3::Client::from_conf(s3b.build());
+
+	// Read-only no-op proving the creds work.
+	s3.get_bucket_location()
+		.bucket(&cfg.bucket)
+		.send()
+		.await
+		.map_err(|e| format!("GetBucketLocation no-op failed: {}", aws_detail(&e)))?;
 	Ok(())
 }
 
 async fn check_object_lock(aws: &Aws, cfg: &ServerGroupBackupConfig) -> Result<(), String> {
-	// Assume the (backup) role and read the lock config.
+	// Assume the maintenance role (the pod's identity can assume it; it has the
+	// S3 read perms) and read the lock config.
 	let resp = aws
 		.sts
 		.assume_role()
-		.role_arn(&cfg.target_role_arn)
+		.role_arn(&cfg.maintenance_role_arn)
 		.role_session_name("canopy-preflight-lock")
 		.send()
 		.await
@@ -205,7 +182,7 @@ async fn check_object_lock(aws: &Aws, cfg: &ServerGroupBackupConfig) -> Result<(
 	validate_object_lock(mode, days)
 }
 
-/// One full per-group deep pass: both-purpose issuance + object-lock, each
+/// One full per-group deep pass: maintenance-role access + object-lock, each
 /// raising/recovering its own group-level alert.
 async fn deep_check_group(
 	db: &mut diesel_async::AsyncPgConnection,
@@ -220,7 +197,7 @@ async fn deep_check_group(
 				refs::PREFLIGHT_ASSUME,
 				Severity::Info,
 				None,
-				"issuance preflight ok",
+				"maintenance-role access ok",
 				false,
 			)
 			.await;
@@ -232,7 +209,7 @@ async fn deep_check_group(
 				cfg.group_id,
 				refs::PREFLIGHT_ASSUME,
 				Severity::Error,
-				Some("backup credential preflight failed"),
+				Some("backup maintenance-role access failed"),
 				&msg,
 				true,
 			)
@@ -349,30 +326,6 @@ pub fn spawn() -> JoinHandle<()> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-
-	#[test]
-	fn restore_policy_has_unconditioned_get_bucket_location() {
-		let p = restore_session_policy("bes-kopia-backups-x", "");
-		let v: serde_json::Value = serde_json::from_str(&p).unwrap();
-		let stmts = v["Statement"].as_array().unwrap();
-		// GetBucketLocation must be its own statement with no Condition.
-		let gbl = stmts
-			.iter()
-			.find(|s| {
-				s["Action"]
-					.as_array()
-					.unwrap()
-					.iter()
-					.any(|a| a == "s3:GetBucketLocation")
-			})
-			.expect("GetBucketLocation present");
-		assert!(
-			gbl.get("Condition").is_none(),
-			"GetBucketLocation must be unconditioned"
-		);
-		// No mutation actions in the restore policy.
-		assert!(!p.contains("PutObject") && !p.contains("DeleteObject"));
-	}
 
 	#[test]
 	fn object_lock_validation() {
