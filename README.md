@@ -175,46 +175,13 @@ In production, the header should be set from a client certificate, as terminated
 - Nginx: use the `$ssl_client_escaped_cert` variable.
 - Caddy: use the `{http.request.tls.client.certificate_pem}` placeholder.
 
-### MCP query interface
-
-The `private-server` exposes a read-only [Model Context Protocol](https://modelcontextprotocol.io)
-endpoint at `/api/mcp`, so AI agents (Claude Code, Claude Desktop, etc.) with tailnet access can
-query the fleet. It is part of the operator surface — available to any authenticated tailnet user,
-not just admins — and never exposed on the device-facing `public-server`. Every tool is read-only;
-nothing it offers changes the fleet.
-
-Available tools:
-
-- `find_servers` / `get_server` — locate servers (by name, host, id, kind, rank, or group) and read
-  full detail (latest status, version, health, platform, owning group, backups).
-- `find_groups` / `get_group` — locate groups and read detail (members, backup config, schedules,
-  repo stats, recent backup/maintenance activity).
-- `list_versions` / `get_version` — known Tamanu versions, known issues, available updates, and
-  which servers run each.
-- `fleet_summary` — counts by kind/rank, version distribution, and health/backup rollups.
-- `find_backup_problems` — overdue/never-reported backups, provisioning errors, recent failed runs,
-  and stuck maintenance, each with a severity.
-
-#### Connecting
-
-In production the endpoint is behind the Tailscale ingress, which injects the caller's identity, so
-point your client at the private-server's tailnet URL with `/api/mcp` appended.
-
-For local development, run the API (`just watch-private-api`, which binds `127.0.0.1:8081`). Debug
-builds bypass Tailscale auth, so no headers are needed.
+### MCP
 
 Claude Code:
 
 ```console
-$ claude mcp add --transport http canopy-local http://127.0.0.1:8081/api/mcp
+$ claude mcp add --transport http canopy https://canopy.tail53aef.ts.net/api/mcp
 ```
 
 Then ask it things like "list the servers in group X" or "which backups are overdue".
 
-To browse the tools and call them by hand, use the MCP Inspector:
-
-```console
-$ npx @modelcontextprotocol/inspector
-```
-
-and connect it to `http://127.0.0.1:8081/api/mcp` (transport: Streamable HTTP).
