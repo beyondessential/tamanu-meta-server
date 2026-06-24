@@ -174,3 +174,14 @@ In production, the header should be set from a client certificate, as terminated
 
 - Nginx: use the `$ssl_client_escaped_cert` variable.
 - Caddy: use the `{http.request.tls.client.certificate_pem}` placeholder.
+
+### MCP
+
+Claude Code:
+
+```console
+$ claude mcp add --transport http canopy https://canopy.tail53aef.ts.net/api/mcp
+```
+
+Then ask it things like "list the servers in group X" or "which backups are overdue".
+
