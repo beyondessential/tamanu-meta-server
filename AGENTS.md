@@ -100,7 +100,7 @@ When adding or changing a UI feature, add Playwright coverage for it in `private
 - Always check: `just check` for basic compilation
 - Run full test suite: `just test`
 - Run specific tests: `just test-name <test_name>`
-- Verify no compilation warnings in tests and main code
+- Verify no compilation warnings in tests and main code, and that `cargo fmt` has been run
 
 ### Tests run on a throwaway RAM-backed Postgres by default
 Each test creates and drops its own database (and runs every migration), and

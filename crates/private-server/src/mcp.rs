@@ -369,7 +369,9 @@ impl CanopyMcp {
 		servers.retain(|s| {
 			kind.as_ref().is_none_or(|k| &s.kind == k)
 				&& rank.as_ref().is_none_or(|r| s.rank.as_ref() == Some(r))
-				&& group.as_ref().is_none_or(|g| s.group_id.as_ref() == Some(g))
+				&& group
+					.as_ref()
+					.is_none_or(|g| s.group_id.as_ref() == Some(g))
 				&& q.as_deref().is_none_or(|q| server_matches(s, q))
 		});
 
@@ -481,8 +483,12 @@ impl CanopyMcp {
 			group_id: server.group_id,
 			group_name: group.as_ref().map(|g| g.name.clone()),
 			sibling_count,
-			reachability: latest.as_ref().map_or(ShortStatus::Gone, |s| s.short_status()),
-			health: latest.as_ref().map_or(HealthState::default(), |s| s.health_state()),
+			reachability: latest
+				.as_ref()
+				.map_or(ShortStatus::Gone, |s| s.short_status()),
+			health: latest
+				.as_ref()
+				.map_or(HealthState::default(), |s| s.health_state()),
 			latest_status,
 			backups,
 		})
@@ -654,10 +660,9 @@ impl CanopyMcp {
 		Parameters(args): Parameters<VersionArgs>,
 	) -> Result<CallToolResult, McpError> {
 		let mut conn = self.conn().await?;
-		let vs = args
-			.version
-			.parse::<VersionStr>()
-			.map_err(|_| McpError::invalid_params(format!("invalid version: {}", args.version), None))?;
+		let vs = args.version.parse::<VersionStr>().map_err(|_| {
+			McpError::invalid_params(format!("invalid version: {}", args.version), None)
+		})?;
 
 		let Ok(version) = Version::get_by_version(&mut conn, vs.clone()).await else {
 			return Ok(not_found(format!("no version {vs}")));
@@ -805,7 +810,10 @@ impl CanopyMcp {
 					group_id: row.group_id,
 					server_id: Some(row.server_id),
 					r#type: Some(row.r#type.to_string()),
-					detail: format!("no successful {} backup within its grace window", row.r#type),
+					detail: format!(
+						"no successful {} backup within its grace window",
+						row.r#type
+					),
 					since: row.last_success_at,
 				}),
 				StalenessVerdict::Never => problems.push(BackupProblem {
@@ -874,7 +882,10 @@ impl CanopyMcp {
 						group_id: c.group_id,
 						server_id: None,
 						r#type: None,
-						detail: format!("{} maintenance still running since {}", m.kind, m.started_at),
+						detail: format!(
+							"{} maintenance still running since {}",
+							m.kind, m.started_at
+						),
 						since: Some(m.started_at),
 					});
 				}
@@ -889,9 +900,7 @@ impl CanopyMcp {
 }
 
 impl CanopyMcp {
-	async fn conn(
-		&self,
-	) -> Result<impl std::ops::DerefMut<Target = AsyncPgConnection>, McpError> {
+	async fn conn(&self) -> Result<impl std::ops::DerefMut<Target = AsyncPgConnection>, McpError> {
 		self.state.db.get().await.map_err(mcp_err)
 	}
 
@@ -902,7 +911,9 @@ impl CanopyMcp {
 	) -> Result<HashMap<String, u32>, McpError> {
 		let servers = Server::get_all(conn, 0, None).await.map_err(mcp_err)?;
 		let ids: Vec<Uuid> = servers.iter().map(|s| s.id).collect();
-		let statuses = Status::latest_for_servers(conn, &ids).await.map_err(mcp_err)?;
+		let statuses = Status::latest_for_servers(conn, &ids)
+			.await
+			.map_err(mcp_err)?;
 		let mut adoption: HashMap<String, u32> = HashMap::new();
 		for st in &statuses {
 			if let Some(v) = &st.version {
@@ -951,9 +962,10 @@ fn summarize(s: &Server, st: Option<&Status>, group_name: Option<String>) -> Ser
 }
 
 fn server_matches(s: &Server, q: &str) -> bool {
-	s.name.as_deref().is_some_and(|n| n.to_lowercase().contains(q))
-		|| s
-			.host
+	s.name
+		.as_deref()
+		.is_some_and(|n| n.to_lowercase().contains(q))
+		|| s.host
 			.as_ref()
 			.is_some_and(|h| h.0.to_string().to_lowercase().contains(q))
 		|| s.id.to_string().contains(q)
@@ -967,10 +979,7 @@ fn first_line(s: &str) -> String {
 	s.lines().next().unwrap_or("").trim().to_string()
 }
 
-fn parse_opt<T: std::str::FromStr>(
-	v: &Option<String>,
-	field: &str,
-) -> Result<Option<T>, McpError> {
+fn parse_opt<T: std::str::FromStr>(v: &Option<String>, field: &str) -> Result<Option<T>, McpError> {
 	match v.as_deref() {
 		Some(s) => s
 			.parse::<T>()
