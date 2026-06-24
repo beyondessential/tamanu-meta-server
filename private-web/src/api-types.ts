@@ -2584,6 +2584,13 @@ export interface components {
             effective_interval?: number | null;
             effective_retention: components["schemas"]["RetentionPolicy"];
             has_override: boolean;
+            /**
+             * Format: date-time
+             * @description When the next scheduled backup of this type is expected: the group's most
+             *     recent successful backup of the type plus the interval — or "now" if the
+             *     type is scheduled but has never succeeded yet. Null for manual-only types.
+             */
+            next_run_at?: string | null;
             type: string;
         };
         /**

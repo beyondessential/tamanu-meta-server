@@ -461,6 +461,43 @@ async fn stats_includes_runs_and_pending_requests() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn group_schedules_reports_next_run_from_last_success_plus_interval() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group_id = seed_group(&mut conn).await;
+		let device_id = Uuid::new_v4();
+		let server_id = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO devices (id, role) VALUES ('{device_id}', 'server');
+			 INSERT INTO servers (id, host, kind, group_id, device_id) VALUES \
+				('{server_id}', 'https://e.test', 'central', '{group_id}', '{device_id}');
+			 INSERT INTO server_backup_capabilities (server_id, type, enabled) VALUES \
+				('{server_id}', 'tamanu-postgres', true);
+			 -- A 1h scheduled interval and a successful backup at a known time.
+			 INSERT INTO server_group_backup_schedule (group_id, type, expected_interval) VALUES \
+				('{group_id}', 'tamanu-postgres', INTERVAL '3600 seconds');
+			 INSERT INTO backup_runs (id, device_id, group_id, server_id, type, purpose, outcome, reported_at) VALUES \
+				('{}', '{device_id}', '{group_id}', '{server_id}', 'tamanu-postgres', 'backup', 'success', '2026-06-01T00:00:00Z');",
+			Uuid::new_v4()
+		))
+		.await
+		.expect("seed schedule + run");
+
+		let resp = private
+			.post("/api/backups/group_schedules")
+			.json(&serde_json::json!({ "server_group_id": group_id }))
+			.await;
+		resp.assert_status_ok();
+		let body: serde_json::Value = resp.json();
+		let row = &body[0];
+		assert_eq!(row["type"], "tamanu-postgres");
+		assert_eq!(row["effective_interval"], 3600);
+		// next run = last success (00:00:00Z) + 1h.
+		assert_eq!(row["next_run_at"], "2026-06-01T01:00:00Z");
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn update_region_and_delete() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let group_id = seed_group(&mut conn).await;
