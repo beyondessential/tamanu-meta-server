@@ -280,7 +280,16 @@ async fn probe_aws(
 	}
 
 	// Assume the maintenance role (full read) for the inspect.
-	let s3 = match assume_s3(sdk, &sts, maintenance_role_arn, region, "canopy-probe", None).await {
+	let s3 = match assume_s3(
+		sdk,
+		&sts,
+		maintenance_role_arn,
+		region,
+		"canopy-probe",
+		None,
+	)
+	.await
+	{
 		Ok(s3) => s3,
 		Err(e) => return inaccessible(e),
 	};
