@@ -15,6 +15,8 @@
 use std::time::Duration;
 
 use aws_sdk_s3::types::ObjectLockRetentionMode;
+use aws_sdk_sts::error::{ProvideErrorMetadata, SdkError};
+use aws_sdk_sts::operation::RequestId;
 use commons_servers::backup_jobs::slot_is_due;
 use commons_types::issue::Severity;
 use database::{
@@ -86,6 +88,30 @@ struct Aws {
 	config: aws_config::SdkConfig,
 }
 
+/// Human-readable detail for an AWS SDK error. The bare `SdkError` `Display` is
+/// just "service error" (and the structured log shows nothing more), so pull out
+/// the service error code + message + request id — that's what tells AccessDenied
+/// from throttling from an expired token. Falls back to the `Display` chain for
+/// non-service errors (timeouts, dispatch failures).
+fn aws_detail<E, R>(e: &SdkError<E, R>) -> String
+where
+	E: ProvideErrorMetadata + std::error::Error,
+	SdkError<E, R>: RequestId,
+{
+	let rid = e
+		.request_id()
+		.map(|r| format!(" (request id {r})"))
+		.unwrap_or_default();
+	match e.as_service_error() {
+		Some(svc) => format!(
+			"{}: {}{rid}",
+			svc.code().unwrap_or("Unknown"),
+			svc.message().unwrap_or("(no message)"),
+		),
+		None => format!("{e}{rid}"),
+	}
+}
+
 async fn run_deep_check(aws: &Aws, cfg: &ServerGroupBackupConfig) -> Result<(), String> {
 	// Both purposes must mint working creds + pass a read-only no-op.
 	for restore in [false, true] {
@@ -101,7 +127,7 @@ async fn run_deep_check(aws: &Aws, cfg: &ServerGroupBackupConfig) -> Result<(), 
 		let resp = assume
 			.send()
 			.await
-			.map_err(|e| format!("{leg}: AssumeRole failed: {e}"))?;
+			.map_err(|e| format!("{leg}: AssumeRole failed: {}", aws_detail(&e)))?;
 		let c = resp
 			.credentials()
 			.ok_or_else(|| format!("{leg}: AssumeRole returned no credentials"))?;
@@ -123,7 +149,7 @@ async fn run_deep_check(aws: &Aws, cfg: &ServerGroupBackupConfig) -> Result<(), 
 			.bucket(&cfg.bucket)
 			.send()
 			.await
-			.map_err(|e| format!("{leg}: GetBucketLocation no-op failed: {e}"))?;
+			.map_err(|e| format!("{leg}: GetBucketLocation no-op failed: {}", aws_detail(&e)))?;
 	}
 	Ok(())
 }
@@ -137,7 +163,12 @@ async fn check_object_lock(aws: &Aws, cfg: &ServerGroupBackupConfig) -> Result<(
 		.role_session_name("canopy-preflight-lock")
 		.send()
 		.await
-		.map_err(|e| format!("AssumeRole for object-lock check failed: {e}"))?;
+		.map_err(|e| {
+			format!(
+				"AssumeRole for object-lock check failed: {}",
+				aws_detail(&e)
+			)
+		})?;
 	let c = resp
 		.credentials()
 		.ok_or_else(|| "AssumeRole returned no credentials".to_string())?;
@@ -159,7 +190,12 @@ async fn check_object_lock(aws: &Aws, cfg: &ServerGroupBackupConfig) -> Result<(
 		.bucket(&cfg.bucket)
 		.send()
 		.await
-		.map_err(|e| format!("GetBucketObjectLockConfiguration failed: {e}"))?;
+		.map_err(|e| {
+			format!(
+				"GetBucketObjectLockConfiguration failed: {}",
+				aws_detail(&e)
+			)
+		})?;
 	let rule = resp
 		.object_lock_configuration()
 		.and_then(|c| c.rule())
@@ -277,7 +313,7 @@ pub fn spawn() -> JoinHandle<()> {
 						.await;
 					}
 					Err(e) => {
-						let msg = format!("sts:GetCallerIdentity failed: {e}");
+						let msg = format!("sts:GetCallerIdentity failed: {}", aws_detail(e));
 						warn!("preflight: {msg}");
 						let _ = raise_group_event(
 							&mut db,
