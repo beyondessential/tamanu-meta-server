@@ -163,7 +163,12 @@ async fn check_object_lock(aws: &Aws, cfg: &ServerGroupBackupConfig) -> Result<(
 		.role_session_name("canopy-preflight-lock")
 		.send()
 		.await
-		.map_err(|e| format!("AssumeRole for object-lock check failed: {}", aws_detail(&e)))?;
+		.map_err(|e| {
+			format!(
+				"AssumeRole for object-lock check failed: {}",
+				aws_detail(&e)
+			)
+		})?;
 	let c = resp
 		.credentials()
 		.ok_or_else(|| "AssumeRole returned no credentials".to_string())?;
@@ -185,7 +190,12 @@ async fn check_object_lock(aws: &Aws, cfg: &ServerGroupBackupConfig) -> Result<(
 		.bucket(&cfg.bucket)
 		.send()
 		.await
-		.map_err(|e| format!("GetBucketObjectLockConfiguration failed: {}", aws_detail(&e)))?;
+		.map_err(|e| {
+			format!(
+				"GetBucketObjectLockConfiguration failed: {}",
+				aws_detail(&e)
+			)
+		})?;
 	let rule = resp
 		.object_lock_configuration()
 		.and_then(|c| c.rule())
