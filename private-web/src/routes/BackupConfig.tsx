@@ -100,6 +100,7 @@ function ConfigForm({
 				prefix,
 				region: region.trim() === "" ? null : region,
 				maintenance_role_arn: maintenanceRoleArn,
+				target_role_arn: roleArn,
 			})) as ProbeResult;
 			setProbe(result);
 			setStep(1);

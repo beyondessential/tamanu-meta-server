@@ -3156,6 +3156,12 @@ export interface components {
             maintenance_role_arn: string;
             prefix?: string;
             region?: string | null;
+            /**
+             * @description Device/issuance role to also validate (assume both ways + read-only no-op).
+             *     Optional; the wizard supplies it so a device-role trust gap is caught before
+             *     saving rather than only when a device first backs up.
+             */
+            target_role_arn?: string | null;
         };
         /**
          * @description Inspect-probe result for the wizard: what's at `bucket/prefix`, plus whether

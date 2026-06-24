@@ -7856,6 +7856,13 @@
               "string",
               "null"
             ]
+          },
+          "target_role_arn": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Device/issuance role to also validate (assume both ways + read-only no-op).\nOptional; the wizard supplies it so a device-role trust gap is caught before\nsaving rather than only when a device first backs up."
           }
         }
       },

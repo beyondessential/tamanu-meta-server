@@ -581,6 +581,7 @@ pub async fn upsert(
 					&args.prefix,
 					args.region.as_deref(),
 					&args.maintenance_role_arn,
+					Some(&args.target_role_arn),
 				)
 				.await?;
 			match probe.state {
@@ -658,6 +659,11 @@ pub struct ProbeArgs {
 	pub region: Option<String>,
 	/// Maintenance role to assume for the inspect (full read).
 	pub maintenance_role_arn: String,
+	/// Device/issuance role to also validate (assume both ways + read-only no-op).
+	/// Optional; the wizard supplies it so a device-role trust gap is caught before
+	/// saving rather than only when a device first backs up.
+	#[serde(default)]
+	pub target_role_arn: Option<String>,
 }
 
 /// Inspect-probe result for the wizard: what's at `bucket/prefix`, plus whether
@@ -698,6 +704,7 @@ pub async fn probe(
 			&args.prefix,
 			args.region.as_deref(),
 			&args.maintenance_role_arn,
+			args.target_role_arn.as_deref(),
 		)
 		.await?;
 
