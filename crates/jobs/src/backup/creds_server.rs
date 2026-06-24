@@ -21,13 +21,19 @@
 
 use std::{
 	collections::HashMap,
+	future::Future,
 	net::{Ipv4Addr, SocketAddr},
+	pin::Pin,
 	sync::{Arc, Mutex},
+	time::{Duration, SystemTime},
 };
 
 use anyhow::{Context, Result};
 use aws_config::{BehaviorVersion, sts::AssumeRoleProvider};
-use aws_sdk_sts::config::{ProvideCredentials, Region, SharedCredentialsProvider};
+use aws_sdk_sts::config::{Credentials, ProvideCredentials, Region, SharedCredentialsProvider};
+use bestool_kopia::proxy::{
+	self, BoxError, CredentialProvider, Credentials as ProxyCredentials, RunningProxy, S3ProxyConfig,
+};
 use axum::{
 	Json, Router,
 	extract::State,
@@ -134,6 +140,83 @@ impl CredsServer {
 			access_key_id: creds.access_key_id().to_string(),
 			secret_access_key: creds.secret_access_key().to_string(),
 			session_token: creds.session_token().unwrap_or_default().to_string(),
+		})
+	}
+
+	/// Spawn a loopback [SigV4 re-signing proxy](bestool_kopia::proxy) for a long
+	/// kopia op (maintenance), fronting `s3.<region>.amazonaws.com`. kopia connects
+	/// to the returned proxy's [`endpoint`](RunningProxy::endpoint) with dummy keys;
+	/// the proxy re-signs each request with credentials assumed for `role_arn`,
+	/// refreshed ahead of expiry — so the op isn't capped at the ~1h
+	/// assumed-session lifetime the static [`resolve`](Self::resolve) path is. Drop
+	/// the handle (or call [`shutdown`](RunningProxy::shutdown)) when the op ends.
+	pub async fn spawn_maintenance_proxy(
+		&self,
+		role_arn: &str,
+		region: &str,
+	) -> Result<RunningProxy> {
+		let provider = SharedCredentialsProvider::new(
+			AssumeRoleProvider::builder(role_arn)
+				.session_name("canopy-maintenance")
+				.region(Region::new(region.to_string()))
+				.configure(&self.sdk_config)
+				.build()
+				.await,
+		);
+		let provider: Arc<dyn CredentialProvider> = Arc::new(RefreshingAssumeRole {
+			provider,
+			cached: tokio::sync::Mutex::new(None),
+		});
+		let config = S3ProxyConfig {
+			upstream: format!("https://s3.{region}.amazonaws.com"),
+			upstream_host: format!("s3.{region}.amazonaws.com"),
+			region: region.to_string(),
+		};
+		proxy::spawn(config, provider)
+			.await
+			.context("spawning the s3 re-signing proxy for maintenance")
+	}
+}
+
+/// Refresh the assumed session this far ahead of its expiry, so the proxy never
+/// signs a request with credentials that lapse mid-flight.
+const PROXY_CREDS_REFRESH_SKEW: Duration = Duration::from_secs(300);
+
+/// A [`CredentialProvider`] for the proxy that assumes a role via the SDK and
+/// caches the session, re-assuming a few minutes before expiry. The proxy calls
+/// it once per request, so it must be cheap when the cached session is still
+/// valid; the SDK refreshes the base (IRSA) identity under the hood, and this
+/// cache refreshes the assumed session, so a long op keeps signing with live
+/// credentials.
+struct RefreshingAssumeRole {
+	provider: SharedCredentialsProvider,
+	cached: tokio::sync::Mutex<Option<Credentials>>,
+}
+
+impl CredentialProvider for RefreshingAssumeRole {
+	fn credentials(
+		&self,
+	) -> Pin<Box<dyn Future<Output = std::result::Result<ProxyCredentials, BoxError>> + Send + '_>> {
+		Box::pin(async move {
+			let mut cached = self.cached.lock().await;
+			let still_fresh = cached.as_ref().is_some_and(|c| match c.expiry() {
+				Some(exp) => exp > SystemTime::now() + PROXY_CREDS_REFRESH_SKEW,
+				None => true, // no expiry (shouldn't happen for STS) → treat as fresh
+			});
+			if !still_fresh {
+				let fresh = self
+					.provider
+					.provide_credentials()
+					.await
+					.map_err(|e| Box::new(e) as BoxError)?;
+				*cached = Some(fresh);
+			}
+			let c = cached.as_ref().expect("populated just above");
+			Ok(ProxyCredentials {
+				access_key: c.access_key_id().to_string(),
+				secret_key: c.secret_access_key().to_string(),
+				session_token: c.session_token().map(str::to_string),
+			})
 		})
 	}
 }

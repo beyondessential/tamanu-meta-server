@@ -17,6 +17,7 @@ aws-sdk-cloudwatch.workspace = true
 aws-sdk-s3.workspace = true
 aws-sdk-sts.workspace = true
 axum.workspace = true
+bestool-kopia.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
 commons-errors = { path = "../commons-errors" }
 commons-servers = { path = "../commons-servers" }

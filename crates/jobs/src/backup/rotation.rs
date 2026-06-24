@@ -49,6 +49,7 @@ fn kopia_env(
 		session_token: creds.session_token.clone(),
 		region: config.region.clone(),
 		password,
+		proxy_endpoint: None,
 	}
 }
 

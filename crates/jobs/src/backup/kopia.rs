@@ -11,13 +11,22 @@
 //!
 //! ## Credentials
 //!
-//! The pod runs as the shared `canopy-jobs` IRSA identity. kopia's S3 backend
-//! gets per-op creds for the group's **maintenance** role by polling the
-//! loopback container-credentials endpoint ([`super::creds_server`]) — minio-go
-//! re-polls before expiry, so a run isn't capped at the 1h chained-session
-//! limit. The per-op env (`AWS_CONTAINER_CREDENTIALS_FULL_URI` + token, with the
-//! pod's web-identity vars scrubbed) plus `KOPIA_PASSWORD` is carried by
-//! [`KopiaEnv`].
+//! The pod runs as the shared `canopy-jobs` IRSA identity. For an op, Canopy
+//! assumes the group's **maintenance** role and gives kopia's S3 backend its
+//! credentials one of two ways, both carried by [`KopiaEnv`] (which also carries
+//! `KOPIA_PASSWORD`):
+//!
+//! - **Short ops** (init, inspection, rotation) take the assumed role's static
+//!   credentials via `AWS_*` env. These are ~1h-lived, fine for a short op.
+//! - **Long maintenance** is routed through the bestool-kopia SigV4 re-signing
+//!   proxy ([`super::creds_server::CredsServer::spawn_maintenance_proxy`]): kopia
+//!   connects to a loopback endpoint with dummy keys (`proxy_endpoint` set) and
+//!   the proxy re-signs each request with freshly-refreshed credentials, so the
+//!   run isn't capped at the assumed-session lifetime (maintenance can exceed an
+//!   hour). See the S3P spec.
+//!
+//! Either way the pod's own IRSA / container-creds env vars are scrubbed off the
+//! kopia subprocess so they can't shadow the per-op credentials.
 
 use std::collections::BTreeMap;
 use std::process::Output;
@@ -40,37 +49,49 @@ pub const MAINTENANCE_HOST: &str = "canopy-maintenance";
 // ===========================================================================
 
 /// The per-op environment applied to every kopia [`Command`]. kopia's S3 backend
-/// (minio-go) gets its AWS creds by polling our loopback container-credentials
-/// endpoint (`AWS_CONTAINER_CREDENTIALS_FULL_URI` + a raw `Authorization` token),
-/// which mints + refreshes the group's maintenance-role session. See
-/// [`super::creds_server`].
+/// (minio-go) reads its AWS creds from `AWS_*` env. For short ops these are the
+/// group's assumed-role static creds; for long maintenance they're dummy keys and
+/// the request is re-signed by the proxy (`proxy_endpoint`). `KOPIA_PASSWORD`
+/// carries the repo passphrase.
 #[derive(Debug, Clone)]
 pub struct KopiaEnv {
-	/// `AWS_ACCESS_KEY_ID` — assumed-role static creds (kopia's S3 connector
-	/// requires real keys; it can't use the container-creds endpoint).
+	/// `AWS_ACCESS_KEY_ID` — the assumed role's static key for direct ops, or a
+	/// dummy value when `proxy_endpoint` is set (the proxy holds the real creds).
 	pub access_key_id: String,
-	/// `AWS_SECRET_ACCESS_KEY`.
+	/// `AWS_SECRET_ACCESS_KEY` (real, or dummy under the proxy).
 	pub secret_access_key: String,
-	/// `AWS_SESSION_TOKEN` (assumed-role creds are always session creds).
+	/// `AWS_SESSION_TOKEN`. Empty under the proxy (dummy creds aren't STS); set
+	/// for direct assumed-role creds. An empty value is not exported.
 	pub session_token: String,
 	/// The group's region (`AWS_REGION`), if set.
 	pub region: Option<String>,
 	/// The repo passphrase, read from the group's k8s Secret (`KOPIA_PASSWORD`).
 	pub password: String,
+	/// When set, kopia's S3 backend is pointed at this loopback proxy endpoint
+	/// (`host:port`) with TLS disabled, and the credentials above are meaningless
+	/// dummies — the [SigV4 re-signing proxy](super::creds_server) holds and
+	/// refreshes the real credentials. When `None`, kopia talks to S3 directly
+	/// with the static creds above.
+	pub proxy_endpoint: Option<String>,
 }
 
 impl KopiaEnv {
 	/// Apply the per-op env to a `kopia` Command. kopia 0.23.1's `s3` connector
-	/// requires real credentials (its CLI demands `--access-key`, defaulting from
-	/// `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_SESSION_TOKEN`) — it does
-	/// **not** honor `AWS_CONTAINER_CREDENTIALS_FULL_URI`. So pass the assumed-role
-	/// static creds via those env vars, and **scrub** the IRSA / container-creds
-	/// sources the pod injects so they can't shadow them in minio-go's chain.
+	/// requires credentials at parse time (its CLI demands `--access-key`,
+	/// defaulting from `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/
+	/// `AWS_SESSION_TOKEN`) — it does **not** honor the container-creds endpoint.
+	/// So pass creds via those env vars (real for direct ops, dummy under the
+	/// proxy), and **scrub** the IRSA / container-creds sources the pod injects so
+	/// they can't shadow them in minio-go's chain.
 	fn apply(&self, cmd: &mut Command) {
 		cmd.env("KOPIA_PASSWORD", &self.password);
 		cmd.env("AWS_ACCESS_KEY_ID", &self.access_key_id);
 		cmd.env("AWS_SECRET_ACCESS_KEY", &self.secret_access_key);
-		cmd.env("AWS_SESSION_TOKEN", &self.session_token);
+		if self.session_token.is_empty() {
+			cmd.env_remove("AWS_SESSION_TOKEN");
+		} else {
+			cmd.env("AWS_SESSION_TOKEN", &self.session_token);
+		}
 		for shadowing in [
 			"AWS_WEB_IDENTITY_TOKEN_FILE",
 			"AWS_ROLE_ARN",
@@ -84,6 +105,15 @@ impl KopiaEnv {
 		if let Some(region) = &self.region {
 			cmd.env("AWS_REGION", region);
 			cmd.env("AWS_DEFAULT_REGION", region);
+		}
+	}
+
+	/// The extra `s3` connector flags for the proxy, when one is in use:
+	/// `--endpoint <host:port> --disable-tls`. Empty for the direct path.
+	fn s3_endpoint_flags(&self) -> Vec<&str> {
+		match &self.proxy_endpoint {
+			Some(ep) => vec!["--endpoint", ep.as_str(), "--disable-tls"],
+			None => Vec::new(),
 		}
 	}
 }
@@ -356,26 +386,25 @@ fn short_stderr(stderr: &[u8]) -> String {
 /// IS the maintenance owner (required for `maintenance run`; harmless for
 /// read-only inspect).
 pub async fn connect(env: &KopiaEnv, bucket: &str, prefix: &str, region: &str) -> Result<()> {
-	run_kopia_ok(
-		env,
-		&[
-			"repository",
-			"connect",
-			"s3",
-			"--bucket",
-			bucket,
-			"--prefix",
-			prefix,
-			"--region",
-			region,
-			"--override-username",
-			MAINTENANCE_USER,
-			"--override-hostname",
-			MAINTENANCE_HOST,
-		],
-	)
-	.await
-	.context("cannot connect to repository")?;
+	let mut args = vec![
+		"repository",
+		"connect",
+		"s3",
+		"--bucket",
+		bucket,
+		"--prefix",
+		prefix,
+		"--region",
+		region,
+		"--override-username",
+		MAINTENANCE_USER,
+		"--override-hostname",
+		MAINTENANCE_HOST,
+	];
+	args.extend(env.s3_endpoint_flags());
+	run_kopia_ok(env, &args)
+		.await
+		.context("cannot connect to repository")?;
 	Ok(())
 }
 
@@ -464,21 +493,19 @@ pub async fn run_init(
 	create_new: bool,
 ) -> Result<()> {
 	if create_new {
-		let create = run_kopia(
-			env,
-			&[
-				"repository",
-				"create",
-				"s3",
-				"--bucket",
-				bucket,
-				"--prefix",
-				prefix,
-				"--region",
-				region,
-			],
-		)
-		.await?;
+		let mut create_args = vec![
+			"repository",
+			"create",
+			"s3",
+			"--bucket",
+			bucket,
+			"--prefix",
+			prefix,
+			"--region",
+			region,
+		];
+		create_args.extend(env.s3_endpoint_flags());
+		let create = run_kopia(env, &create_args).await?;
 		if !create.status.success() {
 			connect(env, bucket, prefix, region)
 				.await

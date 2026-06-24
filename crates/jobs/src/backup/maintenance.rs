@@ -10,10 +10,11 @@
 //! concurrency.
 //!
 //! Retention is resolved per-`(group, type)` (schedule override → type default →
-//! org floor) and applied per source by the kopia layer. Canopy assumes the
-//! group's role and passes the resulting (static, ~1h) credentials to the kopia
-//! subprocess via `AWS_*` env (kopia's S3 connector requires real keys); it reads
-//! `KOPIA_PASSWORD` from the group's k8s Secret.
+//! org floor) and applied per source by the kopia layer. Init uses the group
+//! role's static credentials directly; maintenance — which can outlive a single
+//! assumed-role session — is driven through the SigV4 re-signing proxy (see
+//! [`super::creds_server::CredsServer::spawn_maintenance_proxy`] and the kopia
+//! layer). `KOPIA_PASSWORD` is read from the group's k8s Secret.
 
 use std::{collections::HashSet, time::Duration};
 
@@ -70,7 +71,7 @@ async fn retention_map_for_group(
 }
 
 /// Build the per-op kopia env from the assumed-role static creds, the group's
-/// region, and its repo password.
+/// region, and its repo password. The direct (non-proxy) path — used by init.
 fn kopia_env(
 	creds: &ResolvedCreds,
 	config: &ServerGroupBackupConfig,
@@ -82,6 +83,7 @@ fn kopia_env(
 		session_token: creds.session_token.clone(),
 		region: config.region.clone(),
 		password,
+		proxy_endpoint: None,
 	}
 }
 
@@ -327,17 +329,20 @@ fn spawn_maint(worker: &Worker, config: ServerGroupBackupConfig, kind: Maintenan
 }
 
 /// The kopia side of a maintenance op.
+///
+/// Maintenance can run well over an hour (large repos), past the lifetime of a
+/// single assumed-role session, so it's driven through the SigV4 re-signing
+/// proxy: kopia connects to a loopback endpoint with dummy keys and the proxy
+/// re-signs each request with freshly-refreshed maintenance-role credentials.
+/// (A region is required to address the proxy's upstream; a region-less config
+/// — which kopia's `--region` would already choke on — falls back to the direct
+/// static-creds path.)
 async fn run_maint_op(
 	worker: &Worker,
 	config: &ServerGroupBackupConfig,
 	kind: MaintenanceKind,
 ) -> anyhow::Result<kopia::MaintOutcome> {
 	let password = worker.read_repo_password(&config.repo_password_ref).await?;
-	let creds = worker
-		.creds
-		.resolve(&config.maintenance_role_arn, config.region.as_deref())
-		.await?;
-	let env = kopia_env(&creds, config, password);
 	let retention = {
 		let mut db = worker
 			.pool
@@ -348,16 +353,38 @@ async fn run_maint_op(
 			.await
 			.map_err(|e| anyhow::anyhow!(e))?
 	};
-	let region = config.region.as_deref().unwrap_or_default();
-	kopia::run_maintenance(
-		&env,
-		&config.bucket,
-		&config.prefix,
-		region,
-		kind,
-		&retention,
-	)
-	.await
+
+	match config.region.as_deref().filter(|r| !r.is_empty()) {
+		Some(region) => {
+			let proxy = worker
+				.creds
+				.spawn_maintenance_proxy(&config.maintenance_role_arn, region)
+				.await?;
+			// Dummy creds — the proxy holds and refreshes the real ones.
+			let env = KopiaEnv {
+				access_key_id: "canopy-proxy".to_string(),
+				secret_access_key: "canopy-proxy".to_string(),
+				session_token: String::new(),
+				region: Some(region.to_string()),
+				password,
+				proxy_endpoint: Some(proxy.endpoint()),
+			};
+			let result =
+				kopia::run_maintenance(&env, &config.bucket, &config.prefix, region, kind, &retention)
+					.await;
+			proxy.shutdown().await;
+			result
+		}
+		None => {
+			// No region: keep the direct static-creds path (best-effort, ~1h cap).
+			let creds = worker
+				.creds
+				.resolve(&config.maintenance_role_arn, config.region.as_deref())
+				.await?;
+			let env = kopia_env(&creds, config, password);
+			kopia::run_maintenance(&env, &config.bucket, &config.prefix, "", kind, &retention).await
+		}
+	}
 }
 
 async fn tick(worker: &Worker) -> Result<(), String> {
