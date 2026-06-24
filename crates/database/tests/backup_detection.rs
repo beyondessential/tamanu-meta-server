@@ -446,7 +446,9 @@ async fn sweep_files_never_for_server_that_never_succeeded() {
 		let issue = server_issue(&mut conn, server_id, &nref)
 			.await
 			.expect("never issue filed");
-		assert_eq!(issue.severity, Severity::Error.to_string());
+		// Never-reported is a warning (so first-time setup doesn't open an
+		// incident); a *missed* backup is the error that pages.
+		assert_eq!(issue.severity, Severity::Warning.to_string());
 		assert!(issue.active);
 		// Staleness ref must NOT be filed when there's never been a success.
 		assert!(

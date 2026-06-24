@@ -356,6 +356,9 @@ test.describe("backups ready: stats + backup-now", () => {
 		await expect(
 			panel.getByRole("button", { name: /backup now/i }),
 		).toHaveCount(2);
+		// The disabled-for-schedule type is marked, so it's clear it still has a
+		// button only for on-demand use.
+		await expect(panel.getByText(/not scheduled/i)).toBeVisible();
 
 		// Backing up the non-default type writes a request for exactly that type.
 		await panel

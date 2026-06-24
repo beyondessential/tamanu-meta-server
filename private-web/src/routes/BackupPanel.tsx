@@ -720,6 +720,12 @@ function RunsAndRequests({
 				p.purpose === "backup",
 		);
 
+	// Whether the server has this type toggled on (scheduled). `undefined` when
+	// the type isn't a declared capability (e.g. a lingering pending request).
+	const enabledFor = (serverId: string, type: string): boolean | undefined =>
+		capabilities.find((c) => c.server_id === serverId && c.type === type)
+			?.enabled;
+
 	const onRequest = async (serverId: string, type: string) => {
 		try {
 			await requestNow.call({
@@ -808,6 +814,15 @@ function RunsAndRequests({
 													>
 														{t}
 													</Typography>
+													{enabledFor(m.id, t) === false && (
+														<Tooltip title="This type isn't on the backup schedule for this server (toggle it on in the server's Backups section). You can still back it up on demand.">
+															<Chip
+																size="small"
+																variant="outlined"
+																label="not scheduled"
+															/>
+														</Tooltip>
+													)}
 													{req ? (
 														<>
 															<Chip

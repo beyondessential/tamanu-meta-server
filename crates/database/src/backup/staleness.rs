@@ -274,10 +274,15 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 				// `backup-never` clears on first success (it transitions to OK,
 				// not Recovered — there's no recovery message for it). Only file
 				// while it's still never-backed-up.
+				//
+				// Warning, not Error: a server that has *never* backed up (freshly
+				// set up, or blocked by an upstream issue) shouldn't open an
+				// incident. A *missed* backup — a server that was backing up and
+				// stopped (`Stale`, above) — is the Error that pages.
 				NewEvent {
 					source: refs::CANOPY_SOURCE.into(),
 					r#ref: never_ref,
-					severity: Some(Severity::Error),
+					severity: Some(Severity::Warning),
 					description: None,
 					message: format!(
 						"Server {label} has never reported a successful {} backup (expected since {})",
