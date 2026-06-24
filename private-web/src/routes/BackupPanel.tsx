@@ -4,6 +4,7 @@ import {
 	Button,
 	Chip,
 	CircularProgress,
+	Collapse,
 	Dialog,
 	DialogActions,
 	DialogContent,
@@ -11,6 +12,7 @@ import {
 	DialogTitle,
 	Divider,
 	FormControlLabel,
+	IconButton,
 	LinearProgress,
 	Link as MuiLink,
 	Paper,
@@ -29,6 +31,8 @@ import { useState } from "react";
 import BackupIcon from "@mui/icons-material/Backup";
 import DeleteIcon from "@mui/icons-material/Delete";
 import EditIcon from "@mui/icons-material/Edit";
+import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
+import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
@@ -43,6 +47,7 @@ import {
 	BACKUP_STATUS_LABEL,
 	type BackupConfigStatus,
 	type BackupConfigView,
+	type BackupRun,
 	type ServerInfo,
 } from "../types";
 
@@ -189,7 +194,7 @@ export default function BackupPanel() {
 			{status === "ready" && (
 				<>
 					<SchedulesPanel groupId={id} isAdmin={isAdmin} />
-					<StatsPanel groupId={id} />
+					<StatsPanel groupId={id} members={members} />
 					<RunsAndRequests
 						groupId={id}
 						members={members}
@@ -594,7 +599,88 @@ function ProvisioningCard({
 	);
 }
 
-function StatsPanel({ groupId }: { groupId: string }) {
+/// Human label for the server a run came from. Falls back to the host or a
+/// short id when the server has no name, and to "—" for runs with no server.
+function serverLabel(
+	members: ServerInfo[],
+	serverId: string | null | undefined,
+): string {
+	if (!serverId) return "—";
+	const m = members.find((m) => m.id === serverId);
+	return m?.name || m?.display_host || serverId.slice(0, 8);
+}
+
+/// One row of the recent-runs table. Failed runs get an expand toggle that
+/// reveals the device-reported error detail in a collapsible sub-row.
+function RunRow({ run, members }: { run: BackupRun; members: ServerInfo[] }) {
+	const [open, setOpen] = useState(false);
+	const hasError = Boolean(run.error);
+	return (
+		<>
+			<TableRow sx={hasError ? { "& > *": { borderBottom: "unset" } } : undefined}>
+				<TableCell padding="checkbox">
+					{hasError && (
+						<IconButton
+							size="small"
+							aria-label={open ? "Hide error" : "Show error"}
+							onClick={() => setOpen((o) => !o)}
+						>
+							{open ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
+						</IconButton>
+					)}
+				</TableCell>
+				<TableCell>
+					<TimeAgo timestamp={run.reported_at} />
+				</TableCell>
+				<TableCell>{serverLabel(members, run.server_id)}</TableCell>
+				<TableCell>{run.type}</TableCell>
+				<TableCell>{run.purpose}</TableCell>
+				<TableCell>
+					<Chip
+						size="small"
+						label={run.outcome}
+						color={run.outcome === "success" ? "success" : "error"}
+					/>
+				</TableCell>
+				<TableCell>
+					{run.bytes_uploaded == null
+						? "—"
+						: formatBytes(run.bytes_uploaded)}
+				</TableCell>
+			</TableRow>
+			{hasError && (
+				<TableRow>
+					<TableCell colSpan={7} sx={{ py: 0, border: 0 }}>
+						<Collapse in={open} timeout="auto" unmountOnExit>
+							<Alert severity="error" variant="outlined" sx={{ my: 1 }}>
+								<Typography
+									component="pre"
+									variant="body2"
+									sx={{
+										m: 0,
+										fontFamily: "monospace",
+										whiteSpace: "pre-wrap",
+										wordBreak: "break-word",
+									}}
+								>
+									{run.error}
+								</Typography>
+							</Alert>
+						</Collapse>
+					</TableCell>
+				</TableRow>
+			)}
+		</>
+	);
+}
+
+function StatsPanel({
+	groupId,
+	members,
+}: {
+	groupId: string;
+	members: ServerInfo[];
+}) {
 	const stats = useApi(
 		"backups",
 		"stats",
@@ -642,7 +728,9 @@ function StatsPanel({ groupId }: { groupId: string }) {
 				<Table size="small">
 					<TableHead>
 						<TableRow>
+							<TableCell padding="checkbox" />
 							<TableCell>When</TableCell>
+							<TableCell>Server</TableCell>
 							<TableCell>Type</TableCell>
 							<TableCell>Purpose</TableCell>
 							<TableCell>Outcome</TableCell>
@@ -651,21 +739,7 @@ function StatsPanel({ groupId }: { groupId: string }) {
 					</TableHead>
 					<TableBody>
 						{stats.data.recent_runs.map((r) => (
-							<TableRow key={r.id}>
-								<TableCell>
-									<TimeAgo timestamp={r.reported_at} />
-								</TableCell>
-								<TableCell>{r.type}</TableCell>
-								<TableCell>{r.purpose}</TableCell>
-								<TableCell>
-									<Chip
-										size="small"
-										label={r.outcome}
-										color={r.outcome === "success" ? "success" : "error"}
-									/>
-								</TableCell>
-								<TableCell>{formatBytes(r.bytes_uploaded)}</TableCell>
-							</TableRow>
+							<RunRow key={r.id} run={r} members={members} />
 						))}
 					</TableBody>
 				</Table>

@@ -253,6 +253,47 @@ test.describe("backups ready: stats + backup-now", () => {
 		await expect(page.getByText(/bucket bytes:\s*unknown/i)).toBeVisible();
 		await expect(page.getByText(/recent runs/i)).toBeVisible();
 		await expect(page.getByText("success")).toBeVisible();
+		// The run carries a server_id, so the table names which server it's from.
+		const runs = page.getByRole("table").last();
+		await expect(runs.getByText("stats-srv")).toBeVisible();
+	});
+
+	test("failed run shows expandable error detail and no upload size", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "err-group" });
+		const device = await seedDevice(sql);
+		const server = await seedServer(sql, {
+			name: "err-srv",
+			groupId: group.id,
+			deviceId: device.id,
+		});
+		await seedServerGroupBackupConfig(sql, {
+			groupId: group.id,
+			status: "ready",
+			intervalSeconds: 3600,
+		});
+		await seedBackupRun(sql, {
+			deviceId: device.id,
+			groupId: group.id,
+			serverId: server.id,
+			outcome: "failure",
+			error: "kopia: snapshot failed: disk quota exceeded",
+			bytesUploaded: null,
+		});
+
+		await page.goto(`/groups/${group.id}/backups`);
+		const runs = page.getByRole("table").last();
+		await expect(runs.getByText("err-srv")).toBeVisible();
+		await expect(runs.getByText("failure")).toBeVisible();
+		// A failed run uploaded nothing → "—", not "unknown".
+		await expect(runs.getByText("—")).toBeVisible();
+
+		// Error detail is hidden until the row is expanded.
+		await expect(page.getByText(/disk quota exceeded/i)).toBeHidden();
+		await runs.getByRole("button", { name: /show error/i }).click();
+		await expect(page.getByText(/disk quota exceeded/i)).toBeVisible();
 	});
 
 	test("backup-now writes a request row; cancel deletes it", async ({
