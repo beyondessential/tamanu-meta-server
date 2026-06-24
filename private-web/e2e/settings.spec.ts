@@ -24,10 +24,10 @@ test.describe("Settings", () => {
 	}) => {
 		await page.goto("/settings/backup-defaults");
 		// The seeded tamanu-postgres default is shown.
-		await expect(page.getByText("tamanu-postgres")).toBeVisible();
-
-		await page.getByLabel("Back up every (hours)").fill("8");
-		await page.getByRole("button", { name: /^save$/i }).click();
+		const card = page.getByTestId("type-default-tamanu-postgres");
+		await expect(card).toBeVisible();
+		await card.getByLabel("Back up every (hours)").fill("8");
+		await card.getByRole("button", { name: /^save$/i }).click();
 
 		await expect
 			.poll(async () => {
@@ -38,5 +38,44 @@ test.describe("Settings", () => {
 				return rows[0] ? Number(rows[0].secs) : null;
 			})
 			.toBe(28800);
+	});
+
+	test("backup defaults editor adds a new canopy-wide type default", async ({
+		page,
+		sql,
+	}) => {
+		await page.goto("/settings/backup-defaults");
+
+		const add = page.getByTestId("type-default-new");
+		await add.getByLabel("Backup type").fill("tamanu-files");
+		await add.getByLabel("Back up every (hours)").fill("12");
+		await add.getByRole("button", { name: /add type/i }).click();
+
+		// The new default lands in the DB...
+		await expect
+			.poll(async () => {
+				const rows = await sql.query<{ secs: string }>(
+					`SELECT EXTRACT(EPOCH FROM default_interval)::text AS secs
+					 FROM backup_type_defaults WHERE type = 'tamanu-files'`,
+				);
+				return rows[0] ? Number(rows[0].secs) : null;
+			})
+			.toBe(43200);
+
+		// ...and the list reloads to show it as its own editor card.
+		await expect(page.getByTestId("type-default-tamanu-files")).toBeVisible();
+	});
+
+	test("backup defaults editor blocks adding a duplicate type", async ({
+		page,
+	}) => {
+		await page.goto("/settings/backup-defaults");
+
+		const add = page.getByTestId("type-default-new");
+		await add.getByLabel("Backup type").fill("tamanu-postgres");
+		await expect(
+			add.getByText(/a default for this type already exists/i),
+		).toBeVisible();
+		await expect(add.getByRole("button", { name: /add type/i })).toBeDisabled();
 	});
 });
