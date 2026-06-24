@@ -89,6 +89,7 @@ async fn run_inspect_op(
 		session_token: creds.session_token,
 		region: config.region.clone(),
 		password,
+		proxy_endpoint: None,
 	};
 	let region = config.region.as_deref().unwrap_or_default();
 	kopia::run_inspect(&env, &config.bucket, &config.prefix, region).await
