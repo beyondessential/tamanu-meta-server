@@ -83,6 +83,7 @@ async fn unknown_tailnet_node_auto_creates_untrusted_then_403s_role_gate() {
 				ro_pool: None,
 				tailnet_directory: Some(directory),
 				kube: None,
+				sts: None,
 				prober: private_server::backup_probe::BucketProber::fake(
 					private_server::backup_probe::ProbeState::Empty,
 				),

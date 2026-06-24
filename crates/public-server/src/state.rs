@@ -111,6 +111,25 @@ impl AppState {
 			kube: None,
 		})
 	}
+
+	/// Like [`from_db_with_directory`](Self::from_db_with_directory) but with the
+	/// backup-credential clients wired in. private-server's nested `/public`
+	/// mount uses this so device callers reaching it can issue backup credentials
+	/// (STS `AssumeRole`) and fetch the repo target/password (kube Secret store)
+	/// exactly like the standalone public server — the bare `from_db*` base leaves
+	/// both `None`, which 502s the whole backup API.
+	pub fn for_nested_mount(
+		db: Db,
+		tailnet_directory: Option<TailnetDirectory>,
+		sts: Option<aws_sdk_sts::Client>,
+		kube: Option<BackupSecrets>,
+	) -> Result<Self> {
+		Ok(Self {
+			sts,
+			kube,
+			..Self::from_db_with_directory(db, tailnet_directory)?
+		})
+	}
 }
 
 impl FromRef<AppState> for crate::ratelimit::RateLimiter {
