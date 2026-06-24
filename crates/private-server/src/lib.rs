@@ -1,5 +1,6 @@
 pub mod backup_probe;
 pub mod fns;
+pub mod mcp;
 pub mod openapi;
 pub mod spa;
 pub mod state;
@@ -19,10 +20,18 @@ pub fn routes(state: crate::state::AppState) -> commons_errors::Result<axum::rou
 	// device extractor. Everything else (admin API, Swagger, SPA) is
 	// human-only — the tagged-device guard 403s those callers up front
 	// rather than relying on downstream extractors' opportunistic checks.
+	// Read-only MCP query interface for tailnet agents. Mounted inside the
+	// non-public subtree so it inherits the tagged-device guard; gated on top
+	// by "any tailnet user" (see `mcp::require_tailnet_user`).
+	let mcp: Router<crate::state::AppState> = Router::new()
+		.fallback_service(mcp::service(state.clone()))
+		.layer(middleware::from_fn(mcp::require_tailnet_user));
+
 	let non_public = Router::new()
 		.merge(commons_servers::health::routes())
 		.merge(api_router)
 		.merge(SwaggerUi::new("/api/docs").url("/api/openapi.json", api_spec))
+		.nest("/api/mcp", mcp)
 		.fallback(spa::handler)
 		.layer(middleware::from_fn(
 			commons_servers::tailnet_guard::reject_tagged_devices,

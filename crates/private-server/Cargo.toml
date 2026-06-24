@@ -31,7 +31,9 @@ lloggs = { workspace = true, features = ["miette-7"] }
 mime_guess = "2.0.5"
 miette = { workspace = true, features = ["fancy"] }
 public-server = { path = "../public-server", default-features = false }
+rmcp = { version = "1.8", features = ["server", "macros", "transport-streamable-http-server"] }
 rust-embed = { version = "8.11.0", features = ["mime-guess", "interpolate-folder-path"] }
+schemars = "1"
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = "1.0.150"
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "signal", "time"] }
