@@ -96,6 +96,7 @@ End-to-end tests use Playwright. Run with `npm run test:e2e` from `/private-web/
 When adding or changing a UI feature, add Playwright coverage for it in `private-web/e2e/` as part of the same change — seed state with the helpers in `e2e/seed.ts` (extend them when the feature needs new tables) and follow the existing spec patterns. Rust endpoint tests don't cover the rendered behaviour, and typecheck alone doesn't prove the feature works.
 
 ## Development Workflow
+- Write or change specs in `.workhorse/specs/`; follow the spec rules in [.workhorse/rules.md](.workhorse/rules.md)
 - Always check: `just check` for basic compilation
 - Run full test suite: `just test`
 - Run specific tests: `just test-name <test_name>`
