@@ -1,22 +1,24 @@
-//! Inspection scheduler. Per-minute tick: for each `ready` group
-//! due on its hash-jittered cadence, claim a per-group + concurrency slot and
-//! **spawn a tokio task** that runs a **read-only** kopia inspection in-process
-//! ([`super::kopia::run_inspect`]) and writes the ground truth inline
-//! ([`super::complete::complete_inspect`]): upserts `backup_repo_snapshots` +
-//! the repo fields of `backup_repo_stats`, and raises/recovers the group-level
-//! `CORRUPTION` alert off `verify_ok`.
+//! Inspection scheduler. Per-minute tick: for each `ready` group that's due,
+//! claim a per-group + concurrency slot and **spawn a tokio task** that runs a
+//! **read-only** kopia inspection in-process ([`super::kopia::run_inspect`]) and
+//! writes the ground truth inline ([`super::complete::complete_inspect`]):
+//! upserts `backup_repo_snapshots` + the repo fields of `backup_repo_stats`, and
+//! raises/recovers the group-level `CORRUPTION` alert off `verify_ok`.
 //!
 //! Inspection is read-only, but it still goes through the in-flight set
 //! ([`super::worker`]) so it doesn't overlap a maintenance run on the same repo.
 //!
-//! The per-group inspection cadence is the group's effective backup interval
-//! (min across enabled types' schedule/default `expected_interval`), floored to
-//! weekly.
+//! A group is due when **a backup has landed since its last inspection** (so the
+//! stats panel freshens shortly after a backup — including a manual "back up
+//! now" — rather than waiting), or otherwise on its **hash-jittered cadence**:
+//! the group's effective backup interval (min across enabled types'
+//! schedule/default `expected_interval`), floored to weekly, so corruption/drift
+//! is still caught on quiet repos.
 
 use std::time::Duration;
 
 use commons_servers::backup_jobs::{effective_interval_for_group, slot_is_due};
-use database::{BackupConfigStatus, ServerGroupBackupConfig};
+use database::{BackupConfigStatus, BackupRepoSnapshot, BackupRun, ServerGroupBackupConfig};
 use jiff::Timestamp;
 use tokio::{
 	task::{self, JoinHandle},
@@ -38,6 +40,22 @@ const INSPECT_FLOOR: Duration = Duration::from_secs(7 * 24 * 3600);
 fn secs_into(now: Timestamp, window: Duration) -> u64 {
 	let w = window.as_secs().max(1) as i64;
 	now.as_second().rem_euclid(w) as u64
+}
+
+/// Whether a backup has landed since the repo was last inspected — the signal to
+/// inspect promptly (so the stats panel freshens shortly after a backup,
+/// including a manual "back up now") instead of waiting for the weekly cadence.
+/// `latest_backup` is the group's newest successful backup; `last_inspected` is
+/// the newest inspection. Never-inspected with a backup present → due.
+fn backup_since_inspect(
+	latest_backup: Option<Timestamp>,
+	last_inspected: Option<Timestamp>,
+) -> bool {
+	match (latest_backup, last_inspected) {
+		(Some(backup), Some(inspected)) => backup > inspected,
+		(Some(_), None) => true,
+		(None, _) => false,
+	}
 }
 
 /// Run an inspection op in a spawned task: read the password, run
@@ -110,14 +128,25 @@ async fn tick(worker: &Worker) -> Result<(), String> {
 		if in_flight.contains(&c.group_id) {
 			continue; // already mid-op
 		}
-		// Per-group cadence: the group's effective backup interval, floored to
-		// weekly (also weekly when no enabled type has an interval).
+		// Inspect promptly once a backup has landed since the last inspection
+		// (so the panel freshens shortly after a backup / "back up now")...
+		let latest_backup = BackupRun::latest_backup_at_for_group(&mut db, c.group_id)
+			.await
+			.map_err(|e| e.to_string())?;
+		let last_inspected = BackupRepoSnapshot::last_inspected_at_for_group(&mut db, c.group_id)
+			.await
+			.map_err(|e| e.to_string())?;
+		let due_after_backup = backup_since_inspect(latest_backup, last_inspected);
+
+		// ...otherwise fall back to the per-group cadence: the group's effective
+		// backup interval, floored to weekly (also the floor when no enabled type
+		// has an interval), so corruption/drift is still caught on quiet repos.
 		let window = effective_interval_for_group(&mut db, c.group_id)
 			.await
 			.map_err(|e| e.to_string())?
 			.map_or(INSPECT_FLOOR, |i| i.max(INSPECT_FLOOR));
 		let into = secs_into(now, window);
-		if !slot_is_due(c.group_id, window, TICK, into) {
+		if !due_after_backup && !slot_is_due(c.group_id, window, TICK, into) {
 			continue;
 		}
 		spawn_inspect(worker, c.clone());
@@ -136,4 +165,25 @@ pub fn spawn(worker: Worker) -> JoinHandle<()> {
 			}
 		}
 	})
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn backup_since_inspect_decisions() {
+		let t0: Timestamp = "2026-06-01T00:00:00Z".parse().unwrap();
+		let t1: Timestamp = "2026-06-01T01:00:00Z".parse().unwrap();
+		// Backup newer than last inspection → due.
+		assert!(backup_since_inspect(Some(t1), Some(t0)));
+		// Inspection at/after the latest backup → not due.
+		assert!(!backup_since_inspect(Some(t0), Some(t1)));
+		assert!(!backup_since_inspect(Some(t0), Some(t0)));
+		// Backup present but never inspected → due.
+		assert!(backup_since_inspect(Some(t0), None));
+		// No successful backup yet → nothing to inspect for.
+		assert!(!backup_since_inspect(None, None));
+		assert!(!backup_since_inspect(None, Some(t0)));
+	}
 }

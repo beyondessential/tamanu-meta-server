@@ -849,6 +849,26 @@ impl BackupRun {
 			.collect())
 	}
 
+	/// When the group last had a successful *backup* reported (any server/type),
+	/// or `None` if it never has. Drives prompt post-backup inspection.
+	pub async fn latest_backup_at_for_group(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+	) -> Result<Option<Timestamp>> {
+		use crate::schema::backup_runs::dsl;
+
+		let row: Option<Self> = dsl::backup_runs
+			.filter(dsl::group_id.eq(group_id))
+			.filter(dsl::purpose.eq(BackupPurpose::Backup))
+			.filter(dsl::outcome.eq(RunOutcome::Success))
+			.order_by(dsl::reported_at.desc())
+			.first(db)
+			.await
+			.optional()
+			.map_err(AppError::from)?;
+		Ok(row.map(|r| r.reported_at))
+	}
+
 	/// Recent runs for a group, newest-first (stats panel).
 	pub async fn list_for_group(
 		db: &mut AsyncPgConnection,
@@ -1030,6 +1050,26 @@ impl BackupRepoSnapshot {
 			.load(db)
 			.await
 			.map_err(AppError::from)
+	}
+
+	/// When the group's repo was last inspected (newest `observed_at` across its
+	/// sources), or `None` if never. This table is written *only* by the
+	/// inspection Job — unlike `backup_repo_stats.observed_at`, which the daily
+	/// s3-metrics writer also bumps — so it's the clean "last inspected" signal.
+	pub async fn last_inspected_at_for_group(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+	) -> Result<Option<Timestamp>> {
+		use crate::schema::backup_repo_snapshots::dsl;
+
+		let row: Option<Self> = dsl::backup_repo_snapshots
+			.filter(dsl::group_id.eq(group_id))
+			.order_by(dsl::observed_at.desc())
+			.first(db)
+			.await
+			.optional()
+			.map_err(AppError::from)?;
+		Ok(row.map(|r| r.observed_at))
 	}
 }
 
