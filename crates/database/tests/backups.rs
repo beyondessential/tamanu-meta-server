@@ -464,6 +464,115 @@ async fn repo_snapshot_upsert_in_place() {
 	.await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn latest_backup_and_last_inspected_for_group() {
+	TestDb::run(|mut conn, _url| async move {
+		let group_id = insert_group(&mut conn, "g").await;
+		let server_id = insert_server(&mut conn, group_id).await;
+		let device_id = insert_device(&mut conn).await;
+
+		// Nothing reported / inspected yet.
+		assert!(
+			BackupRun::latest_backup_at_for_group(&mut conn, group_id)
+				.await
+				.unwrap()
+				.is_none()
+		);
+		assert!(
+			BackupRepoSnapshot::last_inspected_at_for_group(&mut conn, group_id)
+				.await
+				.unwrap()
+				.is_none()
+		);
+
+		// A failed backup and a successful restore don't count as a backup.
+		BackupRun::record(
+			&mut conn,
+			new_run(
+				Uuid::new_v4(),
+				device_id,
+				group_id,
+				Some(server_id),
+				BackupPurpose::Backup,
+				RunOutcome::Failure,
+			),
+		)
+		.await
+		.unwrap();
+		BackupRun::record(
+			&mut conn,
+			new_run(
+				Uuid::new_v4(),
+				device_id,
+				group_id,
+				Some(server_id),
+				BackupPurpose::Restore,
+				RunOutcome::Success,
+			),
+		)
+		.await
+		.unwrap();
+		assert!(
+			BackupRun::latest_backup_at_for_group(&mut conn, group_id)
+				.await
+				.unwrap()
+				.is_none(),
+			"only successful backups count"
+		);
+
+		// A successful backup → its reported_at.
+		BackupRun::record(
+			&mut conn,
+			new_run(
+				Uuid::new_v4(),
+				device_id,
+				group_id,
+				Some(server_id),
+				BackupPurpose::Backup,
+				RunOutcome::Success,
+			),
+		)
+		.await
+		.unwrap();
+		let runs = BackupRun::list_for_group(&mut conn, group_id, 10)
+			.await
+			.unwrap();
+		let success = runs
+			.iter()
+			.find(|r| r.purpose == BackupPurpose::Backup && r.outcome == RunOutcome::Success)
+			.unwrap();
+		assert_eq!(
+			BackupRun::latest_backup_at_for_group(&mut conn, group_id)
+				.await
+				.unwrap(),
+			Some(success.reported_at)
+		);
+
+		// last-inspected comes from the (inspection-only) snapshots table.
+		let t: Timestamp = "2026-06-10T00:00:00.000001Z".parse().unwrap();
+		BackupRepoSnapshot::upsert(
+			&mut conn,
+			group_id,
+			&format!("canopy@{server_id}:/data"),
+			Some(server_id),
+			Some(&BackupType::TamanuPostgres),
+			Some(t),
+		)
+		.await
+		.unwrap();
+		let snaps = BackupRepoSnapshot::list_for_group(&mut conn, group_id)
+			.await
+			.unwrap();
+		assert_eq!(
+			BackupRepoSnapshot::last_inspected_at_for_group(&mut conn, group_id)
+				.await
+				.unwrap(),
+			Some(snaps[0].observed_at)
+		);
+	})
+	.await;
+}
+
 // --- repo stats: two independent writers ------------------------------------
 
 #[tokio::test(flavor = "multi_thread")]
