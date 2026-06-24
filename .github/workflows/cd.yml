@@ -24,9 +24,6 @@ jobs:
     strategy:
       matrix:
         include:
-          - arch: amd64
-            runner: ubuntu-24.04
-            target: x86_64-unknown-linux-gnu
           - arch: arm64
             runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
@@ -86,12 +83,6 @@ jobs:
       - id: tag
         run: echo "value=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
-      - name: Download AMD64 binaries
-        uses: actions/download-artifact@v8
-        with:
-          name: binaries-amd64
-          path: .github/build-context/amd64/
-
       - name: Download ARM64 binaries
         uses: actions/download-artifact@v8
         with:
@@ -124,7 +115,7 @@ jobs:
         with:
           context: .github/build-context
           file: .github/Dockerfile.native
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/arm64
           push: true
           labels: ${{ steps.meta.outputs.labels }}
           tags: ${{ steps.meta.outputs.tags }}
