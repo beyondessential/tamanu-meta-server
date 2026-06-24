@@ -12,6 +12,7 @@ import {
 	Divider,
 	FormControlLabel,
 	LinearProgress,
+	Link as MuiLink,
 	Paper,
 	Stack,
 	Switch,
@@ -47,7 +48,6 @@ import {
 
 export default function BackupPanel() {
 	const { id = "" } = useParams<{ id: string }>();
-	usePageTitle("Backups");
 	const isAdmin = useIsAdmin() === true;
 	const config = useApi(
 		"backups",
@@ -71,6 +71,9 @@ export default function BackupPanel() {
 		{ server_group_id: id },
 		[id],
 	);
+	const groupName =
+		group.status === "ok" ? group.data.group.name : undefined;
+	usePageTitle(groupName ? `Backups · ${groupName}` : "Backups");
 
 	const data =
 		configForTick.status === "ok"
@@ -89,9 +92,19 @@ export default function BackupPanel() {
 	if (data == null) {
 		return (
 			<Stack spacing={2}>
-				<Typography variant="h4" component="h1">
-					Backups
-				</Typography>
+				<Box>
+					<MuiLink
+						component={RouterLink}
+						to={`/groups/${id}`}
+						variant="body2"
+						underline="hover"
+					>
+						‹ Back to {groupName ?? "group"}
+					</MuiLink>
+					<Typography variant="h4" component="h1">
+						{groupName ? `${groupName} backups` : "Backups"}
+					</Typography>
+				</Box>
 				<Alert severity="info">Backups not set up for this group.</Alert>
 				{isAdmin && (
 					<Box>
@@ -115,35 +128,49 @@ export default function BackupPanel() {
 
 	return (
 		<Stack spacing={3}>
-			<Stack
-				direction="row"
-				spacing={2}
-				sx={{ alignItems: "center", justifyContent: "space-between" }}
-			>
-				<Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
-					<Typography variant="h4" component="h1">
-						Backups
-					</Typography>
-					<Chip
-						label={BACKUP_STATUS_LABEL[status]}
-						color={BACKUP_STATUS_INTENT[status]}
-						size="small"
-					/>
-				</Stack>
-				{isAdmin && (
-					<Stack direction="row" spacing={1}>
-						<Button
-							component={RouterLink}
-							to={`/groups/${id}/backups/config`}
-							variant="outlined"
-							startIcon={<EditIcon />}
-						>
-							Edit config
-						</Button>
-						<DeleteConfigButton groupId={id} onDeleted={configForTick.reload} />
+			<Box>
+				<MuiLink
+					component={RouterLink}
+					to={`/groups/${id}`}
+					variant="body2"
+					underline="hover"
+				>
+					‹ Back to {groupName ?? "group"}
+				</MuiLink>
+				<Stack
+					direction="row"
+					spacing={2}
+					sx={{
+						alignItems: "center",
+						justifyContent: "space-between",
+						mt: 0.5,
+					}}
+				>
+					<Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
+						<Typography variant="h4" component="h1">
+							{groupName ? `${groupName} backups` : "Backups"}
+						</Typography>
+						<Chip
+							label={BACKUP_STATUS_LABEL[status]}
+							color={BACKUP_STATUS_INTENT[status]}
+							size="small"
+						/>
 					</Stack>
-				)}
-			</Stack>
+					{isAdmin && (
+						<Stack direction="row" spacing={1}>
+							<Button
+								component={RouterLink}
+								to={`/groups/${id}/backups/config`}
+								variant="outlined"
+								startIcon={<EditIcon />}
+							>
+								Edit config
+							</Button>
+							<DeleteConfigButton groupId={id} onDeleted={configForTick.reload} />
+						</Stack>
+					)}
+				</Stack>
+			</Box>
 
 			<Alert severity={BACKUP_STATUS_INTENT[status]}>
 				{BACKUP_STATUS_HELP[status]}
@@ -320,6 +347,7 @@ type GroupTypeSchedule = {
 		keep_annual: number;
 	};
 	has_override: boolean;
+	next_run_at: string | null;
 };
 
 function TypeSchedule({
@@ -364,6 +392,12 @@ function TypeSchedule({
 				· retention latest {r.keep_latest}, daily {r.keep_daily}, weekly{" "}
 				{r.keep_weekly}, monthly {r.keep_monthly}, annual {r.keep_annual}
 			</Typography>
+			{schedule.effective_interval != null && schedule.next_run_at && (
+				<Typography variant="body2" color="text.secondary">
+					Next backup expected{" "}
+					<TimeAgo timestamp={schedule.next_run_at} />
+				</Typography>
+			)}
 			{editing && (
 				<OverrideEditor
 					groupId={groupId}
@@ -734,9 +768,15 @@ function RunsAndRequests({
 									justifyContent: "space-between",
 								}}
 							>
-								<Typography variant="body2" sx={{ pt: 0.75 }}>
+								<MuiLink
+									component={RouterLink}
+									to={`/servers/${m.id}#backups`}
+									variant="body2"
+									underline="hover"
+									sx={{ pt: 0.75 }}
+								>
 									{m.name ?? m.id.slice(0, 8)}
-								</Typography>
+								</MuiLink>
 								{types.length === 0 ? (
 									<Tooltip title="This server hasn't registered any backup types yet.">
 										{/* span so the tooltip works on the disabled button */}

@@ -195,6 +195,8 @@ test.describe("backups ready: stats + backup-now", () => {
 		// No override yet → inherits the seeded canopy-wide default.
 		await expect(schedules.getByText("tamanu-postgres")).toBeVisible();
 		await expect(schedules.getByText("Inherited default")).toBeVisible();
+		// A scheduled type shows its next expected run (no successful run yet → now).
+		await expect(schedules.getByText(/next backup expected/i)).toBeVisible();
 
 		// Override the interval to 12h.
 		await page.getByRole("button", { name: /^override$/i }).click();
@@ -369,6 +371,40 @@ test.describe("backups ready: stats + backup-now", () => {
 			expect(rows).toHaveLength(1);
 			expect(rows[0]!.type).toBe("files");
 		}).toPass();
+	});
+
+	test("backup page names the group and cross-links to/from the server backup section", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "Linky Group" });
+		const server = await seedServer(sql, {
+			name: "linky-srv",
+			groupId: group.id,
+		});
+		await seedServerBackupCapability(sql, { serverId: server.id });
+		await seedServerGroupBackupConfig(sql, {
+			groupId: group.id,
+			status: "ready",
+		});
+
+		await page.goto(`/groups/${group.id}/backups`);
+
+		// Header carries the group name + a back-link to the group page.
+		await expect(
+			page.getByRole("heading", { name: /linky group backups/i }),
+		).toBeVisible();
+		await expect(
+			page.getByRole("link", { name: /back to linky group/i }),
+		).toBeVisible();
+
+		// The server in the "back up now" panel links to its page's backup section.
+		await page.getByRole("link", { name: "linky-srv" }).click();
+		await expect(page).toHaveURL(new RegExp(`/servers/${server.id}#backups$`));
+
+		// That backup section links back to the group's backup page.
+		await page.getByRole("link", { name: /group backups/i }).click();
+		await expect(page).toHaveURL(new RegExp(`/groups/${group.id}/backups$`));
 	});
 
 	test("provisioning with init error shows retry", async ({ page, sql }) => {

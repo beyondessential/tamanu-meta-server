@@ -37,7 +37,12 @@ import NotificationsOffIcon from "@mui/icons-material/NotificationsOff";
 import NotificationsOffOutlinedIcon from "@mui/icons-material/NotificationsOffOutlined";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { Fragment, useEffect, useState } from "react";
-import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
+import {
+	Link as RouterLink,
+	useLocation,
+	useNavigate,
+	useParams,
+} from "react-router-dom";
 import ExternalUsersDetails, {
 	parseExternalUserSessions,
 } from "../components/ExternalUsersDetails";
@@ -108,6 +113,19 @@ export default function ServerDetail() {
 	);
 	const hasOpenIncident =
 		openIncidents.status === "ok" && openIncidents.data.length > 0;
+	// Honour a `#backups` anchor (linked from the group's backup page): once the
+	// detail has loaded and the section is painted, scroll it into view.
+	const location = useLocation();
+	const detailLoaded = detail.status === "ok";
+	useEffect(() => {
+		if (!detailLoaded || location.hash !== "#backups") return;
+		const frame = requestAnimationFrame(() => {
+			document
+				.getElementById("backups")
+				?.scrollIntoView({ behavior: "smooth", block: "start" });
+		});
+		return () => cancelAnimationFrame(frame);
+	}, [detailLoaded, location.hash]);
 	usePageTitle(
 		detail.status === "ok"
 			? (detail.data.server.name ?? "Unnamed server")
@@ -169,6 +187,7 @@ export default function ServerDetail() {
 			)}
 			<BackupCapabilitiesSection
 				serverId={data.server.id}
+				groupId={data.group?.id ?? null}
 				isAdmin={admin}
 			/>
 			{(data.server.notes || Object.keys(data.server.tags ?? {}).length > 0) && (
@@ -1616,9 +1635,11 @@ function SiblingServers({
 /// renders an explicit empty state rather than disappearing.
 function BackupCapabilitiesSection({
 	serverId,
+	groupId,
 	isAdmin,
 }: {
 	serverId: string;
+	groupId: string | null;
 	isAdmin: boolean;
 }) {
 	const caps = useApi(
@@ -1628,10 +1649,26 @@ function BackupCapabilitiesSection({
 		[serverId],
 	);
 	return (
-		<Paper variant="outlined" sx={{ p: 2 }}>
-			<Typography variant="h6" component="h2" gutterBottom>
-				Backups
-			</Typography>
+		<Paper id="backups" variant="outlined" sx={{ p: 2 }}>
+			<Stack
+				direction="row"
+				spacing={2}
+				sx={{ alignItems: "baseline", justifyContent: "space-between" }}
+			>
+				<Typography variant="h6" component="h2" gutterBottom>
+					Backups
+				</Typography>
+				{groupId && (
+					<MuiLink
+						component={RouterLink}
+						to={`/groups/${groupId}/backups`}
+						variant="body2"
+						underline="hover"
+					>
+						Group backups ›
+					</MuiLink>
+				)}
+			</Stack>
 			{caps.status === "loading" || caps.status === "idle" ? (
 				<LinearProgress />
 			) : caps.status === "error" ? (

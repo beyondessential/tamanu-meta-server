@@ -844,6 +844,10 @@ pub struct GroupTypeScheduleView {
 	pub effective_interval: Option<i64>,
 	pub effective_retention: RetentionPolicy,
 	pub has_override: bool,
+	/// When the next scheduled backup of this type is expected: the group's most
+	/// recent successful backup of the type plus the interval — or "now" if the
+	/// type is scheduled but has never succeeded yet. Null for manual-only types.
+	pub next_run_at: Option<Timestamp>,
 }
 
 /// Per enabled backup type, the group's effective schedule/retention (override
@@ -864,6 +868,25 @@ pub async fn group_schedules(
 	let mut conn = state.db.get().await?;
 	let types =
 		ServerBackupCapability::enabled_types_for_group(&mut conn, args.server_group_id).await?;
+
+	// Anchor for the next-expected-run estimate: the group's most recent
+	// successful backup per type (max over its servers).
+	let mut last_success: std::collections::HashMap<BackupType, Timestamp> =
+		std::collections::HashMap::new();
+	for ((_, ty), run) in
+		BackupRun::latest_success_by_server_type_for_group(&mut conn, args.server_group_id).await?
+	{
+		last_success
+			.entry(ty)
+			.and_modify(|t| {
+				if run.reported_at > *t {
+					*t = run.reported_at;
+				}
+			})
+			.or_insert(run.reported_at);
+	}
+	let now = Timestamp::now();
+
 	let mut out = Vec::with_capacity(types.len());
 	for ty in types {
 		let over = ServerGroupBackupSchedule::get(&mut conn, args.server_group_id, &ty).await?;
@@ -882,11 +905,20 @@ pub async fn group_schedules(
 					.and_then(|d| RetentionPolicy::from_json(&d.default_retention))
 			})
 			.unwrap_or(FLOOR_RETENTION);
+		// Scheduled types: latest success + interval (or now if never run yet).
+		// Manual-only types (no interval) have no expected next run.
+		let next_run_at = effective_interval.map(|secs| {
+			last_success
+				.get(&ty)
+				.and_then(|last| Timestamp::from_second(last.as_second() + secs).ok())
+				.unwrap_or(now)
+		});
 		out.push(GroupTypeScheduleView {
 			r#type: ty,
 			effective_interval,
 			effective_retention,
 			has_override: over.is_some(),
+			next_run_at,
 		});
 	}
 	Ok(Json(out))
