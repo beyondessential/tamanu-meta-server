@@ -31,14 +31,15 @@ use std::{
 use anyhow::{Context, Result};
 use aws_config::{BehaviorVersion, sts::AssumeRoleProvider};
 use aws_sdk_sts::config::{Credentials, ProvideCredentials, Region, SharedCredentialsProvider};
-use bestool_kopia::proxy::{
-	self, BoxError, CredentialProvider, Credentials as ProxyCredentials, RunningProxy, S3ProxyConfig,
-};
 use axum::{
 	Json, Router,
 	extract::State,
 	http::{HeaderMap, StatusCode, header::AUTHORIZATION},
 	routing::get,
+};
+use bestool_kopia::proxy::{
+	self, BoxError, CredentialProvider, Credentials as ProxyCredentials, RunningProxy,
+	S3ProxyConfig,
 };
 use jiff::Timestamp;
 use serde::Serialize;
@@ -196,7 +197,8 @@ struct RefreshingAssumeRole {
 impl CredentialProvider for RefreshingAssumeRole {
 	fn credentials(
 		&self,
-	) -> Pin<Box<dyn Future<Output = std::result::Result<ProxyCredentials, BoxError>> + Send + '_>> {
+	) -> Pin<Box<dyn Future<Output = std::result::Result<ProxyCredentials, BoxError>> + Send + '_>>
+	{
 		Box::pin(async move {
 			let mut cached = self.cached.lock().await;
 			let still_fresh = cached.as_ref().is_some_and(|c| match c.expiry() {

@@ -369,9 +369,15 @@ async fn run_maint_op(
 				password,
 				proxy_endpoint: Some(proxy.endpoint()),
 			};
-			let result =
-				kopia::run_maintenance(&env, &config.bucket, &config.prefix, region, kind, &retention)
-					.await;
+			let result = kopia::run_maintenance(
+				&env,
+				&config.bucket,
+				&config.prefix,
+				region,
+				kind,
+				&retention,
+			)
+			.await;
 			proxy.shutdown().await;
 			result
 		}
