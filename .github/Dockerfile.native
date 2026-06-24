@@ -8,8 +8,6 @@ FROM docker.io/kopia/kopia:0.23.1 AS kopia
 
 FROM busybox:glibc
 
-ARG TARGETPLATFORM
-
 # Create user and group
 RUN addgroup -g 1000 tamanu && adduser -D -u 1000 -G tamanu tamanu
 
@@ -20,19 +18,8 @@ COPY --from=certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certifica
 # spawns it via a bare `kopia` (PATH lookup), so /usr/bin is correct.
 COPY --from=kopia /usr/bin/kopia /usr/bin/kopia
 
-# Copy all binaries from both architectures
-COPY --chmod=0755 amd64/ /tmp/bins/amd64/
-COPY --chmod=0755 arm64/ /tmp/bins/arm64/
-
-# Select and copy the correct binaries based on target platform
-RUN if [ "$TARGETPLATFORM" = "linux/amd64" ]; then \
-        cp /tmp/bins/amd64/* /usr/bin/; \
-    elif [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
-        cp /tmp/bins/arm64/* /usr/bin/; \
-    else \
-        echo "Unknown platform: $TARGETPLATFORM"; exit 1; \
-    fi && \
-    rm -rf /tmp/bins
+# We only build for arm64.
+COPY --chmod=0755 arm64/ /usr/bin/
 
 # Public-server's Tera templates link to /static/public.css and /static/images/...
 # (private-server has its React bundle embedded in the binary).
