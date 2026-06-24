@@ -186,9 +186,15 @@ test.describe("backups ready: stats + backup-now", () => {
 
 		await page.goto(`/groups/${group.id}/backups`);
 
+		// Scope to the schedule panel: the type now also appears in the "Back up
+		// now" panel (as a declared-type label), so a page-wide text match is
+		// ambiguous.
+		const schedules = page
+			.getByRole("heading", { name: /schedule & retention/i })
+			.locator("..");
 		// No override yet → inherits the seeded canopy-wide default.
-		await expect(page.getByText("tamanu-postgres")).toBeVisible();
-		await expect(page.getByText("Inherited default")).toBeVisible();
+		await expect(schedules.getByText("tamanu-postgres")).toBeVisible();
+		await expect(schedules.getByText("Inherited default")).toBeVisible();
 
 		// Override the interval to 12h.
 		await page.getByRole("button", { name: /^override$/i }).click();
