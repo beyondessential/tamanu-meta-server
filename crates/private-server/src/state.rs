@@ -31,6 +31,10 @@ pub struct AppState {
 	/// them here). `None` in non-cluster runs ⇒ onboarding returns 502. Reuses
 	/// the public-server's `BackupSecrets` (kube or in-memory).
 	pub kube: Option<BackupSecrets>,
+	/// STS client passed to the nested `/public` mount so device callers reaching
+	/// it can issue backup credentials (`AssumeRole`) like the standalone public
+	/// server. `None` in non-AWS/test runs.
+	pub sts: Option<aws_sdk_sts::Client>,
 	/// Bucket prober for the setup wizard (assume role + inspect S3). `Aws` in
 	/// prod; a `Fake` canned result in tests / the e2e binary.
 	pub prober: BucketProber,
@@ -73,12 +77,18 @@ impl AppState {
 
 		let kube = BackupSecrets::try_default().await;
 		let prober = BucketProber::try_default().await;
+		// For the nested `/public` mount's backup-credential issuance. Building
+		// the client needs no creds (they resolve per-call from the pod's IRSA
+		// identity), so this is always `Some` in a real run.
+		let aws = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
+		let sts = Some(aws_sdk_sts::Client::new(&aws));
 
 		Ok(Self {
 			db: database::init(),
 			ro_pool,
 			tailnet_directory,
 			kube,
+			sts,
 			prober,
 			recovery_recipients: recovery_recipients_from_env(),
 			recovery_challenge: Arc::new(Mutex::new(None)),
@@ -97,6 +107,8 @@ impl AppState {
 			// In-memory secret store so onboarding (Secret creation) is exercised
 			// in tests without a cluster.
 			kube: Some(BackupSecrets::memory()),
+			// No real STS in tests; the nested-mount issuance path isn't exercised.
+			sts: None,
 			// Bucket-name-derived fake prober (matches the e2e fixture): a test
 			// drives each probe state by naming the bucket — `…existing…` → kopia
 			// repo, `…other…` → other content, `…denied…` → inaccessible, else empty.

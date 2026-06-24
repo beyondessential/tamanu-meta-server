@@ -32,9 +32,14 @@ pub fn routes(state: crate::state::AppState) -> commons_errors::Result<axum::rou
 		.nest(
 			"/public",
 			Router::from(public_server::routes().with_state(
-				public_server::state::AppState::from_db_with_directory(
+				// Wire the backup-credential clients (STS + kube Secret store) so the
+				// nested public API can issue backup credentials and serve the repo
+				// target/password, not just the DB-only endpoints.
+				public_server::state::AppState::for_nested_mount(
 					state.db.clone(),
 					state.tailnet_directory.clone(),
+					state.sts.clone(),
+					state.kube.clone(),
 				)?,
 			)),
 		)
