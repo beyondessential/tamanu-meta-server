@@ -20,11 +20,11 @@ aws-sdk-sts = "1.107.0"
 aws-smithy-mocks = "0.2.6"
 axum = "0.8.9"
 axum-test = "20.0.0"
-# bestool-kopia's SigV4 re-signing proxy (S3P spec). Pinned to the PR branch
-# until the crate publishes the `proxy` feature to crates.io, then revert to a
-# plain version requirement. NOTE: the `proxy` feature pulls in a `ring` rustls
-# provider alongside the workspace's `aws-lc-rs` one.
-bestool-kopia = { git = "https://github.com/beyondessential/bestool", branch = "s3-proxy", features = [
+# bestool-kopia's SigV4 re-signing proxy (S3P spec). bestool#529 is merged to
+# main but not yet released, so pin to a main rev until the crate publishes the
+# `proxy` feature to crates.io, then revert to a plain version requirement. The
+# proxy feature uses the workspace's `aws-lc-rs` rustls provider.
+bestool-kopia = { git = "https://github.com/beyondessential/bestool", rev = "ebd4663cfe48743404b3117cca4db3ff71a0a053", features = [
 	"proxy",
 ] }
 clap = "4.6.1"
