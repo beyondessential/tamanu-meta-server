@@ -229,8 +229,11 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Per enabled backup type, the group's effective schedule/retention (override
-         *     or inherited default) — drives the per-type editor in the group panel.
+         * Per **declared** backup type (not just enabled), the group's effective
+         *     schedule/retention (override or inherited default) — drives the per-type
+         *     editor in the group panel. Includes non-scheduled (disabled) types, since a
+         *     manual backup of one is still retained under its own type policy; those show
+         *     a null `effective_interval` ("manual only").
          */
         post: operations["backups_group_schedules"];
         delete?: never;

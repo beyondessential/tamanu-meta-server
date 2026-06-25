@@ -103,14 +103,16 @@ fn resolve_policy(override_json: Option<Value>, default_json: Option<Value>) -> 
 	}
 }
 
-/// Resolve the effective retention policy for each backup type enabled in the
-/// group: schedule override → type default → org floor, with the floor always
-/// enforced. Returns one `(type, policy)` pair per enabled type.
+/// Resolve the effective retention policy for each backup type **declared** in
+/// the group (not just enabled): schedule override → type default → org floor,
+/// with the floor always enforced. Returns one `(type, policy)` pair per declared
+/// type — so a manual backup of a non-scheduled (disabled) type is still retained
+/// under its own type policy rather than only the repo's global baseline.
 pub async fn effective_retention_for_group(
 	db: &mut AsyncPgConnection,
 	group_id: Uuid,
 ) -> Result<Vec<(BackupType, RetentionPolicy)>> {
-	let types = ServerBackupCapability::enabled_types_for_group(db, group_id).await?;
+	let types = ServerBackupCapability::declared_types_for_group(db, group_id).await?;
 	let mut out = Vec::with_capacity(types.len());
 	for ty in types {
 		let override_json = ServerGroupBackupSchedule::get(db, group_id, &ty)
