@@ -263,6 +263,13 @@ pub struct ServerBackupCapabilityView {
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
 	pub enabled: bool,
+	/// kopia snapshot id of this server+type's most recent successful backup,
+	/// if any.
+	pub latest_snapshot_id: Option<String>,
+	/// When that snapshot was reported.
+	pub latest_snapshot_at: Option<Timestamp>,
+	/// Bytes uploaded by that run, if reported.
+	pub latest_snapshot_bytes: Option<i64>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -1127,6 +1134,9 @@ pub async fn stats(
 
 	// Pending requests + declared capabilities across the group's member servers.
 	let members = group.list_servers(&mut conn).await?;
+	// Latest successful backup per (server, type), to decorate each capability.
+	let latest_by =
+		BackupRun::latest_success_by_server_type_for_group(&mut conn, args.server_group_id).await?;
 	let mut pending_requests = Vec::new();
 	let mut capabilities = Vec::new();
 	for server in &members {
@@ -1140,8 +1150,12 @@ pub async fn stats(
 			});
 		}
 		for cap in ServerBackupCapability::list_for_server(&mut conn, server.id).await? {
+			let last = latest_by.get(&(cap.server_id, cap.r#type.clone()));
 			capabilities.push(ServerBackupCapabilityView {
 				server_id: cap.server_id,
+				latest_snapshot_id: last.and_then(|r| r.snapshot_id.clone()),
+				latest_snapshot_at: last.map(|r| r.reported_at),
+				latest_snapshot_bytes: last.and_then(|r| r.bytes_uploaded),
 				r#type: cap.r#type,
 				enabled: cap.enabled,
 			});
@@ -1174,15 +1188,19 @@ pub async fn capabilities(
 ) -> Result<Json<Vec<ServerBackupCapabilityView>>> {
 	let mut conn = state.db.get().await?;
 	let rows = ServerBackupCapability::list_for_server(&mut conn, args.server_id).await?;
-	Ok(Json(
-		rows.into_iter()
-			.map(|c| ServerBackupCapabilityView {
-				server_id: c.server_id,
-				r#type: c.r#type,
-				enabled: c.enabled,
-			})
-			.collect(),
-	))
+	let mut out = Vec::with_capacity(rows.len());
+	for c in rows {
+		let last = BackupRun::latest_success_for_server(&mut conn, c.server_id, &c.r#type).await?;
+		out.push(ServerBackupCapabilityView {
+			server_id: c.server_id,
+			latest_snapshot_id: last.as_ref().and_then(|r| r.snapshot_id.clone()),
+			latest_snapshot_at: last.as_ref().map(|r| r.reported_at),
+			latest_snapshot_bytes: last.as_ref().and_then(|r| r.bytes_uploaded),
+			r#type: c.r#type,
+			enabled: c.enabled,
+		});
+	}
+	Ok(Json(out))
 }
 
 /// Operator toggle of a `(server, type)` capability's enabled flag.

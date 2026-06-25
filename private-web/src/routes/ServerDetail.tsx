@@ -54,6 +54,7 @@ import SilencedRefsSection from "../components/SilencedRefsSection";
 import StatusDot from "../components/StatusDot";
 import TailnetIdentitySection from "../components/TailnetIdentitySection";
 import TimeAgo from "../components/TimeAgo";
+import { LatestSnapshot } from "../components/SnapshotId";
 import TimezoneTooltip from "../components/TimezoneTooltip";
 import VersionIndicator from "../components/VersionIndicator";
 import { HealthLegend, StatusLegend, VersionLegend } from "../components/Legends";
@@ -1724,9 +1725,16 @@ function BackupCapabilityRow({
 			spacing={2}
 			sx={{ alignItems: "center", justifyContent: "space-between", py: 0.5 }}
 		>
-			<Typography variant="body2" sx={{ fontFamily: "monospace" }}>
-				{cap.type}
-			</Typography>
+			<Stack spacing={0.25} sx={{ minWidth: 0 }}>
+				<Typography variant="body2" sx={{ fontFamily: "monospace" }}>
+					{cap.type}
+				</Typography>
+				<LatestSnapshot
+					id={cap.latest_snapshot_id}
+					at={cap.latest_snapshot_at}
+					bytes={cap.latest_snapshot_bytes}
+				/>
+			</Stack>
 			<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
 				{setCapability.error && (
 					<Typography variant="caption" color="error">

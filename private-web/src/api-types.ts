@@ -3357,6 +3357,21 @@ export interface components {
          */
         ServerBackupCapabilityView: {
             enabled: boolean;
+            /**
+             * Format: date-time
+             * @description When that snapshot was reported.
+             */
+            latest_snapshot_at?: string | null;
+            /**
+             * Format: int64
+             * @description Bytes uploaded by that run, if reported.
+             */
+            latest_snapshot_bytes?: number | null;
+            /**
+             * @description kopia snapshot id of this server+type's most recent successful backup,
+             *     if any.
+             */
+            latest_snapshot_id?: string | null;
             /** Format: uuid */
             server_id: string;
             type: string;
