@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use commons_types::{
 	Uuid,
 	backup::{BackupConfigStatus, BackupPlacement, BackupRepoMode, RunOutcome},
+	issue::Severity,
 	server::{kind::ServerKind, rank::ServerRank},
 	status::{HealthState, ShortStatus},
 	version::VersionStr,
@@ -28,6 +29,7 @@ use database::{
 		ServerBackupCapability, ServerGroupBackupConfig, ServerGroupBackupSchedule,
 	},
 	diesel_async::AsyncPgConnection,
+	issues::{Event, Incident, Issue, IssueListFilters},
 	server_groups::ServerGroup,
 	servers::Server,
 	statuses::Status,
@@ -120,6 +122,48 @@ pub struct EmptyArgs {}
 pub struct FindBackupProblemsArgs {
 	/// Narrow the scan to one group's id. Omit to scan the whole fleet.
 	pub group_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct FindIncidentsArgs {
+	/// Look back this many days; returns incidents that were open at any point in
+	/// the window (still open, or closed within it). Default 7.
+	pub since_days: Option<u32>,
+	/// Restrict to one group's id.
+	pub group_id: Option<String>,
+	/// Filter by status: `open` (not yet closed), `resolved` (operator-resolved),
+	/// or `all` (default).
+	pub status: Option<String>,
+	/// Max incidents to return (default 100).
+	pub limit: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct IncidentIdArgs {
+	/// The incident's id.
+	pub incident_id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct FindIssuesArgs {
+	/// Only currently-active, unresolved issues. Default true.
+	pub active_only: Option<bool>,
+	/// Filter to these severities: `critical`, `error`, `warning`, `info`, `debug`.
+	pub severities: Option<Vec<String>>,
+	/// Restrict to issues whose server is in this group's id.
+	pub group_id: Option<String>,
+	/// Restrict to one server's id.
+	pub server_id: Option<String>,
+	/// Only issues last seen within this many days.
+	pub since_days: Option<u32>,
+	/// Max issues to return (default 100).
+	pub limit: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct IssueIdArgs {
+	/// The issue's id.
+	pub issue_id: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -331,6 +375,131 @@ struct BackupProblem {
 struct BackupProblems {
 	count: usize,
 	problems: Vec<BackupProblem>,
+}
+
+#[derive(Serialize)]
+struct IncidentSummary {
+	id: Uuid,
+	group_id: Uuid,
+	group_name: Option<String>,
+	/// `open` (not closed), `resolved` (operator-resolved), or `closed`.
+	status: &'static str,
+	opened_at: Timestamp,
+	closed_at: Option<Timestamp>,
+	resolved_at: Option<Timestamp>,
+	resolved_by: Option<String>,
+	resolved_reason: Option<String>,
+	/// Whether the incident ever escalated (a critical issue joined).
+	escalated: bool,
+	issue_count: i64,
+	event_count: i64,
+}
+
+#[derive(Serialize)]
+struct IncidentList {
+	count: usize,
+	since: Timestamp,
+	incidents: Vec<IncidentSummary>,
+}
+
+#[derive(Serialize)]
+struct IncidentIssueOut {
+	issue_id: Uuid,
+	severity: Severity,
+	source: String,
+	r#ref: String,
+	description: Option<String>,
+	message: String,
+	active: bool,
+	server_id: Option<Uuid>,
+	server_name: Option<String>,
+	first_seen: Timestamp,
+	last_seen: Timestamp,
+	joined_at: Timestamp,
+	/// None = still attached to the incident.
+	left_at: Option<Timestamp>,
+}
+
+#[derive(Serialize)]
+struct IncidentDetail {
+	id: Uuid,
+	group_id: Uuid,
+	group_name: Option<String>,
+	status: &'static str,
+	opened_at: Timestamp,
+	closed_at: Option<Timestamp>,
+	resolved_at: Option<Timestamp>,
+	resolved_by: Option<String>,
+	resolved_reason: Option<String>,
+	escalated_at: Option<Timestamp>,
+	created_at: Timestamp,
+	updated_at: Timestamp,
+	issues: Vec<IncidentIssueOut>,
+}
+
+#[derive(Serialize)]
+struct IssueSummary {
+	id: Uuid,
+	server_id: Option<Uuid>,
+	server_name: Option<String>,
+	group_id: Option<Uuid>,
+	source: String,
+	r#ref: String,
+	severity: Severity,
+	description: Option<String>,
+	message: String,
+	active: bool,
+	first_seen: Timestamp,
+	last_seen: Timestamp,
+	resolved_at: Option<Timestamp>,
+	snoozed_until: Option<Timestamp>,
+}
+
+#[derive(Serialize)]
+struct IssueList {
+	count: usize,
+	issues: Vec<IssueSummary>,
+}
+
+#[derive(Serialize)]
+struct EventOut {
+	created_at: Timestamp,
+	occurred_at: Option<Timestamp>,
+	severity: Severity,
+	description: Option<String>,
+	message: String,
+	active: bool,
+	occurrences: i32,
+	last_seen: Timestamp,
+}
+
+#[derive(Serialize)]
+struct IncidentRefOut {
+	incident_id: Uuid,
+	opened_at: Timestamp,
+	closed_at: Option<Timestamp>,
+}
+
+#[derive(Serialize)]
+struct IssueDetail {
+	id: Uuid,
+	server_id: Option<Uuid>,
+	server_name: Option<String>,
+	group_id: Option<Uuid>,
+	source: String,
+	r#ref: String,
+	severity: Severity,
+	description: Option<String>,
+	message: String,
+	active: bool,
+	first_seen: Timestamp,
+	last_seen: Timestamp,
+	resolved_at: Option<Timestamp>,
+	resolved_by: Option<String>,
+	resolved_reason: Option<String>,
+	snoozed_until: Option<Timestamp>,
+	recent_events: Vec<EventOut>,
+	incidents: Vec<IncidentRefOut>,
 }
 
 // ---------------------------------------------------------------------------
@@ -897,6 +1066,252 @@ impl CanopyMcp {
 			problems,
 		})
 	}
+
+	#[tool(
+		description = "List incidents that were open at any point in a recent window (default last \
+		               7 days), optionally for one group, with status, timing, and issue counts. \
+		               Use this for 'incidents open in the past week'."
+	)]
+	async fn find_incidents(
+		&self,
+		Parameters(args): Parameters<FindIncidentsArgs>,
+	) -> Result<CallToolResult, McpError> {
+		let mut conn = self.conn().await?;
+		let since = since_from_days(args.since_days.unwrap_or(7));
+		let group = parse_opt_uuid(&args.group_id, "group_id")?;
+		let limit = args.limit.unwrap_or(100);
+		let status = args.status.as_deref().unwrap_or("all");
+
+		let incidents: Vec<Incident> = Incident::list_open_since(&mut conn, since, group, limit)
+			.await
+			.map_err(mcp_err)?
+			.into_iter()
+			.filter(|i| match status {
+				"open" => i.closed_at.is_none(),
+				"resolved" => i.resolved_at.is_some(),
+				_ => true,
+			})
+			.collect();
+
+		let group_names = group_names(
+			&mut conn,
+			&unique(incidents.iter().map(|i| i.server_group_id)),
+		)
+		.await?;
+		let ids: Vec<Uuid> = incidents.iter().map(|i| i.id).collect();
+		let stats = Incident::stats_for(&self.state.db, &ids)
+			.await
+			.map_err(mcp_err)?;
+
+		let summaries: Vec<IncidentSummary> = incidents
+			.iter()
+			.map(|i| {
+				let s = stats.get(&i.id);
+				IncidentSummary {
+					id: i.id,
+					group_id: i.server_group_id,
+					group_name: group_names.get(&i.server_group_id).cloned(),
+					status: incident_status(i),
+					opened_at: i.opened_at,
+					closed_at: i.closed_at,
+					resolved_at: i.resolved_at,
+					resolved_by: i.resolved_by.clone(),
+					resolved_reason: i.resolved_reason.clone(),
+					escalated: i.escalated_at.is_some(),
+					issue_count: s.map_or(0, |s| s.issue_count),
+					event_count: s.map_or(0, |s| s.event_count),
+				}
+			})
+			.collect();
+
+		ok_json(&IncidentList {
+			count: summaries.len(),
+			since,
+			incidents: summaries,
+		})
+	}
+
+	#[tool(
+		description = "Full detail for one incident: timing, status, and the issues attached to it \
+		               (with their severities and messages)."
+	)]
+	async fn get_incident(
+		&self,
+		Parameters(args): Parameters<IncidentIdArgs>,
+	) -> Result<CallToolResult, McpError> {
+		let mut conn = self.conn().await?;
+		let id = parse_uuid(&args.incident_id, "incident_id")?;
+		let Ok((incident, rows)) = Incident::get_with_issues(&mut conn, id).await else {
+			return Ok(not_found(format!("no incident with id {id}")));
+		};
+		let group = ServerGroup::get_by_id(&mut conn, incident.server_group_id)
+			.await
+			.ok();
+		let names = Server::names_by_ids(
+			&mut conn,
+			&unique(rows.iter().filter_map(|(_, i)| i.server_id)),
+		)
+		.await
+		.map_err(mcp_err)?;
+
+		let issues = rows
+			.iter()
+			.map(|(link, iss)| IncidentIssueOut {
+				issue_id: iss.id,
+				severity: iss.severity,
+				source: iss.source.clone(),
+				r#ref: iss.r#ref.clone(),
+				description: iss.description.clone(),
+				message: iss.message.clone(),
+				active: iss.active,
+				server_id: iss.server_id,
+				server_name: iss
+					.server_id
+					.and_then(|s| names.get(&s))
+					.and_then(|(n, _)| n.clone()),
+				first_seen: iss.first_seen,
+				last_seen: iss.last_seen,
+				joined_at: link.joined_at,
+				left_at: link.left_at,
+			})
+			.collect();
+
+		ok_json(&IncidentDetail {
+			id: incident.id,
+			group_id: incident.server_group_id,
+			group_name: group.as_ref().map(|g| g.name.clone()),
+			status: incident_status(&incident),
+			opened_at: incident.opened_at,
+			closed_at: incident.closed_at,
+			resolved_at: incident.resolved_at,
+			resolved_by: incident.resolved_by.clone(),
+			resolved_reason: incident.resolved_reason.clone(),
+			escalated_at: incident.escalated_at,
+			created_at: incident.created_at,
+			updated_at: incident.updated_at,
+			issues,
+		})
+	}
+
+	#[tool(
+		description = "List issues across the fleet, filtered by active state, severity, group, \
+		               server, and recency. Issues are the per-(server,source,ref) events that make \
+		               up incidents."
+	)]
+	async fn find_issues(
+		&self,
+		Parameters(args): Parameters<FindIssuesArgs>,
+	) -> Result<CallToolResult, McpError> {
+		let mut conn = self.conn().await?;
+		let severities = parse_severities(&args.severities)?;
+		let group = parse_opt_uuid(&args.group_id, "group_id")?;
+		let server = parse_opt_uuid(&args.server_id, "server_id")?;
+		let since = args.since_days.map(since_from_days);
+		let limit = args.limit.unwrap_or(100);
+
+		let mut issues = Issue::list(
+			&mut conn,
+			IssueListFilters {
+				active_only: args.active_only.unwrap_or(true),
+				severities,
+				server_group_id: group,
+				since,
+			},
+			limit,
+		)
+		.await
+		.map_err(mcp_err)?;
+		if let Some(sid) = server {
+			issues.retain(|i| i.server_id == Some(sid));
+		}
+
+		let names = Server::names_by_ids(
+			&mut conn,
+			&unique(issues.iter().filter_map(|i| i.server_id)),
+		)
+		.await
+		.map_err(mcp_err)?;
+		let summaries: Vec<IssueSummary> =
+			issues.iter().map(|i| issue_summary(i, &names)).collect();
+		ok_json(&IssueList {
+			count: summaries.len(),
+			issues: summaries,
+		})
+	}
+
+	#[tool(
+		description = "Full detail for one issue: its fields, recent events, and the incidents it \
+		               is or was part of."
+	)]
+	async fn get_issue(
+		&self,
+		Parameters(args): Parameters<IssueIdArgs>,
+	) -> Result<CallToolResult, McpError> {
+		let mut conn = self.conn().await?;
+		let id = parse_uuid(&args.issue_id, "issue_id")?;
+		let Ok(issue) = Issue::get_by_id(&mut conn, id).await else {
+			return Ok(not_found(format!("no issue with id {id}")));
+		};
+		let events = Event::list_for_issue(&mut conn, id, 0, 20)
+			.await
+			.map_err(mcp_err)?;
+		let inc = Incident::for_issues(&mut conn, &[id])
+			.await
+			.map_err(mcp_err)?;
+		let server_name = match issue.server_id {
+			Some(sid) => Server::names_by_ids(&mut conn, &[sid])
+				.await
+				.map_err(mcp_err)?
+				.get(&sid)
+				.and_then(|(n, _)| n.clone()),
+			None => None,
+		};
+
+		let recent_events = events
+			.iter()
+			.map(|e| EventOut {
+				created_at: e.created_at,
+				occurred_at: e.occurred_at,
+				severity: e.severity,
+				description: e.description.clone(),
+				message: e.message.clone(),
+				active: e.active,
+				occurrences: e.occurrences,
+				last_seen: e.last_seen,
+			})
+			.collect();
+		let incidents = inc
+			.get(&id)
+			.into_iter()
+			.flatten()
+			.map(|r| IncidentRefOut {
+				incident_id: r.incident_id,
+				opened_at: r.opened_at,
+				closed_at: r.closed_at,
+			})
+			.collect();
+
+		ok_json(&IssueDetail {
+			id: issue.id,
+			server_id: issue.server_id,
+			server_name,
+			group_id: issue.server_group_id,
+			source: issue.source.clone(),
+			r#ref: issue.r#ref.clone(),
+			severity: issue.severity,
+			description: issue.description.clone(),
+			message: issue.message.clone(),
+			active: issue.active,
+			first_seen: issue.first_seen,
+			last_seen: issue.last_seen,
+			resolved_at: issue.resolved_at,
+			resolved_by: issue.resolved_by.clone(),
+			resolved_reason: issue.resolved_reason.clone(),
+			snoozed_until: issue.snoozed_until,
+			recent_events,
+			incidents,
+		})
+	}
 }
 
 impl CanopyMcp {
@@ -977,6 +1392,76 @@ fn version_str(v: &Version) -> String {
 
 fn first_line(s: &str) -> String {
 	s.lines().next().unwrap_or("").trim().to_string()
+}
+
+/// A timestamp `days` ago (clamped to a decade), for recency windows.
+fn since_from_days(days: u32) -> Timestamp {
+	let days = days.min(3650) as i64;
+	Timestamp::now() - SignedDuration::from_hours(24 * days)
+}
+
+fn incident_status(i: &Incident) -> &'static str {
+	if i.resolved_at.is_some() {
+		"resolved"
+	} else if i.closed_at.is_some() {
+		"closed"
+	} else {
+		"open"
+	}
+}
+
+fn parse_severities(v: &Option<Vec<String>>) -> Result<Option<Vec<Severity>>, McpError> {
+	match v {
+		Some(list) if !list.is_empty() => {
+			let mut out = Vec::with_capacity(list.len());
+			for s in list {
+				out.push(s.parse::<Severity>().map_err(|_| {
+					McpError::invalid_params(format!("invalid severity: {s}"), None)
+				})?);
+			}
+			Ok(Some(out))
+		}
+		_ => Ok(None),
+	}
+}
+
+async fn group_names(
+	conn: &mut AsyncPgConnection,
+	ids: &[Uuid],
+) -> Result<HashMap<Uuid, String>, McpError> {
+	let groups = ServerGroup::list_by_ids(conn, ids).await.map_err(mcp_err)?;
+	Ok(groups.into_iter().map(|g| (g.id, g.name)).collect())
+}
+
+/// Deduplicate a stream of ids, preserving first-seen order.
+fn unique(it: impl IntoIterator<Item = Uuid>) -> Vec<Uuid> {
+	let mut seen = std::collections::HashSet::new();
+	it.into_iter().filter(|x| seen.insert(*x)).collect()
+}
+
+fn issue_summary(
+	i: &Issue,
+	names: &HashMap<Uuid, (Option<String>, Option<String>)>,
+) -> IssueSummary {
+	IssueSummary {
+		id: i.id,
+		server_id: i.server_id,
+		server_name: i
+			.server_id
+			.and_then(|s| names.get(&s))
+			.and_then(|(n, _)| n.clone()),
+		group_id: i.server_group_id,
+		source: i.source.clone(),
+		r#ref: i.r#ref.clone(),
+		severity: i.severity,
+		description: i.description.clone(),
+		message: i.message.clone(),
+		active: i.active,
+		first_seen: i.first_seen,
+		last_seen: i.last_seen,
+		resolved_at: i.resolved_at,
+		snoozed_until: i.snoozed_until,
+	}
 }
 
 fn parse_opt<T: std::str::FromStr>(v: &Option<String>, field: &str) -> Result<Option<T>, McpError> {
