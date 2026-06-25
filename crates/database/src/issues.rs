@@ -165,6 +165,8 @@ pub struct IssueListFilters {
 	pub severities: Option<Vec<Severity>>,
 	/// Restrict to issues whose server belongs to this group.
 	pub server_group_id: Option<Uuid>,
+	/// When `Some`, restrict to issues last seen at or after this time.
+	pub since: Option<Timestamp>,
 }
 
 fn hash_event(
@@ -1258,6 +1260,9 @@ impl Issue {
 				.await?;
 			q = q.filter(dsl::server_id.eq_any(server_ids));
 		}
+		if let Some(since) = filters.since {
+			q = q.filter(dsl::last_seen.ge(jiff_diesel::Timestamp::from(since)));
+		}
 		q.order(dsl::last_seen.desc())
 			.limit(limit)
 			.load(db)
@@ -1662,6 +1667,36 @@ impl Incident {
 			.select(Self::as_select())
 			.filter(dsl::closed_at.is_null())
 			.order(dsl::opened_at.desc())
+			.limit(limit)
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// Incidents that were open at any point at or after `since`: either still
+	/// open (`closed_at IS NULL`) or closed no earlier than `since`. Optionally
+	/// restricted to one group. Ordered newest-opened first. Drives historical
+	/// queries like "incidents open in the past week".
+	pub async fn list_open_since(
+		db: &mut AsyncPgConnection,
+		since: Timestamp,
+		group_id: Option<Uuid>,
+		limit: i64,
+	) -> Result<Vec<Self>> {
+		use crate::schema::incidents::dsl;
+
+		let mut q = dsl::incidents
+			.select(Self::as_select())
+			.filter(
+				dsl::closed_at
+					.is_null()
+					.or(dsl::closed_at.ge(jiff_diesel::Timestamp::from(since))),
+			)
+			.into_boxed();
+		if let Some(gid) = group_id {
+			q = q.filter(dsl::server_group_id.eq(gid));
+		}
+		q.order(dsl::opened_at.desc())
 			.limit(limit)
 			.load(db)
 			.await

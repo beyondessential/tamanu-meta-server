@@ -322,6 +322,7 @@ pub async fn list(
 			active_only: args.active_only.unwrap_or(true),
 			severities: args.severities,
 			server_group_id: args.server_group_id,
+			since: None,
 		},
 		args.limit.unwrap_or(DEFAULT_LIMIT),
 	)

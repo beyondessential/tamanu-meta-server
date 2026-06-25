@@ -116,6 +116,10 @@ async fn initialize_and_list_tools() {
 			"get_version",
 			"fleet_summary",
 			"find_backup_problems",
+			"find_incidents",
+			"get_incident",
+			"find_issues",
+			"get_issue",
 		] {
 			assert!(body.contains(tool), "tools/list missing {tool}: {body}");
 		}
@@ -316,6 +320,154 @@ async fn fleet_summary_rolls_up() {
 		assert_eq!(s["counts"]["by_kind"]["facility"], 1);
 		assert_eq!(s["version_distribution"]["2.34.1"], 1);
 		assert_eq!(s["health"]["healthy"], 1);
+	})
+	.await
+}
+
+// --- incidents & issues ------------------------------------------------------
+
+const IGROUP: &str = "aaaaaaaa-0000-0000-0000-000000000001";
+const ISRV: &str = "aaaaaaaa-0000-0000-0000-000000000002";
+const ISSUE1: &str = "aaaaaaaa-0000-0000-0000-000000000011";
+const ISSUE2: &str = "aaaaaaaa-0000-0000-0000-000000000012";
+const INC_OPEN: &str = "aaaaaaaa-0000-0000-0000-0000000000a1";
+const INC_CLOSED: &str = "aaaaaaaa-0000-0000-0000-0000000000a2";
+
+/// Seed a group + server, two issues (one active error, one inactive warning),
+/// an open incident (2d ago) linked to the active issue, and a closed incident
+/// (opened 5d ago, closed 3d ago).
+async fn seed_incidents(conn: &mut impl SimpleAsyncConnection) {
+	conn.batch_execute(&format!(
+		"INSERT INTO server_groups (id, name) VALUES ('{IGROUP}', 'Inc Group'); \
+		 INSERT INTO servers (id, host, name, kind, group_id, is_monitored) VALUES \
+			('{ISRV}', 'https://inc', 'Inc Server', 'central', '{IGROUP}', true); \
+		 INSERT INTO issues (id, created_at, updated_at, server_id, source, ref, severity, description, message, active, first_seen, last_seen) VALUES \
+			('{ISSUE1}', NOW(), NOW(), '{ISRV}', 'test', 'r1', 'error', 'Disk full', 'disk usage 98%', true, NOW() - interval '2 days', NOW() - interval '1 hour'), \
+			('{ISSUE2}', NOW(), NOW(), '{ISRV}', 'test', 'r2', 'warning', NULL, 'slow query', false, NOW() - interval '10 days', NOW() - interval '9 days'); \
+		 INSERT INTO events (id, created_at, issue_id, severity, message, active, hash, occurrences, last_seen) VALUES \
+			(gen_random_uuid(), NOW() - interval '1 hour', '{ISSUE1}', 'error', 'disk usage 98%', true, '\\x00'::bytea, 3, NOW() - interval '1 hour'); \
+		 INSERT INTO incidents (id, created_at, updated_at, server_group_id, opened_at, closed_at) VALUES \
+			('{INC_OPEN}', NOW(), NOW(), '{IGROUP}', NOW() - interval '2 days', NULL), \
+			('{INC_CLOSED}', NOW(), NOW(), '{IGROUP}', NOW() - interval '5 days', NOW() - interval '3 days'); \
+		 INSERT INTO incident_issues (incident_id, issue_id, joined_at, left_at) VALUES \
+			('{INC_OPEN}', '{ISSUE1}', NOW() - interval '2 days', NULL);"
+	))
+	.await
+	.expect("seed incidents");
+}
+
+fn ids_of(list: &serde_json::Value, key: &str) -> Vec<String> {
+	list[key]
+		.as_array()
+		.unwrap()
+		.iter()
+		.map(|x| x["id"].as_str().unwrap().to_string())
+		.collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn incidents_window_status_and_detail() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		seed_incidents(&mut conn).await;
+
+		// Default 7-day window: both the still-open and the (closed 3d ago) incident.
+		let week = call_tool!(private, "find_incidents", serde_json::json!({}));
+		let week_ids = ids_of(&week, "incidents");
+		assert!(week_ids.contains(&INC_OPEN.to_string()));
+		assert!(
+			week_ids.contains(&INC_CLOSED.to_string()),
+			"7d window should include the incident closed 3d ago"
+		);
+		let open = week["incidents"]
+			.as_array()
+			.unwrap()
+			.iter()
+			.find(|i| i["id"] == INC_OPEN)
+			.unwrap();
+		assert_eq!(open["status"], "open");
+		assert_eq!(open["group_name"], "Inc Group");
+		assert_eq!(open["issue_count"], 1);
+
+		// 1-day window excludes the incident that closed 3 days ago.
+		let day = call_tool!(
+			private,
+			"find_incidents",
+			serde_json::json!({ "since_days": 1 })
+		);
+		let day_ids = ids_of(&day, "incidents");
+		assert!(day_ids.contains(&INC_OPEN.to_string()));
+		assert!(!day_ids.contains(&INC_CLOSED.to_string()));
+
+		// status=open excludes the closed one.
+		let only_open = call_tool!(
+			private,
+			"find_incidents",
+			serde_json::json!({ "status": "open" })
+		);
+		let open_ids = ids_of(&only_open, "incidents");
+		assert!(open_ids.contains(&INC_OPEN.to_string()));
+		assert!(!open_ids.contains(&INC_CLOSED.to_string()));
+
+		// Detail: the open incident carries its attached issue.
+		let detail = call_tool!(
+			private,
+			"get_incident",
+			serde_json::json!({ "incident_id": INC_OPEN })
+		);
+		let issues = detail["issues"].as_array().unwrap();
+		assert_eq!(issues.len(), 1);
+		assert_eq!(issues[0]["issue_id"], ISSUE1);
+		assert_eq!(issues[0]["severity"], "error");
+		assert_eq!(issues[0]["ref"], "r1");
+		assert_eq!(issues[0]["server_name"], "Inc Server");
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn issues_filter_and_detail() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		seed_incidents(&mut conn).await;
+
+		// active_only (default true) → only the active error issue.
+		let active = call_tool!(private, "find_issues", serde_json::json!({}));
+		let active_ids = ids_of(&active, "issues");
+		assert!(active_ids.contains(&ISSUE1.to_string()));
+		assert!(!active_ids.contains(&ISSUE2.to_string()));
+
+		// active_only=false → the inactive one shows up too.
+		let all = call_tool!(
+			private,
+			"find_issues",
+			serde_json::json!({ "active_only": false })
+		);
+		let all_ids = ids_of(&all, "issues");
+		assert!(all_ids.contains(&ISSUE2.to_string()));
+
+		// severity filter.
+		let warnings = call_tool!(
+			private,
+			"find_issues",
+			serde_json::json!({ "active_only": false, "severities": ["warning"] })
+		);
+		let w = warnings["issues"].as_array().unwrap();
+		assert!(!w.is_empty() && w.iter().all(|i| i["severity"] == "warning"));
+
+		// Detail: events + the incident it belongs to.
+		let detail = call_tool!(
+			private,
+			"get_issue",
+			serde_json::json!({ "issue_id": ISSUE1 })
+		);
+		assert_eq!(detail["severity"], "error");
+		assert!(!detail["recent_events"].as_array().unwrap().is_empty());
+		let inc_ids: Vec<String> = detail["incidents"]
+			.as_array()
+			.unwrap()
+			.iter()
+			.map(|i| i["incident_id"].as_str().unwrap().to_string())
+			.collect();
+		assert!(inc_ids.contains(&INC_OPEN.to_string()));
 	})
 	.await
 }

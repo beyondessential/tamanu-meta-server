@@ -60,6 +60,20 @@ When the result is truncated to its bound, the result says so, so the client doe
 
 **Find backup problems** optionally narrows to one group, otherwise scans the whole fleet, and returns the current backup problems with a severity for each: server-and-type pairs whose last successful backup is overdue against its schedule, types that have never reported a backup, groups whose backup repository is in an error state, recent failed backup runs, and maintenance runs that appear stuck.
 
+### Incidents and issues
+
+An issue is a per-server (or per-group) condition raised from a known source under a stable reference, carrying a severity, a current active state, and a history of events; an incident aggregates the issues active for a group over a span of time, from when it opened until it closes or an operator resolves it.
+
+**Find incidents** takes a look-back window (in days, defaulting to a week) and optionally one group, and returns the incidents that were open at any point within that window — those still open, plus those that closed no earlier than the window start.
+Each is returned with its group, its status (open, closed, or operator-resolved), when it opened, closed, and was resolved, who resolved it and why, whether it ever escalated, and how many issues and events it covers.
+A status filter can narrow the result to only open or only resolved incidents.
+
+**Get incident** takes an incident identifier and returns the incident with the issues attached to it: each issue's severity, source, reference, message, owning server, active state, and when it joined and (if applicable) left the incident.
+
+**Find issues** returns issues across the fleet, filtered by active state, by severity, by group, by server, and by recency (issues last seen within a look-back window).
+
+**Get issue** takes an issue identifier and returns the issue with its recent events and the incidents it is or was part of.
+
 ## Result semantics
 
 A server's reported status reflects reports received within the recent-activity window; a server silent beyond that window reads as not recently seen rather than as a stale "up".
@@ -69,3 +83,5 @@ The health classifications this interface reports — a server's healthy / warni
 A client and an operator looking at the same server or group reach the same conclusion about whether it is healthy and whether its backups are in good order.
 
 Version adoption counts and the version distribution count live servers by the version each currently reports, so they reflect what is deployed now rather than what has ever been seen.
+
+An incident counts as open within a look-back window if it was open at any point in that window, not only if it opened within it: a long-running incident that opened earlier and is still open, or that closed during the window, is included.
