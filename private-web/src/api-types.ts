@@ -3347,11 +3347,6 @@ export interface components {
             /** Format: uuid */
             server_id: string;
         };
-        /**
-         * @description One `(server, type)` backup capability and whether the operator has it
-         *     enabled. `enabled` toggles whether the scheduler issues credentials and
-         *     schedules runs for the pair.
-         */
         ServerBackupCapabilityView: {
             enabled: boolean;
             /**
@@ -3369,6 +3364,15 @@ export interface components {
              *     if any.
              */
             latest_snapshot_id?: string | null;
+            /**
+             * Format: date-time
+             * @description When this server's next backup of this type is expected: the server's own
+             *     last success plus the effective interval, or "now" (overdue) if it's
+             *     scheduled but has never succeeded. `None` for disabled or manual-only
+             *     (no-interval) types. Per-server, so a lagging member isn't masked by a
+             *     freshly-backed-up sibling.
+             */
+            next_backup_at?: string | null;
             /** Format: uuid */
             server_id: string;
             type: string;

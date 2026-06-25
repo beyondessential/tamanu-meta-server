@@ -186,17 +186,15 @@ test.describe("backups ready: stats + backup-now", () => {
 
 		await page.goto(`/groups/${group.id}/backups`);
 
-		// Scope to the schedule panel: the type now also appears in the "Back up
-		// now" panel (as a declared-type label), so a page-wide text match is
-		// ambiguous.
+		// Scope to the schedule panel: the type also appears in the Servers
+		// panel (as a declared-type label), so a page-wide text match is
+		// ambiguous. (Next-expected lives in the Servers panel now, not here.)
 		const schedules = page
 			.getByRole("heading", { name: /schedule & retention/i })
 			.locator("..");
 		// No override yet → inherits the seeded canopy-wide default.
 		await expect(schedules.getByText("tamanu-postgres")).toBeVisible();
 		await expect(schedules.getByText("Inherited default")).toBeVisible();
-		// A scheduled type shows its next expected run (no successful run yet → now).
-		await expect(schedules.getByText(/next backup expected/i)).toBeVisible();
 
 		// Override the interval to 12h.
 		await page.getByRole("button", { name: /^override$/i }).click();
@@ -426,7 +424,7 @@ test.describe("backups ready: stats + backup-now", () => {
 		// Both declared types are listed (the disabled-for-schedule one too, since
 		// a one-off backup-now overrides the enabled gate), each with its own button.
 		const panel = page
-			.getByRole("heading", { name: /back up now/i })
+			.getByRole("heading", { name: /^servers$/i })
 			.locator("..");
 		await expect(panel.getByText("tamanu-postgres")).toBeVisible();
 		await expect(panel.getByText("files")).toBeVisible();
@@ -438,9 +436,10 @@ test.describe("backups ready: stats + backup-now", () => {
 		await expect(panel.getByText(/not scheduled/i)).toBeVisible();
 
 		// Backing up the non-default type writes a request for exactly that type.
+		// Scope to the files row so we click that type's button, not the other's.
 		await panel
-			.getByText("files")
-			.locator("..")
+			.getByRole("row")
+			.filter({ hasText: "files" })
 			.getByRole("button", { name: /backup now/i })
 			.click();
 		await expect(async () => {
@@ -451,6 +450,52 @@ test.describe("backups ready: stats + backup-now", () => {
 			expect(rows).toHaveLength(1);
 			expect(rows[0]!.type).toBe("files");
 		}).toPass();
+	});
+
+	test("servers panel shows per-server next-backup (a lagging member isn't masked)", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "lag-group" });
+		const device = await seedDevice(sql);
+		await seedServerGroupBackupConfig(sql, {
+			groupId: group.id,
+			status: "ready",
+			intervalSeconds: 7200, // 2h
+		});
+		const ahead = await seedServer(sql, { name: "srv-ahead", groupId: group.id });
+		const behind = await seedServer(sql, {
+			name: "srv-behind",
+			groupId: group.id,
+		});
+		await seedServerBackupCapability(sql, { serverId: ahead.id });
+		await seedServerBackupCapability(sql, { serverId: behind.id });
+		// Only `ahead` has actually backed up.
+		await seedBackupRun(sql, {
+			deviceId: device.id,
+			groupId: group.id,
+			serverId: ahead.id,
+			outcome: "success",
+			bytesUploaded: 4096,
+			snapshotId: "kdeadbeef0123cafe",
+		});
+
+		await page.goto(`/groups/${group.id}/backups`);
+		const panel = page
+			.getByRole("heading", { name: /^servers$/i })
+			.locator("..");
+		await expect(panel.getByText("Next backup")).toBeVisible();
+
+		// The ahead server's next backup is in the future; it has a snapshot.
+		const aheadRow = panel.getByRole("row").filter({ hasText: "srv-ahead" });
+		await expect(aheadRow.getByText(/^in /)).toBeVisible();
+		await expect(aheadRow.getByText(/kdeadbeef/)).toBeVisible();
+
+		// The behind server never backed up → due now (not masked by `ahead`).
+		const behindRow = panel.getByRole("row").filter({ hasText: "srv-behind" });
+		// exact: the "Backup now" button also contains "now".
+		await expect(behindRow.getByText("now", { exact: true })).toBeVisible();
+		await expect(behindRow.getByText(/no snapshot yet/i)).toBeVisible();
 	});
 
 	test("backup page names the group and cross-links to/from the server backup section", async ({
