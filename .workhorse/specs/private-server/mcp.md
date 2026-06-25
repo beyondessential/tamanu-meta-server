@@ -65,8 +65,13 @@ When the result is truncated to its bound, the result says so, so the client doe
 An issue is a per-server (or per-group) condition raised from a known source under a stable reference, carrying a severity, a current active state, and a history of events; an incident aggregates the issues active for a group over a span of time, from when it opened until it closes or an operator resolves it.
 
 **Find incidents** takes a look-back window (in days, defaulting to a week) and optionally one group, and returns the incidents that were open at any point within that window — those still open, plus those that closed no earlier than the window start.
-Each is returned with its group, its status (open, closed, or operator-resolved), when it opened, closed, and was resolved, who resolved it and why, whether it ever escalated, and how many issues and events it covers.
+Each is returned with its group, its status (open, closed, or operator-resolved), when it opened, closed, and was resolved, who resolved it and why, whether it ever escalated, how long it was open, whether it was published, and how many issues and events it covers.
 A status filter can narrow the result to only open or only resolved incidents.
+
+The window includes incidents that flapped open and shut within their group's grace period and so never surfaced to anyone.
+Each incident therefore carries a **published** flag — true when it actually notified operators, which happens only when it stayed open past its group's grace period or it escalated (a critical issue joined, which bypasses the grace) — and the result reports how many of the returned incidents were published.
+The raw event count an incident accumulated is not a measure of its duration or severity: a high count can belong to a sub-minute flap.
+A summary or ranking of incidents should count published incidents rather than raw rows unless raw activity is explicitly wanted.
 
 **Get incident** takes an incident identifier and returns the incident with the issues attached to it: each issue's severity, source, reference, message, owning server, active state, and when it joined and (if applicable) left the incident.
 

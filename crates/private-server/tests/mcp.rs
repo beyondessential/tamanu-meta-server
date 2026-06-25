@@ -350,7 +350,9 @@ async fn seed_incidents(conn: &mut impl SimpleAsyncConnection) {
 			('{INC_OPEN}', NOW(), NOW(), '{IGROUP}', NOW() - interval '2 days', NULL), \
 			('{INC_CLOSED}', NOW(), NOW(), '{IGROUP}', NOW() - interval '5 days', NOW() - interval '3 days'); \
 		 INSERT INTO incident_issues (incident_id, issue_id, joined_at, left_at) VALUES \
-			('{INC_OPEN}', '{ISSUE1}', NOW() - interval '2 days', NULL);"
+			('{INC_OPEN}', '{ISSUE1}', NOW() - interval '2 days', NULL); \
+		 INSERT INTO slack_outbox (kind, incident_id, payload, deliver_after, delivered_at, attempts) VALUES \
+			('incident_open', '{INC_OPEN}', '{{}}'::jsonb, NOW() - interval '2 days', NOW() - interval '2 days', 1);"
 	))
 	.await
 	.expect("seed incidents");
@@ -387,6 +389,17 @@ async fn incidents_window_status_and_detail() {
 		assert_eq!(open["status"], "open");
 		assert_eq!(open["group_name"], "Inc Group");
 		assert_eq!(open["issue_count"], 1);
+		// INC_OPEN has a delivered Slack open → published; INC_CLOSED has none.
+		assert_eq!(open["published"], true);
+		assert!(open["open_duration_secs"].as_i64().unwrap() > 0);
+		assert_eq!(week["published_count"], 1);
+		let closed = week["incidents"]
+			.as_array()
+			.unwrap()
+			.iter()
+			.find(|i| i["id"] == INC_CLOSED)
+			.unwrap();
+		assert_eq!(closed["published"], false);
 
 		// 1-day window excludes the incident that closed 3 days ago.
 		let day = call_tool!(
@@ -414,6 +427,7 @@ async fn incidents_window_status_and_detail() {
 			"get_incident",
 			serde_json::json!({ "incident_id": INC_OPEN })
 		);
+		assert_eq!(detail["published"], true);
 		let issues = detail["issues"].as_array().unwrap();
 		assert_eq!(issues.len(), 1);
 		assert_eq!(issues[0]["issue_id"], ISSUE1);

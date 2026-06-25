@@ -32,6 +32,7 @@ use database::{
 	issues::{Event, Incident, Issue, IssueListFilters},
 	server_groups::ServerGroup,
 	servers::Server,
+	slack_outbox::SlackOutbox,
 	statuses::Status,
 	version_known_issues::VersionKnownIssue,
 	versions::Version,
@@ -391,13 +392,24 @@ struct IncidentSummary {
 	resolved_reason: Option<String>,
 	/// Whether the incident ever escalated (a critical issue joined).
 	escalated: bool,
+	/// Whether the incident actually surfaced to operators (its Slack open
+	/// notice was delivered): it outlived the group's grace window, or it
+	/// escalated. Incidents that flapped shut within the grace never published.
+	/// Prefer counting `published` incidents over raw rows.
+	published: bool,
+	/// How long the incident was (or has been) open, in seconds.
+	open_duration_secs: i64,
 	issue_count: i64,
+	/// Raw count of status events the incident accumulated. NOT a measure of
+	/// duration or severity — a high count can be a sub-minute flap.
 	event_count: i64,
 }
 
 #[derive(Serialize)]
 struct IncidentList {
 	count: usize,
+	/// How many of `count` actually surfaced to operators (see `published`).
+	published_count: usize,
 	since: Timestamp,
 	incidents: Vec<IncidentSummary>,
 }
@@ -432,6 +444,9 @@ struct IncidentDetail {
 	resolved_by: Option<String>,
 	resolved_reason: Option<String>,
 	escalated_at: Option<Timestamp>,
+	/// Whether the incident surfaced to operators (Slack open delivered).
+	published: bool,
+	open_duration_secs: i64,
 	created_at: Timestamp,
 	updated_at: Timestamp,
 	issues: Vec<IncidentIssueOut>,
@@ -1069,8 +1084,19 @@ impl CanopyMcp {
 
 	#[tool(
 		description = "List incidents that were open at any point in a recent window (default last \
-		               7 days), optionally for one group, with status, timing, and issue counts. \
-		               Use this for 'incidents open in the past week'."
+		               7 days), optionally for one group. Use this for 'incidents open in the past \
+		               week'.\n\n\
+		               IMPORTANT for summaries/ranking: count `published` incidents, not raw rows. \
+		               The window includes a large volume of sub-grace flapping (health checks that \
+		               recover/refire, alerts that self-clear in under a minute) that was recorded \
+		               but never surfaced to anyone. An incident is `published` only if its Slack \
+		               open notice was delivered: it stayed open past the group's grace window \
+		               (slack_open_delay, ~3 min by default) OR it escalated (a critical issue \
+		               joined, which bypasses the grace). `event_count` is raw status-event churn \
+		               and does NOT track duration or severity — a high-event incident can be a \
+		               sub-minute flap. A high count dominated by unpublished short-lived rows \
+		               usually means a twitchy alert/health-check threshold, not a real outage. \
+		               `published_count` gives the surfaced subset directly."
 	)]
 	async fn find_incidents(
 		&self,
@@ -1102,6 +1128,9 @@ impl CanopyMcp {
 		let stats = Incident::stats_for(&self.state.db, &ids)
 			.await
 			.map_err(mcp_err)?;
+		let published = SlackOutbox::delivered_open_ids(&mut conn, &ids)
+			.await
+			.map_err(mcp_err)?;
 
 		let summaries: Vec<IncidentSummary> = incidents
 			.iter()
@@ -1118,6 +1147,8 @@ impl CanopyMcp {
 					resolved_by: i.resolved_by.clone(),
 					resolved_reason: i.resolved_reason.clone(),
 					escalated: i.escalated_at.is_some(),
+					published: published.contains(&i.id),
+					open_duration_secs: open_duration_secs(i),
 					issue_count: s.map_or(0, |s| s.issue_count),
 					event_count: s.map_or(0, |s| s.event_count),
 				}
@@ -1126,6 +1157,7 @@ impl CanopyMcp {
 
 		ok_json(&IncidentList {
 			count: summaries.len(),
+			published_count: summaries.iter().filter(|s| s.published).count(),
 			since,
 			incidents: summaries,
 		})
@@ -1147,6 +1179,10 @@ impl CanopyMcp {
 		let group = ServerGroup::get_by_id(&mut conn, incident.server_group_id)
 			.await
 			.ok();
+		let published = SlackOutbox::delivered_open_ids(&mut conn, &[incident.id])
+			.await
+			.map_err(mcp_err)?
+			.contains(&incident.id);
 		let names = Server::names_by_ids(
 			&mut conn,
 			&unique(rows.iter().filter_map(|(_, i)| i.server_id)),
@@ -1187,6 +1223,8 @@ impl CanopyMcp {
 			resolved_by: incident.resolved_by.clone(),
 			resolved_reason: incident.resolved_reason.clone(),
 			escalated_at: incident.escalated_at,
+			published,
+			open_duration_secs: open_duration_secs(&incident),
 			created_at: incident.created_at,
 			updated_at: incident.updated_at,
 			issues,
@@ -1345,8 +1383,15 @@ impl ServerHandler for CanopyMcp {
 		let mut info = ServerInfo::default();
 		info.instructions = Some(
 			"Read-only access to the Canopy fleet: servers, groups, health/status, Tamanu \
-			 versions, and backups. All data is live. Use find_* to locate entities and get_* \
-			 for detail; fleet_summary and find_backup_problems for triage."
+			 versions, backups, and incidents/issues. All data is live. Use find_* to locate \
+			 entities and get_* for detail; fleet_summary and find_backup_problems for triage.\n\n\
+			 Incidents: an incident groups the issues active for a group over a span of time. \
+			 find_incidents returns everything open in the window, including heavy sub-grace \
+			 flapping that was recorded but never surfaced. When summarizing or ranking, count \
+			 `published` incidents (also given as `published_count`), not raw rows: an incident is \
+			 published only if it outlived the group's grace window (~3 min default) or escalated. \
+			 `event_count` is raw event churn, not duration or severity — a huge count can be a \
+			 sub-minute flap, usually a twitchy threshold rather than a real outage."
 				.into(),
 		);
 		info.capabilities = ServerCapabilities::builder().enable_tools().build();
@@ -1398,6 +1443,12 @@ fn first_line(s: &str) -> String {
 fn since_from_days(days: u32) -> Timestamp {
 	let days = days.min(3650) as i64;
 	Timestamp::now() - SignedDuration::from_hours(24 * days)
+}
+
+/// How long the incident was (or has been) open, in seconds.
+fn open_duration_secs(i: &Incident) -> i64 {
+	let end = i.closed_at.unwrap_or_else(Timestamp::now);
+	end.duration_since(i.opened_at).as_secs().max(0)
 }
 
 fn incident_status(i: &Incident) -> &'static str {

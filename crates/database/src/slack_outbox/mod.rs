@@ -167,6 +167,32 @@ impl SlackOutbox {
 		Ok(rows.into_iter().map(|(id, t)| (id, t.into())).collect())
 	}
 
+	/// Of `incident_ids`, those whose `incident_open` notice was actually
+	/// delivered to Slack — i.e. operators were paged. This is the
+	/// authoritative "the incident surfaced" signal: it excludes opens still
+	/// held in the grace window and opens cancelled or given up before
+	/// delivery. (Escalation produces a delivered open, so it's included.)
+	pub async fn delivered_open_ids(
+		db: &mut AsyncPgConnection,
+		incident_ids: &[Uuid],
+	) -> Result<std::collections::HashSet<Uuid>> {
+		use crate::schema::slack_outbox::dsl;
+		use std::collections::HashSet;
+
+		if incident_ids.is_empty() {
+			return Ok(HashSet::new());
+		}
+		let rows: Vec<Uuid> = dsl::slack_outbox
+			.select(dsl::incident_id)
+			.filter(dsl::kind.eq(KIND_INCIDENT_OPEN))
+			.filter(dsl::incident_id.eq_any(incident_ids))
+			.filter(dsl::delivered_at.is_not_null())
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(rows.into_iter().collect())
+	}
+
 	/// Claim up to `limit` pending rows in insertion order. Uses
 	/// `FOR UPDATE SKIP LOCKED` so multiple workers (or a worker plus a
 	/// hand-run reprocess) won't fight over the same row. The caller must
