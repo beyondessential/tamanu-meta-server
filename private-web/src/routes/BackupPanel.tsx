@@ -39,8 +39,10 @@ import { useApi, useApiAction } from "../api";
 import { useReloadInterval } from "../hooks/useReloadInterval";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { humanSeconds } from "../lib/humanDuration";
+import { formatBytes } from "../lib/formatBytes";
 import { usePageTitle } from "../hooks/usePageTitle";
 import TimeAgo from "../components/TimeAgo";
+import { LatestSnapshot, SnapshotId } from "../components/SnapshotId";
 import {
 	BACKUP_STATUS_HELP,
 	BACKUP_STATUS_INTENT,
@@ -647,10 +649,13 @@ function RunRow({ run, members }: { run: BackupRun; members: ServerInfo[] }) {
 						? "—"
 						: formatBytes(run.bytes_uploaded)}
 				</TableCell>
+				<TableCell>
+					<SnapshotId id={run.snapshot_id} />
+				</TableCell>
 			</TableRow>
 			{hasError && (
 				<TableRow>
-					<TableCell colSpan={7} sx={{ py: 0, border: 0 }}>
+					<TableCell colSpan={8} sx={{ py: 0, border: 0 }}>
 						<Collapse in={open} timeout="auto" unmountOnExit>
 							<Alert severity="error" variant="outlined" sx={{ my: 1 }}>
 								<Typography
@@ -735,6 +740,7 @@ function StatsPanel({
 							<TableCell>Purpose</TableCell>
 							<TableCell>Outcome</TableCell>
 							<TableCell>Uploaded</TableCell>
+							<TableCell>Snapshot</TableCell>
 						</TableRow>
 					</TableHead>
 					<TableBody>
@@ -799,6 +805,9 @@ function RunsAndRequests({
 	const enabledFor = (serverId: string, type: string): boolean | undefined =>
 		capabilities.find((c) => c.server_id === serverId && c.type === type)
 			?.enabled;
+
+	const capFor = (serverId: string, type: string) =>
+		capabilities.find((c) => c.server_id === serverId && c.type === type);
 
 	const onRequest = async (serverId: string, type: string) => {
 		try {
@@ -875,19 +884,24 @@ function RunsAndRequests({
 									<Stack spacing={0.5} sx={{ alignItems: "flex-end" }}>
 										{types.map((t) => {
 											const req = pendingFor(m.id, t);
+											const cap = capFor(m.id, t);
 											return (
 												<Stack
 													key={t}
-													direction="row"
-													spacing={1}
-													sx={{ alignItems: "center" }}
+													spacing={0.25}
+													sx={{ alignItems: "flex-end" }}
 												>
-													<Typography
-														variant="body2"
-														sx={{ fontFamily: "monospace" }}
+													<Stack
+														direction="row"
+														spacing={1}
+														sx={{ alignItems: "center" }}
 													>
-														{t}
-													</Typography>
+														<Typography
+															variant="body2"
+															sx={{ fontFamily: "monospace" }}
+														>
+															{t}
+														</Typography>
 													{enabledFor(m.id, t) === false && (
 														<Tooltip title="This type isn't on the backup schedule for this server (toggle it on in the server's Backups section). You can still back it up on demand.">
 															<Chip
@@ -934,6 +948,12 @@ function RunsAndRequests({
 														)
 													)}
 												</Stack>
+												<LatestSnapshot
+													id={cap?.latest_snapshot_id}
+													at={cap?.latest_snapshot_at}
+													bytes={cap?.latest_snapshot_bytes}
+												/>
+											</Stack>
 											);
 										})}
 									</Stack>
@@ -969,15 +989,3 @@ function Stat({
 
 /// Format a byte count, rendering null as "unknown" (indicators always show a
 /// state, never hide).
-function formatBytes(bytes: number | null): string {
-	if (bytes == null) return "unknown";
-	if (bytes < 1024) return `${bytes} B`;
-	const units = ["KiB", "MiB", "GiB", "TiB"];
-	let v = bytes / 1024;
-	let i = 0;
-	while (v >= 1024 && i < units.length - 1) {
-		v /= 1024;
-		i++;
-	}
-	return `${v.toFixed(1)} ${units[i]}`;
-}

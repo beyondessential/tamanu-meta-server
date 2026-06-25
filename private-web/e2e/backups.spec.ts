@@ -258,6 +258,41 @@ test.describe("backups ready: stats + backup-now", () => {
 		await expect(runs.getByText("stats-srv")).toBeVisible();
 	});
 
+	test("recent run shows a truncated, copyable snapshot id", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "snap-group" });
+		const device = await seedDevice(sql);
+		const server = await seedServer(sql, {
+			name: "snap-srv",
+			groupId: group.id,
+			deviceId: device.id,
+		});
+		await seedServerGroupBackupConfig(sql, {
+			groupId: group.id,
+			status: "ready",
+			intervalSeconds: 3600,
+		});
+		await seedBackupRun(sql, {
+			deviceId: device.id,
+			groupId: group.id,
+			serverId: server.id,
+			outcome: "success",
+			bytesUploaded: 2048,
+			snapshotId: "k0123456789abcdef0123",
+		});
+
+		await page.goto(`/groups/${group.id}/backups`);
+		const runs = page.getByRole("table").last();
+		// Shown truncated (not the full opaque id), with a copy button.
+		await expect(runs.getByText(/k0123456789/)).toBeVisible();
+		await expect(runs.getByText("k0123456789abcdef0123")).toBeHidden();
+		await expect(
+			runs.getByRole("button", { name: /copy snapshot id/i }),
+		).toBeVisible();
+	});
+
 	test("failed run shows expandable error detail and no upload size", async ({
 		page,
 		sql,
@@ -287,8 +322,9 @@ test.describe("backups ready: stats + backup-now", () => {
 		const runs = page.getByRole("table").last();
 		await expect(runs.getByText("err-srv")).toBeVisible();
 		await expect(runs.getByText("failure")).toBeVisible();
-		// A failed run uploaded nothing → "—", not "unknown".
-		await expect(runs.getByText("—")).toBeVisible();
+		// A failed run uploaded nothing and has no snapshot → "—" cells (Uploaded
+		// + Snapshot), not "unknown".
+		await expect(runs.getByRole("cell", { name: "—" }).first()).toBeVisible();
 
 		// Error detail is hidden until the row is expanded.
 		await expect(page.getByText(/disk quota exceeded/i)).toBeHidden();
@@ -511,6 +547,58 @@ test.describe("server backup capabilities", () => {
 		await expect(
 			page.getByText(/no backup types registered for this server/i),
 		).toBeVisible();
+	});
+
+	test("a capability shows its latest snapshot (id + size), copyable", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "snap-caps-group" });
+		const device = await seedDevice(sql);
+		const server = await seedServer(sql, {
+			name: "snap-caps-srv",
+			groupId: group.id,
+			deviceId: device.id,
+		});
+		await seedServerBackupCapability(sql, {
+			serverId: server.id,
+			type: "tamanu-postgres",
+		});
+		await seedBackupRun(sql, {
+			deviceId: device.id,
+			groupId: group.id,
+			serverId: server.id,
+			outcome: "success",
+			bytesUploaded: 2048,
+			snapshotId: "k0123456789abcdef0123",
+		});
+
+		await page.goto(`/servers/${server.id}`);
+		const backups = page.locator("#backups");
+		await expect(backups.getByText(/k0123456789/)).toBeVisible();
+		await expect(backups.getByText(/2\.0 KiB/)).toBeVisible();
+		await expect(
+			backups.getByRole("button", { name: /copy snapshot id/i }),
+		).toBeVisible();
+	});
+
+	test("a capability with no successful backup shows 'no snapshot yet'", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "no-snap-group" });
+		const server = await seedServer(sql, {
+			name: "no-snap-srv",
+			groupId: group.id,
+		});
+		await seedServerBackupCapability(sql, {
+			serverId: server.id,
+			type: "tamanu-postgres",
+		});
+
+		await page.goto(`/servers/${server.id}`);
+		const backups = page.locator("#backups");
+		await expect(backups.getByText(/no snapshot yet/i)).toBeVisible();
 	});
 
 	test("toggling a capability switch flips enabled in the DB", async ({
