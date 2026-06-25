@@ -1,18 +1,19 @@
 //! Tests for the read-only MCP query interface mounted at `/api/mcp`.
 //!
-//! The debug build bypasses Tailscale auth, so no headers are needed. These
-//! drive the real protocol path (initialize → tools/call over Streamable HTTP)
-//! against seeded data and assert the structured results, so they cover both
-//! the wiring and each tool's data shaping.
+//! The endpoint runs in stateless mode (no server-side session), so each POST
+//! is self-contained: a `tools/call` needs no prior `initialize`, just an
+//! `MCP-Protocol-Version` header. Responses are plain `application/json`. The
+//! debug build bypasses Tailscale auth, so no identity headers are needed.
 
 use commons_tests::diesel_async::SimpleAsyncConnection;
 
-/// The Streamable HTTP transport requires the client to accept both JSON and
-/// SSE on the POST leg.
+/// Clients must accept both JSON and SSE on the POST leg.
 const ACCEPT: &str = "application/json, text/event-stream";
+/// Required on every non-initialize request in stateless mode.
+const PROTO: &str = "2025-06-18";
 
-/// Extract the JSON-RPC envelope from a Streamable HTTP response body, which is
-/// either a bare JSON object or an SSE stream whose `data:` line carries it.
+/// Extract the JSON-RPC envelope from a response body (plain JSON in
+/// json-response mode, or an SSE `data:` line otherwise).
 fn parse_envelope(body: &str) -> serde_json::Value {
 	let trimmed = body.trim_start();
 	if trimmed.starts_with('{') {
@@ -26,50 +27,14 @@ fn parse_envelope(body: &str) -> serde_json::Value {
 	serde_json::from_str(data.trim()).expect("json in SSE data line")
 }
 
-/// Initialize a session and return its id. Expanded inline so the test never
-/// has to name `axum_test::TestServer`.
-macro_rules! init_session {
-	($private:expr) => {{
-		let init = $private
-			.post("/api/mcp")
-			.add_header("accept", ACCEPT)
-			.json(&serde_json::json!({
-				"jsonrpc": "2.0", "id": 1, "method": "initialize",
-				"params": {
-					"protocolVersion": "2025-06-18",
-					"capabilities": {},
-					"clientInfo": { "name": "canopy-tests", "version": "0" }
-				}
-			}))
-			.await;
-		assert_eq!(init.status_code().as_u16(), 200, "initialize should 200");
-		let session = init
-			.headers()
-			.get("mcp-session-id")
-			.expect("session id")
-			.to_str()
-			.unwrap()
-			.to_owned();
-		$private
-			.post("/api/mcp")
-			.add_header("accept", ACCEPT)
-			.add_header("mcp-session-id", &session)
-			.json(&serde_json::json!({
-				"jsonrpc": "2.0", "method": "notifications/initialized"
-			}))
-			.await;
-		session
-	}};
-}
-
 /// Call a tool and return its `structuredContent`. Asserts the call succeeded
 /// (no JSON-RPC error and `isError` is not true).
 macro_rules! call_tool {
-	($private:expr, $session:expr, $name:expr, $args:expr) => {{
+	($private:expr, $name:expr, $args:expr) => {{
 		let resp = $private
 			.post("/api/mcp")
 			.add_header("accept", ACCEPT)
-			.add_header("mcp-session-id", &$session)
+			.add_header("mcp-protocol-version", PROTO)
 			.json(&serde_json::json!({
 				"jsonrpc": "2.0", "id": 2, "method": "tools/call",
 				"params": { "name": $name, "arguments": $args }
@@ -93,7 +58,7 @@ macro_rules! call_tool {
 }
 
 /// Seed a group, two servers (one grouped + monitored with a fresh healthy
-/// status, one ungrouped), and a backup config + capability + schedule.
+/// status, one ungrouped), and a status carrying a version + platform.
 const GROUP: &str = "11111111-1111-1111-1111-111111111111";
 const SRV_GROUPED: &str = "22222222-2222-2222-2222-222222222222";
 const SRV_UNGROUPED: &str = "33333333-3333-3333-3333-333333333333";
@@ -116,11 +81,26 @@ async fn seed(conn: &mut impl SimpleAsyncConnection) {
 #[tokio::test(flavor = "multi_thread")]
 async fn initialize_and_list_tools() {
 	commons_tests::server::run(async |_conn, _public, private| {
-		let session = init_session!(private);
+		// initialize works (and returns tool capability), but is not required
+		// before other calls in stateless mode.
+		let init = private
+			.post("/api/mcp")
+			.add_header("accept", ACCEPT)
+			.json(&serde_json::json!({
+				"jsonrpc": "2.0", "id": 1, "method": "initialize",
+				"params": {
+					"protocolVersion": PROTO,
+					"capabilities": {},
+					"clientInfo": { "name": "canopy-tests", "version": "0" }
+				}
+			}))
+			.await;
+		assert_eq!(init.status_code().as_u16(), 200, "initialize should 200");
+
 		let list = private
 			.post("/api/mcp")
 			.add_header("accept", ACCEPT)
-			.add_header("mcp-session-id", &session)
+			.add_header("mcp-protocol-version", PROTO)
 			.json(&serde_json::json!({
 				"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}
 			}))
@@ -144,11 +124,25 @@ async fn initialize_and_list_tools() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn tools_call_needs_no_session() {
+	// Regression: the endpoint is stateless, so a `tools/call` must succeed on
+	// its own — no `initialize` handshake and no session id. (The default
+	// stateful mode 404s any request routed to a replica that didn't handle
+	// `initialize`, which is what broke real clients behind the load balancer.)
+	commons_tests::server::run(async |mut conn, _public, private| {
+		seed(&mut conn).await;
+		let summary = call_tool!(private, "fleet_summary", serde_json::json!({}));
+		assert!(summary["total_servers"].as_u64().unwrap() >= 2);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn oauth_discovery_is_404_not_spa() {
-	// Regression: MCP clients probe `/.well-known/oauth-*` for OAuth metadata.
-	// The SPA fallback used to answer 200 text/html, which clients fail to parse
-	// as JSON and report as "needs authentication". A 404 tells them there's no
-	// OAuth, so they connect with the ambient (Tailscale) identity instead.
+	// MCP clients probe `/.well-known/oauth-*` for OAuth metadata. The SPA
+	// fallback used to answer 200 text/html, which clients fail to parse as JSON
+	// and report as "needs authentication". A 404 tells them there's no OAuth, so
+	// they connect with the ambient (Tailscale) identity instead.
 	commons_tests::server::run(async |_conn, _public, private| {
 		for path in [
 			"/.well-known/oauth-protected-resource",
@@ -180,7 +174,7 @@ async fn accepts_non_loopback_host() {
 			.json(&serde_json::json!({
 				"jsonrpc": "2.0", "id": 1, "method": "initialize",
 				"params": {
-					"protocolVersion": "2025-06-18",
+					"protocolVersion": PROTO,
 					"capabilities": {},
 					"clientInfo": { "name": "canopy-tests", "version": "0" }
 				}
@@ -200,16 +194,14 @@ async fn accepts_non_loopback_host() {
 async fn find_servers_filters_and_decorates() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		seed(&mut conn).await;
-		let session = init_session!(private);
 
 		// Unfiltered: both seeded servers.
-		let all = call_tool!(private, session, "find_servers", serde_json::json!({}));
+		let all = call_tool!(private, "find_servers", serde_json::json!({}));
 		assert!(all["total_matched"].as_u64().unwrap() >= 2);
 
 		// Filter by kind=facility → only the ungrouped one.
 		let facility = call_tool!(
 			private,
-			session,
 			"find_servers",
 			serde_json::json!({ "kind": "facility" })
 		);
@@ -221,7 +213,6 @@ async fn find_servers_filters_and_decorates() {
 		// Query matches by name.
 		let q = call_tool!(
 			private,
-			session,
 			"find_servers",
 			serde_json::json!({ "query": "central" })
 		);
@@ -233,11 +224,11 @@ async fn find_servers_filters_and_decorates() {
 			.collect();
 		assert_eq!(names, vec!["Prod Central"]);
 
-		// Bad enum → invalid params (protocol error).
+		// Bad enum → error (protocol or tool-level).
 		let bad = private
 			.post("/api/mcp")
 			.add_header("accept", ACCEPT)
-			.add_header("mcp-session-id", &session)
+			.add_header("mcp-protocol-version", PROTO)
 			.json(&serde_json::json!({
 				"jsonrpc": "2.0", "id": 9, "method": "tools/call",
 				"params": { "name": "find_servers", "arguments": { "kind": "nonsense" } }
@@ -256,11 +247,9 @@ async fn find_servers_filters_and_decorates() {
 async fn get_server_detail_and_not_found() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		seed(&mut conn).await;
-		let session = init_session!(private);
 
 		let detail = call_tool!(
 			private,
-			session,
 			"get_server",
 			serde_json::json!({ "server_id": SRV_GROUPED })
 		);
@@ -273,7 +262,7 @@ async fn get_server_detail_and_not_found() {
 		let missing = private
 			.post("/api/mcp")
 			.add_header("accept", ACCEPT)
-			.add_header("mcp-session-id", &session)
+			.add_header("mcp-protocol-version", PROTO)
 			.json(&serde_json::json!({
 				"jsonrpc": "2.0", "id": 3, "method": "tools/call",
 				"params": {
@@ -292,9 +281,8 @@ async fn get_server_detail_and_not_found() {
 async fn group_listing_and_detail() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		seed(&mut conn).await;
-		let session = init_session!(private);
 
-		let groups = call_tool!(private, session, "find_groups", serde_json::json!({}));
+		let groups = call_tool!(private, "find_groups", serde_json::json!({}));
 		let g = groups["groups"]
 			.as_array()
 			.unwrap()
@@ -307,7 +295,6 @@ async fn group_listing_and_detail() {
 
 		let detail = call_tool!(
 			private,
-			session,
 			"get_group",
 			serde_json::json!({ "group_id": GROUP })
 		);
@@ -323,9 +310,8 @@ async fn group_listing_and_detail() {
 async fn fleet_summary_rolls_up() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		seed(&mut conn).await;
-		let session = init_session!(private);
 
-		let s = call_tool!(private, session, "fleet_summary", serde_json::json!({}));
+		let s = call_tool!(private, "fleet_summary", serde_json::json!({}));
 		assert!(s["total_servers"].as_u64().unwrap() >= 2);
 		assert_eq!(s["counts"]["by_kind"]["facility"], 1);
 		assert_eq!(s["version_distribution"]["2.34.1"], 1);
@@ -338,14 +324,8 @@ async fn fleet_summary_rolls_up() {
 async fn backup_problems_scan_runs() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		seed(&mut conn).await;
-		let session = init_session!(private);
 		// No ready backup config seeded, so the scan returns an empty, well-formed set.
-		let p = call_tool!(
-			private,
-			session,
-			"find_backup_problems",
-			serde_json::json!({})
-		);
+		let p = call_tool!(private, "find_backup_problems", serde_json::json!({}));
 		assert!(p["count"].is_number());
 		assert!(p["problems"].is_array());
 	})
