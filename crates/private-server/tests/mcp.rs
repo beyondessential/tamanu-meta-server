@@ -144,6 +144,29 @@ async fn initialize_and_list_tools() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn oauth_discovery_is_404_not_spa() {
+	// Regression: MCP clients probe `/.well-known/oauth-*` for OAuth metadata.
+	// The SPA fallback used to answer 200 text/html, which clients fail to parse
+	// as JSON and report as "needs authentication". A 404 tells them there's no
+	// OAuth, so they connect with the ambient (Tailscale) identity instead.
+	commons_tests::server::run(async |_conn, _public, private| {
+		for path in [
+			"/.well-known/oauth-protected-resource",
+			"/.well-known/oauth-protected-resource/api/mcp",
+			"/.well-known/oauth-authorization-server",
+		] {
+			let resp = private.get(path).await;
+			assert_eq!(
+				resp.status_code().as_u16(),
+				404,
+				"{path} should be 404, not the SPA"
+			);
+		}
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn accepts_non_loopback_host() {
 	// Regression: rmcp's DNS-rebinding guard defaults to a loopback-only Host
 	// allowlist, which 403s the real tailnet deployment host. The endpoint is
