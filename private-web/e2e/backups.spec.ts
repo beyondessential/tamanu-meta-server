@@ -600,6 +600,7 @@ test.describe("server backup capabilities", () => {
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "snap-caps-group" });
+		await seedServerGroupBackupConfig(sql, { groupId: group.id, status: "ready" });
 		const device = await seedDevice(sql);
 		const server = await seedServer(sql, {
 			name: "snap-caps-srv",
@@ -633,6 +634,7 @@ test.describe("server backup capabilities", () => {
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "no-snap-group" });
+		await seedServerGroupBackupConfig(sql, { groupId: group.id, status: "ready" });
 		const server = await seedServer(sql, {
 			name: "no-snap-srv",
 			groupId: group.id,
@@ -652,6 +654,7 @@ test.describe("server backup capabilities", () => {
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "inflight-group" });
+		await seedServerGroupBackupConfig(sql, { groupId: group.id, status: "ready" });
 		const device = await seedDevice(sql);
 		const server = await seedServer(sql, {
 			name: "inflight-srv",
@@ -683,11 +686,41 @@ test.describe("server backup capabilities", () => {
 		await expect(backups.getByText(/kfreshsnap/)).toBeVisible();
 	});
 
+	test("with no group backup config, capabilities are collapsed behind a message", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "unconfigured-group" });
+		const server = await seedServer(sql, {
+			name: "unconfigured-srv",
+			groupId: group.id,
+		});
+		// A declared capability, but the group has NO backup config.
+		await seedServerBackupCapability(sql, {
+			serverId: server.id,
+			type: "tamanu-postgres",
+		});
+
+		await page.goto(`/servers/${server.id}`);
+		const backups = page.locator("#backups");
+		// The message explains the toggles are inert.
+		await expect(backups.getByText(/aren't set up for this group/i)).toBeVisible();
+		// The toggle is collapsed (not visible) until expanded.
+		const toggle = backups.getByRole("switch", {
+			name: /enable tamanu-postgres backups/i,
+		});
+		await expect(toggle).toBeHidden();
+		// …but still reachable: expanding reveals it.
+		await backups.getByRole("button", { name: /show backup types/i }).click();
+		await expect(toggle).toBeVisible();
+	});
+
 	test("toggling a capability switch flips enabled in the DB", async ({
 		page,
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "caps-group" });
+		await seedServerGroupBackupConfig(sql, { groupId: group.id, status: "ready" });
 		const server = await seedServer(sql, {
 			name: "caps-srv",
 			groupId: group.id,
