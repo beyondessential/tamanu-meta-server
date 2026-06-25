@@ -1024,6 +1024,17 @@ fn mcp_err(e: impl std::fmt::Display) -> McpError {
 /// Build the tower service nested into the axum router at `/api/mcp`.
 pub fn service(state: AppState) -> StreamableHttpService<CanopyMcp, LocalSessionManager> {
 	let mut config = StreamableHttpServerConfig::default();
+	// Stateless: each request is self-contained, with no server-side session.
+	// The default stateful mode keeps sessions in process memory and 404s
+	// ("Session not found") any follow-up request that a load balancer routes to
+	// a different replica than the one that handled `initialize` — which is
+	// exactly what a multi-replica deployment behind the Tailscale ingress does.
+	// This is a read-only request/response API with no server-initiated push, so
+	// sessions buy us nothing.
+	config.stateful_mode = false;
+	// Return plain `application/json` per request instead of an SSE stream. With
+	// no streaming there's no long-lived response for a proxy to buffer or drop.
+	config.json_response = true;
 	// rmcp's `allowed_hosts` defaults to loopback only — a DNS-rebinding defense
 	// aimed at browser-facing localhost MCP servers. That threat doesn't apply
 	// here: the endpoint is reachable only through the Tailscale ingress (which
