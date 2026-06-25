@@ -1,6 +1,8 @@
-//! Bucket reconcile. Per tick (slow, slot-jittered daily cadence), converge each
-//! `ready` group's bucket toward what canopy wants — so config changes reach
-//! already-provisioned buckets, not just newly-created ones:
+//! Bucket reconcile. Once in a forced sweep at startup, then on a slot-jittered
+//! daily cadence, converge each `ready` group's bucket toward what canopy wants
+//! — so config changes reach already-provisioned buckets, not just newly-created
+//! ones (the startup sweep makes a deploy converge promptly rather than over the
+//! next ~24h):
 //!
 //! - **Shared** (canopy-managed): re-apply the whole idempotent provisioning
 //!   recipe via the provisioner role (object-lock, versioning, lifecycle incl.
@@ -33,7 +35,10 @@ fn secs_into(now: Timestamp, window: Duration) -> u64 {
 	now.as_second().rem_euclid(w) as u64
 }
 
-async fn tick(db: &mut diesel_async::AsyncPgConnection) -> Result<(), String> {
+/// One reconcile pass. `force` reconciles *every* ready group regardless of its
+/// jittered daily slot — used for the one-shot sweep at startup so a deploy that
+/// changes the recipe converges promptly instead of trickling out over ~24h.
+async fn tick(db: &mut diesel_async::AsyncPgConnection, force: bool) -> Result<(), String> {
 	let ready: Vec<ServerGroupBackupConfig> = ServerGroupBackupConfig::list(db)
 		.await
 		.map_err(|e| e.to_string())?
@@ -56,7 +61,7 @@ async fn tick(db: &mut diesel_async::AsyncPgConnection) -> Result<(), String> {
 		.filter(|v| !v.trim().is_empty());
 
 	for c in &ready {
-		if !slot_is_due(c.group_id, RECONCILE_WINDOW, TICK, into) {
+		if !force && !slot_is_due(c.group_id, RECONCILE_WINDOW, TICK, into) {
 			continue;
 		}
 		let group = match ServerGroup::get_by_id(db, c.group_id).await {
@@ -110,15 +115,22 @@ async fn tick(db: &mut diesel_async::AsyncPgConnection) -> Result<(), String> {
 pub fn spawn() -> JoinHandle<()> {
 	let pool = database::init();
 	task::spawn(async move {
+		// One-shot forced sweep at startup: reconcile every ready group once
+		// (bypassing the jittered daily slot) so a freshly-deployed recipe change
+		// converges promptly instead of trickling out over the next ~24h. The
+		// per-group reconcile is sequential — a gentle sweep, not a burst — and is
+		// retried each tick until it lands once, after which we settle into the
+		// normal jittered daily cadence.
+		let mut swept = false;
 		loop {
-			sleep(TICK).await;
-			let Ok(mut db) = pool.get().await else {
-				error!("tag-reconcile: failed to get database connection");
-				continue;
-			};
-			if let Err(e) = tick(&mut db).await {
-				error!("tag-reconcile tick failed: {e}");
+			match pool.get().await {
+				Ok(mut db) => match tick(&mut db, !swept).await {
+					Ok(()) => swept = true,
+					Err(e) => error!("tag-reconcile tick failed: {e}"),
+				},
+				Err(_) => error!("tag-reconcile: failed to get database connection"),
 			}
+			sleep(TICK).await;
 		}
 	})
 }
