@@ -14,6 +14,16 @@ pub async fn handler(uri: Uri) -> impl IntoResponse {
 	let path = uri.path().trim_start_matches('/');
 	let is_asset = path.starts_with("assets/");
 
+	// Don't serve the SPA for `/.well-known/` probes. MCP clients (e.g. Claude
+	// Code) discover OAuth by fetching `/.well-known/oauth-protected-resource`;
+	// answering with `index.html` makes them fail with "Failed to parse JSON"
+	// instead of concluding there's no OAuth. A 404 means "not a protected
+	// resource — connect without OAuth" (this endpoint authenticates via the
+	// Tailscale ingress, not OAuth).
+	if path.starts_with(".well-known/") {
+		return (StatusCode::NOT_FOUND, "not found").into_response();
+	}
+
 	let resolved = if !is_asset && Assets::get(path).is_none() {
 		"index.html"
 	} else {
