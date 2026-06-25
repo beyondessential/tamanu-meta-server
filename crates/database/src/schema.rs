@@ -109,6 +109,10 @@ diesel::table! {
 		bytes_uploaded -> Nullable<Int8>,
 		snapshot_id -> Nullable<Text>,
 		reported_at -> Timestamptz,
+		s3_sent_raw_bytes -> Nullable<Int8>,
+		s3_sent_payload_bytes -> Nullable<Int8>,
+		s3_received_raw_bytes -> Nullable<Int8>,
+		s3_received_payload_bytes -> Nullable<Int8>,
 	}
 }
 

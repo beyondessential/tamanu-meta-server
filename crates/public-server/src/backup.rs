@@ -471,6 +471,13 @@ pub struct ReportArgs {
 	pub error: Option<String>,
 	pub bytes_uploaded: Option<i64>,
 	pub snapshot_id: Option<String>,
+	/// S3 traffic the proxy tallied during the run: `raw` is the full HTTP
+	/// message (incl. SigV4 chunk framing), `payload` the decoded object data.
+	/// Reported on both success and failure; absent from older clients.
+	pub s3_sent_raw_bytes: Option<i64>,
+	pub s3_sent_payload_bytes: Option<i64>,
+	pub s3_received_raw_bytes: Option<i64>,
+	pub s3_received_payload_bytes: Option<i64>,
 }
 
 #[utoipa::path(
@@ -512,6 +519,10 @@ async fn report(
 			error: rep.error,
 			bytes_uploaded: rep.bytes_uploaded,
 			snapshot_id: rep.snapshot_id,
+			s3_sent_raw_bytes: rep.s3_sent_raw_bytes,
+			s3_sent_payload_bytes: rep.s3_sent_payload_bytes,
+			s3_received_raw_bytes: rep.s3_received_raw_bytes,
+			s3_received_payload_bytes: rep.s3_received_payload_bytes,
 		},
 	)
 	.await?;

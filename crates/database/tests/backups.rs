@@ -223,6 +223,10 @@ fn new_run(
 		error: None,
 		bytes_uploaded: Some(42),
 		snapshot_id: Some("kopia-snap-1".into()),
+		s3_sent_raw_bytes: None,
+		s3_sent_payload_bytes: None,
+		s3_received_raw_bytes: None,
+		s3_received_payload_bytes: None,
 	}
 }
 

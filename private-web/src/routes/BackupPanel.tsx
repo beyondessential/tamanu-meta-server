@@ -619,19 +619,36 @@ function serverLabel(
 	return m?.name || m?.display_host || serverId.slice(0, 8);
 }
 
-/// One row of the recent-runs table. Failed runs get an expand toggle that
-/// reveals the device-reported error detail in a collapsible sub-row.
+/// True when the run carries any of bestool's four S3 traffic tallies.
+function hasS3Traffic(run: BackupRun): boolean {
+	return (
+		run.s3_sent_raw_bytes != null ||
+		run.s3_sent_payload_bytes != null ||
+		run.s3_received_raw_bytes != null ||
+		run.s3_received_payload_bytes != null
+	);
+}
+
+/// One row of the recent-runs table. Runs with an error or reported S3 traffic
+/// get an expand toggle that reveals the detail in a collapsible sub-row.
 function RunRow({ run, members }: { run: BackupRun; members: ServerInfo[] }) {
 	const [open, setOpen] = useState(false);
 	const hasError = Boolean(run.error);
+	const hasS3 = hasS3Traffic(run);
+	const expandable = hasError || hasS3;
+	// bestool reports an explicit upload size for some backup types; when it's
+	// absent, the S3 payload-sent tally is the closest proxy (marked approximate).
+	const uploadedApprox =
+		run.bytes_uploaded == null && run.s3_sent_payload_bytes != null;
+	const uploaded = run.bytes_uploaded ?? run.s3_sent_payload_bytes ?? null;
 	return (
 		<>
-			<TableRow sx={hasError ? { "& > *": { borderBottom: "unset" } } : undefined}>
+			<TableRow sx={expandable ? { "& > *": { borderBottom: "unset" } } : undefined}>
 				<TableCell padding="checkbox">
-					{hasError && (
+					{expandable && (
 						<IconButton
 							size="small"
-							aria-label={open ? "Hide error" : "Show error"}
+							aria-label={open ? "Hide details" : "Show details"}
 							onClick={() => setOpen((o) => !o)}
 						>
 							{open ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
@@ -652,37 +669,64 @@ function RunRow({ run, members }: { run: BackupRun; members: ServerInfo[] }) {
 					/>
 				</TableCell>
 				<TableCell>
-					{run.bytes_uploaded == null
-						? "—"
-						: formatBytes(run.bytes_uploaded)}
+					{uploaded == null ? (
+						"—"
+					) : uploadedApprox ? (
+						<Tooltip title="Approximate: from S3 payload sent (no explicit upload size reported)">
+							<span>~{formatBytes(uploaded)}</span>
+						</Tooltip>
+					) : (
+						formatBytes(uploaded)
+					)}
 				</TableCell>
 				<TableCell>
 					<SnapshotId id={run.snapshot_id} />
 				</TableCell>
 			</TableRow>
-			{hasError && (
+			{expandable && (
 				<TableRow>
 					<TableCell colSpan={8} sx={{ py: 0, border: 0 }}>
 						<Collapse in={open} timeout="auto" unmountOnExit>
-							<Alert severity="error" variant="outlined" sx={{ my: 1 }}>
-								<Typography
-									component="pre"
-									variant="body2"
-									sx={{
-										m: 0,
-										fontFamily: "monospace",
-										whiteSpace: "pre-wrap",
-										wordBreak: "break-word",
-									}}
-								>
-									{run.error}
-								</Typography>
-							</Alert>
+							{hasError && (
+								<Alert severity="error" variant="outlined" sx={{ my: 1 }}>
+									<Typography
+										component="pre"
+										variant="body2"
+										sx={{
+											m: 0,
+											fontFamily: "monospace",
+											whiteSpace: "pre-wrap",
+											wordBreak: "break-word",
+										}}
+									>
+										{run.error}
+									</Typography>
+								</Alert>
+							)}
+							{hasS3 && <S3TrafficDetail run={run} />}
 						</Collapse>
 					</TableCell>
 				</TableRow>
 			)}
 		</>
+	);
+}
+
+/// S3 traffic the proxy tallied during a run, shown in the expand row: raw is
+/// the full HTTP message (incl. SigV4 chunk framing), payload the object data.
+function S3TrafficDetail({ run }: { run: BackupRun }) {
+	return (
+		<Stack spacing={0.5} sx={{ my: 1 }}>
+			<Typography variant="subtitle2">S3 traffic</Typography>
+			<Stat
+				label="Sent"
+				value={`${formatBytes(run.s3_sent_payload_bytes)} payload / ${formatBytes(run.s3_sent_raw_bytes)} raw`}
+			/>
+			<Stat
+				label="Received"
+				value={`${formatBytes(run.s3_received_payload_bytes)} payload / ${formatBytes(run.s3_received_raw_bytes)} raw`}
+			/>
+		</Stack>
 	);
 }
 

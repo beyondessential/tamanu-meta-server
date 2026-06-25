@@ -294,6 +294,10 @@ async fn report_writes_run_with_context_attribution_and_204() {
 					"group_id": bogus_group,
 					"bytes_uploaded": 4096,
 					"snapshot_id": "k0pia123",
+					"s3_sent_raw_bytes": 5000,
+					"s3_sent_payload_bytes": 4096,
+					"s3_received_raw_bytes": 320,
+					"s3_received_payload_bytes": 128,
 				}))
 				.await;
 			resp.assert_status(http::StatusCode::NO_CONTENT);
@@ -311,6 +315,10 @@ async fn report_writes_run_with_context_attribution_and_204() {
 			assert_eq!(run.device_id, device_id);
 			assert_eq!(run.server_id, Some(server));
 			assert_eq!(run.bytes_uploaded, Some(4096));
+			assert_eq!(run.s3_sent_raw_bytes, Some(5000));
+			assert_eq!(run.s3_sent_payload_bytes, Some(4096));
+			assert_eq!(run.s3_received_raw_bytes, Some(320));
+			assert_eq!(run.s3_received_payload_bytes, Some(128));
 		},
 	)
 	.await;

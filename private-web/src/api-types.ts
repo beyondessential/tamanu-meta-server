@@ -2279,6 +2279,18 @@ export interface components {
             purpose: components["schemas"]["BackupPurpose"];
             /** Format: date-time */
             reported_at: string;
+            /** Format: int64 */
+            s3_received_payload_bytes?: number | null;
+            /** Format: int64 */
+            s3_received_raw_bytes?: number | null;
+            /** Format: int64 */
+            s3_sent_payload_bytes?: number | null;
+            /**
+             * Format: int64
+             * @description S3 traffic tallied by bestool's proxy: `raw` counts the full HTTP message
+             *     (incl. SigV4 chunk framing), `payload` the decoded object data.
+             */
+            s3_sent_raw_bytes?: number | null;
             /** Format: uuid */
             server_id?: string | null;
             snapshot_id?: string | null;

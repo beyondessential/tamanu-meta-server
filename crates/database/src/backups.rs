@@ -806,6 +806,12 @@ pub struct BackupRun {
 	pub snapshot_id: Option<String>,
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub reported_at: Timestamp,
+	/// S3 traffic tallied by bestool's proxy: `raw` counts the full HTTP message
+	/// (incl. SigV4 chunk framing), `payload` the decoded object data.
+	pub s3_sent_raw_bytes: Option<i64>,
+	pub s3_sent_payload_bytes: Option<i64>,
+	pub s3_received_raw_bytes: Option<i64>,
+	pub s3_received_payload_bytes: Option<i64>,
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -824,6 +830,10 @@ pub struct NewBackupRun {
 	pub error: Option<String>,
 	pub bytes_uploaded: Option<i64>,
 	pub snapshot_id: Option<String>,
+	pub s3_sent_raw_bytes: Option<i64>,
+	pub s3_sent_payload_bytes: Option<i64>,
+	pub s3_received_raw_bytes: Option<i64>,
+	pub s3_received_payload_bytes: Option<i64>,
 }
 
 impl BackupRun {

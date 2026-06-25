@@ -1470,6 +1470,35 @@
             "format": "uuid",
             "description": "The run-uuid bestool minted at run start (becomes `backup_runs.id`)."
           },
+          "s3_received_payload_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "s3_received_raw_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "s3_sent_payload_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "s3_sent_raw_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "S3 traffic the proxy tallied during the run: `raw` is the full HTTP\nmessage (incl. SigV4 chunk framing), `payload` the decoded object data.\nReported on both success and failure; absent from older clients."
+          },
           "snapshot_id": {
             "type": [
               "string",
