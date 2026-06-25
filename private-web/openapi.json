@@ -8335,6 +8335,14 @@
             "format": "date-time",
             "description": "When this server's next backup of this type is expected: the server's own\nlast success plus the effective interval, or \"now\" (overdue) if it's\nscheduled but has never succeeded. `None` for disabled or manual-only\n(no-interval) types. Per-server, so a lagging member isn't masked by a\nfreshly-backed-up sibling."
           },
+          "processing_since": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "`Some(issued_at)` when a backup of this type appears to be in flight:\ncredentials were issued under an hour ago and no run has been reported\nsince. `None` otherwise. Lets the UI show a \"backing up…\" state."
+          },
           "server_id": {
             "type": "string",
             "format": "uuid"

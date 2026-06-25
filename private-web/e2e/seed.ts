@@ -47,7 +47,7 @@ function randomLabel(prefix: string): string {
  * statement with CASCADE. */
 export async function resetSeededTables(sql: Sql): Promise<void> {
 	await sql.query(
-		"TRUNCATE statuses, issues, device_keys, servers, server_groups, devices, versions, tailscale_users, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_repo_stats, backup_maintenance_runs RESTART IDENTITY CASCADE",
+		"TRUNCATE statuses, issues, device_keys, servers, server_groups, devices, versions, tailscale_users, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances RESTART IDENTITY CASCADE",
 	);
 }
 
@@ -432,6 +432,39 @@ export async function seedBackupRun(
 		],
 	);
 	return { id };
+}
+
+/** Seed a `backup_credential_issuances` row. `issuedAgoSecs` controls how long
+ * ago the creds were issued (default 0 = now); `ttlSecs` their lifetime. */
+export async function seedBackupCredentialIssuance(
+	sql: Sql,
+	opts: {
+		deviceId: string;
+		groupId: string;
+		type?: string;
+		purpose?: "backup" | "restore";
+		issuedAgoSecs?: number;
+		ttlSecs?: number;
+	},
+): Promise<void> {
+	await sql.query(
+		`INSERT INTO backup_credential_issuances
+		 (device_id, group_id, type, issued_at, expires_at, purpose, sts_assumed_role, bucket, prefix)
+		 VALUES ($1, $2, $3, NOW() - ($4 || ' seconds')::interval,
+		         NOW() - ($4 || ' seconds')::interval + ($5 || ' seconds')::interval,
+		         $6, $7, $8, $9)`,
+		[
+			opts.deviceId,
+			opts.groupId,
+			opts.type ?? "tamanu-postgres",
+			String(opts.issuedAgoSecs ?? 0),
+			String(opts.ttlSecs ?? 3600),
+			opts.purpose ?? "backup",
+			"arn:aws:iam::000:role/test",
+			"bes-test-bucket",
+			"",
+		],
+	);
 }
 
 /** Seed the cached `backup_repo_stats` row for a group. */

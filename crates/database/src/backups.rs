@@ -754,6 +754,31 @@ impl BackupCredentialIssuance {
 			.await
 			.map_err(AppError::from)
 	}
+
+	/// Latest *backup-purpose* credential issuance per `(device, type)` within a
+	/// group, as `(issued_at, expires_at)`. Keyed `(device_id, type)`; restore
+	/// issuances are excluded. Used to infer an in-flight backup: creds still
+	/// within their validity window with no newer run report.
+	pub async fn latest_backup_by_device_type_for_group(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+	) -> Result<HashMap<(Uuid, BackupType), (Timestamp, Timestamp)>> {
+		use crate::schema::backup_credential_issuances::dsl;
+
+		let rows: Vec<Self> = dsl::backup_credential_issuances
+			.filter(dsl::group_id.eq(group_id))
+			.filter(dsl::purpose.eq(BackupPurpose::Backup))
+			.distinct_on((dsl::device_id, dsl::type_))
+			.order_by((dsl::device_id, dsl::type_, dsl::issued_at.desc()))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		Ok(rows
+			.into_iter()
+			.map(|r| ((r.device_id, r.r#type.clone()), (r.issued_at, r.expires_at)))
+			.collect())
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -868,6 +893,35 @@ impl BackupRun {
 		Ok(rows
 			.into_iter()
 			.filter_map(|r| r.server_id.map(|sid| ((sid, r.r#type.clone()), r)))
+			.collect())
+	}
+
+	/// Latest *reported* backup per `(server, type)` within a group, regardless of
+	/// outcome (success or failure). Keyed `(server_id, type)`. Used to tell
+	/// whether a backup has been reported since credentials were last issued —
+	/// i.e. whether one is still in flight.
+	pub async fn latest_report_by_server_type_for_group(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+	) -> Result<HashMap<(Uuid, BackupType), Timestamp>> {
+		use crate::schema::backup_runs::dsl;
+
+		let rows: Vec<Self> = dsl::backup_runs
+			.filter(dsl::group_id.eq(group_id))
+			.filter(dsl::purpose.eq(BackupPurpose::Backup))
+			.filter(dsl::server_id.is_not_null())
+			.distinct_on((dsl::server_id, dsl::type_))
+			.order_by((dsl::server_id, dsl::type_, dsl::reported_at.desc()))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		Ok(rows
+			.into_iter()
+			.filter_map(|r| {
+				r.server_id
+					.map(|sid| ((sid, r.r#type.clone()), r.reported_at))
+			})
 			.collect())
 	}
 

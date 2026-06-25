@@ -42,6 +42,7 @@ import { formatBytes } from "../lib/formatBytes";
 import { usePageTitle } from "../hooks/usePageTitle";
 import TimeAgo from "../components/TimeAgo";
 import { LatestSnapshot, SnapshotId } from "../components/SnapshotId";
+import { BackupProcessingChip } from "../components/BackupProcessingChip";
 import {
 	BACKUP_STATUS_HELP,
 	BACKUP_STATUS_INTENT,
@@ -989,6 +990,9 @@ function ServersPanel({
 															/>
 														</Tooltip>
 													)}
+													<BackupProcessingChip
+														since={cap?.processing_since}
+													/>
 												</Stack>
 											</TableCell>
 											<TableCell>
