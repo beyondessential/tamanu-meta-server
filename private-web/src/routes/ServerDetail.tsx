@@ -55,6 +55,7 @@ import StatusDot from "../components/StatusDot";
 import TailnetIdentitySection from "../components/TailnetIdentitySection";
 import TimeAgo from "../components/TimeAgo";
 import { LatestSnapshot } from "../components/SnapshotId";
+import { BackupProcessingChip } from "../components/BackupProcessingChip";
 import TimezoneTooltip from "../components/TimezoneTooltip";
 import VersionIndicator from "../components/VersionIndicator";
 import { HealthLegend, StatusLegend, VersionLegend } from "../components/Legends";
@@ -1726,9 +1727,12 @@ function BackupCapabilityRow({
 			sx={{ alignItems: "center", justifyContent: "space-between", py: 0.5 }}
 		>
 			<Stack spacing={0.25} sx={{ minWidth: 0 }}>
-				<Typography variant="body2" sx={{ fontFamily: "monospace" }}>
-					{cap.type}
-				</Typography>
+				<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+					<Typography variant="body2" sx={{ fontFamily: "monospace" }}>
+						{cap.type}
+					</Typography>
+					<BackupProcessingChip since={cap.processing_since} />
+				</Stack>
 				<LatestSnapshot
 					id={cap.latest_snapshot_id}
 					at={cap.latest_snapshot_at}

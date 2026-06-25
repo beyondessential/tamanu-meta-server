@@ -18,6 +18,7 @@ use commons_types::{
 	Uuid,
 	backup::{BackupConfigStatus, BackupPlacement, BackupPurpose, BackupRepoMode, BackupType},
 };
+use database::backups::BackupCredentialIssuance;
 use database::diesel_async::AsyncPgConnection;
 use database::pg_duration::PgDuration;
 use database::{
@@ -274,6 +275,25 @@ async fn effective_interval_secs(
 		.map(|pg| pg.0.as_secs()))
 }
 
+/// `Some(issued_at)` when a backup looks in flight: a backup credential is still
+/// within its validity window (`now < expires_at`) and no run has been reported
+/// since it was issued. `None` otherwise. The window is the credential lifetime
+/// itself — once the creds expire the device can no longer be using them.
+fn processing_since(
+	now: Timestamp,
+	issuance: Option<(Timestamp, Timestamp)>,
+	last_report_at: Option<Timestamp>,
+) -> Option<Timestamp> {
+	let (issued, expires) = issuance?;
+	if now >= expires {
+		return None;
+	}
+	match last_report_at {
+		Some(reported) if reported >= issued => None,
+		_ => Some(issued),
+	}
+}
+
 /// Next expected backup for one `(server, type)`: the server's own last success
 /// plus the interval, or `now` (overdue) if scheduled-but-never-run. `None` when
 /// disabled or manual-only.
@@ -313,6 +333,10 @@ pub struct ServerBackupCapabilityView {
 	/// (no-interval) types. Per-server, so a lagging member isn't masked by a
 	/// freshly-backed-up sibling.
 	pub next_backup_at: Option<Timestamp>,
+	/// `Some(issued_at)` when a backup of this type appears to be in flight:
+	/// credentials were issued under an hour ago and no run has been reported
+	/// since. `None` otherwise. Lets the UI show a "backing up…" state.
+	pub processing_since: Option<Timestamp>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -1177,6 +1201,17 @@ pub async fn stats(
 	// Latest successful backup per (server, type), to decorate each capability.
 	let latest_by =
 		BackupRun::latest_success_by_server_type_for_group(&mut conn, args.server_group_id).await?;
+	// In-flight detection: latest backup-cred issuance per (device, type) and the
+	// latest reported run (any outcome) per (server, type).
+	let latest_issuance = BackupCredentialIssuance::latest_backup_by_device_type_for_group(
+		&mut conn,
+		args.server_group_id,
+	)
+	.await?;
+	let latest_report =
+		BackupRun::latest_report_by_server_type_for_group(&mut conn, args.server_group_id).await?;
+	let device_by_server: std::collections::HashMap<Uuid, Option<Uuid>> =
+		members.iter().map(|s| (s.id, s.device_id)).collect();
 	let now = Timestamp::now();
 	let mut intervals: std::collections::HashMap<BackupType, Option<i64>> =
 		std::collections::HashMap::new();
@@ -1203,6 +1238,14 @@ pub async fn stats(
 					v
 				}
 			};
+			let issuance = device_by_server
+				.get(&cap.server_id)
+				.copied()
+				.flatten()
+				.and_then(|d| latest_issuance.get(&(d, cap.r#type.clone())).copied());
+			let last_report = latest_report
+				.get(&(cap.server_id, cap.r#type.clone()))
+				.copied();
 			capabilities.push(ServerBackupCapabilityView {
 				server_id: cap.server_id,
 				latest_snapshot_id: last.and_then(|r| r.snapshot_id.clone()),
@@ -1214,6 +1257,7 @@ pub async fn stats(
 					last.map(|r| r.reported_at),
 					now,
 				),
+				processing_since: processing_since(now, issuance, last_report),
 				r#type: cap.r#type,
 				enabled: cap.enabled,
 			});
@@ -1245,11 +1289,20 @@ pub async fn capabilities(
 	Json(args): Json<ServerArgs>,
 ) -> Result<Json<Vec<ServerBackupCapabilityView>>> {
 	let mut conn = state.db.get().await?;
-	let group_id = Server::get_by_id(&mut conn, args.server_id)
+	let (group_id, device_id) = Server::get_by_id(&mut conn, args.server_id)
 		.await
 		.ok()
-		.and_then(|s| s.group_id);
+		.map(|s| (s.group_id, s.device_id))
+		.unwrap_or((None, None));
 	let now = Timestamp::now();
+	// Reuse the group-wide in-flight maps, then look up this server/device.
+	let (latest_issuance, latest_report) = match group_id {
+		Some(g) => (
+			BackupCredentialIssuance::latest_backup_by_device_type_for_group(&mut conn, g).await?,
+			BackupRun::latest_report_by_server_type_for_group(&mut conn, g).await?,
+		),
+		None => Default::default(),
+	};
 	let rows = ServerBackupCapability::list_for_server(&mut conn, args.server_id).await?;
 	let mut out = Vec::with_capacity(rows.len());
 	for c in rows {
@@ -1258,6 +1311,8 @@ pub async fn capabilities(
 			Some(g) => effective_interval_secs(&mut conn, g, &c.r#type).await?,
 			None => None,
 		};
+		let issuance = device_id.and_then(|d| latest_issuance.get(&(d, c.r#type.clone())).copied());
+		let last_report = latest_report.get(&(c.server_id, c.r#type.clone())).copied();
 		out.push(ServerBackupCapabilityView {
 			server_id: c.server_id,
 			latest_snapshot_id: last.as_ref().and_then(|r| r.snapshot_id.clone()),
@@ -1269,6 +1324,7 @@ pub async fn capabilities(
 				last.as_ref().map(|r| r.reported_at),
 				now,
 			),
+			processing_since: processing_since(now, issuance, last_report),
 			r#type: c.r#type,
 			enabled: c.enabled,
 		});

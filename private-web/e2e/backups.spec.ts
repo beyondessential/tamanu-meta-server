@@ -1,6 +1,7 @@
 import { expect, test } from "./test-fixtures";
 import {
 	resetSeededTables,
+	seedBackupCredentialIssuance,
 	seedBackupRepoStats,
 	seedBackupRun,
 	seedDevice,
@@ -644,6 +645,42 @@ test.describe("server backup capabilities", () => {
 		await page.goto(`/servers/${server.id}`);
 		const backups = page.locator("#backups");
 		await expect(backups.getByText(/no snapshot yet/i)).toBeVisible();
+	});
+
+	test("a recent issuance with no newer run shows 'backing up…'", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "inflight-group" });
+		const device = await seedDevice(sql);
+		const server = await seedServer(sql, {
+			name: "inflight-srv",
+			groupId: group.id,
+			deviceId: device.id,
+		});
+		await seedServerBackupCapability(sql, { serverId: server.id });
+		// Credentials issued 10 minutes ago, no run reported since → in flight.
+		await seedBackupCredentialIssuance(sql, {
+			deviceId: device.id,
+			groupId: group.id,
+			issuedAgoSecs: 600,
+		});
+
+		await page.goto(`/servers/${server.id}`);
+		const backups = page.locator("#backups");
+		await expect(backups.getByText(/backing up…/i)).toBeVisible();
+
+		// A run reported after the issuance clears the in-flight state.
+		await seedBackupRun(sql, {
+			deviceId: device.id,
+			groupId: group.id,
+			serverId: server.id,
+			outcome: "success",
+			snapshotId: "kfreshsnap0001",
+		});
+		await page.reload();
+		await expect(backups.getByText(/backing up…/i)).toBeHidden();
+		await expect(backups.getByText(/kfreshsnap/)).toBeVisible();
 	});
 
 	test("toggling a capability switch flips enabled in the DB", async ({

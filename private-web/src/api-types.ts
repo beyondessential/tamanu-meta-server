@@ -3373,6 +3373,13 @@ export interface components {
              *     freshly-backed-up sibling.
              */
             next_backup_at?: string | null;
+            /**
+             * Format: date-time
+             * @description `Some(issued_at)` when a backup of this type appears to be in flight:
+             *     credentials were issued under an hour ago and no run has been reported
+             *     since. `None` otherwise. Lets the UI show a "backing up…" state.
+             */
+            processing_since?: string | null;
             /** Format: uuid */
             server_id: string;
             type: string;
