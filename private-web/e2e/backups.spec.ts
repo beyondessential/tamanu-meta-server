@@ -327,8 +327,52 @@ test.describe("backups ready: stats + backup-now", () => {
 
 		// Error detail is hidden until the row is expanded.
 		await expect(page.getByText(/disk quota exceeded/i)).toBeHidden();
-		await runs.getByRole("button", { name: /show error/i }).click();
+		await runs.getByRole("button", { name: /show details/i }).click();
 		await expect(page.getByText(/disk quota exceeded/i)).toBeVisible();
+	});
+
+	test("run with S3 traffic but no upload size shows ~payload and expandable traffic detail", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "s3-group" });
+		const device = await seedDevice(sql);
+		const server = await seedServer(sql, {
+			name: "s3-srv",
+			groupId: group.id,
+			deviceId: device.id,
+		});
+		await seedServerGroupBackupConfig(sql, {
+			groupId: group.id,
+			status: "ready",
+			intervalSeconds: 3600,
+		});
+		// No explicit upload size, but the proxy tallied S3 traffic → the Uploaded
+		// column falls back to the payload-sent figure, marked approximate.
+		await seedBackupRun(sql, {
+			deviceId: device.id,
+			groupId: group.id,
+			serverId: server.id,
+			outcome: "success",
+			bytesUploaded: null,
+			s3SentPayloadBytes: 2048, // 2.0 KiB → the Uploaded approximation
+			s3SentRawBytes: 3072, // 3.0 KiB
+			s3ReceivedPayloadBytes: 512, // 512 B
+			s3ReceivedRawBytes: 1024, // 1.0 KiB
+		});
+
+		await page.goto(`/groups/${group.id}/backups`);
+		const runs = page.getByRole("table").last();
+		await expect(runs.getByText("s3-srv")).toBeVisible();
+		// Uploaded falls back to the payload-sent figure, prefixed "~".
+		await expect(runs.getByText("~2.0 KiB")).toBeVisible();
+
+		// The S3 traffic breakdown is hidden until the row is expanded.
+		await expect(page.getByText(/s3 traffic/i)).toBeHidden();
+		await runs.getByRole("button", { name: /show details/i }).click();
+		await expect(page.getByText(/s3 traffic/i)).toBeVisible();
+		await expect(page.getByText(/2\.0 KiB payload \/ 3\.0 KiB raw/i)).toBeVisible();
+		await expect(page.getByText(/512 B payload \/ 1\.0 KiB raw/i)).toBeVisible();
 	});
 
 	test("backup-now writes a request row; cancel deletes it", async ({
