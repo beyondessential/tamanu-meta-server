@@ -10,7 +10,6 @@ import {
 	DialogContent,
 	DialogContentText,
 	DialogTitle,
-	Divider,
 	FormControlLabel,
 	IconButton,
 	LinearProgress,
@@ -179,11 +178,27 @@ export default function BackupPanel() {
 				</Stack>
 			</Box>
 
-			<Alert severity={BACKUP_STATUS_INTENT[status]}>
-				{BACKUP_STATUS_HELP[status]}
-			</Alert>
+			{status !== "ready" && (
+				<Alert severity={BACKUP_STATUS_INTENT[status]}>
+					{BACKUP_STATUS_HELP[status]}
+				</Alert>
+			)}
 
-			<ConfigSummary config={data} />
+			{status === "ready" ? (
+				<Box
+					sx={{
+						display: "grid",
+						gap: 2,
+						gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" },
+						alignItems: "start",
+					}}
+				>
+					<ConfigSummary config={data} />
+					<RepoStatsPanel groupId={id} />
+				</Box>
+			) : (
+				<ConfigSummary config={data} />
+			)}
 
 			{status === "provisioning" && (
 				<ProvisioningCard
@@ -195,13 +210,9 @@ export default function BackupPanel() {
 
 			{status === "ready" && (
 				<>
+					<ServersPanel groupId={id} members={members} isAdmin={isAdmin} />
 					<SchedulesPanel groupId={id} isAdmin={isAdmin} />
-					<StatsPanel groupId={id} members={members} />
-					<RunsAndRequests
-						groupId={id}
-						members={members}
-						isAdmin={isAdmin}
-					/>
+					<RecentRunsPanel groupId={id} members={members} />
 				</>
 			)}
 		</Stack>
@@ -400,12 +411,6 @@ function TypeSchedule({
 				· retention latest {r.keep_latest}, daily {r.keep_daily}, weekly{" "}
 				{r.keep_weekly}, monthly {r.keep_monthly}, annual {r.keep_annual}
 			</Typography>
-			{schedule.effective_interval != null && schedule.next_run_at && (
-				<Typography variant="body2" color="text.secondary">
-					Next backup expected{" "}
-					<TimeAgo timestamp={schedule.next_run_at} />
-				</Typography>
-			)}
 			{editing && (
 				<OverrideEditor
 					groupId={groupId}
@@ -680,7 +685,55 @@ function RunRow({ run, members }: { run: BackupRun; members: ServerInfo[] }) {
 	);
 }
 
-function StatsPanel({
+/// Repository stats (top, beside the config summary). Read-only snapshot of the
+/// kopia repo's size/counts as of the last inspection.
+function RepoStatsPanel({ groupId }: { groupId: string }) {
+	const stats = useApi(
+		"backups",
+		"stats",
+		{ server_group_id: groupId },
+		[groupId],
+	);
+	return (
+		<Paper variant="outlined" sx={{ p: 2 }}>
+			<Typography variant="h6" component="h2" gutterBottom>
+				Repository stats
+			</Typography>
+			{stats.status === "loading" || stats.status === "idle" ? (
+				<LinearProgress />
+			) : stats.status === "error" ? (
+				<Alert severity="error">{stats.error.message}</Alert>
+			) : stats.data.stats == null ? (
+				<Typography color="text.secondary">
+					No stats yet (awaiting first inspection).
+				</Typography>
+			) : (
+				<Stack spacing={0.5}>
+					<Stat label="Snapshots" value={stats.data.stats.snapshot_count} />
+					<Stat label="Sources" value={stats.data.stats.source_count} />
+					<Stat
+						label="Logical bytes"
+						value={formatBytes(stats.data.stats.logical_bytes)}
+					/>
+					<Stat
+						label="Physical bytes"
+						value={formatBytes(stats.data.stats.physical_bytes)}
+					/>
+					<Stat
+						label="Bucket bytes"
+						value={formatBytes(stats.data.stats.bucket_bytes)}
+					/>
+					<Typography variant="caption" color="text.secondary">
+						Observed <TimeAgo timestamp={stats.data.stats.observed_at} />
+					</Typography>
+				</Stack>
+			)}
+		</Paper>
+	);
+}
+
+/// The group's recent backup runs (bottom). Failed runs expand to their error.
+function RecentRunsPanel({
 	groupId,
 	members,
 }: {
@@ -693,69 +746,49 @@ function StatsPanel({
 		{ server_group_id: groupId },
 		[groupId],
 	);
-	if (stats.status === "loading" || stats.status === "idle") {
-		return <LinearProgress />;
-	}
-	if (stats.status === "error") {
-		return <Alert severity="error">{stats.error.message}</Alert>;
-	}
-	const s = stats.data.stats;
 	return (
 		<Paper variant="outlined" sx={{ p: 2 }}>
 			<Typography variant="h6" component="h2" gutterBottom>
-				Repository stats
-			</Typography>
-			{s == null ? (
-				<Typography color="text.secondary">
-					No stats yet (awaiting first inspection).
-				</Typography>
-			) : (
-				<Stack spacing={0.5}>
-					<Stat label="Snapshots" value={s.snapshot_count} />
-					<Stat label="Sources" value={s.source_count} />
-					<Stat label="Logical bytes" value={formatBytes(s.logical_bytes)} />
-					<Stat label="Physical bytes" value={formatBytes(s.physical_bytes)} />
-					<Stat
-						label="Bucket bytes"
-						value={formatBytes(s.bucket_bytes)}
-					/>
-					<Typography variant="caption" color="text.secondary">
-						Observed <TimeAgo timestamp={s.observed_at} />
-					</Typography>
-				</Stack>
-			)}
-			<Divider sx={{ my: 2 }} />
-			<Typography variant="subtitle1" gutterBottom>
 				Recent runs
 			</Typography>
-			{stats.data.recent_runs.length === 0 ? (
+			{stats.status === "loading" || stats.status === "idle" ? (
+				<LinearProgress />
+			) : stats.status === "error" ? (
+				<Alert severity="error">{stats.error.message}</Alert>
+			) : stats.data.recent_runs.length === 0 ? (
 				<Typography color="text.secondary">No runs reported yet.</Typography>
 			) : (
-				<Table size="small">
-					<TableHead>
-						<TableRow>
-							<TableCell padding="checkbox" />
-							<TableCell>When</TableCell>
-							<TableCell>Server</TableCell>
-							<TableCell>Type</TableCell>
-							<TableCell>Purpose</TableCell>
-							<TableCell>Outcome</TableCell>
-							<TableCell>Uploaded</TableCell>
-							<TableCell>Snapshot</TableCell>
-						</TableRow>
-					</TableHead>
-					<TableBody>
-						{stats.data.recent_runs.map((r) => (
-							<RunRow key={r.id} run={r} members={members} />
-						))}
-					</TableBody>
-				</Table>
+				<Box sx={{ overflowX: "auto" }}>
+					<Table size="small">
+						<TableHead>
+							<TableRow>
+								<TableCell padding="checkbox" />
+								<TableCell>When</TableCell>
+								<TableCell>Server</TableCell>
+								<TableCell>Type</TableCell>
+								<TableCell>Purpose</TableCell>
+								<TableCell>Outcome</TableCell>
+								<TableCell>Uploaded</TableCell>
+								<TableCell>Snapshot</TableCell>
+							</TableRow>
+						</TableHead>
+						<TableBody>
+							{stats.data.recent_runs.map((r) => (
+								<RunRow key={r.id} run={r} members={members} />
+							))}
+						</TableBody>
+					</Table>
+				</Box>
 			)}
 		</Paper>
 	);
 }
 
-function RunsAndRequests({
+/// The group's servers and their backup types: per (server, type) the schedule
+/// state, when the next backup is expected (per-server, so a lagging member
+/// isn't masked by a freshly-backed-up sibling), the latest snapshot, and the
+/// on-demand "backup now" action.
+function ServersPanel({
 	groupId,
 	members,
 	isAdmin,
@@ -773,10 +806,8 @@ function RunsAndRequests({
 	const requestNow = useApiAction("backups", "request_now");
 	const cancel = useApiAction("backups", "cancel_request");
 
-	const pending =
-		stats.status === "ok" ? stats.data.pending_requests : [];
-	const capabilities =
-		stats.status === "ok" ? stats.data.capabilities : [];
+	const pending = stats.status === "ok" ? stats.data.pending_requests : [];
+	const capabilities = stats.status === "ok" ? stats.data.capabilities : [];
 
 	// The backup types to offer per server: the ones it has declared it can run
 	// (bestool fails fast on a type it has no definition for), unioned with any
@@ -792,31 +823,17 @@ function RunsAndRequests({
 		}
 		return [...set].sort();
 	};
-
 	const pendingFor = (serverId: string, type: string) =>
 		pending.find(
 			(p) =>
-				p.server_id === serverId &&
-				p.type === type &&
-				p.purpose === "backup",
+				p.server_id === serverId && p.type === type && p.purpose === "backup",
 		);
-
-	// Whether the server has this type toggled on (scheduled). `undefined` when
-	// the type isn't a declared capability (e.g. a lingering pending request).
-	const enabledFor = (serverId: string, type: string): boolean | undefined =>
-		capabilities.find((c) => c.server_id === serverId && c.type === type)
-			?.enabled;
-
 	const capFor = (serverId: string, type: string) =>
 		capabilities.find((c) => c.server_id === serverId && c.type === type);
 
 	const onRequest = async (serverId: string, type: string) => {
 		try {
-			await requestNow.call({
-				server_id: serverId,
-				type,
-				purpose: "backup",
-			});
+			await requestNow.call({ server_id: serverId, type, purpose: "backup" });
 			stats.reload();
 		} catch {
 			/* surfaced via requestNow.error */
@@ -824,87 +841,147 @@ function RunsAndRequests({
 	};
 	const onCancel = async (serverId: string, type: string) => {
 		try {
-			await cancel.call({
-				server_id: serverId,
-				type,
-				purpose: "backup",
-			});
+			await cancel.call({ server_id: serverId, type, purpose: "backup" });
 			stats.reload();
 		} catch {
 			/* surfaced via cancel.error */
 		}
 	};
 
+	const serverLink = (m: ServerInfo) => (
+		<MuiLink
+			component={RouterLink}
+			to={`/servers/${m.id}#backups`}
+			variant="body2"
+			underline="hover"
+		>
+			{m.name ?? m.id.slice(0, 8)}
+		</MuiLink>
+	);
+
+	const actionCell = (serverId: string, type: string) => {
+		const req = pendingFor(serverId, type);
+		if (req) {
+			return (
+				<Stack
+					direction="row"
+					spacing={1}
+					sx={{ alignItems: "center", justifyContent: "flex-end" }}
+				>
+					<Chip
+						size="small"
+						color="info"
+						label={
+							<>
+								requested <TimeAgo timestamp={req.requested_at} />
+							</>
+						}
+					/>
+					{isAdmin && (
+						<Button
+							size="small"
+							color="error"
+							onClick={() => onCancel(serverId, type)}
+							disabled={cancel.pending}
+						>
+							Cancel
+						</Button>
+					)}
+				</Stack>
+			);
+		}
+		return (
+			isAdmin && (
+				<Button
+					size="small"
+					variant="outlined"
+					startIcon={<BackupIcon />}
+					onClick={() => onRequest(serverId, type)}
+					disabled={requestNow.pending}
+				>
+					Backup now
+				</Button>
+			)
+		);
+	};
+
 	return (
 		<Paper variant="outlined" sx={{ p: 2 }}>
 			<Typography variant="h6" component="h2" gutterBottom>
-				Back up now
+				Servers
 			</Typography>
 			{members.length === 0 ? (
 				<Typography color="text.secondary">
 					No member servers in this group.
 				</Typography>
 			) : (
-				<Stack spacing={1} divider={<Divider />}>
-					{members.map((m) => {
-						const types = typesForServer(m.id);
-						return (
-							<Stack
-								key={m.id}
-								direction="row"
-								spacing={2}
-								sx={{
-									alignItems: "flex-start",
-									justifyContent: "space-between",
-								}}
-							>
-								<MuiLink
-									component={RouterLink}
-									to={`/servers/${m.id}#backups`}
-									variant="body2"
-									underline="hover"
-									sx={{ pt: 0.75 }}
-								>
-									{m.name ?? m.id.slice(0, 8)}
-								</MuiLink>
-								{types.length === 0 ? (
-									<Tooltip title="This server hasn't registered any backup types yet.">
-										{/* span so the tooltip works on the disabled button */}
-										<span>
-											<Button
-												size="small"
-												variant="outlined"
-												startIcon={<BackupIcon />}
-												disabled
-											>
-												Backup now
-											</Button>
-										</span>
-									</Tooltip>
-								) : (
-									<Stack spacing={0.5} sx={{ alignItems: "flex-end" }}>
-										{types.map((t) => {
-											const req = pendingFor(m.id, t);
-											const cap = capFor(m.id, t);
-											return (
-												<Stack
-													key={t}
-													spacing={0.25}
-													sx={{ alignItems: "flex-end" }}
-												>
-													<Stack
-														direction="row"
-														spacing={1}
-														sx={{ alignItems: "center" }}
-													>
-														<Typography
-															variant="body2"
-															sx={{ fontFamily: "monospace" }}
+				<Box sx={{ overflowX: "auto" }}>
+					<Table size="small">
+						<TableHead>
+							<TableRow>
+								<TableCell>Server</TableCell>
+								<TableCell>Type</TableCell>
+								<TableCell>Next backup</TableCell>
+								<TableCell>Latest snapshot</TableCell>
+								<TableCell align="right">Actions</TableCell>
+							</TableRow>
+						</TableHead>
+						<TableBody>
+							{members.map((m) => {
+								const types = typesForServer(m.id);
+								if (types.length === 0) {
+									return (
+										<TableRow key={m.id}>
+											<TableCell>{serverLink(m)}</TableCell>
+											<TableCell colSpan={3}>
+												<Typography variant="body2" color="text.secondary">
+													No backup types registered yet
+												</Typography>
+											</TableCell>
+											<TableCell align="right">
+												<Tooltip title="This server hasn't registered any backup types yet.">
+													{/* span so the tooltip works on the disabled button */}
+													<span>
+														<Button
+															size="small"
+															variant="outlined"
+															startIcon={<BackupIcon />}
+															disabled
 														>
-															{t}
-														</Typography>
-													{enabledFor(m.id, t) === false && (
-														<Tooltip title="This type isn't on the backup schedule for this server (toggle it on in the server's Backups section). You can still back it up on demand.">
+															Backup now
+														</Button>
+													</span>
+												</Tooltip>
+											</TableCell>
+										</TableRow>
+									);
+								}
+								return types.map((t, i) => {
+									const cap = capFor(m.id, t);
+									return (
+										<TableRow key={`${m.id}:${t}`}>
+											{i === 0 && (
+												<TableCell
+													rowSpan={types.length}
+													sx={{ verticalAlign: "top" }}
+												>
+													{serverLink(m)}
+												</TableCell>
+											)}
+											<TableCell>
+												<Stack
+													direction="row"
+													spacing={1}
+													sx={{ alignItems: "center" }}
+												>
+													<Typography
+														variant="body2"
+														sx={{ fontFamily: "monospace" }}
+													>
+														{t}
+													</Typography>
+													{cap?.enabled === false && (
+														<Tooltip title="Not on the backup schedule for this server (toggle it on in the server's Backups section). You can still back it up on demand.">
 															<Chip
 																size="small"
 																variant="outlined"
@@ -912,57 +989,32 @@ function RunsAndRequests({
 															/>
 														</Tooltip>
 													)}
-													{req ? (
-														<>
-															<Chip
-																size="small"
-																color="info"
-																label={
-																	<>
-																		requested{" "}
-																		<TimeAgo timestamp={req.requested_at} />
-																	</>
-																}
-															/>
-															{isAdmin && (
-																<Button
-																	size="small"
-																	color="error"
-																	onClick={() => onCancel(m.id, t)}
-																	disabled={cancel.pending}
-																>
-																	Cancel
-																</Button>
-															)}
-														</>
-													) : (
-														isAdmin && (
-															<Button
-																size="small"
-																variant="outlined"
-																startIcon={<BackupIcon />}
-																onClick={() => onRequest(m.id, t)}
-																disabled={requestNow.pending}
-															>
-																Backup now
-															</Button>
-														)
-													)}
 												</Stack>
+											</TableCell>
+											<TableCell>
+												{cap?.next_backup_at ? (
+													<TimeAgo timestamp={cap.next_backup_at} />
+												) : (
+													<Typography variant="body2" color="text.secondary">
+														—
+													</Typography>
+												)}
+											</TableCell>
+											<TableCell>
 												<LatestSnapshot
 													id={cap?.latest_snapshot_id}
 													at={cap?.latest_snapshot_at}
 													bytes={cap?.latest_snapshot_bytes}
 												/>
-											</Stack>
-											);
-										})}
-									</Stack>
-								)}
-							</Stack>
-						);
-					})}
-				</Stack>
+											</TableCell>
+											<TableCell align="right">{actionCell(m.id, t)}</TableCell>
+										</TableRow>
+									);
+								});
+							})}
+						</TableBody>
+					</Table>
+				</Box>
 			)}
 			{(requestNow.error || cancel.error) && (
 				<Alert severity="error" sx={{ mt: 1 }}>

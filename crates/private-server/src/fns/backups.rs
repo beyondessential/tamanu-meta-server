@@ -18,12 +18,13 @@ use commons_types::{
 	Uuid,
 	backup::{BackupConfigStatus, BackupPlacement, BackupPurpose, BackupRepoMode, BackupType},
 };
+use database::diesel_async::AsyncPgConnection;
 use database::pg_duration::PgDuration;
 use database::{
 	BackupMaintenanceRun, BackupRecoveryVerification, BackupRepoStats, BackupRequest, BackupRun,
 	BackupTypeDefault, NewBackupTypeDefault, NewServerGroupBackupConfig,
 	NewServerGroupBackupSchedule, RetentionPolicy, ServerBackupCapability, ServerGroupBackupConfig,
-	ServerGroupBackupSchedule, server_groups::ServerGroup,
+	ServerGroupBackupSchedule, server_groups::ServerGroup, servers::Server,
 };
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -256,6 +257,42 @@ pub struct BackupStatsView {
 /// One `(server, type)` backup capability and whether the operator has it
 /// enabled. `enabled` toggles whether the scheduler issues credentials and
 /// schedules runs for the pair.
+///
+/// Effective scheduled interval (seconds) for a `(group, type)`: the per-group
+/// override if set, else the canopy-wide default. `None` = manual-only.
+async fn effective_interval_secs(
+	conn: &mut AsyncPgConnection,
+	group_id: Uuid,
+	ty: &BackupType,
+) -> Result<Option<i64>> {
+	let over = ServerGroupBackupSchedule::get(conn, group_id, ty).await?;
+	let def = BackupTypeDefault::get(conn, ty).await?;
+	Ok(over
+		.as_ref()
+		.and_then(|s| s.expected_interval)
+		.or_else(|| def.as_ref().and_then(|d| d.default_interval))
+		.map(|pg| pg.0.as_secs()))
+}
+
+/// Next expected backup for one `(server, type)`: the server's own last success
+/// plus the interval, or `now` (overdue) if scheduled-but-never-run. `None` when
+/// disabled or manual-only.
+fn next_backup_at(
+	enabled: bool,
+	interval_secs: Option<i64>,
+	last_success_at: Option<Timestamp>,
+	now: Timestamp,
+) -> Option<Timestamp> {
+	if !enabled {
+		return None;
+	}
+	let secs = interval_secs?;
+	Some(match last_success_at {
+		Some(last) => Timestamp::from_second(last.as_second() + secs).unwrap_or(now),
+		None => now,
+	})
+}
+
 #[derive(Serialize, ToSchema)]
 pub struct ServerBackupCapabilityView {
 	pub server_id: Uuid,
@@ -270,6 +307,12 @@ pub struct ServerBackupCapabilityView {
 	pub latest_snapshot_at: Option<Timestamp>,
 	/// Bytes uploaded by that run, if reported.
 	pub latest_snapshot_bytes: Option<i64>,
+	/// When this server's next backup of this type is expected: the server's own
+	/// last success plus the effective interval, or "now" (overdue) if it's
+	/// scheduled but has never succeeded. `None` for disabled or manual-only
+	/// (no-interval) types. Per-server, so a lagging member isn't masked by a
+	/// freshly-backed-up sibling.
+	pub next_backup_at: Option<Timestamp>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -1137,6 +1180,9 @@ pub async fn stats(
 	// Latest successful backup per (server, type), to decorate each capability.
 	let latest_by =
 		BackupRun::latest_success_by_server_type_for_group(&mut conn, args.server_group_id).await?;
+	let now = Timestamp::now();
+	let mut intervals: std::collections::HashMap<BackupType, Option<i64>> =
+		std::collections::HashMap::new();
 	let mut pending_requests = Vec::new();
 	let mut capabilities = Vec::new();
 	for server in &members {
@@ -1151,11 +1197,26 @@ pub async fn stats(
 		}
 		for cap in ServerBackupCapability::list_for_server(&mut conn, server.id).await? {
 			let last = latest_by.get(&(cap.server_id, cap.r#type.clone()));
+			let interval = match intervals.get(&cap.r#type) {
+				Some(v) => *v,
+				None => {
+					let v = effective_interval_secs(&mut conn, args.server_group_id, &cap.r#type)
+						.await?;
+					intervals.insert(cap.r#type.clone(), v);
+					v
+				}
+			};
 			capabilities.push(ServerBackupCapabilityView {
 				server_id: cap.server_id,
 				latest_snapshot_id: last.and_then(|r| r.snapshot_id.clone()),
 				latest_snapshot_at: last.map(|r| r.reported_at),
 				latest_snapshot_bytes: last.and_then(|r| r.bytes_uploaded),
+				next_backup_at: next_backup_at(
+					cap.enabled,
+					interval,
+					last.map(|r| r.reported_at),
+					now,
+				),
 				r#type: cap.r#type,
 				enabled: cap.enabled,
 			});
@@ -1187,15 +1248,30 @@ pub async fn capabilities(
 	Json(args): Json<ServerArgs>,
 ) -> Result<Json<Vec<ServerBackupCapabilityView>>> {
 	let mut conn = state.db.get().await?;
+	let group_id = Server::get_by_id(&mut conn, args.server_id)
+		.await
+		.ok()
+		.and_then(|s| s.group_id);
+	let now = Timestamp::now();
 	let rows = ServerBackupCapability::list_for_server(&mut conn, args.server_id).await?;
 	let mut out = Vec::with_capacity(rows.len());
 	for c in rows {
 		let last = BackupRun::latest_success_for_server(&mut conn, c.server_id, &c.r#type).await?;
+		let interval = match group_id {
+			Some(g) => effective_interval_secs(&mut conn, g, &c.r#type).await?,
+			None => None,
+		};
 		out.push(ServerBackupCapabilityView {
 			server_id: c.server_id,
 			latest_snapshot_id: last.as_ref().and_then(|r| r.snapshot_id.clone()),
 			latest_snapshot_at: last.as_ref().map(|r| r.reported_at),
 			latest_snapshot_bytes: last.as_ref().and_then(|r| r.bytes_uploaded),
+			next_backup_at: next_backup_at(
+				c.enabled,
+				interval,
+				last.as_ref().map(|r| r.reported_at),
+				now,
+			),
 			r#type: c.r#type,
 			enabled: c.enabled,
 		});

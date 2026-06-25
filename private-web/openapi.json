@@ -8295,7 +8295,6 @@
       },
       "ServerBackupCapabilityView": {
         "type": "object",
-        "description": "One `(server, type)` backup capability and whether the operator has it\nenabled. `enabled` toggles whether the scheduler issues credentials and\nschedules runs for the pair.",
         "required": [
           "server_id",
           "type",
@@ -8327,6 +8326,14 @@
               "null"
             ],
             "description": "kopia snapshot id of this server+type's most recent successful backup,\nif any."
+          },
+          "next_backup_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this server's next backup of this type is expected: the server's own\nlast success plus the effective interval, or \"now\" (overdue) if it's\nscheduled but has never succeeded. `None` for disabled or manual-only\n(no-interval) types. Per-server, so a lagging member isn't masked by a\nfreshly-backed-up sibling."
           },
           "server_id": {
             "type": "string",
