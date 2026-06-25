@@ -556,7 +556,7 @@
         "tags": [
           "backups"
         ],
-        "summary": "Per enabled backup type, the group's effective schedule/retention (override\nor inherited default) — drives the per-type editor in the group panel.",
+        "summary": "Per **declared** backup type (not just enabled), the group's effective\nschedule/retention (override or inherited default) — drives the per-type\neditor in the group panel. Includes non-scheduled (disabled) types, since a\nmanual backup of one is still retained under its own type policy; those show\na null `effective_interval` (\"manual only\").",
         "operationId": "backups_group_schedules",
         "requestBody": {
           "content": {

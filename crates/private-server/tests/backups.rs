@@ -498,6 +498,43 @@ async fn group_schedules_reports_next_run_from_last_success_plus_interval() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn group_schedules_includes_disabled_declared_types() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group_id = seed_group(&mut conn).await;
+		let server_id = Uuid::new_v4();
+		// A *declared but disabled* type (manual-only): retention still applies, so
+		// it must surface in schedule/retention as a manual-only entry.
+		conn.batch_execute(&format!(
+			"INSERT INTO servers (id, host, kind, group_id) VALUES \
+				('{server_id}', 'https://e.test', 'central', '{group_id}');
+			 INSERT INTO server_backup_capabilities (server_id, type, enabled) VALUES \
+				('{server_id}', 'files', false);"
+		))
+		.await
+		.expect("seed disabled capability");
+
+		let resp = private
+			.post("/api/backups/group_schedules")
+			.json(&serde_json::json!({ "server_group_id": group_id }))
+			.await;
+		resp.assert_status_ok();
+		let body: serde_json::Value = resp.json();
+		let row = body
+			.as_array()
+			.unwrap()
+			.iter()
+			.find(|r| r["type"] == "files")
+			.expect("disabled declared type appears in schedule/retention");
+		// Manual-only: no schedule, but a (floor) retention policy that applies to
+		// manual backups of this type.
+		assert!(row["effective_interval"].is_null());
+		assert!(row["next_run_at"].is_null());
+		assert!(row["effective_retention"]["keep_daily"].as_i64().unwrap() >= 7);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn update_region_and_delete() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let group_id = seed_group(&mut conn).await;

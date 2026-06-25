@@ -857,8 +857,11 @@ pub struct GroupTypeScheduleView {
 	pub next_run_at: Option<Timestamp>,
 }
 
-/// Per enabled backup type, the group's effective schedule/retention (override
-/// or inherited default) — drives the per-type editor in the group panel.
+/// Per **declared** backup type (not just enabled), the group's effective
+/// schedule/retention (override or inherited default) — drives the per-type
+/// editor in the group panel. Includes non-scheduled (disabled) types, since a
+/// manual backup of one is still retained under its own type policy; those show
+/// a null `effective_interval` ("manual only").
 #[utoipa::path(
 	post,
 	path = "/group_schedules",
@@ -874,7 +877,7 @@ pub async fn group_schedules(
 ) -> Result<Json<Vec<GroupTypeScheduleView>>> {
 	let mut conn = state.db.get().await?;
 	let types =
-		ServerBackupCapability::enabled_types_for_group(&mut conn, args.server_group_id).await?;
+		ServerBackupCapability::declared_types_for_group(&mut conn, args.server_group_id).await?;
 
 	// Anchor for the next-expected-run estimate: the group's most recent
 	// successful backup per type (max over its servers).

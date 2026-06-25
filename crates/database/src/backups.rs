@@ -504,21 +504,43 @@ impl ServerBackupCapability {
 	}
 
 	/// Distinct backup types that are **enabled** on any non-archived server in
-	/// the group — i.e. the types the group's repo is actively expected to
-	/// hold. The scheduler resolves a per-type retention/cadence for each of
-	/// these.
+	/// the group — i.e. the types the group is actively expected to back up on a
+	/// schedule. Used for scheduling cadence and staleness alerting.
 	pub async fn enabled_types_for_group(
 		db: &mut AsyncPgConnection,
 		group_id: Uuid,
 	) -> Result<Vec<BackupType>> {
+		Self::types_for_group(db, group_id, true).await
+	}
+
+	/// Distinct backup types **declared** (advertised by bestool) on any
+	/// non-archived server in the group, regardless of their enabled flag — i.e.
+	/// every type the repo can hold snapshots for, including manual-only
+	/// (disabled) ones. Retention is resolved per declared type so a manual
+	/// backup of a non-scheduled type still gets its own policy, not the global.
+	pub async fn declared_types_for_group(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+	) -> Result<Vec<BackupType>> {
+		Self::types_for_group(db, group_id, false).await
+	}
+
+	async fn types_for_group(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+		enabled_only: bool,
+	) -> Result<Vec<BackupType>> {
 		use crate::schema::{server_backup_capabilities as cap, servers};
 
-		cap::table
+		let mut q = cap::table
 			.inner_join(servers::table.on(servers::id.eq(cap::server_id)))
 			.filter(servers::group_id.eq(group_id))
 			.filter(servers::deleted_at.is_null())
-			.filter(cap::enabled.eq(true))
-			.select(cap::type_)
+			.into_boxed();
+		if enabled_only {
+			q = q.filter(cap::enabled.eq(true));
+		}
+		q.select(cap::type_)
 			.distinct()
 			.load::<BackupType>(db)
 			.await

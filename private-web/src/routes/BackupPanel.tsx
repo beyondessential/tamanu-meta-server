@@ -321,8 +321,9 @@ function SchedulesPanel({
 				<Alert severity="error">{schedules.error.message}</Alert>
 			) : schedules.data.length === 0 ? (
 				<Alert severity="info">
-					No backup types are enabled for this group's servers yet. Each type
-					inherits the canopy-wide default until a server advertises it.
+					No backup types registered for this group's servers yet. Each type a
+					server advertises appears here — scheduled or manual-only — and
+					inherits the canopy-wide default retention until overridden.
 				</Alert>
 			) : (
 				<Stack spacing={2}>
