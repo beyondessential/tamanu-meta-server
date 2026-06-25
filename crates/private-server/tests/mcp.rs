@@ -144,6 +144,36 @@ async fn initialize_and_list_tools() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn accepts_non_loopback_host() {
+	// Regression: rmcp's DNS-rebinding guard defaults to a loopback-only Host
+	// allowlist, which 403s the real tailnet deployment host. The endpoint is
+	// gated by the ingress + tagged-device guard + tailnet-user check instead,
+	// so a non-loopback Host must be accepted.
+	commons_tests::server::run(async |_conn, _public, private| {
+		let init = private
+			.post("/api/mcp")
+			.add_header("accept", ACCEPT)
+			.add_header("host", "canopy.example.ts.net")
+			.json(&serde_json::json!({
+				"jsonrpc": "2.0", "id": 1, "method": "initialize",
+				"params": {
+					"protocolVersion": "2025-06-18",
+					"capabilities": {},
+					"clientInfo": { "name": "canopy-tests", "version": "0" }
+				}
+			}))
+			.await;
+		assert_eq!(
+			init.status_code().as_u16(),
+			200,
+			"non-loopback Host should be accepted, got: {}",
+			init.text()
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn find_servers_filters_and_decorates() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		seed(&mut conn).await;
