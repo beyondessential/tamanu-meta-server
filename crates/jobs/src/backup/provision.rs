@@ -18,9 +18,8 @@ use aws_sdk_s3::types::{
 	AbortIncompleteMultipartUpload, BucketLifecycleConfiguration, BucketLocationConstraint,
 	BucketVersioningStatus, CreateBucketConfiguration, DefaultRetention, ExpirationStatus,
 	LifecycleExpiration, LifecycleRule, LifecycleRuleFilter, NoncurrentVersionExpiration,
-	ObjectLockConfiguration,
-	ObjectLockEnabled, ObjectLockRetentionMode, ObjectLockRule, PublicAccessBlockConfiguration,
-	Tag, Tagging, VersioningConfiguration,
+	ObjectLockConfiguration, ObjectLockEnabled, ObjectLockRetentionMode, ObjectLockRule,
+	PublicAccessBlockConfiguration, Tag, Tagging, VersioningConfiguration,
 };
 
 /// Default Object Lock retention applied bucket-wide (server-side on every PUT,
