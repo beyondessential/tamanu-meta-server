@@ -1,10 +1,17 @@
-//! Billing-tag reconcile. Per tick (slow, slot-jittered daily cadence), re-apply
-//! each `ready` group's `billing.*` tags to its bucket when they've drifted —
-//! catching group renames / rank changes (the bucket *name* can't follow a
-//! rename, but `billing.deployment` does). Covers both placements: shared buckets
-//! via the provisioner role, external (BYO) buckets via the group's maintenance
-//! role. Best-effort: on any error (e.g. an external account whose maintenance
-//! role doesn't yet grant `PutBucketTagging`), log + continue, never alert.
+//! Bucket reconcile. Per tick (slow, slot-jittered daily cadence), converge each
+//! `ready` group's bucket toward what canopy wants — so config changes reach
+//! already-provisioned buckets, not just newly-created ones:
+//!
+//! - **Shared** (canopy-managed): re-apply the whole idempotent provisioning
+//!   recipe via the provisioner role (object-lock, versioning, lifecycle incl.
+//!   delete-marker reaping, the TLS-only policy, and the `billing.*` tags).
+//! - **External** (BYO): reconcile only the `billing.*` tags via the group's
+//!   maintenance role — canopy never owns a BYO bucket's own config.
+//!
+//! Tag drift catches group renames / rank changes (the bucket *name* can't follow
+//! a rename, but `billing.deployment` does). Best-effort: on any error (e.g. an
+//! external account whose maintenance role doesn't yet grant `PutBucketTagging`),
+//! log + continue, never alert.
 
 use std::time::Duration;
 
@@ -72,11 +79,29 @@ async fn tick(db: &mut diesel_async::AsyncPgConnection) -> Result<(), String> {
 		let tags =
 			backup_bucket_billing_tags(&group.tags, &group.name, ranks.get(&c.group_id).copied());
 		let region = c.region.as_deref().unwrap_or("us-east-1");
-		match super::provision::reconcile_bucket_tags(&role_arn, &c.bucket, region, &tags).await {
-			Ok(true) => debug!(group = %c.group_id, "tag-reconcile: applied billing tags"),
-			Ok(false) => {}
-			// Best-effort: an external role without PutBucketTagging lands here.
-			Err(e) => warn!(group = %c.group_id, "tag-reconcile failed (non-fatal): {e:#}"),
+		let result = match c.placement {
+			// Shared buckets are canopy-managed: re-apply the whole (idempotent)
+			// provisioning recipe so changes to it — object-lock, lifecycle (incl.
+			// delete-marker reaping), the TLS-only policy, billing tags — converge
+			// on already-provisioned buckets, not just newly-created ones.
+			BackupPlacement::Shared => {
+				super::provision::ensure_bucket(&role_arn, &c.bucket, region, &tags)
+					.await
+					.map(|()| "reconciled shared bucket")
+			}
+			// BYO buckets: canopy owns only the billing tags, never the bucket's
+			// own config — reconcile tags alone, via the group's maintenance role.
+			BackupPlacement::External => {
+				super::provision::reconcile_bucket_tags(&role_arn, &c.bucket, region, &tags)
+					.await
+					.map(|changed| if changed { "applied billing tags" } else { "" })
+			}
+		};
+		match result {
+			Ok("") => {}
+			Ok(msg) => debug!(group = %c.group_id, "bucket-reconcile: {msg}"),
+			// Best-effort: e.g. an external role without PutBucketTagging lands here.
+			Err(e) => warn!(group = %c.group_id, "bucket-reconcile failed (non-fatal): {e:#}"),
 		}
 	}
 	Ok(())

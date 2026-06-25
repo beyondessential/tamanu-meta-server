@@ -17,9 +17,9 @@ use aws_sdk_s3::operation::create_bucket::CreateBucketError;
 use aws_sdk_s3::types::{
 	AbortIncompleteMultipartUpload, BucketLifecycleConfiguration, BucketLocationConstraint,
 	BucketVersioningStatus, CreateBucketConfiguration, DefaultRetention, ExpirationStatus,
-	LifecycleRule, LifecycleRuleFilter, NoncurrentVersionExpiration, ObjectLockConfiguration,
-	ObjectLockEnabled, ObjectLockRetentionMode, ObjectLockRule, PublicAccessBlockConfiguration,
-	Tag, Tagging, VersioningConfiguration,
+	LifecycleExpiration, LifecycleRule, LifecycleRuleFilter, NoncurrentVersionExpiration,
+	ObjectLockConfiguration, ObjectLockEnabled, ObjectLockRetentionMode, ObjectLockRule,
+	PublicAccessBlockConfiguration, Tag, Tagging, VersioningConfiguration,
 };
 
 /// Default Object Lock retention applied bucket-wide (server-side on every PUT,
@@ -198,7 +198,8 @@ async fn create_bucket(s3: &aws_sdk_s3::Client, bucket: &str, region: &str) -> R
 }
 
 /// Reclaim lifecycle for the versioned, object-locked bucket: noncurrent
-/// versions expire (lock governs the actual delete time) and incomplete
+/// versions expire (lock governs the actual delete time), the delete-markers
+/// kopia leaves once their noncurrent version is gone are reaped, and incomplete
 /// multipart uploads are aborted.
 fn lifecycle() -> Result<BucketLifecycleConfiguration> {
 	let rule = LifecycleRule::builder()
@@ -208,6 +209,14 @@ fn lifecycle() -> Result<BucketLifecycleConfiguration> {
 		.noncurrent_version_expiration(
 			NoncurrentVersionExpiration::builder()
 				.noncurrent_days(1)
+				.build(),
+		)
+		// kopia deletes are version-less, so each leaves a delete-marker; once its
+		// last noncurrent version expires, clean up the dangling marker too (else
+		// they accumulate forever). Marker-only expiry — no Days/Date.
+		.expiration(
+			LifecycleExpiration::builder()
+				.expired_object_delete_marker(true)
 				.build(),
 		)
 		.abort_incomplete_multipart_upload(
