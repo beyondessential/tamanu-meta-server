@@ -1023,10 +1023,32 @@ fn mcp_err(e: impl std::fmt::Display) -> McpError {
 
 /// Build the tower service nested into the axum router at `/api/mcp`.
 pub fn service(state: AppState) -> StreamableHttpService<CanopyMcp, LocalSessionManager> {
+	let mut config = StreamableHttpServerConfig::default();
+	// rmcp's `allowed_hosts` defaults to loopback only — a DNS-rebinding defense
+	// aimed at browser-facing localhost MCP servers. That threat doesn't apply
+	// here: the endpoint is reachable only through the Tailscale ingress (which
+	// injects the caller's identity), behind the tagged-device guard and the
+	// tailnet-user gate, and serves no CORS headers, so a browser can't make a
+	// cross-origin POST to it. Left as-is the loopback default 403s the real
+	// deployment host, so disable it. An operator who wants to pin the Host
+	// allowlist anyway can set CANOPY_MCP_ALLOWED_HOSTS to a comma-separated
+	// list (e.g. `canopy.example.ts.net`); loopback stays allowed for dev.
+	match std::env::var("CANOPY_MCP_ALLOWED_HOSTS") {
+		Ok(list) if !list.trim().is_empty() => {
+			config.allowed_hosts.extend(
+				list.split(',')
+					.map(str::trim)
+					.filter(|s| !s.is_empty())
+					.map(ToOwned::to_owned),
+			);
+		}
+		_ => config = config.disable_allowed_hosts(),
+	}
+
 	StreamableHttpService::new(
 		move || Ok(CanopyMcp::new(state.clone())),
 		LocalSessionManager::default().into(),
-		StreamableHttpServerConfig::default(),
+		config,
 	)
 }
 
