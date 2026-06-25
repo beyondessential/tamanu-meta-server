@@ -6,6 +6,7 @@ import {
 	Box,
 	Button,
 	Chip,
+	Collapse,
 	Dialog,
 	DialogActions,
 	DialogContent,
@@ -1631,10 +1632,16 @@ function SiblingServers({
 	);
 }
 
+/// The all-zero group id, used to query backup config for an ungrouped server:
+/// it always resolves to "no config" rather than erroring on a missing group.
+const NIL_UUID = "00000000-0000-0000-0000-000000000000";
+
 /// Per-(server, type) backup capabilities with an admin-only enable toggle.
 /// Reads `backups.capabilities`; the switch calls `backups.set_capability` and
 /// refetches. Capabilities are advertised by bestool, so a server with none yet
-/// renders an explicit empty state rather than disappearing.
+/// renders an explicit empty state rather than disappearing. When the group has
+/// no active backup config the toggles are greyed + collapsed behind a message,
+/// since they have no effect until backups are set up.
 function BackupCapabilitiesSection({
 	serverId,
 	groupId,
@@ -1650,6 +1657,41 @@ function BackupCapabilitiesSection({
 		{ server_id: serverId },
 		[serverId],
 	);
+	// Whether the group has an *active* (ready) backup config. Ungrouped servers
+	// query the nil group, which always returns no config. While this is loading
+	// we optimistically treat the section as active to avoid a grey→normal flash.
+	const config = useApi(
+		"backups",
+		"get",
+		{ server_group_id: groupId ?? NIL_UUID },
+		[groupId],
+	);
+	const inactive =
+		config.status === "ok" &&
+		!(config.data != null && config.data.status === "ready");
+	const inactiveMessage = !groupId
+		? "This server isn't in a group, so backups can't be configured for it."
+		: config.status === "ok" && config.data == null
+			? "Backups aren't set up for this group yet, so these settings have no effect."
+			: "Backups for this group are still being set up, so these settings have no effect yet.";
+
+	const [showInactive, setShowInactive] = useState(false);
+
+	const rows = (
+		<Stack divider={<Divider />}>
+			{caps.status === "ok" &&
+				caps.data.map((cap) => (
+					<BackupCapabilityRow
+						key={cap.type}
+						serverId={serverId}
+						cap={cap}
+						isAdmin={isAdmin}
+						onChanged={caps.reload}
+					/>
+				))}
+		</Stack>
+	);
+
 	return (
 		<Paper id="backups" variant="outlined" sx={{ p: 2 }}>
 			<Stack
@@ -1671,6 +1713,28 @@ function BackupCapabilitiesSection({
 					</MuiLink>
 				)}
 			</Stack>
+
+			{inactive && (
+				<Alert
+					severity="info"
+					sx={{ mb: 1 }}
+					action={
+						groupId && isAdmin ? (
+							<Button
+								component={RouterLink}
+								to={`/groups/${groupId}/backups`}
+								color="inherit"
+								size="small"
+							>
+								Set up
+							</Button>
+						) : undefined
+					}
+				>
+					{inactiveMessage}
+				</Alert>
+			)}
+
 			{caps.status === "loading" || caps.status === "idle" ? (
 				<LinearProgress />
 			) : caps.status === "error" ? (
@@ -1679,18 +1743,32 @@ function BackupCapabilitiesSection({
 				<Typography variant="body2" color="text.secondary">
 					No backup types registered for this server.
 				</Typography>
+			) : inactive ? (
+				// Collapsed + greyed: the toggles still work (they record intent for
+				// when backups are set up), but it's clear they're dormant right now.
+				<>
+					<Button
+						size="small"
+						onClick={() => setShowInactive((s) => !s)}
+						endIcon={
+							<ExpandMoreIcon
+								sx={{
+									transform: showInactive ? "rotate(180deg)" : "none",
+									transition: "transform 150ms",
+								}}
+							/>
+						}
+					>
+						{showInactive
+							? "Hide backup types"
+							: `Show backup types (${caps.data.length})`}
+					</Button>
+					<Collapse in={showInactive}>
+						<Box sx={{ opacity: 0.6, mt: 1 }}>{rows}</Box>
+					</Collapse>
+				</>
 			) : (
-				<Stack divider={<Divider />}>
-					{caps.data.map((cap) => (
-						<BackupCapabilityRow
-							key={cap.type}
-							serverId={serverId}
-							cap={cap}
-							isAdmin={isAdmin}
-							onChanged={caps.reload}
-						/>
-					))}
-				</Stack>
+				rows
 			)}
 		</Paper>
 	);
