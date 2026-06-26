@@ -13,8 +13,9 @@
 //!
 //! All four resolve `device → live server → group_id → group backup config`
 //! identically: **412** when the device is bound to no live server, **409**
-//! when the server is ungrouped / has no `ready` config / the type isn't an
-//! enabled capability, **502** when STS or kube fails or isn't configured.
+//! when the server is ungrouped / has no `ready` config / the type is neither
+//! an enabled capability nor has a pending request, **502** when STS or kube
+//! fails or isn't configured.
 
 use aws_sdk_sts::operation::RequestId as _;
 use axum::{Json, extract::State, http::StatusCode};
@@ -101,22 +102,26 @@ async fn require_ready_config(
 	Ok(cfg)
 }
 
-/// Require that `(server, type)` is an enabled capability — the per-`(server,
-/// type)` issuance gate. Not enabled / not registered ⇒ 409.
-async fn require_enabled_capability(
+/// The per-`(server, type)` credential-issuance gate. Mirrors what the
+/// heartbeat is willing to ask the device to run: a type may be issued creds
+/// when it's an enabled capability (on the auto-schedule), or when an on-demand
+/// request of this `purpose` is pending (an operator "backup now" / restore).
+/// Neither ⇒ 409.
+async fn require_issuable_capability(
 	conn: &mut database::diesel_async::AsyncPgConnection,
 	server_id: Uuid,
 	r#type: &BackupType,
+	purpose: BackupPurpose,
 ) -> Result<()> {
 	let enabled = ServerBackupCapability::list_for_server(conn, server_id)
 		.await?
 		.into_iter()
 		.any(|c| &c.r#type == r#type && c.enabled);
-	if enabled {
+	if enabled || BackupRequest::exists(conn, server_id, r#type, purpose).await? {
 		Ok(())
 	} else {
 		Err(AppError::Conflict(format!(
-			"backup type {type} is not an enabled capability for this server",
+			"backup type {type} is not an enabled capability for this server, and no {purpose} is pending",
 			type = r#type
 		)))
 	}
@@ -177,7 +182,8 @@ async fn capabilities(
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct CredentialsArgs {
-	/// The backup type these creds are for. Must be an enabled capability.
+	/// The backup type these creds are for. Must be an enabled capability or
+	/// have a pending request of this `purpose` (an on-demand backup/restore).
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
 	/// `backup` (default) grants write-without-delete; `restore` is downscoped
@@ -301,7 +307,7 @@ async fn credentials(
 	let server = resolve_server(&mut conn, device_id).await?;
 	let group_id = require_group(&server)?;
 	let cfg = require_ready_config(&mut conn, group_id).await?;
-	require_enabled_capability(&mut conn, server.id, &args.r#type).await?;
+	require_issuable_capability(&mut conn, server.id, &args.r#type, args.purpose).await?;
 
 	// Always attach a bucket-scoped session policy so the issued creds can only
 	// reach this group's bucket — redundant for a dedicated per-bucket role
