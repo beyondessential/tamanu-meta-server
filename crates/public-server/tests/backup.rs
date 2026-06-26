@@ -69,6 +69,34 @@ async fn enable_capability(conn: &mut AsyncPgConnection, server_id: Uuid, r#type
 	.expect("insert capability");
 }
 
+/// Register a capability that is declared but *not* on the schedule (`enabled =
+/// false`) — only an on-demand request can drive a backup of it.
+async fn declare_capability_disabled(conn: &mut AsyncPgConnection, server_id: Uuid, r#type: &str) {
+	sql_query(
+		"INSERT INTO server_backup_capabilities (server_id, type, enabled) VALUES ($1, $2, false)",
+	)
+	.bind::<sql_types::Uuid, _>(server_id)
+	.bind::<sql_types::Text, _>(r#type)
+	.execute(conn)
+	.await
+	.expect("insert disabled capability");
+}
+
+async fn enqueue_request(
+	conn: &mut AsyncPgConnection,
+	server_id: Uuid,
+	r#type: &str,
+	purpose: &str,
+) {
+	sql_query("INSERT INTO backup_requests (server_id, type, purpose) VALUES ($1, $2, $3)")
+		.bind::<sql_types::Uuid, _>(server_id)
+		.bind::<sql_types::Text, _>(r#type)
+		.bind::<sql_types::Text, _>(purpose)
+		.execute(conn)
+		.await
+		.expect("insert backup request");
+}
+
 // --- 412 / 409 / 502 resolution matrix --------------------------------------
 
 #[tokio::test(flavor = "multi_thread")]
@@ -156,6 +184,27 @@ async fn credentials_type_not_enabled_is_409() {
 				.post("/backup-credentials")
 				.add_header("mtls-certificate", &cert)
 				.json(&serde_json::json!({ "type": "tamanu-postgres" }))
+				.await;
+			resp.assert_status(http::StatusCode::CONFLICT);
+		},
+	)
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn credentials_disabled_capability_no_request_is_409() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			let server = make_server(&mut conn, device_id, Some(group)).await;
+			make_config(&mut conn, group, "ready").await;
+			// Declared but not scheduled, and no pending request → still 409.
+			declare_capability_disabled(&mut conn, server, "tamanu-config").await;
+			let resp = public
+				.post("/backup-credentials")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({ "type": "tamanu-config" }))
 				.await;
 			resp.assert_status(http::StatusCode::CONFLICT);
 		},
@@ -514,6 +563,42 @@ async fn credentials_backup_happy_path_200_and_audit() {
 		assert_eq!(iss.access_key_id.as_deref(), Some("AKIATESTKEY"));
 		assert_eq!(iss.sts_assumed_role, "arn:aws:iam::123456789012:role/grp");
 		assert_eq!(iss.bucket, "grp-bucket");
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn credentials_disabled_capability_with_pending_request_200() {
+	use commons_types::backup::BackupPurpose;
+	use database::BackupCredentialIssuance;
+
+	commons_tests::db::TestDb::run(async |mut conn, url| {
+		let (device_id, cert) = seed_device(&mut conn, "server").await;
+		let group = make_group(&mut conn).await;
+		let server = make_server(&mut conn, device_id, Some(group)).await;
+		make_config(&mut conn, group, "ready").await;
+		// A declared-but-not-scheduled type with an operator "backup now" request
+		// pending: the issuance gate must let it through (this is the bug fix).
+		declare_capability_disabled(&mut conn, server, "tamanu-config").await;
+		enqueue_request(&mut conn, server, "tamanu-config", "backup").await;
+
+		let rule = assume_role_rule(Some("arn:aws:s3:::grp-bucket"));
+		let sts = aws_smithy_mocks::mock_client!(aws_sdk_sts, RuleMode::MatchAny, [&rule]);
+		let public = public_server_with_sts(&url, sts);
+
+		let resp = public
+			.post("/backup-credentials")
+			.add_header("mtls-certificate", &cert)
+			.json(&serde_json::json!({ "type": "tamanu-config", "purpose": "backup" }))
+			.await;
+		resp.assert_status_ok();
+
+		let issuances = BackupCredentialIssuance::list_for_group(&mut conn, group, 10)
+			.await
+			.unwrap();
+		assert_eq!(issuances.len(), 1);
+		assert_eq!(issuances[0].purpose, BackupPurpose::Backup);
+		assert_eq!(issuances[0].r#type, "tamanu-config".into());
 	})
 	.await;
 }

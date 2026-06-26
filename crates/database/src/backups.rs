@@ -1331,6 +1331,27 @@ impl BackupRequest {
 			.await
 			.map_err(AppError::from)
 	}
+
+	/// Whether a one-off request is pending for `(server, type, purpose)`.
+	pub async fn exists(
+		db: &mut AsyncPgConnection,
+		server_id: Uuid,
+		r#type: &BackupType,
+		purpose: BackupPurpose,
+	) -> Result<bool> {
+		use crate::schema::backup_requests::dsl;
+		use diesel::dsl::{exists, select};
+
+		select(exists(
+			dsl::backup_requests
+				.filter(dsl::server_id.eq(server_id))
+				.filter(dsl::type_.eq(r#type.as_str()))
+				.filter(dsl::purpose.eq(purpose)),
+		))
+		.get_result(db)
+		.await
+		.map_err(AppError::from)
+	}
 }
 
 // ---------------------------------------------------------------------------

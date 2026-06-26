@@ -1174,7 +1174,7 @@
           },
           "type": {
             "type": "string",
-            "description": "The backup type these creds are for. Must be an enabled capability."
+            "description": "The backup type these creds are for. Must be an enabled capability or\nhave a pending request of this `purpose` (an on-demand backup/restore)."
           }
         }
       },
