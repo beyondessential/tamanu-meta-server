@@ -980,8 +980,10 @@ function MaintenanceSummary({ runs }: { runs: BackupMaintenanceRun[] }) {
 }
 
 /// Repo maintenance: the at-a-glance health summary plus recent kopia
-/// maintenance cycles (full maintenance is what expires/reclaims; quick is the
-/// lighter compaction). Failed runs expand to their error.
+/// maintenance cycles. Every cycle expires snapshots per the retention policy
+/// (`kopia snapshot expire --delete`); full maintenance additionally reclaims
+/// the freed space, while quick is the lighter compaction. Failed runs expand
+/// to their error.
 function MaintenancePanel({ groupId }: { groupId: string }) {
 	const stats = useApi(
 		"backups",
