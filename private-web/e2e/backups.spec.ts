@@ -878,7 +878,8 @@ test.describe("backups ready: repo maintenance panel", () => {
 		await expect(panel.getByText("Healthy")).toBeVisible();
 		await expect(panel.getByText(/last successful maintenance/i)).toBeVisible();
 		await expect(panel.getByText("Full")).toBeVisible();
-		await expect(panel.getByText("success")).toBeVisible();
+		// exact: the "Last successful maintenance" caption also contains "success".
+		await expect(panel.getByText("success", { exact: true })).toBeVisible();
 		await expect(panel.getByText("1.0 MiB")).toBeVisible();
 	});
 
@@ -934,7 +935,8 @@ test.describe("backups ready: repo maintenance panel", () => {
 		const panel = page
 			.getByRole("heading", { name: /repo maintenance/i })
 			.locator("..");
-		await expect(panel.getByText("running")).toBeVisible();
+		// exact: the summary chip reads "Running" (capitalised); the row chip "running".
+		await expect(panel.getByText("running", { exact: true })).toBeVisible();
 		await expect(panel.getByText("Quick")).toBeVisible();
 	});
 });
