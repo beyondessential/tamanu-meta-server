@@ -120,6 +120,7 @@ async fn insert_schedule(
 			r#type: ty.clone(),
 			expected_interval: Some(PgDuration(interval)),
 			retention: Some(retention()),
+			allow_below_floor: false,
 		},
 	)
 	.await

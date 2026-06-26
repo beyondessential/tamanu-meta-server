@@ -123,6 +123,7 @@ diesel::table! {
 		default_interval -> Nullable<Interval>,
 		default_retention -> Jsonb,
 		auto_enable -> Bool,
+		allow_below_floor -> Bool,
 	}
 }
 
@@ -351,6 +352,7 @@ diesel::table! {
 		retention -> Nullable<Jsonb>,
 		created_at -> Timestamptz,
 		updated_at -> Timestamptz,
+		allow_below_floor -> Bool,
 	}
 }
 

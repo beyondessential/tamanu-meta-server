@@ -164,6 +164,28 @@ async fn set_schedule_floor_rejected_and_accepted() {
 		assert_eq!(sched["type"], "tamanu-postgres");
 		assert_eq!(sched["expected_interval"], 3600);
 		assert_eq!(sched["retention"]["keep_daily"], 7);
+		assert_eq!(sched["allow_below_floor"], false);
+
+		// Below floor but allow_below_floor → accepted, and the dangerous flag
+		// round-trips into the view.
+		let resp = private
+			.post("/api/backups/set_schedule")
+			.json(&serde_json::json!({
+				"server_group_id": group_id,
+				"type": "tamanu-postgres",
+				"expected_interval": 3600,
+				"retention": {
+					"keep_latest": 1, "keep_daily": 2, "keep_weekly": 0,
+					"keep_monthly": 0, "keep_annual": 0
+				},
+				"allow_below_floor": true,
+			}))
+			.await;
+		resp.assert_status_ok();
+		let body: serde_json::Value = resp.json();
+		let sched = &body["schedules"][0];
+		assert_eq!(sched["retention"]["keep_daily"], 2);
+		assert_eq!(sched["allow_below_floor"], true);
 	})
 	.await;
 }
@@ -934,6 +956,8 @@ async fn type_defaults_list_and_set_roundtrip() {
 		assert_eq!(td["default_interval"], 7200);
 		assert_eq!(td["auto_enable"], false);
 
+		assert_eq!(td["allow_below_floor"], false);
+
 		// Below-floor retention → 400.
 		private
 			.post("/api/backups/set_type_default")
@@ -947,6 +971,34 @@ async fn type_defaults_list_and_set_roundtrip() {
 			}))
 			.await
 			.assert_status_bad_request();
+
+		// Below-floor retention with allow_below_floor → accepted, flag persisted.
+		private
+			.post("/api/backups/set_type_default")
+			.json(&serde_json::json!({
+				"type": "tamanu-postgres",
+				"default_interval": null,
+				"default_retention": {
+					"keep_latest": 1, "keep_daily": 1, "keep_weekly": 0,
+					"keep_monthly": 0, "keep_annual": 0
+				},
+				"allow_below_floor": true,
+			}))
+			.await
+			.assert_status_ok();
+		let resp = private
+			.post("/api/backups/type_defaults")
+			.json(&serde_json::json!({}))
+			.await;
+		let body: serde_json::Value = resp.json();
+		let td = body
+			.as_array()
+			.unwrap()
+			.iter()
+			.find(|d| d["type"] == "tamanu-postgres")
+			.unwrap();
+		assert_eq!(td["allow_below_floor"], true);
+		assert_eq!(td["default_retention"]["keep_daily"], 1);
 	})
 	.await;
 }

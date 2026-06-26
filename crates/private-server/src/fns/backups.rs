@@ -84,6 +84,8 @@ pub struct ScheduleView {
 	#[schema(value_type = Option<i64>, format = "int64")]
 	pub expected_interval: Option<PgDuration>,
 	pub retention: Option<RetentionPolicy>,
+	/// Whether this override opts out of the org retention floor (dangerous).
+	pub allow_below_floor: bool,
 }
 
 /// Full config + lifecycle for a group. Never includes the passphrase value.
@@ -122,6 +124,7 @@ impl BackupConfigView {
 				r#type: s.r#type,
 				expected_interval: s.expected_interval,
 				retention: s.retention.as_ref().and_then(RetentionPolicy::from_json),
+				allow_below_floor: s.allow_below_floor,
 			})
 			.collect();
 		Ok(Self {
@@ -217,8 +220,13 @@ pub struct SetScheduleArgs {
 	/// Seconds; None = manual-only (no schedule), distinct from 0.
 	#[schema(value_type = Option<i64>, format = "int64")]
 	pub expected_interval: Option<PgDuration>,
-	/// None = inherit the type default. A present policy is floor-validated.
+	/// None = inherit the type default. A present policy is floor-validated
+	/// unless `allow_below_floor` is set.
 	pub retention: Option<RetentionPolicy>,
+	/// Dangerous: opt this override out of the org retention floor, allowing a
+	/// retention smaller than the org minimum. Defaults false.
+	#[serde(default)]
+	pub allow_below_floor: bool,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -851,7 +859,9 @@ pub async fn set_schedule(
 	let mut conn = state.db.get().await?;
 	require_config(&mut conn, args.server_group_id).await?;
 	if let Some(policy) = &args.retention {
-		policy.validate_floor()?;
+		if !args.allow_below_floor {
+			policy.validate_floor()?;
+		}
 	}
 	ServerGroupBackupSchedule::upsert(
 		&mut conn,
@@ -860,6 +870,7 @@ pub async fn set_schedule(
 			r#type: args.r#type,
 			expected_interval: args.expected_interval,
 			retention: args.retention.map(|r| r.to_json()),
+			allow_below_floor: args.allow_below_floor,
 		},
 	)
 	.await?;
@@ -925,6 +936,9 @@ pub struct GroupTypeScheduleView {
 	pub effective_interval: Option<i64>,
 	pub effective_retention: RetentionPolicy,
 	pub has_override: bool,
+	/// Whether the effective config opts out of the org retention floor — taken
+	/// from the override if present, else the type default.
+	pub allow_below_floor: bool,
 	/// When the next scheduled backup of this type is expected: the group's most
 	/// recent successful backup of the type plus the interval — or "now" if the
 	/// type is scheduled but has never succeeded yet. Null for manual-only types.
@@ -989,6 +1003,14 @@ pub async fn group_schedules(
 					.and_then(|d| RetentionPolicy::from_json(&d.default_retention))
 			})
 			.unwrap_or(FLOOR_RETENTION);
+		// Mirror the retention precedence: the override's flag governs when it
+		// supplies the effective retention, else the type default's.
+		let allow_below_floor = over
+			.as_ref()
+			.filter(|s| s.retention.is_some())
+			.map(|s| s.allow_below_floor)
+			.or_else(|| def.as_ref().map(|d| d.allow_below_floor))
+			.unwrap_or(false);
 		// Scheduled types: latest success + interval (or now if never run yet).
 		// Manual-only types (no interval) have no expected next run.
 		let next_run_at = effective_interval.map(|secs| {
@@ -1001,6 +1023,7 @@ pub async fn group_schedules(
 			r#type: ty,
 			effective_interval,
 			effective_retention,
+			allow_below_floor,
 			has_override: over.is_some(),
 			next_run_at,
 		});
@@ -1018,6 +1041,8 @@ pub struct TypeDefaultView {
 	pub default_interval: Option<i64>,
 	pub default_retention: Option<RetentionPolicy>,
 	pub auto_enable: bool,
+	/// Whether this default opts out of the org retention floor (dangerous).
+	pub allow_below_floor: bool,
 }
 
 /// List the canopy-wide per-type defaults (the "global" schedule/retention each
@@ -1043,6 +1068,7 @@ pub async fn type_defaults(
 				default_interval: d.default_interval.map(|pg| pg.0.as_secs()),
 				default_retention: RetentionPolicy::from_json(&d.default_retention),
 				auto_enable: d.auto_enable,
+				allow_below_floor: d.allow_below_floor,
 			})
 			.collect(),
 	))
@@ -1059,6 +1085,9 @@ pub struct SetTypeDefaultArgs {
 	pub default_retention: RetentionPolicy,
 	#[serde(default)]
 	pub auto_enable: bool,
+	/// Dangerous: opt this default out of the org retention floor. Defaults false.
+	#[serde(default)]
+	pub allow_below_floor: bool,
 }
 
 /// Set the canopy-wide default schedule/retention for a backup type
@@ -1077,7 +1106,9 @@ pub async fn set_type_default(
 	_admin: TailscaleAdmin,
 	Json(args): Json<SetTypeDefaultArgs>,
 ) -> Result<Json<()>> {
-	args.default_retention.validate_floor()?;
+	if !args.allow_below_floor {
+		args.default_retention.validate_floor()?;
+	}
 	let mut conn = state.db.get().await?;
 	BackupTypeDefault::upsert(
 		&mut conn,
@@ -1086,6 +1117,7 @@ pub async fn set_type_default(
 			default_interval: args.default_interval,
 			default_retention: args.default_retention.to_json(),
 			auto_enable: args.auto_enable,
+			allow_below_floor: args.allow_below_floor,
 		},
 	)
 	.await?;

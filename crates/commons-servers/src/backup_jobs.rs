@@ -92,22 +92,32 @@ impl RetentionPolicy {
 }
 
 /// Merge a per-`(group, type)` retention override with the type's default and
-/// the org floor: the schedule override JSON wins; else the type default JSON;
-/// else (or on parse error) the floor baseline. The result always has the floor
-/// enforced. Pure so the precedence/floor logic is unit-testable without a DB.
-fn resolve_policy(override_json: Option<Value>, default_json: Option<Value>) -> RetentionPolicy {
-	let json = override_json.or(default_json);
-	match json.map(serde_json::from_value::<RetentionPolicy>) {
-		Some(Ok(policy)) => policy.enforce_floor(),
-		_ => RetentionPolicy::floor_baseline(),
+/// the org floor: the schedule override wins; else the type default; else (or on
+/// parse error) the floor baseline. The floor is enforced on the result **unless**
+/// the winning source opted out (`allow_below_floor`, a dangerous per-config
+/// toggle for backups we're not authorised to keep). Each source is an
+/// `(json, allow_below_floor)` pair. Pure so the precedence/floor logic is
+/// unit-testable without a DB.
+fn resolve_policy(
+	override_: Option<(Value, bool)>,
+	default: Option<(Value, bool)>,
+) -> RetentionPolicy {
+	match override_.or(default) {
+		Some((json, allow_below_floor)) => match serde_json::from_value::<RetentionPolicy>(json) {
+			Ok(policy) if allow_below_floor => policy,
+			Ok(policy) => policy.enforce_floor(),
+			Err(_) => RetentionPolicy::floor_baseline(),
+		},
+		None => RetentionPolicy::floor_baseline(),
 	}
 }
 
 /// Resolve the effective retention policy for each backup type **declared** in
-/// the group (not just enabled): schedule override → type default → org floor,
-/// with the floor always enforced. Returns one `(type, policy)` pair per declared
-/// type — so a manual backup of a non-scheduled (disabled) type is still retained
-/// under its own type policy rather than only the repo's global baseline.
+/// the group (not just enabled): schedule override → type default → org floor.
+/// The floor is enforced unless the winning source set `allow_below_floor`.
+/// Returns one `(type, policy)` pair per declared type — so a manual backup of a
+/// non-scheduled (disabled) type is still retained under its own type policy
+/// rather than only the repo's global baseline.
 pub async fn effective_retention_for_group(
 	db: &mut AsyncPgConnection,
 	group_id: Uuid,
@@ -115,13 +125,13 @@ pub async fn effective_retention_for_group(
 	let types = ServerBackupCapability::declared_types_for_group(db, group_id).await?;
 	let mut out = Vec::with_capacity(types.len());
 	for ty in types {
-		let override_json = ServerGroupBackupSchedule::get(db, group_id, &ty)
+		let override_ = ServerGroupBackupSchedule::get(db, group_id, &ty)
 			.await?
-			.and_then(|s| s.retention);
-		let default_json = BackupTypeDefault::get(db, &ty)
+			.and_then(|s| s.retention.map(|r| (r, s.allow_below_floor)));
+		let default = BackupTypeDefault::get(db, &ty)
 			.await?
-			.map(|d| d.default_retention);
-		out.push((ty, resolve_policy(override_json, default_json)));
+			.map(|d| (d.default_retention, d.allow_below_floor));
+		out.push((ty, resolve_policy(override_, default)));
 	}
 	Ok(out)
 }
@@ -489,13 +499,13 @@ mod tests {
 	fn resolve_policy_precedence_and_floor() {
 		// Override wins over default.
 		let p = resolve_policy(
-			Some(serde_json::json!({"keep_daily": 30})),
-			Some(serde_json::json!({"keep_daily": 10})),
+			Some((serde_json::json!({"keep_daily": 30}), false)),
+			Some((serde_json::json!({"keep_daily": 10}), false)),
 		);
 		assert_eq!(p.keep_daily, 30, "override wins");
 
 		// No override → default applies.
-		let p = resolve_policy(None, Some(serde_json::json!({"keep_monthly": 12})));
+		let p = resolve_policy(None, Some((serde_json::json!({"keep_monthly": 12}), false)));
 		assert_eq!(p.keep_monthly, 12, "default fallback");
 		assert_eq!(p.keep_daily, 7, "floor still enforced on default");
 
@@ -508,15 +518,41 @@ mod tests {
 
 		// Below-floor override → clamped up to the floor.
 		let p = resolve_policy(
-			Some(serde_json::json!({"keep_daily": 2, "keep_weekly": 1})),
+			Some((
+				serde_json::json!({"keep_daily": 2, "keep_weekly": 1}),
+				false,
+			)),
 			None,
 		);
 		assert_eq!(p.keep_daily, 7, "clamped up");
 		assert_eq!(p.keep_weekly, 4, "clamped up");
 
 		// Garbage JSON → floor baseline (parse error path).
-		let p = resolve_policy(Some(serde_json::json!("not a policy")), None);
+		let p = resolve_policy(Some((serde_json::json!("not a policy"), false)), None);
 		assert_eq!(p.keep_daily, 7);
+	}
+
+	#[test]
+	fn resolve_policy_allow_below_floor_skips_floor() {
+		// A dangerous override below the floor is preserved verbatim, not clamped.
+		let p = resolve_policy(
+			Some((serde_json::json!({"keep_daily": 2, "keep_weekly": 0}), true)),
+			None,
+		);
+		assert_eq!(p.keep_daily, 2, "below-floor preserved");
+		assert_eq!(p.keep_weekly, 0, "below-floor preserved");
+
+		// A dangerous default is also exempt when it's the winning source.
+		let p = resolve_policy(None, Some((serde_json::json!({"keep_daily": 1}), true)));
+		assert_eq!(p.keep_daily, 1, "dangerous default exempt");
+
+		// The override's flag governs — a dangerous default doesn't exempt a
+		// non-dangerous override (the override is the winning source).
+		let p = resolve_policy(
+			Some((serde_json::json!({"keep_daily": 3}), false)),
+			Some((serde_json::json!({"keep_daily": 1}), true)),
+		);
+		assert_eq!(p.keep_daily, 7, "non-dangerous override still floored");
 	}
 
 	#[test]

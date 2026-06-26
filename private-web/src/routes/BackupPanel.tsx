@@ -367,6 +367,7 @@ type GroupTypeSchedule = {
 		keep_annual: number;
 	};
 	has_override: boolean;
+	allow_below_floor: boolean;
 	next_run_at: string | null;
 };
 
@@ -398,6 +399,9 @@ function TypeSchedule({
 					color={schedule.has_override ? "secondary" : "default"}
 					variant={schedule.has_override ? "filled" : "outlined"}
 				/>
+				{schedule.allow_below_floor && (
+					<Chip size="small" color="error" label="below floor" />
+				)}
 				<Box sx={{ flex: 1 }} />
 				{isAdmin && !editing && (
 					<Button size="small" onClick={() => setEditing(true)}>
@@ -461,10 +465,15 @@ function OverrideEditor({
 			: "6",
 	);
 	const [retention, setRetention] = useState(schedule.effective_retention);
+	const [allowBelowFloor, setAllowBelowFloor] = useState(
+		schedule.allow_below_floor,
+	);
 
-	const floorError = RETENTION_FIELDS.filter(
-		(f) => f.floor != null && retention[f.key] < f.floor,
-	).map((f) => `${f.label} must be ≥ ${f.floor}`);
+	const floorError = allowBelowFloor
+		? []
+		: RETENTION_FIELDS.filter(
+				(f) => f.floor != null && retention[f.key] < f.floor,
+			).map((f) => `${f.label} must be ≥ ${f.floor}`);
 
 	const save = async () => {
 		await setSchedule.call({
@@ -472,6 +481,7 @@ function OverrideEditor({
 			type: schedule.type,
 			expected_interval: scheduled ? Math.max(1, Number(hours)) * 3600 : null,
 			retention,
+			allow_below_floor: allowBelowFloor,
 		});
 		onDone();
 	};
@@ -519,13 +529,34 @@ function OverrideEditor({
 							setRetention({ ...retention, [f.key]: Number(e.target.value) })
 						}
 						disabled={pending}
-						error={f.floor != null && retention[f.key] < f.floor}
-						helperText={f.floor != null ? `≥ ${f.floor}` : undefined}
-						slotProps={{ htmlInput: { min: f.floor ?? 0, step: 1 } }}
+						error={!allowBelowFloor && f.floor != null && retention[f.key] < f.floor}
+						helperText={
+							!allowBelowFloor && f.floor != null ? `≥ ${f.floor}` : undefined
+						}
+						slotProps={{
+							htmlInput: { min: allowBelowFloor ? 0 : (f.floor ?? 0), step: 1 },
+						}}
 						sx={{ width: 100 }}
 					/>
 				))}
 			</Stack>
+			<FormControlLabel
+				control={
+					<Switch
+						checked={allowBelowFloor}
+						onChange={(e) => setAllowBelowFloor(e.target.checked)}
+						disabled={pending}
+						color="error"
+					/>
+				}
+				label="Allow retention below the org minimum (dangerous)"
+			/>
+			{allowBelowFloor && (
+				<Alert severity="warning">
+					Snapshots of this type may be pruned below the org-minimum retention.
+					Only use this for data you are not authorised to keep longer.
+				</Alert>
+			)}
 			{floorError.length > 0 && (
 				<Alert severity="warning">{floorError.join("; ")}</Alert>
 			)}

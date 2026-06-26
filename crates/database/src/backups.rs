@@ -36,7 +36,8 @@ use crate::pg_duration::PgDuration;
 
 /// kopia `keep-*` retention policy. Org-minimum floors
 /// (`keep_daily ≥ 7, keep_weekly ≥ 4, keep_monthly ≥ 6`) are enforced by
-/// [`RetentionPolicy::validate_floor`] on create/update.
+/// [`RetentionPolicy::validate_floor`] on create/update — unless the config
+/// opts out via its `allow_below_floor` flag (dangerous).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct RetentionPolicy {
 	#[serde(default = "RetentionPolicy::default_keep_latest")]
@@ -355,6 +356,9 @@ pub struct BackupTypeDefault {
 	pub default_interval: Option<PgDuration>,
 	pub default_retention: JsonValue,
 	pub auto_enable: bool,
+	/// Opt out of the org retention floor for this type's default (dangerous):
+	/// the floor is neither validated on write nor enforced on resolve.
+	pub allow_below_floor: bool,
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -366,6 +370,7 @@ pub struct NewBackupTypeDefault {
 	pub default_interval: Option<PgDuration>,
 	pub default_retention: JsonValue,
 	pub auto_enable: bool,
+	pub allow_below_floor: bool,
 }
 
 impl BackupTypeDefault {
@@ -401,6 +406,7 @@ impl BackupTypeDefault {
 				dsl::default_interval.eq(new.default_interval),
 				dsl::default_retention.eq(&new.default_retention),
 				dsl::auto_enable.eq(new.auto_enable),
+				dsl::allow_below_floor.eq(new.allow_below_floor),
 			))
 			.returning(Self::as_select())
 			.get_result(db)
@@ -570,6 +576,9 @@ pub struct ServerGroupBackupSchedule {
 	pub created_at: Timestamp,
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub updated_at: Timestamp,
+	/// Opt out of the org retention floor for this override (dangerous): the
+	/// floor is neither validated on write nor enforced on resolve.
+	pub allow_below_floor: bool,
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -581,6 +590,7 @@ pub struct NewServerGroupBackupSchedule {
 	pub r#type: BackupType,
 	pub expected_interval: Option<PgDuration>,
 	pub retention: Option<JsonValue>,
+	pub allow_below_floor: bool,
 }
 
 impl ServerGroupBackupSchedule {
@@ -624,6 +634,7 @@ impl ServerGroupBackupSchedule {
 			.set((
 				dsl::expected_interval.eq(new.expected_interval),
 				dsl::retention.eq(&new.retention),
+				dsl::allow_below_floor.eq(new.allow_below_floor),
 				dsl::updated_at.eq(now),
 			))
 			.returning(Self::as_select())
