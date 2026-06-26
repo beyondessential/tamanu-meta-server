@@ -213,6 +213,44 @@ test.describe("backups ready: stats + backup-now", () => {
 		expect(Number(rows[0]!.secs)).toBe(43200);
 	});
 
+	test("override editor dangerous toggle allows retention below the floor", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "danger-group" });
+		const server = await seedServer(sql, { groupId: group.id });
+		await seedServerBackupCapability(sql, { serverId: server.id });
+		await seedServerGroupBackupConfig(sql, {
+			groupId: group.id,
+			status: "ready",
+		});
+
+		await page.goto(`/groups/${group.id}/backups`);
+		await page.getByRole("button", { name: /^override$/i }).click();
+
+		// Below-floor daily is blocked until the dangerous toggle is on.
+		await page.getByLabel("Daily").fill("2");
+		await expect(page.getByText(/daily must be ≥ 7/i)).toBeVisible();
+		await page
+			.getByLabel(/allow retention below the org minimum/i)
+			.check();
+		await page.getByRole("button", { name: /save override/i }).click();
+
+		await expect(page.getByText("below floor")).toBeVisible();
+		await expect
+			.poll(async () => {
+				const rows = await sql.query<{ allow: boolean; keep_daily: string }>(
+					`SELECT allow_below_floor AS allow,
+					        (retention->>'keep_daily') AS keep_daily
+					 FROM server_group_backup_schedule
+					 WHERE group_id = $1 AND type = 'tamanu-postgres'`,
+					[group.id],
+				);
+				return rows[0] ? `${rows[0].allow}:${rows[0].keep_daily}` : null;
+			})
+			.toBe("true:2");
+	});
+
 	test("stats render with unknown bucket bytes and recent runs", async ({
 		page,
 		sql,

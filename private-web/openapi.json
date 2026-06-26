@@ -6425,9 +6425,14 @@
         "required": [
           "type",
           "effective_retention",
-          "has_override"
+          "has_override",
+          "allow_below_floor"
         ],
         "properties": {
+          "allow_below_floor": {
+            "type": "boolean",
+            "description": "Whether the effective config opts out of the org retention floor — taken\nfrom the override if present, else the type default."
+          },
           "effective_interval": {
             "type": [
               "integer",
@@ -8193,7 +8198,7 @@
       },
       "RetentionPolicy": {
         "type": "object",
-        "description": "kopia `keep-*` retention policy. Org-minimum floors\n(`keep_daily ≥ 7, keep_weekly ≥ 4, keep_monthly ≥ 6`) are enforced by\n[`RetentionPolicy::validate_floor`] on create/update.",
+        "description": "kopia `keep-*` retention policy. Org-minimum floors\n(`keep_daily ≥ 7, keep_weekly ≥ 4, keep_monthly ≥ 6`) are enforced by\n[`RetentionPolicy::validate_floor`] on create/update — unless the config\nopts out via its `allow_below_floor` flag (dangerous).",
         "required": [
           "keep_daily",
           "keep_weekly",
@@ -8274,9 +8279,14 @@
         "type": "object",
         "description": "Per-`(group,type)` schedule + retention override. `expected_interval` None =\nmanual-only (distinct from 0). `retention` None = inherit the type default.",
         "required": [
-          "type"
+          "type",
+          "allow_below_floor"
         ],
         "properties": {
+          "allow_below_floor": {
+            "type": "boolean",
+            "description": "Whether this override opts out of the org retention floor (dangerous)."
+          },
           "expected_interval": {
             "type": [
               "integer",
@@ -9045,6 +9055,10 @@
           "type"
         ],
         "properties": {
+          "allow_below_floor": {
+            "type": "boolean",
+            "description": "Dangerous: opt this override out of the org retention floor, allowing a\nretention smaller than the org minimum. Defaults false."
+          },
           "expected_interval": {
             "type": [
               "integer",
@@ -9060,7 +9074,7 @@
               },
               {
                 "$ref": "#/components/schemas/RetentionPolicy",
-                "description": "None = inherit the type default. A present policy is floor-validated."
+                "description": "None = inherit the type default. A present policy is floor-validated\nunless `allow_below_floor` is set."
               }
             ]
           },
@@ -9080,6 +9094,10 @@
           "default_retention"
         ],
         "properties": {
+          "allow_below_floor": {
+            "type": "boolean",
+            "description": "Dangerous: opt this default out of the org retention floor. Defaults false."
+          },
           "auto_enable": {
             "type": "boolean"
           },
@@ -9539,9 +9557,14 @@
         "description": "Canopy-wide default schedule/retention for a backup type.",
         "required": [
           "type",
-          "auto_enable"
+          "auto_enable",
+          "allow_below_floor"
         ],
         "properties": {
+          "allow_below_floor": {
+            "type": "boolean",
+            "description": "Whether this default opts out of the org retention floor (dangerous)."
+          },
           "auto_enable": {
             "type": "boolean"
           },

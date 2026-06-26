@@ -2593,6 +2593,11 @@ export interface components {
          */
         GroupTypeScheduleView: {
             /**
+             * @description Whether the effective config opts out of the org retention floor — taken
+             *     from the override if present, else the type default.
+             */
+            allow_below_floor: boolean;
+            /**
              * Format: int64
              * @description Seconds between scheduled runs; null = manual-only (no scheduled interval).
              */
@@ -3312,7 +3317,8 @@ export interface components {
         /**
          * @description kopia `keep-*` retention policy. Org-minimum floors
          *     (`keep_daily ≥ 7, keep_weekly ≥ 4, keep_monthly ≥ 6`) are enforced by
-         *     [`RetentionPolicy::validate_floor`] on create/update.
+         *     [`RetentionPolicy::validate_floor`] on create/update — unless the config
+         *     opts out via its `allow_below_floor` flag (dangerous).
          */
         RetentionPolicy: {
             /** Format: int32 */
@@ -3350,6 +3356,8 @@ export interface components {
          *     manual-only (distinct from 0). `retention` None = inherit the type default.
          */
         ScheduleView: {
+            /** @description Whether this override opts out of the org retention floor (dangerous). */
+            allow_below_floor: boolean;
             /** Format: int64 */
             expected_interval?: number | null;
             retention?: null | components["schemas"]["RetentionPolicy"];
@@ -3622,6 +3630,11 @@ export interface components {
         };
         SetScheduleArgs: {
             /**
+             * @description Dangerous: opt this override out of the org retention floor, allowing a
+             *     retention smaller than the org minimum. Defaults false.
+             */
+            allow_below_floor?: boolean;
+            /**
              * Format: int64
              * @description Seconds; None = manual-only (no schedule), distinct from 0.
              */
@@ -3632,6 +3645,8 @@ export interface components {
             type: string;
         };
         SetTypeDefaultArgs: {
+            /** @description Dangerous: opt this default out of the org retention floor. Defaults false. */
+            allow_below_floor?: boolean;
             auto_enable?: boolean;
             /**
              * Format: int64
@@ -3820,6 +3835,8 @@ export interface components {
         };
         /** @description Canopy-wide default schedule/retention for a backup type. */
         TypeDefaultView: {
+            /** @description Whether this default opts out of the org retention floor (dangerous). */
+            allow_below_floor: boolean;
             auto_enable: boolean;
             /**
              * Format: int64

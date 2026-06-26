@@ -28,6 +28,7 @@ type TypeDefault = {
 	default_interval: number | null;
 	default_retention: Retention | null;
 	auto_enable: boolean;
+	allow_below_floor: boolean;
 };
 
 const FLOOR_RETENTION: Retention = {
@@ -53,6 +54,7 @@ const BLANK_DEFAULT: TypeDefault = {
 	default_interval: 6 * 3600,
 	default_retention: FLOOR_RETENTION,
 	auto_enable: false,
+	allow_below_floor: false,
 };
 
 /// Canopy-wide per-type backup defaults (`backup_type_defaults`): the schedule +
@@ -131,13 +133,18 @@ function TypeDefaultEditor({
 	const [retention, setRetention] = useState<Retention>(
 		value.default_retention ?? FLOOR_RETENTION,
 	);
+	const [allowBelowFloor, setAllowBelowFloor] = useState(
+		value.allow_below_floor,
+	);
 
 	const trimmedType = typeName.trim();
 	const duplicate = creating && existingTypes.includes(trimmedType);
 
-	const floorError = RETENTION_FIELDS.filter(
-		(f) => f.floor != null && retention[f.key] < f.floor,
-	).map((f) => `${f.label} must be ≥ ${f.floor}`);
+	const floorError = allowBelowFloor
+		? []
+		: RETENTION_FIELDS.filter(
+				(f) => f.floor != null && retention[f.key] < f.floor,
+			).map((f) => `${f.label} must be ≥ ${f.floor}`);
 
 	const canSave =
 		!save.pending &&
@@ -150,6 +157,7 @@ function TypeDefaultEditor({
 			default_interval: scheduled ? Math.max(1, Number(hours)) * 3600 : null,
 			default_retention: retention,
 			auto_enable: autoEnable,
+			allow_below_floor: allowBelowFloor,
 		});
 		onSaved();
 	};
@@ -213,13 +221,37 @@ function TypeDefaultEditor({
 								setRetention({ ...retention, [f.key]: Number(e.target.value) })
 							}
 							disabled={save.pending}
-							error={f.floor != null && retention[f.key] < f.floor}
-							helperText={f.floor != null ? `≥ ${f.floor}` : undefined}
-							slotProps={{ htmlInput: { min: f.floor ?? 0, step: 1 } }}
+							error={
+								!allowBelowFloor && f.floor != null && retention[f.key] < f.floor
+							}
+							helperText={
+								!allowBelowFloor && f.floor != null ? `≥ ${f.floor}` : undefined
+							}
+							slotProps={{
+								htmlInput: { min: allowBelowFloor ? 0 : (f.floor ?? 0), step: 1 },
+							}}
 							sx={{ width: 100 }}
 						/>
 					))}
 				</Stack>
+				<FormControlLabel
+					control={
+						<Switch
+							checked={allowBelowFloor}
+							onChange={(e) => setAllowBelowFloor(e.target.checked)}
+							disabled={save.pending}
+							color="error"
+						/>
+					}
+					label="Allow retention below the org minimum (dangerous)"
+				/>
+				{allowBelowFloor && (
+					<Alert severity="warning">
+						Snapshots of this type may be pruned below the org-minimum
+						retention. Only use this for data you are not authorised to keep
+						longer.
+					</Alert>
+				)}
 				<FormControlLabel
 					control={
 						<Switch

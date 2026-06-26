@@ -138,6 +138,7 @@ async fn type_defaults_retention_must_be_object() {
 				default_interval: Some(PgDuration(SignedDuration::from_hours(24))),
 				default_retention: retention(),
 				auto_enable: true,
+				allow_below_floor: false,
 			},
 		)
 		.await
@@ -153,6 +154,7 @@ async fn type_defaults_retention_must_be_object() {
 				default_interval: None,
 				default_retention: serde_json::json!([1, 2, 3]),
 				auto_enable: false,
+				allow_below_floor: false,
 			},
 		)
 		.await;
@@ -706,6 +708,7 @@ async fn schedule_upsert_and_get() {
 				r#type: pg.clone(),
 				expected_interval: Some(PgDuration(SignedDuration::from_hours(12))),
 				retention: Some(retention()),
+				allow_below_floor: false,
 			},
 		)
 		.await
@@ -729,6 +732,7 @@ async fn schedule_upsert_and_get() {
 				r#type: pg.clone(),
 				expected_interval: None,
 				retention: None,
+				allow_below_floor: false,
 			},
 		)
 		.await

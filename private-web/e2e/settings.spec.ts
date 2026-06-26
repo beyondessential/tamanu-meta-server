@@ -66,6 +66,42 @@ test.describe("Settings", () => {
 		await expect(page.getByTestId("type-default-tamanu-files")).toBeVisible();
 	});
 
+	test("backup defaults dangerous toggle allows retention below the floor", async ({
+		page,
+		sql,
+	}) => {
+		await page.goto("/settings/backup-defaults");
+		const card = page.getByTestId("type-default-tamanu-postgres");
+		await expect(card).toBeVisible();
+
+		// A below-floor daily without the toggle blocks saving.
+		await card.getByLabel("Daily").fill("1");
+		await expect(
+			card.getByText(/daily must be ≥ 7/i),
+		).toBeVisible();
+		await expect(card.getByRole("button", { name: /^save$/i })).toBeDisabled();
+
+		// Flip the dangerous toggle → the floor no longer blocks; save persists it.
+		await card
+			.getByLabel(/allow retention below the org minimum/i)
+			.check();
+		await card.getByRole("button", { name: /^save$/i }).click();
+
+		await expect
+			.poll(async () => {
+				const rows = await sql.query<{
+					allow: boolean;
+					keep_daily: string;
+				}>(
+					`SELECT allow_below_floor AS allow,
+					        (default_retention->>'keep_daily') AS keep_daily
+					 FROM backup_type_defaults WHERE type = 'tamanu-postgres'`,
+				);
+				return rows[0] ? `${rows[0].allow}:${rows[0].keep_daily}` : null;
+			})
+			.toBe("true:1");
+	});
+
 	test("backup defaults editor blocks adding a duplicate type", async ({
 		page,
 	}) => {
