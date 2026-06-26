@@ -12,7 +12,10 @@
 use std::collections::HashMap;
 
 use commons_errors::Result;
-use commons_types::{backup::BackupType, issue::Severity};
+use commons_types::{
+	backup::{BackupType, RunOutcome},
+	issue::Severity,
+};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use jiff::{SignedDuration, Span, SpanRelativeTo, SpanRound, Timestamp, Unit};
@@ -326,10 +329,17 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 	Ok(filed)
 }
 
-/// Group-level maintenance staleness: a `status='ready'` group whose latest
-/// successful maintenance run (any kind) is older than [`MAINTENANCE_STALE_AFTER`]
-/// (or has none at all, past the threshold from its config creation) fires
-/// `backup-maintenance-stale`; a fresh success clears it.
+/// Group-level maintenance health, per `status='ready'` group:
+///
+/// - **Staleness** ([`refs::MAINTENANCE_STALE`]): latest *successful* run (any
+///   kind) older than [`MAINTENANCE_STALE_AFTER`] — or none at all, past the
+///   threshold from config creation. A fresh success clears it.
+/// - **Failure** ([`refs::MAINTENANCE_ERROR`]): the most recently *finished*
+///   run failed. Distinct from staleness — maintenance can run on cadence yet
+///   error every time. A newer successful run clears it.
+///
+/// Both are `Error` severity (open an incident + page). A group that is both
+/// stale and erroring files both, independently keyed.
 async fn sweep_maintenance(db: &mut AsyncPgConnection, now: Timestamp) -> Result<usize> {
 	use crate::schema::{backup_maintenance_runs as mr, server_group_backup_config as cfg};
 
@@ -384,6 +394,48 @@ async fn sweep_maintenance(db: &mut AsyncPgConnection, now: Timestamp) -> Result
 			)
 			.await?;
 			filed += 1;
+		}
+
+		// Failure leg: a group can run maintenance on cadence yet error every
+		// time, which staleness (absence-of-success) never catches. Key off the
+		// most recently *finished* run.
+		let latest_completed =
+			crate::backups::BackupMaintenanceRun::latest_completed_for_group(db, group_id).await?;
+		let err_active = open_group_issue_active(db, group_id, refs::MAINTENANCE_ERROR).await?;
+		match latest_completed {
+			Some(run) if run.outcome == Some(RunOutcome::Failure) => {
+				raise_group_event(
+					db,
+					group_id,
+					refs::MAINTENANCE_ERROR,
+					Severity::Error,
+					None,
+					&format!(
+						"Repo maintenance ({}) failed: {}",
+						run.kind,
+						run.error.as_deref().unwrap_or("(no detail reported)"),
+					),
+					true,
+				)
+				.await?;
+				filed += 1;
+			}
+			// Most recent finished run succeeded (or there is none): clear any
+			// open failure issue.
+			_ if err_active => {
+				raise_group_event(
+					db,
+					group_id,
+					refs::MAINTENANCE_ERROR,
+					Severity::Info,
+					None,
+					"Repo maintenance completed successfully again",
+					false,
+				)
+				.await?;
+				filed += 1;
+			}
+			_ => {}
 		}
 	}
 	Ok(filed)

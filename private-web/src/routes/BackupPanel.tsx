@@ -49,6 +49,7 @@ import {
 	BACKUP_STATUS_LABEL,
 	type BackupConfigStatus,
 	type BackupConfigView,
+	type BackupMaintenanceRun,
 	type BackupRun,
 	type ServerInfo,
 } from "../types";
@@ -213,6 +214,7 @@ export default function BackupPanel() {
 				<>
 					<ServersPanel groupId={id} members={members} isAdmin={isAdmin} />
 					<SchedulesPanel groupId={id} isAdmin={isAdmin} />
+					<MaintenancePanel groupId={id} />
 					<RecentRunsPanel groupId={id} members={members} />
 				</>
 			)}
@@ -855,6 +857,172 @@ function RecentRunsPanel({
 						</TableBody>
 					</Table>
 				</Box>
+			)}
+		</Paper>
+	);
+}
+
+const MAINT_KIND_LABEL: Record<string, string> = {
+	quick: "Quick",
+	full: "Full",
+};
+
+/// One row of the maintenance table. Failed runs get an expand toggle that
+/// reveals the error in a collapsible sub-row (mirrors RunRow).
+function MaintRow({ run }: { run: BackupMaintenanceRun }) {
+	const [open, setOpen] = useState(false);
+	const hasError = Boolean(run.error);
+	const running = run.outcome == null;
+	return (
+		<>
+			<TableRow
+				sx={hasError ? { "& > *": { borderBottom: "unset" } } : undefined}
+			>
+				<TableCell padding="checkbox">
+					{hasError && (
+						<IconButton
+							size="small"
+							aria-label={open ? "Hide error" : "Show error"}
+							onClick={() => setOpen((o) => !o)}
+						>
+							{open ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
+						</IconButton>
+					)}
+				</TableCell>
+				<TableCell>
+					<TimeAgo timestamp={run.started_at} />
+				</TableCell>
+				<TableCell>{MAINT_KIND_LABEL[run.kind] ?? run.kind}</TableCell>
+				<TableCell>
+					{running ? (
+						<Chip size="small" label="running" color="info" />
+					) : (
+						<Chip
+							size="small"
+							label={run.outcome}
+							color={run.outcome === "success" ? "success" : "error"}
+						/>
+					)}
+				</TableCell>
+				<TableCell>
+					{run.finished_at ? <TimeAgo timestamp={run.finished_at} /> : "—"}
+				</TableCell>
+				<TableCell>
+					{run.bytes_reclaimed == null ? "—" : formatBytes(run.bytes_reclaimed)}
+				</TableCell>
+			</TableRow>
+			{hasError && (
+				<TableRow>
+					<TableCell colSpan={6} sx={{ py: 0, border: 0 }}>
+						<Collapse in={open} timeout="auto" unmountOnExit>
+							<Alert severity="error" variant="outlined" sx={{ my: 1 }}>
+								<Typography
+									component="pre"
+									variant="body2"
+									sx={{
+										m: 0,
+										fontFamily: "monospace",
+										whiteSpace: "pre-wrap",
+										wordBreak: "break-word",
+									}}
+								>
+									{run.error}
+								</Typography>
+							</Alert>
+						</Collapse>
+					</TableCell>
+				</TableRow>
+			)}
+		</>
+	);
+}
+
+/// At-a-glance "has maintenance run, and did it succeed" indicator derived from
+/// the recent runs. The authoritative overdue/failed alerting is the group
+/// incident (backup-maintenance-stale / backup-maintenance-error); this is the
+/// quick read for an operator looking at the panel.
+function MaintenanceSummary({ runs }: { runs: BackupMaintenanceRun[] }) {
+	if (runs.length === 0) {
+		return (
+			<Alert severity="warning" variant="outlined">
+				No maintenance has run yet.
+			</Alert>
+		);
+	}
+	const lastFinished = runs.find((r) => r.outcome != null);
+	const lastSuccess = runs.find((r) => r.outcome === "success");
+	const failing = lastFinished?.outcome === "failure";
+	return (
+		<Stack spacing={0.5}>
+			<Box>
+				{failing ? (
+					<Chip size="small" color="error" label="Last run failed" />
+				) : lastFinished ? (
+					<Chip size="small" color="success" label="Healthy" />
+				) : (
+					<Chip size="small" color="info" label="Running" />
+				)}
+			</Box>
+			<Typography variant="body2" color="text.secondary">
+				{lastSuccess ? (
+					<>
+						Last successful maintenance{" "}
+						<TimeAgo
+							timestamp={lastSuccess.finished_at ?? lastSuccess.started_at}
+						/>
+					</>
+				) : (
+					"No successful maintenance recorded yet."
+				)}
+			</Typography>
+		</Stack>
+	);
+}
+
+/// Repo maintenance: the at-a-glance health summary plus recent kopia
+/// maintenance cycles (full maintenance is what expires/reclaims; quick is the
+/// lighter compaction). Failed runs expand to their error.
+function MaintenancePanel({ groupId }: { groupId: string }) {
+	const stats = useApi(
+		"backups",
+		"stats",
+		{ server_group_id: groupId },
+		[groupId],
+	);
+	return (
+		<Paper variant="outlined" sx={{ p: 2 }}>
+			<Typography variant="h6" component="h2" gutterBottom>
+				Repo maintenance
+			</Typography>
+			{stats.status === "loading" || stats.status === "idle" ? (
+				<LinearProgress />
+			) : stats.status === "error" ? (
+				<Alert severity="error">{stats.error.message}</Alert>
+			) : (
+				<Stack spacing={1.5}>
+					<MaintenanceSummary runs={stats.data.recent_maintenance} />
+					{stats.data.recent_maintenance.length > 0 && (
+						<Box sx={{ overflowX: "auto" }}>
+							<Table size="small">
+								<TableHead>
+									<TableRow>
+										<TableCell padding="checkbox" />
+										<TableCell>Started</TableCell>
+										<TableCell>Kind</TableCell>
+										<TableCell>Outcome</TableCell>
+										<TableCell>Finished</TableCell>
+										<TableCell>Reclaimed</TableCell>
+									</TableRow>
+								</TableHead>
+								<TableBody>
+									{stats.data.recent_maintenance.map((m) => (
+										<MaintRow key={m.id} run={m} />
+									))}
+								</TableBody>
+							</Table>
+						</Box>
+					)}
+				</Stack>
 			)}
 		</Paper>
 	);

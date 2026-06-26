@@ -2,6 +2,7 @@ import { expect, test } from "./test-fixtures";
 import {
 	resetSeededTables,
 	seedBackupCredentialIssuance,
+	seedBackupMaintenanceRun,
 	seedBackupRepoStats,
 	seedBackupRun,
 	seedDevice,
@@ -831,5 +832,109 @@ test.describe("server backup capabilities", () => {
 		}).toPass();
 
 		await expect(toggle).toBeChecked();
+	});
+});
+
+test.describe("backups ready: repo maintenance panel", () => {
+	test.beforeEach(async ({ sql }) => {
+		await resetSeededTables(sql);
+	});
+
+	test("zero-state shows maintenance has never run", async ({ page, sql }) => {
+		const group = await seedServerGroup(sql, { name: "maint-empty" });
+		await seedServerGroupBackupConfig(sql, {
+			groupId: group.id,
+			status: "ready",
+		});
+
+		await page.goto(`/groups/${group.id}/backups`);
+		const panel = page
+			.getByRole("heading", { name: /repo maintenance/i })
+			.locator("..");
+		await expect(panel.getByText(/no maintenance has run yet/i)).toBeVisible();
+	});
+
+	test("a successful run shows Healthy, last-success time, and reclaimed bytes", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "maint-ok" });
+		await seedServerGroupBackupConfig(sql, {
+			groupId: group.id,
+			status: "ready",
+		});
+		await seedBackupMaintenanceRun(sql, {
+			groupId: group.id,
+			kind: "full",
+			outcome: "success",
+			bytesReclaimed: 1048576, // 1.0 MiB
+			finishedAgoSecs: 3600,
+		});
+
+		await page.goto(`/groups/${group.id}/backups`);
+		const panel = page
+			.getByRole("heading", { name: /repo maintenance/i })
+			.locator("..");
+		await expect(panel.getByText("Healthy")).toBeVisible();
+		await expect(panel.getByText(/last successful maintenance/i)).toBeVisible();
+		await expect(panel.getByText("Full")).toBeVisible();
+		await expect(panel.getByText("success")).toBeVisible();
+		await expect(panel.getByText("1.0 MiB")).toBeVisible();
+	});
+
+	test("a failed latest run shows the failure and expands to its error", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "maint-failed" });
+		await seedServerGroupBackupConfig(sql, {
+			groupId: group.id,
+			status: "ready",
+		});
+		// An older success, then a newer failure — the panel reads the latest.
+		await seedBackupMaintenanceRun(sql, {
+			groupId: group.id,
+			kind: "full",
+			outcome: "success",
+			finishedAgoSecs: 7 * 86400,
+		});
+		await seedBackupMaintenanceRun(sql, {
+			groupId: group.id,
+			kind: "full",
+			outcome: "failure",
+			error: "kopia maintenance: connection refused",
+			finishedAgoSecs: 3600,
+		});
+
+		await page.goto(`/groups/${group.id}/backups`);
+		const panel = page
+			.getByRole("heading", { name: /repo maintenance/i })
+			.locator("..");
+		await expect(panel.getByText(/last run failed/i)).toBeVisible();
+		// Error detail is hidden until the failed row is expanded.
+		await expect(page.getByText(/connection refused/i)).toBeHidden();
+		await panel.getByRole("button", { name: /show error/i }).click();
+		await expect(page.getByText(/connection refused/i)).toBeVisible();
+	});
+
+	test("an in-flight run renders as running", async ({ page, sql }) => {
+		const group = await seedServerGroup(sql, { name: "maint-running" });
+		await seedServerGroupBackupConfig(sql, {
+			groupId: group.id,
+			status: "ready",
+		});
+		await seedBackupMaintenanceRun(sql, {
+			groupId: group.id,
+			kind: "quick",
+			outcome: null, // still in flight
+			finishedAgoSecs: 60,
+		});
+
+		await page.goto(`/groups/${group.id}/backups`);
+		const panel = page
+			.getByRole("heading", { name: /repo maintenance/i })
+			.locator("..");
+		await expect(panel.getByText("running")).toBeVisible();
+		await expect(panel.getByText("Quick")).toBeVisible();
 	});
 });

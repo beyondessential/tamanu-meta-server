@@ -107,6 +107,31 @@ async fn insert_ready_config(conn: &mut AsyncPgConnection, group_id: Uuid, age: 
 		.expect("backdate config created_at");
 }
 
+/// Insert a finished `backup_maintenance_runs` row, backdating both
+/// `started_at` and `finished_at` by `finished_age`.
+async fn insert_maintenance_run(
+	conn: &mut AsyncPgConnection,
+	group_id: Uuid,
+	kind: &str,
+	outcome: &str,
+	error: Option<&str>,
+	finished_age: SignedDuration,
+) {
+	let secs = finished_age.as_secs().to_string();
+	sql_query(
+		"INSERT INTO backup_maintenance_runs (group_id, kind, started_at, finished_at, outcome, error) \
+		 VALUES ($1, $2, NOW() - ($5 || ' seconds')::INTERVAL, NOW() - ($5 || ' seconds')::INTERVAL, $3, $4)",
+	)
+	.bind::<sql_types::Uuid, _>(group_id)
+	.bind::<sql_types::Text, _>(kind)
+	.bind::<sql_types::Text, _>(outcome)
+	.bind::<sql_types::Nullable<sql_types::Text>, _>(error)
+	.bind::<sql_types::Text, _>(secs)
+	.execute(conn)
+	.await
+	.expect("insert maintenance run");
+}
+
 async fn insert_schedule(
 	conn: &mut AsyncPgConnection,
 	group_id: Uuid,
@@ -770,6 +795,136 @@ async fn group_event_pages_even_when_all_members_unmonitored() {
 		assert!(
 			still_open.is_empty(),
 			"incident auto-closes when its only contributor recovers",
+		);
+	})
+	.await;
+}
+
+// ===========================================================================
+// Case 6 — maintenance failure (backup-maintenance-error)
+// ===========================================================================
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sweep_files_maintenance_error_when_latest_run_failed_then_clears_on_success() {
+	TestDb::run(|mut conn, _url| async move {
+		let group_id = insert_group(&mut conn, "g").await;
+		// Freshly-created config so maintenance-STALE does NOT also fire — this
+		// isolates the failure signal from absence-of-success.
+		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(1)).await;
+
+		// The most recently finished run failed an hour ago.
+		insert_maintenance_run(
+			&mut conn,
+			group_id,
+			"full",
+			"failure",
+			Some("kopia maintenance: connection refused"),
+			SignedDuration::from_hours(1),
+		)
+		.await;
+
+		let rows = database::backup::staleness::scan_rows(&mut conn)
+			.await
+			.expect("scan");
+		database::backup::staleness::sweep(&mut conn, &rows)
+			.await
+			.expect("sweep");
+
+		let issue = group_issue(&mut conn, group_id, refs::MAINTENANCE_ERROR)
+			.await
+			.expect("maintenance-error issue filed");
+		assert_eq!(issue.severity, Severity::Error.to_string());
+		assert!(issue.active, "failure issue is active");
+		assert_eq!(
+			group_issue_open_links(&mut conn, group_id, refs::MAINTENANCE_ERROR).await,
+			1,
+			"maintenance failure opens an incident",
+		);
+		// Staleness must NOT fire for a freshly-created group.
+		assert!(
+			group_issue(&mut conn, group_id, refs::MAINTENANCE_STALE)
+				.await
+				.is_none(),
+			"a recent config is not maintenance-stale",
+		);
+
+		// A newer successful run is now the latest finished run → clears it.
+		insert_maintenance_run(
+			&mut conn,
+			group_id,
+			"full",
+			"success",
+			None,
+			SignedDuration::from_secs(0),
+		)
+		.await;
+		database::backup::staleness::sweep(&mut conn, &rows)
+			.await
+			.expect("re-sweep");
+
+		let cleared = group_issue(&mut conn, group_id, refs::MAINTENANCE_ERROR)
+			.await
+			.expect("issue row persists");
+		assert!(
+			!cleared.active,
+			"failure issue cleared after a successful run",
+		);
+		assert_eq!(
+			group_issue_open_links(&mut conn, group_id, refs::MAINTENANCE_ERROR).await,
+			0,
+			"recovery removes the failure issue from its incident",
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn in_flight_run_does_not_clear_an_open_maintenance_error() {
+	TestDb::run(|mut conn, _url| async move {
+		let group_id = insert_group(&mut conn, "g").await;
+		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(1)).await;
+		insert_maintenance_run(
+			&mut conn,
+			group_id,
+			"full",
+			"failure",
+			Some("boom"),
+			SignedDuration::from_hours(1),
+		)
+		.await;
+
+		let rows = database::backup::staleness::scan_rows(&mut conn)
+			.await
+			.expect("scan");
+		database::backup::staleness::sweep(&mut conn, &rows)
+			.await
+			.expect("sweep");
+		assert!(
+			group_issue(&mut conn, group_id, refs::MAINTENANCE_ERROR)
+				.await
+				.expect("error filed")
+				.active
+		);
+
+		// A run that has started but not finished (outcome NULL) must be ignored:
+		// it is not evidence that the failure recovered.
+		database::BackupMaintenanceRun::start(
+			&mut conn,
+			group_id,
+			commons_types::backup::MaintenanceKind::Full,
+		)
+		.await
+		.expect("start in-flight run");
+		database::backup::staleness::sweep(&mut conn, &rows)
+			.await
+			.expect("re-sweep");
+
+		assert!(
+			group_issue(&mut conn, group_id, refs::MAINTENANCE_ERROR)
+				.await
+				.expect("error still present")
+				.active,
+			"an in-flight run must not clear the failure issue",
 		);
 	})
 	.await;

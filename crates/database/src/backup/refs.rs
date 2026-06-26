@@ -33,6 +33,12 @@ pub const RECONCILE_REPORT_GAP: &str = "backup-reconcile-report-gap";
 /// maintenance-cadence threshold. Group-scoped, `Error`.
 pub const MAINTENANCE_STALE: &str = "backup-maintenance-stale";
 
+/// A group whose most recently *finished* maintenance run failed. Distinct
+/// from [`MAINTENANCE_STALE`] (which fires on absence of success): this fires
+/// when maintenance is running but erroring. Group-scoped, `Error`. Clears
+/// when a newer run finishes successfully.
+pub const MAINTENANCE_ERROR: &str = "backup-maintenance-error";
+
 /// A run reported success but no matching repo snapshot landed (the device
 /// lied or the upload didn't persist). Group-scoped, `Error`.
 pub const RECONCILE_MISSING: &str = "backup-reconcile-missing";

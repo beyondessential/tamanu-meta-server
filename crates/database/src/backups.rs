@@ -1062,6 +1062,25 @@ impl BackupMaintenanceRun {
 			.map_err(AppError::from)
 	}
 
+	/// The most recently *finished* maintenance run for the group (any
+	/// outcome), ignoring runs still in flight (`outcome IS NULL`). Used by the
+	/// detection sweep to decide whether the latest concluded run failed.
+	pub async fn latest_completed_for_group(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+	) -> Result<Option<Self>> {
+		use crate::schema::backup_maintenance_runs::dsl;
+
+		dsl::backup_maintenance_runs
+			.filter(dsl::group_id.eq(group_id))
+			.filter(dsl::outcome.is_not_null())
+			.order(dsl::finished_at.desc())
+			.first(db)
+			.await
+			.optional()
+			.map_err(AppError::from)
+	}
+
 	/// Whether a run row still exists and is open (`outcome IS NULL`). Used by
 	/// the scheduler's crash-detection to mark a run failed when its Job
 	/// finished without ever reporting.
