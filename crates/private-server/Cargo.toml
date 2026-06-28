@@ -25,7 +25,7 @@ commons-servers = { path = "../commons-servers" }
 commons-types = { path = "../commons-types" }
 database = { path = "../database" }
 futures.workspace = true
-itertools = "0.14.0"
+itertools = "0.15.0"
 jiff = { version = "0.2.24", features = ["serde"] }
 lloggs = { workspace = true, features = ["miette-7"] }
 mime_guess = "2.0.5"
