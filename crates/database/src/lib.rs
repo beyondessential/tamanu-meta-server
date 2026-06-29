@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use diesel_async::{
 	AsyncPgConnection,
 	pooled_connection::{AsyncDieselConnectionManager, mobc::Pool},
@@ -52,5 +54,25 @@ pub fn init() -> Db {
 }
 
 pub fn init_to(url: &str) -> Db {
-	Pool::new(AsyncDieselConnectionManager::<AsyncPgConnection>::new(url))
+	// Bound the pool. Every pod that links this crate (the two servers plus each
+	// job) runs its own pool against the same primary; mobc's defaults
+	// (max_open=10, idle and lifetimes uncapped) let the fleet's aggregate
+	// demand exceed the server's max_connections and pin backends indefinitely.
+	// Size per role via env, and recycle connections so a failover doesn't leave
+	// the pool holding dead backends.
+	let max_open = env_u64("DB_MAX_OPEN_CONNECTIONS", 5);
+	let max_idle = env_u64("DB_MAX_IDLE_CONNECTIONS", 2);
+	Pool::builder()
+		.max_open(max_open)
+		.max_idle(max_idle)
+		.max_lifetime(Some(Duration::from_secs(30 * 60)))
+		.max_idle_lifetime(Some(Duration::from_secs(10 * 60)))
+		.build(AsyncDieselConnectionManager::<AsyncPgConnection>::new(url))
+}
+
+fn env_u64(key: &str, default: u64) -> u64 {
+	std::env::var(key)
+		.ok()
+		.and_then(|v| v.parse().ok())
+		.unwrap_or(default)
 }
