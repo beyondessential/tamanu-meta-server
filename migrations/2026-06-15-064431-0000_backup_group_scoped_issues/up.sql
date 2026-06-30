@@ -1,4 +1,4 @@
--- Group-scoped issues (Option B from specs/canopy-jobs-detection-preflight.md).
+-- Group-scoped issues: an issue keyed to a server_group with no member server.
 --
 -- The incident model is server-keyed today: issues.server_id is NOT NULL and
 -- every issue belongs to exactly one server. Group-level backup checks
