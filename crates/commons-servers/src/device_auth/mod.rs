@@ -82,6 +82,7 @@ macro_rules! device_role_struct {
 device_role_struct!(AdminDevice, DeviceRole::Admin);
 device_role_struct!(ServerDevice, DeviceRole::Server);
 device_role_struct!(ReleaserDevice, DeviceRole::Releaser);
+device_role_struct!(BackupRestoreDevice, DeviceRole::BackupRestore);
 
 impl<S> axum::extract::FromRequestParts<S> for AuthDevice
 where

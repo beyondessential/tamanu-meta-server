@@ -455,6 +455,23 @@ impl Server {
 			.map_err(AppError::from)
 	}
 
+	/// All live (non-archived) servers in a group, ordered by name. Used to
+	/// expand a group-wide restore-replica declaration into per-server entries.
+	pub async fn list_live_in_group(
+		db: &mut AsyncPgConnection,
+		group_id_: Uuid,
+	) -> Result<Vec<Self>> {
+		use crate::schema::servers::dsl::*;
+		servers
+			.select(Self::as_select())
+			.filter(group_id.eq(group_id_))
+			.filter(deleted_at.is_null())
+			.order(name.asc())
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	/// All servers without a group, ordered by name. Used by the Ungrouped UI tab.
 	pub async fn list_ungrouped(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
 		use crate::schema::servers::dsl::*;

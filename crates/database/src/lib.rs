@@ -14,6 +14,7 @@ pub mod healthcheck_severities;
 pub mod issues;
 pub mod notes;
 pub mod pg_duration;
+pub mod restore;
 pub mod schema;
 pub mod server_enrollment_challenges;
 pub mod server_enrollment_tokens;
@@ -38,9 +39,11 @@ pub use backups::{
 };
 pub use bestool_snippets::{BestoolSnippet, NewBestoolSnippet};
 pub use commons_types::backup::{
-	BackupConfigStatus, BackupPurpose, BackupRepoMode, BackupType, MaintenanceKind, RunOutcome,
+	BackupConfigStatus, BackupPurpose, BackupRepoMode, BackupType, MaintenanceKind, RestoreIntent,
+	RunOutcome,
 };
 pub use devices::{Device, DeviceConnection, DeviceKey, DeviceWithInfo};
+pub use restore::{NewRestoreReplica, RestoreConsumerCapability, RestoreReplica};
 
 pub type Db = Pool<AsyncPgConnection>;
 

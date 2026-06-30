@@ -31,7 +31,12 @@ import {
 	type DeviceRole,
 } from "../types";
 
-const TRUSTABLE_ROLES: DeviceRole[] = ["server", "releaser", "admin"];
+const TRUSTABLE_ROLES: DeviceRole[] = [
+	"server",
+	"releaser",
+	"admin",
+	"backup-restore",
+];
 
 export default function DeviceDetail() {
 	const { id = "" } = useParams<{ id: string }>();

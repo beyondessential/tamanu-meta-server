@@ -292,6 +292,32 @@ diesel::table! {
 }
 
 diesel::table! {
+	restore_consumer_capabilities (consumer_device_id, intent) {
+		consumer_device_id -> Uuid,
+		intent -> Text,
+		registered_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
+	restore_replicas (id) {
+		id -> Uuid,
+		consumer_device_id -> Uuid,
+		group_id -> Uuid,
+		server_id -> Nullable<Uuid>,
+		#[sql_name = "type"]
+		type_ -> Text,
+		intent -> Text,
+		name -> Text,
+		freshness -> Nullable<Interval>,
+		enabled -> Bool,
+		created_by -> Nullable<Text>,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
 	server_backup_capabilities (server_id, type_) {
 		server_id -> Uuid,
 		#[sql_name = "type"]
@@ -524,6 +550,10 @@ diesel::joinable!(issue_notes -> issues (issue_id));
 diesel::joinable!(issues -> devices (device_id));
 diesel::joinable!(issues -> server_groups (server_group_id));
 diesel::joinable!(issues -> servers (server_id));
+diesel::joinable!(restore_consumer_capabilities -> devices (consumer_device_id));
+diesel::joinable!(restore_replicas -> devices (consumer_device_id));
+diesel::joinable!(restore_replicas -> server_groups (group_id));
+diesel::joinable!(restore_replicas -> servers (server_id));
 diesel::joinable!(server_backup_capabilities -> servers (server_id));
 diesel::joinable!(server_enrollment_challenges -> servers (server_id));
 diesel::joinable!(server_enrollment_tokens -> servers (server_id));
@@ -563,6 +593,8 @@ diesel::allow_tables_to_appear_in_same_query!(
 	incidents,
 	issue_notes,
 	issues,
+	restore_consumer_capabilities,
+	restore_replicas,
 	server_backup_capabilities,
 	server_enrollment_challenges,
 	server_enrollment_tokens,

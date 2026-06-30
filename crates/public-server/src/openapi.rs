@@ -45,6 +45,7 @@ impl Modify for SecuritySchemes {
 		};
 		components.add_security_scheme("server-device", role_scheme("server"));
 		components.add_security_scheme("releaser-device", role_scheme("releaser"));
+		components.add_security_scheme("backup-restore-device", role_scheme("backup-restore"));
 		components.add_security_scheme(
 			"admin-device",
 			SecurityScheme::MutualTls {
