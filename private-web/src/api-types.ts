@@ -1319,6 +1319,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/restore_replicas/checks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["restore_replicas_checks"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/restore_replicas/consumers": {
         parameters: {
             query?: never;
@@ -2360,6 +2376,43 @@ export interface components {
             snapshot_count?: number | null;
             /** Format: int32 */
             source_count?: number | null;
+        };
+        /**
+         * @description A restore-health report: one row per report a consumer sends about a
+         *     replica — proof a snapshot actually restored into a healthy database, the
+         *     strongest backup-health signal. `snapshot_id` joins back to the
+         *     produced/persisted record for that snapshot.
+         */
+        BackupRestoreCheck: {
+            /** Format: uuid */
+            consumer_device_id: string;
+            error?: string | null;
+            /** Format: uuid */
+            group_id: string;
+            /** Format: int64 */
+            id: number;
+            intent: string;
+            /** Format: date-time */
+            observed_at: string;
+            outcome: string;
+            postgres_version?: string | null;
+            replica_healthy: boolean;
+            /** Format: uuid */
+            replica_id?: string | null;
+            /** Format: date-time */
+            reported_at: string;
+            /** Format: int64 */
+            s3_received_payload_bytes?: number | null;
+            /** Format: int64 */
+            s3_received_raw_bytes?: number | null;
+            /** Format: int64 */
+            s3_sent_payload_bytes?: number | null;
+            /** Format: int64 */
+            s3_sent_raw_bytes?: number | null;
+            /** Format: uuid */
+            server_id?: string | null;
+            snapshot_id?: string | null;
+            type: string;
         };
         BackupRun: {
             /** Format: int64 */
@@ -6322,6 +6375,25 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IssueData"];
+                };
+            };
+        };
+    };
+    restore_replicas_checks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupRestoreCheck"][];
                 };
             };
         };

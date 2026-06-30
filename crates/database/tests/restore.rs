@@ -3,14 +3,64 @@
 
 use commons_errors::AppError;
 use commons_tests::db::TestDb;
-use commons_types::backup::{BackupType, RestoreIntent};
+use commons_types::backup::{BackupType, RestoreIntent, RunOutcome};
 use database::diesel_async::AsyncPgConnection;
 use database::pg_duration::PgDuration;
-use database::{NewRestoreReplica, RestoreConsumerCapability, RestoreReplica};
+use database::{
+	BackupRestoreCheck, NewBackupRestoreCheck, NewRestoreReplica, RestoreConsumerCapability,
+	RestoreReplica,
+};
 use diesel::{sql_query, sql_types};
 use diesel_async::RunQueryDsl;
-use jiff::SignedDuration;
+use jiff::{SignedDuration, Timestamp};
 use uuid::Uuid;
+
+#[derive(diesel::QueryableByName)]
+struct Count {
+	#[diesel(sql_type = sql_types::BigInt)]
+	count: i64,
+}
+
+/// Count active `restore-verification:*` group issues for a group.
+async fn active_restore_issues(conn: &mut AsyncPgConnection, group: Uuid) -> i64 {
+	sql_query(
+		"SELECT count(*) AS count FROM issues \
+		 WHERE server_group_id = $1 AND ref LIKE 'restore-verification:%' AND active = true",
+	)
+	.bind::<sql_types::Uuid, _>(group)
+	.get_result::<Count>(conn)
+	.await
+	.expect("count issues")
+	.count
+}
+
+fn new_check(
+	consumer: Uuid,
+	group: Uuid,
+	server: Uuid,
+	intent: RestoreIntent,
+	outcome: RunOutcome,
+	healthy: bool,
+) -> NewBackupRestoreCheck {
+	NewBackupRestoreCheck {
+		replica_id: None,
+		consumer_device_id: consumer,
+		group_id: group,
+		server_id: Some(server),
+		r#type: BackupType::TamanuPostgres,
+		intent,
+		snapshot_id: Some("snap-x".into()),
+		outcome,
+		error: None,
+		replica_healthy: healthy,
+		postgres_version: Some("15".into()),
+		observed_at: Timestamp::now(),
+		s3_sent_raw_bytes: None,
+		s3_sent_payload_bytes: None,
+		s3_received_raw_bytes: None,
+		s3_received_payload_bytes: None,
+	}
+}
 
 #[derive(diesel::QueryableByName)]
 struct RowId {
@@ -284,6 +334,115 @@ async fn capability_register_replaces_set() {
 			.await
 			.expect("list");
 		assert!(got.is_empty());
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn record_report_raises_then_recovers() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn, "g").await;
+		let server = insert_server(&mut conn, group).await;
+
+		// A failed report raises a per-(server,type,intent) group issue.
+		BackupRestoreCheck::record_report(
+			&mut conn,
+			new_check(
+				consumer,
+				group,
+				server,
+				RestoreIntent::Verify,
+				RunOutcome::Failure,
+				false,
+			),
+		)
+		.await
+		.expect("record failure");
+		assert_eq!(active_restore_issues(&mut conn, group).await, 1);
+
+		// A success-and-healthy report for the same key recovers it.
+		BackupRestoreCheck::record_report(
+			&mut conn,
+			new_check(
+				consumer,
+				group,
+				server,
+				RestoreIntent::Verify,
+				RunOutcome::Success,
+				true,
+			),
+		)
+		.await
+		.expect("record success");
+		assert_eq!(active_restore_issues(&mut conn, group).await, 0);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn record_report_unhealthy_success_still_raises() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn, "g").await;
+		let server = insert_server(&mut conn, group).await;
+
+		// Restore succeeded but the database wasn't healthy → still a failure.
+		BackupRestoreCheck::record_report(
+			&mut conn,
+			new_check(
+				consumer,
+				group,
+				server,
+				RestoreIntent::Verify,
+				RunOutcome::Success,
+				false,
+			),
+		)
+		.await
+		.expect("record");
+		assert_eq!(active_restore_issues(&mut conn, group).await, 1);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sweep_overdue_raises_for_stale_replica_but_skips_gaps() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn, "g").await;
+		insert_server(&mut conn, group).await;
+
+		// Consumer supports only `verify`.
+		RestoreConsumerCapability::register(&mut conn, consumer, &[RestoreIntent::Verify])
+			.await
+			.expect("register caps");
+
+		// A supported, freshness-bound declaration with no healthy check → overdue.
+		let mut verify = new_replica(consumer, group, None, RestoreIntent::Verify, "verify-all");
+		verify.freshness = Some(PgDuration(SignedDuration::from_secs(3600)));
+		RestoreReplica::create(&mut conn, verify)
+			.await
+			.expect("verify decl");
+
+		// An unsupported-intent declaration (a gap) must NOT raise.
+		let mut analytics = new_replica(
+			consumer,
+			group,
+			None,
+			RestoreIntent::Analytics,
+			"analytics-all",
+		);
+		analytics.freshness = Some(PgDuration(SignedDuration::from_secs(3600)));
+		RestoreReplica::create(&mut conn, analytics)
+			.await
+			.expect("analytics decl");
+
+		let filed = database::restore::sweep_overdue(&mut conn)
+			.await
+			.expect("sweep");
+		assert_eq!(filed, 1, "only the supported declaration is overdue");
+		assert_eq!(active_restore_issues(&mut conn, group).await, 1);
 	})
 	.await;
 }

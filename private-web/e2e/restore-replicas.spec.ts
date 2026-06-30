@@ -2,6 +2,7 @@ import { expect, test } from "./test-fixtures";
 import {
 	resetSeededTables,
 	seedDevice,
+	seedRestoreCheck,
 	seedRestoreConsumerCapability,
 	seedRestoreReplica,
 	seedServer,
@@ -135,6 +136,31 @@ test.describe("restore replicas", () => {
 				return rows[0]?.enabled;
 			})
 			.toBe(false);
+	});
+
+	test("recent restore checks render with their outcome", async ({
+		page,
+		sql,
+	}) => {
+		const consumer = await seedDevice(sql, { role: "backup-restore" });
+		const group = await seedServerGroup(sql, { name: "chk-group" });
+		const server = await seedServer(sql, { groupId: group.id, name: "chk-srv" });
+		await seedRestoreCheck(sql, {
+			consumerDeviceId: consumer.id,
+			groupId: group.id,
+			serverId: server.id,
+			outcome: "failure",
+			replicaHealthy: false,
+			error: "restore blew up",
+		});
+
+		await page.goto("/restore-replicas");
+		const checksHeading = page.getByRole("heading", {
+			name: /recent restore checks/i,
+		});
+		await expect(checksHeading).toBeVisible();
+		// The failed check renders with a "failed" chip.
+		await expect(page.getByText("failed")).toBeVisible();
 	});
 
 	test("declaring a replica through the dialog persists it", async ({

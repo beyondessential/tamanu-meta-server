@@ -17,11 +17,13 @@ use aws_sdk_sts::operation::RequestId as _;
 use axum::{Json, extract::State, http::StatusCode};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::device_auth::BackupRestoreDevice;
-use commons_types::backup::{BackupPurpose, BackupType, RestoreIntent};
+use commons_types::backup::{BackupPurpose, BackupType, RestoreIntent, RunOutcome};
 use database::{
 	Db,
 	backups::{BackupRun, NewBackupCredentialIssuance, ServerGroupBackupConfig},
-	restore::{RestoreConsumerCapability, RestoreReplica},
+	restore::{
+		BackupRestoreCheck, NewBackupRestoreCheck, RestoreConsumerCapability, RestoreReplica,
+	},
 	servers::Server,
 };
 use jiff::Timestamp;
@@ -44,6 +46,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(capabilities))
 		.routes(routes!(worklist))
 		.routes(routes!(credentials))
+		.routes(routes!(verification))
 }
 
 // ---------------------------------------------------------------------------
@@ -364,4 +367,89 @@ async fn credentials(
 		},
 		repo_password,
 	}))
+}
+
+// ---------------------------------------------------------------------------
+// POST /restore-verification
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct VerificationArgs {
+	/// The declaration this report concerns (from the worklist entry); optional
+	/// so a report survives the declaration being retired mid-flight.
+	pub replica_id: Option<Uuid>,
+	pub group: Uuid,
+	pub server_id: Uuid,
+	#[schema(value_type = String)]
+	pub r#type: BackupType,
+	#[schema(value_type = String)]
+	pub intent: RestoreIntent,
+	/// The snapshot that was restored; omit on a failure that never got there.
+	pub snapshot_id: Option<String>,
+	#[schema(value_type = String)]
+	pub outcome: RunOutcome,
+	pub error: Option<String>,
+	/// Whether the restored database came up healthy and passed readiness.
+	pub replica_healthy: bool,
+	pub postgres_version: Option<String>,
+	/// When the restore was observed (RFC3339).
+	#[schema(value_type = String)]
+	pub observed_at: Timestamp,
+	pub s3_sent_raw_bytes: Option<i64>,
+	pub s3_sent_payload_bytes: Option<i64>,
+	pub s3_received_raw_bytes: Option<i64>,
+	pub s3_received_payload_bytes: Option<i64>,
+}
+
+#[utoipa::path(
+	post,
+	path = "/restore-verification",
+	tag = "restore",
+	security(("backup-restore-device" = [])),
+	request_body = VerificationArgs,
+	responses(
+		(status = 204, description = "Report recorded."),
+		(status = 403, description = "No enabled declaration authorizes this (group, type).", body = ProblemDetailsSchema),
+	),
+)]
+async fn verification(
+	State(db): State<Db>,
+	device: BackupRestoreDevice,
+	Json(args): Json<VerificationArgs>,
+) -> Result<StatusCode> {
+	let mut conn = db.get().await?;
+	let consumer_device_id = device.0.0.id;
+
+	// Same authorization as credentials: a consumer may report only on the
+	// (group, type) pairs its enabled declarations cover.
+	if !RestoreReplica::authorizes(&mut conn, consumer_device_id, args.group, &args.r#type).await? {
+		return Err(AppError::AuthInsufficientPermissions {
+			required: "an enabled restore-replica declaration for this group and type".into(),
+		});
+	}
+
+	BackupRestoreCheck::record_report(
+		&mut conn,
+		NewBackupRestoreCheck {
+			replica_id: args.replica_id,
+			consumer_device_id,
+			group_id: args.group,
+			server_id: Some(args.server_id),
+			r#type: args.r#type,
+			intent: args.intent,
+			snapshot_id: args.snapshot_id,
+			outcome: args.outcome,
+			error: args.error,
+			replica_healthy: args.replica_healthy,
+			postgres_version: args.postgres_version,
+			observed_at: args.observed_at,
+			s3_sent_raw_bytes: args.s3_sent_raw_bytes,
+			s3_sent_payload_bytes: args.s3_sent_payload_bytes,
+			s3_received_raw_bytes: args.s3_received_raw_bytes,
+			s3_received_payload_bytes: args.s3_received_payload_bytes,
+		},
+	)
+	.await?;
+
+	Ok(StatusCode::NO_CONTENT)
 }

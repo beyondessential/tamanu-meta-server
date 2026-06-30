@@ -55,6 +55,7 @@ export default function RestoreReplicas() {
 
 	const replicas = useApi("restore_replicas", "list", {}, [tick]);
 	const consumers = useApi("restore_replicas", "consumers", {}, [tick]);
+	const checks = useApi("restore_replicas", "checks", {}, [tick]);
 
 	const [createOpen, setCreateOpen] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -233,6 +234,57 @@ export default function RestoreReplicas() {
 						))}
 					</Stack>
 				)}
+			</Box>
+
+			<Box>
+				<Typography variant="h6" component="h2" gutterBottom>
+					Recent restore checks
+				</Typography>
+				{checks.status === "ok" && checks.data.length === 0 ? (
+					<Alert severity="info">No restore-health reports yet.</Alert>
+				) : checks.status === "ok" ? (
+					<Paper variant="outlined">
+						<Table size="small">
+							<TableHead>
+								<TableRow>
+									<TableCell>When</TableCell>
+									<TableCell>Server</TableCell>
+									<TableCell>Type</TableCell>
+									<TableCell>Intent</TableCell>
+									<TableCell>Outcome</TableCell>
+									<TableCell>Snapshot</TableCell>
+								</TableRow>
+							</TableHead>
+							<TableBody>
+								{checks.data.map((c) => {
+									const ok = c.outcome === "success" && c.replica_healthy;
+									return (
+										<TableRow key={c.id}>
+											<TableCell>
+												{new Date(c.observed_at).toLocaleString()}
+											</TableCell>
+											<TableCell>
+												{c.server_id ? c.server_id.slice(0, 8) : "—"}
+											</TableCell>
+											<TableCell>{c.type}</TableCell>
+											<TableCell>{c.intent}</TableCell>
+											<TableCell>
+												<Chip
+													label={ok ? "healthy" : "failed"}
+													color={ok ? "success" : "error"}
+													size="small"
+												/>
+											</TableCell>
+											<TableCell>
+												{c.snapshot_id ? c.snapshot_id.slice(0, 12) : "—"}
+											</TableCell>
+										</TableRow>
+									);
+								})}
+							</TableBody>
+						</Table>
+					</Paper>
+				) : null}
 			</Box>
 
 			{createOpen && (

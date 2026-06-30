@@ -20,7 +20,10 @@ use commons_types::{
 };
 use database::diesel_async::AsyncPgConnection;
 use database::pg_duration::PgDuration;
-use database::{NewRestoreReplica, RestoreConsumerCapability, RestoreReplica, devices::Device};
+use database::{
+	BackupRestoreCheck, NewRestoreReplica, RestoreConsumerCapability, RestoreReplica,
+	devices::Device,
+};
 use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -33,6 +36,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(list))
 		.routes(routes!(for_group))
 		.routes(routes!(consumers))
+		.routes(routes!(checks))
 		.routes(routes!(create))
 		.routes(routes!(update))
 		.routes(routes!(delete))
@@ -221,6 +225,20 @@ pub async fn consumers(State(state): State<AppState>) -> Result<Json<Vec<Restore
 		});
 	}
 	Ok(Json(out))
+}
+
+#[utoipa::path(
+	post,
+	path = "/checks",
+	operation_id = "restore_replicas_checks",
+	tag = "restore_replicas",
+	security(("tailscale-user" = [])),
+	responses((status = 200, body = Vec<BackupRestoreCheck>)),
+)]
+pub async fn checks(State(state): State<AppState>) -> Result<Json<Vec<BackupRestoreCheck>>> {
+	let mut conn = state.db.get().await?;
+	let rows = BackupRestoreCheck::list_recent(&mut conn, 50).await?;
+	Ok(Json(rows))
 }
 
 #[utoipa::path(

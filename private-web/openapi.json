@@ -3175,6 +3175,34 @@
         ]
       }
     },
+    "/api/restore_replicas/checks": {
+      "post": {
+        "tags": [
+          "restore_replicas"
+        ],
+        "operationId": "restore_replicas_checks",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BackupRestoreCheck"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
     "/api/restore_replicas/consumers": {
       "post": {
         "tags": [
@@ -5680,6 +5708,115 @@
               "null"
             ],
             "format": "int32"
+          }
+        }
+      },
+      "BackupRestoreCheck": {
+        "type": "object",
+        "description": "A restore-health report: one row per report a consumer sends about a\nreplica — proof a snapshot actually restored into a healthy database, the\nstrongest backup-health signal. `snapshot_id` joins back to the\nproduced/persisted record for that snapshot.",
+        "required": [
+          "id",
+          "consumer_device_id",
+          "group_id",
+          "type",
+          "intent",
+          "outcome",
+          "replica_healthy",
+          "observed_at",
+          "reported_at"
+        ],
+        "properties": {
+          "consumer_device_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "group_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "intent": {
+            "type": "string"
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "postgres_version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "replica_healthy": {
+            "type": "boolean"
+          },
+          "replica_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "reported_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "s3_received_payload_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "s3_received_raw_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "s3_sent_payload_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "s3_sent_raw_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "server_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "snapshot_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "type": {
+            "type": "string"
           }
         }
       },

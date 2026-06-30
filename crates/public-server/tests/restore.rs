@@ -306,3 +306,94 @@ async fn restore_endpoints_reject_non_consumer_role() {
 	)
 	.await;
 }
+
+#[derive(diesel::QueryableByName)]
+struct Count {
+	#[diesel(sql_type = sql_types::BigInt)]
+	count: i64,
+}
+
+async fn count(conn: &mut AsyncPgConnection, query: &str, group: Uuid) -> i64 {
+	sql_query(query)
+		.bind::<sql_types::Uuid, _>(group)
+		.get_result::<Count>(conn)
+		.await
+		.expect("count")
+		.count
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn restore_verification_without_declaration_is_403() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, _device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			let server = make_server(&mut conn, group).await;
+			let resp = public
+				.post("/restore-verification")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"group": group,
+					"server_id": server,
+					"type": "tamanu-postgres",
+					"intent": "verify",
+					"outcome": "failure",
+					"replica_healthy": false,
+					"observed_at": "2026-06-30T00:00:00Z",
+				}))
+				.await;
+			resp.assert_status(http::StatusCode::FORBIDDEN);
+		},
+	)
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn restore_verification_records_and_raises_alert() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			let server = make_server(&mut conn, group).await;
+			declare_replica(&mut conn, device_id, group, "verify").await;
+
+			public
+				.post("/restore-verification")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"group": group,
+					"server_id": server,
+					"type": "tamanu-postgres",
+					"intent": "verify",
+					"snapshot_id": "snap-1",
+					"outcome": "failure",
+					"error": "restore failed",
+					"replica_healthy": false,
+					"observed_at": "2026-06-30T00:00:00Z",
+				}))
+				.await
+				.assert_status(http::StatusCode::NO_CONTENT);
+
+			assert_eq!(
+				count(
+					&mut conn,
+					"SELECT count(*) AS count FROM backup_restore_checks WHERE group_id = $1",
+					group,
+				)
+				.await,
+				1,
+			);
+			assert_eq!(
+				count(
+					&mut conn,
+					"SELECT count(*) AS count FROM issues WHERE server_group_id = $1 \
+					 AND ref LIKE 'restore-verification:%' AND active = true",
+					group,
+				)
+				.await,
+				1,
+			);
+		},
+	)
+	.await;
+}

@@ -4,8 +4,11 @@
 //! ([`RestoreConsumerCapability`]). The worklist expansion, credential issuance,
 //! and restore-health ingest live in the public-server and `jobs` components.
 
+use std::collections::HashMap;
+
 use commons_errors::{AppError, Result};
-use commons_types::backup::{BackupType, RestoreIntent};
+use commons_types::backup::{BackupType, RestoreIntent, RunOutcome};
+use commons_types::issue::Severity;
 use diesel::{
 	prelude::*,
 	result::{DatabaseErrorKind, Error as DieselError},
@@ -15,6 +18,8 @@ use jiff::Timestamp;
 use serde::Serialize;
 use uuid::Uuid;
 
+use crate::backup::alerts::raise_group_event;
+use crate::backup::refs;
 use crate::pg_duration::PgDuration;
 
 /// An operator-declared replica: a consumer should keep a replica of a
@@ -261,4 +266,296 @@ impl RestoreConsumerCapability {
 			.await?;
 		Ok(rows.into_iter().map(RestoreIntent::from).collect())
 	}
+}
+
+/// The stable group-level alert ref for one replica's restore-health. Per
+/// `(server, type, intent)` so each replica recovers independently (a healthy
+/// `verify` must not clear a failing `disaster-recovery` on the same server).
+fn restore_verification_ref(
+	server_id: Uuid,
+	r#type: &BackupType,
+	intent: &RestoreIntent,
+) -> String {
+	format!(
+		"{}:{}:{}:{}",
+		refs::RESTORE_VERIFICATION,
+		server_id,
+		r#type,
+		intent
+	)
+}
+
+/// A restore-health report: one row per report a consumer sends about a
+/// replica — proof a snapshot actually restored into a healthy database, the
+/// strongest backup-health signal. `snapshot_id` joins back to the
+/// produced/persisted record for that snapshot.
+#[derive(Debug, Clone, Serialize, Queryable, Selectable, utoipa::ToSchema)]
+#[diesel(table_name = crate::schema::backup_restore_checks)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct BackupRestoreCheck {
+	pub id: i64,
+	pub replica_id: Option<Uuid>,
+	pub consumer_device_id: Uuid,
+	pub group_id: Uuid,
+	pub server_id: Option<Uuid>,
+	#[diesel(column_name = type_)]
+	#[schema(value_type = String)]
+	pub r#type: BackupType,
+	#[schema(value_type = String)]
+	pub intent: RestoreIntent,
+	pub snapshot_id: Option<String>,
+	#[schema(value_type = String)]
+	pub outcome: RunOutcome,
+	pub error: Option<String>,
+	pub replica_healthy: bool,
+	pub postgres_version: Option<String>,
+	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
+	pub observed_at: Timestamp,
+	pub s3_sent_raw_bytes: Option<i64>,
+	pub s3_sent_payload_bytes: Option<i64>,
+	pub s3_received_raw_bytes: Option<i64>,
+	pub s3_received_payload_bytes: Option<i64>,
+	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
+	pub reported_at: Timestamp,
+}
+
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = crate::schema::backup_restore_checks)]
+pub struct NewBackupRestoreCheck {
+	pub replica_id: Option<Uuid>,
+	pub consumer_device_id: Uuid,
+	pub group_id: Uuid,
+	pub server_id: Option<Uuid>,
+	#[diesel(column_name = type_)]
+	pub r#type: BackupType,
+	pub intent: RestoreIntent,
+	pub snapshot_id: Option<String>,
+	pub outcome: RunOutcome,
+	pub error: Option<String>,
+	pub replica_healthy: bool,
+	pub postgres_version: Option<String>,
+	#[diesel(serialize_as = jiff_diesel::Timestamp)]
+	pub observed_at: Timestamp,
+	pub s3_sent_raw_bytes: Option<i64>,
+	pub s3_sent_payload_bytes: Option<i64>,
+	pub s3_received_raw_bytes: Option<i64>,
+	pub s3_received_payload_bytes: Option<i64>,
+}
+
+impl BackupRestoreCheck {
+	/// Record a restore-health report and raise or recover its group-level
+	/// alert. A success-and-healthy report recovers the replica's
+	/// `restore-verification` issue; any other outcome raises it (`Error`,
+	/// group-level, pages regardless of `is_monitored`).
+	pub async fn record_report(
+		db: &mut AsyncPgConnection,
+		new: NewBackupRestoreCheck,
+	) -> Result<()> {
+		use crate::schema::backup_restore_checks::dsl;
+
+		let healthy = new.outcome == RunOutcome::Success && new.replica_healthy;
+		let group_id = new.group_id;
+		let server_id = new.server_id;
+		let r#type = new.r#type.clone();
+		let intent = new.intent.clone();
+		let error = new.error.clone();
+		let snapshot_id = new.snapshot_id.clone();
+
+		diesel::insert_into(dsl::backup_restore_checks)
+			.values(new)
+			.execute(db)
+			.await?;
+
+		// Restore-health is attributed per server; a report without one is
+		// recorded but raises no group-level incident.
+		if let Some(sid) = server_id {
+			let r#ref = restore_verification_ref(sid, &r#type, &intent);
+			if healthy {
+				raise_group_event(
+					db,
+					group_id,
+					&r#ref,
+					Severity::Info,
+					None,
+					&format!("Restore verification healthy: {type} / {intent} for server {sid}"),
+					false,
+				)
+				.await?;
+			} else {
+				let detail =
+					error.unwrap_or_else(|| "restored database did not come up healthy".into());
+				let snap = snapshot_id
+					.map(|s| format!(" (snapshot {s})"))
+					.unwrap_or_default();
+				raise_group_event(
+					db,
+					group_id,
+					&r#ref,
+					Severity::Error,
+					Some("restore verification failed"),
+					&format!(
+						"Restore verification failed: {type} / {intent} for server {sid}{snap}: {detail}"
+					),
+					true,
+				)
+				.await?;
+			}
+		}
+		Ok(())
+	}
+
+	/// Recent reports for a group, newest first — the operator restore-health
+	/// view.
+	pub async fn list_recent_for_group(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+		limit: i64,
+	) -> Result<Vec<Self>> {
+		use crate::schema::backup_restore_checks::dsl;
+		dsl::backup_restore_checks
+			.select(Self::as_select())
+			.filter(dsl::group_id.eq(group_id))
+			.order(dsl::observed_at.desc())
+			.limit(limit)
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// Recent reports across all groups, newest first.
+	pub async fn list_recent(db: &mut AsyncPgConnection, limit: i64) -> Result<Vec<Self>> {
+		use crate::schema::backup_restore_checks::dsl;
+		dsl::backup_restore_checks
+			.select(Self::as_select())
+			.order(dsl::observed_at.desc())
+			.limit(limit)
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// Latest *healthy* report timestamp per `(server, type, intent)` in a
+	/// group — the freshness anchor the overdue sweep compares against.
+	pub async fn latest_healthy_by_key_for_group(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+	) -> Result<HashMap<(Uuid, BackupType, RestoreIntent), Timestamp>> {
+		use crate::schema::backup_restore_checks::dsl;
+		let rows: Vec<Self> = dsl::backup_restore_checks
+			.select(Self::as_select())
+			.filter(dsl::group_id.eq(group_id))
+			.filter(dsl::server_id.is_not_null())
+			.filter(dsl::outcome.eq(RunOutcome::Success))
+			.filter(dsl::replica_healthy.eq(true))
+			.distinct_on((dsl::server_id, dsl::type_, dsl::intent))
+			.order_by((
+				dsl::server_id,
+				dsl::type_,
+				dsl::intent,
+				dsl::observed_at.desc(),
+			))
+			.load(db)
+			.await?;
+		Ok(rows
+			.into_iter()
+			.filter_map(|r| {
+				r.server_id
+					.map(|sid| ((sid, r.r#type.clone(), r.intent.clone()), r.observed_at))
+			})
+			.collect())
+	}
+}
+
+/// Overdue restore-verification sweep: for every enabled declaration with a
+/// freshness bound (whose intent the consumer still supports), raise the
+/// `restore-verification` alert for any concrete `(server, type, intent)` whose
+/// last healthy report is older than the bound or never happened. Recovery is
+/// driven by the next healthy report ([`BackupRestoreCheck::record_report`]),
+/// so this only raises. Returns the number of overdue alerts filed.
+pub async fn sweep_overdue(db: &mut AsyncPgConnection) -> Result<usize> {
+	use crate::schema::restore_replicas::dsl;
+	let now = Timestamp::now();
+
+	let declarations: Vec<RestoreReplica> = dsl::restore_replicas
+		.select(RestoreReplica::as_select())
+		.filter(dsl::enabled.eq(true))
+		.filter(dsl::freshness.is_not_null())
+		.load(db)
+		.await?;
+
+	let mut capability_cache: HashMap<Uuid, std::collections::HashSet<RestoreIntent>> =
+		HashMap::new();
+	let mut healthy_cache: HashMap<Uuid, HashMap<(Uuid, BackupType, RestoreIntent), Timestamp>> =
+		HashMap::new();
+	let mut filed = 0usize;
+
+	for d in declarations {
+		let Some(freshness) = d.freshness else {
+			continue;
+		};
+
+		// Skip declarations the consumer can't satisfy — those are gaps, not
+		// restore-health incidents.
+		if !capability_cache.contains_key(&d.consumer_device_id) {
+			let set = RestoreConsumerCapability::list_for_consumer(db, d.consumer_device_id)
+				.await?
+				.into_iter()
+				.collect();
+			capability_cache.insert(d.consumer_device_id, set);
+		}
+		if !capability_cache[&d.consumer_device_id].contains(&d.intent) {
+			continue;
+		}
+
+		let servers = match d.server_id {
+			Some(sid) => {
+				let s = crate::servers::Server::get_by_id(db, sid).await.ok();
+				match s {
+					Some(s) if s.group_id == Some(d.group_id) && s.deleted_at.is_none() => {
+						vec![sid]
+					}
+					_ => vec![],
+				}
+			}
+			None => crate::servers::Server::list_live_in_group(db, d.group_id)
+				.await?
+				.into_iter()
+				.map(|s| s.id)
+				.collect(),
+		};
+
+		if !healthy_cache.contains_key(&d.group_id) {
+			let map = BackupRestoreCheck::latest_healthy_by_key_for_group(db, d.group_id).await?;
+			healthy_cache.insert(d.group_id, map);
+		}
+		let healthy = healthy_cache[&d.group_id].clone();
+
+		for sid in servers {
+			let key = (sid, d.r#type.clone(), d.intent.clone());
+			let overdue = match healthy.get(&key) {
+				Some(last) => now.duration_since(*last) > freshness.0,
+				None => true,
+			};
+			if !overdue {
+				continue;
+			}
+			let r#ref = restore_verification_ref(sid, &d.r#type, &d.intent);
+			raise_group_event(
+				db,
+				d.group_id,
+				&r#ref,
+				Severity::Error,
+				Some("restore verification overdue"),
+				&format!(
+					"No healthy restore verification within the freshness window: {} / {} for server {sid}",
+					d.r#type, d.intent
+				),
+				true,
+			)
+			.await?;
+			filed += 1;
+		}
+	}
+
+	Ok(filed)
 }
