@@ -1319,6 +1319,102 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/restore_replicas/consumers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["restore_replicas_consumers"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/restore_replicas/create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["restore_replicas_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/restore_replicas/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["restore_replicas_delete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/restore_replicas/for_group": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["restore_replicas_for_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/restore_replicas/list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["restore_replicas_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/restore_replicas/update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["restore_replicas_update"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/server_groups/create": {
         parameters: {
             query?: never;
@@ -2344,15 +2440,23 @@ export interface components {
             limit?: number | null;
         };
         CreateArgs: {
-            name: string;
-            notes?: string;
+            /** Format: uuid */
+            consumer_device_id: string;
             /**
              * Format: int64
-             * @description Optional initial value (seconds) for the group's Slack open
-             *     cooldown. Omit to let the database default apply.
+             * @description Max snapshot age before overdue, in whole seconds; `None` = latest only.
              */
-            slack_open_delay?: number | null;
-            tags?: components["schemas"]["TagMap"];
+            freshness_seconds?: number | null;
+            /** Format: uuid */
+            group_id: string;
+            intent: string;
+            name: string;
+            /**
+             * Format: uuid
+             * @description `None` = all current servers in the group.
+             */
+            server_id?: string | null;
+            type: string;
         };
         CreateArtifactArgs: {
             artifact_type: string;
@@ -2468,7 +2572,7 @@ export interface components {
             pem_data: string;
         };
         /** @enum {string} */
-        DeviceRole: "untrusted" | "admin" | "releaser" | "server";
+        DeviceRole: "untrusted" | "admin" | "releaser" | "server" | "backup-restore";
         EnrollmentStatus: {
             /**
              * Format: date-time
@@ -2705,6 +2809,10 @@ export interface components {
         HistoryCursor: {
             /** Format: date-time */
             created_at: string;
+            /** Format: uuid */
+            id: string;
+        };
+        IdArgs: {
             /** Format: uuid */
             id: string;
         };
@@ -3314,6 +3422,42 @@ export interface components {
          * @enum {string}
          */
         ResolvedReason: "fixed" | "wont_fix" | "expected" | "duplicate" | "flapping";
+        /**
+         * @description A restore consumer (a `backup-restore` device) and the intents it currently
+         *     supports — drives the declaration form's consumer and intent pickers.
+         */
+        RestoreConsumerView: {
+            /** Format: uuid */
+            device_id: string;
+            intents: string[];
+            name?: string | null;
+        };
+        /**
+         * @description A declared replica for the operator UI. `gap` is true when the consumer does
+         *     not currently advertise this declaration's intent, so Canopy is not
+         *     dispatching it.
+         */
+        RestoreReplicaView: {
+            /** Format: uuid */
+            consumer_device_id: string;
+            consumer_name?: string | null;
+            created_at: string;
+            created_by?: string | null;
+            enabled: boolean;
+            /** Format: int64 */
+            freshness_seconds?: number | null;
+            gap: boolean;
+            /** Format: uuid */
+            group_id: string;
+            /** Format: uuid */
+            id: string;
+            intent: string;
+            name: string;
+            /** Format: uuid */
+            server_id?: string | null;
+            type: string;
+            updated_at: string;
+        };
         /**
          * @description kopia `keep-*` retention policy. Org-minimum floors
          *     (`keep_daily ≥ 7, keep_weekly ≥ 4, keep_monthly ≥ 6`) are enforced by
@@ -6178,6 +6322,159 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IssueData"];
+                };
+            };
+        };
+    };
+    restore_replicas_consumers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RestoreConsumerView"][];
+                };
+            };
+        };
+    };
+    restore_replicas_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RestoreReplicaView"];
+                };
+            };
+            /** @description A matching declaration already exists. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    restore_replicas_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    restore_replicas_for_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroupArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RestoreReplicaView"][];
+                };
+            };
+        };
+    };
+    restore_replicas_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RestoreReplicaView"][];
+                };
+            };
+        };
+    };
+    restore_replicas_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RestoreReplicaView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
         };

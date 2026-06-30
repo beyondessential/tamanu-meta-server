@@ -3175,6 +3175,228 @@
         ]
       }
     },
+    "/api/restore_replicas/consumers": {
+      "post": {
+        "tags": [
+          "restore_replicas"
+        ],
+        "operationId": "restore_replicas_consumers",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RestoreConsumerView"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/restore_replicas/create": {
+      "post": {
+        "tags": [
+          "restore_replicas"
+        ],
+        "operationId": "restore_replicas_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestoreReplicaView"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A matching declaration already exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/restore_replicas/delete": {
+      "post": {
+        "tags": [
+          "restore_replicas"
+        ],
+        "operationId": "restore_replicas_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/restore_replicas/for_group": {
+      "post": {
+        "tags": [
+          "restore_replicas"
+        ],
+        "operationId": "restore_replicas_for_group",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RestoreReplicaView"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/restore_replicas/list": {
+      "post": {
+        "tags": [
+          "restore_replicas"
+        ],
+        "operationId": "restore_replicas_list",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RestoreReplicaView"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/restore_replicas/update": {
+      "post": {
+        "tags": [
+          "restore_replicas"
+        ],
+        "operationId": "restore_replicas_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestoreReplicaView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/server_groups/create": {
       "post": {
         "tags": [
@@ -5718,25 +5940,45 @@
       "CreateArgs": {
         "type": "object",
         "required": [
+          "consumer_device_id",
+          "group_id",
+          "type",
+          "intent",
           "name"
         ],
         "properties": {
-          "name": {
-            "type": "string"
+          "consumer_device_id": {
+            "type": "string",
+            "format": "uuid"
           },
-          "notes": {
-            "type": "string"
-          },
-          "slack_open_delay": {
+          "freshness_seconds": {
             "type": [
               "integer",
               "null"
             ],
             "format": "int64",
-            "description": "Optional initial value (seconds) for the group's Slack open\ncooldown. Omit to let the database default apply."
+            "description": "Max snapshot age before overdue, in whole seconds; `None` = latest only."
           },
-          "tags": {
-            "$ref": "#/components/schemas/TagMap"
+          "group_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "intent": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "server_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "`None` = all current servers in the group."
+          },
+          "type": {
+            "type": "string"
           }
         }
       },
@@ -6117,7 +6359,8 @@
           "untrusted",
           "admin",
           "releaser",
-          "server"
+          "server",
+          "backup-restore"
         ]
       },
       "EnrollmentStatus": {
@@ -6641,6 +6884,18 @@
             "type": "string",
             "format": "date-time"
           },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "IdArgs": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
           "id": {
             "type": "string",
             "format": "uuid"
@@ -8195,6 +8450,109 @@
           "duplicate",
           "flapping"
         ]
+      },
+      "RestoreConsumerView": {
+        "type": "object",
+        "description": "A restore consumer (a `backup-restore` device) and the intents it currently\nsupports — drives the declaration form's consumer and intent pickers.",
+        "required": [
+          "device_id",
+          "intents"
+        ],
+        "properties": {
+          "device_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "intents": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "RestoreReplicaView": {
+        "type": "object",
+        "description": "A declared replica for the operator UI. `gap` is true when the consumer does\nnot currently advertise this declaration's intent, so Canopy is not\ndispatching it.",
+        "required": [
+          "id",
+          "consumer_device_id",
+          "group_id",
+          "type",
+          "intent",
+          "name",
+          "enabled",
+          "gap",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "consumer_device_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "consumer_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "freshness_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "gap": {
+            "type": "boolean"
+          },
+          "group_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "intent": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "server_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
       },
       "RetentionPolicy": {
         "type": "object",
