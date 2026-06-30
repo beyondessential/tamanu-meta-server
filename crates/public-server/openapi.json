@@ -526,6 +526,44 @@
         ]
       }
     },
+    "/restore-verification": {
+      "post": {
+        "tags": [
+          "restore"
+        ],
+        "operationId": "verification",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerificationArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Report recorded."
+          },
+          "403": {
+            "description": "No enabled declaration authorizes this (group, type).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "backup-restore-device": []
+          }
+        ]
+      }
+    },
     "/restore-worklist": {
       "get": {
         "tags": [
@@ -1808,6 +1846,100 @@
       "UrlField": {
         "type": "string",
         "format": "uri"
+      },
+      "VerificationArgs": {
+        "type": "object",
+        "required": [
+          "group",
+          "server_id",
+          "type",
+          "intent",
+          "outcome",
+          "replica_healthy",
+          "observed_at"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "group": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "intent": {
+            "type": "string"
+          },
+          "observed_at": {
+            "type": "string",
+            "description": "When the restore was observed (RFC3339)."
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "postgres_version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "replica_healthy": {
+            "type": "boolean",
+            "description": "Whether the restored database came up healthy and passed readiness."
+          },
+          "replica_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The declaration this report concerns (from the worklist entry); optional\nso a report survives the declaration being retired mid-flight."
+          },
+          "s3_received_payload_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "s3_received_raw_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "s3_sent_payload_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "s3_sent_raw_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "snapshot_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The snapshot that was restored; omit on a failure that never got there."
+          },
+          "type": {
+            "type": "string"
+          }
+        }
       },
       "Version": {
         "type": "object",

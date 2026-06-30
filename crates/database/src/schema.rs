@@ -96,6 +96,30 @@ diesel::table! {
 }
 
 diesel::table! {
+	backup_restore_checks (id) {
+		id -> Int8,
+		replica_id -> Nullable<Uuid>,
+		consumer_device_id -> Uuid,
+		group_id -> Uuid,
+		server_id -> Nullable<Uuid>,
+		#[sql_name = "type"]
+		type_ -> Text,
+		intent -> Text,
+		snapshot_id -> Nullable<Text>,
+		outcome -> Text,
+		error -> Nullable<Text>,
+		replica_healthy -> Bool,
+		postgres_version -> Nullable<Text>,
+		observed_at -> Timestamptz,
+		s3_sent_raw_bytes -> Nullable<Int8>,
+		s3_sent_payload_bytes -> Nullable<Int8>,
+		s3_received_raw_bytes -> Nullable<Int8>,
+		s3_received_payload_bytes -> Nullable<Int8>,
+		reported_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
 	backup_runs (id) {
 		id -> Uuid,
 		device_id -> Uuid,
@@ -534,6 +558,10 @@ diesel::joinable!(backup_repo_snapshots -> server_groups (group_id));
 diesel::joinable!(backup_repo_snapshots -> servers (server_id));
 diesel::joinable!(backup_repo_stats -> server_groups (group_id));
 diesel::joinable!(backup_requests -> servers (server_id));
+diesel::joinable!(backup_restore_checks -> devices (consumer_device_id));
+diesel::joinable!(backup_restore_checks -> restore_replicas (replica_id));
+diesel::joinable!(backup_restore_checks -> server_groups (group_id));
+diesel::joinable!(backup_restore_checks -> servers (server_id));
 diesel::joinable!(backup_runs -> devices (device_id));
 diesel::joinable!(backup_runs -> server_groups (group_id));
 diesel::joinable!(backup_runs -> servers (server_id));

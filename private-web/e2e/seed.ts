@@ -47,7 +47,7 @@ function randomLabel(prefix: string): string {
  * statement with CASCADE. */
 export async function resetSeededTables(sql: Sql): Promise<void> {
 	await sql.query(
-		"TRUNCATE statuses, issues, device_keys, servers, server_groups, devices, versions, tailscale_users, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities RESTART IDENTITY CASCADE",
+		"TRUNCATE statuses, issues, device_keys, servers, server_groups, devices, versions, tailscale_users, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks RESTART IDENTITY CASCADE",
 	);
 }
 
@@ -645,4 +645,42 @@ export async function seedRestoreReplica(
 		);
 	}
 	return { id };
+}
+
+/** Seed a restore-health report row. */
+export async function seedRestoreCheck(
+	sql: Sql,
+	opts: {
+		consumerDeviceId: string;
+		groupId: string;
+		serverId?: string | null;
+		replicaId?: string | null;
+		type?: string;
+		intent?: string;
+		snapshotId?: string | null;
+		outcome?: "success" | "failure";
+		replicaHealthy?: boolean;
+		error?: string | null;
+		/** ISO 8601; defaults to NOW(). */
+		observedAt?: string;
+	},
+): Promise<void> {
+	await sql.query(
+		`INSERT INTO backup_restore_checks
+		 (replica_id, consumer_device_id, group_id, server_id, type, intent, snapshot_id, outcome, error, replica_healthy, observed_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11::timestamptz, NOW()))`,
+		[
+			opts.replicaId ?? null,
+			opts.consumerDeviceId,
+			opts.groupId,
+			opts.serverId ?? null,
+			opts.type ?? "tamanu-postgres",
+			opts.intent ?? "verify",
+			opts.snapshotId ?? null,
+			opts.outcome ?? "success",
+			opts.error ?? null,
+			opts.replicaHealthy ?? true,
+			opts.observedAt ?? null,
+		],
+	);
 }

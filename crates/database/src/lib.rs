@@ -45,7 +45,10 @@ pub use commons_types::backup::{
 	RunOutcome,
 };
 pub use devices::{Device, DeviceConnection, DeviceKey, DeviceWithInfo};
-pub use restore::{NewRestoreReplica, RestoreConsumerCapability, RestoreReplica};
+pub use restore::{
+	BackupRestoreCheck, NewBackupRestoreCheck, NewRestoreReplica, RestoreConsumerCapability,
+	RestoreReplica,
+};
 
 pub type Db = Pool<AsyncPgConnection>;
 

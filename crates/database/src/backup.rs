@@ -29,5 +29,6 @@ pub async fn sweep(db: &mut AsyncPgConnection) -> Result<usize> {
 	let rows = staleness::scan_rows(db).await?;
 	let mut filed = staleness::sweep(db, &rows).await?;
 	filed += reconcile::sweep(db, &rows).await?;
+	filed += crate::restore::sweep_overdue(db).await?;
 	Ok(filed)
 }
