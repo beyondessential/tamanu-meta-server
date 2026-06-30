@@ -17,6 +17,7 @@ import BackupConfig from "./routes/BackupConfig";
 import BackupDefaults from "./routes/BackupDefaults";
 import RecoveryVault from "./routes/RecoveryVault";
 import BackupPanel from "./routes/BackupPanel";
+import RestoreReplicas from "./routes/RestoreReplicas";
 import Bestool from "./routes/Bestool";
 import BestoolSnippetDetail from "./routes/BestoolSnippetDetail";
 import BestoolSnippets from "./routes/BestoolSnippets";
@@ -55,6 +56,7 @@ const BASE_NAV: NavItem[] = [
 	{ label: "Servers", to: "/servers" },
 	{ label: "Versions", to: "/versions" },
 	{ label: "Devices", to: "/devices" },
+	{ label: "Restore", to: "/restore-replicas" },
 	{ label: "Bestool", to: "/bestool" },
 	{ label: "Settings", to: "/settings" },
 ];
@@ -226,6 +228,7 @@ export default function App() {
 						/>
 					</Route>
 					<Route path="/devices/:id" element={<DeviceDetail />} />
+					<Route path="/restore-replicas" element={<RestoreReplicas />} />
 					<Route path="/bestool" element={<Bestool />}>
 						<Route
 							index
