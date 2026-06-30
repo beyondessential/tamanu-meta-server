@@ -54,6 +54,20 @@ There is no separate grant object — declaring a replica *is* the authorization
 A device reaches this role through one-off operator promotion, the same path a release-publishing device uses; no fleet-enrolment flow is involved.
 Either transport Canopy already accepts for devices — tailnet identity or a client certificate — satisfies the role; the role, not the transport, is the contract.
 
+## Consumer capabilities
+
+A restore consumer advertises the set of intents it can satisfy, and registers it with Canopy when it starts and whenever it changes.
+Canopy stores the set against the consumer and treats it as the authority on what that consumer can be asked to do.
+
+The registered set governs two things:
+
+- **What can be declared.** Canopy offers operators the intents the chosen consumer supports when they declare a replica.
+- **What is dispatched.** A consumer's worklist includes only entries whose intent it currently supports; Canopy never asks a consumer to satisfy an intent it has not advertised.
+
+When a consumer's set grows, the new intents become available for operators to assign, so a consumer gaining a capability is reflected without operator guesswork.
+When a consumer's set shrinks, any enabled declaration whose intent is no longer supported becomes a *gap*: Canopy drops it from the worklist immediately and surfaces it to operators as a declaration no consumer can currently satisfy, to reassign or retire.
+A gap is a configuration state shown to the operator, not a restore-health incident; the backups themselves are unaffected.
+
 ## Declared replicas
 
 An operator declares replicas against Canopy.
@@ -74,6 +88,8 @@ The well-known intents are:
 - **analytics** — a persistent replica kept running for querying, refreshed to the latest snapshot on the freshness cadence.
 - **disaster-recovery** — a periodic rehearsal of the full recovery path: a replica restored the way a real recovery would be, checked as a viable stand-in for the server, then discarded. It is the managed, automated counterpart to the operator-driven recovery in [Scope](#scope), not the recovery event itself.
 
+A declaration's intent must be one the chosen consumer supports (see [Consumer capabilities](#consumer-capabilities)); a declaration whose intent is unsupported is a gap, surfaced to the operator and never dispatched.
+
 A declaration scoped to a whole group expands to one replica per current server in that group.
 Servers joining or leaving a group change what the consumer is asked to maintain, with no per-server operator action.
 
@@ -83,7 +99,7 @@ Deleting a declaration stops the consumer being asked to maintain that replica a
 ## The worklist
 
 A restore consumer fetches its complete desired state from Canopy in one request, scoped to the calling consumer.
-Canopy expands the consumer's enabled declarations against the current servers and the latest known snapshot for each, and returns one entry per concrete replica:
+Canopy expands the consumer's enabled declarations — those whose intent the consumer currently supports — against the current servers and the latest known snapshot for each, and returns one entry per concrete replica:
 
 - the declaration's identifier, group, server, type, intent, name, and freshness;
 - the **snapshot to restore**: the snapshot identifier and its timestamp, or empty when no successful backup is yet known for that server and type;

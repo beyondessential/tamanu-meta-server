@@ -92,8 +92,12 @@ best-effort reporting that never blocks restore progress; no `consumer_instance`
 
 ## 4. Endpoint surface (shapes to be frozen on sign-off)
 
+- `POST /restore-capabilities {intents: [...]}` → pgro registers the intents it
+  can satisfy, on start and whenever they change. Canopy persists the set and
+  dispatches only matching worklist entries (see §7).
 - `GET  /restore-worklist` → desired replicas (expanded per server) + per-group
-  repo coordinates + the snapshot to restore for each.
+  repo coordinates + the snapshot to restore for each. Only entries whose intent
+  pgro currently supports are returned.
 - `POST /restore-credentials {group, type}` → short-lived read-only creds +
   repo password. Authorized iff an enabled declaration covers `(group, type)`.
   `purpose=backup` rejected for this role.
@@ -106,19 +110,47 @@ best-effort reporting that never blocks restore progress; no `consumer_instance`
 The original A.2/A.3 (`restore_credentials`, `restore_target`) are replaced by
 a worklist fetch plus per-group `restore_credentials`; `restore_target`
 collapses into the worklist. A.1 `RestoreVerification` gains `server_id` (and a
-declaration id). A.4 `restore_verification` is unchanged in spirit. Canopy will
-restate the exact bestool deltas once you've signed off on §3 and the shapes
-are frozen.
+declaration id). A.4 `restore_verification` is unchanged in spirit. A new
+`CanopyClient::restore_capabilities(base, &[intents])` registers the supported
+intents (§7). Canopy will restate the exact bestool deltas once the shapes are
+frozen.
 
 ## 6. What canopy is building now
 
 Two PRs:
 
 1. **Control + access** — `backup-restore` role; the declared-replica model +
-   operator UI; `GET /restore-worklist`; `POST /restore-credentials`.
+   operator UI; consumer capability registration (`POST /restore-capabilities`)
+   + capability-aware declaration UX + gap surfacing; `GET /restore-worklist`;
+   `POST /restore-credentials`.
 2. **Health** — `backup_restore_checks` + `POST /restore-verification`;
    per-server group-level alert routing + recovery; the overdue-freshness sweep;
    restore-health surfacing in the operator UI.
 
-Ping canopy if §3 is contentious; otherwise canopy freezes the shapes at the
-end of PR1 and hands the restated Appendix A to bestool.
+Canopy freezes the shapes at the end of PR1 and hands the restated Appendix A to
+bestool.
+
+## 7. Resolution of pgro's open question — unsupported intents
+
+pgro's sign-off asked how canopy should handle an intent pgro doesn't
+implement, defaulting to an implicit `outcome=failure, error="unsupported"`
+report. Canopy is taking the structured route instead, because the implicit one
+conflates a *capability mismatch* with an *unrestorable backup* — the latter
+pages a group-level incident, which is the wrong response to "pgro can't do
+this intent yet."
+
+Inverted model: **pgro registers its supported intents** (`POST
+/restore-capabilities`) on start and on change; canopy persists them and:
+
+- offers operators only supported intents when they declare a replica;
+- dispatches only matching worklist entries — pgro never receives an intent it
+  hasn't advertised, so there is no unsupported-intent report and no spurious
+  page;
+- when pgro's set **grows**, the new intents become assignable; when it
+  **shrinks**, declarations stranded on a now-unsupported intent become *gaps* —
+  dropped from the worklist immediately and surfaced to operators to reassign or
+  retire, as configuration state, not a restore-health incident.
+
+Consequence for pgro: implement `restore_capabilities` registration on start;
+the `/restore-verification` outcome stays just success/failure (no `unsupported`
+value).
