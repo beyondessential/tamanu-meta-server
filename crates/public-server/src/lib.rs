@@ -12,6 +12,7 @@ pub mod openapi;
 #[cfg(feature = "ui")]
 pub mod password;
 pub mod ratelimit;
+pub mod restore;
 #[cfg(feature = "ui")]
 pub mod server_versions;
 pub mod servers;
@@ -27,6 +28,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 	let mut router = OpenApiRouter::new()
 		.merge(events::routes())
 		.merge(backup::routes())
+		.merge(restore::routes())
 		.nest("/artifacts", artifacts::routes())
 		.nest("/bestool", bestool::routes())
 		.nest("/servers", servers::routes())

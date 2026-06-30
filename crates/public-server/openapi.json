@@ -433,6 +433,127 @@
         ]
       }
     },
+    "/restore-capabilities": {
+      "post": {
+        "tags": [
+          "restore"
+        ],
+        "operationId": "capabilities",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CapabilitiesArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Capability set registered."
+          }
+        },
+        "security": [
+          {
+            "backup-restore-device": []
+          }
+        ]
+      }
+    },
+    "/restore-credentials": {
+      "post": {
+        "tags": [
+          "restore"
+        ],
+        "operationId": "credentials",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CredentialsArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestoreCredentials"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No enabled declaration authorizes this (group, type).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Group has no ready backup config.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "STS issuance or repo-password read failed or is not configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "backup-restore-device": []
+          }
+        ]
+      }
+    },
+    "/restore-worklist": {
+      "get": {
+        "tags": [
+          "restore"
+        ],
+        "operationId": "worklist",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/WorklistEntry"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "backup-restore-device": []
+          }
+        ]
+      }
+    },
     "/servers": {
       "get": {
         "tags": [
@@ -1511,6 +1632,23 @@
           }
         }
       },
+      "RestoreCredentials": {
+        "type": "object",
+        "description": "Read-only credentials plus the repo password for one `(group, type)`. The\nAWS creds are the `credential_process` shape the consumer's proxy refreshes;\nthe password opens the kopia repo.",
+        "required": [
+          "credentials",
+          "repo_password"
+        ],
+        "properties": {
+          "credentials": {
+            "$ref": "#/components/schemas/CredentialProcessOutput"
+          },
+          "repo_password": {
+            "type": "string",
+            "description": "The kopia repo passphrase, read from the group's k8s Secret."
+          }
+        }
+      },
       "RunOutcome": {
         "type": "string",
         "description": "Outcome of a reported backup/restore run.",
@@ -1769,12 +1907,91 @@
             "$ref": "#/components/schemas/VersionStatus"
           }
         }
+      },
+      "WorklistEntry": {
+        "type": "object",
+        "description": "One concrete replica the consumer should maintain: a declaration expanded\nagainst a single server, carrying the snapshot to restore and the repo\ncoordinates to find it. Credentials and the repo password are obtained\nseparately via `/restore-credentials`.",
+        "required": [
+          "replica_id",
+          "group_id",
+          "server_id",
+          "type",
+          "intent",
+          "name",
+          "storage",
+          "bucket",
+          "prefix",
+          "region"
+        ],
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "freshness_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Max time since the last healthy restore before overdue, in whole seconds\n— the consumer's restore cadence, not the backup interval; `None` = no\noverdue bound."
+          },
+          "group_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "intent": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "region": {
+            "type": "string"
+          },
+          "replica_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The declaration this entry came from."
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "snapshot_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "RFC3339 timestamp of that snapshot, if known."
+          },
+          "snapshot_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The snapshot Canopy wants restored — the latest successful backup for\nthis `(server, type)`. `None` when no successful backup is yet known."
+          },
+          "storage": {
+            "type": "string",
+            "description": "Always `\"s3\"`."
+          },
+          "type": {
+            "type": "string"
+          }
+        }
       }
     },
     "securitySchemes": {
       "admin-device": {
         "type": "mutualTLS",
         "description": "mTLS client certificate for a device with the `admin` role."
+      },
+      "backup-restore-device": {
+        "type": "mutualTLS",
+        "description": "mTLS client certificate for a device with the `backup-restore` role (or `admin`)."
       },
       "releaser-device": {
         "type": "mutualTLS",
@@ -1802,6 +2019,10 @@
     {
       "name": "events",
       "description": "Device-pushed events; rolled up into issues and incidents server-side."
+    },
+    {
+      "name": "restore",
+      "description": "Managed restore replicas: consumer capability registration, worklist, and read-only restore credentials."
     },
     {
       "name": "servers",

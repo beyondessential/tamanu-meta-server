@@ -27,6 +27,8 @@ pub enum DeviceRole {
 	Admin,
 	Releaser,
 	Server,
+	#[serde(rename = "backup-restore")]
+	BackupRestore,
 }
 
 #[derive(Debug, Clone, Copy, thiserror::Error)]
@@ -42,6 +44,7 @@ impl std::str::FromStr for DeviceRole {
 			"admin" => Ok(Self::Admin),
 			"releaser" => Ok(Self::Releaser),
 			"server" => Ok(Self::Server),
+			"backup-restore" => Ok(Self::BackupRestore),
 			_ => Err(DeviceRoleFromStringError),
 		}
 	}
@@ -62,6 +65,7 @@ impl std::fmt::Display for DeviceRole {
 			DeviceRole::Admin => "admin",
 			DeviceRole::Releaser => "releaser",
 			DeviceRole::Server => "server",
+			DeviceRole::BackupRestore => "backup-restore",
 		};
 		write!(f, "{}", s)
 	}

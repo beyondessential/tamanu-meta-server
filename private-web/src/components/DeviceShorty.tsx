@@ -10,6 +10,7 @@ const ROLE_COLORS: Record<
 	server: "primary",
 	releaser: "warning",
 	admin: "info",
+	"backup-restore": "primary",
 };
 
 export function deviceDisplayName(info: DeviceInfo): string {

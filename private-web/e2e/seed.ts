@@ -47,7 +47,7 @@ function randomLabel(prefix: string): string {
  * statement with CASCADE. */
 export async function resetSeededTables(sql: Sql): Promise<void> {
 	await sql.query(
-		"TRUNCATE statuses, issues, device_keys, servers, server_groups, devices, versions, tailscale_users, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances RESTART IDENTITY CASCADE",
+		"TRUNCATE statuses, issues, device_keys, servers, server_groups, devices, versions, tailscale_users, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities RESTART IDENTITY CASCADE",
 	);
 }
 
@@ -572,4 +572,77 @@ export async function seedBackupRequest(
 			opts.requestedBy ?? null,
 		],
 	);
+}
+
+/** Register the intents a restore consumer (a `backup-restore` device) supports. */
+export async function seedRestoreConsumerCapability(
+	sql: Sql,
+	opts: { deviceId: string; intents: string[] },
+): Promise<void> {
+	for (const intent of opts.intents) {
+		await sql.query(
+			`INSERT INTO restore_consumer_capabilities (consumer_device_id, intent)
+			 VALUES ($1, $2)`,
+			[opts.deviceId, intent],
+		);
+	}
+}
+
+export interface SeededRestoreReplica {
+	id: string;
+}
+
+/** Seed a declared restore replica. */
+export async function seedRestoreReplica(
+	sql: Sql,
+	opts: {
+		consumerDeviceId: string;
+		groupId: string;
+		/** Omit for a whole-group declaration. */
+		serverId?: string | null;
+		type?: string;
+		intent?: string;
+		name?: string;
+		/** Whole seconds; omit for "latest only". */
+		freshnessSeconds?: number | null;
+		enabled?: boolean;
+	},
+): Promise<SeededRestoreReplica> {
+	const id = randomUUID();
+	const freshness = opts.freshnessSeconds ?? null;
+	if (freshness == null) {
+		await sql.query(
+			`INSERT INTO restore_replicas
+			 (id, consumer_device_id, group_id, server_id, type, intent, name, enabled)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+			[
+				id,
+				opts.consumerDeviceId,
+				opts.groupId,
+				opts.serverId ?? null,
+				opts.type ?? "tamanu-postgres",
+				opts.intent ?? "verify",
+				opts.name ?? randomLabel("replica"),
+				opts.enabled ?? true,
+			],
+		);
+	} else {
+		await sql.query(
+			`INSERT INTO restore_replicas
+			 (id, consumer_device_id, group_id, server_id, type, intent, name, freshness, enabled)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, make_interval(secs => $8), $9)`,
+			[
+				id,
+				opts.consumerDeviceId,
+				opts.groupId,
+				opts.serverId ?? null,
+				opts.type ?? "tamanu-postgres",
+				opts.intent ?? "verify",
+				opts.name ?? randomLabel("replica"),
+				freshness,
+				opts.enabled ?? true,
+			],
+		);
+	}
+	return { id };
 }

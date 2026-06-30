@@ -16,7 +16,12 @@ fn build_spec() -> serde_json::Value {
 fn spec_has_security_schemes() {
 	let spec = build_spec();
 	let schemes = &spec["components"]["securitySchemes"];
-	for s in ["server-device", "releaser-device", "admin-device"] {
+	for s in [
+		"server-device",
+		"releaser-device",
+		"admin-device",
+		"backup-restore-device",
+	] {
 		assert!(schemes[s].is_object(), "{s} scheme present");
 	}
 }

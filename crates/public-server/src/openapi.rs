@@ -19,6 +19,7 @@ use utoipa::{Modify, OpenApi, openapi::security::SecurityScheme};
 		(name = "backup", description = "Device backup credential minting, target config, capability registration, and run reporting."),
 		(name = "bestool", description = "Bestool SQL snippet read API."),
 		(name = "events", description = "Device-pushed events; rolled up into issues and incidents server-side."),
+		(name = "restore", description = "Managed restore replicas: consumer capability registration, worklist, and read-only restore credentials."),
 		(name = "servers", description = "Server registry — listing for the public, self-registration for server devices."),
 		(name = "statuses", description = "Heartbeat / status submissions from server devices."),
 		(name = "versions", description = "Canopy release versions and their downloadable artifacts."),
@@ -45,6 +46,7 @@ impl Modify for SecuritySchemes {
 		};
 		components.add_security_scheme("server-device", role_scheme("server"));
 		components.add_security_scheme("releaser-device", role_scheme("releaser"));
+		components.add_security_scheme("backup-restore-device", role_scheme("backup-restore"));
 		components.add_security_scheme(
 			"admin-device",
 			SecurityScheme::MutualTls {

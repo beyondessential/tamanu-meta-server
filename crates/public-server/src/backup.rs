@@ -47,7 +47,7 @@ pub const REPO_PASSWORD_SECRET_KEY: &str = "password";
 /// Fallback AWS region served by `GET /backup-target` when the group config's
 /// `region` is NULL. Read from `AWS_REGION` (the EKS pod always has it), with a
 /// last-resort default so the endpoint always returns a concrete region string.
-fn deployment_default_region() -> String {
+pub(crate) fn deployment_default_region() -> String {
 	std::env::var("AWS_REGION")
 		.or_else(|_| std::env::var("AWS_DEFAULT_REGION"))
 		.unwrap_or_else(|_| "us-east-1".to_string())

@@ -524,6 +524,19 @@ impl Device {
 		Self::list_trusted_with_info_paginated(db, i64::MAX, 0).await
 	}
 
+	/// All devices holding a given role, newest first. Used to list restore
+	/// consumers (`backup-restore` devices) for the operator's replica forms.
+	pub async fn list_by_role(db: &mut AsyncPgConnection, role: DeviceRole) -> Result<Vec<Self>> {
+		use crate::schema::devices;
+		devices::table
+			.select(Self::as_select())
+			.filter(devices::role.eq(role))
+			.order(devices::created_at.desc())
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	/// List trusted devices with pagination.
 	pub async fn list_trusted_with_info_paginated(
 		db: &mut AsyncPgConnection,

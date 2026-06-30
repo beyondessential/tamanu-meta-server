@@ -280,6 +280,109 @@ where
 	}
 }
 
+/// What a managed restore replica is for. Open by design, mirroring
+/// [`BackupType`]: a restore consumer advertises the intents it can satisfy and
+/// Canopy preserves any it does not model in `Custom` rather than rejecting it.
+/// Stored as `TEXT`; serializes as a plain string (no DB `CHECK`).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, AsExpression, FromSqlRow)]
+#[diesel(sql_type = Text)]
+pub enum RestoreIntent {
+	/// A transient replica restored only to prove the snapshot is restorable.
+	Verify,
+	/// A persistent replica kept running for querying.
+	Analytics,
+	/// A periodic rehearsal of the full recovery path.
+	DisasterRecovery,
+	/// Any other intent name, preserved as advertised.
+	Custom(String),
+}
+
+impl RestoreIntent {
+	const VERIFY: &'static str = "verify";
+	const ANALYTICS: &'static str = "analytics";
+	const DISASTER_RECOVERY: &'static str = "disaster-recovery";
+
+	/// The wire/DB string for this intent.
+	pub fn as_str(&self) -> &str {
+		match self {
+			Self::Verify => Self::VERIFY,
+			Self::Analytics => Self::ANALYTICS,
+			Self::DisasterRecovery => Self::DISASTER_RECOVERY,
+			Self::Custom(s) => s,
+		}
+	}
+}
+
+impl Display for RestoreIntent {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.write_str(self.as_str())
+	}
+}
+
+impl From<String> for RestoreIntent {
+	fn from(s: String) -> Self {
+		match s.as_str() {
+			Self::VERIFY => Self::Verify,
+			Self::ANALYTICS => Self::Analytics,
+			Self::DISASTER_RECOVERY => Self::DisasterRecovery,
+			_ => Self::Custom(s),
+		}
+	}
+}
+
+impl From<&str> for RestoreIntent {
+	fn from(s: &str) -> Self {
+		Self::from(s.to_owned())
+	}
+}
+
+impl FromStr for RestoreIntent {
+	type Err = std::convert::Infallible;
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		Ok(Self::from(s))
+	}
+}
+
+impl From<RestoreIntent> for String {
+	fn from(v: RestoreIntent) -> Self {
+		match v {
+			RestoreIntent::Custom(s) => s,
+			other => other.as_str().to_owned(),
+		}
+	}
+}
+
+impl Serialize for RestoreIntent {
+	fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+		s.serialize_str(self.as_str())
+	}
+}
+
+impl<'de> Deserialize<'de> for RestoreIntent {
+	fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+		Ok(Self::from(String::deserialize(d)?))
+	}
+}
+
+impl<DB> FromSql<Text, DB> for RestoreIntent
+where
+	DB: Backend,
+	String: FromSql<Text, DB>,
+{
+	fn from_sql(bytes: DB::RawValue<'_>) -> deserialize::Result<Self> {
+		Ok(Self::from(String::from_sql(bytes)?))
+	}
+}
+
+impl ToSql<Text, diesel::pg::Pg> for RestoreIntent
+where
+	String: ToSql<Text, diesel::pg::Pg>,
+{
+	fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, diesel::pg::Pg>) -> serialize::Result {
+		<str as ToSql<Text, diesel::pg::Pg>>::to_sql(self.as_str(), &mut out.reborrow())
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
