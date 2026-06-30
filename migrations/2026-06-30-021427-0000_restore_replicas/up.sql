@@ -15,8 +15,9 @@ CREATE TABLE restore_replicas (
 	type               TEXT NOT NULL,
 	intent             TEXT NOT NULL,
 	name               TEXT NOT NULL,
-	-- Max age of the restored snapshot before the replica is overdue; NULL =
-	-- always track the latest snapshot.
+	-- Max time since the last healthy restore before the replica is overdue —
+	-- the consumer's restore cadence (download + restore + any hold), not the
+	-- backup interval; NULL = no overdue bound.
 	freshness          INTERVAL,
 	enabled            BOOLEAN NOT NULL DEFAULT TRUE,
 	created_by         TEXT,

@@ -36,8 +36,9 @@ pub struct RestoreReplica {
 	#[schema(value_type = String)]
 	pub intent: RestoreIntent,
 	pub name: String,
-	/// Max age of the restored snapshot before the replica is overdue, in
-	/// whole seconds; `None` = always track the latest snapshot.
+	/// Max time since the last healthy restore before the replica is overdue
+	/// — the consumer's *restore* cadence (download + restore + any hold), not
+	/// the backup interval. In whole seconds; `None` = no overdue bound.
 	#[schema(value_type = Option<i64>)]
 	pub freshness: Option<PgDuration>,
 	pub enabled: bool,

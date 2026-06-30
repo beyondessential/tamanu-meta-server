@@ -1933,7 +1933,7 @@
               "null"
             ],
             "format": "int64",
-            "description": "Max snapshot age before the replica is overdue, in whole seconds;\n`None` = always track the latest."
+            "description": "Max time since the last healthy restore before overdue, in whole seconds\n— the consumer's restore cadence, not the backup interval; `None` = no\noverdue bound."
           },
           "group_id": {
             "type": "string",

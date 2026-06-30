@@ -96,8 +96,9 @@ pub struct WorklistEntry {
 	#[schema(value_type = String)]
 	pub intent: RestoreIntent,
 	pub name: String,
-	/// Max snapshot age before the replica is overdue, in whole seconds;
-	/// `None` = always track the latest.
+	/// Max time since the last healthy restore before overdue, in whole seconds
+	/// — the consumer's restore cadence, not the backup interval; `None` = no
+	/// overdue bound.
 	pub freshness_seconds: Option<i64>,
 	/// The snapshot Canopy wants restored — the latest successful backup for
 	/// this `(server, type)`. `None` when no successful backup is yet known.

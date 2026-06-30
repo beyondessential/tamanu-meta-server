@@ -78,7 +78,7 @@ Each declaration carries:
 - a **server** within the group, or all servers in the group when none is named;
 - an **intent** describing what the replica is for;
 - a human-readable **name**;
-- a **freshness** bound: the maximum age of the restored snapshot before the replica is considered out of date and should be refreshed or re-verified;
+- a **freshness** bound: the maximum time the replica may go without a fresh successful restore before it is considered overdue — a bound on the consumer's *restore* cadence, deliberately independent of how often backups are produced (below);
 - whether the declaration is **enabled**.
 
 Intent is an open set; unrecognised intents are preserved verbatim rather than rejected, so a consumer may advertise intents Canopy does not model.
@@ -107,6 +107,13 @@ Canopy expands the consumer's enabled declarations — those whose intent the co
 
 The worklist does not carry credentials or the repo password.
 The consumer reconciles the worklist against what it is actually running — creating, refreshing, and tearing down replicas to match — and is responsible for converging on the desired state over time.
+
+### Latest state, not a queue
+
+Each entry names the *latest* snapshot for its `(server, type)`, not a backlog to drain.
+A consumer restores on its own cadence and skips the intermediate snapshots produced since its last restore; restoring less often than backups are produced is expected, not a failure.
+A restore can take far longer than the interval between backups — the data is slow to download and restore, and a persistent replica may be held up while its workload runs — so the consumer's restore cadence is independent of, and typically much slower than, the backup cadence.
+Consequently a replica's **freshness** bound is set to cover the consumer's restore cycle (download, restore, and any hold), not the backup interval: setting it to the backup interval would alert continuously even when restores are keeping pace as designed.
 
 ### Snapshot authority
 
