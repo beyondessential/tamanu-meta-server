@@ -17,7 +17,7 @@ test.describe("provision device credentials", () => {
 		await page
 			.getByLabel("Key name (optional)")
 			.fill("e2e-provisioned");
-		await page.getByRole("button", { name: "Provision" }).click();
+		await page.getByRole("button", { name: "Provision", exact: true }).click();
 
 		// One-shot result view: the "shown once" warning and a passphrase.
 		await expect(page.getByText(/shown once/i)).toBeVisible();
@@ -56,7 +56,7 @@ test.describe("provision device credentials", () => {
 		await page
 			.getByRole("button", { name: "Provision credential" })
 			.click();
-		await page.getByRole("button", { name: "Provision" }).click();
+		await page.getByRole("button", { name: "Provision", exact: true }).click();
 
 		const downloadPromise = page.waitForEvent("download");
 		await page.getByRole("button", { name: "Download key file" }).click();
