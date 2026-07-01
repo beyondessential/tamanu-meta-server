@@ -27,10 +27,16 @@ import {
 	Tooltip,
 	Typography,
 } from "@mui/material";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ApiError, callApi, useApi } from "../api";
 
-const WELL_KNOWN_INTENTS = ["verify", "analytics", "disaster-recovery"];
+function kebabCase(s: string): string {
+	return s
+		.trim()
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-+|-+$/g, "");
+}
 
 function formatError(err: unknown): string {
 	if (err instanceof ApiError) {
@@ -304,16 +310,15 @@ function CreateReplicaDialog({
 	const [consumerId, setConsumerId] = useState("");
 	const [serverId, setServerId] = useState(""); // "" = whole group
 	const [type, setType] = useState("tamanu-postgres");
-	const [intent, setIntent] = useState("verify");
+	const [intent, setIntent] = useState("");
 	const [name, setName] = useState("");
+	const [nameEdited, setNameEdited] = useState(false);
 	const [freshnessHours, setFreshnessHours] = useState("");
 	const [pending, setPending] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
 	const selectedConsumer = consumers.find((c) => c.device_id === consumerId);
-	const intentOptions = Array.from(
-		new Set([...(selectedConsumer?.intents ?? []), ...WELL_KNOWN_INTENTS]),
-	);
+	const intentOptions = selectedConsumer?.intents ?? [];
 	const servers =
 		detail.status === "ok"
 			? detail.data.servers.filter((s) => !s.archived)
@@ -323,8 +328,37 @@ function CreateReplicaDialog({
 			? typeDefaults.data.map((t) => t.type)
 			: ["tamanu-postgres"];
 
+	// Auto-select the sole consumer, if there's only one to choose from.
+	useEffect(() => {
+		if (!consumerId && consumers.length === 1) {
+			setConsumerId(consumers[0].device_id);
+		}
+	}, [consumers, consumerId]);
+
+	// Keep the intent on a value the selected consumer actually supports.
+	useEffect(() => {
+		if (intentOptions.length > 0 && !intentOptions.includes(intent)) {
+			setIntent(intentOptions[0]);
+		}
+	}, [intentOptions, intent]);
+
+	// Suggest a name from the group and (if picked) server, until the operator
+	// types their own.
+	const groupName = detail.status === "ok" ? detail.data.group.name : "";
+	const selectedServer = servers.find((s) => s.id === serverId);
+	const serverName = selectedServer
+		? (selectedServer.name ?? selectedServer.display_host ?? selectedServer.id)
+		: "";
+	const suggestedName = kebabCase(
+		[groupName, serverName].filter(Boolean).join("-"),
+	);
+	useEffect(() => {
+		if (!nameEdited) setName(suggestedName);
+	}, [suggestedName, nameEdited]);
+
 	const onSubmit = async () => {
 		if (!consumerId) return setError("Pick a consumer");
+		if (!intent) return setError("Pick an intent the consumer supports");
 		if (!name.trim()) return setError("Name cannot be empty");
 		const hours = freshnessHours.trim();
 		const freshness_seconds =
@@ -416,15 +450,11 @@ function CreateReplicaDialog({
 							value={intent}
 							onChange={(e) => setIntent(e.target.value)}
 						>
-							{intentOptions.map((i) => {
-								const supported = selectedConsumer?.intents.includes(i) ?? false;
-								return (
-									<MenuItem key={i} value={i}>
-										{i}
-										{!supported && " (unsupported — will be a gap)"}
-									</MenuItem>
-								);
-							})}
+							{intentOptions.map((i) => (
+								<MenuItem key={i} value={i}>
+									{i}
+								</MenuItem>
+							))}
 						</Select>
 					</FormControl>
 
@@ -433,7 +463,10 @@ function CreateReplicaDialog({
 						fullWidth
 						label="Name"
 						value={name}
-						onChange={(e) => setName(e.target.value)}
+						onChange={(e) => {
+							setName(e.target.value);
+							setNameEdited(true);
+						}}
 					/>
 
 					<TextField

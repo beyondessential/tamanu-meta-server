@@ -199,4 +199,59 @@ test.describe("restore replicas", () => {
 		);
 		expect(rows).toHaveLength(1);
 	});
+
+	test("the dialog auto-selects the sole consumer and defaults the name", async ({
+		page,
+		sql,
+	}) => {
+		const consumer = await seedDevice(sql, { role: "backup-restore" });
+		await seedRestoreConsumerCapability(sql, {
+			deviceId: consumer.id,
+			intents: ["verify"],
+		});
+		const groupId = await groupWithBackups(sql, "solo-group");
+		await seedServer(sql, { groupId, name: "srv-a" });
+
+		await page.goto(`/groups/${groupId}/backups`);
+		await page.getByRole("button", { name: /declare replica/i }).click();
+		const dialog = page.getByRole("dialog");
+
+		// Name defaults to the kebab-cased group name (whole-group scope).
+		await expect(dialog.getByLabel("Name")).toHaveValue("solo-group");
+		// Picking a server folds the server name into the default.
+		await dialog.getByLabel("Server").click();
+		await page.getByRole("option", { name: "srv-a" }).click();
+		await expect(dialog.getByLabel("Name")).toHaveValue("solo-group-srv-a");
+
+		// The consumer was never picked, yet Declare succeeds — the sole consumer
+		// was auto-selected.
+		await dialog.getByRole("button", { name: /^declare$/i }).click();
+		await expect(
+			page.getByRole("row", { name: /solo-group-srv-a/ }),
+		).toBeVisible();
+	});
+
+	test("the intent dropdown offers only intents the consumer registered", async ({
+		page,
+		sql,
+	}) => {
+		const consumer = await seedDevice(sql, { role: "backup-restore" });
+		await seedRestoreConsumerCapability(sql, {
+			deviceId: consumer.id,
+			intents: ["verify"],
+		});
+		const groupId = await groupWithBackups(sql, "intent-group");
+
+		await page.goto(`/groups/${groupId}/backups`);
+		await page.getByRole("button", { name: /declare replica/i }).click();
+		const dialog = page.getByRole("dialog");
+
+		await dialog.getByLabel("Intent").click();
+		await expect(page.getByRole("option", { name: "verify" })).toBeVisible();
+		// The formerly-hardcoded well-known intents are gone.
+		await expect(page.getByRole("option", { name: "analytics" })).toHaveCount(0);
+		await expect(
+			page.getByRole("option", { name: "disaster-recovery" }),
+		).toHaveCount(0);
+	});
 });
