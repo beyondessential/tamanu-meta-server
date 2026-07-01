@@ -1,11 +1,9 @@
 # Backup credentials: blind-relay issuer isolation (STUB — stage 2)
 
-**Status: deferred.** This is a stage-2 hardening of the backup-credentials
-design in [`backup-credentials.md`](./backup-credentials.md). Stage 1
-knowingly accepts the risk this would close (see that plan's
-threat-boundary section: the internet-facing `public-server` holds the
-privileged issuer rights). This file is a placeholder to revisit, not a
-worked plan.
+**Status: deferred.** This is a stage-2 hardening of the shipped
+backup-credentials design. Stage 1 knowingly accepts the risk this would
+close: the internet-facing `public-server` holds the privileged issuer
+rights. This file is a placeholder to revisit, not a worked plan.
 
 ## Problem it closes
 
@@ -70,8 +68,8 @@ opaque blobs it can't open.
 
 Replaces only the *delivery* mechanism: the on-demand `/backup-credentials`
 minting and the `/backup-target` password-serving become staged,
-envelope-encrypted, blind-relayed delivery. Everything else in
-`backup-credentials.md` (per-bucket cross-account roles, the group model,
+envelope-encrypted, blind-relayed delivery. Everything else in the shipped
+backup-credentials design (per-bucket cross-account roles, the group model,
 GOVERNANCE object lock, Canopy-owned maintenance/retention/inspection,
 detection, preflight) is unchanged.
 
