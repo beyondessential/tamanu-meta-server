@@ -2003,6 +2003,62 @@
         ]
       }
     },
+    "/api/devices/provision_credential": {
+      "post": {
+        "tags": [
+          "devices"
+        ],
+        "summary": "Mint a device keypair server-side, store its public key as an active key on\na new or existing device at the chosen role, and return the private key\nonce, encrypted under a fresh passphrase (spec DPK). Canopy keeps only the\npublic key; the private key is never persisted or logged.",
+        "operationId": "provision_credential",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProvisionArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProvisionedCredential"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/devices/resolve_tailnet_identifier": {
       "post": {
         "tags": [
@@ -8476,6 +8532,71 @@
             "format": "uri",
             "description": "A URI reference identifying the problem type.",
             "example": "/errors/resource-not-found"
+          }
+        }
+      },
+      "ProvisionArgs": {
+        "type": "object",
+        "required": [
+          "role"
+        ],
+        "properties": {
+          "device_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Provision an additional credential onto this existing device. When\nomitted, a new device is created at `role`."
+          },
+          "key_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Display name for the new key. Defaults to \"Provisioned key\"."
+          },
+          "role": {
+            "$ref": "#/components/schemas/DeviceRole",
+            "description": "Role to trust the device at. Any trustable role is allowed; `untrusted`\nis rejected."
+          }
+        }
+      },
+      "ProvisionedCredential": {
+        "type": "object",
+        "description": "The one-time result of provisioning a device credential. The plaintext\nprivate key lives only inside `key_age_base64`; Canopy never persists it.",
+        "required": [
+          "device_id",
+          "key_id",
+          "fingerprint",
+          "filename",
+          "key_age_base64",
+          "passphrase"
+        ],
+        "properties": {
+          "device_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "filename": {
+            "type": "string",
+            "description": "Suggested filename for the downloaded encrypted key."
+          },
+          "fingerprint": {
+            "type": "string",
+            "description": "Lowercase hex SHA-256 of the stored public key, to correlate the\ncredential with the device's key list."
+          },
+          "key_age_base64": {
+            "type": "string",
+            "description": "Base64 (standard) of the age-encrypted PKCS#8 PEM private key. Decrypt\nwith `passphrase` (e.g. `bestool crypto reveal`) to recover the PEM."
+          },
+          "key_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "passphrase": {
+            "type": "string",
+            "description": "Freshly-generated passphrase that decrypts `key_age_base64`. Share it\nout-of-band, on a separate channel from the file."
           }
         }
       },

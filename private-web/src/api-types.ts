@@ -833,6 +833,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/devices/provision_credential": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint a device keypair server-side, store its public key as an active key on
+         *     a new or existing device at the chosen role, and return the private key
+         *     once, encrypted under a fresh passphrase (spec DPK). Canopy keeps only the
+         *     public key; the private key is never persisted or logged.
+         */
+        post: operations["provision_credential"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/devices/resolve_tailnet_identifier": {
         parameters: {
             query?: never;
@@ -3435,6 +3457,48 @@ export interface components {
              */
             type: string;
         };
+        ProvisionArgs: {
+            /**
+             * Format: uuid
+             * @description Provision an additional credential onto this existing device. When
+             *     omitted, a new device is created at `role`.
+             */
+            device_id?: string | null;
+            /** @description Display name for the new key. Defaults to "Provisioned key". */
+            key_name?: string | null;
+            /**
+             * @description Role to trust the device at. Any trustable role is allowed; `untrusted`
+             *     is rejected.
+             */
+            role: components["schemas"]["DeviceRole"];
+        };
+        /**
+         * @description The one-time result of provisioning a device credential. The plaintext
+         *     private key lives only inside `key_age_base64`; Canopy never persists it.
+         */
+        ProvisionedCredential: {
+            /** Format: uuid */
+            device_id: string;
+            /** @description Suggested filename for the downloaded encrypted key. */
+            filename: string;
+            /**
+             * @description Lowercase hex SHA-256 of the stored public key, to correlate the
+             *     credential with the device's key list.
+             */
+            fingerprint: string;
+            /**
+             * @description Base64 (standard) of the age-encrypted PKCS#8 PEM private key. Decrypt
+             *     with `passphrase` (e.g. `bestool crypto reveal`) to recover the PEM.
+             */
+            key_age_base64: string;
+            /** Format: uuid */
+            key_id: string;
+            /**
+             * @description Freshly-generated passphrase that decrypts `key_age_base64`. Share it
+             *     out-of-band, on a separate channel from the file.
+             */
+            passphrase: string;
+        };
         RecoveryChallengeResponse: {
             /**
              * @description The challenge ciphertext (`age` to the recipients), base64-encoded. The
@@ -5623,6 +5687,45 @@ export interface operations {
             };
             /** @description Both source and target hold tailscale identity or a server attachment. */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    provision_credential: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProvisionArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProvisionedCredential"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
