@@ -38,7 +38,7 @@ serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = "1.0.150"
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "signal", "time"] }
 tokio-postgres = { version = "0.7.17", features = ["with-jiff-0_2", "with-serde_json-1", "with-uuid-1"] }
-tower-http = { version = "0.6.11", features = ["fs"] }
+tower-http = { version = "0.7.0", features = ["fs"] }
 tracing.workspace = true
 utoipa.workspace = true
 utoipa-axum.workspace = true

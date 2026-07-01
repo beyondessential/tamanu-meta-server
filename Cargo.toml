@@ -30,15 +30,15 @@ futures = "0.3.32"
 http = "1.4.0"
 jiff = { version = "0.2.24", features = ["serde"] }
 # k8s-openapi requires exactly one Kubernetes-version feature, and the version
-# is pinned to 0.27 to match what kube 3.1 depends on (a mismatch causes a
-# duplicate k8s-openapi with no version feature → build failure). `v1_32` is a
+# is pinned to match what kube depends on (a mismatch causes a duplicate
+# k8s-openapi with no version feature → build failure). `v1_32` is a
 # conservative recent control-plane version — CONFIRM against the actual EKS
 # control-plane version with ops before release (see spec open-question).
-k8s-openapi = { version = "0.27.1", features = ["v1_32"] }
+k8s-openapi = { version = "0.28.0", features = ["v1_32"] }
 # Disable kube's default `ring` crypto backend and use `aws-lc-rs` instead, so
 # we don't pull in a second rustls provider alongside the one the AWS SDK and
 # the rest of the workspace already use.
-kube = { version = "3.1.0", default-features = false, features = [
+kube = { version = "4.0.0", default-features = false, features = [
 	"client",
 	"config",
 	"rustls-tls",
