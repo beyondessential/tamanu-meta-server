@@ -8,22 +8,11 @@ use diesel::{
 use serde::{Deserialize, Serialize};
 
 #[derive(
-	Debug,
-	Clone,
-	Copy,
-	Default,
-	PartialEq,
-	Eq,
-	Serialize,
-	Deserialize,
-	AsExpression,
-	utoipa::ToSchema,
+	Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, AsExpression, utoipa::ToSchema,
 )]
 #[diesel(sql_type = Text)]
 #[serde(rename_all = "lowercase")]
 pub enum DeviceRole {
-	#[default]
-	Untrusted,
 	Admin,
 	Releaser,
 	Server,
@@ -40,7 +29,6 @@ impl std::str::FromStr for DeviceRole {
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		match s.to_ascii_lowercase().as_ref() {
-			"untrusted" => Ok(Self::Untrusted),
 			"admin" => Ok(Self::Admin),
 			"releaser" => Ok(Self::Releaser),
 			"server" => Ok(Self::Server),
@@ -61,7 +49,6 @@ impl TryFrom<String> for DeviceRole {
 impl std::fmt::Display for DeviceRole {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		let s = match self {
-			DeviceRole::Untrusted => "untrusted",
 			DeviceRole::Admin => "admin",
 			DeviceRole::Releaser => "releaser",
 			DeviceRole::Server => "server",

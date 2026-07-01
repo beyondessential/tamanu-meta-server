@@ -3,14 +3,12 @@ import { Outlet, useLocation, useNavigate } from "react-router-dom";
 
 const TABS: Array<{ value: string; label: string; to: string }> = [
 	{ value: "search", label: "Search", to: "/devices" },
-	{ value: "untrusted", label: "Untrusted devices", to: "/devices/untrusted" },
-	{ value: "trusted", label: "Trusted devices", to: "/devices/trusted" },
+	{ value: "all", label: "All devices", to: "/devices/all" },
 ];
 
 function valueFromPath(pathname: string): string {
 	if (pathname === "/devices") return "search";
-	if (pathname.startsWith("/devices/untrusted")) return "untrusted";
-	if (pathname.startsWith("/devices/trusted")) return "trusted";
+	if (pathname.startsWith("/devices/all")) return "all";
 	return ""; // detail/history pages — no tab highlighted
 }
 

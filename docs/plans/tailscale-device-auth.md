@@ -1,5 +1,10 @@
 # Tailscale device auth on the existing `/public/...` mount
 
+> Historical design doc. The first-contact auto-creation of `Untrusted`
+> devices described below has since been removed: unknown tailnet nodes and
+> unrecognised mTLS keys no longer create rows, and there is no untrusted role.
+> See the [device trust model spec](../../.workhorse/specs/private-server/device-trust.md).
+
 Add a second auth path to the device extractor so a tailnet-resident
 device can hit the existing `/public/...` endpoints (mounted under
 the private-server's Tailscale tunnel) and be identified as its

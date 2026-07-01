@@ -220,14 +220,7 @@ export default function App() {
 					</Route>
 					<Route path="/devices" element={<Devices />}>
 						<Route index element={<DevicesSearch />} />
-						<Route
-							path="untrusted"
-							element={<DevicesList scope="untrusted" />}
-						/>
-						<Route
-							path="trusted"
-							element={<DevicesList scope="trusted" />}
-						/>
+						<Route path="all" element={<DevicesList />} />
 					</Route>
 					<Route path="/devices/:id" element={<DeviceDetail />} />
 					<Route path="/bestool" element={<Bestool />}>

@@ -47,11 +47,11 @@ async fn tailnet_server_device_can_post_event() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn unknown_tailnet_node_auto_creates_untrusted_then_403s_role_gate() {
+async fn unknown_tailnet_node_is_rejected_without_creating_a_row() {
 	// The directory knows the caller's IP but no `Device` row has the
-	// corresponding `tailscale_node_id` yet. The dual-auth extractor
-	// should auto-create the device row with role `Untrusted`, then the
-	// `ServerDevice` role wrapper rejects it for insufficient permissions.
+	// corresponding `tailscale_node_id` yet. The dual-auth extractor rejects
+	// the request (unauthenticated) and does not auto-create any device row —
+	// devices only exist once an operator provisions or attaches them.
 	use axum_client_ip::ClientIpSource;
 	use commons_servers::{
 		router,
@@ -104,19 +104,18 @@ async fn unknown_tailnet_node_auto_creates_untrusted_then_403s_role_gate() {
 				"message": "first contact",
 			}))
 			.await;
-		assert_eq!(response.status_code().as_u16(), 403);
+		assert_eq!(response.status_code().as_u16(), 401);
 
-		// And the device row should now exist with role Untrusted, ready
-		// for an admin to promote.
+		// And no device row was created for the unknown node.
 		use commons_tests::diesel_async::SimpleAsyncConnection;
 		let mut conn = conn;
 		conn.batch_execute(&format!(
-			"DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM devices \
-			 WHERE tailscale_node_id = '{unknown_node_id}' AND role = 'untrusted') \
-			 THEN RAISE EXCEPTION 'auto-discovery did not insert the expected device row'; END IF; END $$;"
+			"DO $$ BEGIN IF EXISTS (SELECT 1 FROM devices \
+			 WHERE tailscale_node_id = '{unknown_node_id}') \
+			 THEN RAISE EXCEPTION 'unknown tailnet node should not create a device row'; END IF; END $$;"
 		))
 		.await
-		.expect("untrusted device row exists after auto-discovery");
+		.expect("no device row created for unknown node");
 	})
 	.await
 }

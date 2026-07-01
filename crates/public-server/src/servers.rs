@@ -361,10 +361,10 @@ pub async fn register_complete(
 						existing_id
 					} else {
 						// Re-enrollment with a *different* box: replace the device.
-						// The old device kept working until now; release it (so it
-						// can't authenticate as this server) and bind the new one.
-						Device::untrust(conn, existing_id).await?;
-						Device::deactivate_keys(conn, existing_id).await?;
+						// The old device kept working until now; revoke its access
+						// (so it can't authenticate as this server) and bind the new
+						// one.
+						Device::revoke(conn, existing_id).await?;
 						bind_fresh_device(conn, args.server_id, &spki).await?
 					}
 				}

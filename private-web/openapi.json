@@ -1913,41 +1913,6 @@
         ]
       }
     },
-    "/api/devices/list_untrusted": {
-      "post": {
-        "tags": [
-          "devices"
-        ],
-        "operationId": "list_untrusted",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PaginationArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Page_DeviceInfo"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
     "/api/devices/merge_into": {
       "post": {
         "tags": [
@@ -2031,16 +1996,6 @@
               }
             }
           },
-          "400": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          },
           "404": {
             "description": "",
             "content": {
@@ -2105,6 +2060,35 @@
         ]
       }
     },
+    "/api/devices/revoke": {
+      "post": {
+        "tags": [
+          "devices"
+        ],
+        "summary": "Revoke a device's access: deactivate its keys and detach any tailnet\nidentity, so it can no longer authenticate. The row and its role are kept\nfor history.",
+        "operationId": "device_revoke",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/devices/search": {
       "post": {
         "tags": [
@@ -2134,72 +2118,6 @@
                 }
               }
             }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
-    "/api/devices/trust": {
-      "post": {
-        "tags": [
-          "devices"
-        ],
-        "operationId": "device_trust",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/TrustArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": ""
-          },
-          "400": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
-    "/api/devices/untrust": {
-      "post": {
-        "tags": [
-          "devices"
-        ],
-        "operationId": "device_untrust",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DeviceIdArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": ""
           }
         },
         "security": [
@@ -6648,7 +6566,6 @@
       "DeviceRole": {
         "type": "string",
         "enum": [
-          "untrusted",
           "admin",
           "releaser",
           "server",
@@ -8540,7 +8457,7 @@
           },
           "role": {
             "$ref": "#/components/schemas/DeviceRole",
-            "description": "Role to trust the device at. Any trustable role is allowed; `untrusted`\nis rejected."
+            "description": "Role to trust the device at."
           }
         }
       },

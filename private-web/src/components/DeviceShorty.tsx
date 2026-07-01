@@ -2,11 +2,7 @@ import { Box, Chip, Link as MuiLink, Stack } from "@mui/material";
 import { Link as RouterLink } from "react-router-dom";
 import type { DeviceInfo, DeviceRole } from "../types";
 
-const ROLE_COLORS: Record<
-	DeviceRole,
-	"error" | "primary" | "warning" | "info"
-> = {
-	untrusted: "error",
+const ROLE_COLORS: Record<DeviceRole, "primary" | "warning" | "info"> = {
 	server: "primary",
 	releaser: "warning",
 	admin: "info",

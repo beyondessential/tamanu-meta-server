@@ -70,7 +70,6 @@ function DeviceView({
 	refresh: () => void;
 }) {
 	const name = deviceDisplayName(device);
-	const role = device.device.role;
 	return (
 		<Stack spacing={3}>
 			<Typography variant="h4" component="h1">
@@ -80,9 +79,7 @@ function DeviceView({
 			<TailnetIdentitySection device={device} refresh={refresh} />
 			<KeysBox device={device} refresh={refresh} />
 			<RoleControls device={device} refresh={refresh} />
-			{role !== "untrusted" && (
-				<AssociatedServersSection deviceId={device.device.id} />
-			)}
+			<AssociatedServersSection deviceId={device.device.id} />
 			<PastServersSection deviceId={device.device.id} />
 			<ConnectionHistory deviceId={device.device.id} />
 		</Stack>
@@ -262,43 +259,36 @@ function RoleControls({
 	refresh: () => void;
 }) {
 	const role = device.device.role;
-	const trustAction = useApiAction("devices", "trust");
-	const untrustAction = useApiAction("devices", "untrust");
 	const updateRoleAction = useApiAction("devices", "update_role");
+	const revokeAction = useApiAction("devices", "revoke");
 
-	const [selected, setSelected] = useState<DeviceRole>(
-		role === "untrusted" ? "server" : role,
-	);
-	const [confirmUntrust, setConfirmUntrust] = useState(false);
+	const [selected, setSelected] = useState<DeviceRole>(role);
+	const [confirmRevoke, setConfirmRevoke] = useState(false);
 	const [provisionOpen, setProvisionOpen] = useState(false);
 
 	const onSave = async () => {
 		try {
-			if (role === "untrusted") {
-				await trustAction.call({ device_id: device.device.id, role: selected });
-			} else {
-				await updateRoleAction.call({
-					device_id: device.device.id,
-					role: selected,
-				});
-			}
+			await updateRoleAction.call({
+				device_id: device.device.id,
+				role: selected,
+			});
 			refresh();
 		} catch {
-			/* surfaced via *.error */
+			/* surfaced via updateRoleAction.error */
 		}
 	};
 
-	const onUntrust = async () => {
+	const onRevoke = async () => {
 		try {
-			await untrustAction.call({ device_id: device.device.id });
-			setConfirmUntrust(false);
+			await revokeAction.call({ device_id: device.device.id });
+			setConfirmRevoke(false);
 			refresh();
 		} catch {
-			/* surfaced via untrustAction.error */
+			/* surfaced via revokeAction.error */
 		}
 	};
 
-	const pending = trustAction.pending || untrustAction.pending || updateRoleAction.pending;
+	const pending = revokeAction.pending || updateRoleAction.pending;
 
 	return (
 		<Paper variant="outlined" sx={{ p: 2 }}>
@@ -313,9 +303,7 @@ function RoleControls({
 					spacing={1}
 					sx={{ alignItems: "center" }}
 				>
-					<Typography variant="body2">
-						{role === "untrusted" ? "Trust this device as:" : "Change role:"}
-					</Typography>
+					<Typography variant="body2">Role:</Typography>
 					<TextField
 						select
 						size="small"
@@ -332,67 +320,57 @@ function RoleControls({
 					<Button
 						variant="contained"
 						onClick={onSave}
-						disabled={pending}
+						disabled={pending || selected === role}
 					>
-						{role === "untrusted"
-							? trustAction.pending
-								? "Trusting…"
-								: "Trust"
-							: updateRoleAction.pending
-								? "Saving…"
-								: "Save"}
+						{updateRoleAction.pending ? "Saving…" : "Save"}
 					</Button>
 				</Stack>
-				{role !== "untrusted" && (
-					<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-						<Button
-							variant="outlined"
-							onClick={() => setProvisionOpen(true)}
-						>
-							Provision credential
-						</Button>
-						{confirmUntrust ? (
-							<Stack direction="row" spacing={1}>
-								<Button
-									variant="contained"
-									color="error"
-									onClick={onUntrust}
-									disabled={pending}
-								>
-									{untrustAction.pending ? "Untrusting…" : "Confirm untrust"}
-								</Button>
-								<Button
-									variant="outlined"
-									onClick={() => setConfirmUntrust(false)}
-									disabled={pending}
-								>
-									Cancel
-								</Button>
-							</Stack>
-						) : (
+				<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+					<Button
+						variant="outlined"
+						onClick={() => setProvisionOpen(true)}
+					>
+						Provision credential
+					</Button>
+					{confirmRevoke ? (
+						<Stack direction="row" spacing={1}>
+							<Button
+								variant="contained"
+								color="error"
+								onClick={onRevoke}
+								disabled={pending}
+							>
+								{revokeAction.pending ? "Revoking…" : "Confirm revoke"}
+							</Button>
 							<Button
 								variant="outlined"
-								color="error"
-								onClick={() => setConfirmUntrust(true)}
+								onClick={() => setConfirmRevoke(false)}
+								disabled={pending}
 							>
-								Untrust
+								Cancel
 							</Button>
-						)}
-					</Stack>
-				)}
+						</Stack>
+					) : (
+						<Button
+							variant="outlined"
+							color="error"
+							onClick={() => setConfirmRevoke(true)}
+						>
+							Revoke access
+						</Button>
+					)}
+				</Stack>
 			</Stack>
-			{(trustAction.error ||
-				untrustAction.error ||
-				updateRoleAction.error) && (
+			{(revokeAction.error || updateRoleAction.error) && (
 				<Alert severity="error" sx={{ mt: 1 }}>
-					{(trustAction.error ?? untrustAction.error ?? updateRoleAction.error)?.message}
+					{(revokeAction.error ?? updateRoleAction.error)?.message}
 				</Alert>
 			)}
 			<ProvisionCredentialDialog
 				open={provisionOpen}
 				onClose={() => setProvisionOpen(false)}
 				deviceId={device.device.id}
-				role={role === "untrusted" ? undefined : role}
+				role={role}
 				onProvisioned={refresh}
 			/>
 		</Paper>

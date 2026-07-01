@@ -4,8 +4,8 @@
 //!
 //! - **No directory** (internet-facing public-server binary): use the
 //!   [`mtls`] path. Devices present a client certificate; the public
-//!   key derived from it keys into `device_keys.key_data`. First-contact
-//!   auto-creates the `Device` row.
+//!   key derived from it keys into `device_keys.key_data`. An unknown
+//!   key does not authenticate — no row is auto-created.
 //! - **Directory present** (private-server's `/public/...` mount,
 //!   reached via the Tailscale Operator's ingress proxy): use the
 //!   [`tailnet`] path. The Tailscale ingress terminates the client's
@@ -14,8 +14,8 @@
 //!   The caller's tailnet CGNAT v4 or ULA v6 address is read from
 //!   `X-Forwarded-For` (via `axum-client-ip`'s `ClientIp`), resolved
 //!   to a node identity through the Tailscale control plane API, then
-//!   keyed into `devices.tailscale_node_id`. First-contact auto-creates
-//!   a `Device` row with role `Untrusted`.
+//!   keyed into `devices.tailscale_node_id`. An unknown node does not
+//!   authenticate — no row is auto-created.
 //!
 //! Exactly one path runs per request. Failure surfaces as
 //! `AuthMissingCertificate`.

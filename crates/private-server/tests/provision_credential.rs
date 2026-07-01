@@ -124,18 +124,6 @@ async fn provisions_onto_existing_device_and_updates_role() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn rejects_untrusted_role() {
-	run(async |_conn, _public, private| {
-		private
-			.post("/api/devices/provision_credential")
-			.json(&json!({ "role": "untrusted" }))
-			.await
-			.assert_status_bad_request();
-	})
-	.await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn missing_device_is_not_found() {
 	run(async |_conn, _public, private| {
 		private

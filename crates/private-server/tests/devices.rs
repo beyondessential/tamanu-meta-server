@@ -4,93 +4,19 @@ use database::servers::Server;
 use database::{Device, DeviceConnection, DeviceKey};
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_count_untrusted_devices() {
+async fn test_count_devices() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
-		// Initially should be 0
-		let count = Device::count_untrusted(&mut conn).await.unwrap();
+		let count = Device::count_trusted(&mut conn).await.unwrap();
 		assert_eq!(count, 0);
 
-		// Create 3 untrusted devices
 		for i in 0..3 {
 			Device::create(&mut conn, vec![i, i + 1, i + 2])
 				.await
 				.unwrap();
 		}
 
-		// Count should now be 3
-		let count = Device::count_untrusted(&mut conn).await.unwrap();
+		let count = Device::count_trusted(&mut conn).await.unwrap();
 		assert_eq!(count, 3);
-
-		// Trust one device
-		let devices = Device::list_untrusted_with_info(&mut conn).await.unwrap();
-		Device::trust(&mut conn, devices[0].device.id, DeviceRole::Server)
-			.await
-			.unwrap();
-
-		// Count should now be 2
-		let count = Device::count_untrusted(&mut conn).await.unwrap();
-		assert_eq!(count, 2);
-	})
-	.await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn test_count_trusted_devices() {
-	commons_tests::db::TestDb::run(|mut conn, _url| async move {
-		// Initially should be 0
-		let count = Device::count_trusted(&mut conn).await.unwrap();
-		assert_eq!(count, 0);
-
-		// Create 3 devices and trust 2 of them
-		for i in 0..3 {
-			let device = Device::create(&mut conn, vec![i, i + 1, i + 2])
-				.await
-				.unwrap();
-			if i < 2 {
-				Device::trust(&mut conn, device.id, DeviceRole::Server)
-					.await
-					.unwrap();
-			}
-		}
-
-		// Count should be 2
-		let count = Device::count_trusted(&mut conn).await.unwrap();
-		assert_eq!(count, 2);
-	})
-	.await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn test_list_untrusted_pagination() {
-	commons_tests::db::TestDb::run(|mut conn, _url| async move {
-		// Create 15 untrusted devices
-		for i in 0..15 {
-			Device::create(&mut conn, vec![i as u8]).await.unwrap();
-		}
-
-		// Get first page (10 items)
-		let page1 = Device::list_untrusted_with_info_paginated(&mut conn, 10, 0)
-			.await
-			.unwrap();
-		assert_eq!(page1.len(), 10);
-
-		// Get second page (5 items)
-		let page2 = Device::list_untrusted_with_info_paginated(&mut conn, 10, 10)
-			.await
-			.unwrap();
-		assert_eq!(page2.len(), 5);
-
-		// Verify no overlap
-		let page1_ids: Vec<_> = page1.iter().map(|d| d.device.id).collect();
-		let page2_ids: Vec<_> = page2.iter().map(|d| d.device.id).collect();
-		for id in &page1_ids {
-			assert!(!page2_ids.contains(id));
-		}
-
-		// Verify ordered by created_at desc (newer first)
-		for i in 1..page1.len() {
-			assert!(page1[i - 1].device.created_at >= page1[i].device.created_at);
-		}
 	})
 	.await;
 }
@@ -145,7 +71,7 @@ async fn test_get_device_by_id() {
 
 		// Verify device info
 		assert_eq!(device_info.device.id, device.id);
-		assert_eq!(device_info.device.role, DeviceRole::Untrusted);
+		assert_eq!(device_info.device.role, DeviceRole::Server);
 		assert_eq!(device_info.keys.len(), 1);
 		assert_eq!(device_info.keys[0].key_data, key_data);
 		assert!(device_info.latest_connection.is_none());
@@ -171,50 +97,17 @@ async fn test_get_servers_for_device() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_list_untrusted_devices_empty() {
+async fn test_create_device_is_server() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
-		// Test that listing untrusted devices returns empty when none exist
-		let devices = Device::list_untrusted_with_info(&mut conn).await.unwrap();
-		assert!(devices.is_empty());
-	})
-	.await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn test_create_untrusted_device() {
-	commons_tests::db::TestDb::run(|mut conn, _url| async move {
-		// Create a device with a key
 		let key_data = b"test-device-key-data";
 		let device = Device::create(&mut conn, key_data.to_vec()).await.unwrap();
+		assert_eq!(device.role, DeviceRole::Server);
 
-		// Verify it was created as untrusted
-		assert_eq!(device.role, DeviceRole::Untrusted);
-
-		// List untrusted devices and verify it appears
-		let devices = Device::list_untrusted_with_info(&mut conn).await.unwrap();
+		let devices = Device::list_trusted_with_info(&mut conn).await.unwrap();
 		assert_eq!(devices.len(), 1);
 		assert_eq!(devices[0].device.id, device.id);
 		assert_eq!(devices[0].keys.len(), 1);
 		assert_eq!(devices[0].keys[0].key_data, key_data);
-	})
-	.await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn test_trust_device() {
-	commons_tests::db::TestDb::run(|mut conn, _url| async move {
-		// Create an untrusted device
-		let key_data = b"test-device-key-data";
-		let device = Device::create(&mut conn, key_data.to_vec()).await.unwrap();
-
-		// Trust the device as admin
-		Device::trust(&mut conn, device.id, DeviceRole::Admin)
-			.await
-			.unwrap();
-
-		// Verify it's no longer in the untrusted list
-		let untrusted_devices = Device::list_untrusted_with_info(&mut conn).await.unwrap();
-		assert!(untrusted_devices.is_empty());
 	})
 	.await;
 }
@@ -252,40 +145,38 @@ async fn test_list_trusted_devices() {
 				assert_eq!(device.device.role, DeviceRole::Server);
 			}
 		}
-
-		// Verify untrusted list is empty
-		let untrusted_devices = Device::list_untrusted_with_info(&mut conn).await.unwrap();
-		assert!(untrusted_devices.is_empty());
 	})
 	.await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_untrust_device() {
+async fn test_revoke_device() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
-		// Create and trust a device
+		// Create a device (with an active key) and give it a tailnet identity.
 		let key_data = b"test-device-key-data";
 		let device = Device::create(&mut conn, key_data.to_vec()).await.unwrap();
-		Device::trust(&mut conn, device.id, DeviceRole::Admin)
-			.await
-			.unwrap();
+		Device::attach_tailscale(
+			&mut conn,
+			device.id,
+			database::devices::TailscaleIdentity {
+				node_id: "nodekey:revoke-test".to_string(),
+				node_name: Some("revoke-test".to_string()),
+				tailnet: Some("test-tailnet".to_string()),
+			},
+		)
+		.await
+		.unwrap();
 
-		// Verify it's in trusted list
-		let trusted_devices = Device::list_trusted_with_info(&mut conn).await.unwrap();
-		assert_eq!(trusted_devices.len(), 1);
+		// Revoke: keys deactivated and tailnet identity detached, role kept.
+		Device::revoke(&mut conn, device.id).await.unwrap();
 
-		// Untrust the device
-		Device::untrust(&mut conn, device.id).await.unwrap();
-
-		// Verify it's back in untrusted list
-		let untrusted_devices = Device::list_untrusted_with_info(&mut conn).await.unwrap();
-		assert_eq!(untrusted_devices.len(), 1);
-		assert_eq!(untrusted_devices[0].device.id, device.id);
-		assert_eq!(untrusted_devices[0].device.role, DeviceRole::Untrusted);
-
-		// Verify trusted list is empty
-		let trusted_devices = Device::list_trusted_with_info(&mut conn).await.unwrap();
-		assert!(trusted_devices.is_empty());
+		let info = Device::get_with_info(&mut conn, device.id).await.unwrap();
+		assert!(info.keys.is_empty(), "active keys cleared");
+		assert!(
+			info.device.tailscale_node_id.is_none(),
+			"tailnet identity detached",
+		);
+		assert_eq!(info.device.role, DeviceRole::Server, "role kept");
 	})
 	.await;
 }
@@ -427,8 +318,8 @@ async fn test_device_with_multiple_keys() {
 		.await
 		.unwrap();
 
-		// List untrusted devices and verify both keys are present
-		let devices = Device::list_untrusted_with_info(&mut conn).await.unwrap();
+		// List devices and verify both keys are present
+		let devices = Device::list_trusted_with_info(&mut conn).await.unwrap();
 		assert_eq!(devices.len(), 1);
 		assert_eq!(devices[0].keys.len(), 2);
 

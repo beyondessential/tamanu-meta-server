@@ -1,13 +1,13 @@
 //! Tailnet path of the device-auth extractor. Reads the calling node's
 //! Tailscale CGNAT v4 or ULA v6 address from the request's `ClientIp`,
 //! resolves it via the [`TailnetDirectory`], and keys into
-//! `devices.tailscale_node_id` (auto-creating on first contact with
-//! role `Untrusted`).
+//! `devices.tailscale_node_id`. An unknown node is not authenticated: devices
+//! are only created when an operator provisions or attaches them.
 
 use axum::RequestPartsExt as _;
 use axum_client_ip::ClientIp;
 use commons_errors::{AppError, Result};
-use database::devices::{Device, TailscaleIdentity};
+use database::devices::Device;
 use diesel_async::AsyncPgConnection;
 use http::request::Parts;
 
@@ -49,21 +49,12 @@ pub async fn resolve(
 		return Err(AppError::AuthTailnetNodeNotPermitted);
 	}
 
-	let device = if let Some(existing) = Device::from_tailscale_node_id(db, &entry.node_id).await? {
-		existing
-	} else {
-		Device::create_with_tailscale(
-			db,
-			TailscaleIdentity {
-				node_id: entry.node_id.clone(),
-				node_name: Some(entry.node_name.clone()),
-				tailnet: Some(entry.tailnet.clone()),
-			},
-		)
-		.await
-		.map_err(|e| AppError::AuthFailed {
-			reason: format!("Failed to create tailnet device: {}", e),
-		})?
+	// A tailnet node is only ever a device once an operator has provisioned or
+	// attached it. An unknown node is not auto-created — it simply fails to
+	// authenticate (the caller maps `None` to an auth error). This avoids
+	// minting inert placeholder rows for every node that touches the tunnel.
+	let Some(device) = Device::from_tailscale_node_id(db, &entry.node_id).await? else {
+		return Ok(None);
 	};
 
 	Ok(Some((device, entry.node_id)))

@@ -276,9 +276,9 @@ impl Server {
 	}
 
 	/// Archive a server: hide it from live listings and monitoring while
-	/// retaining its history. Releases its device (clears `device_id`,
-	/// demotes to `Untrusted`, deactivates its keys) so the box can only
-	/// return through the gated enrollment flow. Idempotent.
+	/// retaining its history. Releases its device (clears `device_id` and
+	/// revokes the device's credentials) so the box can only return through the
+	/// gated enrollment flow. Idempotent.
 	pub async fn soft_delete(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<()> {
 		use crate::schema::servers::dsl;
 		use diesel_async::AsyncConnection;
@@ -297,8 +297,7 @@ impl Server {
 			}
 
 			if let Some(device_id) = server.device_id {
-				crate::devices::Device::untrust(conn, device_id).await?;
-				crate::devices::Device::deactivate_keys(conn, device_id).await?;
+				crate::devices::Device::revoke(conn, device_id).await?;
 			}
 
 			diesel::update(dsl::servers.filter(dsl::id.eq(server_id)))

@@ -801,22 +801,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/devices/list_untrusted": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["list_untrusted"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/devices/merge_into": {
         parameters: {
             query?: never;
@@ -877,6 +861,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/devices/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke a device's access: deactivate its keys and detach any tailnet
+         *     identity, so it can no longer authenticate. The row and its role are kept
+         *     for history.
+         */
+        post: operations["device_revoke"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/devices/search": {
         parameters: {
             query?: never;
@@ -887,38 +892,6 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["device_search"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/devices/trust": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["device_trust"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/devices/untrust": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["device_untrust"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2680,7 +2653,7 @@ export interface components {
             pem_data: string;
         };
         /** @enum {string} */
-        DeviceRole: "untrusted" | "admin" | "releaser" | "server" | "backup-restore";
+        DeviceRole: "admin" | "releaser" | "server" | "backup-restore";
         EnrollmentStatus: {
             /**
              * Format: date-time
@@ -3450,10 +3423,7 @@ export interface components {
             device_id?: string | null;
             /** @description Display name for the new key. Defaults to "Provisioned key". */
             key_name?: string | null;
-            /**
-             * @description Role to trust the device at. Any trustable role is allowed; `untrusted`
-             *     is rejected.
-             */
+            /** @description Role to trust the device at. */
             role: components["schemas"]["DeviceRole"];
         };
         /**
@@ -5617,29 +5587,6 @@ export interface operations {
             };
         };
     };
-    list_untrusted: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PaginationArgs"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Page_DeviceInfo"];
-                };
-            };
-        };
-    };
     merge_into: {
         parameters: {
             query?: never;
@@ -5701,14 +5648,6 @@ export interface operations {
                     "application/json": components["schemas"]["ProvisionedCredential"];
                 };
             };
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -5751,6 +5690,27 @@ export interface operations {
             };
         };
     };
+    device_revoke: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeviceIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     device_search: {
         parameters: {
             query?: never;
@@ -5771,56 +5731,6 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["DeviceInfo"][];
                 };
-            };
-        };
-    };
-    device_trust: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TrustArgs"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-        };
-    };
-    device_untrust: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DeviceIdArgs"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
             };
         };
     };

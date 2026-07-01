@@ -6,14 +6,11 @@ test.describe("devices index", () => {
 		await resetSeededTables(sql);
 	});
 
-	test("renders the three tabs and the search input", async ({ page }) => {
+	test("renders the tabs and the search input", async ({ page }) => {
 		await page.goto("/devices");
 		await expect(page.getByRole("tab", { name: "Search" })).toBeVisible();
 		await expect(
-			page.getByRole("tab", { name: "Untrusted devices" }),
-		).toBeVisible();
-		await expect(
-			page.getByRole("tab", { name: "Trusted devices", exact: true }),
+			page.getByRole("tab", { name: "All devices" }),
 		).toBeVisible();
 		await expect(
 			page.getByRole("searchbox", { name: /Search by public key/i }),
@@ -21,39 +18,32 @@ test.describe("devices index", () => {
 	});
 });
 
-test.describe("devices list tabs", () => {
+test.describe("devices list", () => {
 	test.beforeEach(async ({ sql }) => {
 		await resetSeededTables(sql);
 	});
 
-	test("untrusted tab shows untrusted devices, trusted tab shows trusted ones", async ({
+	test("all-devices tab lists every device regardless of role", async ({
 		page,
 		sql,
 	}) => {
-		const untrusted = await seedDevice(sql, { role: "untrusted" });
+		const server = await seedDevice(sql, { role: "server" });
 		await seedDeviceKey(sql, {
-			deviceId: untrusted.id,
-			name: "naughty-cert",
+			deviceId: server.id,
+			name: "server-cert",
 			isActive: true,
 		});
-		const trusted = await seedDevice(sql, { role: "server" });
+		const releaser = await seedDevice(sql, { role: "releaser" });
 		await seedDeviceKey(sql, {
-			deviceId: trusted.id,
-			name: "blessed-cert",
+			deviceId: releaser.id,
+			name: "releaser-cert",
 			isActive: true,
 		});
 
-		// Untrusted tab.
-		await page.goto("/devices/untrusted");
-		await expect(page).toHaveURL(/\/devices\/untrusted$/);
-		await expect(page.getByText("naughty-cert")).toBeVisible();
-		await expect(page.getByText("blessed-cert")).not.toBeVisible();
-
-		// Trusted tab.
-		await page.goto("/devices/trusted");
-		await expect(page).toHaveURL(/\/devices\/trusted$/);
-		await expect(page.getByText("blessed-cert")).toBeVisible();
-		await expect(page.getByText("naughty-cert")).not.toBeVisible();
+		await page.goto("/devices/all");
+		await expect(page).toHaveURL(/\/devices\/all$/);
+		await expect(page.getByText("server-cert")).toBeVisible();
+		await expect(page.getByText("releaser-cert")).toBeVisible();
 	});
 });
 
