@@ -43,8 +43,7 @@ pub struct StatusPayload {
 	/// consulted for incident or severity decisions**: canopy derives
 	/// the system-healthy judgement from per-check results, with each
 	/// check's severity coming from the operator-owned
-	/// `healthcheck_severities` catalog. See
-	/// `docs/plans/healthcheck-severity-catalog.md`.
+	/// `healthcheck_severities` catalog.
 	pub healthy: Option<bool>,
 
 	/// Per-check breakdown. **Required** — a push without a `health`
@@ -101,11 +100,7 @@ pub struct HealthCheck {
 /// couldn't reach you" from "you told us you're sick".
 const STATUS_SOURCE: &str = "status";
 /// Prefix for per-check refs. Each failed check is filed at
-/// `(status, health/<check_name>)`. There used to be a roll-up
-/// issue at `(status, health)` driven by bestool's top-level
-/// `healthy` flag — that was retired (see
-/// `docs/plans/healthcheck-severity-catalog.md`); the prefix lives
-/// on for the per-check refs.
+/// `(status, health/<check_name>)`.
 const HEALTH_REF: &str = "health";
 /// Prefix for broken-check refs. A check reporting `result: broken`
 /// files at `(status, health-broken/<check_name>)` — a separate ref
@@ -266,9 +261,7 @@ async fn create_legacy_status(
 /// fixed Warning; a broken check neither confirms nor clears a known
 /// failure, so its `health/<check>` issue stays open. Skipped checks
 /// (`result: skipped` — precondition not met) file nothing and close
-/// both refs. The roll-up issue that used to live at
-/// `(status, health)` (driven by bestool's top-level `healthy` flag)
-/// is retired — see `docs/plans/healthcheck-severity-catalog.md`.
+/// both refs.
 ///
 /// Severity for each warning/failed check comes from the
 /// operator-owned `healthcheck_severities` catalog (see

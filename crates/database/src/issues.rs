@@ -1,6 +1,4 @@
 //! Issues, events, incidents.
-//!
-//! See `docs/plans/issues-events-incidents.md` for the design rationale.
 
 use commons_errors::{AppError, Result};
 use commons_types::issue::Severity;

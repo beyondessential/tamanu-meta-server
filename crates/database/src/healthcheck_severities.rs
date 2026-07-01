@@ -1,5 +1,5 @@
 //! Operator-owned catalog of healthcheck names → the severity to file
-//! their failures at. See `docs/plans/healthcheck-severity-catalog.md`.
+//! their failures at.
 //!
 //! Ingestion (in the public-server status handler) calls
 //! [`HealthcheckSeverity::upsert_default`] for every check name seen on
