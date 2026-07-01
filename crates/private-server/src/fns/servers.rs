@@ -850,7 +850,6 @@ pub struct EnrollmentTicket {
 	pub expires_at: Timestamp,
 }
 
-
 /// Mint (or reissue) an enrollment token for a server and return the
 /// passphrase-encrypted ticket the operator runs through bestool, plus the
 /// 4-word passphrase that decrypts it. The plaintext token lives only inside

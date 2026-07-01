@@ -618,7 +618,11 @@ pub async fn provision_credential(
 	.map_err(|e| AppError::custom(format!("encrypting device key: {e}")))?;
 	let key_age_base64 = base64::engine::general_purpose::STANDARD.encode(&encrypted);
 
-	let filename = format!("canopy-{}-{}.pem.age", args.role, &generated.fingerprint[..12]);
+	let filename = format!(
+		"canopy-{}-{}.pem.age",
+		args.role,
+		&generated.fingerprint[..12]
+	);
 
 	Ok(Json(ProvisionedCredential {
 		device_id,

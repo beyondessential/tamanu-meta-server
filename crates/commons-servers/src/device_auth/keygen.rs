@@ -8,8 +8,8 @@ use std::fmt::Write as _;
 
 use commons_errors::{AppError, Result};
 use rcgen::{
-	CertificateParams, DistinguishedName, ExtendedKeyUsagePurpose, IsCa, KeyPair,
-	KeyUsagePurpose, PKCS_ECDSA_P256_SHA256,
+	CertificateParams, DistinguishedName, ExtendedKeyUsagePurpose, IsCa, KeyPair, KeyUsagePurpose,
+	PKCS_ECDSA_P256_SHA256,
 };
 use x509_parser::prelude::*;
 
