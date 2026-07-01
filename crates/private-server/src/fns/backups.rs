@@ -63,6 +63,8 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(create_repo))
 		.routes(routes!(request_now))
 		.routes(routes!(cancel_request))
+		.routes(routes!(request_maintenance))
+		.routes(routes!(cancel_maintenance))
 		.routes(routes!(stats))
 		.routes(routes!(capabilities))
 		.routes(routes!(set_capability))
@@ -108,6 +110,11 @@ pub struct BackupConfigView {
 	pub last_init_error: Option<String>,
 	pub created_at: Timestamp,
 	pub updated_at: Timestamp,
+	/// When an operator has requested a one-off full maintenance run that the
+	/// scheduler hasn't picked up yet; `None` = no pending request.
+	pub force_full_maintenance_at: Option<Timestamp>,
+	/// Who requested the pending full-maintenance run (Tailscale login).
+	pub force_full_maintenance_by: Option<String>,
 	/// Per-`(group,type)` schedule + retention overrides.
 	pub schedules: Vec<ScheduleView>,
 }
@@ -140,6 +147,8 @@ impl BackupConfigView {
 			last_init_error: config.last_init_error,
 			created_at: config.created_at,
 			updated_at: config.updated_at,
+			force_full_maintenance_at: config.force_full_maintenance_at,
+			force_full_maintenance_by: config.force_full_maintenance_by,
 			schedules,
 		})
 	}
@@ -1202,6 +1211,69 @@ pub async fn cancel_request(
 	let mut conn = state.db.get().await?;
 	BackupRequest::clear(&mut conn, args.server_id, &args.r#type, args.purpose).await?;
 	Ok(Json(()))
+}
+
+/// Request a one-off full maintenance run for a group. The scheduler picks it up
+/// on its next tick, bypassing the cadence jitter slot. Idempotent — re-request
+/// refreshes the pending flag. Requires the repo to be `ready`.
+#[utoipa::path(
+	post,
+	path = "/request_maintenance",
+	operation_id = "backups_request_maintenance",
+	tag = "backups",
+	security(("tailscale-admin" = [])),
+	request_body = GroupArgs,
+	responses(
+		(status = 200, body = BackupConfigView),
+		(status = 404, body = ProblemDetailsSchema),
+		(status = 409, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn request_maintenance(
+	State(state): State<AppState>,
+	TailscaleAdmin(admin): TailscaleAdmin,
+	Json(args): Json<GroupArgs>,
+) -> Result<Json<BackupConfigView>> {
+	let mut conn = state.db.get().await?;
+	let config = require_config(&mut conn, args.server_group_id).await?;
+	if config.status != BackupConfigStatus::Ready {
+		return Err(AppError::Conflict(
+			"repo is not ready; maintenance can only run on a ready repo".into(),
+		));
+	}
+	let config = ServerGroupBackupConfig::request_full_maintenance(
+		&mut conn,
+		args.server_group_id,
+		Some(&admin.login),
+	)
+	.await?;
+	Ok(Json(BackupConfigView::build(&mut conn, config).await?))
+}
+
+/// Cancel a pending full-maintenance request the scheduler hasn't picked up yet.
+/// A no-op if there's none pending (or the run already started).
+#[utoipa::path(
+	post,
+	path = "/cancel_maintenance",
+	operation_id = "backups_cancel_maintenance",
+	tag = "backups",
+	security(("tailscale-admin" = [])),
+	request_body = GroupArgs,
+	responses(
+		(status = 200, body = BackupConfigView),
+		(status = 404, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn cancel_maintenance(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<GroupArgs>,
+) -> Result<Json<BackupConfigView>> {
+	let mut conn = state.db.get().await?;
+	let config = require_config(&mut conn, args.server_group_id).await?;
+	ServerGroupBackupConfig::clear_full_maintenance_request(&mut conn, config.group_id).await?;
+	let config = require_config(&mut conn, args.server_group_id).await?;
+	Ok(Json(BackupConfigView::build(&mut conn, config).await?))
 }
 
 /// Stats panel: cached repo stats + recent runs + recent maintenance + pending

@@ -390,6 +390,8 @@ diesel::table! {
 		mode -> Text,
 		last_init_error -> Nullable<Text>,
 		placement -> Text,
+		force_full_maintenance_at -> Nullable<Timestamptz>,
+		force_full_maintenance_by -> Nullable<Text>,
 	}
 }
 

@@ -58,10 +58,11 @@ Retention is floored to an organisational minimum; a configuration may deliberat
 
 A server participates in a type when that type is an enabled capability on it; an operator toggles participation per `(server, type)`.
 An operator may queue a one-off backup — or restore — for a `(server, type)` to run on the next cycle, and may cancel a queued one before it runs.
+An operator may also request a one-off full maintenance run for a group, to reclaim storage or apply repo-settings changes without waiting for the scheduled cadence, and may cancel it before the scheduler picks it up (see [BKJ](../jobs/backup.md)); at most one such request is pending per group.
 
 ## Status
 
-The operator can see, per group: the repo's size and cost basis, recent runs with their outcomes and errors, recent maintenance, the latest snapshot per server, and any in-flight or pending one-off requests.
+The operator can see, per group: the repo's size and cost basis, recent runs with their outcomes and errors, recent maintenance, the latest snapshot per server, and any in-flight or pending one-off requests — including a pending on-demand full maintenance request and who made it.
 
 ## Passphrase recovery
 

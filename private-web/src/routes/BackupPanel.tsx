@@ -214,7 +214,12 @@ export default function BackupPanel() {
 				<>
 					<ServersPanel groupId={id} members={members} isAdmin={isAdmin} />
 					<SchedulesPanel groupId={id} isAdmin={isAdmin} />
-					<MaintenancePanel groupId={id} />
+					<MaintenancePanel
+						groupId={id}
+						config={data}
+						isAdmin={isAdmin}
+						onChanged={configForTick.reload}
+					/>
 					<RecentRunsPanel groupId={id} members={members} />
 				</>
 			)}
@@ -984,18 +989,135 @@ function MaintenanceSummary({ runs }: { runs: BackupMaintenanceRun[] }) {
 /// (`kopia snapshot expire --delete`); full maintenance additionally reclaims
 /// the freed space, while quick is the lighter compaction. Failed runs expand
 /// to their error.
-function MaintenancePanel({ groupId }: { groupId: string }) {
+function MaintenancePanel({
+	groupId,
+	config,
+	isAdmin,
+	onChanged,
+}: {
+	groupId: string;
+	config: BackupConfigView;
+	isAdmin: boolean;
+	onChanged: () => void;
+}) {
+	// Poll faster while a run is in flight so the "running" indicator appears and
+	// clears promptly; back off to a gentle cadence when idle.
+	const [running, setRunning] = useState(false);
+	const tick = useReloadInterval(running ? 5_000 : 30_000, "canopy-data-changed");
 	const stats = useApi(
 		"backups",
 		"stats",
 		{ server_group_id: groupId },
-		[groupId],
+		[groupId, tick],
 	);
+	const request = useApiAction("backups", "request_maintenance");
+	const cancel = useApiAction("backups", "cancel_maintenance");
+	const queued = config.force_full_maintenance_at != null;
+
+	// An open run (no outcome yet) is one that's currently in flight — the run row
+	// is written before the kopia work starts. `full` in flight blocks a useful
+	// new full request; any run in flight drives the spinner + poll cadence.
+	const recent =
+		stats.status === "ok" ? stats.data.recent_maintenance : [];
+	const fullRunning = recent.some((m) => m.outcome == null && m.kind === "full");
+	const anyRunning = recent.some((m) => m.outcome == null);
+	if (anyRunning !== running) setRunning(anyRunning);
+
+	const onRequest = async () => {
+		try {
+			await request.call({ server_group_id: groupId });
+			onChanged();
+		} catch {
+			/* surfaced via request.error */
+		}
+	};
+	const onCancel = async () => {
+		try {
+			await cancel.call({ server_group_id: groupId });
+			onChanged();
+		} catch {
+			/* surfaced via cancel.error */
+		}
+	};
+
 	return (
-		<Paper variant="outlined" sx={{ p: 2 }}>
-			<Typography variant="h6" component="h2" gutterBottom>
-				Repo maintenance
-			</Typography>
+		<Paper variant="outlined" sx={{ p: 2 }} data-testid="repo-maintenance">
+			<Stack
+				direction="row"
+				spacing={2}
+				sx={{
+					alignItems: "center",
+					justifyContent: "space-between",
+					mb: 1,
+				}}
+			>
+				<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+					<Typography variant="h6" component="h2">
+						Repo maintenance
+					</Typography>
+					{anyRunning && (
+						<Chip
+							size="small"
+							color="info"
+							variant="outlined"
+							icon={<CircularProgress size={12} thickness={6} />}
+							label="Running"
+						/>
+					)}
+				</Stack>
+				{isAdmin &&
+					(queued ? (
+						<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+							<Chip
+								size="small"
+								color="info"
+								label={
+									config.force_full_maintenance_by
+										? `Full run queued by ${config.force_full_maintenance_by}`
+										: "Full run queued"
+								}
+							/>
+							<Button
+								size="small"
+								color="inherit"
+								disabled={cancel.pending}
+								onClick={onCancel}
+							>
+								Cancel
+							</Button>
+						</Stack>
+					) : (
+						<Tooltip
+							title={
+								fullRunning
+									? "A full maintenance run is already in progress"
+									: ""
+							}
+						>
+							<span>
+								<Button
+									size="small"
+									variant="outlined"
+									disabled={request.pending || fullRunning}
+									onClick={onRequest}
+								>
+									Run full maintenance now
+								</Button>
+							</span>
+						</Tooltip>
+					))}
+			</Stack>
+			{(request.error || cancel.error) && (
+				<Alert severity="error" sx={{ mb: 1 }}>
+					{(request.error ?? cancel.error)?.message}
+				</Alert>
+			)}
+			{isAdmin && queued && (
+				<Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+					Queued — the scheduler picks it up within a minute; it runs once the
+					group has no other maintenance in flight.
+				</Typography>
+			)}
 			{stats.status === "loading" || stats.status === "idle" ? (
 				<LinearProgress />
 			) : stats.status === "error" ? (

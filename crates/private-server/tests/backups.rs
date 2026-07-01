@@ -439,6 +439,82 @@ async fn request_now_upserts_and_cancel_deletes() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn request_maintenance_flags_and_cancel_clears() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group_id = seed_group(&mut conn).await;
+		private
+			.post("/api/backups/create")
+			.json(&serde_json::json!({
+				"server_group_id": group_id,
+				"bucket": "b",
+				"target_role_arn": "arn",
+				"maintenance_role_arn": "maint-arn",
+				"mode": "from_birth",
+			}))
+			.await
+			.assert_status_ok();
+
+		// Not ready yet (provisioning) → 409.
+		private
+			.post("/api/backups/request_maintenance")
+			.json(&serde_json::json!({ "server_group_id": group_id }))
+			.await
+			.assert_status_conflict();
+
+		conn.batch_execute(&format!(
+			"UPDATE server_group_backup_config SET status = 'ready' WHERE group_id = '{group_id}';"
+		))
+		.await
+		.expect("ready");
+
+		// Ready → flags the request and echoes it back on the view.
+		let resp = private
+			.post("/api/backups/request_maintenance")
+			.json(&serde_json::json!({ "server_group_id": group_id }))
+			.await;
+		resp.assert_status_ok();
+		let body: serde_json::Value = resp.json();
+		assert!(
+			!body["force_full_maintenance_at"].is_null(),
+			"request set the pending flag"
+		);
+
+		// Re-request is an idempotent refresh, not an error.
+		private
+			.post("/api/backups/request_maintenance")
+			.json(&serde_json::json!({ "server_group_id": group_id }))
+			.await
+			.assert_status_ok();
+
+		// Cancel clears it.
+		let resp = private
+			.post("/api/backups/cancel_maintenance")
+			.json(&serde_json::json!({ "server_group_id": group_id }))
+			.await;
+		resp.assert_status_ok();
+		let body: serde_json::Value = resp.json();
+		assert!(
+			body["force_full_maintenance_at"].is_null(),
+			"cancel cleared the pending flag"
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn request_maintenance_missing_config_is_404() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group_id = seed_group(&mut conn).await;
+		private
+			.post("/api/backups/request_maintenance")
+			.json(&serde_json::json!({ "server_group_id": group_id }))
+			.await
+			.assert_status_not_found();
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn stats_includes_runs_and_pending_requests() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let group_id = seed_group(&mut conn).await;

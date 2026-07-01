@@ -20,6 +20,7 @@ Canopy acts only on groups whose configuration is ready, runs at most one operat
 Canopy runs each group's repo maintenance on a cadence — clients are never granted the rights to.
 It enforces the group's retention as part of maintenance, and records every run's outcome so a stuck or failing maintenance is itself detectable.
 Maintenance also re-asserts that the repo carries no repo-level object-lock retention mode of its own, healing a repo that was imported with one before Canopy disabled it (see [BKO](../private-server/backup.md)).
+Beyond the cadence, an operator may request a one-off full maintenance run for a group (see [BKO](../private-server/backup.md)); Canopy runs it on the next scheduling opportunity, ahead of the jittered cadence slot, subject to the same one-run-per-group interlock — so a forced run never overlaps an in-flight one.
 
 ## Passphrase rotation
 

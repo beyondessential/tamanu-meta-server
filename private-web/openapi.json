@@ -157,6 +157,52 @@
         ]
       }
     },
+    "/api/backups/cancel_maintenance": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Cancel a pending full-maintenance request the scheduler hasn't picked up yet.\nA no-op if there's none pending (or the run already started).",
+        "operationId": "backups_cancel_maintenance",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupConfigView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/backups/cancel_request": {
       "post": {
         "tags": [
@@ -780,6 +826,62 @@
             }
           },
           "502": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/backups/request_maintenance": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Request a one-off full maintenance run for a group. The scheduler picks it up\non its next tick, bypassing the cadence jitter slot. Idempotent — re-request\nrefreshes the pending flag. Requires the repo to be `ready`.",
+        "operationId": "backups_request_maintenance",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupConfigView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "409": {
             "description": "",
             "content": {
               "application/json": {
@@ -5545,6 +5647,21 @@
           "created_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "force_full_maintenance_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When an operator has requested a one-off full maintenance run that the\nscheduler hasn't picked up yet; `None` = no pending request."
+          },
+          "force_full_maintenance_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Who requested the pending full-maintenance run (Tailscale login)."
           },
           "last_init_error": {
             "type": [
