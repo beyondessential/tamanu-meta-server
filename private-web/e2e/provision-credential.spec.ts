@@ -10,7 +10,7 @@ test.describe("provision device credentials", () => {
 	test("create device mints a downloadable age-encrypted key", async ({
 		page,
 	}) => {
-		await page.goto("/devices/trusted");
+		await page.goto("/devices/all");
 		await page.getByRole("button", { name: "Create device" }).click();
 
 		// Name the key so we can find the device in the list afterwards.
