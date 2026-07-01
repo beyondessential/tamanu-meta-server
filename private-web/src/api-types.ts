@@ -1440,22 +1440,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/restore_replicas/list": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["restore_replicas_list"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/restore_replicas/update": {
         parameters: {
             query?: never;
@@ -6505,7 +6489,11 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroupArgs"];
+            };
+        };
         responses: {
             200: {
                 headers: {
@@ -6609,25 +6597,6 @@ export interface operations {
                 "application/json": components["schemas"]["GroupArgs"];
             };
         };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RestoreReplicaView"][];
-                };
-            };
-        };
-    };
-    restore_replicas_list: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
         responses: {
             200: {
                 headers: {
