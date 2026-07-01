@@ -278,9 +278,12 @@ async fn provision_shared(
 
 /// Run a maintenance op in a spawned task: start the run row, read the password,
 /// resolve retention, run `kopia::run_maintenance`, then close the run row.
-fn spawn_maint(worker: &Worker, config: ServerGroupBackupConfig, kind: MaintenanceKind) {
+/// Returns whether the op was actually claimed and spawned (`false` when the
+/// group is already in-flight or the concurrency cap is hit — the caller should
+/// leave any triggering request in place so it fires on a later tick).
+fn spawn_maint(worker: &Worker, config: ServerGroupBackupConfig, kind: MaintenanceKind) -> bool {
 	let Some(guard) = worker.try_claim(config.group_id) else {
-		return;
+		return false;
 	};
 	let worker = worker.clone();
 	task::spawn(async move {
@@ -326,6 +329,7 @@ fn spawn_maint(worker: &Worker, config: ServerGroupBackupConfig, kind: Maintenan
 			}
 		}
 	});
+	true
 }
 
 /// The kopia side of a maintenance op.
@@ -421,6 +425,23 @@ async fn tick(worker: &Worker) -> Result<(), String> {
 		if in_flight.contains(&c.group_id) {
 			continue; // already mid-op
 		}
+
+		// Operator-forced full maintenance takes priority over the cadence and
+		// ignores the jitter slot: run it on the first free tick. Clear the
+		// request only once we've actually claimed + spawned, so a lost claim
+		// (in-flight / at the cap) leaves it to fire on a later tick.
+		if c.force_full_maintenance_at.is_some() {
+			if spawn_maint(worker, (*c).clone(), MaintenanceKind::Full) {
+				if let Err(e) =
+					ServerGroupBackupConfig::clear_full_maintenance_request(&mut db, c.group_id)
+						.await
+				{
+					error!(group = %c.group_id, "clearing forced-maintenance request failed: {e}");
+				}
+			}
+			continue;
+		}
+
 		let runs = BackupMaintenanceRun::list_for_group(&mut db, c.group_id, 20)
 			.await
 			.map_err(|e| e.to_string())?;
@@ -485,6 +506,8 @@ mod tests {
 			mode: commons_types::backup::BackupRepoMode::FromBirth,
 			last_init_error: last_init_error.map(str::to_string),
 			placement: commons_types::backup::BackupPlacement::External,
+			force_full_maintenance_at: None,
+			force_full_maintenance_by: None,
 		}
 	}
 

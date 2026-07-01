@@ -121,6 +121,17 @@ pub struct ServerGroupBackupConfig {
 	pub last_init_error: Option<String>,
 	#[schema(value_type = String)]
 	pub placement: BackupPlacement,
+	/// Set when an operator has requested a one-off full maintenance run; the
+	/// scheduler honors it on its next tick (bypassing the cadence slot) and
+	/// clears it once the run is spawned. `None` = no pending request.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	#[diesel(
+		deserialize_as = jiff_diesel::NullableTimestamp,
+		serialize_as = jiff_diesel::NullableTimestamp,
+		treat_none_as_default_value = false
+	)]
+	pub force_full_maintenance_at: Option<Timestamp>,
+	pub force_full_maintenance_by: Option<String>,
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -266,6 +277,47 @@ impl ServerGroupBackupConfig {
 			.get_result(db)
 			.await
 			.map_err(AppError::from)
+	}
+
+	/// Flag a one-off full maintenance run for the scheduler to pick up on its
+	/// next tick (bypassing the cadence slot). Idempotent: re-requesting refreshes
+	/// the timestamp/requester. `updated_at` is deliberately not touched — this is
+	/// operator intent, not a config edit.
+	pub async fn request_full_maintenance(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+		requested_by: Option<&str>,
+	) -> Result<Self> {
+		use crate::schema::server_group_backup_config::dsl;
+
+		diesel::update(dsl::server_group_backup_config.filter(dsl::group_id.eq(group_id)))
+			.set((
+				dsl::force_full_maintenance_at.eq(now),
+				dsl::force_full_maintenance_by.eq(requested_by),
+			))
+			.returning(Self::as_select())
+			.get_result(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// Clear a pending full-maintenance request — called both when the scheduler
+	/// spawns the run and when an operator cancels a not-yet-picked-up request.
+	pub async fn clear_full_maintenance_request(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+	) -> Result<()> {
+		use crate::schema::server_group_backup_config::dsl;
+
+		diesel::update(dsl::server_group_backup_config.filter(dsl::group_id.eq(group_id)))
+			.set((
+				dsl::force_full_maintenance_at.eq(None::<jiff_diesel::Timestamp>),
+				dsl::force_full_maintenance_by.eq(None::<String>),
+			))
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(())
 	}
 
 	/// Advance (or reset) the lifecycle status (repo-init flow).

@@ -52,6 +52,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backups/cancel_maintenance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel a pending full-maintenance request the scheduler hasn't picked up yet.
+         *     A no-op if there's none pending (or the run already started).
+         */
+        post: operations["backups_cancel_maintenance"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backups/cancel_request": {
         parameters: {
             query?: never;
@@ -336,6 +356,27 @@ export interface paths {
          *     recipient set.
          */
         post: operations["backups_recovery_verify"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backups/request_maintenance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request a one-off full maintenance run for a group. The scheduler picks it up
+         *     on its next tick, bypassing the cadence jitter slot. Idempotent — re-request
+         *     refreshes the pending flag. Requires the repo to be `ready`.
+         */
+        post: operations["backups_request_maintenance"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2320,6 +2361,14 @@ export interface components {
             bucket: string;
             /** Format: date-time */
             created_at: string;
+            /**
+             * Format: date-time
+             * @description When an operator has requested a one-off full maintenance run that the
+             *     scheduler hasn't picked up yet; `None` = no pending request.
+             */
+            force_full_maintenance_at?: string | null;
+            /** @description Who requested the pending full-maintenance run (Tailscale login). */
+            force_full_maintenance_by?: string | null;
             last_init_error?: string | null;
             maintenance_role_arn: string;
             mode: string;
@@ -4288,6 +4337,37 @@ export interface operations {
             };
         };
     };
+    backups_cancel_maintenance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroupArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupConfigView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
     backups_cancel_request: {
         parameters: {
             query?: never;
@@ -4709,6 +4789,45 @@ export interface operations {
                 };
             };
             502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    backups_request_maintenance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroupArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupConfigView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

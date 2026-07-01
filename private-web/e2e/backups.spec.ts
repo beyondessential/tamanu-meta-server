@@ -848,9 +848,7 @@ test.describe("backups ready: repo maintenance panel", () => {
 		});
 
 		await page.goto(`/groups/${group.id}/backups`);
-		const panel = page
-			.getByRole("heading", { name: /repo maintenance/i })
-			.locator("..");
+		const panel = page.getByTestId("repo-maintenance");
 		await expect(panel.getByText(/no maintenance has run yet/i)).toBeVisible();
 	});
 
@@ -872,12 +870,11 @@ test.describe("backups ready: repo maintenance panel", () => {
 		});
 
 		await page.goto(`/groups/${group.id}/backups`);
-		const panel = page
-			.getByRole("heading", { name: /repo maintenance/i })
-			.locator("..");
+		const panel = page.getByTestId("repo-maintenance");
 		await expect(panel.getByText("Healthy")).toBeVisible();
 		await expect(panel.getByText(/last successful maintenance/i)).toBeVisible();
-		await expect(panel.getByText("Full")).toBeVisible();
+		// exact: the "Run full maintenance now" button also contains "full".
+		await expect(panel.getByText("Full", { exact: true })).toBeVisible();
 		// exact: the "Last successful maintenance" caption also contains "success".
 		await expect(panel.getByText("success", { exact: true })).toBeVisible();
 		await expect(panel.getByText("1.0 MiB")).toBeVisible();
@@ -908,9 +905,7 @@ test.describe("backups ready: repo maintenance panel", () => {
 		});
 
 		await page.goto(`/groups/${group.id}/backups`);
-		const panel = page
-			.getByRole("heading", { name: /repo maintenance/i })
-			.locator("..");
+		const panel = page.getByTestId("repo-maintenance");
 		await expect(panel.getByText(/last run failed/i)).toBeVisible();
 		// Error detail is hidden until the failed row is expanded.
 		await expect(page.getByText(/connection refused/i)).toBeHidden();
@@ -932,11 +927,93 @@ test.describe("backups ready: repo maintenance panel", () => {
 		});
 
 		await page.goto(`/groups/${group.id}/backups`);
-		const panel = page
-			.getByRole("heading", { name: /repo maintenance/i })
-			.locator("..");
+		const panel = page.getByTestId("repo-maintenance");
 		// exact: the summary chip reads "Running" (capitalised); the row chip "running".
 		await expect(panel.getByText("running", { exact: true })).toBeVisible();
 		await expect(panel.getByText("Quick")).toBeVisible();
+	});
+
+	test("an admin can queue and cancel an on-demand full maintenance run", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "maint-ondemand" });
+		await seedServerGroupBackupConfig(sql, {
+			groupId: group.id,
+			status: "ready",
+		});
+
+		await page.goto(`/groups/${group.id}/backups`);
+		const panel = page.getByTestId("repo-maintenance");
+
+		await panel
+			.getByRole("button", { name: /run full maintenance now/i })
+			.click();
+
+		// The pending request is echoed as a chip and persisted on the config row.
+		await expect(panel.getByText(/full run queued/i)).toBeVisible();
+		await expect
+			.poll(async () => {
+				const rows = await sql.query(
+					`SELECT 1 FROM server_group_backup_config
+					 WHERE group_id = $1 AND force_full_maintenance_at IS NOT NULL`,
+					[group.id],
+				);
+				return rows.length;
+			})
+			.toBe(1);
+
+		// Cancelling clears it and restores the request button.
+		await panel.getByRole("button", { name: /^cancel$/i }).click();
+		await expect(
+			panel.getByRole("button", { name: /run full maintenance now/i }),
+		).toBeVisible();
+		await expect
+			.poll(async () => {
+				const rows = await sql.query(
+					`SELECT 1 FROM server_group_backup_config
+					 WHERE group_id = $1 AND force_full_maintenance_at IS NOT NULL`,
+					[group.id],
+				);
+				return rows.length;
+			})
+			.toBe(0);
+	});
+
+	test("a full run in flight disables the request button and spins the indicator", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "maint-fullrunning" });
+		await seedServerGroupBackupConfig(sql, {
+			groupId: group.id,
+			status: "ready",
+		});
+		// A prior success (so the summary reads "Healthy", not "Running") plus a
+		// current full run still in flight (no outcome yet).
+		await seedBackupMaintenanceRun(sql, {
+			groupId: group.id,
+			kind: "full",
+			outcome: "success",
+			finishedAgoSecs: 7 * 86400,
+		});
+		await seedBackupMaintenanceRun(sql, {
+			groupId: group.id,
+			kind: "full",
+			outcome: null,
+			finishedAgoSecs: 30,
+		});
+
+		await page.goto(`/groups/${group.id}/backups`);
+		const panel = page.getByTestId("repo-maintenance");
+
+		// Header shows the spinning "Running" indicator (a progressbar). exact:
+		// the in-flight row chip reads lowercase "running".
+		await expect(panel.getByText("Running", { exact: true })).toBeVisible();
+		await expect(panel.getByRole("progressbar")).toBeVisible();
+		// A new full run can't be usefully requested while one is running.
+		await expect(
+			panel.getByRole("button", { name: /run full maintenance now/i }),
+		).toBeDisabled();
 	});
 });

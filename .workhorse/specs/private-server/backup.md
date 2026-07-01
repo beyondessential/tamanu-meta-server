@@ -42,7 +42,7 @@ When a configuration is created, Canopy probes the target bucket and classifies 
 The classification chooses the mode:
 
 - **from-birth** — an empty bucket; Canopy generates a fresh passphrase and creates a new repo.
-- **passphrase** — an existing repo; the operator supplies its passphrase and Canopy connects to it.
+- **passphrase** — an existing repo; the operator supplies its passphrase and Canopy connects to it. On adoption Canopy disables any repo-level object-lock retention the existing repo carries: immutability is the bucket's Object Lock and expiry is Canopy's maintenance, and a live repo-level retention mode would block both device writes and maintenance reclamation.
 
 A bucket holding unrelated content is refused rather than written into; Canopy never deletes to make room.
 Either way Canopy creates and owns the passphrase secret, and configuration and secret are created together — if the secret cannot be stored, the configuration is rolled back, so a configuration never exists without its passphrase.
@@ -58,10 +58,11 @@ Retention is floored to an organisational minimum; a configuration may deliberat
 
 A server participates in a type when that type is an enabled capability on it; an operator toggles participation per `(server, type)`.
 An operator may queue a one-off backup — or restore — for a `(server, type)` to run on the next cycle, and may cancel a queued one before it runs.
+An operator may also request a one-off full maintenance run for a group, to reclaim storage or apply repo-settings changes without waiting for the scheduled cadence, and may cancel it before the scheduler picks it up (see [BKJ](../jobs/backup.md)); at most one such request is pending per group.
 
 ## Status
 
-The operator can see, per group: the repo's size and cost basis, recent runs with their outcomes and errors, recent maintenance, the latest snapshot per server, and any in-flight or pending one-off requests.
+The operator can see, per group: the repo's size and cost basis, recent runs with their outcomes and errors, recent maintenance, the latest snapshot per server, and any in-flight or pending one-off requests — including a pending on-demand full maintenance request and who made it.
 
 ## Passphrase recovery
 
