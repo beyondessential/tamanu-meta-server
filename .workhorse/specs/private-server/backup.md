@@ -42,7 +42,7 @@ When a configuration is created, Canopy probes the target bucket and classifies 
 The classification chooses the mode:
 
 - **from-birth** — an empty bucket; Canopy generates a fresh passphrase and creates a new repo.
-- **passphrase** — an existing repo; the operator supplies its passphrase and Canopy connects to it.
+- **passphrase** — an existing repo; the operator supplies its passphrase and Canopy connects to it. On adoption Canopy disables any repo-level object-lock retention the existing repo carries: immutability is the bucket's Object Lock and expiry is Canopy's maintenance, and a live repo-level retention mode would block both device writes and maintenance reclamation.
 
 A bucket holding unrelated content is refused rather than written into; Canopy never deletes to make room.
 Either way Canopy creates and owns the passphrase secret, and configuration and secret are created together — if the secret cannot be stored, the configuration is rolled back, so a configuration never exists without its passphrase.

@@ -522,6 +522,22 @@ pub async fn run_init(
 	// explicit so we own maintenance regardless of path). Idempotent.
 	connect(env, bucket, prefix, region).await?;
 
+	if !create_new {
+		// Adopting a pre-existing repo: it may carry operator-set kopia
+		// blob-retention (repo-level S3 Object Lock retention mode). Canopy
+		// does not use kopia's client-side lock-awareness — immutability is
+		// the bucket's default GOVERNANCE Object Lock and expiry is Canopy's
+		// maintenance. A live blob-retention mode would make every device
+		// write require `PutObjectRetention` (which the device creds lack) and
+		// keep maintenance from reclaiming space. Disable it on adoption.
+		// Idempotent: a no-op when retention is already off.
+		run_kopia_ok(
+			env,
+			&["repository", "set-parameters", "--retention-mode", "none"],
+		)
+		.await?;
+	}
+
 	// No sources exist yet: set a conservative GLOBAL baseline = the element-wise
 	// strictest (max) policy across the map (or the org floor when empty).
 	apply_policy(env, "--global", &strictest_policy(retention)).await?;
@@ -572,6 +588,17 @@ pub async fn run_maintenance(
 	retention: &RetentionMap,
 ) -> Result<MaintOutcome> {
 	connect(env, bucket, prefix, region).await?;
+
+	// Assert the repo carries no kopia blob-retention (repo-level Object Lock
+	// mode). `run_init` disables it on adoption, but repos imported before that
+	// existed — or one an operator re-enabled — would otherwise block writes and
+	// maintenance reclamation. Re-asserting here heals them. Idempotent: a no-op
+	// when retention is already off.
+	run_kopia_ok(
+		env,
+		&["repository", "set-parameters", "--retention-mode", "none"],
+	)
+	.await?;
 
 	// Assert per-source retention. List sources, and for each source whose type
 	// (the path tail) is a key in the retention map, set that type's policy.
