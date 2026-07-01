@@ -673,6 +673,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/devices/add_key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Register an externally-generated public key as an active key on a device.
+         *     Unlike `provision_credential`, Canopy never sees a private key here — the
+         *     operator supplies the public half of a keypair they hold.
+         */
+        post: operations["add_key"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/devices/attach_tailscale": {
         parameters: {
             query?: never;
@@ -721,6 +742,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/devices/deactivate_key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Disable a single key so it can no longer authenticate. The row is kept and
+         *     can be re-enabled; disabling one key of several lets a device rotate keys
+         *     with no gap (add the new key, then disable the old).
+         */
+        post: operations["deactivate_key"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/devices/detach_tailscale": {
         parameters: {
             query?: never;
@@ -731,6 +773,27 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["detach_tailscale"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/devices/disable_all_keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Disable every active key on a device, so none of them can authenticate.
+         *     The rows are kept (for history) and can be re-enabled individually. Tailnet
+         *     identity, if any, is untouched — detach it separately.
+         */
+        post: operations["device_disable_all_keys"];
         delete?: never;
         options?: never;
         head?: never;
@@ -839,6 +902,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/devices/reactivate_key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Re-enable a previously disabled key. */
+        post: operations["reactivate_key"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/devices/resolve_tailnet_identifier": {
         parameters: {
             query?: never;
@@ -855,27 +935,6 @@ export interface paths {
          *     hitting attach.
          */
         post: operations["resolve_tailnet_identifier"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/devices/revoke": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Revoke a device's access: deactivate its keys and detach any tailnet
-         *     identity, so it can no longer authenticate. The row and its role are kept
-         *     for history.
-         */
-        post: operations["device_revoke"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2279,6 +2338,17 @@ export interface components {
         AddArgs: {
             email: string;
         };
+        AddKeyArgs: {
+            /** Format: uuid */
+            device_id: string;
+            /** @description Display name for the key. Defaults to "Added key". */
+            name?: string | null;
+            /**
+             * @description The device's public key, PEM-encoded `SubjectPublicKeyInfo`
+             *     (`-----BEGIN PUBLIC KEY-----`). Bare base64 (no armor) is also accepted.
+             */
+            public_key_pem: string;
+        };
         AddKnownIssueArgs: {
             description: string;
             /** Format: uuid */
@@ -2649,6 +2719,11 @@ export interface components {
             device_id: string;
             /** Format: uuid */
             id: string;
+            /**
+             * @description Whether this key can currently authenticate. Inactive keys are kept for
+             *     history and can be re-enabled.
+             */
+            is_active: boolean;
             name?: string | null;
             pem_data: string;
         };
@@ -3049,6 +3124,10 @@ export interface components {
             id: string;
             /** Format: uuid */
             issue_id: string;
+        };
+        KeyIdArgs: {
+            /** Format: uuid */
+            key_id: string;
         };
         KnownIssueData: {
             author: string;
@@ -5360,6 +5439,45 @@ export interface operations {
             };
         };
     };
+    add_key: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddKeyArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceInfo"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
     attach_tailscale: {
         parameters: {
             query?: never;
@@ -5456,6 +5574,27 @@ export interface operations {
             };
         };
     };
+    deactivate_key: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KeyIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     detach_tailscale: {
         parameters: {
             query?: never;
@@ -5484,6 +5623,27 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
+            };
+        };
+    };
+    device_disable_all_keys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeviceIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -5658,6 +5818,27 @@ export interface operations {
             };
         };
     };
+    reactivate_key: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KeyIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     resolve_tailnet_identifier: {
         parameters: {
             query?: never;
@@ -5687,27 +5868,6 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
-            };
-        };
-    };
-    device_revoke: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DeviceIdArgs"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
             };
         };
     };

@@ -41,7 +41,7 @@ test.describe("provision device credentials", () => {
 		await expect(page.getByText("e2e-provisioned")).toBeVisible();
 	});
 
-	test("provision credential on an existing device adds a key", async ({
+	test("generate a new key for an existing device", async ({
 		page,
 		sql,
 	}) => {
@@ -54,7 +54,7 @@ test.describe("provision device credentials", () => {
 
 		await page.goto(`/devices/${device.id}`);
 		await page
-			.getByRole("button", { name: "Provision credential" })
+			.getByRole("button", { name: "Generate new key" })
 			.click();
 		await page.getByRole("button", { name: "Provision", exact: true }).click();
 

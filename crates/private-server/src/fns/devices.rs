@@ -73,6 +73,7 @@ impl DeviceInfo {
 	pub fn name(&self) -> String {
 		self.keys
 			.iter()
+			.filter(|key| key.is_active)
 			.filter_map(|key| {
 				key.name
 					.as_ref()
@@ -113,6 +114,9 @@ pub struct DeviceKeyInfo {
 	pub name: Option<String>,
 	pub pem_data: String,
 	pub created_at: Timestamp,
+	/// Whether this key can currently authenticate. Inactive keys are kept for
+	/// history and can be re-enabled.
+	pub is_active: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -163,6 +167,7 @@ impl From<DeviceKey> for DeviceKeyInfo {
 			name: key.name,
 			pem_data: format_key_as_pem(&key.key_data),
 			created_at: key.created_at,
+			is_active: key.is_active,
 		}
 	}
 }
@@ -200,9 +205,12 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(connection_history))
 		.routes(routes!(connection_count))
 		.routes(routes!(list_trusted))
-		.routes(routes!(revoke))
+		.routes(routes!(disable_all_keys))
 		.routes(routes!(update_role))
 		.routes(routes!(provision_credential))
+		.routes(routes!(add_key))
+		.routes(routes!(deactivate_key))
+		.routes(routes!(reactivate_key))
 		.routes(routes!(search))
 		.routes(routes!(update_key_name))
 		.routes(routes!(attach_tailscale))
@@ -398,13 +406,13 @@ pub async fn list_trusted(
 	Ok(Json(Page { items, total }))
 }
 
-/// Revoke a device's access: deactivate its keys and detach any tailnet
-/// identity, so it can no longer authenticate. The row and its role are kept
-/// for history.
+/// Disable every active key on a device, so none of them can authenticate.
+/// The rows are kept (for history) and can be re-enabled individually. Tailnet
+/// identity, if any, is untouched — detach it separately.
 #[utoipa::path(
 	post,
-	path = "/revoke",
-	operation_id = "device_revoke",
+	path = "/disable_all_keys",
+	operation_id = "device_disable_all_keys",
 	tag = "devices",
 	security(("tailscale-admin" = [])),
 	request_body = DeviceIdArgs,
@@ -412,13 +420,13 @@ pub async fn list_trusted(
 		(status = 200),
 	),
 )]
-pub async fn revoke(
+pub async fn disable_all_keys(
 	State(state): State<AppState>,
 	_admin: TailscaleAdmin,
 	Json(args): Json<DeviceIdArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
-	Device::revoke(&mut conn, args.device_id).await?;
+	Device::deactivate_keys(&mut conn, args.device_id).await?;
 	Ok(Json(()))
 }
 
@@ -562,6 +570,110 @@ pub async fn provision_credential(
 		key_age_base64,
 		passphrase,
 	}))
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct AddKeyArgs {
+	pub device_id: Uuid,
+	/// The device's public key, PEM-encoded `SubjectPublicKeyInfo`
+	/// (`-----BEGIN PUBLIC KEY-----`). Bare base64 (no armor) is also accepted.
+	pub public_key_pem: String,
+	/// Display name for the key. Defaults to "Added key".
+	#[serde(default)]
+	pub name: Option<String>,
+}
+
+/// Register an externally-generated public key as an active key on a device.
+/// Unlike `provision_credential`, Canopy never sees a private key here — the
+/// operator supplies the public half of a keypair they hold.
+#[utoipa::path(
+	post,
+	path = "/add_key",
+	tag = "devices",
+	security(("tailscale-admin" = [])),
+	request_body = AddKeyArgs,
+	responses(
+		(status = 200, body = DeviceInfo),
+		(status = 400, body = ProblemDetailsSchema),
+		(status = 404, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn add_key(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<AddKeyArgs>,
+) -> Result<Json<DeviceInfo>> {
+	use base64::Engine as _;
+
+	// Accept PEM armor or bare base64; decode to DER and validate it's an SPKI.
+	let b64: String = args
+		.public_key_pem
+		.lines()
+		.filter(|l| !l.trim_start().starts_with("-----"))
+		.collect::<Vec<_>>()
+		.join("");
+	let der = base64::engine::general_purpose::STANDARD
+		.decode(b64.trim())
+		.map_err(|e| AppError::BadRequest(format!("public key is not valid base64/PEM: {e}")))?;
+	keygen::validate_spki_der(&der)?;
+
+	let name = args
+		.name
+		.filter(|n| !n.trim().is_empty())
+		.unwrap_or_else(|| "Added key".to_string());
+
+	let mut conn = state.db.get().await?;
+	// 404s if the device doesn't exist.
+	Device::get_with_info(&mut conn, args.device_id).await?;
+	DeviceKey::create(&mut conn, args.device_id, der, Some(name)).await?;
+
+	let info = Device::get_with_info(&mut conn, args.device_id).await?;
+	Ok(Json(DeviceInfo::from_db(info, &state).await))
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct KeyIdArgs {
+	pub key_id: Uuid,
+}
+
+/// Disable a single key so it can no longer authenticate. The row is kept and
+/// can be re-enabled; disabling one key of several lets a device rotate keys
+/// with no gap (add the new key, then disable the old).
+#[utoipa::path(
+	post,
+	path = "/deactivate_key",
+	tag = "devices",
+	security(("tailscale-admin" = [])),
+	request_body = KeyIdArgs,
+	responses((status = 200)),
+)]
+pub async fn deactivate_key(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<KeyIdArgs>,
+) -> Result<Json<()>> {
+	let mut conn = state.db.get().await?;
+	DeviceKey::deactivate(&mut conn, args.key_id).await?;
+	Ok(Json(()))
+}
+
+/// Re-enable a previously disabled key.
+#[utoipa::path(
+	post,
+	path = "/reactivate_key",
+	tag = "devices",
+	security(("tailscale-admin" = [])),
+	request_body = KeyIdArgs,
+	responses((status = 200)),
+)]
+pub async fn reactivate_key(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<KeyIdArgs>,
+) -> Result<Json<()>> {
+	let mut conn = state.db.get().await?;
+	DeviceKey::reactivate(&mut conn, args.key_id).await?;
+	Ok(Json(()))
 }
 
 #[derive(Deserialize, ToSchema)]
