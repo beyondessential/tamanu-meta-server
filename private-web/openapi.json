@@ -5982,6 +5982,14 @@
               "null"
             ]
           },
+          "snapshot_logical_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Logical size of this run's snapshot as observed by canopy's own repo\ninspection, matched to the run by `snapshot_id`. Distinct from\n`bytes_uploaded` (the device's own figure); written once by inspection."
+          },
           "type": {
             "type": "string"
           }

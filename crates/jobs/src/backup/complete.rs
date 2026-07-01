@@ -110,6 +110,12 @@ pub(crate) async fn complete_inspect(
 	.await
 	.map_err(|err| err.to_string())?;
 
+	// Fill each device run's snapshot size from the repo (write-once, matched by
+	// snapshot id). The size-discrepancy check reads it back off `backup_runs`.
+	database::backups::BackupRun::backfill_snapshot_logical_bytes(db, group_id, &outcome.snapshots)
+		.await
+		.map_err(|err| err.to_string())?;
+
 	let (severity, description, active) = corruption_decision(outcome.verify_ok);
 	database::backup::alerts::raise_group_event(
 		db,
@@ -300,6 +306,7 @@ mod tests {
 						type_: Some("tamanu-postgres".into()),
 						latest_snapshot_at: None,
 					}],
+					snapshots: vec![],
 				};
 				complete_inspect(&mut conn, group_id, &outcome)
 					.await

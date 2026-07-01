@@ -2471,6 +2471,13 @@ export interface components {
             /** Format: uuid */
             server_id?: string | null;
             snapshot_id?: string | null;
+            /**
+             * Format: int64
+             * @description Logical size of this run's snapshot as observed by canopy's own repo
+             *     inspection, matched to the run by `snapshot_id`. Distinct from
+             *     `bytes_uploaded` (the device's own figure); written once by inspection.
+             */
+            snapshot_logical_bytes?: number | null;
             type: string;
         };
         BackupStatsView: {

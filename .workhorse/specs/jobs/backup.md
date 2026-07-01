@@ -42,7 +42,8 @@ Canopy periodically inspects each group's repo against the storage directly, ind
 
 - it verifies repo integrity, and a failed verification is repo corruption;
 - it inventories the repo — the latest snapshot per source — as the ground truth a device's report is reconciled against;
-- it records repo size, logical and physical, and the storage cost basis for display.
+- it records repo size, logical and physical, and the storage cost basis for display;
+- it records each snapshot's logical size and matches it to the device run that produced it by snapshot id, so the repo's own size stands in when a run reported none, and is cross-checked against the size a run did report. A snapshot's recorded size is written once, because a snapshot is immutable.
 
 ## Upstream preflight
 
@@ -56,13 +57,14 @@ Canopy reconciles three sources — what a device reported, what credentials wer
 
 - **staleness** — a server with a prior successful backup but none recent, or one that has never backed up though it has been expected long enough.
 - **reconcile** — a device reported a successful backup but no matching snapshot landed (the report is false or the upload didn't persist), or a fresh snapshot exists but no recent report (the reporting path is broken).
+- **size** — a device reported a snapshot size that disagrees with the size the same snapshot occupies in the repo; only compared when both sizes are known and non-zero.
 - **maintenance** — a group whose maintenance is overdue, or whose most recent maintenance failed.
 
 ## Alerting
 
 Backup alerts are raised at one of two scopes:
 
-- **Per-server** signals (staleness, never-backed-up, the report-gap) are subject to the server's monitoring gate: still recorded for visibility, but they contribute to an incident only when the server is monitored, because some servers are intentionally intermittent.
+- **Per-server** signals (staleness, never-backed-up, the report-gap, the size discrepancy) are subject to the server's monitoring gate: still recorded for visibility, but they contribute to an incident only when the server is monitored, because some servers are intentionally intermittent.
 - **Group-level** signals (repo corruption, maintenance failure, missing-snapshot reconciliation, preflight failures, and restore-verification — see the managed restore replicas spec, `RST`) page regardless of any member's monitoring state, because they are control-plane or data-safety concerns that belong to no single server.
 
 Each signal has a stable key by which operators silence or snooze it and by which the interface and notifications refer to it; the keys are a contract and are not renamed without migrating stored silences.

@@ -410,6 +410,7 @@ export async function seedBackupRun(
 		error?: string | null;
 		bytesUploaded?: number | null;
 		snapshotId?: string | null;
+		snapshotLogicalBytes?: number | null;
 		s3SentRawBytes?: number | null;
 		s3SentPayloadBytes?: number | null;
 		s3ReceivedRawBytes?: number | null;
@@ -420,8 +421,9 @@ export async function seedBackupRun(
 	await sql.query(
 		`INSERT INTO backup_runs
 		 (id, device_id, group_id, server_id, type, purpose, outcome, error, bytes_uploaded, snapshot_id,
-		  s3_sent_raw_bytes, s3_sent_payload_bytes, s3_received_raw_bytes, s3_received_payload_bytes)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+		  s3_sent_raw_bytes, s3_sent_payload_bytes, s3_received_raw_bytes, s3_received_payload_bytes,
+		  snapshot_logical_bytes)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
 		[
 			id,
 			opts.deviceId,
@@ -437,6 +439,7 @@ export async function seedBackupRun(
 			opts.s3SentPayloadBytes ?? null,
 			opts.s3ReceivedRawBytes ?? null,
 			opts.s3ReceivedPayloadBytes ?? null,
+			opts.snapshotLogicalBytes ?? null,
 		],
 	);
 	return { id };

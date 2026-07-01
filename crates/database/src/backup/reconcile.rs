@@ -15,6 +15,13 @@
 //! - **neither** → genuinely stale; the staleness scan already owns it, emit
 //!   nothing.
 //!
+//! Independently, per `(server, type)`, the latest run that carries both a
+//! device-reported size and an inspection-observed size is compared:
+//!
+//! - **sizes disagree** (both non-zero) → `backup-reconcile-size-mismatch`
+//!   (`Warning`, per-server, non-paging). The device reported a snapshot size
+//!   that doesn't match what the repo holds.
+//!
 //! Freshness guard: if the repo inventory for the group is itself stale (its
 //! `observed_at` older than [`INVENTORY_STALE_AFTER`]), the "missing" verdict
 //! is skipped — a lagging inspector must not produce false "report lied"
@@ -66,6 +73,15 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 		s.drain().collect()
 	};
 	let snaps = snapshot_info(db, &group_ids).await?;
+
+	// Latest comparable (reported, observed) sizes per (server, type). A server
+	// belongs to one group, so keys don't collide across groups.
+	let mut sized: HashMap<(Uuid, BackupType), (i64, i64)> = HashMap::new();
+	for gid in &group_ids {
+		sized.extend(
+			crate::backups::BackupRun::latest_sized_by_server_type_for_group(db, *gid).await?,
+		);
+	}
 
 	let mut filed = 0usize;
 	for row in rows {
@@ -153,8 +169,64 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 			// verdict.
 			(true, false) => {}
 		}
+
+		// Size discrepancy: orthogonal to freshness. Compare the latest run that
+		// has both a reported and an observed size.
+		let size_ref = format!("{}:{}", refs::RECONCILE_SIZE_MISMATCH, row.r#type);
+		match sized.get(&(row.server_id, row.r#type.clone())) {
+			Some(&(reported, observed)) if reported != observed => {
+				let server = Server::get_by_id(db, row.server_id).await?;
+				NewEvent {
+					source: refs::CANOPY_SOURCE.into(),
+					r#ref: size_ref,
+					severity: Some(Severity::Warning),
+					description: None,
+					message: format!(
+						"Server {} reported a {} snapshot size of {reported} bytes but the repo holds {observed}",
+						server.id, row.r#type,
+					),
+					active: Some(true),
+					occurred_at: Some(now),
+				}
+				.save(db, row.server_id, row.device_id)
+				.await?;
+				filed += 1;
+			}
+			// Agree, or no comparable run → clear any open mismatch.
+			_ => {
+				filed += clear_size_mismatch(db, row, &size_ref, now).await?;
+			}
+		}
 	}
 	Ok(filed)
+}
+
+/// Clear an open per-server size-mismatch issue when the sizes agree again (or
+/// there's no longer a comparable run to disagree).
+async fn clear_size_mismatch(
+	db: &mut AsyncPgConnection,
+	row: &ScanRow,
+	size_ref: &str,
+	now: Timestamp,
+) -> Result<usize> {
+	if !crate::backup::staleness::open_server_issue_active(db, row.server_id, size_ref).await? {
+		return Ok(0);
+	}
+	NewEvent {
+		source: refs::CANOPY_SOURCE.into(),
+		r#ref: size_ref.to_string(),
+		severity: Some(Severity::Info),
+		description: None,
+		message: format!(
+			"Reported and repo {} snapshot sizes for {} agree again",
+			row.r#type, row.server_id
+		),
+		active: Some(false),
+		occurred_at: Some(now),
+	}
+	.save(db, row.server_id, row.device_id)
+	.await?;
+	Ok(1)
 }
 
 /// Clear an open per-server report-gap issue when the report path is healthy
