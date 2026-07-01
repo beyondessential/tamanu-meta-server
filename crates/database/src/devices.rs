@@ -447,11 +447,12 @@ impl Device {
 			.await
 			.map_err(AppError::from)?;
 
+		// All keys, active and inactive — the detail view shows disabled keys
+		// (greyed, re-enableable), active first then oldest-first.
 		let keys: Vec<DeviceKey> = device_keys::table
 			.select(DeviceKey::as_select())
 			.filter(device_keys::device_id.eq(device_id))
-			.filter(device_keys::is_active.eq(true))
-			.order(device_keys::created_at.asc())
+			.order((device_keys::is_active.desc(), device_keys::created_at.asc()))
 			.load(db)
 			.await
 			.map_err(AppError::from)?;
@@ -1152,6 +1153,21 @@ impl DeviceKey {
 
 		diesel::update(dsl::device_keys.filter(dsl::id.eq(key_id)))
 			.set(dsl::is_active.eq(false))
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+
+		Ok(())
+	}
+
+	/// Re-enable a previously deactivated key. The inverse of [`deactivate`];
+	/// used by the operator's per-key controls to undo a disable (e.g. during a
+	/// botched rotation).
+	pub async fn reactivate(db: &mut AsyncPgConnection, key_id: Uuid) -> Result<()> {
+		use crate::schema::device_keys::dsl;
+
+		diesel::update(dsl::device_keys.filter(dsl::id.eq(key_id)))
+			.set(dsl::is_active.eq(true))
 			.execute(db)
 			.await
 			.map_err(AppError::from)?;

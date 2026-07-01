@@ -2,6 +2,7 @@ import {
 	Alert,
 	Box,
 	Button,
+	Chip,
 	IconButton,
 	LinearProgress,
 	MenuItem,
@@ -19,6 +20,7 @@ import ServerShorty, {
 } from "../components/ServerShorty";
 import TailnetIdentitySection from "../components/TailnetIdentitySection";
 import ProvisionCredentialDialog from "../components/ProvisionCredentialDialog";
+import AddPublicKeyDialog from "../components/AddPublicKeyDialog";
 import { type ApiState, callApi, useApi, useApiAction } from "../api";
 import { deviceDisplayName } from "../components/DeviceShorty";
 import TimeAgo from "../components/TimeAgo";
@@ -140,16 +142,98 @@ function KeysBox({
 	device: DeviceInfo;
 	refresh: () => void;
 }) {
+	const [generateOpen, setGenerateOpen] = useState(false);
+	const [addOpen, setAddOpen] = useState(false);
+	const [confirmDisableAll, setConfirmDisableAll] = useState(false);
+	const disableAll = useApiAction("devices", "disable_all_keys");
+	const hasActiveKey = device.keys.some((k) => k.is_active);
+
+	const onDisableAll = async () => {
+		try {
+			await disableAll.call({ device_id: device.device.id });
+			setConfirmDisableAll(false);
+			refresh();
+		} catch {
+			/* surfaced via disableAll.error */
+		}
+	};
+
 	return (
 		<Paper variant="outlined" sx={{ p: 2 }}>
-			<Typography variant="h6" component="h2" gutterBottom>
-				Public Keys ({device.keys.length})
-			</Typography>
+			<Stack
+				direction="row"
+				spacing={1}
+				useFlexGap
+				sx={{
+					alignItems: "center",
+					justifyContent: "space-between",
+					flexWrap: "wrap",
+					mb: 1,
+				}}
+			>
+				<Typography variant="h6" component="h2">
+					Public Keys ({device.keys.length})
+				</Typography>
+				<Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
+					<Button variant="outlined" onClick={() => setAddOpen(true)}>
+						Add from public key
+					</Button>
+					<Button variant="contained" onClick={() => setGenerateOpen(true)}>
+						Generate new key
+					</Button>
+					{hasActiveKey &&
+						(confirmDisableAll ? (
+							<>
+								<Button
+									variant="contained"
+									color="error"
+									onClick={onDisableAll}
+									disabled={disableAll.pending}
+								>
+									{disableAll.pending ? "Disabling…" : "Confirm disable all"}
+								</Button>
+								<Button
+									variant="outlined"
+									onClick={() => setConfirmDisableAll(false)}
+									disabled={disableAll.pending}
+								>
+									Cancel
+								</Button>
+							</>
+						) : (
+							<Button
+								variant="outlined"
+								color="error"
+								onClick={() => setConfirmDisableAll(true)}
+							>
+								Disable all keys
+							</Button>
+						))}
+				</Stack>
+			</Stack>
+			{disableAll.error && (
+				<Alert severity="error" sx={{ mb: 1 }}>
+					{disableAll.error.message}
+				</Alert>
+			)}
 			<Stack spacing={2}>
 				{device.keys.map((k) => (
 					<KeyRow key={k.id} keyData={k} onSaved={refresh} />
 				))}
 			</Stack>
+			<ProvisionCredentialDialog
+				open={generateOpen}
+				onClose={() => setGenerateOpen(false)}
+				deviceId={device.device.id}
+				role={device.device.role}
+				onProvisioned={refresh}
+			/>
+			<AddPublicKeyDialog
+				open={addOpen}
+				onClose={() => setAddOpen(false)}
+				deviceId={device.device.id}
+				onAdded={refresh}
+			/>
 		</Paper>
 	);
 }
@@ -164,6 +248,9 @@ function KeyRow({
 	const [editing, setEditing] = useState(false);
 	const [name, setName] = useState(keyData.name ?? "");
 	const action = useApiAction("devices", "update_key_name");
+	const disable = useApiAction("devices", "deactivate_key");
+	const enable = useApiAction("devices", "reactivate_key");
+	const toggling = disable.pending || enable.pending;
 
 	const save = async () => {
 		const trimmed = name.trim();
@@ -179,8 +266,18 @@ function KeyRow({
 		}
 	};
 
+	const onToggleActive = async () => {
+		try {
+			if (keyData.is_active) await disable.call({ key_id: keyData.id });
+			else await enable.call({ key_id: keyData.id });
+			onSaved();
+		} catch {
+			/* surfaced via disable/enable.error */
+		}
+	};
+
 	return (
-		<Box>
+		<Box sx={{ opacity: keyData.is_active ? 1 : 0.55 }}>
 			{editing ? (
 				<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
 					<TextField
@@ -216,21 +313,43 @@ function KeyRow({
 					spacing={1}
 					sx={{ alignItems: "center", justifyContent: "space-between" }}
 				>
-					<Typography variant="subtitle1">
-						{keyData.name ?? "Unnamed key"}
-					</Typography>
-					<IconButton
-						aria-label={`edit name for ${keyData.name ?? "key"}`}
-						size="small"
-						onClick={() => setEditing(true)}
-					>
-						<EditIcon fontSize="small" />
-					</IconButton>
+					<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+						<Typography variant="subtitle1">
+							{keyData.name ?? "Unnamed key"}
+						</Typography>
+						{!keyData.is_active && (
+							<Chip size="small" label="disabled" color="default" />
+						)}
+					</Stack>
+					<Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
+						<Button
+							size="small"
+							variant="outlined"
+							color={keyData.is_active ? "error" : "primary"}
+							onClick={onToggleActive}
+							disabled={toggling}
+						>
+							{keyData.is_active
+								? disable.pending
+									? "Disabling…"
+									: "Disable"
+								: enable.pending
+									? "Enabling…"
+									: "Enable"}
+						</Button>
+						<IconButton
+							aria-label={`edit name for ${keyData.name ?? "key"}`}
+							size="small"
+							onClick={() => setEditing(true)}
+						>
+							<EditIcon fontSize="small" />
+						</IconButton>
+					</Stack>
 				</Stack>
 			)}
-			{action.error && (
+			{(action.error || disable.error || enable.error) && (
 				<Alert severity="error" sx={{ mt: 1 }}>
-					{action.error.message}
+					{(action.error ?? disable.error ?? enable.error)?.message}
 				</Alert>
 			)}
 			<Box
@@ -260,11 +379,7 @@ function RoleControls({
 }) {
 	const role = device.device.role;
 	const updateRoleAction = useApiAction("devices", "update_role");
-	const revokeAction = useApiAction("devices", "revoke");
-
 	const [selected, setSelected] = useState<DeviceRole>(role);
-	const [confirmRevoke, setConfirmRevoke] = useState(false);
-	const [provisionOpen, setProvisionOpen] = useState(false);
 
 	const onSave = async () => {
 		try {
@@ -278,101 +393,36 @@ function RoleControls({
 		}
 	};
 
-	const onRevoke = async () => {
-		try {
-			await revokeAction.call({ device_id: device.device.id });
-			setConfirmRevoke(false);
-			refresh();
-		} catch {
-			/* surfaced via revokeAction.error */
-		}
-	};
-
-	const pending = revokeAction.pending || updateRoleAction.pending;
-
 	return (
 		<Paper variant="outlined" sx={{ p: 2 }}>
-			<Stack
-				direction="row"
-				spacing={2}
-				sx={{ alignItems: "center", justifyContent: "space-between" }}
-				useFlexGap
-			>
-				<Stack
-					direction="row"
-					spacing={1}
-					sx={{ alignItems: "center" }}
+			<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+				<Typography variant="body2">Role:</Typography>
+				<TextField
+					select
+					size="small"
+					value={selected}
+					onChange={(e) => setSelected(e.target.value as DeviceRole)}
+					disabled={updateRoleAction.pending}
 				>
-					<Typography variant="body2">Role:</Typography>
-					<TextField
-						select
-						size="small"
-						value={selected}
-						onChange={(e) => setSelected(e.target.value as DeviceRole)}
-						disabled={pending}
-					>
-						{TRUSTABLE_ROLES.map((r) => (
-							<MenuItem key={r} value={r}>
-								{r}
-							</MenuItem>
-						))}
-					</TextField>
-					<Button
-						variant="contained"
-						onClick={onSave}
-						disabled={pending || selected === role}
-					>
-						{updateRoleAction.pending ? "Saving…" : "Save"}
-					</Button>
-				</Stack>
-				<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-					<Button
-						variant="outlined"
-						onClick={() => setProvisionOpen(true)}
-					>
-						Provision credential
-					</Button>
-					{confirmRevoke ? (
-						<Stack direction="row" spacing={1}>
-							<Button
-								variant="contained"
-								color="error"
-								onClick={onRevoke}
-								disabled={pending}
-							>
-								{revokeAction.pending ? "Revoking…" : "Confirm revoke"}
-							</Button>
-							<Button
-								variant="outlined"
-								onClick={() => setConfirmRevoke(false)}
-								disabled={pending}
-							>
-								Cancel
-							</Button>
-						</Stack>
-					) : (
-						<Button
-							variant="outlined"
-							color="error"
-							onClick={() => setConfirmRevoke(true)}
-						>
-							Revoke access
-						</Button>
-					)}
-				</Stack>
+					{TRUSTABLE_ROLES.map((r) => (
+						<MenuItem key={r} value={r}>
+							{r}
+						</MenuItem>
+					))}
+				</TextField>
+				<Button
+					variant="contained"
+					onClick={onSave}
+					disabled={updateRoleAction.pending || selected === role}
+				>
+					{updateRoleAction.pending ? "Saving…" : "Save"}
+				</Button>
 			</Stack>
-			{(revokeAction.error || updateRoleAction.error) && (
+			{updateRoleAction.error && (
 				<Alert severity="error" sx={{ mt: 1 }}>
-					{(revokeAction.error ?? updateRoleAction.error)?.message}
+					{updateRoleAction.error.message}
 				</Alert>
 			)}
-			<ProvisionCredentialDialog
-				open={provisionOpen}
-				onClose={() => setProvisionOpen(false)}
-				deviceId={device.device.id}
-				role={role}
-				onProvisioned={refresh}
-			/>
 		</Paper>
 	);
 }

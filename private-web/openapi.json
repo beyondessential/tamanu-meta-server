@@ -1572,6 +1572,62 @@
         }
       }
     },
+    "/api/devices/add_key": {
+      "post": {
+        "tags": [
+          "devices"
+        ],
+        "summary": "Register an externally-generated public key as an active key on a device.\nUnlike `provision_credential`, Canopy never sees a private key here — the\noperator supplies the public half of a keypair they hold.",
+        "operationId": "add_key",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddKeyArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/devices/attach_tailscale": {
       "post": {
         "tags": [
@@ -1712,6 +1768,35 @@
         ]
       }
     },
+    "/api/devices/deactivate_key": {
+      "post": {
+        "tags": [
+          "devices"
+        ],
+        "summary": "Disable a single key so it can no longer authenticate. The row is kept and\ncan be re-enabled; disabling one key of several lets a device rotate keys\nwith no gap (add the new key, then disable the old).",
+        "operationId": "deactivate_key",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KeyIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/devices/detach_tailscale": {
       "post": {
         "tags": [
@@ -1748,6 +1833,35 @@
                 }
               }
             }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/devices/disable_all_keys": {
+      "post": {
+        "tags": [
+          "devices"
+        ],
+        "summary": "Disable every active key on a device, so none of them can authenticate.\nThe rows are kept (for history) and can be re-enabled individually. Tailnet\nidentity, if any, is untouched — detach it separately.",
+        "operationId": "device_disable_all_keys",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
           }
         },
         "security": [
@@ -2014,6 +2128,35 @@
         ]
       }
     },
+    "/api/devices/reactivate_key": {
+      "post": {
+        "tags": [
+          "devices"
+        ],
+        "summary": "Re-enable a previously disabled key.",
+        "operationId": "reactivate_key",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KeyIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/devices/resolve_tailnet_identifier": {
       "post": {
         "tags": [
@@ -2051,35 +2194,6 @@
                 }
               }
             }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
-    "/api/devices/revoke": {
-      "post": {
-        "tags": [
-          "devices"
-        ],
-        "summary": "Revoke a device's access: deactivate its keys and detach any tailnet\nidentity, so it can no longer authenticate. The row and its role are kept\nfor history.",
-        "operationId": "device_revoke",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DeviceIdArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": ""
           }
         },
         "security": [
@@ -5425,6 +5539,30 @@
           }
         }
       },
+      "AddKeyArgs": {
+        "type": "object",
+        "required": [
+          "device_id",
+          "public_key_pem"
+        ],
+        "properties": {
+          "device_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Display name for the key. Defaults to \"Added key\"."
+          },
+          "public_key_pem": {
+            "type": "string",
+            "description": "The device's public key, PEM-encoded `SubjectPublicKeyInfo`\n(`-----BEGIN PUBLIC KEY-----`). Bare base64 (no armor) is also accepted."
+          }
+        }
+      },
       "AddKnownIssueArgs": {
         "type": "object",
         "required": [
@@ -6537,7 +6675,8 @@
           "id",
           "device_id",
           "pem_data",
-          "created_at"
+          "created_at",
+          "is_active"
         ],
         "properties": {
           "created_at": {
@@ -6551,6 +6690,10 @@
           "id": {
             "type": "string",
             "format": "uuid"
+          },
+          "is_active": {
+            "type": "boolean",
+            "description": "Whether this key can currently authenticate. Inactive keys are kept for\nhistory and can be re-enabled."
           },
           "name": {
             "type": [
@@ -7501,6 +7644,18 @@
             "format": "uuid"
           },
           "issue_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "KeyIdArgs": {
+        "type": "object",
+        "required": [
+          "key_id"
+        ],
+        "properties": {
+          "key_id": {
             "type": "string",
             "format": "uuid"
           }

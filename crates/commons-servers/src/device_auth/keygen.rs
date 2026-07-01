@@ -65,3 +65,13 @@ pub fn generate_device_key() -> Result<GeneratedDeviceKey> {
 		fingerprint,
 	})
 }
+
+/// Validate that `der` parses as a `SubjectPublicKeyInfo` — the public-key form
+/// device keys are stored as and mTLS auth matches against. Used when an
+/// operator registers a key from an externally-generated public key rather than
+/// having Canopy mint it.
+pub fn validate_spki_der(der: &[u8]) -> Result<()> {
+	SubjectPublicKeyInfo::from_der(der)
+		.map(|_| ())
+		.map_err(|e| AppError::BadRequest(format!("not a valid public key: {e}")))
+}

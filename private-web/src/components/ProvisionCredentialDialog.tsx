@@ -106,7 +106,7 @@ export default function ProvisionCredentialDialog({
 	return (
 		<Dialog open={open} onClose={close} fullWidth maxWidth="sm">
 			<DialogTitle>
-				{deviceId ? "Provision credential" : "Create device"}
+				{deviceId ? "Generate new key" : "Create device"}
 			</DialogTitle>
 			<DialogContent>
 				{result ? (

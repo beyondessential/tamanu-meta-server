@@ -171,7 +171,11 @@ async fn test_revoke_device() {
 		Device::revoke(&mut conn, device.id).await.unwrap();
 
 		let info = Device::get_with_info(&mut conn, device.id).await.unwrap();
-		assert!(info.keys.is_empty(), "active keys cleared");
+		// Keys are kept for history but deactivated — none can authenticate.
+		assert!(
+			info.keys.iter().all(|k| !k.is_active),
+			"all keys deactivated",
+		);
 		assert!(
 			info.device.tailscale_node_id.is_none(),
 			"tailnet identity detached",
