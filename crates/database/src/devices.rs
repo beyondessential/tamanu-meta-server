@@ -571,8 +571,7 @@ impl Device {
 	/// Revoke a device's access: deactivate its keys and detach any tailnet
 	/// identity, so it can no longer authenticate by either path. The row is
 	/// kept (with its role) for history; re-granting access means provisioning
-	/// a fresh credential or re-enrolling. Replaces the old "untrust" action now
-	/// that there is no untrusted role.
+	/// a fresh credential or re-enrolling.
 	pub async fn revoke(db: &mut AsyncPgConnection, device_id: Uuid) -> Result<()> {
 		db.transaction::<_, AppError, _>(async |conn| {
 			Self::deactivate_keys(conn, device_id).await?;

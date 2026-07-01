@@ -1,11 +1,9 @@
 //! mTLS path of the device-auth extractor. Reads a client certificate
 //! from one of the supported headers, derives a stable public-key blob,
-//! and resolves it to an existing trusted [`Device`] row.
+//! and resolves it to an existing [`Device`] row.
 //!
-//! First-contact auto-creation was deliberately removed: a device row is
-//! born only through the gated enrollment flow (`/servers/register/*`), so
-//! merely connecting once from the internet can no longer mint an `Untrusted`
-//! device. An unknown key here is `AuthCertificateNotFound`.
+//! A device row is created only through the gated enrollment flow
+//! (`/servers/register/*`); an unknown key here is `AuthCertificateNotFound`.
 
 use commons_errors::{AppError, Result};
 use database::devices::Device;

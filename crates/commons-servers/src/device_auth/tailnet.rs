@@ -49,10 +49,9 @@ pub async fn resolve(
 		return Err(AppError::AuthTailnetNodeNotPermitted);
 	}
 
-	// A tailnet node is only ever a device once an operator has provisioned or
-	// attached it. An unknown node is not auto-created — it simply fails to
-	// authenticate (the caller maps `None` to an auth error). This avoids
-	// minting inert placeholder rows for every node that touches the tunnel.
+	// A tailnet node is a device only once an operator has provisioned or
+	// attached it. An unknown node fails to authenticate: the caller maps
+	// `None` to an auth error.
 	let Some(device) = Device::from_tailscale_node_id(db, &entry.node_id).await? else {
 		return Ok(None);
 	};
