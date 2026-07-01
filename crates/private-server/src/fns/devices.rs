@@ -566,8 +566,8 @@ pub async fn provision_credential(
 	use base64::Engine as _;
 
 	if args.role == DeviceRole::Untrusted {
-		return Err(AppError::custom(
-			"cannot provision a credential at the untrusted role",
+		return Err(AppError::BadRequest(
+			"cannot provision a credential at the untrusted role".into(),
 		));
 	}
 
