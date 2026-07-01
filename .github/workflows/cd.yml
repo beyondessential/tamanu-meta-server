@@ -104,7 +104,7 @@ jobs:
             type=raw,value=latest
             type=raw,value=${{ steps.tag.outputs.value }}
           labels: |
-            org.opencontainers.image.vendor=BES
+            org.opencontainers.image.vendor=BES International
             org.opencontainers.image.title=Canopy
             org.opencontainers.image.url=https://www.bes.au/products/tamanu/
             org.opencontainers.image.source=https://github.com/beyondessential/canopy/
