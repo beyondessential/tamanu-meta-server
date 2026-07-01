@@ -280,36 +280,20 @@ where
 	}
 }
 
-/// What a managed restore replica is for. Open by design, mirroring
-/// [`BackupType`]: a restore consumer advertises the intents it can satisfy and
-/// Canopy preserves any it does not model in `Custom` rather than rejecting it.
-/// Stored as `TEXT`; serializes as a plain string (no DB `CHECK`).
+/// What a managed restore replica is for. Fully open: a restore consumer
+/// advertises the intents it can satisfy and Canopy stores and dispatches them
+/// verbatim, never branching on any particular value. Stored as `TEXT`;
+/// serializes as a plain string (no DB `CHECK`). Well-known intents (`verify`,
+/// `analytics`, `disaster-recovery`) are documented in the restore-replicas
+/// spec, not enforced here.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, AsExpression, FromSqlRow)]
 #[diesel(sql_type = Text)]
-pub enum RestoreIntent {
-	/// A transient replica restored only to prove the snapshot is restorable.
-	Verify,
-	/// A persistent replica kept running for querying.
-	Analytics,
-	/// A periodic rehearsal of the full recovery path.
-	DisasterRecovery,
-	/// Any other intent name, preserved as advertised.
-	Custom(String),
-}
+pub struct RestoreIntent(pub String);
 
 impl RestoreIntent {
-	const VERIFY: &'static str = "verify";
-	const ANALYTICS: &'static str = "analytics";
-	const DISASTER_RECOVERY: &'static str = "disaster-recovery";
-
 	/// The wire/DB string for this intent.
 	pub fn as_str(&self) -> &str {
-		match self {
-			Self::Verify => Self::VERIFY,
-			Self::Analytics => Self::ANALYTICS,
-			Self::DisasterRecovery => Self::DISASTER_RECOVERY,
-			Self::Custom(s) => s,
-		}
+		&self.0
 	}
 }
 
@@ -321,12 +305,7 @@ impl Display for RestoreIntent {
 
 impl From<String> for RestoreIntent {
 	fn from(s: String) -> Self {
-		match s.as_str() {
-			Self::VERIFY => Self::Verify,
-			Self::ANALYTICS => Self::Analytics,
-			Self::DISASTER_RECOVERY => Self::DisasterRecovery,
-			_ => Self::Custom(s),
-		}
+		Self(s)
 	}
 }
 
@@ -345,10 +324,7 @@ impl FromStr for RestoreIntent {
 
 impl From<RestoreIntent> for String {
 	fn from(v: RestoreIntent) -> Self {
-		match v {
-			RestoreIntent::Custom(s) => s,
-			other => other.as_str().to_owned(),
-		}
+		v.0
 	}
 }
 
@@ -429,6 +405,24 @@ mod tests {
 		assert_eq!(
 			serde_json::from_str::<BackupType>("\"custom-x\"").unwrap(),
 			BackupType::Custom("custom-x".into()),
+		);
+	}
+
+	#[test]
+	fn restore_intent_is_an_open_string() {
+		assert_eq!(RestoreIntent::from("verify").to_string(), "verify");
+		assert_eq!(
+			RestoreIntent::from("anything-goes").as_str(),
+			"anything-goes"
+		);
+		// Round-trips through the wire as a plain string.
+		assert_eq!(
+			serde_json::to_string(&RestoreIntent::from("verify")).unwrap(),
+			"\"verify\""
+		);
+		assert_eq!(
+			serde_json::from_str::<RestoreIntent>("\"custom-x\"").unwrap(),
+			RestoreIntent::from("custom-x"),
 		);
 	}
 }

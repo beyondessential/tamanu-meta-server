@@ -123,12 +123,18 @@ async fn create_list_get_roundtrip() {
 
 		let created = RestoreReplica::create(
 			&mut conn,
-			new_replica(consumer, group, None, RestoreIntent::Verify, "verify-all"),
+			new_replica(
+				consumer,
+				group,
+				None,
+				RestoreIntent::from("verify"),
+				"verify-all",
+			),
 		)
 		.await
 		.expect("create");
 		assert_eq!(created.name, "verify-all");
-		assert_eq!(created.intent, RestoreIntent::Verify);
+		assert_eq!(created.intent, RestoreIntent::from("verify"));
 		assert!(created.enabled, "new declarations default to enabled");
 		assert_eq!(created.created_by.as_deref(), Some("op@example.com"));
 
@@ -162,7 +168,13 @@ async fn duplicate_scope_conflicts_but_server_scope_is_separate() {
 
 		RestoreReplica::create(
 			&mut conn,
-			new_replica(consumer, group, None, RestoreIntent::Verify, "group-wide"),
+			new_replica(
+				consumer,
+				group,
+				None,
+				RestoreIntent::from("verify"),
+				"group-wide",
+			),
 		)
 		.await
 		.expect("group-wide");
@@ -170,7 +182,7 @@ async fn duplicate_scope_conflicts_but_server_scope_is_separate() {
 		// Same (consumer, group, type, intent) group-wide scope → 409.
 		let dup = RestoreReplica::create(
 			&mut conn,
-			new_replica(consumer, group, None, RestoreIntent::Verify, "dup"),
+			new_replica(consumer, group, None, RestoreIntent::from("verify"), "dup"),
 		)
 		.await;
 		assert!(matches!(dup, Err(AppError::Conflict(_))), "got {dup:?}");
@@ -182,7 +194,7 @@ async fn duplicate_scope_conflicts_but_server_scope_is_separate() {
 				consumer,
 				group,
 				Some(server),
-				RestoreIntent::Verify,
+				RestoreIntent::from("verify"),
 				"server-scoped",
 			),
 		)
@@ -199,7 +211,7 @@ async fn update_and_delete() {
 		let group = insert_group(&mut conn, "g").await;
 		let r = RestoreReplica::create(
 			&mut conn,
-			new_replica(consumer, group, None, RestoreIntent::Verify, "n"),
+			new_replica(consumer, group, None, RestoreIntent::from("verify"), "n"),
 		)
 		.await
 		.expect("create");
@@ -252,7 +264,7 @@ async fn authorizes_only_with_enabled_matching_declaration() {
 
 		let r = RestoreReplica::create(
 			&mut conn,
-			new_replica(consumer, group, None, RestoreIntent::Verify, "n"),
+			new_replica(consumer, group, None, RestoreIntent::from("verify"), "n"),
 		)
 		.await
 		.expect("create");
@@ -298,7 +310,10 @@ async fn capability_register_replaces_set() {
 		RestoreConsumerCapability::register(
 			&mut conn,
 			consumer,
-			&[RestoreIntent::Verify, RestoreIntent::Analytics],
+			&[
+				RestoreIntent::from("verify"),
+				RestoreIntent::from("analytics"),
+			],
 		)
 		.await
 		.expect("register");
@@ -306,14 +321,23 @@ async fn capability_register_replaces_set() {
 			.await
 			.expect("list");
 		got.sort_by_key(|i| i.to_string());
-		assert_eq!(got, vec![RestoreIntent::Analytics, RestoreIntent::Verify]);
+		assert_eq!(
+			got,
+			vec![
+				RestoreIntent::from("analytics"),
+				RestoreIntent::from("verify")
+			]
+		);
 
 		// Re-register a different set: verify is kept, analytics dropped,
 		// disaster-recovery added.
 		RestoreConsumerCapability::register(
 			&mut conn,
 			consumer,
-			&[RestoreIntent::Verify, RestoreIntent::DisasterRecovery],
+			&[
+				RestoreIntent::from("verify"),
+				RestoreIntent::from("disaster-recovery"),
+			],
 		)
 		.await
 		.expect("re-register");
@@ -323,7 +347,10 @@ async fn capability_register_replaces_set() {
 		got.sort_by_key(|i| i.to_string());
 		assert_eq!(
 			got,
-			vec![RestoreIntent::DisasterRecovery, RestoreIntent::Verify]
+			vec![
+				RestoreIntent::from("disaster-recovery"),
+				RestoreIntent::from("verify")
+			]
 		);
 
 		// Empty set clears all capabilities.
@@ -352,7 +379,7 @@ async fn record_report_raises_then_recovers() {
 				consumer,
 				group,
 				server,
-				RestoreIntent::Verify,
+				RestoreIntent::from("verify"),
 				RunOutcome::Failure,
 				false,
 			),
@@ -368,7 +395,7 @@ async fn record_report_raises_then_recovers() {
 				consumer,
 				group,
 				server,
-				RestoreIntent::Verify,
+				RestoreIntent::from("verify"),
 				RunOutcome::Success,
 				true,
 			),
@@ -394,7 +421,7 @@ async fn record_report_unhealthy_success_still_raises() {
 				consumer,
 				group,
 				server,
-				RestoreIntent::Verify,
+				RestoreIntent::from("verify"),
 				RunOutcome::Success,
 				false,
 			),
@@ -414,12 +441,18 @@ async fn sweep_overdue_raises_for_stale_replica_but_skips_gaps() {
 		insert_server(&mut conn, group).await;
 
 		// Consumer supports only `verify`.
-		RestoreConsumerCapability::register(&mut conn, consumer, &[RestoreIntent::Verify])
+		RestoreConsumerCapability::register(&mut conn, consumer, &[RestoreIntent::from("verify")])
 			.await
 			.expect("register caps");
 
 		// A supported, freshness-bound declaration with no healthy check → overdue.
-		let mut verify = new_replica(consumer, group, None, RestoreIntent::Verify, "verify-all");
+		let mut verify = new_replica(
+			consumer,
+			group,
+			None,
+			RestoreIntent::from("verify"),
+			"verify-all",
+		);
 		verify.freshness = Some(PgDuration(SignedDuration::from_secs(3600)));
 		RestoreReplica::create(&mut conn, verify)
 			.await
@@ -430,7 +463,7 @@ async fn sweep_overdue_raises_for_stale_replica_but_skips_gaps() {
 			consumer,
 			group,
 			None,
-			RestoreIntent::Analytics,
+			RestoreIntent::from("analytics"),
 			"analytics-all",
 		);
 		analytics.freshness = Some(PgDuration(SignedDuration::from_secs(3600)));
