@@ -191,7 +191,7 @@ export default function HealthcheckDetail() {
 		<Stack spacing={2}>
 			<Box>
 				<Typography variant="body2" color="text.secondary">
-					<RouterLink to="/healthchecks">← All healthchecks</RouterLink>
+					<RouterLink to="/settings/healthchecks">← All healthchecks</RouterLink>
 				</Typography>
 				<Typography variant="h6" component="h2" sx={{ fontFamily: "monospace" }}>
 					{checkName}

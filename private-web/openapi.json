@@ -3283,6 +3283,16 @@
           "restore_replicas"
         ],
         "operationId": "restore_replicas_checks",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupArgs"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "",
@@ -3432,34 +3442,6 @@
           },
           "required": true
         },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/RestoreReplicaView"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-user": []
-          }
-        ]
-      }
-    },
-    "/api/restore_replicas/list": {
-      "post": {
-        "tags": [
-          "restore_replicas"
-        ],
-        "operationId": "restore_replicas_list",
         "responses": {
           "200": {
             "description": "",

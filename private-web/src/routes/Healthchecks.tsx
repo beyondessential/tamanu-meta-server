@@ -150,13 +150,13 @@ function HealthcheckRow({
 	return (
 		<TableRow hover>
 			<TableCell sx={{ fontFamily: "monospace" }}>
-				<RouterLink to={`/healthchecks/${row.check_name}`}>{row.check_name}</RouterLink>
+				<RouterLink to={`/settings/healthchecks/${row.check_name}`}>{row.check_name}</RouterLink>
 			</TableCell>
 			<TableCell>
 				{hasRules ? (
 					<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
 						<Typography variant="body2">
-							<RouterLink to={`/healthchecks/${row.check_name}`}>
+							<RouterLink to={`/settings/healthchecks/${row.check_name}`}>
 								Custom rules ({row.rule_count})
 							</RouterLink>
 						</Typography>
@@ -196,7 +196,7 @@ function HealthcheckRow({
 						)}
 						<Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
 							·{" "}
-							<RouterLink to={`/healthchecks/${row.check_name}`}>
+							<RouterLink to={`/settings/healthchecks/${row.check_name}`}>
 								Add custom rules
 							</RouterLink>
 						</Typography>

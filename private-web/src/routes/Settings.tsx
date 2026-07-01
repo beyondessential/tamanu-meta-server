@@ -6,16 +6,29 @@ import { Outlet, useLocation, useNavigate } from "react-router-dom";
 const TABS: Array<{ value: string; label: string; to: string }> = [
 	{ value: "admins", label: "Admins", to: "/settings/admins" },
 	{
+		value: "healthchecks",
+		label: "Healthchecks",
+		to: "/settings/healthchecks",
+	},
+	{
 		value: "backup-defaults",
 		label: "Backup defaults",
 		to: "/settings/backup-defaults",
 	},
 	{ value: "recovery", label: "Recovery vault", to: "/settings/recovery" },
+	{
+		value: "restore-consumers",
+		label: "Restore consumers",
+		to: "/settings/restore-consumers",
+	},
 ];
 
 function valueFromPath(pathname: string): string {
 	if (pathname.startsWith("/settings/recovery")) return "recovery";
 	if (pathname.startsWith("/settings/backup-defaults")) return "backup-defaults";
+	if (pathname.startsWith("/settings/healthchecks")) return "healthchecks";
+	if (pathname.startsWith("/settings/restore-consumers"))
+		return "restore-consumers";
 	if (pathname.startsWith("/settings/admins")) return "admins";
 	return "";
 }

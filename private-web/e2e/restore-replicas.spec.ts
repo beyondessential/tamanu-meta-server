@@ -7,21 +7,38 @@ import {
 	seedRestoreReplica,
 	seedServer,
 	seedServerGroup,
+	seedServerGroupBackupConfig,
+	type Sql,
 } from "./seed";
 
 // The e2e fixture runs the private-server in a debug build, so the Tailscale
-// auth bypass treats every caller as `admin@localhost` (an admin). These specs
-// exercise the operator-facing managed-restore UI.
+// auth bypass treats every caller as `admin@localhost` (an admin).
+//
+// The restore-replica UI lives inside each group's backup page
+// (`/groups/:id/backups`, shown once the group has a ready backup config); the
+// fleet-wide consumer roster lives in Settings.
 
 test.describe("restore replicas", () => {
 	test.beforeEach(async ({ sql }) => {
 		await resetSeededTables(sql);
 	});
 
-	test("empty state shows the no-declarations banner", async ({ page }) => {
-		await page.goto("/restore-replicas");
+	/** A group with a ready backup config, so its backup page renders the panels
+	 * (including the restore-replicas section). */
+	async function groupWithBackups(
+		sql: Sql,
+		name: string,
+	): Promise<string> {
+		const group = await seedServerGroup(sql, { name });
+		await seedServerGroupBackupConfig(sql, { groupId: group.id, status: "ready" });
+		return group.id;
+	}
+
+	test("empty state shows the no-declarations banner", async ({ page, sql }) => {
+		const groupId = await groupWithBackups(sql, "empty-group");
+		await page.goto(`/groups/${groupId}/backups`);
 		await expect(
-			page.getByText(/no restore replicas declared/i),
+			page.getByText(/no restore replicas declared for this group/i),
 		).toBeVisible();
 	});
 
@@ -34,35 +51,32 @@ test.describe("restore replicas", () => {
 			deviceId: consumer.id,
 			intents: ["verify"],
 		});
-		const group = await seedServerGroup(sql, { name: "rr-group" });
+		const groupId = await groupWithBackups(sql, "rr-group");
 
-		// Supported intent — no gap.
 		await seedRestoreReplica(sql, {
 			consumerDeviceId: consumer.id,
-			groupId: group.id,
+			groupId,
 			intent: "verify",
 			name: "verify-all",
 		});
-		// Unsupported intent — gap.
 		await seedRestoreReplica(sql, {
 			consumerDeviceId: consumer.id,
-			groupId: group.id,
+			groupId,
 			intent: "analytics",
 			name: "analytics-all",
 		});
 
-		await page.goto("/restore-replicas");
+		await page.goto(`/groups/${groupId}/backups`);
 
 		const verifyRow = page.getByRole("row", { name: /verify-all/ });
 		const analyticsRow = page.getByRole("row", { name: /analytics-all/ });
 		await expect(verifyRow).toBeVisible();
 		await expect(analyticsRow).toBeVisible();
-		// The unsupported declaration carries a gap chip; the supported one does not.
 		await expect(analyticsRow.getByText("gap")).toBeVisible();
 		await expect(verifyRow.getByText("gap")).toHaveCount(0);
 	});
 
-	test("consumers panel lists the device and its capabilities", async ({
+	test("settings lists restore consumers and their capabilities", async ({
 		page,
 		sql,
 	}) => {
@@ -72,8 +86,7 @@ test.describe("restore replicas", () => {
 			intents: ["verify", "disaster-recovery"],
 		});
 
-		await page.goto("/restore-replicas");
-		// The consumer's intents render as chips.
+		await page.goto("/settings/restore-consumers");
 		await expect(page.getByText("verify").first()).toBeVisible();
 		await expect(page.getByText("disaster-recovery").first()).toBeVisible();
 	});
@@ -84,15 +97,15 @@ test.describe("restore replicas", () => {
 			deviceId: consumer.id,
 			intents: ["verify"],
 		});
-		const group = await seedServerGroup(sql, { name: "del-group" });
+		const groupId = await groupWithBackups(sql, "del-group");
 		await seedRestoreReplica(sql, {
 			consumerDeviceId: consumer.id,
-			groupId: group.id,
+			groupId,
 			intent: "verify",
 			name: "doomed",
 		});
 
-		await page.goto("/restore-replicas");
+		await page.goto(`/groups/${groupId}/backups`);
 		await expect(page.getByRole("row", { name: /doomed/ })).toBeVisible();
 		await page.getByRole("button", { name: "delete doomed" }).click();
 		await expect(page.getByRole("row", { name: /doomed/ })).toHaveCount(0);
@@ -112,16 +125,16 @@ test.describe("restore replicas", () => {
 			deviceId: consumer.id,
 			intents: ["verify"],
 		});
-		const group = await seedServerGroup(sql, { name: "tog-group" });
+		const groupId = await groupWithBackups(sql, "tog-group");
 		const replica = await seedRestoreReplica(sql, {
 			consumerDeviceId: consumer.id,
-			groupId: group.id,
+			groupId,
 			intent: "verify",
 			name: "togglable",
 			enabled: true,
 		});
 
-		await page.goto("/restore-replicas");
+		await page.goto(`/groups/${groupId}/backups`);
 		await page
 			.getByRole("row", { name: /togglable/ })
 			.locator('input[type="checkbox"]')
@@ -143,23 +156,19 @@ test.describe("restore replicas", () => {
 		sql,
 	}) => {
 		const consumer = await seedDevice(sql, { role: "backup-restore" });
-		const group = await seedServerGroup(sql, { name: "chk-group" });
-		const server = await seedServer(sql, { groupId: group.id, name: "chk-srv" });
+		const groupId = await groupWithBackups(sql, "chk-group");
+		const server = await seedServer(sql, { groupId, name: "chk-srv" });
 		await seedRestoreCheck(sql, {
 			consumerDeviceId: consumer.id,
-			groupId: group.id,
+			groupId,
 			serverId: server.id,
 			outcome: "failure",
 			replicaHealthy: false,
 			error: "restore blew up",
 		});
 
-		await page.goto("/restore-replicas");
-		const checksHeading = page.getByRole("heading", {
-			name: /recent restore checks/i,
-		});
-		await expect(checksHeading).toBeVisible();
-		// The failed check renders with a "failed" chip.
+		await page.goto(`/groups/${groupId}/backups`);
+		await expect(page.getByText(/recent restore checks/i)).toBeVisible();
 		await expect(page.getByText("failed")).toBeVisible();
 	});
 
@@ -172,24 +181,19 @@ test.describe("restore replicas", () => {
 			deviceId: consumer.id,
 			intents: ["verify"],
 		});
-		const group = await seedServerGroup(sql, { name: "create-group" });
-		await seedServer(sql, { groupId: group.id, name: "srv-a" });
+		const groupId = await groupWithBackups(sql, "create-group");
+		await seedServer(sql, { groupId, name: "srv-a" });
 
-		await page.goto("/restore-replicas");
+		await page.goto(`/groups/${groupId}/backups`);
 		await page.getByRole("button", { name: /declare replica/i }).click();
 
-		await page.getByLabel("Consumer").click();
+		const dialog = page.getByRole("dialog");
+		await dialog.getByLabel("Consumer").click();
 		await page.getByRole("option").first().click();
-		await page.getByLabel("Group").click();
-		await page.getByRole("option", { name: "create-group" }).click();
-		await page.getByLabel("Name").fill("dialog-made");
-		await page
-			.getByRole("button", { name: /^declare$/i })
-			.click();
+		await dialog.getByLabel("Name").fill("dialog-made");
+		await dialog.getByRole("button", { name: /^declare$/i }).click();
 
-		await expect(
-			page.getByRole("row", { name: /dialog-made/ }),
-		).toBeVisible();
+		await expect(page.getByRole("row", { name: /dialog-made/ })).toBeVisible();
 		const rows = await sql.query<{ name: string }>(
 			"SELECT name FROM restore_replicas WHERE name = 'dialog-made'",
 		);

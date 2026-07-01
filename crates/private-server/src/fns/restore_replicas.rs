@@ -33,7 +33,6 @@ use crate::state::AppState;
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(list))
 		.routes(routes!(for_group))
 		.routes(routes!(consumers))
 		.routes(routes!(checks))
@@ -174,20 +173,6 @@ async fn to_views(
 
 #[utoipa::path(
 	post,
-	path = "/list",
-	operation_id = "restore_replicas_list",
-	tag = "restore_replicas",
-	security(("tailscale-user" = [])),
-	responses((status = 200, body = Vec<RestoreReplicaView>)),
-)]
-pub async fn list(State(state): State<AppState>) -> Result<Json<Vec<RestoreReplicaView>>> {
-	let mut conn = state.db.get().await?;
-	let replicas = RestoreReplica::list_all(&mut conn).await?;
-	Ok(Json(to_views(&mut conn, replicas).await?))
-}
-
-#[utoipa::path(
-	post,
 	path = "/for_group",
 	operation_id = "restore_replicas_for_group",
 	tag = "restore_replicas",
@@ -233,11 +218,16 @@ pub async fn consumers(State(state): State<AppState>) -> Result<Json<Vec<Restore
 	operation_id = "restore_replicas_checks",
 	tag = "restore_replicas",
 	security(("tailscale-user" = [])),
+	request_body = GroupArgs,
 	responses((status = 200, body = Vec<BackupRestoreCheck>)),
 )]
-pub async fn checks(State(state): State<AppState>) -> Result<Json<Vec<BackupRestoreCheck>>> {
+pub async fn checks(
+	State(state): State<AppState>,
+	Json(args): Json<GroupArgs>,
+) -> Result<Json<Vec<BackupRestoreCheck>>> {
 	let mut conn = state.db.get().await?;
-	let rows = BackupRestoreCheck::list_recent(&mut conn, 50).await?;
+	let rows =
+		BackupRestoreCheck::list_recent_for_group(&mut conn, args.server_group_id, 50).await?;
 	Ok(Json(rows))
 }
 

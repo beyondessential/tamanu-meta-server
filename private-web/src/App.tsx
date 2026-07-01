@@ -17,7 +17,7 @@ import BackupConfig from "./routes/BackupConfig";
 import BackupDefaults from "./routes/BackupDefaults";
 import RecoveryVault from "./routes/RecoveryVault";
 import BackupPanel from "./routes/BackupPanel";
-import RestoreReplicas from "./routes/RestoreReplicas";
+import RestoreConsumers from "./routes/RestoreConsumers";
 import Bestool from "./routes/Bestool";
 import BestoolSnippetDetail from "./routes/BestoolSnippetDetail";
 import BestoolSnippets from "./routes/BestoolSnippets";
@@ -52,11 +52,9 @@ interface NavItem {
 const BASE_NAV: NavItem[] = [
 	{ label: "Status", to: "/status" },
 	{ label: "Incidents", to: "/incidents" },
-	{ label: "Healthchecks", to: "/healthchecks" },
 	{ label: "Servers", to: "/servers" },
 	{ label: "Versions", to: "/versions" },
 	{ label: "Devices", to: "/devices" },
-	{ label: "Restore", to: "/restore-replicas" },
 	{ label: "Bestool", to: "/bestool" },
 	{ label: "Settings", to: "/settings" },
 ];
@@ -181,8 +179,6 @@ export default function App() {
 					<Route path="/status" element={<Status />} />
 					<Route path="/incidents" element={<Incidents />} />
 					<Route path="/incidents/:id" element={<IncidentDetail />} />
-					<Route path="/healthchecks" element={<Healthchecks />} />
-					<Route path="/healthchecks/:checkName" element={<HealthcheckDetail />} />
 					<Route path="/versions" element={<Versions />} />
 					<Route path="/versions/:version" element={<VersionDetail />} />
 					<Route path="/servers" element={<Servers />}>
@@ -215,6 +211,12 @@ export default function App() {
 						<Route path="admins" element={<Admins />} />
 						<Route path="backup-defaults" element={<BackupDefaults />} />
 						<Route path="recovery" element={<RecoveryVault />} />
+						<Route path="healthchecks" element={<Healthchecks />} />
+						<Route
+							path="healthchecks/:checkName"
+							element={<HealthcheckDetail />}
+						/>
+						<Route path="restore-consumers" element={<RestoreConsumers />} />
 					</Route>
 					<Route path="/devices" element={<Devices />}>
 						<Route index element={<DevicesSearch />} />
@@ -228,7 +230,6 @@ export default function App() {
 						/>
 					</Route>
 					<Route path="/devices/:id" element={<DeviceDetail />} />
-					<Route path="/restore-replicas" element={<RestoreReplicas />} />
 					<Route path="/bestool" element={<Bestool />}>
 						<Route
 							index

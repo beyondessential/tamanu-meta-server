@@ -43,6 +43,7 @@ import { usePageTitle } from "../hooks/usePageTitle";
 import TimeAgo from "../components/TimeAgo";
 import { LatestSnapshot, SnapshotId } from "../components/SnapshotId";
 import { BackupProcessingChip } from "../components/BackupProcessingChip";
+import RestoreReplicasSection from "../components/RestoreReplicasSection";
 import {
 	BACKUP_STATUS_HELP,
 	BACKUP_STATUS_INTENT,
@@ -221,6 +222,7 @@ export default function BackupPanel() {
 						onChanged={configForTick.reload}
 					/>
 					<RecentRunsPanel groupId={id} members={members} />
+					<RestoreReplicasSection groupId={id} isAdmin={isAdmin} />
 				</>
 			)}
 		</Stack>
