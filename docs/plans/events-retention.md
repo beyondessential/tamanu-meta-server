@@ -6,9 +6,17 @@ time-based partitioning and drop-by-partition retention.
 
 ## Sizing
 
-Worst case ≈ 100 devices × 1 push/minute with no coalescing ≈ 50M rows/year.
-Steady-state coalescing cuts that roughly 10×, but a flapping issue doesn't
-coalesce. Plan for 5M–50M rows/year.
+Observed ≈ **6M rows/year**, extrapolated from the first ~1½ months of
+`events` data. That's the low end of the theoretical range (worst case ≈ 100
+devices × 1 push/minute with no coalescing ≈ 50M rows/year; steady-state
+coalescing cuts that roughly 10×, though a flapping issue doesn't). Re-check
+the rate as the fleet and event mix grow:
+
+```sql
+SELECT count(*) * EXTRACT(EPOCH FROM ('1 year'::interval))
+              / EXTRACT(EPOCH FROM (max(created_at) - min(created_at)))
+FROM events;
+```
 
 ## Approach
 
