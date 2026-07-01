@@ -18,6 +18,7 @@ import ServerShorty, {
 	type ServerInfo as ServerShortyInfo,
 } from "../components/ServerShorty";
 import TailnetIdentitySection from "../components/TailnetIdentitySection";
+import ProvisionCredentialDialog from "../components/ProvisionCredentialDialog";
 import { type ApiState, callApi, useApi, useApiAction } from "../api";
 import { deviceDisplayName } from "../components/DeviceShorty";
 import TimeAgo from "../components/TimeAgo";
@@ -269,6 +270,7 @@ function RoleControls({
 		role === "untrusted" ? "server" : role,
 	);
 	const [confirmUntrust, setConfirmUntrust] = useState(false);
+	const [provisionOpen, setProvisionOpen] = useState(false);
 
 	const onSave = async () => {
 		try {
@@ -342,7 +344,13 @@ function RoleControls({
 					</Button>
 				</Stack>
 				{role !== "untrusted" && (
-					<Box>
+					<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+						<Button
+							variant="outlined"
+							onClick={() => setProvisionOpen(true)}
+						>
+							Provision credential
+						</Button>
 						{confirmUntrust ? (
 							<Stack direction="row" spacing={1}>
 								<Button
@@ -370,7 +378,7 @@ function RoleControls({
 								Untrust
 							</Button>
 						)}
-					</Box>
+					</Stack>
 				)}
 			</Stack>
 			{(trustAction.error ||
@@ -380,6 +388,13 @@ function RoleControls({
 					{(trustAction.error ?? untrustAction.error ?? updateRoleAction.error)?.message}
 				</Alert>
 			)}
+			<ProvisionCredentialDialog
+				open={provisionOpen}
+				onClose={() => setProvisionOpen(false)}
+				deviceId={device.device.id}
+				role={role === "untrusted" ? undefined : role}
+				onProvisioned={refresh}
+			/>
 		</Paper>
 	);
 }

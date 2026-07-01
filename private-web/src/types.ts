@@ -77,6 +77,7 @@ export type ServerKind = Solidify<Schemas["ServerKind"]>;
 export type ServerRank = Solidify<Schemas["ServerRank"]>;
 export type VersionStatus = Solidify<Schemas["VersionStatus"]>;
 export type DeviceRole = Solidify<Schemas["DeviceRole"]>;
+export type ProvisionedCredential = Solidify<Schemas["ProvisionedCredential"]>;
 export type Severity = Solidify<Schemas["Severity"]>;
 export type ResolvedReason = Solidify<Schemas["ResolvedReason"]>;
 

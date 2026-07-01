@@ -26,6 +26,23 @@ pub struct Page<T> {
 	pub total: u64,
 }
 
+/// Generate a 4-word lowercase, hyphen-separated passphrase from the EFF large
+/// wordlist (~52 bits of entropy), e.g. `correct-horse-battery-staple`. Used to
+/// wrap secrets (enrollment tickets, provisioned device keys) that travel to an
+/// operator out of band.
+pub(crate) fn generate_passphrase() -> String {
+	use chbs::{config::BasicConfig, prelude::*, probability::Probability, word::WordList};
+
+	let config = BasicConfig {
+		words: 4,
+		word_provider: WordList::builtin_eff_large().sampler(),
+		separator: "-".into(),
+		capitalize_first: Probability::Never,
+		capitalize_words: Probability::Never,
+	};
+	config.to_scheme().generate()
+}
+
 pub fn routes() -> OpenApiRouter<crate::state::AppState> {
 	OpenApiRouter::new().nest(
 		"/api",

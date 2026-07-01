@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use axum::Json;
 use axum::extract::State;
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
+use commons_servers::device_auth::keygen;
 use commons_servers::tailnet_directory::DirectoryEntry;
 use commons_servers::tailscale_auth::TailscaleAdmin;
 use commons_types::{Uuid, device::DeviceRole};
@@ -203,6 +204,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(list_trusted))
 		.routes(routes!(untrust))
 		.routes(routes!(update_role))
+		.routes(routes!(provision_credential))
 		.routes(routes!(search))
 		.routes(routes!(update_key_name))
 		.routes(routes!(attach_tailscale))
@@ -501,6 +503,135 @@ pub async fn update_role(
 	let mut conn = state.db.get().await?;
 	Device::trust(&mut conn, args.device_id, args.role).await?;
 	Ok(Json(()))
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct ProvisionArgs {
+	/// Role to trust the device at. Any trustable role is allowed; `untrusted`
+	/// is rejected.
+	pub role: DeviceRole,
+	/// Provision an additional credential onto this existing device. When
+	/// omitted, a new device is created at `role`.
+	#[serde(default)]
+	pub device_id: Option<Uuid>,
+	/// Display name for the new key. Defaults to "Provisioned key".
+	#[serde(default)]
+	pub key_name: Option<String>,
+}
+
+/// The one-time result of provisioning a device credential. The plaintext
+/// private key lives only inside `key_age_base64`; Canopy never persists it.
+#[derive(Serialize, ToSchema)]
+pub struct ProvisionedCredential {
+	pub device_id: Uuid,
+	pub key_id: Uuid,
+	/// Lowercase hex SHA-256 of the stored public key, to correlate the
+	/// credential with the device's key list.
+	pub fingerprint: String,
+	/// Suggested filename for the downloaded encrypted key.
+	pub filename: String,
+	/// Base64 (standard) of the age-encrypted PKCS#8 PEM private key. Decrypt
+	/// with `passphrase` (e.g. `bestool crypto reveal`) to recover the PEM.
+	pub key_age_base64: String,
+	/// Freshly-generated passphrase that decrypts `key_age_base64`. Share it
+	/// out-of-band, on a separate channel from the file.
+	pub passphrase: String,
+}
+
+/// Mint a device keypair server-side, store its public key as an active key on
+/// a new or existing device at the chosen role, and return the private key
+/// once, encrypted under a fresh passphrase (spec DPK). Canopy keeps only the
+/// public key; the private key is never persisted or logged.
+#[utoipa::path(
+	post,
+	path = "/provision_credential",
+	tag = "devices",
+	security(("tailscale-admin" = [])),
+	request_body = ProvisionArgs,
+	responses(
+		(status = 200, body = ProvisionedCredential),
+		(status = 400, body = ProblemDetailsSchema),
+		(status = 404, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn provision_credential(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<ProvisionArgs>,
+) -> Result<Json<ProvisionedCredential>> {
+	use algae_cli::{
+		passphrases::{Passphrase, SecretString},
+		streams::encrypt_stream,
+	};
+	use base64::Engine as _;
+
+	if args.role == DeviceRole::Untrusted {
+		return Err(AppError::BadRequest(
+			"cannot provision a credential at the untrusted role".into(),
+		));
+	}
+
+	let mut conn = state.db.get().await?;
+
+	let generated = keygen::generate_device_key()?;
+	let key_name = args
+		.key_name
+		.filter(|n| !n.trim().is_empty())
+		.unwrap_or_else(|| "Provisioned key".to_string());
+
+	let (device_id, key) = match args.device_id {
+		Some(device_id) => {
+			// 404s if the device doesn't exist.
+			let existing = Device::get_with_info(&mut conn, device_id).await?;
+			let key =
+				DeviceKey::create(&mut conn, device_id, generated.spki_der, Some(key_name)).await?;
+			if existing.device.role != args.role {
+				Device::trust(&mut conn, device_id, args.role).await?;
+			}
+			(device_id, key)
+		}
+		None => {
+			let device =
+				Device::create_at_role(&mut conn, generated.spki_der, args.role, Some(key_name))
+					.await?;
+			let key = DeviceKey::find_by_device(&mut conn, device.id)
+				.await?
+				.into_iter()
+				.next()
+				.ok_or_else(|| AppError::custom("provisioned device has no key"))?;
+			(device.id, key)
+		}
+	};
+
+	// Encrypt the private PEM with a fresh passphrase (age/scrypt), the same
+	// primitives bestool's `crypto reveal` reads. The ciphertext is base64'd
+	// for transport; the passphrase travels out-of-band.
+	let passphrase = crate::fns::generate_passphrase();
+	let encryptor = Passphrase::new(SecretString::from(passphrase.clone()));
+	let mut encrypted = Vec::new();
+	encrypt_stream(
+		generated.private_key_pem.as_bytes(),
+		futures::io::Cursor::new(&mut encrypted),
+		Box::new(encryptor),
+	)
+	.await
+	.map_err(|e| AppError::custom(format!("encrypting device key: {e}")))?;
+	let key_age_base64 = base64::engine::general_purpose::STANDARD.encode(&encrypted);
+
+	let filename = format!(
+		"canopy-{}-{}.pem.age",
+		args.role,
+		&generated.fingerprint[..12]
+	);
+
+	Ok(Json(ProvisionedCredential {
+		device_id,
+		key_id: key.id,
+		fingerprint: generated.fingerprint,
+		filename,
+		key_age_base64,
+		passphrase,
+	}))
 }
 
 #[derive(Deserialize, ToSchema)]

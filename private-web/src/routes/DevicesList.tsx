@@ -1,12 +1,15 @@
 import {
 	Alert,
 	Box,
+	Button,
 	LinearProgress,
 	Pagination,
 	Stack,
 } from "@mui/material";
+import AddIcon from "@mui/icons-material/Add";
 import { useState } from "react";
 import DeviceShorty from "../components/DeviceShorty";
+import ProvisionCredentialDialog from "../components/ProvisionCredentialDialog";
 import { useApi } from "../api";
 import { usePageTitle } from "../hooks/usePageTitle";
 
@@ -19,6 +22,7 @@ export default function DevicesList({
 }) {
 	usePageTitle(scope === "trusted" ? "Trusted devices" : "Untrusted devices");
 	const [page, setPage] = useState(0);
+	const [createOpen, setCreateOpen] = useState(false);
 
 	const listFn = scope === "trusted" ? "list_trusted" : "list_untrusted";
 	const result = useApi(
@@ -33,6 +37,22 @@ export default function DevicesList({
 
 	return (
 		<Stack spacing={2}>
+			{scope === "trusted" && (
+				<Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+					<Button
+						variant="contained"
+						startIcon={<AddIcon />}
+						onClick={() => setCreateOpen(true)}
+					>
+						Create device
+					</Button>
+					<ProvisionCredentialDialog
+						open={createOpen}
+						onClose={() => setCreateOpen(false)}
+						onProvisioned={() => result.reload()}
+					/>
+				</Box>
+			)}
 			{result.status === "loading" || result.status === "idle" ? (
 				<LinearProgress />
 			) : result.status === "error" ? (

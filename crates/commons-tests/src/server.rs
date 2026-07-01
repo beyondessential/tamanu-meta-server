@@ -81,6 +81,25 @@ pub fn make_signing_certificate() -> (Vec<u8>, String, ring::signature::EcdsaKey
 	(key_data, cert_enc, signing_key)
 }
 
+/// Derive the DER `SubjectPublicKeyInfo` from a PKCS#8 PEM private key, exactly
+/// as the mTLS auth path derives it from a presented certificate: self-sign a
+/// throwaway cert and read `subject_pki.raw`. Used to prove a server-minted
+/// credential's stored public key matches the delivered private key.
+pub fn spki_from_key_pem(key_pem: &str) -> Vec<u8> {
+	let key = KeyPair::from_pem(key_pem).expect("rcgen key from pem");
+	let mut cert = CertificateParams::default();
+	cert.is_ca = IsCa::NoCa;
+	cert.key_usages = vec![KeyUsagePurpose::DigitalSignature];
+	cert.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
+	cert.distinguished_name = DistinguishedName::new();
+	let cert = cert.self_signed(&key).expect("sign cert");
+
+	let cert_pem = cert.pem();
+	let (_, pem_parsed) = parse_x509_pem(cert_pem.as_bytes()).expect("parse pem");
+	let (_, x509_cert) = parse_x509_certificate(&pem_parsed.contents).expect("parse cert");
+	x509_cert.tbs_certificate.subject_pki.raw.to_vec()
+}
+
 pub async fn run<F, T, Fut>(test: F) -> T
 where
 	F: FnOnce(AsyncPgConnection, TestServer, TestServer) -> Fut,

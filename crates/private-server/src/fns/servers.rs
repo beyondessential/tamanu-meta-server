@@ -850,21 +850,6 @@ pub struct EnrollmentTicket {
 	pub expires_at: Timestamp,
 }
 
-/// Generate a 4-word lowercase, hyphen-separated passphrase from the EFF large
-/// wordlist (~52 bits of entropy), e.g. `correct-horse-battery-staple`.
-fn generate_passphrase() -> String {
-	use chbs::{config::BasicConfig, prelude::*, probability::Probability, word::WordList};
-
-	let config = BasicConfig {
-		words: 4,
-		word_provider: WordList::builtin_eff_large().sampler(),
-		separator: "-".into(),
-		capitalize_first: Probability::Never,
-		capitalize_words: Probability::Never,
-	};
-	config.to_scheme().generate()
-}
-
 /// Mint (or reissue) an enrollment token for a server and return the
 /// passphrase-encrypted ticket the operator runs through bestool, plus the
 /// 4-word passphrase that decrypts it. The plaintext token lives only inside
@@ -914,7 +899,7 @@ pub async fn mint_enrollment(
 	// Encrypt the payload with a fresh 4-word passphrase (age/scrypt), the same
 	// primitives bestool's `protect`/`reveal` use. The ciphertext is base64'd
 	// for transport; the passphrase travels out-of-band.
-	let passphrase = generate_passphrase();
+	let passphrase = crate::fns::generate_passphrase();
 	let key = Passphrase::new(SecretString::from(passphrase.clone()));
 
 	let mut encrypted = Vec::new();
