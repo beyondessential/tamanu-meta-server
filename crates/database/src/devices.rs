@@ -126,6 +126,31 @@ impl Device {
 		Ok(device)
 	}
 
+	/// Create a device already at `role`, with one active key named `key_name`.
+	/// Used by operator-provisioned credentials (spec DPK), where Canopy mints
+	/// the keypair server-side and the device is trusted at its role from the
+	/// outset — unlike [`create`], which leaves the device untrusted and names
+	/// its key "Initial Key".
+	pub async fn create_at_role(
+		db: &mut AsyncPgConnection,
+		key: Vec<u8>,
+		role: DeviceRole,
+		key_name: Option<String>,
+	) -> Result<Self> {
+		use crate::schema::devices;
+
+		let device: Self = diesel::insert_into(devices::table)
+			.values(devices::role.eq(role))
+			.returning(Self::as_select())
+			.get_result(db)
+			.await
+			.map_err(AppError::from)?;
+
+		DeviceKey::create(db, device.id, key, key_name).await?;
+
+		Ok(device)
+	}
+
 	pub async fn from_tailscale_node_id(
 		db: &mut AsyncPgConnection,
 		node_id: &str,

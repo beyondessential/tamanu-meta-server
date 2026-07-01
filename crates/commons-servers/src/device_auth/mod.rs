@@ -33,6 +33,7 @@ use database::{
 
 use crate::tailnet_directory::TailnetDirectory;
 
+pub mod keygen;
 pub mod mtls;
 pub mod pop;
 pub mod tailnet;
