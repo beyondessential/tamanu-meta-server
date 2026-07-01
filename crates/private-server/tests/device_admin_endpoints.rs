@@ -175,21 +175,22 @@ async fn attach_tailscale_conflict_when_node_id_already_claimed() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn attach_tailscale_detaches_untrusted_claimant() {
+async fn attach_tailscale_conflicts_when_node_already_claimed() {
 	TestDb::run(async |mut conn, url| {
 		let (_ip, node_id, dir) = test_directory();
 		let private = private_with_directory(&url, dir).await;
 
-		// Untrusted placeholder, auto-created on first contact, holds the node id.
-		let placeholder = Uuid::new_v4();
+		// Another device already holds the node id. There are no untrusted
+		// placeholders to silently displace, so attaching it elsewhere is a
+		// conflict the operator must resolve via merge.
+		let claimant = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO devices (id, role, tailscale_node_id, tailscale_node_name) \
-			 VALUES ('{placeholder}', 'untrusted', '{node_id}', 'placeholder-name');"
+			 VALUES ('{claimant}', 'server', '{node_id}', 'claimant-name');"
 		))
 		.await
-		.expect("seed placeholder");
+		.expect("seed claimant");
 
-		// Real (server-role) device the operator wants to bind the node id to.
 		let target = insert_device(&mut conn).await;
 
 		let resp = private
@@ -199,31 +200,7 @@ async fn attach_tailscale_detaches_untrusted_claimant() {
 				"identifier": node_id,
 			}))
 			.await;
-		resp.assert_status_ok();
-		let body: serde_json::Value = resp.json();
-		assert_eq!(
-			body["device"]["tailscale_node_id"].as_str(),
-			Some(node_id.as_str()),
-		);
-		assert_eq!(
-			body["device"]["id"].as_str(),
-			Some(target.to_string().as_str()),
-		);
-
-		// Placeholder row is still there, but its tailscale fields are cleared.
-		conn.batch_execute(&format!(
-			"DO $$ BEGIN \
-			   IF NOT EXISTS ( \
-			     SELECT 1 FROM devices \
-			     WHERE id = '{placeholder}' \
-			       AND tailscale_node_id IS NULL \
-			       AND tailscale_node_name IS NULL \
-			       AND tailscale_tailnet IS NULL \
-			   ) THEN RAISE EXCEPTION 'placeholder should be detached'; END IF; \
-			 END $$;"
-		))
-		.await
-		.expect("placeholder detached");
+		assert_eq!(resp.status_code().as_u16(), 409);
 	})
 	.await
 }
@@ -261,11 +238,11 @@ async fn merge_into_reparents_keys_and_deletes_source() {
 
 		let source = Uuid::new_v4();
 		let target = Uuid::new_v4();
-		// Source: tailnet-only auto-discovered, Untrusted.
+		// Source: tailnet-only, server-role.
 		// Target: mTLS-only, server-role, has one key.
 		conn.batch_execute(&format!(
 			"INSERT INTO devices (id, role, tailscale_node_id) \
-			   VALUES ('{source}', 'untrusted', 'nodekey:fromauto'); \
+			   VALUES ('{source}', 'server', 'nodekey:fromauto'); \
 			 INSERT INTO devices (id, role) VALUES ('{target}', 'server'); \
 			 INSERT INTO device_keys (device_id, key_data, name, is_active) \
 			   VALUES ('{target}', '\\x010203', 'mtls', true);"
@@ -313,7 +290,7 @@ async fn merge_into_conflict_when_both_have_tailscale() {
 		let target = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO devices (id, role, tailscale_node_id) VALUES \
-			   ('{source}', 'untrusted', 'nodekey:src'), \
+			   ('{source}', 'server', 'nodekey:src'), \
 			   ('{target}', 'server', 'nodekey:tgt');"
 		))
 		.await

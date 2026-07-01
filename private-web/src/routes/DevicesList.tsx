@@ -15,21 +15,16 @@ import { usePageTitle } from "../hooks/usePageTitle";
 
 const PAGE_SIZE = 10;
 
-export default function DevicesList({
-	scope,
-}: {
-	scope: "trusted" | "untrusted";
-}) {
-	usePageTitle(scope === "trusted" ? "Trusted devices" : "Untrusted devices");
+export default function DevicesList() {
+	usePageTitle("Devices");
 	const [page, setPage] = useState(0);
 	const [createOpen, setCreateOpen] = useState(false);
 
-	const listFn = scope === "trusted" ? "list_trusted" : "list_untrusted";
 	const result = useApi(
 		"devices",
-		listFn,
+		"list_trusted",
 		{ offset: page * PAGE_SIZE, limit: PAGE_SIZE },
-		[scope, page],
+		[page],
 	);
 
 	const total = result.status === "ok" ? result.data.total : 0;
@@ -37,22 +32,20 @@ export default function DevicesList({
 
 	return (
 		<Stack spacing={2}>
-			{scope === "trusted" && (
-				<Box sx={{ display: "flex", justifyContent: "flex-end" }}>
-					<Button
-						variant="contained"
-						startIcon={<AddIcon />}
-						onClick={() => setCreateOpen(true)}
-					>
-						Create device
-					</Button>
-					<ProvisionCredentialDialog
-						open={createOpen}
-						onClose={() => setCreateOpen(false)}
-						onProvisioned={() => result.reload()}
-					/>
-				</Box>
-			)}
+			<Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+				<Button
+					variant="contained"
+					startIcon={<AddIcon />}
+					onClick={() => setCreateOpen(true)}
+				>
+					Create device
+				</Button>
+				<ProvisionCredentialDialog
+					open={createOpen}
+					onClose={() => setCreateOpen(false)}
+					onProvisioned={() => result.reload()}
+				/>
+			</Box>
 			{result.status === "loading" || result.status === "idle" ? (
 				<LinearProgress />
 			) : result.status === "error" ? (

@@ -380,9 +380,6 @@ struct SeededDevices {
 	tailscale_admin: Uuid,
 	/// A trusted releaser device (mTLS).
 	releaser: Uuid,
-	/// Untrusted devices awaiting an operator decision (drives the
-	/// "untrusted devices" review queue).
-	untrusted: Vec<Uuid>,
 }
 
 async fn seed_devices(conn: &mut AsyncPgConnection) -> Result<SeededDevices> {
@@ -429,9 +426,9 @@ async fn seed_devices(conn: &mut AsyncPgConnection) -> Result<SeededDevices> {
 				node_name: Some("operator-laptop.example-tailnet.ts.net".to_string()),
 				tailnet: Some("example-tailnet.ts.net".to_string()),
 			},
+			DeviceRole::Admin,
 		)
 		.await?;
-		Device::trust(conn, dev.id, DeviceRole::Admin).await?;
 		dev.id
 	};
 
@@ -453,35 +450,14 @@ async fn seed_devices(conn: &mut AsyncPgConnection) -> Result<SeededDevices> {
 	)
 	.await?;
 
-	// Two untrusted devices waiting in the review queue.
-	let mut untrusted = Vec::new();
-	for i in 0..2u8 {
-		let dev = Device::create(conn, fake_key(0x40 + i)).await?;
-		untrusted.push(dev.id);
-	}
-	// One untrusted device discovered over the tailnet (no key).
-	{
-		let dev = Device::create_with_tailscale(
-			conn,
-			database::devices::TailscaleIdentity {
-				node_id: "nodekey:seed-unknown-node".to_string(),
-				node_name: Some("unknown-node.example-tailnet.ts.net".to_string()),
-				tailnet: Some("example-tailnet.ts.net".to_string()),
-			},
-		)
-		.await?;
-		untrusted.push(dev.id);
-	}
-
 	// A few connection rows so the device detail page shows connection history.
-	seed_device_connections(conn, &mtls_server, tailscale_server, &untrusted).await?;
+	seed_device_connections(conn, &mtls_server, tailscale_server).await?;
 
 	Ok(SeededDevices {
 		mtls_server,
 		tailscale_server,
 		tailscale_admin,
 		releaser,
-		untrusted,
 	})
 }
 
@@ -489,7 +465,6 @@ async fn seed_device_connections(
 	conn: &mut AsyncPgConnection,
 	mtls_server: &[Uuid],
 	tailscale_server: Uuid,
-	untrusted: &[Uuid],
 ) -> Result<()> {
 	let entries: &[(Uuid, &str, &str)] = &[
 		(
@@ -506,11 +481,6 @@ async fn seed_device_connections(
 			tailscale_server,
 			"100.64.0.12/32",
 			"bestool/2.10.0 (Node.js/20.11.0; linux)",
-		),
-		(
-			untrusted[0],
-			"192.0.2.55/32",
-			"bestool/2.8.0 (Node.js/18.19.0; linux)",
 		),
 	];
 	for (device_id, ip, ua) in entries {
@@ -801,12 +771,11 @@ async fn seed_servers(
 	.await?;
 	Server::soft_delete(conn, archived).await?;
 
-	// Re-bind the releaser device (soft_delete released it) so the releaser
-	// keeps its role for the device listing. soft_delete untrusts the device;
-	// promote it back to releaser.
+	// Re-assert the releaser role for the device listing (soft_delete revoked
+	// the device's credentials but kept its role).
 	Device::trust(conn, devices.releaser, DeviceRole::Releaser).await?;
 
-	let _ = (devices.tailscale_admin, devices.untrusted.len());
+	let _ = devices.tailscale_admin;
 
 	Ok(SeededServers {
 		healthy_central,

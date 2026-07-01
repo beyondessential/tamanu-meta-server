@@ -126,14 +126,9 @@ export default function TailnetIdentitySection({
 								Detach
 							</Button>
 						))}
-					{device.device.role === "untrusted" && (
-						<Button
-							variant="outlined"
-							onClick={() => setMergeOpen(true)}
-						>
-							Merge into existing device…
-						</Button>
-					)}
+					<Button variant="outlined" onClick={() => setMergeOpen(true)}>
+						Merge into existing device…
+					</Button>
 				</Stack>
 
 				{detachAction.error && (

@@ -5,6 +5,7 @@ use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
 use commons_types::{
 	Uuid,
+	device::DeviceRole,
 	geo::GeoPoint,
 	server::{TagMap, kind::ServerKind, rank::ServerRank},
 	status::{HealthState, ShortStatus},
@@ -754,6 +755,7 @@ pub async fn create(
 						node_name: Some(entry.node_name.clone()),
 						tailnet: Some(entry.tailnet.clone()),
 					},
+					DeviceRole::Server,
 				)
 				.await?
 			}
@@ -1041,6 +1043,7 @@ pub async fn attach_tailscale_device(
 					node_name: Some(entry.node_name.clone()),
 					tailnet: Some(entry.tailnet.clone()),
 				},
+				DeviceRole::Server,
 			)
 			.await?
 		};

@@ -195,14 +195,12 @@ fn format_key_as_pem(key_data: &[u8]) -> String {
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
 		.routes(routes!(get_device_by_id))
-		.routes(routes!(list_untrusted))
 		.routes(routes!(get_servers_for_device))
 		.routes(routes!(get_past_server_associations))
 		.routes(routes!(connection_history))
 		.routes(routes!(connection_count))
-		.routes(routes!(trust))
 		.routes(routes!(list_trusted))
-		.routes(routes!(untrust))
+		.routes(routes!(revoke))
 		.routes(routes!(update_role))
 		.routes(routes!(provision_credential))
 		.routes(routes!(search))
@@ -244,39 +242,6 @@ pub async fn get_device_by_id(
 pub struct PaginationArgs {
 	pub offset: u64,
 	pub limit: Option<u64>,
-}
-
-#[utoipa::path(
-	post,
-	path = "/list_untrusted",
-	tag = "devices",
-	security(("tailscale-admin" = [])),
-	request_body = PaginationArgs,
-	responses(
-		(status = 200, body = Page<DeviceInfo>),
-	),
-)]
-pub async fn list_untrusted(
-	State(state): State<AppState>,
-	_admin: TailscaleAdmin,
-	Json(args): Json<PaginationArgs>,
-) -> Result<Json<Page<DeviceInfo>>> {
-	let mut conn = state.db.get().await?;
-	let total = Device::count_untrusted(&mut conn)
-		.await?
-		.try_into()
-		.unwrap_or(0);
-	let devices_with_info = Device::list_untrusted_with_info_paginated(
-		&mut conn,
-		args.limit.unwrap_or(10).try_into().unwrap_or(10),
-		args.offset.try_into().unwrap_or(0),
-	)
-	.await?;
-	let mut items = Vec::with_capacity(devices_with_info.len());
-	for d in devices_with_info {
-		items.push(DeviceInfo::from_db(d, &state).await);
-	}
-	Ok(Json(Page { items, total }))
 }
 
 #[utoipa::path(
@@ -402,31 +367,6 @@ pub struct TrustArgs {
 
 #[utoipa::path(
 	post,
-	path = "/trust",
-	operation_id = "device_trust",
-	tag = "devices",
-	security(("tailscale-admin" = [])),
-	request_body = TrustArgs,
-	responses(
-		(status = 200),
-		(status = 400, body = ProblemDetailsSchema),
-	),
-)]
-pub async fn trust(
-	State(state): State<AppState>,
-	_admin: TailscaleAdmin,
-	Json(args): Json<TrustArgs>,
-) -> Result<Json<()>> {
-	if args.role == DeviceRole::Untrusted {
-		return Err(AppError::custom("Cannot set device role to untrusted"));
-	}
-	let mut conn = state.db.get().await?;
-	Device::trust(&mut conn, args.device_id, args.role).await?;
-	Ok(Json(()))
-}
-
-#[utoipa::path(
-	post,
 	path = "/list_trusted",
 	tag = "devices",
 	security(("tailscale-admin" = [])),
@@ -458,10 +398,13 @@ pub async fn list_trusted(
 	Ok(Json(Page { items, total }))
 }
 
+/// Revoke a device's access: deactivate its keys and detach any tailnet
+/// identity, so it can no longer authenticate. The row and its role are kept
+/// for history.
 #[utoipa::path(
 	post,
-	path = "/untrust",
-	operation_id = "device_untrust",
+	path = "/revoke",
+	operation_id = "device_revoke",
 	tag = "devices",
 	security(("tailscale-admin" = [])),
 	request_body = DeviceIdArgs,
@@ -469,13 +412,13 @@ pub async fn list_trusted(
 		(status = 200),
 	),
 )]
-pub async fn untrust(
+pub async fn revoke(
 	State(state): State<AppState>,
 	_admin: TailscaleAdmin,
 	Json(args): Json<DeviceIdArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
-	Device::untrust(&mut conn, args.device_id).await?;
+	Device::revoke(&mut conn, args.device_id).await?;
 	Ok(Json(()))
 }
 
@@ -495,11 +438,6 @@ pub async fn update_role(
 	_admin: TailscaleAdmin,
 	Json(args): Json<TrustArgs>,
 ) -> Result<Json<()>> {
-	if args.role == DeviceRole::Untrusted {
-		return Err(AppError::custom(
-			"Use untrust function to set device role to untrusted",
-		));
-	}
 	let mut conn = state.db.get().await?;
 	Device::trust(&mut conn, args.device_id, args.role).await?;
 	Ok(Json(()))
@@ -507,8 +445,7 @@ pub async fn update_role(
 
 #[derive(Deserialize, ToSchema)]
 pub struct ProvisionArgs {
-	/// Role to trust the device at. Any trustable role is allowed; `untrusted`
-	/// is rejected.
+	/// Role to trust the device at.
 	pub role: DeviceRole,
 	/// Provision an additional credential onto this existing device. When
 	/// omitted, a new device is created at `role`.
@@ -550,7 +487,6 @@ pub struct ProvisionedCredential {
 	request_body = ProvisionArgs,
 	responses(
 		(status = 200, body = ProvisionedCredential),
-		(status = 400, body = ProblemDetailsSchema),
 		(status = 404, body = ProblemDetailsSchema),
 	),
 )]
@@ -564,12 +500,6 @@ pub async fn provision_credential(
 		streams::encrypt_stream,
 	};
 	use base64::Engine as _;
-
-	if args.role == DeviceRole::Untrusted {
-		return Err(AppError::BadRequest(
-			"cannot provision a credential at the untrusted role".into(),
-		));
-	}
 
 	let mut conn = state.db.get().await?;
 

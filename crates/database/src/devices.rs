@@ -109,12 +109,15 @@ impl Device {
 			.map_err(AppError::from)
 	}
 
+	/// Create a device with an initial key. The device is a `Server`: this is
+	/// the enrollment path, which only ever mints server devices (other roles
+	/// are provisioned through [`create_at_role`]).
 	pub async fn create(db: &mut AsyncPgConnection, key: Vec<u8>) -> Result<Self> {
 		use crate::schema::devices;
 
 		// Create the device first
 		let device: Self = diesel::insert_into(devices::table)
-			.default_values()
+			.values(devices::role.eq(DeviceRole::Server))
 			.returning(Self::as_select())
 			.get_result(db)
 			.await
@@ -128,9 +131,7 @@ impl Device {
 
 	/// Create a device already at `role`, with one active key named `key_name`.
 	/// Used by operator-provisioned credentials (spec DPK), where Canopy mints
-	/// the keypair server-side and the device is trusted at its role from the
-	/// outset — unlike [`create`], which leaves the device untrusted and names
-	/// its key "Initial Key".
+	/// the keypair server-side and names its key rather than using "Initial Key".
 	pub async fn create_at_role(
 		db: &mut AsyncPgConnection,
 		key: Vec<u8>,
@@ -166,17 +167,19 @@ impl Device {
 			.map_err(AppError::from)
 	}
 
-	/// First-contact insert for a tailnet device that has no mTLS key yet.
-	/// Mirrors `create` but uses the Tailscale identity in place of an
-	/// initial key, and leaves `device_keys` empty for this row.
+	/// Insert a tailnet device at `role`, identified by its Tailscale identity
+	/// with no mTLS key yet (`device_keys` left empty). Used by the operator
+	/// attach/create flows, which trust the tailnet identity as a `Server`.
 	pub async fn create_with_tailscale(
 		db: &mut AsyncPgConnection,
 		identity: TailscaleIdentity,
+		role: DeviceRole,
 	) -> Result<Self> {
 		use crate::schema::devices;
 
 		diesel::insert_into(devices::table)
 			.values((
+				devices::role.eq(role),
 				devices::tailscale_node_id.eq(identity.node_id),
 				devices::tailscale_node_name.eq(identity.node_name),
 				devices::tailscale_tailnet.eq(identity.tailnet),
@@ -192,16 +195,9 @@ impl Device {
 	/// knows a device is about to come online over the tailnet (or is
 	/// being moved off mTLS).
 	///
-	/// If another device already holds this `node_id`:
-	///
-	/// - If that device is `Untrusted` (the typical case — an
-	///   auto-created placeholder from a tailnet first-contact), the
-	///   identity is detached from it so the target can claim it. The
-	///   placeholder row is left in place but with its tailscale_*
-	///   columns cleared.
-	/// - Otherwise (the conflicting device has a real role), this
-	///   returns `DeviceTailscaleNodeAlreadyClaimed` and the operator
-	///   must reach for the merge flow.
+	/// If another device already holds this `node_id`, this returns
+	/// `DeviceTailscaleNodeAlreadyClaimed` and the operator must reach for the
+	/// merge flow.
 	pub async fn attach_tailscale(
 		db: &mut AsyncPgConnection,
 		device_id: Uuid,
@@ -218,19 +214,8 @@ impl Device {
 				.await
 				.optional()
 				.map_err(AppError::from)?;
-			if let Some(conflict) = conflict {
-				if conflict.role != DeviceRole::Untrusted {
-					return Err(AppError::DeviceTailscaleNodeAlreadyClaimed);
-				}
-				diesel::update(dsl::devices.filter(dsl::id.eq(conflict.id)))
-					.set((
-						dsl::tailscale_node_id.eq(None::<String>),
-						dsl::tailscale_node_name.eq(None::<String>),
-						dsl::tailscale_tailnet.eq(None::<String>),
-					))
-					.execute(conn)
-					.await
-					.map_err(AppError::from)?;
+			if conflict.is_some() {
+				return Err(AppError::DeviceTailscaleNodeAlreadyClaimed);
 			}
 
 			diesel::update(dsl::devices.filter(dsl::id.eq(device_id)))
@@ -483,68 +468,7 @@ impl Device {
 		})
 	}
 
-	/// List all untrusted devices with their keys and latest connection info.
-	pub async fn list_untrusted_with_info(
-		db: &mut AsyncPgConnection,
-	) -> Result<Vec<DeviceWithInfo>> {
-		Self::list_untrusted_with_info_paginated(db, i64::MAX, 0).await
-	}
-
-	/// List untrusted devices with pagination.
-	pub async fn list_untrusted_with_info_paginated(
-		db: &mut AsyncPgConnection,
-		limit: i64,
-		offset: i64,
-	) -> Result<Vec<DeviceWithInfo>> {
-		use crate::schema::{device_keys, devices};
-
-		let untrusted_devices: Vec<Self> = devices::table
-			.select(Self::as_select())
-			.filter(devices::role.eq(DeviceRole::Untrusted))
-			.order(devices::created_at.desc())
-			.limit(limit)
-			.offset(offset)
-			.load(db)
-			.await
-			.map_err(AppError::from)?;
-
-		let device_ids: Vec<Uuid> = untrusted_devices.iter().map(|d| d.id).collect();
-
-		let device_keys: Vec<DeviceKey> = device_keys::table
-			.select(DeviceKey::as_select())
-			.filter(device_keys::device_id.eq_any(&device_ids))
-			.filter(device_keys::is_active.eq(true))
-			.order(device_keys::created_at.asc())
-			.load(db)
-			.await
-			.map_err(AppError::from)?;
-
-		let latest_connections =
-			DeviceConnection::get_latest_from_device_ids(db, device_ids.iter().copied()).await?;
-
-		let mut keys_by_device: HashMap<Uuid, Vec<DeviceKey>> = HashMap::new();
-		for key in device_keys {
-			keys_by_device.entry(key.device_id).or_default().push(key);
-		}
-
-		let mut connections_by_device: HashMap<Uuid, DeviceConnection> = HashMap::new();
-		for connection in latest_connections {
-			connections_by_device.insert(connection.device_id, connection);
-		}
-
-		let result = untrusted_devices
-			.into_iter()
-			.map(|device| DeviceWithInfo {
-				keys: keys_by_device.remove(&device.id).unwrap_or_default(),
-				latest_connection: connections_by_device.remove(&device.id),
-				device,
-			})
-			.collect();
-
-		Ok(result)
-	}
-
-	/// List all trusted devices with their keys and latest connection info.
+	/// List all devices with their keys and latest connection info.
 	pub async fn list_trusted_with_info(db: &mut AsyncPgConnection) -> Result<Vec<DeviceWithInfo>> {
 		Self::list_trusted_with_info_paginated(db, i64::MAX, 0).await
 	}
@@ -562,7 +486,7 @@ impl Device {
 			.map_err(AppError::from)
 	}
 
-	/// List trusted devices with pagination.
+	/// List devices with pagination.
 	pub async fn list_trusted_with_info_paginated(
 		db: &mut AsyncPgConnection,
 		limit: i64,
@@ -572,7 +496,6 @@ impl Device {
 
 		let trusted_devices: Vec<Self> = devices::table
 			.select(Self::as_select())
-			.filter(devices::role.ne(DeviceRole::Untrusted))
 			.order(devices::created_at.desc())
 			.limit(limit)
 			.offset(offset)
@@ -616,26 +539,12 @@ impl Device {
 		Ok(result)
 	}
 
-	/// Count untrusted devices.
-	pub async fn count_untrusted(db: &mut AsyncPgConnection) -> Result<i64> {
-		use crate::schema::devices;
-		use diesel::dsl::count_star;
-
-		devices::table
-			.filter(devices::role.eq(DeviceRole::Untrusted))
-			.select(count_star())
-			.first(db)
-			.await
-			.map_err(AppError::from)
-	}
-
-	/// Count trusted devices.
+	/// Count all devices.
 	pub async fn count_trusted(db: &mut AsyncPgConnection) -> Result<i64> {
 		use crate::schema::devices;
 		use diesel::dsl::count_star;
 
 		devices::table
-			.filter(devices::role.ne(DeviceRole::Untrusted))
 			.select(count_star())
 			.first(db)
 			.await
@@ -659,9 +568,17 @@ impl Device {
 		Ok(())
 	}
 
-	/// Untrust a device by setting its role to Untrusted.
-	pub async fn untrust(db: &mut AsyncPgConnection, device_id: Uuid) -> Result<()> {
-		Self::trust(db, device_id, DeviceRole::Untrusted).await
+	/// Revoke a device's access: deactivate its keys and detach any tailnet
+	/// identity, so it can no longer authenticate by either path. The row is
+	/// kept (with its role) for history; re-granting access means provisioning
+	/// a fresh credential or re-enrolling.
+	pub async fn revoke(db: &mut AsyncPgConnection, device_id: Uuid) -> Result<()> {
+		db.transaction::<_, AppError, _>(async |conn| {
+			Self::deactivate_keys(conn, device_id).await?;
+			Self::detach_tailscale(conn, device_id).await?;
+			Ok(())
+		})
+		.await
 	}
 
 	/// Like [`from_key`] but matches inactive keys too. Used by enrollment to

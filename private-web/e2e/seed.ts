@@ -160,8 +160,7 @@ export async function seedDevice(
 	return { id, role };
 }
 
-/** Add a device_key row so the device shows up as trusted (active
- * key) or untrusted (inactive key). */
+/** Add a device_key row for a device (active or inactive). */
 export async function seedDeviceKey(
 	sql: Sql,
 	opts: {

@@ -267,6 +267,7 @@ async fn enrollment_adds_key_to_tailscale_precreated_device() {
 				node_name: None,
 				tailnet: None,
 			},
+			commons_types::device::DeviceRole::Server,
 		)
 		.await
 		.unwrap();
