@@ -1761,7 +1761,7 @@
           },
           "healthy": {
             "type": "boolean",
-            "description": "Server's overall self-reported health. Absent in the payload ⇒ true\n(legacy compat); see `docs/plans/status-snapshots-and-health.md`."
+            "description": "Server's overall self-reported health. Absent in the payload ⇒ true\n(legacy compat)."
           },
           "id": {
             "type": "string",
@@ -1807,7 +1807,7 @@
                   "boolean",
                   "null"
                 ],
-                "description": "Overall server self-reported health. **Absent ⇒ `true`** —\nlegacy senders that don't know about this field never\nfalse-positive unhealthy. Persisted on `statuses.healthy` for\nhistorical analysis and the status snapshot UI, but **not\nconsulted for incident or severity decisions**: canopy derives\nthe system-healthy judgement from per-check results, with each\ncheck's severity coming from the operator-owned\n`healthcheck_severities` catalog. See\n`docs/plans/healthcheck-severity-catalog.md`."
+                "description": "Overall server self-reported health. **Absent ⇒ `true`** —\nlegacy senders that don't know about this field never\nfalse-positive unhealthy. Persisted on `statuses.healthy` for\nhistorical analysis and the status snapshot UI, but **not\nconsulted for incident or severity decisions**: canopy derives\nthe system-healthy judgement from per-check results, with each\ncheck's severity coming from the operator-owned\n`healthcheck_severities` catalog."
               }
             }
           }

@@ -43,8 +43,7 @@ pub struct StatusPayload {
 	/// consulted for incident or severity decisions**: canopy derives
 	/// the system-healthy judgement from per-check results, with each
 	/// check's severity coming from the operator-owned
-	/// `healthcheck_severities` catalog. See
-	/// `docs/plans/healthcheck-severity-catalog.md`.
+	/// `healthcheck_severities` catalog.
 	pub healthy: Option<bool>,
 
 	/// Per-check breakdown. **Required** — a push without a `health`

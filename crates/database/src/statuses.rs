@@ -75,7 +75,7 @@ pub struct Status {
 	pub version: Option<VersionStr>,
 	pub extra: serde_json::Value,
 	/// Server's overall self-reported health. Absent in the payload ⇒ true
-	/// (legacy compat); see `docs/plans/status-snapshots-and-health.md`.
+	/// (legacy compat).
 	pub healthy: bool,
 	/// Per-check breakdown. Each entry is an object with at least
 	/// `{check: string, healthy: bool, ...}`; extra fields are passed
