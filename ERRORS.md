@@ -135,6 +135,19 @@ in order of likelihood:
   refresh hasn't happened yet, or the directory background task
   is failing.
 
+## Auth: token not valid
+
+Returned (HTTP 401, with a `WWW-Authenticate: Bearer` challenge) by the
+public-server MCP mount (`/mcp`) when the request carries no usable access
+token: the `Authorization: Bearer` header is missing or malformed, or the
+token is unknown, revoked, or expired. The response is deliberately uniform
+across those cases so it can't be used as a token-lifecycle oracle; the
+distinction is logged server-side.
+
+If you're wiring up an agent and hit this, mint a fresh token from the admin
+UI (Settings → MCP access) and check it was pasted whole — tokens start with
+`canopy_mcp_`. Tokens expire a year after minting.
+
 ## Enrollment failed
 
 Returned by the public-server enrollment endpoints

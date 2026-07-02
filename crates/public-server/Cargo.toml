@@ -18,6 +18,7 @@ required-features = ["cli"]
 aws-config.workspace = true
 aws-sdk-sts.workspace = true
 axum = { workspace = true, features = ["json", "macros"] }
+canopy-mcp = { path = "../canopy-mcp" }
 clap = { workspace = true, optional = true, features = ["derive", "env"] }
 commons-errors = { path = "../commons-errors" }
 commons-servers = { path = "../commons-servers" }

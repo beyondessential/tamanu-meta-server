@@ -8,6 +8,7 @@ pub mod artifacts;
 pub mod backup;
 pub mod bestool;
 pub mod events;
+pub mod mcp;
 pub mod openapi;
 #[cfg(feature = "ui")]
 pub mod password;

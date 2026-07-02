@@ -112,6 +112,12 @@ pub enum AppError {
 	#[error("no tailnet identity could be resolved for this request")]
 	AuthTailnetIdentityMissing,
 
+	/// Deliberately opaque refusal for bearer-token-gated endpoints: a missing,
+	/// malformed, unknown, revoked, and expired token all collapse to this so
+	/// the response is not a token-lifecycle oracle. Maps to 401.
+	#[error("missing or invalid access token")]
+	AuthTokenNotValid,
+
 	/// User-supplied input was syntactically or semantically invalid.
 	/// Maps to 400 so callers don't have to chase a generic 500.
 	#[error("invalid request: {0}")]
@@ -206,6 +212,7 @@ impl AppError {
 			Self::DeviceTailscaleNodeAlreadyClaimed => StatusCode::CONFLICT,
 			Self::DeviceMergeConflict => StatusCode::CONFLICT,
 			Self::AuthTailnetIdentityMissing => StatusCode::UNAUTHORIZED,
+			Self::AuthTokenNotValid => StatusCode::UNAUTHORIZED,
 			Self::BadRequest(_) => StatusCode::BAD_REQUEST,
 			Self::Conflict(_) => StatusCode::CONFLICT,
 			Self::EnrollmentFailed => StatusCode::FORBIDDEN,
@@ -259,6 +266,7 @@ impl AppError {
 							"device-tailscale-node-already-claimed",
 						Self::DeviceMergeConflict => "device-merge-conflict",
 						Self::AuthTailnetIdentityMissing => "auth-tailnet-identity-missing",
+						Self::AuthTokenNotValid => "auth-token-not-valid",
 						Self::BadRequest(_) => "bad-request",
 						Self::Conflict(_) => "conflict",
 						Self::EnrollmentFailed => "enrollment-failed",
