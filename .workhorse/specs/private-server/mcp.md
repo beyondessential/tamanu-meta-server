@@ -36,7 +36,7 @@ The token secret is shown exactly once, at minting; the system persists only a d
 A token can be revoked at any time, taking effect immediately.
 Each token records when it was last used, so idle tokens are visible.
 
-From fifteen days before a token's expiry until that token expires or is revoked, a single operator-visible alert is raised against the system itself — not against any fleet member — so rotation happens on schedule rather than as an outage.
+From fifteen days before a token's expiry until that token expires or is revoked, a [self-alert](self-alerts.md) is raised, so rotation happens on schedule rather than as an outage.
 
 ## Read-only
 
