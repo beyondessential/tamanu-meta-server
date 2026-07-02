@@ -1,10 +1,13 @@
 import AddIcon from "@mui/icons-material/Add";
 import DeleteIcon from "@mui/icons-material/Delete";
+import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
+import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import {
 	Alert,
 	Box,
 	Button,
 	Chip,
+	Collapse,
 	Dialog,
 	DialogActions,
 	DialogContent,
@@ -29,6 +32,7 @@ import {
 } from "@mui/material";
 import { useEffect, useState } from "react";
 import { ApiError, callApi, useApi } from "../api";
+import type { BackupRestoreCheck } from "../types";
 
 function kebabCase(s: string): string {
 	return s
@@ -234,40 +238,20 @@ export default function RestoreReplicasSection({
 					<Table size="small">
 						<TableHead>
 							<TableRow>
+								<TableCell padding="checkbox" />
 								<TableCell>When</TableCell>
 								<TableCell>Server</TableCell>
 								<TableCell>Type</TableCell>
 								<TableCell>Intent</TableCell>
 								<TableCell>Outcome</TableCell>
+								<TableCell>PG version</TableCell>
 								<TableCell>Snapshot</TableCell>
 							</TableRow>
 						</TableHead>
 						<TableBody>
-							{checks.data.map((c) => {
-								const ok = c.outcome === "success" && c.replica_healthy;
-								return (
-									<TableRow key={c.id}>
-										<TableCell>
-											{new Date(c.observed_at).toLocaleString()}
-										</TableCell>
-										<TableCell>
-											{c.server_id ? c.server_id.slice(0, 8) : "—"}
-										</TableCell>
-										<TableCell>{c.type}</TableCell>
-										<TableCell>{c.intent}</TableCell>
-										<TableCell>
-											<Chip
-												label={ok ? "healthy" : "failed"}
-												color={ok ? "success" : "error"}
-												size="small"
-											/>
-										</TableCell>
-										<TableCell>
-											{c.snapshot_id ? c.snapshot_id.slice(0, 12) : "—"}
-										</TableCell>
-									</TableRow>
-								);
-							})}
+							{checks.data.map((c) => (
+								<CheckRow key={c.id} check={c} />
+							))}
 						</TableBody>
 					</Table>
 				</Paper>
@@ -491,5 +475,77 @@ function CreateReplicaDialog({
 				</Button>
 			</DialogActions>
 		</Dialog>
+	);
+}
+
+/** One restore-check row. When the consumer sent arbitrary `health_details`,
+ * the row expands to reveal it as pretty-printed JSON. */
+function CheckRow({ check }: { check: BackupRestoreCheck }) {
+	const [open, setOpen] = useState(false);
+	const ok = check.outcome === "success" && check.replica_healthy;
+	const hasDetails =
+		check.health_details != null &&
+		!(
+			typeof check.health_details === "object" &&
+			Object.keys(check.health_details).length === 0
+		);
+	return (
+		<>
+			<TableRow sx={hasDetails ? { "& > *": { borderBottom: "unset" } } : undefined}>
+				<TableCell padding="checkbox">
+					{hasDetails && (
+						<IconButton
+							size="small"
+							aria-label={open ? "Hide health details" : "Show health details"}
+							onClick={() => setOpen((o) => !o)}
+						>
+							{open ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
+						</IconButton>
+					)}
+				</TableCell>
+				<TableCell>{new Date(check.observed_at).toLocaleString()}</TableCell>
+				<TableCell>{check.server_id ? check.server_id.slice(0, 8) : "—"}</TableCell>
+				<TableCell>{check.type}</TableCell>
+				<TableCell>{check.intent}</TableCell>
+				<TableCell>
+					<Chip
+						label={ok ? "healthy" : "failed"}
+						color={ok ? "success" : "error"}
+						size="small"
+					/>
+				</TableCell>
+				<TableCell>{check.postgres_version ?? "—"}</TableCell>
+				<TableCell>
+					{check.snapshot_id ? check.snapshot_id.slice(0, 12) : "—"}
+				</TableCell>
+			</TableRow>
+			{hasDetails && (
+				<TableRow>
+					<TableCell sx={{ py: 0 }} colSpan={8}>
+						<Collapse in={open} timeout="auto" unmountOnExit>
+							<Box sx={{ my: 1 }}>
+								<Typography variant="caption" color="text.secondary">
+									Health details
+								</Typography>
+								<Box
+									component="pre"
+									sx={{
+										m: 0,
+										mt: 0.5,
+										p: 1,
+										fontSize: "0.75rem",
+										overflowX: "auto",
+										bgcolor: "action.hover",
+										borderRadius: 1,
+									}}
+								>
+									{JSON.stringify(check.health_details, null, 2)}
+								</Box>
+							</Box>
+						</Collapse>
+					</TableCell>
+				</TableRow>
+			)}
+		</>
 	);
 }

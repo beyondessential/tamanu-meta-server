@@ -116,6 +116,7 @@ diesel::table! {
 		s3_received_raw_bytes -> Nullable<Int8>,
 		s3_received_payload_bytes -> Nullable<Int8>,
 		reported_at -> Timestamptz,
+		health_details -> Nullable<Jsonb>,
 	}
 }
 

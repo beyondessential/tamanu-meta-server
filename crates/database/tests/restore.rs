@@ -59,6 +59,7 @@ fn new_check(
 		s3_sent_payload_bytes: None,
 		s3_received_raw_bytes: None,
 		s3_received_payload_bytes: None,
+		health_details: None,
 	}
 }
 
@@ -476,6 +477,57 @@ async fn sweep_overdue_raises_for_stale_replica_but_skips_gaps() {
 			.expect("sweep");
 		assert_eq!(filed, 1, "only the supported declaration is overdue");
 		assert_eq!(active_restore_issues(&mut conn, group).await, 1);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn records_and_returns_arbitrary_health_details() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn, "g").await;
+		let server = insert_server(&mut conn, group).await;
+
+		let details = serde_json::json!({
+			"cluster": { "live_tuples": 12345, "dead_tuples": 6 },
+			"indexes_fixed": true,
+		});
+		let mut check = new_check(
+			consumer,
+			group,
+			server,
+			RestoreIntent::from("verify"),
+			RunOutcome::Success,
+			true,
+		);
+		check.health_details = Some(details.clone());
+		BackupRestoreCheck::record_report(&mut conn, check)
+			.await
+			.expect("record");
+
+		let recent = BackupRestoreCheck::list_recent_for_group(&mut conn, group, 10)
+			.await
+			.expect("list");
+		assert_eq!(recent.len(), 1);
+		// Stored and returned verbatim (opaque to canopy).
+		assert_eq!(recent[0].health_details, Some(details));
+
+		// A report with no health data keeps the column NULL.
+		let plain = new_check(
+			consumer,
+			group,
+			server,
+			RestoreIntent::from("verify"),
+			RunOutcome::Success,
+			true,
+		);
+		BackupRestoreCheck::record_report(&mut conn, plain)
+			.await
+			.expect("record plain");
+		let recent = BackupRestoreCheck::list_recent_for_group(&mut conn, group, 10)
+			.await
+			.expect("list");
+		assert!(recent.iter().any(|c| c.health_details.is_none()));
 	})
 	.await;
 }

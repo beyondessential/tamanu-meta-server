@@ -145,7 +145,8 @@ A report carries:
 - the **outcome** — restored-and-healthy, or failed — and, on failure, an error description;
 - whether the restored database came up healthy, and its Postgres major version;
 - when the restore was observed;
-- the object-storage traffic the restore moved.
+- the object-storage traffic the restore moved;
+- optionally, arbitrary health data the consumer chooses to attach (e.g. cluster statistics, whether indexes needed fixing). Canopy stores and displays it as-is without interpreting it; specific fields may later be promoted to first-class, queryable form.
 
 Restored-and-healthy means the snapshot restored, the database started, and the consumer's readiness checks passed — a stronger statement than a snapshot merely existing.
 A failure covers any stage: the restore itself, the database failing to come up, or a readiness check failing.

@@ -399,6 +399,9 @@ pub struct VerificationArgs {
 	pub s3_sent_payload_bytes: Option<i64>,
 	pub s3_received_raw_bytes: Option<i64>,
 	pub s3_received_payload_bytes: Option<i64>,
+	/// Arbitrary health data to record alongside the check (postgres cluster
+	/// stats, whether indexes needed fixing, …). Stored and displayed as-is.
+	pub health_details: Option<serde_json::Value>,
 }
 
 #[utoipa::path(
@@ -447,6 +450,7 @@ async fn verification(
 			s3_sent_payload_bytes: args.s3_sent_payload_bytes,
 			s3_received_raw_bytes: args.s3_received_raw_bytes,
 			s3_received_payload_bytes: args.s3_received_payload_bytes,
+			health_details: args.health_details,
 		},
 	)
 	.await?;
