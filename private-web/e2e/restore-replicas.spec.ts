@@ -190,14 +190,18 @@ test.describe("restore replicas", () => {
 		});
 
 		await page.goto(`/groups/${groupId}/backups`);
-		const row = page.getByRole("row", { name: /health-srv/ });
-		await expect(row).toBeVisible();
+		// The checks table shows the server as a truncated id, not its name, so
+		// locate the check row by its own expand button rather than the server.
+		const detailsButton = page.getByRole("button", {
+			name: /show health details/i,
+		});
+		const row = page.getByRole("row").filter({ has: detailsButton });
 		// The postgres version is now surfaced in the table.
 		await expect(row.getByText("16.3")).toBeVisible();
 
 		// Health details are collapsed until expanded, then shown as JSON.
 		await expect(page.getByText(/live_tuples/)).toBeHidden();
-		await row.getByRole("button", { name: /show health details/i }).click();
+		await detailsButton.click();
 		await expect(page.getByText(/"indexes_fixed": true/)).toBeVisible();
 		await expect(page.getByText(/"live_tuples": 4242/)).toBeVisible();
 	});
