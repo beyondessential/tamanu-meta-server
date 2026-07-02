@@ -318,6 +318,19 @@ diesel::table! {
 }
 
 diesel::table! {
+	mcp_tokens (id) {
+		id -> Uuid,
+		name -> Text,
+		token_hash -> Bytea,
+		created_by -> Text,
+		created_at -> Timestamptz,
+		expires_at -> Timestamptz,
+		revoked_at -> Nullable<Timestamptz>,
+		last_used_at -> Nullable<Timestamptz>,
+	}
+}
+
+diesel::table! {
 	restore_consumer_capabilities (consumer_device_id, intent) {
 		consumer_device_id -> Uuid,
 		intent -> Text,
@@ -625,6 +638,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 	incidents,
 	issue_notes,
 	issues,
+	mcp_tokens,
 	restore_consumer_capabilities,
 	restore_replicas,
 	server_backup_capabilities,
