@@ -3365,6 +3365,177 @@
         ]
       }
     },
+    "/api/mcp_tokens/list": {
+      "post": {
+        "tags": [
+          "mcp_tokens"
+        ],
+        "operationId": "mcp_tokens_list",
+        "responses": {
+          "200": {
+            "description": "All MCP access tokens, newest first, revoked included.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/McpTokenView"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/mcp_tokens/mint": {
+      "post": {
+        "tags": [
+          "mcp_tokens"
+        ],
+        "operationId": "mcp_tokens_mint",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MintArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Freshly minted token; the secret in this response is shown once.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MintedToken"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/mcp_tokens/revoke": {
+      "post": {
+        "tags": [
+          "mcp_tokens"
+        ],
+        "operationId": "mcp_tokens_revoke",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevokeArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Token revoked (idempotent)."
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/restore_replicas/checks": {
       "post": {
         "tags": [
@@ -7929,6 +8100,51 @@
           "full"
         ]
       },
+      "McpTokenView": {
+        "type": "object",
+        "description": "A token row for the operator UI: everything but the secret (only a hash of\nwhich exists server-side anyway).",
+        "required": [
+          "id",
+          "name",
+          "created_by",
+          "created_at",
+          "expires_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "last_used_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "name": {
+            "type": "string"
+          },
+          "revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
       "MergeIntoArgs": {
         "type": "object",
         "required": [
@@ -7994,6 +8210,35 @@
             "items": {
               "$ref": "#/components/schemas/VersionData"
             }
+          }
+        }
+      },
+      "MintArgs": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Operator-chosen label, e.g. which agent will hold this token."
+          }
+        }
+      },
+      "MintedToken": {
+        "type": "object",
+        "description": "The one and only exposure of the token plaintext.",
+        "required": [
+          "token",
+          "secret"
+        ],
+        "properties": {
+          "secret": {
+            "type": "string",
+            "description": "The bearer token itself. Shown once; never retrievable again."
+          },
+          "token": {
+            "$ref": "#/components/schemas/McpTokenView"
           }
         }
       },
@@ -9022,6 +9267,18 @@
           "keep_weekly": {
             "type": "integer",
             "format": "int32"
+          }
+        }
+      },
+      "RevokeArgs": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
@@ -10744,6 +11001,10 @@
     {
       "name": "issues",
       "description": "Per-server issues raised from device events."
+    },
+    {
+      "name": "mcp_tokens",
+      "description": "Bearer tokens for the public MCP mount."
     },
     {
       "name": "servers",

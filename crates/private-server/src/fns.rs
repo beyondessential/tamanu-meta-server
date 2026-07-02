@@ -9,6 +9,7 @@ pub mod devices;
 pub mod healthchecks;
 pub mod incidents;
 pub mod issues;
+pub mod mcp_tokens;
 pub mod restore_replicas;
 pub mod server_groups;
 pub mod servers;
@@ -55,6 +56,7 @@ pub fn routes() -> OpenApiRouter<crate::state::AppState> {
 			.nest("/healthchecks", healthchecks::routes())
 			.nest("/incidents", incidents::routes())
 			.nest("/issues", issues::routes())
+			.nest("/mcp_tokens", mcp_tokens::routes())
 			.nest("/restore_replicas", restore_replicas::routes())
 			.nest("/server_groups", server_groups::routes())
 			.nest("/servers", servers::routes())
