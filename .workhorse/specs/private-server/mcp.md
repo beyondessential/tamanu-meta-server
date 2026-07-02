@@ -15,12 +15,28 @@ This interface gives an agent a single, self-describing entry point: it advertis
 
 ## Access and identity
 
-The interface is part of the operator-facing surface, alongside the operator API and web UI, and is never exposed on the device-facing surface.
-It speaks the Model Context Protocol over HTTP at `/api/mcp`.
+The interface speaks the Model Context Protocol over HTTP, and is reachable over two paths with distinct authentication.
 
-Every caller is identified by a tailnet user identity, the same identity the rest of the operator surface uses.
-The interface is available to any human tailnet user, not only to administrators, and is not reachable by tagged automation devices.
-Each query a caller makes is attributable to that identity.
+On the operator-facing surface, alongside the operator API and web UI, it is served at `/api/mcp`.
+Every caller there is identified by a tailnet user identity, the same identity the rest of the operator surface uses.
+That path is available to any human tailnet user, not only to administrators, and is not reachable by tagged automation devices.
+
+On the internet-facing surface it is served at `/mcp`, for agents that operators run outside the tailnet.
+A caller there authenticates with a bearer access token in the standard authorization header.
+Device identity plays no part on this path: a device credential grants no access to the interface, and an access token grants no access to the device API.
+Requests without a valid token are refused without revealing whether the token is unknown, revoked, or expired, and repeated failures from one origin are rate limited.
+
+Each query a caller makes is attributable to its identity: the tailnet user on the operator path, the token's name on the token path.
+
+## Access tokens
+
+Access tokens are minted, listed, and revoked by administrators on the operator surface.
+Each token has an operator-chosen name, records who minted it and when, and carries a fixed lifetime of one year from minting that cannot be extended or chosen at mint time.
+The token secret is shown exactly once, at minting; the system persists only a digest of it, and never logs or re-displays the secret.
+A token can be revoked at any time, taking effect immediately.
+Each token records when it was last used, so idle tokens are visible.
+
+From fifteen days before a token's expiry until that token expires or is revoked, an operator-visible alert is raised across the fleet, so rotation happens on schedule rather than as an outage.
 
 ## Read-only
 
