@@ -36,6 +36,12 @@ pub mod vars;
 pub const KIND_INCIDENT_OPEN: &str = "incident_open";
 /// Incident resolved — Phase A: top-level; Phase B: reply in the incident thread.
 pub const KIND_INCIDENT_RESOLVE: &str = "incident_resolve";
+/// Self-alert became active ([`crate::self_alerts`]). No incident; `issue_id`
+/// carries the nil-server issue.
+pub const KIND_SELF_ALERT_OPEN: &str = "self_alert_open";
+/// Self-alert recovered. Routed to the same webhook as the open; the payload's
+/// `state` field tells the workflow which is which.
+pub const KIND_SELF_ALERT_RESOLVE: &str = "self_alert_resolve";
 
 #[derive(Clone, Debug, Serialize, Deserialize, Queryable, Selectable)]
 #[diesel(table_name = crate::schema::slack_outbox)]
@@ -45,7 +51,8 @@ pub struct SlackOutbox {
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub created_at: Timestamp,
 	pub kind: String,
-	pub incident_id: Uuid,
+	/// `None` for self-alert rows, which have no incident.
+	pub incident_id: Option<Uuid>,
 	pub issue_id: Option<Uuid>,
 	pub note_id: Option<Uuid>,
 	pub payload: JsonValue,
@@ -83,7 +90,7 @@ impl SlackOutbox {
 	pub async fn enqueue(
 		db: &mut AsyncPgConnection,
 		kind: &str,
-		incident_id: Uuid,
+		incident_id: Option<Uuid>,
 		issue_id: Option<Uuid>,
 		note_id: Option<Uuid>,
 		payload: JsonValue,
@@ -121,8 +128,36 @@ impl SlackOutbox {
 		let now = Timestamp::now();
 		let rows = diesel::update(
 			dsl::slack_outbox
-				.filter(dsl::incident_id.eq(incident_id))
+				.filter(dsl::incident_id.eq(Some(incident_id)))
 				.filter(dsl::kind.eq(KIND_INCIDENT_OPEN))
+				.filter(dsl::delivered_at.is_null())
+				.filter(dsl::gave_up_at.is_null()),
+		)
+		.set((
+			dsl::gave_up_at.eq(jiff_diesel::Timestamp::from(now)),
+			dsl::last_error.eq(reason),
+		))
+		.execute(db)
+		.await
+		.map_err(AppError::from)?;
+		Ok(rows)
+	}
+
+	/// Self-alert twin of [`cancel_pending_open`](Self::cancel_pending_open),
+	/// keyed on the nil-server issue instead of an incident. Same contract: a
+	/// non-zero return means the open never reached Slack and the caller
+	/// should skip the resolve enqueue.
+	pub async fn cancel_pending_self_alert_open(
+		db: &mut AsyncPgConnection,
+		issue_id: Uuid,
+		reason: &str,
+	) -> Result<usize> {
+		use crate::schema::slack_outbox::dsl;
+		let now = Timestamp::now();
+		let rows = diesel::update(
+			dsl::slack_outbox
+				.filter(dsl::issue_id.eq(Some(issue_id)))
+				.filter(dsl::kind.eq(KIND_SELF_ALERT_OPEN))
 				.filter(dsl::delivered_at.is_null())
 				.filter(dsl::gave_up_at.is_null()),
 		)
@@ -155,9 +190,9 @@ impl SlackOutbox {
 		}
 		let now = Timestamp::now();
 		let rows: Vec<(Uuid, jiff_diesel::Timestamp)> = dsl::slack_outbox
-			.select((dsl::incident_id, dsl::deliver_after))
+			.select((dsl::incident_id.assume_not_null(), dsl::deliver_after))
 			.filter(dsl::kind.eq(KIND_INCIDENT_OPEN))
-			.filter(dsl::incident_id.eq_any(incident_ids))
+			.filter(dsl::incident_id.eq_any(incident_ids.iter().map(|i| Some(*i))))
 			.filter(dsl::delivered_at.is_null())
 			.filter(dsl::gave_up_at.is_null())
 			.filter(dsl::deliver_after.gt(jiff_diesel::Timestamp::from(now)))
@@ -183,9 +218,9 @@ impl SlackOutbox {
 			return Ok(HashSet::new());
 		}
 		let rows: Vec<Uuid> = dsl::slack_outbox
-			.select(dsl::incident_id)
+			.select(dsl::incident_id.assume_not_null())
 			.filter(dsl::kind.eq(KIND_INCIDENT_OPEN))
-			.filter(dsl::incident_id.eq_any(incident_ids))
+			.filter(dsl::incident_id.eq_any(incident_ids.iter().map(|i| Some(*i))))
 			.filter(dsl::delivered_at.is_not_null())
 			.load(db)
 			.await
