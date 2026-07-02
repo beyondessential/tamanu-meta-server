@@ -131,6 +131,14 @@ pub fn spawn() -> JoinHandle<()> {
 					Err(err) => error!("tailnet key-expiry sweep failed: {err}"),
 				}
 			}
+
+			// MCP bearer tokens near their fixed one-year expiry: fleet-wide,
+			// fanned out per group (see `sweep_token_expiry` for why).
+			match database::mcp_tokens::sweep_token_expiry(&mut db).await {
+				Ok(0) => {}
+				Ok(n) => debug!("filed {n} mcp token-expiry events"),
+				Err(err) => error!("mcp token-expiry sweep failed: {err}"),
+			}
 		}
 	})
 }
