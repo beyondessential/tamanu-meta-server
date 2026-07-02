@@ -1558,6 +1558,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/self_alerts/active": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["self_alerts_active"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/self_alerts/list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["self_alerts_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/self_alerts/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["self_alerts_resolve"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/server_groups/create": {
         parameters: {
             query?: never;
@@ -3800,6 +3848,24 @@ export interface components {
         };
         SearchArgs: {
             query: string;
+        };
+        SelfAlertView: {
+            active: boolean;
+            /** Format: date-time */
+            first_seen: string;
+            /** Format: uuid */
+            id: string;
+            /** Format: date-time */
+            last_seen: string;
+            message: string;
+            /** @description The stable condition key, e.g. `mcp-token-expiry`. */
+            ref: string;
+            /** Format: date-time */
+            resolved_at?: string | null;
+            resolved_by?: string | null;
+            severity: components["schemas"]["Severity"];
+            /** @description Single-line headline. */
+            title?: string | null;
         };
         ServerArgs: {
             /** Format: uuid */
@@ -7022,6 +7088,108 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RestoreReplicaView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    self_alerts_active: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Currently-alerting self-alerts (active and not operator-resolved), for the banner. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SelfAlertView"][];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    self_alerts_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Self-alerts, newest activity first, recovered/resolved included. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SelfAlertView"][];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    self_alerts_resolve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolveArgs"];
+            };
+        };
+        responses: {
+            /** @description Alert marked operator-resolved; a pending notification is cancelled. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
             404: {
