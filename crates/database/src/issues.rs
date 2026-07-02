@@ -1076,7 +1076,7 @@ async fn enqueue_slack_open(
 	crate::slack_outbox::SlackOutbox::enqueue(
 		conn,
 		crate::slack_outbox::KIND_INCIDENT_OPEN,
-		incident_id,
+		Some(incident_id),
 		Some(issue.id),
 		None,
 		payload,
@@ -1103,7 +1103,7 @@ async fn accelerate_pending_open(conn: &mut AsyncPgConnection, incident_id: Uuid
 	let now = Timestamp::now();
 	let updated = diesel::update(
 		dsl::slack_outbox
-			.filter(dsl::incident_id.eq(incident_id))
+			.filter(dsl::incident_id.eq(Some(incident_id)))
 			.filter(dsl::kind.eq(crate::slack_outbox::KIND_INCIDENT_OPEN))
 			.filter(dsl::delivered_at.is_null())
 			.filter(dsl::gave_up_at.is_null())
@@ -1150,7 +1150,7 @@ async fn enqueue_slack_resolve_inner(
 	crate::slack_outbox::SlackOutbox::enqueue(
 		conn,
 		crate::slack_outbox::KIND_INCIDENT_RESOLVE,
-		incident.id,
+		Some(incident.id),
 		None,
 		None,
 		payload,
@@ -1240,7 +1240,12 @@ impl Issue {
 		use crate::schema::issues::dsl;
 		use crate::schema::servers;
 
-		let mut q = dsl::issues.select(Self::as_select()).into_boxed();
+		let mut q = dsl::issues
+			.select(Self::as_select())
+			// Self-alerts (the nil "Canopy" server's issues) have their own
+			// surface (`crate::self_alerts`); they are not fleet issues.
+			.filter(dsl::server_id.is_distinct_from(Uuid::nil()))
+			.into_boxed();
 		if filters.active_only {
 			q = q
 				.filter(dsl::active.eq(true))

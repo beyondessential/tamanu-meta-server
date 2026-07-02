@@ -57,57 +57,32 @@ fn validate_object_lock(
 	}
 }
 
-/// File the shared-identity alert: one coalescing Critical issue against the
-/// nil/meta server (the same home as the other canopy self-alerts).
+/// Raise the shared-identity self-alert (Critical → notifies immediately).
 async fn file_identity_alert(
 	db: &mut diesel_async::AsyncPgConnection,
 	msg: &str,
 ) -> Result<(), commons_errors::AppError> {
-	database::issues::NewEvent {
-		source: refs::CANOPY_SOURCE.into(),
-		r#ref: refs::PREFLIGHT_IDENTITY.into(),
-		severity: Some(Severity::Critical),
-		description: Some("Canopy IRSA identity broken".into()),
-		message: msg.into(),
-		active: Some(true),
-		occurred_at: None,
-	}
-	.save(db, uuid::Uuid::nil(), None)
+	database::self_alerts::raise(
+		db,
+		refs::PREFLIGHT_IDENTITY,
+		Severity::Critical,
+		"Canopy IRSA identity broken",
+		msg,
+	)
 	.await?;
 	Ok(())
 }
 
-/// Recover the shared-identity alert wherever it is live: the nil/meta-server
-/// issue, and any group-scoped issues left over from when this alert fanned
-/// out per group (without this, a legacy issue that was active at deploy time
-/// would stay open forever). Writes nothing when nothing is active.
+/// Recover the shared-identity alert wherever it is live: the self-alert,
+/// and any group-scoped issues left over from when this alert fanned out per
+/// group (without this, a legacy issue that was active at deploy time would
+/// stay open forever). Writes nothing when nothing is active.
 async fn recover_identity_alert(
 	db: &mut diesel_async::AsyncPgConnection,
 ) -> Result<(), commons_errors::AppError> {
 	use database::issues::Issue;
 
-	let live = Issue::list_by_source_ref(
-		db,
-		refs::CANOPY_SOURCE,
-		refs::PREFLIGHT_IDENTITY,
-		&[uuid::Uuid::nil()],
-	)
-	.await?
-	.into_iter()
-	.any(|i| i.active);
-	if live {
-		database::issues::NewEvent {
-			source: refs::CANOPY_SOURCE.into(),
-			r#ref: refs::PREFLIGHT_IDENTITY.into(),
-			severity: Some(Severity::Info),
-			description: None,
-			message: "caller identity ok".into(),
-			active: Some(false),
-			occurred_at: None,
-		}
-		.save(db, uuid::Uuid::nil(), None)
-		.await?;
-	}
+	database::self_alerts::recover(db, refs::PREFLIGHT_IDENTITY, "caller identity ok").await?;
 
 	for group_id in
 		Issue::active_group_ids_by_source_ref(db, refs::CANOPY_SOURCE, refs::PREFLIGHT_IDENTITY)

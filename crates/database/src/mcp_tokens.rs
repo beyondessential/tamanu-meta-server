@@ -193,47 +193,24 @@ impl McpToken {
 /// refs, this is a contract: silences and Slack messages reference it.
 pub const EXPIRY_REF: &str = "mcp-token-expiry";
 
-/// Rotation alert, run from the monitor loop. Files ONE coalescing issue
-/// against the nil/meta server — canopy's own row, the same home as the
-/// slack-delivery-failure self-alert — never one per group: a rotation
-/// heads-up must not page N times for N groups. It pages (once) when the
-/// meta server is grouped and monitored, and is otherwise visible on the
-/// issues page and in the Settings token list.
-///
-/// Active while any un-revoked token is inside [`EXPIRY_ALERT_LEAD`] of its
-/// expiry; recovers when none are. Idle sweeps write nothing.
+/// Rotation alert, run from the monitor loop: a [self-alert](crate::self_alerts)
+/// — one coalescing record, one notification per raise/recovery, never one per
+/// group. Active while any un-revoked token is inside [`EXPIRY_ALERT_LEAD`] of
+/// its expiry; recovers when none are. Idle sweeps write nothing.
 pub async fn sweep_token_expiry(db: &mut AsyncPgConnection) -> Result<usize> {
-	use crate::issues::{Issue, NewEvent};
 	use commons_types::issue::Severity;
 
 	let expiring = McpToken::expiring_soon(db).await?;
 
 	if expiring.is_empty() {
-		// Recover only if the alert is live, so the idle path is read-only.
-		let live = Issue::list_by_source_ref(
+		return Ok(crate::self_alerts::recover(
 			db,
-			crate::statuses::CANOPY_SOURCE,
 			EXPIRY_REF,
-			&[Uuid::nil()],
+			"all mcp access tokens rotated or revoked",
 		)
 		.await?
-		.into_iter()
-		.any(|i| i.active);
-		if !live {
-			return Ok(0);
-		}
-		NewEvent {
-			source: crate::statuses::CANOPY_SOURCE.into(),
-			r#ref: EXPIRY_REF.into(),
-			severity: Some(Severity::Info),
-			description: None,
-			message: "all mcp access tokens rotated or revoked".into(),
-			active: Some(false),
-			occurred_at: None,
-		}
-		.save(db, Uuid::nil(), None)
-		.await?;
-		return Ok(1);
+		.map(|_| 1)
+		.unwrap_or(0));
 	}
 
 	let now = Timestamp::now();
@@ -256,16 +233,13 @@ pub async fn sweep_token_expiry(db: &mut AsyncPgConnection) -> Result<usize> {
 		.collect::<Vec<_>>()
 		.join("\n");
 
-	NewEvent {
-		source: crate::statuses::CANOPY_SOURCE.into(),
-		r#ref: EXPIRY_REF.into(),
-		severity: Some(Severity::Error),
-		description: Some("MCP access token nearing expiry".into()),
-		message,
-		active: Some(true),
-		occurred_at: None,
-	}
-	.save(db, Uuid::nil(), None)
+	crate::self_alerts::raise(
+		db,
+		EXPIRY_REF,
+		Severity::Error,
+		"MCP access token nearing expiry",
+		&message,
+	)
 	.await?;
 	Ok(1)
 }

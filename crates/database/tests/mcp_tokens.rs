@@ -123,13 +123,13 @@ async fn expiring_soon_catches_the_alert_window() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn expiry_sweep_files_one_meta_issue_and_recovers() {
-	use database::issues::Issue;
+async fn expiry_sweep_files_one_self_alert_and_recovers() {
 	use database::mcp_tokens::{EXPIRY_REF, sweep_token_expiry};
+	use database::self_alerts;
 
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
 		// Groups exist, but must NOT each get an alert: a rotation heads-up
-		// files once against the nil/meta server, not per group.
+		// is a single self-alert, not per group.
 		conn.batch_execute(&format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{}', 'A'), ('{}', 'B');",
 			Uuid::new_v4(),
@@ -140,12 +140,15 @@ async fn expiry_sweep_files_one_meta_issue_and_recovers() {
 
 		// Nothing expiring, nothing alerted: the sweep is a no-op.
 		assert_eq!(sweep_token_expiry(&mut conn).await.expect("sweep"), 0);
-		let issues = Issue::list(&mut conn, Default::default(), 100)
-			.await
-			.expect("list issues");
-		assert!(issues.is_empty(), "idle sweep must not file issues");
+		assert!(
+			self_alerts::list(&mut conn, 50)
+				.await
+				.expect("list")
+				.is_empty(),
+			"idle sweep must not file alerts"
+		);
 
-		// A token inside the 15-day lead raises the single meta-server alert.
+		// A token inside the 15-day lead raises the single self-alert.
 		let (token, _) = McpToken::mint(&mut conn, "claude", "admin@example.com")
 			.await
 			.expect("mint");
@@ -157,12 +160,13 @@ async fn expiry_sweep_files_one_meta_issue_and_recovers() {
 		.expect("age token");
 
 		assert_eq!(sweep_token_expiry(&mut conn).await.expect("sweep"), 1);
-		let issues = Issue::list(&mut conn, Default::default(), 100)
-			.await
-			.expect("list issues");
-		let expiry: Vec<_> = issues.iter().filter(|i| i.r#ref == EXPIRY_REF).collect();
-		let [issue] = expiry.as_slice() else {
-			panic!("exactly one meta-server alert, got: {issues:?}");
+		let alerts = self_alerts::list(&mut conn, 50).await.expect("list");
+		let [issue] = alerts
+			.iter()
+			.filter(|i| i.r#ref == EXPIRY_REF)
+			.collect::<Vec<_>>()[..]
+		else {
+			panic!("exactly one self-alert, got: {alerts:?}");
 		};
 		assert!(issue.active);
 		assert_eq!(issue.server_id, Some(Uuid::nil()));
@@ -173,11 +177,10 @@ async fn expiry_sweep_files_one_meta_issue_and_recovers() {
 		// Revoking the token recovers the alert on the next sweep…
 		McpToken::revoke(&mut conn, token.id).await.expect("revoke");
 		assert_eq!(sweep_token_expiry(&mut conn).await.expect("sweep"), 1);
-		let issues = Issue::list(&mut conn, Default::default(), 100)
-			.await
-			.expect("list issues");
 		assert!(
-			issues
+			self_alerts::list(&mut conn, 50)
+				.await
+				.expect("list")
 				.iter()
 				.filter(|i| i.r#ref == EXPIRY_REF)
 				.all(|i| !i.active),
