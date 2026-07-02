@@ -132,8 +132,8 @@ pub fn spawn() -> JoinHandle<()> {
 				}
 			}
 
-			// MCP bearer tokens near their fixed one-year expiry: fleet-wide,
-			// fanned out per group (see `sweep_token_expiry` for why).
+			// MCP bearer tokens near their fixed one-year expiry: one
+			// coalescing issue on the nil/meta server (see `sweep_token_expiry`).
 			match database::mcp_tokens::sweep_token_expiry(&mut db).await {
 				Ok(0) => {}
 				Ok(n) => debug!("filed {n} mcp token-expiry events"),
