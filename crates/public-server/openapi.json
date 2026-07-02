@@ -1869,6 +1869,9 @@
             "type": "string",
             "format": "uuid"
           },
+          "health_details": {
+            "description": "Arbitrary health data to record alongside the check (postgres cluster\nstats, whether indexes needed fixing, …). Stored and displayed as-is."
+          },
           "intent": {
             "type": "string"
           },

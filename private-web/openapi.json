@@ -5813,6 +5813,9 @@
             "type": "string",
             "format": "uuid"
           },
+          "health_details": {
+            "description": "Arbitrary health data the consumer sent (postgres cluster stats, whether\nindexes needed fixing, …). Opaque to canopy — stored and displayed as-is."
+          },
           "id": {
             "type": "integer",
             "format": "int64"

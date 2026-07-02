@@ -2417,6 +2417,11 @@ export interface components {
             error?: string | null;
             /** Format: uuid */
             group_id: string;
+            /**
+             * @description Arbitrary health data the consumer sent (postgres cluster stats, whether
+             *     indexes needed fixing, …). Opaque to canopy — stored and displayed as-is.
+             */
+            health_details?: unknown;
             /** Format: int64 */
             id: number;
             intent: string;

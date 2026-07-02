@@ -141,6 +141,7 @@ export type RetentionPolicy = Solidify<Schemas["RetentionPolicy"]>;
 export type BackupStatsView = Solidify<Schemas["BackupStatsView"]>;
 export type BackupRepoStats = Solidify<Schemas["BackupRepoStats"]>;
 export type BackupRun = Solidify<Schemas["BackupRun"]>;
+export type BackupRestoreCheck = Solidify<Schemas["BackupRestoreCheck"]>;
 export type BackupMaintenanceRun = Solidify<Schemas["BackupMaintenanceRun"]>;
 export type PendingRequestRow = Solidify<Schemas["PendingRequestRow"]>;
 export type ServerBackupCapabilityView = Solidify<

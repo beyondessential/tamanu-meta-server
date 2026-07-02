@@ -172,6 +172,36 @@ test.describe("restore replicas", () => {
 		await expect(page.getByText("failed")).toBeVisible();
 	});
 
+	test("a restore check shows its postgres version and expandable health details", async ({
+		page,
+		sql,
+	}) => {
+		const consumer = await seedDevice(sql, { role: "backup-restore" });
+		const groupId = await groupWithBackups(sql, "health-group");
+		const server = await seedServer(sql, { groupId, name: "health-srv" });
+		await seedRestoreCheck(sql, {
+			consumerDeviceId: consumer.id,
+			groupId,
+			serverId: server.id,
+			outcome: "success",
+			replicaHealthy: true,
+			postgresVersion: "16.3",
+			healthDetails: { indexes_fixed: true, live_tuples: 4242 },
+		});
+
+		await page.goto(`/groups/${groupId}/backups`);
+		const row = page.getByRole("row", { name: /health-srv/ });
+		await expect(row).toBeVisible();
+		// The postgres version is now surfaced in the table.
+		await expect(row.getByText("16.3")).toBeVisible();
+
+		// Health details are collapsed until expanded, then shown as JSON.
+		await expect(page.getByText(/live_tuples/)).toBeHidden();
+		await row.getByRole("button", { name: /show health details/i }).click();
+		await expect(page.getByText(/"indexes_fixed": true/)).toBeVisible();
+		await expect(page.getByText(/"live_tuples": 4242/)).toBeVisible();
+	});
+
 	test("declaring a replica through the dialog persists it", async ({
 		page,
 		sql,

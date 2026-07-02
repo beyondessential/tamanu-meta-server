@@ -317,6 +317,9 @@ pub struct BackupRestoreCheck {
 	pub s3_received_payload_bytes: Option<i64>,
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub reported_at: Timestamp,
+	/// Arbitrary health data the consumer sent (postgres cluster stats, whether
+	/// indexes needed fixing, …). Opaque to canopy — stored and displayed as-is.
+	pub health_details: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -340,6 +343,7 @@ pub struct NewBackupRestoreCheck {
 	pub s3_sent_payload_bytes: Option<i64>,
 	pub s3_received_raw_bytes: Option<i64>,
 	pub s3_received_payload_bytes: Option<i64>,
+	pub health_details: Option<serde_json::Value>,
 }
 
 impl BackupRestoreCheck {
