@@ -19,8 +19,8 @@ async fn mint_find_touch_revoke_lifecycle() {
 		assert!(token.revoked_at.is_none());
 		assert!(token.last_used_at.is_none());
 		// Roughly a year out; exact value is the model's business.
-		let ttl = token.expires_at - token.created_at;
-		assert!(ttl.get_hours() > 364 * 24 && ttl.get_hours() <= 366 * 24);
+		let ttl = token.expires_at.duration_since(token.created_at);
+		assert!(ttl.as_hours() > 364 * 24 && ttl.as_hours() <= 366 * 24);
 
 		let found = McpToken::find_active(&mut conn, &plaintext)
 			.await
