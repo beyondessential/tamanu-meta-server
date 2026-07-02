@@ -1,0 +1,13 @@
+{
+	"name": "canopy",
+	"owner": {
+		"name": "BES International"
+	},
+	"plugins": [
+		{
+			"name": "canopy-mcp",
+			"source": "./plugins/canopy-mcp",
+			"description": "Read-only fleet queries against Canopy: Tamanu servers, groups, versions, backups, incidents, and issues."
+		}
+	]
+}
