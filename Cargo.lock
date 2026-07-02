@@ -4773,6 +4773,7 @@ dependencies = [
  "axum-client-ip",
  "axum-test",
  "base64 0.22.1",
+ "canopy-mcp",
  "clap",
  "commons-errors",
  "commons-servers",
