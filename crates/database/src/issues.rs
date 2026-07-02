@@ -1315,6 +1315,26 @@ impl Issue {
 	/// Bulk lookup of issues that share the same `(source, ref)` across many
 	/// servers. Each `(server_id, source, ref)` is unique, so at most one row
 	/// per server is returned. Used by the canopy reachability sweep.
+	/// Group ids carrying an active group-scoped issue with this
+	/// `(source, ref)`. Used by sweeps to recover only where an alert is
+	/// live, keeping their idle path read-only.
+	pub async fn active_group_ids_by_source_ref(
+		db: &mut AsyncPgConnection,
+		source: &str,
+		ref_: &str,
+	) -> Result<Vec<Uuid>> {
+		use crate::schema::issues::dsl;
+		dsl::issues
+			.filter(dsl::source.eq(source))
+			.filter(dsl::ref_.eq(ref_))
+			.filter(dsl::active.eq(true))
+			.filter(dsl::server_group_id.is_not_null())
+			.select(dsl::server_group_id.assume_not_null())
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	pub async fn list_by_source_ref(
 		db: &mut AsyncPgConnection,
 		source: &str,

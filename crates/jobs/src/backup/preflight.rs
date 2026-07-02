@@ -57,6 +57,76 @@ fn validate_object_lock(
 	}
 }
 
+/// File the shared-identity alert: one coalescing Critical issue against the
+/// nil/meta server (the same home as the other canopy self-alerts).
+async fn file_identity_alert(
+	db: &mut diesel_async::AsyncPgConnection,
+	msg: &str,
+) -> Result<(), commons_errors::AppError> {
+	database::issues::NewEvent {
+		source: refs::CANOPY_SOURCE.into(),
+		r#ref: refs::PREFLIGHT_IDENTITY.into(),
+		severity: Some(Severity::Critical),
+		description: Some("Canopy IRSA identity broken".into()),
+		message: msg.into(),
+		active: Some(true),
+		occurred_at: None,
+	}
+	.save(db, uuid::Uuid::nil(), None)
+	.await?;
+	Ok(())
+}
+
+/// Recover the shared-identity alert wherever it is live: the nil/meta-server
+/// issue, and any group-scoped issues left over from when this alert fanned
+/// out per group (without this, a legacy issue that was active at deploy time
+/// would stay open forever). Writes nothing when nothing is active.
+async fn recover_identity_alert(
+	db: &mut diesel_async::AsyncPgConnection,
+) -> Result<(), commons_errors::AppError> {
+	use database::issues::Issue;
+
+	let live = Issue::list_by_source_ref(
+		db,
+		refs::CANOPY_SOURCE,
+		refs::PREFLIGHT_IDENTITY,
+		&[uuid::Uuid::nil()],
+	)
+	.await?
+	.into_iter()
+	.any(|i| i.active);
+	if live {
+		database::issues::NewEvent {
+			source: refs::CANOPY_SOURCE.into(),
+			r#ref: refs::PREFLIGHT_IDENTITY.into(),
+			severity: Some(Severity::Info),
+			description: None,
+			message: "caller identity ok".into(),
+			active: Some(false),
+			occurred_at: None,
+		}
+		.save(db, uuid::Uuid::nil(), None)
+		.await?;
+	}
+
+	for group_id in
+		Issue::active_group_ids_by_source_ref(db, refs::CANOPY_SOURCE, refs::PREFLIGHT_IDENTITY)
+			.await?
+	{
+		raise_group_event(
+			db,
+			group_id,
+			refs::PREFLIGHT_IDENTITY,
+			Severity::Info,
+			None,
+			"caller identity ok",
+			false,
+		)
+		.await?;
+	}
+	Ok(())
+}
+
 /// Seconds elapsed into the current `window` for `now` — used with
 /// [`slot_is_due`] to fire a group's hourly deep check on the right minute tick.
 fn secs_into_window(now: Timestamp, window: Duration) -> u64 {
@@ -273,35 +343,24 @@ pub fn spawn() -> JoinHandle<()> {
 					}
 				};
 
-			// Shared check (every tick): IRSA identity resolves.
+			// Shared check (every tick): IRSA identity resolves. Filed ONCE
+			// against the nil/meta server — a broken shared identity is one
+			// fact about canopy, not one per group, and paging N groups at
+			// once for it helps nobody.
 			let identity_ok = aws.sts.get_caller_identity().send().await;
-			for cfg in &ready {
+			if !ready.is_empty() {
 				match &identity_ok {
 					Ok(_) => {
-						let _ = raise_group_event(
-							&mut db,
-							cfg.group_id,
-							refs::PREFLIGHT_IDENTITY,
-							Severity::Info,
-							None,
-							"caller identity ok",
-							false,
-						)
-						.await;
+						if let Err(err) = recover_identity_alert(&mut db).await {
+							error!("preflight: identity-alert recovery failed: {err}");
+						}
 					}
 					Err(e) => {
 						let msg = format!("sts:GetCallerIdentity failed: {}", aws_detail(e));
 						warn!("preflight: {msg}");
-						let _ = raise_group_event(
-							&mut db,
-							cfg.group_id,
-							refs::PREFLIGHT_IDENTITY,
-							Severity::Critical,
-							Some("Canopy IRSA identity broken"),
-							&msg,
-							true,
-						)
-						.await;
+						if let Err(err) = file_identity_alert(&mut db, &msg).await {
+							error!("preflight: identity-alert filing failed: {err}");
+						}
 					}
 				}
 			}
@@ -334,5 +393,81 @@ mod tests {
 		assert!(validate_object_lock(Some(ObjectLockRetentionMode::Governance), Some(7)).is_err());
 		assert!(validate_object_lock(Some(ObjectLockRetentionMode::Governance), None).is_err());
 		assert!(validate_object_lock(None, None).is_err());
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn identity_alert_files_once_and_recovers_legacy_fanout() {
+		use database::issues::Issue;
+		use diesel_async::SimpleAsyncConnection as _;
+		use uuid::Uuid;
+
+		commons_tests::db::TestDb::run(async |mut conn, _url| {
+			// A leftover from the fan-out era: an active group-scoped
+			// identity issue that predates this deploy.
+			let group = Uuid::new_v4();
+			conn.batch_execute(&format!(
+				"INSERT INTO server_groups (id, name) VALUES ('{group}', 'Legacy');"
+			))
+			.await
+			.expect("seed group");
+			raise_group_event(
+				&mut conn,
+				group,
+				refs::PREFLIGHT_IDENTITY,
+				Severity::Critical,
+				Some("Canopy IRSA identity broken"),
+				"legacy fan-out alert",
+				true,
+			)
+			.await
+			.expect("seed legacy alert");
+
+			// Filing twice coalesces into the one nil/meta-server issue.
+			file_identity_alert(&mut conn, "sts:GetCallerIdentity failed: boom")
+				.await
+				.expect("file");
+			file_identity_alert(&mut conn, "sts:GetCallerIdentity failed: boom")
+				.await
+				.expect("file again");
+			let nil_issues = Issue::list_by_source_ref(
+				&mut conn,
+				refs::CANOPY_SOURCE,
+				refs::PREFLIGHT_IDENTITY,
+				&[Uuid::nil()],
+			)
+			.await
+			.expect("list");
+			assert_eq!(nil_issues.len(), 1, "one coalescing meta-server issue");
+			assert!(nil_issues[0].active);
+
+			// Recovery clears the meta-server issue AND the legacy one.
+			recover_identity_alert(&mut conn).await.expect("recover");
+			let nil_issues = Issue::list_by_source_ref(
+				&mut conn,
+				refs::CANOPY_SOURCE,
+				refs::PREFLIGHT_IDENTITY,
+				&[Uuid::nil()],
+			)
+			.await
+			.expect("list");
+			assert!(!nil_issues[0].active, "meta-server alert recovered");
+			assert!(
+				Issue::active_group_ids_by_source_ref(
+					&mut conn,
+					refs::CANOPY_SOURCE,
+					refs::PREFLIGHT_IDENTITY,
+				)
+				.await
+				.expect("scan")
+				.is_empty(),
+				"legacy group-scoped alert recovered"
+			);
+
+			// Recovering again with nothing live is a no-op.
+			recover_identity_alert(&mut conn)
+				.await
+				.expect("idle recover");
+		})
+		.await
 	}
 }
