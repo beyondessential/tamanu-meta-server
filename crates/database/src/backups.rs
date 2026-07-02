@@ -875,6 +875,10 @@ pub struct BackupRun {
 	pub s3_sent_payload_bytes: Option<i64>,
 	pub s3_received_raw_bytes: Option<i64>,
 	pub s3_received_payload_bytes: Option<i64>,
+	/// Logical size of this run's snapshot as observed by canopy's own repo
+	/// inspection, matched to the run by `snapshot_id`. Distinct from
+	/// `bytes_uploaded` (the device's own figure); written once by inspection.
+	pub snapshot_logical_bytes: Option<i64>,
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -1033,6 +1037,63 @@ impl BackupRun {
 			.load(db)
 			.await
 			.map_err(AppError::from)
+	}
+
+	/// Fill `snapshot_logical_bytes` from repo inspection for runs matched by
+	/// snapshot id, only where it is still unset — write-once, since a snapshot
+	/// is immutable. `sizes` maps a snapshot id to its observed logical size.
+	/// Returns the number of runs updated.
+	pub async fn backfill_snapshot_logical_bytes(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+		sizes: &[(String, i64)],
+	) -> Result<usize> {
+		use crate::schema::backup_runs::dsl;
+
+		let mut updated = 0usize;
+		for (snapshot_id, size) in sizes {
+			updated += diesel::update(dsl::backup_runs)
+				.filter(dsl::group_id.eq(group_id))
+				.filter(dsl::snapshot_id.eq(snapshot_id))
+				.filter(dsl::snapshot_logical_bytes.is_null())
+				.set(dsl::snapshot_logical_bytes.eq(size))
+				.execute(db)
+				.await
+				.map_err(AppError::from)?;
+		}
+		Ok(updated)
+	}
+
+	/// The latest backup run per `(server, type)` in a group that carries both a
+	/// device-reported size (`bytes_uploaded`) and an inspection-observed size
+	/// (`snapshot_logical_bytes`), both non-zero. Keyed `(server_id, type)` →
+	/// `(reported, observed)`. The basis for the size-discrepancy check.
+	pub async fn latest_sized_by_server_type_for_group(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+	) -> Result<HashMap<(Uuid, BackupType), (i64, i64)>> {
+		use crate::schema::backup_runs::dsl;
+
+		let rows: Vec<Self> = dsl::backup_runs
+			.filter(dsl::group_id.eq(group_id))
+			.filter(dsl::purpose.eq(BackupPurpose::Backup))
+			.filter(dsl::server_id.is_not_null())
+			.filter(dsl::bytes_uploaded.is_not_null())
+			.filter(dsl::snapshot_logical_bytes.is_not_null())
+			.distinct_on((dsl::server_id, dsl::type_))
+			.order_by((dsl::server_id, dsl::type_, dsl::reported_at.desc()))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		Ok(rows
+			.into_iter()
+			.filter_map(|r| {
+				let sid = r.server_id?;
+				let (up, snap) = (r.bytes_uploaded?, r.snapshot_logical_bytes?);
+				(up > 0 && snap > 0).then_some(((sid, r.r#type.clone()), (up, snap)))
+			})
+			.collect())
 	}
 }
 

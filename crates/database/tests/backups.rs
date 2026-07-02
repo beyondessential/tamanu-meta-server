@@ -275,6 +275,113 @@ async fn backup_run_client_uuid_and_duplicate_is_conflict() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn backfill_snapshot_logical_bytes_writes_once() {
+	TestDb::run(|mut conn, _url| async move {
+		let group_id = insert_group(&mut conn, "g").await;
+		let server_id = insert_server(&mut conn, group_id).await;
+		let device_id = insert_device(&mut conn).await;
+
+		let id = Uuid::new_v4();
+		BackupRun::record(
+			&mut conn,
+			new_run(
+				id,
+				device_id,
+				group_id,
+				Some(server_id),
+				BackupPurpose::Backup,
+				RunOutcome::Success,
+			),
+		)
+		.await
+		.expect("record");
+
+		// Matched by snapshot id ("kopia-snap-1" from new_run); starts unset.
+		let n = BackupRun::backfill_snapshot_logical_bytes(
+			&mut conn,
+			group_id,
+			&[("kopia-snap-1".into(), 1490)],
+		)
+		.await
+		.expect("backfill");
+		assert_eq!(n, 1);
+		let runs = BackupRun::list_for_group(&mut conn, group_id, 10)
+			.await
+			.unwrap();
+		assert_eq!(runs[0].snapshot_logical_bytes, Some(1490));
+
+		// Write-once: a later inspection with a different value doesn't clobber.
+		let n2 = BackupRun::backfill_snapshot_logical_bytes(
+			&mut conn,
+			group_id,
+			&[("kopia-snap-1".into(), 9999)],
+		)
+		.await
+		.expect("backfill again");
+		assert_eq!(n2, 0);
+		let runs = BackupRun::list_for_group(&mut conn, group_id, 10)
+			.await
+			.unwrap();
+		assert_eq!(runs[0].snapshot_logical_bytes, Some(1490));
+
+		// An unknown snapshot id matches nothing.
+		let n3 =
+			BackupRun::backfill_snapshot_logical_bytes(&mut conn, group_id, &[("nope".into(), 1)])
+				.await
+				.expect("backfill unknown");
+		assert_eq!(n3, 0);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn latest_sized_lists_only_runs_with_both_sizes() {
+	TestDb::run(|mut conn, _url| async move {
+		let group_id = insert_group(&mut conn, "g").await;
+		let server_id = insert_server(&mut conn, group_id).await;
+		let device_id = insert_device(&mut conn).await;
+
+		BackupRun::record(
+			&mut conn,
+			new_run(
+				Uuid::new_v4(),
+				device_id,
+				group_id,
+				Some(server_id),
+				BackupPurpose::Backup,
+				RunOutcome::Success,
+			),
+		)
+		.await
+		.expect("record");
+
+		// Reported size present but not yet inspected → not comparable.
+		let map = BackupRun::latest_sized_by_server_type_for_group(&mut conn, group_id)
+			.await
+			.unwrap();
+		assert!(map.is_empty(), "no observed size yet → nothing to compare");
+
+		// After inspection fills the observed size, the pair is comparable.
+		BackupRun::backfill_snapshot_logical_bytes(
+			&mut conn,
+			group_id,
+			&[("kopia-snap-1".into(), 1490)],
+		)
+		.await
+		.expect("backfill");
+		let map = BackupRun::latest_sized_by_server_type_for_group(&mut conn, group_id)
+			.await
+			.unwrap();
+		assert_eq!(
+			map.get(&(server_id, BackupType::TamanuPostgres)),
+			Some(&(42, 1490)),
+			"reported 42 (new_run), observed 1490",
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn latest_success_ignores_restore_and_failure() {
 	TestDb::run(|mut conn, _url| async move {
 		let group_id = insert_group(&mut conn, "g").await;

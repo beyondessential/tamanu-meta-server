@@ -202,13 +202,33 @@ pub struct KStats {
 	total_size: i64,
 }
 
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct KSummary {
+	#[serde(default)]
+	size: i64,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct KRootEntry {
+	#[serde(default)]
+	summ: KSummary,
+}
+
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct Manifest {
+	/// The snapshot manifest id — what bestool reports as its `snapshot_id`.
+	#[serde(default)]
+	id: String,
 	source: KSource,
 	#[serde(rename = "startTime")]
 	start_time: Option<String>,
 	#[serde(default)]
 	stats: KStats,
+	/// The root directory entry; `summ.size` is the logical snapshot size
+	/// bestool records (it can't use `stats.totalSize`, which isn't known at
+	/// upload time), so it's the field to cross-check a device report against.
+	#[serde(rename = "rootEntry", default)]
+	root_entry: KRootEntry,
 }
 
 impl KSource {
@@ -255,6 +275,9 @@ pub struct Inspected {
 	pub source_count: i32,
 	pub logical_bytes: i64,
 	pub sources: Vec<SourceEntry>,
+	/// `(snapshot id, logical size)` for every snapshot with a non-empty id,
+	/// for matching back to the device runs that produced them.
+	pub snapshots: Vec<(String, i64)>,
 }
 
 /// Reduce a parsed snapshot-manifest list to per-source latest entries + counts
@@ -284,11 +307,18 @@ pub fn inspect_manifests(manifests: &[Manifest]) -> Inspected {
 		})
 		.collect();
 
+	let snapshots = manifests
+		.iter()
+		.filter(|m| !m.id.is_empty())
+		.map(|m| (m.id.clone(), m.root_entry.summ.size))
+		.collect();
+
 	Inspected {
 		snapshot_count: manifests.len() as i32,
 		source_count: groups.len() as i32,
 		logical_bytes,
 		sources,
+		snapshots,
 	}
 }
 
@@ -643,6 +673,9 @@ pub struct InspectOutcome {
 	/// Physical (stored) bytes from `kopia content stats`; `None` if unparseable.
 	pub physical_bytes: Option<i64>,
 	pub sources: Vec<SourceEntry>,
+	/// `(snapshot id, logical size)` for every snapshot, matched back to the
+	/// device runs that produced them by the completion logic.
+	pub snapshots: Vec<(String, i64)>,
 }
 
 /// Connect, list snapshots, read physical stats, and verify (read-only). A
@@ -682,6 +715,7 @@ pub async fn run_inspect(
 		logical_bytes: inspected.logical_bytes,
 		physical_bytes,
 		sources: inspected.sources,
+		snapshots: inspected.snapshots,
 	})
 }
 
@@ -695,6 +729,7 @@ mod tests {
 
 	fn manifest(user: &str, host: &str, path: &str, start: &str, size: i64) -> Manifest {
 		Manifest {
+			id: format!("snap-{host}-{start}"),
 			source: KSource {
 				user_name: user.to_string(),
 				host: host.to_string(),
@@ -702,6 +737,9 @@ mod tests {
 			},
 			start_time: Some(start.to_string()),
 			stats: KStats { total_size: size },
+			root_entry: KRootEntry {
+				summ: KSummary { size },
+			},
 		}
 	}
 
@@ -761,6 +799,41 @@ mod tests {
 		assert_eq!(got.source_count, 0);
 		assert_eq!(got.logical_bytes, 0);
 		assert!(got.sources.is_empty());
+		assert!(got.snapshots.is_empty());
+	}
+
+	#[test]
+	fn parses_id_and_root_entry_size_for_matching() {
+		// The manifest id (what bestool reports as snapshot_id) and
+		// rootEntry.summ.size (the size bestool records) are what we match and
+		// cross-check against a device run.
+		let json = r#"[
+			{
+				"id": "k9c0ffee",
+				"source": {"host": "srv-1", "userName": "canopy", "path": "tamanu-postgres"},
+				"startTime": "2026-06-18T13:00:00Z",
+				"stats": {"totalSize": 1500},
+				"rootEntry": {"obj": "abc", "summ": {"size": 1490}}
+			}
+		]"#;
+		let manifests: Vec<Manifest> = serde_json::from_str(json).unwrap();
+		let got = inspect_manifests(&manifests);
+		assert_eq!(got.snapshots, vec![("k9c0ffee".to_string(), 1490)]);
+	}
+
+	#[test]
+	fn snapshots_skip_empty_ids() {
+		// An element without an id (shouldn't happen from kopia, but be safe)
+		// is dropped from the match set rather than matched to snapshot_id "".
+		let json = r#"[
+			{
+				"source": {"host": "srv-1", "userName": "canopy", "path": "tamanu-postgres"},
+				"startTime": "2026-06-18T13:00:00Z",
+				"rootEntry": {"summ": {"size": 10}}
+			}
+		]"#;
+		let manifests: Vec<Manifest> = serde_json::from_str(json).unwrap();
+		assert!(inspect_manifests(&manifests).snapshots.is_empty());
 	}
 
 	#[test]

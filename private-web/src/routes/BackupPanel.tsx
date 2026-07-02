@@ -677,10 +677,20 @@ function RunRow({ run, members }: { run: BackupRun; members: ServerInfo[] }) {
 	const hasS3 = hasS3Traffic(run);
 	const expandable = hasError || hasS3;
 	// bestool reports an explicit upload size for some backup types; when it's
-	// absent, the S3 payload-sent tally is the closest proxy (marked approximate).
+	// absent, canopy's own repo inspection fills in the snapshot's logical size
+	// (exact, but from a different source), and failing that the S3 payload-sent
+	// tally is the closest proxy (marked approximate).
+	const fromInspect =
+		run.bytes_uploaded == null && run.snapshot_logical_bytes != null;
 	const uploadedApprox =
-		run.bytes_uploaded == null && run.s3_sent_payload_bytes != null;
-	const uploaded = run.bytes_uploaded ?? run.s3_sent_payload_bytes ?? null;
+		run.bytes_uploaded == null &&
+		run.snapshot_logical_bytes == null &&
+		run.s3_sent_payload_bytes != null;
+	const uploaded =
+		run.bytes_uploaded ??
+		run.snapshot_logical_bytes ??
+		run.s3_sent_payload_bytes ??
+		null;
 	return (
 		<>
 			<TableRow sx={expandable ? { "& > *": { borderBottom: "unset" } } : undefined}>
@@ -714,6 +724,10 @@ function RunRow({ run, members }: { run: BackupRun; members: ServerInfo[] }) {
 					) : uploadedApprox ? (
 						<Tooltip title="Approximate: from S3 payload sent (no explicit upload size reported)">
 							<span>~{formatBytes(uploaded)}</span>
+						</Tooltip>
+					) : fromInspect ? (
+						<Tooltip title="From repo inspection (the device reported no size)">
+							<span>{formatBytes(uploaded)}</span>
 						</Tooltip>
 					) : (
 						formatBytes(uploaded)

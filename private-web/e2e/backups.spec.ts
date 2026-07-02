@@ -331,6 +331,40 @@ test.describe("backups ready: stats + backup-now", () => {
 		).toBeVisible();
 	});
 
+	test("run with no reported size falls back to the inspected snapshot size", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "size-group" });
+		const device = await seedDevice(sql);
+		const server = await seedServer(sql, {
+			name: "size-srv",
+			groupId: group.id,
+			deviceId: device.id,
+		});
+		await seedServerGroupBackupConfig(sql, {
+			groupId: group.id,
+			status: "ready",
+			intervalSeconds: 3600,
+		});
+		// The device reported no size, but repo inspection observed the snapshot's
+		// logical size and backfilled it onto the run.
+		await seedBackupRun(sql, {
+			deviceId: device.id,
+			groupId: group.id,
+			serverId: server.id,
+			outcome: "success",
+			bytesUploaded: null,
+			snapshotLogicalBytes: 4096,
+		});
+
+		await page.goto(`/groups/${group.id}/backups`);
+		const runs = page.getByRole("table").last();
+		// Shown exactly (from inspection), not the "~" approximate S3 proxy.
+		await expect(runs.getByText("4.0 KiB")).toBeVisible();
+		await expect(runs.getByText("~4.0 KiB")).toHaveCount(0);
+	});
+
 	test("failed run shows expandable error detail and no upload size", async ({
 		page,
 		sql,

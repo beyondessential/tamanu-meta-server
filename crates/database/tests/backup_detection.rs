@@ -732,6 +732,147 @@ async fn reconcile_clears_report_gap_when_report_and_snapshot_agree() {
 	.await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn reconcile_files_size_mismatch_when_reported_size_differs_from_repo() {
+	TestDb::run(|mut conn, _url| async move {
+		let pg = BackupType::TamanuPostgres;
+		let interval = SignedDuration::from_hours(12);
+		let group_id = insert_group(&mut conn, "g").await;
+		let server_id = insert_server(&mut conn, group_id, true).await;
+		let device_id = insert_device(&mut conn).await;
+
+		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(72)).await;
+		insert_schedule(&mut conn, group_id, &pg, interval).await;
+		enable_capability(&mut conn, server_id, &pg).await;
+
+		// A reported run (bytes_uploaded = 42, snapshot_id "kopia-snap")...
+		insert_backup_success_aged(
+			&mut conn,
+			device_id,
+			group_id,
+			server_id,
+			&pg,
+			SignedDuration::from_hours(2),
+		)
+		.await;
+		// ...but inspection observed a different logical size for that snapshot.
+		BackupRun::backfill_snapshot_logical_bytes(
+			&mut conn,
+			group_id,
+			&[("kopia-snap".into(), 99)],
+		)
+		.await
+		.expect("backfill");
+
+		let rows = database::backup::staleness::scan_rows(&mut conn)
+			.await
+			.expect("scan");
+		database::backup::reconcile::sweep(&mut conn, &rows)
+			.await
+			.expect("reconcile sweep");
+
+		let sref = typed_ref(refs::RECONCILE_SIZE_MISMATCH, &pg);
+		let issue = server_issue(&mut conn, server_id, &sref)
+			.await
+			.expect("size-mismatch issue filed");
+		assert_eq!(
+			issue.severity,
+			Severity::Warning.to_string(),
+			"size-mismatch is Warning (non-paging)",
+		);
+		assert!(issue.active);
+		assert_eq!(
+			server_issue_open_links(&mut conn, server_id, &sref).await,
+			0,
+			"Warning size-mismatch does not open an incident by itself",
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn reconcile_clears_size_mismatch_when_latest_sizes_agree() {
+	TestDb::run(|mut conn, _url| async move {
+		let pg = BackupType::TamanuPostgres;
+		let interval = SignedDuration::from_hours(12);
+		let group_id = insert_group(&mut conn, "g").await;
+		let server_id = insert_server(&mut conn, group_id, true).await;
+		let device_id = insert_device(&mut conn).await;
+
+		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(72)).await;
+		insert_schedule(&mut conn, group_id, &pg, interval).await;
+		enable_capability(&mut conn, server_id, &pg).await;
+
+		// An older run whose reported size disagrees with the repo → raises.
+		insert_backup_success_aged(
+			&mut conn,
+			device_id,
+			group_id,
+			server_id,
+			&pg,
+			SignedDuration::from_hours(5),
+		)
+		.await;
+		BackupRun::backfill_snapshot_logical_bytes(
+			&mut conn,
+			group_id,
+			&[("kopia-snap".into(), 99)],
+		)
+		.await
+		.expect("backfill mismatch");
+		let rows = database::backup::staleness::scan_rows(&mut conn)
+			.await
+			.expect("scan");
+		database::backup::reconcile::sweep(&mut conn, &rows)
+			.await
+			.expect("first reconcile");
+		let sref = typed_ref(refs::RECONCILE_SIZE_MISMATCH, &pg);
+		assert!(
+			server_issue(&mut conn, server_id, &sref)
+				.await
+				.expect("size-mismatch open")
+				.active,
+			"precondition: size-mismatch is active",
+		);
+
+		// A newer run whose reported and observed sizes agree becomes the latest
+		// comparable run → clears. (Write-once backfill leaves the older run's
+		// recorded size untouched; only the new null row is filled.)
+		insert_backup_success_aged(
+			&mut conn,
+			device_id,
+			group_id,
+			server_id,
+			&pg,
+			SignedDuration::from_hours(1),
+		)
+		.await;
+		BackupRun::backfill_snapshot_logical_bytes(
+			&mut conn,
+			group_id,
+			&[("kopia-snap".into(), 42)],
+		)
+		.await
+		.expect("backfill match");
+		let rows = database::backup::staleness::scan_rows(&mut conn)
+			.await
+			.expect("scan2");
+		database::backup::reconcile::sweep(&mut conn, &rows)
+			.await
+			.expect("second reconcile");
+
+		let issue = server_issue(&mut conn, server_id, &sref)
+			.await
+			.expect("size-mismatch still present (now cleared)");
+		assert!(
+			!issue.active,
+			"size-mismatch cleared once latest sizes agree"
+		);
+		assert_eq!(issue.severity, Severity::Info.to_string());
+	})
+	.await;
+}
+
 // ===========================================================================
 // Case 5 — raise_group_event bypasses the is_monitored gate (NON-NEGOTIABLE)
 // ===========================================================================

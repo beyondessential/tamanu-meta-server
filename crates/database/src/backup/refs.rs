@@ -27,6 +27,11 @@ pub const NEVER: &str = "backup-never";
 /// `Warning` (non-paging on its own).
 pub const RECONCILE_REPORT_GAP: &str = "backup-reconcile-report-gap";
 
+/// A device reported a snapshot size that disagrees with the size the same
+/// snapshot occupies in the repo (compared only when both are known and
+/// non-zero). Server-scoped, `Warning` (non-paging on its own).
+pub const RECONCILE_SIZE_MISMATCH: &str = "backup-reconcile-size-mismatch";
+
 // --- group-level (page regardless of any member's is_monitored) ---
 
 /// A group whose last successful maintenance run is older than the

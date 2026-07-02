@@ -137,6 +137,7 @@ diesel::table! {
 		s3_sent_payload_bytes -> Nullable<Int8>,
 		s3_received_raw_bytes -> Nullable<Int8>,
 		s3_received_payload_bytes -> Nullable<Int8>,
+		snapshot_logical_bytes -> Nullable<Int8>,
 	}
 }
 
