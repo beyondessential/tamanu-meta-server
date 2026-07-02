@@ -106,18 +106,18 @@ where
 	Fut: Future<Output = T>,
 {
 	TestDb::run(async |conn, url| {
+		let public_state = public_server::state::AppState {
+			db: database::init_to(&url),
+			tera: public_server::state::AppState::init_tera().unwrap(),
+			server_versions_secret: Some("test-secret".to_string()),
+			tailnet_directory: None,
+			rate_limiter: Default::default(),
+			sts: None,
+			kube: None,
+		};
 		let public_router = router(
-			axum::Router::from(public_server::routes().with_state(
-				public_server::state::AppState {
-					db: database::init_to(&url),
-					tera: public_server::state::AppState::init_tera().unwrap(),
-					server_versions_secret: Some("test-secret".to_string()),
-					tailnet_directory: None,
-					rate_limiter: Default::default(),
-					sts: None,
-					kube: None,
-				},
-			)),
+			axum::Router::from(public_server::routes().with_state(public_state.clone()))
+				.merge(public_server::mcp::routes(public_state)),
 			ClientIpSource::RightmostForwarded,
 		);
 		let private_router = router(
@@ -231,18 +231,18 @@ where
 			},
 		)]);
 
+		let public_state = public_server::state::AppState {
+			db: database::init_to(&url),
+			tera: public_server::state::AppState::init_tera().unwrap(),
+			server_versions_secret: Some("test-secret".to_string()),
+			tailnet_directory: None,
+			rate_limiter: Default::default(),
+			sts: None,
+			kube: None,
+		};
 		let public_router = router(
-			axum::Router::from(public_server::routes().with_state(
-				public_server::state::AppState {
-					db: database::init_to(&url),
-					tera: public_server::state::AppState::init_tera().unwrap(),
-					server_versions_secret: Some("test-secret".to_string()),
-					tailnet_directory: None,
-					rate_limiter: Default::default(),
-					sts: None,
-					kube: None,
-				},
-			)),
+			axum::Router::from(public_server::routes().with_state(public_state.clone()))
+				.merge(public_server::mcp::routes(public_state)),
 			ClientIpSource::RightmostForwarded,
 		);
 		let private_router = router(

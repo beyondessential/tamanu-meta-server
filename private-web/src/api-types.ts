@@ -1414,6 +1414,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/mcp_tokens/list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["mcp_tokens_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/mcp_tokens/mint": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["mcp_tokens_mint"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/mcp_tokens/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["mcp_tokens_revoke"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/restore_replicas/checks": {
         parameters: {
             query?: never;
@@ -3223,6 +3271,24 @@ export interface components {
          * @enum {string}
          */
         MaintenanceKind: "quick" | "full";
+        /**
+         * @description A token row for the operator UI: everything but the secret (only a hash of
+         *     which exists server-side anyway).
+         */
+        McpTokenView: {
+            /** Format: date-time */
+            created_at: string;
+            created_by: string;
+            /** Format: date-time */
+            expires_at: string;
+            /** Format: uuid */
+            id: string;
+            /** Format: date-time */
+            last_used_at?: string | null;
+            name: string;
+            /** Format: date-time */
+            revoked_at?: string | null;
+        };
         MergeIntoArgs: {
             /**
              * Format: uuid
@@ -3256,6 +3322,16 @@ export interface components {
              */
             ready: boolean;
             versions: components["schemas"]["VersionData"][];
+        };
+        MintArgs: {
+            /** @description Operator-chosen label, e.g. which agent will hold this token. */
+            name: string;
+        };
+        /** @description The one and only exposure of the token plaintext. */
+        MintedToken: {
+            /** @description The bearer token itself. Shown once; never retrievable again. */
+            secret: string;
+            token: components["schemas"]["McpTokenView"];
         };
         /**
          * @description One identified human connected to a server right now, distilled from
@@ -3686,6 +3762,10 @@ export interface components {
             keep_monthly: number;
             /** Format: int32 */
             keep_weekly: number;
+        };
+        RevokeArgs: {
+            /** Format: uuid */
+            id: string;
         };
         /**
          * @description Outcome of a reported backup/restore run.
@@ -6663,6 +6743,136 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IssueData"];
+                };
+            };
+        };
+    };
+    mcp_tokens_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description All MCP access tokens, newest first, revoked included. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpTokenView"][];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    mcp_tokens_mint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MintArgs"];
+            };
+        };
+        responses: {
+            /** @description Freshly minted token; the secret in this response is shown once. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MintedToken"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    mcp_tokens_revoke: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RevokeArgs"];
+            };
+        };
+        responses: {
+            /** @description Token revoked (idempotent). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
         };

@@ -41,12 +41,14 @@ async fn main() -> miette::Result<()> {
 		.bind
 		.unwrap_or_else(|| SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, args.port, 0, 0)));
 
+	let state = AppState::init().await?;
 	let (api_router, api_spec) =
 		OpenApiRouter::with_openapi(public_server::openapi::ApiDoc::openapi())
 			.merge(public_server::routes())
 			.split_for_parts();
 	let app: Router<()> = api_router
-		.with_state(AppState::init().await?)
+		.with_state(state.clone())
+		.merge(public_server::mcp::routes(state))
 		.merge(SwaggerUi::new("/api/docs").url("/api/openapi.json", api_spec));
 
 	serve(router(app, args.client_ip_source), addr).await?;

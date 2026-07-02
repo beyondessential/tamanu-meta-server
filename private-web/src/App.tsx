@@ -17,6 +17,7 @@ import BackupConfig from "./routes/BackupConfig";
 import BackupDefaults from "./routes/BackupDefaults";
 import RecoveryVault from "./routes/RecoveryVault";
 import BackupPanel from "./routes/BackupPanel";
+import McpTokens from "./routes/McpTokens";
 import RestoreConsumers from "./routes/RestoreConsumers";
 import Bestool from "./routes/Bestool";
 import BestoolSnippetDetail from "./routes/BestoolSnippetDetail";
@@ -217,6 +218,7 @@ export default function App() {
 							element={<HealthcheckDetail />}
 						/>
 						<Route path="restore-consumers" element={<RestoreConsumers />} />
+						<Route path="mcp-tokens" element={<McpTokens />} />
 					</Route>
 					<Route path="/devices" element={<Devices />}>
 						<Route index element={<DevicesSearch />} />

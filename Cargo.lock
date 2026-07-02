@@ -1278,6 +1278,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4ce8d3bd5823c7504d3f579f13e7b2f3da252fcb938c594d5680ee508bf846f"
 
 [[package]]
+name = "canopy-mcp"
+version = "6.6.6"
+dependencies = [
+ "commons-types",
+ "database",
+ "jiff",
+ "rmcp",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
 name = "cbor-diag"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4664,6 +4678,7 @@ dependencies = [
  "axum-server-timing",
  "base64 0.22.1",
  "bestool-postgres",
+ "canopy-mcp",
  "chbs",
  "clap",
  "commons-errors",
@@ -4680,9 +4695,7 @@ dependencies = [
  "mime_guess",
  "public-server",
  "rcgen",
- "rmcp",
  "rust-embed",
- "schemars",
  "serde",
  "serde_json",
  "tokio",
@@ -4760,6 +4773,7 @@ dependencies = [
  "axum-client-ip",
  "axum-test",
  "base64 0.22.1",
+ "canopy-mcp",
  "clap",
  "commons-errors",
  "commons-servers",
