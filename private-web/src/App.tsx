@@ -19,6 +19,8 @@ import RecoveryVault from "./routes/RecoveryVault";
 import BackupPanel from "./routes/BackupPanel";
 import McpTokens from "./routes/McpTokens";
 import RestoreConsumers from "./routes/RestoreConsumers";
+import SelfAlerts from "./routes/SelfAlerts";
+import SelfAlertsBanner from "./components/SelfAlertsBanner";
 import Bestool from "./routes/Bestool";
 import BestoolSnippetDetail from "./routes/BestoolSnippetDetail";
 import BestoolSnippets from "./routes/BestoolSnippets";
@@ -174,10 +176,12 @@ export default function App() {
 					))}
 				</Toolbar>
 			</AppBar>
+			<SelfAlertsBanner reloadTick={reloadTick} />
 			<Container maxWidth="lg" sx={{ py: 3 }}>
 				<Routes>
 					<Route path="/" element={<Navigate to="/status" replace />} />
 					<Route path="/status" element={<Status />} />
+					<Route path="/alerts" element={<SelfAlerts />} />
 					<Route path="/incidents" element={<Incidents />} />
 					<Route path="/incidents/:id" element={<IncidentDetail />} />
 					<Route path="/versions" element={<Versions />} />

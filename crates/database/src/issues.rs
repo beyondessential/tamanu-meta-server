@@ -1076,7 +1076,7 @@ async fn enqueue_slack_open(
 	crate::slack_outbox::SlackOutbox::enqueue(
 		conn,
 		crate::slack_outbox::KIND_INCIDENT_OPEN,
-		incident_id,
+		Some(incident_id),
 		Some(issue.id),
 		None,
 		payload,
@@ -1103,7 +1103,7 @@ async fn accelerate_pending_open(conn: &mut AsyncPgConnection, incident_id: Uuid
 	let now = Timestamp::now();
 	let updated = diesel::update(
 		dsl::slack_outbox
-			.filter(dsl::incident_id.eq(incident_id))
+			.filter(dsl::incident_id.eq(Some(incident_id)))
 			.filter(dsl::kind.eq(crate::slack_outbox::KIND_INCIDENT_OPEN))
 			.filter(dsl::delivered_at.is_null())
 			.filter(dsl::gave_up_at.is_null())
@@ -1150,7 +1150,7 @@ async fn enqueue_slack_resolve_inner(
 	crate::slack_outbox::SlackOutbox::enqueue(
 		conn,
 		crate::slack_outbox::KIND_INCIDENT_RESOLVE,
-		incident.id,
+		Some(incident.id),
 		None,
 		None,
 		payload,
@@ -1240,7 +1240,12 @@ impl Issue {
 		use crate::schema::issues::dsl;
 		use crate::schema::servers;
 
-		let mut q = dsl::issues.select(Self::as_select()).into_boxed();
+		let mut q = dsl::issues
+			.select(Self::as_select())
+			// Self-alerts (the nil "Canopy" server's issues) have their own
+			// surface (`crate::self_alerts`); they are not fleet issues.
+			.filter(dsl::server_id.is_distinct_from(Uuid::nil()))
+			.into_boxed();
 		if filters.active_only {
 			q = q
 				.filter(dsl::active.eq(true))
@@ -1315,6 +1320,26 @@ impl Issue {
 	/// Bulk lookup of issues that share the same `(source, ref)` across many
 	/// servers. Each `(server_id, source, ref)` is unique, so at most one row
 	/// per server is returned. Used by the canopy reachability sweep.
+	/// Group ids carrying an active group-scoped issue with this
+	/// `(source, ref)`. Used by sweeps to recover only where an alert is
+	/// live, keeping their idle path read-only.
+	pub async fn active_group_ids_by_source_ref(
+		db: &mut AsyncPgConnection,
+		source: &str,
+		ref_: &str,
+	) -> Result<Vec<Uuid>> {
+		use crate::schema::issues::dsl;
+		dsl::issues
+			.filter(dsl::source.eq(source))
+			.filter(dsl::ref_.eq(ref_))
+			.filter(dsl::active.eq(true))
+			.filter(dsl::server_group_id.is_not_null())
+			.select(dsl::server_group_id.assume_not_null())
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	pub async fn list_by_source_ref(
 		db: &mut AsyncPgConnection,
 		source: &str,

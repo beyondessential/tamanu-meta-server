@@ -123,27 +123,32 @@ async fn expiring_soon_catches_the_alert_window() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn expiry_sweep_raises_per_group_and_recovers() {
-	use database::issues::Issue;
+async fn expiry_sweep_files_one_self_alert_and_recovers() {
 	use database::mcp_tokens::{EXPIRY_REF, sweep_token_expiry};
+	use database::self_alerts;
 
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let group_a = Uuid::new_v4();
-		let group_b = Uuid::new_v4();
+		// Groups exist, but must NOT each get an alert: a rotation heads-up
+		// is a single self-alert, not per group.
 		conn.batch_execute(&format!(
-			"INSERT INTO server_groups (id, name) VALUES ('{group_a}', 'A'), ('{group_b}', 'B');"
+			"INSERT INTO server_groups (id, name) VALUES ('{}', 'A'), ('{}', 'B');",
+			Uuid::new_v4(),
+			Uuid::new_v4(),
 		))
 		.await
 		.expect("seed groups");
 
 		// Nothing expiring, nothing alerted: the sweep is a no-op.
 		assert_eq!(sweep_token_expiry(&mut conn).await.expect("sweep"), 0);
-		let issues = Issue::list(&mut conn, Default::default(), 100)
-			.await
-			.expect("list issues");
-		assert!(issues.is_empty(), "idle sweep must not file issues");
+		assert!(
+			self_alerts::list(&mut conn, 50)
+				.await
+				.expect("list")
+				.is_empty(),
+			"idle sweep must not file alerts"
+		);
 
-		// A token inside the 15-day lead alerts every group.
+		// A token inside the 15-day lead raises the single self-alert.
 		let (token, _) = McpToken::mint(&mut conn, "claude", "admin@example.com")
 			.await
 			.expect("mint");
@@ -154,32 +159,32 @@ async fn expiry_sweep_raises_per_group_and_recovers() {
 		.await
 		.expect("age token");
 
-		assert_eq!(sweep_token_expiry(&mut conn).await.expect("sweep"), 2);
-		let issues = Issue::list(&mut conn, Default::default(), 100)
-			.await
-			.expect("list issues");
-		let expiry: Vec<_> = issues.iter().filter(|i| i.r#ref == EXPIRY_REF).collect();
-		assert_eq!(expiry.len(), 2, "one alert per group: {issues:?}");
-		for issue in &expiry {
-			assert!(issue.active);
-			assert!(issue.server_id.is_none());
-			assert!(issue.server_group_id.is_some());
-			assert!(issue.message.contains("claude"), "{}", issue.message);
-			assert!(issue.message.contains("in 10 days"), "{}", issue.message);
-		}
+		assert_eq!(sweep_token_expiry(&mut conn).await.expect("sweep"), 1);
+		let alerts = self_alerts::list(&mut conn, 50).await.expect("list");
+		let [issue] = alerts
+			.iter()
+			.filter(|i| i.r#ref == EXPIRY_REF)
+			.collect::<Vec<_>>()[..]
+		else {
+			panic!("exactly one self-alert, got: {alerts:?}");
+		};
+		assert!(issue.active);
+		assert_eq!(issue.server_id, Some(Uuid::nil()));
+		assert!(issue.server_group_id.is_none());
+		assert!(issue.message.contains("claude"), "{}", issue.message);
+		assert!(issue.message.contains("in 10 days"), "{}", issue.message);
 
-		// Revoking the token recovers the alerts on the next sweep…
+		// Revoking the token recovers the alert on the next sweep…
 		McpToken::revoke(&mut conn, token.id).await.expect("revoke");
-		assert_eq!(sweep_token_expiry(&mut conn).await.expect("sweep"), 2);
-		let issues = Issue::list(&mut conn, Default::default(), 100)
-			.await
-			.expect("list issues");
+		assert_eq!(sweep_token_expiry(&mut conn).await.expect("sweep"), 1);
 		assert!(
-			issues
+			self_alerts::list(&mut conn, 50)
+				.await
+				.expect("list")
 				.iter()
 				.filter(|i| i.r#ref == EXPIRY_REF)
 				.all(|i| !i.active),
-			"alerts must recover after revocation"
+			"alert must recover after revocation"
 		);
 
 		// …and once recovered, further sweeps are no-ops again.

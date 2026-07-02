@@ -11,6 +11,7 @@ pub mod incidents;
 pub mod issues;
 pub mod mcp_tokens;
 pub mod restore_replicas;
+pub mod self_alerts;
 pub mod server_groups;
 pub mod servers;
 pub mod silenced_refs;
@@ -58,6 +59,7 @@ pub fn routes() -> OpenApiRouter<crate::state::AppState> {
 			.nest("/issues", issues::routes())
 			.nest("/mcp_tokens", mcp_tokens::routes())
 			.nest("/restore_replicas", restore_replicas::routes())
+			.nest("/self_alerts", self_alerts::routes())
 			.nest("/server_groups", server_groups::routes())
 			.nest("/servers", servers::routes())
 			.nest("/silenced_refs", silenced_refs::routes())

@@ -3768,6 +3768,140 @@
         ]
       }
     },
+    "/api/self_alerts/active": {
+      "post": {
+        "tags": [
+          "self_alerts"
+        ],
+        "operationId": "self_alerts_active",
+        "responses": {
+          "200": {
+            "description": "Currently-alerting self-alerts (active and not operator-resolved), for the banner.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SelfAlertView"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/self_alerts/list": {
+      "post": {
+        "tags": [
+          "self_alerts"
+        ],
+        "operationId": "self_alerts_list",
+        "responses": {
+          "200": {
+            "description": "Self-alerts, newest activity first, recovered/resolved included.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SelfAlertView"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/self_alerts/resolve": {
+      "post": {
+        "tags": [
+          "self_alerts"
+        ],
+        "operationId": "self_alerts_resolve",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Alert marked operator-resolved; a pending notification is cancelled."
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/server_groups/create": {
       "post": {
         "tags": [
@@ -9375,6 +9509,65 @@
           }
         }
       },
+      "SelfAlertView": {
+        "type": "object",
+        "required": [
+          "id",
+          "ref",
+          "severity",
+          "message",
+          "active",
+          "first_seen",
+          "last_seen"
+        ],
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "first_seen": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "last_seen": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "message": {
+            "type": "string"
+          },
+          "ref": {
+            "type": "string",
+            "description": "The stable condition key, e.g. `mcp-token-expiry`."
+          },
+          "resolved_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "resolved_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "severity": {
+            "$ref": "#/components/schemas/Severity"
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Single-line headline."
+          }
+        }
+      },
       "ServerArgs": {
         "type": "object",
         "required": [
@@ -11005,6 +11198,10 @@
     {
       "name": "mcp_tokens",
       "description": "Bearer tokens for the public MCP mount."
+    },
+    {
+      "name": "self_alerts",
+      "description": "Canopy's alerts about its own operation."
     },
     {
       "name": "servers",

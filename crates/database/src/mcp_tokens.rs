@@ -193,48 +193,24 @@ impl McpToken {
 /// refs, this is a contract: silences and Slack messages reference it.
 pub const EXPIRY_REF: &str = "mcp-token-expiry";
 
-/// Fleet-wide rotation alert, run from the monitor loop. An issue can only
-/// attach to a server or a group, and incidents/Slack are strictly per-group,
-/// so a fleet condition fans out to every group — the same idiom as the
-/// backup preflight identity alert. Severity `Error`, the incident-opening
-/// floor: a token lapsing unrotated is an outage for whoever relies on it.
-///
-/// Raises on every group while any un-revoked token is inside
-/// [`EXPIRY_ALERT_LEAD`] of its expiry; recovers (only) the groups whose alert
-/// is currently active once none are. Idle sweeps write nothing.
+/// Rotation alert, run from the monitor loop: a [self-alert](crate::self_alerts)
+/// — one coalescing record, one notification per raise/recovery, never one per
+/// group. Active while any un-revoked token is inside [`EXPIRY_ALERT_LEAD`] of
+/// its expiry; recovers when none are. Idle sweeps write nothing.
 pub async fn sweep_token_expiry(db: &mut AsyncPgConnection) -> Result<usize> {
-	use crate::issues::raise_group_event;
 	use commons_types::issue::Severity;
 
 	let expiring = McpToken::expiring_soon(db).await?;
 
 	if expiring.is_empty() {
-		// Recover only where the alert is live, so the idle path is read-only.
-		let alerted: Vec<Uuid> = {
-			use crate::schema::issues::dsl;
-			dsl::issues
-				.filter(dsl::source.eq(crate::statuses::CANOPY_SOURCE))
-				.filter(dsl::ref_.eq(EXPIRY_REF))
-				.filter(dsl::active.eq(true))
-				.filter(dsl::server_group_id.is_not_null())
-				.select(dsl::server_group_id.assume_not_null())
-				.load(db)
-				.await
-				.map_err(AppError::from)?
-		};
-		for group_id in &alerted {
-			raise_group_event(
-				db,
-				*group_id,
-				EXPIRY_REF,
-				Severity::Info,
-				None,
-				"all mcp access tokens rotated or revoked",
-				false,
-			)
-			.await?;
-		}
-		return Ok(alerted.len());
+		return Ok(crate::self_alerts::recover(
+			db,
+			EXPIRY_REF,
+			"all mcp access tokens rotated or revoked",
+		)
+		.await?
+		.map(|_| 1)
+		.unwrap_or(0));
 	}
 
 	let now = Timestamp::now();
@@ -257,20 +233,13 @@ pub async fn sweep_token_expiry(db: &mut AsyncPgConnection) -> Result<usize> {
 		.collect::<Vec<_>>()
 		.join("\n");
 
-	let groups = crate::server_groups::ServerGroup::list_all(db).await?;
-	let mut filed = 0;
-	for group in &groups {
-		raise_group_event(
-			db,
-			group.id,
-			EXPIRY_REF,
-			Severity::Error,
-			Some("MCP access token nearing expiry"),
-			&message,
-			true,
-		)
-		.await?;
-		filed += 1;
-	}
-	Ok(filed)
+	crate::self_alerts::raise(
+		db,
+		EXPIRY_REF,
+		Severity::Error,
+		"MCP access token nearing expiry",
+		&message,
+	)
+	.await?;
+	Ok(1)
 }

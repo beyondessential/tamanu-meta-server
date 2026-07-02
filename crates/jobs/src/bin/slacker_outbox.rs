@@ -16,8 +16,10 @@ use std::time::Duration;
 
 use clap::Parser;
 use commons_types::issue::Severity;
-use database::issues::NewEvent;
-use database::slack_outbox::{KIND_INCIDENT_OPEN, KIND_INCIDENT_RESOLVE, SlackOutbox};
+use database::slack_outbox::{
+	KIND_INCIDENT_OPEN, KIND_INCIDENT_RESOLVE, KIND_SELF_ALERT_OPEN, KIND_SELF_ALERT_RESOLVE,
+	SlackOutbox,
+};
 use diesel_async::AsyncConnection;
 use lloggs::{LoggingArgs, PreArgs};
 use miette::IntoDiagnostic;
@@ -48,15 +50,24 @@ const WATCHDOG_CHECK_EVERY: Duration = Duration::from_secs(30);
 /// `incident_open` and `incident_resolve` need separate workflows), plus
 /// the `PRIVATE_URL` base that the `link` variable points at.
 ///
-/// Validation policy: either **all** known webhook URLs are set (along with
-/// `PRIVATE_URL`), or **none** of them are (no-op mode for dev). Partial
-/// configuration is a hard error at startup — silently dropping rows for an
-/// unconfigured kind is exactly how we missed an entire month of resolve
-/// notifications previously, so a noisy startup failure is preferred.
+/// Validation policy: either **all** incident webhook URLs are set (along
+/// with `PRIVATE_URL`), or **none** of them are (no-op mode for dev).
+/// Partial configuration is a hard error at startup — silently dropping rows
+/// for an unconfigured kind is exactly how we missed an entire month of
+/// resolve notifications previously, so a noisy startup failure is preferred.
+///
+/// `SLACK_WEBHOOK_SELF_ALERT_URL` is deliberately outside that all-or-none
+/// set: it postdates deployed configuration, and folding it in would
+/// hard-fail every existing deploy on upgrade. Unset while incident hooks
+/// are configured, self-alert rows are marked delivered without posting and
+/// a warning is logged at startup — the alerts are still recorded and shown
+/// in the operator UI. Fold it into the strict set once ops config carries
+/// it everywhere.
 #[derive(Clone, Debug, Default)]
 struct Config {
 	open: Option<String>,
 	resolve: Option<String>,
+	self_alert: Option<String>,
 	private_url: Option<String>,
 }
 
@@ -65,6 +76,7 @@ impl Config {
 		Self::build(
 			std::env::var("SLACK_WEBHOOK_OPEN_URL").ok(),
 			std::env::var("SLACK_WEBHOOK_RESOLVE_URL").ok(),
+			std::env::var("SLACK_WEBHOOK_SELF_ALERT_URL").ok(),
 			std::env::var("PRIVATE_URL").ok(),
 		)
 	}
@@ -72,6 +84,7 @@ impl Config {
 	fn build(
 		open: Option<String>,
 		resolve: Option<String>,
+		self_alert: Option<String>,
 		private_url: Option<String>,
 	) -> miette::Result<Self> {
 		let inputs: [(&str, &Option<String>); 2] = [
@@ -79,19 +92,19 @@ impl Config {
 			("SLACK_WEBHOOK_RESOLVE_URL", &resolve),
 		];
 		let set_count = inputs.iter().filter(|(_, v)| v.is_some()).count();
-		if set_count == 0 {
+		if set_count == 0 && self_alert.is_none() {
 			return Ok(Self::default());
 		}
-		if set_count != inputs.len() {
+		if set_count != 0 && set_count != inputs.len() {
 			let missing: Vec<&str> = inputs
 				.iter()
 				.filter(|(_, v)| v.is_none())
 				.map(|(name, _)| *name)
 				.collect();
 			return Err(miette::miette!(
-				"slack outbox drainer requires every SLACK_WEBHOOK_*_URL to be set \
-				 when any is set (missing: {}). Set all of them, or leave them all \
-				 unset for no-op mode.",
+				"slack outbox drainer requires every incident SLACK_WEBHOOK_*_URL to \
+				 be set when any is set (missing: {}). Set all of them, or leave them \
+				 all unset for no-op mode.",
 				missing.join(", ")
 			));
 		}
@@ -105,25 +118,34 @@ impl Config {
 		Ok(Self {
 			open,
 			resolve,
+			self_alert,
 			private_url: Some(private_url),
 		})
 	}
 
 	fn any_hook(&self) -> bool {
-		self.open.is_some() || self.resolve.is_some()
+		self.open.is_some() || self.resolve.is_some() || self.self_alert.is_some()
 	}
 
-	fn url_for(&self, kind: &str) -> Option<&str> {
+	/// `Ok(Some(url))` — post there; `Ok(None)` — known kind whose optional
+	/// hook is unset (mark delivered without posting); `Err` — unknown kind.
+	fn url_for(&self, kind: &str) -> Result<Option<&str>, ()> {
 		match kind {
-			KIND_INCIDENT_OPEN => self.open.as_deref(),
-			KIND_INCIDENT_RESOLVE => self.resolve.as_deref(),
-			_ => None,
+			KIND_INCIDENT_OPEN => Ok(self.open.as_deref()),
+			KIND_INCIDENT_RESOLVE => Ok(self.resolve.as_deref()),
+			KIND_SELF_ALERT_OPEN | KIND_SELF_ALERT_RESOLVE => Ok(self.self_alert.as_deref()),
+			_ => Err(()),
 		}
 	}
 
-	fn incident_link(&self, incident_id: uuid::Uuid) -> Option<String> {
+	/// The `link` variable for a row: its incident page, or the self-alerts
+	/// view for rows that have no incident.
+	fn link_for(&self, row: &SlackOutbox) -> Option<String> {
 		let base = self.private_url.as_deref()?.trim_end_matches('/');
-		Some(format!("{base}/incidents/{incident_id}"))
+		Some(match row.incident_id {
+			Some(incident_id) => format!("{base}/incidents/{incident_id}"),
+			None => format!("{base}/alerts"),
+		})
 	}
 }
 
@@ -131,6 +153,11 @@ fn spawn(cfg: Config) -> JoinHandle<()> {
 	let pool = database::init();
 	if !cfg.any_hook() {
 		info!("no SLACK_WEBHOOK_*_URL set; slack outbox drainer running in no-op mode");
+	} else if cfg.self_alert.is_none() {
+		warn!(
+			"SLACK_WEBHOOK_SELF_ALERT_URL unset; self-alerts will be recorded and \
+			 shown in the operator UI but not sent to Slack"
+		);
 	}
 	let client = reqwest::Client::builder()
 		.timeout(REQUEST_TIMEOUT)
@@ -156,7 +183,7 @@ fn spawn(cfg: Config) -> JoinHandle<()> {
 								info!(
 									id = %row.id,
 									kind = %row.kind,
-									incident_id = %row.incident_id,
+									incident_id = ?row.incident_id,
 									response = %body,
 									"slack delivered"
 								);
@@ -168,7 +195,7 @@ fn spawn(cfg: Config) -> JoinHandle<()> {
 									error!(
 										id = %row.id,
 										kind = %row.kind,
-										incident_id = %row.incident_id,
+										incident_id = ?row.incident_id,
 										attempts = next_attempts,
 										err = %err.msg,
 										response = ?err.body,
@@ -194,7 +221,7 @@ fn spawn(cfg: Config) -> JoinHandle<()> {
 									warn!(
 										id = %row.id,
 										kind = %row.kind,
-										incident_id = %row.incident_id,
+										incident_id = ?row.incident_id,
 										attempts = next_attempts,
 										err = %err.msg,
 										response = ?err.body,
@@ -221,33 +248,33 @@ fn spawn(cfg: Config) -> JoinHandle<()> {
 	})
 }
 
-/// File a `canopy/slack-delivery-failure` event against the nil/meta
-/// server when the drainer abandons a row. All such events coalesce into
-/// one issue (same source + ref), so a flapping drainer becomes a single
-/// long-lived issue with rising event counts rather than many small ones.
+/// Raise the `slack-delivery-failure` self-alert when the drainer abandons
+/// a row. Coalesces into one issue, so a flapping drainer becomes a single
+/// long-lived alert with rising event counts rather than many small ones.
+/// This can't feed back into itself: the raise only enqueues a Slack row on
+/// the not-alerting → alerting transition, so the follow-up failure of that
+/// row re-raises an already-active alert and enqueues nothing.
 async fn file_self_event(
 	conn: &mut diesel_async::AsyncPgConnection,
 	row: &SlackOutbox,
 	attempts: i32,
 	err: &DeliveryError,
 ) -> Result<(), commons_errors::AppError> {
-	let evt = NewEvent {
-		source: "canopy".to_string(),
-		r#ref: "slack-delivery-failure".to_string(),
-		severity: Some(Severity::Error),
-		description: Some(format!("Slack delivery permanently failed ({})", row.kind)),
-		message: format!(
-			"outbox row {} (kind={}, incident={}): gave up after {attempts} attempts. Last error: {}. Last response: {}",
+	database::self_alerts::raise(
+		conn,
+		database::self_alerts::SLACK_DELIVERY_FAILURE_REF,
+		Severity::Error,
+		&format!("Slack delivery permanently failed ({})", row.kind),
+		&format!(
+			"outbox row {} (kind={}, incident={:?}): gave up after {attempts} attempts. Last error: {}. Last response: {}",
 			row.id,
 			row.kind,
 			row.incident_id,
 			err.msg,
 			err.body.as_deref().unwrap_or("<none>"),
 		),
-		active: Some(true),
-		occurred_at: None,
-	};
-	evt.save(conn, uuid::Uuid::nil(), None).await?;
+	)
+	.await?;
 	Ok(())
 }
 
@@ -326,13 +353,31 @@ async fn deliver(
 		debug!(id = %row.id, kind = %row.kind, "no-op mode; row marked delivered without posting");
 		return Ok(String::new());
 	}
-	let url = cfg.url_for(&row.kind).ok_or_else(|| DeliveryError {
-		msg: format!("no webhook url configured for kind {:?}", row.kind),
-		body: None,
-	})?;
+	let url = match cfg.url_for(&row.kind) {
+		Err(()) => {
+			return Err(DeliveryError {
+				msg: format!("unknown outbox kind {:?}", row.kind),
+				body: None,
+			});
+		}
+		Ok(Some(url)) => url,
+		// The self-alert hook is optional (see Config docs): unset means
+		// record-only. Incident kinds unset while any hook is configured
+		// stay a hard error — that silence has bitten before.
+		Ok(None) if row.kind == KIND_SELF_ALERT_OPEN || row.kind == KIND_SELF_ALERT_RESOLVE => {
+			debug!(id = %row.id, kind = %row.kind, "self-alert hook unset; row marked delivered without posting");
+			return Ok(String::new());
+		}
+		Ok(None) => {
+			return Err(DeliveryError {
+				msg: format!("no webhook url configured for kind {:?}", row.kind),
+				body: None,
+			});
+		}
+	};
 	let mut payload = row.payload.clone();
 	if let Some(obj) = payload.as_object_mut()
-		&& let Some(link) = cfg.incident_link(row.incident_id)
+		&& let Some(link) = cfg.link_for(row)
 	{
 		obj.insert("link".to_string(), serde_json::Value::String(link));
 	}
@@ -367,7 +412,7 @@ mod tests {
 			id: Uuid::nil(),
 			created_at: Timestamp::now(),
 			kind: kind.into(),
-			incident_id: Uuid::nil(),
+			incident_id: Some(Uuid::nil()),
 			issue_id: None,
 			note_id: None,
 			payload,
@@ -436,9 +481,10 @@ mod tests {
 		let err = Config::build(
 			Some("http://example/open".into()),
 			None,
+			None,
 			Some("https://canopy.test".into()),
 		)
-		.expect_err("must require every SLACK_WEBHOOK_*_URL when any is set");
+		.expect_err("must require every incident SLACK_WEBHOOK_*_URL when any is set");
 		assert!(
 			err.to_string().contains("SLACK_WEBHOOK_RESOLVE_URL"),
 			"error names the missing var; got: {err}"
@@ -451,6 +497,7 @@ mod tests {
 			Some("http://example/open".into()),
 			Some("http://example/resolve".into()),
 			None,
+			None,
 		)
 		.expect_err("must require PRIVATE_URL");
 		assert!(err.to_string().contains("PRIVATE_URL"));
@@ -458,7 +505,7 @@ mod tests {
 
 	#[test]
 	fn config_ok_when_no_hooks_set_even_without_private_url() {
-		let cfg = Config::build(None, None, None).expect("no-op mode is fine");
+		let cfg = Config::build(None, None, None, None).expect("no-op mode is fine");
 		assert!(!cfg.any_hook());
 	}
 
@@ -467,15 +514,28 @@ mod tests {
 		let cfg = Config::build(
 			Some("http://example/open".into()),
 			Some("http://example/resolve".into()),
+			Some("http://example/self-alert".into()),
 			Some("https://canopy.test".into()),
 		)
 		.expect("complete config is fine");
 		assert!(cfg.any_hook());
-		assert_eq!(cfg.url_for(KIND_INCIDENT_OPEN), Some("http://example/open"));
+		assert_eq!(
+			cfg.url_for(KIND_INCIDENT_OPEN),
+			Ok(Some("http://example/open"))
+		);
 		assert_eq!(
 			cfg.url_for(KIND_INCIDENT_RESOLVE),
-			Some("http://example/resolve")
+			Ok(Some("http://example/resolve"))
 		);
+		assert_eq!(
+			cfg.url_for(KIND_SELF_ALERT_OPEN),
+			Ok(Some("http://example/self-alert"))
+		);
+		assert_eq!(
+			cfg.url_for(KIND_SELF_ALERT_RESOLVE),
+			Ok(Some("http://example/self-alert"))
+		);
+		assert_eq!(cfg.url_for("mystery"), Err(()));
 	}
 
 	#[tokio::test(flavor = "multi_thread")]
@@ -493,6 +553,7 @@ mod tests {
 		let cfg = Config {
 			open: Some(url),
 			resolve: None,
+			self_alert: None,
 			private_url: Some("https://canopy.example.ts.net".into()),
 		};
 		let mut r = row(
@@ -504,7 +565,7 @@ mod tests {
 				"message": "boom",
 			}),
 		);
-		r.incident_id = incident_id;
+		r.incident_id = Some(incident_id);
 		let body = deliver(&reqwest::Client::new(), &cfg, &r)
 			.await
 			.expect("deliver ok");
@@ -538,13 +599,14 @@ mod tests {
 		let cfg = Config {
 			open: Some(url),
 			resolve: None,
+			self_alert: None,
 			private_url: Some("https://new.example/".into()),
 		};
 		let mut r = row(
 			KIND_INCIDENT_OPEN,
 			serde_json::json!({ "link": "https://stale.example/old" }),
 		);
-		r.incident_id = incident_id;
+		r.incident_id = Some(incident_id);
 		deliver(&reqwest::Client::new(), &cfg, &r)
 			.await
 			.expect("deliver ok");
@@ -577,6 +639,7 @@ mod tests {
 		let cfg = Config {
 			open: Some("http://127.0.0.1:1/open-should-not-be-hit".into()),
 			resolve: Some(resolve_url),
+			self_alert: None,
 			private_url: Some("https://canopy.test".into()),
 		};
 		let r = row(
@@ -606,6 +669,7 @@ mod tests {
 		let cfg = Config {
 			open: Some(url),
 			resolve: None,
+			self_alert: None,
 			private_url: Some("https://canopy.test".into()),
 		};
 		let r = row(KIND_INCIDENT_OPEN, serde_json::json!({}));
@@ -629,6 +693,7 @@ mod tests {
 		let cfg = Config {
 			open: Some("http://127.0.0.1:1/should-not-be-hit".into()),
 			resolve: Some("http://127.0.0.1:1/should-not-be-hit".into()),
+			self_alert: None,
 			private_url: Some("https://canopy.test".into()),
 		};
 		let r = row("bogus_kind", serde_json::json!({}));
@@ -636,9 +701,75 @@ mod tests {
 			.await
 			.expect_err("unknown kind must error in configured mode");
 		assert!(
-			err.to_string().contains("no webhook url configured"),
+			err.to_string().contains("unknown outbox kind"),
 			"error explains why; got: {err}"
 		);
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn deliver_self_alert_without_hook_is_a_per_kind_noop() {
+		// The self-alert hook is optional: with incident hooks configured
+		// but SLACK_WEBHOOK_SELF_ALERT_URL unset, self-alert rows are
+		// marked delivered without posting rather than erroring forever.
+		let cfg = Config {
+			open: Some("http://127.0.0.1:1/should-not-be-hit".into()),
+			resolve: Some("http://127.0.0.1:1/should-not-be-hit".into()),
+			self_alert: None,
+			private_url: Some("https://canopy.test".into()),
+		};
+		let mut r = row(KIND_SELF_ALERT_OPEN, serde_json::json!({}));
+		r.incident_id = None;
+		let body = deliver(&reqwest::Client::new(), &cfg, &r)
+			.await
+			.expect("per-kind noop ok");
+		assert_eq!(body, "");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn deliver_routes_self_alert_kinds_and_links_to_alerts() {
+		let (url, server, recorded) = one_shot_server();
+		let cfg = Config {
+			open: Some("http://127.0.0.1:1/open-should-not-be-hit".into()),
+			resolve: Some("http://127.0.0.1:1/resolve-should-not-be-hit".into()),
+			self_alert: Some(url),
+			private_url: Some("https://canopy.example.ts.net".into()),
+		};
+		let mut r = row(
+			KIND_SELF_ALERT_OPEN,
+			serde_json::json!({
+				"state": "alert",
+				"severity": "Critical",
+				"source_ref": "canopy/preflight-identity",
+				"title": "Canopy IRSA identity broken",
+				"message": "boom",
+			}),
+		);
+		r.incident_id = None;
+		deliver(&reqwest::Client::new(), &cfg, &r)
+			.await
+			.expect("deliver ok");
+		server.join().unwrap();
+
+		let got = recorded.lock().unwrap().clone().expect("got a request");
+		assert_eq!(got["state"], "alert");
+		assert_eq!(got["source_ref"], "canopy/preflight-identity");
+		assert_eq!(
+			got["link"], "https://canopy.example.ts.net/alerts",
+			"self-alert rows link to the alerts view, not an incident",
+		);
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn config_accepts_missing_self_alert_hook() {
+		let cfg = Config::build(
+			Some("http://example/open".into()),
+			Some("http://example/resolve".into()),
+			None,
+			Some("https://canopy.test".into()),
+		)
+		.expect("self-alert hook is optional");
+		assert!(cfg.any_hook());
+		assert_eq!(cfg.url_for(KIND_SELF_ALERT_OPEN), Ok(None));
 	}
 
 	#[tokio::test(flavor = "multi_thread")]

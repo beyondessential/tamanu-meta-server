@@ -24,6 +24,7 @@ use utoipa::{
 		(name = "incidents", description = "Operational incidents (groups of issues against a server)."),
 		(name = "issues", description = "Per-server issues raised from device events."),
 		(name = "mcp_tokens", description = "Bearer tokens for the public MCP mount."),
+		(name = "self_alerts", description = "Canopy's alerts about its own operation."),
 		(name = "servers", description = "Server inventory, hierarchy, and metadata."),
 		(name = "sql", description = "Read-only SQL playground."),
 		(name = "statuses", description = "Live server status and version-distance summaries."),

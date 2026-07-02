@@ -54,7 +54,9 @@ pub const RECONCILE_MISSING: &str = "backup-reconcile-missing";
 pub const CORRUPTION: &str = "backup-corruption";
 
 /// Canopy's own `sts:GetCallerIdentity` failed — the shared IRSA identity is
-/// broken. `Critical`. Fanned out per group (see the preflight binary).
+/// broken. `Critical`. Filed once against the nil/meta server (one fact about
+/// canopy, not one per group); recovery also clears any group-scoped issues
+/// left from when this alert fanned out per group.
 pub const PREFLIGHT_IDENTITY: &str = "preflight-identity";
 
 /// Cross-account `AssumeRole` or the read-only no-op S3 call failed for a

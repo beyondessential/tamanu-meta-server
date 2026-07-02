@@ -489,7 +489,7 @@ diesel::table! {
 		id -> Uuid,
 		created_at -> Timestamptz,
 		kind -> Text,
-		incident_id -> Uuid,
+		incident_id -> Nullable<Uuid>,
 		issue_id -> Nullable<Uuid>,
 		note_id -> Nullable<Uuid>,
 		payload -> Jsonb,
