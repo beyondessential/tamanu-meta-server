@@ -140,6 +140,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 #[utoipa::path(
 	post,
 	path = "/{server_id}",
+	operation_id = "submit_status",
 	tag = "statuses",
 	security(("server-device" = [])),
 	params(

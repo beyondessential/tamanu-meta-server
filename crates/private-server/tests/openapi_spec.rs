@@ -86,3 +86,40 @@ fn spec_path_count() {
 		paths.len()
 	);
 }
+
+/// `operationId` must be unique across the whole document (OpenAPI requires it,
+/// and codegen/tooling keys off it). utoipa defaults an operation's id to the
+/// handler's function name, so two same-named handlers in different modules
+/// silently collide — set an explicit `operation_id` in the `#[utoipa::path]`
+/// to disambiguate.
+#[test]
+fn no_duplicate_operation_ids() {
+	let spec = build_spec();
+	let paths = spec["paths"].as_object().expect("paths object");
+
+	let mut by_id: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+	for (path, item) in paths {
+		let ops = item.as_object().expect("path item object");
+		for (method, op) in ops {
+			// Non-operation keys (parameters, summary, …) aren't objects with
+			// an operationId, so they fall through this filter.
+			if let Some(id) = op.get("operationId").and_then(|v| v.as_str()) {
+				by_id
+					.entry(id.to_string())
+					.or_default()
+					.push(format!("{} {path}", method.to_uppercase()));
+			}
+		}
+	}
+
+	let dupes: Vec<String> = by_id
+		.iter()
+		.filter(|(_, uses)| uses.len() > 1)
+		.map(|(id, uses)| format!("{id}: {}", uses.join(", ")))
+		.collect();
+	assert!(
+		dupes.is_empty(),
+		"duplicate operationIds (invalid OpenAPI) — set an explicit `operation_id`:\n{}",
+		dupes.join("\n"),
+	);
+}

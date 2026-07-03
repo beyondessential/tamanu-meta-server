@@ -18,7 +18,7 @@
         "tags": [
           "artifacts"
         ],
-        "operationId": "create",
+        "operationId": "register_artifact",
         "parameters": [
           {
             "name": "version",
@@ -111,7 +111,7 @@
         "tags": [
           "backup"
         ],
-        "operationId": "capabilities",
+        "operationId": "register_backup_capabilities",
         "requestBody": {
           "content": {
             "application/json": {
@@ -159,7 +159,7 @@
         "tags": [
           "backup"
         ],
-        "operationId": "credentials",
+        "operationId": "mint_backup_credentials",
         "requestBody": {
           "content": {
             "application/json": {
@@ -363,7 +363,7 @@
         "tags": [
           "events"
         ],
-        "operationId": "create",
+        "operationId": "submit_event",
         "requestBody": {
           "content": {
             "application/json": {
@@ -438,7 +438,7 @@
         "tags": [
           "restore"
         ],
-        "operationId": "capabilities",
+        "operationId": "register_restore_capabilities",
         "requestBody": {
           "content": {
             "application/json": {
@@ -466,7 +466,7 @@
         "tags": [
           "restore"
         ],
-        "operationId": "credentials",
+        "operationId": "mint_restore_credentials",
         "requestBody": {
           "content": {
             "application/json": {
@@ -597,7 +597,7 @@
         "tags": [
           "servers"
         ],
-        "operationId": "list",
+        "operationId": "list_servers",
         "responses": {
           "200": {
             "description": "Publicly-listed central servers, ordered by rank then name.",
@@ -710,7 +710,7 @@
         "tags": [
           "statuses"
         ],
-        "operationId": "create",
+        "operationId": "submit_status",
         "parameters": [
           {
             "name": "server_id",
@@ -844,7 +844,7 @@
         "tags": [
           "versions"
         ],
-        "operationId": "list",
+        "operationId": "list_versions",
         "responses": {
           "200": {
             "description": "All published versions.",
@@ -911,7 +911,7 @@
         "tags": [
           "versions"
         ],
-        "operationId": "create",
+        "operationId": "create_version",
         "parameters": [
           {
             "name": "version",

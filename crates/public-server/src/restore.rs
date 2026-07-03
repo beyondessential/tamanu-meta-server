@@ -67,6 +67,7 @@ pub struct CapabilitiesArgs {
 #[utoipa::path(
 	post,
 	path = "/restore-capabilities",
+	operation_id = "register_restore_capabilities",
 	tag = "restore",
 	security(("backup-restore-device" = [])),
 	request_body = CapabilitiesArgs,
@@ -278,6 +279,7 @@ pub struct RestoreCredentials {
 #[utoipa::path(
 	post,
 	path = "/restore-credentials",
+	operation_id = "mint_restore_credentials",
 	tag = "restore",
 	security(("backup-restore-device" = [])),
 	request_body = CredentialsArgs,
