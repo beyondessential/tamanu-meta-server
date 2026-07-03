@@ -2506,3 +2506,140 @@ async fn status_one_off_request_surfaced_then_cleared_by_report() {
 	)
 	.await
 }
+
+// -----------------------------------------------------------------
+// Version sourcing: `tamanuVersion` payload extra supersedes the
+// legacy `X-Version` header, and the header is now optional.
+// -----------------------------------------------------------------
+
+#[derive(QueryableByName)]
+struct VersionRow {
+	#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
+	version: Option<String>,
+}
+
+async fn fetch_latest_version(
+	conn: &mut diesel_async::AsyncPgConnection,
+	server_id: Uuid,
+) -> Option<String> {
+	let row: VersionRow = sql_query(
+		"SELECT version FROM statuses WHERE server_id = $1 ORDER BY created_at DESC LIMIT 1",
+	)
+	.bind::<sql_types::Uuid, _>(server_id)
+	.get_result(conn)
+	.await
+	.expect("fetch latest status version");
+	row.version
+}
+
+/// `run_with_device_auth` sends `X-Version: 3.4.5` by default. A payload
+/// carrying `tamanuVersion` wins over that header.
+#[tokio::test(flavor = "multi_thread")]
+async fn submit_status_version_prefers_tamanu_version_over_header() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+
+			post_status(
+				&public,
+				&cert,
+				server_id,
+				serde_json::json!({ "tamanuVersion": "2.11.0", "health": [] }),
+			)
+			.await;
+
+			assert_eq!(
+				fetch_latest_version(&mut conn, server_id).await.as_deref(),
+				Some("2.11.0"),
+				"tamanuVersion in the payload supersedes the X-Version header"
+			);
+		},
+	)
+	.await
+}
+
+/// With no `tamanuVersion` in the payload, the version falls back to the
+/// `X-Version` header (here the helper's default `3.4.5`).
+#[tokio::test(flavor = "multi_thread")]
+async fn submit_status_version_falls_back_to_header() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+
+			post_status(
+				&public,
+				&cert,
+				server_id,
+				serde_json::json!({ "health": [] }),
+			)
+			.await;
+
+			assert_eq!(
+				fetch_latest_version(&mut conn, server_id).await.as_deref(),
+				Some("3.4.5"),
+				"absent tamanuVersion falls back to the X-Version header"
+			);
+		},
+	)
+	.await
+}
+
+/// The `X-Version` header is now optional: a push with no header but a
+/// `tamanuVersion` in the body is accepted and records the payload version.
+#[tokio::test(flavor = "multi_thread")]
+async fn submit_status_version_without_header_uses_payload() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+
+			// Drop every default header (including the helper's X-Version),
+			// then restore only what device auth / client IP need.
+			let response = public
+				.post(&format!("/status/{server_id}"))
+				.clear_headers()
+				.add_header("Forwarded", "for=192.0.1.60")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({ "tamanuVersion": "2.12.3", "health": [] }))
+				.await;
+			response.assert_status_ok();
+
+			assert_eq!(
+				fetch_latest_version(&mut conn, server_id).await.as_deref(),
+				Some("2.12.3"),
+				"missing X-Version is fine when the payload carries tamanuVersion"
+			);
+		},
+	)
+	.await
+}
+
+/// Neither source present: the push still succeeds and the row is
+/// versionless (the column is nullable).
+#[tokio::test(flavor = "multi_thread")]
+async fn submit_status_versionless_when_neither_present() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+
+			let response = public
+				.post(&format!("/status/{server_id}"))
+				.clear_headers()
+				.add_header("Forwarded", "for=192.0.1.60")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({ "health": [] }))
+				.await;
+			response.assert_status_ok();
+
+			assert_eq!(
+				fetch_latest_version(&mut conn, server_id).await,
+				None,
+				"no tamanuVersion and no X-Version ⇒ versionless status"
+			);
+		},
+	)
+	.await
+}

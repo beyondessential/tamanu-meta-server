@@ -1846,7 +1846,7 @@
         "allOf": [
           {
             "type": "object",
-            "description": "Free-form additional data (uptime, postgres version, timezone,\nhostname, etc.). Stored verbatim in `statuses.extra` and\nsurfaced as raw JSON in the status snapshot."
+            "description": "Free-form additional data (uptime, postgres version, timezone,\nhostname, etc.). Stored verbatim in `statuses.extra` and\nsurfaced as raw JSON in the status snapshot.\n\nA `tamanuVersion` here is used as the server's tracked version\n(compared against the published version catalog), superseding the\nlegacy `X-Version` request header. If both are present,\n`tamanuVersion` wins; if neither is, the status is versionless."
           },
           {
             "type": "object",
