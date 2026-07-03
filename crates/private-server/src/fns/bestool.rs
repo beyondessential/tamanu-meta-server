@@ -36,7 +36,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 }
 
 #[derive(Deserialize, ToSchema)]
-pub struct ListArgs {
+pub struct BestoolListArgs {
 	pub offset: u64,
 	pub limit: Option<u64>,
 }
@@ -45,7 +45,7 @@ pub struct ListArgs {
 	post,
 	path = "/list_snippets",
 	tag = "bestool",
-	request_body = ListArgs,
+	request_body = BestoolListArgs,
 	responses(
 		(status = 200, body = Page<BestoolSnippetInfo>),
 		(status = 500, body = ProblemDetailsSchema),
@@ -53,7 +53,7 @@ pub struct ListArgs {
 )]
 pub async fn list_snippets(
 	State(state): State<AppState>,
-	Json(args): Json<ListArgs>,
+	Json(args): Json<BestoolListArgs>,
 ) -> Result<Json<Page<BestoolSnippetInfo>>> {
 	let mut conn = state.db.get().await?;
 	let total = database::BestoolSnippet::count_current(&mut conn).await? as u64;

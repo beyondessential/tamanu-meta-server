@@ -104,7 +104,7 @@ pub async fn list(
 }
 
 #[derive(Deserialize, ToSchema)]
-pub struct UpdateArgs {
+pub struct HealthcheckUpdateArgs {
 	pub check_name: String,
 	pub severity: Severity,
 	/// Optional operator notes. `None` leaves the existing notes alone…
@@ -120,7 +120,7 @@ pub struct UpdateArgs {
 	operation_id = "healthcheck_update",
 	tag = "healthchecks",
 	security(("tailscale-admin" = [])),
-	request_body = UpdateArgs,
+	request_body = HealthcheckUpdateArgs,
 	responses(
 		(status = 200, description = "Updated catalog row.", body = HealthcheckSeverityData),
 		(status = 401, body = ProblemDetailsSchema),
@@ -130,7 +130,7 @@ pub struct UpdateArgs {
 pub async fn update(
 	State(state): State<AppState>,
 	admin: TailscaleAdmin,
-	Json(args): Json<UpdateArgs>,
+	Json(args): Json<HealthcheckUpdateArgs>,
 ) -> Result<Json<HealthcheckSeverityData>> {
 	let mut conn = state.db.get().await?;
 	let row = HealthcheckSeverity::update(

@@ -2450,11 +2450,6 @@ export interface components {
             /** Format: uuid */
             version_id: string;
         };
-        AddNoteArgs: {
-            body: string;
-            /** Format: uuid */
-            incident_id: string;
-        };
         ArtifactData: {
             artifact_type: string;
             download_url: string;
@@ -2673,6 +2668,16 @@ export interface components {
             recent_runs: components["schemas"]["BackupRun"][];
             stats?: null | components["schemas"]["BackupRepoStats"];
         };
+        BackupsGroupArgs: {
+            /** Format: uuid */
+            server_group_id: string;
+        };
+        BestoolListArgs: {
+            /** Format: int64 */
+            limit?: number | null;
+            /** Format: int64 */
+            offset: number;
+        };
         BestoolSnippetDetail: {
             description?: string | null;
             editor: string;
@@ -2707,27 +2712,6 @@ export interface components {
             device_id: string;
             /** Format: int64 */
             limit?: number | null;
-        };
-        CreateArgs: {
-            /** Format: uuid */
-            consumer_device_id: string;
-            /** Format: uuid */
-            group_id: string;
-            intent: string;
-            name: string;
-            /**
-             * Format: int64
-             * @description Overdue bound in whole seconds; `None` = no bound.
-             */
-            overdue_after_seconds?: number | null;
-            /** @description Operator-supplied parameter values, validated against the intent's schema. */
-            params?: Record<string, never>;
-            /**
-             * Format: uuid
-             * @description `None` = all current servers in the group.
-             */
-            server_id?: string | null;
-            type: string;
         };
         CreateArtifactArgs: {
             artifact_type: string;
@@ -2791,10 +2775,6 @@ export interface components {
         DeleteArgs: {
             email: string;
         };
-        DeleteNoteArgs: {
-            /** Format: uuid */
-            note_id: string;
-        };
         DeviceConnectionData: {
             /** Format: date-time */
             created_at: string;
@@ -2849,6 +2829,9 @@ export interface components {
         };
         /** @enum {string} */
         DeviceRole: "admin" | "releaser" | "server" | "backup-restore";
+        DeviceSearchArgs: {
+            query: string;
+        };
         EnrollmentStatus: {
             /**
              * Format: date-time
@@ -2937,10 +2920,6 @@ export interface components {
         GetIncidentArgs: {
             /** Format: uuid */
             incident_id: string;
-        };
-        GroupArgs: {
-            /** Format: uuid */
-            server_group_id: string;
         };
         GroupDetail: {
             /** @description The group's effective `billing.*` labels (product/deployment/stage). */
@@ -3076,6 +3055,16 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
+        HealthcheckUpdateArgs: {
+            check_name: string;
+            /**
+             * @description Optional operator notes. `None` leaves the existing notes alone…
+             *     well, actually it overwrites with NULL — pass the current value
+             *     to preserve. The UI sends the full current state.
+             */
+            notes?: string | null;
+            severity: components["schemas"]["Severity"];
+        };
         HistoryArgs: {
             /** Format: int64 */
             limit?: number | null;
@@ -3091,6 +3080,11 @@ export interface components {
         IdArgs: {
             /** Format: uuid */
             id: string;
+        };
+        IncidentAddNoteArgs: {
+            body: string;
+            /** Format: uuid */
+            incident_id: string;
         };
         IncidentData: {
             /** Format: date-time */
@@ -3136,6 +3130,10 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
+        IncidentDeleteNoteArgs: {
+            /** Format: uuid */
+            note_id: string;
+        };
         IncidentIdArgs: {
             /** Format: uuid */
             incident_id: string;
@@ -3146,6 +3144,19 @@ export interface components {
             joined_at: string;
             /** Format: date-time */
             left_at?: string | null;
+        };
+        IncidentListForServerArgs: {
+            include_closed?: boolean | null;
+            /** Format: int64 */
+            limit?: number | null;
+            /** Format: uuid */
+            server_id: string;
+        };
+        IncidentListNotesArgs: {
+            /** Format: uuid */
+            incident_id: string;
+            /** Format: int64 */
+            limit?: number | null;
         };
         IncidentNoteData: {
             author: string;
@@ -3170,6 +3181,11 @@ export interface components {
             intent: string;
             params?: components["schemas"]["BTreeMap"];
             semantics?: string[];
+        };
+        IssueAddNoteArgs: {
+            body: string;
+            /** Format: uuid */
+            issue_id: string;
         };
         IssueData: {
             active: boolean;
@@ -3229,6 +3245,10 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
+        IssueDeleteNoteArgs: {
+            /** Format: uuid */
+            note_id: string;
+        };
         IssueIdArgs: {
             /** Format: uuid */
             issue_id: string;
@@ -3245,6 +3265,27 @@ export interface components {
             /** Format: date-time */
             opened_at: string;
         };
+        IssueListArgs: {
+            activeOnly?: boolean | null;
+            /** Format: int64 */
+            limit?: number | null;
+            /** Format: uuid */
+            serverGroupId?: string | null;
+            severities?: components["schemas"]["Severity"][] | null;
+        };
+        IssueListForServerArgs: {
+            active_only?: boolean | null;
+            /** Format: int64 */
+            limit?: number | null;
+            /** Format: uuid */
+            server_id: string;
+        };
+        IssueListNotesArgs: {
+            /** Format: uuid */
+            issue_id: string;
+            /** Format: int64 */
+            limit?: number | null;
+        };
         IssueNoteData: {
             author: string;
             body: string;
@@ -3254,6 +3295,11 @@ export interface components {
             id: string;
             /** Format: uuid */
             issue_id: string;
+        };
+        IssueResolveArgs: {
+            /** Format: uuid */
+            issue_id: string;
+            reason: components["schemas"]["ResolvedReason"];
         };
         KeyIdArgs: {
             /** Format: uuid */
@@ -3291,12 +3337,6 @@ export interface components {
             /** Format: int64 */
             limit?: number | null;
         };
-        ListArgs: {
-            /** Format: int64 */
-            limit?: number | null;
-            /** Format: int64 */
-            offset: number;
-        };
         ListEventsArgs: {
             /** Format: uuid */
             issue_id: string;
@@ -3318,19 +3358,6 @@ export interface components {
             limit?: number | null;
             /** Format: uuid */
             server_group_id: string;
-        };
-        ListForServerArgs: {
-            include_closed?: boolean | null;
-            /** Format: int64 */
-            limit?: number | null;
-            /** Format: uuid */
-            server_id: string;
-        };
-        ListNotesArgs: {
-            /** Format: uuid */
-            incident_id: string;
-            /** Format: int64 */
-            limit?: number | null;
         };
         LiveVersionsBracket: {
             max: components["schemas"]["VersionStr"];
@@ -3746,11 +3773,6 @@ export interface components {
             server_id: string;
             type: string;
         };
-        ResolveArgs: {
-            /** Format: uuid */
-            issue_id: string;
-            reason: components["schemas"]["ResolvedReason"];
-        };
         ResolveIncidentArgs: {
             /** Format: uuid */
             incident_id: string;
@@ -3827,6 +3849,40 @@ export interface components {
             type: string;
             updated_at: string;
         };
+        RestoreReplicasCreateArgs: {
+            /** Format: uuid */
+            consumer_device_id: string;
+            /** Format: uuid */
+            group_id: string;
+            intent: string;
+            name: string;
+            /**
+             * Format: int64
+             * @description Overdue bound in whole seconds; `None` = no bound.
+             */
+            overdue_after_seconds?: number | null;
+            /** @description Operator-supplied parameter values, validated against the intent's schema. */
+            params?: Record<string, never>;
+            /**
+             * Format: uuid
+             * @description `None` = all current servers in the group.
+             */
+            server_id?: string | null;
+            type: string;
+        };
+        RestoreReplicasGroupArgs: {
+            /** Format: uuid */
+            server_group_id: string;
+        };
+        RestoreReplicasUpdateArgs: {
+            enabled: boolean;
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** Format: int64 */
+            overdue_after_seconds?: number | null;
+            params?: Record<string, never>;
+        };
         /**
          * @description kopia `keep-*` retention policy. Org-minimum floors
          *     (`keep_daily ≥ 7, keep_weekly ≥ 4, keep_monthly ≥ 6`) are enforced by
@@ -3880,9 +3936,6 @@ export interface components {
             retention?: null | components["schemas"]["RetentionPolicy"];
             type: string;
         };
-        SearchArgs: {
-            query: string;
-        };
         SelfAlertView: {
             active: boolean;
             /** Format: date-time */
@@ -3900,6 +3953,10 @@ export interface components {
             severity: components["schemas"]["Severity"];
             /** @description Single-line headline. */
             title?: string | null;
+        };
+        SelfAlertsResolveArgs: {
+            /** Format: uuid */
+            id: string;
         };
         ServerArgs: {
             /** Format: uuid */
@@ -4040,6 +4097,25 @@ export interface components {
             server_group_id: string;
             source: string;
         };
+        ServerGroupsCreateArgs: {
+            name: string;
+            notes?: string;
+            /**
+             * Format: int64
+             * @description Optional initial value (seconds) for the group's Slack open
+             *     cooldown. Omit to let the database default apply.
+             */
+            slack_open_delay?: number | null;
+            tags?: components["schemas"]["TagMap"];
+        };
+        ServerGroupsSearchArgs: {
+            query: string;
+        };
+        ServerGroupsUpdateArgs: {
+            data: components["schemas"]["PartialServerGroup"];
+            /** Format: uuid */
+            server_group_id: string;
+        };
         ServerIdArgs: {
             /** Format: uuid */
             server_id: string;
@@ -4142,6 +4218,13 @@ export interface components {
             /** Format: int64 */
             version_distance?: number | null;
         };
+        ServerListArgs: {
+            kind?: null | components["schemas"]["ServerKind"];
+            /** Format: int64 */
+            limit?: number | null;
+            /** Format: int64 */
+            offset: number;
+        };
         /** @enum {string} */
         ServerRank: "production" | "clone" | "demo" | "test" | "dev";
         ServerScopeArgs: {
@@ -4156,6 +4239,11 @@ export interface components {
             /** Format: uuid */
             server_id: string;
             source: string;
+        };
+        ServerUpdateArgs: {
+            data: components["schemas"]["ServerDataUpdate"];
+            /** Format: uuid */
+            server_id: string;
         };
         SetCapabilityArgs: {
             enabled: boolean;
@@ -4380,16 +4468,6 @@ export interface components {
             default_interval?: number | null;
             default_retention?: null | components["schemas"]["RetentionPolicy"];
             type: string;
-        };
-        UpdateArgs: {
-            check_name: string;
-            /**
-             * @description Optional operator notes. `None` leaves the existing notes alone…
-             *     well, actually it overwrites with NULL — pass the current value
-             *     to preserve. The UI sends the full current state.
-             */
-            notes?: string | null;
-            severity: components["schemas"]["Severity"];
         };
         UpdateArtifactArgs: {
             /** Format: uuid */
@@ -4635,7 +4713,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["GroupArgs"];
+                "application/json": components["schemas"]["BackupsGroupArgs"];
             };
         };
         responses: {
@@ -4788,7 +4866,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["GroupArgs"];
+                "application/json": components["schemas"]["BackupsGroupArgs"];
             };
         };
         responses: {
@@ -4874,7 +4952,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["GroupArgs"];
+                "application/json": components["schemas"]["BackupsGroupArgs"];
             };
         };
         responses: {
@@ -4903,7 +4981,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["GroupArgs"];
+                "application/json": components["schemas"]["BackupsGroupArgs"];
             };
         };
         responses: {
@@ -4934,7 +5012,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["GroupArgs"];
+                "application/json": components["schemas"]["BackupsGroupArgs"];
             };
         };
         responses: {
@@ -5096,7 +5174,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["GroupArgs"];
+                "application/json": components["schemas"]["BackupsGroupArgs"];
             };
         };
         responses: {
@@ -5261,7 +5339,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["GroupArgs"];
+                "application/json": components["schemas"]["BackupsGroupArgs"];
             };
         };
         responses: {
@@ -5502,7 +5580,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ListArgs"];
+                "application/json": components["schemas"]["BestoolListArgs"];
             };
         };
         responses: {
@@ -6072,7 +6150,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["SearchArgs"];
+                "application/json": components["schemas"]["DeviceSearchArgs"];
             };
         };
         responses: {
@@ -6257,7 +6335,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["UpdateArgs"];
+                "application/json": components["schemas"]["HealthcheckUpdateArgs"];
             };
         };
         responses: {
@@ -6345,7 +6423,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AddNoteArgs"];
+                "application/json": components["schemas"]["IncidentAddNoteArgs"];
             };
         };
         responses: {
@@ -6376,7 +6454,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["DeleteNoteArgs"];
+                "application/json": components["schemas"]["IncidentDeleteNoteArgs"];
             };
         };
         responses: {
@@ -6474,7 +6552,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ListForServerArgs"];
+                "application/json": components["schemas"]["IncidentListForServerArgs"];
             };
         };
         responses: {
@@ -6497,7 +6575,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ListNotesArgs"];
+                "application/json": components["schemas"]["IncidentListNotesArgs"];
             };
         };
         responses: {
@@ -6566,7 +6644,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AddNoteArgs"];
+                "application/json": components["schemas"]["IssueAddNoteArgs"];
             };
         };
         responses: {
@@ -6597,7 +6675,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["DeleteNoteArgs"];
+                "application/json": components["schemas"]["IssueDeleteNoteArgs"];
             };
         };
         responses: {
@@ -6618,7 +6696,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ListArgs"];
+                "application/json": components["schemas"]["IssueListArgs"];
             };
         };
         responses: {
@@ -6687,7 +6765,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ListForServerArgs"];
+                "application/json": components["schemas"]["IssueListForServerArgs"];
             };
         };
         responses: {
@@ -6710,7 +6788,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ListNotesArgs"];
+                "application/json": components["schemas"]["IssueListNotesArgs"];
             };
         };
         responses: {
@@ -6733,7 +6811,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ResolveArgs"];
+                "application/json": components["schemas"]["IssueResolveArgs"];
             };
         };
         responses: {
@@ -6986,7 +7064,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["GroupArgs"];
+                "application/json": components["schemas"]["RestoreReplicasGroupArgs"];
             };
         };
         responses: {
@@ -7028,7 +7106,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CreateArgs"];
+                "application/json": components["schemas"]["RestoreReplicasCreateArgs"];
             };
         };
         responses: {
@@ -7089,7 +7167,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["GroupArgs"];
+                "application/json": components["schemas"]["RestoreReplicasGroupArgs"];
             };
         };
         responses: {
@@ -7112,7 +7190,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["UpdateArgs"];
+                "application/json": components["schemas"]["RestoreReplicasUpdateArgs"];
             };
         };
         responses: {
@@ -7199,7 +7277,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ResolveArgs"];
+                "application/json": components["schemas"]["SelfAlertsResolveArgs"];
             };
         };
         responses: {
@@ -7245,7 +7323,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CreateArgs"];
+                "application/json": components["schemas"]["ServerGroupsCreateArgs"];
             };
         };
         responses: {
@@ -7411,7 +7489,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["SearchArgs"];
+                "application/json": components["schemas"]["ServerGroupsSearchArgs"];
             };
         };
         responses: {
@@ -7457,7 +7535,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["UpdateArgs"];
+                "application/json": components["schemas"]["ServerGroupsUpdateArgs"];
             };
         };
         responses: {
@@ -7763,7 +7841,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ListArgs"];
+                "application/json": components["schemas"]["ServerListArgs"];
             };
         };
         responses: {
@@ -7898,7 +7976,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["UpdateArgs"];
+                "application/json": components["schemas"]["ServerUpdateArgs"];
             };
         };
         responses: {

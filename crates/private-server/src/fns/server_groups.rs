@@ -162,7 +162,7 @@ pub async fn get(
 }
 
 #[derive(Deserialize, ToSchema)]
-pub struct CreateArgs {
+pub struct ServerGroupsCreateArgs {
 	pub name: String,
 	#[serde(default)]
 	pub notes: String,
@@ -181,7 +181,7 @@ pub struct CreateArgs {
 	operation_id = "server_groups_create",
 	tag = "server_groups",
 	security(("tailscale-admin" = [])),
-	request_body = CreateArgs,
+	request_body = ServerGroupsCreateArgs,
 	responses(
 		(status = 200, body = ServerGroup),
 		(status = 400, body = ProblemDetailsSchema),
@@ -190,7 +190,7 @@ pub struct CreateArgs {
 pub async fn create(
 	State(state): State<AppState>,
 	_admin: TailscaleAdmin,
-	Json(args): Json<CreateArgs>,
+	Json(args): Json<ServerGroupsCreateArgs>,
 ) -> Result<Json<ServerGroup>> {
 	let mut conn = state.db.get().await?;
 	let group = ServerGroup::create(
@@ -207,7 +207,7 @@ pub async fn create(
 }
 
 #[derive(Deserialize, ToSchema)]
-pub struct UpdateArgs {
+pub struct ServerGroupsUpdateArgs {
 	pub server_group_id: Uuid,
 	pub data: PartialServerGroup,
 }
@@ -218,7 +218,7 @@ pub struct UpdateArgs {
 	operation_id = "server_groups_update",
 	tag = "server_groups",
 	security(("tailscale-admin" = [])),
-	request_body = UpdateArgs,
+	request_body = ServerGroupsUpdateArgs,
 	responses(
 		(status = 200, body = ServerGroup),
 		(status = 400, body = ProblemDetailsSchema),
@@ -228,7 +228,7 @@ pub struct UpdateArgs {
 pub async fn update(
 	State(state): State<AppState>,
 	_admin: TailscaleAdmin,
-	Json(args): Json<UpdateArgs>,
+	Json(args): Json<ServerGroupsUpdateArgs>,
 ) -> Result<Json<ServerGroup>> {
 	let mut conn = state.db.get().await?;
 	let group = ServerGroup::update(&mut conn, args.server_group_id, args.data).await?;
@@ -302,7 +302,7 @@ pub async fn list_archived(
 }
 
 #[derive(Deserialize, ToSchema)]
-pub struct SearchArgs {
+pub struct ServerGroupsSearchArgs {
 	pub query: String,
 }
 
@@ -312,14 +312,14 @@ pub struct SearchArgs {
 	operation_id = "server_groups_search",
 	tag = "server_groups",
 	security(("tailscale-user" = [])),
-	request_body = SearchArgs,
+	request_body = ServerGroupsSearchArgs,
 	responses(
 		(status = 200, body = Vec<ServerGroup>),
 	),
 )]
 pub async fn search(
 	State(state): State<AppState>,
-	Json(args): Json<SearchArgs>,
+	Json(args): Json<ServerGroupsSearchArgs>,
 ) -> Result<Json<Vec<ServerGroup>>> {
 	let mut conn = state.db.get().await?;
 	let groups = ServerGroup::search(&mut conn, &args.query).await?;

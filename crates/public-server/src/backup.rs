@@ -132,7 +132,7 @@ async fn require_issuable_capability(
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Deserialize, ToSchema)]
-pub struct CapabilitiesArgs {
+pub struct BackupCapabilitiesArgs {
 	/// The backup types bestool can run on this server.
 	#[schema(value_type = Vec<String>)]
 	pub types: Vec<BackupType>,
@@ -144,7 +144,7 @@ pub struct CapabilitiesArgs {
 	operation_id = "register_backup_capabilities",
 	tag = "backup",
 	security(("server-device" = [])),
-	request_body = CapabilitiesArgs,
+	request_body = BackupCapabilitiesArgs,
 	responses(
 		(status = 204, description = "Capabilities registered."),
 		(status = 412, description = "Device is not bound to a live server.", body = ProblemDetailsSchema),
@@ -154,7 +154,7 @@ pub struct CapabilitiesArgs {
 async fn capabilities(
 	State(db): State<Db>,
 	device: ServerDevice,
-	Json(args): Json<CapabilitiesArgs>,
+	Json(args): Json<BackupCapabilitiesArgs>,
 ) -> Result<StatusCode> {
 	let mut conn = db.get().await?;
 	let device_id = device.0.0.id;
@@ -182,7 +182,7 @@ async fn capabilities(
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Deserialize, ToSchema)]
-pub struct CredentialsArgs {
+pub struct BackupCredentialsArgs {
 	/// The backup type these creds are for. Must be an enabled capability or
 	/// have a pending request of this `purpose` (an on-demand backup/restore).
 	#[schema(value_type = String)]
@@ -289,7 +289,7 @@ pub fn backup_session_policy(bucket: &str, prefix: &str) -> String {
 	operation_id = "mint_backup_credentials",
 	tag = "backup",
 	security(("server-device" = [])),
-	request_body = CredentialsArgs,
+	request_body = BackupCredentialsArgs,
 	responses(
 		(status = 200, body = CredentialProcessOutput),
 		(status = 409, description = "Server ungrouped, no ready config, or type not enabled.", body = ProblemDetailsSchema),
@@ -301,7 +301,7 @@ async fn credentials(
 	State(db): State<Db>,
 	State(sts): State<Option<aws_sdk_sts::Client>>,
 	device: ServerDevice,
-	Json(args): Json<CredentialsArgs>,
+	Json(args): Json<BackupCredentialsArgs>,
 ) -> Result<Json<CredentialProcessOutput>> {
 	let mut conn = db.get().await?;
 	let device_id = device.0.0.id;

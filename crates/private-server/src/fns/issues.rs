@@ -287,7 +287,7 @@ fn filter_from(active_only: Option<bool>) -> IssueFilter {
 
 #[derive(Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ListArgs {
+pub struct IssueListArgs {
 	#[serde(default)]
 	pub active_only: Option<bool>,
 	#[serde(default)]
@@ -305,7 +305,7 @@ pub struct ListArgs {
 	operation_id = "issue_list",
 	tag = "issues",
 	security(("tailscale-user" = [])),
-	request_body = ListArgs,
+	request_body = IssueListArgs,
 	responses(
 		(status = 200, body = Vec<IssueData>),
 	),
@@ -313,7 +313,7 @@ pub struct ListArgs {
 pub async fn list(
 	State(state): State<AppState>,
 	_user: TailscaleUser,
-	Json(args): Json<ListArgs>,
+	Json(args): Json<IssueListArgs>,
 ) -> Result<Json<Vec<IssueData>>> {
 	let mut conn = state.db.get().await?;
 	let issues = Issue::list(
@@ -366,7 +366,7 @@ pub async fn list_for_device(
 }
 
 #[derive(Deserialize, ToSchema)]
-pub struct ListForServerArgs {
+pub struct IssueListForServerArgs {
 	pub server_id: Uuid,
 	#[serde(default)]
 	pub active_only: Option<bool>,
@@ -380,7 +380,7 @@ pub struct ListForServerArgs {
 	operation_id = "issue_list_for_server",
 	tag = "issues",
 	security(("tailscale-user" = [])),
-	request_body = ListForServerArgs,
+	request_body = IssueListForServerArgs,
 	responses(
 		(status = 200, body = Vec<IssueData>),
 	),
@@ -388,7 +388,7 @@ pub struct ListForServerArgs {
 pub async fn list_for_server(
 	State(state): State<AppState>,
 	_user: TailscaleUser,
-	Json(args): Json<ListForServerArgs>,
+	Json(args): Json<IssueListForServerArgs>,
 ) -> Result<Json<Vec<IssueData>>> {
 	let mut conn = state.db.get().await?;
 	let issues = Issue::list_for_server(
@@ -495,7 +495,7 @@ pub struct IssueIdArgs {
 }
 
 #[derive(Deserialize, ToSchema)]
-pub struct ResolveArgs {
+pub struct IssueResolveArgs {
 	pub issue_id: Uuid,
 	pub reason: ResolvedReason,
 }
@@ -506,7 +506,7 @@ pub struct ResolveArgs {
 	operation_id = "issue_resolve",
 	tag = "issues",
 	security(("tailscale-admin" = [])),
-	request_body = ResolveArgs,
+	request_body = IssueResolveArgs,
 	responses(
 		(status = 200, body = IssueData),
 	),
@@ -514,7 +514,7 @@ pub struct ResolveArgs {
 pub async fn resolve(
 	State(state): State<AppState>,
 	admin: TailscaleAdmin,
-	Json(args): Json<ResolveArgs>,
+	Json(args): Json<IssueResolveArgs>,
 ) -> Result<Json<IssueData>> {
 	let mut conn = state.db.get().await?;
 	let issue = Issue::resolve(&mut conn, args.issue_id, &admin.0.login, args.reason).await?;
@@ -612,7 +612,7 @@ impl From<IssueNote> for IssueNoteData {
 }
 
 #[derive(Deserialize, ToSchema)]
-pub struct AddNoteArgs {
+pub struct IssueAddNoteArgs {
 	pub issue_id: Uuid,
 	pub body: String,
 }
@@ -623,7 +623,7 @@ pub struct AddNoteArgs {
 	operation_id = "issue_add_note",
 	tag = "issues",
 	security(("tailscale-admin" = [])),
-	request_body = AddNoteArgs,
+	request_body = IssueAddNoteArgs,
 	responses(
 		(status = 200, body = IssueNoteData),
 		(status = 400, body = ProblemDetailsSchema),
@@ -632,7 +632,7 @@ pub struct AddNoteArgs {
 pub async fn add_note(
 	State(state): State<AppState>,
 	admin: TailscaleAdmin,
-	Json(args): Json<AddNoteArgs>,
+	Json(args): Json<IssueAddNoteArgs>,
 ) -> Result<Json<IssueNoteData>> {
 	if args.body.trim().is_empty() {
 		return Err(AppError::custom("note body is required"));
@@ -643,7 +643,7 @@ pub async fn add_note(
 }
 
 #[derive(Deserialize, ToSchema)]
-pub struct ListNotesArgs {
+pub struct IssueListNotesArgs {
 	pub issue_id: Uuid,
 	#[serde(default)]
 	pub limit: Option<i64>,
@@ -655,7 +655,7 @@ pub struct ListNotesArgs {
 	operation_id = "issue_list_notes",
 	tag = "issues",
 	security(("tailscale-user" = [])),
-	request_body = ListNotesArgs,
+	request_body = IssueListNotesArgs,
 	responses(
 		(status = 200, body = Vec<IssueNoteData>),
 	),
@@ -663,7 +663,7 @@ pub struct ListNotesArgs {
 pub async fn list_notes(
 	State(state): State<AppState>,
 	_user: TailscaleUser,
-	Json(args): Json<ListNotesArgs>,
+	Json(args): Json<IssueListNotesArgs>,
 ) -> Result<Json<Vec<IssueNoteData>>> {
 	let mut conn = state.db.get().await?;
 	let notes = IssueNote::list_for_issue(
@@ -676,7 +676,7 @@ pub async fn list_notes(
 }
 
 #[derive(Deserialize, ToSchema)]
-pub struct DeleteNoteArgs {
+pub struct IssueDeleteNoteArgs {
 	pub note_id: Uuid,
 }
 
@@ -686,7 +686,7 @@ pub struct DeleteNoteArgs {
 	operation_id = "issue_delete_note",
 	tag = "issues",
 	security(("tailscale-admin" = [])),
-	request_body = DeleteNoteArgs,
+	request_body = IssueDeleteNoteArgs,
 	responses(
 		(status = 200),
 	),
@@ -694,7 +694,7 @@ pub struct DeleteNoteArgs {
 pub async fn delete_note(
 	State(state): State<AppState>,
 	_admin: TailscaleAdmin,
-	Json(args): Json<DeleteNoteArgs>,
+	Json(args): Json<IssueDeleteNoteArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
 	IssueNote::delete(&mut conn, args.note_id).await?;
