@@ -349,12 +349,21 @@ export function RankedDotStrip({ members }: { members: FacilityServerStatus[] })
 		else chunks.push({ rank: key, entries: [m] });
 	}
 	return (
-		<Stack direction="row" spacing={0} sx={{ flexWrap: "wrap", alignItems: "center" }}>
+		<Stack
+			direction="row"
+			spacing={0}
+			sx={{ flexWrap: "wrap", alignItems: "center", rowGap: "0.5em" }}
+		>
 			{chunks.map((chunk, idx) => (
 				<Box
 					key={chunk.rank}
 					component="span"
-					sx={{ display: "inline-flex", alignItems: "center" }}
+					sx={{
+						display: "inline-flex",
+						flexWrap: "wrap",
+						alignItems: "center",
+						rowGap: "0.5em",
+					}}
 				>
 					{idx > 0 && (
 						<Box
@@ -364,7 +373,7 @@ export function RankedDotStrip({ members }: { members: FacilityServerStatus[] })
 								display: "inline-block",
 								width: "1px",
 								height: "0.9em",
-								mx: 0.5,
+								mx: "0.25em",
 								bgcolor: "text.disabled",
 							}}
 						/>
