@@ -363,6 +363,30 @@ test.describe("backups ready: stats + backup-now", () => {
 		await expect(tooltip).not.toContainText("assumed");
 	});
 
+	test("bucket bytes shows an estimated monthly cost tooltip", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "cost-group" });
+		await seedServerGroupBackupConfig(sql, {
+			groupId: group.id,
+			status: "ready",
+			region: "ap-southeast-2",
+		});
+		await seedBackupRepoStats(sql, {
+			groupId: group.id,
+			bucketBytes: 107374182400, // 100 GiB
+		});
+
+		await page.goto(`/groups/${group.id}/backups`);
+		await expect(page.getByText(/bucket bytes:\s*100\.0 GiB/i)).toBeVisible();
+
+		await page.getByText(/^100\.0 GiB$/).hover();
+		const tooltip = page.getByRole("tooltip");
+		await expect(tooltip).toContainText("$2.50/month");
+		await expect(tooltip).toContainText("ap-southeast-2");
+	});
+
 	test("recent run shows a truncated, copyable snapshot id", async ({
 		page,
 		sql,
