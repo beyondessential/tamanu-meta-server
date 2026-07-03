@@ -12,6 +12,11 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(is_current_user_admin))
 }
 
+/// Get the configured public API base URL.
+///
+/// Returns the base URL of the device-facing public API for this
+/// deployment, or `null` if none is configured. Used by the operator UI to
+/// build links out to device-facing resources.
 #[utoipa::path(
 	post,
 	path = "/public_url",
@@ -25,6 +30,12 @@ pub async fn public_url() -> Result<Json<Option<String>>> {
 	Ok(Json(std::env::var("PUBLIC_URL").ok()))
 }
 
+/// Get a ready-to-share link to the public server-versions page.
+///
+/// Returns a full URL to the public server-versions status page, with its
+/// access secret already embedded in the query string, so it can be shared
+/// and opened directly without further configuration. Returns `null` if the
+/// public API base URL or the server-versions secret is not configured.
 #[utoipa::path(
 	post,
 	path = "/server_versions_url",
@@ -43,6 +54,13 @@ pub async fn server_versions_url() -> Result<Json<Option<String>>> {
 	Ok(Json(url))
 }
 
+/// Check whether the caller is an admin.
+///
+/// Reports `true` if the caller is authenticated and their identity is on
+/// the admin allow-list, `false` otherwise — including when the caller is
+/// not authenticated at all. This endpoint intentionally requires no
+/// authentication of its own, since it exists so a client can check whether
+/// to show admin-only controls before doing anything else.
 // No `security` block: the handler intentionally accepts unauthenticated
 // callers and reports `false`. Marking it admin-gated (or even user-gated)
 // would make Swagger UI demand auth before letting you call it, defeating

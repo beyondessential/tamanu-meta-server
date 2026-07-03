@@ -24,19 +24,37 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(resolve))
 }
 
+/// A self-alert: a problem with canopy's own operation, such as an
+/// expiring credential or a failed notification delivery — distinct from
+/// issues raised against monitored servers.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct SelfAlertView {
+	/// Unique identifier of this self-alert.
 	pub id: Uuid,
-	/// The stable condition key, e.g. `mcp-token-expiry`.
+	/// The stable identifier of the underlying condition, e.g.
+	/// `mcp-token-expiry`. Stable across repeated raises of the same
+	/// condition.
 	pub r#ref: String,
+	/// How severe the condition is, from `critical` (most severe) down to
+	/// `debug` (least).
 	pub severity: Severity,
 	/// Single-line headline.
 	pub title: Option<String>,
+	/// Full detail message describing the condition.
 	pub message: String,
+	/// Whether the underlying condition is still ongoing. Becomes `false`
+	/// once the condition has cleared on its own, independently of whether
+	/// an operator has resolved the alert.
 	pub active: bool,
+	/// When this condition was first raised.
 	pub first_seen: Timestamp,
+	/// When this condition was most recently reaffirmed as still ongoing.
 	pub last_seen: Timestamp,
+	/// When an operator marked this alert resolved, or `null` if it has not
+	/// been resolved.
 	pub resolved_at: Option<Timestamp>,
+	/// The login of the operator who resolved this alert, or `null` if it
+	/// has not been resolved.
 	pub resolved_by: Option<String>,
 }
 
@@ -57,6 +75,12 @@ impl From<Issue> for SelfAlertView {
 	}
 }
 
+/// List currently-alerting self-alerts.
+///
+/// Returns self-alerts whose underlying condition is still ongoing and
+/// that have not been marked resolved by an operator. This is the feed
+/// meant for a live alert banner; see the full listing endpoint for
+/// complete history including recovered and resolved alerts.
 #[utoipa::path(
 	post,
 	path = "/active",
@@ -82,6 +106,12 @@ pub async fn active(
 	Ok(Json(alerts))
 }
 
+/// List self-alerts.
+///
+/// Returns self-alerts ordered by most recent activity first, including
+/// ones that have since recovered on their own or been resolved by an
+/// operator. Use the "active" endpoint instead for just the ones currently
+/// alerting.
 #[utoipa::path(
 	post,
 	path = "/list",
@@ -106,11 +136,19 @@ pub async fn list(
 	Ok(Json(alerts))
 }
 
+/// Request body for resolving a self-alert.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct SelfAlertsResolveArgs {
+	/// The id of the self-alert to resolve.
 	pub id: Uuid,
 }
 
+/// Mark a self-alert as resolved.
+///
+/// Records that an operator has resolved the given self-alert and cancels
+/// its notification if one is still pending delivery (e.g. inside the
+/// initial grace period before a low-severity alert is sent). Returns 404
+/// if no self-alert with that id exists.
 #[utoipa::path(
 	post,
 	path = "/resolve",

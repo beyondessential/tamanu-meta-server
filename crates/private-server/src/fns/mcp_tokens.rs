@@ -25,16 +25,25 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(revoke))
 }
 
-/// A token row for the operator UI: everything but the secret (only a hash of
-/// which exists server-side anyway).
+/// Metadata about an MCP access token. Never includes the secret value
+/// itself — that's only ever returned once, at minting time.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct McpTokenView {
+	/// Unique identifier of the token.
 	pub id: Uuid,
+	/// Operator-chosen label for what the token is used for.
 	pub name: String,
+	/// The login of the admin who minted this token.
 	pub created_by: String,
+	/// When the token was minted.
 	pub created_at: Timestamp,
+	/// When the token stops being accepted. Tokens are valid for one year
+	/// from minting; there is no way to request a different lifetime.
 	pub expires_at: Timestamp,
+	/// When the token was revoked, or `null` if it has not been revoked.
 	pub revoked_at: Option<Timestamp>,
+	/// When the token was last used to authenticate, or `null` if it has
+	/// never been used. May lag the true last use by up to a minute.
 	pub last_used_at: Option<Timestamp>,
 }
 
@@ -52,6 +61,11 @@ impl From<McpToken> for McpTokenView {
 	}
 }
 
+/// List MCP access tokens.
+///
+/// Returns every access token that has ever been minted, newest first,
+/// including ones that have since been revoked — this is the full history
+/// view. Token secrets are never included, only metadata about each token.
 #[utoipa::path(
 	post,
 	path = "/list",
@@ -73,20 +87,33 @@ pub async fn list(
 	Ok(Json(tokens.into_iter().map(Into::into).collect()))
 }
 
+/// Request body for minting a new MCP access token.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct MintArgs {
-	/// Operator-chosen label, e.g. which agent will hold this token.
+	/// Operator-chosen label, e.g. which agent will hold this token. Cannot
+	/// be empty or only whitespace.
 	pub name: String,
 }
 
-/// The one and only exposure of the token plaintext.
+/// The result of minting a new MCP access token: its metadata plus the
+/// one-time secret value. This is the only response that will ever include
+/// the secret.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct MintedToken {
+	/// Metadata about the newly minted token.
 	pub token: McpTokenView,
 	/// The bearer token itself. Shown once; never retrievable again.
 	pub secret: String,
 }
 
+/// Mint a new MCP access token.
+///
+/// Creates a new bearer token that can be used to authenticate against the
+/// public MCP endpoint, and returns its metadata together with the
+/// plaintext secret. The secret appears only in this response and cannot be
+/// retrieved again afterwards, so it must be copied out immediately. Tokens
+/// are valid for one year from minting. Returns 400 if the supplied name is
+/// empty or only whitespace.
 #[utoipa::path(
 	post,
 	path = "/mint",
@@ -120,11 +147,18 @@ pub async fn mint(
 	}))
 }
 
+/// Request body for revoking an MCP access token.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct RevokeArgs {
+	/// The id of the token to revoke.
 	pub id: Uuid,
 }
 
+/// Revoke an MCP access token.
+///
+/// Immediately invalidates the token with the given id so it can no longer
+/// authenticate. Revoking an already-revoked token succeeds without doing
+/// anything further. Returns 404 if no token with that id exists.
 #[utoipa::path(
 	post,
 	path = "/revoke",
