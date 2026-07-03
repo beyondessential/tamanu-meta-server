@@ -167,7 +167,7 @@ pub struct BackupConfigSummary {
 }
 
 #[derive(Deserialize, ToSchema)]
-pub struct GroupArgs {
+pub struct BackupsGroupArgs {
 	pub server_group_id: Uuid,
 }
 
@@ -380,7 +380,7 @@ pub struct SetCapabilityArgs {
 	operation_id = "backups_get",
 	tag = "backups",
 	security(("tailscale-user" = [])),
-	request_body = GroupArgs,
+	request_body = BackupsGroupArgs,
 	responses(
 		(status = 200, body = Option<BackupConfigView>),
 		(status = 404, body = ProblemDetailsSchema),
@@ -388,7 +388,7 @@ pub struct SetCapabilityArgs {
 )]
 pub async fn get(
 	State(state): State<AppState>,
-	Json(args): Json<GroupArgs>,
+	Json(args): Json<BackupsGroupArgs>,
 ) -> Result<Json<Option<BackupConfigView>>> {
 	let mut conn = state.db.get().await?;
 	// 404 if the group itself is missing.
@@ -965,12 +965,12 @@ pub struct GroupTypeScheduleView {
 	operation_id = "backups_group_schedules",
 	tag = "backups",
 	security(("tailscale-user" = [])),
-	request_body = GroupArgs,
+	request_body = BackupsGroupArgs,
 	responses((status = 200, body = Vec<GroupTypeScheduleView>)),
 )]
 pub async fn group_schedules(
 	State(state): State<AppState>,
-	Json(args): Json<GroupArgs>,
+	Json(args): Json<BackupsGroupArgs>,
 ) -> Result<Json<Vec<GroupTypeScheduleView>>> {
 	let mut conn = state.db.get().await?;
 	let types =
@@ -1141,7 +1141,7 @@ pub async fn set_type_default(
 	operation_id = "backups_create_repo",
 	tag = "backups",
 	security(("tailscale-admin" = [])),
-	request_body = GroupArgs,
+	request_body = BackupsGroupArgs,
 	responses(
 		(status = 200, body = BackupConfigView),
 		(status = 404, body = ProblemDetailsSchema),
@@ -1151,7 +1151,7 @@ pub async fn set_type_default(
 pub async fn create_repo(
 	State(state): State<AppState>,
 	_admin: TailscaleAdmin,
-	Json(args): Json<GroupArgs>,
+	Json(args): Json<BackupsGroupArgs>,
 ) -> Result<Json<BackupConfigView>> {
 	let mut conn = state.db.get().await?;
 	let config = require_config(&mut conn, args.server_group_id).await?;
@@ -1222,7 +1222,7 @@ pub async fn cancel_request(
 	operation_id = "backups_request_maintenance",
 	tag = "backups",
 	security(("tailscale-admin" = [])),
-	request_body = GroupArgs,
+	request_body = BackupsGroupArgs,
 	responses(
 		(status = 200, body = BackupConfigView),
 		(status = 404, body = ProblemDetailsSchema),
@@ -1232,7 +1232,7 @@ pub async fn cancel_request(
 pub async fn request_maintenance(
 	State(state): State<AppState>,
 	TailscaleAdmin(admin): TailscaleAdmin,
-	Json(args): Json<GroupArgs>,
+	Json(args): Json<BackupsGroupArgs>,
 ) -> Result<Json<BackupConfigView>> {
 	let mut conn = state.db.get().await?;
 	let config = require_config(&mut conn, args.server_group_id).await?;
@@ -1258,7 +1258,7 @@ pub async fn request_maintenance(
 	operation_id = "backups_cancel_maintenance",
 	tag = "backups",
 	security(("tailscale-admin" = [])),
-	request_body = GroupArgs,
+	request_body = BackupsGroupArgs,
 	responses(
 		(status = 200, body = BackupConfigView),
 		(status = 404, body = ProblemDetailsSchema),
@@ -1267,7 +1267,7 @@ pub async fn request_maintenance(
 pub async fn cancel_maintenance(
 	State(state): State<AppState>,
 	_admin: TailscaleAdmin,
-	Json(args): Json<GroupArgs>,
+	Json(args): Json<BackupsGroupArgs>,
 ) -> Result<Json<BackupConfigView>> {
 	let mut conn = state.db.get().await?;
 	let config = require_config(&mut conn, args.server_group_id).await?;
@@ -1284,7 +1284,7 @@ pub async fn cancel_maintenance(
 	operation_id = "backups_stats",
 	tag = "backups",
 	security(("tailscale-user" = [])),
-	request_body = GroupArgs,
+	request_body = BackupsGroupArgs,
 	responses(
 		(status = 200, body = BackupStatsView),
 		(status = 404, body = ProblemDetailsSchema),
@@ -1292,7 +1292,7 @@ pub async fn cancel_maintenance(
 )]
 pub async fn stats(
 	State(state): State<AppState>,
-	Json(args): Json<GroupArgs>,
+	Json(args): Json<BackupsGroupArgs>,
 ) -> Result<Json<BackupStatsView>> {
 	let mut conn = state.db.get().await?;
 	let group = ServerGroup::get_by_id(&mut conn, args.server_group_id).await?;
@@ -1469,13 +1469,13 @@ pub async fn set_capability(
 	operation_id = "backups_delete",
 	tag = "backups",
 	security(("tailscale-admin" = [])),
-	request_body = GroupArgs,
+	request_body = BackupsGroupArgs,
 	responses((status = 200), (status = 404, body = ProblemDetailsSchema)),
 )]
 pub async fn delete(
 	State(state): State<AppState>,
 	_admin: TailscaleAdmin,
-	Json(args): Json<GroupArgs>,
+	Json(args): Json<BackupsGroupArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
 	let config = require_config(&mut conn, args.server_group_id).await?;

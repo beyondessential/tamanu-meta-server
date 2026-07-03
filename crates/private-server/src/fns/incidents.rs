@@ -170,7 +170,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 }
 
 #[derive(Deserialize, ToSchema)]
-pub struct ListForServerArgs {
+pub struct IncidentListForServerArgs {
 	pub server_id: Uuid,
 	#[serde(default)]
 	pub include_closed: Option<bool>,
@@ -184,7 +184,7 @@ pub struct ListForServerArgs {
 	operation_id = "incident_list_for_server",
 	tag = "incidents",
 	security(("tailscale-user" = [])),
-	request_body = ListForServerArgs,
+	request_body = IncidentListForServerArgs,
 	responses(
 		(status = 200, body = Vec<IncidentData>),
 	),
@@ -192,7 +192,7 @@ pub struct ListForServerArgs {
 pub async fn list_for_server(
 	State(state): State<AppState>,
 	_user: TailscaleUser,
-	Json(args): Json<ListForServerArgs>,
+	Json(args): Json<IncidentListForServerArgs>,
 ) -> Result<Json<Vec<IncidentData>>> {
 	let mut conn = state.db.get().await?;
 	let incidents = Incident::list_for_server(
@@ -383,7 +383,7 @@ impl From<IncidentNote> for IncidentNoteData {
 }
 
 #[derive(Deserialize, ToSchema)]
-pub struct AddNoteArgs {
+pub struct IncidentAddNoteArgs {
 	pub incident_id: Uuid,
 	pub body: String,
 }
@@ -394,7 +394,7 @@ pub struct AddNoteArgs {
 	operation_id = "incident_add_note",
 	tag = "incidents",
 	security(("tailscale-admin" = [])),
-	request_body = AddNoteArgs,
+	request_body = IncidentAddNoteArgs,
 	responses(
 		(status = 200, body = IncidentNoteData),
 		(status = 400, body = ProblemDetailsSchema),
@@ -403,7 +403,7 @@ pub struct AddNoteArgs {
 pub async fn add_note(
 	State(state): State<AppState>,
 	admin: TailscaleAdmin,
-	Json(args): Json<AddNoteArgs>,
+	Json(args): Json<IncidentAddNoteArgs>,
 ) -> Result<Json<IncidentNoteData>> {
 	if args.body.trim().is_empty() {
 		return Err(AppError::custom("note body is required"));
@@ -414,7 +414,7 @@ pub async fn add_note(
 }
 
 #[derive(Deserialize, ToSchema)]
-pub struct ListNotesArgs {
+pub struct IncidentListNotesArgs {
 	pub incident_id: Uuid,
 	#[serde(default)]
 	pub limit: Option<i64>,
@@ -426,7 +426,7 @@ pub struct ListNotesArgs {
 	operation_id = "incident_list_notes",
 	tag = "incidents",
 	security(("tailscale-user" = [])),
-	request_body = ListNotesArgs,
+	request_body = IncidentListNotesArgs,
 	responses(
 		(status = 200, body = Vec<IncidentNoteData>),
 	),
@@ -434,7 +434,7 @@ pub struct ListNotesArgs {
 pub async fn list_notes(
 	State(state): State<AppState>,
 	_user: TailscaleUser,
-	Json(args): Json<ListNotesArgs>,
+	Json(args): Json<IncidentListNotesArgs>,
 ) -> Result<Json<Vec<IncidentNoteData>>> {
 	let mut conn = state.db.get().await?;
 	let notes = IncidentNote::list_for_incident(
@@ -449,7 +449,7 @@ pub async fn list_notes(
 }
 
 #[derive(Deserialize, ToSchema)]
-pub struct DeleteNoteArgs {
+pub struct IncidentDeleteNoteArgs {
 	pub note_id: Uuid,
 }
 
@@ -459,7 +459,7 @@ pub struct DeleteNoteArgs {
 	operation_id = "incident_delete_note",
 	tag = "incidents",
 	security(("tailscale-admin" = [])),
-	request_body = DeleteNoteArgs,
+	request_body = IncidentDeleteNoteArgs,
 	responses(
 		(status = 200),
 	),
@@ -467,7 +467,7 @@ pub struct DeleteNoteArgs {
 pub async fn delete_note(
 	State(state): State<AppState>,
 	_admin: TailscaleAdmin,
-	Json(args): Json<DeleteNoteArgs>,
+	Json(args): Json<IncidentDeleteNoteArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
 	IncidentNote::delete(&mut conn, args.note_id).await?;

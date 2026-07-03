@@ -297,7 +297,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 }
 
 #[derive(Deserialize, ToSchema)]
-pub struct ListArgs {
+pub struct ServerListArgs {
 	pub kind: Option<ServerKind>,
 	pub offset: u64,
 	pub limit: Option<u64>,
@@ -307,14 +307,14 @@ pub struct ListArgs {
 	post,
 	path = "/list_some",
 	tag = "servers",
-	request_body = ListArgs,
+	request_body = ServerListArgs,
 	responses(
 		(status = 200, body = Page<ServerInfo>),
 	),
 )]
 pub async fn list_some(
 	State(state): State<AppState>,
-	Json(args): Json<ListArgs>,
+	Json(args): Json<ServerListArgs>,
 ) -> Result<Json<Page<ServerInfo>>> {
 	let mut conn = state.db.get().await?;
 	let total = if let Some(kind) = args.kind {
@@ -603,7 +603,7 @@ pub async fn get_detail(
 }
 
 #[derive(Deserialize, ToSchema)]
-pub struct UpdateArgs {
+pub struct ServerUpdateArgs {
 	pub server_id: Uuid,
 	pub data: ServerDataUpdate,
 }
@@ -614,7 +614,7 @@ pub struct UpdateArgs {
 	operation_id = "server_update",
 	tag = "servers",
 	security(("tailscale-admin" = [])),
-	request_body = UpdateArgs,
+	request_body = ServerUpdateArgs,
 	responses(
 		(status = 200),
 		(status = 400, body = ProblemDetailsSchema),
@@ -623,7 +623,7 @@ pub struct UpdateArgs {
 pub async fn update(
 	State(state): State<AppState>,
 	_admin: TailscaleAdmin,
-	Json(args): Json<UpdateArgs>,
+	Json(args): Json<ServerUpdateArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
 

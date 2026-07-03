@@ -107,7 +107,7 @@ pub async fn list(
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
-pub struct ResolveArgs {
+pub struct SelfAlertsResolveArgs {
 	pub id: Uuid,
 }
 
@@ -117,7 +117,7 @@ pub struct ResolveArgs {
 	operation_id = "self_alerts_resolve",
 	tag = "self_alerts",
 	security(("tailscale-admin" = [])),
-	request_body = ResolveArgs,
+	request_body = SelfAlertsResolveArgs,
 	responses(
 		(status = 200, description = "Alert marked operator-resolved; a pending notification is cancelled."),
 		(status = 401, body = ProblemDetailsSchema),
@@ -128,7 +128,7 @@ pub struct ResolveArgs {
 pub async fn resolve(
 	State(state): State<AppState>,
 	TailscaleAdmin(admin): TailscaleAdmin,
-	Json(args): Json<ResolveArgs>,
+	Json(args): Json<SelfAlertsResolveArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
 	Issue::resolve(&mut conn, args.id, &admin.login, ResolvedReason::Fixed).await?;

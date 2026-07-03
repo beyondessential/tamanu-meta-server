@@ -83,12 +83,12 @@ pub struct RestoreConsumerView {
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
-pub struct GroupArgs {
+pub struct RestoreReplicasGroupArgs {
 	pub server_group_id: Uuid,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
-pub struct CreateArgs {
+pub struct RestoreReplicasCreateArgs {
 	pub consumer_device_id: Uuid,
 	pub group_id: Uuid,
 	/// `None` = all current servers in the group.
@@ -107,7 +107,7 @@ pub struct CreateArgs {
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
-pub struct UpdateArgs {
+pub struct RestoreReplicasUpdateArgs {
 	pub id: Uuid,
 	pub name: String,
 	pub overdue_after_seconds: Option<i64>,
@@ -207,12 +207,12 @@ async fn to_views(
 	operation_id = "restore_replicas_for_group",
 	tag = "restore_replicas",
 	security(("tailscale-user" = [])),
-	request_body = GroupArgs,
+	request_body = RestoreReplicasGroupArgs,
 	responses((status = 200, body = Vec<RestoreReplicaView>)),
 )]
 pub async fn for_group(
 	State(state): State<AppState>,
-	Json(args): Json<GroupArgs>,
+	Json(args): Json<RestoreReplicasGroupArgs>,
 ) -> Result<Json<Vec<RestoreReplicaView>>> {
 	let mut conn = state.db.get().await?;
 	let replicas = RestoreReplica::list_for_group(&mut conn, args.server_group_id).await?;
@@ -248,12 +248,12 @@ pub async fn consumers(State(state): State<AppState>) -> Result<Json<Vec<Restore
 	operation_id = "restore_replicas_checks",
 	tag = "restore_replicas",
 	security(("tailscale-user" = [])),
-	request_body = GroupArgs,
+	request_body = RestoreReplicasGroupArgs,
 	responses((status = 200, body = Vec<BackupRestoreCheck>)),
 )]
 pub async fn checks(
 	State(state): State<AppState>,
-	Json(args): Json<GroupArgs>,
+	Json(args): Json<RestoreReplicasGroupArgs>,
 ) -> Result<Json<Vec<BackupRestoreCheck>>> {
 	let mut conn = state.db.get().await?;
 	let rows =
@@ -267,7 +267,7 @@ pub async fn checks(
 	operation_id = "restore_replicas_create",
 	tag = "restore_replicas",
 	security(("tailscale-admin" = [])),
-	request_body = CreateArgs,
+	request_body = RestoreReplicasCreateArgs,
 	responses(
 		(status = 200, body = RestoreReplicaView),
 		(status = 409, description = "A matching declaration already exists.", body = ProblemDetailsSchema),
@@ -276,7 +276,7 @@ pub async fn checks(
 pub async fn create(
 	State(state): State<AppState>,
 	TailscaleAdmin(admin): TailscaleAdmin,
-	Json(args): Json<CreateArgs>,
+	Json(args): Json<RestoreReplicasCreateArgs>,
 ) -> Result<Json<RestoreReplicaView>> {
 	let mut conn = state.db.get().await?;
 	validate_params_for_intent(
@@ -311,7 +311,7 @@ pub async fn create(
 	operation_id = "restore_replicas_update",
 	tag = "restore_replicas",
 	security(("tailscale-admin" = [])),
-	request_body = UpdateArgs,
+	request_body = RestoreReplicasUpdateArgs,
 	responses(
 		(status = 200, body = RestoreReplicaView),
 		(status = 404, body = ProblemDetailsSchema),
@@ -320,7 +320,7 @@ pub async fn create(
 pub async fn update(
 	State(state): State<AppState>,
 	_admin: TailscaleAdmin,
-	Json(args): Json<UpdateArgs>,
+	Json(args): Json<RestoreReplicasUpdateArgs>,
 ) -> Result<Json<RestoreReplicaView>> {
 	let mut conn = state.db.get().await?;
 	// Validate parameter values against the intent's schema. Scope fields are

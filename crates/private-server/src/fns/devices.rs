@@ -677,7 +677,7 @@ pub async fn reactivate_key(
 }
 
 #[derive(Deserialize, ToSchema)]
-pub struct SearchArgs {
+pub struct DeviceSearchArgs {
 	pub query: String,
 }
 
@@ -687,7 +687,7 @@ pub struct SearchArgs {
 	operation_id = "device_search",
 	tag = "devices",
 	security(("tailscale-admin" = [])),
-	request_body = SearchArgs,
+	request_body = DeviceSearchArgs,
 	responses(
 		(status = 200, body = Vec<DeviceInfo>),
 	),
@@ -695,7 +695,7 @@ pub struct SearchArgs {
 pub async fn search(
 	State(state): State<AppState>,
 	_admin: TailscaleAdmin,
-	Json(args): Json<SearchArgs>,
+	Json(args): Json<DeviceSearchArgs>,
 ) -> Result<Json<Vec<DeviceInfo>>> {
 	if args.query.trim().is_empty() {
 		return Ok(Json(vec![]));

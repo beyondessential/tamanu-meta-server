@@ -57,7 +57,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Deserialize, ToSchema)]
-pub struct CapabilitiesArgs {
+pub struct RestoreCapabilitiesArgs {
 	/// The intents this consumer can satisfy, each with its description, the
 	/// Canopy semantics it opts into, and its parameter schema. Replaces the
 	/// consumer's advertised set wholesale.
@@ -70,13 +70,13 @@ pub struct CapabilitiesArgs {
 	operation_id = "register_restore_capabilities",
 	tag = "restore",
 	security(("backup-restore-device" = [])),
-	request_body = CapabilitiesArgs,
+	request_body = RestoreCapabilitiesArgs,
 	responses((status = 204, description = "Capability set registered.")),
 )]
 async fn capabilities(
 	State(db): State<Db>,
 	device: BackupRestoreDevice,
-	Json(args): Json<CapabilitiesArgs>,
+	Json(args): Json<RestoreCapabilitiesArgs>,
 ) -> Result<StatusCode> {
 	let mut conn = db.get().await?;
 	let consumer_device_id = device.0.0.id;
@@ -258,7 +258,7 @@ async fn worklist(
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Deserialize, ToSchema)]
-pub struct CredentialsArgs {
+pub struct RestoreCredentialsArgs {
 	/// The group whose repo to read.
 	pub group: Uuid,
 	/// The backup type to restore.
@@ -282,7 +282,7 @@ pub struct RestoreCredentials {
 	operation_id = "mint_restore_credentials",
 	tag = "restore",
 	security(("backup-restore-device" = [])),
-	request_body = CredentialsArgs,
+	request_body = RestoreCredentialsArgs,
 	responses(
 		(status = 200, body = RestoreCredentials),
 		(status = 403, description = "No enabled declaration authorizes this (group, type).", body = ProblemDetailsSchema),
@@ -295,7 +295,7 @@ async fn credentials(
 	State(sts): State<Option<aws_sdk_sts::Client>>,
 	State(kube): State<Option<BackupSecrets>>,
 	device: BackupRestoreDevice,
-	Json(args): Json<CredentialsArgs>,
+	Json(args): Json<RestoreCredentialsArgs>,
 ) -> Result<Json<RestoreCredentials>> {
 	let mut conn = db.get().await?;
 	let consumer_device_id = device.0.0.id;

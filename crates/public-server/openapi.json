@@ -116,7 +116,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CapabilitiesArgs"
+                "$ref": "#/components/schemas/BackupCapabilitiesArgs"
               }
             }
           },
@@ -164,7 +164,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CredentialsArgs"
+                "$ref": "#/components/schemas/BackupCredentialsArgs"
               }
             }
           },
@@ -443,7 +443,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CapabilitiesArgs"
+                "$ref": "#/components/schemas/RestoreCapabilitiesArgs"
               }
             }
           },
@@ -471,7 +471,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CredentialsArgs"
+                "$ref": "#/components/schemas/RestoreCredentialsArgs"
               }
             }
           },
@@ -1159,6 +1159,37 @@
           "type": "string"
         }
       },
+      "BackupCapabilitiesArgs": {
+        "type": "object",
+        "required": [
+          "types"
+        ],
+        "properties": {
+          "types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The backup types bestool can run on this server."
+          }
+        }
+      },
+      "BackupCredentialsArgs": {
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "purpose": {
+            "$ref": "#/components/schemas/BackupPurpose",
+            "description": "`backup` (default) grants write-without-delete; `restore` is downscoped\nread-only via a session policy."
+          },
+          "type": {
+            "type": "string",
+            "description": "The backup type these creds are for. Must be an enabled capability or\nhave a pending request of this `purpose` (an on-demand backup/restore)."
+          }
+        }
+      },
       "BackupPurpose": {
         "type": "string",
         "description": "Why a credential was issued / a run executed. A real capability gate\non the issued S3 creds, not just audit metadata: `Backup` grants\nwrite-without-delete, `Restore` grants read-only.",
@@ -1235,21 +1266,6 @@
           "nonce": {
             "type": "string",
             "description": "Base64 (standard) of the 32-byte challenge nonce."
-          }
-        }
-      },
-      "CapabilitiesArgs": {
-        "type": "object",
-        "required": [
-          "types"
-        ],
-        "properties": {
-          "types": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "The backup types bestool can run on this server."
           }
         }
       },
@@ -1339,22 +1355,6 @@
             "format": "int32",
             "description": "Always the literal `1`.",
             "minimum": 0
-          }
-        }
-      },
-      "CredentialsArgs": {
-        "type": "object",
-        "required": [
-          "type"
-        ],
-        "properties": {
-          "purpose": {
-            "$ref": "#/components/schemas/BackupPurpose",
-            "description": "`backup` (default) grants write-without-delete; `restore` is downscoped\nread-only via a session policy."
-          },
-          "type": {
-            "type": "string",
-            "description": "The backup type these creds are for. Must be an enabled capability or\nhave a pending request of this `purpose` (an on-demand backup/restore)."
           }
         }
       },
@@ -1729,6 +1729,21 @@
           }
         }
       },
+      "RestoreCapabilitiesArgs": {
+        "type": "object",
+        "required": [
+          "intents"
+        ],
+        "properties": {
+          "intents": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IntentDescriptor"
+            },
+            "description": "The intents this consumer can satisfy, each with its description, the\nCanopy semantics it opts into, and its parameter schema. Replaces the\nconsumer's advertised set wholesale."
+          }
+        }
+      },
       "RestoreCredentials": {
         "type": "object",
         "description": "Read-only credentials plus the repo password for one `(group, type)`. The\nAWS creds are the `credential_process` shape the consumer's proxy refreshes;\nthe password opens the kopia repo.",
@@ -1743,6 +1758,24 @@
           "repo_password": {
             "type": "string",
             "description": "The kopia repo passphrase, read from the group's k8s Secret."
+          }
+        }
+      },
+      "RestoreCredentialsArgs": {
+        "type": "object",
+        "required": [
+          "group",
+          "type"
+        ],
+        "properties": {
+          "group": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The group whose repo to read."
+          },
+          "type": {
+            "type": "string",
+            "description": "The backup type to restore."
           }
         }
       },

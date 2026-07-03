@@ -168,7 +168,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/GroupArgs"
+                "$ref": "#/components/schemas/BackupsGroupArgs"
               }
             }
           },
@@ -394,7 +394,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/GroupArgs"
+                "$ref": "#/components/schemas/BackupsGroupArgs"
               }
             }
           },
@@ -516,7 +516,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/GroupArgs"
+                "$ref": "#/components/schemas/BackupsGroupArgs"
               }
             }
           },
@@ -555,7 +555,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/GroupArgs"
+                "$ref": "#/components/schemas/BackupsGroupArgs"
               }
             }
           },
@@ -608,7 +608,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/GroupArgs"
+                "$ref": "#/components/schemas/BackupsGroupArgs"
               }
             }
           },
@@ -854,7 +854,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/GroupArgs"
+                "$ref": "#/components/schemas/BackupsGroupArgs"
               }
             }
           },
@@ -1083,7 +1083,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/GroupArgs"
+                "$ref": "#/components/schemas/BackupsGroupArgs"
               }
             }
           },
@@ -1411,7 +1411,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ListArgs"
+                "$ref": "#/components/schemas/BestoolListArgs"
               }
             }
           },
@@ -2213,7 +2213,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SearchArgs"
+                "$ref": "#/components/schemas/DeviceSearchArgs"
               }
             }
           },
@@ -2469,7 +2469,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/UpdateArgs"
+                "$ref": "#/components/schemas/HealthcheckUpdateArgs"
               }
             }
           },
@@ -2589,7 +2589,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AddNoteArgs"
+                "$ref": "#/components/schemas/IncidentAddNoteArgs"
               }
             }
           },
@@ -2634,7 +2634,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/DeleteNoteArgs"
+                "$ref": "#/components/schemas/IncidentDeleteNoteArgs"
               }
             }
           },
@@ -2783,7 +2783,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ListForServerArgs"
+                "$ref": "#/components/schemas/IncidentListForServerArgs"
               }
             }
           },
@@ -2821,7 +2821,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ListNotesArgs"
+                "$ref": "#/components/schemas/IncidentListNotesArgs"
               }
             }
           },
@@ -2929,7 +2929,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AddNoteArgs"
+                "$ref": "#/components/schemas/IssueAddNoteArgs"
               }
             }
           },
@@ -2974,7 +2974,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/DeleteNoteArgs"
+                "$ref": "#/components/schemas/IssueDeleteNoteArgs"
               }
             }
           },
@@ -3003,7 +3003,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ListArgs"
+                "$ref": "#/components/schemas/IssueListArgs"
               }
             }
           },
@@ -3114,7 +3114,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ListForServerArgs"
+                "$ref": "#/components/schemas/IssueListForServerArgs"
               }
             }
           },
@@ -3152,7 +3152,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ListNotesArgs"
+                "$ref": "#/components/schemas/IssueListNotesArgs"
               }
             }
           },
@@ -3190,7 +3190,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ResolveArgs"
+                "$ref": "#/components/schemas/IssueResolveArgs"
               }
             }
           },
@@ -3546,7 +3546,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/GroupArgs"
+                "$ref": "#/components/schemas/RestoreReplicasGroupArgs"
               }
             }
           },
@@ -3612,7 +3612,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CreateArgs"
+                "$ref": "#/components/schemas/RestoreReplicasCreateArgs"
               }
             }
           },
@@ -3695,7 +3695,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/GroupArgs"
+                "$ref": "#/components/schemas/RestoreReplicasGroupArgs"
               }
             }
           },
@@ -3733,7 +3733,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/UpdateArgs"
+                "$ref": "#/components/schemas/RestoreReplicasUpdateArgs"
               }
             }
           },
@@ -3854,7 +3854,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ResolveArgs"
+                "$ref": "#/components/schemas/SelfAlertsResolveArgs"
               }
             }
           },
@@ -3912,7 +3912,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CreateArgs"
+                "$ref": "#/components/schemas/ServerGroupsCreateArgs"
               }
             }
           },
@@ -4151,7 +4151,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SearchArgs"
+                "$ref": "#/components/schemas/ServerGroupsSearchArgs"
               }
             }
           },
@@ -4226,7 +4226,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/UpdateArgs"
+                "$ref": "#/components/schemas/ServerGroupsUpdateArgs"
               }
             }
           },
@@ -4647,7 +4647,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ListArgs"
+                "$ref": "#/components/schemas/ServerListArgs"
               }
             }
           },
@@ -4835,7 +4835,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/UpdateArgs"
+                "$ref": "#/components/schemas/ServerUpdateArgs"
               }
             }
           },
@@ -5884,22 +5884,6 @@
           }
         }
       },
-      "AddNoteArgs": {
-        "type": "object",
-        "required": [
-          "incident_id",
-          "body"
-        ],
-        "properties": {
-          "body": {
-            "type": "string"
-          },
-          "incident_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        }
-      },
       "ArtifactData": {
         "type": "object",
         "required": [
@@ -6508,6 +6492,39 @@
           }
         }
       },
+      "BackupsGroupArgs": {
+        "type": "object",
+        "required": [
+          "server_group_id"
+        ],
+        "properties": {
+          "server_group_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "BestoolListArgs": {
+        "type": "object",
+        "required": [
+          "offset"
+        ],
+        "properties": {
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "offset": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
       "BestoolSnippetDetail": {
         "type": "object",
         "required": [
@@ -6619,55 +6636,6 @@
             ],
             "format": "int64",
             "minimum": 0
-          }
-        }
-      },
-      "CreateArgs": {
-        "type": "object",
-        "required": [
-          "consumer_device_id",
-          "group_id",
-          "type",
-          "intent",
-          "name"
-        ],
-        "properties": {
-          "consumer_device_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "group_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "intent": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "overdue_after_seconds": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "Overdue bound in whole seconds; `None` = no bound."
-          },
-          "params": {
-            "type": "object",
-            "description": "Operator-supplied parameter values, validated against the intent's schema."
-          },
-          "server_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid",
-            "description": "`None` = all current servers in the group."
-          },
-          "type": {
-            "type": "string"
           }
         }
       },
@@ -6870,18 +6838,6 @@
           }
         }
       },
-      "DeleteNoteArgs": {
-        "type": "object",
-        "required": [
-          "note_id"
-        ],
-        "properties": {
-          "note_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        }
-      },
       "DeviceConnectionData": {
         "type": "object",
         "required": [
@@ -7055,6 +7011,17 @@
           "server",
           "backup-restore"
         ]
+      },
+      "DeviceSearchArgs": {
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "properties": {
+          "query": {
+            "type": "string"
+          }
+        }
       },
       "EnrollmentStatus": {
         "type": "object",
@@ -7259,18 +7226,6 @@
         ],
         "properties": {
           "incident_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        }
-      },
-      "GroupArgs": {
-        "type": "object",
-        "required": [
-          "server_group_id"
-        ],
-        "properties": {
-          "server_group_id": {
             "type": "string",
             "format": "uuid"
           }
@@ -7545,6 +7500,28 @@
           }
         }
       },
+      "HealthcheckUpdateArgs": {
+        "type": "object",
+        "required": [
+          "check_name",
+          "severity"
+        ],
+        "properties": {
+          "check_name": {
+            "type": "string"
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional operator notes. `None` leaves the existing notes alone…\nwell, actually it overwrites with NULL — pass the current value\nto preserve. The UI sends the full current state."
+          },
+          "severity": {
+            "$ref": "#/components/schemas/Severity"
+          }
+        }
+      },
       "HistoryArgs": {
         "type": "object",
         "required": [
@@ -7590,6 +7567,22 @@
         ],
         "properties": {
           "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "IncidentAddNoteArgs": {
+        "type": "object",
+        "required": [
+          "incident_id",
+          "body"
+        ],
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "incident_id": {
             "type": "string",
             "format": "uuid"
           }
@@ -7694,6 +7687,18 @@
           }
         }
       },
+      "IncidentDeleteNoteArgs": {
+        "type": "object",
+        "required": [
+          "note_id"
+        ],
+        "properties": {
+          "note_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
       "IncidentIdArgs": {
         "type": "object",
         "required": [
@@ -7726,6 +7731,50 @@
               "null"
             ],
             "format": "date-time"
+          }
+        }
+      },
+      "IncidentListForServerArgs": {
+        "type": "object",
+        "required": [
+          "server_id"
+        ],
+        "properties": {
+          "include_closed": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "IncidentListNotesArgs": {
+        "type": "object",
+        "required": [
+          "incident_id"
+        ],
+        "properties": {
+          "incident_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
           }
         }
       },
@@ -7801,6 +7850,22 @@
             "items": {
               "type": "string"
             }
+          }
+        }
+      },
+      "IssueAddNoteArgs": {
+        "type": "object",
+        "required": [
+          "issue_id",
+          "body"
+        ],
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "issue_id": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
@@ -7950,6 +8015,18 @@
           }
         }
       },
+      "IssueDeleteNoteArgs": {
+        "type": "object",
+        "required": [
+          "note_id"
+        ],
+        "properties": {
+          "note_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
       "IssueIdArgs": {
         "type": "object",
         "required": [
@@ -7987,6 +8064,84 @@
           }
         }
       },
+      "IssueListArgs": {
+        "type": "object",
+        "properties": {
+          "activeOnly": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "serverGroupId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "severities": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/Severity"
+            }
+          }
+        }
+      },
+      "IssueListForServerArgs": {
+        "type": "object",
+        "required": [
+          "server_id"
+        ],
+        "properties": {
+          "active_only": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "IssueListNotesArgs": {
+        "type": "object",
+        "required": [
+          "issue_id"
+        ],
+        "properties": {
+          "issue_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          }
+        }
+      },
       "IssueNoteData": {
         "type": "object",
         "required": [
@@ -8014,6 +8169,22 @@
           "issue_id": {
             "type": "string",
             "format": "uuid"
+          }
+        }
+      },
+      "IssueResolveArgs": {
+        "type": "object",
+        "required": [
+          "issue_id",
+          "reason"
+        ],
+        "properties": {
+          "issue_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/ResolvedReason"
           }
         }
       },
@@ -8122,27 +8293,6 @@
           }
         }
       },
-      "ListArgs": {
-        "type": "object",
-        "required": [
-          "offset"
-        ],
-        "properties": {
-          "limit": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "minimum": 0
-          },
-          "offset": {
-            "type": "integer",
-            "format": "int64",
-            "minimum": 0
-          }
-        }
-      },
       "ListEventsArgs": {
         "type": "object",
         "required": [
@@ -8216,50 +8366,6 @@
           "server_group_id": {
             "type": "string",
             "format": "uuid"
-          }
-        }
-      },
-      "ListForServerArgs": {
-        "type": "object",
-        "required": [
-          "server_id"
-        ],
-        "properties": {
-          "include_closed": {
-            "type": [
-              "boolean",
-              "null"
-            ]
-          },
-          "limit": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64"
-          },
-          "server_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        }
-      },
-      "ListNotesArgs": {
-        "type": "object",
-        "required": [
-          "incident_id"
-        ],
-        "properties": {
-          "incident_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "limit": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64"
           }
         }
       },
@@ -9243,22 +9349,6 @@
           }
         }
       },
-      "ResolveArgs": {
-        "type": "object",
-        "required": [
-          "issue_id",
-          "reason"
-        ],
-        "properties": {
-          "issue_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "reason": {
-            "$ref": "#/components/schemas/ResolvedReason"
-          }
-        }
-      },
       "ResolveIncidentArgs": {
         "type": "object",
         "required": [
@@ -9441,6 +9531,97 @@
           }
         }
       },
+      "RestoreReplicasCreateArgs": {
+        "type": "object",
+        "required": [
+          "consumer_device_id",
+          "group_id",
+          "type",
+          "intent",
+          "name"
+        ],
+        "properties": {
+          "consumer_device_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "group_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "intent": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "overdue_after_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Overdue bound in whole seconds; `None` = no bound."
+          },
+          "params": {
+            "type": "object",
+            "description": "Operator-supplied parameter values, validated against the intent's schema."
+          },
+          "server_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "`None` = all current servers in the group."
+          },
+          "type": {
+            "type": "string"
+          }
+        }
+      },
+      "RestoreReplicasGroupArgs": {
+        "type": "object",
+        "required": [
+          "server_group_id"
+        ],
+        "properties": {
+          "server_group_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "RestoreReplicasUpdateArgs": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "overdue_after_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "params": {
+            "type": "object"
+          }
+        }
+      },
       "RetentionPolicy": {
         "type": "object",
         "description": "kopia `keep-*` retention policy. Org-minimum floors\n(`keep_daily ≥ 7, keep_weekly ≥ 4, keep_monthly ≥ 6`) are enforced by\n[`RetentionPolicy::validate_floor`] on create/update — unless the config\nopts out via its `allow_below_floor` flag (dangerous).",
@@ -9566,17 +9747,6 @@
           }
         }
       },
-      "SearchArgs": {
-        "type": "object",
-        "required": [
-          "query"
-        ],
-        "properties": {
-          "query": {
-            "type": "string"
-          }
-        }
-      },
       "SelfAlertView": {
         "type": "object",
         "required": [
@@ -9633,6 +9803,18 @@
               "null"
             ],
             "description": "Single-line headline."
+          }
+        }
+      },
+      "SelfAlertsResolveArgs": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
@@ -10023,6 +10205,58 @@
           }
         }
       },
+      "ServerGroupsCreateArgs": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "slack_open_delay": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Optional initial value (seconds) for the group's Slack open\ncooldown. Omit to let the database default apply."
+          },
+          "tags": {
+            "$ref": "#/components/schemas/TagMap"
+          }
+        }
+      },
+      "ServerGroupsSearchArgs": {
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "properties": {
+          "query": {
+            "type": "string"
+          }
+        }
+      },
+      "ServerGroupsUpdateArgs": {
+        "type": "object",
+        "required": [
+          "server_group_id",
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PartialServerGroup"
+          },
+          "server_group_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
       "ServerIdArgs": {
         "type": "object",
         "required": [
@@ -10291,6 +10525,37 @@
           }
         }
       },
+      "ServerListArgs": {
+        "type": "object",
+        "required": [
+          "offset"
+        ],
+        "properties": {
+          "kind": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerKind"
+              }
+            ]
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "offset": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
       "ServerRank": {
         "type": "string",
         "enum": [
@@ -10341,6 +10606,22 @@
           },
           "source": {
             "type": "string"
+          }
+        }
+      },
+      "ServerUpdateArgs": {
+        "type": "object",
+        "required": [
+          "server_id",
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ServerDataUpdate"
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
@@ -10904,28 +11185,6 @@
           },
           "type": {
             "type": "string"
-          }
-        }
-      },
-      "UpdateArgs": {
-        "type": "object",
-        "required": [
-          "check_name",
-          "severity"
-        ],
-        "properties": {
-          "check_name": {
-            "type": "string"
-          },
-          "notes": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Optional operator notes. `None` leaves the existing notes alone…\nwell, actually it overwrites with NULL — pass the current value\nto preserve. The UI sends the full current state."
-          },
-          "severity": {
-            "$ref": "#/components/schemas/Severity"
           }
         }
       },
