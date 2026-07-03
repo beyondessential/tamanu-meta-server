@@ -10,11 +10,11 @@ use utoipa::{
 	info(
 		title = "canopy private-server",
 		version = "",
-		description = "Admin/operator API for the canopy fleet manager. Requests are gated behind Tailscale auth; admin-only endpoints additionally check the caller is on the admin list.",
+		description = "Admin/operator API for the canopy fleet manager. Requests are gated behind Tailscale auth; admin-only endpoints additionally check the caller is on the admin list.\n\nRequest bodies may be sent compressed, and this is recommended for large payloads: the server transparently decodes `Content-Encoding: gzip`, `br`, `deflate`, or `zstd`. The accepted encodings are also listed structurally in the `x-request-compression` extension.",
 		contact(name = "BES Developers", email = "contact@bes.au"),
 		license(name = "GPL-3.0-or-later"),
 	),
-	modifiers(&SecuritySchemes),
+	modifiers(&SecuritySchemes, &RequestCompression),
 	tags(
 		(name = "admins", description = "Admin email allow-list management."),
 		(name = "backups", description = "Group backup-repo onboarding, scheduling, and stats."),
@@ -32,6 +32,25 @@ use utoipa::{
 	),
 )]
 pub struct ApiDoc;
+
+/// Advertises the request-body Content-Encodings the server accepts as the
+/// top-level `x-request-compression` vendor extension. Sourced from
+/// [`commons_servers::request_compression_extension`] so it tracks the actual
+/// decompression layer.
+struct RequestCompression;
+
+impl Modify for RequestCompression {
+	fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+		openapi.extensions = Some(
+			utoipa::openapi::extensions::ExtensionsBuilder::new()
+				.add(
+					"x-request-compression",
+					commons_servers::request_compression_extension(),
+				)
+				.build(),
+		);
+	}
+}
 
 struct SecuritySchemes;
 
