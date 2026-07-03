@@ -22,53 +22,83 @@ use crate::state::AppState;
 
 const DEFAULT_LIMIT: i64 = 100;
 
+/// A problem raised against a server (or a group of servers), tracking its
+/// current severity, whether it's still ongoing, and how it's been handled
+/// by an operator.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct IssueData {
+	/// Unique identifier for this issue.
 	pub id: Uuid,
-	/// `None` for group-scoped issues (backup control-plane alerts that point
-	/// at a group, not a server — see the group-scoped-issues migration).
+	/// The server this issue was raised against. Absent for issues that
+	/// apply to a whole group of servers rather than a single one.
 	pub server_id: Option<Uuid>,
-	/// The issue's server name (may be null — fall back to `server_host`).
+	/// Display name of the affected server, when one is set. Falls back to
+	/// `server_host` when absent.
 	pub server_name: Option<String>,
+	/// Hostname or address of the affected server.
 	pub server_host: String,
-	/// Group id the issue's server belongs to; `None` when ungrouped. Used
-	/// by the UI to offer group-scope actions (silence, etc.) without a
-	/// second fetch.
+	/// Id of the group the affected server belongs to, if any.
 	pub server_group_id: Option<Uuid>,
-	/// Display name of the group the issue's server belongs to. `None` when
-	/// the server is ungrouped; the UI hides the group prefix in that case.
+	/// Display name of the group the affected server belongs to. Absent
+	/// when the server isn't in a group.
 	pub server_group_name: Option<String>,
+	/// Id of the device that reported the underlying event, if the issue
+	/// originated from a device push rather than a manual entry.
 	pub device_id: Option<Uuid>,
+	/// What raised the issue (for example, an automated health check or a
+	/// manually submitted event).
 	pub source: String,
+	/// Identifier used to match new incoming events to this issue; unique
+	/// within its source and server.
 	#[serde(rename = "ref")]
 	pub r#ref: String,
+	/// Current severity level of the issue.
 	pub severity: Severity,
+	/// Short headline describing the issue, if one was given.
 	pub description: Option<String>,
+	/// Latest human-readable message describing the issue's state.
 	pub message: String,
+	/// Whether the underlying condition is still ongoing. `false` once the
+	/// condition has stopped recurring.
 	pub active: bool,
+	/// When the issue was first raised.
 	pub first_seen: Timestamp,
+	/// When the most recent event for this issue was recorded.
 	pub last_seen: Timestamp,
+	/// When the issue was resolved by an operator, if it has been.
 	pub resolved_at: Option<Timestamp>,
+	/// Login of the operator who resolved the issue, if any.
 	pub resolved_by: Option<String>,
+	/// Display name of the operator who resolved the issue, filled in when
+	/// available.
 	pub resolved_by_name: Option<String>,
+	/// Profile picture URL of the operator who resolved the issue, filled
+	/// in when available.
 	pub resolved_by_pic: Option<String>,
-	/// The string stored in the DB; parses to `ResolvedReason` if valid.
-	/// Kept as String to round-trip any historical value.
+	/// Reason given when the issue was resolved, if any. Older records may
+	/// contain a value that no longer corresponds to a recognized reason.
 	pub resolved_reason: Option<String>,
+	/// If set, the issue is snoozed and won't demand attention again until
+	/// this time.
 	pub snoozed_until: Option<Timestamp>,
+	/// When this issue record was created.
 	pub created_at: Timestamp,
+	/// When this issue record was last updated.
 	pub updated_at: Timestamp,
-	/// Distinct incidents this issue is or was attached to, most recent first.
-	/// Empty for issues that never crossed the threshold to join an incident.
+	/// Incidents this issue is or was attached to, most recent first. Empty
+	/// for issues that never escalated into an incident.
 	pub incidents: Vec<IssueIncidentLink>,
 }
 
-/// Minimal incident reference attached to an issue, enough for the UI to
-/// render a link and indicate open/closed status. See `Incident::for_issues`.
+/// A reference to an incident that a given issue is or was part of, enough
+/// to link to that incident and show whether it's still open.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct IssueIncidentLink {
+	/// Id of the referenced incident.
 	pub incident_id: Uuid,
+	/// When the incident was opened.
 	pub opened_at: Timestamp,
+	/// When the incident was closed, if it has been.
 	pub closed_at: Option<Timestamp>,
 }
 
@@ -231,17 +261,31 @@ pub(crate) async fn enrich_issue(
 	))
 }
 
+/// A single recorded occurrence of an issue's underlying condition — one
+/// push from a device or a manually submitted event.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct EventData {
+	/// Unique identifier for this event.
 	pub id: Uuid,
+	/// Id of the issue this event belongs to.
 	pub issue_id: Uuid,
+	/// When this event was recorded on the server.
 	pub created_at: Timestamp,
+	/// When the underlying condition actually occurred, if reported
+	/// separately from the time it was recorded.
 	pub occurred_at: Option<Timestamp>,
+	/// Severity reported for this event.
 	pub severity: Severity,
+	/// Short headline for this event, if one was given.
 	pub description: Option<String>,
+	/// Human-readable message describing this event.
 	pub message: String,
+	/// Whether the underlying condition was active as of this event.
 	pub active: bool,
+	/// Number of times this same condition has repeated and been coalesced
+	/// into this event rather than creating a new one.
 	pub occurrences: i32,
+	/// When this condition was last seen recurring.
 	pub last_seen: Timestamp,
 }
 
@@ -285,20 +329,31 @@ fn filter_from(active_only: Option<bool>) -> IssueFilter {
 	}
 }
 
+/// Filters for listing issues across all servers.
 #[derive(Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct IssueListArgs {
+	/// When `false`, include resolved and inactive issues as well as active
+	/// ones. Defaults to `true` (active issues only) when omitted.
 	#[serde(default)]
 	pub active_only: Option<bool>,
+	/// Restrict to issues at one of these severity levels. Omit to include
+	/// all severities.
 	#[serde(default)]
 	pub severities: Option<Vec<Severity>>,
+	/// Restrict to issues whose server belongs to this group.
 	#[serde(default)]
 	pub server_group_id: Option<Uuid>,
+	/// Maximum number of issues to return. Defaults to 100 when omitted.
 	#[serde(default)]
 	pub limit: Option<i64>,
 }
 
-/// Cross-server filtered issues list (used by the global Incidents page).
+/// List issues across all servers, with optional filtering.
+///
+/// Returns the most relevant issues fleet-wide, matching the given filters.
+/// By default only currently active issues are returned; pass
+/// `activeOnly: false` to also see resolved and inactive ones.
 #[utoipa::path(
 	post,
 	path = "/list",
@@ -332,13 +387,18 @@ pub async fn list(
 
 #[derive(Deserialize, ToSchema)]
 pub struct ListForDeviceArgs {
+	/// Id of the device whose issues to list.
 	pub device_id: Uuid,
+	/// When `false`, include resolved and inactive issues as well as active
+	/// ones. Defaults to `true` (active issues only) when omitted.
 	#[serde(default)]
 	pub active_only: Option<bool>,
+	/// Maximum number of issues to return. Defaults to 100 when omitted.
 	#[serde(default)]
 	pub limit: Option<i64>,
 }
 
+/// List issues raised by a specific device.
 #[utoipa::path(
 	post,
 	path = "/list_for_device",
@@ -367,13 +427,18 @@ pub async fn list_for_device(
 
 #[derive(Deserialize, ToSchema)]
 pub struct IssueListForServerArgs {
+	/// Id of the server whose issues to list.
 	pub server_id: Uuid,
+	/// When `false`, include resolved and inactive issues as well as active
+	/// ones. Defaults to `true` (active issues only) when omitted.
 	#[serde(default)]
 	pub active_only: Option<bool>,
+	/// Maximum number of issues to return. Defaults to 100 when omitted.
 	#[serde(default)]
 	pub limit: Option<i64>,
 }
 
+/// List issues raised against a specific server.
 #[utoipa::path(
 	post,
 	path = "/list_for_server",
@@ -403,13 +468,20 @@ pub async fn list_for_server(
 
 #[derive(Deserialize, ToSchema)]
 pub struct ListEventsArgs {
+	/// Id of the issue whose events to list.
 	pub issue_id: Uuid,
+	/// Number of events to skip, for pagination. Defaults to 0.
 	#[serde(default)]
 	pub offset: Option<i64>,
+	/// Maximum number of events to return. Defaults to 100 when omitted.
 	#[serde(default)]
 	pub limit: Option<i64>,
 }
 
+/// List the events recorded against a specific issue, most recent first.
+///
+/// Returns a page of events along with the total number of events recorded
+/// for the issue, for pagination with `offset`/`limit`.
 #[utoipa::path(
 	post,
 	path = "/list_events",
@@ -441,20 +513,38 @@ pub async fn list_events(
 #[derive(Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SubmitManualEventArgs {
+	/// Id of the server the event applies to.
 	pub server_id: Uuid,
+	/// Identifier for the underlying condition. Events with the same `ref`
+	/// on the same server are coalesced into the same issue rather than
+	/// opening a new one each time; use a fresh unique value if that
+	/// deduplication isn't wanted.
 	#[serde(rename = "ref")]
 	pub r#ref: String,
+	/// Severity to record. If omitted, a default severity is used.
 	#[serde(default)]
 	pub severity: Option<Severity>,
+	/// Short, single-line headline for the event. Must not contain
+	/// newlines — use `message` for multi-line detail.
 	#[serde(default)]
 	pub description: Option<String>,
+	/// Human-readable message describing the event. May be multi-line.
 	pub message: String,
+	/// Whether the underlying condition is currently active. Defaults to
+	/// `true` when omitted.
 	#[serde(default)]
 	pub active: Option<bool>,
+	/// When the underlying condition actually occurred, if different from
+	/// the time of submission. Defaults to now when omitted.
 	#[serde(default)]
 	pub occurred_at: Option<Timestamp>,
 }
 
+/// Manually record an event against a server, creating or updating an issue.
+///
+/// Finds or creates an issue keyed by the server and the given `ref`,
+/// appends this event to it, and returns the resulting issue. Returns 400
+/// if `ref` is empty or if `description` contains a newline.
 #[utoipa::path(
 	post,
 	path = "/submit_manual_event",
@@ -491,15 +581,22 @@ pub async fn submit_manual_event(
 
 #[derive(Deserialize, ToSchema)]
 pub struct IssueIdArgs {
+	/// Id of the issue to act on.
 	pub issue_id: Uuid,
 }
 
 #[derive(Deserialize, ToSchema)]
 pub struct IssueResolveArgs {
+	/// Id of the issue to resolve.
 	pub issue_id: Uuid,
+	/// Reason the issue is being resolved.
 	pub reason: ResolvedReason,
 }
 
+/// Mark an issue as resolved.
+///
+/// Records the calling operator as the resolver along with the given
+/// reason, and returns the updated issue.
 #[utoipa::path(
 	post,
 	path = "/resolve",
@@ -521,6 +618,10 @@ pub async fn resolve(
 	Ok(Json(enrich_issue(&mut conn, issue).await?))
 }
 
+/// Undo a previous resolution, marking an issue as unresolved again.
+///
+/// Clears the resolution timestamp, resolver, and reason, and returns the
+/// updated issue.
 #[utoipa::path(
 	post,
 	path = "/unresolve",
@@ -544,10 +645,14 @@ pub async fn unresolve(
 
 #[derive(Deserialize, ToSchema)]
 pub struct SnoozeArgs {
+	/// Id of the issue to snooze.
 	pub issue_id: Uuid,
+	/// Time until which the issue should be snoozed.
 	pub until: Timestamp,
 }
 
+/// Snooze an issue until a given time, suppressing it from demanding
+/// attention until then.
 #[utoipa::path(
 	post,
 	path = "/snooze",
@@ -569,6 +674,8 @@ pub async fn snooze(
 	Ok(Json(enrich_issue(&mut conn, issue).await?))
 }
 
+/// Clear a snooze on an issue, making it demand attention again
+/// immediately.
 #[utoipa::path(
 	post,
 	path = "/unsnooze",
@@ -590,12 +697,19 @@ pub async fn unsnooze(
 	Ok(Json(enrich_issue(&mut conn, issue).await?))
 }
 
+/// A free-text note left by an operator on an issue, for handoff and
+/// context that doesn't belong in the issue's own message.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct IssueNoteData {
+	/// Unique identifier for this note.
 	pub id: Uuid,
+	/// Id of the issue this note is attached to.
 	pub issue_id: Uuid,
+	/// Login of the operator who wrote the note.
 	pub author: String,
+	/// Text of the note.
 	pub body: String,
+	/// When the note was created.
 	pub created_at: Timestamp,
 }
 
@@ -613,10 +727,16 @@ impl From<IssueNote> for IssueNoteData {
 
 #[derive(Deserialize, ToSchema)]
 pub struct IssueAddNoteArgs {
+	/// Id of the issue to attach the note to.
 	pub issue_id: Uuid,
+	/// Text of the note. Must not be empty or whitespace-only.
 	pub body: String,
 }
 
+/// Add a note to an issue.
+///
+/// Records the calling operator as the author. Returns 400 if the note
+/// body is empty or whitespace-only.
 #[utoipa::path(
 	post,
 	path = "/add_note",
@@ -644,11 +764,14 @@ pub async fn add_note(
 
 #[derive(Deserialize, ToSchema)]
 pub struct IssueListNotesArgs {
+	/// Id of the issue whose notes to list.
 	pub issue_id: Uuid,
+	/// Maximum number of notes to return. Defaults to 100 when omitted.
 	#[serde(default)]
 	pub limit: Option<i64>,
 }
 
+/// List the notes left on a specific issue.
 #[utoipa::path(
 	post,
 	path = "/list_notes",
@@ -677,9 +800,11 @@ pub async fn list_notes(
 
 #[derive(Deserialize, ToSchema)]
 pub struct IssueDeleteNoteArgs {
+	/// Id of the note to delete.
 	pub note_id: Uuid,
 }
 
+/// Permanently delete a note from an issue.
 #[utoipa::path(
 	post,
 	path = "/delete_note",
