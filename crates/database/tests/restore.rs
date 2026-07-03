@@ -507,6 +507,99 @@ async fn sweep_overdue_raises_for_stale_replica_but_skips_gaps() {
 	.await;
 }
 
+/// Insert a successful backup run whose snapshot was produced `hours_ago`.
+async fn insert_old_success_run(
+	conn: &mut AsyncPgConnection,
+	device: Uuid,
+	group: Uuid,
+	server: Uuid,
+	snapshot: &str,
+	hours_ago: i64,
+) {
+	sql_query(
+		"INSERT INTO backup_runs (id, device_id, group_id, server_id, type, purpose, outcome, snapshot_id, reported_at) \
+		 VALUES (gen_random_uuid(), $1, $2, $3, 'tamanu-postgres', 'backup', 'success', $4, now() - make_interval(hours => $5))",
+	)
+	.bind::<sql_types::Uuid, _>(device)
+	.bind::<sql_types::Uuid, _>(group)
+	.bind::<sql_types::Uuid, _>(server)
+	.bind::<sql_types::Text, _>(snapshot)
+	.bind::<sql_types::Int4, _>(hours_ago as i32)
+	.execute(conn)
+	.await
+	.expect("insert old run");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sweep_once_is_snapshot_driven() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn, "g").await;
+		let server = insert_server(&mut conn, group).await;
+
+		RestoreConsumerCapability::register(
+			&mut conn,
+			consumer,
+			&[descriptor("verify", &["check", "once"])],
+		)
+		.await
+		.expect("register caps");
+
+		let mut verify = new_replica(
+			consumer,
+			group,
+			Some(server),
+			RestoreIntent::from("verify"),
+			"verify-srv",
+		);
+		verify.overdue_after = Some(PgDuration(SignedDuration::from_secs(3600)));
+		RestoreReplica::create(&mut conn, verify)
+			.await
+			.expect("verify decl");
+
+		// No snapshot exists yet → nothing to verify, so not overdue.
+		assert_eq!(
+			database::restore::sweep_overdue(&mut conn).await.unwrap(),
+			0,
+			"no snapshot → not overdue"
+		);
+
+		// A snapshot older than the bound, never verified → overdue.
+		insert_old_success_run(&mut conn, consumer, group, server, "snap-1", 2).await;
+		assert_eq!(
+			database::restore::sweep_overdue(&mut conn).await.unwrap(),
+			1,
+			"old unverified snapshot → overdue"
+		);
+
+		// Once that snapshot is verified healthy, the `once` intent is satisfied
+		// and no longer overdue (and the alert recovers).
+		BackupRestoreCheck::record_report(
+			&mut conn,
+			NewBackupRestoreCheck {
+				snapshot_id: Some("snap-1".into()),
+				..new_check(
+					consumer,
+					group,
+					server,
+					RestoreIntent::from("verify"),
+					RunOutcome::Success,
+					true,
+				)
+			},
+		)
+		.await
+		.expect("record healthy");
+		assert_eq!(
+			database::restore::sweep_overdue(&mut conn).await.unwrap(),
+			0,
+			"verified latest snapshot → not overdue"
+		);
+		assert_eq!(active_restore_issues(&mut conn, group).await, 0);
+	})
+	.await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn records_and_returns_arbitrary_health_details() {
 	TestDb::run(|mut conn, _url| async move {
