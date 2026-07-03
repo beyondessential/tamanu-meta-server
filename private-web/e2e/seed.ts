@@ -47,7 +47,7 @@ function randomLabel(prefix: string): string {
  * statement with CASCADE. */
 export async function resetSeededTables(sql: Sql): Promise<void> {
 	await sql.query(
-		"TRUNCATE statuses, issues, device_keys, servers, server_groups, devices, versions, tailscale_users, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks RESTART IDENTITY CASCADE",
+		"TRUNCATE statuses, issues, device_keys, servers, server_groups, devices, versions, tailscale_users, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, recovery_vault_writes RESTART IDENTITY CASCADE",
 	);
 	// The truncate takes the migration-seeded nil "Canopy" server with it;
 	// self-alerts attach to that row, so put it back.
@@ -719,5 +719,18 @@ export async function seedRestoreCheck(
 			opts.healthDetails === undefined ? null : JSON.stringify(opts.healthDetails),
 			opts.observedAt ?? null,
 		],
+	);
+}
+
+/** Seed a `recovery_vault_writes` row. `writtenAgoSecs` backdates the write;
+ * omit for NOW(). */
+export async function seedRecoveryVaultWrite(
+	sql: Sql,
+	opts: { bytes?: number; writtenAgoSecs?: number } = {},
+): Promise<void> {
+	await sql.query(
+		`INSERT INTO recovery_vault_writes (written_at, bytes)
+		 VALUES (NOW() - make_interval(secs => $1), $2)`,
+		[opts.writtenAgoSecs ?? 0, opts.bytes ?? 4096],
 	);
 }

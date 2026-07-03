@@ -950,6 +950,37 @@ async fn recovery_ceremony_roundtrip() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn recovery_status_reports_last_write() {
+	use database::RecoveryVaultWrite;
+
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		// No writes yet → null.
+		let resp = private
+			.post("/api/backups/recovery_status")
+			.json(&serde_json::json!({}))
+			.await;
+		resp.assert_status_ok();
+		let body: serde_json::Value = resp.json();
+		assert!(body["last_write_at"].is_null());
+		assert!(body["last_write_bytes"].is_null());
+
+		RecoveryVaultWrite::record(&mut conn, 12_345)
+			.await
+			.expect("record vault write");
+
+		let resp = private
+			.post("/api/backups/recovery_status")
+			.json(&serde_json::json!({}))
+			.await;
+		resp.assert_status_ok();
+		let body: serde_json::Value = resp.json();
+		assert!(!body["last_write_at"].is_null());
+		assert_eq!(body["last_write_bytes"], 12_345);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn recovery_verify_rejects_wrong_and_missing() {
 	let identity = age::x25519::Identity::generate();
 	unsafe {

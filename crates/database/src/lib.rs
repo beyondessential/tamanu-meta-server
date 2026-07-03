@@ -17,6 +17,7 @@ pub mod issues;
 pub mod mcp_tokens;
 pub mod notes;
 pub mod pg_duration;
+pub mod recovery_vault;
 pub mod restore;
 pub mod schema;
 pub mod self_alerts;
@@ -47,6 +48,7 @@ pub use commons_types::backup::{
 	RunOutcome,
 };
 pub use devices::{Device, DeviceConnection, DeviceKey, DeviceWithInfo};
+pub use recovery_vault::RecoveryVaultWrite;
 pub use restore::{
 	BackupRestoreCheck, NewBackupRestoreCheck, NewRestoreReplica, RestoreConsumerCapability,
 	RestoreReplica,

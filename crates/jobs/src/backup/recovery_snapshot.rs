@@ -231,6 +231,9 @@ async fn tick(worker: &Worker, config: &RecoveryVaultConfig) -> Result<()> {
 		bytes,
 		"recovery-snapshot: wrote encrypted vault object"
 	);
+	if let Err(e) = database::RecoveryVaultWrite::record(&mut db, bytes as i64).await {
+		warn!("recovery-snapshot: failed to record write bookkeeping: {e:#}");
+	}
 	Ok(())
 }
 

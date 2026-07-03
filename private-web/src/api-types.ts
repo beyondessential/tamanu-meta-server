@@ -3745,6 +3745,16 @@ export interface components {
             last_verified_at?: string | null;
             /** @description The recipient set the last verification covered. */
             last_verified_recipients: string[];
+            /**
+             * Format: date-time
+             * @description When the vault object was last successfully written by the backups pod.
+             */
+            last_write_at?: string | null;
+            /**
+             * Format: int64
+             * @description Size (bytes) of the ciphertext from the last successful write.
+             */
+            last_write_bytes?: number | null;
             /** @description Human-readable reason for the `due` value. */
             reason: string;
             /** @description The live recipient fingerprints (`age1…`). */
