@@ -2666,6 +2666,17 @@ export interface components {
             pending_requests: components["schemas"]["PendingRequestRow"][];
             recent_maintenance: components["schemas"]["BackupMaintenanceRun"][];
             recent_runs: components["schemas"]["BackupRun"][];
+            /** Format: int64 */
+            s3_month_received_bytes: number;
+            /**
+             * Format: int64
+             * @description Total S3 bytes sent to (uploads) and received from (downloads) the
+             *     bucket by the group's device backup runs so far this calendar month
+             *     (UTC), raw wire bytes. Repo maintenance/inspection traffic isn't
+             *     tallied anywhere, so this undercounts the bucket's actual monthly S3
+             *     traffic.
+             */
+            s3_month_sent_bytes: number;
             stats?: null | components["schemas"]["BackupRepoStats"];
         };
         BackupsGroupArgs: {

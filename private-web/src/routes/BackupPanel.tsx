@@ -39,6 +39,7 @@ import { useReloadInterval } from "../hooks/useReloadInterval";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { humanSeconds } from "../lib/humanDuration";
 import { formatBytes } from "../lib/formatBytes";
+import { s3EgressRateForRegion } from "../lib/s3Pricing";
 import { usePageTitle } from "../hooks/usePageTitle";
 import TimeAgo from "../components/TimeAgo";
 import { LatestSnapshot, SnapshotId } from "../components/SnapshotId";
@@ -197,7 +198,7 @@ export default function BackupPanel() {
 					}}
 				>
 					<ConfigSummary config={data} />
-					<RepoStatsPanel groupId={id} />
+					<RepoStatsPanel groupId={id} region={data.region} />
 				</Box>
 			) : (
 				<ConfigSummary config={data} />
@@ -786,7 +787,13 @@ function S3TrafficDetail({ run }: { run: BackupRun }) {
 
 /// Repository stats (top, beside the config summary). Read-only snapshot of the
 /// kopia repo's size/counts as of the last inspection.
-function RepoStatsPanel({ groupId }: { groupId: string }) {
+function RepoStatsPanel({
+	groupId,
+	region,
+}: {
+	groupId: string;
+	region: string | null;
+}) {
 	const stats = useApi(
 		"backups",
 		"stats",
@@ -802,32 +809,78 @@ function RepoStatsPanel({ groupId }: { groupId: string }) {
 				<LinearProgress />
 			) : stats.status === "error" ? (
 				<Alert severity="error">{stats.error.message}</Alert>
-			) : stats.data.stats == null ? (
-				<Typography color="text.secondary">
-					No stats yet (awaiting first inspection).
-				</Typography>
 			) : (
 				<Stack spacing={0.5}>
-					<Stat label="Snapshots" value={stats.data.stats.snapshot_count} />
-					<Stat label="Sources" value={stats.data.stats.source_count} />
-					<Stat
-						label="Logical bytes"
-						value={formatBytes(stats.data.stats.logical_bytes)}
+					{stats.data.stats == null ? (
+						<Typography color="text.secondary">
+							No stats yet (awaiting first inspection).
+						</Typography>
+					) : (
+						<>
+							<Stat label="Snapshots" value={stats.data.stats.snapshot_count} />
+							<Stat label="Sources" value={stats.data.stats.source_count} />
+							<Stat
+								label="Logical bytes"
+								value={formatBytes(stats.data.stats.logical_bytes)}
+							/>
+							<Stat
+								label="Physical bytes"
+								value={formatBytes(stats.data.stats.physical_bytes)}
+							/>
+							<Stat
+								label="Bucket bytes"
+								value={formatBytes(stats.data.stats.bucket_bytes)}
+							/>
+							<Typography variant="caption" color="text.secondary">
+								Observed <TimeAgo timestamp={stats.data.stats.observed_at} />
+							</Typography>
+						</>
+					)}
+					<S3MonthlyTrafficStat
+						sentBytes={stats.data.s3_month_sent_bytes}
+						receivedBytes={stats.data.s3_month_received_bytes}
+						region={region}
 					/>
-					<Stat
-						label="Physical bytes"
-						value={formatBytes(stats.data.stats.physical_bytes)}
-					/>
-					<Stat
-						label="Bucket bytes"
-						value={formatBytes(stats.data.stats.bucket_bytes)}
-					/>
-					<Typography variant="caption" color="text.secondary">
-						Observed <TimeAgo timestamp={stats.data.stats.observed_at} />
-					</Typography>
 				</Stack>
 			)}
 		</Paper>
+	);
+}
+
+/// This calendar month's S3 traffic tallied across the group's device backup
+/// runs, with a tooltip estimating the egress cost. Uploads (sent) are data
+/// transfer IN, which AWS never charges for; downloads (received) are egress
+/// to the internet, billed per GB by region.
+function S3MonthlyTrafficStat({
+	sentBytes,
+	receivedBytes,
+	region,
+}: {
+	sentBytes: number;
+	receivedBytes: number;
+	region: string | null;
+}) {
+	const { rate, region: priceRegion, assumed } = s3EgressRateForRegion(region);
+	const estimatedCost = (receivedBytes / 1_000_000_000) * rate;
+	const tooltip =
+		`Uploads are free (data transfer in). Downloads are billed as internet ` +
+		`egress: ~$${rate.toFixed(3)}/GB in ${priceRegion}` +
+		(assumed ? " (assumed — no region set on this config)" : "") +
+		`, so this month's downloads are an estimated $${estimatedCost.toFixed(2)}. ` +
+		`Excludes AWS's 100 GB/month free egress allowance and per-request costs.`;
+	return (
+		<Stack spacing={0}>
+			<Tooltip title={tooltip}>
+				<Typography variant="body2" sx={{ cursor: "help", width: "fit-content" }}>
+					<strong>S3 traffic (this month):</strong> {formatBytes(sentBytes)} sent /{" "}
+					{formatBytes(receivedBytes)} received
+				</Typography>
+			</Tooltip>
+			<Typography variant="caption" color="text.secondary">
+				* device backup traffic only — repository maintenance/inspection traffic
+				isn't tallied
+			</Typography>
+		</Stack>
 	);
 }
 

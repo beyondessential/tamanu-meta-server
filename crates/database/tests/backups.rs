@@ -453,6 +453,126 @@ async fn latest_success_ignores_restore_and_failure() {
 	.await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_traffic_this_month_sums_raw_bytes_within_the_month_window() {
+	TestDb::run(|mut conn, _url| async move {
+		let group_id = insert_group(&mut conn, "g").await;
+		let other_group_id = insert_group(&mut conn, "other").await;
+		let server_id = insert_server(&mut conn, group_id).await;
+		let device_id = insert_device(&mut conn).await;
+
+		async fn insert_run_with_s3(
+			conn: &mut AsyncPgConnection,
+			group_id: Uuid,
+			device_id: Uuid,
+			server_id: Uuid,
+			sent: Option<i64>,
+			received: Option<i64>,
+			age: Option<SignedDuration>,
+		) -> Uuid {
+			let id = Uuid::new_v4();
+			BackupRun::record(
+				conn,
+				NewBackupRun {
+					id,
+					device_id,
+					group_id,
+					server_id: Some(server_id),
+					r#type: BackupType::TamanuPostgres,
+					purpose: BackupPurpose::Backup,
+					outcome: RunOutcome::Success,
+					error: None,
+					bytes_uploaded: Some(1),
+					snapshot_id: None,
+					s3_sent_raw_bytes: sent,
+					s3_sent_payload_bytes: sent,
+					s3_received_raw_bytes: received,
+					s3_received_payload_bytes: received,
+				},
+			)
+			.await
+			.unwrap();
+			if let Some(age) = age {
+				sql_query(
+					"UPDATE backup_runs SET reported_at = NOW() - ($2 || ' seconds')::INTERVAL \
+					 WHERE id = $1",
+				)
+				.bind::<sql_types::Uuid, _>(id)
+				.bind::<sql_types::Text, _>(age.as_secs().to_string())
+				.execute(conn)
+				.await
+				.expect("backdate reported_at");
+			}
+			id
+		}
+
+		// Two runs this month → summed.
+		insert_run_with_s3(
+			&mut conn,
+			group_id,
+			device_id,
+			server_id,
+			Some(100),
+			Some(10),
+			None,
+		)
+		.await;
+		insert_run_with_s3(
+			&mut conn,
+			group_id,
+			device_id,
+			server_id,
+			Some(200),
+			Some(20),
+			None,
+		)
+		.await;
+		// A run with no S3 tally at all (e.g. a backup type the proxy didn't
+		// instrument) contributes nothing, not an error.
+		insert_run_with_s3(&mut conn, group_id, device_id, server_id, None, None, None).await;
+		// A run reported last month is out of the window (40 days always crosses
+		// a calendar-month boundary, regardless of today's date).
+		insert_run_with_s3(
+			&mut conn,
+			group_id,
+			device_id,
+			server_id,
+			Some(9_999),
+			Some(9_999),
+			Some(SignedDuration::from_hours(24 * 40)),
+		)
+		.await;
+		// A run in another group must not leak into this group's total.
+		let other_server_id = insert_server(&mut conn, other_group_id).await;
+		insert_run_with_s3(
+			&mut conn,
+			other_group_id,
+			device_id,
+			other_server_id,
+			Some(5_000),
+			Some(5_000),
+			None,
+		)
+		.await;
+
+		let (sent, received) = BackupRun::s3_traffic_this_month_for_group(&mut conn, group_id)
+			.await
+			.unwrap();
+		assert_eq!(sent, 300);
+		assert_eq!(received, 30);
+
+		// A group with no runs at all gets zeros, not an error.
+		let empty_group_id = insert_group(&mut conn, "empty").await;
+		let (sent, received) =
+			BackupRun::s3_traffic_this_month_for_group(&mut conn, empty_group_id)
+				.await
+				.unwrap();
+		assert_eq!(sent, 0);
+		assert_eq!(received, 0);
+	})
+	.await;
+}
+
 // --- issuances --------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread")]
