@@ -22,6 +22,7 @@ use utoipa::{Modify, OpenApi, openapi::security::SecurityScheme};
 		(name = "restore", description = "Managed restore replicas: consumer capability registration, worklist, and read-only restore credentials."),
 		(name = "servers", description = "Server registry — listing for the public, self-registration for server devices."),
 		(name = "statuses", description = "Heartbeat / status submissions from server devices."),
+		(name = "tags", description = "Key/value tags describing a server."),
 		(name = "versions", description = "Canopy release versions and their downloadable artifacts."),
 	),
 )]
