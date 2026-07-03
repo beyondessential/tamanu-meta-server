@@ -331,6 +331,14 @@ diesel::table! {
 }
 
 diesel::table! {
+	recovery_vault_writes (id) {
+		id -> Uuid,
+		written_at -> Timestamptz,
+		bytes -> Int8,
+	}
+}
+
+diesel::table! {
 	restore_consumer_capabilities (consumer_device_id, intent) {
 		consumer_device_id -> Uuid,
 		intent -> Text,
@@ -643,6 +651,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 	issue_notes,
 	issues,
 	mcp_tokens,
+	recovery_vault_writes,
 	restore_consumer_capabilities,
 	restore_replicas,
 	server_backup_capabilities,
