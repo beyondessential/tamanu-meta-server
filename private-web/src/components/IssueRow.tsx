@@ -30,6 +30,8 @@ import TimeAgo from "./TimeAgo";
 import {
 	RESOLVED_REASONS,
 	RESOLVED_REASON_LABEL,
+	healthcheckNameFromRef,
+	healthcheckPath,
 	type IssueData,
 	type IssueIncidentLink,
 	type ResolvedReason,
@@ -574,6 +576,7 @@ function IssueActions({
 function IssueMeta({ issue }: { issue: IssueData }) {
 	const incidents = issue.incidents;
 	const n = incidents.length;
+	const checkName = healthcheckNameFromRef(issue.source, issue.ref);
 
 	return (
 		<Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
@@ -582,7 +585,13 @@ function IssueMeta({ issue }: { issue: IssueData }) {
 				component="code"
 				sx={{ fontFamily: "monospace", fontSize: "0.9em" }}
 			>
-				{issue.ref}
+				{checkName ? (
+					<MuiLink component={RouterLink} to={healthcheckPath(checkName)}>
+						{issue.ref}
+					</MuiLink>
+				) : (
+					issue.ref
+				)}
 			</Box>
 			)
 			{n > 0 && (

@@ -6,15 +6,17 @@ use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleUser;
 use commons_types::{
+	issue::Severity,
 	server::{
 		cards::{FacilityServerStatus, ServerGroupCard},
 		rank::ServerRank,
 	},
-	status::{OperatorPresence, ShortStatus},
+	status::{CheckResult, OperatorPresence, ShortStatus},
 	version::VersionStr,
 };
 use database::{
-	devices::DeviceConnection, server_groups::ServerGroup, servers::Server, statuses::Status,
+	devices::DeviceConnection, healthcheck_severities::HealthcheckSeverity,
+	server_groups::ServerGroup, servers::Server, statuses::Status,
 	tailscale_users::TailscaleUser as CachedTailscaleUser, versions::Version,
 };
 use jiff::Timestamp;
@@ -92,6 +94,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(server_grouped_ids))
 		.routes(routes!(group_details))
 		.routes(routes!(snapshot))
+		.routes(routes!(check_attention))
 }
 
 /// Get a fleet-wide summary of software versions running in production.
@@ -265,6 +268,134 @@ pub async fn group_details(
 		version: card_version,
 		version_distance,
 		members,
+	}))
+}
+
+/// One server currently flagging [`CheckAttentionData::check`], for
+/// [`check_attention`].
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct CheckAttentionServerData {
+	/// The server's id — the UI links to `/servers/{server_id}`.
+	pub server_id: Uuid,
+	/// The server's display name; empty string when the server has none.
+	pub server_name: String,
+	/// The server's group id, if it belongs to one.
+	pub group_id: Option<Uuid>,
+	/// The server's group name, if it belongs to one.
+	pub group_name: Option<String>,
+	/// The check's result on this server's latest status. Always warning,
+	/// failed, or broken — passed/skipped checks never reach this endpoint.
+	pub result: CheckResult,
+	/// When the reporting status was recorded.
+	pub status_created_at: Timestamp,
+}
+
+/// Request body for [`check_attention`].
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct CheckAttentionArgs {
+	/// The healthcheck name to look up, exactly as reported by devices in
+	/// `health[].check` (an arbitrary, device/plugin-defined string).
+	pub check: String,
+}
+
+/// Response for [`check_attention`]: the queried check's catalog severity
+/// (if it has one yet) and every live server whose latest status is
+/// currently flagging it.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct CheckAttentionData {
+	/// The check name that was queried, echoed back so the page can
+	/// render its heading without re-decoding the request.
+	pub check: String,
+	/// The catalog's configured base severity for this check, or `None`
+	/// if no server has ever reported it yet (so it has no catalog row).
+	pub severity: Option<Severity>,
+	/// Servers currently flagging this check as a TODO list: failed
+	/// before warning before broken (most urgent first), then by group
+	/// name then server name.
+	pub servers: Vec<CheckAttentionServerData>,
+}
+
+/// Rank used to order [`CheckAttentionServerData::result`] most-urgent
+/// first: failed, then warning, then broken. Mirrors the private-web
+/// `CHECK_RESULT_ORDER` display order.
+fn check_result_rank(result: CheckResult) -> u8 {
+	match result {
+		CheckResult::Failed => 0,
+		CheckResult::Warning => 1,
+		CheckResult::Broken => 2,
+		CheckResult::Passed => 3,
+		CheckResult::Skipped => 4,
+	}
+}
+
+/// List the servers currently failing or warning one named healthcheck.
+///
+/// Everything the per-healthcheck page needs: the catalog's configured
+/// severity for `check` (if any) plus every live server whose **latest**
+/// status currently reports it as warning, failed, or broken — i.e. the
+/// current, real-time failures, not a history of past issues/events. This
+/// is the data behind the `/healthchecks/:check` "who's affected" page,
+/// which doubles as an operator TODO list and as a way to correlate
+/// servers sharing the same issue during a fleet-wide incident.
+#[utoipa::path(
+	post,
+	path = "/check_attention",
+	operation_id = "status_check_attention",
+	tag = "statuses",
+	request_body = CheckAttentionArgs,
+	responses(
+		(status = 200, description = "The check's catalog severity and the servers currently flagging it.", body = CheckAttentionData),
+		(status = 500, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn check_attention(
+	State(state): State<AppState>,
+	Json(args): Json<CheckAttentionArgs>,
+) -> Result<Json<CheckAttentionData>> {
+	let mut conn = state.db_read.get().await?;
+	let flagged = Status::unhealthy_with_servers_for_check(&mut conn, &args.check).await?;
+
+	let group_ids: Vec<Uuid> = flagged
+		.iter()
+		.filter_map(|(s, _, _)| s.group_id)
+		.collect::<BTreeSet<_>>()
+		.into_iter()
+		.collect();
+	let group_names: HashMap<Uuid, String> = ServerGroup::list_by_ids(&mut conn, &group_ids)
+		.await?
+		.into_iter()
+		.map(|g| (g.id, g.name))
+		.collect();
+
+	let mut servers: Vec<CheckAttentionServerData> = flagged
+		.into_iter()
+		.map(|(server, status, result)| {
+			let group_name = server.group_id.and_then(|g| group_names.get(&g).cloned());
+			CheckAttentionServerData {
+				server_id: server.id,
+				server_name: server.name.clone().unwrap_or_default(),
+				group_id: server.group_id,
+				group_name,
+				result,
+				status_created_at: status.created_at,
+			}
+		})
+		.collect();
+	servers.sort_by(|a, b| {
+		check_result_rank(a.result)
+			.cmp(&check_result_rank(b.result))
+			.then_with(|| a.group_name.cmp(&b.group_name))
+			.then_with(|| a.server_name.cmp(&b.server_name))
+	});
+
+	let severity = HealthcheckSeverity::get(&mut conn, &args.check)
+		.await?
+		.map(|row| row.severity);
+
+	Ok(Json(CheckAttentionData {
+		check: args.check,
+		severity,
+		servers,
 	}))
 }
 

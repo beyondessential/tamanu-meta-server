@@ -73,6 +73,7 @@ import {
 	SERVER_RANK_ORDER,
 	checkResultOf,
 	compareServersByRankThenKind,
+	healthcheckPath,
 	type CheckResult,
 	type DeviceInfo,
 	type HealthState,
@@ -1093,7 +1094,9 @@ function CheckRow({
 					useFlexGap
 				>
 					<Typography variant="body2" sx={{ fontFamily: "monospace" }}>
-						{entry.check}
+						<MuiLink component={RouterLink} to={healthcheckPath(entry.check)}>
+							{entry.check}
+						</MuiLink>
 					</Typography>
 					<SilencedChip
 						serverSilence={serverSilence}

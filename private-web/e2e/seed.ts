@@ -47,7 +47,7 @@ function randomLabel(prefix: string): string {
  * statement with CASCADE. */
 export async function resetSeededTables(sql: Sql): Promise<void> {
 	await sql.query(
-		"TRUNCATE statuses, issues, device_keys, servers, server_groups, devices, versions, tailscale_users, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, recovery_vault_writes RESTART IDENTITY CASCADE",
+		"TRUNCATE statuses, issues, device_keys, servers, server_groups, devices, versions, tailscale_users, healthcheck_severities, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, recovery_vault_writes RESTART IDENTITY CASCADE",
 	);
 	// The truncate takes the migration-seeded nil "Canopy" server with it;
 	// self-alerts attach to that row, so put it back.
@@ -235,6 +235,31 @@ export async function seedStatus(
 		params,
 	);
 	return { id, createdAt: String(rows[0]!.created_at) };
+}
+
+export interface SeededHealthcheckSeverity {
+	checkName: string;
+}
+
+/** Catalog row for a healthcheck name, as ingestion would have upserted
+ * (plus an operator-set severity). Upserts so tests can call it without
+ * worrying whether ingestion already created a default row. */
+export async function seedHealthcheckSeverity(
+	sql: Sql,
+	opts: {
+		checkName: string;
+		severity?: string;
+		notes?: string | null;
+	},
+): Promise<SeededHealthcheckSeverity> {
+	await sql.query(
+		`INSERT INTO healthcheck_severities (check_name, severity, notes)
+		 VALUES ($1, $2, $3)
+		 ON CONFLICT (check_name)
+		 DO UPDATE SET severity = EXCLUDED.severity, notes = EXCLUDED.notes`,
+		[opts.checkName, opts.severity ?? "warning", opts.notes ?? null],
+	);
+	return { checkName: opts.checkName };
 }
 
 /** Cache row for a Tailscale user's display info, as the auth layer

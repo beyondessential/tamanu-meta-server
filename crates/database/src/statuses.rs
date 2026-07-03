@@ -448,6 +448,93 @@ impl Status {
 		query.load::<Status>(db).await.map_err(AppError::from)
 	}
 
+	/// Live (non-deleted, non-canopy-own) servers whose latest status is
+	/// [`HealthState::Warning`] or [`HealthState::Unhealthy`], paired with
+	/// that status. Mirrors the live-server scoping in
+	/// [`crate::servers::Server::get_all`] / the status-board queries:
+	/// archived servers and canopy's own row (`id = Uuid::nil()`) never
+	/// appear.
+	pub async fn unhealthy_with_servers(
+		db: &mut AsyncPgConnection,
+	) -> Result<Vec<(Server, Status)>> {
+		use crate::schema::servers::dsl as servers_dsl;
+
+		let servers: Vec<Server> = servers_dsl::servers
+			.select(Server::as_select())
+			.filter(servers_dsl::id.ne(Uuid::nil()))
+			.filter(servers_dsl::deleted_at.is_null())
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		let server_ids: Vec<Uuid> = servers.iter().map(|s| s.id).collect();
+
+		let mut status_map: std::collections::HashMap<Uuid, Status> =
+			Self::latest_for_servers(db, &server_ids)
+				.await?
+				.into_iter()
+				.map(|s| (s.server_id, s))
+				.collect();
+
+		Ok(servers
+			.into_iter()
+			.filter_map(|s| {
+				let status = status_map.remove(&s.id)?;
+				(status.health_state() != HealthState::Healthy).then_some((s, status))
+			})
+			.collect())
+	}
+
+	/// This status row's `health[]` entries that reported warning, failed,
+	/// or broken — the checks an operator needs to look at. Passed and
+	/// skipped entries don't count against the server (same rule as
+	/// [`Status::health_state`]).
+	pub fn offending_checks(&self) -> Vec<(String, CheckResult)> {
+		let Some(arr) = self.health.as_array() else {
+			return Vec::new();
+		};
+		arr.iter()
+			.filter_map(|entry| {
+				let obj = entry.as_object()?;
+				let check = obj.get("check")?.as_str()?.to_string();
+				let result = CheckResult::from_entry(obj)?;
+				matches!(
+					result,
+					CheckResult::Warning | CheckResult::Failed | CheckResult::Broken
+				)
+				.then_some((check, result))
+			})
+			.collect()
+	}
+
+	/// [`Self::unhealthy_with_servers`], further narrowed to servers whose
+	/// latest status reports `check_name` specifically as warning, failed,
+	/// or broken — the data backing the per-healthcheck "who's affected"
+	/// page.
+	///
+	/// The check-name filter stays on the Rust side rather than folding
+	/// into the SQL: `unhealthy_with_servers` already limits the query to
+	/// the (typically small) set of currently-unhealthy servers, and
+	/// reproducing [`CheckResult::from_entry`]'s legacy `healthy: bool`
+	/// fallback as a jsonb predicate would just duplicate logic that
+	/// already lives in [`Self::offending_checks`].
+	pub async fn unhealthy_with_servers_for_check(
+		db: &mut AsyncPgConnection,
+		check_name: &str,
+	) -> Result<Vec<(Server, Status, CheckResult)>> {
+		Ok(Self::unhealthy_with_servers(db)
+			.await?
+			.into_iter()
+			.filter_map(|(server, status)| {
+				let result = status
+					.offending_checks()
+					.into_iter()
+					.find(|(check, _)| check == check_name)
+					.map(|(_, result)| result)?;
+				Some((server, status, result))
+			})
+			.collect())
+	}
+
 	pub async fn production_versions(db: &mut AsyncPgConnection) -> Result<Vec<VersionStr>> {
 		use crate::schema::servers::dsl as servers_dsl;
 
