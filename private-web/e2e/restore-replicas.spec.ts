@@ -288,4 +288,70 @@ test.describe("restore replicas", () => {
 			page.getByRole("option", { name: "disaster-recovery" }),
 		).toHaveCount(0);
 	});
+
+	test("the dialog shows the intent description and typed parameter fields, and persists a value", async ({
+		page,
+		sql,
+	}) => {
+		const consumer = await seedDevice(sql, { role: "backup-restore" });
+		await seedRestoreConsumerCapability(sql, {
+			deviceId: consumer.id,
+			intents: [
+				{
+					intent: "analytics",
+					description: "Keeps a queryable replica running.",
+					semantics: ["check", "url"],
+					params: {
+						minimum_uptime: { type: "duration", default: 7200 },
+						anonymisation: { type: "boolean", default: true },
+					},
+				},
+			],
+		});
+		const groupId = await groupWithBackups(sql, "param-group");
+
+		await page.goto(`/groups/${groupId}/backups`);
+		await page.getByRole("button", { name: /declare replica/i }).click();
+		const dialog = page.getByRole("dialog");
+
+		// The sole consumer is auto-selected and its sole intent chosen, so the
+		// description and parameter fields for `analytics` render.
+		await expect(dialog.getByText("Keeps a queryable replica running.")).toBeVisible();
+		const uptime = dialog.getByLabel("minimum_uptime (seconds)");
+		await expect(uptime).toBeVisible();
+		await expect(dialog.getByLabel("anonymisation")).toBeVisible();
+
+		await uptime.fill("3600");
+		await dialog.getByLabel("Name").fill("with-params");
+		await dialog.getByRole("button", { name: /^declare$/i }).click();
+
+		await expect(page.getByRole("row", { name: /with-params/ })).toBeVisible();
+		const rows = await sql.query<{ params: { minimum_uptime?: number } }>(
+			"SELECT params FROM restore_replicas WHERE name = 'with-params'",
+		);
+		expect(rows).toHaveLength(1);
+		expect(rows[0]!.params.minimum_uptime).toBe(3600);
+	});
+
+	test("a restore check surfaces a replica url as a link", async ({
+		page,
+		sql,
+	}) => {
+		const consumer = await seedDevice(sql, { role: "backup-restore" });
+		const groupId = await groupWithBackups(sql, "url-group");
+		const server = await seedServer(sql, { groupId, name: "url-srv" });
+		await seedRestoreCheck(sql, {
+			consumerDeviceId: consumer.id,
+			groupId,
+			serverId: server.id,
+			outcome: "success",
+			replicaHealthy: true,
+			healthDetails: { url: "https://replica.example.test/db" },
+		});
+
+		await page.goto(`/groups/${groupId}/backups`);
+		const link = page.getByRole("link", { name: /open/i });
+		await expect(link).toBeVisible();
+		await expect(link).toHaveAttribute("href", "https://replica.example.test/db");
+	});
 });

@@ -359,6 +359,144 @@ where
 	}
 }
 
+/// Canopy-defined restore semantics: behaviours a consumer opts an intent into.
+/// Semantics are carried as plain strings so a consumer may advertise ahead of
+/// Canopy support; these are the ones Canopy acts on. Unrecognised semantics are
+/// stored and preserved but change no behaviour.
+pub mod semantics {
+	/// The intent produces restore-health feedback: Canopy expects a report per
+	/// replica and holds it to the overdue bound.
+	pub const CHECK: &str = "check";
+	/// A given snapshot is dispatched to the intent at most once: Canopy omits
+	/// the worklist entry once the current snapshot has a healthy report, and
+	/// measures overdue against the latest snapshot rather than the clock.
+	pub const ONCE: &str = "once";
+	/// The intent's health report carries a link to the running replica within
+	/// its health data, which Canopy surfaces to operators.
+	pub const URL: &str = "url";
+}
+
+/// The type of a restore-replica parameter. Informs the operator form's input
+/// and the validation Canopy applies. The underlying JSON is a number
+/// (`duration` in whole seconds, `bytes`, `integer`), a boolean (`boolean`), or
+/// a string (`text`); Canopy does not otherwise interpret parameter values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ParamType {
+	Duration,
+	Bytes,
+	Boolean,
+	Integer,
+	Text,
+}
+
+/// One parameter a restore consumer accepts per replica of an intent.
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct ParamSpec {
+	#[serde(rename = "type")]
+	pub r#type: ParamType,
+	/// The value sent when the operator leaves the parameter unset. Absent means
+	/// an unset parameter is sent as JSON `null`.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub default: Option<serde_json::Value>,
+}
+
+/// A consumer's parameter schema for one intent: parameter name → spec, ordered
+/// for stable output.
+pub type ParamSchema = std::collections::BTreeMap<String, ParamSpec>;
+
+/// Operator-supplied parameter values for one replica: parameter name → value.
+pub type ParamValues = std::collections::BTreeMap<String, serde_json::Value>;
+
+/// One intent a restore consumer advertises: the behaviours it opts into and the
+/// settings it accepts per replica.
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct IntentDescriptor {
+	#[schema(value_type = String)]
+	pub intent: RestoreIntent,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub description: Option<String>,
+	#[serde(default)]
+	pub semantics: Vec<String>,
+	#[serde(default)]
+	pub params: ParamSchema,
+}
+
+impl IntentDescriptor {
+	/// Whether the intent opts into a semantic (see [`semantics`]).
+	pub fn has_semantic(&self, semantic: &str) -> bool {
+		self.semantics.iter().any(|s| s == semantic)
+	}
+}
+
+/// A parameter value failed validation against its intent's schema.
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum ParamValidationError {
+	#[error("unknown parameter {0:?}")]
+	Unknown(String),
+	#[error("parameter {name:?} expects a {expected} value")]
+	WrongType {
+		name: String,
+		expected: &'static str,
+	},
+}
+
+/// Validate operator-supplied values against a schema. Every value must name a
+/// parameter in the schema and match its type; `null` is always allowed. Missing
+/// parameters are legal — every parameter is optional.
+pub fn validate_params(
+	schema: &ParamSchema,
+	values: &ParamValues,
+) -> Result<(), ParamValidationError> {
+	for (name, value) in values {
+		let Some(spec) = schema.get(name) else {
+			return Err(ParamValidationError::Unknown(name.clone()));
+		};
+		if value.is_null() {
+			continue;
+		}
+		let (ok, expected) = match spec.r#type {
+			ParamType::Boolean => (value.is_boolean(), "boolean"),
+			ParamType::Text => (value.is_string(), "text"),
+			ParamType::Integer => (value.is_i64() || value.is_u64(), "integer"),
+			ParamType::Duration => (
+				value.as_i64().is_some_and(|n| n >= 0) || value.is_u64(),
+				"duration in whole seconds",
+			),
+			ParamType::Bytes => (
+				value.as_i64().is_some_and(|n| n >= 0) || value.is_u64(),
+				"size in bytes",
+			),
+		};
+		if !ok {
+			return Err(ParamValidationError::WrongType {
+				name: name.clone(),
+				expected,
+			});
+		}
+	}
+	Ok(())
+}
+
+/// Resolve the values to send in the worklist: one entry per parameter the
+/// intent advertises. A set (non-null) value wins; otherwise the parameter's
+/// default, or JSON `null` when it has none. Stored values for parameters the
+/// intent no longer advertises are dropped.
+pub fn resolve_params(schema: &ParamSchema, values: &ParamValues) -> ParamValues {
+	schema
+		.iter()
+		.map(|(name, spec)| {
+			let resolved = values
+				.get(name)
+				.filter(|v| !v.is_null())
+				.cloned()
+				.or_else(|| spec.default.clone())
+				.unwrap_or(serde_json::Value::Null);
+			(name.clone(), resolved)
+		})
+		.collect()
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -424,5 +562,73 @@ mod tests {
 			serde_json::from_str::<RestoreIntent>("\"custom-x\"").unwrap(),
 			RestoreIntent::from("custom-x"),
 		);
+	}
+
+	fn schema() -> ParamSchema {
+		serde_json::from_value(serde_json::json!({
+			"minimum_uptime": {"type": "duration", "default": 7200},
+			"max_size": {"type": "bytes"},
+			"anonymisation": {"type": "boolean", "default": true},
+		}))
+		.unwrap()
+	}
+
+	#[test]
+	fn param_type_serializes_snake_case() {
+		assert_eq!(
+			serde_json::to_string(&ParamType::Duration).unwrap(),
+			"\"duration\""
+		);
+		assert_eq!(
+			serde_json::from_str::<ParamType>("\"boolean\"").unwrap(),
+			ParamType::Boolean
+		);
+	}
+
+	#[test]
+	fn validate_params_accepts_matching_and_null() {
+		let values: ParamValues = serde_json::from_value(serde_json::json!({
+			"minimum_uptime": 3600,
+			"max_size": serde_json::Value::Null,
+			"anonymisation": false,
+		}))
+		.unwrap();
+		assert!(validate_params(&schema(), &values).is_ok());
+		// No values at all is legal — every parameter is optional.
+		assert!(validate_params(&schema(), &ParamValues::new()).is_ok());
+	}
+
+	#[test]
+	fn validate_params_rejects_unknown_and_wrong_type() {
+		let unknown: ParamValues = serde_json::from_value(serde_json::json!({"nope": 1})).unwrap();
+		assert!(matches!(
+			validate_params(&schema(), &unknown),
+			Err(ParamValidationError::Unknown(_))
+		));
+		let wrong: ParamValues =
+			serde_json::from_value(serde_json::json!({"anonymisation": "yes"})).unwrap();
+		assert!(matches!(
+			validate_params(&schema(), &wrong),
+			Err(ParamValidationError::WrongType { .. })
+		));
+		// A negative duration is not a valid whole-seconds value.
+		let negative: ParamValues =
+			serde_json::from_value(serde_json::json!({"minimum_uptime": -5})).unwrap();
+		assert!(validate_params(&schema(), &negative).is_err());
+	}
+
+	#[test]
+	fn resolve_params_fills_defaults_and_nulls() {
+		let values: ParamValues =
+			serde_json::from_value(serde_json::json!({"anonymisation": false})).unwrap();
+		let resolved = resolve_params(&schema(), &values);
+		// Set value wins.
+		assert_eq!(resolved["anonymisation"], serde_json::json!(false));
+		// Unset-with-default → default.
+		assert_eq!(resolved["minimum_uptime"], serde_json::json!(7200));
+		// Unset-without-default → null.
+		assert_eq!(resolved["max_size"], serde_json::Value::Null);
+		// Only advertised parameters appear.
+		assert_eq!(resolved.len(), 3);
 	}
 }

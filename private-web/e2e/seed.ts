@@ -581,16 +581,36 @@ export async function seedBackupRequest(
 	);
 }
 
-/** Register the intents a restore consumer (a `backup-restore` device) supports. */
+/** One advertised intent: a bare name (no semantics/params) or a full
+ * descriptor with the Canopy semantics it opts into and its parameter schema. */
+export type SeedIntent =
+	| string
+	| {
+			intent: string;
+			description?: string | null;
+			semantics?: string[];
+			params?: Record<string, unknown>;
+	  };
+
+/** Register the intents a restore consumer (a `backup-restore` device)
+ * advertises, with their descriptions, semantics, and parameter schemas. */
 export async function seedRestoreConsumerCapability(
 	sql: Sql,
-	opts: { deviceId: string; intents: string[] },
+	opts: { deviceId: string; intents: SeedIntent[] },
 ): Promise<void> {
-	for (const intent of opts.intents) {
+	for (const raw of opts.intents) {
+		const d = typeof raw === "string" ? { intent: raw } : raw;
 		await sql.query(
-			`INSERT INTO restore_consumer_capabilities (consumer_device_id, intent)
-			 VALUES ($1, $2)`,
-			[opts.deviceId, intent],
+			`INSERT INTO restore_consumer_capabilities
+			 (consumer_device_id, intent, description, semantics, params)
+			 VALUES ($1, $2, $3, $4::jsonb, $5::jsonb)`,
+			[
+				opts.deviceId,
+				d.intent,
+				d.description ?? null,
+				JSON.stringify(d.semantics ?? []),
+				JSON.stringify(d.params ?? {}),
+			],
 		);
 	}
 }
@@ -610,18 +630,21 @@ export async function seedRestoreReplica(
 		type?: string;
 		intent?: string;
 		name?: string;
-		/** Whole seconds; omit for "latest only". */
-		freshnessSeconds?: number | null;
+		/** Whole seconds; omit for "no overdue bound". */
+		overdueAfterSeconds?: number | null;
+		/** Operator-supplied parameter values. */
+		params?: Record<string, unknown>;
 		enabled?: boolean;
 	},
 ): Promise<SeededRestoreReplica> {
 	const id = randomUUID();
-	const freshness = opts.freshnessSeconds ?? null;
-	if (freshness == null) {
+	const overdue = opts.overdueAfterSeconds ?? null;
+	const params = JSON.stringify(opts.params ?? {});
+	if (overdue == null) {
 		await sql.query(
 			`INSERT INTO restore_replicas
-			 (id, consumer_device_id, group_id, server_id, type, intent, name, enabled)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+			 (id, consumer_device_id, group_id, server_id, type, intent, name, params, enabled)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)`,
 			[
 				id,
 				opts.consumerDeviceId,
@@ -630,14 +653,15 @@ export async function seedRestoreReplica(
 				opts.type ?? "tamanu-postgres",
 				opts.intent ?? "verify",
 				opts.name ?? randomLabel("replica"),
+				params,
 				opts.enabled ?? true,
 			],
 		);
 	} else {
 		await sql.query(
 			`INSERT INTO restore_replicas
-			 (id, consumer_device_id, group_id, server_id, type, intent, name, freshness, enabled)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, make_interval(secs => $8), $9)`,
+			 (id, consumer_device_id, group_id, server_id, type, intent, name, overdue_after, params, enabled)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, make_interval(secs => $8), $9::jsonb, $10)`,
 			[
 				id,
 				opts.consumerDeviceId,
@@ -646,7 +670,8 @@ export async function seedRestoreReplica(
 				opts.type ?? "tamanu-postgres",
 				opts.intent ?? "verify",
 				opts.name ?? randomLabel("replica"),
-				freshness,
+				overdue,
+				params,
 				opts.enabled ?? true,
 			],
 		);

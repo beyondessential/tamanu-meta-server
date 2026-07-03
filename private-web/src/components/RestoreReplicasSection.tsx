@@ -2,6 +2,7 @@ import AddIcon from "@mui/icons-material/Add";
 import DeleteIcon from "@mui/icons-material/Delete";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
+import OpenInNewIcon from "@mui/icons-material/OpenInNew";
 import {
 	Alert,
 	Box,
@@ -15,6 +16,7 @@ import {
 	FormControl,
 	IconButton,
 	InputLabel,
+	Link,
 	LinearProgress,
 	MenuItem,
 	Paper,
@@ -32,7 +34,12 @@ import {
 } from "@mui/material";
 import { useEffect, useState } from "react";
 import { ApiError, callApi, useApi } from "../api";
-import type { BackupRestoreCheck } from "../types";
+import type {
+	BackupRestoreCheck,
+	IntentDescriptor,
+	ParamSpec,
+	RestoreConsumerView,
+} from "../types";
 
 function kebabCase(s: string): string {
 	return s
@@ -51,16 +58,20 @@ function formatError(err: unknown): string {
 	return String(err);
 }
 
-function freshnessLabel(seconds: number | null | undefined): string {
-	if (seconds == null) return "latest";
+function overdueLabel(seconds: number | null | undefined): string {
+	if (seconds == null) return "no bound";
 	const hours = seconds / 3600;
 	return hours >= 1 ? `${hours}h` : `${seconds}s`;
 }
 
-interface ConsumerOption {
-	device_id: string;
-	name?: string | null;
-	intents: string[];
+/** Pull a string `url` out of a check's opaque health details, if present — the
+ * link a `url`-semantic intent attaches to its running replica. */
+function healthUrl(details: unknown): string | null {
+	if (details && typeof details === "object" && "url" in details) {
+		const url = (details as { url?: unknown }).url;
+		if (typeof url === "string" && url.length > 0) return url;
+	}
+	return null;
 }
 
 /** Managed restore replicas for one group — the declarations Canopy drives and
@@ -105,14 +116,17 @@ export default function RestoreReplicasSection({
 	const onToggle = async (
 		id: string,
 		name: string,
-		freshnessSeconds: number | null | undefined,
+		overdueAfterSeconds: number | null | undefined,
+		params: unknown,
 		enabled: boolean,
 	) => {
 		try {
 			await callApi("restore_replicas", "update", {
 				id,
 				name,
-				freshness_seconds: freshnessSeconds ?? null,
+				overdue_after_seconds: overdueAfterSeconds ?? null,
+				// Preserve the stored parameter values; update replaces them wholesale.
+				params: (params ?? {}) as Record<string, unknown>,
 				enabled,
 			});
 			reload();
@@ -169,7 +183,8 @@ export default function RestoreReplicasSection({
 								<TableCell>Scope</TableCell>
 								<TableCell>Type</TableCell>
 								<TableCell>Intent</TableCell>
-								<TableCell>Freshness</TableCell>
+								<TableCell>Overdue after</TableCell>
+								<TableCell>Params</TableCell>
 								<TableCell>Enabled</TableCell>
 								{isAdmin && <TableCell align="right">Actions</TableCell>}
 							</TableRow>
@@ -193,19 +208,28 @@ export default function RestoreReplicasSection({
 										>
 											<span>{r.intent}</span>
 											{r.gap && (
-												<Tooltip title="The consumer does not currently support this intent, so Canopy is not dispatching it.">
+												<Tooltip title="The consumer does not currently advertise this intent, so Canopy is not dispatching it.">
 													<Chip label="gap" color="warning" size="small" />
 												</Tooltip>
 											)}
 										</Stack>
 									</TableCell>
-									<TableCell>{freshnessLabel(r.freshness_seconds)}</TableCell>
+									<TableCell>{overdueLabel(r.overdue_after_seconds)}</TableCell>
+									<TableCell>
+										<ParamSummary params={r.params} />
+									</TableCell>
 									<TableCell>
 										<Switch
 											checked={r.enabled}
 											disabled={!isAdmin}
 											onChange={(e) =>
-												onToggle(r.id, r.name, r.freshness_seconds, e.target.checked)
+												onToggle(
+													r.id,
+													r.name,
+													r.overdue_after_seconds,
+													r.params,
+													e.target.checked,
+												)
 											}
 											slotProps={{ input: { "aria-label": `toggle ${r.name}` } }}
 										/>
@@ -246,6 +270,7 @@ export default function RestoreReplicasSection({
 								<TableCell>Outcome</TableCell>
 								<TableCell>PG version</TableCell>
 								<TableCell>Snapshot</TableCell>
+								<TableCell>Replica</TableCell>
 							</TableRow>
 						</TableHead>
 						<TableBody>
@@ -272,6 +297,72 @@ export default function RestoreReplicasSection({
 	);
 }
 
+/** Compact one-line summary of a replica's stored parameter values. */
+function ParamSummary({ params }: { params: unknown }) {
+	if (!params || typeof params !== "object") return <span>—</span>;
+	const entries = Object.entries(params as Record<string, unknown>);
+	if (entries.length === 0) return <span>—</span>;
+	return (
+		<Typography variant="caption" color="text.secondary">
+			{entries.map(([k, v]) => `${k}=${String(v)}`).join(", ")}
+		</Typography>
+	);
+}
+
+/** A single typed parameter input for the declare-replica form. Empty leaves the
+ * parameter unset (the consumer receives its default, or null). */
+function ParamField({
+	name,
+	spec,
+	value,
+	onChange,
+}: {
+	name: string;
+	spec: ParamSpec;
+	value: string;
+	onChange: (value: string) => void;
+}) {
+	const def = spec.default;
+	const defHint = def != null ? `default: ${String(def)}` : "optional";
+
+	if (spec.type === "boolean") {
+		return (
+			<FormControl fullWidth size="small">
+				<InputLabel id={`param-${name}-label`}>{name}</InputLabel>
+				<Select
+					labelId={`param-${name}-label`}
+					label={name}
+					value={value}
+					onChange={(e) => onChange(e.target.value)}
+				>
+					<MenuItem value="">
+						<em>{defHint}</em>
+					</MenuItem>
+					<MenuItem value="true">true</MenuItem>
+					<MenuItem value="false">false</MenuItem>
+				</Select>
+			</FormControl>
+		);
+	}
+
+	const numeric =
+		spec.type === "integer" || spec.type === "bytes" || spec.type === "duration";
+	const unit =
+		spec.type === "duration" ? "seconds" : spec.type === "bytes" ? "bytes" : "";
+	return (
+		<TextField
+			size="small"
+			fullWidth
+			type={numeric ? "number" : "text"}
+			label={unit ? `${name} (${unit})` : name}
+			placeholder={def != null ? String(def) : "optional"}
+			helperText={defHint}
+			value={value}
+			onChange={(e) => onChange(e.target.value)}
+		/>
+	);
+}
+
 function CreateReplicaDialog({
 	groupId,
 	onClose,
@@ -281,7 +372,7 @@ function CreateReplicaDialog({
 	groupId: string;
 	onClose: () => void;
 	onCreated: () => void;
-	consumers: ConsumerOption[];
+	consumers: RestoreConsumerView[];
 }) {
 	const detail = useApi(
 		"server_groups",
@@ -297,12 +388,16 @@ function CreateReplicaDialog({
 	const [intent, setIntent] = useState("");
 	const [name, setName] = useState("");
 	const [nameEdited, setNameEdited] = useState(false);
-	const [freshnessHours, setFreshnessHours] = useState("");
+	const [overdueHours, setOverdueHours] = useState("");
+	const [paramValues, setParamValues] = useState<Record<string, string>>({});
 	const [pending, setPending] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
 	const selectedConsumer = consumers.find((c) => c.device_id === consumerId);
-	const intentOptions = selectedConsumer?.intents ?? [];
+	const intentOptions: IntentDescriptor[] = selectedConsumer?.intents ?? [];
+	const selectedDescriptor = intentOptions.find((d) => d.intent === intent);
+	const paramSchema: Record<string, ParamSpec> =
+		(selectedDescriptor?.params as Record<string, ParamSpec> | undefined) ?? {};
 	const servers =
 		detail.status === "ok"
 			? detail.data.servers.filter((s) => !s.archived)
@@ -319,12 +414,19 @@ function CreateReplicaDialog({
 		}
 	}, [consumers, consumerId]);
 
-	// Keep the intent on a value the selected consumer actually supports.
+	// Keep the intent on a value the selected consumer actually advertises.
 	useEffect(() => {
-		if (intentOptions.length > 0 && !intentOptions.includes(intent)) {
-			setIntent(intentOptions[0]);
+		const names = intentOptions.map((d) => d.intent);
+		if (names.length > 0 && !names.includes(intent)) {
+			setIntent(names[0]);
 		}
 	}, [intentOptions, intent]);
+
+	// Reset parameter values whenever the intent changes — a param set is
+	// specific to one intent's schema.
+	useEffect(() => {
+		setParamValues({});
+	}, [intent]);
 
 	// Suggest a name from the group and (if picked) server, until the operator
 	// types their own.
@@ -340,16 +442,42 @@ function CreateReplicaDialog({
 		if (!nameEdited) setName(suggestedName);
 	}, [suggestedName, nameEdited]);
 
+	// Convert the typed form fields into the wire params object, omitting any the
+	// operator left unset (the consumer resolves those to their default or null).
+	const buildParams = (): Record<string, unknown> | string => {
+		const out: Record<string, unknown> = {};
+		for (const [key, spec] of Object.entries(paramSchema)) {
+			const raw = paramValues[key];
+			if (raw == null || raw === "") continue;
+			if (spec.type === "boolean") {
+				out[key] = raw === "true";
+			} else if (
+				spec.type === "integer" ||
+				spec.type === "bytes" ||
+				spec.type === "duration"
+			) {
+				const n = Number(raw);
+				if (!Number.isFinite(n)) return `Parameter "${key}" must be a number`;
+				out[key] = n;
+			} else {
+				out[key] = raw;
+			}
+		}
+		return out;
+	};
+
 	const onSubmit = async () => {
 		if (!consumerId) return setError("Pick a consumer");
-		if (!intent) return setError("Pick an intent the consumer supports");
+		if (!intent) return setError("Pick an intent the consumer advertises");
 		if (!name.trim()) return setError("Name cannot be empty");
-		const hours = freshnessHours.trim();
-		const freshness_seconds =
+		const hours = overdueHours.trim();
+		const overdue_after_seconds =
 			hours === "" ? null : Math.round(Number(hours) * 3600);
-		if (freshness_seconds != null && !Number.isFinite(freshness_seconds)) {
-			return setError("Freshness must be a number of hours");
+		if (overdue_after_seconds != null && !Number.isFinite(overdue_after_seconds)) {
+			return setError("Overdue bound must be a number of hours");
 		}
+		const params = buildParams();
+		if (typeof params === "string") return setError(params);
 		setPending(true);
 		setError(null);
 		try {
@@ -360,7 +488,8 @@ function CreateReplicaDialog({
 				type,
 				intent,
 				name: name.trim(),
-				freshness_seconds,
+				overdue_after_seconds,
+				params,
 			});
 			onCreated();
 		} catch (err) {
@@ -434,13 +563,19 @@ function CreateReplicaDialog({
 							value={intent}
 							onChange={(e) => setIntent(e.target.value)}
 						>
-							{intentOptions.map((i) => (
-								<MenuItem key={i} value={i}>
-									{i}
+							{intentOptions.map((d) => (
+								<MenuItem key={d.intent} value={d.intent}>
+									{d.intent}
 								</MenuItem>
 							))}
 						</Select>
 					</FormControl>
+
+					{selectedDescriptor?.description && (
+						<Typography variant="body2" color="text.secondary">
+							{selectedDescriptor.description}
+						</Typography>
+					)}
 
 					<TextField
 						size="small"
@@ -457,11 +592,26 @@ function CreateReplicaDialog({
 						size="small"
 						fullWidth
 						type="number"
-						label="Freshness (hours, optional)"
-						placeholder="latest only"
-						value={freshnessHours}
-						onChange={(e) => setFreshnessHours(e.target.value)}
+						label="Overdue after (hours, optional)"
+						placeholder="no bound"
+						value={overdueHours}
+						onChange={(e) => setOverdueHours(e.target.value)}
 					/>
+
+					{Object.keys(paramSchema).length > 0 && (
+						<Typography variant="subtitle2">Parameters</Typography>
+					)}
+					{Object.entries(paramSchema).map(([key, spec]) => (
+						<ParamField
+							key={key}
+							name={key}
+							spec={spec}
+							value={paramValues[key] ?? ""}
+							onChange={(v) =>
+								setParamValues((prev) => ({ ...prev, [key]: v }))
+							}
+						/>
+					))}
 
 					{error && <Alert severity="error">{error}</Alert>}
 				</Stack>
@@ -479,10 +629,12 @@ function CreateReplicaDialog({
 }
 
 /** One restore-check row. When the consumer sent arbitrary `health_details`,
- * the row expands to reveal it as pretty-printed JSON. */
+ * the row expands to reveal it as pretty-printed JSON; a `url` in the details is
+ * surfaced as a link to the running replica. */
 function CheckRow({ check }: { check: BackupRestoreCheck }) {
 	const [open, setOpen] = useState(false);
 	const ok = check.outcome === "success" && check.replica_healthy;
+	const url = healthUrl(check.health_details);
 	const hasDetails =
 		check.health_details != null &&
 		!(
@@ -518,10 +670,25 @@ function CheckRow({ check }: { check: BackupRestoreCheck }) {
 				<TableCell>
 					{check.snapshot_id ? check.snapshot_id.slice(0, 12) : "—"}
 				</TableCell>
+				<TableCell>
+					{url ? (
+						<Link
+							href={url}
+							target="_blank"
+							rel="noopener noreferrer"
+							sx={{ display: "inline-flex", alignItems: "center", gap: 0.5 }}
+						>
+							open
+							<OpenInNewIcon fontSize="inherit" />
+						</Link>
+					) : (
+						"—"
+					)}
+				</TableCell>
 			</TableRow>
 			{hasDetails && (
 				<TableRow>
-					<TableCell sx={{ py: 0 }} colSpan={8}>
+					<TableCell sx={{ py: 0 }} colSpan={9}>
 						<Collapse in={open} timeout="auto" unmountOnExit>
 							<Box sx={{ my: 1 }}>
 								<Typography variant="caption" color="text.secondary">

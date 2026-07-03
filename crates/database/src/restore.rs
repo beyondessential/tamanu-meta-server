@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use commons_errors::{AppError, Result};
-use commons_types::backup::{BackupType, RestoreIntent, RunOutcome};
+use commons_types::backup::{BackupType, IntentDescriptor, RestoreIntent, RunOutcome, semantics};
 use commons_types::issue::Severity;
 use diesel::{
 	prelude::*,
@@ -20,6 +20,7 @@ use uuid::Uuid;
 
 use crate::backup::alerts::raise_group_event;
 use crate::backup::refs;
+use crate::backups::BackupRun;
 use crate::pg_duration::PgDuration;
 
 /// An operator-declared replica: a consumer should keep a replica of a
@@ -41,11 +42,16 @@ pub struct RestoreReplica {
 	#[schema(value_type = String)]
 	pub intent: RestoreIntent,
 	pub name: String,
-	/// Max time since the last healthy restore before the replica is overdue
-	/// — the consumer's *restore* cadence (download + restore + any hold), not
-	/// the backup interval. In whole seconds; `None` = no overdue bound.
+	/// The overdue bound. For a `once` intent it bounds how long the latest
+	/// snapshot may go unverified; otherwise it bounds staleness since the last
+	/// healthy report. `None` = no overdue bound.
 	#[schema(value_type = Option<i64>)]
-	pub freshness: Option<PgDuration>,
+	pub overdue_after: Option<PgDuration>,
+	/// Operator-supplied parameter values (name → value), passed through to the
+	/// consumer resolved against the intent's schema. Only the values the
+	/// operator set are stored.
+	#[schema(value_type = Object)]
+	pub params: serde_json::Value,
 	pub enabled: bool,
 	pub created_by: Option<String>,
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
@@ -64,7 +70,8 @@ pub struct NewRestoreReplica {
 	pub r#type: BackupType,
 	pub intent: RestoreIntent,
 	pub name: String,
-	pub freshness: Option<PgDuration>,
+	pub overdue_after: Option<PgDuration>,
+	pub params: serde_json::Value,
 	pub created_by: Option<String>,
 }
 
@@ -145,14 +152,16 @@ impl RestoreReplica {
 		db: &mut AsyncPgConnection,
 		id: Uuid,
 		name: &str,
-		freshness: Option<PgDuration>,
+		overdue_after: Option<PgDuration>,
+		params: serde_json::Value,
 		enabled: bool,
 	) -> Result<Self> {
 		use crate::schema::restore_replicas::dsl;
 		diesel::update(dsl::restore_replicas.filter(dsl::id.eq(id)))
 			.set((
 				dsl::name.eq(name),
-				dsl::freshness.eq(freshness),
+				dsl::overdue_after.eq(overdue_after),
+				dsl::params.eq(params),
 				dsl::enabled.eq(enabled),
 			))
 			.returning(Self::as_select())
@@ -196,48 +205,89 @@ impl RestoreReplica {
 	}
 }
 
-/// One intent a consumer can satisfy. The full set is registered by the
+/// A consumer's advertised capability row: one intent it can satisfy, with the
+/// description, semantics, and parameter schema it advertises. Registered by the
 /// consumer on start and whenever it changes; Canopy dispatches only matching
-/// worklist entries and constrains the declaration UX to this set.
-#[derive(Debug, Clone, Serialize, Queryable, Selectable, utoipa::ToSchema)]
+/// worklist entries, acts on the semantics it recognises, and constrains the
+/// declaration UX to this set.
+#[derive(Debug, Clone, Queryable, Selectable)]
 #[diesel(table_name = crate::schema::restore_consumer_capabilities)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct RestoreConsumerCapability {
-	pub consumer_device_id: Uuid,
-	#[schema(value_type = String)]
-	pub intent: RestoreIntent,
-	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
-	pub registered_at: Timestamp,
+struct CapabilityRow {
+	#[allow(dead_code)]
+	consumer_device_id: Uuid,
+	intent: RestoreIntent,
+	#[diesel(deserialize_as = jiff_diesel::Timestamp)]
+	#[allow(dead_code)]
+	registered_at: Timestamp,
+	description: Option<String>,
+	semantics: serde_json::Value,
+	params: serde_json::Value,
 }
 
+impl CapabilityRow {
+	fn into_descriptor(self) -> IntentDescriptor {
+		IntentDescriptor {
+			intent: self.intent,
+			description: self.description,
+			semantics: serde_json::from_value(self.semantics).unwrap_or_default(),
+			params: serde_json::from_value(self.params).unwrap_or_default(),
+		}
+	}
+}
+
+#[derive(Debug, Insertable)]
+#[diesel(table_name = crate::schema::restore_consumer_capabilities)]
+struct NewCapability {
+	consumer_device_id: Uuid,
+	intent: RestoreIntent,
+	description: Option<String>,
+	semantics: serde_json::Value,
+	params: serde_json::Value,
+}
+
+/// Registration and lookup of a consumer's advertised capabilities.
+pub struct RestoreConsumerCapability;
+
 impl RestoreConsumerCapability {
-	/// Replace a consumer's capability set with `intents`. Implemented as
-	/// insert-then-prune (not a transaction) so there is never a window where
-	/// a still-valid intent is absent: new intents are inserted first, then any
-	/// no longer present are removed.
+	/// Replace a consumer's advertised set with `descriptors`. Implemented as
+	/// upsert-then-prune (not a transaction) so there is never a window where a
+	/// still-valid intent is absent: advertised intents are upserted first, then
+	/// any no longer present are removed.
 	pub async fn register(
 		db: &mut AsyncPgConnection,
 		consumer_device_id: Uuid,
-		intents: &[RestoreIntent],
+		descriptors: &[IntentDescriptor],
 	) -> Result<()> {
 		use crate::schema::restore_consumer_capabilities::dsl;
+		use diesel::upsert::excluded;
 
-		let strings: Vec<String> = intents.iter().map(|i| i.as_str().to_owned()).collect();
-
-		let rows: Vec<_> = intents
+		let names: Vec<String> = descriptors
 			.iter()
-			.map(|i| {
-				(
-					dsl::consumer_device_id.eq(consumer_device_id),
-					dsl::intent.eq(i.as_str().to_owned()),
-				)
+			.map(|d| d.intent.as_str().to_owned())
+			.collect();
+
+		let rows: Vec<NewCapability> = descriptors
+			.iter()
+			.map(|d| NewCapability {
+				consumer_device_id,
+				intent: d.intent.clone(),
+				description: d.description.clone(),
+				semantics: serde_json::to_value(&d.semantics).expect("semantics serialize"),
+				params: serde_json::to_value(&d.params).expect("params serialize"),
 			})
 			.collect();
+
 		if !rows.is_empty() {
 			diesel::insert_into(dsl::restore_consumer_capabilities)
 				.values(rows)
 				.on_conflict((dsl::consumer_device_id, dsl::intent))
-				.do_nothing()
+				.do_update()
+				.set((
+					dsl::description.eq(excluded(dsl::description)),
+					dsl::semantics.eq(excluded(dsl::semantics)),
+					dsl::params.eq(excluded(dsl::params)),
+				))
 				.execute(db)
 				.await?;
 		}
@@ -245,26 +295,29 @@ impl RestoreConsumerCapability {
 		diesel::delete(
 			dsl::restore_consumer_capabilities
 				.filter(dsl::consumer_device_id.eq(consumer_device_id))
-				.filter(dsl::intent.ne_all(strings)),
+				.filter(dsl::intent.ne_all(names)),
 		)
 		.execute(db)
 		.await?;
 		Ok(())
 	}
 
-	/// The intents a consumer currently supports.
+	/// The descriptors a consumer currently advertises, ordered by intent.
 	pub async fn list_for_consumer(
 		db: &mut AsyncPgConnection,
 		consumer_device_id: Uuid,
-	) -> Result<Vec<RestoreIntent>> {
+	) -> Result<Vec<IntentDescriptor>> {
 		use crate::schema::restore_consumer_capabilities::dsl;
-		let rows: Vec<String> = dsl::restore_consumer_capabilities
+		let rows: Vec<CapabilityRow> = dsl::restore_consumer_capabilities
 			.filter(dsl::consumer_device_id.eq(consumer_device_id))
-			.select(dsl::intent)
+			.select(CapabilityRow::as_select())
 			.order(dsl::intent.asc())
 			.load(db)
 			.await?;
-		Ok(rows.into_iter().map(RestoreIntent::from).collect())
+		Ok(rows
+			.into_iter()
+			.map(CapabilityRow::into_descriptor)
+			.collect())
 	}
 }
 
@@ -468,14 +521,51 @@ impl BackupRestoreCheck {
 			})
 			.collect())
 	}
+
+	/// The snapshot id of the most recent *healthy* report per
+	/// `(server, type, intent)` in a group — the anchor for `once` suppression
+	/// (a snapshot is already verified when this equals the latest snapshot) and
+	/// snapshot-driven overdue. Reports without a snapshot id are ignored.
+	pub async fn latest_healthy_snapshot_by_key_for_group(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+	) -> Result<HashMap<(Uuid, BackupType, RestoreIntent), String>> {
+		use crate::schema::backup_restore_checks::dsl;
+		let rows: Vec<Self> = dsl::backup_restore_checks
+			.select(Self::as_select())
+			.filter(dsl::group_id.eq(group_id))
+			.filter(dsl::server_id.is_not_null())
+			.filter(dsl::snapshot_id.is_not_null())
+			.filter(dsl::outcome.eq(RunOutcome::Success))
+			.filter(dsl::replica_healthy.eq(true))
+			.distinct_on((dsl::server_id, dsl::type_, dsl::intent))
+			.order_by((
+				dsl::server_id,
+				dsl::type_,
+				dsl::intent,
+				dsl::observed_at.desc(),
+			))
+			.load(db)
+			.await?;
+		Ok(rows
+			.into_iter()
+			.filter_map(|r| match (r.server_id, r.snapshot_id) {
+				(Some(sid), Some(snap)) => Some(((sid, r.r#type.clone(), r.intent.clone()), snap)),
+				_ => None,
+			})
+			.collect())
+	}
 }
 
-/// Overdue restore-verification sweep: for every enabled declaration with a
-/// freshness bound (whose intent the consumer still supports), raise the
-/// `restore-verification` alert for any concrete `(server, type, intent)` whose
-/// last healthy report is older than the bound or never happened. Recovery is
-/// driven by the next healthy report ([`BackupRestoreCheck::record_report`]),
-/// so this only raises. Returns the number of overdue alerts filed.
+/// Overdue restore-verification sweep: for every enabled declaration with an
+/// overdue bound whose intent the consumer still advertises with the `check`
+/// semantic, raise the `restore-verification` alert for any concrete
+/// `(server, type, intent)` that is overdue. Overdue is measured per the intent's
+/// semantics: a `once` intent is overdue when the latest snapshot has gone
+/// unverified for longer than the bound; any other `check` intent is overdue
+/// when it has no healthy report within the bound. Recovery is driven by the
+/// next healthy report ([`BackupRestoreCheck::record_report`]), so this only
+/// raises. Returns the number of overdue alerts filed.
 pub async fn sweep_overdue(db: &mut AsyncPgConnection) -> Result<usize> {
 	use crate::schema::restore_replicas::dsl;
 	let now = Timestamp::now();
@@ -483,33 +573,45 @@ pub async fn sweep_overdue(db: &mut AsyncPgConnection) -> Result<usize> {
 	let declarations: Vec<RestoreReplica> = dsl::restore_replicas
 		.select(RestoreReplica::as_select())
 		.filter(dsl::enabled.eq(true))
-		.filter(dsl::freshness.is_not_null())
+		.filter(dsl::overdue_after.is_not_null())
 		.load(db)
 		.await?;
 
-	let mut capability_cache: HashMap<Uuid, std::collections::HashSet<RestoreIntent>> =
+	// Per-consumer descriptors (to read semantics) and per-group health anchors.
+	let mut capability_cache: HashMap<Uuid, HashMap<RestoreIntent, IntentDescriptor>> =
 		HashMap::new();
 	let mut healthy_cache: HashMap<Uuid, HashMap<(Uuid, BackupType, RestoreIntent), Timestamp>> =
+		HashMap::new();
+	let mut verified_snapshot_cache: HashMap<
+		Uuid,
+		HashMap<(Uuid, BackupType, RestoreIntent), String>,
+	> = HashMap::new();
+	let mut latest_snapshot_cache: HashMap<Uuid, HashMap<(Uuid, BackupType), BackupRun>> =
 		HashMap::new();
 	let mut filed = 0usize;
 
 	for d in declarations {
-		let Some(freshness) = d.freshness else {
+		let Some(overdue_after) = d.overdue_after else {
 			continue;
 		};
 
 		// Skip declarations the consumer can't satisfy — those are gaps, not
-		// restore-health incidents.
+		// restore-health incidents. Only `check` intents are held to a bound.
 		if !capability_cache.contains_key(&d.consumer_device_id) {
-			let set = RestoreConsumerCapability::list_for_consumer(db, d.consumer_device_id)
+			let map = RestoreConsumerCapability::list_for_consumer(db, d.consumer_device_id)
 				.await?
 				.into_iter()
+				.map(|desc| (desc.intent.clone(), desc))
 				.collect();
-			capability_cache.insert(d.consumer_device_id, set);
+			capability_cache.insert(d.consumer_device_id, map);
 		}
-		if !capability_cache[&d.consumer_device_id].contains(&d.intent) {
+		let Some(descriptor) = capability_cache[&d.consumer_device_id].get(&d.intent) else {
+			continue;
+		};
+		if !descriptor.has_semantic(semantics::CHECK) {
 			continue;
 		}
+		let once = descriptor.has_semantic(semantics::ONCE);
 
 		let servers = match d.server_id {
 			Some(sid) => {
@@ -529,31 +631,65 @@ pub async fn sweep_overdue(db: &mut AsyncPgConnection) -> Result<usize> {
 		};
 
 		if !healthy_cache.contains_key(&d.group_id) {
-			let map = BackupRestoreCheck::latest_healthy_by_key_for_group(db, d.group_id).await?;
-			healthy_cache.insert(d.group_id, map);
+			healthy_cache.insert(
+				d.group_id,
+				BackupRestoreCheck::latest_healthy_by_key_for_group(db, d.group_id).await?,
+			);
+			verified_snapshot_cache.insert(
+				d.group_id,
+				BackupRestoreCheck::latest_healthy_snapshot_by_key_for_group(db, d.group_id)
+					.await?,
+			);
+			latest_snapshot_cache.insert(
+				d.group_id,
+				BackupRun::latest_success_by_server_type_for_group(db, d.group_id).await?,
+			);
 		}
-		let healthy = healthy_cache[&d.group_id].clone();
 
 		for sid in servers {
 			let key = (sid, d.r#type.clone(), d.intent.clone());
-			let overdue = match healthy.get(&key) {
-				Some(last) => now.duration_since(*last) > freshness.0,
-				None => true,
+			let overdue = if once {
+				// A `once` intent is overdue only when a snapshot exists to verify,
+				// it is not the last one verified, and it has stood past the bound.
+				match latest_snapshot_cache[&d.group_id].get(&(sid, d.r#type.clone())) {
+					None => false,
+					Some(run) => {
+						let verified = verified_snapshot_cache[&d.group_id].get(&key);
+						let already = matches!(
+							(verified, run.snapshot_id.as_ref()),
+							(Some(v), Some(s)) if v == s
+						);
+						!already && now.duration_since(run.reported_at) > overdue_after.0
+					}
+				}
+			} else {
+				match healthy_cache[&d.group_id].get(&key) {
+					Some(last) => now.duration_since(*last) > overdue_after.0,
+					None => true,
+				}
 			};
 			if !overdue {
 				continue;
 			}
 			let r#ref = restore_verification_ref(sid, &d.r#type, &d.intent);
+			let message = if once {
+				format!(
+					"Latest snapshot for {} / {} on server {sid} has not been verified within its overdue bound",
+					d.r#type, d.intent
+				)
+			} else {
+				format!(
+					"No healthy restore verification for {} / {} on server {sid} within its overdue bound",
+					d.r#type, d.intent
+				)
+			};
 			raise_group_event(
 				db,
 				d.group_id,
 				&r#ref,
 				Severity::Error,
 				Some("restore verification overdue"),
-				&format!(
-					"No healthy restore verification within the freshness window: {} / {} for server {sid}",
-					d.r#type, d.intent
-				),
+				&message,
 				true,
 			)
 			.await?;

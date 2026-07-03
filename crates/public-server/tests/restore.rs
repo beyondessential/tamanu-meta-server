@@ -123,7 +123,9 @@ async fn capabilities_register_then_worklist_filters_by_intent() {
 			public
 				.post("/restore-capabilities")
 				.add_header("mtls-certificate", &cert)
-				.json(&serde_json::json!({ "intents": ["verify"] }))
+				.json(
+					&serde_json::json!({ "intents": [{"intent": "verify", "semantics": ["check", "once"]}] }),
+				)
 				.await
 				.assert_status(http::StatusCode::NO_CONTENT);
 
@@ -159,7 +161,9 @@ async fn worklist_expands_group_wide_to_each_server() {
 			public
 				.post("/restore-capabilities")
 				.add_header("mtls-certificate", &cert)
-				.json(&serde_json::json!({ "intents": ["verify"] }))
+				.json(
+					&serde_json::json!({ "intents": [{"intent": "verify", "semantics": ["check", "once"]}] }),
+				)
 				.await
 				.assert_status(http::StatusCode::NO_CONTENT);
 
@@ -210,7 +214,9 @@ async fn worklist_dedupes_server_specific_over_group_wide() {
 			public
 				.post("/restore-capabilities")
 				.add_header("mtls-certificate", &cert)
-				.json(&serde_json::json!({ "intents": ["verify"] }))
+				.json(
+					&serde_json::json!({ "intents": [{"intent": "verify", "semantics": ["check", "once"]}] }),
+				)
 				.await
 				.assert_status(http::StatusCode::NO_CONTENT);
 
@@ -246,6 +252,115 @@ async fn worklist_empty_without_registered_capabilities() {
 			resp.assert_status_ok();
 			let entries: Vec<serde_json::Value> = resp.json();
 			assert!(entries.is_empty(), "got {entries:?}");
+		},
+	)
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn worklist_once_suppresses_verified_snapshot_until_newer() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			make_config(&mut conn, group, "ready").await;
+			let server = make_server(&mut conn, group).await;
+			make_success_run(&mut conn, device_id, group, server, "snap-1").await;
+			declare_replica(&mut conn, device_id, group, "verify").await;
+			public
+				.post("/restore-capabilities")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"intents": [{"intent": "verify", "semantics": ["check", "once"]}]
+				}))
+				.await
+				.assert_status(http::StatusCode::NO_CONTENT);
+
+			// Before verification, snap-1 is on the worklist.
+			let entries: Vec<serde_json::Value> = public
+				.get("/restore-worklist")
+				.add_header("mtls-certificate", &cert)
+				.await
+				.json();
+			assert_eq!(entries.len(), 1, "got {entries:?}");
+
+			// Report snap-1 verified healthy → a `once` intent drops it.
+			public
+				.post("/restore-verification")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"group": group,
+					"server_id": server,
+					"type": "tamanu-postgres",
+					"intent": "verify",
+					"snapshot_id": "snap-1",
+					"outcome": "success",
+					"replica_healthy": true,
+					"observed_at": "2026-06-30T00:00:00Z",
+				}))
+				.await
+				.assert_status(http::StatusCode::NO_CONTENT);
+
+			let entries: Vec<serde_json::Value> = public
+				.get("/restore-worklist")
+				.add_header("mtls-certificate", &cert)
+				.await
+				.json();
+			assert!(
+				entries.is_empty(),
+				"verified snapshot suppressed: {entries:?}"
+			);
+
+			// A newer snapshot brings the entry back.
+			make_success_run(&mut conn, device_id, group, server, "snap-2").await;
+			let entries: Vec<serde_json::Value> = public
+				.get("/restore-worklist")
+				.add_header("mtls-certificate", &cert)
+				.await
+				.json();
+			assert_eq!(entries.len(), 1, "newer snapshot reappears: {entries:?}");
+			assert_eq!(entries[0]["snapshot_id"], "snap-2");
+		},
+	)
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn worklist_resolves_params_with_defaults_and_nulls() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			make_config(&mut conn, group, "ready").await;
+			let server = make_server(&mut conn, group).await;
+			make_success_run(&mut conn, device_id, group, server, "snap-1").await;
+			declare_replica(&mut conn, device_id, group, "analytics").await;
+			// Advertise analytics with a defaulted duration and an unset bytes cap.
+			public
+				.post("/restore-capabilities")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"intents": [{
+						"intent": "analytics",
+						"semantics": ["check", "url"],
+						"params": {
+							"minimum_uptime": {"type": "duration", "default": 7200},
+							"max_size": {"type": "bytes"},
+						},
+					}]
+				}))
+				.await
+				.assert_status(http::StatusCode::NO_CONTENT);
+
+			let entries: Vec<serde_json::Value> = public
+				.get("/restore-worklist")
+				.add_header("mtls-certificate", &cert)
+				.await
+				.json();
+			assert_eq!(entries.len(), 1, "got {entries:?}");
+			// Unset-with-default → default; unset-without-default → null.
+			assert_eq!(entries[0]["params"]["minimum_uptime"], 7200);
+			assert_eq!(entries[0]["params"]["max_size"], serde_json::Value::Null);
 		},
 	)
 	.await;

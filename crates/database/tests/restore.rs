@@ -3,7 +3,7 @@
 
 use commons_errors::AppError;
 use commons_tests::db::TestDb;
-use commons_types::backup::{BackupType, RestoreIntent, RunOutcome};
+use commons_types::backup::{BackupType, IntentDescriptor, RestoreIntent, RunOutcome};
 use database::diesel_async::AsyncPgConnection;
 use database::pg_duration::PgDuration;
 use database::{
@@ -111,8 +111,19 @@ fn new_replica(
 		r#type: BackupType::TamanuPostgres,
 		intent,
 		name: name.into(),
-		freshness: None,
+		overdue_after: None,
+		params: serde_json::json!({}),
 		created_by: Some("op@example.com".into()),
+	}
+}
+
+/// A minimal capability descriptor advertising the given intent and semantics.
+fn descriptor(intent: &str, semantics: &[&str]) -> IntentDescriptor {
+	IntentDescriptor {
+		intent: RestoreIntent::from(intent),
+		description: None,
+		semantics: semantics.iter().map(|s| (*s).to_owned()).collect(),
+		params: Default::default(),
 	}
 }
 
@@ -222,13 +233,15 @@ async fn update_and_delete() {
 			r.id,
 			"renamed",
 			Some(PgDuration(SignedDuration::from_secs(7200))),
+			serde_json::json!({"minimum_uptime": 60}),
 			false,
 		)
 		.await
 		.expect("update");
 		assert_eq!(updated.name, "renamed");
 		assert!(!updated.enabled);
-		assert_eq!(updated.freshness.map(|f| f.0.as_secs()), Some(7200));
+		assert_eq!(updated.overdue_after.map(|f| f.0.as_secs()), Some(7200));
+		assert_eq!(updated.params, serde_json::json!({"minimum_uptime": 60}));
 
 		// Disabled declarations drop out of the consumer worklist basis.
 		let enabled = RestoreReplica::list_enabled_for_consumer(&mut conn, consumer)
@@ -290,7 +303,7 @@ async fn authorizes_only_with_enabled_matching_declaration() {
 		);
 
 		// Disabling the only declaration revokes authorization.
-		RestoreReplica::update(&mut conn, r.id, "n", None, false)
+		RestoreReplica::update(&mut conn, r.id, "n", None, serde_json::json!({}), false)
 			.await
 			.expect("disable");
 		assert!(
@@ -312,8 +325,8 @@ async fn capability_register_replaces_set() {
 			&mut conn,
 			consumer,
 			&[
-				RestoreIntent::from("verify"),
-				RestoreIntent::from("analytics"),
+				descriptor("verify", &["check", "once"]),
+				descriptor("analytics", &["check", "url"]),
 			],
 		)
 		.await
@@ -321,23 +334,28 @@ async fn capability_register_replaces_set() {
 		let mut got = RestoreConsumerCapability::list_for_consumer(&mut conn, consumer)
 			.await
 			.expect("list");
-		got.sort_by_key(|i| i.to_string());
+		got.sort_by_key(|d| d.intent.to_string());
+		let intents: Vec<RestoreIntent> = got.iter().map(|d| d.intent.clone()).collect();
 		assert_eq!(
-			got,
+			intents,
 			vec![
 				RestoreIntent::from("analytics"),
 				RestoreIntent::from("verify")
 			]
 		);
+		// The advertised description/semantics/params round-trip.
+		let verify = got.iter().find(|d| d.intent.as_str() == "verify").unwrap();
+		assert!(verify.has_semantic("once"));
+		assert!(verify.has_semantic("check"));
 
-		// Re-register a different set: verify is kept, analytics dropped,
-		// disaster-recovery added.
+		// Re-register a different set: verify is kept (and its semantics updated),
+		// analytics dropped, files added.
 		RestoreConsumerCapability::register(
 			&mut conn,
 			consumer,
 			&[
-				RestoreIntent::from("verify"),
-				RestoreIntent::from("disaster-recovery"),
+				descriptor("verify", &["check"]),
+				descriptor("files", &["check", "url"]),
 			],
 		)
 		.await
@@ -345,13 +363,17 @@ async fn capability_register_replaces_set() {
 		let mut got = RestoreConsumerCapability::list_for_consumer(&mut conn, consumer)
 			.await
 			.expect("list");
-		got.sort_by_key(|i| i.to_string());
+		got.sort_by_key(|d| d.intent.to_string());
+		let intents: Vec<RestoreIntent> = got.iter().map(|d| d.intent.clone()).collect();
 		assert_eq!(
-			got,
-			vec![
-				RestoreIntent::from("disaster-recovery"),
-				RestoreIntent::from("verify")
-			]
+			intents,
+			vec![RestoreIntent::from("files"), RestoreIntent::from("verify")]
+		);
+		// Upsert updated verify's semantics (once dropped).
+		let verify = got.iter().find(|d| d.intent.as_str() == "verify").unwrap();
+		assert!(
+			!verify.has_semantic("once"),
+			"re-register updates semantics"
 		);
 
 		// Empty set clears all capabilities.
@@ -441,12 +463,16 @@ async fn sweep_overdue_raises_for_stale_replica_but_skips_gaps() {
 		let group = insert_group(&mut conn, "g").await;
 		insert_server(&mut conn, group).await;
 
-		// Consumer supports only `verify`.
-		RestoreConsumerCapability::register(&mut conn, consumer, &[RestoreIntent::from("verify")])
-			.await
-			.expect("register caps");
+		// Consumer advertises only `verify`, as a standing (non-`once`) check.
+		RestoreConsumerCapability::register(
+			&mut conn,
+			consumer,
+			&[descriptor("verify", &["check"])],
+		)
+		.await
+		.expect("register caps");
 
-		// A supported, freshness-bound declaration with no healthy check → overdue.
+		// A supported, bounded declaration with no healthy check → overdue.
 		let mut verify = new_replica(
 			consumer,
 			group,
@@ -454,12 +480,12 @@ async fn sweep_overdue_raises_for_stale_replica_but_skips_gaps() {
 			RestoreIntent::from("verify"),
 			"verify-all",
 		);
-		verify.freshness = Some(PgDuration(SignedDuration::from_secs(3600)));
+		verify.overdue_after = Some(PgDuration(SignedDuration::from_secs(3600)));
 		RestoreReplica::create(&mut conn, verify)
 			.await
 			.expect("verify decl");
 
-		// An unsupported-intent declaration (a gap) must NOT raise.
+		// An unadvertised-intent declaration (a gap) must NOT raise.
 		let mut analytics = new_replica(
 			consumer,
 			group,
@@ -467,7 +493,7 @@ async fn sweep_overdue_raises_for_stale_replica_but_skips_gaps() {
 			RestoreIntent::from("analytics"),
 			"analytics-all",
 		);
-		analytics.freshness = Some(PgDuration(SignedDuration::from_secs(3600)));
+		analytics.overdue_after = Some(PgDuration(SignedDuration::from_secs(3600)));
 		RestoreReplica::create(&mut conn, analytics)
 			.await
 			.expect("analytics decl");
@@ -477,6 +503,99 @@ async fn sweep_overdue_raises_for_stale_replica_but_skips_gaps() {
 			.expect("sweep");
 		assert_eq!(filed, 1, "only the supported declaration is overdue");
 		assert_eq!(active_restore_issues(&mut conn, group).await, 1);
+	})
+	.await;
+}
+
+/// Insert a successful backup run whose snapshot was produced `hours_ago`.
+async fn insert_old_success_run(
+	conn: &mut AsyncPgConnection,
+	device: Uuid,
+	group: Uuid,
+	server: Uuid,
+	snapshot: &str,
+	hours_ago: i64,
+) {
+	sql_query(
+		"INSERT INTO backup_runs (id, device_id, group_id, server_id, type, purpose, outcome, snapshot_id, reported_at) \
+		 VALUES (gen_random_uuid(), $1, $2, $3, 'tamanu-postgres', 'backup', 'success', $4, now() - make_interval(hours => $5))",
+	)
+	.bind::<sql_types::Uuid, _>(device)
+	.bind::<sql_types::Uuid, _>(group)
+	.bind::<sql_types::Uuid, _>(server)
+	.bind::<sql_types::Text, _>(snapshot)
+	.bind::<sql_types::Int4, _>(hours_ago as i32)
+	.execute(conn)
+	.await
+	.expect("insert old run");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sweep_once_is_snapshot_driven() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn, "g").await;
+		let server = insert_server(&mut conn, group).await;
+
+		RestoreConsumerCapability::register(
+			&mut conn,
+			consumer,
+			&[descriptor("verify", &["check", "once"])],
+		)
+		.await
+		.expect("register caps");
+
+		let mut verify = new_replica(
+			consumer,
+			group,
+			Some(server),
+			RestoreIntent::from("verify"),
+			"verify-srv",
+		);
+		verify.overdue_after = Some(PgDuration(SignedDuration::from_secs(3600)));
+		RestoreReplica::create(&mut conn, verify)
+			.await
+			.expect("verify decl");
+
+		// No snapshot exists yet → nothing to verify, so not overdue.
+		assert_eq!(
+			database::restore::sweep_overdue(&mut conn).await.unwrap(),
+			0,
+			"no snapshot → not overdue"
+		);
+
+		// A snapshot older than the bound, never verified → overdue.
+		insert_old_success_run(&mut conn, consumer, group, server, "snap-1", 2).await;
+		assert_eq!(
+			database::restore::sweep_overdue(&mut conn).await.unwrap(),
+			1,
+			"old unverified snapshot → overdue"
+		);
+
+		// Once that snapshot is verified healthy, the `once` intent is satisfied
+		// and no longer overdue (and the alert recovers).
+		BackupRestoreCheck::record_report(
+			&mut conn,
+			NewBackupRestoreCheck {
+				snapshot_id: Some("snap-1".into()),
+				..new_check(
+					consumer,
+					group,
+					server,
+					RestoreIntent::from("verify"),
+					RunOutcome::Success,
+					true,
+				)
+			},
+		)
+		.await
+		.expect("record healthy");
+		assert_eq!(
+			database::restore::sweep_overdue(&mut conn).await.unwrap(),
+			0,
+			"verified latest snapshot → not overdue"
+		);
+		assert_eq!(active_restore_issues(&mut conn, group).await, 0);
 	})
 	.await;
 }

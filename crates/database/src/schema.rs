@@ -335,6 +335,9 @@ diesel::table! {
 		consumer_device_id -> Uuid,
 		intent -> Text,
 		registered_at -> Timestamptz,
+		description -> Nullable<Text>,
+		semantics -> Jsonb,
+		params -> Jsonb,
 	}
 }
 
@@ -348,11 +351,12 @@ diesel::table! {
 		type_ -> Text,
 		intent -> Text,
 		name -> Text,
-		freshness -> Nullable<Interval>,
+		overdue_after -> Nullable<Interval>,
 		enabled -> Bool,
 		created_by -> Nullable<Text>,
 		created_at -> Timestamptz,
 		updated_at -> Timestamptz,
+		params -> Jsonb,
 	}
 }
 
