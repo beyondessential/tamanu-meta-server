@@ -46,40 +46,48 @@ fn higher_rank(a: ServerRank, b: ServerRank) -> ServerRank {
 	}
 }
 
+/// A group of servers managed together: incidents roll up across the group,
+/// members share tags, and the group carries its own notes and
+/// notification settings.
 #[derive(
 	Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable, utoipa::ToSchema,
 )]
 #[diesel(table_name = crate::schema::server_groups)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ServerGroup {
+	/// Unique identifier for this group.
 	pub id: Uuid,
+	/// When this group was created.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub created_at: Timestamp,
+	/// When this group was last modified.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub updated_at: Timestamp,
+	/// The group's display name.
 	pub name: String,
+	/// Free-form operator notes about this group.
 	#[serde(default)]
 	pub notes: String,
+	/// Key/value tags shared by every server in the group.
 	#[serde(default)]
 	pub tags: TagMap,
-	/// How long an `incident_open` Slack notification waits in the outbox
-	/// before the drainer is allowed to ship it. A resolve that arrives
-	/// inside this window cancels the open outright (and skips its own
-	/// notification), so groups with chronic flap can crank this up to
-	/// keep Slack quiet without losing the underlying incident record.
+	/// How long, in seconds, an incident-opened notification waits before
+	/// it's sent. If the incident resolves within this window, the
+	/// notification is cancelled outright and never sent — useful for
+	/// groups prone to brief flapping, so a transient blip doesn't spam
+	/// notifications, without losing the underlying incident record.
 	#[schema(value_type = i64, format = "int64")]
 	pub slack_open_delay: PgDuration,
-	/// The group's canonical member (highest rank, then highest kind) whose
-	/// version is cached in `effective_version`. Maintained by
-	/// [`ServerGroup::recompute_version`] on membership/rank/kind/delete
-	/// changes. `None` when the group has no members.
+	/// The id of the group's canonical member server (the one whose version
+	/// is reflected in `effective_version`), chosen by highest rank then
+	/// highest kind. `None` when the group has no members.
 	pub version_server_id: Option<Uuid>,
-	/// The canonical member's last reported version. Maintained by the
-	/// `statuses` AFTER INSERT trigger (canonical member reports a new version)
-	/// and by [`ServerGroup::recompute_version`] (membership changes).
+	/// The version reported by the group's canonical member server. `None`
+	/// if the group has no members or that member hasn't reported a
+	/// version yet.
 	pub effective_version: Option<VersionStr>,
-	/// When set, the group is archived (soft-deleted): hidden from live listings
-	/// but kept (with its archived members) and restorable.
+	/// When set, the group is archived: hidden from live listings but kept,
+	/// along with its members, and can be restored.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	#[diesel(
 		deserialize_as = jiff_diesel::NullableTimestamp,
@@ -89,27 +97,42 @@ pub struct ServerGroup {
 	pub deleted_at: Option<Timestamp>,
 }
 
+/// Fields required to create a new server group.
 #[derive(Debug, Clone, Deserialize, Insertable, utoipa::ToSchema)]
 #[diesel(table_name = crate::schema::server_groups)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewServerGroup {
+	/// The group's display name.
 	pub name: String,
+	/// Free-form operator notes about this group. Defaults to empty.
 	#[serde(default)]
 	pub notes: String,
+	/// Key/value tags shared by every server in the group. Defaults to
+	/// empty.
 	#[serde(default)]
 	pub tags: TagMap,
+	/// How long, in seconds, an incident-opened notification waits before
+	/// it's sent, letting brief flaps resolve without notifying. Defaults
+	/// to the system default delay if omitted.
 	#[serde(default)]
 	#[schema(value_type = Option<i64>, format = "int64")]
 	pub slack_open_delay: Option<PgDuration>,
 }
 
+/// Fields to update on an existing server group. Only the fields present
+/// are changed; omitted fields are left as-is.
 #[derive(Debug, Clone, Deserialize, AsChangeset, utoipa::ToSchema)]
 #[diesel(table_name = crate::schema::server_groups)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct PartialServerGroup {
+	/// New display name for the group.
 	pub name: Option<String>,
+	/// New free-form operator notes for the group.
 	pub notes: Option<String>,
+	/// New set of key/value tags shared by every server in the group. This
+	/// replaces the whole tag set.
 	pub tags: Option<TagMap>,
+	/// New incident-opened notification delay, in seconds.
 	#[schema(value_type = Option<i64>, format = "int64")]
 	pub slack_open_delay: Option<PgDuration>,
 }

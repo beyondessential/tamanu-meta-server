@@ -19,12 +19,13 @@ pub mod sql;
 pub mod statuses;
 pub mod versions;
 
-/// Standard wrapper for paginated list responses. The total reflects the full
-/// row count (not just the current page) so the frontend can render page
-/// counts without a separate count fetch.
+/// A single page of a paginated list response.
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Page<T> {
+	/// The items in this page.
 	pub items: Vec<T>,
+	/// The total number of items across all pages, not just this one — use
+	/// this to render page counts without a separate request.
 	pub total: u64,
 }
 
