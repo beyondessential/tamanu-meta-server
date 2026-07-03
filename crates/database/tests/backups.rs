@@ -782,6 +782,90 @@ async fn maintenance_list_filtered_narrows_by_every_field() {
 	.await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn maintenance_latest_successful_finished_at() {
+	TestDb::run(|mut conn, _url| async move {
+		let group_id = insert_group(&mut conn, "g").await;
+
+		// No runs at all → None.
+		assert_eq!(
+			BackupMaintenanceRun::latest_successful_finished_at_for_group(&mut conn, group_id)
+				.await
+				.unwrap(),
+			None
+		);
+
+		// A failed run doesn't count.
+		let failed = BackupMaintenanceRun::start(&mut conn, group_id, MaintenanceKind::Quick)
+			.await
+			.unwrap();
+		BackupMaintenanceRun::finish(
+			&mut conn,
+			failed,
+			RunOutcome::Failure,
+			Some("boom".into()),
+			None,
+		)
+		.await
+		.unwrap();
+		assert_eq!(
+			BackupMaintenanceRun::latest_successful_finished_at_for_group(&mut conn, group_id)
+				.await
+				.unwrap(),
+			None
+		);
+
+		// A successful run is picked up.
+		let ok = BackupMaintenanceRun::start(&mut conn, group_id, MaintenanceKind::Full)
+			.await
+			.unwrap();
+		BackupMaintenanceRun::finish(&mut conn, ok, RunOutcome::Success, None, Some(2048))
+			.await
+			.unwrap();
+		let first_success =
+			BackupMaintenanceRun::latest_successful_finished_at_for_group(&mut conn, group_id)
+				.await
+				.unwrap();
+		assert!(first_success.is_some());
+
+		// A later failure doesn't regress the "latest success" answer.
+		tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+		let failed_after = BackupMaintenanceRun::start(&mut conn, group_id, MaintenanceKind::Quick)
+			.await
+			.unwrap();
+		BackupMaintenanceRun::finish(
+			&mut conn,
+			failed_after,
+			RunOutcome::Failure,
+			Some("boom".into()),
+			None,
+		)
+		.await
+		.unwrap();
+		assert_eq!(
+			BackupMaintenanceRun::latest_successful_finished_at_for_group(&mut conn, group_id)
+				.await
+				.unwrap(),
+			first_success
+		);
+
+		// A newer success overtakes it.
+		tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+		let ok2 = BackupMaintenanceRun::start(&mut conn, group_id, MaintenanceKind::Full)
+			.await
+			.unwrap();
+		BackupMaintenanceRun::finish(&mut conn, ok2, RunOutcome::Success, None, Some(4096))
+			.await
+			.unwrap();
+		let second_success =
+			BackupMaintenanceRun::latest_successful_finished_at_for_group(&mut conn, group_id)
+				.await
+				.unwrap();
+		assert!(second_success > first_success);
+	})
+	.await;
+}
+
 // --- repo snapshots ---------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread")]
