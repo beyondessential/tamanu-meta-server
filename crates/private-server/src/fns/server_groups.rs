@@ -23,6 +23,11 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(search))
 }
 
+/// List all live server groups.
+///
+/// Returns every non-archived server group, including its name, notes, tags,
+/// Slack notification delay, and effective version information. The request
+/// body is ignored; send an empty JSON object.
 #[utoipa::path(
 	post,
 	path = "/list",
@@ -42,14 +47,21 @@ pub async fn list(
 	Ok(Json(groups))
 }
 
+/// The number of live servers in one server group.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct GroupServerCount {
+	/// Identifier of the server group.
 	pub server_group_id: Uuid,
+	/// Number of live (non-archived) servers currently in the group.
 	pub server_count: i64,
 }
 
-/// Live (non-archived) server count per group, for the groups list. Groups with
-/// no live members are omitted (the client defaults missing entries to 0).
+/// Count live servers per group.
+///
+/// Returns one entry per server group that has at least one live
+/// (non-archived) member server. Groups with no live members are omitted, so
+/// treat a missing entry as a count of zero. The request body is ignored;
+/// send an empty JSON object.
 #[utoipa::path(
 	post,
 	path = "/server_counts",
@@ -77,17 +89,25 @@ pub async fn server_counts(
 	))
 }
 
+/// Identifies the server group to operate on.
 #[derive(Deserialize, ToSchema)]
 pub struct GroupIdArgs {
+	/// Identifier of the server group.
 	pub server_group_id: Uuid,
 }
 
-/// One effective `billing.*` label canopy attributes a group's AWS resources
-/// under (computed: explicit `billing.*` group tags honored verbatim, else
-/// product `tamanu`, deployment = lower-kebab group name, stage = highest rank).
+/// One effective billing label attributed to a group's cloud resources.
+///
+/// Labels are computed from the group's configuration: explicit `billing.*`
+/// tags on the group are honoured verbatim; otherwise the product defaults to
+/// `tamanu`, the deployment to the group name in lower-kebab-case, and the
+/// stage to the group's highest-ranked live member (for example `prod`). The
+/// stage label is omitted entirely when the group has no ranked members.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct BillingTag {
+	/// Label key, for example `billing.product`.
 	pub key: String,
+	/// Label value.
 	pub value: String,
 }
 
@@ -109,14 +129,23 @@ pub(crate) async fn group_billing_labels(
 	)
 }
 
+/// A server group together with its member servers and billing labels.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct GroupDetail {
+	/// The group itself.
 	pub group: ServerGroup,
+	/// The group's member servers, sorted by name, with current status and
+	/// display host included.
 	pub servers: Vec<super::servers::ServerInfo>,
 	/// The group's effective `billing.*` labels (product/deployment/stage).
 	pub billing_labels: Vec<BillingTag>,
 }
 
+/// Get a server group with its members.
+///
+/// Returns the group, its member servers (sorted by name, with current status
+/// and display host), and the group's effective billing labels. Responds 404
+/// if no group exists with the given identifier.
 #[utoipa::path(
 	post,
 	path = "/get",
@@ -161,20 +190,31 @@ pub async fn get(
 	}))
 }
 
+/// Request to create a new server group.
 #[derive(Deserialize, ToSchema)]
 pub struct ServerGroupsCreateArgs {
+	/// Display name for the new group.
 	pub name: String,
+	/// Free-form notes about the group. Defaults to empty.
 	#[serde(default)]
 	pub notes: String,
+	/// Tags to set on the group, as an object of string keys to string
+	/// values. Keys with the reserved `canopy:` prefix cannot be set.
+	/// Defaults to empty.
 	#[serde(default)]
 	pub tags: TagMap,
-	/// Optional initial value (seconds) for the group's Slack open
-	/// cooldown. Omit to let the database default apply.
+	/// Optional initial delay, in whole seconds, before an "incident opened"
+	/// Slack notification for this group is delivered; an incident that
+	/// resolves within the window never notifies. Omit to accept the default.
 	#[serde(default)]
 	#[schema(value_type = Option<i64>, format = "int64")]
 	pub slack_open_delay: Option<database::pg_duration::PgDuration>,
 }
 
+/// Create a server group.
+///
+/// Creates a new, empty server group and returns it. Requires the caller to
+/// be on the admin allow-list. Responds 400 if the request is invalid.
 #[utoipa::path(
 	post,
 	path = "/create",
@@ -206,12 +246,21 @@ pub async fn create(
 	Ok(Json(group))
 }
 
+/// Request to update a server group.
 #[derive(Deserialize, ToSchema)]
 pub struct ServerGroupsUpdateArgs {
+	/// Identifier of the group to update.
 	pub server_group_id: Uuid,
+	/// The fields to change. Any field omitted is left unchanged.
 	pub data: PartialServerGroup,
 }
 
+/// Update a server group.
+///
+/// Applies a partial update: only the fields present in `data` (name, notes,
+/// tags, Slack notification delay) are changed. Returns the updated group.
+/// Requires the caller to be on the admin allow-list. Responds 404 if the
+/// group does not exist and 400 if the request is invalid.
 #[utoipa::path(
 	post,
 	path = "/update",
@@ -235,9 +284,12 @@ pub async fn update(
 	Ok(Json(group))
 }
 
-/// Archive (soft-delete) a group. Kept at `/delete` for the existing client;
-/// the group is hidden from live listings but restorable. Refuses if the group
-/// still has live members (409).
+/// Archive a server group.
+///
+/// Soft-deletes the group: it disappears from live listings but is kept and
+/// can be restored later. Requires the caller to be on the admin allow-list.
+/// Responds 409 if the group still has live member servers; move or archive
+/// those first.
 #[utoipa::path(
 	post,
 	path = "/delete",
@@ -260,6 +312,11 @@ pub async fn delete(
 	Ok(Json(()))
 }
 
+/// Restore an archived server group.
+///
+/// Un-archives a previously deleted group so it reappears in live listings.
+/// Requires the caller to be on the admin allow-list. Responds 404 if the
+/// group does not exist.
 #[utoipa::path(
 	post,
 	path = "/restore",
@@ -282,6 +339,10 @@ pub async fn restore(
 	Ok(Json(()))
 }
 
+/// List archived server groups.
+///
+/// Returns every group that has been archived (soft-deleted) and can be
+/// restored. The request body is ignored; send an empty JSON object.
 #[utoipa::path(
 	post,
 	path = "/list_archived",
@@ -301,11 +362,16 @@ pub async fn list_archived(
 	Ok(Json(groups))
 }
 
+/// Search terms for finding server groups.
 #[derive(Deserialize, ToSchema)]
 pub struct ServerGroupsSearchArgs {
+	/// Free-text search query.
 	pub query: String,
 }
 
+/// Search live server groups.
+///
+/// Returns non-archived groups matching the free-text query.
 #[utoipa::path(
 	post,
 	path = "/search",
