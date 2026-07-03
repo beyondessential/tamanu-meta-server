@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::str::FromStr as _;
 
 use axum::{
 	Json,
@@ -8,7 +9,10 @@ use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::{
 	backup_jobs::backups_due_now_for_server, device_auth::ServerDevice, headers::VersionHeader,
 };
-use commons_types::{backup::BackupType, device::DeviceRole, issue::Severity, status::CheckResult};
+use commons_types::{
+	backup::BackupType, device::DeviceRole, issue::Severity, status::CheckResult,
+	version::VersionStr,
+};
 use database::{
 	Db,
 	devices::Device,
@@ -68,6 +72,11 @@ pub struct StatusPayload {
 	/// Free-form additional data (uptime, postgres version, timezone,
 	/// hostname, etc.). Stored verbatim in `statuses.extra` and
 	/// surfaced as raw JSON in the status snapshot.
+	///
+	/// A `tamanuVersion` here is used as the server's tracked version
+	/// (compared against the published version catalog), superseding the
+	/// legacy `X-Version` request header. If both are present,
+	/// `tamanuVersion` wins; if neither is, the status is versionless.
 	#[serde(flatten)]
 	#[schema(additional_properties = true, value_type = Object)]
 	pub extra: serde_json::Map<String, serde_json::Value>,
@@ -151,7 +160,7 @@ async fn create(
 	Path(server_id): Path<Uuid>,
 	State(db): State<Db>,
 	device: ServerDevice,
-	current_version: VersionHeader,
+	current_version: Option<VersionHeader>,
 	body: Option<Json<serde_json::Value>>,
 ) -> Result<Json<StatusResponse>> {
 	let mut db = db.get().await?;
@@ -179,6 +188,12 @@ async fn create(
 	let raw = body.map(|j| j.0).unwrap_or(serde_json::Value::Null);
 	let (healthy, health, extra) = split_health_from_extra(raw)?;
 
+	// The server version canopy tracks (and compares against the published
+	// version catalog) is the Tamanu version. Prefer the payload's
+	// `tamanuVersion` extra; fall back to the legacy `X-Version` header for
+	// reporters that predate carrying it in the body. Either may be absent.
+	let version = resolve_version(&extra, current_version.map(|v| v.0));
+
 	let Some(health) = health else {
 		// Legacy format (no `health` array). Off by default — only servers an
 		// operator has explicitly opted in via `allow_legacy_status` may use
@@ -186,7 +201,7 @@ async fn create(
 		if !server.allow_legacy_status {
 			return Err(AppError::BadRequest("`health` array is required".into()));
 		}
-		let status = create_legacy_status(&mut db, server_id, id, extra, current_version.0).await?;
+		let status = create_legacy_status(&mut db, server_id, id, extra, version).await?;
 		return Ok(Json(StatusResponse { status, backup_now }));
 	};
 
@@ -207,7 +222,7 @@ async fn create(
 			let status = NewStatus {
 				server_id,
 				device_id: Some(id),
-				version: Some(current_version.0),
+				version,
 				extra,
 				healthy,
 				health,
@@ -236,7 +251,7 @@ async fn create_legacy_status(
 	server_id: Uuid,
 	device_id: Uuid,
 	extra: serde_json::Value,
-	version: commons_types::version::VersionStr,
+	version: Option<VersionStr>,
 ) -> Result<Status> {
 	let (healthy, health) = match Status::latest_for_server(db, server_id).await? {
 		Some(prior) => (prior.healthy, prior.health),
@@ -245,13 +260,27 @@ async fn create_legacy_status(
 	NewStatus {
 		server_id,
 		device_id: Some(device_id),
-		version: Some(version),
+		version,
 		extra,
 		healthy,
 		health,
 	}
 	.save(db)
 	.await
+}
+
+/// Resolve the server version to record on this status. Prefers the payload's
+/// `tamanuVersion` extra (the version bestool now carries in the body), parsed
+/// as a semver; falls back to the `X-Version` header for reporters that still
+/// send it there. Returns `None` when neither is present or parseable — the
+/// `statuses.version` column is nullable and every consumer already handles a
+/// versionless row.
+fn resolve_version(extra: &serde_json::Value, header: Option<VersionStr>) -> Option<VersionStr> {
+	extra
+		.get("tamanuVersion")
+		.and_then(|v| v.as_str())
+		.and_then(|s| VersionStr::from_str(s).ok())
+		.or(header)
 }
 
 /// Per-push event filing. Warning/failed checks land at
