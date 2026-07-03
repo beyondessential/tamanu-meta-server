@@ -23,6 +23,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 #[utoipa::path(
 	post,
 	path = "/{version}/{artifact_type}/{platform}",
+	operation_id = "register_artifact",
 	tag = "artifacts",
 	security(("releaser-device" = [])),
 	params(

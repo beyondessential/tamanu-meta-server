@@ -17,6 +17,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 #[utoipa::path(
 	post,
 	path = "/events",
+	operation_id = "submit_event",
 	tag = "events",
 	security(("server-device" = [])),
 	request_body = NewEvent,

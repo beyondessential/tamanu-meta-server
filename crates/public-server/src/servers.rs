@@ -62,6 +62,7 @@ fn rank_order(rank: &Option<ServerRank>) -> u32 {
 #[utoipa::path(
 	get,
 	path = "/",
+	operation_id = "list_servers",
 	tag = "servers",
 	responses(
 		(status = 200, description = "Publicly-listed central servers, ordered by rank then name.", body = Vec<PublicServer>),

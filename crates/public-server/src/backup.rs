@@ -141,6 +141,7 @@ pub struct CapabilitiesArgs {
 #[utoipa::path(
 	post,
 	path = "/backup-capabilities",
+	operation_id = "register_backup_capabilities",
 	tag = "backup",
 	security(("server-device" = [])),
 	request_body = CapabilitiesArgs,
@@ -285,6 +286,7 @@ pub fn backup_session_policy(bucket: &str, prefix: &str) -> String {
 #[utoipa::path(
 	post,
 	path = "/backup-credentials",
+	operation_id = "mint_backup_credentials",
 	tag = "backup",
 	security(("server-device" = [])),
 	request_body = CredentialsArgs,

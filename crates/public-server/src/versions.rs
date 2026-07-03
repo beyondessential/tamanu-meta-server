@@ -160,6 +160,7 @@ pub fn parse_markdown(text: &str) -> String {
 #[utoipa::path(
 	get,
 	path = "/",
+	operation_id = "list_versions",
 	tag = "versions",
 	responses(
 		(status = 200, description = "All published versions.", body = Vec<Version>),
@@ -175,6 +176,7 @@ async fn list(State(db): State<Db>) -> Result<Json<Vec<Version>>> {
 #[utoipa::path(
 	post,
 	path = "/{version}",
+	operation_id = "create_version",
 	tag = "versions",
 	security(("releaser-device" = [])),
 	params(("version" = String, Path)),
