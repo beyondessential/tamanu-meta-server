@@ -68,30 +68,38 @@ fn restore_session_policy(bucket: &str, prefix: &str) -> String {
 /// Env var that forces the fake prober (no AWS needed). Set by the e2e fixture.
 const FAKE_ENV: &str = "CANOPY_BACKUP_PROBER_FAKE";
 
-/// What the probe found at `bucket/prefix`.
+/// What was found when inspecting the target bucket/prefix during setup.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ProbeState {
-	/// Nothing there (or only a `.storageconfig`) — safe to create from-birth.
+	/// Nothing there (or only a leftover marker file) — safe to create a new
+	/// backup repository from scratch.
 	Empty,
-	/// An existing kopia repo (`<prefix>kopia.repository` present) — import only.
+	/// An existing backup repository was found — it can only be imported, not
+	/// created fresh over.
 	KopiaRepo,
-	/// Non-kopia objects present — block; operator must clear it or pick another
-	/// prefix/bucket.
+	/// Objects that don't belong to a backup repository are present. Setup is
+	/// blocked; the operator must clear the location or pick another
+	/// bucket/prefix.
 	OtherContent,
-	/// Couldn't assume the role or list the bucket (creds/role/bucket/region).
+	/// The bucket or prefix couldn't be inspected — e.g. a credentials, role,
+	/// bucket-name, or region problem.
 	Inaccessible,
 }
 
-/// Result of an inspect probe. `already_configured` is filled by the handler
-/// (a DB check), not the prober.
+/// Result of inspecting a bucket/prefix during backup setup. `already_configured`
+/// (added separately by the endpoint that returns this) indicates whether the
+/// location is already in use by an existing configuration.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ProbeResult {
+	/// What was found at the inspected location.
 	#[schema(value_type = String)]
 	pub state: ProbeState,
-	/// Present for `Inaccessible`: the assume/list failure, surfaced-ish.
+	/// Present when `state` is `inaccessible`: a description of why the
+	/// bucket/prefix couldn't be inspected.
 	pub error: Option<String>,
-	/// A few object keys, for the `OtherContent` warning.
+	/// A few sample object keys, present when `state` is `other_content`, to
+	/// help the operator identify what's there.
 	pub object_sample: Vec<String>,
 }
 
