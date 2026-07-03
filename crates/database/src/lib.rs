@@ -62,14 +62,33 @@ pub fn init() -> Db {
 }
 
 pub fn init_to(url: &str) -> Db {
-	// Bound the pool. Every pod that links this crate (the two servers plus each
-	// job) runs its own pool against the same primary; mobc's defaults
-	// (max_open=10, idle and lifetimes uncapped) let the fleet's aggregate
-	// demand exceed the server's max_connections and pin backends indefinitely.
-	// Size per role via env, and recycle connections so a failover doesn't leave
-	// the pool holding dead backends.
-	let max_open = env_u64("DB_MAX_OPEN_CONNECTIONS", 5);
-	let max_idle = env_u64("DB_MAX_IDLE_CONNECTIONS", 2);
+	build_pool(url, "DB_MAX_OPEN_CONNECTIONS", "DB_MAX_IDLE_CONNECTIONS")
+}
+
+/// A second pool for workloads that only ever read, built against
+/// `RO_DATABASE_URL` when it's set. Routing reads off the primary pool keeps
+/// read traffic from starving writers of connections, and lets ops later
+/// point the var at an actual read replica without a code change. `None`
+/// when the var is unset — callers fall back to the primary pool.
+pub fn init_ro() -> Option<Db> {
+	std::env::var("RO_DATABASE_URL")
+		.ok()
+		.map(|url| init_ro_to(&url))
+}
+
+pub fn init_ro_to(url: &str) -> Db {
+	build_pool(url, "DB_RO_MAX_OPEN_CONNECTIONS", "DB_RO_MAX_IDLE_CONNECTIONS")
+}
+
+// Bound the pool. Every pod that links this crate (the two servers plus each
+// job) runs its own pool against the same backend; mobc's defaults
+// (max_open=10, idle and lifetimes uncapped) let the fleet's aggregate demand
+// exceed the server's max_connections and pin backends indefinitely. Size per
+// role via env, and recycle connections so a failover doesn't leave the pool
+// holding dead backends.
+fn build_pool(url: &str, max_open_key: &str, max_idle_key: &str) -> Db {
+	let max_open = env_u64(max_open_key, 5);
+	let max_idle = env_u64(max_idle_key, 2);
 	Pool::builder()
 		.max_open(max_open)
 		.max_idle(max_idle)
