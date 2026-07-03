@@ -837,6 +837,7 @@ async fn seed_statuses(
 			"pgVersion": pg,
 			"tamanuVersion": tamanu,
 			"bestoolVersion": "2.10.5",
+			"nodeVersion": "20.11.0",
 			"uptimeSecs": uptime,
 		})
 	}

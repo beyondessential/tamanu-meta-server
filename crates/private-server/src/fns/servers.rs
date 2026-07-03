@@ -526,7 +526,11 @@ pub async fn get_detail(
 
 		let platform = st.platform();
 		let postgres = st.postgres_version();
-		let nodejs = connection.and_then(|d| d.nodejs_version());
+		// Prefer the payload-reported `nodeVersion`; fall back to the device
+		// connection's User-Agent.
+		let nodejs = st
+			.node_version()
+			.or_else(|| connection.and_then(|d| d.nodejs_version()));
 		let version_distance = latest_version
 			.as_ref()
 			.and_then(|lv| st.distance_from_version(lv));
