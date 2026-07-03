@@ -820,6 +820,8 @@ struct SnapshotData {
 	healthy: Option<bool>,
 	#[serde(default)]
 	health: Option<serde_json::Value>,
+	#[serde(default)]
+	nodejs: Option<String>,
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -852,6 +854,84 @@ async fn snapshot_returns_latest_when_at_omitted() {
 		assert_eq!(data.healthy, Some(false), "latest is the most recent");
 		let health = data.health.unwrap();
 		assert_eq!(health.as_array().unwrap().len(), 1);
+	})
+	.await
+}
+
+/// The Node.js version reported in the status payload's `nodeVersion` extra
+/// is preferred over the value scraped from the device connection's User-Agent.
+#[tokio::test(flavor = "multi_thread")]
+async fn snapshot_prefers_payload_node_version_over_user_agent() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO devices (id, role) VALUES
+			('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'server');
+
+			INSERT INTO servers (id, host, kind, device_id) VALUES
+			('20000000-0000-0000-0000-000000000010', 'https://node.example.com', 'central', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
+
+			INSERT INTO device_connections (device_id, ip, user_agent) VALUES
+			('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', '192.168.1.10', 'Tamanu/1.0.0 Node.js/18.20.5');
+
+			INSERT INTO statuses (server_id, device_id, created_at, healthy, health, extra) VALUES
+			('20000000-0000-0000-0000-000000000010', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', NOW() - INTERVAL '1 hour', true, '[]'::jsonb, '{\"nodeVersion\":\"20.11.0\"}'::jsonb)",
+		)
+		.await
+		.unwrap();
+
+		let r = private
+			.post("/api/statuses/snapshot")
+			.json(&serde_json::json!({
+				"server_id": "20000000-0000-0000-0000-000000000010"
+			}))
+			.await;
+		r.assert_status_ok();
+		let data: Option<SnapshotData> = r.json();
+		let data = data.expect("snapshot returned");
+		assert_eq!(
+			data.nodejs,
+			Some("20.11.0".to_string()),
+			"payload nodeVersion supersedes the User-Agent's Node.js token"
+		);
+	})
+	.await
+}
+
+/// With no `nodeVersion` in the payload, the snapshot falls back to the
+/// `Node.js/x` token in the device connection's User-Agent.
+#[tokio::test(flavor = "multi_thread")]
+async fn snapshot_node_version_falls_back_to_user_agent() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO devices (id, role) VALUES
+			('cccccccc-cccc-cccc-cccc-cccccccccccc', 'server');
+
+			INSERT INTO servers (id, host, kind, device_id) VALUES
+			('20000000-0000-0000-0000-000000000011', 'https://node2.example.com', 'central', 'cccccccc-cccc-cccc-cccc-cccccccccccc');
+
+			INSERT INTO device_connections (device_id, ip, user_agent) VALUES
+			('cccccccc-cccc-cccc-cccc-cccccccccccc', '192.168.1.11', 'Tamanu/1.0.0 Node.js/18.20.5');
+
+			INSERT INTO statuses (server_id, device_id, created_at, healthy, health, extra) VALUES
+			('20000000-0000-0000-0000-000000000011', 'cccccccc-cccc-cccc-cccc-cccccccccccc', NOW() - INTERVAL '1 hour', true, '[]'::jsonb, '{}'::jsonb)",
+		)
+		.await
+		.unwrap();
+
+		let r = private
+			.post("/api/statuses/snapshot")
+			.json(&serde_json::json!({
+				"server_id": "20000000-0000-0000-0000-000000000011"
+			}))
+			.await;
+		r.assert_status_ok();
+		let data: Option<SnapshotData> = r.json();
+		let data = data.expect("snapshot returned");
+		assert_eq!(
+			data.nodejs,
+			Some("18.20.5".to_string()),
+			"absent nodeVersion falls back to the User-Agent"
+		);
 	})
 	.await
 }

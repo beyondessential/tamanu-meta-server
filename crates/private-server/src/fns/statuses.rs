@@ -315,18 +315,23 @@ pub async fn snapshot(
 		Ok(v) => status.distance_from_version(&v.as_semver()),
 		Err(_) => None,
 	};
-	// nodejs lives on the *latest* device connection rather than a
-	// contemporary one — the device-side connection metadata isn't
-	// versioned in lockstep with status pushes, and looking up "as
-	// of" would mostly mislead.
-	let nodejs = if let Some(dev_id) = status.device_id {
-		DeviceConnection::get_latest_from_device_ids(&mut conn, [dev_id].into_iter())
-			.await?
-			.into_iter()
-			.next()
-			.and_then(|d| d.nodejs_version())
-	} else {
-		None
+	// Prefer the Node.js version the server reported in its status payload
+	// (`nodeVersion`). Fall back to scraping the *latest* device connection's
+	// User-Agent — that metadata isn't versioned in lockstep with status
+	// pushes, so looking it up "as of" a time would mostly mislead.
+	let nodejs = match status.node_version() {
+		Some(v) => Some(v),
+		None => {
+			if let Some(dev_id) = status.device_id {
+				DeviceConnection::get_latest_from_device_ids(&mut conn, [dev_id].into_iter())
+					.await?
+					.into_iter()
+					.next()
+					.and_then(|d| d.nodejs_version())
+			} else {
+				None
+			}
+		}
 	};
 	let min_chrome_version = if let Some(ref v) = status.version {
 		super::servers::compute_min_chrome_version(&mut conn, v).await

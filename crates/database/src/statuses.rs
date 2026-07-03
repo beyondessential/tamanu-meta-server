@@ -465,6 +465,16 @@ impl Status {
 			.map(|vers| vers.trim_end_matches(',').into())
 	}
 
+	/// Node.js runtime version the server reported in its status payload
+	/// (`nodeVersion` extra), if present. Preferred over scraping the device
+	/// connection's User-Agent (see [`crate::devices::DeviceConnection::nodejs_version`]),
+	/// which only reflects whichever transport happened to set that header.
+	pub fn node_version(&self) -> Option<String> {
+		self.extra("nodeVersion")
+			.and_then(|v| v.as_str())
+			.map(ToOwned::to_owned)
+	}
+
 	/// Server's self-reported health state derived from this status
 	/// row's per-check results. The top-level `healthy` bool is being
 	/// retired from the wire (absent ⇒ true on ingestion), so this
