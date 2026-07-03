@@ -57,16 +57,53 @@ Either transport Canopy already accepts for devices — tailnet identity or a cl
 ## Consumer capabilities
 
 A restore consumer advertises the set of intents it can satisfy, and registers it with Canopy when it starts and whenever it changes.
-Canopy stores the set against the consumer and treats it as the authority on what that consumer can be asked to do.
+Each advertised intent carries:
 
-The registered set governs two things:
+- a stable **name**, an open identifier for the intent;
+- a human-readable **description**, shown to operators choosing an intent;
+- a set of **semantics**: well-known tags, defined by Canopy, that the consumer opts the intent into, each granting Canopy a specific behaviour for that intent (see [Semantics](#semantics));
+- a **parameter schema**: named, typed settings the consumer accepts per replica of the intent, each optionally with a default (see [Parameters](#parameters)).
 
-- **What can be declared.** Canopy offers operators the intents the chosen consumer supports when they declare a replica.
-- **What is dispatched.** A consumer's worklist includes only entries whose intent it currently supports; Canopy never asks a consumer to satisfy an intent it has not advertised.
+Canopy stores the advertised set against the consumer and treats it as the authority on what that consumer can be asked to do and how.
+Registration replaces the consumer's whole advertised set.
+
+The advertised set governs three things:
+
+- **What can be declared.** Canopy offers operators the intents the chosen consumer advertises when they declare a replica, along with each intent's description and parameter fields.
+- **What is dispatched.** A consumer's worklist includes only entries whose intent it currently advertises; Canopy never asks a consumer to satisfy an intent it has not advertised.
+- **How Canopy behaves.** The intent's semantics select Canopy's dispatch and alerting behaviour for its replicas.
 
 When a consumer's set grows, the new intents become available for operators to assign, so a consumer gaining a capability is reflected without operator guesswork.
-When a consumer's set shrinks, any enabled declaration whose intent is no longer supported becomes a *gap*: Canopy drops it from the worklist immediately and surfaces it to operators as a declaration no consumer can currently satisfy, to reassign or retire.
+When a consumer's set shrinks, any enabled declaration whose intent is no longer advertised becomes a *gap*: Canopy drops it from the worklist immediately and surfaces it to operators as a declaration no consumer can currently satisfy, to reassign or retire.
 A gap is a configuration state shown to the operator, not a restore-health incident; the backups themselves are unaffected.
+
+Intent is an open set defined by consumers; Canopy fixes no canonical list.
+For example, an intent that restores a snapshot solely to prove it is restorable and then discards it opts into `check` and `once`; an intent that keeps a queryable replica running opts into `check` and `url` and accepts parameters such as a minimum uptime and a size cap.
+
+### Semantics
+
+A semantic is a Canopy-defined behaviour an intent opts into.
+Canopy acts only on the semantics it recognises; an unrecognised semantic is stored and preserved but changes no behaviour, so a consumer may advertise ahead of Canopy support.
+The recognised semantics are:
+
+- **check** — the intent produces restore-health feedback.
+  Canopy expects a report for each of the intent's replicas and holds it to an overdue bound (see [Alerting](#alerting)).
+  An intent without `check` is dispatched but never reported on nor alerted.
+- **once** — a given snapshot is dispatched to the intent at most once.
+  Canopy omits a replica from the worklist once the intent has a healthy report for that replica's current snapshot, and reinstates it only when a newer snapshot exists.
+  Without `once`, the intent is always pointed at the latest snapshot and manages its own refresh.
+- **url** — the intent's health report carries a link to the running replica within its attached health data, which Canopy surfaces to operators.
+
+### Parameters
+
+An intent's parameter schema names the settings the consumer accepts for each replica of that intent.
+Each parameter has a type — a duration, a size in bytes, a boolean, an integer, or text — and may carry a default.
+Canopy uses the schema to collect values when a replica is declared, validates the values against it, stores them with the declaration, and returns them in the worklist so the consumer receives its per-replica settings.
+Canopy does not interpret parameter values beyond their type; they are settings passed through to the consumer.
+
+Every parameter is optional: an operator may leave any one unset.
+The worklist carries a resolved value for each parameter the intent advertises, and only for those: an unset parameter that has a default is sent as its default, and an unset parameter without a default is sent as JSON `null`.
+A value for a parameter the intent no longer advertises is preserved with the declaration rather than rejected, mirroring how an unrecognised intent is preserved, but is not sent in the worklist.
 
 ## Declared replicas
 
@@ -76,19 +113,13 @@ Each declaration carries:
 - the **group** whose repo holds the backups;
 - the **type** of backup to restore;
 - a **server** within the group, or all servers in the group when none is named;
-- an **intent** describing what the replica is for;
+- an **intent** the chosen consumer advertises;
 - a human-readable **name**;
-- a **freshness** bound: the maximum time the replica may go without a fresh successful restore before it is considered overdue — a bound on the consumer's *restore* cadence, deliberately independent of how often backups are produced (below);
+- **parameter values** for the intent's schema, defaulted where the schema provides one;
+- an **overdue bound**: the maximum time a replica may go without meeting its intent's health expectation before Canopy considers it overdue, interpreted per the intent's semantics (see [Alerting](#alerting));
 - whether the declaration is **enabled**.
 
-Intent is an open set; unrecognised intents are preserved verbatim rather than rejected, so a consumer may advertise intents Canopy does not model.
-The well-known intents are:
-
-- **verify** — a transient replica restored solely to prove the snapshot is restorable, then discarded; re-run on the freshness cadence.
-- **analytics** — a persistent replica kept running for querying, refreshed to the latest snapshot on the freshness cadence.
-- **disaster-recovery** — a periodic rehearsal of the full recovery path: a replica restored the way a real recovery would be, checked as a viable stand-in for the server, then discarded. It is the managed, automated counterpart to the operator-driven recovery in [Scope](#scope), not the recovery event itself.
-
-A declaration's intent must be one the chosen consumer supports (see [Consumer capabilities](#consumer-capabilities)); a declaration whose intent is unsupported is a gap, surfaced to the operator and never dispatched.
+A declaration's intent must be one the chosen consumer advertises (see [Consumer capabilities](#consumer-capabilities)); a declaration whose intent is unadvertised is a gap, surfaced to the operator and never dispatched.
 
 A declaration scoped to a whole group expands to one replica per current server in that group.
 Servers joining or leaving a group change what the consumer is asked to maintain, with no per-server operator action.
@@ -99,21 +130,25 @@ Deleting a declaration stops the consumer being asked to maintain that replica a
 ## The worklist
 
 A restore consumer fetches its complete desired state from Canopy in one request, scoped to the calling consumer.
-Canopy expands the consumer's enabled declarations — those whose intent the consumer currently supports — against the current servers and the latest known snapshot for each, and returns one entry per concrete replica:
+Canopy expands the consumer's enabled declarations — those whose intent the consumer currently advertises — against the current servers and the latest known snapshot for each, and returns one entry per concrete replica the consumer should currently act on:
 
-- the declaration's identifier, group, server, type, intent, name, and freshness;
+- the declaration's identifier, group, server, type, intent, name, and overdue bound;
+- the resolved **parameter values** for the replica, one per parameter the intent advertises (unset parameters resolved to their default, or JSON `null` when they have none);
 - the **snapshot to restore**: the snapshot identifier and its timestamp, or empty when no successful backup is yet known for that server and type;
 - the repo coordinates needed to locate the backups (storage, bucket, prefix, region).
 
 The worklist does not carry credentials or the repo password.
 The consumer reconciles the worklist against what it is actually running — creating, refreshing, and tearing down replicas to match — and is responsible for converging on the desired state over time.
 
+An intent carrying `once` contributes an entry only while the latest snapshot for its `(server, type)` has no healthy report; once that snapshot is verified the entry is omitted until a newer snapshot exists.
+An intent without `once` always contributes an entry naming the latest snapshot.
+
 ### Latest state, not a queue
 
 Each entry names the *latest* snapshot for its `(server, type)`, not a backlog to drain.
 A consumer restores on its own cadence and skips the intermediate snapshots produced since its last restore; restoring less often than backups are produced is expected, not a failure.
-A restore can take far longer than the interval between backups — the data is slow to download and restore, and a persistent replica may be held up while its workload runs — so the consumer's restore cadence is independent of, and typically much slower than, the backup cadence.
-Consequently a replica's **freshness** bound is set to cover the consumer's restore cycle (download, restore, and any hold), not the backup interval: setting it to the backup interval would alert continuously even when restores are keeping pace as designed.
+A restore can take far longer than the interval between backups — the data is slow to download and restore, and a persistent replica may be held up while its workload runs.
+A `once` intent verifies each snapshot at most once and is not asked to restore again until a newer snapshot exists, so its work follows the backup cadence rather than the clock; an intent without `once` is always pointed at the latest snapshot and refreshes on its own cadence.
 
 ### Snapshot authority
 
@@ -148,8 +183,12 @@ A report carries:
 - the object-storage traffic the restore moved;
 - optionally, arbitrary health data the consumer chooses to attach (e.g. cluster statistics, whether indexes needed fixing). Canopy stores and displays it as-is without interpreting it; specific fields may later be promoted to first-class, queryable form.
 
+When the intent carries the `url` semantic, the attached health data includes a link to the running replica, which Canopy surfaces to operators alongside the report.
+
 Restored-and-healthy means the snapshot restored, the database started, and the consumer's readiness checks passed — a stronger statement than a snapshot merely existing.
 A failure covers any stage: the restore itself, the database failing to come up, or a readiness check failing.
+
+Only intents carrying `check` are expected to report; an intent without it is dispatched but produces no restore-health signal and is never alerted on.
 
 Reports are retained indefinitely as an audit trail.
 
@@ -158,10 +197,13 @@ Reports are retained indefinitely as an audit trail.
 A failed or overdue restore-health report is a group-level incident that pages regardless of any individual server's monitoring state, because an unrestorable backup is a control-plane and data-safety concern, not one server's operational noise.
 
 A failure raises a group-scoped restore-verification alert identifying the affected server and snapshot.
-Each server's restore-health is tracked independently, so one server's failed restore does not mask or merge with another's.
-The alert recovers when that server's next report for the same type is healthy.
+Restore-health is tracked independently per server, type, and intent, so one replica's failed restore does not mask or merge with another's.
+The alert recovers when the next report for the same server, type, and intent is healthy.
 
-A replica with no recent healthy report within its freshness bound is overdue and raises the same alert; Canopy detects this on a periodic sweep rather than waiting for a report that never arrives.
+A replica is also overdue — raising the same alert on a periodic sweep, rather than waiting for a report that never arrives — when it has not met its intent's health expectation within the declaration's overdue bound.
+For an intent carrying `once`, the expectation is measured against the latest snapshot: the replica is overdue when the latest snapshot has gone unverified for longer than the bound, not merely because time has passed since an earlier snapshot was verified.
+For an intent without `once`, it is measured against wall-clock time since the last healthy report.
+Overdue applies only to intents carrying `check`.
 
 ## Out of scope
 
