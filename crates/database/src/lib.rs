@@ -77,7 +77,11 @@ pub fn init_ro() -> Option<Db> {
 }
 
 pub fn init_ro_to(url: &str) -> Db {
-	build_pool(url, "DB_RO_MAX_OPEN_CONNECTIONS", "DB_RO_MAX_IDLE_CONNECTIONS")
+	build_pool(
+		url,
+		"DB_RO_MAX_OPEN_CONNECTIONS",
+		"DB_RO_MAX_IDLE_CONNECTIONS",
+	)
 }
 
 // Bound the pool. Every pod that links this crate (the two servers plus each

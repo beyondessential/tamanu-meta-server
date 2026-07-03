@@ -108,6 +108,7 @@ where
 	TestDb::run(async |conn, url| {
 		let public_state = public_server::state::AppState {
 			db: database::init_to(&url),
+			db_read: database::init_to(&url),
 			tera: public_server::state::AppState::init_tera().unwrap(),
 			server_versions_secret: Some("test-secret".to_string()),
 			tailnet_directory: None,
@@ -233,6 +234,7 @@ where
 
 		let public_state = public_server::state::AppState {
 			db: database::init_to(&url),
+			db_read: database::init_to(&url),
 			tera: public_server::state::AppState::init_tera().unwrap(),
 			server_versions_secret: Some("test-secret".to_string()),
 			tailnet_directory: None,
@@ -248,6 +250,7 @@ where
 		let private_router = router(
 			private_server::routes(private_server::state::AppState {
 				db: database::init_to(&url),
+				db_read: database::init_to(&url),
 				ro_pool: None,
 				tailnet_directory: Some(directory),
 				kube: Some(public_server::state::BackupSecrets::memory()),

@@ -80,6 +80,7 @@ async fn unknown_tailnet_node_is_rejected_without_creating_a_row() {
 		let private_router = router(
 			private_server::routes(private_server::state::AppState {
 				db: database::init_to(&url),
+				db_read: database::init_to(&url),
 				ro_pool: None,
 				tailnet_directory: Some(directory),
 				kube: None,

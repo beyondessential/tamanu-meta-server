@@ -16,6 +16,12 @@ pub use commons_servers::backup_secrets::BackupSecrets;
 #[derive(Clone, Debug)]
 pub struct AppState {
 	pub db: Db,
+	/// Pool for read-only workloads: the RO pool when `RO_DATABASE_URL` is
+	/// configured, otherwise a clone of `db`. Used by the internet-facing
+	/// read-only MCP mount (`crate::mcp`); the device-facing endpoints under
+	/// `crate::routes` all write (status/event ingestion, credential
+	/// issuance) and stay on `db`.
+	pub db_read: Db,
 	#[cfg(feature = "ui")]
 	pub tera: Arc<Tera>,
 	#[cfg(feature = "ui")]
@@ -99,8 +105,10 @@ impl AppState {
 		db: Db,
 		tailnet_directory: Option<TailnetDirectory>,
 	) -> Result<Self> {
+		let db_read = database::init_ro().unwrap_or_else(|| db.clone());
 		Ok(Self {
 			db,
+			db_read,
 			#[cfg(feature = "ui")]
 			tera: Self::init_tera()?,
 			#[cfg(feature = "ui")]

@@ -315,7 +315,7 @@ pub async fn list(
 	_user: TailscaleUser,
 	Json(args): Json<IssueListArgs>,
 ) -> Result<Json<Vec<IssueData>>> {
-	let mut conn = state.db.get().await?;
+	let mut conn = state.db_read.get().await?;
 	let issues = Issue::list(
 		&mut conn,
 		IssueListFilters {
@@ -354,7 +354,7 @@ pub async fn list_for_device(
 	_user: TailscaleUser,
 	Json(args): Json<ListForDeviceArgs>,
 ) -> Result<Json<Vec<IssueData>>> {
-	let mut conn = state.db.get().await?;
+	let mut conn = state.db_read.get().await?;
 	let issues = Issue::list_for_device(
 		&mut conn,
 		args.device_id,
@@ -390,7 +390,7 @@ pub async fn list_for_server(
 	_user: TailscaleUser,
 	Json(args): Json<IssueListForServerArgs>,
 ) -> Result<Json<Vec<IssueData>>> {
-	let mut conn = state.db.get().await?;
+	let mut conn = state.db_read.get().await?;
 	let issues = Issue::list_for_server(
 		&mut conn,
 		args.server_id,
@@ -425,7 +425,7 @@ pub async fn list_events(
 	_user: TailscaleUser,
 	Json(args): Json<ListEventsArgs>,
 ) -> Result<Json<Page<EventData>>> {
-	let mut conn = state.db.get().await?;
+	let mut conn = state.db_read.get().await?;
 	let total = Event::count_for_issue(&mut conn, args.issue_id).await? as u64;
 	let events = Event::list_for_issue(
 		&mut conn,
@@ -665,7 +665,7 @@ pub async fn list_notes(
 	_user: TailscaleUser,
 	Json(args): Json<IssueListNotesArgs>,
 ) -> Result<Json<Vec<IssueNoteData>>> {
-	let mut conn = state.db.get().await?;
+	let mut conn = state.db_read.get().await?;
 	let notes = IssueNote::list_for_issue(
 		&mut conn,
 		args.issue_id,

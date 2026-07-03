@@ -458,6 +458,7 @@ async fn report_no_live_server_is_412() {
 fn public_server_with_sts(url: &str, sts: aws_sdk_sts::Client) -> TestServer {
 	let state = public_server::state::AppState {
 		db: database::init_to(url),
+		db_read: database::init_to(url),
 		tera: public_server::state::AppState::init_tera().unwrap(),
 		server_versions_secret: Some("test-secret".to_string()),
 		tailnet_directory: None,

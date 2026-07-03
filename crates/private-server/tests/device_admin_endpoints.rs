@@ -34,6 +34,7 @@ async fn private_with_directory(url: &str, directory: TailnetDirectory) -> TestS
 	let router = router(
 		private_server::routes(private_server::state::AppState {
 			db: database::init_to(url),
+			db_read: database::init_to(url),
 			ro_pool: None,
 			tailnet_directory: Some(directory),
 			kube: None,
