@@ -63,6 +63,25 @@ pub fn router(routes: Router<()>, client_ip_source: ClientIpSource) -> Router<()
 		.layer(ServerTimingLayer::new("srv"))
 }
 
+/// Content-Encodings the [`RequestDecompressionLayer`] applied in [`router`]
+/// transparently decodes on request bodies (courtesy of tower-http's
+/// `decompression-full` feature). Advertised in both OpenAPI specs via
+/// [`request_compression_extension`] so clients know large request bodies
+/// (status pushes, backup reports, event batches) may be — and are encouraged
+/// to be — sent compressed.
+pub const ACCEPTED_REQUEST_ENCODINGS: &[&str] = &["gzip", "br", "deflate", "zstd"];
+
+/// Value of the `x-request-compression` OpenAPI vendor extension. Built here,
+/// beside the decompression layer, so the advertised encodings can't drift from
+/// what the server actually accepts.
+pub fn request_compression_extension() -> serde_json::Value {
+	serde_json::json!({
+		"accepted": ACCEPTED_REQUEST_ENCODINGS,
+		"recommended": true,
+		"header": "Content-Encoding",
+	})
+}
+
 pub async fn serve(routes: Router<()>, addr: SocketAddr) -> commons_errors::Result<()> {
 	let service = routes.into_make_service_with_connect_info::<SocketAddr>();
 	let listener = TcpListener::bind(addr).await?;

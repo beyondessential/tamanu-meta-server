@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "canopy private-server",
-    "description": "Admin/operator API for the canopy fleet manager. Requests are gated behind Tailscale auth; admin-only endpoints additionally check the caller is on the admin list.",
+    "description": "Admin/operator API for the canopy fleet manager. Requests are gated behind Tailscale auth; admin-only endpoints additionally check the caller is on the admin list.\n\nRequest bodies may be sent compressed, and this is recommended for large payloads: the server transparently decodes `Content-Encoding: gzip`, `br`, `deflate`, or `zstd`. The accepted encodings are also listed structurally in the `x-request-compression` extension.",
     "contact": {
       "name": "BES Developers",
       "email": "contact@bes.au"
@@ -11287,5 +11287,15 @@
       "name": "versions",
       "description": "Canopy release versions and downloadable artifacts."
     }
-  ]
+  ],
+  "x-request-compression": {
+    "accepted": [
+      "gzip",
+      "br",
+      "deflate",
+      "zstd"
+    ],
+    "header": "Content-Encoding",
+    "recommended": true
+  }
 }
