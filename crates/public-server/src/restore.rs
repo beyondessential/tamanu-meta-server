@@ -17,7 +17,10 @@ use aws_sdk_sts::operation::RequestId as _;
 use axum::{Json, extract::State, http::StatusCode};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::device_auth::BackupRestoreDevice;
-use commons_types::backup::{BackupPurpose, BackupType, RestoreIntent, RunOutcome};
+use commons_types::backup::{
+	BackupPurpose, BackupType, IntentDescriptor, ParamValues, RestoreIntent, RunOutcome,
+	resolve_params, semantics,
+};
 use database::{
 	Db,
 	backups::{BackupRun, NewBackupCredentialIssuance, ServerGroupBackupConfig},
@@ -28,7 +31,7 @@ use database::{
 };
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
 use uuid::Uuid;
@@ -55,10 +58,10 @@ pub fn routes() -> OpenApiRouter<AppState> {
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct CapabilitiesArgs {
-	/// The intents this consumer can satisfy (e.g. `verify`, `analytics`,
-	/// `disaster-recovery`). Replaces the consumer's registered set wholesale.
-	#[schema(value_type = Vec<String>)]
-	pub intents: Vec<RestoreIntent>,
+	/// The intents this consumer can satisfy, each with its description, the
+	/// Canopy semantics it opts into, and its parameter schema. Replaces the
+	/// consumer's advertised set wholesale.
+	pub intents: Vec<IntentDescriptor>,
 }
 
 #[utoipa::path(
@@ -99,10 +102,14 @@ pub struct WorklistEntry {
 	#[schema(value_type = String)]
 	pub intent: RestoreIntent,
 	pub name: String,
-	/// Max time since the last healthy restore before overdue, in whole seconds
-	/// — the consumer's restore cadence, not the backup interval; `None` = no
-	/// overdue bound.
-	pub freshness_seconds: Option<i64>,
+	/// The overdue bound in whole seconds; `None` = no bound. Interpreted per the
+	/// intent's semantics (a `once` snapshot bound, or a standing staleness
+	/// bound).
+	pub overdue_after_seconds: Option<i64>,
+	/// The resolved parameter values for this replica: one per parameter the
+	/// intent advertises, unset ones filled with their default or JSON `null`.
+	#[schema(value_type = Object)]
+	pub params: ParamValues,
 	/// The snapshot Canopy wants restored — the latest successful backup for
 	/// this `(server, type)`. `None` when no successful backup is yet known.
 	pub snapshot_id: Option<String>,
@@ -129,18 +136,21 @@ async fn worklist(
 	let mut conn = db.get().await?;
 	let consumer_device_id = device.0.0.id;
 
-	// Only intents the consumer currently supports are dispatched; a declaration
-	// on an unsupported intent is a gap, surfaced to operators, never sent here.
-	let supported: HashSet<RestoreIntent> =
+	// Only intents the consumer currently advertises are dispatched; a
+	// declaration on an unadvertised intent is a gap, surfaced to operators,
+	// never sent here. Keep the descriptors to read semantics and parameter
+	// schemas per intent.
+	let descriptors: HashMap<RestoreIntent, IntentDescriptor> =
 		RestoreConsumerCapability::list_for_consumer(&mut conn, consumer_device_id)
 			.await?
 			.into_iter()
+			.map(|d| (d.intent.clone(), d))
 			.collect();
 
 	let mut declarations = RestoreReplica::list_enabled_for_consumer(&mut conn, consumer_device_id)
 		.await?
 		.into_iter()
-		.filter(|d| supported.contains(&d.intent))
+		.filter(|d| descriptors.contains_key(&d.intent))
 		.collect::<Vec<_>>();
 	// Process server-specific declarations before group-wide ones so a
 	// server-scoped declaration wins the dedup over a group-wide one covering
@@ -150,11 +160,11 @@ async fn worklist(
 	let mut out: Vec<WorklistEntry> = Vec::new();
 	let mut seen: HashSet<(Uuid, String, String)> = HashSet::new();
 	// Per-group caches so a group referenced by several declarations is resolved
-	// once.
-	let mut snapshot_cache: std::collections::HashMap<
-		Uuid,
-		std::collections::HashMap<(Uuid, BackupType), BackupRun>,
-	> = std::collections::HashMap::new();
+	// once: the latest produced snapshot per (server, type), and the latest
+	// healthy-verified snapshot per (server, type, intent) for `once` suppression.
+	let mut snapshot_cache: HashMap<Uuid, HashMap<(Uuid, BackupType), BackupRun>> = HashMap::new();
+	let mut verified_cache: HashMap<Uuid, HashMap<(Uuid, BackupType, RestoreIntent), String>> =
+		HashMap::new();
 
 	for d in declarations {
 		// A worklist entry needs somewhere to restore from: skip groups without
@@ -181,11 +191,25 @@ async fn worklist(
 		};
 
 		if !snapshot_cache.contains_key(&d.group_id) {
-			let map =
-				BackupRun::latest_success_by_server_type_for_group(&mut conn, d.group_id).await?;
-			snapshot_cache.insert(d.group_id, map);
+			snapshot_cache.insert(
+				d.group_id,
+				BackupRun::latest_success_by_server_type_for_group(&mut conn, d.group_id).await?,
+			);
+			verified_cache.insert(
+				d.group_id,
+				BackupRestoreCheck::latest_healthy_snapshot_by_key_for_group(&mut conn, d.group_id)
+					.await?,
+			);
 		}
 		let snapshots = &snapshot_cache[&d.group_id];
+		let verified = &verified_cache[&d.group_id];
+
+		// The descriptor governs the intent's semantics and parameter resolution.
+		let descriptor = &descriptors[&d.intent];
+		let once = descriptor.has_semantic(semantics::ONCE);
+		let replica_values: ParamValues =
+			serde_json::from_value(d.params.clone()).unwrap_or_default();
+		let params = resolve_params(&descriptor.params, &replica_values);
 
 		let region = cfg.region.clone().unwrap_or_else(deployment_default_region);
 		for server in servers {
@@ -194,6 +218,18 @@ async fn worklist(
 				continue;
 			}
 			let latest = snapshots.get(&(server.id, d.r#type.clone()));
+			// A `once` intent drops off the worklist once the latest snapshot has
+			// a healthy report; it reappears only when a newer snapshot exists.
+			if once {
+				let key = (server.id, d.r#type.clone(), d.intent.clone());
+				let already = matches!(
+					(verified.get(&key), latest.and_then(|r| r.snapshot_id.as_ref())),
+					(Some(v), Some(s)) if v == s
+				);
+				if already {
+					continue;
+				}
+			}
 			out.push(WorklistEntry {
 				replica_id: d.id,
 				group_id: d.group_id,
@@ -201,7 +237,8 @@ async fn worklist(
 				r#type: d.r#type.clone(),
 				intent: d.intent.clone(),
 				name: d.name.clone(),
-				freshness_seconds: d.freshness.map(|f| f.0.as_secs()),
+				overdue_after_seconds: d.overdue_after.map(|f| f.0.as_secs()),
+				params: params.clone(),
 				snapshot_id: latest.and_then(|r| r.snapshot_id.clone()),
 				snapshot_at: latest.map(|r| r.reported_at.to_string()),
 				storage: "s3".into(),

@@ -11,12 +11,12 @@ use std::collections::{HashMap, HashSet};
 
 use axum::Json;
 use axum::extract::State;
-use commons_errors::{ProblemDetailsSchema, Result};
+use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
 use commons_types::device::DeviceRole;
 use commons_types::{
 	Uuid,
-	backup::{BackupType, RestoreIntent},
+	backup::{BackupType, IntentDescriptor, ParamValues, RestoreIntent, validate_params},
 };
 use database::diesel_async::AsyncPgConnection;
 use database::pg_duration::PgDuration;
@@ -58,7 +58,10 @@ pub struct RestoreReplicaView {
 	#[schema(value_type = String)]
 	pub intent: RestoreIntent,
 	pub name: String,
-	pub freshness_seconds: Option<i64>,
+	pub overdue_after_seconds: Option<i64>,
+	/// Operator-supplied parameter values (name → value).
+	#[schema(value_type = Object)]
+	pub params: serde_json::Value,
 	pub enabled: bool,
 	pub gap: bool,
 	pub created_by: Option<String>,
@@ -69,13 +72,14 @@ pub struct RestoreReplicaView {
 }
 
 /// A restore consumer (a `backup-restore` device) and the intents it currently
-/// supports — drives the declaration form's consumer and intent pickers.
+/// advertises, with each intent's description, semantics, and parameter schema —
+/// drives the declaration form's consumer/intent pickers and dynamic param
+/// fields.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct RestoreConsumerView {
 	pub device_id: Uuid,
 	pub name: Option<String>,
-	#[schema(value_type = Vec<String>)]
-	pub intents: Vec<RestoreIntent>,
+	pub intents: Vec<IntentDescriptor>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -94,15 +98,22 @@ pub struct CreateArgs {
 	#[schema(value_type = String)]
 	pub intent: RestoreIntent,
 	pub name: String,
-	/// Max snapshot age before overdue, in whole seconds; `None` = latest only.
-	pub freshness_seconds: Option<i64>,
+	/// Overdue bound in whole seconds; `None` = no bound.
+	pub overdue_after_seconds: Option<i64>,
+	/// Operator-supplied parameter values, validated against the intent's schema.
+	#[serde(default)]
+	#[schema(value_type = Object)]
+	pub params: ParamValues,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct UpdateArgs {
 	pub id: Uuid,
 	pub name: String,
-	pub freshness_seconds: Option<i64>,
+	pub overdue_after_seconds: Option<i64>,
+	#[serde(default)]
+	#[schema(value_type = Object)]
+	pub params: ParamValues,
 	pub enabled: bool,
 }
 
@@ -113,8 +124,25 @@ pub struct IdArgs {
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
-fn freshness_to_pg(seconds: Option<i64>) -> Option<PgDuration> {
+fn overdue_after_to_pg(seconds: Option<i64>) -> Option<PgDuration> {
 	seconds.map(|s| PgDuration(SignedDuration::from_secs(s)))
+}
+
+/// Validate operator-supplied parameter values against the consumer's advertised
+/// schema for `intent`. If the intent is not advertised (a gap) there is no
+/// schema to check against, so the values are accepted as-is.
+async fn validate_params_for_intent(
+	conn: &mut AsyncPgConnection,
+	consumer_device_id: Uuid,
+	intent: &RestoreIntent,
+	params: &ParamValues,
+) -> Result<()> {
+	let descriptors =
+		RestoreConsumerCapability::list_for_consumer(conn, consumer_device_id).await?;
+	if let Some(desc) = descriptors.iter().find(|d| &d.intent == intent) {
+		validate_params(&desc.params, params).map_err(|e| AppError::BadRequest(e.to_string()))?;
+	}
+	Ok(())
 }
 
 /// Build views from declarations, resolving consumer display names and the
@@ -138,6 +166,7 @@ async fn to_views(
 		let set: HashSet<RestoreIntent> = RestoreConsumerCapability::list_for_consumer(conn, id)
 			.await?
 			.into_iter()
+			.map(|d| d.intent)
 			.collect();
 		caps.insert(id, set);
 	}
@@ -151,7 +180,8 @@ async fn to_views(
 				.unwrap_or(false);
 			RestoreReplicaView {
 				consumer_name: names.get(&r.consumer_device_id).cloned().flatten(),
-				freshness_seconds: r.freshness.map(|f| f.0.as_secs()),
+				overdue_after_seconds: r.overdue_after.map(|f| f.0.as_secs()),
+				params: r.params,
 				gap,
 				id: r.id,
 				consumer_device_id: r.consumer_device_id,
@@ -249,6 +279,13 @@ pub async fn create(
 	Json(args): Json<CreateArgs>,
 ) -> Result<Json<RestoreReplicaView>> {
 	let mut conn = state.db.get().await?;
+	validate_params_for_intent(
+		&mut conn,
+		args.consumer_device_id,
+		&args.intent,
+		&args.params,
+	)
+	.await?;
 	let replica = RestoreReplica::create(
 		&mut conn,
 		NewRestoreReplica {
@@ -258,7 +295,8 @@ pub async fn create(
 			r#type: args.r#type,
 			intent: args.intent,
 			name: args.name,
-			freshness: freshness_to_pg(args.freshness_seconds),
+			overdue_after: overdue_after_to_pg(args.overdue_after_seconds),
+			params: serde_json::to_value(&args.params).expect("params serialize"),
 			created_by: Some(admin.login),
 		},
 	)
@@ -285,11 +323,22 @@ pub async fn update(
 	Json(args): Json<UpdateArgs>,
 ) -> Result<Json<RestoreReplicaView>> {
 	let mut conn = state.db.get().await?;
+	// Validate parameter values against the intent's schema. Scope fields are
+	// immutable, so the existing declaration carries the consumer and intent.
+	let existing = RestoreReplica::get(&mut conn, args.id).await?;
+	validate_params_for_intent(
+		&mut conn,
+		existing.consumer_device_id,
+		&existing.intent,
+		&args.params,
+	)
+	.await?;
 	let replica = RestoreReplica::update(
 		&mut conn,
 		args.id,
 		&args.name,
-		freshness_to_pg(args.freshness_seconds),
+		overdue_after_to_pg(args.overdue_after_seconds),
+		serde_json::to_value(&args.params).expect("params serialize"),
 		args.enabled,
 	)
 	.await?;
