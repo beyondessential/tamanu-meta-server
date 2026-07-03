@@ -29,30 +29,63 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(tag_keys))
 }
 
-/// Catalog row enriched with `pending_review` and `rule_count` derivations
-/// for the UI. `rules` is the raw JsonLogic blob exactly as stored; the
-/// React side parses it client-side (or the per-check editor rebuilds it
-/// from form state and POSTs to /update_rules). Malformed `rules` parses
-/// to `rule_count: 0` and the row behaves as "no conditional rules" — the
-/// evaluator does the same on the ingestion path.
+/// A named healthcheck's alerting policy: the base severity assigned to
+/// its failures, plus optional conditional rules that can override that
+/// severity based on the details of a given failure.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct HealthcheckSeverityData {
+	/// The healthcheck's name, exactly as reported by monitored servers.
 	pub check_name: String,
+	/// The severity assigned to a failure of this check when no
+	/// conditional rule (see `rules`) overrides it.
 	pub severity: Severity,
+	/// When this check was first reported and this policy entry was
+	/// created.
 	pub first_seen: Timestamp,
+	/// When an operator last reviewed or updated this policy. `null` if
+	/// it has never been reviewed.
 	pub reviewed_at: Option<Timestamp>,
+	/// The operator who last reviewed this policy. `null` if it has
+	/// never been reviewed.
 	pub reviewed_by: Option<String>,
+	/// Free-form operator notes about this check.
 	pub notes: Option<String>,
+	/// When this policy was last modified.
 	pub updated_at: Timestamp,
-	/// `true` when no operator has confirmed this row yet
-	/// (`reviewed_at IS NULL`). The catalog UI surfaces these.
+	/// `true` if no operator has reviewed this policy yet.
 	pub pending_review: bool,
-	/// JsonLogic if-ladder; `null` means no conditional rules.
+	/// Conditional rules that can assign a different severity than
+	/// `severity`, depending on the failing check's own fields, the
+	/// surrounding status report, or the reporting server's tags. `null`
+	/// means no conditional rules are configured, and `severity` always
+	/// applies.
+	///
+	/// When present, this is a single-key object shaped like
+	/// `{"if": [condition_1, severity_1, condition_2, severity_2, ...]}`.
+	/// Conditions are tried in order, and the severity paired with the
+	/// first matching condition is used; if none match, the base
+	/// `severity` is used instead. There's no explicit "else" branch —
+	/// the fallback to `severity` plays that role — so the array must
+	/// have an even number of entries and at least one pair.
+	///
+	/// Each condition is a single-key object naming a comparison
+	/// operator — one of `==`, `!=`, `<`, `<=`, `>`, `>=`, or `in_range`
+	/// — whose value is a two-element array: a variable reference and a
+	/// value to compare it against. A variable reference has the shape
+	/// `{"var": "<namespace>.<field>"}`, where `<namespace>` is one of
+	/// `check` (a field on the failing check itself), `status` (a
+	/// top-level field on the status report that contained it), or
+	/// `tag` (a tag on the reporting server, merged with its group's
+	/// tags). `in_range` compares a version-like string against a
+	/// semantic version range (e.g. `">=1.2.0 <2.0.0"`). If the named
+	/// variable isn't present in the data being evaluated, the condition
+	/// doesn't match. A `rules` value that doesn't parse into this shape
+	/// is treated the same as `null` (no conditional rules).
 	#[schema(value_type = Option<serde_json::Value>)]
 	pub rules: Option<JsonValue>,
-	/// Number of branches in the rules ladder; 0 when `rules` is null
-	/// or malformed. The main /healthchecks page uses this to decide
-	/// between the simple severity dropdown and the "Custom rules" link.
+	/// Number of condition/severity branches in `rules`; `0` when
+	/// `rules` is `null` or couldn't be parsed. Lets a caller tell
+	/// whether conditional rules exist without parsing `rules` itself.
 	pub rule_count: u32,
 }
 
@@ -82,6 +115,12 @@ impl From<HealthcheckSeverity> for HealthcheckSeverityData {
 	}
 }
 
+/// List the healthcheck severity catalog.
+///
+/// Returns every known healthcheck name together with its current
+/// severity policy, ordered by name. An entry exists for every check name
+/// any server has ever reported; new checks are added automatically the
+/// first time they're seen, with a default policy pending review.
 #[utoipa::path(
 	post,
 	path = "/list",
@@ -103,17 +142,29 @@ pub async fn list(
 	Ok(Json(rows.into_iter().map(Into::into).collect()))
 }
 
+/// Request body for updating a healthcheck's base severity policy.
 #[derive(Deserialize, ToSchema)]
 pub struct HealthcheckUpdateArgs {
+	/// The healthcheck name to update; must already exist in the
+	/// catalog.
 	pub check_name: String,
+	/// The severity to assign to this check's failures when no
+	/// conditional rule overrides it.
 	pub severity: Severity,
-	/// Optional operator notes. `None` leaves the existing notes alone…
-	/// well, actually it overwrites with NULL — pass the current value
-	/// to preserve. The UI sends the full current state.
+	/// Operator notes to store alongside the new severity. Omitting this
+	/// or sending `null` clears any existing notes — there's no way to
+	/// leave them unchanged implicitly, so resend the current value to
+	/// keep it.
 	#[serde(default)]
 	pub notes: Option<String>,
 }
 
+/// Update a healthcheck's severity policy.
+///
+/// Sets the base severity (and optionally notes) for the given check, and
+/// marks it as reviewed by the caller. Saving with the same severity as
+/// before still counts as a review, so an operator can acknowledge a
+/// check without changing its policy.
 #[utoipa::path(
 	post,
 	path = "/update",
@@ -144,17 +195,28 @@ pub async fn update(
 	Ok(Json(row.into()))
 }
 
+/// Request body for replacing a healthcheck's conditional severity rules.
 #[derive(Deserialize, ToSchema)]
 pub struct UpdateRulesArgs {
+	/// The healthcheck name whose rules to replace; must already exist
+	/// in the catalog.
 	pub check_name: String,
-	/// Either `null` (clear the ladder) or a JsonLogic if-ladder as
-	/// documented on `IfLadder`. An empty-branches ladder is normalised
-	/// to null at the API layer.
+	/// The new conditional rules to store, or `null` to remove all
+	/// conditional rules and rely solely on the base severity. Same
+	/// shape as the `rules` field returned when listing checks. A ladder
+	/// with no condition/severity pairs is treated the same as `null`.
 	#[schema(value_type = Option<serde_json::Value>)]
 	#[serde(default)]
 	pub rules: Option<JsonValue>,
 }
 
+/// Replace a healthcheck's conditional severity rules.
+///
+/// Stores a new set of conditional rules for the given check (or removes
+/// them, if `rules` is `null`), and marks the check as reviewed by the
+/// caller. Returns 400 if `rules` doesn't parse as a valid ladder — for
+/// example an unknown comparison operator, a malformed variable
+/// reference, or an odd number of entries.
 #[utoipa::path(
 	post,
 	path = "/update_rules",
@@ -199,39 +261,56 @@ pub async fn update_rules(
 	Ok(Json(row.into()))
 }
 
+/// Request body identifying which healthcheck to sample data for.
 #[derive(Deserialize, ToSchema)]
 pub struct SampleArgs {
+	/// The healthcheck name to sample.
 	pub check_name: String,
 }
 
-/// Materialised sample of the inputs available to a rule when this check
-/// fails — fetched from the most recent status push (across all servers)
-/// that reported `check_name`. The UI uses this to power autocomplete
-/// suggestions, pass/warn validation on `var` input, and live previews
-/// of a rule's effect against realistic data.
+/// A real-world sample of the data a conditional rule can reference for a
+/// given healthcheck, taken from the most recent status report (across
+/// all servers) that included it.
 #[derive(Serialize, ToSchema)]
 pub struct HealthcheckSample {
-	/// Top-level status extras (`statuses.extra`).
+	/// Additional top-level fields submitted with the status report that
+	/// contained this check, available to conditional rules under the
+	/// `status.<field>` namespace.
 	pub status_extra: serde_json::Map<String, JsonValue>,
-	/// The failing check's own fields (`health[i]` minus `check` /
-	/// `healthy`).
+	/// The sampled check's own reported fields (excluding its name and
+	/// pass/fail flag), available to conditional rules under the
+	/// `check.<field>` namespace.
 	pub check_extra: serde_json::Map<String, JsonValue>,
-	/// Server's resolved tag map (server + group merge).
+	/// The reporting server's tags, merged with its group's tags,
+	/// available to conditional rules under the `tag.<key>` namespace.
 	pub tags: HashMap<String, String>,
-	/// Server hostname for display.
+	/// Hostname of the server the sample was taken from.
 	pub server_host: String,
-	/// Optional friendly server name.
+	/// Friendly name of the server the sample was taken from, if it has
+	/// one.
 	pub server_name: Option<String>,
-	/// When the sampled status push happened.
+	/// When the sampled status report was received.
 	pub seen_at: Timestamp,
 }
 
+/// Result of sampling real data for a healthcheck's conditional rules.
 #[derive(Serialize, ToSchema)]
 pub struct HealthcheckSampleResponse {
+	/// The healthcheck name that was sampled.
 	pub check_name: String,
+	/// The sampled data, or `null` if no server has ever reported this
+	/// check.
 	pub sample: Option<HealthcheckSample>,
 }
 
+/// Sample real data available to a healthcheck's conditional rules.
+///
+/// Fetches the most recent status report from any server that reported
+/// the given check, and returns the fields a conditional rule could
+/// reference for it. Useful for discovering what data is actually
+/// available before writing a rule, and for previewing how a candidate
+/// rule would evaluate. Returns a `null` sample if no server has ever
+/// reported this check.
 #[utoipa::path(
 	post,
 	path = "/sample",
@@ -313,12 +392,13 @@ pub async fn sample(
 	}))
 }
 
-/// Distinct tag keys known anywhere in the system — union across all
-/// servers and server groups, sorted. Feeds the rule editor's
-/// Autocomplete so operators can pick `tag.<key>` even when the
-/// sampled server doesn't carry that key. The sample-based pass/warn
-/// badge still reflects the sample only; this list only widens the
-/// completion menu.
+/// List all known tag keys.
+///
+/// Returns the sorted, deduplicated set of tag keys used across every
+/// server and server group in the fleet, including keys not present on
+/// the sample returned by the sampling endpoint. Useful for discovering
+/// which `tag.<key>` variables are available when writing a conditional
+/// rule, even for tags the sampled server doesn't happen to carry.
 #[utoipa::path(
 	post,
 	path = "/tag_keys",
