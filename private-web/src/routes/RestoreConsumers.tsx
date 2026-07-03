@@ -4,6 +4,7 @@ import {
 	LinearProgress,
 	Paper,
 	Stack,
+	Tooltip,
 	Typography,
 } from "@mui/material";
 import { useApi } from "../api";
@@ -52,7 +53,26 @@ export default function RestoreConsumers() {
 										No capabilities registered yet.
 									</Typography>
 								) : (
-									c.intents.map((i) => <Chip key={i} label={i} size="small" />)
+									c.intents.map((i) => {
+										const tip = [
+											i.description,
+											i.semantics && i.semantics.length > 0
+												? `semantics: ${i.semantics.join(", ")}`
+												: null,
+										]
+											.filter(Boolean)
+											.join(" — ");
+										const chip = (
+											<Chip key={i.intent} label={i.intent} size="small" />
+										);
+										return tip ? (
+											<Tooltip key={i.intent} title={tip}>
+												{chip}
+											</Tooltip>
+										) : (
+											chip
+										);
+									})
 								)}
 							</Stack>
 						</Paper>
