@@ -104,9 +104,18 @@ async fn sweep_files_when_no_status_ever() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		// No status row at all → infinite downtime → always crosses threshold.
 		let id = insert_server(&mut conn, "http://gone.invalid/", 600).await;
-		Status::sweep_reachability(&mut conn).await.expect("sweep");
+		let filed = Status::sweep_reachability(&mut conn).await.expect("sweep");
+		assert_eq!(filed, 1);
 		let issue = issue_for(&mut conn, id).await.expect("issue exists");
 		assert_eq!(issue.severity, Severity::Error);
+		assert!(issue.active);
+		assert!(
+			issue.message.contains("has never reported"),
+			"expected a never-reported message, got: {}",
+			issue.message
+		);
+		assert!(issue.message.contains("(threshold 10m)"));
+		assert!(!issue.message.contains("106751991167300d"));
 	})
 	.await
 }
