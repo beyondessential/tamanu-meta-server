@@ -8,8 +8,8 @@ pub mod state;
 pub fn routes(state: crate::state::AppState) -> commons_errors::Result<axum::routing::Router<()>> {
 	use axum::middleware;
 	use axum::routing::Router;
+	use canopy_utoipa_axum::router::OpenApiRouter;
 	use utoipa::OpenApi;
-	use utoipa_axum::router::OpenApiRouter;
 	use utoipa_swagger_ui::SwaggerUi;
 
 	let (api_router, api_spec) = OpenApiRouter::with_openapi(openapi::ApiDoc::openapi())

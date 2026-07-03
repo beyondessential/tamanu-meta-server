@@ -40,7 +40,7 @@ tokio-postgres = { version = "0.7.17", features = ["with-jiff-0_2", "with-serde_
 tower-http = { version = "0.7.0", features = ["fs"] }
 tracing.workspace = true
 utoipa.workspace = true
-utoipa-axum.workspace = true
+canopy-utoipa-axum.workspace = true
 utoipa-swagger-ui.workspace = true
 uuid = { version = "1.23.1", features = ["serde", "v4"] }
 chbs = "0.1.1"

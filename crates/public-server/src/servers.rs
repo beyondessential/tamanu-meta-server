@@ -8,6 +8,7 @@ use commons_servers::device_auth::{mtls, pop};
 use commons_servers::tailnet_directory::TailnetDirectory;
 
 use crate::ratelimit::RateLimiter;
+use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_types::server::{kind::ServerKind, rank::ServerRank};
 use database::{
 	Db,
@@ -20,7 +21,6 @@ use database::{
 use diesel_async::AsyncConnection;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
-use utoipa_axum::{router::OpenApiRouter, routes};
 use uuid::Uuid;
 
 use crate::state::AppState;

@@ -1,6 +1,7 @@
 use axum::Json;
 use axum::extract::State;
 use base64::Engine;
+use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
 use commons_types::{
@@ -25,7 +26,6 @@ use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use utoipa::ToSchema;
-use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::fns::Page;
 use crate::state::AppState;

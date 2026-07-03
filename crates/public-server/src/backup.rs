@@ -19,6 +19,7 @@
 
 use aws_sdk_sts::operation::RequestId as _;
 use axum::{Json, extract::State, http::StatusCode};
+use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::device_auth::ServerDevice;
 use commons_types::backup::{BackupConfigStatus, BackupPurpose, BackupType, RunOutcome};
@@ -34,7 +35,6 @@ use database::{
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
-use utoipa_axum::{router::OpenApiRouter, routes};
 use uuid::Uuid;
 
 use crate::state::{AppState, BackupSecrets};

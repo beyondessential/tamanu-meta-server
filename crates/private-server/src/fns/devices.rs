@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use axum::Json;
 use axum::extract::State;
+use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::device_auth::keygen;
 use commons_servers::tailnet_directory::DirectoryEntry;
@@ -12,7 +13,6 @@ use database::servers::Server;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
-use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::fns::Page;
 use crate::fns::servers::{ServerInfo, decorate_with_status, fill_display_hosts, server_to_info};

@@ -5,6 +5,7 @@ use axum::{
 	Json,
 	extract::{Path, State},
 };
+use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::{
 	backup_jobs::backups_due_now_for_server, device_auth::ServerDevice, headers::VersionHeader,
@@ -25,7 +26,6 @@ use database::{
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
-use utoipa_axum::{router::OpenApiRouter, routes};
 use uuid::Uuid;
 
 use crate::state::AppState;

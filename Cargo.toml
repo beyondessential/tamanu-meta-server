@@ -10,6 +10,7 @@ members = [
 	"crates/jobs",
 	"crates/private-server",
 	"crates/public-server",
+	"vendor/canopy-utoipa-axum",
 ]
 
 [workspace.dependencies]
@@ -58,7 +59,10 @@ timesimp = "1.0.0"
 tokio = "1.52.3"
 tracing = "0.1.44"
 utoipa = { version = "5", features = ["jiff_0_2", "uuid", "axum_extras"] }
-utoipa-axum = "0.2"
+# Vendored fork of utoipa-axum under vendor/canopy-utoipa-axum — panics on
+# OpenAPI schema-name collisions instead of silently overwriting. See that
+# crate's Cargo.toml header.
+canopy-utoipa-axum = { path = "vendor/canopy-utoipa-axum" }
 utoipa-swagger-ui = { version = "9", default-features = false, features = ["axum", "vendored"] }
 
 [profile.release]

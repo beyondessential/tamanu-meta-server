@@ -1,12 +1,12 @@
 use axum::Json;
 use axum::extract::State;
+use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{ProblemDetailsSchema, Result};
 use commons_servers::{backup_jobs::BillingLabels, tailscale_auth::TailscaleAdmin};
 use commons_types::{Uuid, server::TagMap};
 use database::server_groups::{NewServerGroup, PartialServerGroup, ServerGroup};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
-use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::state::AppState;
 

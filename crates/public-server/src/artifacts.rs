@@ -2,6 +2,7 @@ use axum::{
 	Json,
 	extract::{Path, State},
 };
+use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{ProblemDetailsSchema, Result};
 use commons_servers::device_auth::ReleaserDevice;
 use commons_types::version::{VersionStatus, VersionStr};
@@ -12,7 +13,6 @@ use database::{
 };
 use diesel::SelectableHelper as _;
 use diesel_async::RunQueryDsl as _;
-use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::state::AppState;
 
