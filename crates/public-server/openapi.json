@@ -1138,6 +1138,27 @@
           }
         }
       },
+      "BTreeMap": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "description": "One parameter a restore consumer accepts per replica of an intent.",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "default": {
+              "description": "The value sent when the operator leaves the parameter unset. Absent means\nan unset parameter is sent as JSON `null`."
+            },
+            "type": {
+              "$ref": "#/components/schemas/ParamType"
+            }
+          }
+        },
+        "propertyNames": {
+          "type": "string"
+        }
+      },
       "BackupPurpose": {
         "type": "string",
         "description": "Why a credential was issued / a run executed. A real capability gate\non the issued S3 creds, not just audit metadata: `Backup` grants\nwrite-without-delete, `Restore` grants read-only.",
@@ -1375,6 +1396,33 @@
           }
         ]
       },
+      "IntentDescriptor": {
+        "type": "object",
+        "description": "One intent a restore consumer advertises: the behaviours it opts into and the\nsettings it accepts per replica.",
+        "required": [
+          "intent"
+        ],
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "intent": {
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/components/schemas/BTreeMap"
+          },
+          "semantics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "Issue": {
         "type": "object",
         "required": [
@@ -1535,6 +1583,17 @@
             "type": "string"
           }
         }
+      },
+      "ParamType": {
+        "type": "string",
+        "description": "The type of a restore-replica parameter. Informs the operator form's input\nand the validation Canopy applies. The underlying JSON is a number\n(`duration` in whole seconds, `bytes`, `integer`), a boolean (`boolean`), or\na string (`text`); Canopy does not otherwise interpret parameter values.",
+        "enum": [
+          "duration",
+          "bytes",
+          "boolean",
+          "integer",
+          "text"
+        ]
       },
       "ProblemDetailsSchema": {
         "type": "object",
@@ -2053,6 +2112,7 @@
           "type",
           "intent",
           "name",
+          "params",
           "storage",
           "bucket",
           "prefix",
@@ -2061,14 +2121,6 @@
         "properties": {
           "bucket": {
             "type": "string"
-          },
-          "freshness_seconds": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "Max time since the last healthy restore before overdue, in whole seconds\n— the consumer's restore cadence, not the backup interval; `None` = no\noverdue bound."
           },
           "group_id": {
             "type": "string",
@@ -2079,6 +2131,18 @@
           },
           "name": {
             "type": "string"
+          },
+          "overdue_after_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The overdue bound in whole seconds; `None` = no bound. Interpreted per the\nintent's semantics (a `once` snapshot bound, or a standing staleness\nbound)."
+          },
+          "params": {
+            "type": "object",
+            "description": "The resolved parameter values for this replica: one per parameter the\nintent advertises, unset ones filled with their default or JSON `null`."
           },
           "prefix": {
             "type": "string"

@@ -2492,6 +2492,16 @@ export interface components {
             /** Format: uuid */
             server_id: string;
         };
+        BTreeMap: {
+            [key: string]: {
+                /**
+                 * @description The value sent when the operator leaves the parameter unset. Absent means
+                 *     an unset parameter is sent as JSON `null`.
+                 */
+                default?: unknown;
+                type: components["schemas"]["ParamType"];
+            };
+        };
         /** @description Fleet-overview row for the configured-groups listing. */
         BackupConfigSummary: {
             bucket: string;
@@ -2701,15 +2711,17 @@ export interface components {
         CreateArgs: {
             /** Format: uuid */
             consumer_device_id: string;
-            /**
-             * Format: int64
-             * @description Max snapshot age before overdue, in whole seconds; `None` = latest only.
-             */
-            freshness_seconds?: number | null;
             /** Format: uuid */
             group_id: string;
             intent: string;
             name: string;
+            /**
+             * Format: int64
+             * @description Overdue bound in whole seconds; `None` = no bound.
+             */
+            overdue_after_seconds?: number | null;
+            /** @description Operator-supplied parameter values, validated against the intent's schema. */
+            params?: Record<string, never>;
             /**
              * Format: uuid
              * @description `None` = all current servers in the group.
@@ -3149,6 +3161,16 @@ export interface components {
             incident: components["schemas"]["IncidentData"];
             issues: components["schemas"]["IncidentIssueData"][];
         };
+        /**
+         * @description One intent a restore consumer advertises: the behaviours it opts into and the
+         *     settings it accepts per replica.
+         */
+        IntentDescriptor: {
+            description?: string | null;
+            intent: string;
+            params?: components["schemas"]["BTreeMap"];
+            semantics?: string[];
+        };
         IssueData: {
             active: boolean;
             /** Format: date-time */
@@ -3558,6 +3580,14 @@ export interface components {
             /** Format: int64 */
             offset: number;
         };
+        /**
+         * @description The type of a restore-replica parameter. Informs the operator form's input
+         *     and the validation Canopy applies. The underlying JSON is a number
+         *     (`duration` in whole seconds, `bytes`, `integer`), a boolean (`boolean`), or
+         *     a string (`text`); Canopy does not otherwise interpret parameter values.
+         * @enum {string}
+         */
+        ParamType: "duration" | "bytes" | "boolean" | "integer" | "text";
         PartialServerGroup: {
             name?: string | null;
             notes?: string | null;
@@ -3759,12 +3789,14 @@ export interface components {
         ResolvedReason: "fixed" | "wont_fix" | "expected" | "duplicate" | "flapping";
         /**
          * @description A restore consumer (a `backup-restore` device) and the intents it currently
-         *     supports — drives the declaration form's consumer and intent pickers.
+         *     advertises, with each intent's description, semantics, and parameter schema —
+         *     drives the declaration form's consumer/intent pickers and dynamic param
+         *     fields.
          */
         RestoreConsumerView: {
             /** Format: uuid */
             device_id: string;
-            intents: string[];
+            intents: components["schemas"]["IntentDescriptor"][];
             name?: string | null;
         };
         /**
@@ -3779,8 +3811,6 @@ export interface components {
             created_at: string;
             created_by?: string | null;
             enabled: boolean;
-            /** Format: int64 */
-            freshness_seconds?: number | null;
             gap: boolean;
             /** Format: uuid */
             group_id: string;
@@ -3788,6 +3818,10 @@ export interface components {
             id: string;
             intent: string;
             name: string;
+            /** Format: int64 */
+            overdue_after_seconds?: number | null;
+            /** @description Operator-supplied parameter values (name → value). */
+            params: Record<string, never>;
             /** Format: uuid */
             server_id?: string | null;
             type: string;
