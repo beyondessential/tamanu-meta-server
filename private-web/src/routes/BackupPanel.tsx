@@ -1151,7 +1151,11 @@ function MaintenancePanel({
 										<TableCell>Kind</TableCell>
 										<TableCell>Outcome</TableCell>
 										<TableCell>Finished</TableCell>
-										<TableCell>Reclaimed</TableCell>
+										<TableCell>
+											<Tooltip title="Approximate: kopia's garbage collection is two-phase, so a run can under-report until a later full run sweeps quarantined blobs">
+												<span>Reclaimed</span>
+											</Tooltip>
+										</TableCell>
 									</TableRow>
 								</TableHead>
 								<TableBody>
