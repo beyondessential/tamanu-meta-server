@@ -6452,7 +6452,9 @@
           "recent_runs",
           "recent_maintenance",
           "pending_requests",
-          "capabilities"
+          "capabilities",
+          "s3_month_sent_bytes",
+          "s3_month_received_bytes"
         ],
         "properties": {
           "capabilities": {
@@ -6479,6 +6481,15 @@
             "items": {
               "$ref": "#/components/schemas/BackupRun"
             }
+          },
+          "s3_month_received_bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "s3_month_sent_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total S3 bytes sent to (uploads) and received from (downloads) the\nbucket by the group's device backup runs so far this calendar month\n(UTC), raw wire bytes. Repo maintenance/inspection traffic isn't\ntallied anywhere, so this undercounts the bucket's actual monthly S3\ntraffic."
           },
           "stats": {
             "oneOf": [

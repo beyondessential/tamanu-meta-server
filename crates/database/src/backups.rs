@@ -1083,6 +1083,46 @@ impl BackupRun {
 			.map_err(AppError::from)
 	}
 
+	/// Total S3 bytes sent/received (raw — the full wire size including SigV4
+	/// chunk framing, not the decoded payload) across the group's device backup
+	/// runs reported so far this calendar month (UTC boundary). Returns
+	/// `(sent, received)`, `0` for a side with no tallied runs.
+	///
+	/// This only covers what bestool's proxy tallies on `backup_runs` during
+	/// device backups — repo maintenance and inspection traffic against the
+	/// bucket isn't tallied anywhere, so the total undercounts the bucket's
+	/// actual monthly S3 traffic.
+	pub async fn s3_traffic_this_month_for_group(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+	) -> Result<(i64, i64)> {
+		#[derive(diesel::QueryableByName)]
+		struct Totals {
+			#[diesel(sql_type = diesel::sql_types::Int8)]
+			sent: i64,
+			#[diesel(sql_type = diesel::sql_types::Int8)]
+			received: i64,
+		}
+
+		// SUM() over bigint columns promotes to numeric in Postgres, so the
+		// query casts back to bigint explicitly; COALESCE turns "no rows"/
+		// "all NULL" into 0 rather than surfacing NULL.
+		let totals: Totals = diesel::sql_query(
+			"SELECT \
+				COALESCE(SUM(s3_sent_raw_bytes), 0)::bigint AS sent, \
+				COALESCE(SUM(s3_received_raw_bytes), 0)::bigint AS received \
+			FROM backup_runs \
+			WHERE group_id = $1 \
+				AND reported_at >= date_trunc('month', now(), 'UTC')",
+		)
+		.bind::<diesel::sql_types::Uuid, _>(group_id)
+		.get_result(db)
+		.await
+		.map_err(AppError::from)?;
+
+		Ok((totals.sent, totals.received))
+	}
+
 	/// Fill `snapshot_logical_bytes` from repo inspection for runs matched by
 	/// snapshot id, only where it is still unset — write-once, since a snapshot
 	/// is immutable. `sizes` maps a snapshot id to its observed logical size.

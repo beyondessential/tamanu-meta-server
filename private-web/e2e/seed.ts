@@ -420,6 +420,8 @@ export async function seedBackupRun(
 		s3SentPayloadBytes?: number | null;
 		s3ReceivedRawBytes?: number | null;
 		s3ReceivedPayloadBytes?: number | null;
+		/** Backdate `reported_at` by this many seconds (default: now). */
+		reportedAgoSecs?: number;
 	},
 ): Promise<{ id: string }> {
 	const id = randomUUID();
@@ -427,8 +429,9 @@ export async function seedBackupRun(
 		`INSERT INTO backup_runs
 		 (id, device_id, group_id, server_id, type, purpose, outcome, error, bytes_uploaded, snapshot_id,
 		  s3_sent_raw_bytes, s3_sent_payload_bytes, s3_received_raw_bytes, s3_received_payload_bytes,
-		  snapshot_logical_bytes)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+		  snapshot_logical_bytes, reported_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+		  NOW() - make_interval(secs => $16))`,
 		[
 			id,
 			opts.deviceId,
@@ -445,6 +448,7 @@ export async function seedBackupRun(
 			opts.s3ReceivedRawBytes ?? null,
 			opts.s3ReceivedPayloadBytes ?? null,
 			opts.snapshotLogicalBytes ?? null,
+			opts.reportedAgoSecs ?? 0,
 		],
 	);
 	return { id };

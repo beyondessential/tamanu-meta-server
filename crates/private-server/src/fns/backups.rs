@@ -270,6 +270,13 @@ pub struct BackupStatsView {
 	/// enabled state), so the "back up now" panel can offer the right types per
 	/// server and grey out servers that have declared none.
 	pub capabilities: Vec<ServerBackupCapabilityView>,
+	/// Total S3 bytes sent to (uploads) and received from (downloads) the
+	/// bucket by the group's device backup runs so far this calendar month
+	/// (UTC), raw wire bytes. Repo maintenance/inspection traffic isn't
+	/// tallied anywhere, so this undercounts the bucket's actual monthly S3
+	/// traffic.
+	pub s3_month_sent_bytes: i64,
+	pub s3_month_received_bytes: i64,
 }
 
 /// One `(server, type)` backup capability and whether the operator has it
@@ -1302,6 +1309,8 @@ pub async fn stats(
 		BackupRun::list_for_group(&mut conn, args.server_group_id, RECENT_LIMIT).await?;
 	let recent_maintenance =
 		BackupMaintenanceRun::list_for_group(&mut conn, args.server_group_id, RECENT_LIMIT).await?;
+	let (s3_month_sent_bytes, s3_month_received_bytes) =
+		BackupRun::s3_traffic_this_month_for_group(&mut conn, args.server_group_id).await?;
 
 	// Pending requests + declared capabilities across the group's member servers.
 	let members = group.list_servers(&mut conn).await?;
@@ -1377,6 +1386,8 @@ pub async fn stats(
 		recent_maintenance,
 		pending_requests,
 		capabilities,
+		s3_month_sent_bytes,
+		s3_month_received_bytes,
 	}))
 }
 
