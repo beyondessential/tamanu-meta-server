@@ -2,7 +2,6 @@ import {
 	Alert,
 	Box,
 	Chip,
-	Collapse,
 	FormControlLabel,
 	IconButton,
 	LinearProgress,
@@ -223,24 +222,19 @@ function AttentionRow({ server }: { server: CheckAttentionServerData }) {
 					<TimeAgo timestamp={server.status_created_at} />
 				</TableCell>
 			</TableRow>
-			<TableRow>
-				<TableCell
-					colSpan={5}
-					sx={{ py: 0, border: expanded ? undefined : 0 }}
-				>
-					<Collapse in={expanded} timeout="auto" unmountOnExit>
-						<Box sx={{ py: 1 }}>
-							{extras.length > 0 ? (
-								<CheckExtrasList extras={extras} />
-							) : (
-								<Typography variant="body2" color="text.secondary">
-									No additional data reported for this check.
-								</Typography>
-							)}
-						</Box>
-					</Collapse>
-				</TableCell>
-			</TableRow>
+			{expanded && (
+				<TableRow>
+					<TableCell colSpan={5} sx={{ py: 1 }}>
+						{extras.length > 0 ? (
+							<CheckExtrasList extras={extras} />
+						) : (
+							<Typography variant="body2" color="text.secondary">
+								No additional data reported for this check.
+							</Typography>
+						)}
+					</TableCell>
+				</TableRow>
+			)}
 		</>
 	);
 }
