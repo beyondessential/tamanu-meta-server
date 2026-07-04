@@ -336,9 +336,9 @@ function OperatorCountChip({
 }
 
 /// Strip of StatusDots for a group's members, sorted by rank then kind
-/// (centrals first within a rank). A thin grey vertical bar separates
-/// adjacent ranks, so operators can see at a glance how the group
-/// breaks down without naming each dot.
+/// (centrals first within a rank). A hollow right-pointing triangle
+/// separates adjacent ranks, so operators can see at a glance how the
+/// group breaks down without naming each dot.
 // Every child of the strip — dot or rank separator — sits in an identical
 // fixed-size cell, so wrapped rows always align to the same column grid no
 // matter where the line breaks fall. Spacing comes from the container's
@@ -365,12 +365,23 @@ export function RankedDotStrip({ members }: { members: FacilityServerStatus[] })
 					key={`sep-${rank}`}
 					component="span"
 					aria-hidden
-					sx={dotCellSx}
+					sx={{ ...dotCellSx, color: "text.primary" }}
 				>
-					<Box
-						component="span"
-						sx={{ width: "1px", height: "0.9em", bgcolor: "text.disabled" }}
-					/>
+					{/* Hollow play-button triangle, dot-sized; MUI's
+					    PlayArrowOutlined renders too small in a 1em cell and
+					    has sharp corners, hence the inline SVG. */}
+					<svg
+						width="1em"
+						height="1em"
+						viewBox="0 0 16 16"
+						fill="none"
+						stroke="currentColor"
+						strokeWidth={2}
+						strokeLinejoin="round"
+						strokeLinecap="round"
+					>
+						<path d="M4.5 3.2 12.8 8 4.5 12.8Z" />
+					</svg>
 				</Box>,
 			);
 		}
