@@ -15,7 +15,9 @@ repository = "https://github.com/juhaku/utoipa"
 authors = ["Juha Kukkonen <juha7kukkonen@gmail.com>"]
 
 [features]
-debug = []
+# The derive(Debug) on OpenApiRouter needs utoipa's own debug feature for
+# OpenApi's Debug impl; without forwarding, --all-features builds fail.
+debug = ["utoipa/debug"]
 
 # default-features can't be overridden through workspace inheritance, and the
 # servers already pull axum/utoipa with their default features on, so feature
