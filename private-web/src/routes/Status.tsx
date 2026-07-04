@@ -365,6 +365,7 @@ export function RankedDotStrip({ members }: { members: FacilityServerStatus[] })
 					key={`sep-${rank}`}
 					component="span"
 					aria-hidden
+					data-testid="rank-separator"
 					sx={{ ...dotCellSx, color: "text.primary" }}
 				>
 					{/* Hollow play-button triangle, dot-sized; MUI's
@@ -409,6 +410,7 @@ export function RankedDotStrip({ members }: { members: FacilityServerStatus[] })
 		<Stack
 			direction="row"
 			spacing={0}
+			data-testid="dot-strip"
 			sx={{ flexWrap: "wrap", alignItems: "center", gap: "0.5em" }}
 		>
 			{cells}
