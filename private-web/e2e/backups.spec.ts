@@ -343,7 +343,9 @@ test.describe("backups ready: stats + backup-now", () => {
 		});
 
 		await page.goto(`/groups/${group.id}/backups`);
-		const stat = page.getByText(/S3 traffic \(this month\)/i);
+		// getByText resolves to the innermost <strong> label; the values live in
+		// its parent Typography, so assert (and hover) on that.
+		const stat = page.getByText(/S3 traffic \(this month\)/i).locator("..");
 		await expect(stat).toBeVisible();
 		// Raw-byte totals for the in-month runs only (9999s excluded).
 		await expect(stat).toContainText("300 B sent / 30 B received");
@@ -505,12 +507,14 @@ test.describe("backups ready: stats + backup-now", () => {
 		// Uploaded falls back to the payload-sent figure, prefixed "~".
 		await expect(runs.getByText("~2.0 KiB")).toBeVisible();
 
-		// The S3 traffic breakdown is hidden until the row is expanded.
-		await expect(page.getByText(/s3 traffic/i)).toBeHidden();
+		// The S3 traffic breakdown is hidden until the row is expanded. Scoped to
+		// the runs table: the repo-stats panel has its own always-visible
+		// "S3 traffic (this month)" stat that would otherwise match.
+		await expect(runs.getByText(/s3 traffic/i)).toBeHidden();
 		await runs.getByRole("button", { name: /show details/i }).click();
-		await expect(page.getByText(/s3 traffic/i)).toBeVisible();
-		await expect(page.getByText(/2\.0 KiB payload \/ 3\.0 KiB raw/i)).toBeVisible();
-		await expect(page.getByText(/512 B payload \/ 1\.0 KiB raw/i)).toBeVisible();
+		await expect(runs.getByText(/s3 traffic/i)).toBeVisible();
+		await expect(runs.getByText(/2\.0 KiB payload \/ 3\.0 KiB raw/i)).toBeVisible();
+		await expect(runs.getByText(/512 B payload \/ 1\.0 KiB raw/i)).toBeVisible();
 	});
 
 	test("backup-now writes a request row; cancel deletes it", async ({
