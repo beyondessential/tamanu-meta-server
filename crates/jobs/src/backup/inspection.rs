@@ -8,14 +8,18 @@
 //! Inspection is read-only, but it still goes through the in-flight set
 //! ([`super::worker`]) so it doesn't overlap a maintenance run on the same repo.
 //!
-//! A group is due when **a backup has landed since its last inspection** (so the
-//! stats panel freshens shortly after a backup — including a manual "back up
-//! now" — rather than waiting), **a maintenance run has completed successfully
-//! since its last inspection** (maintenance prunes/compacts the repo, so the
-//! inventory should freshen after it too), or otherwise on its
-//! **hash-jittered cadence**: the group's effective backup interval (min
-//! across enabled types' schedule/default `expected_interval`), floored to
-//! weekly, so corruption/drift is still caught on quiet repos.
+//! A group is due when any of these hold:
+//!
+//! - **a backup has landed since its last inspection** — so the stats panel
+//!   freshens shortly after a backup (including a manual "back up now")
+//!   rather than waiting;
+//! - **a maintenance run has completed successfully since its last
+//!   inspection** — maintenance prunes/compacts the repo, so the inventory
+//!   should freshen after it too;
+//! - otherwise, its **hash-jittered cadence** has come around: the group's
+//!   effective backup interval (min across enabled types' schedule/default
+//!   `expected_interval`), floored to weekly, so corruption/drift is still
+//!   caught on quiet repos.
 
 use std::time::Duration;
 
