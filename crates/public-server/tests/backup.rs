@@ -456,9 +456,10 @@ async fn report_no_live_server_is_412() {
 /// client (and no kube), against the given DB url. Mirrors the harness wiring
 /// but lets the test inject the stubbed STS path.
 fn public_server_with_sts(url: &str, sts: aws_sdk_sts::Client) -> TestServer {
+	let db = database::init_to(url);
 	let state = public_server::state::AppState {
-		db: database::init_to(url),
-		db_read: database::init_to(url),
+		db: db.clone(),
+		db_read: db,
 		tera: public_server::state::AppState::init_tera().unwrap(),
 		server_versions_secret: Some("test-secret".to_string()),
 		tailnet_directory: None,

@@ -31,10 +31,11 @@ fn test_directory() -> (std::net::IpAddr, String, TailnetDirectory) {
 }
 
 async fn private_with_directory(url: &str, directory: TailnetDirectory) -> TestServer {
+	let db = database::init_to(url);
 	let router = router(
 		private_server::routes(private_server::state::AppState {
-			db: database::init_to(url),
-			db_read: database::init_to(url),
+			db: db.clone(),
+			db_read: db,
 			ro_pool: None,
 			tailnet_directory: Some(directory),
 			kube: None,
