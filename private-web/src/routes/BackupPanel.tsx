@@ -28,6 +28,7 @@ import {
 } from "@mui/material";
 import { useState } from "react";
 import BackupIcon from "@mui/icons-material/Backup";
+import RestoreIcon from "@mui/icons-material/SettingsBackupRestore";
 import DeleteIcon from "@mui/icons-material/Delete";
 import EditIcon from "@mui/icons-material/Edit";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
@@ -1263,9 +1264,83 @@ function ServersPanel({
 	);
 	const requestNow = useApiAction("backups", "request_now");
 	const cancel = useApiAction("backups", "cancel_request");
+	const allowRestore = useApiAction("backups", "allow_restore");
+	const disallowRestore = useApiAction("backups", "disallow_restore");
 
 	const pending = stats.status === "ok" ? stats.data.pending_requests : [];
 	const capabilities = stats.status === "ok" ? stats.data.capabilities : [];
+	const restoreWindows =
+		stats.status === "ok" ? stats.data.restore_windows : [];
+	const restoreWindowFor = (serverId: string) =>
+		restoreWindows.find((w) => w.server_id === serverId);
+
+	const onAllowRestore = async (serverId: string) => {
+		try {
+			await allowRestore.call({ server_id: serverId });
+			stats.reload();
+		} catch {
+			/* surfaced via allowRestore.error */
+		}
+	};
+	const onDisallowRestore = async (serverId: string) => {
+		try {
+			await disallowRestore.call({ server_id: serverId });
+			stats.reload();
+		} catch {
+			/* surfaced via disallowRestore.error */
+		}
+	};
+
+	// Per-server restore-window control, shown under the server name. Restores
+	// are gated behind a deliberate, time-boxed opt-in, so this is where an
+	// operator opens (or closes) the window before running `bestool canopy
+	// restore` on the box.
+	const restoreControl = (serverId: string) => {
+		if (!isAdmin) return null;
+		const win = restoreWindowFor(serverId);
+		const busy = allowRestore.pending || disallowRestore.pending;
+		if (win) {
+			return (
+				<Stack
+					direction="row"
+					spacing={0.5}
+					sx={{ alignItems: "center", flexWrap: "wrap" }}
+				>
+					<Chip
+						size="small"
+						color="warning"
+						variant="outlined"
+						icon={<RestoreIcon />}
+						label={
+							<>
+								restores allowed until{" "}
+								<TimeAgo timestamp={win.allowed_until} />
+							</>
+						}
+					/>
+					<Button
+						size="small"
+						color="warning"
+						onClick={() => onDisallowRestore(serverId)}
+						disabled={busy}
+					>
+						Disable
+					</Button>
+				</Stack>
+			);
+		}
+		return (
+			<Button
+				size="small"
+				color="warning"
+				startIcon={<RestoreIcon />}
+				onClick={() => onAllowRestore(serverId)}
+				disabled={busy}
+			>
+				Allow restores
+			</Button>
+		);
+	};
 
 	// The backup types to offer per server: the ones it has declared it can run
 	// (bestool fails fast on a type it has no definition for), unioned with any
@@ -1390,7 +1465,12 @@ function ServersPanel({
 								if (types.length === 0) {
 									return (
 										<TableRow key={m.id}>
-											<TableCell>{serverLink(m)}</TableCell>
+											<TableCell>
+												<Stack spacing={0.5} sx={{ alignItems: "flex-start" }}>
+													{serverLink(m)}
+													{restoreControl(m.id)}
+												</Stack>
+											</TableCell>
 											<TableCell colSpan={3}>
 												<Typography variant="body2" color="text.secondary">
 													No backup types registered yet
@@ -1423,7 +1503,13 @@ function ServersPanel({
 													rowSpan={types.length}
 													sx={{ verticalAlign: "top" }}
 												>
-													{serverLink(m)}
+													<Stack
+														spacing={0.5}
+														sx={{ alignItems: "flex-start" }}
+													>
+														{serverLink(m)}
+														{restoreControl(m.id)}
+													</Stack>
 												</TableCell>
 											)}
 											<TableCell>
@@ -1477,9 +1563,17 @@ function ServersPanel({
 					</Table>
 				</Box>
 			)}
-			{(requestNow.error || cancel.error) && (
+			{(requestNow.error ||
+				cancel.error ||
+				allowRestore.error ||
+				disallowRestore.error) && (
 				<Alert severity="error" sx={{ mt: 1 }}>
-					{(requestNow.error || cancel.error)!.message}
+					{
+						(requestNow.error ||
+							cancel.error ||
+							allowRestore.error ||
+							disallowRestore.error)!.message
+					}
 				</Alert>
 			)}
 		</Paper>

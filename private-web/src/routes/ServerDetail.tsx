@@ -33,6 +33,7 @@ import EditIcon from "@mui/icons-material/Edit";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import LanguageIcon from "@mui/icons-material/Language";
 import RestoreIcon from "@mui/icons-material/RestoreFromTrash";
+import RestoreDataIcon from "@mui/icons-material/SettingsBackupRestore";
 import NotificationsActiveOutlinedIcon from "@mui/icons-material/NotificationsActiveOutlined";
 import NotificationsOffIcon from "@mui/icons-material/NotificationsOff";
 import NotificationsOffOutlinedIcon from "@mui/icons-material/NotificationsOffOutlined";
@@ -1634,6 +1635,36 @@ function BackupCapabilitiesSection({
 		{ server_group_id: groupId ?? NIL_UUID },
 		[groupId],
 	);
+	// The server's restore window: while open, an operator can run an ad-hoc
+	// `bestool canopy restore` on the box. Server-scoped, so it's shown here as
+	// well as on the group backups page.
+	const restore = useApi(
+		"backups",
+		"restore_window",
+		{ server_id: serverId },
+		[serverId],
+	);
+	const allowRestore = useApiAction("backups", "allow_restore");
+	const disallowRestore = useApiAction("backups", "disallow_restore");
+	const restoreUntil =
+		restore.status === "ok" ? restore.data.allowed_until : null;
+	const onAllowRestore = async () => {
+		try {
+			await allowRestore.call({ server_id: serverId });
+			restore.reload();
+		} catch {
+			/* surfaced via allowRestore.error */
+		}
+	};
+	const onDisallowRestore = async () => {
+		try {
+			await disallowRestore.call({ server_id: serverId });
+			restore.reload();
+		} catch {
+			/* surfaced via disallowRestore.error */
+		}
+	};
+
 	const inactive =
 		config.status === "ok" &&
 		!(config.data != null && config.data.status === "ready");
@@ -1681,6 +1712,47 @@ function BackupCapabilitiesSection({
 					</MuiLink>
 				)}
 			</Stack>
+
+			{groupId && isAdmin && (
+				<Box sx={{ mb: 1 }}>
+					{restoreUntil ? (
+						<Alert
+							severity="warning"
+							icon={<RestoreDataIcon fontSize="inherit" />}
+							action={
+								<Button
+									color="inherit"
+									size="small"
+									onClick={onDisallowRestore}
+									disabled={allowRestore.pending || disallowRestore.pending}
+								>
+									Disable
+								</Button>
+							}
+						>
+							Restores are allowed for this server until{" "}
+							<TimeAgo timestamp={restoreUntil} />. While open, the server can
+							restore backups on demand.
+						</Alert>
+					) : (
+						<Button
+							size="small"
+							color="warning"
+							variant="outlined"
+							startIcon={<RestoreDataIcon />}
+							onClick={onAllowRestore}
+							disabled={allowRestore.pending || disallowRestore.pending}
+						>
+							Allow restores (24h)
+						</Button>
+					)}
+					{(allowRestore.error || disallowRestore.error) && (
+						<Alert severity="error" sx={{ mt: 1 }}>
+							{(allowRestore.error || disallowRestore.error)!.message}
+						</Alert>
+					)}
+				</Box>
+			)}
 
 			{inactive && (
 				<Alert

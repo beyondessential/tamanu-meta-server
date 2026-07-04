@@ -82,6 +82,24 @@ async fn declare_capability_disabled(conn: &mut AsyncPgConnection, server_id: Uu
 	.expect("insert disabled capability");
 }
 
+/// Open the server's restore window, expiring an hour from now.
+async fn allow_restore(conn: &mut AsyncPgConnection, server_id: Uuid) {
+	sql_query("UPDATE servers SET restore_allowed_until = now() + interval '1 hour' WHERE id = $1")
+		.bind::<sql_types::Uuid, _>(server_id)
+		.execute(conn)
+		.await
+		.expect("open restore window");
+}
+
+/// Set an already-expired restore window (was opened, but the 24h lapsed).
+async fn expire_restore(conn: &mut AsyncPgConnection, server_id: Uuid) {
+	sql_query("UPDATE servers SET restore_allowed_until = now() - interval '1 hour' WHERE id = $1")
+		.bind::<sql_types::Uuid, _>(server_id)
+		.execute(conn)
+		.await
+		.expect("expire restore window");
+}
+
 async fn enqueue_request(
 	conn: &mut AsyncPgConnection,
 	server_id: Uuid,
@@ -207,6 +225,81 @@ async fn credentials_disabled_capability_no_request_is_409() {
 				.json(&serde_json::json!({ "type": "tamanu-config" }))
 				.await;
 			resp.assert_status(http::StatusCode::CONFLICT);
+		},
+	)
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn credentials_restore_closed_window_is_409() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			make_server(&mut conn, device_id, Some(group)).await;
+			make_config(&mut conn, group, "ready").await;
+			// Restore with no window ever opened: rejected, and the message must
+			// speak to the restore window rather than the backup-schedule gate.
+			let resp = public
+				.post("/backup-credentials")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({ "type": "tamanu-postgres", "purpose": "restore" }))
+				.await;
+			resp.assert_status(http::StatusCode::CONFLICT);
+			let body = resp.text();
+			assert!(
+				body.contains("restores are not currently allowed"),
+				"restore 409 should mention the restore window, got: {body}"
+			);
+			assert!(
+				!body.contains("enabled capability"),
+				"restore 409 must not mention the backup-schedule gate, got: {body}"
+			);
+		},
+	)
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn credentials_restore_expired_window_is_409() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			let server = make_server(&mut conn, device_id, Some(group)).await;
+			make_config(&mut conn, group, "ready").await;
+			// A window that was opened but has since lapsed reads as closed.
+			expire_restore(&mut conn, server).await;
+			let resp = public
+				.post("/backup-credentials")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({ "type": "tamanu-postgres", "purpose": "restore" }))
+				.await;
+			resp.assert_status(http::StatusCode::CONFLICT);
+		},
+	)
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn credentials_restore_open_window_passes_gate() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			let server = make_server(&mut conn, device_id, Some(group)).await;
+			make_config(&mut conn, group, "ready").await;
+			// An open window authorises the restore even though no backup type is
+			// enabled for this server (the disaster-recovery case: a fresh box
+			// restoring onto itself). The gate passes, so with no STS configured
+			// we reach the 502 issuer-unavailable branch rather than a 409.
+			allow_restore(&mut conn, server).await;
+			let resp = public
+				.post("/backup-credentials")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({ "type": "tamanu-postgres", "purpose": "restore" }))
+				.await;
+			resp.assert_status(http::StatusCode::BAD_GATEWAY);
 		},
 	)
 	.await;
@@ -615,7 +708,9 @@ async fn credentials_restore_sends_session_policy() {
 		let group = make_group(&mut conn).await;
 		let server = make_server(&mut conn, device_id, Some(group)).await;
 		make_config(&mut conn, group, "ready").await;
-		enable_capability(&mut conn, server, "tamanu-postgres").await;
+		// Restores are authorised by an open restore window, not by the type
+		// being on the backup schedule.
+		allow_restore(&mut conn, server).await;
 
 		// The rule only matches if a session policy naming the bucket was sent.
 		let rule = assume_role_rule(Some("arn:aws:s3:::grp-bucket"));

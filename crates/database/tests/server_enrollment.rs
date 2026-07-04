@@ -27,6 +27,8 @@ fn new_server(host: &str) -> Server {
 		tags: TagMap::default(),
 		deleted_at: None,
 		registered_at: None,
+		restore_allowed_until: None,
+		restore_allowed_by: None,
 	}
 }
 

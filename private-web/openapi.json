@@ -163,6 +163,53 @@
         ]
       }
     },
+    "/api/backups/allow_restore": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Allow this server to restore for the next 24 hours.",
+        "description": "Opens the server's restore window so an operator can run an ad-hoc\n`bestool canopy restore` on it: while the window is open the device can mint\nread-only restore credentials for its group's backup repository. The window\nauto-expires after 24 hours; calling again re-arms it from now. Returns the\nnew window. Restores are gated behind this deliberate opt-in because they\ngrant read access to the group's entire backup history.",
+        "operationId": "backups_allow_restore",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestoreWindowView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/backups/cancel_maintenance": {
       "post": {
         "tags": [
@@ -558,6 +605,36 @@
         ]
       }
     },
+    "/api/backups/disallow_restore": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Stop allowing this server to restore, immediately.",
+        "description": "Closes the server's restore window now, before its 24-hour expiry. Any\ncredentials already minted keep their (at most one hour) validity, but no\nnew restore credentials can be minted until an operator allows restores\nagain. Closing an already-closed window succeeds without effect.",
+        "operationId": "backups_disallow_restore",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/backups/get": {
       "post": {
         "tags": [
@@ -942,6 +1019,53 @@
         "responses": {
           "200": {
             "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/backups/restore_window": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "The current restore-window state for a server.",
+        "description": "Reports until when the server may mint restore credentials for itself, or\n`null` if restores are not currently allowed (never opened, or expired).",
+        "operationId": "backups_restore_window",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestoreWindowView"
+                }
+              }
+            }
           },
           "404": {
             "description": "",
@@ -6824,6 +6948,7 @@
           "recent_maintenance",
           "pending_requests",
           "capabilities",
+          "restore_windows",
           "s3_month_sent_bytes",
           "s3_month_received_bytes"
         ],
@@ -6855,6 +6980,13 @@
               "$ref": "#/components/schemas/BackupRun"
             },
             "description": "The most recent backup runs across the group's member servers."
+          },
+          "restore_windows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RestoreWindowRow"
+            },
+            "description": "Member servers whose restore window is currently open, so the panel can\nshow which servers may restore right now and until when. Servers with no\nopen window are omitted."
           },
           "s3_month_received_bytes": {
             "type": "integer",
@@ -10575,6 +10707,54 @@
           "type": {
             "type": "string",
             "description": "The backup type to restore, for example `tamanu-postgres`."
+          }
+        }
+      },
+      "RestoreWindowRow": {
+        "type": "object",
+        "description": "A server's currently-open restore window, as shown in the group stats.",
+        "required": [
+          "server_id",
+          "allowed_until"
+        ],
+        "properties": {
+          "allowed_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Who opened the window (Tailscale login), if known."
+          },
+          "allowed_until": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the window closes; the server may mint restore credentials until\nthen."
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The server the window applies to."
+          }
+        }
+      },
+      "RestoreWindowView": {
+        "type": "object",
+        "description": "A single server's restore-window state, for the server detail page.",
+        "properties": {
+          "allowed_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Who opened the current window (Tailscale login), if known."
+          },
+          "allowed_until": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the restore window closes, or `null` if restores are not currently\nallowed for this server."
           }
         }
       },

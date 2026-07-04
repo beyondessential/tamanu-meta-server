@@ -609,6 +609,8 @@ async fn seed_servers(
 			tags: TagMap::default(),
 			deleted_at: None,
 			registered_at: None,
+			restore_allowed_until: None,
+			restore_allowed_by: None,
 		}
 	}
 

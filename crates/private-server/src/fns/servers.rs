@@ -915,6 +915,8 @@ pub async fn create(
 		tags: args.tags.unwrap_or_default(),
 		deleted_at: None,
 		registered_at: None,
+		restore_allowed_until: None,
+		restore_allowed_by: None,
 	};
 
 	let created = Server::create(&mut conn, server).await?;
