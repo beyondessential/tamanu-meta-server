@@ -1,8 +1,10 @@
 import { expect, test } from "./test-fixtures";
 import {
 	resetSeededTables,
+	seedDevice,
 	seedServer,
 	seedServerGroup,
+	seedStatus,
 	seedVersion,
 } from "./seed";
 
@@ -70,5 +72,71 @@ test.describe("status page", () => {
 		await expect(
 			page.locator(`a[href="/groups/${prodGroup.id}"]`),
 		).toBeVisible();
+	});
+
+	test("dot strips wrap and align across a spread of group sizes", async ({
+		page,
+		sql,
+	}) => {
+		test.setTimeout(120_000);
+		await seedVersion(sql, { major: 1, minor: 0, patch: 0 });
+		const device = await seedDevice(sql);
+
+		// Groups of increasing size so the strip renders unwrapped, wrapped
+		// once, and wrapped many times (the screenshots artifact shows the
+		// grids). Each group spans three ranks, so two triangle separators
+		// appear per strip; health states cycle so plain, failed-ringed,
+		// warning-ringed, and never-reported dots all show up.
+		const splits: Record<number, [number, number, number]> = {
+			5: [3, 1, 1],
+			10: [6, 2, 2],
+			20: [12, 5, 3],
+			30: [18, 8, 4],
+			50: [30, 13, 7],
+		};
+		const groups: Array<{ id: string; size: number }> = [];
+		for (const [size, split] of Object.entries(splits)) {
+			const n = Number(size);
+			const group = await seedServerGroup(sql, { name: `fleet-of-${n}` });
+			groups.push({ id: group.id, size: n });
+			const ranks = (["production", "clone", "dev"] as const).flatMap(
+				(rank, ri) => Array(split[ri]).fill(rank) as ("production" | "clone" | "dev")[],
+			);
+			for (const [i, rank] of ranks.entries()) {
+				const server = await seedServer(sql, {
+					name: `f${n}-${i}`,
+					kind: i === 0 ? "central" : "facility",
+					rank,
+					groupId: group.id,
+				});
+				if (i % 7 === 6) continue; // never reported: grey dot
+				const health =
+					i % 4 === 3
+						? [{ check: "postgres", result: "failed" }]
+						: i % 5 === 4
+							? [{ check: "disk_space", result: "warning" }]
+							: [];
+				await seedStatus(sql, {
+					serverId: server.id,
+					deviceId: device.id,
+					healthy: i % 4 !== 3,
+					health,
+				});
+			}
+		}
+
+		await page.goto("/status");
+
+		for (const { id, size } of groups) {
+			// A group may surface under more than one rank bucket; every card
+			// shows the full strip, so scope to the first.
+			const card = page.locator(`a[href="/groups/${id}"]`).first();
+			const strip = card.getByTestId("dot-strip");
+			await expect(strip).toBeVisible();
+			// Two rank boundaries (production→clone, clone→dev).
+			await expect(strip.getByTestId("rank-separator")).toHaveCount(2);
+			// Every child cell is a dot or a separator.
+			await expect(strip.locator("> *")).toHaveCount(size + 2);
+		}
 	});
 });

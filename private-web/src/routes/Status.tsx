@@ -336,68 +336,84 @@ function OperatorCountChip({
 }
 
 /// Strip of StatusDots for a group's members, sorted by rank then kind
-/// (centrals first within a rank). A thin grey vertical bar separates
-/// adjacent ranks, so operators can see at a glance how the group
-/// breaks down without naming each dot.
+/// (centrals first within a rank). A hollow right-pointing triangle
+/// separates adjacent ranks, so operators can see at a glance how the
+/// group breaks down without naming each dot.
+// Every child of the strip — dot or rank separator — sits in an identical
+// fixed-size cell, so wrapped rows always align to the same column grid no
+// matter where the line breaks fall. Spacing comes from the container's
+// `gap`, not per-dot margins (StatusDot's inline right-margin is neutralised).
+const dotCellSx = {
+	display: "inline-flex",
+	width: "1em",
+	height: "1em",
+	alignItems: "center",
+	justifyContent: "center",
+	flex: "none",
+	"& > span": { marginRight: 0 },
+} as const;
+
 export function RankedDotStrip({ members }: { members: FacilityServerStatus[] }) {
 	const sorted = [...members].sort(compareServersByRankThenKind);
-	const chunks: Array<{ rank: string; entries: FacilityServerStatus[] }> = [];
+	const cells: React.ReactNode[] = [];
+	let prevRank: string | null = null;
 	for (const m of sorted) {
-		const key = m.rank ?? "_unranked";
-		const last = chunks[chunks.length - 1];
-		if (last && last.rank === key) last.entries.push(m);
-		else chunks.push({ rank: key, entries: [m] });
+		const rank = m.rank ?? "_unranked";
+		if (prevRank != null && rank !== prevRank) {
+			cells.push(
+				<Box
+					key={`sep-${rank}`}
+					component="span"
+					aria-hidden
+					data-testid="rank-separator"
+					sx={{ ...dotCellSx, color: "text.primary" }}
+				>
+					{/* Hollow play-button triangle, dot-sized; MUI's
+					    PlayArrowOutlined renders too small in a 1em cell and
+					    has sharp corners, hence the inline SVG. */}
+					<svg
+						width="1em"
+						height="1em"
+						viewBox="0 0 16 16"
+						fill="none"
+						stroke="currentColor"
+						strokeWidth={2}
+						strokeLinejoin="round"
+						strokeLinecap="round"
+					>
+						<path d="M4.5 3.2 12.8 8 4.5 12.8Z" />
+					</svg>
+				</Box>,
+			);
+		}
+		prevRank = rank;
+		cells.push(
+			<Tooltip
+				key={m.id}
+				title={`${m.name || "(unnamed)"}${
+					m.rank ? ` · ${m.rank}` : ""
+				} · ${m.kind}`}
+			>
+				<Box component="span" sx={dotCellSx}>
+					<StatusDot
+						up={m.up}
+						health={m.health}
+						title={`${m.name}: ${m.up}${
+							m.health !== "healthy" ? ` (${m.health})` : ""
+						}`}
+					/>
+				</Box>
+			</Tooltip>,
+		);
 	}
 	return (
 		<Stack
 			direction="row"
 			spacing={0}
-			sx={{ flexWrap: "wrap", alignItems: "center", rowGap: "0.5em" }}
+			data-testid="dot-strip"
+			sx={{ flexWrap: "wrap", alignItems: "center", gap: "0.5em" }}
 		>
-			{chunks.map((chunk, idx) => (
-				<Box
-					key={chunk.rank}
-					component="span"
-					sx={{
-						display: "inline-flex",
-						flexWrap: "wrap",
-						alignItems: "center",
-						rowGap: "0.5em",
-					}}
-				>
-					{idx > 0 && (
-						<Box
-							component="span"
-							aria-hidden
-							sx={{
-								display: "inline-block",
-								width: "1px",
-								height: "0.9em",
-								mx: "0.25em",
-								bgcolor: "text.disabled",
-							}}
-						/>
-					)}
-					{chunk.entries.map((m) => (
-						<Tooltip
-							key={m.id}
-							title={`${m.name || "(unnamed)"}${
-								m.rank ? ` · ${m.rank}` : ""
-							} · ${m.kind}`}
-						>
-							<Box component="span" sx={{ display: "inline-flex" }}>
-								<StatusDot
-									up={m.up}
-									health={m.health}
-									title={`${m.name}: ${m.up}${
-										m.health !== "healthy" ? ` (${m.health})` : ""
-									}`}
-								/>
-							</Box>
-						</Tooltip>
-					))}
-				</Box>
-			))}
+			{cells}
 		</Stack>
 	);
 }
