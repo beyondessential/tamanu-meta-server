@@ -163,6 +163,19 @@ impl HealthcheckSeverity {
 			.map_err(AppError::from)
 	}
 
+	/// The catalog row for a single check name, or `None` if no server has
+	/// ever reported it (so ingestion has never upserted a row).
+	pub async fn get(db: &mut AsyncPgConnection, check_name: &str) -> Result<Option<Self>> {
+		use crate::schema::healthcheck_severities::dsl;
+		dsl::healthcheck_severities
+			.select(Self::as_select())
+			.filter(dsl::check_name.eq(check_name))
+			.first(db)
+			.await
+			.optional()
+			.map_err(AppError::from)
+	}
+
 	/// Update the severity (and optionally notes) for a check, stamping
 	/// `reviewed_at = NOW()` and `reviewed_by = by`. Even a no-op save
 	/// (same severity) marks the row reviewed — operators can ack

@@ -41,6 +41,7 @@ import { evaluate as evalCondition } from "../lib/healthcheck-rule-eval";
 import {
 	SEVERITIES,
 	SEVERITY_INTENT,
+	healthcheckPath,
 	type HealthcheckSample,
 	type HealthcheckSeverityData,
 	type Severity,
@@ -195,6 +196,11 @@ export default function HealthcheckDetail() {
 				</Typography>
 				<Typography variant="h6" component="h2" sx={{ fontFamily: "monospace" }}>
 					{checkName}
+				</Typography>
+				<Typography variant="body2">
+					<RouterLink to={healthcheckPath(checkName ?? "")}>
+						See servers currently flagging this check
+					</RouterLink>
 				</Typography>
 			</Box>
 

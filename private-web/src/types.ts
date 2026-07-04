@@ -90,6 +90,10 @@ export type ServerGroupCard = Solidify<Schemas["ServerGroupCard"]>;
 export type ServerGroup = Solidify<Schemas["ServerGroup"]>;
 export type GroupDetail = Solidify<Schemas["GroupDetail"]>;
 export type SummaryData = Solidify<Schemas["SummaryData"]>;
+export type CheckAttentionData = Solidify<Schemas["CheckAttentionData"]>;
+export type CheckAttentionServerData = Solidify<
+	Schemas["CheckAttentionServerData"]
+>;
 export type TagMap = Solidify<Schemas["TagMap"]>;
 
 export type VersionData = Solidify<Schemas["VersionData"]>;
@@ -279,6 +283,27 @@ export function checkResultOf(
 	const healthy = entry.healthy;
 	if (typeof healthy === "boolean") return healthy ? "passed" : "failed";
 	return null;
+}
+
+/// Route to the per-healthcheck "who's affected" page for `check`. Check
+/// names are arbitrary strings reported by devices (not restricted to
+/// URL-safe characters), so every link builder must go through this
+/// instead of interpolating the name directly.
+export function healthcheckPath(check: string): string {
+	return `/healthchecks/${encodeURIComponent(check)}`;
+}
+
+/// The check name embedded in a status-sourced issue/event's `ref`
+/// (`health/<check>` — see the public-server `STATUS_SOURCE` constant),
+/// or `null` for issues filed by any other source (backups, manual,
+/// canopy reachability, …), which don't reference a healthcheck.
+export function healthcheckNameFromRef(
+	source: string,
+	ref: string,
+): string | null {
+	const prefix = "health/";
+	if (source !== "status" || !ref.startsWith(prefix)) return null;
+	return ref.slice(prefix.length);
 }
 
 /// One person connected somewhere in a server group, with the names of

@@ -1028,6 +1028,257 @@ async fn snapshot_server_without_statuses_returns_null() {
 	.await
 }
 
+// -----------------------------------------------------------------
+// check_attention endpoint: servers currently flagging one named check
+// -----------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct CheckAttentionServer {
+	server_id: String,
+	server_name: String,
+	group_id: Option<String>,
+	group_name: Option<String>,
+	result: String,
+	data: serde_json::Value,
+	failing_since: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CheckAttentionResponse {
+	check: String,
+	severity: Option<String>,
+	servers: Vec<CheckAttentionServer>,
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn check_attention_empty_database() {
+	commons_tests::server::run(async |_conn, _, private| {
+		let r = private
+			.post("/api/statuses/check_attention")
+			.json(&serde_json::json!({"check": "postgres"}))
+			.await;
+		r.assert_status_ok();
+		let data: CheckAttentionResponse = r.json();
+		assert_eq!(data.check, "postgres");
+		assert_eq!(data.severity, None);
+		assert!(data.servers.is_empty());
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn check_attention_lists_servers_reporting_that_check_ordered_failed_first() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO server_groups (id, name) VALUES
+			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Attention cluster');
+			INSERT INTO servers (id, name, host, rank, kind, group_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Warning Server', 'https://warning.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+			('22222222-2222-2222-2222-222222222222', 'Failing Server', 'https://failing.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+			('33333333-3333-3333-3333-333333333333', 'Healthy Server', 'https://healthy.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+			('44444444-4444-4444-4444-444444444444', 'Other Check Server', 'https://other.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+
+			INSERT INTO statuses (server_id, created_at, healthy, health) VALUES
+			('11111111-1111-1111-1111-111111111111', NOW(), true,
+				'[{\"check\":\"postgres\",\"result\":\"warning\"}]'::jsonb),
+			('22222222-2222-2222-2222-222222222222', NOW(), true,
+				'[{\"check\":\"postgres\",\"result\":\"failed\",\"free_pct\":2}]'::jsonb),
+			('33333333-3333-3333-3333-333333333333', NOW(), true,
+				'[{\"check\":\"postgres\",\"result\":\"passed\"}]'::jsonb),
+			('44444444-4444-4444-4444-444444444444', NOW(), true,
+				'[{\"check\":\"disk_space\",\"result\":\"failed\"}]'::jsonb)",
+		)
+		.await
+		.unwrap();
+
+		let r = private
+			.post("/api/statuses/check_attention")
+			.json(&serde_json::json!({"check": "postgres"}))
+			.await;
+		r.assert_status_ok();
+		let data: CheckAttentionResponse = r.json();
+
+		assert_eq!(data.check, "postgres");
+		assert_eq!(data.severity, None, "no catalog row was ever created");
+		assert_eq!(
+			data.servers.len(),
+			3,
+			"every server reporting postgres appears (healthy included); other checks don't"
+		);
+
+		// Failed sorts before warning, regardless of insertion order; the
+		// healthy server sorts last so the client's default (unhealthy-only)
+		// view is a prefix.
+		assert_eq!(data.servers[0].server_name, "Failing Server");
+		assert_eq!(data.servers[0].result, "failed");
+		assert_eq!(
+			data.servers[0].group_id,
+			Some("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa".to_string())
+		);
+		assert_eq!(
+			data.servers[0].group_name,
+			Some("Attention cluster".to_string())
+		);
+		assert_eq!(
+			data.servers[0].server_id,
+			"22222222-2222-2222-2222-222222222222"
+		);
+		// The full health[] entry rides along for the expandable row.
+		assert_eq!(
+			data.servers[0].data,
+			serde_json::json!({"check": "postgres", "result": "failed", "free_pct": 2}),
+		);
+		assert_eq!(
+			data.servers[0].failing_since, None,
+			"no issue on file for this failure"
+		);
+
+		assert_eq!(data.servers[1].server_name, "Warning Server");
+		assert_eq!(data.servers[1].result, "warning");
+
+		assert_eq!(data.servers[2].server_name, "Healthy Server");
+		assert_eq!(data.servers[2].result, "passed");
+		assert_eq!(data.servers[2].failing_since, None);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn check_attention_failing_since_comes_from_the_active_issue() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO servers (id, name, host, rank, kind) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Failing Server', 'https://failing.example.com', 'production', 'central'),
+			('22222222-2222-2222-2222-222222222222', 'Recovered Issue Server', 'https://recovered.example.com', 'production', 'central');
+
+			INSERT INTO statuses (server_id, created_at, healthy, health) VALUES
+			('11111111-1111-1111-1111-111111111111', NOW(), true,
+				'[{\"check\":\"postgres\",\"result\":\"failed\"}]'::jsonb),
+			('22222222-2222-2222-2222-222222222222', NOW(), true,
+				'[{\"check\":\"postgres\",\"result\":\"failed\"}]'::jsonb);
+
+			-- Active issue: its first_seen is the failing-since timestamp.
+			INSERT INTO issues (server_id, source, \"ref\", severity, message, active, first_seen, last_seen) VALUES
+			('11111111-1111-1111-1111-111111111111', 'status', 'health/postgres', 'error',
+				'postgres check failing', true, NOW() - INTERVAL '3 hours', NOW()),
+			-- Inactive issue (check recovered then re-failed without a new
+			-- push being processed yet): must NOT be used.
+			('22222222-2222-2222-2222-222222222222', 'status', 'health/postgres', 'error',
+				'postgres check failing', false, NOW() - INTERVAL '9 hours', NOW() - INTERVAL '8 hours')",
+		)
+		.await
+		.unwrap();
+
+		let r = private
+			.post("/api/statuses/check_attention")
+			.json(&serde_json::json!({"check": "postgres"}))
+			.await;
+		r.assert_status_ok();
+		let data: CheckAttentionResponse = r.json();
+		assert_eq!(data.servers.len(), 2);
+
+		let failing = data
+			.servers
+			.iter()
+			.find(|s| s.server_name == "Failing Server")
+			.unwrap();
+		let since = failing
+			.failing_since
+			.as_deref()
+			.expect("active issue provides failing_since");
+		let since: jiff::Timestamp = since.parse().expect("failing_since is a timestamp");
+		let age = jiff::Timestamp::now().duration_since(since);
+		assert!(
+			age > jiff::SignedDuration::from_hours(2) && age < jiff::SignedDuration::from_hours(4),
+			"failing_since reflects the issue's first_seen (~3h ago), got {age:?}"
+		);
+
+		let recovered = data
+			.servers
+			.iter()
+			.find(|s| s.server_name == "Recovered Issue Server")
+			.unwrap();
+		assert_eq!(
+			recovered.failing_since, None,
+			"inactive issues don't provide failing_since"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn check_attention_excludes_ungrouped_and_archived_servers() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO servers (id, name, host, rank, kind, group_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Standalone Failing', 'https://standalone.example.com', 'production', 'central', NULL),
+			('22222222-2222-2222-2222-222222222222', 'Archived Failing', 'https://archived.example.com', 'production', 'central', NULL);
+
+			UPDATE servers SET deleted_at = NOW() WHERE id = '22222222-2222-2222-2222-222222222222';
+
+			INSERT INTO statuses (server_id, created_at, healthy, health) VALUES
+			('11111111-1111-1111-1111-111111111111', NOW(), true,
+				'[{\"check\":\"postgres\",\"result\":\"failed\"}]'::jsonb),
+			('22222222-2222-2222-2222-222222222222', NOW(), true,
+				'[{\"check\":\"postgres\",\"result\":\"failed\"}]'::jsonb)",
+		)
+		.await
+		.unwrap();
+
+		let r = private
+			.post("/api/statuses/check_attention")
+			.json(&serde_json::json!({"check": "postgres"}))
+			.await;
+		r.assert_status_ok();
+		let data: CheckAttentionResponse = r.json();
+
+		assert_eq!(data.servers.len(), 1, "the archived server is excluded");
+		assert_eq!(data.servers[0].server_name, "Standalone Failing");
+		assert_eq!(data.servers[0].group_id, None);
+		assert_eq!(data.servers[0].group_name, None);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn check_attention_returns_catalog_severity_and_ignores_non_matching_check() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO healthcheck_severities (check_name, severity) VALUES ('postgres', 'error');
+			INSERT INTO servers (id, name, host, rank, kind) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Failing Server', 'https://failing.example.com', 'production', 'central');
+			INSERT INTO statuses (server_id, created_at, healthy, health) VALUES
+			('11111111-1111-1111-1111-111111111111', NOW(), true,
+				'[{\"check\":\"postgres\",\"result\":\"failed\"}]'::jsonb)",
+		)
+		.await
+		.unwrap();
+
+		// The check this server is actually failing.
+		let r = private
+			.post("/api/statuses/check_attention")
+			.json(&serde_json::json!({"check": "postgres"}))
+			.await;
+		r.assert_status_ok();
+		let data: CheckAttentionResponse = r.json();
+		assert_eq!(data.severity, Some("error".to_string()));
+		assert_eq!(data.servers.len(), 1);
+
+		// A different, never-reported check name: no servers, but the
+		// catalog lookup still runs (and correctly finds nothing).
+		let r = private
+			.post("/api/statuses/check_attention")
+			.json(&serde_json::json!({"check": "unrelated_check"}))
+			.await;
+		r.assert_status_ok();
+		let data: CheckAttentionResponse = r.json();
+		assert_eq!(data.check, "unrelated_check");
+		assert_eq!(data.severity, None);
+		assert!(data.servers.is_empty());
+	})
+	.await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn snapshot_surfaces_per_check_severity() {
 	commons_tests::server::run(async |mut conn, _, private| {

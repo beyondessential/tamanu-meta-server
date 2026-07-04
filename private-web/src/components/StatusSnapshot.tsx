@@ -17,8 +17,8 @@ import InfoIcon from "@mui/icons-material/Info";
 import PreviewIcon from "@mui/icons-material/Preview";
 import RemoveCircleOutlinedIcon from "@mui/icons-material/RemoveCircleOutlined";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
-import { Fragment } from "react";
 import { useApi, type ApiState } from "../api";
+import CheckExtrasList, { checkEntryExtras } from "./CheckExtras";
 import ExternalUsersDetails, {
 	parseExternalUserSessions,
 } from "./ExternalUsersDetails";
@@ -248,39 +248,7 @@ function ChecksBlock({
 										operators={operators}
 									/>
 								)}
-								{extras.length > 0 && (
-									<Box
-										component="dl"
-										sx={{
-											m: 0,
-											mt: 0.5,
-											display: "grid",
-											gridTemplateColumns: "max-content 1fr",
-											columnGap: 1.5,
-											rowGap: 0.25,
-											fontSize: "0.8em",
-										}}
-									>
-										{extras.map(([k, v]) => (
-											<Fragment key={k}>
-												<Box component="dt" sx={{ color: "text.secondary" }}>
-													{k}
-												</Box>
-												<Box
-													component="dd"
-													sx={{
-														m: 0,
-														fontFamily: "monospace",
-														minWidth: 0,
-														overflowWrap: "anywhere",
-													}}
-												>
-													{renderValue(v)}
-												</Box>
-											</Fragment>
-										))}
-									</Box>
-								)}
+								<CheckExtrasList extras={extras} />
 							</Box>
 						</Stack>
 					);
@@ -330,10 +298,7 @@ function parseChecks(health: StatusSnapshotData["health"]): ParsedCheck[] {
 		const check = obj.check;
 		const result = checkResultOf(obj);
 		if (typeof check !== "string" || result === null) continue;
-		const extras: Array<[string, unknown]> = Object.entries(obj).filter(
-			([k]) => k !== "check" && k !== "healthy" && k !== "result",
-		);
-		parsed.push({ check, result, extras });
+		parsed.push({ check, result, extras: checkEntryExtras(obj) });
 	}
 	parsed.sort((a, b) => {
 		if (a.result !== b.result) {
@@ -423,12 +388,6 @@ function CheckIcon({
 				</Tooltip>
 			);
 	}
-}
-
-function renderValue(v: unknown): string {
-	if (typeof v === "string") return v;
-	if (v === null) return "null";
-	return JSON.stringify(v);
 }
 
 /** Toggle button that opens an inline snapshot panel. Caller owns the

@@ -2787,6 +2787,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/statuses/check_attention": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List the servers whose latest status reports one named healthcheck.
+         * @description Everything the per-healthcheck page needs: the catalog's configured
+         *     severity for `check` (if any) plus every live server whose **latest**
+         *     status reports it — the current, real-time picture, not a history of
+         *     past issues/events, though each failing server carries a
+         *     `failing_since` timestamp derived from its active issue. This is the
+         *     data behind the `/healthchecks/:check` "who's affected" page, which
+         *     doubles as an operator TODO list and as a way to correlate servers
+         *     sharing the same issue during a fleet-wide incident.
+         */
+        post: operations["status_check_attention"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/statuses/group_details": {
         parameters: {
             query?: never;
@@ -3716,6 +3743,92 @@ export interface components {
             /** @description Label value. */
             value: string;
         };
+        /** @description Request body for [`check_attention`]. */
+        CheckAttentionArgs: {
+            /**
+             * @description The healthcheck name to look up, exactly as reported by devices in
+             *     `health[].check` (an arbitrary, device/plugin-defined string).
+             */
+            check: string;
+        };
+        /**
+         * @description Response for [`check_attention`]: the queried check's catalog severity
+         *     (if it has one yet) and every live server whose latest status reports
+         *     it, failing or healthy.
+         */
+        CheckAttentionData: {
+            /**
+             * @description The check name that was queried, echoed back so the page can
+             *     render its heading without re-decoding the request.
+             */
+            check: string;
+            /**
+             * @description Every live server whose latest status reports this check, at any
+             *     result, ordered as a TODO list: failed, warning, broken, passed,
+             *     skipped (most urgent first), then by group name then server name.
+             *     The client filters out the passed/skipped tail unless the "show
+             *     healthy" toggle is on.
+             */
+            servers: components["schemas"]["CheckAttentionServerData"][];
+            severity?: null | components["schemas"]["Severity"];
+        };
+        /**
+         * @description One server whose latest status reports [`CheckAttentionData::check`],
+         *     for [`check_attention`].
+         */
+        CheckAttentionServerData: {
+            /**
+             * @description The check's full `health[]` entry from this server's latest status,
+             *     verbatim (including the `check`/`healthy`/`result` keys), so the
+             *     row can expand to the same per-check detail the server page shows.
+             */
+            data: unknown;
+            /**
+             * Format: date-time
+             * @description When this check started failing on this server: the `first_seen`
+             *     of the still-active issue canopy filed at `(status,
+             *     health/<check>)` when the check degraded. `None` for servers
+             *     currently reporting the check healthy, and for failing servers
+             *     with no active issue on file (e.g. the issue was
+             *     operator-resolved, or the ref is silenced so nothing was filed).
+             */
+            failing_since?: string | null;
+            /**
+             * Format: uuid
+             * @description The server's group id, if it belongs to one — the UI links to
+             *     `/groups/{group_id}`.
+             */
+            group_id?: string | null;
+            /** @description The server's group name, if it belongs to one. */
+            group_name?: string | null;
+            /**
+             * @description The check's result on this server's latest status. The UI shows
+             *     warning/failed/broken servers by default and puts passed/skipped
+             *     ones behind a "show healthy" toggle.
+             */
+            result: components["schemas"]["CheckResult"];
+            /**
+             * Format: uuid
+             * @description The server's id — the UI links to `/servers/{server_id}`.
+             */
+            server_id: string;
+            /** @description The server's display name; empty string when the server has none. */
+            server_name: string;
+            /**
+             * Format: date-time
+             * @description When the reporting status was recorded.
+             */
+            status_created_at: string;
+        };
+        /**
+         * @description Outcome of a single health check reported in a server's status update.
+         *
+         *     Older reports may send a plain pass/fail flag instead of one of these
+         *     outcomes; when that happens a passing flag is treated as `passed` and a
+         *     failing flag as `failed`.
+         * @enum {string}
+         */
+        CheckResult: "passed" | "warning" | "failed" | "broken" | "skipped";
         /** @description Identifies a server group's schedule override for a backup type. */
         ClearScheduleArgs: {
             /**
@@ -10897,6 +11010,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": boolean;
+                };
+            };
+        };
+    };
+    status_check_attention: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CheckAttentionArgs"];
+            };
+        };
+        responses: {
+            /** @description The check's catalog severity and the servers currently reporting it. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CheckAttentionData"];
+                };
+            };
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
         };
