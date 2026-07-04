@@ -296,6 +296,71 @@ test.describe("backups ready: stats + backup-now", () => {
 		await expect(runs.getByText("stats-srv")).toBeVisible();
 	});
 
+	test("monthly S3 traffic totals this month's runs with an egress-cost tooltip", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "s3-traffic-group" });
+		const device = await seedDevice(sql);
+		const server = await seedServer(sql, {
+			name: "s3-traffic-srv",
+			groupId: group.id,
+			deviceId: device.id,
+		});
+		await seedServerGroupBackupConfig(sql, {
+			groupId: group.id,
+			status: "ready",
+			region: "ap-southeast-2",
+			intervalSeconds: 3600,
+		});
+		// Two runs this month → summed (300 sent / 30 received, raw bytes).
+		await seedBackupRun(sql, {
+			deviceId: device.id,
+			groupId: group.id,
+			serverId: server.id,
+			s3SentRawBytes: 100,
+			s3SentPayloadBytes: 90,
+			s3ReceivedRawBytes: 10,
+			s3ReceivedPayloadBytes: 9,
+		});
+		await seedBackupRun(sql, {
+			deviceId: device.id,
+			groupId: group.id,
+			serverId: server.id,
+			s3SentRawBytes: 200,
+			s3SentPayloadBytes: 180,
+			s3ReceivedRawBytes: 20,
+			s3ReceivedPayloadBytes: 18,
+		});
+		// Backdated 40 days → always outside the calendar month, must not count.
+		await seedBackupRun(sql, {
+			deviceId: device.id,
+			groupId: group.id,
+			serverId: server.id,
+			s3SentRawBytes: 9999,
+			s3ReceivedRawBytes: 9999,
+			reportedAgoSecs: 40 * 24 * 3600,
+		});
+
+		await page.goto(`/groups/${group.id}/backups`);
+		const stat = page.getByText(/S3 traffic \(this month\)/i);
+		await expect(stat).toBeVisible();
+		// Raw-byte totals for the in-month runs only (9999s excluded).
+		await expect(stat).toContainText("300 B sent / 30 B received");
+		// The undercount caveat is visible without hovering.
+		await expect(
+			page.getByText(/device backup traffic only/i),
+		).toBeVisible();
+
+		// The tooltip prices egress by the config's region.
+		await stat.hover();
+		const tooltip = page.getByRole("tooltip");
+		await expect(tooltip).toContainText("Uploads are free");
+		await expect(tooltip).toContainText("$0.114/GB in ap-southeast-2");
+		await expect(tooltip).toContainText("estimated $0.00");
+		await expect(tooltip).not.toContainText("assumed");
+	});
+
 	test("recent run shows a truncated, copyable snapshot id", async ({
 		page,
 		sql,
