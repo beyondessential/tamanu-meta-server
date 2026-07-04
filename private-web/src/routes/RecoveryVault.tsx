@@ -15,6 +15,7 @@ import {
 } from "@mui/material";
 import { useState } from "react";
 import { useApi, useApiAction } from "../api";
+import TimeAgo from "../components/TimeAgo";
 import { usePageTitle } from "../hooks/usePageTitle";
 
 /// Decode the base64 age ciphertext and download it as a `.age` file the
@@ -104,6 +105,18 @@ export default function RecoveryVault() {
 						{s.last_verified_at
 							? new Date(s.last_verified_at).toLocaleString()
 							: "never"}
+					</Typography>
+					<Typography variant="body2">
+						Last vault write:{" "}
+						{s.last_write_at ? (
+							<>
+								<TimeAgo timestamp={s.last_write_at} />
+								{s.last_write_bytes != null &&
+									` (${s.last_write_bytes.toLocaleString()} bytes)`}
+							</>
+						) : (
+							"never"
+						)}
 					</Typography>
 
 					<Typography variant="subtitle2">Recipients</Typography>

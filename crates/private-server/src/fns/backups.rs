@@ -24,8 +24,9 @@ use database::pg_duration::PgDuration;
 use database::{
 	BackupMaintenanceRun, BackupRecoveryVerification, BackupRepoStats, BackupRequest, BackupRun,
 	BackupTypeDefault, NewBackupTypeDefault, NewServerGroupBackupConfig,
-	NewServerGroupBackupSchedule, RetentionPolicy, ServerBackupCapability, ServerGroupBackupConfig,
-	ServerGroupBackupSchedule, server_groups::ServerGroup, servers::Server,
+	NewServerGroupBackupSchedule, RecoveryVaultWrite, RetentionPolicy, ServerBackupCapability,
+	ServerGroupBackupConfig, ServerGroupBackupSchedule, server_groups::ServerGroup,
+	servers::Server,
 };
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -1514,6 +1515,10 @@ pub struct RecoveryStatusResponse {
 	pub due: bool,
 	/// Human-readable reason for the `due` value.
 	pub reason: String,
+	/// When the vault object was last successfully written by the backups pod.
+	pub last_write_at: Option<Timestamp>,
+	/// Size (bytes) of the ciphertext from the last successful write.
+	pub last_write_bytes: Option<i64>,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -1589,6 +1594,7 @@ pub async fn recovery_status(
 	let mut conn = state.db.get().await?;
 	let latest = BackupRecoveryVerification::latest(&mut conn).await?;
 	let (due, reason) = recovery_due(latest.as_ref(), &recipients, Timestamp::now());
+	let last_write = RecoveryVaultWrite::latest(&mut conn).await?;
 	Ok(Json(RecoveryStatusResponse {
 		configured: state.recovery_recipients.is_some(),
 		recipients,
@@ -1596,6 +1602,8 @@ pub async fn recovery_status(
 		last_verified_recipients: latest.map(|v| v.recipient_list()).unwrap_or_default(),
 		due,
 		reason,
+		last_write_at: last_write.as_ref().map(|w| w.written_at),
+		last_write_bytes: last_write.map(|w| w.bytes),
 	}))
 }
 

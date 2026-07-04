@@ -1,3 +1,4 @@
+import { resetSeededTables, seedRecoveryVaultWrite } from "./seed";
 import { expect, test } from "./test-fixtures";
 
 // The fixture configures CANOPY_RECOVERY_VAULT_KEYS with a throwaway age public
@@ -32,5 +33,21 @@ test.describe("Recovery vault ceremony", () => {
 		await page.getByLabel("Decrypted answer").fill("not-the-nonce");
 		await page.getByRole("button", { name: /submit answer/i }).click();
 		await expect(page.getByText(/does not match/i)).toBeVisible();
+	});
+
+	test("shows the last vault write, and 'never' before the first", async ({
+		page,
+		sql,
+	}) => {
+		await resetSeededTables(sql);
+
+		await page.goto("/settings/recovery");
+		await expect(page.getByText(/last vault write:\s*never/i)).toBeVisible();
+
+		await seedRecoveryVaultWrite(sql, { bytes: 2048, writtenAgoSecs: 3600 });
+		await page.reload();
+		await expect(page.getByText(/last vault write:/i)).toContainText(
+			"1h ago (2,048 bytes)",
+		);
 	});
 });

@@ -9277,6 +9277,22 @@
             },
             "description": "The recipient set the last verification covered."
           },
+          "last_write_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the vault object was last successfully written by the backups pod."
+          },
+          "last_write_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Size (bytes) of the ciphertext from the last successful write."
+          },
           "reason": {
             "type": "string",
             "description": "Human-readable reason for the `due` value."
