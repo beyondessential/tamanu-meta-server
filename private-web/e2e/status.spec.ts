@@ -74,79 +74,69 @@ test.describe("status page", () => {
 		).toBeVisible();
 	});
 
-	test("dot strip renders a wide group's members with rank separators", async ({
+	test("dot strips wrap and align across a spread of group sizes", async ({
 		page,
 		sql,
 	}) => {
+		test.setTimeout(120_000);
 		await seedVersion(sql, { major: 1, minor: 0, patch: 0 });
-		const group = await seedServerGroup(sql, { name: "wide-fleet" });
 		const device = await seedDevice(sql);
 
-		// Twelve members across three ranks, with a spread of health states so
-		// the strip shows plain, ringed, and never-reported dots. Enough dots
-		// that the strip wraps at typical card widths (the screenshots artifact
-		// shows the resulting grid).
-		const members: Array<{
-			rank: "production" | "clone" | "dev";
-			kind: "central" | "facility";
-			health?: unknown[];
-			healthy?: boolean;
-			reported?: boolean;
-		}> = [
-			{ rank: "production", kind: "central" },
-			{ rank: "production", kind: "facility" },
-			{
-				rank: "production",
-				kind: "facility",
-				health: [{ check: "postgres", result: "failed" }],
-				healthy: false,
-			},
-			{
-				rank: "production",
-				kind: "facility",
-				health: [{ check: "disk_space", result: "warning" }],
-			},
-			{ rank: "production", kind: "facility" },
-			{ rank: "production", kind: "facility", reported: false },
-			{ rank: "clone", kind: "central" },
-			{
-				rank: "clone",
-				kind: "facility",
-				health: [{ check: "postgres", result: "failed" }],
-				healthy: false,
-			},
-			{ rank: "clone", kind: "facility" },
-			{ rank: "dev", kind: "central" },
-			{ rank: "dev", kind: "facility" },
-			{ rank: "dev", kind: "facility", reported: false },
-		];
-		for (const [i, m] of members.entries()) {
-			const server = await seedServer(sql, {
-				name: `wf-${m.rank}-${i}`,
-				kind: m.kind,
-				rank: m.rank,
-				groupId: group.id,
-			});
-			if (m.reported !== false) {
+		// Groups of increasing size so the strip renders unwrapped, wrapped
+		// once, and wrapped many times (the screenshots artifact shows the
+		// grids). Each group spans three ranks, so two triangle separators
+		// appear per strip; health states cycle so plain, failed-ringed,
+		// warning-ringed, and never-reported dots all show up.
+		const splits: Record<number, [number, number, number]> = {
+			5: [3, 1, 1],
+			10: [6, 2, 2],
+			20: [12, 5, 3],
+			30: [18, 8, 4],
+			50: [30, 13, 7],
+		};
+		const groups: Array<{ id: string; size: number }> = [];
+		for (const [size, split] of Object.entries(splits)) {
+			const n = Number(size);
+			const group = await seedServerGroup(sql, { name: `fleet-of-${n}` });
+			groups.push({ id: group.id, size: n });
+			const ranks = (["production", "clone", "dev"] as const).flatMap(
+				(rank, ri) => Array(split[ri]).fill(rank) as ("production" | "clone" | "dev")[],
+			);
+			for (const [i, rank] of ranks.entries()) {
+				const server = await seedServer(sql, {
+					name: `f${n}-${i}`,
+					kind: i === 0 ? "central" : "facility",
+					rank,
+					groupId: group.id,
+				});
+				if (i % 7 === 6) continue; // never reported: grey dot
+				const health =
+					i % 4 === 3
+						? [{ check: "postgres", result: "failed" }]
+						: i % 5 === 4
+							? [{ check: "disk_space", result: "warning" }]
+							: [];
 				await seedStatus(sql, {
 					serverId: server.id,
 					deviceId: device.id,
-					healthy: m.healthy ?? true,
-					health: m.health ?? [],
+					healthy: i % 4 !== 3,
+					health,
 				});
 			}
 		}
 
 		await page.goto("/status");
 
-		// The group may surface under more than one rank bucket; every card
-		// shows the full strip, so scope to the first.
-		const card = page.locator(`a[href="/groups/${group.id}"]`).first();
-		const strip = card.getByTestId("dot-strip");
-		await expect(strip).toBeVisible();
-		// Two rank boundaries (production→clone, clone→dev).
-		await expect(strip.getByTestId("rank-separator")).toHaveCount(2);
-		// Every child cell is a dot or separator: 12 members + 2 separators.
-		await expect(strip.locator("> *")).toHaveCount(14);
+		for (const { id, size } of groups) {
+			// A group may surface under more than one rank bucket; every card
+			// shows the full strip, so scope to the first.
+			const card = page.locator(`a[href="/groups/${id}"]`).first();
+			const strip = card.getByTestId("dot-strip");
+			await expect(strip).toBeVisible();
+			// Two rank boundaries (production→clone, clone→dev).
+			await expect(strip.getByTestId("rank-separator")).toHaveCount(2);
+			// Every child cell is a dot or a separator.
+			await expect(strip.locator("> *")).toHaveCount(size + 2);
+		}
 	});
 });
