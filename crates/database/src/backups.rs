@@ -34,17 +34,27 @@ use crate::pg_duration::PgDuration;
 // per-(group,type) schedule and on the type defaults.
 // ---------------------------------------------------------------------------
 
-/// kopia `keep-*` retention policy. Org-minimum floors
-/// (`keep_daily ≥ 7, keep_weekly ≥ 4, keep_monthly ≥ 6`) are enforced by
-/// [`RetentionPolicy::validate_floor`] on create/update — unless the config
-/// opts out via its `allow_below_floor` flag (dangerous).
+/// How many backups to keep at each retention tier once older snapshots are
+/// pruned. The organization enforces minimum floors (at least 7 daily, 4
+/// weekly, and 6 monthly) on write, unless the containing schedule or default
+/// explicitly opts out via its `allow_below_floor` flag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct RetentionPolicy {
+	/// Number of most-recent backups to always keep regardless of age.
+	/// Defaults to 1.
 	#[serde(default = "RetentionPolicy::default_keep_latest")]
 	pub keep_latest: i32,
+	/// Number of most-recent daily backups to keep. Must be at least 7 unless
+	/// the retention floor is bypassed.
 	pub keep_daily: i32,
+	/// Number of most-recent weekly backups to keep. Must be at least 4 unless
+	/// the retention floor is bypassed.
 	pub keep_weekly: i32,
+	/// Number of most-recent monthly backups to keep. Must be at least 6
+	/// unless the retention floor is bypassed.
 	pub keep_monthly: i32,
+	/// Number of most-recent annual backups to keep. Defaults to 0 (no annual
+	/// retention).
 	#[serde(default)]
 	pub keep_annual: i32,
 }
@@ -98,27 +108,52 @@ impl RetentionPolicy {
 // server_group_backup_config — repo-level config, one row per configured group
 // ---------------------------------------------------------------------------
 
+/// Backup repository configuration for a server group: which bucket/prefix
+/// the group's backups are stored in, the IAM roles used to access it, and
+/// the current provisioning lifecycle state.
 #[derive(
 	Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable, utoipa::ToSchema,
 )]
 #[diesel(table_name = crate::schema::server_group_backup_config)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ServerGroupBackupConfig {
+	/// ID of the server group this backup configuration belongs to.
 	pub group_id: Uuid,
+	/// Name of the S3 bucket backups are stored in.
 	pub bucket: String,
+	/// Key prefix within the bucket under which this group's backup
+	/// repository lives. Empty string means the repository sits at the
+	/// bucket root.
 	pub prefix: String,
+	/// ARN of the IAM role devices assume to upload their own backups
+	/// (write-only; no delete permission).
 	pub target_role_arn: String,
+	/// ARN of the IAM role used to run repository maintenance, inspection,
+	/// and metrics collection (full read/write/delete permission).
 	pub maintenance_role_arn: String,
+	/// AWS region the bucket lives in, if known.
 	pub region: Option<String>,
+	/// Reference to where the repository's encryption passphrase is stored.
+	/// Never the passphrase itself.
 	pub repo_password_ref: String,
+	/// Current lifecycle state of this configuration.
 	pub status: BackupConfigStatus,
+	/// When this configuration was first created.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub created_at: Timestamp,
+	/// When this configuration was last updated.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub updated_at: Timestamp,
+	/// How the repository's passphrase was sourced: generated fresh for a new
+	/// repository, or supplied by the operator to connect to an existing one.
 	#[schema(value_type = String)]
 	pub mode: BackupRepoMode,
+	/// Error message from the most recent failed provisioning attempt, if
+	/// any.
 	pub last_init_error: Option<String>,
+	/// Where the backup bucket lives and who provisioned it: an externally
+	/// provisioned account the deployment brought itself, or an
+	/// automatically provisioned bucket in a shared account.
 	#[schema(value_type = String)]
 	pub placement: BackupPlacement,
 	/// Set when an operator has requested a one-off full maintenance run; the
@@ -131,6 +166,7 @@ pub struct ServerGroupBackupConfig {
 		treat_none_as_default_value = false
 	)]
 	pub force_full_maintenance_at: Option<Timestamp>,
+	/// Who requested the pending full-maintenance run, if any.
 	pub force_full_maintenance_by: Option<String>,
 }
 
@@ -394,19 +430,28 @@ impl ServerGroupBackupConfig {
 // backup_type_defaults — canopy-wide per-type defaults
 // ---------------------------------------------------------------------------
 
+/// Canopy-wide default schedule and retention for a backup type. Any group
+/// that doesn't set its own override for the type inherits these values.
 #[derive(
 	Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable, utoipa::ToSchema,
 )]
 #[diesel(table_name = crate::schema::backup_type_defaults)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct BackupTypeDefault {
+	/// The backup type this default applies to (e.g. `tamanu-postgres`).
 	#[diesel(column_name = type_)]
 	#[serde(rename = "type")]
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
+	/// Default interval, in seconds, between scheduled backups of this type.
+	/// `None` means manual-only (no schedule).
 	#[schema(value_type = Option<i64>, format = "int64")]
 	pub default_interval: Option<PgDuration>,
+	/// Default retention policy for this type: how many backups to keep at
+	/// each retention tier.
 	pub default_retention: JsonValue,
+	/// Whether a server that advertises this type has it enabled
+	/// automatically, without an operator opting in.
 	pub auto_enable: bool,
 	/// Opt out of the org retention floor for this type's default (dangerous):
 	/// the floor is neither validated on write nor enforced on resolve.
@@ -471,18 +516,25 @@ impl BackupTypeDefault {
 // server_backup_capabilities — what a server advertises it can back up
 // ---------------------------------------------------------------------------
 
+/// A backup type that a server has advertised it can run, and whether it's
+/// currently enabled for that server.
 #[derive(
 	Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable, utoipa::ToSchema,
 )]
 #[diesel(table_name = crate::schema::server_backup_capabilities)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ServerBackupCapability {
+	/// ID of the server that advertised this capability.
 	pub server_id: Uuid,
+	/// The backup type advertised (e.g. `tamanu-postgres`).
 	#[diesel(column_name = type_)]
 	#[serde(rename = "type")]
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
+	/// Whether this `(server, type)` pair is enabled — only enabled pairs are
+	/// scheduled and issued credentials.
 	pub enabled: bool,
+	/// When the server first advertised this capability.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub registered_at: Timestamp,
 }
@@ -610,22 +662,34 @@ impl ServerBackupCapability {
 // server_group_backup_schedule — per-(group,type) schedule/retention overrides
 // ---------------------------------------------------------------------------
 
+/// A group's override of the schedule and/or retention for one backup type,
+/// taking precedence over the canopy-wide default for that type.
 #[derive(
 	Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable, utoipa::ToSchema,
 )]
 #[diesel(table_name = crate::schema::server_group_backup_schedule)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ServerGroupBackupSchedule {
+	/// ID of the server group this override applies to.
 	pub group_id: Uuid,
+	/// The backup type this override applies to (e.g. `tamanu-postgres`).
 	#[diesel(column_name = type_)]
 	#[serde(rename = "type")]
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
+	/// Interval, in seconds, between scheduled backups of this type for this
+	/// group. `None` means manual-only (no schedule) — distinct from a
+	/// present value of 0.
 	#[schema(value_type = Option<i64>, format = "int64")]
 	pub expected_interval: Option<PgDuration>,
+	/// Retention policy override for this group and type, in the same shape
+	/// as the retention policy schema. `None` means inherit the type's
+	/// canopy-wide default.
 	pub retention: Option<JsonValue>,
+	/// When this override was first created.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub created_at: Timestamp,
+	/// When this override was last updated.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub updated_at: Timestamp,
 	/// Opt out of the org retention floor for this override (dangerous): the
@@ -720,28 +784,49 @@ impl ServerGroupBackupSchedule {
 // backup_credential_issuances — audit log of every STS issuance
 // ---------------------------------------------------------------------------
 
+/// Audit record of one set of temporary S3 credentials issued to a device for
+/// backup or restore. Only the access key id is recorded — the secret key and
+/// session token are handed to the device but never stored.
 #[derive(
 	Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable, utoipa::ToSchema,
 )]
 #[diesel(table_name = crate::schema::backup_credential_issuances)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct BackupCredentialIssuance {
+	/// Unique id of this issuance record.
 	pub id: i64,
+	/// ID of the device the credentials were issued to.
 	pub device_id: Uuid,
+	/// ID of the server group whose backup repository the credentials grant
+	/// access to.
 	pub group_id: Uuid,
+	/// The backup type the credentials were issued for (e.g.
+	/// `tamanu-postgres`).
 	#[diesel(column_name = type_)]
 	#[serde(rename = "type")]
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
+	/// When the credentials were issued.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub issued_at: Timestamp,
+	/// When the credentials expire and are no longer usable.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub expires_at: Timestamp,
+	/// Whether these credentials were issued for uploading a backup or for
+	/// restoring from one.
 	pub purpose: BackupPurpose,
+	/// ARN of the IAM role that was assumed to produce these credentials.
 	pub sts_assumed_role: String,
+	/// Request id AWS STS returned for the AssumeRole call, if available.
 	pub sts_request_id: Option<String>,
+	/// Access key id of the issued credentials. The corresponding secret key
+	/// and session token are never persisted.
 	pub access_key_id: Option<String>,
+	/// Name of the S3 bucket these credentials grant access to, as it was at
+	/// the time of issuance.
 	pub bucket: String,
+	/// Key prefix within the bucket these credentials grant access to, as it
+	/// was at the time of issuance.
 	pub prefix: String,
 }
 
@@ -848,36 +933,56 @@ impl BackupCredentialIssuance {
 // backup_runs — what bestool reported per run (client-minted UUID PK)
 // ---------------------------------------------------------------------------
 
+/// A backup or restore run reported by a device, with its outcome and any
+/// size/traffic figures collected for it.
 #[derive(
 	Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable, utoipa::ToSchema,
 )]
 #[diesel(table_name = crate::schema::backup_runs)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct BackupRun {
+	/// Unique id of this run, minted by the reporting device.
 	pub id: Uuid,
+	/// ID of the device that performed and reported this run.
 	pub device_id: Uuid,
+	/// ID of the server group the run's backup repository belongs to.
 	pub group_id: Uuid,
+	/// ID of the server the run was performed for, if known.
 	pub server_id: Option<Uuid>,
+	/// The backup type this run performed (e.g. `tamanu-postgres`).
 	#[diesel(column_name = type_)]
 	#[serde(rename = "type")]
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
+	/// Whether this run was a backup (upload) or a restore (download).
 	pub purpose: BackupPurpose,
+	/// Whether the run succeeded or failed.
 	pub outcome: RunOutcome,
+	/// Error message reported for a failed run, if any.
 	pub error: Option<String>,
+	/// Number of bytes the device reports having uploaded for this run.
 	pub bytes_uploaded: Option<i64>,
+	/// Id of the snapshot this run produced, if any.
 	pub snapshot_id: Option<String>,
+	/// When this run was reported.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub reported_at: Timestamp,
-	/// S3 traffic tallied by bestool's proxy: `raw` counts the full HTTP message
-	/// (incl. SigV4 chunk framing), `payload` the decoded object data.
+	/// Bytes sent to S3 for this run, counting the full HTTP request including
+	/// signing/chunking overhead.
 	pub s3_sent_raw_bytes: Option<i64>,
+	/// Bytes sent to S3 for this run, counting only the decoded object data
+	/// (excludes request/signing overhead).
 	pub s3_sent_payload_bytes: Option<i64>,
+	/// Bytes received from S3 for this run, counting the full HTTP response
+	/// including framing overhead.
 	pub s3_received_raw_bytes: Option<i64>,
+	/// Bytes received from S3 for this run, counting only the decoded object
+	/// data (excludes response framing overhead).
 	pub s3_received_payload_bytes: Option<i64>,
-	/// Logical size of this run's snapshot as observed by canopy's own repo
-	/// inspection, matched to the run by `snapshot_id`. Distinct from
-	/// `bytes_uploaded` (the device's own figure); written once by inspection.
+	/// Logical (uncompressed) size of this run's snapshot, as independently
+	/// observed by repository inspection rather than reported by the device.
+	/// Distinct from `bytes_uploaded`; filled in after the fact, once, and
+	/// never overwritten.
 	pub snapshot_logical_bytes: Option<i64>,
 }
 
@@ -1185,20 +1290,30 @@ impl BackupRun {
 // backup_maintenance_runs — Canopy-owned maintenance outcomes (per-group)
 // ---------------------------------------------------------------------------
 
+/// One run of repository maintenance (compaction, garbage collection, etc.)
+/// for a group's backup repository.
 #[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, utoipa::ToSchema)]
 #[diesel(table_name = crate::schema::backup_maintenance_runs)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct BackupMaintenanceRun {
+	/// Unique id of this maintenance run.
 	pub id: i64,
+	/// ID of the server group whose backup repository was maintained.
 	pub group_id: Uuid,
+	/// Which maintenance cycle this run performed: a lightweight "quick" pass
+	/// or a more thorough "full" pass.
 	pub kind: MaintenanceKind,
+	/// When this maintenance run started.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub started_at: Timestamp,
+	/// When this maintenance run finished. `None` while still running.
 	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
 	pub finished_at: Option<Timestamp>,
-	/// NULL while running.
+	/// Outcome of the run. `None` while still running.
 	pub outcome: Option<RunOutcome>,
+	/// Error message for a failed run, if any.
 	pub error: Option<String>,
+	/// Number of bytes of unreferenced data reclaimed by this run, if known.
 	pub bytes_reclaimed: Option<i64>,
 }
 
@@ -1378,19 +1493,34 @@ impl BackupMaintenanceRun {
 // backup_repo_snapshots — ground-truth inventory from the inspection Job
 // ---------------------------------------------------------------------------
 
+/// Inventory of one backup source found in a group's repository during
+/// inspection, independent of what canopy's own run records say. This is the
+/// ground-truth view of what's actually stored, used to reconcile against
+/// reported runs.
 #[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, utoipa::ToSchema)]
 #[diesel(table_name = crate::schema::backup_repo_snapshots)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct BackupRepoSnapshot {
+	/// ID of the server group this repository belongs to.
 	pub group_id: Uuid,
+	/// Raw source identifier as recorded in the backup repository (typically
+	/// combines a host and path). Used to match this inventory row back to a
+	/// server and backup type.
 	pub source: String,
+	/// Server this source was matched to, if the source identifier could be
+	/// parsed as one of the group's servers.
 	pub server_id: Option<Uuid>,
+	/// Backup type this source was matched to, if the source identifier could
+	/// be parsed as a known backup type.
 	#[diesel(column_name = type_)]
 	#[serde(rename = "type")]
 	#[schema(value_type = Option<String>)]
 	pub r#type: Option<BackupType>,
+	/// Timestamp of the most recent snapshot found for this source in the
+	/// repository, if any.
 	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
 	pub latest_snapshot_at: Option<Timestamp>,
+	/// When this source's inventory was last refreshed by inspection.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub observed_at: Timestamp,
 }
@@ -1469,16 +1599,35 @@ impl BackupRepoSnapshot {
 // backup_repo_stats — cached repo + bucket stats (per-group, two writers)
 // ---------------------------------------------------------------------------
 
+/// Cached size and count statistics for a group's backup repository and its
+/// underlying bucket. Populated by two independent processes: repository
+/// inspection fills the snapshot/source/logical/physical figures, and a
+/// separate bucket-metrics collector fills `bucket_bytes`; either can be
+/// stale relative to the other.
 #[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, utoipa::ToSchema)]
 #[diesel(table_name = crate::schema::backup_repo_stats)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct BackupRepoStats {
+	/// ID of the server group these stats describe.
 	pub group_id: Uuid,
+	/// Total number of snapshots currently in the repository, if known.
 	pub snapshot_count: Option<i32>,
+	/// Number of distinct backup sources (servers/types) currently in the
+	/// repository, if known.
 	pub source_count: Option<i32>,
+	/// Total logical (uncompressed, pre-dedup) size of all data in the
+	/// repository, in bytes, if known.
 	pub logical_bytes: Option<i64>,
+	/// Total physical (as actually stored, after compression/dedup) size of
+	/// the repository, in bytes, if known.
 	pub physical_bytes: Option<i64>,
+	/// Total size of the underlying S3 bucket, in bytes, as reported by cloud
+	/// storage metrics. Can differ from `physical_bytes` (e.g. it includes
+	/// content outside the repository, or reflects a different point in
+	/// time).
 	pub bucket_bytes: Option<i64>,
+	/// When these stats were last refreshed. Whichever of the two collectors
+	/// wrote most recently.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub observed_at: Timestamp,
 }
@@ -1558,18 +1707,25 @@ impl BackupRepoStats {
 // backup_requests — pending operator one-off "backup now" flags
 // ---------------------------------------------------------------------------
 
+/// A pending one-off "run now" request for a server, outside its normal
+/// schedule. Cleared once the requested run is reported.
 #[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, utoipa::ToSchema)]
 #[diesel(table_name = crate::schema::backup_requests)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct BackupRequest {
+	/// ID of the server the one-off run is requested for.
 	pub server_id: Uuid,
+	/// The backup type to run (e.g. `tamanu-postgres`).
 	#[diesel(column_name = type_)]
 	#[serde(rename = "type")]
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
+	/// Whether the requested run is a backup or a restore.
 	pub purpose: BackupPurpose,
+	/// When this request was made (or last refreshed, if re-requested).
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub requested_at: Timestamp,
+	/// Who made the request, if known.
 	pub requested_by: Option<String>,
 }
 

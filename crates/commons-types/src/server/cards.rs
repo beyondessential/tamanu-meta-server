@@ -7,35 +7,52 @@ use crate::{
 	version::VersionStr,
 };
 
+/// Current status of a single server within a group, as shown on the status
+/// dashboard.
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct FacilityServerStatus {
+	/// Unique identifier of the server.
 	pub id: Uuid,
+	/// Name of the server.
 	pub name: String,
+	/// Reachability of the server, based on how recently it last reported a
+	/// status update.
 	pub up: ShortStatus,
+	/// The server's self-reported health.
 	pub health: HealthState,
-	/// Identified humans connected to this server right now, from the
-	/// latest status push's `external_users` check. Empty unless the
-	/// server is actively reporting (up/blip) — a stale push can't claim
-	/// active presence.
+	/// People currently connected to this server, from its latest status
+	/// update. Always empty unless the server is actively reporting (`up`
+	/// or `blip`) — a stale report can't be trusted to reflect who is
+	/// connected right now.
 	pub operators: Vec<OperatorPresence>,
-	/// Server's rank, when set. Surfaced so the UI can group dots by
-	/// rank (production first, then clone, demo, …) in a stable order.
+	/// The server's rank, when set. Lets consumers group or order servers by
+	/// rank (e.g. production before clone, demo, and so on) in a consistent
+	/// order.
 	pub rank: Option<ServerRank>,
-	/// Server's kind (central / facility / canopy). UI breaks ties
-	/// within a rank by kind, centrals first.
+	/// The server's kind (central, facility, or canopy).
 	pub kind: ServerKind,
 }
 
-/// Status-page card for a server group. Replaces the old per-central-server
-/// card: each card now stands for a group of equal-level servers (no implicit
-/// root). The card carries the headline name plus the per-member status dots
-/// — version comes from the most recently-pushing member.
+/// A status-dashboard card summarising one group of equivalent servers, with
+/// a status entry per member. The group's version is taken from whichever
+/// member reported most recently.
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ServerGroupCard {
+	/// Unique identifier of the group.
 	pub id: Uuid,
+	/// Name of the group.
 	pub name: String,
+	/// Free-text notes about the group.
 	pub notes: String,
+	/// Version reported by the most recently-reporting member of the group,
+	/// when known.
 	pub version: Option<VersionStr>,
+	/// How far the reported `version` lags behind the latest known release,
+	/// when both are known. Combines the major and minor version gaps into a
+	/// single number that grows the further behind the version is (major
+	/// gaps count for more than minor ones); `0` means the version is
+	/// current or newer than the latest known release.
 	pub version_distance: Option<u64>,
+	/// Status of each server belonging to this group.
 	pub members: Vec<FacilityServerStatus>,
 }

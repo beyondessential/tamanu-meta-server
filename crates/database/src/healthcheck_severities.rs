@@ -16,24 +16,42 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 
+/// The severity policy for one named healthcheck. An entry is created
+/// automatically the first time a check with this name is reported, using
+/// a default policy; operators then review and adjust how that check's
+/// failures should be classified going forward.
 #[derive(Clone, Debug, Serialize, Deserialize, Queryable, Selectable, utoipa::ToSchema)]
 #[diesel(table_name = crate::schema::healthcheck_severities)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct HealthcheckSeverity {
+	/// The healthcheck's name, as reported in status pushes. Uniquely
+	/// identifies this policy.
 	pub check_name: String,
+	/// The severity assigned to a failure of this check when no conditional
+	/// rule (see `rules`) overrides it.
 	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub severity: Severity,
+	/// When this check was first observed and this policy entry was created.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub first_seen: Timestamp,
+	/// When an operator last reviewed or edited this policy. `None` if it
+	/// has never been reviewed.
 	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
 	pub reviewed_at: Option<Timestamp>,
+	/// The operator who last reviewed this policy. `None` if it has never
+	/// been reviewed.
 	pub reviewed_by: Option<String>,
+	/// Free-form operator notes about this check.
 	pub notes: Option<String>,
+	/// When this policy was last modified.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub updated_at: Timestamp,
-	/// JsonLogic `if`-ladder evaluating to a Severity string. NULL ⇒
-	/// no conditional rules; `severity` is used directly. Format and
-	/// constraints documented on [`IfLadder`].
+	/// Optional conditional rules that can assign a different severity
+	/// depending on the details of the failing check, the surrounding status
+	/// report, or the server's tags. `None` means no conditional rules are
+	/// configured and `severity` always applies. When present, the rules are
+	/// evaluated in order and the first matching one wins; if none match,
+	/// `severity` is used as the fallback.
 	#[schema(value_type = Option<serde_json::Value>)]
 	pub rules: Option<JsonValue>,
 }

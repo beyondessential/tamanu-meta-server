@@ -11,6 +11,7 @@ use diesel::{
 use node_semver::SemverError;
 use serde::{Deserialize, Serialize};
 
+/// Publication status of a release version.
 #[derive(
 	Debug,
 	Clone,
@@ -27,9 +28,12 @@ use serde::{Deserialize, Serialize};
 #[diesel(sql_type = Text)]
 #[serde(rename_all = "lowercase")]
 pub enum VersionStatus {
+	/// Not yet released; hidden from public version listings. The default.
 	#[default]
 	Draft,
+	/// Released and visible in public version listings.
 	Published,
+	/// Withdrawn after release; hidden from public version listings again.
 	Yanked,
 }
 
@@ -86,6 +90,7 @@ where
 	}
 }
 
+/// A semantic version string, e.g. `2.10.5`.
 #[derive(
 	Debug,
 	Clone,

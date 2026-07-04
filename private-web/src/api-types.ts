@@ -13,6 +13,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Add an email address to the admin allow-list.
+         * @description Grants admin access to the given email address. Has no effect if the
+         *     email is already an admin.
+         */
         post: operations["admin_add"];
         delete?: never;
         options?: never;
@@ -29,6 +34,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Remove an email address from the admin allow-list.
+         * @description Revokes admin access for the given email address. Has no effect if the
+         *     email was not an admin.
+         */
         post: operations["admin_delete"];
         delete?: never;
         options?: never;
@@ -45,6 +55,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * List the admin allow-list.
+         * @description Returns the email addresses of every account currently granted admin
+         *     access to this API, in no particular order.
+         */
         post: operations["admin_list"];
         delete?: never;
         options?: never;
@@ -62,8 +77,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Cancel a pending full-maintenance request the scheduler hasn't picked up yet.
-         *     A no-op if there's none pending (or the run already started).
+         * Cancel a pending full-maintenance request.
+         * @description Clears the group's outstanding request for a one-off full maintenance
+         *     run. Cancelling when nothing is pending — or when the run has already
+         *     started — succeeds without effect. Returns the updated configuration.
          */
         post: operations["backups_cancel_maintenance"];
         delete?: never;
@@ -81,7 +98,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Cancel a pending one-off request. */
+        /**
+         * Cancel a pending one-off backup or restore request.
+         * @description Removes the pending request matching the given server, type, and
+         *     purpose. Cancelling when nothing is pending succeeds without effect.
+         */
         post: operations["backups_cancel_request"];
         delete?: never;
         options?: never;
@@ -99,8 +120,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * A server's registered backup capabilities + their enabled state. Empty when
-         *     the server has advertised none yet.
+         * List a server's backup capabilities and their enabled state.
+         * @description Returns one entry per backup type the server has advertised, with its
+         *     enabled state, scheduling information, and recent run status. Empty if
+         *     the server hasn't advertised any capabilities yet.
          */
         post: operations["backups_capabilities"];
         delete?: never;
@@ -119,8 +142,9 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Remove a per-`(group,type)` schedule override → revert that type to inheriting
-         *     the canopy-wide default.
+         * Remove a group's schedule and retention override for a backup type.
+         * @description The type reverts to inheriting the canopy-wide default schedule and
+         *     retention. Returns the updated configuration.
          */
         post: operations["backups_clear_schedule"];
         delete?: never;
@@ -139,9 +163,11 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Insert a config row (`status='provisioning'`). Does NOT create the repo —
-         *     that's `create_repo`. 409 if the group already has a config; 404 if the
-         *     group is missing.
+         * Register a new external (bring-your-own-account) backup configuration.
+         * @description This only records the configuration, in a provisioning state; it does not
+         *     create the backup repository itself — call the `/backups/create_repo`
+         *     endpoint next. Returns 409 if the group already has a backup
+         *     configuration, or 404 if the group doesn't exist.
          */
         post: operations["backups_create"];
         delete?: never;
@@ -160,8 +186,12 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Record intent for the init Job: set/keep `provisioning`, clear
-         *     `last_init_error`. Idempotent retry. 409 if already `ready`.
+         * Trigger (or retry) provisioning of a group's backup repository.
+         * @description Sets the configuration's status to provisioning and clears any previous
+         *     error, so provisioning is retried asynchronously; a failure surfaces in
+         *     the `last_init_error` field rather than in this call's response.
+         *     Idempotent — safe to call again while provisioning is already in
+         *     progress. Returns 409 if the repository is already ready.
          */
         post: operations["backups_create_repo"];
         delete?: never;
@@ -180,16 +210,16 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Onboard a group onto **shared-account** backups — for deployments with no AWS
-         *     account of their own. Canopy auto-names a bucket
-         *     (`bes-canopy-backup-<group>-<random>`), generates + stores the passphrase, and
-         *     marks the config `provisioning`/`placement=shared` with **blank** role ARNs.
-         *     The backups pod stamps the shared device/maintenance role ARNs + region (from
-         *     its own `CANOPY_SHARED_BACKUP_*` env) and creates the bucket at init — so this
-         *     endpoint needs no shared-account env (a missing pod env surfaces as
-         *     `last_init_error`, not here). Unlike `create`/`upsert` (BYO), there's no
-         *     caller-supplied bucket/roles and no probe. 502 only if the secret store
-         *     (passphrase Secret) isn't configured.
+         * Onboard a group onto Canopy's shared-account backups.
+         * @description Use this for deployments that don't have their own AWS account. Canopy
+         *     generates a bucket name automatically, generates and stores the repository
+         *     passphrase, and marks the configuration as provisioning with shared
+         *     placement. The bucket and its access roles are provisioned asynchronously;
+         *     any failure surfaces in the `last_init_error` field rather than in this
+         *     call's response. Unlike the `/backups/create` and `/backups/upsert`
+         *     endpoints (used for bring-your-own-account setups), the caller does not
+         *     supply a bucket or role ARNs, and no bucket probe is performed. Returns
+         *     502 only if the server's secret storage isn't configured.
          */
         post: operations["backups_create_shared"];
         delete?: never;
@@ -208,9 +238,11 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Delete a group's config row (decommission). The bucket and its object-locked
-         *     objects persist; this only stops credential issuance and removes the
-         *     Canopy-owned passphrase Secret (which must not outlive its config).
+         * Delete a group's backup configuration (decommission).
+         * @description The bucket and its existing backups are left untouched — object lock
+         *     prevents deletion — but this stops credential issuance for the group and
+         *     deletes the stored repository passphrase, which must not outlive its
+         *     configuration.
          */
         post: operations["backups_delete"];
         delete?: never;
@@ -229,8 +261,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Full config + lifecycle for a group. `null` (200) when the group has no
-         *     config (the zero-state); 404 only when the group itself doesn't exist.
+         * Get a group's backup configuration.
+         * @description Returns the full configuration and lifecycle state for a server group.
+         *     Returns `null` with a 200 status if the group has no backup configuration
+         *     yet; 404 only if the group itself doesn't exist.
          */
         post: operations["backups_get"];
         delete?: never;
@@ -249,11 +283,11 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Per **declared** backup type (not just enabled), the group's effective
-         *     schedule/retention (override or inherited default) — drives the per-type
-         *     editor in the group panel. Includes non-scheduled (disabled) types, since a
-         *     manual backup of one is still retained under its own type policy; those show
-         *     a null `effective_interval` ("manual only").
+         * List the effective schedule and retention for every backup type a group's
+         *     servers have declared support for (not just the ones currently enabled).
+         * @description A type with no scheduled interval still appears, with a null
+         *     `effective_interval`, since a manually run backup of that type is still
+         *     retained under its own policy.
          */
         post: operations["backups_group_schedules"];
         delete?: never;
@@ -271,7 +305,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** All configured groups (fleet overview). */
+        /**
+         * List all groups with a backup configuration.
+         * @description Returns one summary row per configured group: the bucket, how the
+         *     repository passphrase originated, the provisioning status, and the
+         *     last provisioning error if any.
+         */
         post: operations["backups_list"];
         delete?: never;
         options?: never;
@@ -289,9 +328,11 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Synchronous setup-wizard probe: assume the maintenance role and inspect the
-         *     bucket/prefix (empty / kopia_repo / other_content / inaccessible), and report
-         *     whether Canopy already has a config for it. Read-only; never mutates.
+         * Inspect a bucket/prefix for the backup setup wizard.
+         * @description Assumes the maintenance role and reports what's there: empty, an existing
+         *     backup repository, other (non-backup) content, or inaccessible — plus
+         *     whether Canopy already has a configuration for this bucket and prefix.
+         *     Read-only; it never creates or modifies anything.
          */
         post: operations["backups_probe"];
         delete?: never;
@@ -310,9 +351,12 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Issue a verification challenge: a fresh nonce encrypted to the recovery recipients.
-         *     The operator decrypts it offline (proving a private key is genuinely held) and
-         *     posts the plaintext back to `recovery_verify`.
+         * Issue a fresh recovery-verification challenge: a nonce encrypted to the
+         *     configured recovery recipients.
+         * @description The operator decrypts it offline to prove a private key is genuinely
+         *     held, then submits the plaintext to the `/backups/recovery_verify`
+         *     endpoint. Returns 502 if recovery recipients aren't configured on this
+         *     server.
          */
         post: operations["backups_recovery_challenge"];
         delete?: never;
@@ -331,8 +375,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Report the recovery vault verification status (recipients, last verification, and
-         *     whether a ceremony is due).
+         * Get the disaster-recovery verification status.
+         * @description Reports the configured recovery recipients, when recovery was last
+         *     verified, and whether a fresh verification is due (either because a
+         *     year has passed or because the recipient set changed).
          */
         post: operations["backups_recovery_status"];
         delete?: never;
@@ -351,9 +397,11 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Complete the ceremony: verify the operator's decrypted answer matches the
-         *     outstanding challenge, then record the verification against the current
-         *     recipient set.
+         * Complete the recovery-verification ceremony.
+         * @description Checks that the submitted answer matches the outstanding challenge
+         *     issued by the `/backups/recovery_challenge` endpoint, then records the
+         *     verification against the current recipient set. Returns 400 if there's
+         *     no outstanding challenge, it has expired, or the answer is wrong.
          */
         post: operations["backups_recovery_verify"];
         delete?: never;
@@ -372,9 +420,11 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Request a one-off full maintenance run for a group. The scheduler picks it up
-         *     on its next tick, bypassing the cadence jitter slot. Idempotent — re-request
-         *     refreshes the pending flag. Requires the repo to be `ready`.
+         * Request an out-of-cycle full maintenance run for a group's backup
+         *     repository.
+         * @description It runs on the scheduler's next pass rather than waiting for its regular
+         *     staggered interval. Idempotent — re-requesting keeps the request pending.
+         *     Requires the repository to be ready; returns 409 otherwise.
          */
         post: operations["backups_request_maintenance"];
         delete?: never;
@@ -393,8 +443,9 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * One-off "backup now": upsert a `backup_requests` row keyed
-         *     `(server_id, type, purpose)`. Idempotent (re-request refreshes the row).
+         * Request a one-off backup or restore for a server.
+         * @description Idempotent per server, type, and purpose — re-requesting refreshes the
+         *     existing pending request rather than creating a duplicate.
          */
         post: operations["backups_request_now"];
         delete?: never;
@@ -412,7 +463,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Operator toggle of a `(server, type)` capability's enabled flag. */
+        /**
+         * Enable or disable a server's backup capability for one type.
+         * @description Disabled capabilities are excluded from scheduling and can't be issued
+         *     backup credentials, outside of explicit operator-requested runs.
+         */
         post: operations["backups_set_capability"];
         delete?: never;
         options?: never;
@@ -430,8 +485,11 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Set (or clear) the per-`(group,type)` schedule + retention. None interval =
-         *     manual-only; a present retention is floor-validated (400 on violation).
+         * Set the schedule and retention override for one backup type of a group.
+         * @description A null interval means manual-only backups (no schedule). A specified
+         *     retention policy is validated against the organization's retention floor
+         *     and rejected with 400 if it falls below it, unless `allow_below_floor` is
+         *     set.
          */
         post: operations["backups_set_schedule"];
         delete?: never;
@@ -450,8 +508,9 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Set the canopy-wide default schedule/retention for a backup type
-         *     (floor-validated). Operators tune these in Settings → Backup defaults.
+         * Set the canopy-wide default schedule and retention for a backup type.
+         * @description A retention policy below the organization's retention floor is rejected
+         *     with 400, unless `allow_below_floor` is set.
          */
         post: operations["backups_set_type_default"];
         delete?: never;
@@ -470,8 +529,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Stats panel: cached repo stats + recent runs + recent maintenance + pending
-         *     one-off requests (across the group's member servers).
+         * Get backup statistics for a group.
+         * @description Returns the group's cached repository stats, recent backup and
+         *     maintenance runs, pending one-off requests, and each member server's
+         *     declared backup capabilities.
          */
         post: operations["backups_stats"];
         delete?: never;
@@ -490,8 +551,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * List the canopy-wide per-type defaults (the "global" schedule/retention each
-         *     group inherits unless it overrides a type).
+         * List the canopy-wide default schedule and retention for every backup type.
+         * @description Groups inherit these defaults unless they set a per-group override.
          */
         post: operations["backups_type_defaults"];
         delete?: never;
@@ -510,9 +571,11 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Edit the non-structural config (region). Structural fields
-         *     (bucket/role/mode) are create-only; interval/retention live on
-         *     `set_schedule`.
+         * Update a group's mutable backup configuration fields.
+         * @description Currently only the region can be changed. Structural fields — bucket,
+         *     roles, mode — can only be set when the configuration is created;
+         *     schedule and retention are managed through the `/backups/set_schedule`
+         *     endpoint. Returns the updated configuration.
          */
         post: operations["backups_update"];
         delete?: never;
@@ -531,12 +594,15 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Machine-facing config-as-a-resource upsert for ops/pulumi: declaratively
-         *     register/converge a group's backup config in one idempotent call (config +
-         *     generated passphrase Secret + schedule/retention + auto-provision). Creating
-         *     is from-birth onto an empty bucket only — a non-empty/existing-repo/
-         *     inaccessible bucket is rejected. Re-applying reconciles the role ARNs,
-         *     region, schedule and retention; `bucket`/`prefix` are immutable.
+         * Declaratively create or update a group's backup configuration.
+         * @description Registers or converges a group's backup configuration in a single
+         *     idempotent call, generating and storing the repository passphrase and (for
+         *     a new configuration) provisioning the repository automatically. Creating a
+         *     configuration only succeeds onto an empty, unclaimed bucket — a bucket
+         *     that already holds a backup repository or other content, or one that
+         *     can't be accessed, is rejected. Re-applying an existing configuration
+         *     reconciles the role ARNs and region to match the request; `bucket` and
+         *     `prefix` are immutable and any mismatch is rejected.
          */
         post: operations["backups_upsert"];
         delete?: never;
@@ -554,6 +620,13 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Soft-delete a saved snippet.
+         * @description Marks the given snippet version as deleted; it stops appearing in the
+         *     snippet list, but the version itself (and the rest of its history)
+         *     isn't removed. Deleting one version doesn't affect any other version
+         *     in the same snippet's history.
+         */
         post: operations["delete_snippet"];
         delete?: never;
         options?: never;
@@ -570,6 +643,13 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Resolve a snippet id to its latest version.
+         * @description Follows the version chain forward from the given id and returns the
+         *     newest id in that chain (the same id, if it's already the latest).
+         *     Useful for turning a stored or bookmarked snippet id into the id of
+         *     its current version.
+         */
         post: operations["get_latest_snippet_id"];
         delete?: never;
         options?: never;
@@ -586,6 +666,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Get a saved SQL snippet by id.
+         * @description Returns the full content of the given snippet version, including its
+         *     SQL text. The id doesn't have to be the current version — superseded
+         *     and deleted versions can still be fetched directly.
+         */
         post: operations["get_snippet"];
         delete?: never;
         options?: never;
@@ -602,6 +688,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * List saved SQL snippets.
+         * @description Returns a page of the current snippets in the library — one entry per
+         *     snippet, showing only its latest, non-deleted version — ordered by
+         *     name, together with the total count.
+         */
         post: operations["list_snippets"];
         delete?: never;
         options?: never;
@@ -618,6 +710,13 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Save a SQL snippet.
+         * @description Creates a brand new snippet, or — when `supersedes` is set — a new
+         *     version that supersedes an existing one. The new version is recorded
+         *     under the caller's Tailscale identity. Returns the full content of the
+         *     newly created version.
+         */
         post: operations["save_snippet"];
         delete?: never;
         options?: never;
@@ -634,6 +733,14 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Check whether the caller is an admin.
+         * @description Reports `true` if the caller is authenticated and their identity is on
+         *     the admin allow-list, `false` otherwise — including when the caller is
+         *     not authenticated at all. This endpoint intentionally requires no
+         *     authentication of its own, since it exists so a client can check whether
+         *     to show admin-only controls before doing anything else.
+         */
         post: operations["is_current_user_admin"];
         delete?: never;
         options?: never;
@@ -650,6 +757,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Get the configured public API base URL.
+         * @description Returns the base URL of the device-facing public API for this
+         *     deployment, or `null` if none is configured. Used by the operator UI to
+         *     build links out to device-facing resources.
+         */
         post: operations["public_url"];
         delete?: never;
         options?: never;
@@ -666,6 +779,13 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Get a ready-to-share link to the public server-versions page.
+         * @description Returns a full URL to the public server-versions status page, with its
+         *     access secret already embedded in the query string, so it can be shared
+         *     and opened directly without further configuration. Returns `null` if the
+         *     public API base URL or the server-versions secret is not configured.
+         */
         post: operations["server_versions_url"];
         delete?: never;
         options?: never;
@@ -684,8 +804,10 @@ export interface paths {
         put?: never;
         /**
          * Register an externally-generated public key as an active key on a device.
-         *     Unlike `provision_credential`, Canopy never sees a private key here — the
-         *     operator supplies the public half of a keypair they hold.
+         * @description Unlike the `provision_credential` endpoint, Canopy never generates or
+         *     sees a private key here — the operator supplies the public half of a
+         *     keypair they already hold. Returns 400 if the supplied value isn't a
+         *     valid public key, and 404 if the device doesn't exist.
          */
         post: operations["add_key"];
         delete?: never;
@@ -703,6 +825,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Attach a device to a Tailscale network node.
+         * @description Resolves the given identifier against the cached tailnet directory and
+         *     records the canonical node identity on the device. Returns the updated
+         *     device record, including its live tailnet snapshot when available.
+         */
         post: operations["attach_tailscale"];
         delete?: never;
         options?: never;
@@ -719,6 +847,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Count how many times a device has connected.
+         * @description Returns the total number of connections recorded for the device, for
+         *     paginating its connection history.
+         */
         post: operations["connection_count"];
         delete?: never;
         options?: never;
@@ -735,6 +868,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * List a device's connection history, most recent first.
+         * @description Supports cursor-based pagination: pass the oldest entry from a previous
+         *     page as `before` to continue further back in time.
+         */
         post: operations["connection_history"];
         delete?: never;
         options?: never;
@@ -752,9 +890,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Disable a single key so it can no longer authenticate. The row is kept and
-         *     can be re-enabled; disabling one key of several lets a device rotate keys
-         *     with no gap (add the new key, then disable the old).
+         * Disable a single key so it can no longer authenticate.
+         * @description The key record is kept and can be re-enabled later. Disabling one key
+         *     while others remain active lets a device rotate keys with no downtime:
+         *     add the new key first, then disable the old one.
          */
         post: operations["deactivate_key"];
         delete?: never;
@@ -772,6 +911,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Detach a device from its Tailscale network node.
+         * @description Returns the updated device record, with its tailnet identity cleared.
+         *     Returns 404 if the device doesn't exist.
+         */
         post: operations["detach_tailscale"];
         delete?: never;
         options?: never;
@@ -790,8 +934,9 @@ export interface paths {
         put?: never;
         /**
          * Disable every active key on a device, so none of them can authenticate.
-         *     The rows are kept (for history) and can be re-enabled individually. Tailnet
-         *     identity, if any, is untouched — detach it separately.
+         * @description The keys stay in the device's history and can be re-enabled individually.
+         *     Any Tailscale identity attached to the device is untouched — detach it
+         *     separately.
          */
         post: operations["device_disable_all_keys"];
         delete?: never;
@@ -809,6 +954,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Look up a single device by id.
+         * @description Returns full device details: its identity and role, every key ever
+         *     registered on it, its most recent connection, and a live Tailscale
+         *     snapshot when available. Returns 404 if no device exists with that id.
+         */
         post: operations["get_device_by_id"];
         delete?: never;
         options?: never;
@@ -825,6 +976,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * List servers a device was previously associated with, but no longer is.
+         * @description Useful for tracing a device's history when it has since been reassigned
+         *     or replaced on a different server.
+         */
         post: operations["get_past_server_associations"];
         delete?: never;
         options?: never;
@@ -841,6 +997,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * List the servers a device is currently associated with.
+         * @description Returns the servers this device is currently bound to (usually zero or
+         *     one), including reachability status and a best-effort display address
+         *     for each.
+         */
         post: operations["get_servers_for_device"];
         delete?: never;
         options?: never;
@@ -857,6 +1019,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * List registered devices, paginated.
+         * @description Returns a page of the device registry, newest first, plus the total
+         *     count for rendering a pager. Every registered device is included,
+         *     whatever its role.
+         */
         post: operations["list_trusted"];
         delete?: never;
         options?: never;
@@ -873,6 +1041,16 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Merge one device record into another.
+         * @description Combines keys, connections, and tailnet/server attachments onto the
+         *     target device and removes the source. Used to reconcile a device that
+         *     was auto-discovered via the tailnet directory with the device it
+         *     actually corresponds to, once that device authenticates with its own
+         *     key. Returns 409 if both devices independently hold a Tailscale
+         *     identity or a server attachment, since the merge can't decide which one
+         *     to keep.
+         */
         post: operations["merge_into"];
         delete?: never;
         options?: never;
@@ -890,10 +1068,13 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Mint a device keypair server-side, store its public key as an active key on
-         *     a new or existing device at the chosen role, and return the private key
-         *     once, encrypted under a fresh passphrase (spec DPK). Canopy keeps only the
-         *     public key; the private key is never persisted or logged.
+         * Generate a new device credential and return the private key once.
+         * @description Generates a keypair, registers its public key as an active key on a new
+         *     or existing device at the chosen role, and returns the private key
+         *     encrypted under a freshly-generated passphrase. Canopy keeps only the
+         *     public key — the private key is never stored or logged after this
+         *     response. Returns 404 if `device_id` is given but doesn't match an
+         *     existing device.
          */
         post: operations["provision_credential"];
         delete?: never;
@@ -911,7 +1092,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Re-enable a previously disabled key. */
+        /**
+         * Re-enable a previously disabled device key.
+         * @description The key can authenticate again immediately.
+         */
         post: operations["reactivate_key"];
         delete?: never;
         options?: never;
@@ -929,10 +1113,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Look up a Tailscale IP / node id / DNS name in the directory and
-         *     return the canonical identity if found. Used by the attach UI's
-         *     preview pane so the operator can confirm the resolved node before
-         *     hitting attach.
+         * Look up a Tailscale IP address, node id, or DNS name.
+         * @description Resolves the identifier against the live tailnet directory and returns
+         *     its canonical node identity if found. Useful for confirming what an
+         *     identifier resolves to before using it to attach a device.
          */
         post: operations["resolve_tailnet_identifier"];
         delete?: never;
@@ -950,6 +1134,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Search for devices by key, name, IP address, or Tailscale identity.
+         * @description Returns an empty list if the query is blank.
+         */
         post: operations["device_search"];
         delete?: never;
         options?: never;
@@ -966,6 +1154,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Rename a device key, or clear its name.
+         * @description Sets the key's display name to the given value, or removes the name
+         *     when `null` is passed.
+         */
         post: operations["update_key_name"];
         delete?: never;
         options?: never;
@@ -982,6 +1175,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Change the role a device is trusted at.
+         * @description Immediately changes what the device is permitted to do system-wide.
+         */
         post: operations["update_role"];
         delete?: never;
         options?: never;
@@ -998,6 +1195,13 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * List the healthcheck severity catalog.
+         * @description Returns every known healthcheck name together with its current
+         *     severity policy, ordered by name. An entry exists for every check name
+         *     any server has ever reported; new checks are added automatically the
+         *     first time they're seen, with a default policy pending review.
+         */
         post: operations["healthcheck_list"];
         delete?: never;
         options?: never;
@@ -1014,6 +1218,15 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Sample real data available to a healthcheck's conditional rules.
+         * @description Fetches the most recent status report from any server that reported
+         *     the given check, and returns the fields a conditional rule could
+         *     reference for it. Useful for discovering what data is actually
+         *     available before writing a rule, and for previewing how a candidate
+         *     rule would evaluate. Returns a `null` sample if no server has ever
+         *     reported this check.
+         */
         post: operations["healthcheck_sample"];
         delete?: never;
         options?: never;
@@ -1031,12 +1244,12 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Distinct tag keys known anywhere in the system — union across all
-         *     servers and server groups, sorted. Feeds the rule editor's
-         *     Autocomplete so operators can pick `tag.<key>` even when the
-         *     sampled server doesn't carry that key. The sample-based pass/warn
-         *     badge still reflects the sample only; this list only widens the
-         *     completion menu.
+         * List all known tag keys.
+         * @description Returns the sorted, deduplicated set of tag keys used across every
+         *     server and server group in the fleet, including keys not present on
+         *     the sample returned by the sampling endpoint. Useful for discovering
+         *     which `tag.<key>` variables are available when writing a conditional
+         *     rule, even for tags the sampled server doesn't happen to carry.
          */
         post: operations["healthcheck_tag_keys"];
         delete?: never;
@@ -1054,6 +1267,13 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Update a healthcheck's severity policy.
+         * @description Sets the base severity (and optionally notes) for the given check, and
+         *     marks it as reviewed by the caller. Saving with the same severity as
+         *     before still counts as a review, so an operator can acknowledge a
+         *     check without changing its policy.
+         */
         post: operations["healthcheck_update"];
         delete?: never;
         options?: never;
@@ -1070,6 +1290,14 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Replace a healthcheck's conditional severity rules.
+         * @description Stores a new set of conditional rules for the given check (or removes
+         *     them, if `rules` is `null`), and marks the check as reviewed by the
+         *     caller. Returns 400 if `rules` doesn't parse as a valid ladder — for
+         *     example an unknown comparison operator, a malformed variable
+         *     reference, or an odd number of entries.
+         */
         post: operations["healthcheck_update_rules"];
         delete?: never;
         options?: never;
@@ -1086,6 +1314,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Add a note to an incident.
+         * @description Records a note authored by the calling operator and returns it. Requires
+         *     the caller to be on the admin allow-list. Responds 400 if the note body
+         *     is empty or whitespace-only.
+         */
         post: operations["incident_add_note"];
         delete?: never;
         options?: never;
@@ -1102,6 +1336,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Delete an incident note.
+         * @description Permanently removes the note. Notes cannot be edited in place; to change
+         *     one, delete it and add a replacement. Requires the caller to be on the
+         *     admin allow-list.
+         */
         post: operations["incident_delete_note"];
         delete?: never;
         options?: never;
@@ -1118,6 +1358,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Get an incident with its contributing issues.
+         * @description Returns the incident and every issue that has contributed to it, each
+         *     with the times it joined and (where applicable) left the incident.
+         *     Responds 404 if the incident does not exist.
+         */
         post: operations["get_incident"];
         delete?: never;
         options?: never;
@@ -1134,6 +1380,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * List open incidents across all server groups.
+         * @description Returns every incident that is currently open, fleet-wide.
+         */
         post: operations["list_active"];
         delete?: never;
         options?: never;
@@ -1150,6 +1400,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * List incidents for a server group.
+         * @description Returns the group's incidents. By default only open incidents are
+         *     returned; set `include_closed` to also include closed ones.
+         */
         post: operations["incident_list_for_group"];
         delete?: never;
         options?: never;
@@ -1166,6 +1421,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * List incidents involving a server.
+         * @description Returns incidents that issues on the given server have contributed to.
+         *     By default only open incidents are returned; set `include_closed` to
+         *     also include closed ones.
+         */
         post: operations["incident_list_for_server"];
         delete?: never;
         options?: never;
@@ -1182,6 +1443,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * List notes on an incident.
+         * @description Returns notes written on the incident itself; notes on its contributing
+         *     issues are not included.
+         */
         post: operations["incident_list_notes"];
         delete?: never;
         options?: never;
@@ -1198,6 +1464,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Resolve an incident.
+         * @description Marks the incident resolved with the given reason, recording the calling
+         *     operator as the resolver. Returns the updated incident. Requires the
+         *     caller to be on the admin allow-list.
+         */
         post: operations["incident_resolve"];
         delete?: never;
         options?: never;
@@ -1214,6 +1486,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Undo an incident's resolution.
+         * @description Clears the incident's resolved state (time, resolver, and reason).
+         *     Returns the updated incident. Requires the caller to be on the admin
+         *     allow-list.
+         */
         post: operations["incident_unresolve"];
         delete?: never;
         options?: never;
@@ -1230,6 +1508,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Add a note to an issue.
+         * @description Records the calling operator as the author. Returns 400 if the note
+         *     body is empty or whitespace-only.
+         */
         post: operations["issue_add_note"];
         delete?: never;
         options?: never;
@@ -1246,6 +1529,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Permanently delete a note from an issue.
+         * @description The note is removed outright; there is no undo. Deleting a note that
+         *     doesn't exist succeeds without effect.
+         */
         post: operations["issue_delete_note"];
         delete?: never;
         options?: never;
@@ -1262,7 +1550,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Cross-server filtered issues list (used by the global Incidents page). */
+        /**
+         * List issues across all servers, with optional filtering.
+         * @description Returns the most relevant issues fleet-wide, matching the given filters.
+         *     By default only currently active issues are returned; pass
+         *     `activeOnly: false` to also see resolved and inactive ones.
+         */
         post: operations["issue_list"];
         delete?: never;
         options?: never;
@@ -1279,6 +1572,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * List the events recorded against a specific issue, most recent first.
+         * @description Returns a page of events along with the total number of events recorded
+         *     for the issue, for pagination with `offset`/`limit`.
+         */
         post: operations["list_events"];
         delete?: never;
         options?: never;
@@ -1295,6 +1593,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * List issues raised by a specific device.
+         * @description Returns the issues that the given device reported, most relevant
+         *     first. By default only currently active issues are returned; pass
+         *     `active_only: false` to also see resolved and inactive ones.
+         */
         post: operations["list_for_device"];
         delete?: never;
         options?: never;
@@ -1311,6 +1615,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * List issues raised against a specific server.
+         * @description Returns the issues recorded against the given server, most relevant
+         *     first. By default only currently active issues are returned; pass
+         *     `active_only: false` to also see resolved and inactive ones.
+         */
         post: operations["issue_list_for_server"];
         delete?: never;
         options?: never;
@@ -1327,6 +1637,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * List the notes left on a specific issue.
+         * @description Returns the issue's notes, most recent first, each with its author and
+         *     creation time.
+         */
         post: operations["issue_list_notes"];
         delete?: never;
         options?: never;
@@ -1343,6 +1658,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Mark an issue as resolved.
+         * @description Records the calling operator as the resolver along with the given
+         *     reason, and returns the updated issue.
+         */
         post: operations["issue_resolve"];
         delete?: never;
         options?: never;
@@ -1359,6 +1679,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Snooze an issue until a given time.
+         * @description A snoozed issue stops demanding attention until the given time, after
+         *     which it surfaces again on its own. Returns the updated issue.
+         */
         post: operations["issue_snooze"];
         delete?: never;
         options?: never;
@@ -1375,6 +1700,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Manually record an event against a server, creating or updating an issue.
+         * @description Finds or creates an issue keyed by the server and the given `ref`,
+         *     appends this event to it, and returns the resulting issue. Returns 400
+         *     if `ref` is empty or if `description` contains a newline.
+         */
         post: operations["submit_manual_event"];
         delete?: never;
         options?: never;
@@ -1391,6 +1722,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Undo a previous resolution, marking an issue as unresolved again.
+         * @description Clears the resolution timestamp, resolver, and reason, and returns the
+         *     updated issue.
+         */
         post: operations["issue_unresolve"];
         delete?: never;
         options?: never;
@@ -1407,6 +1743,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Clear a snooze on an issue.
+         * @description Makes a previously snoozed issue demand attention again immediately,
+         *     without waiting for its snooze time to pass. Returns the updated issue.
+         */
         post: operations["issue_unsnooze"];
         delete?: never;
         options?: never;
@@ -1423,6 +1764,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * List MCP access tokens.
+         * @description Returns every access token that has ever been minted, newest first,
+         *     including ones that have since been revoked — this is the full history
+         *     view. Token secrets are never included, only metadata about each token.
+         */
         post: operations["mcp_tokens_list"];
         delete?: never;
         options?: never;
@@ -1439,6 +1786,15 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Mint a new MCP access token.
+         * @description Creates a new bearer token that can be used to authenticate against the
+         *     public MCP endpoint, and returns its metadata together with the
+         *     plaintext secret. The secret appears only in this response and cannot be
+         *     retrieved again afterwards, so it must be copied out immediately. Tokens
+         *     are valid for one year from minting. Returns 400 if the supplied name is
+         *     empty or only whitespace.
+         */
         post: operations["mcp_tokens_mint"];
         delete?: never;
         options?: never;
@@ -1455,6 +1811,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Revoke an MCP access token.
+         * @description Immediately invalidates the token with the given id so it can no longer
+         *     authenticate. Revoking an already-revoked token succeeds without doing
+         *     anything further. Returns 404 if no token with that id exists.
+         */
         post: operations["mcp_tokens_revoke"];
         delete?: never;
         options?: never;
@@ -1471,6 +1833,14 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * List recent restore-health reports for a group.
+         * @description Returns up to the 50 most recent restore-health reports submitted by
+         *     consumers for the given server group. Each report records whether a
+         *     backup snapshot restored successfully and whether the resulting replica
+         *     was healthy — the strongest available signal that the group's backups are
+         *     actually restorable.
+         */
         post: operations["restore_replicas_checks"];
         delete?: never;
         options?: never;
@@ -1487,6 +1857,14 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * List restore consumers and their advertised intents.
+         * @description Returns every device with the backup-restore role, together with the
+         *     restore intents it currently advertises (each with its description,
+         *     semantics flags, and parameter schema). Use this to discover which
+         *     consumers and intents a declaration can target and which parameters each
+         *     intent accepts.
+         */
         post: operations["restore_replicas_consumers"];
         delete?: never;
         options?: never;
@@ -1503,6 +1881,17 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Declare a managed restore replica.
+         * @description Creates a declaration instructing the chosen consumer to maintain a
+         *     restored replica of the given backup type for the given intent, and
+         *     records the calling operator as its creator. Parameter values are
+         *     validated against the consumer's advertised schema for the intent; if the
+         *     intent is not currently advertised, the values are accepted as-is and the
+         *     declaration is created with a gap. Requires the caller to be on the admin
+         *     allow-list. Responds 400 if a parameter value fails validation and 409 if
+         *     a matching declaration already exists.
+         */
         post: operations["restore_replicas_create"];
         delete?: never;
         options?: never;
@@ -1519,6 +1908,13 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Delete a restore replica declaration.
+         * @description Removes the declaration: the consumer stops being asked to maintain the
+         *     replica and loses the backup access the declaration granted. Requires the
+         *     caller to be on the admin allow-list. Responds 404 if the declaration
+         *     does not exist.
+         */
         post: operations["restore_replicas_delete"];
         delete?: never;
         options?: never;
@@ -1535,6 +1931,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * List restore replica declarations for a group.
+         * @description Returns every declaration scoped to the given server group, with each
+         *     consumer's display name resolved and the `gap` flag computed against the
+         *     intents the consumer currently advertises.
+         */
         post: operations["restore_replicas_for_group"];
         delete?: never;
         options?: never;
@@ -1551,6 +1953,14 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Update a restore replica declaration.
+         * @description Changes the declaration's name, overdue bound, parameter values, and
+         *     enabled flag; the scope (consumer, group, server, backup type, intent)
+         *     cannot be changed. Parameter values are validated against the intent's
+         *     advertised parameter schema. Requires the caller to be on the admin
+         *     allow-list. Responds 404 if the declaration does not exist.
+         */
         post: operations["restore_replicas_update"];
         delete?: never;
         options?: never;
@@ -1567,6 +1977,13 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * List currently-alerting self-alerts.
+         * @description Returns self-alerts whose underlying condition is still ongoing and
+         *     that have not been marked resolved by an operator. This is the feed
+         *     meant for a live alert banner; see the full listing endpoint for
+         *     complete history including recovered and resolved alerts.
+         */
         post: operations["self_alerts_active"];
         delete?: never;
         options?: never;
@@ -1583,6 +2000,13 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * List self-alerts.
+         * @description Returns self-alerts ordered by most recent activity first, including
+         *     ones that have since recovered on their own or been resolved by an
+         *     operator. Use the "active" endpoint instead for just the ones currently
+         *     alerting.
+         */
         post: operations["self_alerts_list"];
         delete?: never;
         options?: never;
@@ -1599,6 +2023,13 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Mark a self-alert as resolved.
+         * @description Records that an operator has resolved the given self-alert and cancels
+         *     its notification if one is still pending delivery (e.g. inside the
+         *     initial grace period before a low-severity alert is sent). Returns 404
+         *     if no self-alert with that id exists.
+         */
         post: operations["self_alerts_resolve"];
         delete?: never;
         options?: never;
@@ -1615,6 +2046,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Create a server group.
+         * @description Creates a new, empty server group and returns it. Requires the caller to
+         *     be on the admin allow-list. Responds 400 if the request is invalid.
+         */
         post: operations["server_groups_create"];
         delete?: never;
         options?: never;
@@ -1632,9 +2068,11 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Archive (soft-delete) a group. Kept at `/delete` for the existing client;
-         *     the group is hidden from live listings but restorable. Refuses if the group
-         *     still has live members (409).
+         * Archive a server group.
+         * @description Soft-deletes the group: it disappears from live listings but is kept and
+         *     can be restored later. Requires the caller to be on the admin allow-list.
+         *     Responds 409 if the group still has live member servers; move or archive
+         *     those first.
          */
         post: operations["server_groups_delete"];
         delete?: never;
@@ -1652,6 +2090,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Get a server group with its members.
+         * @description Returns the group, its member servers (sorted by name, with current status
+         *     and display host), and the group's effective billing labels. Responds 404
+         *     if no group exists with the given identifier.
+         */
         post: operations["server_groups_get"];
         delete?: never;
         options?: never;
@@ -1668,6 +2112,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * List all live server groups.
+         * @description Returns every non-archived server group, including its name, notes, tags,
+         *     Slack notification delay, and effective version information. The request
+         *     body is ignored; send an empty JSON object.
+         */
         post: operations["server_groups_list"];
         delete?: never;
         options?: never;
@@ -1684,6 +2134,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * List archived server groups.
+         * @description Returns every group that has been archived (soft-deleted) and can be
+         *     restored. The request body is ignored; send an empty JSON object.
+         */
         post: operations["server_groups_list_archived"];
         delete?: never;
         options?: never;
@@ -1700,6 +2155,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Restore an archived server group.
+         * @description Un-archives a previously deleted group so it reappears in live listings.
+         *     Requires the caller to be on the admin allow-list. Responds 404 if the
+         *     group does not exist.
+         */
         post: operations["server_groups_restore"];
         delete?: never;
         options?: never;
@@ -1716,6 +2177,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Search live server groups.
+         * @description Returns non-archived groups matching the free-text query.
+         */
         post: operations["server_groups_search"];
         delete?: never;
         options?: never;
@@ -1733,8 +2198,11 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Live (non-archived) server count per group, for the groups list. Groups with
-         *     no live members are omitted (the client defaults missing entries to 0).
+         * Count live servers per group.
+         * @description Returns one entry per server group that has at least one live
+         *     (non-archived) member server. Groups with no live members are omitted, so
+         *     treat a missing entry as a count of zero. The request body is ignored;
+         *     send an empty JSON object.
          */
         post: operations["server_groups_server_counts"];
         delete?: never;
@@ -1752,6 +2220,13 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Update a server group.
+         * @description Applies a partial update: only the fields present in `data` (name, notes,
+         *     tags, Slack notification delay) are changed. Returns the updated group.
+         *     Requires the caller to be on the admin allow-list. Responds 404 if the
+         *     group does not exist and 400 if the request is invalid.
+         */
         post: operations["server_groups_update"];
         delete?: never;
         options?: never;
@@ -1769,12 +2244,13 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Find or create a `Device` row for a Tailscale node id resolved
-         *     from the supplied identifier, and attach it to the server
-         *     (`servers.device_id`). Used when a server has no device yet (e.g.
-         *     an operator-imported server that hasn't reported in) and the
-         *     operator wants to bind it to a tailnet node without going through
-         *     the device admin page first.
+         * Attach a device to a server via a Tailscale identifier.
+         * @description Resolves the identifier to a tailnet node, finds the device already
+         *     attached to that node or creates a new one for it, and binds that device
+         *     to the server. Useful when a server has no device yet (e.g. an
+         *     operator-imported server that hasn't reported in) and should be bound to
+         *     a tailnet node directly. Returns 409 if the resolved device is already
+         *     attached to another live server — detach it there first.
          */
         post: operations["attach_tailscale_device"];
         delete?: never;
@@ -1793,8 +2269,9 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Operator-driven server creation. Creates the `servers` row (optionally
-         *     pre-bound to a Tailscale device), ungrouped or in the supplied group.
+         * Create a new server.
+         * @description Creates the server record, optionally pre-bound to a Tailscale device
+         *     via `tailscale_identifier`, either ungrouped or in the given group.
          */
         post: operations["create"];
         delete?: never;
@@ -1812,7 +2289,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Archive (soft-delete) a server. Releases and demotes its device. */
+        /**
+         * Archive (soft-delete) a server.
+         * @description Releases and demotes its device. Archived servers no longer appear in
+         *     regular listings but can be restored later.
+         */
         post: operations["delete"];
         delete?: never;
         options?: never;
@@ -1830,8 +2311,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Enrollment state for a server: whether it has registered, and whether an
-         *     enrollment token is currently outstanding (expiry only).
+         * Get the enrollment state of a server.
+         * @description Reports whether the server has completed enrollment, and whether an
+         *     enrollment token is currently outstanding (issue and expiry times only —
+         *     the token itself is never revealed).
          */
         post: operations["enrollment_status"];
         delete?: never;
@@ -1849,6 +2332,13 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Get full detail for a server.
+         * @description Returns the server's record, its bound device (if any), its most recent
+         *     status report, current reachability/health, its group (if any) together
+         *     with sibling servers in the same group, and the group's billing labels.
+         *     Returns 404 if no server exists with that id.
+         */
         post: operations["get_detail"];
         delete?: never;
         options?: never;
@@ -1865,6 +2355,13 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Get a server's basic record.
+         * @description Returns identity, classification, and configuration for a single server,
+         *     including its group name where applicable. Does not include current
+         *     reachability/health or device/group detail — use the detail endpoint for
+         *     that. Returns 404 if no server exists with that id.
+         */
         post: operations["get_info"];
         delete?: never;
         options?: never;
@@ -1881,6 +2378,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Get a server's display name.
+         * @description Returns the server's name if set, else its stored host, else its id —
+         *     always a non-empty string suitable for display. Returns 404 if no server
+         *     exists with that id.
+         */
         post: operations["get_name"];
         delete?: never;
         options?: never;
@@ -1898,8 +2401,9 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Archived (soft-deleted) servers, for the Archived view. Each carries
-         *     `archived: true`; the UI offers Restore.
+         * List archived (soft-deleted) servers.
+         * @description Each entry has `archived: true` and includes current reachability/health.
+         *     Archived servers can be brought back with the restore endpoint.
          */
         post: operations["list_archived"];
         delete?: never;
@@ -1917,6 +2421,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * List servers, optionally filtered by kind, paginated.
+         * @description Returns a page of servers plus the total matching count. Entries include
+         *     their group name where applicable, but not current reachability/health —
+         *     use the detail endpoint for that.
+         */
         post: operations["list_some"];
         delete?: never;
         options?: never;
@@ -1934,8 +2444,9 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Servers without a group, used by the Ungrouped tab. Returned alongside a
-         *     total count so the UI can show "(N ungrouped)" without a second fetch.
+         * List servers that don't belong to any group.
+         * @description Returns a page of ungrouped servers, each with current
+         *     reachability/health, plus the total count of ungrouped servers.
          */
         post: operations["list_ungrouped"];
         delete?: never;
@@ -1954,10 +2465,12 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Mint (or reissue) an enrollment token for a server and return the
-         *     passphrase-encrypted ticket the operator runs through bestool, plus the
-         *     4-word passphrase that decrypts it. The plaintext token lives only inside
-         *     the encrypted ticket; reissuing invalidates any prior token.
+         * Mint (or reissue) an enrollment ticket for a server.
+         * @description Creates a fresh enrollment token and returns it wrapped in a
+         *     passphrase-encrypted ticket the operator runs through bestool on the
+         *     enrolling machine, plus the 4-word passphrase that decrypts it. The
+         *     plaintext token lives only inside the encrypted ticket; reissuing
+         *     invalidates any prior token. Fails if the server is archived.
          */
         post: operations["mint_enrollment"];
         delete?: never;
@@ -1975,7 +2488,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Un-archive a server. The box must re-enroll to rebind a device. */
+        /**
+         * Un-archive a server.
+         * @description Restores a previously archived server to regular listings. Its machine
+         *     must re-enroll afterwards to rebind a device. Restoring a server that
+         *     isn't archived has no effect.
+         */
         post: operations["restore"];
         delete?: never;
         options?: never;
@@ -1993,8 +2511,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Revoke any outstanding enrollment ticket for a server (e.g. issued by
-         *     mistake). The next `enrollment_status` will report no outstanding token.
+         * Revoke any outstanding enrollment ticket for a server.
+         * @description Use this when a ticket was issued by mistake or is no longer needed.
+         *     Afterwards, the enrollment status endpoint reports no outstanding token,
+         *     and the revoked ticket can no longer be used to enroll.
          */
         post: operations["revoke_enrollment"];
         delete?: never;
@@ -2012,6 +2532,14 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Update a server's fields.
+         * @description Applies a partial update — only the fields present in `data` are
+         *     changed. Moving a previously-ungrouped server into a group, or toggling
+         *     `is_monitored`, re-evaluates the server's open issues so incidents catch
+         *     up with the new state. Returns 400 if the update is rejected (e.g. an
+         *     invalid host value).
+         */
         post: operations["server_update"];
         delete?: never;
         options?: never;
@@ -2028,6 +2556,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * List group-scoped silences for a server group.
+         * @description Returns every (source, ref) pair currently silenced for this server
+         *     group — applying to every server in the group — most recently created
+         *     first.
+         */
         post: operations["list_for_group"];
         delete?: never;
         options?: never;
@@ -2044,6 +2578,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * List server-scoped silences for a server.
+         * @description Returns every (source, ref) pair currently silenced specifically for
+         *     this server, most recently created first. Doesn't include silences
+         *     applied at the server's group level.
+         */
         post: operations["list_for_server"];
         delete?: never;
         options?: never;
@@ -2060,6 +2600,16 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Silence an issue on a server group.
+         * @description Suppresses alerting for the given (source, ref) pair across every
+         *     server in this group: matching issues keep being recorded, but stop
+         *     counting toward opening or extending an incident. Idempotent —
+         *     silencing a pair that's already silenced leaves the original entry,
+         *     including who created it and when, unchanged. Requires admin access.
+         *     Returns 400 if the request is invalid, for example if it references a
+         *     server group that doesn't exist.
+         */
         post: operations["silence_group"];
         delete?: never;
         options?: never;
@@ -2076,6 +2626,15 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Silence an issue on a server.
+         * @description Suppresses alerting for the given (source, ref) pair on this server:
+         *     matching issues keep being recorded, but stop counting toward opening
+         *     or extending an incident. Idempotent — silencing a pair that's already
+         *     silenced leaves the original entry, including who created it and when,
+         *     unchanged. Requires admin access. Returns 400 if the request is
+         *     invalid, for example if it references a server that doesn't exist.
+         */
         post: operations["silence_server"];
         delete?: never;
         options?: never;
@@ -2092,6 +2651,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Unsilence an issue on a server group.
+         * @description Removes a group-scoped silence for the given (source, ref) pair, if
+         *     one exists. Removing a silence that isn't there is not an error.
+         *     Requires admin access.
+         */
         post: operations["unsilence_group"];
         delete?: never;
         options?: never;
@@ -2108,6 +2673,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Unsilence an issue on a server.
+         * @description Removes a server-scoped silence for the given (source, ref) pair, if
+         *     one exists. Removing a silence that isn't there is not an error.
+         *     Requires admin access.
+         */
         post: operations["unsilence_server"];
         delete?: never;
         options?: never;
@@ -2124,6 +2695,20 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Run a query in the read-only SQL playground.
+         * @description The query runs inside an explicit read-only transaction — Postgres
+         *     rejects write statements within it — and the transaction is always
+         *     rolled back afterwards regardless of the outcome, so nothing it does
+         *     can be committed. Execution is capped at 60 seconds; a query that runs
+         *     longer is aborted and reported as an error. The query text is recorded
+         *     to the shared query history under the caller's identity before it
+         *     runs, even if execution subsequently fails.
+         *
+         *     Returns an error if the read-only SQL playground isn't configured on
+         *     this server, or if the query fails, times out, or can't be recorded to
+         *     history.
+         */
         post: operations["execute_query"];
         delete?: never;
         options?: never;
@@ -2140,6 +2725,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Get the caller's most recently run playground query.
+         * @description Returns the SQL text of the last query the caller executed in the SQL
+         *     playground, or `null` if they haven't run one yet.
+         */
         post: operations["get_last_user_query"];
         delete?: never;
         options?: never;
@@ -2156,6 +2746,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * List the shared history of SQL playground queries.
+         * @description Returns a page of every query run by any user in the SQL playground,
+         *     most recent first, together with the total number of entries.
+         */
         post: operations["get_query_history"];
         delete?: never;
         options?: never;
@@ -2172,6 +2767,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Check whether the read-only SQL playground is enabled.
+         * @description Returns `true` if this server is configured with a read-only database
+         *     connection to run playground queries against, `false` otherwise. Does
+         *     not require authentication.
+         */
         post: operations["is_sql_available"];
         delete?: never;
         options?: never;
@@ -2188,6 +2789,13 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Get a status card for a server group.
+         * @description Returns the group's identity, its headline version and how far behind
+         *     the latest published release that version is, and a per-member summary
+         *     (up/down state, health, connected operators, rank, kind) for every
+         *     server in the group. Returns 404 if the group doesn't exist.
+         */
         post: operations["group_details"];
         delete?: never;
         options?: never;
@@ -2205,12 +2813,11 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Server group ids bucketed by their **highest-ranked member's** rank.
-         *     `ServerRank::Production` outranks `Clone`, `Demo`, `Test`, `Dev` in that
-         *     order. Groups whose members are all unranked don't appear in the response
-         *     at all (the status page intentionally hides them — they're typically dev
-         *     scratch).
-         * @description Within each bucket, groups are ordered alphabetically by name.
+         * List server group ids, bucketed by rank.
+         * @description Each group is bucketed under the highest rank held by any of its member
+         *     servers (production outranks clone, which outranks demo, then test,
+         *     then dev). Groups whose members are all unranked are omitted entirely.
+         *     Within each rank bucket, groups are ordered alphabetically by name.
          */
         post: operations["server_grouped_ids"];
         delete?: never;
@@ -2228,6 +2835,14 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Get a server's status as of a point in time.
+         * @description Returns the most recent status push at or before `at` (or the latest
+         *     push overall, if `at` is omitted), enriched with version distance,
+         *     minimum browser version, connected operators, and per-check severities.
+         *     Returns `null` in the response body if the server has no recorded
+         *     status.
+         */
         post: operations["status_snapshot"];
         delete?: never;
         options?: never;
@@ -2244,6 +2859,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Get a fleet-wide summary of software versions running in production.
+         * @description Looks at the most recent status reported by every server ranked as
+         *     production (within the last 7 days) and returns the range of versions
+         *     seen, the distinct release lines, and every distinct exact version.
+         */
         post: operations["status_summary"];
         delete?: never;
         options?: never;
@@ -2260,6 +2881,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Record a new known issue affecting a version's release line, starting
+         *     from the given version's exact patch.
+         * @description Returns 400 if the description is empty or whitespace-only.
+         */
         post: operations["add_known_issue"];
         delete?: never;
         options?: never;
@@ -2276,6 +2902,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Create a new artifact tied to an exact version.
+         * @description Registers a download of the given type and platform against the
+         *     version, and returns the created artifact.
+         */
         post: operations["create_artifact"];
         delete?: never;
         options?: never;
@@ -2292,6 +2923,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Permanently delete an artifact.
+         * @description The artifact record is removed outright; the file it pointed to is not
+         *     touched. There is no undo.
+         */
         post: operations["delete_artifact"];
         delete?: never;
         options?: never;
@@ -2308,6 +2944,13 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * List all versions, grouped by release line.
+         * @description Returns every version, including drafts, grouped by major.minor release
+         *     line and ordered newest release line first. Each group includes a
+         *     readiness flag reflecting whether its latest published patch has any
+         *     unresolved known issues.
+         */
         post: operations["get_grouped_versions"];
         delete?: never;
         options?: never;
@@ -2324,6 +2967,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * List the downloadable artifacts available for a version.
+         * @description Returns one entry per artifact type/platform combination actually
+         *     served for this version, whether tied to the exact version or matched
+         *     via a version range pattern. Returns 404 if the version doesn't exist.
+         */
         post: operations["get_version_artifacts"];
         delete?: never;
         options?: never;
@@ -2340,6 +2989,13 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Get full details for a single version.
+         * @description Returns the version's changelog, minimum browser version requirement,
+         *     whether it's the latest patch in its release line, other versions in
+         *     the same release line, its readiness, and its full known-issue history.
+         *     Returns 404 if the version doesn't exist.
+         */
         post: operations["get_version_detail"];
         delete?: never;
         options?: never;
@@ -2356,6 +3012,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * List known issues for a version's release line.
+         * @description Returns every known issue ever raised against the major.minor release
+         *     line the given version belongs to, resolved or not. Returns 404 if the
+         *     version doesn't exist.
+         */
         post: operations["list_known_issues"];
         delete?: never;
         options?: never;
@@ -2372,6 +3034,13 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Mark a known issue as resolved as of a given fix version.
+         * @description Returns 400 if the resolution message is empty or whitespace-only.
+         *     Returns 404 if the known issue doesn't exist, is already resolved, or
+         *     if `fix_version` isn't in the same release line as the issue or isn't
+         *     strictly above its earliest affected patch.
+         */
         post: operations["resolve_known_issue"];
         delete?: never;
         options?: never;
@@ -2388,6 +3057,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Update an existing artifact's type, platform, and download URL.
+         * @description All three fields are replaced with the supplied values; the artifact's
+         *     version association is unchanged.
+         */
         post: operations["update_artifact"];
         delete?: never;
         options?: never;
@@ -2404,6 +3078,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Replace a version's changelog text.
+         * @description Overwrites the changelog of the version identified by its exact
+         *     version string. Updating a version that doesn't exist succeeds
+         *     without effect.
+         */
         post: operations["update_version_changelog"];
         delete?: never;
         options?: never;
@@ -2420,6 +3100,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Change a version's publication status.
+         * @description Returns 400 if the change would move a published version back to draft
+         *     while it isn't the latest published patch in its release line — older
+         *     published patches can't be un-published out from under a newer one.
+         */
         post: operations["update_version_status"];
         delete?: never;
         options?: never;
@@ -2431,11 +3117,17 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description Request body for granting admin access to an email address. */
         AddArgs: {
+            /** @description The email address to add to the admin allow-list. */
             email: string;
         };
+        /** @description Request to register an existing public key on a device. */
         AddKeyArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The device to add the key to.
+             */
             device_id: string;
             /** @description Display name for the key. Defaults to "Added key". */
             name?: string | null;
@@ -2445,32 +3137,73 @@ export interface components {
              */
             public_key_pem: string;
         };
+        /** @description A known issue to record against a version. */
         AddKnownIssueArgs: {
+            /** @description Description of the issue. Must not be empty or whitespace-only. */
             description: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Id of a version in the release line the issue affects. The issue is
+             *     recorded as affecting that version's exact patch onward, within its
+             *     release line.
+             */
             version_id: string;
         };
+        /**
+         * @description A downloadable artifact (for example an installer) associated with a
+         *     version, either tied to that exact version or matched via a version
+         *     range pattern.
+         */
         ArtifactData: {
+            /** @description Kind of artifact (for example, an installer or update package). */
             artifact_type: string;
+            /** @description URL clients use to download this artifact. */
             download_url: string;
-            /** @description If true, this ranged artifact has an exact-version override (only when is_exact=true) */
+            /**
+             * @description Only meaningful when `is_exact` is `true`: `true` when a
+             *     range-matched artifact of the same type and platform also matches
+             *     this version, and would be served instead if this exact artifact
+             *     were removed.
+             */
             has_range_override: boolean;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Unique identifier for this artifact.
+             */
             id: string;
-            /** @description Whether this artifact is for the exact version (true) or via a range pattern (false) */
+            /**
+             * @description `true` when this artifact is tied to the exact version being
+             *     queried; `false` when it was matched via a version range pattern
+             *     instead.
+             */
             is_exact: boolean;
-            /** @description If true, this is the artifact that will be served to public API clients */
+            /**
+             * @description `true` when this is the artifact actually served to public API
+             *     clients requesting a download for this version.
+             */
             is_used_in_public_api: boolean;
+            /** @description Target platform this artifact is built for. */
             platform: string;
-            /** @description The version range pattern if this is a ranged artifact, None if exact */
+            /**
+             * @description Version range pattern this artifact applies to, if it's a
+             *     range-matched artifact rather than an exact one.
+             */
             version_range_pattern?: string | null;
         };
+        /** @description Identifies a single artifact by id. */
         ArtifactIdArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Id of the artifact to delete.
+             */
             artifact_id: string;
         };
+        /** @description Request to attach a device to a Tailscale network node. */
         AttachTailscaleArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The device to attach a tailnet identity to.
+             */
             device_id: string;
             /**
              * @description Any of: a Tailscale CGNAT/ULA IP, a node id, or a DNS name —
@@ -2481,181 +3214,401 @@ export interface components {
              */
             identifier: string;
         };
+        /** @description Request to bind a server to a device identified by its Tailscale node. */
         AttachTailscaleDeviceArgs: {
             /** @description Any of: a Tailscale CGNAT/ULA IP, a node id, or a DNS name. */
             identifier: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The server to attach the device to.
+             */
             server_id: string;
         };
         BTreeMap: {
             [key: string]: {
                 /**
-                 * @description The value sent when the operator leaves the parameter unset. Absent means
-                 *     an unset parameter is sent as JSON `null`.
+                 * @description The value used when the parameter is left unset. `None` means an
+                 *     unset parameter is sent as JSON `null` rather than a default value.
                  */
                 default?: unknown;
+                /**
+                 * @description The parameter's data type, which determines how its value is
+                 *     validated.
+                 */
                 type: components["schemas"]["ParamType"];
             };
         };
-        /** @description Fleet-overview row for the configured-groups listing. */
+        /**
+         * @description Summary of one server group's backup configuration, for the fleet-wide
+         *     overview list.
+         */
         BackupConfigSummary: {
+            /** @description Name of the S3 bucket backups are stored in. */
             bucket: string;
+            /**
+             * @description Error message from the most recent failed provisioning attempt, if
+             *     any.
+             */
             last_init_error?: string | null;
+            /** @description How the repository's encryption passphrase is managed. */
             mode: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The server group this configuration belongs to.
+             */
             server_group_id: string;
+            /** @description Current lifecycle state of the backup repository. */
             status: string;
         };
-        /** @description Full config + lifecycle for a group. Never includes the passphrase value. */
+        /**
+         * @description The full backup configuration and lifecycle state for a server group.
+         *     Never includes the repository passphrase.
+         */
         BackupConfigView: {
+            /** @description Name of the S3 bucket backups are stored in. */
             bucket: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When this configuration was created.
+             */
             created_at: string;
             /**
              * Format: date-time
-             * @description When an operator has requested a one-off full maintenance run that the
-             *     scheduler hasn't picked up yet; `None` = no pending request.
+             * @description When an operator requested an out-of-cycle full maintenance run that
+             *     hasn't started yet; null if none is pending.
              */
             force_full_maintenance_at?: string | null;
-            /** @description Who requested the pending full-maintenance run (Tailscale login). */
+            /**
+             * @description Identity of the operator who requested the pending full-maintenance
+             *     run (Tailscale login), if any.
+             */
             force_full_maintenance_by?: string | null;
+            /**
+             * @description Error message from the most recent failed provisioning attempt, if
+             *     any.
+             */
             last_init_error?: string | null;
+            /**
+             * @description AWS IAM role ARN used for maintenance, inspection, and metrics
+             *     collection on the backup repository; grants full access, including
+             *     delete.
+             */
             maintenance_role_arn: string;
+            /**
+             * @description How the repository's encryption passphrase is managed: generated
+             *     automatically by Canopy, or supplied by the operator when connecting
+             *     an existing repository.
+             */
             mode: string;
             /**
-             * @description `external` (BYO account) or `shared` (canopy-provisioned in the shared
-             *     account). Lets the UI distinguish the two onboarding paths.
+             * @description Where the backup bucket lives: `external` if it was provisioned in the
+             *     deployment's own cloud account, or `shared` if Canopy provisioned it
+             *     automatically in a shared account. Distinguishes the two onboarding
+             *     paths.
              */
             placement: string;
+            /**
+             * @description Key prefix within the bucket that this group's backups are stored
+             *     under; empty means the bucket root.
+             */
             prefix: string;
+            /** @description AWS region the bucket is in, if set explicitly. */
             region?: string | null;
-            /** @description Per-`(group,type)` schedule + retention overrides. */
+            /** @description Per-backup-type schedule and retention overrides for this group. */
             schedules: components["schemas"]["ScheduleView"][];
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The server group this configuration belongs to.
+             */
             server_group_id: string;
+            /**
+             * @description Current lifecycle state of the backup repository: provisioning while
+             *     it's being created, ready once backups and restores can run.
+             */
             status: string;
+            /**
+             * @description AWS IAM role ARN used to issue upload credentials to devices; grants
+             *     write access only, not delete.
+             */
             target_role_arn: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When this configuration was last updated.
+             */
             updated_at: string;
         };
+        /**
+         * @description One run of repository maintenance (compaction, garbage collection, etc.)
+         *     for a group's backup repository.
+         */
         BackupMaintenanceRun: {
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Number of bytes of unreferenced data reclaimed by this run, if known.
+             */
             bytes_reclaimed?: number | null;
+            /** @description Error message for a failed run, if any. */
             error?: string | null;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When this maintenance run finished. `None` while still running.
+             */
             finished_at?: string | null;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description ID of the server group whose backup repository was maintained.
+             */
             group_id: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Unique id of this maintenance run.
+             */
             id: number;
+            /**
+             * @description Which maintenance cycle this run performed: a lightweight "quick" pass
+             *     or a more thorough "full" pass.
+             */
             kind: components["schemas"]["MaintenanceKind"];
             outcome?: null | components["schemas"]["RunOutcome"];
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When this maintenance run started.
+             */
             started_at: string;
         };
         /**
-         * @description Why a credential was issued / a run executed. A real capability gate
-         *     on the issued S3 creds, not just audit metadata: `Backup` grants
-         *     write-without-delete, `Restore` grants read-only.
+         * @description Why a backup credential was issued, or what a reported run was for.
+         *     Determines the access the credential grants: a `backup` credential can
+         *     write new data but not delete existing data, while a `restore`
+         *     credential is read-only.
          * @enum {string}
          */
         BackupPurpose: "backup" | "restore";
+        /**
+         * @description Cached size and count statistics for a group's backup repository and its
+         *     underlying bucket. Populated by two independent processes: repository
+         *     inspection fills the snapshot/source/logical/physical figures, and a
+         *     separate bucket-metrics collector fills `bucket_bytes`; either can be
+         *     stale relative to the other.
+         */
         BackupRepoStats: {
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Total size of the underlying S3 bucket, in bytes, as reported by cloud
+             *     storage metrics. Can differ from `physical_bytes` (e.g. it includes
+             *     content outside the repository, or reflects a different point in
+             *     time).
+             */
             bucket_bytes?: number | null;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description ID of the server group these stats describe.
+             */
             group_id: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Total logical (uncompressed, pre-dedup) size of all data in the
+             *     repository, in bytes, if known.
+             */
             logical_bytes?: number | null;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When these stats were last refreshed. Whichever of the two collectors
+             *     wrote most recently.
+             */
             observed_at: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Total physical (as actually stored, after compression/dedup) size of
+             *     the repository, in bytes, if known.
+             */
             physical_bytes?: number | null;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Total number of snapshots currently in the repository, if known.
+             */
             snapshot_count?: number | null;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Number of distinct backup sources (servers/types) currently in the
+             *     repository, if known.
+             */
             source_count?: number | null;
         };
         /**
-         * @description A restore-health report: one row per report a consumer sends about a
-         *     replica — proof a snapshot actually restored into a healthy database, the
-         *     strongest backup-health signal. `snapshot_id` joins back to the
-         *     produced/persisted record for that snapshot.
+         * @description A restore-health report submitted by a restore consumer: proof (or
+         *     disproof) that a backup snapshot actually restores into a healthy
+         *     database — the strongest available signal of backup health. `snapshot_id`
+         *     identifies which snapshot was restored, if the report is snapshot-scoped.
          */
         BackupRestoreCheck: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The device (restore consumer) that submitted this report.
+             */
             consumer_device_id: string;
+            /** @description Error message reported for a failed restore, if any. */
             error?: string | null;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The server group this report belongs to.
+             */
             group_id: string;
             /**
-             * @description Arbitrary health data the consumer sent (postgres cluster stats, whether
-             *     indexes needed fixing, …). Opaque to canopy — stored and displayed as-is.
+             * @description Additional health data supplied by the consumer (for example,
+             *     database cluster statistics or whether indexes needed repair).
+             *     Passed through and displayed as-is. `None` if none was supplied.
              */
             health_details?: unknown;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Unique identifier for this report.
+             */
             id: number;
+            /** @description The restore intent this report was performed for. */
             intent: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the restore attempt this report describes actually took place.
+             */
             observed_at: string;
+            /** @description Whether the restore attempt itself succeeded or failed. */
             outcome: string;
+            /** @description The Postgres version of the restored database, if reported. */
             postgres_version?: string | null;
+            /**
+             * @description Whether the restored database came up and passed its health checks.
+             *     A report only counts as fully healthy when `outcome` is success and
+             *     this is also `true`.
+             */
             replica_healthy: boolean;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The replica declaration this report is for, if it was made against
+             *     a declared replica. `None` for reports not tied to a declaration.
+             */
             replica_id?: string | null;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When this report was received.
+             */
             reported_at: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Bytes received from storage for this restore, counting only the
+             *     decoded object data (excludes response framing overhead).
+             */
             s3_received_payload_bytes?: number | null;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Bytes received from storage for this restore, counting the full HTTP
+             *     response including framing overhead.
+             */
             s3_received_raw_bytes?: number | null;
-            /** Format: int64 */
-            s3_sent_payload_bytes?: number | null;
-            /** Format: int64 */
-            s3_sent_raw_bytes?: number | null;
-            /** Format: uuid */
-            server_id?: string | null;
-            snapshot_id?: string | null;
-            type: string;
-        };
-        BackupRun: {
-            /** Format: int64 */
-            bytes_uploaded?: number | null;
-            /** Format: uuid */
-            device_id: string;
-            error?: string | null;
-            /** Format: uuid */
-            group_id: string;
-            /** Format: uuid */
-            id: string;
-            outcome: components["schemas"]["RunOutcome"];
-            purpose: components["schemas"]["BackupPurpose"];
-            /** Format: date-time */
-            reported_at: string;
-            /** Format: int64 */
-            s3_received_payload_bytes?: number | null;
-            /** Format: int64 */
-            s3_received_raw_bytes?: number | null;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Bytes sent to storage for this restore, counting only the decoded
+             *     object data (excludes request/signing overhead).
+             */
             s3_sent_payload_bytes?: number | null;
             /**
              * Format: int64
-             * @description S3 traffic tallied by bestool's proxy: `raw` counts the full HTTP message
-             *     (incl. SigV4 chunk framing), `payload` the decoded object data.
+             * @description Bytes sent to storage for this restore, counting the full HTTP
+             *     request including signing/chunking overhead.
              */
             s3_sent_raw_bytes?: number | null;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The server this report is about, if any.
+             */
             server_id?: string | null;
+            /**
+             * @description The id of the snapshot that was restored, if the report is scoped to
+             *     a specific snapshot.
+             */
+            snapshot_id?: string | null;
+            /** @description The backup type this report covers. */
+            type: string;
+        };
+        /**
+         * @description A backup or restore run reported by a device, with its outcome and any
+         *     size/traffic figures collected for it.
+         */
+        BackupRun: {
+            /**
+             * Format: int64
+             * @description Number of bytes the device reports having uploaded for this run.
+             */
+            bytes_uploaded?: number | null;
+            /**
+             * Format: uuid
+             * @description ID of the device that performed and reported this run.
+             */
+            device_id: string;
+            /** @description Error message reported for a failed run, if any. */
+            error?: string | null;
+            /**
+             * Format: uuid
+             * @description ID of the server group the run's backup repository belongs to.
+             */
+            group_id: string;
+            /**
+             * Format: uuid
+             * @description Unique id of this run, minted by the reporting device.
+             */
+            id: string;
+            /** @description Whether the run succeeded or failed. */
+            outcome: components["schemas"]["RunOutcome"];
+            /** @description Whether this run was a backup (upload) or a restore (download). */
+            purpose: components["schemas"]["BackupPurpose"];
+            /**
+             * Format: date-time
+             * @description When this run was reported.
+             */
+            reported_at: string;
+            /**
+             * Format: int64
+             * @description Bytes received from S3 for this run, counting only the decoded object
+             *     data (excludes response framing overhead).
+             */
+            s3_received_payload_bytes?: number | null;
+            /**
+             * Format: int64
+             * @description Bytes received from S3 for this run, counting the full HTTP response
+             *     including framing overhead.
+             */
+            s3_received_raw_bytes?: number | null;
+            /**
+             * Format: int64
+             * @description Bytes sent to S3 for this run, counting only the decoded object data
+             *     (excludes request/signing overhead).
+             */
+            s3_sent_payload_bytes?: number | null;
+            /**
+             * Format: int64
+             * @description Bytes sent to S3 for this run, counting the full HTTP request including
+             *     signing/chunking overhead.
+             */
+            s3_sent_raw_bytes?: number | null;
+            /**
+             * Format: uuid
+             * @description ID of the server the run was performed for, if known.
+             */
+            server_id?: string | null;
+            /** @description Id of the snapshot this run produced, if any. */
             snapshot_id?: string | null;
             /**
              * Format: int64
-             * @description Logical size of this run's snapshot as observed by canopy's own repo
-             *     inspection, matched to the run by `snapshot_id`. Distinct from
-             *     `bytes_uploaded` (the device's own figure); written once by inspection.
+             * @description Logical (uncompressed) size of this run's snapshot, as independently
+             *     observed by repository inspection rather than reported by the device.
+             *     Distinct from `bytes_uploaded`; filled in after the fact, once, and
+             *     never overwritten.
              */
             snapshot_logical_bytes?: number | null;
+            /** @description The backup type this run performed (e.g. `tamanu-postgres`). */
             type: string;
         };
+        /** @description Backup statistics and activity for a server group. */
         BackupStatsView: {
             /**
              * @description Backup types each member server has advertised it can run (with their
@@ -2663,190 +3616,372 @@ export interface components {
              *     server and grey out servers that have declared none.
              */
             capabilities: components["schemas"]["ServerBackupCapabilityView"][];
+            /** @description One-off backup/restore requests awaiting pickup. */
             pending_requests: components["schemas"]["PendingRequestRow"][];
+            /** @description The most recent maintenance runs for the group's backup repository. */
             recent_maintenance: components["schemas"]["BackupMaintenanceRun"][];
+            /** @description The most recent backup runs across the group's member servers. */
             recent_runs: components["schemas"]["BackupRun"][];
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Total raw S3 bytes downloaded from the bucket by the group's device
+             *     backup runs so far this calendar month (UTC). Same undercount caveat
+             *     as `s3_month_sent_bytes`.
+             */
             s3_month_received_bytes: number;
             /**
              * Format: int64
-             * @description Total S3 bytes sent to (uploads) and received from (downloads) the
-             *     bucket by the group's device backup runs so far this calendar month
-             *     (UTC), raw wire bytes. Repo maintenance/inspection traffic isn't
-             *     tallied anywhere, so this undercounts the bucket's actual monthly S3
-             *     traffic.
+             * @description Total raw S3 bytes uploaded to the bucket by the group's device backup
+             *     runs so far this calendar month (UTC). Repo maintenance/inspection
+             *     traffic isn't tallied anywhere, so this undercounts the bucket's
+             *     actual monthly S3 traffic.
              */
             s3_month_sent_bytes: number;
             stats?: null | components["schemas"]["BackupRepoStats"];
         };
+        /** @description Identifies a server group. */
         BackupsGroupArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The server group to operate on.
+             */
             server_group_id: string;
         };
+        /** @description Pagination parameters for listing the snippet library. */
         BestoolListArgs: {
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Maximum number of snippets to return; defaults to 50 if omitted.
+             */
             limit?: number | null;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Number of snippets to skip before the returned page starts.
+             */
             offset: number;
         };
+        /** @description Full content of a saved SQL snippet, including its query text. */
         BestoolSnippetDetail: {
+            /** @description Optional description of what the snippet does. */
             description?: string | null;
+            /**
+             * @description Tailscale login of the user who created this version of the
+             *     snippet.
+             */
             editor: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Unique identifier for this version of the snippet.
+             */
             id: string;
+            /** @description The snippet's display name. */
             name: string;
+            /** @description The stored SQL query text. */
             sql: string;
         };
+        /**
+         * @description Summary of a saved SQL snippet, as shown when listing the snippet
+         *     library.
+         */
         BestoolSnippetInfo: {
+            /** @description Optional description of what the snippet does. */
             description?: string | null;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Unique identifier for this version of the snippet.
+             */
             id: string;
+            /** @description The snippet's display name. */
             name: string;
         };
         /**
-         * @description One effective `billing.*` label canopy attributes a group's AWS resources
-         *     under (computed: explicit `billing.*` group tags honored verbatim, else
-         *     product `tamanu`, deployment = lower-kebab group name, stage = highest rank).
+         * @description One effective billing label attributed to a group's cloud resources.
+         *
+         *     Labels are computed from the group's configuration: explicit `billing.*`
+         *     tags on the group are honoured verbatim; otherwise the product defaults to
+         *     `tamanu`, the deployment to the group name in lower-kebab-case, and the
+         *     stage to the group's highest-ranked live member (for example `prod`). The
+         *     stage label is omitted entirely when the group has no ranked members.
          */
         BillingTag: {
+            /** @description Label key, for example `billing.product`. */
             key: string;
+            /** @description Label value. */
             value: string;
         };
+        /** @description Identifies a server group's schedule override for a backup type. */
         ClearScheduleArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The server group to update.
+             */
             server_group_id: string;
+            /** @description Backup type whose schedule override to remove. */
             type: string;
         };
+        /** @description Request parameters for listing a device's connection history. */
         ConnectionHistoryArgs: {
             before?: null | components["schemas"]["HistoryCursor"];
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The device whose connection history to list.
+             */
             device_id: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Maximum number of connections to return. Defaults to 100.
+             */
             limit?: number | null;
         };
+        /** @description A new artifact to register against a version. */
         CreateArtifactArgs: {
+            /** @description Artifact type. */
             artifact_type: string;
+            /** @description Download URL for the artifact. */
             download_url: string;
+            /** @description Target platform. */
             platform: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Id of the version to attach the new artifact to.
+             */
             version_id: string;
         };
+        /**
+         * @description Request to register a new external (bring-your-own-account) backup
+         *     configuration for a group.
+         */
         CreateBackupConfigArgs: {
+            /** @description Name of the S3 bucket to store backups in. */
             bucket: string;
             /**
-             * @description Maintenance role: the backups pod assumes this for maintenance/inspection/
-             *     s3-metrics (s3:* + delete + CloudWatch).
+             * @description AWS IAM role ARN used for maintenance, inspection, and metrics
+             *     collection on the bucket; requires full S3 access (including delete)
+             *     and CloudWatch access.
              */
             maintenance_role_arn: string;
+            /**
+             * @description How the repository's encryption passphrase should be managed:
+             *     generate one automatically, or use one supplied by the operator.
+             */
             mode: string;
             /**
-             * @description Passphrase mode only: the operator-supplied repo passphrase Canopy stores.
-             *     From-birth ignores this (Canopy generates one).
+             * @description Repository passphrase to use; required when `mode` is `passphrase`,
+             *     ignored otherwise (Canopy generates one automatically).
              */
             passphrase?: string | null;
+            /**
+             * @description Key prefix within the bucket to store this group's backups under;
+             *     defaults to empty (bucket root).
+             */
             prefix?: string;
+            /** @description AWS region the bucket is in, if not the default. */
             region?: string | null;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The server group to configure.
+             */
             server_group_id: string;
-            /** @description Device role: public-server assumes this to mint device creds (no delete). */
+            /**
+             * @description AWS IAM role ARN used to issue upload credentials to devices; must not
+             *     grant delete permission.
+             */
             target_role_arn: string;
         };
+        /** @description Request to create a new server. */
         CreateServerArgs: {
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Downtime threshold in seconds before the server is considered
+             *     down. Defaults to 600 (10 minutes).
+             */
             alert_when_down_for?: number | null;
+            /** @description Whether the server runs in a cloud environment, if known. */
             cloud?: boolean | null;
             geolocation?: null | components["schemas"]["GeoPoint"];
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Group to place the server in. Omit to create it ungrouped.
+             */
             group_id?: string | null;
+            /** @description URL for the server, if known. Can be added or changed later. */
             host?: string | null;
+            /**
+             * @description Whether canopy should actively monitor this server. Defaults to
+             *     true.
+             */
             is_monitored?: boolean | null;
+            /** @description The kind of deployment this server represents. */
             kind: components["schemas"]["ServerKind"];
+            /** @description Name for the server, if any. */
             name?: string | null;
+            /** @description Free-text operator notes about the server. */
             notes?: string | null;
+            /**
+             * @description Name to list the server under in the public mobile-app server list.
+             *     Omit to keep it unlisted.
+             */
             public_name?: string | null;
             rank?: null | components["schemas"]["ServerRank"];
             tags?: null | components["schemas"]["TagMap"];
             /**
-             * @description Optional Tailscale identity to pre-bind a device to (IP / node id / DNS
-             *     name). When given, a device row is created for that identity now and the
-             *     enrolling box's mTLS key is added to it at register time.
+             * @description Optional Tailscale identity to pre-bind a device to (an IP, node id,
+             *     or DNS name). When given, a device is created for that identity
+             *     immediately, and the key the machine presents when it later
+             *     registers is added to that same device.
              */
             tailscale_identifier?: string | null;
         };
         /**
-         * @description Args for [`create_shared`]: just the group (+ optional region override).
-         *     Canopy fills the bucket name and the shared role ARNs itself.
+         * @description Request to onboard a group onto Canopy's shared-account backups. Canopy
+         *     fills in the bucket name and IAM roles automatically.
          */
         CreateSharedBackupConfigArgs: {
-            /** @description Region override; defaults to the shared-account default region. */
+            /**
+             * @description AWS region override for the bucket; if omitted, Canopy uses its
+             *     default region for shared-account backups.
+             */
             region?: string | null;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The server group to onboard.
+             */
             server_group_id: string;
         };
+        /** @description Request body for revoking admin access from an email address. */
         DeleteArgs: {
+            /** @description The email address to remove from the admin allow-list. */
             email: string;
         };
+        /** @description A single recorded connection from a device to the API. */
         DeviceConnectionData: {
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the connection was recorded.
+             */
             created_at: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The device that connected.
+             */
             device_id: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Unique identifier for this connection record.
+             */
             id: string;
+            /** @description IP address the device connected from. */
             ip: string;
+            /** @description User-Agent header sent with the request, if any. */
             user_agent?: string | null;
         };
+        /** @description Core identity and trust state of a device. */
         DeviceData: {
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the device was first registered.
+             */
             created_at: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Unique identifier for the device.
+             */
             id: string;
+            /**
+             * @description The device's current role, which determines what it's trusted to
+             *     do (act as a monitored server, publish releases, administer the
+             *     fleet, or perform backup restores).
+             */
             role: components["schemas"]["DeviceRole"];
             /**
-             * @description The Tailscale node ID this device is attached to, if any. The
-             *     live IP / display name corresponding to this id is in
-             *     [`DeviceInfo::tailnet_live`].
+             * @description The Tailscale node this device is attached to, if any. The live
+             *     address and display name for this node, when available, are
+             *     included separately in the response's tailnet snapshot.
              */
             tailscale_node_id?: string | null;
+            /** @description The Tailscale display name recorded for the attached node, if any. */
             tailscale_node_name?: string | null;
+            /** @description The tailnet (Tailscale network) the attached node belongs to, if any. */
             tailscale_tailnet?: string | null;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the device record was last changed.
+             */
             updated_at: string;
         };
+        /** @description Identifies a single device by id. */
         DeviceIdArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The device to operate on.
+             */
             device_id: string;
         };
+        /**
+         * @description Full record for a device: its identity and role, every authentication
+         *     key ever registered on it, its most recent connection, and a live
+         *     Tailscale snapshot when one is available.
+         */
         DeviceInfo: {
+            /** @description Core identity, role, and Tailscale attachment for the device. */
             device: components["schemas"]["DeviceData"];
+            /** @description Every authentication key ever registered on this device, active or not. */
             keys: components["schemas"]["DeviceKeyInfo"][];
             latest_connection?: null | components["schemas"]["DeviceConnectionData"];
             tailnet_live?: null | components["schemas"]["TailnetLiveInfo"];
         };
+        /** @description An authentication key registered on a device. */
         DeviceKeyInfo: {
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the key was added.
+             */
             created_at: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The device this key belongs to.
+             */
             device_id: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Unique identifier for this key.
+             */
             id: string;
             /**
              * @description Whether this key can currently authenticate. Inactive keys are kept for
              *     history and can be re-enabled.
              */
             is_active: boolean;
+            /** @description Operator-assigned label for the key, if any. */
             name?: string | null;
+            /** @description The key's public half, PEM-encoded. */
             pem_data: string;
         };
-        /** @enum {string} */
+        /**
+         * @description The role a device is trusted with, which determines what it may do.
+         * @enum {string}
+         */
         DeviceRole: "admin" | "releaser" | "server" | "backup-restore";
+        /** @description Free-text search query for devices. */
         DeviceSearchArgs: {
+            /**
+             * @description Search text, matched against key material, key names, connection
+             *     IP addresses, and Tailscale identity fields. Also resolved
+             *     against the live tailnet directory (when configured) to catch
+             *     devices identified by an IP, node id, or DNS name they haven't
+             *     connected with yet.
+             */
             query: string;
         };
+        /**
+         * @description A server's enrollment state: whether a device has registered, and
+         *     whether an enrollment token is currently outstanding.
+         */
         EnrollmentStatus: {
             /**
              * Format: date-time
-             * @description When enrollment completed; `None` while awaiting first check-in.
+             * @description When enrollment completed. Omitted while still awaiting the first
+             *     check-in.
              */
             registered_at?: string | null;
             /**
@@ -2858,12 +3993,19 @@ export interface components {
             /**
              * Format: date-time
              * @description When the currently-active enrollment token was issued, if one is
-             *     outstanding. Lets the UI show "a ticket was issued on <date>".
+             *     outstanding — e.g. to show "a ticket was issued on <date>".
              */
             token_issued_at?: string | null;
         };
+        /**
+         * @description A freshly-minted enrollment ticket: the encrypted enrollment payload and
+         *     the passphrase that decrypts it.
+         */
         EnrollmentTicket: {
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the enrollment token inside the ticket expires.
+             */
             expires_at: string;
             /**
              * @description Freshly-generated 4-word passphrase that decrypts `ticket`. Share this
@@ -2877,89 +4019,169 @@ export interface components {
              */
             ticket: string;
         };
+        /**
+         * @description A single recorded occurrence of an issue's underlying condition — one
+         *     push from a device or a manually submitted event.
+         */
         EventData: {
+            /** @description Whether the underlying condition was active as of this event. */
             active: boolean;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When this event was recorded on the server.
+             */
             created_at: string;
+            /** @description Short headline for this event, if one was given. */
             description?: string | null;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Unique identifier for this event.
+             */
             id: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Id of the issue this event belongs to.
+             */
             issue_id: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When this condition was last seen recurring.
+             */
             last_seen: string;
+            /** @description Human-readable message describing this event. */
             message: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the underlying condition actually occurred, if reported
+             *     separately from the time it was recorded.
+             */
             occurred_at?: string | null;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Number of times this same condition has repeated and been coalesced
+             *     into this event rather than creating a new one.
+             */
             occurrences: number;
+            /** @description Severity reported for this event. */
             severity: components["schemas"]["Severity"];
         };
+        /** @description Request body for running a query in the SQL playground. */
         ExecuteArgs: {
+            /** @description The query to execute. */
             query: components["schemas"]["SqlQuery"];
         };
+        /**
+         * @description Current status of a single server within a group, as shown on the status
+         *     dashboard.
+         */
         FacilityServerStatus: {
+            /** @description The server's self-reported health. */
             health: components["schemas"]["HealthState"];
-            /** Format: uuid */
-            id: string;
             /**
-             * @description Server's kind (central / facility / canopy). UI breaks ties
-             *     within a rank by kind, centrals first.
+             * Format: uuid
+             * @description Unique identifier of the server.
              */
+            id: string;
+            /** @description The server's kind (central, facility, or canopy). */
             kind: components["schemas"]["ServerKind"];
+            /** @description Name of the server. */
             name: string;
             /**
-             * @description Identified humans connected to this server right now, from the
-             *     latest status push's `external_users` check. Empty unless the
-             *     server is actively reporting (up/blip) — a stale push can't claim
-             *     active presence.
+             * @description People currently connected to this server, from its latest status
+             *     update. Always empty unless the server is actively reporting (`up`
+             *     or `blip`) — a stale report can't be trusted to reflect who is
+             *     connected right now.
              */
             operators: components["schemas"]["OperatorPresence"][];
             rank?: null | components["schemas"]["ServerRank"];
+            /**
+             * @description Reachability of the server, based on how recently it last reported a
+             *     status update.
+             */
             up: components["schemas"]["ShortStatus"];
         };
+        /** @description A geographic coordinate, used to place a server on a map. */
         GeoPoint: {
-            /** Format: double */
+            /**
+             * Format: double
+             * @description Latitude in decimal degrees (positive north).
+             */
             lat: number;
-            /** Format: double */
+            /**
+             * Format: double
+             * @description Longitude in decimal degrees (positive east).
+             */
             lon: number;
         };
+        /** @description Request body identifying a single snippet version. */
         GetArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The snippet version's unique identifier. Doesn't need to be the
+             *     latest version in its history.
+             */
             id: string;
         };
+        /** @description Identifies the incident to fetch. */
         GetIncidentArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Identifier of the incident.
+             */
             incident_id: string;
         };
+        /** @description A server group together with its member servers and billing labels. */
         GroupDetail: {
             /** @description The group's effective `billing.*` labels (product/deployment/stage). */
             billing_labels: components["schemas"]["BillingTag"][];
+            /** @description The group itself. */
             group: components["schemas"]["ServerGroup"];
+            /**
+             * @description The group's member servers, sorted by name, with current status and
+             *     display host included.
+             */
             servers: components["schemas"]["ServerInfo"][];
         };
+        /** @description Identifies the server group whose status details to fetch. */
         GroupDetailsArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Id of the server group to fetch details for.
+             */
             server_group_id: string;
         };
+        /** @description Identifies the server group to operate on. */
         GroupIdArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Identifier of the server group.
+             */
             server_group_id: string;
         };
+        /** @description Request body identifying a server group to look up silences for. */
         GroupScopeArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The server group to look up silences for.
+             */
             server_group_id: string;
         };
+        /** @description The number of live servers in one server group. */
         GroupServerCount: {
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Number of live (non-archived) servers currently in the group.
+             */
             server_count: number;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Identifier of the server group.
+             */
             server_group_id: string;
         };
         /**
-         * @description Effective schedule/retention for one enabled backup type of a group: the
-         *     per-`(group,type)` override if present, else the canopy-wide default.
-         *     `has_override` tells the UI whether it's inheriting or overriding.
+         * @description Effective schedule and retention for one backup type of a group, combining
+         *     any per-group override with the canopy-wide default.
          */
         GroupTypeScheduleView: {
             /**
@@ -2972,7 +4194,16 @@ export interface components {
              * @description Seconds between scheduled runs; null = manual-only (no scheduled interval).
              */
             effective_interval?: number | null;
+            /**
+             * @description Retention policy that currently applies: the group's override if set,
+             *     else the canopy-wide default for this type, else the organization's
+             *     minimum retention floor.
+             */
             effective_retention: components["schemas"]["RetentionPolicy"];
+            /**
+             * @description Whether this group has an explicit override for this type, rather
+             *     than inheriting the canopy-wide default.
+             */
             has_override: boolean;
             /**
              * Format: date-time
@@ -2981,555 +4212,1067 @@ export interface components {
              *     type is scheduled but has never succeeded yet. Null for manual-only types.
              */
             next_run_at?: string | null;
+            /** @description Backup type this schedule and retention apply to. */
             type: string;
         };
         /**
-         * @description Server's self-reported health state, derived from the most
-         *     recent status row's per-check results (and, as legacy input, its
-         *     top-level `healthy` field — that flag is being retired from the
-         *     wire). Orthogonal to [`ShortStatus`]: a server can be reachable
-         *     (`up`) and reporting itself unhealthy at the same time.
+         * @description A server's self-reported health, derived from the outcomes of its own
+         *     health checks.
          *
-         *     The UI renders this as the *border* of `<StatusDot>` so both
-         *     dimensions (reachability and self-report) show in one glyph.
+         *     This is independent of reachability: a server can be online and
+         *     reachable while reporting itself unhealthy, or unreachable while its
+         *     last report was healthy.
          * @enum {string}
          */
         HealthState: "healthy" | "warning" | "unhealthy";
         /**
-         * @description Materialised sample of the inputs available to a rule when this check
-         *     fails — fetched from the most recent status push (across all servers)
-         *     that reported `check_name`. The UI uses this to power autocomplete
-         *     suggestions, pass/warn validation on `var` input, and live previews
-         *     of a rule's effect against realistic data.
+         * @description A real-world sample of the data a conditional rule can reference for a
+         *     given healthcheck, taken from the most recent status report (across
+         *     all servers) that included it.
          */
         HealthcheckSample: {
             /**
-             * @description The failing check's own fields (`health[i]` minus `check` /
-             *     `healthy`).
+             * @description The sampled check's own reported fields (excluding its name and
+             *     pass/fail flag), available to conditional rules under the
+             *     `check.<field>` namespace.
              */
             check_extra: {
                 [key: string]: components["schemas"]["Value"];
             };
             /**
              * Format: date-time
-             * @description When the sampled status push happened.
+             * @description When the sampled status report was received.
              */
             seen_at: string;
-            /** @description Server hostname for display. */
+            /** @description Hostname of the server the sample was taken from. */
             server_host: string;
-            /** @description Optional friendly server name. */
+            /**
+             * @description Friendly name of the server the sample was taken from, if it has
+             *     one.
+             */
             server_name?: string | null;
-            /** @description Top-level status extras (`statuses.extra`). */
+            /**
+             * @description Additional top-level fields submitted with the status report that
+             *     contained this check, available to conditional rules under the
+             *     `status.<field>` namespace.
+             */
             status_extra: {
                 [key: string]: components["schemas"]["Value"];
             };
-            /** @description Server's resolved tag map (server + group merge). */
+            /**
+             * @description The reporting server's tags, merged with its group's tags,
+             *     available to conditional rules under the `tag.<key>` namespace.
+             */
             tags: {
                 [key: string]: string;
             };
         };
+        /** @description Result of sampling real data for a healthcheck's conditional rules. */
         HealthcheckSampleResponse: {
+            /** @description The healthcheck name that was sampled. */
             check_name: string;
             sample?: null | components["schemas"]["HealthcheckSample"];
         };
         /**
-         * @description Catalog row enriched with `pending_review` and `rule_count` derivations
-         *     for the UI. `rules` is the raw JsonLogic blob exactly as stored; the
-         *     React side parses it client-side (or the per-check editor rebuilds it
-         *     from form state and POSTs to /update_rules). Malformed `rules` parses
-         *     to `rule_count: 0` and the row behaves as "no conditional rules" — the
-         *     evaluator does the same on the ingestion path.
+         * @description A named healthcheck's alerting policy: the base severity assigned to
+         *     its failures, plus optional conditional rules that can override that
+         *     severity based on the details of a given failure.
          */
         HealthcheckSeverityData: {
+            /** @description The healthcheck's name, exactly as reported by monitored servers. */
             check_name: string;
-            /** Format: date-time */
-            first_seen: string;
-            notes?: string | null;
             /**
-             * @description `true` when no operator has confirmed this row yet
-             *     (`reviewed_at IS NULL`). The catalog UI surfaces these.
+             * Format: date-time
+             * @description When this check was first reported and this policy entry was
+             *     created.
              */
+            first_seen: string;
+            /** @description Free-form operator notes about this check. */
+            notes?: string | null;
+            /** @description `true` if no operator has reviewed this policy yet. */
             pending_review: boolean;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When an operator last reviewed or updated this policy. `null` if
+             *     it has never been reviewed.
+             */
             reviewed_at?: string | null;
+            /**
+             * @description The operator who last reviewed this policy. `null` if it has
+             *     never been reviewed.
+             */
             reviewed_by?: string | null;
             /**
              * Format: int32
-             * @description Number of branches in the rules ladder; 0 when `rules` is null
-             *     or malformed. The main /healthchecks page uses this to decide
-             *     between the simple severity dropdown and the "Custom rules" link.
+             * @description Number of condition/severity branches in `rules`; `0` when
+             *     `rules` is `null` or couldn't be parsed. Lets a caller tell
+             *     whether conditional rules exist without parsing `rules` itself.
              */
             rule_count: number;
-            /** @description JsonLogic if-ladder; `null` means no conditional rules. */
+            /**
+             * @description Conditional rules that can assign a different severity than
+             *     `severity`, depending on the failing check's own fields, the
+             *     surrounding status report, or the reporting server's tags. `null`
+             *     means no conditional rules are configured, and `severity` always
+             *     applies.
+             *
+             *     When present, this is a single-key object shaped like
+             *     `{"if": [condition_1, severity_1, condition_2, severity_2, ...]}`.
+             *     Conditions are tried in order, and the severity paired with the
+             *     first matching condition is used; if none match, the base
+             *     `severity` is used instead. There's no explicit "else" branch —
+             *     the fallback to `severity` plays that role — so the array must
+             *     have an even number of entries and at least one pair.
+             *
+             *     Each condition is a single-key object naming a comparison
+             *     operator — one of `==`, `!=`, `<`, `<=`, `>`, `>=`, or `in_range`
+             *     — whose value is a two-element array: a variable reference and a
+             *     value to compare it against. A variable reference has the shape
+             *     `{"var": "<namespace>.<field>"}`, where `<namespace>` is one of
+             *     `check` (a field on the failing check itself), `status` (a
+             *     top-level field on the status report that contained it), or
+             *     `tag` (a tag on the reporting server, merged with its group's
+             *     tags). `in_range` compares a version-like string against a
+             *     semantic version range (e.g. `">=1.2.0 <2.0.0"`). If the named
+             *     variable isn't present in the data being evaluated, the condition
+             *     doesn't match. A `rules` value that doesn't parse into this shape
+             *     is treated the same as `null` (no conditional rules).
+             */
             rules?: unknown;
+            /**
+             * @description The severity assigned to a failure of this check when no
+             *     conditional rule (see `rules`) overrides it.
+             */
             severity: components["schemas"]["Severity"];
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When this policy was last modified.
+             */
             updated_at: string;
         };
+        /** @description Request body for updating a healthcheck's base severity policy. */
         HealthcheckUpdateArgs: {
+            /**
+             * @description The healthcheck name to update; must already exist in the
+             *     catalog.
+             */
             check_name: string;
             /**
-             * @description Optional operator notes. `None` leaves the existing notes alone…
-             *     well, actually it overwrites with NULL — pass the current value
-             *     to preserve. The UI sends the full current state.
+             * @description Operator notes to store alongside the new severity. Omitting this
+             *     or sending `null` clears any existing notes — there's no way to
+             *     leave them unchanged implicitly, so resend the current value to
+             *     keep it.
              */
             notes?: string | null;
+            /**
+             * @description The severity to assign to this check's failures when no
+             *     conditional rule overrides it.
+             */
             severity: components["schemas"]["Severity"];
         };
+        /** @description Pagination parameters for browsing the shared query history. */
         HistoryArgs: {
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Maximum number of entries to return; defaults to 10 if omitted.
+             */
             limit?: number | null;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Number of history entries to skip before the returned page
+             *     starts.
+             */
             offset: number;
         };
+        /**
+         * @description Pagination cursor for connection history, pointing to a specific
+         *     connection record.
+         */
         HistoryCursor: {
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description Timestamp of the connection to page before.
+             */
             created_at: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Id of the connection to page before, used to break ties when
+             *     timestamps match.
+             */
             id: string;
         };
+        /** @description Identifies the declaration to operate on. */
         IdArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Identifier of the declaration.
+             */
             id: string;
         };
+        /** @description Request to add a note to an incident. */
         IncidentAddNoteArgs: {
+            /** @description The note text; must not be empty or whitespace-only. */
             body: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Identifier of the incident to attach the note to.
+             */
             incident_id: string;
         };
+        /**
+         * @description An operational incident: a group-scoped roll-up of related issues.
+         *
+         *     An incident opens when an issue on a server in the group crosses the
+         *     severity threshold, gathers further contributing issues while open, and
+         *     closes automatically once the last serious contributor clears. Operators
+         *     can additionally mark an incident resolved with a reason.
+         */
         IncidentData: {
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the incident closed (all serious contributing issues cleared);
+             *     null while the incident is still open.
+             */
             closed_at?: string | null;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the incident record was created.
+             */
             created_at: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Total number of events across all contributing issues.
+             */
             event_count: number;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Unique identifier of the incident.
+             */
             id: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Number of distinct issues that have ever contributed to the incident.
+             */
             issue_count: number;
             /**
              * Format: int64
-             * @description Combined: this incident's notes + notes on all contributing issues.
+             * @description Combined count of notes on the incident itself plus notes on all its
+             *     contributing issues.
              */
             note_count: number;
             /**
              * Format: date-time
-             * @description `Some(t)` when this incident's Slack `incident_open` notice is
-             *     still inside the per-group cooldown window (`deliver_after = t`,
-             *     not yet shipped, not given up). `None` once Slack has heard about
-             *     the incident — or the open was cancelled. Lets the UI distinguish
-             *     "open but quietly held" from "open and operators have been paged".
+             * @description When set, the "incident opened" Slack notification is being held
+             *     until this time by the group's notification delay (which suppresses
+             *     flapping); an incident that resolves before then never notifies.
+             *     Null once the notification has been sent, cancelled, or given up on.
+             *     Lets a client distinguish "open but quietly held" from "open and
+             *     operators have been notified".
              */
             notification_held_until?: string | null;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the incident opened.
+             */
             opened_at: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When an operator marked the incident resolved; null if it has not
+             *     been resolved.
+             */
             resolved_at?: string | null;
+            /** @description Login of the operator who resolved the incident, if resolved. */
             resolved_by?: string | null;
+            /** @description Display name of the resolving operator, if known. */
             resolved_by_name?: string | null;
+            /** @description Avatar URL of the resolving operator, if known. */
             resolved_by_pic?: string | null;
+            /**
+             * @description Reason given when resolving: one of `fixed`, `wont_fix`, `expected`,
+             *     `duplicate`, or `flapping`.
+             */
             resolved_reason?: string | null;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Identifier of the server group the incident belongs to.
+             */
             server_group_id: string;
             /**
-             * @description Display name of the group this incident rolls up to. Empty string
-             *     only if the group has been deleted out from under the incident,
-             *     which shouldn't happen via the API.
+             * @description Display name of the group this incident rolls up to. Empty only if
+             *     the group no longer exists, which should not happen in normal
+             *     operation.
              */
             server_group_name: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the incident record was last modified.
+             */
             updated_at: string;
         };
+        /** @description Identifies the note to delete. */
         IncidentDeleteNoteArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Identifier of the note.
+             */
             note_id: string;
         };
+        /** @description Identifies the incident to operate on. */
         IncidentIdArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Identifier of the incident.
+             */
             incident_id: string;
         };
+        /**
+         * @description One issue's involvement in an incident.
+         *
+         *     An issue joins an incident while it is actively contributing and leaves
+         *     when it stops (for example when it is resolved, snoozed, or silenced);
+         *     the same issue can join, leave, and rejoin over the incident's life.
+         */
         IncidentIssueData: {
+            /** @description The issue itself. */
             issue: components["schemas"]["IssueData"];
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the issue joined (started contributing to) the incident.
+             */
             joined_at: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the issue left (stopped contributing to) the incident; null
+             *     while it is still contributing.
+             */
             left_at?: string | null;
         };
+        /** @description Filters for listing incidents that involve a server. */
         IncidentListForServerArgs: {
+            /** @description Also include closed incidents; defaults to false (open incidents only). */
             include_closed?: boolean | null;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Maximum number of incidents to return; defaults to 100.
+             */
             limit?: number | null;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Identifier of the server.
+             */
             server_id: string;
         };
+        /** @description Filters for listing an incident's notes. */
         IncidentListNotesArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Identifier of the incident.
+             */
             incident_id: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Maximum number of notes to return; defaults to 100.
+             */
             limit?: number | null;
         };
+        /**
+         * @description A note attached to an incident.
+         *
+         *     Notes are immutable once written; to change one, delete it and add a
+         *     replacement.
+         */
         IncidentNoteData: {
+            /** @description Login of the operator who wrote the note. */
             author: string;
+            /** @description The note text. */
             body: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the note was written.
+             */
             created_at: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Unique identifier of the note.
+             */
             id: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Identifier of the incident the note is attached to.
+             */
             incident_id: string;
         };
+        /** @description An incident together with every issue that has contributed to it. */
         IncidentWithIssues: {
+            /** @description The incident. */
             incident: components["schemas"]["IncidentData"];
+            /**
+             * @description The issues that have contributed to the incident, each with the times
+             *     it joined and left.
+             */
             issues: components["schemas"]["IncidentIssueData"][];
         };
         /**
-         * @description One intent a restore consumer advertises: the behaviours it opts into and the
-         *     settings it accepts per replica.
+         * @description One restore purpose a consumer advertises support for: the behaviours it
+         *     opts into and the settings it accepts per replica.
          */
         IntentDescriptor: {
+            /** @description Human-readable description of the intent, if provided. */
             description?: string | null;
+            /**
+             * @description Name of the intent: an arbitrary identifier chosen by the consumer
+             *     (e.g. `verify`); any name may be advertised.
+             */
             intent: string;
+            /**
+             * @description Configurable parameters this intent accepts per replica, keyed by
+             *     parameter name.
+             */
             params?: components["schemas"]["BTreeMap"];
+            /**
+             * @description Behaviours this intent opts into. Recognised values are `check` (a
+             *     health report is expected for each replica), `once` (a given snapshot
+             *     is only ever dispatched to a replica once, rather than repeatedly
+             *     until overdue), and `url` (a replica's health report includes a link
+             *     to it). Unrecognised values are stored but have no effect.
+             */
             semantics?: string[];
         };
+        /** @description A note to add to an issue. */
         IssueAddNoteArgs: {
+            /** @description Text of the note. Must not be empty or whitespace-only. */
             body: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Id of the issue to attach the note to.
+             */
             issue_id: string;
         };
+        /**
+         * @description A problem raised against a server (or a group of servers), tracking its
+         *     current severity, whether it's still ongoing, and how it's been handled
+         *     by an operator.
+         */
         IssueData: {
+            /**
+             * @description Whether the underlying condition is still ongoing. `false` once the
+             *     condition has stopped recurring.
+             */
             active: boolean;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When this issue record was created.
+             */
             created_at: string;
+            /** @description Short headline describing the issue, if one was given. */
             description?: string | null;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Id of the device that reported the underlying event, if the issue
+             *     originated from a device push rather than a manual entry.
+             */
             device_id?: string | null;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the issue was first raised.
+             */
             first_seen: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Unique identifier for this issue.
+             */
             id: string;
             /**
-             * @description Distinct incidents this issue is or was attached to, most recent first.
-             *     Empty for issues that never crossed the threshold to join an incident.
+             * @description Incidents this issue is or was attached to, most recent first. Empty
+             *     for issues that never escalated into an incident.
              */
             incidents: components["schemas"]["IssueIncidentLink"][];
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the most recent event for this issue was recorded.
+             */
             last_seen: string;
+            /** @description Latest human-readable message describing the issue's state. */
             message: string;
+            /**
+             * @description Identifier used to match new incoming events to this issue; unique
+             *     within its source and server.
+             */
             ref: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the issue was resolved by an operator, if it has been.
+             */
             resolved_at?: string | null;
+            /** @description Login of the operator who resolved the issue, if any. */
             resolved_by?: string | null;
+            /**
+             * @description Display name of the operator who resolved the issue, filled in when
+             *     available.
+             */
             resolved_by_name?: string | null;
+            /**
+             * @description Profile picture URL of the operator who resolved the issue, filled
+             *     in when available.
+             */
             resolved_by_pic?: string | null;
             /**
-             * @description The string stored in the DB; parses to `ResolvedReason` if valid.
-             *     Kept as String to round-trip any historical value.
+             * @description Reason given when the issue was resolved, if any. Older records may
+             *     contain a value that no longer corresponds to a recognized reason.
              */
             resolved_reason?: string | null;
             /**
              * Format: uuid
-             * @description Group id the issue's server belongs to; `None` when ungrouped. Used
-             *     by the UI to offer group-scope actions (silence, etc.) without a
-             *     second fetch.
+             * @description Id of the group the affected server belongs to, if any.
              */
             server_group_id?: string | null;
             /**
-             * @description Display name of the group the issue's server belongs to. `None` when
-             *     the server is ungrouped; the UI hides the group prefix in that case.
+             * @description Display name of the group the affected server belongs to. Absent
+             *     when the server isn't in a group.
              */
             server_group_name?: string | null;
+            /** @description Hostname or address of the affected server. */
             server_host: string;
             /**
              * Format: uuid
-             * @description `None` for group-scoped issues (backup control-plane alerts that point
-             *     at a group, not a server — see the group-scoped-issues migration).
+             * @description The server this issue was raised against. Absent for issues that
+             *     apply to a whole group of servers rather than a single one.
              */
             server_id?: string | null;
-            /** @description The issue's server name (may be null — fall back to `server_host`). */
+            /**
+             * @description Display name of the affected server, when one is set. Falls back to
+             *     `server_host` when absent.
+             */
             server_name?: string | null;
+            /** @description Current severity level of the issue. */
             severity: components["schemas"]["Severity"];
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description If set, the issue is snoozed and won't demand attention again until
+             *     this time.
+             */
             snoozed_until?: string | null;
+            /**
+             * @description What raised the issue (for example, an automated health check or a
+             *     manually submitted event).
+             */
             source: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When this issue record was last updated.
+             */
             updated_at: string;
         };
+        /** @description Identifies a single note to delete from an issue. */
         IssueDeleteNoteArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Id of the note to delete.
+             */
             note_id: string;
         };
+        /** @description Identifies a single issue by id. */
         IssueIdArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Id of the issue to act on.
+             */
             issue_id: string;
         };
         /**
-         * @description Minimal incident reference attached to an issue, enough for the UI to
-         *     render a link and indicate open/closed status. See `Incident::for_issues`.
+         * @description A reference to an incident that a given issue is or was part of, enough
+         *     to link to that incident and show whether it's still open.
          */
         IssueIncidentLink: {
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the incident was closed, if it has been.
+             */
             closed_at?: string | null;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Id of the referenced incident.
+             */
             incident_id: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the incident was opened.
+             */
             opened_at: string;
         };
+        /** @description Filters for listing issues across all servers. */
         IssueListArgs: {
+            /**
+             * @description When `false`, include resolved and inactive issues as well as active
+             *     ones. Defaults to `true` (active issues only) when omitted.
+             */
             activeOnly?: boolean | null;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Maximum number of issues to return. Defaults to 100 when omitted.
+             */
             limit?: number | null;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Restrict to issues whose server belongs to this group.
+             */
             serverGroupId?: string | null;
+            /**
+             * @description Restrict to issues at one of these severity levels. Omit to include
+             *     all severities.
+             */
             severities?: components["schemas"]["Severity"][] | null;
         };
+        /** @description Filters for listing the issues raised against one server. */
         IssueListForServerArgs: {
+            /**
+             * @description When `false`, include resolved and inactive issues as well as active
+             *     ones. Defaults to `true` (active issues only) when omitted.
+             */
             active_only?: boolean | null;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Maximum number of issues to return. Defaults to 100 when omitted.
+             */
             limit?: number | null;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Id of the server whose issues to list.
+             */
             server_id: string;
         };
+        /** @description Identifies the issue whose notes to list. */
         IssueListNotesArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Id of the issue whose notes to list.
+             */
             issue_id: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Maximum number of notes to return. Defaults to 100 when omitted.
+             */
             limit?: number | null;
         };
+        /**
+         * @description A free-text note left by an operator on an issue, for handoff and
+         *     context that doesn't belong in the issue's own message.
+         */
         IssueNoteData: {
+            /** @description Login of the operator who wrote the note. */
             author: string;
+            /** @description Text of the note. */
             body: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the note was created.
+             */
             created_at: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Unique identifier for this note.
+             */
             id: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Id of the issue this note is attached to.
+             */
             issue_id: string;
         };
+        /** @description Identifies an issue to resolve, with the reason for resolving it. */
         IssueResolveArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Id of the issue to resolve.
+             */
             issue_id: string;
+            /** @description Reason the issue is being resolved. */
             reason: components["schemas"]["ResolvedReason"];
         };
+        /** @description Identifies a single device key by id. */
         KeyIdArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The key to operate on.
+             */
             key_id: string;
         };
+        /**
+         * @description A caveat or defect recorded against a range of patches within a release
+         *     line.
+         */
         KnownIssueData: {
+            /** @description Login of the operator who recorded this known issue. */
             author: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When this known issue was recorded.
+             */
             created_at: string;
+            /** @description Description of the issue. */
             description: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Unique identifier for this known issue.
+             */
             id: string;
             /**
              * Format: int32
-             * @description First unaffected patch. NULL while open — open issues
-             *     implicitly cover every patch from `min` to the end of the minor.
+             * @description Major version of the first unaffected (fixed) patch, if resolved.
+             *     Absent while unresolved — an open issue implicitly covers every
+             *     patch from the minimum affected patch to the end of its release
+             *     line.
              */
             max_major?: number | null;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Minor version of the first unaffected (fixed) patch, if resolved.
+             */
             max_minor?: number | null;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Patch number of the first unaffected (fixed) patch, if resolved.
+             */
             max_patch?: number | null;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Major version of the first affected patch.
+             */
             min_major: number;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Minor version of the first affected patch.
+             */
             min_minor: number;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Patch number of the first affected patch.
+             */
             min_patch: number;
+            /** @description Explanation given when resolving this issue, if any. */
             resolution_message?: string | null;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When this issue was resolved, if it has been.
+             */
             resolved_at?: string | null;
+            /** @description Login of the operator who resolved this issue, if any. */
             resolved_by?: string | null;
         };
+        /** @description Filters for listing open incidents. */
         ListActiveArgs: {
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Maximum number of incidents to return; defaults to 100.
+             */
             limit?: number | null;
         };
+        /** @description Selects an issue and a page of its events. */
         ListEventsArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Id of the issue whose events to list.
+             */
             issue_id: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Maximum number of events to return. Defaults to 100 when omitted.
+             */
             limit?: number | null;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Number of events to skip, for pagination. Defaults to 0.
+             */
             offset?: number | null;
         };
+        /** @description Filters for listing the issues raised by one device. */
         ListForDeviceArgs: {
+            /**
+             * @description When `false`, include resolved and inactive issues as well as active
+             *     ones. Defaults to `true` (active issues only) when omitted.
+             */
             active_only?: boolean | null;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Id of the device whose issues to list.
+             */
             device_id: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Maximum number of issues to return. Defaults to 100 when omitted.
+             */
             limit?: number | null;
         };
+        /** @description Filters for listing a server group's incidents. */
         ListForGroupArgs: {
+            /** @description Also include closed incidents; defaults to false (open incidents only). */
             include_closed?: boolean | null;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Maximum number of incidents to return; defaults to 100.
+             */
             limit?: number | null;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Identifier of the server group.
+             */
             server_group_id: string;
         };
+        /**
+         * @description The lowest and highest software version currently reported by any
+         *     production server.
+         */
         LiveVersionsBracket: {
+            /** @description Newest version currently reported by a production server. */
             max: components["schemas"]["VersionStr"];
+            /** @description Oldest version currently reported by a production server. */
             min: components["schemas"]["VersionStr"];
         };
         /**
-         * @description Which kopia maintenance cycle a Canopy maintenance Job ran.
+         * @description Which maintenance cycle a reported backup-repository maintenance run
+         *     performed.
          * @enum {string}
          */
         MaintenanceKind: "quick" | "full";
         /**
-         * @description A token row for the operator UI: everything but the secret (only a hash of
-         *     which exists server-side anyway).
+         * @description Metadata about an MCP access token. Never includes the secret value
+         *     itself — that's only ever returned once, at minting time.
          */
         McpTokenView: {
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the token was minted.
+             */
             created_at: string;
+            /** @description The login of the admin who minted this token. */
             created_by: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the token stops being accepted. Tokens are valid for one year
+             *     from minting; there is no way to request a different lifetime.
+             */
             expires_at: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Unique identifier of the token.
+             */
             id: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the token was last used to authenticate, or `null` if it has
+             *     never been used. May lag the true last use by up to a minute.
+             */
             last_used_at?: string | null;
+            /** @description Operator-chosen label for what the token is used for. */
             name: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the token was revoked, or `null` if it has not been revoked.
+             */
             revoked_at?: string | null;
         };
+        /** @description Request to merge two device records into one. */
         MergeIntoArgs: {
             /**
              * Format: uuid
-             * @description Device row to fold *into* the target — usually the
-             *     auto-discovered tailnet-only row.
+             * @description The device to merge away — usually the automatically-discovered,
+             *     tailnet-only device that doesn't yet have its own certificate
+             *     key. This device is removed once the merge completes.
              */
             source_id: string;
             /**
              * Format: uuid
-             * @description Device row that keeps existing — usually the existing mTLS
-             *     row that owns the device's server attachment and history.
+             * @description The device that remains after the merge — usually the existing
+             *     device that already owns the server attachment and connection
+             *     history.
              */
             target_id: string;
         };
+        /**
+         * @description A group of versions sharing the same major.minor release line, with a
+         *     summary of the line's overall readiness.
+         */
         MinorVersionGroup: {
+            /** @description Number of patch versions in this release line. */
             count: number;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description Creation time of the first (patch 0) published version in this
+             *     release line. Falls back to the earliest published patch, or the
+             *     current time, if patch 0 hasn't been published.
+             */
             first_created_at: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description Creation time of the latest published patch in this release line,
+             *     or the current time if nothing has been published yet.
+             */
             last_created_at: string;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Highest published patch number in this release line, or 0 if none
+             *     are published yet.
+             */
             latest_patch: number;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Major version number for this release line.
+             */
             major: number;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Minor version number for this release line.
+             */
             minor: number;
             /**
-             * @description `true` when the latest published patch in this minor is itself
-             *     ready. An old, since-fixed issue on an earlier patch doesn't
-             *     dim the whole minor.
+             * @description `true` when the latest published patch in this release line is
+             *     itself ready. An old, since-fixed issue on an earlier patch doesn't
+             *     dim the whole release line. Also `true` when nothing has been
+             *     published yet.
              */
             ready: boolean;
+            /** @description All versions in this release line, patch descending. */
             versions: components["schemas"]["VersionData"][];
         };
+        /** @description Request body for minting a new MCP access token. */
         MintArgs: {
-            /** @description Operator-chosen label, e.g. which agent will hold this token. */
+            /**
+             * @description Operator-chosen label, e.g. which agent will hold this token. Cannot
+             *     be empty or only whitespace.
+             */
             name: string;
         };
-        /** @description The one and only exposure of the token plaintext. */
+        /**
+         * @description The result of minting a new MCP access token: its metadata plus the
+         *     one-time secret value. This is the only response that will ever include
+         *     the secret.
+         */
         MintedToken: {
             /** @description The bearer token itself. Shown once; never retrievable again. */
             secret: string;
+            /** @description Metadata about the newly minted token. */
             token: components["schemas"]["McpTokenView"];
         };
         /**
-         * @description One identified human connected to a server right now, distilled from
-         *     the `external_users` health check on a status push.
+         * @description One person currently connected to a server, identified by their
+         *     Tailscale login.
          *
-         *     "Identified" means the session's source address resolved to a Tailscale
-         *     login via `tailscale whois` on the device — local console or
-         *     non-Tailscale SSH sessions don't produce one of these. One person with
-         *     several concurrent sessions appears once.
+         *     Only sessions that could be tied to an authenticated Tailscale identity
+         *     are reported here — local console access and other unauthenticated
+         *     sessions don't produce one of these. A person with several simultaneous
+         *     sessions appears once.
          */
         OperatorPresence: {
             /**
              * Format: date-time
-             * @description Earliest `connected_since` across the person's sessions — how long
-             *     they've been continuously connected, as tracked by the device.
+             * @description When the person's current connection began. If they have multiple
+             *     simultaneous sessions, this is the earliest start time among them.
              */
             connected_since?: string | null;
-            /** @description Tailscale login (an email), as reported by the device. */
+            /** @description The person's Tailscale login (an email address). */
             login: string;
             /**
-             * @description Display name from the `tailscale_users` cache; `None` when this
-             *     login has never authenticated against canopy.
+             * @description The person's display name, if known. `None` if this login has never
+             *     been seen before.
              */
             name?: string | null;
-            /** @description Profile picture URL from the `tailscale_users` cache. */
+            /** @description URL of the person's profile picture, if known. */
             profile_pic?: string | null;
         };
-        /**
-         * @description Standard wrapper for paginated list responses. The total reflects the full
-         *     row count (not just the current page) so the frontend can render page
-         *     counts without a separate count fetch.
-         */
+        /** @description A single page of a paginated list response. */
         Page_BestoolSnippetInfo: {
+            /** @description The items in this page. */
             items: {
+                /** @description Optional description of what the snippet does. */
                 description?: string | null;
-                /** Format: uuid */
+                /**
+                 * Format: uuid
+                 * @description Unique identifier for this version of the snippet.
+                 */
                 id: string;
+                /** @description The snippet's display name. */
                 name: string;
             }[];
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description The total number of items across all pages, not just this one — use
+             *     this to render page counts without a separate request.
+             */
             total: number;
         };
-        /**
-         * @description Standard wrapper for paginated list responses. The total reflects the full
-         *     row count (not just the current page) so the frontend can render page
-         *     counts without a separate count fetch.
-         */
+        /** @description A single page of a paginated list response. */
         Page_DeviceInfo: {
+            /** @description The items in this page. */
             items: {
+                /** @description Core identity, role, and Tailscale attachment for the device. */
                 device: components["schemas"]["DeviceData"];
+                /** @description Every authentication key ever registered on this device, active or not. */
                 keys: components["schemas"]["DeviceKeyInfo"][];
                 latest_connection?: null | components["schemas"]["DeviceConnectionData"];
                 tailnet_live?: null | components["schemas"]["TailnetLiveInfo"];
             }[];
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description The total number of items across all pages, not just this one — use
+             *     this to render page counts without a separate request.
+             */
             total: number;
         };
-        /**
-         * @description Standard wrapper for paginated list responses. The total reflects the full
-         *     row count (not just the current page) so the frontend can render page
-         *     counts without a separate count fetch.
-         */
+        /** @description A single page of a paginated list response. */
         Page_EventData: {
+            /** @description The items in this page. */
             items: {
+                /** @description Whether the underlying condition was active as of this event. */
                 active: boolean;
-                /** Format: date-time */
+                /**
+                 * Format: date-time
+                 * @description When this event was recorded on the server.
+                 */
                 created_at: string;
+                /** @description Short headline for this event, if one was given. */
                 description?: string | null;
-                /** Format: uuid */
+                /**
+                 * Format: uuid
+                 * @description Unique identifier for this event.
+                 */
                 id: string;
-                /** Format: uuid */
+                /**
+                 * Format: uuid
+                 * @description Id of the issue this event belongs to.
+                 */
                 issue_id: string;
-                /** Format: date-time */
+                /**
+                 * Format: date-time
+                 * @description When this condition was last seen recurring.
+                 */
                 last_seen: string;
+                /** @description Human-readable message describing this event. */
                 message: string;
-                /** Format: date-time */
+                /**
+                 * Format: date-time
+                 * @description When the underlying condition actually occurred, if reported
+                 *     separately from the time it was recorded.
+                 */
                 occurred_at?: string | null;
-                /** Format: int32 */
+                /**
+                 * Format: int32
+                 * @description Number of times this same condition has repeated and been coalesced
+                 *     into this event rather than creating a new one.
+                 */
                 occurrences: number;
+                /** @description Severity reported for this event. */
                 severity: components["schemas"]["Severity"];
             }[];
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description The total number of items across all pages, not just this one — use
+             *     this to render page counts without a separate request.
+             */
             total: number;
         };
-        /**
-         * @description Standard wrapper for paginated list responses. The total reflects the full
-         *     row count (not just the current page) so the frontend can render page
-         *     counts without a separate count fetch.
-         */
+        /** @description A single page of a paginated list response. */
         Page_ServerInfo: {
+            /** @description The items in this page. */
             items: {
                 /**
                  * Format: int64
@@ -3546,27 +5289,37 @@ export interface components {
                 allow_legacy_status: boolean;
                 /** @description Whether the server is archived (soft-deleted). */
                 archived: boolean;
+                /** @description Whether this server runs in a cloud environment, if known. */
                 cloud?: boolean | null;
-                /** Format: uuid */
+                /**
+                 * Format: uuid
+                 * @description The device currently bound to this server, if any.
+                 */
                 device_id?: string | null;
                 /**
                  * @description Effective URL for display: the stored `host`, or `https://{tailnet
-                 *     hostname}` when the server has no URL but is bound to a Tailscale device,
-                 *     else an empty string. Filled by `fill_display_hosts`.
+                 *     hostname}` when the server has no URL but is bound to a Tailscale
+                 *     device, else an empty string.
                  */
                 display_host: string;
                 geolocation?: null | components["schemas"]["GeoPoint"];
-                /** Format: uuid */
+                /**
+                 * Format: uuid
+                 * @description The group this server belongs to, if any.
+                 */
                 group_id?: string | null;
                 /**
-                 * @description Display name of the group this server belongs to (denormalised so list
-                 *     rows don't need to fetch the group separately). `None` if ungrouped.
+                 * @description Display name of the group this server belongs to, included directly so
+                 *     list views don't need a separate lookup. `None` if ungrouped.
                  */
                 group_name?: string | null;
                 health?: null | components["schemas"]["HealthState"];
                 /** @description The server's stored URL, if any. May be absent for device-only servers. */
                 host?: string | null;
-                /** Format: uuid */
+                /**
+                 * Format: uuid
+                 * @description Unique identifier for the server.
+                 */
                 id: string;
                 /**
                  * @description Whether canopy is actively watching this server. When `false`, the
@@ -3574,8 +5327,11 @@ export interface components {
                  *     incidents.
                  */
                 is_monitored: boolean;
+                /** @description The kind of deployment this server represents. */
                 kind: components["schemas"]["ServerKind"];
+                /** @description Operator-assigned name for the server, if any. */
                 name?: string | null;
+                /** @description Free-text operator notes about the server. */
                 notes: string;
                 /**
                  * @description Name this server appears under in the public mobile-app server list.
@@ -3585,123 +5341,198 @@ export interface components {
                 rank?: null | components["schemas"]["ServerRank"];
                 /**
                  * Format: date-time
-                 * @description Set once a device has completed enrollment for this server. While
-                 *     `None`, the UI shows setup instructions.
+                 * @description When a device completed enrollment for this server. `None` while
+                 *     awaiting first check-in, at which point setup instructions still apply.
                  */
                 registered_at?: string | null;
+                /** @description Arbitrary operator-defined key/value labels attached to the server. */
                 tags: components["schemas"]["TagMap"];
                 up?: null | components["schemas"]["ShortStatus"];
             }[];
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description The total number of items across all pages, not just this one — use
+             *     this to render page counts without a separate request.
+             */
             total: number;
         };
-        /**
-         * @description Standard wrapper for paginated list responses. The total reflects the full
-         *     row count (not just the current page) so the frontend can render page
-         *     counts without a separate count fetch.
-         */
+        /** @description A single page of a paginated list response. */
         Page_SqlHistoryEntry: {
+            /** @description The items in this page. */
             items: {
-                /** Format: date-time */
+                /**
+                 * Format: date-time
+                 * @description When the query was executed.
+                 */
                 created_at: string;
-                /** Format: uuid */
+                /**
+                 * Format: uuid
+                 * @description Unique identifier for this history entry.
+                 */
                 id: string;
+                /** @description The SQL text that was executed. */
                 query: string;
+                /** @description Tailscale login of the user who ran the query. */
                 tailscale_user: string;
             }[];
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description The total number of items across all pages, not just this one — use
+             *     this to render page counts without a separate request.
+             */
             total: number;
         };
+        /** @description Pagination window for a paged listing endpoint. */
         PaginationArgs: {
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Maximum number of items to return. Endpoints that use this type
+             *     apply their own default when omitted.
+             */
             limit?: number | null;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Number of items to skip from the start of the result set.
+             */
             offset: number;
         };
         /**
-         * @description The type of a restore-replica parameter. Informs the operator form's input
-         *     and the validation Canopy applies. The underlying JSON is a number
-         *     (`duration` in whole seconds, `bytes`, `integer`), a boolean (`boolean`), or
-         *     a string (`text`); Canopy does not otherwise interpret parameter values.
+         * @description The data type of a restore-replica configuration parameter, which
+         *     determines how its value is validated. `duration` and `bytes` values must
+         *     be non-negative integers (a count of seconds and of bytes, respectively);
+         *     `integer` accepts any whole number, positive or negative; `boolean` is a
+         *     JSON boolean; `text` is a JSON string.
          * @enum {string}
          */
         ParamType: "duration" | "bytes" | "boolean" | "integer" | "text";
+        /**
+         * @description Fields to update on an existing server group. Only the fields present
+         *     are changed; omitted fields are left as-is.
+         */
         PartialServerGroup: {
+            /** @description New display name for the group. */
             name?: string | null;
+            /** @description New free-form operator notes for the group. */
             notes?: string | null;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description New incident-opened notification delay, in seconds.
+             */
             slack_open_delay?: number | null;
             tags?: null | components["schemas"]["TagMap"];
         };
+        /** @description A pending one-off backup or restore request. */
         PendingRequestRow: {
+            /**
+             * @description Why this run was requested: `backup` to write new data, or `restore`
+             *     to read existing data.
+             */
             purpose: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the request was made.
+             */
             requested_at: string;
+            /**
+             * @description Identity of the operator who made the request (Tailscale login), if
+             *     known.
+             */
             requested_by?: string | null;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The server the request is for.
+             */
             server_id: string;
+            /** @description Backup type requested. */
             type: string;
         };
+        /** @description Request to inspect a bucket/prefix before configuring backups on it. */
         ProbeArgs: {
+            /** @description Name of the S3 bucket to inspect. */
             bucket: string;
-            /** @description Maintenance role to assume for the inspect (full read). */
+            /**
+             * @description AWS IAM role ARN to assume for the inspection (requires full read
+             *     access).
+             */
             maintenance_role_arn: string;
+            /**
+             * @description Key prefix within the bucket to inspect; defaults to empty (bucket
+             *     root).
+             */
             prefix?: string;
+            /** @description AWS region the bucket is in, if known. */
             region?: string | null;
             /**
-             * @description Device/issuance role to also validate (assume both ways + read-only no-op).
-             *     Optional; the wizard supplies it so a device-role trust gap is caught before
-             *     saving rather than only when a device first backs up.
+             * @description AWS IAM role ARN to additionally validate for device use (checked in
+             *     both directions with a read-only no-op). Optional; supplying it lets
+             *     the setup wizard catch a role configuration problem before saving,
+             *     rather than when a device first attempts a backup.
              */
             target_role_arn?: string | null;
         };
         /**
-         * @description Inspect-probe result for the wizard: what's at `bucket/prefix`, plus whether
-         *     Canopy already has a config for it.
+         * @description Result of inspecting a bucket/prefix: what's currently stored there, and
+         *     whether Canopy already has a configuration for it.
          */
         ProbeResponse: {
             /**
              * Format: uuid
-             * @description Group id if a config already exists for this exact bucket+prefix.
+             * @description The server group already configured for this exact bucket and prefix,
+             *     if any.
              */
             already_configured?: string | null;
-            /** @description Present for `inaccessible`: the assume/list failure. */
+            /**
+             * @description Present when `state` is `inaccessible`: a description of the failure
+             *     encountered while trying to access the bucket.
+             */
             error?: string | null;
-            /** @description A few keys, for the `other_content` warning. */
+            /** @description A few example object keys found, when `state` is `other_content`. */
             object_sample: string[];
+            /**
+             * @description What was found at the inspected location: empty, an existing backup
+             *     repository, other (non-backup) content, or inaccessible.
+             */
             state: string;
         };
         /**
-         * @description Wire-shape mirror of [`problem_details::ProblemDetails`] for OpenAPI.
+         * @description Standard error response body, returned for every non-2xx response.
          *
-         *     Every error response from the servers serializes to this RFC 7807 shape via
-         *     [`AppError`]'s `IntoResponse`. This struct exists so OpenAPI specs can
-         *     reference a concrete schema; nothing actually constructs values of this
-         *     type at runtime.
+         *     This follows the RFC 7807 "Problem Details" shape: a stable machine-readable
+         *     `type`, a short `title`, the repeated HTTP `status` code, and an optional
+         *     `detail` string with specifics of this particular occurrence.
          */
         ProblemDetailsSchema: {
-            /** @description Human-readable explanation specific to this occurrence. */
+            /**
+             * @description Human-readable explanation specific to this occurrence of the
+             *     problem, if any extra detail is available.
+             */
             detail?: string | null;
             /**
              * Format: int32
-             * @description HTTP status code generated by the origin server.
+             * @description HTTP status code of the response, repeated here for convenience.
              * @example 404
              */
             status: number;
-            /** @description Short human-readable summary of the problem. */
+            /**
+             * @description Short, human-readable summary of the problem type. Does not vary
+             *     between occurrences of the same `type`.
+             */
             title: string;
             /**
              * Format: uri
-             * @description A URI reference identifying the problem type.
+             * @description A URI reference identifying the problem type. Stable across
+             *     occurrences of the same error, so callers can match on it.
              * @example /errors/resource-not-found
              */
             type: string;
         };
+        /** @description Request to mint a new device credential. */
         ProvisionArgs: {
             /**
              * Format: uuid
-             * @description Provision an additional credential onto this existing device. When
-             *     omitted, a new device is created at `role`.
+             * @description Attach the new credential to this existing device instead of
+             *     creating a new one. When omitted, a new device is created at
+             *     `role`.
              */
             device_id?: string | null;
             /** @description Display name for the new key. Defaults to "Provisioned key". */
@@ -3714,7 +5545,10 @@ export interface components {
          *     private key lives only inside `key_age_base64`; Canopy never persists it.
          */
         ProvisionedCredential: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The device the credential was issued for.
+             */
             device_id: string;
             /** @description Suggested filename for the downloaded encrypted key. */
             filename: string;
@@ -3728,7 +5562,10 @@ export interface components {
              *     with `passphrase` (e.g. `bestool crypto reveal`) to recover the PEM.
              */
             key_age_base64: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Unique identifier for the newly-created key record.
+             */
             key_id: string;
             /**
              * @description Freshly-generated passphrase that decrypts `key_age_base64`. Share it
@@ -3736,23 +5573,35 @@ export interface components {
              */
             passphrase: string;
         };
+        /** @description A freshly issued recovery-verification challenge. */
         RecoveryChallengeResponse: {
             /**
-             * @description The challenge ciphertext (`age` to the recipients), base64-encoded. The
-             *     operator decrypts it offline with a held private key (`bestool crypto
-             *     decrypt` / `age`) and submits the plaintext to `recovery_verify`.
+             * @description A single-use verification challenge encrypted to the recovery
+             *     recipients, base64-encoded. The operator decrypts this offline with a
+             *     held private key (any tool that supports the `age` encryption format)
+             *     and submits the decrypted plaintext to the `/backups/recovery_verify`
+             *     endpoint to prove the key is genuinely held.
              */
             ciphertext_base64: string;
-            /** @description The recipients this challenge was encrypted to. */
+            /**
+             * @description The recovery recipients (age public keys) this challenge was
+             *     encrypted to.
+             */
             recipients: string[];
         };
-        /** @description Status of the recovery vault verification ceremony. */
+        /**
+         * @description Status of the disaster-recovery verification ceremony: whether recovery
+         *     is configured, and whether a fresh verification is due.
+         */
         RecoveryStatusResponse: {
             /** @description Whether recovery recipients are configured on this server at all. */
             configured: boolean;
-            /** @description Whether a (fresh) ceremony is due. */
+            /** @description Whether a fresh verification ceremony is due. */
             due: boolean;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the recovery ceremony was last completed successfully, if ever.
+             */
             last_verified_at?: string | null;
             /** @description The recipient set the last verification covered. */
             last_verified_recipients: string[];
@@ -3768,50 +5617,101 @@ export interface components {
             last_write_bytes?: number | null;
             /** @description Human-readable reason for the `due` value. */
             reason: string;
-            /** @description The live recipient fingerprints (`age1…`). */
+            /**
+             * @description Fingerprints of the currently configured recovery recipients (age
+             *     public keys).
+             */
             recipients: string[];
         };
+        /** @description Answer to an outstanding recovery-verification challenge. */
         RecoveryVerifyArgs: {
-            /** @description The decrypted challenge plaintext. */
+            /**
+             * @description The plaintext obtained by decrypting the challenge from the
+             *     `/backups/recovery_challenge` endpoint.
+             */
             answer: string;
         };
+        /** @description Result of a successful recovery verification. */
         RecoveryVerifyResponse: {
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the verification was recorded.
+             */
             verified_at: string;
         };
+        /**
+         * @description Another patch version within the same release line as a version being
+         *     viewed.
+         */
         RelatedVersionData: {
+            /** @description Changelog text for this version. */
             changelog: string;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Major version number.
+             */
             major: number;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Minor version number.
+             */
             minor: number;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Patch version number.
+             */
             patch: number;
         };
+        /** @description Identifies a one-off backup or restore request for a server. */
         RequestArgs: {
+            /**
+             * @description Why this run is requested: `backup` to write new data, or `restore` to
+             *     read existing data.
+             */
             purpose: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The server to back up or restore.
+             */
             server_id: string;
+            /** @description Backup type to run. */
             type: string;
         };
+        /** @description Request to mark an incident resolved. */
         ResolveIncidentArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Identifier of the incident to resolve.
+             */
             incident_id: string;
+            /** @description Why the incident is considered resolved. */
             reason: components["schemas"]["ResolvedReason"];
         };
+        /** @description Identifies a known issue and the version that fixes it. */
         ResolveKnownIssueArgs: {
             /**
-             * @description Semver of the version that contains the fix. Must be in the same
-             *     minor as the issue's `min` and strictly above it.
+             * @description Version string of the first patch that contains the fix. Must be in
+             *     the same release line as the issue's earliest affected patch, and
+             *     strictly above it.
              */
             fix_version: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Id of the known issue to resolve.
+             */
             known_issue_id: string;
+            /**
+             * @description Explanation of how or where the issue was fixed. Must not be empty
+             *     or whitespace-only.
+             */
             resolution_message: string;
         };
+        /** @description A Tailscale identifier to resolve against the live tailnet directory. */
         ResolveTailnetIdentifierArgs: {
+            /** @description A Tailscale IP address, node id, or DNS name to look up. */
             identifier: string;
         };
+        /** @description Result of resolving a Tailscale identifier. */
         ResolveTailnetIdentifierResponse: {
             matched?: null | components["schemas"]["TailnetLiveInfo"];
         };
@@ -3831,159 +5731,345 @@ export interface components {
          */
         ResolvedReason: "fixed" | "wont_fix" | "expected" | "duplicate" | "flapping";
         /**
-         * @description A restore consumer (a `backup-restore` device) and the intents it currently
-         *     advertises, with each intent's description, semantics, and parameter schema —
-         *     drives the declaration form's consumer/intent pickers and dynamic param
-         *     fields.
+         * @description A restore consumer and the restore intents it currently advertises.
+         *
+         *     A restore consumer is a device with the `backup-restore` role: an agent
+         *     that restores backups onto standby replicas. Each advertised intent
+         *     carries a description, semantics flags, and a parameter schema, which
+         *     together determine what declarations can be created for the consumer and
+         *     what parameters they accept.
          */
         RestoreConsumerView: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Identifier of the consumer device.
+             */
             device_id: string;
+            /** @description The intents the consumer currently advertises support for. */
             intents: components["schemas"]["IntentDescriptor"][];
+            /** @description Display name of the consumer device, if known. */
             name?: string | null;
         };
         /**
-         * @description A declared replica for the operator UI. `gap` is true when the consumer does
-         *     not currently advertise this declaration's intent, so Canopy is not
-         *     dispatching it.
+         * @description A managed-restore declaration, as shown to operators.
+         *
+         *     A declaration instructs a restore consumer to maintain a restored replica
+         *     of a backup, for a given purpose (intent). It also grants the consumer
+         *     read access to the covered backups while it is enabled.
          */
         RestoreReplicaView: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Identifier of the restore consumer device the declaration is assigned to.
+             */
             consumer_device_id: string;
+            /** @description Display name of the consumer device, if known. */
             consumer_name?: string | null;
+            /** @description When the declaration was created. */
             created_at: string;
+            /** @description Login of the operator who created the declaration, if recorded. */
             created_by?: string | null;
+            /**
+             * @description Whether the declaration is active. Disabled declarations are not
+             *     dispatched to the consumer and grant no backup access.
+             */
             enabled: boolean;
+            /**
+             * @description True when the consumer does not currently advertise this declaration's
+             *     intent, so the declaration is not being dispatched.
+             */
             gap: boolean;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Identifier of the server group whose backups the declaration covers.
+             */
             group_id: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Unique identifier of the declaration.
+             */
             id: string;
+            /**
+             * @description How the replica is handled, as defined by the consumer: an arbitrary
+             *     identifier from the consumer's advertised intents, e.g. `verify`.
+             */
             intent: string;
-            name: string;
-            /** Format: int64 */
-            overdue_after_seconds?: number | null;
-            /** @description Operator-supplied parameter values (name → value). */
-            params: Record<string, never>;
-            /** Format: uuid */
-            server_id?: string | null;
-            type: string;
-            updated_at: string;
-        };
-        RestoreReplicasCreateArgs: {
-            /** Format: uuid */
-            consumer_device_id: string;
-            /** Format: uuid */
-            group_id: string;
-            intent: string;
+            /** @description Operator-chosen display name for the declaration. */
             name: string;
             /**
              * Format: int64
-             * @description Overdue bound in whole seconds; `None` = no bound.
+             * @description Overdue bound in whole seconds: how long the replica may go without a
+             *     healthy restore report (or, for at-most-once intents, how long the
+             *     latest snapshot may go unverified) before it is considered overdue.
+             *     Null means no bound.
              */
             overdue_after_seconds?: number | null;
-            /** @description Operator-supplied parameter values, validated against the intent's schema. */
+            /** @description Operator-supplied parameter values (name → value). */
+            params: Record<string, never>;
+            /**
+             * Format: uuid
+             * @description Specific server within the group, or null to cover all current servers
+             *     in the group.
+             */
+            server_id?: string | null;
+            /** @description The backup type to restore, for example `tamanu-postgres`. */
+            type: string;
+            /** @description When the declaration was last modified. */
+            updated_at: string;
+        };
+        /**
+         * @description Request to declare a new managed restore replica.
+         *
+         *     The consumer, group, server, backup type, and intent define the
+         *     declaration's scope and cannot be changed after creation; to change them,
+         *     delete the declaration and create a new one.
+         */
+        RestoreReplicasCreateArgs: {
+            /**
+             * Format: uuid
+             * @description Identifier of the restore consumer device to assign the declaration to.
+             */
+            consumer_device_id: string;
+            /**
+             * Format: uuid
+             * @description Identifier of the server group whose backups to restore.
+             */
+            group_id: string;
+            /**
+             * @description How the replica is handled, as defined by the consumer: an arbitrary
+             *     identifier from the consumer's advertised intents, e.g. `verify`.
+             */
+            intent: string;
+            /** @description Display name for the declaration. */
+            name: string;
+            /**
+             * Format: int64
+             * @description Overdue bound in whole seconds; omit or null for no bound.
+             */
+            overdue_after_seconds?: number | null;
+            /**
+             * @description Parameter values for the intent (name → value), validated against the
+             *     consumer's advertised parameter schema. Defaults to empty.
+             */
             params?: Record<string, never>;
             /**
              * Format: uuid
-             * @description `None` = all current servers in the group.
+             * @description Specific server within the group; omit or null to cover all current
+             *     servers in the group.
              */
             server_id?: string | null;
+            /** @description The backup type to restore, for example `tamanu-postgres`. */
             type: string;
         };
+        /** @description Scopes a request to one server group. */
         RestoreReplicasGroupArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Identifier of the server group.
+             */
             server_group_id: string;
         };
+        /**
+         * @description Request to update an existing declaration.
+         *
+         *     Only the name, overdue bound, parameter values, and enabled flag can be
+         *     changed; the declaration's scope (consumer, group, server, backup type,
+         *     intent) is fixed at creation.
+         */
         RestoreReplicasUpdateArgs: {
+            /** @description Whether the declaration should be active. */
             enabled: boolean;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Identifier of the declaration to update.
+             */
             id: string;
+            /** @description New display name for the declaration. */
             name: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description New overdue bound in whole seconds; null removes the bound.
+             */
             overdue_after_seconds?: number | null;
+            /**
+             * @description New parameter values (name → value), validated against the intent's
+             *     advertised parameter schema. Defaults to empty.
+             */
             params?: Record<string, never>;
         };
         /**
-         * @description kopia `keep-*` retention policy. Org-minimum floors
-         *     (`keep_daily ≥ 7, keep_weekly ≥ 4, keep_monthly ≥ 6`) are enforced by
-         *     [`RetentionPolicy::validate_floor`] on create/update — unless the config
-         *     opts out via its `allow_below_floor` flag (dangerous).
+         * @description How many backups to keep at each retention tier once older snapshots are
+         *     pruned. The organization enforces minimum floors (at least 7 daily, 4
+         *     weekly, and 6 monthly) on write, unless the containing schedule or default
+         *     explicitly opts out via its `allow_below_floor` flag.
          */
         RetentionPolicy: {
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Number of most-recent annual backups to keep. Defaults to 0 (no annual
+             *     retention).
+             */
             keep_annual?: number;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Number of most-recent daily backups to keep. Must be at least 7 unless
+             *     the retention floor is bypassed.
+             */
             keep_daily: number;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Number of most-recent backups to always keep regardless of age.
+             *     Defaults to 1.
+             */
             keep_latest?: number;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Number of most-recent monthly backups to keep. Must be at least 6
+             *     unless the retention floor is bypassed.
+             */
             keep_monthly: number;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Number of most-recent weekly backups to keep. Must be at least 4 unless
+             *     the retention floor is bypassed.
+             */
             keep_weekly: number;
         };
+        /** @description Request body for revoking an MCP access token. */
         RevokeArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The id of the token to revoke.
+             */
             id: string;
         };
         /**
-         * @description Outcome of a reported backup/restore run.
+         * @description Outcome of a reported backup or restore run.
          * @enum {string}
          */
         RunOutcome: "success" | "failure";
+        /** @description Request body identifying which healthcheck to sample data for. */
         SampleArgs: {
+            /** @description The healthcheck name to sample. */
             check_name: string;
         };
+        /**
+         * @description Request body for creating a new snippet, or saving a new version of an
+         *     existing one.
+         */
         SaveArgs: {
+            /** @description Optional description of what the snippet does. */
             description?: string | null;
+            /** @description The snippet's display name. */
             name: string;
+            /** @description The SQL query text to store. */
             sql: string;
             /**
              * Format: uuid
-             * @description When set, the saved snippet supersedes the snippet with this id (i.e.
-             *     it's an edit). When absent, a fresh snippet is created.
+             * @description When set, this save creates a new version that supersedes the
+             *     snippet with this id (an edit to an existing snippet). When
+             *     omitted, a brand new snippet is created.
              */
             supersedes?: string | null;
         };
-        /**
-         * @description Per-`(group,type)` schedule + retention override. `expected_interval` None =
-         *     manual-only (distinct from 0). `retention` None = inherit the type default.
-         */
+        /** @description A schedule and retention override for one backup type of a server group. */
         ScheduleView: {
-            /** @description Whether this override opts out of the org retention floor (dangerous). */
+            /**
+             * @description Whether this override is allowed to fall below the organization's
+             *     minimum retention floor.
+             */
             allow_below_floor: boolean;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Expected seconds between scheduled backups of this type; null means
+             *     manual-only (no schedule), which is distinct from an interval of zero.
+             */
             expected_interval?: number | null;
             retention?: null | components["schemas"]["RetentionPolicy"];
+            /** @description Backup type this override applies to. */
             type: string;
         };
+        /**
+         * @description A self-alert: a problem with canopy's own operation, such as an
+         *     expiring credential or a failed notification delivery — distinct from
+         *     issues raised against monitored servers.
+         */
         SelfAlertView: {
+            /**
+             * @description Whether the underlying condition is still ongoing. Becomes `false`
+             *     once the condition has cleared on its own, independently of whether
+             *     an operator has resolved the alert.
+             */
             active: boolean;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When this condition was first raised.
+             */
             first_seen: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Unique identifier of this self-alert.
+             */
             id: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When this condition was most recently reaffirmed as still ongoing.
+             */
             last_seen: string;
+            /** @description Full detail message describing the condition. */
             message: string;
-            /** @description The stable condition key, e.g. `mcp-token-expiry`. */
+            /**
+             * @description The stable identifier of the underlying condition, e.g.
+             *     `mcp-token-expiry`. Stable across repeated raises of the same
+             *     condition.
+             */
             ref: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When an operator marked this alert resolved, or `null` if it has not
+             *     been resolved.
+             */
             resolved_at?: string | null;
+            /**
+             * @description The login of the operator who resolved this alert, or `null` if it
+             *     has not been resolved.
+             */
             resolved_by?: string | null;
+            /**
+             * @description How severe the condition is, from `critical` (most severe) down to
+             *     `debug` (least).
+             */
             severity: components["schemas"]["Severity"];
             /** @description Single-line headline. */
             title?: string | null;
         };
+        /** @description Request body for resolving a self-alert. */
         SelfAlertsResolveArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The id of the self-alert to resolve.
+             */
             id: string;
         };
+        /** @description Identifies a server. */
         ServerArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The server to operate on.
+             */
             server_id: string;
         };
+        /**
+         * @description One backup type a server has advertised support for, whether the operator
+         *     has enabled it, and its most recent activity. Enabling a capability is
+         *     what makes the server eligible for issued backup credentials and
+         *     scheduled runs of that type.
+         */
         ServerBackupCapabilityView: {
+            /**
+             * @description Whether the operator has enabled scheduled backups of this type for
+             *     this server.
+             */
             enabled: boolean;
             /**
              * Format: date-time
@@ -3996,7 +6082,7 @@ export interface components {
              */
             latest_snapshot_bytes?: number | null;
             /**
-             * @description kopia snapshot id of this server+type's most recent successful backup,
+             * @description Identifier of this server and type's most recent successful backup,
              *     if any.
              */
             latest_snapshot_id?: string | null;
@@ -4012,33 +6098,82 @@ export interface components {
             /**
              * Format: date-time
              * @description `Some(issued_at)` when a backup of this type appears to be in flight:
-             *     credentials were issued under an hour ago and no run has been reported
-             *     since. `None` otherwise. Lets the UI show a "backing up…" state.
+             *     backup credentials were issued and are still valid, and no run has
+             *     been reported since they were issued. `None` otherwise. Lets the UI
+             *     show a "backing up…" state.
              */
             processing_since?: string | null;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The server this capability belongs to.
+             */
             server_id: string;
+            /** @description Backup type this capability describes. */
             type: string;
         };
+        /**
+         * @description Partial update to a server's fields. Only fields present in the request
+         *     are changed. For `device_id`, `group_id`, `public_name`, `cloud`, and
+         *     `geolocation`, sending an explicit `null` clears the field, while
+         *     omitting it leaves the current value unchanged.
+         */
         ServerDataUpdate: {
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description New downtime threshold in seconds before this server is considered
+             *     down. Omit to leave unchanged.
+             */
             alert_when_down_for?: number | null;
+            /**
+             * @description Whether to accept the retired legacy status format from this
+             *     server. Omit to leave unchanged.
+             */
             allow_legacy_status?: boolean | null;
+            /**
+             * @description Whether the server runs in a cloud environment, or `null` to clear.
+             *     Omit to leave unchanged.
+             */
             cloud?: boolean | null;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description New device to bind to the server, or `null` to unbind. Omit to leave
+             *     unchanged.
+             */
             device_id?: string | null;
             geolocation?: null | components["schemas"]["GeoPoint"];
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description New group for the server, or `null` to remove it from its group.
+             *     Omit to leave unchanged.
+             */
             group_id?: string | null;
+            /**
+             * @description New URL for the server. An empty string clears it; omit to leave
+             *     unchanged.
+             */
             host?: string | null;
+            /**
+             * @description Whether canopy should actively monitor this server. Omit to leave
+             *     unchanged.
+             */
             is_monitored?: boolean | null;
             kind?: null | components["schemas"]["ServerKind"];
+            /** @description New name for the server. Omit to leave unchanged. */
             name?: string | null;
+            /** @description New free-text notes for the server. Omit to leave unchanged. */
             notes?: string | null;
+            /**
+             * @description New public-facing name for the server, or `null` to unlist it. Omit
+             *     to leave unchanged.
+             */
             public_name?: string | null;
             rank?: null | components["schemas"]["ServerRank"];
             tags?: null | components["schemas"]["TagMap"];
         };
+        /**
+         * @description Full detail view of a server: its own record, its bound device, its most
+         *     recent status report, current reachability/health, and group context.
+         */
         ServerDetailData: {
             /**
              * @description The server's effective `billing.*` labels — i.e. its group's
@@ -4047,8 +6182,10 @@ export interface components {
             billing_labels: components["schemas"]["BillingTag"][];
             device_info?: null | components["schemas"]["DeviceInfo"];
             group?: null | components["schemas"]["ServerGroup"];
+            /** @description Current self-reported health, derived from the most recent status report. */
             health: components["schemas"]["HealthState"];
             last_status?: null | components["schemas"]["ServerLastStatusData"];
+            /** @description The server's own record. */
             server: components["schemas"]["ServerInfo"];
             /**
              * @description Other servers in the same group (excluding `server`). Empty when the
@@ -4056,95 +6193,168 @@ export interface components {
              *     own `up` / `health` so the UI can render a status dot per sibling.
              */
             siblings: components["schemas"]["ServerInfo"][];
+            /** @description Current reachability, derived from the most recent status report. */
             up: components["schemas"]["ShortStatus"];
         };
+        /**
+         * @description A group of servers managed together: incidents roll up across the group,
+         *     members share tags, and the group carries its own notes and
+         *     notification settings.
+         */
         ServerGroup: {
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When this group was created.
+             */
             created_at: string;
             /**
              * Format: date-time
-             * @description When set, the group is archived (soft-deleted): hidden from live listings
-             *     but kept (with its archived members) and restorable.
+             * @description When set, the group is archived: hidden from live listings but kept,
+             *     along with its members, and can be restored.
              */
             deleted_at?: string | null;
             effective_version?: null | components["schemas"]["VersionStr"];
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Unique identifier for this group.
+             */
             id: string;
+            /** @description The group's display name. */
             name: string;
+            /** @description Free-form operator notes about this group. */
             notes?: string;
             /**
              * Format: int64
-             * @description How long an `incident_open` Slack notification waits in the outbox
-             *     before the drainer is allowed to ship it. A resolve that arrives
-             *     inside this window cancels the open outright (and skips its own
-             *     notification), so groups with chronic flap can crank this up to
-             *     keep Slack quiet without losing the underlying incident record.
+             * @description How long, in seconds, an incident-opened notification waits before
+             *     it's sent. If the incident resolves within this window, the
+             *     notification is cancelled outright and never sent — useful for
+             *     groups prone to brief flapping, so a transient blip doesn't spam
+             *     notifications, without losing the underlying incident record.
              */
             slack_open_delay: number;
+            /** @description Key/value tags shared by every server in the group. */
             tags?: components["schemas"]["TagMap"];
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When this group was last modified.
+             */
             updated_at: string;
             /**
              * Format: uuid
-             * @description The group's canonical member (highest rank, then highest kind) whose
-             *     version is cached in `effective_version`. Maintained by
-             *     [`ServerGroup::recompute_version`] on membership/rank/kind/delete
-             *     changes. `None` when the group has no members.
+             * @description The id of the group's canonical member server (the one whose version
+             *     is reflected in `effective_version`), chosen by highest rank then
+             *     highest kind. `None` when the group has no members.
              */
             version_server_id?: string | null;
         };
         /**
-         * @description Status-page card for a server group. Replaces the old per-central-server
-         *     card: each card now stands for a group of equal-level servers (no implicit
-         *     root). The card carries the headline name plus the per-member status dots
-         *     — version comes from the most recently-pushing member.
+         * @description A status-dashboard card summarising one group of equivalent servers, with
+         *     a status entry per member. The group's version is taken from whichever
+         *     member reported most recently.
          */
         ServerGroupCard: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Unique identifier of the group.
+             */
             id: string;
+            /** @description Status of each server belonging to this group. */
             members: components["schemas"]["FacilityServerStatus"][];
+            /** @description Name of the group. */
             name: string;
+            /** @description Free-text notes about the group. */
             notes: string;
             version?: null | components["schemas"]["VersionStr"];
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description How far the reported `version` lags behind the latest known release,
+             *     when both are known. Combines the major and minor version gaps into a
+             *     single number that grows the further behind the version is (major
+             *     gaps count for more than minor ones); `0` means the version is
+             *     current or newer than the latest known release.
+             */
             version_distance?: number | null;
         };
+        /**
+         * @description A silenced issue reference scoped to an entire server group: issues
+         *     matching this `(source, ref)` on any server in the group (or raised
+         *     directly against the group) are still recorded, but are excluded from
+         *     incidents and notifications.
+         */
         ServerGroupSilencedRef: {
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When this silence was created.
+             */
             created_at: string;
+            /** @description The operator who created this silence. `None` if not recorded. */
             created_by?: string | null;
+            /** @description The issue reference this silence matches. */
             ref: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The server group this silence applies to.
+             */
             server_group_id: string;
+            /** @description The issue source this silence matches. */
             source: string;
         };
+        /** @description Request to create a new server group. */
         ServerGroupsCreateArgs: {
+            /** @description Display name for the new group. */
             name: string;
+            /** @description Free-form notes about the group. Defaults to empty. */
             notes?: string;
             /**
              * Format: int64
-             * @description Optional initial value (seconds) for the group's Slack open
-             *     cooldown. Omit to let the database default apply.
+             * @description Optional initial delay, in whole seconds, before an "incident opened"
+             *     Slack notification for this group is delivered; an incident that
+             *     resolves within the window never notifies. Omit to accept the default.
              */
             slack_open_delay?: number | null;
+            /**
+             * @description Tags to set on the group, as an object of string keys to string
+             *     values. Keys with the reserved `canopy:` prefix cannot be set.
+             *     Defaults to empty.
+             */
             tags?: components["schemas"]["TagMap"];
         };
+        /** @description Search terms for finding server groups. */
         ServerGroupsSearchArgs: {
+            /** @description Free-text search query. */
             query: string;
         };
+        /** @description Request to update a server group. */
         ServerGroupsUpdateArgs: {
+            /** @description The fields to change. Any field omitted is left unchanged. */
             data: components["schemas"]["PartialServerGroup"];
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Identifier of the group to update.
+             */
             server_group_id: string;
         };
+        /** @description Identifies a single server by id. */
         ServerIdArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The server to operate on.
+             */
             server_id: string;
         };
+        /** @description Identifies a single server by id. */
         ServerIdOnlyArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The server to operate on.
+             */
             server_id: string;
         };
+        /**
+         * @description A server in the fleet inventory: its identity, classification, network
+         *     address, monitoring configuration, and (when requested by the endpoint)
+         *     current reachability/health.
+         */
         ServerInfo: {
             /**
              * Format: int64
@@ -4161,27 +6371,37 @@ export interface components {
             allow_legacy_status: boolean;
             /** @description Whether the server is archived (soft-deleted). */
             archived: boolean;
+            /** @description Whether this server runs in a cloud environment, if known. */
             cloud?: boolean | null;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The device currently bound to this server, if any.
+             */
             device_id?: string | null;
             /**
              * @description Effective URL for display: the stored `host`, or `https://{tailnet
-             *     hostname}` when the server has no URL but is bound to a Tailscale device,
-             *     else an empty string. Filled by `fill_display_hosts`.
+             *     hostname}` when the server has no URL but is bound to a Tailscale
+             *     device, else an empty string.
              */
             display_host: string;
             geolocation?: null | components["schemas"]["GeoPoint"];
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The group this server belongs to, if any.
+             */
             group_id?: string | null;
             /**
-             * @description Display name of the group this server belongs to (denormalised so list
-             *     rows don't need to fetch the group separately). `None` if ungrouped.
+             * @description Display name of the group this server belongs to, included directly so
+             *     list views don't need a separate lookup. `None` if ungrouped.
              */
             group_name?: string | null;
             health?: null | components["schemas"]["HealthState"];
             /** @description The server's stored URL, if any. May be absent for device-only servers. */
             host?: string | null;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Unique identifier for the server.
+             */
             id: string;
             /**
              * @description Whether canopy is actively watching this server. When `false`, the
@@ -4189,8 +6409,11 @@ export interface components {
              *     incidents.
              */
             is_monitored: boolean;
+            /** @description The kind of deployment this server represents. */
             kind: components["schemas"]["ServerKind"];
+            /** @description Operator-assigned name for the server, if any. */
             name?: string | null;
+            /** @description Free-text operator notes about the server. */
             notes: string;
             /**
              * @description Name this server appears under in the public mobile-app server list.
@@ -4200,104 +6423,197 @@ export interface components {
             rank?: null | components["schemas"]["ServerRank"];
             /**
              * Format: date-time
-             * @description Set once a device has completed enrollment for this server. While
-             *     `None`, the UI shows setup instructions.
+             * @description When a device completed enrollment for this server. `None` while
+             *     awaiting first check-in, at which point setup instructions still apply.
              */
             registered_at?: string | null;
+            /** @description Arbitrary operator-defined key/value labels attached to the server. */
             tags: components["schemas"]["TagMap"];
             up?: null | components["schemas"]["ShortStatus"];
         };
-        /** @enum {string} */
+        /**
+         * @description What kind of server this is within a deployment.
+         * @enum {string}
+         */
         ServerKind: "central" | "facility" | "canopy";
+        /**
+         * @description The server's most recently reported status push: version/host info plus
+         *     health.
+         */
         ServerLastStatusData: {
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When this status was reported.
+             */
             created_at: string;
+            /** @description Additional endpoint-defined data included with this status push. */
             extra: components["schemas"]["Value"];
-            /** @description Per-check breakdown from this push. `[]` for legacy rows. */
+            /**
+             * @description Per-check health breakdown from this push. Empty for reports
+             *     predating structured per-check health.
+             */
             health: components["schemas"]["Value"];
             /**
-             * @description Server's overall self-reported health from this status push.
-             *     `true` for legacy rows that predate the contract.
+             * @description Server's overall self-reported health from this status push. `true`
+             *     for reports predating structured per-check health.
              */
             healthy: boolean;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Unique identifier for this status report.
+             */
             id: string;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Minimum Chrome version required to use this server's reported
+             *     version, if determinable.
+             */
             min_chrome_version?: number | null;
+            /** @description Node.js version associated with the server, if known. */
             nodejs?: string | null;
             /**
-             * @description Identified operators connected as of this push, from the
-             *     `external_users` check, with display info filled from the
-             *     `tailscale_users` cache. Freshness gating ("right now" vs stale)
-             *     is the UI's job — it has `up` to hand.
+             * @description Operators identified as connected to the server as of this push,
+             *     with display details filled in where available. Whether this is
+             *     still current is for the consumer to judge, alongside `up`.
              */
             operators: components["schemas"]["OperatorPresence"][];
+            /** @description Operating system / platform the server reported, if any. */
             platform?: string | null;
+            /** @description PostgreSQL version the server reported, if any. */
             postgres?: string | null;
+            /** @description Timezone the server reported, if any. */
             timezone?: string | null;
             version?: null | components["schemas"]["VersionStr"];
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description How many releases behind the latest known version this server's
+             *     reported version is, if it could be computed.
+             */
             version_distance?: number | null;
         };
+        /** @description Filter and pagination parameters for listing servers. */
         ServerListArgs: {
             kind?: null | components["schemas"]["ServerKind"];
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Maximum number of items to return.
+             */
             limit?: number | null;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Number of items to skip from the start of the result set.
+             */
             offset: number;
         };
-        /** @enum {string} */
+        /**
+         * @description The environment tier of a server, from `production` down to `dev`.
+         * @enum {string}
+         */
         ServerRank: "production" | "clone" | "demo" | "test" | "dev";
+        /** @description Request body identifying a server to look up silences for. */
         ServerScopeArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The server to look up silences for.
+             */
             server_id: string;
         };
+        /**
+         * @description A silenced issue reference scoped to a single server: issues matching
+         *     this `(source, ref)` on this server are still recorded, but are excluded
+         *     from incidents and notifications.
+         */
         ServerSilencedRef: {
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When this silence was created.
+             */
             created_at: string;
+            /** @description The operator who created this silence. `None` if not recorded. */
             created_by?: string | null;
+            /** @description The issue reference this silence matches. */
             ref: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The server this silence applies to.
+             */
             server_id: string;
+            /** @description The issue source this silence matches. */
             source: string;
         };
+        /** @description Request to partially update a server. */
         ServerUpdateArgs: {
+            /** @description The fields to change. Any field omitted is left unchanged. */
             data: components["schemas"]["ServerDataUpdate"];
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The server to update.
+             */
             server_id: string;
         };
+        /** @description Request to enable or disable a server's backup capability for one type. */
         SetCapabilityArgs: {
+            /**
+             * @description Whether scheduled backups of this type should be enabled for this
+             *     server.
+             */
             enabled: boolean;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The server to update.
+             */
             server_id: string;
+            /** @description Backup type to enable or disable. */
             type: string;
         };
+        /**
+         * @description Request to set (or override) the schedule and retention for one backup
+         *     type of a server group.
+         */
         SetScheduleArgs: {
             /**
-             * @description Dangerous: opt this override out of the org retention floor, allowing a
-             *     retention smaller than the org minimum. Defaults false.
+             * @description Allows this override to specify retention below the organization's
+             *     minimum retention floor. Defaults to false.
              */
             allow_below_floor?: boolean;
             /**
              * Format: int64
-             * @description Seconds; None = manual-only (no schedule), distinct from 0.
+             * @description Expected seconds between scheduled backups of this type; null means
+             *     manual-only (no schedule), which is distinct from an interval of zero.
              */
             expected_interval?: number | null;
             retention?: null | components["schemas"]["RetentionPolicy"];
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The server group to configure.
+             */
             server_group_id: string;
+            /** @description Backup type this schedule and retention apply to. */
             type: string;
         };
+        /**
+         * @description Request to set the canopy-wide default schedule and retention for a
+         *     backup type.
+         */
         SetTypeDefaultArgs: {
-            /** @description Dangerous: opt this default out of the org retention floor. Defaults false. */
+            /**
+             * @description Allows this default to specify retention below the organization's
+             *     minimum retention floor. Defaults to false.
+             */
             allow_below_floor?: boolean;
+            /**
+             * @description Whether a server's capability for this type should be enabled by
+             *     default when first advertised.
+             */
             auto_enable?: boolean;
             /**
              * Format: int64
              * @description Seconds between scheduled runs; null = manual-only.
              */
             default_interval?: number | null;
+            /** @description Default retention policy for this type. */
             default_retention: components["schemas"]["RetentionPolicy"];
+            /** @description Backup type these defaults apply to. */
             type: string;
         };
         /**
@@ -4323,164 +6639,318 @@ export interface components {
          * @enum {string}
          */
         Severity: "critical" | "error" | "warning" | "info" | "debug";
-        /** @enum {string} */
+        /**
+         * @description Reachability of a server, based on how recently it last reported a status update.
+         * @enum {string}
+         */
         ShortStatus: "up" | "down" | "away" | "blip" | "gone";
+        /**
+         * @description Request body identifying an issue to silence (or unsilence) across a
+         *     whole server group.
+         */
         SilenceGroupArgs: {
+            /** @description The specific issue identifier within `source` to silence. */
             ref: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The server group to silence the issue on.
+             */
             server_group_id: string;
+            /**
+             * @description Identifies what raises the issue being silenced — for example a
+             *     specific healthcheck or backup pipeline.
+             */
             source: string;
         };
+        /**
+         * @description Request body identifying an issue to silence (or unsilence) on a
+         *     single server.
+         */
         SilenceServerArgs: {
+            /** @description The specific issue identifier within `source` to silence. */
             ref: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The server to silence the issue on.
+             */
             server_id: string;
+            /**
+             * @description Identifies what raises the issue being silenced — for example a
+             *     specific healthcheck or backup pipeline.
+             */
             source: string;
         };
+        /** @description Selects a server and a point in time to fetch a status snapshot for. */
         SnapshotArgs: {
             /**
              * Format: date-time
-             * @description When the snapshot should be "as of". Returns the most recent
-             *     status row with `created_at <= at`. Omit (or `null`) to get
-             *     the latest status (no time bound).
+             * @description Point in time the snapshot should be "as of". Returns the most
+             *     recent status reported at or before this time. Omit (or send
+             *     `null`) to get the latest status with no time bound.
              */
             at?: string | null;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Id of the server to fetch a status snapshot for.
+             */
             server_id: string;
         };
+        /** @description Identifies an issue and the time to snooze it until. */
         SnoozeArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Id of the issue to snooze.
+             */
             issue_id: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description Time until which the issue should be snoozed.
+             */
             until: string;
         };
+        /** @description One entry in the shared history of queries run in the SQL playground. */
         SqlHistoryEntry: {
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the query was executed.
+             */
             created_at: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Unique identifier for this history entry.
+             */
             id: string;
+            /** @description The SQL text that was executed. */
             query: string;
+            /** @description Tailscale login of the user who ran the query. */
             tailscale_user: string;
         };
+        /**
+         * @description A single SQL statement to run, as submitted to (or replayed from) the
+         *     read-only SQL playground.
+         */
         SqlQuery: {
+            /** @description The SQL text to execute. */
             query: string;
         };
+        /** @description The result of running a query in the read-only SQL playground. */
         SqlResult: {
+            /**
+             * @description Column names, in the order they appear in each row. Empty if the
+             *     query returned no rows.
+             */
             columns: string[];
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description How long the query took to run, in milliseconds. Timing starts
+             *     just before execution begins (immediately after the query has
+             *     been recorded to the shared history) and stops once every value
+             *     has been read back, including any text conversions.
+             */
             execution_time_ms: number;
+            /** @description Number of rows returned. */
             row_count: number;
+            /**
+             * @description The result rows. Each row is a list of values positionally
+             *     aligned with `columns`. Most Postgres types are converted to
+             *     their natural JSON equivalent (numbers, booleans, strings,
+             *     timestamps as strings, nested JSON, arrays). Types without a
+             *     natural JSON equivalent — money, ranges, and geometric types, for
+             *     example — are rendered as their text representation instead, and
+             *     so is a genuine SQL NULL, which appears here as the literal
+             *     string `"NULL"` rather than a JSON null. A JSON `null` in this
+             *     data means the value couldn't be converted at all.
+             */
             rows: unknown[][];
         };
         /**
-         * @description What the UI needs to render a status snapshot — the curated
-         *     fields ServerDetail already shows (so the modal/section can look
-         *     like the rest of the app) plus the new `healthy` / `health` and
-         *     the raw `extra` blob for forward-compat as the contract expands.
+         * @description A single status push from a server, as of a point in time, with derived
+         *     health and version information.
          */
         StatusSnapshotData: {
             /**
-             * @description For each unhealthy check on this push, the severity the
-             *     catalog + rules engine would file at. Healthy checks are
-             *     absent; absence on an unhealthy check means the catalog has
-             *     no row yet (treat as the default Warning) — the UI surfaces
-             *     the explicit severity when one is known so operators see
-             *     all five levels, not just the legacy "warning/error" pair
-             *     derived from `healthy`.
+             * @description For each currently-unhealthy check in this push, the severity it
+             *     would be filed at if it turned into an issue. Healthy checks are
+             *     omitted. An unhealthy check with no severity listed here should be
+             *     treated as a default (warning-level) severity.
              */
             check_severities: {
                 [key: string]: components["schemas"]["Severity"];
             };
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When this status push was recorded.
+             */
             created_at: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Id of the device that sent this status push, if known.
+             */
             device_id?: string | null;
+            /**
+             * @description Additional unstructured data reported alongside this push, for
+             *     fields not yet promoted to a named field on this response.
+             */
             extra: unknown;
+            /** @description Raw per-check health results as reported in this push. */
             health: unknown;
             /**
-             * @description Rollup over the per-check results (and the legacy top-level
-             *     flag) — same derivation as the status-dot border. The UI's
-             *     headline chip uses this so a failing check can't hide behind
-             *     a self-reported (or defaulted) top-level `healthy: true`.
+             * @description Overall health rollup for this push, derived from its individual
+             *     health checks (falling back to the legacy `healthy` flag). A single
+             *     failing check can't be masked by an otherwise-healthy overall
+             *     report.
              */
             health_state: components["schemas"]["HealthState"];
             /**
-             * @description Raw legacy top-level self-report. Being retired from the wire
-             *     (absent ⇒ true on ingestion); UI display should use
-             *     `health_state` instead.
+             * @description Legacy overall self-reported health flag. Being phased out in favor
+             *     of `health_state`; new integrations should not rely on it.
              */
             healthy: boolean;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Unique identifier for this status push.
+             */
             id: string;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Minimum embedded browser version required by this software version,
+             *     if known.
+             */
             min_chrome_version?: number | null;
+            /** @description Reported runtime version. */
             nodejs?: string | null;
             /**
-             * @description Identified operators connected as of this push, from the
-             *     `external_users` check, with display info filled from the
-             *     `tailscale_users` cache. Not freshness-gated — a snapshot is
-             *     explicitly "as of" a point in time.
+             * @description Operators identified as connected to the server as of this push,
+             *     with display name and profile picture filled in where known. Not
+             *     filtered by recency — reflects this specific point-in-time snapshot.
              */
             operators: components["schemas"]["OperatorPresence"][];
+            /** @description Reported operating system platform. */
             platform?: string | null;
+            /** @description Reported database engine version. */
             postgres?: string | null;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Id of the server this status was reported by.
+             */
             server_id: string;
+            /** @description Reported system timezone. */
             timezone?: string | null;
             version?: null | components["schemas"]["VersionStr"];
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description How many releases behind the latest published version this push's
+             *     version is. Absent when there's no published version to compare
+             *     against.
+             */
             version_distance?: number | null;
         };
+        /** @description A manually entered event to record against a server. */
         SubmitManualEventArgs: {
+            /**
+             * @description Whether the underlying condition is currently active. Defaults to
+             *     `true` when omitted.
+             */
             active?: boolean | null;
+            /**
+             * @description Short, single-line headline for the event. Must not contain
+             *     newlines — use `message` for multi-line detail.
+             */
             description?: string | null;
+            /** @description Human-readable message describing the event. May be multi-line. */
             message: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the underlying condition actually occurred, if different from
+             *     the time of submission. Defaults to now when omitted.
+             */
             occurredAt?: string | null;
+            /**
+             * @description Identifier for the underlying condition. Events with the same `ref`
+             *     on the same server are coalesced into the same issue rather than
+             *     opening a new one each time; use a fresh unique value if that
+             *     deduplication isn't wanted.
+             */
             ref: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Id of the server the event applies to.
+             */
             serverId: string;
             severity?: null | components["schemas"]["Severity"];
         };
+        /** @description Fleet-wide summary of software versions currently running in production. */
         SummaryData: {
+            /**
+             * @description Lowest and highest version currently reported by a production
+             *     server.
+             */
             bracket: components["schemas"]["LiveVersionsBracket"];
+            /**
+             * @description Distinct major.minor release lines currently observed in
+             *     production, each as a `[major, minor]` pair.
+             */
             releases: [
                 number,
                 number
             ][];
+            /**
+             * @description Every distinct full version string currently observed in
+             *     production, in ascending order.
+             */
             versions: components["schemas"]["VersionStr"][];
         };
+        /** @description Free-form key/value tags, as a JSON object whose values are all strings. */
         TagMap: {
             [key: string]: string;
         };
+        /**
+         * @description A live snapshot of a device's corresponding node on the Tailscale
+         *     network, fetched from the cached tailnet directory rather than stored
+         *     on the device record itself.
+         */
         TailnetLiveInfo: {
+            /** @description The node's current Tailscale IP addresses. */
             addresses: string[];
+            /** @description The node's display name in the Tailscale admin console. */
             display_name: string;
             /**
              * Format: date-time
-             * @description When the Tailscale control plane last saw this node. `None` if
-             *     the API didn't carry a value (or it didn't parse).
+             * @description When the Tailscale network last saw this node online. Omitted if
+             *     that information wasn't available.
              */
             last_seen?: string | null;
+            /** @description The Tailscale network's unique identifier for this node. */
             node_id: string;
             /**
-             * @description Derived: `last_seen` is within the last 5 minutes — Tailscale's
-             *     own "online" heuristic in the admin console. False when
-             *     `last_seen` is missing.
+             * @description Whether the node has been seen within the last 5 minutes — the
+             *     same heuristic Tailscale's own admin console uses to mark a node
+             *     online. False when `last_seen` is missing.
              */
             online: boolean;
+            /** @description ACL tags applied to the node in Tailscale. */
             tags: string[];
+            /** @description The tailnet (Tailscale network) this node belongs to. */
             tailnet: string;
         };
+        /** @description Identifies a device and the role to trust it at. */
         TrustArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The device to update.
+             */
             device_id: string;
+            /** @description The role to assign to the device. */
             role: components["schemas"]["DeviceRole"];
         };
-        /** @description Canopy-wide default schedule/retention for a backup type. */
+        /** @description Canopy-wide default schedule and retention for a backup type. */
         TypeDefaultView: {
             /** @description Whether this default opts out of the org retention floor (dangerous). */
             allow_below_floor: boolean;
+            /**
+             * @description Whether a server's capability for this type is enabled by default
+             *     when first advertised.
+             */
             auto_enable: boolean;
             /**
              * Format: int64
@@ -4488,120 +6958,234 @@ export interface components {
              */
             default_interval?: number | null;
             default_retention?: null | components["schemas"]["RetentionPolicy"];
+            /** @description Backup type these defaults apply to. */
             type: string;
         };
+        /** @description Changes to apply to an existing artifact. */
         UpdateArtifactArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Id of the artifact to update.
+             */
             artifact_id: string;
+            /** @description New artifact type. */
             artifact_type: string;
+            /** @description New download URL. */
             download_url: string;
+            /** @description New target platform. */
             platform: string;
         };
+        /** @description Request to update a group's mutable backup configuration fields. */
         UpdateBackupConfigArgs: {
             /**
-             * @description New region (or None to clear). Changing the region is allowed but is
-             *     effectively a repo migration — the UI warns. Structural fields
-             *     (bucket/role/mode) are not editable here.
+             * @description New AWS region for the bucket, or null to clear it. Changing the
+             *     region effectively migrates the backup repository to a new location.
+             *     Other configuration fields (bucket, roles, mode) cannot be changed
+             *     through this endpoint.
              */
             region?: string | null;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The server group to update.
+             */
             server_group_id: string;
         };
+        /** @description Identifies a version and the changelog text to set on it. */
         UpdateChangelogArgs: {
+            /** @description New changelog text for the version. */
             changelog: string;
+            /** @description Exact version string to update (e.g. `"1.2.3"`). */
             version: string;
         };
+        /** @description Request to rename (or clear the name of) a device key. */
         UpdateKeyNameArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The key to rename.
+             */
             key_id: string;
+            /** @description New display name for the key, or null to clear it. */
             name?: string | null;
         };
+        /** @description Request body for replacing a healthcheck's conditional severity rules. */
         UpdateRulesArgs: {
+            /**
+             * @description The healthcheck name whose rules to replace; must already exist
+             *     in the catalog.
+             */
             check_name: string;
             /**
-             * @description Either `null` (clear the ladder) or a JsonLogic if-ladder as
-             *     documented on `IfLadder`. An empty-branches ladder is normalised
-             *     to null at the API layer.
+             * @description The new conditional rules to store, or `null` to remove all
+             *     conditional rules and rely solely on the base severity. Same
+             *     shape as the `rules` field returned when listing checks. A ladder
+             *     with no condition/severity pairs is treated the same as `null`.
              */
             rules?: unknown;
         };
+        /** @description Identifies a version and the publication status to set on it. */
         UpdateStatusArgs: {
+            /**
+             * @description New status. Accepted values are `"draft"`, `"published"`, and
+             *     `"yanked"` (case-insensitive); an unrecognized value is treated as
+             *     `"draft"`.
+             */
             status: string;
+            /** @description Exact version string to update (e.g. `"1.2.3"`). */
             version: string;
         };
         /**
-         * @description Machine-facing config-as-a-resource upsert (ops/pulumi). `mode` is implicit
-         *     — always from-birth — so the bucket must be empty and no passphrase is
-         *     supplied (importing an existing repo stays an interactive operator action).
-         *     `bucket`/`prefix` are the identity and immutable on re-apply; the role ARNs
-         *     and region are reconciled to the request each time. **Schedule and retention
-         *     are intentionally NOT part of this API** — they're per-`(group, type)` and
-         *     managed through the operator UI (inheriting the canopy-wide type defaults).
+         * @description Request to declaratively create or update a group's backup configuration,
+         *     for automated/infrastructure-as-code callers. Always creates the
+         *     repository with an automatically generated passphrase; importing an
+         *     existing repository is only supported through the interactive setup
+         *     wizard. `bucket`/`prefix` identify the configuration and are immutable
+         *     after creation; the role ARNs and region are reconciled to the request on
+         *     every call. Schedule and retention are not configurable here — see the
+         *     `/backups/set_schedule` endpoint.
          */
         UpsertBackupConfigArgs: {
+            /**
+             * @description Name of the S3 bucket to store backups in. Immutable once the
+             *     configuration is created.
+             */
             bucket: string;
             /**
-             * @description Maintenance role: the backups pod assumes this for maintenance/inspection/
-             *     s3-metrics (s3:* + delete + CloudWatch).
+             * @description AWS IAM role ARN used for maintenance, inspection, and metrics
+             *     collection on the bucket; requires full S3 access (including delete)
+             *     and CloudWatch access.
              */
             maintenance_role_arn: string;
+            /**
+             * @description Key prefix within the bucket to store this group's backups under;
+             *     defaults to empty (bucket root). Immutable once the configuration is
+             *     created.
+             */
             prefix?: string;
+            /** @description AWS region the bucket is in, if not the default. */
             region?: string | null;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The server group to configure.
+             */
             server_group_id: string;
-            /** @description Device role: public-server assumes this to mint device creds (no delete). */
+            /**
+             * @description AWS IAM role ARN used to issue upload credentials to devices; must not
+             *     grant delete permission.
+             */
             target_role_arn: string;
         };
         Value: unknown;
+        /** @description A single released (or draft) software version. */
         VersionData: {
-            /** Format: date-time */
-            created_at: string;
-            /** Format: int32 */
-            major: number;
-            /** Format: int32 */
-            minor: number;
-            /** Format: int32 */
-            patch: number;
             /**
-             * @description `true` when this version has no unresolved known issues. See the
-             *     `version_known_issues` table and `add_known_issue`/`resolve_known_issue`
-             *     endpoints for management.
+             * Format: date-time
+             * @description When this version was created.
              */
-            ready: boolean;
-            status: components["schemas"]["VersionStatus"];
-        };
-        VersionDetail: {
-            changelog: string;
-            /** Format: date-time */
             created_at: string;
-            /** Format: uuid */
-            id: string;
-            is_latest_in_minor: boolean;
-            known_issues: components["schemas"]["KnownIssueData"][];
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Major version number.
+             */
             major: number;
-            /** Format: int32 */
-            min_chrome_version?: number | null;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Minor version number.
+             */
             minor: number;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Patch version number.
+             */
             patch: number;
             /** @description `true` when this version has no unresolved known issues. */
             ready: boolean;
-            related_versions: components["schemas"]["RelatedVersionData"][];
+            /** @description Publication status of this version (e.g. draft, published, yanked). */
             status: components["schemas"]["VersionStatus"];
-            /** Format: date-time */
+        };
+        /**
+         * @description Full detail for a single version, including its changelog, related
+         *     versions in the same release line, and known issues.
+         */
+        VersionDetail: {
+            /** @description Changelog text for this version. */
+            changelog: string;
+            /**
+             * Format: date-time
+             * @description When this version was created.
+             */
+            created_at: string;
+            /**
+             * Format: uuid
+             * @description Unique identifier for this version.
+             */
+            id: string;
+            /**
+             * @description `true` when this is the highest patch published in its release
+             *     line.
+             */
+            is_latest_in_minor: boolean;
+            /**
+             * @description Every known issue ever raised against this version's release line,
+             *     resolved or not.
+             */
+            known_issues: components["schemas"]["KnownIssueData"][];
+            /**
+             * Format: int32
+             * @description Major version number.
+             */
+            major: number;
+            /**
+             * Format: int32
+             * @description Minimum embedded browser version required by this version, if
+             *     known.
+             */
+            min_chrome_version?: number | null;
+            /**
+             * Format: int32
+             * @description Minor version number.
+             */
+            minor: number;
+            /**
+             * Format: int32
+             * @description Patch version number.
+             */
+            patch: number;
+            /**
+             * @description `true` when this exact version has no unresolved known issues.
+             *     Issues fixed at or before this patch don't count against it.
+             */
+            ready: boolean;
+            /** @description Other versions in the same major.minor release line. */
+            related_versions: components["schemas"]["RelatedVersionData"][];
+            /** @description Publication status of this version (e.g. draft, published, yanked). */
+            status: components["schemas"]["VersionStatus"];
+            /**
+             * Format: date-time
+             * @description When this version was last updated.
+             */
             updated_at: string;
         };
+        /** @description Identifies a single version by id. */
         VersionIdArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Id of a version whose release line to look up.
+             */
             version_id: string;
         };
-        /** @enum {string} */
+        /**
+         * @description Publication status of a release version.
+         * @enum {string}
+         */
         VersionStatus: "draft" | "published" | "yanked";
-        /** @example 2.10.5 */
+        /**
+         * @description A semantic version string, e.g. `2.10.5`.
+         * @example 2.10.5
+         */
         VersionStr: string;
+        /** @description Identifies a version by its exact version string. */
         VersionStringArgs: {
+            /** @description Exact version string to look up (e.g. `"1.2.3"`). */
             version: string;
         };
     };

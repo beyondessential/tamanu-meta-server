@@ -9,6 +9,7 @@ use diesel::{
 };
 use serde::{Deserialize, Serialize};
 
+/// What kind of server this is within a deployment.
 #[derive(
 	Debug,
 	Clone,
@@ -24,9 +25,13 @@ use serde::{Deserialize, Serialize};
 #[diesel(sql_type = Text)]
 #[serde(rename_all = "lowercase")]
 pub enum ServerKind {
+	/// A deployment's central server, which its facility servers sync to.
+	/// The default.
 	#[default]
 	Central,
+	/// A facility server: an on-site instance that syncs to a central server.
 	Facility,
+	/// A canopy instance itself, monitored like any other server.
 	Canopy,
 }
 

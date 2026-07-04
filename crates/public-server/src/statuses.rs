@@ -30,75 +30,76 @@ use uuid::Uuid;
 
 use crate::state::AppState;
 
-/// Status payload contract — documents the wire shape only. The
-/// handler actually receives `serde_json::Value` and runs its own
-/// validation so arbitrary additional fields flow through into
-/// `statuses.extra` unchanged.
+/// A status push: a server's periodic heartbeat carrying its self-reported
+/// health.
 ///
-/// Schema is reproduced here so the openapi spec describes the
-/// `healthy` and `health` keys explicitly; otherwise consumers have
-/// to read the prose to know they exist.
+/// Besides the reserved `healthy` and `health` keys described here, any
+/// additional top-level fields are accepted and stored verbatim as extra
+/// status data.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct StatusPayload {
-	/// Overall server self-reported health. **Absent ⇒ `true`** —
-	/// legacy senders that don't know about this field never
-	/// false-positive unhealthy. Persisted on `statuses.healthy` for
-	/// historical analysis and the status snapshot UI, but **not
-	/// consulted for incident or severity decisions**: canopy derives
-	/// the system-healthy judgement from per-check results, with each
-	/// check's severity coming from the operator-owned
-	/// `healthcheck_severities` catalog.
+	/// Overall self-reported health of the server. **Absent means `true`**,
+	/// so senders that predate this field are never treated as unhealthy by
+	/// omission. Recorded for historical analysis and display, but **not
+	/// consulted for incident or severity decisions** — those are derived
+	/// from the per-check results in `health`, with each check's severity
+	/// controlled by an operator-managed catalog.
 	pub healthy: Option<bool>,
 
-	/// Per-check breakdown. **Required** — a push without a `health`
-	/// array is rejected with `400` (unless the server opts into the
-	/// legacy format via `allow_legacy_status`, in which case such a push
-	/// only refreshes reachability and carries prior checks forward). May
-	/// be empty (`[]`) for a server that genuinely runs no checks. Each
-	/// entry must include `check`
-	/// (non-empty) and exactly one of `result` / `healthy`; arbitrary
-	/// additional fields per check (latency, free disk %, certificate
-	/// expiry, etc.) are passed through verbatim and surfaced in the
-	/// status snapshot UI.
+	/// Per-check breakdown. **Required** — a push without a `health` array is
+	/// rejected with 400 (unless an operator has opted the server into the
+	/// legacy format, in which case such a push only refreshes reachability
+	/// and carries the previously reported checks forward). May be empty
+	/// (`[]`) for a server that genuinely runs no checks. Each entry must
+	/// include a non-empty `check` name and exactly one of `result` /
+	/// `healthy`; any additional fields per check (latency, free disk %,
+	/// certificate expiry, etc.) are passed through verbatim and shown in the
+	/// status UI.
 	///
-	/// Each check name seen — whatever its result — upserts into
-	/// `healthcheck_severities` so operators can review and adjust the
-	/// severity assigned to its failures. Failed checks file (or keep
-	/// active) an issue at `(status, health/<check>)` using the
-	/// catalog's current severity for that check name; broken checks
-	/// file at `(status, health-broken/<check>)` at a fixed Warning.
+	/// Every check name seen — whatever its result — is added to the
+	/// operator-facing check catalog, where the severity assigned to its
+	/// failures can be reviewed and adjusted. A failed or warning check opens
+	/// (or keeps open) an issue for that check at the catalog's current
+	/// severity; a broken check opens a separate issue at a fixed Warning
+	/// severity; passed and skipped results open nothing and close prior
+	/// issues.
 	pub health: Vec<HealthCheck>,
 
-	/// Free-form additional data (uptime, postgres version, timezone,
-	/// hostname, etc.). Stored verbatim in `statuses.extra` and
-	/// surfaced as raw JSON in the status snapshot.
+	/// Free-form additional data (uptime, database version, timezone,
+	/// hostname, etc.). Stored verbatim and surfaced as raw JSON in the
+	/// status view.
 	///
-	/// A `tamanuVersion` here is used as the server's tracked version
+	/// A `tamanuVersion` field here is used as the server's tracked version
 	/// (compared against the published version catalog), superseding the
 	/// legacy `X-Version` request header. If both are present,
-	/// `tamanuVersion` wins; if neither is, the status is versionless.
+	/// `tamanuVersion` wins; if neither is, the status is recorded without a
+	/// version.
 	#[serde(flatten)]
 	#[schema(additional_properties = true, value_type = Object)]
 	pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
+/// One health-check result within a status push.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct HealthCheck {
-	/// Identifier for the check. Must be a non-empty string. Used as
-	/// the issue's `ref` (`health/<check>`) so the same check
-	/// transitions land on the same issue across pushes.
+	/// Name of the check. Must be a non-empty string, and should stay stable
+	/// across pushes: results for the same name are correlated over time, so
+	/// successive failures and the eventual recovery land on the same issue.
 	pub check: String,
-	/// Outcome of the check. Exactly one of `result` / `healthy` must
-	/// be present per entry. `failed` files an issue at the catalog
-	/// severity; `broken` (the check itself errored, not the system
-	/// under test) files at a fixed Warning; `skipped` (precondition
-	/// not met) and `passed` file nothing and close prior issues.
+	/// Outcome of the check: `passed`, `warning`, `failed`, `broken`, or
+	/// `skipped`. Exactly one of `result` / `healthy` must be present per
+	/// entry. `warning` and `failed` open an issue at the check's catalog
+	/// severity; `broken` (the check itself errored, not the system under
+	/// test) opens a separate issue at a fixed Warning severity without
+	/// confirming or clearing a known failure; `skipped` (a precondition was
+	/// not met) and `passed` open nothing and close prior issues.
 	pub result: Option<CheckResult>,
-	/// Legacy pass/fail for the check: `true` ⇒ `passed`, `false` ⇒
-	/// `failed`. Mutually exclusive with `result`.
+	/// Legacy pass/fail form: `true` means `passed`, `false` means `failed`.
+	/// Mutually exclusive with `result`.
 	pub healthy: Option<bool>,
-	/// Arbitrary additional fields specific to the check (rendered in
-	/// the snapshot UI as a key/value block).
+	/// Arbitrary additional fields specific to this check (shown in the
+	/// status UI as a key/value block, and available to operator-defined
+	/// severity rules).
 	#[serde(flatten)]
 	#[schema(additional_properties = true, value_type = Object)]
 	pub extra: serde_json::Map<String, serde_json::Value>,
@@ -118,17 +119,21 @@ const HEALTH_REF: &str = "health";
 /// operators can silence the two independently.
 const BROKEN_REF: &str = "health-broken";
 
-/// The status-push response: the persisted [`Status`] plus `backup_now`, the
-/// backup types this server should back up *right now* (operator one-offs +
-/// schedule-due; see [`backups_due_now_for_server`]). The device runs each; an
-/// empty list means "nothing to do". The `Status` fields are flattened so they
-/// stay top-level for clients that predate `backup_now` and ignore it.
+/// The status-push response: the stored status record (its fields appear at
+/// the top level of the response object) plus `backup_now`, the backup types
+/// this server should back up *right now*. Clients that predate `backup_now`
+/// can safely ignore it.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct StatusResponse {
+	/// The status record as stored, flattened into the top level of the
+	/// response.
 	#[serde(flatten)]
 	pub status: Status,
-	/// Backup types due/requested for this server now. Each serializes as a
-	/// plain string (e.g. `"tamanu-postgres"`).
+	/// Backup types the server should back up now: operator-requested
+	/// one-offs plus scheduled backups that are due. Each serializes as a
+	/// plain string (e.g. `"tamanu-postgres"`). The device should run each
+	/// listed type, then report via `POST /backup-report`; an empty list
+	/// means nothing to do.
 	#[schema(value_type = Vec<String>)]
 	pub backup_now: Vec<BackupType>,
 }
@@ -137,6 +142,20 @@ pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new().routes(routes!(create))
 }
 
+/// Submit a status heartbeat for a server.
+///
+/// Records a periodic status push against the server identified in the
+/// path: overall self-reported health, a per-check breakdown, and any
+/// free-form extra data. Each failed or warning check opens (or keeps
+/// open) an issue at that check's operator-configured severity, and each
+/// passed check closes any issue it previously opened; the server's
+/// tracked software version is also updated from the payload.
+///
+/// The calling device must be the one enrolled for this exact server (or
+/// hold the admin role). The response echoes back the stored status
+/// record, plus a `backup_now` list of backup types the server should
+/// back up immediately — devices should treat a non-empty list as a
+/// prompt to run those backups and report them afterwards.
 #[utoipa::path(
 	post,
 	path = "/{server_id}",

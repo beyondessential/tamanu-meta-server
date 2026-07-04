@@ -2,15 +2,21 @@ use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
 
+/// Reachability of a server, based on how recently it last reported a status update.
 #[derive(
 	Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, utoipa::ToSchema,
 )]
 #[serde(rename_all = "lowercase")]
 pub enum ShortStatus {
+	/// The server reported within the last two minutes; it is online and reachable.
 	Up,
+	/// The server has not reported in over thirty minutes; treated as unreachable.
 	Down,
+	/// The server last reported between ten and thirty minutes ago.
 	Away,
+	/// The server last reported between two and ten minutes ago — a brief gap that may not indicate a real problem.
 	Blip,
+	/// No status has ever been reported for this server.
 	#[default]
 	Gone,
 }
@@ -27,26 +33,24 @@ impl Display for ShortStatus {
 	}
 }
 
-/// Outcome of a single `health[]` check, as reported by bestool.
+/// Outcome of a single health check reported in a server's status update.
 ///
-/// The wire field is `result`; legacy senders use `healthy: bool`
-/// instead (exactly one of the two must be present per entry). Use
-/// [`CheckResult::from_entry`] to read either form — stored status
-/// rows keep the legacy shape forever, so every reader of `health[]`
-/// must go through it.
+/// Older reports may send a plain pass/fail flag instead of one of these
+/// outcomes; when that happens a passing flag is treated as `passed` and a
+/// failing flag as `failed`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum CheckResult {
-	/// Check ran, system under test is fine.
+	/// The check ran and the system it tested is healthy.
 	Passed,
-	/// Check ran, system under test is degraded but not failing.
+	/// The check ran and the system it tested is degraded but not failing.
 	Warning,
-	/// Check ran, system under test is unhealthy.
+	/// The check ran and the system it tested is unhealthy.
 	Failed,
-	/// The check itself errored or is misconfigured; says nothing
-	/// about the system under test.
+	/// The check itself failed to run or is misconfigured; this says nothing
+	/// about the health of the system it was meant to test.
 	Broken,
-	/// A precondition wasn't met, so the check didn't run.
+	/// A precondition for the check wasn't met, so it didn't run.
 	Skipped,
 }
 
@@ -96,24 +100,24 @@ impl std::str::FromStr for CheckResult {
 	}
 }
 
-/// One identified human connected to a server right now, distilled from
-/// the `external_users` health check on a status push.
+/// One person currently connected to a server, identified by their
+/// Tailscale login.
 ///
-/// "Identified" means the session's source address resolved to a Tailscale
-/// login via `tailscale whois` on the device — local console or
-/// non-Tailscale SSH sessions don't produce one of these. One person with
-/// several concurrent sessions appears once.
+/// Only sessions that could be tied to an authenticated Tailscale identity
+/// are reported here — local console access and other unauthenticated
+/// sessions don't produce one of these. A person with several simultaneous
+/// sessions appears once.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct OperatorPresence {
-	/// Tailscale login (an email), as reported by the device.
+	/// The person's Tailscale login (an email address).
 	pub login: String,
-	/// Display name from the `tailscale_users` cache; `None` when this
-	/// login has never authenticated against canopy.
+	/// The person's display name, if known. `None` if this login has never
+	/// been seen before.
 	pub name: Option<String>,
-	/// Profile picture URL from the `tailscale_users` cache.
+	/// URL of the person's profile picture, if known.
 	pub profile_pic: Option<String>,
-	/// Earliest `connected_since` across the person's sessions — how long
-	/// they've been continuously connected, as tracked by the device.
+	/// When the person's current connection began. If they have multiple
+	/// simultaneous sessions, this is the earliest start time among them.
 	pub connected_since: Option<jiff::Timestamp>,
 }
 
@@ -317,32 +321,25 @@ mod tests {
 	}
 }
 
-/// Server's self-reported health state, derived from the most
-/// recent status row's per-check results (and, as legacy input, its
-/// top-level `healthy` field — that flag is being retired from the
-/// wire). Orthogonal to [`ShortStatus`]: a server can be reachable
-/// (`up`) and reporting itself unhealthy at the same time.
+/// A server's self-reported health, derived from the outcomes of its own
+/// health checks.
 ///
-/// The UI renders this as the *border* of `<StatusDot>` so both
-/// dimensions (reachability and self-report) show in one glyph.
+/// This is independent of reachability: a server can be online and
+/// reachable while reporting itself unhealthy, or unreachable while its
+/// last report was healthy.
 #[derive(
 	Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, utoipa::ToSchema,
 )]
 #[serde(rename_all = "lowercase")]
 pub enum HealthState {
-	/// Every `health[]` entry passed or was skipped (and the legacy
-	/// top-level `healthy` flag, if sent, was `true`). Also the
-	/// default for servers with no status row at all — there's no
-	/// signal that says otherwise. (Reachability covers the "we
-	/// haven't heard from this server" case separately.)
+	/// Every health check passed or was skipped. Also the default when no
+	/// status has ever been reported for a server, since there's no signal
+	/// to say otherwise.
 	#[default]
 	Healthy,
-	/// At least one `health[]` entry reports warning or broken — or,
-	/// in the legacy form, `healthy: false` under top-level `true`
-	/// (old bestool's warning encoding). Operator should investigate
-	/// but it's not an incident.
+	/// At least one health check reported a warning. Worth investigating,
+	/// but not considered an incident.
 	Warning,
-	/// At least one `health[]` entry reports `result: failed`, or the
-	/// legacy top-level `healthy` flag was `false`. Incident-class.
+	/// At least one health check failed. Considered an incident.
 	Unhealthy,
 }

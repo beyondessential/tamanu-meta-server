@@ -10,19 +10,31 @@ use uuid::Uuid;
 use crate::fns::Page;
 use crate::state::AppState;
 
+/// Summary of a saved SQL snippet, as shown when listing the snippet
+/// library.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct BestoolSnippetInfo {
+	/// Unique identifier for this version of the snippet.
 	pub id: Uuid,
+	/// The snippet's display name.
 	pub name: String,
+	/// Optional description of what the snippet does.
 	pub description: Option<String>,
 }
 
+/// Full content of a saved SQL snippet, including its query text.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct BestoolSnippetDetail {
+	/// Unique identifier for this version of the snippet.
 	pub id: Uuid,
+	/// The snippet's display name.
 	pub name: String,
+	/// Optional description of what the snippet does.
 	pub description: Option<String>,
+	/// The stored SQL query text.
 	pub sql: String,
+	/// Tailscale login of the user who created this version of the
+	/// snippet.
 	pub editor: String,
 }
 
@@ -35,12 +47,20 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(delete_snippet))
 }
 
+/// Pagination parameters for listing the snippet library.
 #[derive(Deserialize, ToSchema)]
 pub struct BestoolListArgs {
+	/// Number of snippets to skip before the returned page starts.
 	pub offset: u64,
+	/// Maximum number of snippets to return; defaults to 50 if omitted.
 	pub limit: Option<u64>,
 }
 
+/// List saved SQL snippets.
+///
+/// Returns a page of the current snippets in the library — one entry per
+/// snippet, showing only its latest, non-deleted version — ordered by
+/// name, together with the total count.
 #[utoipa::path(
 	post,
 	path = "/list_snippets",
@@ -74,16 +94,28 @@ pub async fn list_snippets(
 	Ok(Json(Page { items, total }))
 }
 
+/// Request body for creating a new snippet, or saving a new version of an
+/// existing one.
 #[derive(Deserialize, ToSchema)]
 pub struct SaveArgs {
-	/// When set, the saved snippet supersedes the snippet with this id (i.e.
-	/// it's an edit). When absent, a fresh snippet is created.
+	/// When set, this save creates a new version that supersedes the
+	/// snippet with this id (an edit to an existing snippet). When
+	/// omitted, a brand new snippet is created.
 	pub supersedes: Option<Uuid>,
+	/// The snippet's display name.
 	pub name: String,
+	/// Optional description of what the snippet does.
 	pub description: Option<String>,
+	/// The SQL query text to store.
 	pub sql: String,
 }
 
+/// Save a SQL snippet.
+///
+/// Creates a brand new snippet, or — when `supersedes` is set — a new
+/// version that supersedes an existing one. The new version is recorded
+/// under the caller's Tailscale identity. Returns the full content of the
+/// newly created version.
 #[utoipa::path(
 	post,
 	path = "/save_snippet",
@@ -120,11 +152,19 @@ pub async fn save_snippet(
 	}))
 }
 
+/// Request body identifying a single snippet version.
 #[derive(Deserialize, ToSchema)]
 pub struct GetArgs {
+	/// The snippet version's unique identifier. Doesn't need to be the
+	/// latest version in its history.
 	pub id: Uuid,
 }
 
+/// Get a saved SQL snippet by id.
+///
+/// Returns the full content of the given snippet version, including its
+/// SQL text. The id doesn't have to be the current version — superseded
+/// and deleted versions can still be fetched directly.
 #[utoipa::path(
 	post,
 	path = "/get_snippet",
@@ -153,6 +193,12 @@ pub async fn get_snippet(
 	}))
 }
 
+/// Resolve a snippet id to its latest version.
+///
+/// Follows the version chain forward from the given id and returns the
+/// newest id in that chain (the same id, if it's already the latest).
+/// Useful for turning a stored or bookmarked snippet id into the id of
+/// its current version.
 #[utoipa::path(
 	post,
 	path = "/get_latest_snippet_id",
@@ -172,6 +218,12 @@ pub async fn get_latest_snippet_id(
 	Ok(Json(id))
 }
 
+/// Soft-delete a saved snippet.
+///
+/// Marks the given snippet version as deleted; it stops appearing in the
+/// snippet list, but the version itself (and the rest of its history)
+/// isn't removed. Deleting one version doesn't affect any other version
+/// in the same snippet's history.
 #[utoipa::path(
 	post,
 	path = "/delete_snippet",

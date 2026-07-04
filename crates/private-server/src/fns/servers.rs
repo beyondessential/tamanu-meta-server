@@ -30,12 +30,19 @@ use utoipa::ToSchema;
 use crate::fns::Page;
 use crate::state::AppState;
 
+/// Full detail view of a server: its own record, its bound device, its most
+/// recent status report, current reachability/health, and group context.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ServerDetailData {
+	/// The server's own record.
 	pub server: ServerInfo,
+	/// Full detail on the device bound to this server, if any.
 	pub device_info: Option<super::devices::DeviceInfo>,
+	/// The server's most recently reported status, if it has ever reported one.
 	pub last_status: Option<ServerLastStatusData>,
+	/// Current reachability, derived from the most recent status report.
 	pub up: ShortStatus,
+	/// Current self-reported health, derived from the most recent status report.
 	pub health: HealthState,
 	/// The group this server belongs to, with its notes/tags so the UI can
 	/// render the "Group" section without a second fetch. `None` when the
@@ -50,27 +57,39 @@ pub struct ServerDetailData {
 	pub billing_labels: Vec<super::server_groups::BillingTag>,
 }
 
+/// A server in the fleet inventory: its identity, classification, network
+/// address, monitoring configuration, and (when requested by the endpoint)
+/// current reachability/health.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ServerInfo {
+	/// Unique identifier for the server.
 	pub id: Uuid,
+	/// Operator-assigned name for the server, if any.
 	pub name: Option<String>,
+	/// The kind of deployment this server represents.
 	pub kind: ServerKind,
+	/// Where this server sits in its deployment's promotion order (e.g.
+	/// production vs. staging), if applicable.
 	pub rank: Option<ServerRank>,
 	/// The server's stored URL, if any. May be absent for device-only servers.
 	pub host: Option<String>,
 	/// Effective URL for display: the stored `host`, or `https://{tailnet
-	/// hostname}` when the server has no URL but is bound to a Tailscale device,
-	/// else an empty string. Filled by `fill_display_hosts`.
+	/// hostname}` when the server has no URL but is bound to a Tailscale
+	/// device, else an empty string.
 	pub display_host: String,
+	/// The device currently bound to this server, if any.
 	pub device_id: Option<Uuid>,
+	/// The group this server belongs to, if any.
 	pub group_id: Option<Uuid>,
-	/// Display name of the group this server belongs to (denormalised so list
-	/// rows don't need to fetch the group separately). `None` if ungrouped.
+	/// Display name of the group this server belongs to, included directly so
+	/// list views don't need a separate lookup. `None` if ungrouped.
 	pub group_name: Option<String>,
 	/// Name this server appears under in the public mobile-app server list.
 	/// `None` means the server is not listed publicly.
 	pub public_name: Option<String>,
+	/// Whether this server runs in a cloud environment, if known.
 	pub cloud: Option<bool>,
+	/// Geographic location of the server, if known.
 	pub geolocation: Option<GeoPoint>,
 	/// Whether canopy is actively watching this server. When `false`, the
 	/// reachability sweep skips it and its issues don't contribute to
@@ -84,98 +103,142 @@ pub struct ServerInfo {
 	/// server down. Always positive; only consulted when `is_monitored`
 	/// is `true`. The default at creation is 600 (10 minutes).
 	pub alert_when_down_for: i64,
+	/// Free-text operator notes about the server.
 	pub notes: String,
+	/// Arbitrary operator-defined key/value labels attached to the server.
 	pub tags: TagMap,
-	/// Set once a device has completed enrollment for this server. While
-	/// `None`, the UI shows setup instructions.
+	/// When a device completed enrollment for this server. `None` while
+	/// awaiting first check-in, at which point setup instructions still apply.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub registered_at: Option<Timestamp>,
 	/// Whether the server is archived (soft-deleted).
 	pub archived: bool,
-	/// Reachability of the server, derived from the most recent status row.
-	/// `None` when the endpoint that produced this row didn't batch-fetch
-	/// statuses (e.g. the cheap list/get endpoints); a populated value of
-	/// [`ShortStatus::Gone`] means "fetched and no status exists".
+	/// Reachability of the server, derived from its most recent status
+	/// report. Omitted when the endpoint that produced this response didn't
+	/// batch-fetch statuses (e.g. the cheap list/get endpoints); a present
+	/// value of "gone" means the lookup ran and found no status at all.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub up: Option<ShortStatus>,
-	/// Self-reported health from the most recent status row. Same `None`
-	/// vs. populated-default semantics as [`Self::up`].
+	/// Self-reported health from the most recent status report. Same
+	/// omitted-vs-present semantics as `up`.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub health: Option<HealthState>,
 }
 
+/// The server's most recently reported status push: version/host info plus
+/// health.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ServerLastStatusData {
+	/// Unique identifier for this status report.
 	pub id: Uuid,
+	/// When this status was reported.
 	pub created_at: Timestamp,
+	/// Software version the server reported running, if known.
 	pub version: Option<VersionStr>,
+	/// How many releases behind the latest known version this server's
+	/// reported version is, if it could be computed.
 	pub version_distance: Option<u64>,
+	/// Minimum Chrome version required to use this server's reported
+	/// version, if determinable.
 	pub min_chrome_version: Option<u32>,
+	/// Operating system / platform the server reported, if any.
 	pub platform: Option<String>,
+	/// PostgreSQL version the server reported, if any.
 	pub postgres: Option<String>,
+	/// Node.js version associated with the server, if known.
 	pub nodejs: Option<String>,
+	/// Timezone the server reported, if any.
 	pub timezone: Option<String>,
-	/// Server's overall self-reported health from this status push.
-	/// `true` for legacy rows that predate the contract.
+	/// Server's overall self-reported health from this status push. `true`
+	/// for reports predating structured per-check health.
 	pub healthy: bool,
-	/// Per-check breakdown from this push. `[]` for legacy rows.
+	/// Per-check health breakdown from this push. Empty for reports
+	/// predating structured per-check health.
 	pub health: JsonValue,
+	/// Additional endpoint-defined data included with this status push.
 	pub extra: JsonValue,
-	/// Identified operators connected as of this push, from the
-	/// `external_users` check, with display info filled from the
-	/// `tailscale_users` cache. Freshness gating ("right now" vs stale)
-	/// is the UI's job — it has `up` to hand.
+	/// Operators identified as connected to the server as of this push,
+	/// with display details filled in where available. Whether this is
+	/// still current is for the consumer to judge, alongside `up`.
 	pub operators: Vec<commons_types::status::OperatorPresence>,
 }
 
+/// Partial update to a server's fields. Only fields present in the request
+/// are changed. For `device_id`, `group_id`, `public_name`, `cloud`, and
+/// `geolocation`, sending an explicit `null` clears the field, while
+/// omitting it leaves the current value unchanged.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
 pub struct ServerDataUpdate {
+	/// New name for the server. Omit to leave unchanged.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub name: Option<String>,
+	/// New deployment kind for the server. Omit to leave unchanged.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub kind: Option<ServerKind>,
+	/// New promotion rank for the server. Omit to leave unchanged.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub rank: Option<ServerRank>,
+	/// New URL for the server. An empty string clears it; omit to leave
+	/// unchanged.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub host: Option<String>,
+	/// New device to bind to the server, or `null` to unbind. Omit to leave
+	/// unchanged.
 	#[serde(
 		default,
 		deserialize_with = "deserialize_some",
 		skip_serializing_if = "Option::is_none"
 	)]
 	pub device_id: Option<Option<Uuid>>,
+	/// New group for the server, or `null` to remove it from its group.
+	/// Omit to leave unchanged.
 	#[serde(
 		default,
 		deserialize_with = "deserialize_some",
 		skip_serializing_if = "Option::is_none"
 	)]
 	pub group_id: Option<Option<Uuid>>,
+	/// New public-facing name for the server, or `null` to unlist it. Omit
+	/// to leave unchanged.
 	#[serde(
 		default,
 		deserialize_with = "deserialize_some",
 		skip_serializing_if = "Option::is_none"
 	)]
 	pub public_name: Option<Option<String>>,
+	/// Whether the server runs in a cloud environment, or `null` to clear.
+	/// Omit to leave unchanged.
 	#[serde(
 		default,
 		deserialize_with = "deserialize_some",
 		skip_serializing_if = "Option::is_none"
 	)]
 	pub cloud: Option<Option<bool>>,
+	/// New geographic location for the server, or `null` to clear it. Omit
+	/// to leave unchanged.
 	#[serde(
 		default,
 		deserialize_with = "deserialize_some",
 		skip_serializing_if = "Option::is_none"
 	)]
 	pub geolocation: Option<Option<GeoPoint>>,
+	/// Whether canopy should actively monitor this server. Omit to leave
+	/// unchanged.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub is_monitored: Option<bool>,
+	/// Whether to accept the retired legacy status format from this
+	/// server. Omit to leave unchanged.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub allow_legacy_status: Option<bool>,
+	/// New downtime threshold in seconds before this server is considered
+	/// down. Omit to leave unchanged.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub alert_when_down_for: Option<i64>,
+	/// New free-text notes for the server. Omit to leave unchanged.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub notes: Option<String>,
+	/// New set of operator-defined tags for the server. Omit to leave
+	/// unchanged.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub tags: Option<TagMap>,
 }
@@ -296,13 +359,23 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(attach_tailscale_device))
 }
 
+/// Filter and pagination parameters for listing servers.
 #[derive(Deserialize, ToSchema)]
 pub struct ServerListArgs {
+	/// Restrict results to servers of this deployment kind. Omit to
+	/// include all kinds.
 	pub kind: Option<ServerKind>,
+	/// Number of items to skip from the start of the result set.
 	pub offset: u64,
+	/// Maximum number of items to return.
 	pub limit: Option<u64>,
 }
 
+/// List servers, optionally filtered by kind, paginated.
+///
+/// Returns a page of servers plus the total matching count. Entries include
+/// their group name where applicable, but not current reachability/health —
+/// use the detail endpoint for that.
 #[utoipa::path(
 	post,
 	path = "/list_some",
@@ -336,8 +409,10 @@ pub async fn list_some(
 	Ok(Json(Page { items, total }))
 }
 
-/// Servers without a group, used by the Ungrouped tab. Returned alongside a
-/// total count so the UI can show "(N ungrouped)" without a second fetch.
+/// List servers that don't belong to any group.
+///
+/// Returns a page of ungrouped servers, each with current
+/// reachability/health, plus the total count of ungrouped servers.
 #[utoipa::path(
 	post,
 	path = "/list_ungrouped",
@@ -361,8 +436,10 @@ pub async fn list_ungrouped(
 	Ok(Json(Page { items, total }))
 }
 
-/// Archived (soft-deleted) servers, for the Archived view. Each carries
-/// `archived: true`; the UI offers Restore.
+/// List archived (soft-deleted) servers.
+///
+/// Each entry has `archived: true` and includes current reachability/health.
+/// Archived servers can be brought back with the restore endpoint.
 #[utoipa::path(
 	post,
 	path = "/list_archived",
@@ -385,11 +462,18 @@ pub async fn list_archived(
 	Ok(Json(items))
 }
 
+/// Identifies a single server by id.
 #[derive(Deserialize, ToSchema)]
 pub struct ServerIdArgs {
+	/// The server to operate on.
 	pub server_id: Uuid,
 }
 
+/// Get a server's display name.
+///
+/// Returns the server's name if set, else its stored host, else its id —
+/// always a non-empty string suitable for display. Returns 404 if no server
+/// exists with that id.
 #[utoipa::path(
 	post,
 	path = "/get_name",
@@ -414,6 +498,12 @@ pub async fn get_name(
 	))
 }
 
+/// Get a server's basic record.
+///
+/// Returns identity, classification, and configuration for a single server,
+/// including its group name where applicable. Does not include current
+/// reachability/health or device/group detail — use the detail endpoint for
+/// that. Returns 404 if no server exists with that id.
 #[utoipa::path(
 	post,
 	path = "/get_info",
@@ -442,6 +532,12 @@ pub async fn get_info(
 	Ok(Json(info))
 }
 
+/// Get full detail for a server.
+///
+/// Returns the server's record, its bound device (if any), its most recent
+/// status report, current reachability/health, its group (if any) together
+/// with sibling servers in the same group, and the group's billing labels.
+/// Returns 404 if no server exists with that id.
 #[utoipa::path(
 	post,
 	path = "/get_detail",
@@ -602,12 +698,22 @@ pub async fn get_detail(
 	}))
 }
 
+/// Request to partially update a server.
 #[derive(Deserialize, ToSchema)]
 pub struct ServerUpdateArgs {
+	/// The server to update.
 	pub server_id: Uuid,
+	/// The fields to change. Any field omitted is left unchanged.
 	pub data: ServerDataUpdate,
 }
 
+/// Update a server's fields.
+///
+/// Applies a partial update — only the fields present in `data` are
+/// changed. Moving a previously-ungrouped server into a group, or toggling
+/// `is_monitored`, re-evaluates the server's open issues so incidents catch
+/// up with the new state. Returns 400 if the update is rejected (e.g. an
+/// invalid host value).
 #[utoipa::path(
 	post,
 	path = "/update",
@@ -687,29 +793,49 @@ const DEFAULT_ALERT_SECS: i64 = 600;
 /// Enrollment token lifetime: 7 days (human operational timescale).
 const ENROLLMENT_TTL: jiff::SignedDuration = jiff::SignedDuration::from_hours(24 * 7);
 
+/// Request to create a new server.
 #[derive(Deserialize, ToSchema)]
 pub struct CreateServerArgs {
+	/// Name for the server, if any.
 	pub name: Option<String>,
+	/// URL for the server, if known. Can be added or changed later.
 	#[serde(default)]
 	pub host: Option<String>,
+	/// The kind of deployment this server represents.
 	pub kind: ServerKind,
+	/// Where this server sits in its deployment's promotion order (e.g.
+	/// production vs. staging), if applicable.
 	pub rank: Option<ServerRank>,
+	/// Group to place the server in. Omit to create it ungrouped.
 	pub group_id: Option<Uuid>,
+	/// Name to list the server under in the public mobile-app server list.
+	/// Omit to keep it unlisted.
 	pub public_name: Option<String>,
+	/// Whether the server runs in a cloud environment, if known.
 	pub cloud: Option<bool>,
+	/// Geographic location of the server, if known.
 	pub geolocation: Option<GeoPoint>,
+	/// Whether canopy should actively monitor this server. Defaults to
+	/// true.
 	pub is_monitored: Option<bool>,
+	/// Downtime threshold in seconds before the server is considered
+	/// down. Defaults to 600 (10 minutes).
 	pub alert_when_down_for: Option<i64>,
+	/// Free-text operator notes about the server.
 	pub notes: Option<String>,
+	/// Arbitrary operator-defined key/value labels for the server.
 	pub tags: Option<TagMap>,
-	/// Optional Tailscale identity to pre-bind a device to (IP / node id / DNS
-	/// name). When given, a device row is created for that identity now and the
-	/// enrolling box's mTLS key is added to it at register time.
+	/// Optional Tailscale identity to pre-bind a device to (an IP, node id,
+	/// or DNS name). When given, a device is created for that identity
+	/// immediately, and the key the machine presents when it later
+	/// registers is added to that same device.
 	pub tailscale_identifier: Option<String>,
 }
 
-/// Operator-driven server creation. Creates the `servers` row (optionally
-/// pre-bound to a Tailscale device), ungrouped or in the supplied group.
+/// Create a new server.
+///
+/// Creates the server record, optionally pre-bound to a Tailscale device
+/// via `tailscale_identifier`, either ungrouped or in the given group.
 #[utoipa::path(
 	post,
 	path = "/create",
@@ -795,12 +921,17 @@ pub async fn create(
 	Ok(Json(created.id))
 }
 
+/// Identifies a single server by id.
 #[derive(Deserialize, ToSchema)]
 pub struct ServerIdOnlyArgs {
+	/// The server to operate on.
 	pub server_id: Uuid,
 }
 
-/// Archive (soft-delete) a server. Releases and demotes its device.
+/// Archive (soft-delete) a server.
+///
+/// Releases and demotes its device. Archived servers no longer appear in
+/// regular listings but can be restored later.
 #[utoipa::path(
 	post,
 	path = "/delete",
@@ -822,7 +953,11 @@ pub async fn delete(
 	Ok(Json(()))
 }
 
-/// Un-archive a server. The box must re-enroll to rebind a device.
+/// Un-archive a server.
+///
+/// Restores a previously archived server to regular listings. Its machine
+/// must re-enroll afterwards to rebind a device. Restoring a server that
+/// isn't archived has no effect.
 #[utoipa::path(
 	post,
 	path = "/restore",
@@ -844,6 +979,8 @@ pub async fn restore(
 	Ok(Json(()))
 }
 
+/// A freshly-minted enrollment ticket: the encrypted enrollment payload and
+/// the passphrase that decrypts it.
 #[derive(Serialize, ToSchema)]
 pub struct EnrollmentTicket {
 	/// Base64 (standard) of the age-encrypted enrollment JSON to feed to
@@ -853,13 +990,17 @@ pub struct EnrollmentTicket {
 	/// Freshly-generated 4-word passphrase that decrypts `ticket`. Share this
 	/// out-of-band (a separate channel from the ticket itself).
 	pub passphrase: String,
+	/// When the enrollment token inside the ticket expires.
 	pub expires_at: Timestamp,
 }
 
-/// Mint (or reissue) an enrollment token for a server and return the
-/// passphrase-encrypted ticket the operator runs through bestool, plus the
-/// 4-word passphrase that decrypts it. The plaintext token lives only inside
-/// the encrypted ticket; reissuing invalidates any prior token.
+/// Mint (or reissue) an enrollment ticket for a server.
+///
+/// Creates a fresh enrollment token and returns it wrapped in a
+/// passphrase-encrypted ticket the operator runs through bestool on the
+/// enrolling machine, plus the 4-word passphrase that decrypts it. The
+/// plaintext token lives only inside the encrypted ticket; reissuing
+/// invalidates any prior token. Fails if the server is archived.
 #[utoipa::path(
 	post,
 	path = "/mint_enrollment",
@@ -926,8 +1067,11 @@ pub async fn mint_enrollment(
 	}))
 }
 
-/// Revoke any outstanding enrollment ticket for a server (e.g. issued by
-/// mistake). The next `enrollment_status` will report no outstanding token.
+/// Revoke any outstanding enrollment ticket for a server.
+///
+/// Use this when a ticket was issued by mistake or is no longer needed.
+/// Afterwards, the enrollment status endpoint reports no outstanding token,
+/// and the revoked ticket can no longer be used to enroll.
 #[utoipa::path(
 	post,
 	path = "/revoke_enrollment",
@@ -949,9 +1093,12 @@ pub async fn revoke_enrollment(
 	Ok(Json(()))
 }
 
+/// A server's enrollment state: whether a device has registered, and
+/// whether an enrollment token is currently outstanding.
 #[derive(Serialize, ToSchema)]
 pub struct EnrollmentStatus {
-	/// When enrollment completed; `None` while awaiting first check-in.
+	/// When enrollment completed. Omitted while still awaiting the first
+	/// check-in.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub registered_at: Option<Timestamp>,
 	/// Expiry of the currently-active enrollment token, if one is outstanding.
@@ -959,13 +1106,16 @@ pub struct EnrollmentStatus {
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub token_expires_at: Option<Timestamp>,
 	/// When the currently-active enrollment token was issued, if one is
-	/// outstanding. Lets the UI show "a ticket was issued on <date>".
+	/// outstanding — e.g. to show "a ticket was issued on <date>".
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub token_issued_at: Option<Timestamp>,
 }
 
-/// Enrollment state for a server: whether it has registered, and whether an
-/// enrollment token is currently outstanding (expiry only).
+/// Get the enrollment state of a server.
+///
+/// Reports whether the server has completed enrollment, and whether an
+/// enrollment token is currently outstanding (issue and expiry times only —
+/// the token itself is never revealed).
 #[utoipa::path(
 	post,
 	path = "/enrollment_status",
@@ -992,19 +1142,23 @@ pub async fn enrollment_status(
 	}))
 }
 
+/// Request to bind a server to a device identified by its Tailscale node.
 #[derive(Deserialize, ToSchema)]
 pub struct AttachTailscaleDeviceArgs {
+	/// The server to attach the device to.
 	pub server_id: Uuid,
 	/// Any of: a Tailscale CGNAT/ULA IP, a node id, or a DNS name.
 	pub identifier: String,
 }
 
-/// Find or create a `Device` row for a Tailscale node id resolved
-/// from the supplied identifier, and attach it to the server
-/// (`servers.device_id`). Used when a server has no device yet (e.g.
-/// an operator-imported server that hasn't reported in) and the
-/// operator wants to bind it to a tailnet node without going through
-/// the device admin page first.
+/// Attach a device to a server via a Tailscale identifier.
+///
+/// Resolves the identifier to a tailnet node, finds the device already
+/// attached to that node or creates a new one for it, and binds that device
+/// to the server. Useful when a server has no device yet (e.g. an
+/// operator-imported server that hasn't reported in) and should be bound to
+/// a tailnet node directly. Returns 409 if the resolved device is already
+/// attached to another live server — detach it there first.
 #[utoipa::path(
 	post,
 	path = "/attach_tailscale_device",

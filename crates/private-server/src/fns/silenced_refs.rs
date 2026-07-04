@@ -20,32 +20,53 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(unsilence_group))
 }
 
+/// Request body identifying a server to look up silences for.
 #[derive(Deserialize, ToSchema)]
 pub struct ServerScopeArgs {
+	/// The server to look up silences for.
 	pub server_id: Uuid,
 }
 
+/// Request body identifying a server group to look up silences for.
 #[derive(Deserialize, ToSchema)]
 pub struct GroupScopeArgs {
+	/// The server group to look up silences for.
 	pub server_group_id: Uuid,
 }
 
+/// Request body identifying an issue to silence (or unsilence) on a
+/// single server.
 #[derive(Deserialize, ToSchema)]
 pub struct SilenceServerArgs {
+	/// The server to silence the issue on.
 	pub server_id: Uuid,
+	/// Identifies what raises the issue being silenced — for example a
+	/// specific healthcheck or backup pipeline.
 	pub source: String,
+	/// The specific issue identifier within `source` to silence.
 	#[serde(rename = "ref")]
 	pub r#ref: String,
 }
 
+/// Request body identifying an issue to silence (or unsilence) across a
+/// whole server group.
 #[derive(Deserialize, ToSchema)]
 pub struct SilenceGroupArgs {
+	/// The server group to silence the issue on.
 	pub server_group_id: Uuid,
+	/// Identifies what raises the issue being silenced — for example a
+	/// specific healthcheck or backup pipeline.
 	pub source: String,
+	/// The specific issue identifier within `source` to silence.
 	#[serde(rename = "ref")]
 	pub r#ref: String,
 }
 
+/// List server-scoped silences for a server.
+///
+/// Returns every (source, ref) pair currently silenced specifically for
+/// this server, most recently created first. Doesn't include silences
+/// applied at the server's group level.
 #[utoipa::path(
 	post,
 	path = "/list_for_server",
@@ -65,6 +86,11 @@ pub async fn list_for_server(
 	Ok(Json(rows))
 }
 
+/// List group-scoped silences for a server group.
+///
+/// Returns every (source, ref) pair currently silenced for this server
+/// group — applying to every server in the group — most recently created
+/// first.
 #[utoipa::path(
 	post,
 	path = "/list_for_group",
@@ -84,6 +110,14 @@ pub async fn list_for_group(
 	Ok(Json(rows))
 }
 
+/// Silence an issue on a server.
+///
+/// Suppresses alerting for the given (source, ref) pair on this server:
+/// matching issues keep being recorded, but stop counting toward opening
+/// or extending an incident. Idempotent — silencing a pair that's already
+/// silenced leaves the original entry, including who created it and when,
+/// unchanged. Requires admin access. Returns 400 if the request is
+/// invalid, for example if it references a server that doesn't exist.
 #[utoipa::path(
 	post,
 	path = "/silence_server",
@@ -112,6 +146,11 @@ pub async fn silence_server(
 	Ok(Json(row))
 }
 
+/// Unsilence an issue on a server.
+///
+/// Removes a server-scoped silence for the given (source, ref) pair, if
+/// one exists. Removing a silence that isn't there is not an error.
+/// Requires admin access.
 #[utoipa::path(
 	post,
 	path = "/unsilence_server",
@@ -132,6 +171,15 @@ pub async fn unsilence_server(
 	Ok(Json(()))
 }
 
+/// Silence an issue on a server group.
+///
+/// Suppresses alerting for the given (source, ref) pair across every
+/// server in this group: matching issues keep being recorded, but stop
+/// counting toward opening or extending an incident. Idempotent —
+/// silencing a pair that's already silenced leaves the original entry,
+/// including who created it and when, unchanged. Requires admin access.
+/// Returns 400 if the request is invalid, for example if it references a
+/// server group that doesn't exist.
 #[utoipa::path(
 	post,
 	path = "/silence_group",
@@ -160,6 +208,11 @@ pub async fn silence_group(
 	Ok(Json(row))
 }
 
+/// Unsilence an issue on a server group.
+///
+/// Removes a group-scoped silence for the given (source, ref) pair, if
+/// one exists. Removing a silence that isn't there is not an error.
+/// Requires admin access.
 #[utoipa::path(
 	post,
 	path = "/unsilence_group",

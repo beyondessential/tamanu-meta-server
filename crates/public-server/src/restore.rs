@@ -56,14 +56,23 @@ pub fn routes() -> OpenApiRouter<AppState> {
 // POST /restore-capabilities
 // ---------------------------------------------------------------------------
 
+/// Request body for registering the restore intents a consumer device can
+/// satisfy.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct RestoreCapabilitiesArgs {
-	/// The intents this consumer can satisfy, each with its description, the
-	/// Canopy semantics it opts into, and its parameter schema. Replaces the
-	/// consumer's advertised set wholesale.
+	/// The intents this device can satisfy — arbitrary consumer-chosen
+	/// identifiers (e.g. `verify`) — each with its description, the semantics
+	/// it opts into, and the schema of the parameters it accepts. Replaces the
+	/// device's previously advertised set wholesale.
 	pub intents: Vec<IntentDescriptor>,
 }
 
+/// Register the restore intents this device can satisfy.
+///
+/// Declares the restore intents the calling device supports, replacing any
+/// previously advertised set. Only worklist entries whose intent is currently
+/// advertised are dispatched to this device via `GET /restore-worklist`, so
+/// register on startup and whenever the supported set changes.
 #[utoipa::path(
 	post,
 	path = "/restore-capabilities",
@@ -88,41 +97,73 @@ async fn capabilities(
 // GET /restore-worklist
 // ---------------------------------------------------------------------------
 
-/// One concrete replica the consumer should maintain: a declaration expanded
-/// against a single server, carrying the snapshot to restore and the repo
-/// coordinates to find it. Credentials and the repo password are obtained
-/// separately via `/restore-credentials`.
+/// One replica the consumer device should currently maintain: an operator
+/// declaration expanded against a single server, carrying the snapshot to
+/// restore and the repository coordinates to find it. S3 credentials and the
+/// repository passphrase are obtained separately via
+/// `POST /restore-credentials`.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct WorklistEntry {
-	/// The declaration this entry came from.
+	/// Identifier of the declaration this entry was expanded from. Echo it
+	/// back in `POST /restore-verification` reports.
 	pub replica_id: Uuid,
+	/// The server group whose backup repository holds the snapshot.
 	pub group_id: Uuid,
+	/// The server whose backup should be restored.
 	pub server_id: Uuid,
+	/// The backup type to restore (e.g. `tamanu-postgres`).
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
+	/// The restore intent this entry is for; one of the intents this device
+	/// advertised via `POST /restore-capabilities`.
 	#[schema(value_type = String)]
 	pub intent: RestoreIntent,
+	/// Operator-assigned label for the declaration.
 	pub name: String,
-	/// The overdue bound in whole seconds; `None` = no bound. Interpreted per the
-	/// intent's semantics (a `once` snapshot bound, or a standing staleness
-	/// bound).
+	/// Bound, in whole seconds, after which the replica counts as overdue;
+	/// `null` means no bound. Interpreted per the intent's semantics: for a
+	/// run-once (`once`) intent, how long the latest snapshot may go without a
+	/// healthy verification report; for a standing replica, how stale its last
+	/// healthy report may be.
 	pub overdue_after_seconds: Option<i64>,
-	/// The resolved parameter values for this replica: one per parameter the
-	/// intent advertises, unset ones filled with their default or JSON `null`.
+	/// Resolved parameter values for this replica: one key per parameter the
+	/// intent advertises. Parameters the operator left unset carry the
+	/// intent's declared default, or JSON `null` when there is none.
 	#[schema(value_type = Object)]
 	pub params: ParamValues,
-	/// The snapshot Canopy wants restored — the latest successful backup for
-	/// this `(server, type)`. `None` when no successful backup is yet known.
+	/// Identifier of the snapshot to restore — the latest successful backup
+	/// for this server and type. `null` when no successful backup is known
+	/// yet.
 	pub snapshot_id: Option<String>,
-	/// RFC3339 timestamp of that snapshot, if known.
+	/// When that snapshot was reported, as an RFC 3339 timestamp; `null` if
+	/// unknown.
 	pub snapshot_at: Option<String>,
-	/// Always `"s3"`.
+	/// Kind of storage backend. Always `"s3"`.
 	pub storage: String,
+	/// Name of the S3 bucket holding the group's backup repository.
 	pub bucket: String,
+	/// Key prefix within the bucket under which the repository lives. Normally
+	/// empty (the repository is at the bucket root).
 	pub prefix: String,
+	/// AWS region of the bucket.
 	pub region: String,
 }
 
+/// Fetch the full set of replicas this device should maintain.
+///
+/// Returns the device's complete desired state, computed fresh on every call:
+/// each enabled restore declaration whose intent this device currently
+/// advertises, expanded into one entry per server it covers. A group-wide
+/// declaration expands to every live server in its group; a server-scoped
+/// declaration yields a single entry and takes precedence over a group-wide
+/// one covering the same server, type, and intent. Entries for groups whose
+/// backup configuration is not ready are omitted, and entries for run-once
+/// intents disappear once the latest snapshot has a healthy verification
+/// report, reappearing when a newer snapshot exists.
+///
+/// An empty array means there is nothing to do. Poll this endpoint and
+/// reconcile: create or refresh the replicas listed, and tear down any the
+/// device is maintaining that no longer appear.
 #[utoipa::path(
 	get,
 	path = "/restore-worklist",
@@ -257,25 +298,43 @@ async fn worklist(
 // POST /restore-credentials
 // ---------------------------------------------------------------------------
 
+/// Request body for minting read-only restore credentials.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct RestoreCredentialsArgs {
-	/// The group whose repo to read.
+	/// The server group whose backup repository to read.
 	pub group: Uuid,
-	/// The backup type to restore.
+	/// The backup type to restore (e.g. `tamanu-postgres`).
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
 }
 
-/// Read-only credentials plus the repo password for one `(group, type)`. The
-/// AWS creds are the `credential_process` shape the consumer's proxy refreshes;
-/// the password opens the kopia repo.
+/// Read-only S3 credentials plus the repository passphrase for one group and
+/// backup type: everything needed to open the group's backup repository and
+/// read a snapshot out of it.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct RestoreCredentials {
+	/// Temporary read-only AWS credentials in the `credential_process` output
+	/// format, valid for at most one hour.
 	pub credentials: CredentialProcessOutput,
-	/// The kopia repo passphrase, read from the group's k8s Secret.
+	/// Passphrase for the group's backup repository (a Kopia repository).
 	pub repo_password: String,
 }
 
+/// Mint read-only credentials for a group's backup repository.
+///
+/// Issues temporary AWS credentials — always strictly read-only, scoped to the
+/// group's backup storage — together with the repository passphrase, so the
+/// device can read the snapshot named in a worklist entry. Credentials expire
+/// after at most one hour; request a fresh set per restore rather than caching
+/// them. Every issuance is recorded for audit.
+///
+/// The device must hold an enabled restore declaration covering the requested
+/// group and type (i.e. the pair must appear in its worklist configuration);
+/// otherwise the request is rejected with 403.
+///
+/// Errors: 403 when no enabled declaration authorizes this group and type;
+/// 409 when the group has no ready backup configuration; 502 when the
+/// credential issuer or the passphrase store is unavailable or not configured.
 #[utoipa::path(
 	post,
 	path = "/restore-credentials",
@@ -412,37 +471,68 @@ async fn credentials(
 // POST /restore-verification
 // ---------------------------------------------------------------------------
 
+/// Report of a restore attempt and the health of the resulting replica.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct VerificationArgs {
-	/// The declaration this report concerns (from the worklist entry); optional
-	/// so a report survives the declaration being retired mid-flight.
+	/// The declaration this report concerns, taken from the worklist entry's
+	/// `replica_id`. Optional so a report is still accepted when the
+	/// declaration was retired while the restore was in flight.
 	pub replica_id: Option<Uuid>,
+	/// The server group whose backup was restored.
 	pub group: Uuid,
+	/// The server whose backup was restored.
 	pub server_id: Uuid,
+	/// The backup type that was restored (e.g. `tamanu-postgres`).
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
+	/// The restore intent this attempt was performed under.
 	#[schema(value_type = String)]
 	pub intent: RestoreIntent,
-	/// The snapshot that was restored; omit on a failure that never got there.
+	/// Identifier of the snapshot that was restored. Omit on a failure that
+	/// never got as far as selecting a snapshot.
 	pub snapshot_id: Option<String>,
+	/// Whether the restore succeeded (`success`) or failed (`failure`).
 	#[schema(value_type = String)]
 	pub outcome: RunOutcome,
+	/// Human-readable error detail, when the restore failed.
 	pub error: Option<String>,
-	/// Whether the restored database came up healthy and passed readiness.
+	/// Whether the restored database came up healthy and passed readiness
+	/// checks. A replica only counts as verified when the outcome is
+	/// `success` and this is `true`.
 	pub replica_healthy: bool,
+	/// Version of the PostgreSQL server the data was restored into, if
+	/// applicable.
 	pub postgres_version: Option<String>,
-	/// When the restore was observed (RFC3339).
+	/// When the restore result was observed, as an RFC 3339 timestamp.
 	#[schema(value_type = String)]
 	pub observed_at: Timestamp,
+	/// Bytes of raw HTTP traffic sent to S3 during the restore, including
+	/// protocol and signing overhead. Omit when traffic was not measured.
 	pub s3_sent_raw_bytes: Option<i64>,
+	/// Bytes of decoded object payload sent to S3 during the restore.
 	pub s3_sent_payload_bytes: Option<i64>,
+	/// Bytes of raw HTTP traffic received from S3 during the restore,
+	/// including protocol overhead.
 	pub s3_received_raw_bytes: Option<i64>,
+	/// Bytes of decoded object payload received from S3 during the restore.
 	pub s3_received_payload_bytes: Option<i64>,
-	/// Arbitrary health data to record alongside the check (postgres cluster
-	/// stats, whether indexes needed fixing, …). Stored and displayed as-is.
+	/// Arbitrary structured health data to record alongside the report
+	/// (database statistics, whether indexes needed rebuilding, and so on).
+	/// Stored and displayed as-is.
 	pub health_details: Option<serde_json::Value>,
 }
 
+/// Report the outcome of a restore attempt and the replica's health.
+///
+/// Records a verification report for a restore the device performed from its
+/// worklist. Send one report per attempt, on success and on failure alike. A
+/// report with a `success` outcome and `replica_healthy: true` marks the
+/// snapshot as verified; for run-once intents this is what removes the entry
+/// from `GET /restore-worklist` until a newer snapshot appears.
+///
+/// Authorization matches `POST /restore-credentials`: the device must hold an
+/// enabled restore declaration covering the reported group and type,
+/// otherwise the request is rejected with 403.
 #[utoipa::path(
 	post,
 	path = "/restore-verification",

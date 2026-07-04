@@ -31,72 +31,85 @@ async fn recompute_groups(
 	Ok(())
 }
 
+/// A single server in the fleet: the unit that reports status, files
+/// issues, and is monitored for reachability. A server may belong to a
+/// server group, and may or may not have a device enrolled against it yet.
 #[derive(
 	Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable, utoipa::ToSchema,
 )]
 #[diesel(table_name = crate::schema::servers)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Server {
+	/// Unique identifier for this server.
 	pub id: Uuid,
+	/// The server's display name, scoped within its group. May not be
+	/// globally unique or meaningful outside the group.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub name: Option<String>,
 
 	/// The server's URL. Optional: a server may be identified solely by its
-	/// bound device (e.g. a Tailscale node). Not unique. For a display URL that
-	/// falls back to the tailnet hostname, see the API's `display_host`.
+	/// enrolled device (e.g. a Tailscale node) rather than a URL. Not
+	/// required to be unique. Responses that need a value to display even
+	/// when this is unset fall back to another identifying field.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	#[diesel(treat_none_as_default_value = false)]
 	pub host: Option<UrlField>,
 
+	/// The server's role, for example central or facility.
 	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub kind: ServerKind,
+	/// The server's environment tier, for example production, test, or dev.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub rank: Option<ServerRank>,
+	/// The device enrolled against this server, if any.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub device_id: Option<Uuid>,
+	/// The server group this server belongs to, if any.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub group_id: Option<Uuid>,
-	/// If `Some`, the server appears in the public `/servers` list under this
-	/// name (used by the Tamanu Mobile app). `None` means not listed. Decoupled
-	/// from `name` because server `name`s are scoped within a group and may not
-	/// be globally meaningful.
+	/// If set, the server is listed publicly under this name (used by
+	/// end-user-facing clients). `None` means it is not listed publicly.
+	/// Separate from `name` because that field is only meaningful within
+	/// the server's group.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub public_name: Option<String>,
+	/// Whether this server is hosted in the cloud, if known.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub cloud: Option<bool>,
+	/// The server's physical location, if known.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub geolocation: Option<GeoPoint>,
-	/// Whether canopy is actively watching this server. When `false`, the
-	/// reachability sweep skips it entirely and any of its issues are
-	/// ignored by the incident workflow — operators flip this off for
-	/// test environments and ad-hoc demos. The accompanying
-	/// `alert_when_down_for` is preserved while muted so flipping back on
-	/// doesn't lose the chosen threshold.
+	/// Whether this server is actively monitored. When `false`, reachability
+	/// checks skip it entirely and its issues no longer contribute to
+	/// incidents — useful for test environments and ad-hoc demos. The
+	/// `alert_when_down_for` threshold is preserved while unmonitored, so
+	/// turning monitoring back on doesn't lose the configured value.
 	pub is_monitored: bool,
-	/// Opt-in to the retired legacy `/status` format (a push that carries no
-	/// `health` array). Off by default: the new format is required and a
-	/// legacy push is rejected with 400. When `true`, a legacy push is
+	/// Opt-in to accepting the older status-report format that doesn't
+	/// include a healthchecks array. Off by default, in which case a push in
+	/// the old format is rejected. When `true`, an old-format push is
 	/// accepted but only refreshes reachability — it carries the server's
 	/// last known healthchecks forward instead of clearing them, so a server
-	/// straddling old and new reporters doesn't flap its health issues. Flip
-	/// off (the default) once the server's reporter speaks the new format.
+	/// that's switching between old and new reporters doesn't flap its
+	/// health issues. Turn this off once the server reports in the current
+	/// format.
 	pub allow_legacy_status: bool,
-	/// Per-server downtime threshold: how long a server's status row may
-	/// go un-updated before the canopy reachability sweep files an issue.
-	/// Bump it up for flappy servers, drop it for critical ones that
-	/// should page promptly. Only consulted when `is_monitored` is `true`.
-	///
-	/// Constrained to strictly positive by the database. Default 10
-	/// minutes for newly-inserted rows. On the JSON wire this is
-	/// represented as a count of whole seconds (`i64`).
+	/// How long, in seconds, a server's status may go without an update
+	/// before it's considered unreachable and an issue is filed. Increase
+	/// it for servers with flaky connectivity; decrease it for critical
+	/// servers that should alert promptly. Only enforced while
+	/// `is_monitored` is `true`. Must be a positive number of seconds;
+	/// defaults to 600 (10 minutes) for newly-created servers.
 	#[schema(value_type = i64)]
 	pub alert_when_down_for: PgDuration,
+	/// Free-form operator notes about this server.
 	#[serde(default)]
 	pub notes: String,
+	/// Key/value tags for this server.
 	#[serde(default)]
 	pub tags: TagMap,
-	/// When set, the server is archived (soft-deleted): hidden from live
-	/// listings and monitoring, its device released, but its history retained.
+	/// When set, the server is archived: hidden from live listings and
+	/// monitoring, with its device unenrolled, but its history is retained.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	#[diesel(
 		deserialize_as = jiff_diesel::NullableTimestamp,
@@ -104,7 +117,7 @@ pub struct Server {
 		treat_none_as_default_value = false
 	)]
 	pub deleted_at: Option<Timestamp>,
-	/// Set when a device successfully completes enrollment for this server.
+	/// When a device successfully completed enrollment for this server.
 	/// While `None`, the server is awaiting its first check-in and the UI
 	/// shows setup instructions.
 	#[serde(skip_serializing_if = "Option::is_none")]
@@ -772,14 +785,23 @@ fn test_server_serialization() {
 	);
 }
 
+/// Fields required to create a new server. Other server fields (monitoring
+/// settings, tags, notes, etc.) start at their defaults and are set with a
+/// separate update.
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct NewServer {
+	/// The server's display name, scoped within its group.
 	pub name: Option<String>,
+	/// The server's URL, if known up front.
 	#[serde(default)]
 	pub host: Option<UrlField>,
+	/// The server's role, for example central or facility.
 	pub kind: ServerKind,
+	/// The server's environment tier, for example production, test, or dev.
 	pub rank: Option<ServerRank>,
+	/// The device to enroll against this server, if already known.
 	pub device_id: Option<Uuid>,
+	/// The server group to add this server to, if any.
 	#[serde(default)]
 	pub group_id: Option<Uuid>,
 }
@@ -808,27 +830,50 @@ impl From<NewServer> for Server {
 	}
 }
 
+/// Fields to update on an existing server. Only the fields present are
+/// changed; omitted fields are left as-is. For the fields that are
+/// themselves optional (`host`, `device_id`, `group_id`, `public_name`,
+/// `cloud`, `geolocation`), sending an explicit `null` clears the value,
+/// while omitting the field entirely leaves it unchanged.
 #[derive(Debug, Deserialize, AsChangeset, utoipa::ToSchema)]
 #[diesel(table_name = crate::schema::servers)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct PartialServer {
+	/// The server to update.
 	pub id: Uuid,
+	/// New display name for the server.
 	pub name: Option<String>,
+	/// New role for the server, for example central or facility.
 	pub kind: Option<ServerKind>,
+	/// New environment tier for the server, for example production, test,
+	/// or dev.
 	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub rank: Option<ServerRank>,
-	/// `Some(Some(url))` sets the URL, `Some(None)` clears it, `None` leaves it.
+	/// New URL for the server, or `null` to clear it.
 	pub host: Option<Option<UrlField>>,
+	/// New enrolled device for the server, or `null` to unenroll it.
 	pub device_id: Option<Option<Uuid>>,
+	/// New server group for the server, or `null` to remove it from its
+	/// current group.
 	pub group_id: Option<Option<Uuid>>,
+	/// New public listing name for the server, or `null` to unlist it.
 	pub public_name: Option<Option<String>>,
+	/// New value for whether the server is cloud-hosted, or `null` to clear
+	/// it.
 	pub cloud: Option<Option<bool>>,
+	/// New physical location for the server, or `null` to clear it.
 	pub geolocation: Option<Option<GeoPoint>>,
+	/// New monitored state for the server.
 	pub is_monitored: Option<bool>,
+	/// New legacy-status-format opt-in for the server.
 	pub allow_legacy_status: Option<bool>,
+	/// New downtime threshold for the server, in seconds.
 	#[schema(value_type = Option<i64>)]
 	#[diesel(serialize_as = PgDuration)]
 	pub alert_when_down_for: Option<PgDuration>,
+	/// New free-form operator notes for the server.
 	pub notes: Option<String>,
+	/// New set of key/value tags for the server. This replaces the whole
+	/// tag set.
 	pub tags: Option<TagMap>,
 }

@@ -15,6 +15,10 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(delete))
 }
 
+/// List the admin allow-list.
+///
+/// Returns the email addresses of every account currently granted admin
+/// access to this API, in no particular order.
 #[utoipa::path(
 	post,
 	path = "/list",
@@ -40,11 +44,17 @@ pub async fn list(
 	Ok(Json(admins))
 }
 
+/// Request body for granting admin access to an email address.
 #[derive(Deserialize, ToSchema)]
 pub struct AddArgs {
+	/// The email address to add to the admin allow-list.
 	pub email: String,
 }
 
+/// Add an email address to the admin allow-list.
+///
+/// Grants admin access to the given email address. Has no effect if the
+/// email is already an admin.
 #[utoipa::path(
 	post,
 	path = "/add",
@@ -68,11 +78,17 @@ pub async fn add(
 	Ok(Json(()))
 }
 
+/// Request body for revoking admin access from an email address.
 #[derive(Deserialize, ToSchema)]
 pub struct DeleteArgs {
+	/// The email address to remove from the admin allow-list.
 	pub email: String,
 }
 
+/// Remove an email address from the admin allow-list.
+///
+/// Revokes admin access for the given email address. Has no effect if the
+/// email was not an admin.
 #[utoipa::path(
 	post,
 	path = "/delete",

@@ -11,25 +11,27 @@ pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new().routes(routes!(get_self))
 }
 
-/// Merged tags for the calling device's server.
+/// Get the tags for the calling device's own server.
 ///
-/// The device authenticates with its certificate; we resolve the (unique)
-/// server backed by that device, then overlay the server's `tags` onto the
-/// group's `tags` (server wins on key collision). For ungrouped servers,
-/// returns just the server's own tags.
+/// Returns the effective set of tags for the server the calling device is
+/// registered as: any tags set on the server itself, overlaid onto any tags
+/// inherited from its server group (a tag set on the server takes precedence
+/// over a group tag with the same key). If the server isn't in a group,
+/// this returns just its own tags.
 ///
-/// On top of the stored tags we inject synthetic, read-only tags describing
-/// the server under the reserved `canopy:` namespace: `canopy:kind`,
-/// `canopy:rank` (when set), and `canopy:group-id` / `canopy:group-name`
-/// (when grouped). Operator-set tags can't use that prefix, so they never
-/// collide. See [`Server::tags_for_device`].
+/// The result also includes a few read-only, synthetic tags describing the
+/// server, under the reserved `canopy:` key prefix: `canopy:kind`,
+/// `canopy:rank` (if the server has one set), and `canopy:group-id` /
+/// `canopy:group-name` (if the server belongs to a group). Operators cannot
+/// set tags under that prefix, so these never collide with tags you set
+/// yourself.
 ///
-/// - **401**: no certificate / cert doesn't match a known device.
-/// - **412**: device is registered but isn't attached to a server yet.
-/// - **409**: device is somehow attached to multiple servers (shouldn't
-///   happen — the `servers.device_id` unique index guarantees this can't
-///   occur, but the handler still surfaces the case rather than silently
-///   picking one).
+/// - **401**: the request has no client certificate, or the certificate
+///   doesn't match a known device.
+/// - **409**: the calling device is attached to more than one server, which
+///   should not normally happen; contact support if you see this.
+/// - **412**: the device is registered but has not yet been attached to a
+///   server.
 #[utoipa::path(
 	get,
 	path = "/",

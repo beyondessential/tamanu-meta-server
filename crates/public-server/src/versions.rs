@@ -157,6 +157,12 @@ pub fn parse_markdown(text: &str) -> String {
 	html_output
 }
 
+/// List published, ready-to-serve versions.
+///
+/// Returns every version currently in the published state, excluding any
+/// version a recorded known-issue range still covers (whether that issue
+/// is still open or has since been fixed in a later patch). Ordered
+/// newest first.
 #[utoipa::path(
 	get,
 	path = "/",
@@ -173,6 +179,21 @@ async fn list(State(db): State<Db>) -> Result<Json<Vec<Version>>> {
 	Ok(Json(versions))
 }
 
+/// Publish a version with its changelog.
+///
+/// Requires a device certificate with the releaser role (or admin). The
+/// path parameter is the exact version being published (e.g. `2.10.5`);
+/// the request body is the changelog for that version, as up to 1 MiB of
+/// markdown text.
+///
+/// If the version already exists in the draft state — for example
+/// because an artifact was registered against it before its changelog
+/// was written — the draft is published in place, with this changelog
+/// replacing whatever it had before. Otherwise a new version is created
+/// directly in the published state. Publishing a version that already
+/// exists and is not a draft (already published, or yanked) fails.
+///
+/// Returns the resulting version record.
 #[utoipa::path(
 	post,
 	path = "/{version}",
@@ -247,6 +268,11 @@ async fn create(
 	Ok(Json(version))
 }
 
+/// Yank a version.
+///
+/// Requires a device certificate with the admin role. Marks the given
+/// exact version as yanked, hiding it from listings, update checks, and
+/// artifact lookups without deleting its history.
 #[utoipa::path(
 	delete,
 	path = "/{version}",
@@ -382,6 +408,14 @@ async fn view_artifacts(
 	Ok(Html(tera.render("artifacts", &context)?))
 }
 
+/// List the artifacts available for a version or version range.
+///
+/// The path parameter accepts either an exact version or a semver range
+/// pattern (e.g. `2.10.x`, `^2.10.0`). It resolves to the latest
+/// published, ready version satisfying the input, then returns that
+/// version's artifacts — both ones registered against the exact version
+/// and ones registered against a range pattern that covers it. Returns
+/// 404 if no published, ready version matches.
 #[utoipa::path(
 	get,
 	path = "/{version}/artifacts",
@@ -427,6 +461,15 @@ async fn view_mobile_install(
 	Ok(Html(tera.render("mobile", &context)?))
 }
 
+/// Check for available updates from a given version.
+///
+/// The path parameter is the caller's currently-installed exact version.
+/// For each later minor release line within the same major version,
+/// returns the latest published version that hasn't been excluded by a
+/// recorded known-issue range — falling back to an older ready patch
+/// within that same minor line rather than dropping the line entirely, if
+/// the newest patch isn't ready. Clients use this to discover and offer
+/// available updates.
 #[utoipa::path(
 	get,
 	path = "/update-for/{version}",

@@ -10,6 +10,8 @@ use diesel::{
 use serde::{Deserialize, Serialize};
 use url::Url;
 
+/// A URL, given as a plain string. Any trailing slash is stripped when the
+/// value is returned.
 #[derive(Debug, Clone, Deserialize, AsExpression, FromSqlRow, utoipa::ToSchema)]
 #[diesel(sql_type = Text)]
 #[schema(value_type = String, format = "uri")]

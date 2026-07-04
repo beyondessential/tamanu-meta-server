@@ -17,32 +17,56 @@ use crate::state::AppState;
 
 const DEFAULT_LIMIT: i64 = 100;
 
+/// An operational incident: a group-scoped roll-up of related issues.
+///
+/// An incident opens when an issue on a server in the group crosses the
+/// severity threshold, gathers further contributing issues while open, and
+/// closes automatically once the last serious contributor clears. Operators
+/// can additionally mark an incident resolved with a reason.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct IncidentData {
+	/// Unique identifier of the incident.
 	pub id: Uuid,
+	/// Identifier of the server group the incident belongs to.
 	pub server_group_id: Uuid,
-	/// Display name of the group this incident rolls up to. Empty string
-	/// only if the group has been deleted out from under the incident,
-	/// which shouldn't happen via the API.
+	/// Display name of the group this incident rolls up to. Empty only if
+	/// the group no longer exists, which should not happen in normal
+	/// operation.
 	pub server_group_name: String,
+	/// When the incident opened.
 	pub opened_at: Timestamp,
+	/// When the incident closed (all serious contributing issues cleared);
+	/// null while the incident is still open.
 	pub closed_at: Option<Timestamp>,
+	/// When an operator marked the incident resolved; null if it has not
+	/// been resolved.
 	pub resolved_at: Option<Timestamp>,
+	/// Login of the operator who resolved the incident, if resolved.
 	pub resolved_by: Option<String>,
+	/// Display name of the resolving operator, if known.
 	pub resolved_by_name: Option<String>,
+	/// Avatar URL of the resolving operator, if known.
 	pub resolved_by_pic: Option<String>,
+	/// Reason given when resolving: one of `fixed`, `wont_fix`, `expected`,
+	/// `duplicate`, or `flapping`.
 	pub resolved_reason: Option<String>,
+	/// Number of distinct issues that have ever contributed to the incident.
 	pub issue_count: i64,
+	/// Total number of events across all contributing issues.
 	pub event_count: i64,
-	/// Combined: this incident's notes + notes on all contributing issues.
+	/// Combined count of notes on the incident itself plus notes on all its
+	/// contributing issues.
 	pub note_count: i64,
-	/// `Some(t)` when this incident's Slack `incident_open` notice is
-	/// still inside the per-group cooldown window (`deliver_after = t`,
-	/// not yet shipped, not given up). `None` once Slack has heard about
-	/// the incident — or the open was cancelled. Lets the UI distinguish
-	/// "open but quietly held" from "open and operators have been paged".
+	/// When set, the "incident opened" Slack notification is being held
+	/// until this time by the group's notification delay (which suppresses
+	/// flapping); an incident that resolves before then never notifies.
+	/// Null once the notification has been sent, cancelled, or given up on.
+	/// Lets a client distinguish "open but quietly held" from "open and
+	/// operators have been notified".
 	pub notification_held_until: Option<Timestamp>,
+	/// When the incident record was created.
 	pub created_at: Timestamp,
+	/// When the incident record was last modified.
 	pub updated_at: Timestamp,
 }
 
@@ -133,10 +157,19 @@ async fn enrich_incident(
 	))
 }
 
+/// One issue's involvement in an incident.
+///
+/// An issue joins an incident while it is actively contributing and leaves
+/// when it stops (for example when it is resolved, snoozed, or silenced);
+/// the same issue can join, leave, and rejoin over the incident's life.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct IncidentIssueData {
+	/// When the issue joined (started contributing to) the incident.
 	pub joined_at: Timestamp,
+	/// When the issue left (stopped contributing to) the incident; null
+	/// while it is still contributing.
 	pub left_at: Option<Timestamp>,
+	/// The issue itself.
 	pub issue: IssueData,
 }
 
@@ -150,9 +183,13 @@ impl From<(IncidentIssue, IssueData)> for IncidentIssueData {
 	}
 }
 
+/// An incident together with every issue that has contributed to it.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct IncidentWithIssues {
+	/// The incident.
 	pub incident: IncidentData,
+	/// The issues that have contributed to the incident, each with the times
+	/// it joined and left.
 	pub issues: Vec<IncidentIssueData>,
 }
 
@@ -169,15 +206,24 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(delete_note))
 }
 
+/// Filters for listing incidents that involve a server.
 #[derive(Deserialize, ToSchema)]
 pub struct IncidentListForServerArgs {
+	/// Identifier of the server.
 	pub server_id: Uuid,
+	/// Also include closed incidents; defaults to false (open incidents only).
 	#[serde(default)]
 	pub include_closed: Option<bool>,
+	/// Maximum number of incidents to return; defaults to 100.
 	#[serde(default)]
 	pub limit: Option<i64>,
 }
 
+/// List incidents involving a server.
+///
+/// Returns incidents that issues on the given server have contributed to.
+/// By default only open incidents are returned; set `include_closed` to
+/// also include closed ones.
 #[utoipa::path(
 	post,
 	path = "/list_for_server",
@@ -207,15 +253,23 @@ pub async fn list_for_server(
 	))
 }
 
+/// Filters for listing a server group's incidents.
 #[derive(Deserialize, ToSchema)]
 pub struct ListForGroupArgs {
+	/// Identifier of the server group.
 	pub server_group_id: Uuid,
+	/// Also include closed incidents; defaults to false (open incidents only).
 	#[serde(default)]
 	pub include_closed: Option<bool>,
+	/// Maximum number of incidents to return; defaults to 100.
 	#[serde(default)]
 	pub limit: Option<i64>,
 }
 
+/// List incidents for a server group.
+///
+/// Returns the group's incidents. By default only open incidents are
+/// returned; set `include_closed` to also include closed ones.
 #[utoipa::path(
 	post,
 	path = "/list_for_group",
@@ -245,12 +299,17 @@ pub async fn list_for_group(
 	))
 }
 
+/// Filters for listing open incidents.
 #[derive(Deserialize, ToSchema)]
 pub struct ListActiveArgs {
+	/// Maximum number of incidents to return; defaults to 100.
 	#[serde(default)]
 	pub limit: Option<i64>,
 }
 
+/// List open incidents across all server groups.
+///
+/// Returns every incident that is currently open, fleet-wide.
 #[utoipa::path(
 	post,
 	path = "/list_active",
@@ -273,11 +332,18 @@ pub async fn list_active(
 	))
 }
 
+/// Identifies the incident to fetch.
 #[derive(Deserialize, ToSchema)]
 pub struct GetIncidentArgs {
+	/// Identifier of the incident.
 	pub incident_id: Uuid,
 }
 
+/// Get an incident with its contributing issues.
+///
+/// Returns the incident and every issue that has contributed to it, each
+/// with the times it joined and (where applicable) left the incident.
+/// Responds 404 if the incident does not exist.
 #[utoipa::path(
 	post,
 	path = "/get",
@@ -307,17 +373,27 @@ pub async fn get_incident(
 	Ok(Json(IncidentWithIssues { incident, issues }))
 }
 
+/// Identifies the incident to operate on.
 #[derive(Deserialize, ToSchema)]
 pub struct IncidentIdArgs {
+	/// Identifier of the incident.
 	pub incident_id: Uuid,
 }
 
+/// Request to mark an incident resolved.
 #[derive(Deserialize, ToSchema)]
 pub struct ResolveIncidentArgs {
+	/// Identifier of the incident to resolve.
 	pub incident_id: Uuid,
+	/// Why the incident is considered resolved.
 	pub reason: ResolvedReason,
 }
 
+/// Resolve an incident.
+///
+/// Marks the incident resolved with the given reason, recording the calling
+/// operator as the resolver. Returns the updated incident. Requires the
+/// caller to be on the admin allow-list.
 #[utoipa::path(
 	post,
 	path = "/resolve",
@@ -340,6 +416,11 @@ pub async fn resolve(
 	Ok(Json(enrich_incident(&mut conn, &state.db, incident).await?))
 }
 
+/// Undo an incident's resolution.
+///
+/// Clears the incident's resolved state (time, resolver, and reason).
+/// Returns the updated incident. Requires the caller to be on the admin
+/// allow-list.
 #[utoipa::path(
 	post,
 	path = "/unresolve",
@@ -361,12 +442,21 @@ pub async fn unresolve(
 	Ok(Json(enrich_incident(&mut conn, &state.db, incident).await?))
 }
 
+/// A note attached to an incident.
+///
+/// Notes are immutable once written; to change one, delete it and add a
+/// replacement.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct IncidentNoteData {
+	/// Unique identifier of the note.
 	pub id: Uuid,
+	/// Identifier of the incident the note is attached to.
 	pub incident_id: Uuid,
+	/// Login of the operator who wrote the note.
 	pub author: String,
+	/// The note text.
 	pub body: String,
+	/// When the note was written.
 	pub created_at: Timestamp,
 }
 
@@ -382,12 +472,20 @@ impl From<IncidentNote> for IncidentNoteData {
 	}
 }
 
+/// Request to add a note to an incident.
 #[derive(Deserialize, ToSchema)]
 pub struct IncidentAddNoteArgs {
+	/// Identifier of the incident to attach the note to.
 	pub incident_id: Uuid,
+	/// The note text; must not be empty or whitespace-only.
 	pub body: String,
 }
 
+/// Add a note to an incident.
+///
+/// Records a note authored by the calling operator and returns it. Requires
+/// the caller to be on the admin allow-list. Responds 400 if the note body
+/// is empty or whitespace-only.
 #[utoipa::path(
 	post,
 	path = "/add_note",
@@ -413,13 +511,20 @@ pub async fn add_note(
 	Ok(Json(IncidentNoteData::from(note)))
 }
 
+/// Filters for listing an incident's notes.
 #[derive(Deserialize, ToSchema)]
 pub struct IncidentListNotesArgs {
+	/// Identifier of the incident.
 	pub incident_id: Uuid,
+	/// Maximum number of notes to return; defaults to 100.
 	#[serde(default)]
 	pub limit: Option<i64>,
 }
 
+/// List notes on an incident.
+///
+/// Returns notes written on the incident itself; notes on its contributing
+/// issues are not included.
 #[utoipa::path(
 	post,
 	path = "/list_notes",
@@ -448,11 +553,18 @@ pub async fn list_notes(
 	))
 }
 
+/// Identifies the note to delete.
 #[derive(Deserialize, ToSchema)]
 pub struct IncidentDeleteNoteArgs {
+	/// Identifier of the note.
 	pub note_id: Uuid,
 }
 
+/// Delete an incident note.
+///
+/// Permanently removes the note. Notes cannot be edited in place; to change
+/// one, delete it and add a replacement. Requires the caller to be on the
+/// admin allow-list.
 #[utoipa::path(
 	post,
 	path = "/delete_note",

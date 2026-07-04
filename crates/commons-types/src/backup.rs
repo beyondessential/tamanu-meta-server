@@ -104,11 +104,16 @@ macro_rules! text_enum {
 }
 
 text_enum! {
-	/// Why a credential was issued / a run executed. A real capability gate
-	/// on the issued S3 creds, not just audit metadata: `Backup` grants
-	/// write-without-delete, `Restore` grants read-only.
+	/// Why a backup credential was issued, or what a reported run was for.
+	/// Determines the access the credential grants: a `backup` credential can
+	/// write new data but not delete existing data, while a `restore`
+	/// credential is read-only.
 	pub enum BackupPurpose {
+		/// The credential is for writing a new backup, or the run wrote one.
+		/// Access is write-only — existing data can't be deleted with it.
 		Backup = "backup",
+		/// The credential is for reading existing data, or the run read it.
+		/// Access is read-only.
 		Restore = "restore",
 	}
 	default = Backup;
@@ -116,9 +121,11 @@ text_enum! {
 }
 
 text_enum! {
-	/// Outcome of a reported backup/restore run.
+	/// Outcome of a reported backup or restore run.
 	pub enum RunOutcome {
+		/// The run completed successfully.
 		Success = "success",
+		/// The run failed.
 		Failure = "failure",
 	}
 	default = Success;
@@ -126,9 +133,12 @@ text_enum! {
 }
 
 text_enum! {
-	/// Which kopia maintenance cycle a Canopy maintenance Job ran.
+	/// Which maintenance cycle a reported backup-repository maintenance run
+	/// performed.
 	pub enum MaintenanceKind {
+		/// A lightweight maintenance pass, run frequently.
 		Quick = "quick",
+		/// A more thorough maintenance pass, run less frequently.
 		Full = "full",
 	}
 	default = Quick;
@@ -136,15 +146,16 @@ text_enum! {
 }
 
 text_enum! {
-	/// How a group's repo passphrase is sourced. Canopy owns + rotates every
-	/// passphrase Secret either way (no human copy, no escrow). `FromBirth` means
-	/// Canopy generates the passphrase for a *new* repo. `Passphrase` means the
-	/// operator supplies the passphrase of an *existing* repo to connect to it,
-	/// after which Canopy rotates it to a generated one. Canopy never lets the
-	/// operator choose the passphrase for a repo it creates — that is always
-	/// from-birth.
+	/// How a group's backup-repository passphrase originated. Either way, the
+	/// passphrase is subsequently owned and rotated by Canopy — nobody,
+	/// including the operator, keeps a copy of the current passphrase.
 	pub enum BackupRepoMode {
+		/// Canopy generated the passphrase itself when creating a new
+		/// repository.
 		FromBirth = "from_birth",
+		/// The operator supplied the passphrase of an existing repository to
+		/// connect it. Canopy rotates it to a freshly generated passphrase
+		/// immediately after connecting.
 		Passphrase = "passphrase",
 	}
 	default = FromBirth;
@@ -152,14 +163,16 @@ text_enum! {
 }
 
 text_enum! {
-	/// Where a group's backup bucket lives and who provisioned it. `External`
-	/// (the default): the bucket + dedicated IAM roles are created by ops/pulumi
-	/// in the deployment's own AWS account; canopy only connects. `Shared`:
-	/// canopy auto-creates the bucket in the shared backups account and uses
-	/// shared device/maintenance roles, with per-group session-scoped creds for
-	/// isolation. Invisible to the device either way.
+	/// Where a group's backup storage lives and who provisioned it. This
+	/// distinction has no effect on how backups and restores are performed.
 	pub enum BackupPlacement {
+		/// The storage bucket and its access roles were provisioned ahead of
+		/// time in the deployment's own cloud account; Canopy only connects
+		/// to it. The default.
 		External = "external",
+		/// Canopy automatically created the storage bucket in a shared
+		/// account and issues short-lived credentials scoped to the group
+		/// for isolation.
 		Shared = "shared",
 	}
 	default = External;
@@ -167,13 +180,14 @@ text_enum! {
 }
 
 text_enum! {
-	/// Lifecycle state of a group's backup repo. Backups stay dormant (the
-	/// endpoints 412/409) until `Ready`.
+	/// Lifecycle status of a group's backup repository configuration. No
+	/// backup or restore operations can run until this reaches `ready`.
 	pub enum BackupConfigStatus {
-		/// Repo init running.
+		/// The repository is being created; not yet usable.
 		Provisioning = "provisioning",
-		/// Authorized: config set + repo created. (No escrow step — Canopy owns +
-		/// rotates the passphrase; nobody holds a copy.)
+		/// The repository has been created and is ready for backups and
+		/// restores. There is no separate approval step — the passphrase is
+		/// owned and rotated by Canopy, and nobody holds a copy of it.
 		Ready = "ready",
 	}
 	default = Provisioning;
@@ -280,12 +294,11 @@ where
 	}
 }
 
-/// What a managed restore replica is for. Fully open: a restore consumer
-/// advertises the intents it can satisfy and Canopy stores and dispatches them
-/// verbatim, never branching on any particular value. Stored as `TEXT`;
-/// serializes as a plain string (no DB `CHECK`). Well-known intents (`verify`,
-/// `analytics`, `disaster-recovery`) are documented in the restore-replicas
-/// spec, not enforced here.
+/// How a managed restore replica is handled, as defined by the consumer.
+/// Fully open: a restore consumer advertises the intents it can satisfy as
+/// arbitrary identifiers and Canopy stores and dispatches them verbatim,
+/// never branching on any particular value. Stored as `TEXT`; serializes as
+/// a plain string (no DB `CHECK`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, AsExpression, FromSqlRow)]
 #[diesel(sql_type = Text)]
 pub struct RestoreIntent(pub String);
@@ -376,27 +389,36 @@ pub mod semantics {
 	pub const URL: &str = "url";
 }
 
-/// The type of a restore-replica parameter. Informs the operator form's input
-/// and the validation Canopy applies. The underlying JSON is a number
-/// (`duration` in whole seconds, `bytes`, `integer`), a boolean (`boolean`), or
-/// a string (`text`); Canopy does not otherwise interpret parameter values.
+/// The data type of a restore-replica configuration parameter, which
+/// determines how its value is validated. `duration` and `bytes` values must
+/// be non-negative integers (a count of seconds and of bytes, respectively);
+/// `integer` accepts any whole number, positive or negative; `boolean` is a
+/// JSON boolean; `text` is a JSON string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ParamType {
+	/// A non-negative whole number of seconds.
 	Duration,
+	/// A non-negative size in bytes.
 	Bytes,
+	/// A JSON boolean value.
 	Boolean,
+	/// A JSON whole-number value, positive or negative.
 	Integer,
+	/// A JSON string value.
 	Text,
 }
 
-/// One parameter a restore consumer accepts per replica of an intent.
+/// Describes one configurable parameter that a replica of a restore intent
+/// accepts.
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ParamSpec {
+	/// The parameter's data type, which determines how its value is
+	/// validated.
 	#[serde(rename = "type")]
 	pub r#type: ParamType,
-	/// The value sent when the operator leaves the parameter unset. Absent means
-	/// an unset parameter is sent as JSON `null`.
+	/// The value used when the parameter is left unset. `None` means an
+	/// unset parameter is sent as JSON `null` rather than a default value.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub default: Option<serde_json::Value>,
 }
@@ -408,16 +430,26 @@ pub type ParamSchema = std::collections::BTreeMap<String, ParamSpec>;
 /// Operator-supplied parameter values for one replica: parameter name → value.
 pub type ParamValues = std::collections::BTreeMap<String, serde_json::Value>;
 
-/// One intent a restore consumer advertises: the behaviours it opts into and the
-/// settings it accepts per replica.
+/// One restore purpose a consumer advertises support for: the behaviours it
+/// opts into and the settings it accepts per replica.
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct IntentDescriptor {
+	/// Name of the intent: an arbitrary identifier chosen by the consumer
+	/// (e.g. `verify`); any name may be advertised.
 	#[schema(value_type = String)]
 	pub intent: RestoreIntent,
+	/// Human-readable description of the intent, if provided.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub description: Option<String>,
+	/// Behaviours this intent opts into. Recognised values are `check` (a
+	/// health report is expected for each replica), `once` (a given snapshot
+	/// is only ever dispatched to a replica once, rather than repeatedly
+	/// until overdue), and `url` (a replica's health report includes a link
+	/// to it). Unrecognised values are stored but have no effect.
 	#[serde(default)]
 	pub semantics: Vec<String>,
+	/// Configurable parameters this intent accepts per replica, keyed by
+	/// parameter name.
 	#[serde(default)]
 	pub params: ParamSchema,
 }

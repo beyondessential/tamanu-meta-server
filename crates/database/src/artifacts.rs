@@ -6,6 +6,8 @@ use uuid::Uuid;
 
 use crate::versions::Version;
 
+/// A downloadable artifact belonging to a release version: an installer,
+/// package, or other file published for a given type and platform.
 #[derive(
 	Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Associations, utoipa::ToSchema,
 )]
@@ -13,12 +15,24 @@ use crate::versions::Version;
 #[diesel(table_name = crate::schema::artifacts)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Artifact {
+	/// Unique identifier of the artifact.
 	pub id: Uuid,
+	/// The exact version this artifact belongs to. `null` for range
+	/// artifacts, which apply to every version matching
+	/// `version_range_pattern` instead.
 	pub version_id: Option<Uuid>,
+	/// What kind of artifact this is (e.g. an installer or package name).
 	pub artifact_type: String,
+	/// The platform the artifact targets (e.g. an OS or architecture name).
 	pub platform: String,
+	/// URL the artifact can be downloaded from.
 	pub download_url: String,
+	/// The device that registered this artifact, if it was registered by a
+	/// releaser device rather than created by an operator.
 	pub device_id: Option<Uuid>,
+	/// Semver range this artifact applies to (e.g. `^2.10.0`), for artifacts
+	/// shared across a range of versions rather than pinned to one. `null`
+	/// for exact-version artifacts.
 	pub version_range_pattern: Option<String>,
 }
 

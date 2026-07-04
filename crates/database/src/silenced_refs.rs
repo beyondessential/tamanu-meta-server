@@ -20,31 +20,48 @@ use uuid::Uuid;
 
 use crate::issues::{reevaluate_open_issues_for_group_ref, reevaluate_open_issues_for_server_ref};
 
+/// A silenced issue reference scoped to a single server: issues matching
+/// this `(source, ref)` on this server are still recorded, but are excluded
+/// from incidents and notifications.
 #[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, utoipa::ToSchema)]
 #[diesel(table_name = crate::schema::server_silenced_refs)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ServerSilencedRef {
+	/// The server this silence applies to.
 	pub server_id: Uuid,
+	/// The issue source this silence matches.
 	pub source: String,
+	/// The issue reference this silence matches.
 	#[diesel(column_name = ref_)]
 	#[serde(rename = "ref")]
 	pub r#ref: String,
+	/// When this silence was created.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub created_at: Timestamp,
+	/// The operator who created this silence. `None` if not recorded.
 	pub created_by: Option<String>,
 }
 
+/// A silenced issue reference scoped to an entire server group: issues
+/// matching this `(source, ref)` on any server in the group (or raised
+/// directly against the group) are still recorded, but are excluded from
+/// incidents and notifications.
 #[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, utoipa::ToSchema)]
 #[diesel(table_name = crate::schema::server_group_silenced_refs)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ServerGroupSilencedRef {
+	/// The server group this silence applies to.
 	pub server_group_id: Uuid,
+	/// The issue source this silence matches.
 	pub source: String,
+	/// The issue reference this silence matches.
 	#[diesel(column_name = ref_)]
 	#[serde(rename = "ref")]
 	pub r#ref: String,
+	/// When this silence was created.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub created_at: Timestamp,
+	/// The operator who created this silence. `None` if not recorded.
 	pub created_by: Option<String>,
 }
 

@@ -15,68 +15,120 @@ use uuid::Uuid;
 
 use crate::state::AppState;
 
+/// A single released (or draft) software version.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct VersionData {
+	/// Major version number.
 	pub major: i32,
+	/// Minor version number.
 	pub minor: i32,
+	/// Patch version number.
 	pub patch: i32,
+	/// Publication status of this version (e.g. draft, published, yanked).
 	pub status: VersionStatus,
+	/// When this version was created.
 	pub created_at: Timestamp,
-	/// `true` when this version has no unresolved known issues. See the
-	/// `version_known_issues` table and `add_known_issue`/`resolve_known_issue`
-	/// endpoints for management.
-	pub ready: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct MinorVersionGroup {
-	pub major: i32,
-	pub minor: i32,
-	pub count: usize,
-	pub latest_patch: i32,
-	pub first_created_at: Timestamp,
-	pub last_created_at: Timestamp,
-	pub versions: Vec<VersionData>,
-	/// `true` when the latest published patch in this minor is itself
-	/// ready. An old, since-fixed issue on an earlier patch doesn't
-	/// dim the whole minor.
-	pub ready: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct VersionDetail {
-	pub id: Uuid,
-	pub major: i32,
-	pub minor: i32,
-	pub patch: i32,
-	pub status: VersionStatus,
-	pub created_at: Timestamp,
-	pub updated_at: Timestamp,
-	pub changelog: String,
-	pub min_chrome_version: Option<u32>,
-	pub is_latest_in_minor: bool,
-	pub related_versions: Vec<RelatedVersionData>,
 	/// `true` when this version has no unresolved known issues.
 	pub ready: bool,
+}
+
+/// A group of versions sharing the same major.minor release line, with a
+/// summary of the line's overall readiness.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct MinorVersionGroup {
+	/// Major version number for this release line.
+	pub major: i32,
+	/// Minor version number for this release line.
+	pub minor: i32,
+	/// Number of patch versions in this release line.
+	pub count: usize,
+	/// Highest published patch number in this release line, or 0 if none
+	/// are published yet.
+	pub latest_patch: i32,
+	/// Creation time of the first (patch 0) published version in this
+	/// release line. Falls back to the earliest published patch, or the
+	/// current time, if patch 0 hasn't been published.
+	pub first_created_at: Timestamp,
+	/// Creation time of the latest published patch in this release line,
+	/// or the current time if nothing has been published yet.
+	pub last_created_at: Timestamp,
+	/// All versions in this release line, patch descending.
+	pub versions: Vec<VersionData>,
+	/// `true` when the latest published patch in this release line is
+	/// itself ready. An old, since-fixed issue on an earlier patch doesn't
+	/// dim the whole release line. Also `true` when nothing has been
+	/// published yet.
+	pub ready: bool,
+}
+
+/// Full detail for a single version, including its changelog, related
+/// versions in the same release line, and known issues.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct VersionDetail {
+	/// Unique identifier for this version.
+	pub id: Uuid,
+	/// Major version number.
+	pub major: i32,
+	/// Minor version number.
+	pub minor: i32,
+	/// Patch version number.
+	pub patch: i32,
+	/// Publication status of this version (e.g. draft, published, yanked).
+	pub status: VersionStatus,
+	/// When this version was created.
+	pub created_at: Timestamp,
+	/// When this version was last updated.
+	pub updated_at: Timestamp,
+	/// Changelog text for this version.
+	pub changelog: String,
+	/// Minimum embedded browser version required by this version, if
+	/// known.
+	pub min_chrome_version: Option<u32>,
+	/// `true` when this is the highest patch published in its release
+	/// line.
+	pub is_latest_in_minor: bool,
+	/// Other versions in the same major.minor release line.
+	pub related_versions: Vec<RelatedVersionData>,
+	/// `true` when this exact version has no unresolved known issues.
+	/// Issues fixed at or before this patch don't count against it.
+	pub ready: bool,
+	/// Every known issue ever raised against this version's release line,
+	/// resolved or not.
 	pub known_issues: Vec<KnownIssueData>,
 }
 
+/// A caveat or defect recorded against a range of patches within a release
+/// line.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct KnownIssueData {
+	/// Unique identifier for this known issue.
 	pub id: Uuid,
+	/// When this known issue was recorded.
 	pub created_at: Timestamp,
+	/// Login of the operator who recorded this known issue.
 	pub author: String,
+	/// Description of the issue.
 	pub description: String,
+	/// Major version of the first affected patch.
 	pub min_major: i32,
+	/// Minor version of the first affected patch.
 	pub min_minor: i32,
+	/// Patch number of the first affected patch.
 	pub min_patch: i32,
-	/// First unaffected patch. NULL while open — open issues
-	/// implicitly cover every patch from `min` to the end of the minor.
+	/// Major version of the first unaffected (fixed) patch, if resolved.
+	/// Absent while unresolved — an open issue implicitly covers every
+	/// patch from the minimum affected patch to the end of its release
+	/// line.
 	pub max_major: Option<i32>,
+	/// Minor version of the first unaffected (fixed) patch, if resolved.
 	pub max_minor: Option<i32>,
+	/// Patch number of the first unaffected (fixed) patch, if resolved.
 	pub max_patch: Option<i32>,
+	/// When this issue was resolved, if it has been.
 	pub resolved_at: Option<Timestamp>,
+	/// Login of the operator who resolved this issue, if any.
 	pub resolved_by: Option<String>,
+	/// Explanation given when resolving this issue, if any.
 	pub resolution_message: Option<String>,
 }
 
@@ -100,27 +152,47 @@ impl From<VersionKnownIssue> for KnownIssueData {
 	}
 }
 
+/// Another patch version within the same release line as a version being
+/// viewed.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct RelatedVersionData {
+	/// Major version number.
 	pub major: i32,
+	/// Minor version number.
 	pub minor: i32,
+	/// Patch version number.
 	pub patch: i32,
+	/// Changelog text for this version.
 	pub changelog: String,
 }
 
+/// A downloadable artifact (for example an installer) associated with a
+/// version, either tied to that exact version or matched via a version
+/// range pattern.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ArtifactData {
+	/// Unique identifier for this artifact.
 	pub id: Uuid,
+	/// Kind of artifact (for example, an installer or update package).
 	pub artifact_type: String,
+	/// Target platform this artifact is built for.
 	pub platform: String,
+	/// URL clients use to download this artifact.
 	pub download_url: String,
-	/// Whether this artifact is for the exact version (true) or via a range pattern (false)
+	/// `true` when this artifact is tied to the exact version being
+	/// queried; `false` when it was matched via a version range pattern
+	/// instead.
 	pub is_exact: bool,
-	/// The version range pattern if this is a ranged artifact, None if exact
+	/// Version range pattern this artifact applies to, if it's a
+	/// range-matched artifact rather than an exact one.
 	pub version_range_pattern: Option<String>,
-	/// If true, this ranged artifact has an exact-version override (only when is_exact=true)
+	/// Only meaningful when `is_exact` is `true`: `true` when a
+	/// range-matched artifact of the same type and platform also matches
+	/// this version, and would be served instead if this exact artifact
+	/// were removed.
 	pub has_range_override: bool,
-	/// If true, this is the artifact that will be served to public API clients
+	/// `true` when this is the artifact actually served to public API
+	/// clients requesting a download for this version.
 	pub is_used_in_public_api: bool,
 }
 
@@ -139,6 +211,12 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(resolve_known_issue))
 }
 
+/// List all versions, grouped by release line.
+///
+/// Returns every version, including drafts, grouped by major.minor release
+/// line and ordered newest release line first. Each group includes a
+/// readiness flag reflecting whether its latest published patch has any
+/// unresolved known issues.
 #[utoipa::path(
 	post,
 	path = "/get_grouped_versions",
@@ -231,11 +309,19 @@ pub async fn get_grouped_versions(
 	Ok(Json(result))
 }
 
+/// Identifies a version by its exact version string.
 #[derive(Deserialize, ToSchema)]
 pub struct VersionStringArgs {
+	/// Exact version string to look up (e.g. `"1.2.3"`).
 	pub version: String,
 }
 
+/// Get full details for a single version.
+///
+/// Returns the version's changelog, minimum browser version requirement,
+/// whether it's the latest patch in its release line, other versions in
+/// the same release line, its readiness, and its full known-issue history.
+/// Returns 404 if the version doesn't exist.
 #[utoipa::path(
 	post,
 	path = "/get_version_detail",
@@ -320,6 +406,11 @@ pub async fn get_version_detail(
 	}))
 }
 
+/// List the downloadable artifacts available for a version.
+///
+/// Returns one entry per artifact type/platform combination actually
+/// served for this version, whether tied to the exact version or matched
+/// via a version range pattern. Returns 404 if the version doesn't exist.
 #[utoipa::path(
 	post,
 	path = "/get_version_artifacts",
@@ -358,12 +449,22 @@ pub async fn get_version_artifacts(
 	))
 }
 
+/// Identifies a version and the publication status to set on it.
 #[derive(Deserialize, ToSchema)]
 pub struct UpdateStatusArgs {
+	/// Exact version string to update (e.g. `"1.2.3"`).
 	pub version: String,
+	/// New status. Accepted values are `"draft"`, `"published"`, and
+	/// `"yanked"` (case-insensitive); an unrecognized value is treated as
+	/// `"draft"`.
 	pub status: String,
 }
 
+/// Change a version's publication status.
+///
+/// Returns 400 if the change would move a published version back to draft
+/// while it isn't the latest published patch in its release line — older
+/// published patches can't be un-published out from under a newer one.
 #[utoipa::path(
 	post,
 	path = "/update_version_status",
@@ -398,12 +499,20 @@ pub async fn update_version_status(
 	Ok(Json(()))
 }
 
+/// Identifies a version and the changelog text to set on it.
 #[derive(Deserialize, ToSchema)]
 pub struct UpdateChangelogArgs {
+	/// Exact version string to update (e.g. `"1.2.3"`).
 	pub version: String,
+	/// New changelog text for the version.
 	pub changelog: String,
 }
 
+/// Replace a version's changelog text.
+///
+/// Overwrites the changelog of the version identified by its exact
+/// version string. Updating a version that doesn't exist succeeds
+/// without effect.
 #[utoipa::path(
 	post,
 	path = "/update_version_changelog",
@@ -425,14 +534,23 @@ pub async fn update_version_changelog(
 	Ok(Json(()))
 }
 
+/// Changes to apply to an existing artifact.
 #[derive(Deserialize, ToSchema)]
 pub struct UpdateArtifactArgs {
+	/// Id of the artifact to update.
 	pub artifact_id: Uuid,
+	/// New artifact type.
 	pub artifact_type: String,
+	/// New target platform.
 	pub platform: String,
+	/// New download URL.
 	pub download_url: String,
 }
 
+/// Update an existing artifact's type, platform, and download URL.
+///
+/// All three fields are replaced with the supplied values; the artifact's
+/// version association is unchanged.
 #[utoipa::path(
 	post,
 	path = "/update_artifact",
@@ -460,14 +578,23 @@ pub async fn update_artifact(
 	Ok(Json(()))
 }
 
+/// A new artifact to register against a version.
 #[derive(Deserialize, ToSchema)]
 pub struct CreateArtifactArgs {
+	/// Id of the version to attach the new artifact to.
 	pub version_id: Uuid,
+	/// Artifact type.
 	pub artifact_type: String,
+	/// Target platform.
 	pub platform: String,
+	/// Download URL for the artifact.
 	pub download_url: String,
 }
 
+/// Create a new artifact tied to an exact version.
+///
+/// Registers a download of the given type and platform against the
+/// version, and returns the created artifact.
 #[utoipa::path(
 	post,
 	path = "/create_artifact",
@@ -504,11 +631,17 @@ pub async fn create_artifact(
 	}))
 }
 
+/// Identifies a single artifact by id.
 #[derive(Deserialize, ToSchema)]
 pub struct ArtifactIdArgs {
+	/// Id of the artifact to delete.
 	pub artifact_id: Uuid,
 }
 
+/// Permanently delete an artifact.
+///
+/// The artifact record is removed outright; the file it pointed to is not
+/// touched. There is no undo.
 #[utoipa::path(
 	post,
 	path = "/delete_artifact",
@@ -529,11 +662,18 @@ pub async fn delete_artifact(
 	Ok(Json(()))
 }
 
+/// Identifies a single version by id.
 #[derive(Deserialize, ToSchema)]
 pub struct VersionIdArgs {
+	/// Id of a version whose release line to look up.
 	pub version_id: Uuid,
 }
 
+/// List known issues for a version's release line.
+///
+/// Returns every known issue ever raised against the major.minor release
+/// line the given version belongs to, resolved or not. Returns 404 if the
+/// version doesn't exist.
 #[utoipa::path(
 	post,
 	path = "/list_known_issues",
@@ -556,12 +696,21 @@ pub async fn list_known_issues(
 	Ok(Json(rows.into_iter().map(KnownIssueData::from).collect()))
 }
 
+/// A known issue to record against a version.
 #[derive(Deserialize, ToSchema)]
 pub struct AddKnownIssueArgs {
+	/// Id of a version in the release line the issue affects. The issue is
+	/// recorded as affecting that version's exact patch onward, within its
+	/// release line.
 	pub version_id: Uuid,
+	/// Description of the issue. Must not be empty or whitespace-only.
 	pub description: String,
 }
 
+/// Record a new known issue affecting a version's release line, starting
+/// from the given version's exact patch.
+///
+/// Returns 400 if the description is empty or whitespace-only.
 #[utoipa::path(
 	post,
 	path = "/add_known_issue",
@@ -594,15 +743,26 @@ pub async fn add_known_issue(
 	Ok(Json(KnownIssueData::from(row)))
 }
 
+/// Identifies a known issue and the version that fixes it.
 #[derive(Deserialize, ToSchema)]
 pub struct ResolveKnownIssueArgs {
+	/// Id of the known issue to resolve.
 	pub known_issue_id: Uuid,
-	/// Semver of the version that contains the fix. Must be in the same
-	/// minor as the issue's `min` and strictly above it.
+	/// Version string of the first patch that contains the fix. Must be in
+	/// the same release line as the issue's earliest affected patch, and
+	/// strictly above it.
 	pub fix_version: String,
+	/// Explanation of how or where the issue was fixed. Must not be empty
+	/// or whitespace-only.
 	pub resolution_message: String,
 }
 
+/// Mark a known issue as resolved as of a given fix version.
+///
+/// Returns 400 if the resolution message is empty or whitespace-only.
+/// Returns 404 if the known issue doesn't exist, is already resolved, or
+/// if `fix_version` isn't in the same release line as the issue or isn't
+/// strictly above its earliest affected patch.
 #[utoipa::path(
 	post,
 	path = "/resolve_known_issue",

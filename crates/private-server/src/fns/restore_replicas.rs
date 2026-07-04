@@ -43,82 +43,139 @@ pub fn routes() -> OpenApiRouter<AppState> {
 
 // ── Wire types ──────────────────────────────────────────────────────────────
 
-/// A declared replica for the operator UI. `gap` is true when the consumer does
-/// not currently advertise this declaration's intent, so Canopy is not
-/// dispatching it.
+/// A managed-restore declaration, as shown to operators.
+///
+/// A declaration instructs a restore consumer to maintain a restored replica
+/// of a backup, for a given purpose (intent). It also grants the consumer
+/// read access to the covered backups while it is enabled.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct RestoreReplicaView {
+	/// Unique identifier of the declaration.
 	pub id: Uuid,
+	/// Identifier of the restore consumer device the declaration is assigned to.
 	pub consumer_device_id: Uuid,
+	/// Display name of the consumer device, if known.
 	pub consumer_name: Option<String>,
+	/// Identifier of the server group whose backups the declaration covers.
 	pub group_id: Uuid,
+	/// Specific server within the group, or null to cover all current servers
+	/// in the group.
 	pub server_id: Option<Uuid>,
+	/// The backup type to restore, for example `tamanu-postgres`.
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
+	/// How the replica is handled, as defined by the consumer: an arbitrary
+	/// identifier from the consumer's advertised intents, e.g. `verify`.
 	#[schema(value_type = String)]
 	pub intent: RestoreIntent,
+	/// Operator-chosen display name for the declaration.
 	pub name: String,
+	/// Overdue bound in whole seconds: how long the replica may go without a
+	/// healthy restore report (or, for at-most-once intents, how long the
+	/// latest snapshot may go unverified) before it is considered overdue.
+	/// Null means no bound.
 	pub overdue_after_seconds: Option<i64>,
 	/// Operator-supplied parameter values (name → value).
 	#[schema(value_type = Object)]
 	pub params: serde_json::Value,
+	/// Whether the declaration is active. Disabled declarations are not
+	/// dispatched to the consumer and grant no backup access.
 	pub enabled: bool,
+	/// True when the consumer does not currently advertise this declaration's
+	/// intent, so the declaration is not being dispatched.
 	pub gap: bool,
+	/// Login of the operator who created the declaration, if recorded.
 	pub created_by: Option<String>,
+	/// When the declaration was created.
 	#[schema(value_type = String)]
 	pub created_at: Timestamp,
+	/// When the declaration was last modified.
 	#[schema(value_type = String)]
 	pub updated_at: Timestamp,
 }
 
-/// A restore consumer (a `backup-restore` device) and the intents it currently
-/// advertises, with each intent's description, semantics, and parameter schema —
-/// drives the declaration form's consumer/intent pickers and dynamic param
-/// fields.
+/// A restore consumer and the restore intents it currently advertises.
+///
+/// A restore consumer is a device with the `backup-restore` role: an agent
+/// that restores backups onto standby replicas. Each advertised intent
+/// carries a description, semantics flags, and a parameter schema, which
+/// together determine what declarations can be created for the consumer and
+/// what parameters they accept.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct RestoreConsumerView {
+	/// Identifier of the consumer device.
 	pub device_id: Uuid,
+	/// Display name of the consumer device, if known.
 	pub name: Option<String>,
+	/// The intents the consumer currently advertises support for.
 	pub intents: Vec<IntentDescriptor>,
 }
 
+/// Scopes a request to one server group.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct RestoreReplicasGroupArgs {
+	/// Identifier of the server group.
 	pub server_group_id: Uuid,
 }
 
+/// Request to declare a new managed restore replica.
+///
+/// The consumer, group, server, backup type, and intent define the
+/// declaration's scope and cannot be changed after creation; to change them,
+/// delete the declaration and create a new one.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct RestoreReplicasCreateArgs {
+	/// Identifier of the restore consumer device to assign the declaration to.
 	pub consumer_device_id: Uuid,
+	/// Identifier of the server group whose backups to restore.
 	pub group_id: Uuid,
-	/// `None` = all current servers in the group.
+	/// Specific server within the group; omit or null to cover all current
+	/// servers in the group.
 	pub server_id: Option<Uuid>,
+	/// The backup type to restore, for example `tamanu-postgres`.
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
+	/// How the replica is handled, as defined by the consumer: an arbitrary
+	/// identifier from the consumer's advertised intents, e.g. `verify`.
 	#[schema(value_type = String)]
 	pub intent: RestoreIntent,
+	/// Display name for the declaration.
 	pub name: String,
-	/// Overdue bound in whole seconds; `None` = no bound.
+	/// Overdue bound in whole seconds; omit or null for no bound.
 	pub overdue_after_seconds: Option<i64>,
-	/// Operator-supplied parameter values, validated against the intent's schema.
+	/// Parameter values for the intent (name → value), validated against the
+	/// consumer's advertised parameter schema. Defaults to empty.
 	#[serde(default)]
 	#[schema(value_type = Object)]
 	pub params: ParamValues,
 }
 
+/// Request to update an existing declaration.
+///
+/// Only the name, overdue bound, parameter values, and enabled flag can be
+/// changed; the declaration's scope (consumer, group, server, backup type,
+/// intent) is fixed at creation.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct RestoreReplicasUpdateArgs {
+	/// Identifier of the declaration to update.
 	pub id: Uuid,
+	/// New display name for the declaration.
 	pub name: String,
+	/// New overdue bound in whole seconds; null removes the bound.
 	pub overdue_after_seconds: Option<i64>,
+	/// New parameter values (name → value), validated against the intent's
+	/// advertised parameter schema. Defaults to empty.
 	#[serde(default)]
 	#[schema(value_type = Object)]
 	pub params: ParamValues,
+	/// Whether the declaration should be active.
 	pub enabled: bool,
 }
 
+/// Identifies the declaration to operate on.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct IdArgs {
+	/// Identifier of the declaration.
 	pub id: Uuid,
 }
 
@@ -201,6 +258,11 @@ async fn to_views(
 
 // ── Handlers ──────────────────────────────────────────────────────────────
 
+/// List restore replica declarations for a group.
+///
+/// Returns every declaration scoped to the given server group, with each
+/// consumer's display name resolved and the `gap` flag computed against the
+/// intents the consumer currently advertises.
 #[utoipa::path(
 	post,
 	path = "/for_group",
@@ -219,6 +281,13 @@ pub async fn for_group(
 	Ok(Json(to_views(&mut conn, replicas).await?))
 }
 
+/// List restore consumers and their advertised intents.
+///
+/// Returns every device with the backup-restore role, together with the
+/// restore intents it currently advertises (each with its description,
+/// semantics flags, and parameter schema). Use this to discover which
+/// consumers and intents a declaration can target and which parameters each
+/// intent accepts.
 #[utoipa::path(
 	post,
 	path = "/consumers",
@@ -242,6 +311,13 @@ pub async fn consumers(State(state): State<AppState>) -> Result<Json<Vec<Restore
 	Ok(Json(out))
 }
 
+/// List recent restore-health reports for a group.
+///
+/// Returns up to the 50 most recent restore-health reports submitted by
+/// consumers for the given server group. Each report records whether a
+/// backup snapshot restored successfully and whether the resulting replica
+/// was healthy — the strongest available signal that the group's backups are
+/// actually restorable.
 #[utoipa::path(
 	post,
 	path = "/checks",
@@ -261,6 +337,16 @@ pub async fn checks(
 	Ok(Json(rows))
 }
 
+/// Declare a managed restore replica.
+///
+/// Creates a declaration instructing the chosen consumer to maintain a
+/// restored replica of the given backup type for the given intent, and
+/// records the calling operator as its creator. Parameter values are
+/// validated against the consumer's advertised schema for the intent; if the
+/// intent is not currently advertised, the values are accepted as-is and the
+/// declaration is created with a gap. Requires the caller to be on the admin
+/// allow-list. Responds 400 if a parameter value fails validation and 409 if
+/// a matching declaration already exists.
 #[utoipa::path(
 	post,
 	path = "/create",
@@ -305,6 +391,13 @@ pub async fn create(
 	Ok(Json(views.into_iter().next().expect("one view")))
 }
 
+/// Update a restore replica declaration.
+///
+/// Changes the declaration's name, overdue bound, parameter values, and
+/// enabled flag; the scope (consumer, group, server, backup type, intent)
+/// cannot be changed. Parameter values are validated against the intent's
+/// advertised parameter schema. Requires the caller to be on the admin
+/// allow-list. Responds 404 if the declaration does not exist.
 #[utoipa::path(
 	post,
 	path = "/update",
@@ -346,6 +439,12 @@ pub async fn update(
 	Ok(Json(views.into_iter().next().expect("one view")))
 }
 
+/// Delete a restore replica declaration.
+///
+/// Removes the declaration: the consumer stops being asked to maintain the
+/// replica and loses the backup access the declaration granted. Requires the
+/// caller to be on the admin allow-list. Responds 404 if the declaration
+/// does not exist.
 #[utoipa::path(
 	post,
 	path = "/delete",

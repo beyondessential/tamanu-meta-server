@@ -41,10 +41,16 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(register_complete))
 }
 
+/// A publicly-listed central server that a client can connect to.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct PublicServer {
+	/// Public-facing display name of the server.
 	pub name: String,
+	/// The server's reachable base URL.
 	pub host: UrlField,
+	/// The server's environment tier (production, clone, demo, test, or
+	/// dev), if set. Used to order the listing and to let clients label
+	/// non-production entries.
 	pub rank: Option<ServerRank>,
 }
 
@@ -59,6 +65,12 @@ fn rank_order(rank: &Option<ServerRank>) -> u32 {
 	}
 }
 
+/// List publicly-listed central servers.
+///
+/// Returns every central server that has both a public display name and a
+/// reachable host configured, ordered by environment tier (production
+/// first, then clone, demo, test, dev) and then by name. Used by clients
+/// to let a user pick which server to connect to.
 #[utoipa::path(
 	get,
 	path = "/",
@@ -97,24 +109,35 @@ pub async fn list(State(db): State<Db>) -> Result<Json<Vec<PublicServer>>> {
 	Ok(Json(servers))
 }
 
+/// Request to start device enrollment against a server.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct BeginArgs {
+	/// ID of the server to enroll against.
 	pub server_id: Uuid,
+	/// The enrollment token issued by an operator for this server.
 	pub token: String,
-	/// Base64-standard DER SPKI of the device public key. Required on the
-	/// tailnet transport (there is no client cert to read it from); omitted on
-	/// the mTLS path, where the key comes from the presented certificate. The
-	/// challenge is bound to this key, so `complete` must use the same one.
+	/// Base64-standard-encoded DER SubjectPublicKeyInfo (SPKI) of the
+	/// device's public key. Only required when enrolling over a transport
+	/// with no client certificate to read the key from (e.g. over
+	/// Tailscale); omit it when enrolling over mTLS, where the key is
+	/// taken from the presented client certificate. The returned challenge
+	/// is bound to this key, so the same value must be supplied again when
+	/// completing enrollment.
 	#[serde(default)]
 	pub spki: Option<String>,
 }
 
+/// A freshly-issued enrollment challenge to sign and return.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct BeginResponse {
-	/// Base64 (standard) of the 32-byte challenge nonce.
+	/// Base64-standard-encoded 32-byte challenge nonce. Sign it, together
+	/// with the server ID, device public key, and channel-binding data if
+	/// required, and submit the signature when completing enrollment.
 	pub nonce: String,
-	/// True iff the server requires the TLS exporter (`EKM`) be folded into the
-	/// signed transcript (channel binding). The client must then append it.
+	/// True if the server requires channel-binding data (the connection's
+	/// TLS exported keying material) to be folded into the signed
+	/// transcript. Only relevant when enrolling over mTLS; it never
+	/// applies on a transport without TLS channel binding.
 	pub channel_binding_required: bool,
 }
 
@@ -168,6 +191,18 @@ fn enforce_rate_limit(rl: &RateLimiter, ip: std::net::IpAddr, server_id: uuid::U
 	Ok(())
 }
 
+/// Start device enrollment against a server.
+///
+/// Validates the enrollment token against the given server and, if valid,
+/// issues a short-lived (5 minute) signed challenge bound to the server
+/// ID, the token, and the caller's public key. The device must sign this
+/// challenge and submit it to the completion endpoint to finish
+/// enrollment; the token itself is validated here but not yet consumed.
+///
+/// This endpoint is rate-limited per source IP and per target server; a
+/// tripped limit returns 429. Any other failure — an unknown or deleted
+/// server, or an invalid or expired token — is surfaced as a generic 403,
+/// deliberately not distinguishing which check failed.
 #[utoipa::path(
 	post,
 	path = "/register/begin",
@@ -221,27 +256,56 @@ pub async fn register_begin(
 	}))
 }
 
+/// Request to complete device enrollment by presenting a signed
+/// challenge obtained from the start-enrollment endpoint.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct CompleteArgs {
+	/// ID of the server being enrolled against. Must match the value used
+	/// when starting enrollment.
 	pub server_id: Uuid,
-	/// Base64 (standard) of the nonce returned by `begin`.
+	/// Base64-standard-encoded challenge nonce returned when enrollment
+	/// was started.
 	pub nonce: String,
-	/// Base64 (standard) of the ASN.1 DER ECDSA-P256-SHA256 signature over the
-	/// transcript `nonce ‖ server_id ‖ spki [‖ ekm]`.
+	/// Base64-standard-encoded ASN.1 DER ECDSA (P-256, SHA-256) signature
+	/// over the challenge transcript, proving possession of the device's
+	/// private key. The transcript is the byte concatenation of: the raw
+	/// challenge nonce, the raw 16 bytes of the server ID, the DER SPKI of
+	/// the device public key, and — only when channel binding was flagged
+	/// as required — the connection's TLS exported keying material.
 	pub signature: String,
-	/// Base64-standard DER SPKI of the device public key. Required on the
-	/// tailnet transport; omitted on the mTLS path (key comes from the cert).
-	/// Must match the key used at `begin`.
+	/// Base64-standard-encoded DER SPKI of the device's public key. Only
+	/// required when enrolling over a transport with no client
+	/// certificate to read the key from; must match the key used when
+	/// enrollment was started.
 	#[serde(default)]
 	pub spki: Option<String>,
 }
 
+/// Result of a successful enrollment.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct CompleteResponse {
+	/// The server the device is now enrolled against.
 	pub server_id: Uuid,
+	/// The device identity created or reused for this enrollment. The
+	/// device authenticates as this ID from now on.
 	pub device_id: Uuid,
 }
 
+/// Complete device enrollment by presenting a signed challenge.
+///
+/// Verifies the signature over the challenge transcript using the public
+/// key supplied here, then binds the device to the server: an existing
+/// device re-enrolling with the same key is reused as-is; a device
+/// re-enrolling with a different key replaces the server's previous
+/// device (revoking that device's access); otherwise a new device
+/// identity is created. On success the device is granted the server
+/// role, the enrollment token is consumed, and the server is marked as
+/// registered.
+///
+/// Enrollment is refused if the presented public key is already bound to
+/// a different live server. Like the start-enrollment endpoint, this one
+/// is rate-limited per source IP and per target server (429 on a tripped
+/// limit) and reports every other kind of failure as a generic 403.
 #[utoipa::path(
 	post,
 	path = "/register/complete",

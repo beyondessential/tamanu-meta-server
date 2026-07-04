@@ -11,6 +11,11 @@ use uuid::Uuid;
 
 use crate::{devices::Device, server_groups::ServerGroup, servers::Server};
 
+/// A tracked problem or condition on a server, or on a server group as a
+/// whole. An issue is opened the first time its source reports it and stays
+/// open (accumulating events) until the source reports it as no longer
+/// active or an operator resolves it. Issues are the basic unit that drives
+/// incidents, Slack notifications, and the fleet health view.
 #[derive(
 	Clone, Debug, Serialize, Deserialize, Queryable, Selectable, Associations, utoipa::ToSchema,
 )]
@@ -19,41 +24,66 @@ use crate::{devices::Device, server_groups::ServerGroup, servers::Server};
 #[diesel(table_name = crate::schema::issues)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Issue {
+	/// Unique identifier for this issue.
 	pub id: Uuid,
+	/// When this issue was first created.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub created_at: Timestamp,
+	/// When this issue was last modified.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub updated_at: Timestamp,
-	/// `NULL` for a group-scoped issue (see [`server_group_id`](Self::server_group_id)).
-	/// Exactly one of `server_id` / `server_group_id` is set (DB CHECK).
+	/// The server this issue is attached to. `None` for a group-scoped issue
+	/// (see `server_group_id`) — exactly one of the two is always set.
 	pub server_id: Option<Uuid>,
-	/// `NULL` for an ordinary server-scoped issue; `Some` for a group-scoped
-	/// control-plane issue (backup corruption, preflight, …) raised via
-	/// [`raise_group_event`]. Group-scoped issues bypass the per-server
-	/// `is_monitored` gate.
+	/// The server group this issue is attached to, for a control-plane issue
+	/// (e.g. backup corruption, a failed preflight check) that isn't tied to
+	/// any single server. `None` for an ordinary server-scoped issue.
+	/// Group-scoped issues are always considered even if an individual
+	/// server in the group has monitoring turned off.
 	pub server_group_id: Option<Uuid>,
+	/// The device that reported this issue, if it was raised by a device
+	/// push. `None` for issues raised by an operator or by the platform
+	/// itself.
 	pub device_id: Option<Uuid>,
+	/// Identifies what raised this issue — a healthcheck, a backup pipeline,
+	/// an operator, etc. Used together with `ref` to detect repeat reports
+	/// of the same underlying problem.
 	pub source: String,
+	/// A caller-chosen identifier for this issue within its `source`. The
+	/// same `(source, ref)` pair reported again updates this issue instead
+	/// of creating a new one.
 	#[diesel(column_name = "ref_")]
 	#[serde(rename = "ref")]
 	pub r#ref: String,
+	/// The issue's current severity.
 	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub severity: Severity,
-	/// Single-line title/subject. See [`NewEvent::description`].
+	/// A short, single-line title for the issue, shown as its headline in
+	/// the UI and in Slack notifications. `None` if no title was given.
 	pub description: Option<String>,
-	/// Body / long detail. See [`NewEvent::message`].
+	/// The full body text describing the issue.
 	pub message: String,
+	/// Whether the condition behind this issue is still ongoing. Set to
+	/// `false` when the source reports the condition has cleared.
 	pub active: bool,
+	/// When this issue was first reported.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub first_seen: Timestamp,
+	/// When this issue was most recently reported or updated.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub last_seen: Timestamp,
+	/// When an operator marked this issue resolved. `None` if it hasn't
+	/// been resolved.
 	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
 	pub resolved_at: Option<Timestamp>,
+	/// The operator who resolved this issue. `None` if it hasn't been
+	/// resolved.
 	pub resolved_by: Option<String>,
-	/// Stored as nullable text; validated as `ResolvedReason` at the API layer
-	/// (avoids the diesel orphan-rules dance for nullable enum columns).
+	/// The reason given when the issue was resolved (for example: fixed,
+	/// false positive, won't fix). `None` if it hasn't been resolved.
 	pub resolved_reason: Option<String>,
+	/// If set, this issue is snoozed until this time: it's temporarily
+	/// excluded from incidents and notifications even while still active.
 	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
 	pub snoozed_until: Option<Timestamp>,
 }
@@ -119,31 +149,41 @@ pub struct IncidentIssue {
 	pub left_at: Option<Timestamp>,
 }
 
-/// One event push from a device (public API) or operator (private API).
-///
-/// `ref` is required: clients that don't want dedup can mint a UUID.
-/// `occurred_at` is optional and is the client's "when the thing happened"
-/// timestamp; `created_at` is always server-set to NOW().
+/// A single occurrence to report against an issue, sent either by a device
+/// or by an operator. If an issue with the same `source` and `ref` is
+/// already open, this occurrence is folded into it (bumping its last-seen
+/// time, and coalescing into the latest recorded event when the content is
+/// identical); otherwise a new issue is created.
 #[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct NewEvent {
+	/// Identifies what is reporting this event — a healthcheck, a backup
+	/// pipeline, an operator, etc.
 	pub source: String,
+	/// A caller-chosen identifier for this specific problem within `source`,
+	/// used to detect repeated reports of the same underlying condition.
+	/// Required — mint a UUID if deduplication isn't needed.
 	#[serde(rename = "ref")]
 	pub r#ref: String,
+	/// Severity of this event. Defaults to a standard severity if omitted.
 	#[serde(default)]
 	pub severity: Option<Severity>,
-	/// Short single-line title/subject for this event. Rendered as the
-	/// issue's headline in the UI and as the Slack message subject.
-	/// Must not contain newlines — `save()` returns `BadRequest` if it
-	/// does. Use [`Self::message`] for the body / longer detail.
+	/// A short, single-line title for this event, shown as the issue's
+	/// headline in the UI and as the subject of any Slack notification.
+	/// Must not contain newlines. Use `message` for the full body text.
 	#[serde(default)]
 	pub description: Option<String>,
-	/// Body text for this event. Free-form, multi-line OK. Falls back
-	/// to the headline when [`Self::description`] is `None` (the UI
-	/// uses the first line in that case).
+	/// The full body text for this event. Free-form, multi-line text is
+	/// fine. If `description` is omitted, the UI falls back to using the
+	/// first line of this field as the headline.
 	pub message: String,
+	/// Whether the condition this event describes is still ongoing.
+	/// Defaults to `true`. Sending `false` marks the condition as cleared,
+	/// which can close the issue's contribution to any open incident.
 	#[serde(default)]
 	pub active: Option<bool>,
+	/// When the event actually happened, if known and different from when
+	/// it was received. Defaults to the time the event was received.
 	#[serde(default)]
 	pub occurred_at: Option<Timestamp>,
 }

@@ -24,38 +24,65 @@ use uuid::Uuid;
 
 use crate::state::AppState;
 
+/// The lowest and highest software version currently reported by any
+/// production server.
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, ToSchema)]
 pub struct LiveVersionsBracket {
+	/// Oldest version currently reported by a production server.
 	pub min: VersionStr,
+	/// Newest version currently reported by a production server.
 	pub max: VersionStr,
 }
 
+/// Fleet-wide summary of software versions currently running in production.
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct SummaryData {
+	/// Lowest and highest version currently reported by a production
+	/// server.
 	pub bracket: LiveVersionsBracket,
+	/// Distinct major.minor release lines currently observed in
+	/// production, each as a `[major, minor]` pair.
 	#[schema(value_type = Vec<(u64, u64)>)]
 	pub releases: BTreeSet<(u64, u64)>,
+	/// Every distinct full version string currently observed in
+	/// production, in ascending order.
 	#[schema(value_type = Vec<VersionStr>)]
 	pub versions: BTreeSet<VersionStr>,
 }
 
+/// Basic identifying details for a server. Currently unused by any
+/// endpoint in this API.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ServerDetailsData {
+	/// Server id.
 	pub id: String,
+	/// Server display name.
 	pub name: String,
+	/// Server kind (deployment type).
 	pub kind: String,
+	/// Server rank (e.g. production, test, dev).
 	pub rank: String,
+	/// Server hostname or address.
 	pub host: String,
 }
 
+/// A simplified snapshot of a server's reported status. Currently unused by
+/// any endpoint in this API.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ServerStatusData {
+	/// Up/down state, as a short status string.
 	pub up: String,
+	/// When this status was last updated, as a formatted string.
 	pub updated_at: Option<String>,
+	/// Reported software version.
 	pub version: Option<String>,
+	/// Reported operating system platform.
 	pub platform: Option<String>,
+	/// Reported database engine version.
 	pub postgres: Option<String>,
+	/// Reported runtime version.
 	pub nodejs: Option<String>,
+	/// Reported system timezone.
 	pub timezone: Option<String>,
 }
 
@@ -67,6 +94,11 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(snapshot))
 }
 
+/// Get a fleet-wide summary of software versions running in production.
+///
+/// Looks at the most recent status reported by every server ranked as
+/// production (within the last 7 days) and returns the range of versions
+/// seen, the distinct release lines, and every distinct exact version.
 #[utoipa::path(
 	post,
 	path = "/summary",
@@ -101,13 +133,12 @@ pub async fn summary(State(state): State<AppState>) -> Result<Json<SummaryData>>
 	}))
 }
 
-/// Server group ids bucketed by their **highest-ranked member's** rank.
-/// `ServerRank::Production` outranks `Clone`, `Demo`, `Test`, `Dev` in that
-/// order. Groups whose members are all unranked don't appear in the response
-/// at all (the status page intentionally hides them — they're typically dev
-/// scratch).
+/// List server group ids, bucketed by rank.
 ///
-/// Within each bucket, groups are ordered alphabetically by name.
+/// Each group is bucketed under the highest rank held by any of its member
+/// servers (production outranks clone, which outranks demo, then test,
+/// then dev). Groups whose members are all unranked are omitted entirely.
+/// Within each rank bucket, groups are ordered alphabetically by name.
 #[utoipa::path(
 	post,
 	path = "/server_grouped_ids",
@@ -144,11 +175,19 @@ pub async fn server_grouped_ids(
 	Ok(Json(map))
 }
 
+/// Identifies the server group whose status details to fetch.
 #[derive(Deserialize, ToSchema)]
 pub struct GroupDetailsArgs {
+	/// Id of the server group to fetch details for.
 	pub server_group_id: Uuid,
 }
 
+/// Get a status card for a server group.
+///
+/// Returns the group's identity, its headline version and how far behind
+/// the latest published release that version is, and a per-member summary
+/// (up/down state, health, connected operators, rank, kind) for every
+/// server in the group. Returns 404 if the group doesn't exist.
 #[utoipa::path(
 	post,
 	path = "/group_details",
@@ -229,59 +268,78 @@ pub async fn group_details(
 	}))
 }
 
-/// What the UI needs to render a status snapshot — the curated
-/// fields ServerDetail already shows (so the modal/section can look
-/// like the rest of the app) plus the new `healthy` / `health` and
-/// the raw `extra` blob for forward-compat as the contract expands.
+/// A single status push from a server, as of a point in time, with derived
+/// health and version information.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct StatusSnapshotData {
+	/// Unique identifier for this status push.
 	pub id: Uuid,
+	/// When this status push was recorded.
 	pub created_at: Timestamp,
+	/// Id of the server this status was reported by.
 	pub server_id: Uuid,
+	/// Id of the device that sent this status push, if known.
 	pub device_id: Option<Uuid>,
+	/// Software version reported in this push.
 	pub version: Option<VersionStr>,
+	/// How many releases behind the latest published version this push's
+	/// version is. Absent when there's no published version to compare
+	/// against.
 	pub version_distance: Option<u64>,
+	/// Minimum embedded browser version required by this software version,
+	/// if known.
 	pub min_chrome_version: Option<u32>,
+	/// Reported operating system platform.
 	pub platform: Option<String>,
+	/// Reported database engine version.
 	pub postgres: Option<String>,
+	/// Reported runtime version.
 	pub nodejs: Option<String>,
+	/// Reported system timezone.
 	pub timezone: Option<String>,
-	/// Raw legacy top-level self-report. Being retired from the wire
-	/// (absent ⇒ true on ingestion); UI display should use
-	/// `health_state` instead.
+	/// Legacy overall self-reported health flag. Being phased out in favor
+	/// of `health_state`; new integrations should not rely on it.
 	pub healthy: bool,
-	/// Rollup over the per-check results (and the legacy top-level
-	/// flag) — same derivation as the status-dot border. The UI's
-	/// headline chip uses this so a failing check can't hide behind
-	/// a self-reported (or defaulted) top-level `healthy: true`.
+	/// Overall health rollup for this push, derived from its individual
+	/// health checks (falling back to the legacy `healthy` flag). A single
+	/// failing check can't be masked by an otherwise-healthy overall
+	/// report.
 	pub health_state: commons_types::status::HealthState,
+	/// Raw per-check health results as reported in this push.
 	pub health: serde_json::Value,
+	/// Additional unstructured data reported alongside this push, for
+	/// fields not yet promoted to a named field on this response.
 	pub extra: serde_json::Value,
-	/// Identified operators connected as of this push, from the
-	/// `external_users` check, with display info filled from the
-	/// `tailscale_users` cache. Not freshness-gated — a snapshot is
-	/// explicitly "as of" a point in time.
+	/// Operators identified as connected to the server as of this push,
+	/// with display name and profile picture filled in where known. Not
+	/// filtered by recency — reflects this specific point-in-time snapshot.
 	pub operators: Vec<OperatorPresence>,
-	/// For each unhealthy check on this push, the severity the
-	/// catalog + rules engine would file at. Healthy checks are
-	/// absent; absence on an unhealthy check means the catalog has
-	/// no row yet (treat as the default Warning) — the UI surfaces
-	/// the explicit severity when one is known so operators see
-	/// all five levels, not just the legacy "warning/error" pair
-	/// derived from `healthy`.
+	/// For each currently-unhealthy check in this push, the severity it
+	/// would be filed at if it turned into an issue. Healthy checks are
+	/// omitted. An unhealthy check with no severity listed here should be
+	/// treated as a default (warning-level) severity.
 	pub check_severities: std::collections::HashMap<String, commons_types::issue::Severity>,
 }
 
+/// Selects a server and a point in time to fetch a status snapshot for.
 #[derive(Deserialize, ToSchema)]
 pub struct SnapshotArgs {
+	/// Id of the server to fetch a status snapshot for.
 	pub server_id: Uuid,
-	/// When the snapshot should be "as of". Returns the most recent
-	/// status row with `created_at <= at`. Omit (or `null`) to get
-	/// the latest status (no time bound).
+	/// Point in time the snapshot should be "as of". Returns the most
+	/// recent status reported at or before this time. Omit (or send
+	/// `null`) to get the latest status with no time bound.
 	#[serde(default)]
 	pub at: Option<Timestamp>,
 }
 
+/// Get a server's status as of a point in time.
+///
+/// Returns the most recent status push at or before `at` (or the latest
+/// push overall, if `at` is omitted), enriched with version distance,
+/// minimum browser version, connected operators, and per-check severities.
+/// Returns `null` in the response body if the server has no recorded
+/// status.
 #[utoipa::path(
 	post,
 	path = "/snapshot",

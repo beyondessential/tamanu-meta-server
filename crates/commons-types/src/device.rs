@@ -7,15 +7,20 @@ use diesel::{
 };
 use serde::{Deserialize, Serialize};
 
+/// The role a device is trusted with, which determines what it may do.
 #[derive(
 	Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, AsExpression, utoipa::ToSchema,
 )]
 #[diesel(sql_type = Text)]
 #[serde(rename_all = "lowercase")]
 pub enum DeviceRole {
+	/// Full administrative access, including everything the other roles can do.
 	Admin,
+	/// May publish release versions and register their artifacts.
 	Releaser,
+	/// Acts as a monitored server: submits statuses and events, runs backups.
 	Server,
+	/// May run managed restores of backups onto replica servers.
 	#[serde(rename = "backup-restore")]
 	BackupRestore,
 }

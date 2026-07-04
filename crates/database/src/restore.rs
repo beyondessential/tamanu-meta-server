@@ -23,39 +23,60 @@ use crate::backup::refs;
 use crate::backups::BackupRun;
 use crate::pg_duration::PgDuration;
 
-/// An operator-declared replica: a consumer should keep a replica of a
-/// `(group, [server | all servers], type)` for a given intent. The declaration
-/// is both the work item (it expands into worklist entries) and the
-/// authorization (it grants the consumer read access to that `(group, type)`).
+/// An operator's declaration that a restore consumer should maintain a
+/// restorable replica for a server (or every server in a group) and backup
+/// type, satisfying a given restore intent. This both queues the work for
+/// the consumer and grants that consumer access to the matching backups.
 #[derive(Debug, Clone, Serialize, Queryable, Selectable, utoipa::ToSchema)]
 #[diesel(table_name = crate::schema::restore_replicas)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct RestoreReplica {
+	/// Unique identifier for this declaration.
 	pub id: Uuid,
+	/// The device (restore consumer) responsible for maintaining this
+	/// replica.
 	pub consumer_device_id: Uuid,
+	/// The server group this declaration applies to.
 	pub group_id: Uuid,
-	/// `None` = all current servers in the group, expanded at worklist time.
+	/// The specific server this declaration covers. `None` means every
+	/// server currently in the group.
 	pub server_id: Option<Uuid>,
+	/// The backup type this declaration covers (e.g. a database snapshot
+	/// type). Any type name the consumer advertises support for is
+	/// accepted.
 	#[diesel(column_name = type_)]
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
+	/// The restore intent this declaration should satisfy — what kind of
+	/// restore behaviour the consumer should perform against the backups
+	/// (for example, a periodic verification restore vs. one held ready for
+	/// disaster recovery). Any intent name the consumer advertises support
+	/// for is accepted.
 	#[schema(value_type = String)]
 	pub intent: RestoreIntent,
+	/// An operator-assigned label for this declaration, shown in the UI.
 	pub name: String,
-	/// The overdue bound. For a `once` intent it bounds how long the latest
-	/// snapshot may go unverified; otherwise it bounds staleness since the last
-	/// healthy report. `None` = no overdue bound.
+	/// How long, in seconds, this replica may go without a healthy restore
+	/// report before it's considered overdue and an alert is raised. For an
+	/// intent that only needs to verify the latest snapshot once, this
+	/// instead bounds how long that snapshot may go unverified. `None`
+	/// means no overdue bound is enforced.
 	#[schema(value_type = Option<i64>)]
 	pub overdue_after: Option<PgDuration>,
-	/// Operator-supplied parameter values (name → value), passed through to the
-	/// consumer resolved against the intent's schema. Only the values the
-	/// operator set are stored.
+	/// Operator-supplied parameter values for this declaration, keyed by
+	/// parameter name, passed through to the consumer. Only the values the
+	/// operator explicitly set are included.
 	#[schema(value_type = Object)]
 	pub params: serde_json::Value,
+	/// Whether this declaration is currently active. When disabled, it
+	/// produces no work and grants no access, but is kept for reference.
 	pub enabled: bool,
+	/// The operator who created this declaration. `None` if not recorded.
 	pub created_by: Option<String>,
+	/// When this declaration was created.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub created_at: Timestamp,
+	/// When this declaration was last modified.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub updated_at: Timestamp,
 }
@@ -322,8 +343,9 @@ impl RestoreConsumerCapability {
 }
 
 /// The stable group-level alert ref for one replica's restore-health. Per
-/// `(server, type, intent)` so each replica recovers independently (a healthy
-/// `verify` must not clear a failing `disaster-recovery` on the same server).
+/// `(server, type, intent)` so each replica recovers independently (one
+/// intent's healthy report must not clear another's failure on the same
+/// server).
 fn restore_verification_ref(
 	server_id: Uuid,
 	r#type: &BackupType,
@@ -338,40 +360,67 @@ fn restore_verification_ref(
 	)
 }
 
-/// A restore-health report: one row per report a consumer sends about a
-/// replica — proof a snapshot actually restored into a healthy database, the
-/// strongest backup-health signal. `snapshot_id` joins back to the
-/// produced/persisted record for that snapshot.
+/// A restore-health report submitted by a restore consumer: proof (or
+/// disproof) that a backup snapshot actually restores into a healthy
+/// database — the strongest available signal of backup health. `snapshot_id`
+/// identifies which snapshot was restored, if the report is snapshot-scoped.
 #[derive(Debug, Clone, Serialize, Queryable, Selectable, utoipa::ToSchema)]
 #[diesel(table_name = crate::schema::backup_restore_checks)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct BackupRestoreCheck {
+	/// Unique identifier for this report.
 	pub id: i64,
+	/// The replica declaration this report is for, if it was made against
+	/// a declared replica. `None` for reports not tied to a declaration.
 	pub replica_id: Option<Uuid>,
+	/// The device (restore consumer) that submitted this report.
 	pub consumer_device_id: Uuid,
+	/// The server group this report belongs to.
 	pub group_id: Uuid,
+	/// The server this report is about, if any.
 	pub server_id: Option<Uuid>,
+	/// The backup type this report covers.
 	#[diesel(column_name = type_)]
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
+	/// The restore intent this report was performed for.
 	#[schema(value_type = String)]
 	pub intent: RestoreIntent,
+	/// The id of the snapshot that was restored, if the report is scoped to
+	/// a specific snapshot.
 	pub snapshot_id: Option<String>,
+	/// Whether the restore attempt itself succeeded or failed.
 	#[schema(value_type = String)]
 	pub outcome: RunOutcome,
+	/// Error message reported for a failed restore, if any.
 	pub error: Option<String>,
+	/// Whether the restored database came up and passed its health checks.
+	/// A report only counts as fully healthy when `outcome` is success and
+	/// this is also `true`.
 	pub replica_healthy: bool,
+	/// The Postgres version of the restored database, if reported.
 	pub postgres_version: Option<String>,
+	/// When the restore attempt this report describes actually took place.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub observed_at: Timestamp,
+	/// Bytes sent to storage for this restore, counting the full HTTP
+	/// request including signing/chunking overhead.
 	pub s3_sent_raw_bytes: Option<i64>,
+	/// Bytes sent to storage for this restore, counting only the decoded
+	/// object data (excludes request/signing overhead).
 	pub s3_sent_payload_bytes: Option<i64>,
+	/// Bytes received from storage for this restore, counting the full HTTP
+	/// response including framing overhead.
 	pub s3_received_raw_bytes: Option<i64>,
+	/// Bytes received from storage for this restore, counting only the
+	/// decoded object data (excludes response framing overhead).
 	pub s3_received_payload_bytes: Option<i64>,
+	/// When this report was received.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub reported_at: Timestamp,
-	/// Arbitrary health data the consumer sent (postgres cluster stats, whether
-	/// indexes needed fixing, …). Opaque to canopy — stored and displayed as-is.
+	/// Additional health data supplied by the consumer (for example,
+	/// database cluster statistics or whether indexes needed repair).
+	/// Passed through and displayed as-is. `None` if none was supplied.
 	pub health_details: Option<serde_json::Value>,
 }
 

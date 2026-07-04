@@ -20,6 +20,24 @@ pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new().routes(routes!(create))
 }
 
+/// Register a downloadable artifact for a version or version range.
+///
+/// Requires a device certificate with the releaser role (or admin). The
+/// path identifies the version the artifact belongs to — either an exact
+/// version (e.g. `2.10.5`) or a semver range pattern (e.g. `2.10.x`,
+/// `^2.10.0`) — followed by the artifact's type and target platform. The
+/// request body is the plain-text URL clients should download the
+/// artifact from.
+///
+/// When an exact version is given and it doesn't exist yet, it is created
+/// automatically as an unpublished draft so the artifact has a version to
+/// attach to; publishing that version later (via the version-creation
+/// endpoint) is a separate step. When a range pattern is given instead,
+/// the artifact isn't tied to one version — it matches whichever
+/// published version currently satisfies the range at lookup time.
+///
+/// Returns the created artifact record. Returns 400 if the version or
+/// range syntax can't be parsed.
 #[utoipa::path(
 	post,
 	path = "/{version}/{artifact_type}/{platform}",
