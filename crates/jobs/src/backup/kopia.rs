@@ -34,6 +34,7 @@ use std::process::Output;
 use anyhow::{Context, Result, bail};
 use commons_types::backup::MaintenanceKind;
 use tokio::process::Command;
+use tracing::warn;
 
 /// The kopia maintenance owner identity. kopia maintenance is owned by a single
 /// `user@host` and `maintenance run` refuses unless the connected client
@@ -362,6 +363,13 @@ pub fn parse_total_bytes(text: &str) -> Option<i64> {
 	None
 }
 
+/// Bytes freed by a full-maintenance run, from before/after physical-size
+/// readings. Clamped to 0: concurrent writes during maintenance can grow the
+/// repo, which would otherwise show as a negative reclaim.
+pub fn reclaimed_bytes(before: i64, after: i64) -> i64 {
+	(before - after).max(0)
+}
+
 // ===========================================================================
 // kopia subprocess helpers.
 // ===========================================================================
@@ -402,6 +410,17 @@ pub async fn kopia_json<T: serde::de::DeserializeOwned>(
 	let out = run_kopia_ok(env, args).await?;
 	serde_json::from_slice(&out.stdout)
 		.with_context(|| format!("failed to parse JSON from kopia {}", args.join(" ")))
+}
+
+/// Read the repo's physical (stored) byte count via `kopia content stats`.
+/// `None` on any failure (spawn error, non-zero exit, unparseable output) —
+/// callers treat this as best-effort, never fatal.
+async fn physical_bytes(env: &KopiaEnv) -> Option<i64> {
+	let out = run_kopia(env, &["content", "stats"]).await.ok()?;
+	if !out.status.success() {
+		return None;
+	}
+	parse_total_bytes(&String::from_utf8_lossy(&out.stdout))
 }
 
 /// Trim + truncate stderr to a short single-line message for error context.
@@ -602,8 +621,15 @@ pub async fn run_init(
 /// Outcome of a maintenance run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MaintOutcome {
-	/// Bytes freed. Always `None`: kopia maintenance emits no stable
-	/// machine-readable bytes-reclaimed figure.
+	/// Bytes freed by a full-maintenance run, from `content stats` physical
+	/// size before/after. `None` for quick maintenance (no GC runs, so nothing
+	/// to measure) or if either `content stats` read failed.
+	///
+	/// This is an approximation, not an authoritative count: kopia's GC is
+	/// two-phase (mark-deleted blobs, then sweep them after a safety window on
+	/// a later full run), so a single run can under-report — the actual bytes
+	/// may only disappear on a subsequent full-maintenance run once the
+	/// quarantine window has passed.
 	pub bytes_reclaimed: Option<i64>,
 }
 
@@ -650,15 +676,36 @@ pub async fn run_maintenance(
 	// without it expire is a dry run).
 	run_kopia_ok(env, &["snapshot", "expire", "--all", "--delete"]).await?;
 
+	// Only full maintenance runs GC, so only measure reclaim for it. Read the
+	// "before" figure now, ahead of the actual GC-triggering command.
+	let before = if kind == MaintenanceKind::Full {
+		physical_bytes(env).await
+	} else {
+		None
+	};
+
 	if kind == MaintenanceKind::Full {
 		run_kopia_ok(env, &["maintenance", "run", "--full"]).await?;
 	} else {
 		run_kopia_ok(env, &["maintenance", "run"]).await?;
 	}
 
-	Ok(MaintOutcome {
-		bytes_reclaimed: None,
-	})
+	let bytes_reclaimed = match before {
+		Some(before) => match physical_bytes(env).await {
+			Some(after) => Some(reclaimed_bytes(before, after)),
+			None => {
+				warn!("kopia content stats (after maintenance) failed; bytes_reclaimed unknown");
+				None
+			}
+		},
+		None if kind == MaintenanceKind::Full => {
+			warn!("kopia content stats (before maintenance) failed; bytes_reclaimed unknown");
+			None
+		}
+		None => None,
+	};
+
+	Ok(MaintOutcome { bytes_reclaimed })
 }
 
 /// Outcome of a read-only inspection.
@@ -694,12 +741,7 @@ pub async fn run_inspect(
 		.context("snapshot list failed")?;
 	let inspected = inspect_manifests(&manifests);
 
-	// physical bytes: `kopia content stats` has no --json; parse the text line
-	// "Total Bytes: <n> <unit>" best-effort. None if unavailable.
-	let physical_bytes = match run_kopia(env, &["content", "stats"]).await {
-		Ok(out) if out.status.success() => parse_total_bytes(&String::from_utf8_lossy(&out.stdout)),
-		_ => None,
-	};
+	let physical_bytes = physical_bytes(env).await;
 
 	// verify: a non-zero verify does NOT fail the inspection; the completion
 	// logic raises the corruption alert off verify_ok.
@@ -963,5 +1005,22 @@ mod tests {
 		assert_eq!(parse_total_bytes("Count: 3\n"), None);
 		assert_eq!(parse_total_bytes("Total Bytes: 5 PB"), None);
 		assert_eq!(parse_total_bytes("Total Bytes:"), None);
+	}
+
+	#[test]
+	fn reclaimed_bytes_normal_shrink() {
+		assert_eq!(reclaimed_bytes(1000, 400), 600);
+	}
+
+	#[test]
+	fn reclaimed_bytes_no_change() {
+		assert_eq!(reclaimed_bytes(1000, 1000), 0);
+	}
+
+	#[test]
+	fn reclaimed_bytes_clamps_growth_to_zero() {
+		// Concurrent writes during maintenance can grow the repo; never report
+		// a negative reclaim.
+		assert_eq!(reclaimed_bytes(1000, 1500), 0);
 	}
 }
