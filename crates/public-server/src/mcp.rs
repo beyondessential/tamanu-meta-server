@@ -35,7 +35,7 @@ pub fn routes(state: AppState) -> Router<()> {
 	Router::new().nest(
 		"/mcp",
 		Router::new()
-			.fallback_service(canopy_mcp::service(state.db.clone()))
+			.fallback_service(canopy_mcp::service(state.db_read.clone()))
 			.layer(middleware::from_fn_with_state(state, require_bearer_token)),
 	)
 }

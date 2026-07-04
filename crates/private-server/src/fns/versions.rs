@@ -151,7 +151,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 pub async fn get_grouped_versions(
 	State(state): State<AppState>,
 ) -> Result<Json<Vec<MinorVersionGroup>>> {
-	let mut conn = state.db.get().await?;
+	let mut conn = state.db_read.get().await?;
 	let versions = Version::get_all_including_drafts(&mut conn).await?;
 
 	// One batched query to compute `ready` for every version returned.
@@ -250,7 +250,7 @@ pub async fn get_version_detail(
 	State(state): State<AppState>,
 	Json(args): Json<VersionStringArgs>,
 ) -> Result<Json<VersionDetail>> {
-	let mut conn = state.db.get().await?;
+	let mut conn = state.db_read.get().await?;
 	let version = VersionStr::from_str(&args.version)?;
 	let version_record = Version::get_by_version(&mut conn, version.clone()).await?;
 
@@ -334,7 +334,7 @@ pub async fn get_version_artifacts(
 	State(state): State<AppState>,
 	Json(args): Json<VersionStringArgs>,
 ) -> Result<Json<Vec<ArtifactData>>> {
-	let mut conn = state.db.get().await?;
+	let mut conn = state.db_read.get().await?;
 	let version = VersionStr::from_str(&args.version)?;
 	let version_record = Version::get_by_version(&mut conn, version).await?;
 	let artifacts_with_metadata =
@@ -550,7 +550,7 @@ pub async fn list_known_issues(
 	_user: TailscaleUser,
 	Json(args): Json<VersionIdArgs>,
 ) -> Result<Json<Vec<KnownIssueData>>> {
-	let mut conn = state.db.get().await?;
+	let mut conn = state.db_read.get().await?;
 	let v = Version::get_by_id(&mut conn, args.version_id).await?;
 	let rows = VersionKnownIssue::list_for_minor(&mut conn, v.major, v.minor).await?;
 	Ok(Json(rows.into_iter().map(KnownIssueData::from).collect()))

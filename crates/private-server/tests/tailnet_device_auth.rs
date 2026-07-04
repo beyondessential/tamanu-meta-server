@@ -77,9 +77,11 @@ async fn unknown_tailnet_node_is_rejected_without_creating_a_row() {
 			},
 		)]);
 
+		let db = database::init_to(&url);
 		let private_router = router(
 			private_server::routes(private_server::state::AppState {
-				db: database::init_to(&url),
+				db: db.clone(),
+				db_read: db,
 				ro_pool: None,
 				tailnet_directory: Some(directory),
 				kube: None,

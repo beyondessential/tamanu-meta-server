@@ -78,7 +78,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 	),
 )]
 pub async fn summary(State(state): State<AppState>) -> Result<Json<SummaryData>> {
-	let mut conn = state.db.get().await?;
+	let mut conn = state.db_read.get().await?;
 
 	let versions: BTreeSet<VersionStr> = Status::production_versions(&mut conn)
 		.await?
@@ -120,7 +120,7 @@ pub async fn summary(State(state): State<AppState>) -> Result<Json<SummaryData>>
 pub async fn server_grouped_ids(
 	State(state): State<AppState>,
 ) -> Result<Json<BTreeMap<ServerRank, Vec<Uuid>>>> {
-	let mut conn = state.db.get().await?;
+	let mut conn = state.db_read.get().await?;
 	let groups = ServerGroup::list_all(&mut conn).await?;
 	if groups.is_empty() {
 		return Ok(Json(BTreeMap::new()));
@@ -164,7 +164,7 @@ pub async fn group_details(
 	State(state): State<AppState>,
 	Json(args): Json<GroupDetailsArgs>,
 ) -> Result<Json<ServerGroupCard>> {
-	let mut conn = state.db.get().await?;
+	let mut conn = state.db_read.get().await?;
 	let group = ServerGroup::get_by_id(&mut conn, args.server_group_id).await?;
 	let servers = group.list_servers(&mut conn).await?;
 
@@ -299,7 +299,7 @@ pub async fn snapshot(
 	_user: TailscaleUser,
 	Json(args): Json<SnapshotArgs>,
 ) -> Result<Json<Option<StatusSnapshotData>>> {
-	let mut conn = state.db.get().await?;
+	let mut conn = state.db_read.get().await?;
 	let status = match args.at {
 		Some(at) => Status::at_time(&mut conn, args.server_id, at).await?,
 		None => Status::latest_for_server(&mut conn, args.server_id).await?,

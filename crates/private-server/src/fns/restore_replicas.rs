@@ -214,7 +214,7 @@ pub async fn for_group(
 	State(state): State<AppState>,
 	Json(args): Json<RestoreReplicasGroupArgs>,
 ) -> Result<Json<Vec<RestoreReplicaView>>> {
-	let mut conn = state.db.get().await?;
+	let mut conn = state.db_read.get().await?;
 	let replicas = RestoreReplica::list_for_group(&mut conn, args.server_group_id).await?;
 	Ok(Json(to_views(&mut conn, replicas).await?))
 }
@@ -228,7 +228,7 @@ pub async fn for_group(
 	responses((status = 200, body = Vec<RestoreConsumerView>)),
 )]
 pub async fn consumers(State(state): State<AppState>) -> Result<Json<Vec<RestoreConsumerView>>> {
-	let mut conn = state.db.get().await?;
+	let mut conn = state.db_read.get().await?;
 	let devices = Device::list_by_role(&mut conn, DeviceRole::BackupRestore).await?;
 	let mut out = Vec::with_capacity(devices.len());
 	for d in devices {
@@ -255,7 +255,7 @@ pub async fn checks(
 	State(state): State<AppState>,
 	Json(args): Json<RestoreReplicasGroupArgs>,
 ) -> Result<Json<Vec<BackupRestoreCheck>>> {
-	let mut conn = state.db.get().await?;
+	let mut conn = state.db_read.get().await?;
 	let rows =
 		BackupRestoreCheck::list_recent_for_group(&mut conn, args.server_group_id, 50).await?;
 	Ok(Json(rows))

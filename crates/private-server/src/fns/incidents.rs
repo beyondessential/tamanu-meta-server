@@ -194,7 +194,7 @@ pub async fn list_for_server(
 	_user: TailscaleUser,
 	Json(args): Json<IncidentListForServerArgs>,
 ) -> Result<Json<Vec<IncidentData>>> {
-	let mut conn = state.db.get().await?;
+	let mut conn = state.db_read.get().await?;
 	let incidents = Incident::list_for_server(
 		&mut conn,
 		args.server_id,
@@ -203,7 +203,7 @@ pub async fn list_for_server(
 	)
 	.await?;
 	Ok(Json(
-		enrich_incidents(&mut conn, &state.db, incidents).await?,
+		enrich_incidents(&mut conn, &state.db_read, incidents).await?,
 	))
 }
 
@@ -232,7 +232,7 @@ pub async fn list_for_group(
 	_user: TailscaleUser,
 	Json(args): Json<ListForGroupArgs>,
 ) -> Result<Json<Vec<IncidentData>>> {
-	let mut conn = state.db.get().await?;
+	let mut conn = state.db_read.get().await?;
 	let incidents = Incident::list_for_group(
 		&mut conn,
 		args.server_group_id,
@@ -241,7 +241,7 @@ pub async fn list_for_group(
 	)
 	.await?;
 	Ok(Json(
-		enrich_incidents(&mut conn, &state.db, incidents).await?,
+		enrich_incidents(&mut conn, &state.db_read, incidents).await?,
 	))
 }
 
@@ -266,10 +266,10 @@ pub async fn list_active(
 	_user: TailscaleUser,
 	Json(args): Json<ListActiveArgs>,
 ) -> Result<Json<Vec<IncidentData>>> {
-	let mut conn = state.db.get().await?;
+	let mut conn = state.db_read.get().await?;
 	let incidents = Incident::list_active(&mut conn, args.limit.unwrap_or(DEFAULT_LIMIT)).await?;
 	Ok(Json(
-		enrich_incidents(&mut conn, &state.db, incidents).await?,
+		enrich_incidents(&mut conn, &state.db_read, incidents).await?,
 	))
 }
 
@@ -294,7 +294,7 @@ pub async fn get_incident(
 	_user: TailscaleUser,
 	Json(args): Json<GetIncidentArgs>,
 ) -> Result<Json<IncidentWithIssues>> {
-	let mut conn = state.db.get().await?;
+	let mut conn = state.db_read.get().await?;
 	let (incident, rows) = Incident::get_with_issues(&mut conn, args.incident_id).await?;
 	let (links, raw_issues): (Vec<_>, Vec<_>) = rows.into_iter().unzip();
 	let issue_data = enrich_issues(&mut conn, raw_issues).await?;
@@ -303,7 +303,7 @@ pub async fn get_incident(
 		.zip(issue_data)
 		.map(|(link, issue)| IncidentIssueData::from((link, issue)))
 		.collect();
-	let incident = enrich_incident(&mut conn, &state.db, incident).await?;
+	let incident = enrich_incident(&mut conn, &state.db_read, incident).await?;
 	Ok(Json(IncidentWithIssues { incident, issues }))
 }
 
@@ -436,7 +436,7 @@ pub async fn list_notes(
 	_user: TailscaleUser,
 	Json(args): Json<IncidentListNotesArgs>,
 ) -> Result<Json<Vec<IncidentNoteData>>> {
-	let mut conn = state.db.get().await?;
+	let mut conn = state.db_read.get().await?;
 	let notes = IncidentNote::list_for_incident(
 		&mut conn,
 		args.incident_id,

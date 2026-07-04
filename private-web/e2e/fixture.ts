@@ -186,6 +186,10 @@ export async function startStack(opts: StartOptions = {}): Promise<StackHandle> 
 			env: {
 				...process.env,
 				DATABASE_URL: databaseUrl,
+				// The outer environment (ramdisk-pg.sh, justfile) exports
+				// RO_DATABASE_URL pointing at its own cluster's base database;
+				// the read pool must target this stack's per-worker database.
+				RO_DATABASE_URL: databaseUrl,
 				BIND_ADDRESS: `127.0.0.1:${apiPort}`,
 				// No cluster in e2e: use the in-memory backup Secret store so
 				// onboarding (Secret creation) works against the real binary.

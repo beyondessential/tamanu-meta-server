@@ -106,8 +106,13 @@ where
 	Fut: Future<Output = T>,
 {
 	TestDb::run(async |conn, url| {
+		// One pool per state, shared between the RW and RO handles — a second
+		// pool would double connections against the throwaway test cluster,
+		// and this mirrors production with RO_DATABASE_URL unset.
+		let public_db = database::init_to(&url);
 		let public_state = public_server::state::AppState {
-			db: database::init_to(&url),
+			db: public_db.clone(),
+			db_read: public_db,
 			tera: public_server::state::AppState::init_tera().unwrap(),
 			server_versions_secret: Some("test-secret".to_string()),
 			tailnet_directory: None,
@@ -231,8 +236,10 @@ where
 			},
 		)]);
 
+		let public_db = database::init_to(&url);
 		let public_state = public_server::state::AppState {
-			db: database::init_to(&url),
+			db: public_db.clone(),
+			db_read: public_db,
 			tera: public_server::state::AppState::init_tera().unwrap(),
 			server_versions_secret: Some("test-secret".to_string()),
 			tailnet_directory: None,
@@ -245,9 +252,11 @@ where
 				.merge(public_server::mcp::routes(public_state)),
 			ClientIpSource::RightmostForwarded,
 		);
+		let private_db = database::init_to(&url);
 		let private_router = router(
 			private_server::routes(private_server::state::AppState {
-				db: database::init_to(&url),
+				db: private_db.clone(),
+				db_read: private_db,
 				ro_pool: None,
 				tailnet_directory: Some(directory),
 				kube: Some(public_server::state::BackupSecrets::memory()),

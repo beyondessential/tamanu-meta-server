@@ -25,6 +25,13 @@ pub type RecoveryChallengeStore = Arc<Mutex<Option<RecoveryChallenge>>>;
 #[derive(Clone, Debug, FromRef)]
 pub struct AppState {
 	pub db: Db,
+	/// Pool for read-only workloads: the RO pool when `RO_DATABASE_URL` is
+	/// configured, otherwise a clone of `db`. Handlers that only ever read
+	/// (list/get endpoints, the read-only MCP query interface) use this
+	/// instead of `db` so that traffic can be routed to a read replica
+	/// without a code change on the ops side.
+	#[from_ref(skip)]
+	pub db_read: Db,
 	pub ro_pool: Option<PgPool>,
 	pub tailnet_directory: Option<TailnetDirectory>,
 	/// Secret store for the per-group repo-password Secrets (onboarding creates
@@ -83,8 +90,12 @@ impl AppState {
 		let aws = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
 		let sts = Some(aws_sdk_sts::Client::new(&aws));
 
+		let db = database::init();
+		let db_read = database::init_ro().unwrap_or_else(|| db.clone());
+
 		Ok(Self {
-			db: database::init(),
+			db,
+			db_read,
 			ro_pool,
 			tailnet_directory,
 			kube,
@@ -100,8 +111,10 @@ impl AppState {
 	/// / `BucketProber::fake`), which don't exist in release builds.
 	#[cfg(debug_assertions)]
 	pub async fn from_db_url(url: &str) -> Result<Self> {
+		let db = database::init_to(url);
 		Ok(Self {
-			db: database::init_to(url),
+			db_read: db.clone(),
+			db,
 			ro_pool: None,
 			tailnet_directory: None,
 			// In-memory secret store so onboarding (Secret creation) is exercised
