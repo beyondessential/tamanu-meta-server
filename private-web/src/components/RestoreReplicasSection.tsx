@@ -1,5 +1,6 @@
 import AddIcon from "@mui/icons-material/Add";
 import DeleteIcon from "@mui/icons-material/Delete";
+import EditIcon from "@mui/icons-material/Edit";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import OpenInNewIcon from "@mui/icons-material/OpenInNew";
@@ -14,6 +15,7 @@ import {
 	DialogContent,
 	DialogTitle,
 	FormControl,
+	FormControlLabel,
 	IconButton,
 	InputLabel,
 	Link,
@@ -39,6 +41,7 @@ import type {
 	IntentDescriptor,
 	ParamSpec,
 	RestoreConsumerView,
+	RestoreReplicaView,
 } from "../types";
 
 function kebabCase(s: string): string {
@@ -102,6 +105,9 @@ export default function RestoreReplicasSection({
 	);
 
 	const [createOpen, setCreateOpen] = useState(false);
+	const [editingReplica, setEditingReplica] = useState<RestoreReplicaView | null>(
+		null,
+	);
 	const [error, setError] = useState<string | null>(null);
 
 	const onDelete = async (id: string) => {
@@ -237,6 +243,12 @@ export default function RestoreReplicasSection({
 									{isAdmin && (
 										<TableCell align="right">
 											<IconButton
+												aria-label={`edit ${r.name}`}
+												onClick={() => setEditingReplica(r)}
+											>
+												<EditIcon />
+											</IconButton>
+											<IconButton
 												edge="end"
 												aria-label={`delete ${r.name}`}
 												onClick={() => onDelete(r.id)}
@@ -291,6 +303,18 @@ export default function RestoreReplicasSection({
 						reload();
 					}}
 					consumers={consumers.status === "ok" ? consumers.data : []}
+				/>
+			)}
+
+			{editingReplica && (
+				<EditReplicaDialog
+					replica={editingReplica}
+					consumers={consumers.status === "ok" ? consumers.data : []}
+					onClose={() => setEditingReplica(null)}
+					onUpdated={() => {
+						setEditingReplica(null);
+						reload();
+					}}
 				/>
 			)}
 		</Box>
@@ -361,6 +385,83 @@ function ParamField({
 			onChange={(e) => onChange(e.target.value)}
 		/>
 	);
+}
+
+/** The "Parameters" heading plus one typed input per entry in `paramSchema`,
+ * shared between the declare and edit dialogs. Renders nothing for an intent
+ * with no parameters (or one Canopy has no schema for, e.g. a gap). */
+function ParamFieldsEditor({
+	paramSchema,
+	values,
+	onChange,
+}: {
+	paramSchema: Record<string, ParamSpec>;
+	values: Record<string, string>;
+	onChange: (key: string, value: string) => void;
+}) {
+	const entries = Object.entries(paramSchema);
+	if (entries.length === 0) return null;
+	return (
+		<>
+			<Typography variant="subtitle2">Parameters</Typography>
+			{entries.map(([key, spec]) => (
+				<ParamField
+					key={key}
+					name={key}
+					spec={spec}
+					value={values[key] ?? ""}
+					onChange={(v) => onChange(key, v)}
+				/>
+			))}
+		</>
+	);
+}
+
+/** Convert the typed form fields into the wire params object, omitting any the
+ * operator left unset (the consumer resolves those to their default or null).
+ * Returns an error message string if a numeric field doesn't parse. */
+function paramValuesToWire(
+	paramSchema: Record<string, ParamSpec>,
+	paramValues: Record<string, string>,
+): Record<string, unknown> | string {
+	const out: Record<string, unknown> = {};
+	for (const [key, spec] of Object.entries(paramSchema)) {
+		const raw = paramValues[key];
+		if (raw == null || raw === "") continue;
+		if (spec.type === "boolean") {
+			out[key] = raw === "true";
+		} else if (
+			spec.type === "integer" ||
+			spec.type === "bytes" ||
+			spec.type === "duration"
+		) {
+			const n = Number(raw);
+			if (!Number.isFinite(n)) return `Parameter "${key}" must be a number`;
+			out[key] = n;
+		} else {
+			out[key] = raw;
+		}
+	}
+	return out;
+}
+
+/** Stringify a replica's stored parameter values for the edit form's typed
+ * inputs, keyed by the intent's current schema. Values for keys the schema no
+ * longer describes are dropped — there'd be no field to show them in. */
+function wireParamsToValues(
+	paramSchema: Record<string, ParamSpec>,
+	params: unknown,
+): Record<string, string> {
+	const source = (
+		params && typeof params === "object" ? params : {}
+	) as Record<string, unknown>;
+	const out: Record<string, string> = {};
+	for (const [key, spec] of Object.entries(paramSchema)) {
+		const raw = source[key];
+		if (raw == null) continue;
+		out[key] = spec.type === "boolean" ? String(Boolean(raw)) : String(raw);
+	}
+	return out;
 }
 
 function CreateReplicaDialog({
@@ -442,30 +543,6 @@ function CreateReplicaDialog({
 		if (!nameEdited) setName(suggestedName);
 	}, [suggestedName, nameEdited]);
 
-	// Convert the typed form fields into the wire params object, omitting any the
-	// operator left unset (the consumer resolves those to their default or null).
-	const buildParams = (): Record<string, unknown> | string => {
-		const out: Record<string, unknown> = {};
-		for (const [key, spec] of Object.entries(paramSchema)) {
-			const raw = paramValues[key];
-			if (raw == null || raw === "") continue;
-			if (spec.type === "boolean") {
-				out[key] = raw === "true";
-			} else if (
-				spec.type === "integer" ||
-				spec.type === "bytes" ||
-				spec.type === "duration"
-			) {
-				const n = Number(raw);
-				if (!Number.isFinite(n)) return `Parameter "${key}" must be a number`;
-				out[key] = n;
-			} else {
-				out[key] = raw;
-			}
-		}
-		return out;
-	};
-
 	const onSubmit = async () => {
 		if (!consumerId) return setError("Pick a consumer");
 		if (!intent) return setError("Pick an intent the consumer advertises");
@@ -476,7 +553,7 @@ function CreateReplicaDialog({
 		if (overdue_after_seconds != null && !Number.isFinite(overdue_after_seconds)) {
 			return setError("Overdue bound must be a number of hours");
 		}
-		const params = buildParams();
+		const params = paramValuesToWire(paramSchema, paramValues);
 		if (typeof params === "string") return setError(params);
 		setPending(true);
 		setError(null);
@@ -598,20 +675,13 @@ function CreateReplicaDialog({
 						onChange={(e) => setOverdueHours(e.target.value)}
 					/>
 
-					{Object.keys(paramSchema).length > 0 && (
-						<Typography variant="subtitle2">Parameters</Typography>
-					)}
-					{Object.entries(paramSchema).map(([key, spec]) => (
-						<ParamField
-							key={key}
-							name={key}
-							spec={spec}
-							value={paramValues[key] ?? ""}
-							onChange={(v) =>
-								setParamValues((prev) => ({ ...prev, [key]: v }))
-							}
-						/>
-					))}
+					<ParamFieldsEditor
+						paramSchema={paramSchema}
+						values={paramValues}
+						onChange={(key, v) =>
+							setParamValues((prev) => ({ ...prev, [key]: v }))
+						}
+					/>
 
 					{error && <Alert severity="error">{error}</Alert>}
 				</Stack>
@@ -622,6 +692,132 @@ function CreateReplicaDialog({
 				</Button>
 				<Button variant="contained" onClick={onSubmit} disabled={pending}>
 					{pending ? "Declaring…" : "Declare"}
+				</Button>
+			</DialogActions>
+		</Dialog>
+	);
+}
+
+/** Edit a declared replica's non-structural fields (name, overdue bound,
+ * parameters, enabled). Scope — consumer, group/server, type, intent — is
+ * immutable, so this dialog doesn't offer it. Parameter fields come from the
+ * consumer's current schema for the replica's intent, if it still advertises
+ * one; for a gap declaration there's no schema to render fields for, so the
+ * stored parameter values are carried through unchanged. */
+function EditReplicaDialog({
+	replica,
+	consumers,
+	onClose,
+	onUpdated,
+}: {
+	replica: RestoreReplicaView;
+	consumers: RestoreConsumerView[];
+	onClose: () => void;
+	onUpdated: () => void;
+}) {
+	const selectedConsumer = consumers.find(
+		(c) => c.device_id === replica.consumer_device_id,
+	);
+	const selectedDescriptor = selectedConsumer?.intents.find(
+		(d) => d.intent === replica.intent,
+	);
+	const paramSchema: Record<string, ParamSpec> =
+		(selectedDescriptor?.params as Record<string, ParamSpec> | undefined) ?? {};
+
+	const [name, setName] = useState(replica.name);
+	const [overdueHours, setOverdueHours] = useState(
+		replica.overdue_after_seconds != null
+			? String(replica.overdue_after_seconds / 3600)
+			: "",
+	);
+	const [enabled, setEnabled] = useState(replica.enabled);
+	const [paramValues, setParamValues] = useState<Record<string, string>>(() =>
+		wireParamsToValues(paramSchema, replica.params),
+	);
+	const [pending, setPending] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+
+	const onSubmit = async () => {
+		if (!name.trim()) return setError("Name cannot be empty");
+		const hours = overdueHours.trim();
+		const overdue_after_seconds =
+			hours === "" ? null : Math.round(Number(hours) * 3600);
+		if (overdue_after_seconds != null && !Number.isFinite(overdue_after_seconds)) {
+			return setError("Overdue bound must be a number of hours");
+		}
+		let params: unknown = replica.params;
+		if (Object.keys(paramSchema).length > 0) {
+			const built = paramValuesToWire(paramSchema, paramValues);
+			if (typeof built === "string") return setError(built);
+			params = built;
+		}
+		setPending(true);
+		setError(null);
+		try {
+			await callApi("restore_replicas", "update", {
+				id: replica.id,
+				name: name.trim(),
+				overdue_after_seconds,
+				params,
+				enabled,
+			});
+			onUpdated();
+		} catch (err) {
+			setError(formatError(err));
+			setPending(false);
+		}
+	};
+
+	return (
+		<Dialog open onClose={() => !pending && onClose()} fullWidth maxWidth="sm">
+			<DialogTitle>Edit restore replica</DialogTitle>
+			<DialogContent>
+				<Stack spacing={2} sx={{ mt: 1 }}>
+					<TextField
+						size="small"
+						fullWidth
+						label="Name"
+						value={name}
+						onChange={(e) => setName(e.target.value)}
+					/>
+
+					<TextField
+						size="small"
+						fullWidth
+						type="number"
+						label="Overdue after (hours, optional)"
+						placeholder="no bound"
+						value={overdueHours}
+						onChange={(e) => setOverdueHours(e.target.value)}
+					/>
+
+					<FormControlLabel
+						control={
+							<Switch
+								checked={enabled}
+								onChange={(e) => setEnabled(e.target.checked)}
+							/>
+						}
+						label="Enabled"
+					/>
+
+					<ParamFieldsEditor
+						paramSchema={paramSchema}
+						values={paramValues}
+						onChange={(key, v) =>
+							setParamValues((prev) => ({ ...prev, [key]: v }))
+						}
+					/>
+
+					{error && <Alert severity="error">{error}</Alert>}
+				</Stack>
+			</DialogContent>
+			<DialogActions>
+				<Button onClick={onClose} disabled={pending}>
+					Cancel
+				</Button>
+				<Button variant="contained" onClick={onSubmit} disabled={pending}>
+					{pending ? "Saving…" : "Save"}
 				</Button>
 			</DialogActions>
 		</Dialog>

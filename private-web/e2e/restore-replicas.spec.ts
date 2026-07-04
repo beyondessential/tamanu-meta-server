@@ -333,6 +333,102 @@ test.describe("restore replicas", () => {
 		expect(rows[0]!.params.minimum_uptime).toBe(3600);
 	});
 
+	test("editing a declaration through the dialog updates name, overdue bound, and enabled", async ({
+		page,
+		sql,
+	}) => {
+		const consumer = await seedDevice(sql, { role: "backup-restore" });
+		await seedRestoreConsumerCapability(sql, {
+			deviceId: consumer.id,
+			intents: ["verify"],
+		});
+		const groupId = await groupWithBackups(sql, "edit-group");
+		const replica = await seedRestoreReplica(sql, {
+			consumerDeviceId: consumer.id,
+			groupId,
+			intent: "verify",
+			name: "before-edit",
+			overdueAfterSeconds: 3600,
+			enabled: true,
+		});
+
+		await page.goto(`/groups/${groupId}/backups`);
+		await page.getByRole("button", { name: "edit before-edit" }).click();
+
+		const dialog = page.getByRole("dialog");
+		await expect(dialog.getByLabel("Name")).toHaveValue("before-edit");
+		await expect(dialog.getByLabel("Overdue after (hours, optional)")).toHaveValue(
+			"1",
+		);
+
+		await dialog.getByLabel("Name").fill("after-edit");
+		await dialog.getByLabel("Overdue after (hours, optional)").fill("4");
+		await dialog.getByLabel("Enabled").click();
+		await dialog.getByRole("button", { name: /^save$/i }).click();
+
+		await expect(page.getByRole("row", { name: /after-edit/ })).toBeVisible();
+		await expect(page.getByRole("row", { name: /before-edit/ })).toHaveCount(0);
+
+		const rows = await sql.query<{
+			name: string;
+			overdue_after_secs: string;
+			enabled: boolean;
+		}>(
+			`SELECT name, enabled, EXTRACT(EPOCH FROM overdue_after)::text AS overdue_after_secs
+			 FROM restore_replicas WHERE id = $1`,
+			[replica.id],
+		);
+		expect(rows).toHaveLength(1);
+		expect(rows[0]!.name).toBe("after-edit");
+		expect(rows[0]!.enabled).toBe(false);
+		expect(Number(rows[0]!.overdue_after_secs)).toBe(4 * 3600);
+	});
+
+	test("editing a declaration's parameters persists the typed values", async ({
+		page,
+		sql,
+	}) => {
+		const consumer = await seedDevice(sql, { role: "backup-restore" });
+		await seedRestoreConsumerCapability(sql, {
+			deviceId: consumer.id,
+			intents: [
+				{
+					intent: "analytics",
+					description: "Keeps a queryable replica running.",
+					semantics: ["check", "url"],
+					params: {
+						minimum_uptime: { type: "duration", default: 7200 },
+						anonymisation: { type: "boolean", default: true },
+					},
+				},
+			],
+		});
+		const groupId = await groupWithBackups(sql, "edit-param-group");
+		await seedRestoreReplica(sql, {
+			consumerDeviceId: consumer.id,
+			groupId,
+			intent: "analytics",
+			name: "param-edit",
+			params: { minimum_uptime: 3600, anonymisation: true },
+		});
+
+		await page.goto(`/groups/${groupId}/backups`);
+		await page.getByRole("button", { name: "edit param-edit" }).click();
+
+		const dialog = page.getByRole("dialog");
+		const uptime = dialog.getByLabel("minimum_uptime (seconds)");
+		await expect(uptime).toHaveValue("3600");
+		await uptime.fill("1800");
+		await dialog.getByRole("button", { name: /^save$/i }).click();
+
+		await expect(page.getByRole("row", { name: /param-edit/ })).toBeVisible();
+		const rows = await sql.query<{ params: { minimum_uptime?: number } }>(
+			"SELECT params FROM restore_replicas WHERE name = 'param-edit'",
+		);
+		expect(rows).toHaveLength(1);
+		expect(rows[0]!.params.minimum_uptime).toBe(1800);
+	});
+
 	test("a restore check surfaces a replica url as a link", async ({
 		page,
 		sql,
