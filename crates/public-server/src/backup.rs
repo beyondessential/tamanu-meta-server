@@ -131,13 +131,30 @@ async fn require_issuable_capability(
 // POST /backup-capabilities
 // ---------------------------------------------------------------------------
 
+/// Request body for registering the backup types a server can run.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct BackupCapabilitiesArgs {
-	/// The backup types bestool can run on this server.
+	/// The backup types this server is able to run. Each type is a plain
+	/// string (e.g. `tamanu-postgres`); custom type names are accepted.
 	#[schema(value_type = Vec<String>)]
 	pub types: Vec<BackupType>,
 }
 
+/// Register the backup types this server can run.
+///
+/// Declares the set of backup types the calling device is able to execute on
+/// its server. Types not seen before are added to the server's capability set,
+/// starting out enabled or disabled according to the fleet-wide default for
+/// that type (disabled if the type has no default configured). Types already
+/// registered keep whatever enabled/disabled state an operator has set for
+/// them, so re-registering on every startup is safe and expected.
+///
+/// Only types that are registered here (and enabled) can later be issued
+/// credentials via `POST /backup-credentials`, outside of explicit
+/// operator-requested runs.
+///
+/// Errors: 412 when the calling device is not bound to a live server; 409 when
+/// the server is not in a group.
 #[utoipa::path(
 	post,
 	path = "/backup-capabilities",
@@ -181,30 +198,40 @@ async fn capabilities(
 // POST /backup-credentials
 // ---------------------------------------------------------------------------
 
+/// Request body for minting short-lived S3 credentials for a backup or
+/// restore run.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct BackupCredentialsArgs {
-	/// The backup type these creds are for. Must be an enabled capability or
-	/// have a pending request of this `purpose` (an on-demand backup/restore).
+	/// The backup type the credentials are for (e.g. `tamanu-postgres`). The
+	/// type must be an enabled capability of this server, or the subject of a
+	/// pending operator-requested run matching `purpose`; otherwise the request
+	/// is rejected with 409.
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
-	/// `backup` (default) grants write-without-delete; `restore` is downscoped
-	/// read-only via a session policy.
+	/// What the credentials will be used for. `backup` (the default) grants
+	/// write access for uploading backups; `restore` grants strictly read-only
+	/// access. Either way the credentials are scoped to the group's backup
+	/// storage only.
 	#[serde(default)]
 	pub purpose: BackupPurpose,
 }
 
-/// `credential_process` output. Field names are **fixed by the AWS SDK**:
-/// `Version/AccessKeyId/SecretAccessKey/SessionToken/Expiration` — exactly what
-/// `rename_all = "PascalCase"` produces from these field names.
+/// Short-lived AWS credentials in the AWS `credential_process` output format,
+/// so they can be consumed directly by AWS SDKs and tools. Field names use the
+/// exact casing (`Version`, `AccessKeyId`, ...) that format requires.
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "PascalCase")]
 pub struct CredentialProcessOutput {
-	/// Always the literal `1`.
+	/// Version of the `credential_process` format. Always the literal `1`.
 	pub version: u8,
+	/// The temporary AWS access key ID.
 	pub access_key_id: String,
+	/// The temporary AWS secret access key.
 	pub secret_access_key: String,
+	/// The session token that must accompany the temporary key pair.
 	pub session_token: String,
-	/// RFC3339 / ISO8601 `Z` instant.
+	/// When the credentials expire, as an RFC 3339 / ISO 8601 UTC instant.
+	/// Credentials last at most one hour; request a fresh set per run.
 	pub expiration: String,
 }
 
@@ -283,6 +310,24 @@ pub fn backup_session_policy(bucket: &str, prefix: &str) -> String {
 	.to_string()
 }
 
+/// Mint short-lived S3 credentials for a backup or restore run.
+///
+/// Issues temporary AWS credentials scoped to the backup storage of the
+/// calling server's group, in the `credential_process` output format. With
+/// `purpose: backup` the credentials can upload and manage backup data but
+/// cannot destroy existing backups; with `purpose: restore` they are strictly
+/// read-only. They expire after at most one hour, so request a fresh set for
+/// each run rather than caching them. Every issuance is recorded for audit.
+///
+/// The storage coordinates the credentials apply to (bucket, prefix, region)
+/// come from `GET /backup-target`.
+///
+/// Errors: 409 when the server is not in a group, when the group's backup
+/// configuration is not ready, or when the requested type is neither an
+/// enabled capability of this server nor the subject of a pending
+/// operator-requested run of the given purpose; 412 when the device is not
+/// bound to a live server; 502 when the credential issuer is unavailable or
+/// not configured.
 #[utoipa::path(
 	post,
 	path = "/backup-credentials",
@@ -397,19 +442,33 @@ async fn credentials(
 // GET /backup-target
 // ---------------------------------------------------------------------------
 
+/// The backup storage target for the calling server's group: where the backup
+/// repository lives and the passphrase to open it.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct BackupTarget {
-	/// Always `"s3"`.
+	/// Kind of storage backend. Always `"s3"`.
 	pub storage: String,
+	/// Name of the S3 bucket holding the group's backup repository.
 	pub bucket: String,
-	/// Normally empty (the repo lives at the bucket root).
+	/// Key prefix within the bucket under which the repository lives. Normally
+	/// empty (the repository is at the bucket root).
 	pub prefix: String,
-	/// The group config's region, or the deployment default.
+	/// AWS region of the bucket.
 	pub region: String,
-	/// The kopia repo passphrase, read from the group's k8s Secret.
+	/// Passphrase for the group's backup repository (a Kopia repository).
 	pub repo_password: String,
 }
 
+/// Fetch the backup storage target for this server's group.
+///
+/// Returns the bucket, prefix, region, and repository passphrase the device
+/// needs to connect to its group's backup repository. Call it on every run
+/// rather than caching the result, as the target can change. S3 credentials
+/// are obtained separately via `POST /backup-credentials`.
+///
+/// Errors: 409 when the server is not in a group or the group's backup
+/// configuration is not ready; 412 when the device is not bound to a live
+/// server; 502 when the passphrase store is unavailable or not configured.
 #[utoipa::path(
 	get,
 	path = "/backup-target",
@@ -467,27 +526,52 @@ async fn target(
 // POST /backup-report
 // ---------------------------------------------------------------------------
 
+/// Report of a completed backup or restore run.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct ReportArgs {
-	/// The run-uuid bestool minted at run start (becomes `backup_runs.id`).
+	/// Client-generated UUID identifying this run, minted at run start. Each
+	/// run must use a fresh UUID: reporting the same `run_id` twice is
+	/// rejected with 409.
 	pub run_id: Uuid,
-	/// The backup type that ran.
+	/// The backup type that ran (e.g. `tamanu-postgres`).
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
+	/// Whether the run was a `backup` or a `restore`.
 	pub purpose: BackupPurpose,
+	/// Whether the run succeeded (`success`) or failed (`failure`).
 	pub outcome: RunOutcome,
+	/// Human-readable error detail, when the run failed.
 	pub error: Option<String>,
+	/// Total bytes of backup data uploaded during the run, if known.
 	pub bytes_uploaded: Option<i64>,
+	/// Identifier of the repository snapshot the run produced, for a
+	/// successful backup.
 	pub snapshot_id: Option<String>,
-	/// S3 traffic the proxy tallied during the run: `raw` is the full HTTP
-	/// message (incl. SigV4 chunk framing), `payload` the decoded object data.
-	/// Reported on both success and failure; absent from older clients.
+	/// Bytes of raw HTTP traffic sent to S3 during the run, including protocol
+	/// and signing overhead. Report on both success and failure; omit when
+	/// traffic was not measured.
 	pub s3_sent_raw_bytes: Option<i64>,
+	/// Bytes of decoded object payload sent to S3 during the run (excluding
+	/// protocol and signing overhead).
 	pub s3_sent_payload_bytes: Option<i64>,
+	/// Bytes of raw HTTP traffic received from S3 during the run, including
+	/// protocol overhead.
 	pub s3_received_raw_bytes: Option<i64>,
+	/// Bytes of decoded object payload received from S3 during the run.
 	pub s3_received_payload_bytes: Option<i64>,
 }
 
+/// Report the outcome of a backup or restore run.
+///
+/// Records the run against the calling server and its group. Send one report
+/// per run, on success and on failure alike. Reporting also clears any pending
+/// operator-requested run for the same type and purpose — regardless of
+/// outcome, since an operator request is for one attempt — so the server's
+/// status responses stop asking for it (see the `backup_now` field of the
+/// status-push response).
+///
+/// Errors: 409 when the server is not in a group, or when the `run_id` has
+/// already been reported; 412 when the device is not bound to a live server.
 #[utoipa::path(
 	post,
 	path = "/backup-report",
