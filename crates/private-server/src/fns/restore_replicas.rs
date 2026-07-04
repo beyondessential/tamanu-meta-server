@@ -23,7 +23,7 @@ use database::diesel_async::AsyncPgConnection;
 use database::pg_duration::PgDuration;
 use database::{
 	BackupRestoreCheck, NewRestoreReplica, RestoreConsumerCapability, RestoreReplica,
-	devices::Device,
+	RestoreReplicaUpdate, devices::Device,
 };
 use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
@@ -121,8 +121,7 @@ pub struct RestoreReplicasGroupArgs {
 /// Request to declare a new managed restore replica.
 ///
 /// The consumer, group, server, backup type, and intent define the
-/// declaration's scope and cannot be changed after creation; to change them,
-/// delete the declaration and create a new one.
+/// declaration's scope; all of it can be changed later via `update`.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct RestoreReplicasCreateArgs {
 	/// Identifier of the restore consumer device to assign the declaration to.
@@ -152,13 +151,29 @@ pub struct RestoreReplicasCreateArgs {
 
 /// Request to update an existing declaration.
 ///
-/// Only the name, overdue bound, parameter values, and enabled flag can be
-/// changed; the declaration's scope (consumer, group, server, backup type,
-/// intent) is fixed at creation.
+/// Replaces every field, including scope: the consumer, group, server,
+/// backup type, and intent can all be changed in the same call as the name,
+/// overdue bound, parameter values, and enabled flag. A scope that collides
+/// with another declaration's `(consumer, group, type, intent, server)` maps
+/// to `409`.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct RestoreReplicasUpdateArgs {
 	/// Identifier of the declaration to update.
 	pub id: Uuid,
+	/// Identifier of the restore consumer device to assign the declaration to.
+	pub consumer_device_id: Uuid,
+	/// Identifier of the server group whose backups to restore.
+	pub group_id: Uuid,
+	/// Specific server within the group; omit or null to cover all current
+	/// servers in the group.
+	pub server_id: Option<Uuid>,
+	/// The backup type to restore, for example `tamanu-postgres`.
+	#[schema(value_type = String)]
+	pub r#type: BackupType,
+	/// How the replica is handled, as defined by the consumer: an arbitrary
+	/// identifier from the consumer's advertised intents, e.g. `verify`.
+	#[schema(value_type = String)]
+	pub intent: RestoreIntent,
 	/// New display name for the declaration.
 	pub name: String,
 	/// New overdue bound in whole seconds; null removes the bound.
@@ -393,11 +408,17 @@ pub async fn create(
 
 /// Update a restore replica declaration.
 ///
-/// Changes the declaration's name, overdue bound, parameter values, and
-/// enabled flag; the scope (consumer, group, server, backup type, intent)
-/// cannot be changed. Parameter values are validated against the intent's
-/// advertised parameter schema. Requires the caller to be on the admin
-/// allow-list. Responds 404 if the declaration does not exist.
+/// Replaces every field, including scope: the consumer, group, server,
+/// backup type, and intent can be retargeted in the same call as the name,
+/// overdue bound, parameter values, and enabled flag. Parameter values are
+/// validated against the *new* consumer+intent's advertised parameter schema;
+/// as with `create`, an intent the new consumer doesn't currently advertise
+/// is accepted and the values pass through unvalidated, leaving the
+/// declaration with a gap. If the scope changes, any active
+/// restore-verification alert for the declaration's old scope is recovered.
+/// Requires the caller to be on the admin allow-list. Responds 400 if a
+/// parameter value fails validation, 404 if the declaration does not exist,
+/// and 409 if the new scope collides with another declaration.
 #[utoipa::path(
 	post,
 	path = "/update",
@@ -408,6 +429,7 @@ pub async fn create(
 	responses(
 		(status = 200, body = RestoreReplicaView),
 		(status = 404, body = ProblemDetailsSchema),
+		(status = 409, description = "The new scope collides with another declaration.", body = ProblemDetailsSchema),
 	),
 )]
 pub async fn update(
@@ -416,23 +438,27 @@ pub async fn update(
 	Json(args): Json<RestoreReplicasUpdateArgs>,
 ) -> Result<Json<RestoreReplicaView>> {
 	let mut conn = state.db.get().await?;
-	// Validate parameter values against the intent's schema. Scope fields are
-	// immutable, so the existing declaration carries the consumer and intent.
-	let existing = RestoreReplica::get(&mut conn, args.id).await?;
 	validate_params_for_intent(
 		&mut conn,
-		existing.consumer_device_id,
-		&existing.intent,
+		args.consumer_device_id,
+		&args.intent,
 		&args.params,
 	)
 	.await?;
 	let replica = RestoreReplica::update(
 		&mut conn,
 		args.id,
-		&args.name,
-		overdue_after_to_pg(args.overdue_after_seconds),
-		serde_json::to_value(&args.params).expect("params serialize"),
-		args.enabled,
+		RestoreReplicaUpdate {
+			consumer_device_id: args.consumer_device_id,
+			group_id: args.group_id,
+			server_id: args.server_id,
+			r#type: args.r#type,
+			intent: args.intent,
+			name: args.name,
+			overdue_after: overdue_after_to_pg(args.overdue_after_seconds),
+			params: serde_json::to_value(&args.params).expect("params serialize"),
+			enabled: args.enabled,
+		},
 	)
 	.await?;
 	let views = to_views(&mut conn, vec![replica]).await?;

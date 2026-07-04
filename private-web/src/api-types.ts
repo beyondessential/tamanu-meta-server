@@ -1955,11 +1955,17 @@ export interface paths {
         put?: never;
         /**
          * Update a restore replica declaration.
-         * @description Changes the declaration's name, overdue bound, parameter values, and
-         *     enabled flag; the scope (consumer, group, server, backup type, intent)
-         *     cannot be changed. Parameter values are validated against the intent's
-         *     advertised parameter schema. Requires the caller to be on the admin
-         *     allow-list. Responds 404 if the declaration does not exist.
+         * @description Replaces every field, including scope: the consumer, group, server,
+         *     backup type, and intent can be retargeted in the same call as the name,
+         *     overdue bound, parameter values, and enabled flag. Parameter values are
+         *     validated against the *new* consumer+intent's advertised parameter schema;
+         *     as with `create`, an intent the new consumer doesn't currently advertise
+         *     is accepted and the values pass through unvalidated, leaving the
+         *     declaration with a gap. If the scope changes, any active
+         *     restore-verification alert for the declaration's old scope is recovered.
+         *     Requires the caller to be on the admin allow-list. Responds 400 if a
+         *     parameter value fails validation, 404 if the declaration does not exist,
+         *     and 409 if the new scope collides with another declaration.
          */
         post: operations["restore_replicas_update"];
         delete?: never;
@@ -5821,8 +5827,7 @@ export interface components {
          * @description Request to declare a new managed restore replica.
          *
          *     The consumer, group, server, backup type, and intent define the
-         *     declaration's scope and cannot be changed after creation; to change them,
-         *     delete the declaration and create a new one.
+         *     declaration's scope; all of it can be changed later via `update`.
          */
         RestoreReplicasCreateArgs: {
             /**
@@ -5872,18 +5877,35 @@ export interface components {
         /**
          * @description Request to update an existing declaration.
          *
-         *     Only the name, overdue bound, parameter values, and enabled flag can be
-         *     changed; the declaration's scope (consumer, group, server, backup type,
-         *     intent) is fixed at creation.
+         *     Replaces every field, including scope: the consumer, group, server,
+         *     backup type, and intent can all be changed in the same call as the name,
+         *     overdue bound, parameter values, and enabled flag. A scope that collides
+         *     with another declaration's `(consumer, group, type, intent, server)` maps
+         *     to `409`.
          */
         RestoreReplicasUpdateArgs: {
+            /**
+             * Format: uuid
+             * @description Identifier of the restore consumer device to assign the declaration to.
+             */
+            consumer_device_id: string;
             /** @description Whether the declaration should be active. */
             enabled: boolean;
+            /**
+             * Format: uuid
+             * @description Identifier of the server group whose backups to restore.
+             */
+            group_id: string;
             /**
              * Format: uuid
              * @description Identifier of the declaration to update.
              */
             id: string;
+            /**
+             * @description How the replica is handled, as defined by the consumer: an arbitrary
+             *     identifier from the consumer's advertised intents, e.g. `verify`.
+             */
+            intent: string;
             /** @description New display name for the declaration. */
             name: string;
             /**
@@ -5896,6 +5918,14 @@ export interface components {
              *     advertised parameter schema. Defaults to empty.
              */
             params?: Record<string, never>;
+            /**
+             * Format: uuid
+             * @description Specific server within the group; omit or null to cover all current
+             *     servers in the group.
+             */
+            server_id?: string | null;
+            /** @description The backup type to restore, for example `tamanu-postgres`. */
+            type: string;
         };
         /**
          * @description How many backups to keep at each retention tier once older snapshots are
@@ -9808,6 +9838,15 @@ export interface operations {
                 };
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description The new scope collides with another declaration. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

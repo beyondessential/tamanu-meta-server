@@ -96,6 +96,22 @@ pub struct NewRestoreReplica {
 	pub created_by: Option<String>,
 }
 
+/// The full new state of a declaration, including its scope. Every field is
+/// always set (there is no partial-update shorthand); `server_id: None` means
+/// "every server in the group".
+#[derive(Debug, Clone)]
+pub struct RestoreReplicaUpdate {
+	pub consumer_device_id: Uuid,
+	pub group_id: Uuid,
+	pub server_id: Option<Uuid>,
+	pub r#type: BackupType,
+	pub intent: RestoreIntent,
+	pub name: String,
+	pub overdue_after: Option<PgDuration>,
+	pub params: serde_json::Value,
+	pub enabled: bool,
+}
+
 impl RestoreReplica {
 	/// Create a declaration. A duplicate `(consumer, group, type, intent,
 	/// server)` scope maps to `409`.
@@ -167,30 +183,65 @@ impl RestoreReplica {
 			.ok_or(AppError::DatabaseQuery(DieselError::NotFound))
 	}
 
-	/// Edit the non-structural fields. Scope fields (consumer, group, server,
-	/// type, intent) are immutable — change them by deleting and recreating.
+	/// Edit every field of a declaration, including its scope. A scope change
+	/// that collides with another declaration's `(consumer, group, type,
+	/// intent, server)` maps to `409`, same as [`Self::create`]. If the scope
+	/// (group, server, or type/intent) moves, any active restore-verification
+	/// alert keyed to the *old* scope is recovered — the overdue sweep only
+	/// walks current declarations, so a stale key would otherwise never clear.
 	pub async fn update(
 		db: &mut AsyncPgConnection,
 		id: Uuid,
-		name: &str,
-		overdue_after: Option<PgDuration>,
-		params: serde_json::Value,
-		enabled: bool,
+		update: RestoreReplicaUpdate,
 	) -> Result<Self> {
 		use crate::schema::restore_replicas::dsl;
-		diesel::update(dsl::restore_replicas.filter(dsl::id.eq(id)))
+
+		let existing = Self::get(db, id).await?;
+
+		let result = match diesel::update(dsl::restore_replicas.filter(dsl::id.eq(id)))
 			.set((
-				dsl::name.eq(name),
-				dsl::overdue_after.eq(overdue_after),
-				dsl::params.eq(params),
-				dsl::enabled.eq(enabled),
+				dsl::consumer_device_id.eq(update.consumer_device_id),
+				dsl::group_id.eq(update.group_id),
+				dsl::server_id.eq(update.server_id),
+				dsl::type_.eq(update.r#type),
+				dsl::intent.eq(update.intent),
+				dsl::name.eq(update.name),
+				dsl::overdue_after.eq(update.overdue_after),
+				dsl::params.eq(update.params),
+				dsl::enabled.eq(update.enabled),
 			))
 			.returning(Self::as_select())
 			.get_result(db)
 			.await
-			.optional()
-			.map_err(AppError::from)?
-			.ok_or(AppError::DatabaseQuery(DieselError::NotFound))
+		{
+			Ok(row) => row,
+			Err(DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, _)) => {
+				return Err(AppError::Conflict(
+					"a matching restore replica is already declared".into(),
+				));
+			}
+			Err(DieselError::NotFound) => {
+				return Err(AppError::DatabaseQuery(DieselError::NotFound));
+			}
+			Err(e) => return Err(AppError::from(e)),
+		};
+
+		let scope_changed = existing.group_id != result.group_id
+			|| existing.server_id != result.server_id
+			|| existing.r#type != result.r#type
+			|| existing.intent != result.intent;
+		if scope_changed {
+			recover_old_scope_alerts(
+				db,
+				existing.group_id,
+				existing.server_id,
+				&existing.r#type,
+				&existing.intent,
+			)
+			.await?;
+		}
+
+		Ok(result)
 	}
 
 	pub async fn delete(db: &mut AsyncPgConnection, id: Uuid) -> Result<()> {
@@ -358,6 +409,47 @@ fn restore_verification_ref(
 		r#type,
 		intent
 	)
+}
+
+/// Recover any active restore-verification alert keyed to a declaration's old
+/// `(server, type, intent)`, called when an update moves a declaration's
+/// scope elsewhere. Mirrors the recovery [`BackupRestoreCheck::record_report`]
+/// performs for a healthy report — [`raise_group_event`] with `active: false`.
+/// If the old key is still overdue under some other declaration, the next
+/// [`sweep_overdue`] pass re-raises it.
+async fn recover_old_scope_alerts(
+	db: &mut AsyncPgConnection,
+	old_group_id: Uuid,
+	old_server_id: Option<Uuid>,
+	old_type: &BackupType,
+	old_intent: &RestoreIntent,
+) -> Result<()> {
+	let servers = match old_server_id {
+		Some(sid) => vec![sid],
+		None => crate::servers::Server::list_live_in_group(db, old_group_id)
+			.await?
+			.into_iter()
+			.map(|s| s.id)
+			.collect(),
+	};
+
+	for sid in servers {
+		let r#ref = restore_verification_ref(sid, old_type, old_intent);
+		raise_group_event(
+			db,
+			old_group_id,
+			&r#ref,
+			Severity::Info,
+			None,
+			&format!(
+				"Restore verification no longer tracked at this scope: {old_type} / {old_intent} for server {sid} (declaration scope changed)"
+			),
+			false,
+		)
+		.await?;
+	}
+
+	Ok(())
 }
 
 /// A restore-health report submitted by a restore consumer: proof (or

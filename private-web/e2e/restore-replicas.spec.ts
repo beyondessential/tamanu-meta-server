@@ -429,6 +429,100 @@ test.describe("restore replicas", () => {
 		expect(rows[0]!.params.minimum_uptime).toBe(1800);
 	});
 
+	test("editing a declaration's intent retargets it and re-derives its parameters", async ({
+		page,
+		sql,
+	}) => {
+		const consumer = await seedDevice(sql, { role: "backup-restore" });
+		await seedRestoreConsumerCapability(sql, {
+			deviceId: consumer.id,
+			intents: [
+				"verify",
+				{
+					intent: "analytics",
+					description: "Keeps a queryable replica running.",
+					semantics: ["check", "url"],
+					params: { anonymisation: { type: "boolean", default: true } },
+				},
+			],
+		});
+		const groupId = await groupWithBackups(sql, "retarget-group");
+		const replica = await seedRestoreReplica(sql, {
+			consumerDeviceId: consumer.id,
+			groupId,
+			intent: "verify",
+			name: "retarget-me",
+		});
+
+		await page.goto(`/groups/${groupId}/backups`);
+		await page.getByRole("button", { name: "edit retarget-me" }).click();
+
+		const dialog = page.getByRole("dialog");
+		// Prefilled with the declaration's current intent.
+		await expect(dialog.getByText("verify", { exact: true })).toBeVisible();
+		await dialog.getByLabel("Intent").click();
+		await page.getByRole("option", { name: "analytics" }).click();
+
+		// Switching intent re-derives the parameter fields from analytics' schema.
+		await expect(dialog.getByText("Keeps a queryable replica running.")).toBeVisible();
+		await expect(dialog.getByLabel("anonymisation")).toBeVisible();
+
+		await dialog.getByRole("button", { name: /^save$/i }).click();
+
+		const row = page.getByRole("row", { name: /retarget-me/ });
+		await expect(row).toBeVisible();
+		await expect(row.getByText("analytics")).toBeVisible();
+		await expect(row.getByText("gap")).toHaveCount(0);
+
+		const rows = await sql.query<{ intent: string }>(
+			"SELECT intent FROM restore_replicas WHERE id = $1",
+			[replica.id],
+		);
+		expect(rows).toHaveLength(1);
+		expect(rows[0]!.intent).toBe("analytics");
+	});
+
+	test("editing a declaration's scope onto an existing declaration's scope conflicts", async ({
+		page,
+		sql,
+	}) => {
+		const consumer = await seedDevice(sql, { role: "backup-restore" });
+		await seedRestoreConsumerCapability(sql, {
+			deviceId: consumer.id,
+			intents: ["verify", "analytics"],
+		});
+		const groupId = await groupWithBackups(sql, "conflict-group");
+		await seedRestoreReplica(sql, {
+			consumerDeviceId: consumer.id,
+			groupId,
+			intent: "verify",
+			name: "taken-scope",
+		});
+		await seedRestoreReplica(sql, {
+			consumerDeviceId: consumer.id,
+			groupId,
+			intent: "analytics",
+			name: "movable",
+		});
+
+		await page.goto(`/groups/${groupId}/backups`);
+		await page.getByRole("button", { name: "edit movable" }).click();
+
+		const dialog = page.getByRole("dialog");
+		await dialog.getByLabel("Intent").click();
+		await page.getByRole("option", { name: "verify" }).click();
+		await dialog.getByRole("button", { name: /^save$/i }).click();
+
+		await expect(dialog.getByRole("alert")).toBeVisible();
+		// The dialog stays open and the declaration keeps its original intent.
+		await expect(dialog).toBeVisible();
+		const rows = await sql.query<{ intent: string }>(
+			"SELECT intent FROM restore_replicas WHERE name = 'movable'",
+		);
+		expect(rows).toHaveLength(1);
+		expect(rows[0]!.intent).toBe("analytics");
+	});
+
 	test("a restore check surfaces a replica url as a link", async ({
 		page,
 		sql,
