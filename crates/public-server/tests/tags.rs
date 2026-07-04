@@ -168,6 +168,85 @@ async fn tags_endpoint_includes_synthetic_server_attributes() {
 	.await
 }
 
+/// A grouped server's tags include the group's effective `billing.*` labels:
+/// computed defaults where the group sets nothing, and the group's explicit
+/// `billing.*` tags honoured verbatim.
+#[tokio::test(flavor = "multi_thread")]
+async fn tags_endpoint_includes_effective_billing_labels() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let group_id = Uuid::new_v4();
+			let server_id = Uuid::new_v4();
+			// Group sets an explicit billing.deployment override but leaves
+			// product/stage to be computed.
+			sql_query(
+				"INSERT INTO server_groups (id, name, tags) \
+				 VALUES ($1, 'Billing Cluster', '{\"billing.deployment\": \"acme\"}'::jsonb)",
+			)
+			.bind::<sql_types::Uuid, _>(group_id)
+			.execute(&mut conn)
+			.await
+			.unwrap();
+			sql_query(
+				"INSERT INTO servers (id, host, kind, rank, device_id, group_id) \
+				 VALUES ($1, 'https://b.example.com', 'central', 'production', $2, $3)",
+			)
+			.bind::<sql_types::Uuid, _>(server_id)
+			.bind::<sql_types::Uuid, _>(device_id)
+			.bind::<sql_types::Uuid, _>(group_id)
+			.execute(&mut conn)
+			.await
+			.unwrap();
+
+			let response = public
+				.get("/tags")
+				.add_header("mtls-certificate", &cert)
+				.await;
+			response.assert_status_ok();
+			let tags: HashMap<String, String> = response.json();
+			// Computed default product.
+			assert_eq!(tags.get("billing.product"), Some(&"tamanu".to_string()));
+			// Explicit group override honoured verbatim.
+			assert_eq!(tags.get("billing.deployment"), Some(&"acme".to_string()));
+			// Stage mapped from the highest-ranked member (production -> prod).
+			assert_eq!(tags.get("billing.stage"), Some(&"prod".to_string()));
+		},
+	)
+	.await
+}
+
+/// An ungrouped server gets no billing labels — they're a group concept.
+#[tokio::test(flavor = "multi_thread")]
+async fn tags_endpoint_no_billing_labels_when_ungrouped() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = Uuid::new_v4();
+			sql_query(
+				"INSERT INTO servers (id, host, kind, device_id) \
+				 VALUES ($1, 'https://nb.example.com', 'central', $2)",
+			)
+			.bind::<sql_types::Uuid, _>(server_id)
+			.bind::<sql_types::Uuid, _>(device_id)
+			.execute(&mut conn)
+			.await
+			.unwrap();
+
+			let response = public
+				.get("/tags")
+				.add_header("mtls-certificate", &cert)
+				.await;
+			response.assert_status_ok();
+			let tags: HashMap<String, String> = response.json();
+			assert_eq!(tags.get("billing.product"), None);
+			assert_eq!(tags.get("billing.deployment"), None);
+			assert_eq!(tags.get("billing.stage"), None);
+		},
+	)
+	.await
+}
+
 /// A device that authenticates correctly but isn't attached to any server
 /// gets a 412 (precondition failed) — same code the events endpoint uses
 /// for the same situation.

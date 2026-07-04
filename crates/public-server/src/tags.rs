@@ -1,9 +1,9 @@
 use axum::{Json, extract::State};
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
-use commons_servers::device_auth::ServerDevice;
+use commons_servers::{backup_jobs::BillingLabels, device_auth::ServerDevice};
 use commons_types::server::TagMap;
-use database::{Db, servers::Server};
+use database::{Db, server_groups::ServerGroup, servers::Server};
 
 use crate::state::AppState;
 
@@ -25,6 +25,12 @@ pub fn routes() -> OpenApiRouter<AppState> {
 /// `canopy:group-name` (if the server belongs to a group). Operators cannot
 /// set tags under that prefix, so these never collide with tags you set
 /// yourself.
+///
+/// When the server belongs to a group, the group's effective `billing.*`
+/// labels (`billing.product`, `billing.deployment`, and `billing.stage` when
+/// the group has ranked members) are also included, matching the labels canopy
+/// attributes to the group's cloud resources. These are the computed effective
+/// values, so they take precedence over any stored `billing.*` tags.
 ///
 /// - **401**: the request has no client certificate, or the certificate
 ///   doesn't match a known device.
@@ -55,6 +61,23 @@ pub async fn get_self(device: ServerDevice, State(db): State<Db>) -> Result<Json
 		)));
 	}
 	let server = servers.pop().ok_or(AppError::DeviceHasNoServer)?;
-	let merged = server.tags_for_device(&mut conn).await?;
+	let mut merged = server.tags_for_device(&mut conn).await?;
+
+	// Overlay the group's effective billing labels, matching what canopy
+	// attributes to the group's cloud resources. The effective (computed)
+	// values win over any stored `billing.*` tags of the same key.
+	if let Some(group_id) = server.group_id {
+		let group = ServerGroup::get_by_id(&mut conn, group_id).await?;
+		let highest_rank = ServerGroup::highest_member_ranks(&mut conn, &[group_id])
+			.await?
+			.get(&group_id)
+			.copied();
+		for (key, value) in
+			BillingLabels::from_group(&group.tags, &group.name, highest_rank).into_tags()
+		{
+			merged.0.insert(key, value);
+		}
+	}
+
 	Ok(Json(merged))
 }
