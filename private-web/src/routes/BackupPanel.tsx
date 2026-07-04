@@ -39,7 +39,10 @@ import { useReloadInterval } from "../hooks/useReloadInterval";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { humanSeconds } from "../lib/humanDuration";
 import { formatBytes } from "../lib/formatBytes";
-import { s3EgressRateForRegion } from "../lib/s3Pricing";
+import {
+	estimatedBucketCostTooltip,
+	s3EgressRateForRegion,
+} from "../lib/s3Pricing";
 import { usePageTitle } from "../hooks/usePageTitle";
 import TimeAgo from "../components/TimeAgo";
 import { LatestSnapshot, SnapshotId } from "../components/SnapshotId";
@@ -829,10 +832,21 @@ function RepoStatsPanel({
 								label="Physical bytes"
 								value={formatBytes(stats.data.stats.physical_bytes)}
 							/>
-							<Stat
-								label="Bucket bytes"
-								value={formatBytes(stats.data.stats.bucket_bytes)}
-							/>
+							<Typography variant="body2">
+								<strong>Bucket bytes:</strong>{" "}
+								{stats.data.stats.bucket_bytes == null ? (
+									"unknown"
+								) : (
+									<Tooltip
+										title={estimatedBucketCostTooltip(
+											stats.data.stats.bucket_bytes,
+											region,
+										)}
+									>
+										<span>{formatBytes(stats.data.stats.bucket_bytes)}</span>
+									</Tooltip>
+								)}
+							</Typography>
 							<Typography variant="caption" color="text.secondary">
 								Observed <TimeAgo timestamp={stats.data.stats.observed_at} />
 							</Typography>
