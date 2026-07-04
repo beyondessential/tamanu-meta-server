@@ -26,38 +26,58 @@ macro_rules! predicate_version {
 }
 pub use predicate_version;
 
+/// A release version of the monitored software, with its publication
+/// status and changelog.
 #[derive(
 	Debug, Clone, Serialize, Deserialize, Queryable, Selectable, QueryableByName, utoipa::ToSchema,
 )]
 #[diesel(table_name = crate::schema::versions)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Version {
+	/// Unique identifier of the version.
 	pub id: Uuid,
+	/// When the version record was created.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub created_at: Timestamp,
+	/// When the version record was last changed.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub updated_at: Timestamp,
+	/// Major version number.
 	pub major: i32,
+	/// Minor version number.
 	pub minor: i32,
+	/// Patch version number.
 	pub patch: i32,
+	/// Publication status: `draft`, `published`, or `yanked`.
 	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub status: VersionStatus,
+	/// Changelog text for this version, as Markdown.
 	pub changelog: String,
+	/// The releaser device that published this version, if it was published
+	/// by a device rather than created by an operator.
 	pub device_id: Option<Uuid>,
 }
 
+/// A release version as returned by the version-listing endpoints: the
+/// version numbers, publication status, and changelog.
 #[derive(
 	Debug, Clone, Serialize, Deserialize, Queryable, Selectable, QueryableByName, utoipa::ToSchema,
 )]
 #[diesel(table_name = crate::views::version_updates)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ViewVersion {
+	/// Unique identifier of the version.
 	pub id: Uuid,
+	/// Major version number.
 	pub major: i32,
+	/// Minor version number.
 	pub minor: i32,
+	/// Patch version number.
 	pub patch: i32,
+	/// Publication status: `draft`, `published`, or `yanked`.
 	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub status: VersionStatus,
+	/// Changelog text for this version, as Markdown.
 	pub changelog: String,
 }
 

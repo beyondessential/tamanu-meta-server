@@ -51,6 +51,8 @@ fn format_secs(secs: i64) -> String {
 	}
 }
 
+/// A stored status report from a server: one heartbeat's worth of
+/// self-reported health, version, and extra data.
 #[derive(
 	Debug,
 	Clone,
@@ -67,18 +69,26 @@ fn format_secs(secs: i64) -> String {
 #[diesel(table_name = crate::schema::statuses)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Status {
+	/// Unique identifier of this status record.
 	pub id: Uuid,
+	/// When this status was received.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub created_at: Timestamp,
+	/// The server this status was reported for.
 	pub server_id: Uuid,
+	/// The device that submitted this status, or `null` for statuses
+	/// generated internally (e.g. by the reachability sweep).
 	pub device_id: Option<Uuid>,
+	/// The software version the server reported, if it reported one.
 	pub version: Option<VersionStr>,
+	/// Free-form extra data from the report (uptime, database version,
+	/// timezone, etc.), stored verbatim as a JSON object.
 	pub extra: serde_json::Value,
-	/// Server's overall self-reported health. Absent in the payload ⇒ true
-	/// (legacy compat).
+	/// Server's overall self-reported health. A report that omits this is
+	/// recorded as healthy.
 	pub healthy: bool,
-	/// Per-check breakdown. Each entry is an object with at least
-	/// `{check: string, healthy: bool, ...}`; extra fields are passed
+	/// Per-check breakdown, as an array of objects each with at least a
+	/// `check` name and a result; any extra per-check fields are passed
 	/// through verbatim.
 	pub health: serde_json::Value,
 }

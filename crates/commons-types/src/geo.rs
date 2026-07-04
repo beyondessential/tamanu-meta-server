@@ -7,12 +7,15 @@ use diesel::{
 };
 use serde::{Deserialize, Serialize};
 
+/// A geographic coordinate, used to place a server on a map.
 #[derive(
 	Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, AsExpression, utoipa::ToSchema,
 )]
 #[diesel(sql_type = Array<Nullable<Float8>>)]
 pub struct GeoPoint {
+	/// Latitude in decimal degrees (positive north).
 	pub lat: f64,
+	/// Longitude in decimal degrees (positive east).
 	pub lon: f64,
 }
 

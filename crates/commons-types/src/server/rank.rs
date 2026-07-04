@@ -9,6 +9,7 @@ use diesel::{
 };
 use serde::{Deserialize, Serialize};
 
+/// The environment tier of a server, from `production` down to `dev`.
 #[derive(
 	Debug,
 	Clone,
@@ -27,10 +28,15 @@ use serde::{Deserialize, Serialize};
 #[diesel(sql_type = Text)]
 #[serde(rename_all = "lowercase")]
 pub enum ServerRank {
+	/// A live environment serving real users and real data.
 	Production,
+	/// A copy of a production environment, typically refreshed from it.
 	Clone,
+	/// A demonstration environment with sample data.
 	Demo,
+	/// A testing environment.
 	Test,
+	/// A development environment. The default when no rank is set.
 	#[default]
 	Dev,
 }
