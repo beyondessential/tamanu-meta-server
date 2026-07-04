@@ -3871,7 +3871,7 @@
           "restore_replicas"
         ],
         "summary": "Update a restore replica declaration.",
-        "description": "Changes the declaration's name, overdue bound, parameter values, and\nenabled flag; the scope (consumer, group, server, backup type, intent)\ncannot be changed. Parameter values are validated against the intent's\nadvertised parameter schema. Requires the caller to be on the admin\nallow-list. Responds 404 if the declaration does not exist.",
+        "description": "Replaces every field, including scope: the consumer, group, server,\nbackup type, and intent can be retargeted in the same call as the name,\noverdue bound, parameter values, and enabled flag. Parameter values are\nvalidated against the *new* consumer+intent's advertised parameter schema;\nunlike `create`, an intent the new consumer doesn't currently advertise is\nrejected rather than accepted as a gap, since this is an explicit\nretargeting of a live declaration rather than an initial declaration made\nahead of the consumer registering support. If the scope changes, any\nactive restore-verification alert for the declaration's old scope is\nrecovered. Requires the caller to be on the admin allow-list. Responds 400\nif a parameter value fails validation or the new intent isn't advertised,\n404 if the declaration does not exist, and 409 if the new scope collides\nwith another declaration.",
         "operationId": "restore_replicas_update",
         "requestBody": {
           "content": {
@@ -3896,6 +3896,16 @@
           },
           "404": {
             "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The new scope collides with another declaration.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10280,7 +10290,7 @@
       },
       "RestoreReplicasCreateArgs": {
         "type": "object",
-        "description": "Request to declare a new managed restore replica.\n\nThe consumer, group, server, backup type, and intent define the\ndeclaration's scope and cannot be changed after creation; to change them,\ndelete the declaration and create a new one.",
+        "description": "Request to declare a new managed restore replica.\n\nThe consumer, group, server, backup type, and intent define the\ndeclaration's scope; all of it can be changed later via `update`.",
         "required": [
           "consumer_device_id",
           "group_id",
@@ -10349,21 +10359,39 @@
       },
       "RestoreReplicasUpdateArgs": {
         "type": "object",
-        "description": "Request to update an existing declaration.\n\nOnly the name, overdue bound, parameter values, and enabled flag can be\nchanged; the declaration's scope (consumer, group, server, backup type,\nintent) is fixed at creation.",
+        "description": "Request to update an existing declaration.\n\nReplaces every field, including scope: the consumer, group, server,\nbackup type, and intent can all be changed in the same call as the name,\noverdue bound, parameter values, and enabled flag. A scope that collides\nwith another declaration's `(consumer, group, type, intent, server)` maps\nto `409`.",
         "required": [
           "id",
+          "consumer_device_id",
+          "group_id",
+          "type",
+          "intent",
           "name",
           "enabled"
         ],
         "properties": {
+          "consumer_device_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Identifier of the restore consumer device to assign the declaration to."
+          },
           "enabled": {
             "type": "boolean",
             "description": "Whether the declaration should be active."
+          },
+          "group_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Identifier of the server group whose backups to restore."
           },
           "id": {
             "type": "string",
             "format": "uuid",
             "description": "Identifier of the declaration to update."
+          },
+          "intent": {
+            "type": "string",
+            "description": "How the replica is handled, as defined by the consumer: an arbitrary\nidentifier from the consumer's advertised intents, e.g. `verify`."
           },
           "name": {
             "type": "string",
@@ -10380,6 +10408,18 @@
           "params": {
             "type": "object",
             "description": "New parameter values (name → value), validated against the intent's\nadvertised parameter schema. Defaults to empty."
+          },
+          "server_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Specific server within the group; omit or null to cover all current\nservers in the group."
+          },
+          "type": {
+            "type": "string",
+            "description": "The backup type to restore, for example `tamanu-postgres`."
           }
         }
       },
