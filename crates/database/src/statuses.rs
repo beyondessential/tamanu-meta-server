@@ -243,13 +243,15 @@ impl Status {
 		let mut filed = 0usize;
 		for server in &monitored {
 			let threshold = server.alert_when_down_for.0;
-			let elapsed = match status_map.get(&server.id) {
-				Some(s) => now.duration_since(s.created_at).abs(),
-				// No status ever recorded: treat as infinite downtime so the
-				// threshold always trips. Caps at i64::MAX seconds for arithmetic.
-				None => SignedDuration::MAX,
+			// No status ever recorded ⇒ `None`, which always trips the
+			// threshold below.
+			let elapsed: Option<SignedDuration> = status_map
+				.get(&server.id)
+				.map(|s| now.duration_since(s.created_at).abs());
+			let down = match elapsed {
+				Some(e) => e >= threshold,
+				None => true,
 			};
-			let down = elapsed >= threshold;
 			let existing = issue_map.get(&server.id).copied();
 
 			let event = match (down, existing) {
@@ -269,12 +271,19 @@ impl Status {
 					r#ref: REACHABILITY_REF.into(),
 					severity: Some(Severity::Error),
 					description: None,
-					message: format!(
-						"Server {} has not reported for {} (threshold {})",
-						server_label(server),
-						format_secs(elapsed.as_secs()),
-						format_secs(threshold.as_secs()),
-					),
+					message: match elapsed {
+						Some(e) => format!(
+							"Server {} has not reported for {} (threshold {})",
+							server_label(server),
+							format_secs(e.as_secs()),
+							format_secs(threshold.as_secs()),
+						),
+						None => format!(
+							"Server {} has never reported (threshold {})",
+							server_label(server),
+							format_secs(threshold.as_secs()),
+						),
+					},
 					active: Some(true),
 					occurred_at: Some(now),
 				},
