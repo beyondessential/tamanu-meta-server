@@ -16,7 +16,7 @@ export default defineConfig({
 	expect: { timeout: 10_000 },
 	use: {
 		trace: "retain-on-failure",
-		screenshot: "only-on-failure",
+		screenshot: { mode: "on", fullPage: true },
 		video: "retain-on-failure",
 	},
 	projects: [
