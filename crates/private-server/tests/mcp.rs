@@ -120,6 +120,11 @@ async fn initialize_and_list_tools() {
 			"get_incident",
 			"find_issues",
 			"get_issue",
+			"list_backup_runs",
+			"list_maintenance_runs",
+			"find_restore_replicas",
+			"get_restore_replica",
+			"get_backup_defaults",
 		] {
 			assert!(body.contains(tool), "tools/list missing {tool}: {body}");
 		}
@@ -494,6 +499,282 @@ async fn backup_problems_scan_runs() {
 		let p = call_tool!(private, "find_backup_problems", serde_json::json!({}));
 		assert!(p["count"].is_number());
 		assert!(p["problems"].is_array());
+	})
+	.await
+}
+
+// --- backup runs, maintenance runs, restore replicas, backup defaults -------
+
+const RGROUP: &str = "bbbbbbbb-0000-0000-0000-000000000001";
+const RSERVER: &str = "bbbbbbbb-0000-0000-0000-000000000002";
+const RDEVICE: &str = "bbbbbbbb-0000-0000-0000-000000000003";
+const RUN_OK: &str = "bbbbbbbb-0000-0000-0000-0000000000a1";
+const RUN_FAIL: &str = "bbbbbbbb-0000-0000-0000-0000000000a2";
+const CONSUMER: &str = "bbbbbbbb-0000-0000-0000-000000000004";
+const REPLICA_GROUP_WIDE: &str = "bbbbbbbb-0000-0000-0000-0000000000b1";
+const REPLICA_SERVER_SCOPED: &str = "bbbbbbbb-0000-0000-0000-0000000000b2";
+const REPLICA_GAP: &str = "bbbbbbbb-0000-0000-0000-0000000000b3";
+
+/// A group + server + device, two backup runs (one success, one failure), and
+/// two maintenance runs (one finished, one still running).
+async fn seed_backup_runs(conn: &mut impl SimpleAsyncConnection) {
+	conn.batch_execute(&format!(
+		"INSERT INTO server_groups (id, name) VALUES ('{RGROUP}', 'Backup Group'); \
+		 INSERT INTO servers (id, host, name, kind, group_id) VALUES \
+			('{RSERVER}', 'https://backup-target', 'Backup Target', 'central', '{RGROUP}'); \
+		 INSERT INTO devices (id, role) VALUES ('{RDEVICE}', 'server'); \
+		 INSERT INTO backup_runs \
+			(id, device_id, group_id, server_id, type, purpose, outcome, snapshot_id, bytes_uploaded, s3_sent_raw_bytes, snapshot_logical_bytes, reported_at) \
+			VALUES \
+			('{RUN_OK}', '{RDEVICE}', '{RGROUP}', '{RSERVER}', 'tamanu-postgres', 'backup', 'success', 'snap-1', 1000, 1200, 900, NOW() - interval '1 hour'), \
+			('{RUN_FAIL}', '{RDEVICE}', '{RGROUP}', '{RSERVER}', 'tamanu-postgres', 'backup', 'failure', NULL, NULL, NULL, NULL, NOW() - interval '10 minutes'); \
+		 INSERT INTO backup_maintenance_runs (group_id, kind, started_at, finished_at, outcome, bytes_reclaimed) VALUES \
+			('{RGROUP}', 'quick', NOW() - interval '2 hours', NOW() - interval '110 minutes', 'success', 2048), \
+			('{RGROUP}', 'full', NOW() - interval '30 minutes', NULL, NULL, NULL);"
+	))
+	.await
+	.expect("seed backup runs");
+}
+
+/// A restore consumer advertising only `verify`, and three declarations: a
+/// group-wide `verify` (supported, no single server to report health for), a
+/// server-scoped `verify` (supported, with a healthy check on record), and a
+/// server-scoped `analytics` (unsupported — a gap, since the consumer only
+/// advertises `verify`).
+async fn seed_restore_replicas(conn: &mut impl SimpleAsyncConnection) {
+	conn.batch_execute(&format!(
+		"INSERT INTO devices (id, role) VALUES ('{CONSUMER}', 'backup-restore'); \
+		 INSERT INTO restore_consumer_capabilities (consumer_device_id, intent, semantics) VALUES \
+			('{CONSUMER}', 'verify', '[\"check\"]'::jsonb); \
+		 INSERT INTO restore_replicas (id, consumer_device_id, group_id, server_id, type, intent, name) VALUES \
+			('{REPLICA_GROUP_WIDE}', '{CONSUMER}', '{RGROUP}', NULL, 'tamanu-postgres', 'verify', 'group-wide'), \
+			('{REPLICA_SERVER_SCOPED}', '{CONSUMER}', '{RGROUP}', '{RSERVER}', 'tamanu-postgres', 'verify', 'server-scoped'), \
+			('{REPLICA_GAP}', '{CONSUMER}', '{RGROUP}', '{RSERVER}', 'tamanu-postgres', 'analytics', 'server-scoped-gap'); \
+		 INSERT INTO backup_restore_checks \
+			(replica_id, consumer_device_id, group_id, server_id, type, intent, snapshot_id, outcome, replica_healthy, observed_at) \
+			VALUES \
+			('{REPLICA_SERVER_SCOPED}', '{CONSUMER}', '{RGROUP}', '{RSERVER}', 'tamanu-postgres', 'verify', 'snap-1', 'success', true, NOW() - interval '30 minutes');"
+	))
+	.await
+	.expect("seed restore replicas");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn list_backup_runs_filters() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		seed_backup_runs(&mut conn).await;
+
+		let all = call_tool!(private, "list_backup_runs", serde_json::json!({}));
+		assert_eq!(all["count"], 2);
+		let run = all["runs"]
+			.as_array()
+			.unwrap()
+			.iter()
+			.find(|r| r["id"] == RUN_OK)
+			.expect("seeded run present");
+		assert_eq!(run["group_name"], "Backup Group");
+		assert_eq!(run["server_name"], "Backup Target");
+		assert_eq!(run["outcome"], "success");
+		assert_eq!(run["s3_sent_raw_bytes"], 1200);
+		assert_eq!(run["snapshot_logical_bytes"], 900);
+
+		let failures = call_tool!(
+			private,
+			"list_backup_runs",
+			serde_json::json!({ "outcome": "failure" })
+		);
+		let ids: Vec<&str> = failures["runs"]
+			.as_array()
+			.unwrap()
+			.iter()
+			.map(|r| r["id"].as_str().unwrap())
+			.collect();
+		assert_eq!(ids, vec![RUN_FAIL]);
+
+		let by_type = call_tool!(
+			private,
+			"list_backup_runs",
+			serde_json::json!({ "type": "tamanu-postgres" })
+		);
+		assert_eq!(by_type["count"], 2);
+
+		let by_other_type = call_tool!(
+			private,
+			"list_backup_runs",
+			serde_json::json!({ "type": "files" })
+		);
+		assert_eq!(by_other_type["count"], 0);
+
+		let by_server = call_tool!(
+			private,
+			"list_backup_runs",
+			serde_json::json!({ "server_id": RSERVER })
+		);
+		assert_eq!(by_server["count"], 2);
+
+		let limited = call_tool!(
+			private,
+			"list_backup_runs",
+			serde_json::json!({ "limit": 1 })
+		);
+		assert_eq!(limited["count"], 1);
+		assert_eq!(limited["truncated"], true);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn list_maintenance_runs_filters() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		seed_backup_runs(&mut conn).await;
+
+		let all = call_tool!(private, "list_maintenance_runs", serde_json::json!({}));
+		assert_eq!(all["count"], 2);
+		let finished = all["runs"]
+			.as_array()
+			.unwrap()
+			.iter()
+			.find(|r| r["kind"] == "quick")
+			.expect("finished run present");
+		assert_eq!(finished["group_name"], "Backup Group");
+		assert_eq!(finished["outcome"], "success");
+		assert_eq!(finished["bytes_reclaimed"], 2048);
+
+		let running = call_tool!(
+			private,
+			"list_maintenance_runs",
+			serde_json::json!({ "outcome": "running" })
+		);
+		let kinds: Vec<&str> = running["runs"]
+			.as_array()
+			.unwrap()
+			.iter()
+			.map(|r| r["kind"].as_str().unwrap())
+			.collect();
+		assert_eq!(kinds, vec!["full"]);
+		assert!(running["runs"][0]["finished_at"].is_null());
+
+		let by_kind = call_tool!(
+			private,
+			"list_maintenance_runs",
+			serde_json::json!({ "kind": "full" })
+		);
+		assert_eq!(by_kind["count"], 1);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn find_restore_replicas_reports_gap_and_health() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		seed_backup_runs(&mut conn).await;
+		seed_restore_replicas(&mut conn).await;
+
+		let all = call_tool!(
+			private,
+			"find_restore_replicas",
+			serde_json::json!({ "group_id": RGROUP })
+		);
+		assert_eq!(all["count"], 3);
+		let replicas = all["replicas"].as_array().unwrap();
+
+		let group_wide = replicas
+			.iter()
+			.find(|r| r["id"] == REPLICA_GROUP_WIDE)
+			.unwrap();
+		assert_eq!(group_wide["gap"], false);
+		assert!(
+			group_wide["last_healthy_at"].is_null(),
+			"group-wide declarations have no single server to report health for"
+		);
+
+		let server_scoped = replicas
+			.iter()
+			.find(|r| r["id"] == REPLICA_SERVER_SCOPED)
+			.unwrap();
+		assert_eq!(server_scoped["gap"], false);
+		assert_eq!(server_scoped["server_name"], "Backup Target");
+		assert!(!server_scoped["last_healthy_at"].is_null());
+
+		let gap = replicas.iter().find(|r| r["id"] == REPLICA_GAP).unwrap();
+		assert_eq!(
+			gap["gap"], true,
+			"consumer only advertises verify, not analytics"
+		);
+
+		// Empty for an unrelated group.
+		let none = call_tool!(
+			private,
+			"find_restore_replicas",
+			serde_json::json!({ "group_id": "cccccccc-0000-0000-0000-000000000000" })
+		);
+		assert_eq!(none["count"], 0);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn get_restore_replica_detail_and_gap() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		seed_backup_runs(&mut conn).await;
+		seed_restore_replicas(&mut conn).await;
+
+		let detail = call_tool!(
+			private,
+			"get_restore_replica",
+			serde_json::json!({ "replica_id": REPLICA_SERVER_SCOPED })
+		);
+		assert_eq!(detail["gap"], false);
+		assert_eq!(detail["intent_descriptor"]["intent"], "verify");
+		assert_eq!(detail["intent_descriptor"]["semantics"][0], "check");
+		let checks = detail["recent_checks"].as_array().unwrap();
+		assert_eq!(checks.len(), 1);
+		assert_eq!(checks[0]["outcome"], "success");
+		assert_eq!(checks[0]["replica_healthy"], true);
+		assert_eq!(checks[0]["snapshot_id"], "snap-1");
+
+		let gap_detail = call_tool!(
+			private,
+			"get_restore_replica",
+			serde_json::json!({ "replica_id": REPLICA_GAP })
+		);
+		assert_eq!(gap_detail["gap"], true);
+		assert!(gap_detail["intent_descriptor"].is_null());
+		assert!(gap_detail["recent_checks"].as_array().unwrap().is_empty());
+
+		// Unknown id → tool error, not a protocol error.
+		let missing = private
+			.post("/api/mcp")
+			.add_header("accept", ACCEPT)
+			.add_header("mcp-protocol-version", PROTO)
+			.json(&serde_json::json!({
+				"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+				"params": {
+					"name": "get_restore_replica",
+					"arguments": { "replica_id": "44444444-4444-4444-4444-444444444444" }
+				}
+			}))
+			.await;
+		let env = parse_envelope(&missing.text());
+		assert_eq!(env["result"]["isError"], serde_json::json!(true));
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn backup_defaults_lists_seeded_org_default() {
+	commons_tests::server::run(async |_conn, _public, private| {
+		// The `tamanu-postgres` default is seeded by a migration, so it's present
+		// even with no other setup.
+		let d = call_tool!(private, "get_backup_defaults", serde_json::json!({}));
+		let defaults = d["defaults"].as_array().unwrap();
+		let tpg = defaults
+			.iter()
+			.find(|d| d["type"] == "tamanu-postgres")
+			.expect("seeded default present");
+		assert_eq!(tpg["default_interval_seconds"], 6 * 60 * 60);
+		assert_eq!(tpg["default_retention"]["keep_daily"], 7);
+		assert_eq!(tpg["auto_enable"], false);
 	})
 	.await
 }

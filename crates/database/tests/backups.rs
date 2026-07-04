@@ -6,11 +6,12 @@ use commons_tests::db::TestDb;
 use database::diesel_async::AsyncPgConnection;
 use database::pg_duration::PgDuration;
 use database::{
-	BackupConfigStatus, BackupCredentialIssuance, BackupPurpose, BackupRepoSnapshot,
-	BackupRepoStats, BackupRequest, BackupRun, BackupType, BackupTypeDefault, MaintenanceKind,
-	NewBackupCredentialIssuance, NewBackupRun, NewBackupTypeDefault, NewServerGroupBackupConfig,
-	NewServerGroupBackupSchedule, RunOutcome, ServerBackupCapability, ServerGroupBackupConfig,
-	ServerGroupBackupSchedule, backups::BackupMaintenanceRun,
+	BackupConfigStatus, BackupCredentialIssuance, BackupMaintenanceRunFilters, BackupPurpose,
+	BackupRepoSnapshot, BackupRepoStats, BackupRequest, BackupRun, BackupRunFilters, BackupType,
+	BackupTypeDefault, MaintenanceKind, MaintenanceOutcomeFilter, NewBackupCredentialIssuance,
+	NewBackupRun, NewBackupTypeDefault, NewServerGroupBackupConfig, NewServerGroupBackupSchedule,
+	RunOutcome, ServerBackupCapability, ServerGroupBackupConfig, ServerGroupBackupSchedule,
+	backups::BackupMaintenanceRun,
 };
 use diesel::{sql_query, sql_types};
 use diesel_async::RunQueryDsl;
@@ -494,6 +495,147 @@ async fn issuance_snapshots_bucket_and_orders_newest_first() {
 	.await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn list_filtered_narrows_by_every_field() {
+	TestDb::run(|mut conn, _url| async move {
+		let group_a = insert_group(&mut conn, "a").await;
+		let group_b = insert_group(&mut conn, "b").await;
+		let server_a = insert_server(&mut conn, group_a).await;
+		let server_b = insert_server(&mut conn, group_b).await;
+		let device = insert_device(&mut conn).await;
+
+		let pg_run = new_run(
+			Uuid::new_v4(),
+			device,
+			group_a,
+			Some(server_a),
+			BackupPurpose::Backup,
+			RunOutcome::Success,
+		);
+		BackupRun::record(&mut conn, pg_run).await.expect("pg run");
+
+		let files_run_id = Uuid::new_v4();
+		let mut files_run = new_run(
+			files_run_id,
+			device,
+			group_a,
+			Some(server_a),
+			BackupPurpose::Backup,
+			RunOutcome::Failure,
+		);
+		files_run.r#type = BackupType::from("files");
+		BackupRun::record(&mut conn, files_run)
+			.await
+			.expect("files run");
+
+		let other_group_run = new_run(
+			Uuid::new_v4(),
+			device,
+			group_b,
+			Some(server_b),
+			BackupPurpose::Backup,
+			RunOutcome::Success,
+		);
+		BackupRun::record(&mut conn, other_group_run)
+			.await
+			.expect("other group run");
+
+		// No filters: all three.
+		let all = BackupRun::list_filtered(&mut conn, BackupRunFilters::default(), 10)
+			.await
+			.unwrap();
+		assert_eq!(all.len(), 3);
+
+		// group_id.
+		let for_a = BackupRun::list_filtered(
+			&mut conn,
+			BackupRunFilters {
+				group_id: Some(group_a),
+				..Default::default()
+			},
+			10,
+		)
+		.await
+		.unwrap();
+		assert_eq!(for_a.len(), 2);
+
+		// server_id.
+		let for_server_b = BackupRun::list_filtered(
+			&mut conn,
+			BackupRunFilters {
+				server_id: Some(server_b),
+				..Default::default()
+			},
+			10,
+		)
+		.await
+		.unwrap();
+		assert_eq!(for_server_b.len(), 1);
+		assert_eq!(for_server_b[0].server_id, Some(server_b));
+
+		// type.
+		let files_only = BackupRun::list_filtered(
+			&mut conn,
+			BackupRunFilters {
+				r#type: Some(BackupType::from("files")),
+				..Default::default()
+			},
+			10,
+		)
+		.await
+		.unwrap();
+		assert_eq!(files_only.len(), 1);
+		assert_eq!(files_only[0].id, files_run_id);
+
+		// outcome.
+		let failures = BackupRun::list_filtered(
+			&mut conn,
+			BackupRunFilters {
+				outcome: Some(RunOutcome::Failure),
+				..Default::default()
+			},
+			10,
+		)
+		.await
+		.unwrap();
+		assert_eq!(failures.len(), 1);
+		assert_eq!(failures[0].id, files_run_id);
+
+		// since: a future cutoff excludes everything already recorded.
+		let none = BackupRun::list_filtered(
+			&mut conn,
+			BackupRunFilters {
+				since: Some(Timestamp::now() + SignedDuration::from_hours(1)),
+				..Default::default()
+			},
+			10,
+		)
+		.await
+		.unwrap();
+		assert!(none.is_empty());
+
+		// since: a past cutoff keeps everything.
+		let all_again = BackupRun::list_filtered(
+			&mut conn,
+			BackupRunFilters {
+				since: Some(Timestamp::now() - SignedDuration::from_hours(1)),
+				..Default::default()
+			},
+			10,
+		)
+		.await
+		.unwrap();
+		assert_eq!(all_again.len(), 3);
+
+		// limit caps the result set.
+		let limited = BackupRun::list_filtered(&mut conn, BackupRunFilters::default(), 1)
+			.await
+			.unwrap();
+		assert_eq!(limited.len(), 1);
+	})
+	.await;
+}
+
 // --- maintenance runs -------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread")]
@@ -521,6 +663,121 @@ async fn maintenance_start_finish_bracket() {
 		assert_eq!(done.outcome, Some(RunOutcome::Success));
 		assert_eq!(done.bytes_reclaimed, Some(1024));
 		assert!(done.finished_at.is_some());
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn maintenance_list_filtered_narrows_by_every_field() {
+	TestDb::run(|mut conn, _url| async move {
+		let group_a = insert_group(&mut conn, "a").await;
+		let group_b = insert_group(&mut conn, "b").await;
+
+		let running_id = BackupMaintenanceRun::start(&mut conn, group_a, MaintenanceKind::Quick)
+			.await
+			.unwrap();
+
+		let failed_id = BackupMaintenanceRun::start(&mut conn, group_a, MaintenanceKind::Full)
+			.await
+			.unwrap();
+		BackupMaintenanceRun::finish(
+			&mut conn,
+			failed_id,
+			RunOutcome::Failure,
+			Some("boom".into()),
+			None,
+		)
+		.await
+		.unwrap();
+
+		let other_group_id =
+			BackupMaintenanceRun::start(&mut conn, group_b, MaintenanceKind::Quick)
+				.await
+				.unwrap();
+		BackupMaintenanceRun::finish(
+			&mut conn,
+			other_group_id,
+			RunOutcome::Success,
+			None,
+			Some(512),
+		)
+		.await
+		.unwrap();
+
+		// No filters: all three.
+		let all = BackupMaintenanceRun::list_filtered(
+			&mut conn,
+			BackupMaintenanceRunFilters::default(),
+			10,
+		)
+		.await
+		.unwrap();
+		assert_eq!(all.len(), 3);
+
+		// group_id.
+		let for_a = BackupMaintenanceRun::list_filtered(
+			&mut conn,
+			BackupMaintenanceRunFilters {
+				group_id: Some(group_a),
+				..Default::default()
+			},
+			10,
+		)
+		.await
+		.unwrap();
+		assert_eq!(for_a.len(), 2);
+
+		// kind.
+		let full_only = BackupMaintenanceRun::list_filtered(
+			&mut conn,
+			BackupMaintenanceRunFilters {
+				kind: Some(MaintenanceKind::Full),
+				..Default::default()
+			},
+			10,
+		)
+		.await
+		.unwrap();
+		assert_eq!(full_only.len(), 1);
+		assert_eq!(full_only[0].id, failed_id);
+
+		// outcome=running.
+		let running = BackupMaintenanceRun::list_filtered(
+			&mut conn,
+			BackupMaintenanceRunFilters {
+				outcome: Some(MaintenanceOutcomeFilter::Running),
+				..Default::default()
+			},
+			10,
+		)
+		.await
+		.unwrap();
+		assert_eq!(running.len(), 1);
+		assert_eq!(running[0].id, running_id);
+
+		// outcome=failure.
+		let failed = BackupMaintenanceRun::list_filtered(
+			&mut conn,
+			BackupMaintenanceRunFilters {
+				outcome: Some(MaintenanceOutcomeFilter::Outcome(RunOutcome::Failure)),
+				..Default::default()
+			},
+			10,
+		)
+		.await
+		.unwrap();
+		assert_eq!(failed.len(), 1);
+		assert_eq!(failed[0].id, failed_id);
+
+		// limit caps the result set.
+		let limited = BackupMaintenanceRun::list_filtered(
+			&mut conn,
+			BackupMaintenanceRunFilters::default(),
+			1,
+		)
+		.await
+		.unwrap();
+		assert_eq!(limited.len(), 1);
 	})
 	.await;
 }
