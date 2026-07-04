@@ -8360,7 +8360,7 @@
           },
           "intent": {
             "type": "string",
-            "description": "Name of the intent. Well-known values include `verify`, `analytics`,\nand `disaster-recovery`, but any name may be advertised."
+            "description": "Name of the intent: an arbitrary identifier chosen by the consumer\n(e.g. `verify`); any name may be advertised."
           },
           "params": {
             "$ref": "#/components/schemas/BTreeMap",
@@ -10241,7 +10241,7 @@
           },
           "intent": {
             "type": "string",
-            "description": "What the restored replica is for, for example `verify`, `analytics`,\nor `disaster-recovery`."
+            "description": "How the replica is handled, as defined by the consumer: an arbitrary\nidentifier from the consumer's advertised intents, e.g. `verify`."
           },
           "name": {
             "type": "string",
@@ -10300,7 +10300,7 @@
           },
           "intent": {
             "type": "string",
-            "description": "What the restored replica is for, for example `verify`, `analytics`,\nor `disaster-recovery`."
+            "description": "How the replica is handled, as defined by the consumer: an arbitrary\nidentifier from the consumer's advertised intents, e.g. `verify`."
           },
           "name": {
             "type": "string",

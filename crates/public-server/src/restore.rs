@@ -60,9 +60,9 @@ pub fn routes() -> OpenApiRouter<AppState> {
 /// satisfy.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct RestoreCapabilitiesArgs {
-	/// The intents this device can satisfy (e.g. `verify`, `analytics`,
-	/// `disaster-recovery`), each with its description, the semantics it opts
-	/// into, and the schema of the parameters it accepts. Replaces the
+	/// The intents this device can satisfy — arbitrary consumer-chosen
+	/// identifiers (e.g. `verify`) — each with its description, the semantics
+	/// it opts into, and the schema of the parameters it accepts. Replaces the
 	/// device's previously advertised set wholesale.
 	pub intents: Vec<IntentDescriptor>,
 }

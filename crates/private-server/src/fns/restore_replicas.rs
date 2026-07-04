@@ -64,8 +64,8 @@ pub struct RestoreReplicaView {
 	/// The backup type to restore, for example `tamanu-postgres`.
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
-	/// What the restored replica is for, for example `verify`, `analytics`,
-	/// or `disaster-recovery`.
+	/// How the replica is handled, as defined by the consumer: an arbitrary
+	/// identifier from the consumer's advertised intents, e.g. `verify`.
 	#[schema(value_type = String)]
 	pub intent: RestoreIntent,
 	/// Operator-chosen display name for the declaration.
@@ -135,8 +135,8 @@ pub struct RestoreReplicasCreateArgs {
 	/// The backup type to restore, for example `tamanu-postgres`.
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
-	/// What the restored replica is for, for example `verify`, `analytics`,
-	/// or `disaster-recovery`.
+	/// How the replica is handled, as defined by the consumer: an arbitrary
+	/// identifier from the consumer's advertised intents, e.g. `verify`.
 	#[schema(value_type = String)]
 	pub intent: RestoreIntent,
 	/// Display name for the declaration.

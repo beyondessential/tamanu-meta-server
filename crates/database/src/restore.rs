@@ -343,8 +343,9 @@ impl RestoreConsumerCapability {
 }
 
 /// The stable group-level alert ref for one replica's restore-health. Per
-/// `(server, type, intent)` so each replica recovers independently (a healthy
-/// `verify` must not clear a failing `disaster-recovery` on the same server).
+/// `(server, type, intent)` so each replica recovers independently (one
+/// intent's healthy report must not clear another's failure on the same
+/// server).
 fn restore_verification_ref(
 	server_id: Uuid,
 	r#type: &BackupType,

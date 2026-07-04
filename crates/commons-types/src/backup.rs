@@ -294,12 +294,11 @@ where
 	}
 }
 
-/// What a managed restore replica is for. Fully open: a restore consumer
-/// advertises the intents it can satisfy and Canopy stores and dispatches them
-/// verbatim, never branching on any particular value. Stored as `TEXT`;
-/// serializes as a plain string (no DB `CHECK`). Well-known intents (`verify`,
-/// `analytics`, `disaster-recovery`) are documented in the restore-replicas
-/// spec, not enforced here.
+/// How a managed restore replica is handled, as defined by the consumer.
+/// Fully open: a restore consumer advertises the intents it can satisfy as
+/// arbitrary identifiers and Canopy stores and dispatches them verbatim,
+/// never branching on any particular value. Stored as `TEXT`; serializes as
+/// a plain string (no DB `CHECK`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, AsExpression, FromSqlRow)]
 #[diesel(sql_type = Text)]
 pub struct RestoreIntent(pub String);
@@ -435,8 +434,8 @@ pub type ParamValues = std::collections::BTreeMap<String, serde_json::Value>;
 /// opts into and the settings it accepts per replica.
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct IntentDescriptor {
-	/// Name of the intent. Well-known values include `verify`, `analytics`,
-	/// and `disaster-recovery`, but any name may be advertised.
+	/// Name of the intent: an arbitrary identifier chosen by the consumer
+	/// (e.g. `verify`); any name may be advertised.
 	#[schema(value_type = String)]
 	pub intent: RestoreIntent,
 	/// Human-readable description of the intent, if provided.

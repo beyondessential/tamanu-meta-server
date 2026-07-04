@@ -1478,7 +1478,7 @@
           },
           "intent": {
             "type": "string",
-            "description": "Name of the intent. Well-known values include `verify`, `analytics`,\nand `disaster-recovery`, but any name may be advertised."
+            "description": "Name of the intent: an arbitrary identifier chosen by the consumer\n(e.g. `verify`); any name may be advertised."
           },
           "params": {
             "$ref": "#/components/schemas/BTreeMap",
@@ -1843,7 +1843,7 @@
             "items": {
               "$ref": "#/components/schemas/IntentDescriptor"
             },
-            "description": "The intents this device can satisfy (e.g. `verify`, `analytics`,\n`disaster-recovery`), each with its description, the semantics it opts\ninto, and the schema of the parameters it accepts. Replaces the\ndevice's previously advertised set wholesale."
+            "description": "The intents this device can satisfy — arbitrary consumer-chosen\nidentifiers (e.g. `verify`) — each with its description, the semantics\nit opts into, and the schema of the parameters it accepts. Replaces the\ndevice's previously advertised set wholesale."
           }
         }
       },

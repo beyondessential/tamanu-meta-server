@@ -4616,8 +4616,8 @@ export interface components {
             /** @description Human-readable description of the intent, if provided. */
             description?: string | null;
             /**
-             * @description Name of the intent. Well-known values include `verify`, `analytics`,
-             *     and `disaster-recovery`, but any name may be advertised.
+             * @description Name of the intent: an arbitrary identifier chosen by the consumer
+             *     (e.g. `verify`); any name may be advertised.
              */
             intent: string;
             /**
@@ -5786,8 +5786,8 @@ export interface components {
              */
             id: string;
             /**
-             * @description What the restored replica is for, for example `verify`, `analytics`,
-             *     or `disaster-recovery`.
+             * @description How the replica is handled, as defined by the consumer: an arbitrary
+             *     identifier from the consumer's advertised intents, e.g. `verify`.
              */
             intent: string;
             /** @description Operator-chosen display name for the declaration. */
@@ -5832,8 +5832,8 @@ export interface components {
              */
             group_id: string;
             /**
-             * @description What the restored replica is for, for example `verify`, `analytics`,
-             *     or `disaster-recovery`.
+             * @description How the replica is handled, as defined by the consumer: an arbitrary
+             *     identifier from the consumer's advertised intents, e.g. `verify`.
              */
             intent: string;
             /** @description Display name for the declaration. */
