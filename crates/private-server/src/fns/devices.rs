@@ -413,6 +413,9 @@ pub async fn connection_history(
 }
 
 /// Count how many times a device has connected.
+///
+/// Returns the total number of connections recorded for the device, for
+/// paginating its connection history.
 #[utoipa::path(
 	post,
 	path = "/connection_count",
@@ -757,7 +760,9 @@ pub async fn deactivate_key(
 	Ok(Json(()))
 }
 
-/// Re-enable a previously disabled key so it can authenticate again.
+/// Re-enable a previously disabled device key.
+///
+/// The key can authenticate again immediately.
 #[utoipa::path(
 	post,
 	path = "/reactivate_key",
@@ -863,6 +868,9 @@ pub struct UpdateKeyNameArgs {
 }
 
 /// Rename a device key, or clear its name.
+///
+/// Sets the key's display name to the given value, or removes the name
+/// when `null` is passed.
 #[utoipa::path(
 	post,
 	path = "/update_key_name",

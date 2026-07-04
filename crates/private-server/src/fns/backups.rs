@@ -511,6 +511,10 @@ pub async fn get(
 }
 
 /// List all groups with a backup configuration.
+///
+/// Returns one summary row per configured group: the bucket, how the
+/// repository passphrase originated, the provisioning status, and the
+/// last provisioning error if any.
 #[utoipa::path(
 	post,
 	path = "/list",
@@ -947,10 +951,12 @@ pub async fn probe(
 	}))
 }
 
-/// Update a group's mutable backup configuration fields (currently just the
-/// region). Structural fields — bucket, roles, mode — can only be set when
-/// the configuration is created; schedule and retention are managed through
-/// the `/backups/set_schedule` endpoint.
+/// Update a group's mutable backup configuration fields.
+///
+/// Currently only the region can be changed. Structural fields — bucket,
+/// roles, mode — can only be set when the configuration is created;
+/// schedule and retention are managed through the `/backups/set_schedule`
+/// endpoint. Returns the updated configuration.
 #[utoipa::path(
 	post,
 	path = "/update",
@@ -1048,8 +1054,10 @@ pub struct ClearScheduleArgs {
 	pub r#type: BackupType,
 }
 
-/// Remove a group's schedule and retention override for a backup type,
-/// reverting it to the canopy-wide default.
+/// Remove a group's schedule and retention override for a backup type.
+///
+/// The type reverts to inheriting the canopy-wide default schedule and
+/// retention. Returns the updated configuration.
 #[utoipa::path(
 	post,
 	path = "/clear_schedule",
@@ -1205,8 +1213,9 @@ pub struct TypeDefaultView {
 	pub allow_below_floor: bool,
 }
 
-/// List the canopy-wide default schedule and retention for every backup
-/// type. Groups inherit these defaults unless they set a per-group override.
+/// List the canopy-wide default schedule and retention for every backup type.
+///
+/// Groups inherit these defaults unless they set a per-group override.
 #[utoipa::path(
 	post,
 	path = "/type_defaults",
@@ -1258,9 +1267,9 @@ pub struct SetTypeDefaultArgs {
 }
 
 /// Set the canopy-wide default schedule and retention for a backup type.
+///
 /// A retention policy below the organization's retention floor is rejected
-/// with 400, unless `allow_below_floor` is set. Operators tune these in
-/// Settings → Backup defaults.
+/// with 400, unless `allow_below_floor` is set.
 #[utoipa::path(
 	post,
 	path = "/set_type_default",
@@ -1360,8 +1369,10 @@ pub async fn request_now(
 	Ok(Json(()))
 }
 
-/// Cancel a pending one-off backup or restore request for a server, type,
-/// and purpose. A no-op if none is pending.
+/// Cancel a pending one-off backup or restore request.
+///
+/// Removes the pending request matching the given server, type, and
+/// purpose. Cancelling when nothing is pending succeeds without effect.
 #[utoipa::path(
 	post,
 	path = "/cancel_request",
@@ -1421,8 +1432,11 @@ pub async fn request_maintenance(
 	Ok(Json(BackupConfigView::build(&mut conn, config).await?))
 }
 
-/// Cancel a pending full-maintenance request. A no-op if none is pending, or
-/// if the run has already started.
+/// Cancel a pending full-maintenance request.
+///
+/// Clears the group's outstanding request for a one-off full maintenance
+/// run. Cancelling when nothing is pending — or when the run has already
+/// started — succeeds without effect. Returns the updated configuration.
 #[utoipa::path(
 	post,
 	path = "/cancel_maintenance",
@@ -1447,8 +1461,10 @@ pub async fn cancel_maintenance(
 	Ok(Json(BackupConfigView::build(&mut conn, config).await?))
 }
 
-/// Get backup statistics for a group: cached repository stats, recent backup
-/// and maintenance runs, pending one-off requests, and each member server's
+/// Get backup statistics for a group.
+///
+/// Returns the group's cached repository stats, recent backup and
+/// maintenance runs, pending one-off requests, and each member server's
 /// declared backup capabilities.
 #[utoipa::path(
 	post,
@@ -1556,8 +1572,11 @@ pub async fn stats(
 	}))
 }
 
-/// List a server's backup capabilities and their enabled state. Empty if the
-/// server hasn't advertised any yet.
+/// List a server's backup capabilities and their enabled state.
+///
+/// Returns one entry per backup type the server has advertised, with its
+/// enabled state, scheduling information, and recent run status. Empty if
+/// the server hasn't advertised any capabilities yet.
 #[utoipa::path(
 	post,
 	path = "/capabilities",
@@ -1616,6 +1635,9 @@ pub async fn capabilities(
 }
 
 /// Enable or disable a server's backup capability for one type.
+///
+/// Disabled capabilities are excluded from scheduling and can't be issued
+/// backup credentials, outside of explicit operator-requested runs.
 #[utoipa::path(
 	post,
 	path = "/set_capability",
@@ -1749,8 +1771,11 @@ fn recovery_due(
 	)
 }
 
-/// Get the disaster-recovery verification status: configured recipients,
-/// when it was last verified, and whether a fresh verification is due.
+/// Get the disaster-recovery verification status.
+///
+/// Reports the configured recovery recipients, when recovery was last
+/// verified, and whether a fresh verification is due (either because a
+/// year has passed or because the recipient set changed).
 #[utoipa::path(
 	post,
 	path = "/recovery_status",
@@ -1828,11 +1853,12 @@ pub async fn recovery_challenge(
 	}))
 }
 
-/// Complete the recovery-verification ceremony: check that the submitted
-/// answer matches the outstanding challenge issued by the
-/// `/backups/recovery_challenge` endpoint, then record the verification
-/// against the current recipient set. Returns 400 if there's no outstanding
-/// challenge, it has expired, or the answer is wrong.
+/// Complete the recovery-verification ceremony.
+///
+/// Checks that the submitted answer matches the outstanding challenge
+/// issued by the `/backups/recovery_challenge` endpoint, then records the
+/// verification against the current recipient set. Returns 400 if there's
+/// no outstanding challenge, it has expired, or the answer is wrong.
 #[utoipa::path(
 	post,
 	path = "/recovery_verify",
