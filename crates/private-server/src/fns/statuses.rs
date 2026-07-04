@@ -175,6 +175,7 @@ pub async fn server_grouped_ids(
 	Ok(Json(map))
 }
 
+/// Identifies the server group whose status details to fetch.
 #[derive(Deserialize, ToSchema)]
 pub struct GroupDetailsArgs {
 	/// Id of the server group to fetch details for.
@@ -320,6 +321,7 @@ pub struct StatusSnapshotData {
 	pub check_severities: std::collections::HashMap<String, commons_types::issue::Severity>,
 }
 
+/// Selects a server and a point in time to fetch a status snapshot for.
 #[derive(Deserialize, ToSchema)]
 pub struct SnapshotArgs {
 	/// Id of the server to fetch a status snapshot for.

@@ -309,6 +309,7 @@ pub async fn get_grouped_versions(
 	Ok(Json(result))
 }
 
+/// Identifies a version by its exact version string.
 #[derive(Deserialize, ToSchema)]
 pub struct VersionStringArgs {
 	/// Exact version string to look up (e.g. `"1.2.3"`).
@@ -448,6 +449,7 @@ pub async fn get_version_artifacts(
 	))
 }
 
+/// Identifies a version and the publication status to set on it.
 #[derive(Deserialize, ToSchema)]
 pub struct UpdateStatusArgs {
 	/// Exact version string to update (e.g. `"1.2.3"`).
@@ -497,6 +499,7 @@ pub async fn update_version_status(
 	Ok(Json(()))
 }
 
+/// Identifies a version and the changelog text to set on it.
 #[derive(Deserialize, ToSchema)]
 pub struct UpdateChangelogArgs {
 	/// Exact version string to update (e.g. `"1.2.3"`).
@@ -506,6 +509,10 @@ pub struct UpdateChangelogArgs {
 }
 
 /// Replace a version's changelog text.
+///
+/// Overwrites the changelog of the version identified by its exact
+/// version string. Updating a version that doesn't exist succeeds
+/// without effect.
 #[utoipa::path(
 	post,
 	path = "/update_version_changelog",
@@ -527,6 +534,7 @@ pub async fn update_version_changelog(
 	Ok(Json(()))
 }
 
+/// Changes to apply to an existing artifact.
 #[derive(Deserialize, ToSchema)]
 pub struct UpdateArtifactArgs {
 	/// Id of the artifact to update.
@@ -540,6 +548,9 @@ pub struct UpdateArtifactArgs {
 }
 
 /// Update an existing artifact's type, platform, and download URL.
+///
+/// All three fields are replaced with the supplied values; the artifact's
+/// version association is unchanged.
 #[utoipa::path(
 	post,
 	path = "/update_artifact",
@@ -567,6 +578,7 @@ pub async fn update_artifact(
 	Ok(Json(()))
 }
 
+/// A new artifact to register against a version.
 #[derive(Deserialize, ToSchema)]
 pub struct CreateArtifactArgs {
 	/// Id of the version to attach the new artifact to.
@@ -580,6 +592,9 @@ pub struct CreateArtifactArgs {
 }
 
 /// Create a new artifact tied to an exact version.
+///
+/// Registers a download of the given type and platform against the
+/// version, and returns the created artifact.
 #[utoipa::path(
 	post,
 	path = "/create_artifact",
@@ -616,6 +631,7 @@ pub async fn create_artifact(
 	}))
 }
 
+/// Identifies a single artifact by id.
 #[derive(Deserialize, ToSchema)]
 pub struct ArtifactIdArgs {
 	/// Id of the artifact to delete.
@@ -623,6 +639,9 @@ pub struct ArtifactIdArgs {
 }
 
 /// Permanently delete an artifact.
+///
+/// The artifact record is removed outright; the file it pointed to is not
+/// touched. There is no undo.
 #[utoipa::path(
 	post,
 	path = "/delete_artifact",
@@ -643,6 +662,7 @@ pub async fn delete_artifact(
 	Ok(Json(()))
 }
 
+/// Identifies a single version by id.
 #[derive(Deserialize, ToSchema)]
 pub struct VersionIdArgs {
 	/// Id of a version whose release line to look up.
@@ -676,6 +696,7 @@ pub async fn list_known_issues(
 	Ok(Json(rows.into_iter().map(KnownIssueData::from).collect()))
 }
 
+/// A known issue to record against a version.
 #[derive(Deserialize, ToSchema)]
 pub struct AddKnownIssueArgs {
 	/// Id of a version in the release line the issue affects. The issue is
@@ -722,6 +743,7 @@ pub async fn add_known_issue(
 	Ok(Json(KnownIssueData::from(row)))
 }
 
+/// Identifies a known issue and the version that fixes it.
 #[derive(Deserialize, ToSchema)]
 pub struct ResolveKnownIssueArgs {
 	/// Id of the known issue to resolve.

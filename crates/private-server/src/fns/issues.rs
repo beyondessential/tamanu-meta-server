@@ -385,6 +385,7 @@ pub async fn list(
 	Ok(Json(enrich_issues(&mut conn, issues).await?))
 }
 
+/// Filters for listing the issues raised by one device.
 #[derive(Deserialize, ToSchema)]
 pub struct ListForDeviceArgs {
 	/// Id of the device whose issues to list.
@@ -399,6 +400,10 @@ pub struct ListForDeviceArgs {
 }
 
 /// List issues raised by a specific device.
+///
+/// Returns the issues that the given device reported, most relevant
+/// first. By default only currently active issues are returned; pass
+/// `active_only: false` to also see resolved and inactive ones.
 #[utoipa::path(
 	post,
 	path = "/list_for_device",
@@ -425,6 +430,7 @@ pub async fn list_for_device(
 	Ok(Json(enrich_issues(&mut conn, issues).await?))
 }
 
+/// Filters for listing the issues raised against one server.
 #[derive(Deserialize, ToSchema)]
 pub struct IssueListForServerArgs {
 	/// Id of the server whose issues to list.
@@ -439,6 +445,10 @@ pub struct IssueListForServerArgs {
 }
 
 /// List issues raised against a specific server.
+///
+/// Returns the issues recorded against the given server, most relevant
+/// first. By default only currently active issues are returned; pass
+/// `active_only: false` to also see resolved and inactive ones.
 #[utoipa::path(
 	post,
 	path = "/list_for_server",
@@ -466,6 +476,7 @@ pub async fn list_for_server(
 	Ok(Json(enrich_issues(&mut conn, issues).await?))
 }
 
+/// Selects an issue and a page of its events.
 #[derive(Deserialize, ToSchema)]
 pub struct ListEventsArgs {
 	/// Id of the issue whose events to list.
@@ -510,6 +521,7 @@ pub async fn list_events(
 	Ok(Json(Page { items, total }))
 }
 
+/// A manually entered event to record against a server.
 #[derive(Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SubmitManualEventArgs {
@@ -579,12 +591,14 @@ pub async fn submit_manual_event(
 	Ok(Json(enrich_issue(&mut conn, issue).await?))
 }
 
+/// Identifies a single issue by id.
 #[derive(Deserialize, ToSchema)]
 pub struct IssueIdArgs {
 	/// Id of the issue to act on.
 	pub issue_id: Uuid,
 }
 
+/// Identifies an issue to resolve, with the reason for resolving it.
 #[derive(Deserialize, ToSchema)]
 pub struct IssueResolveArgs {
 	/// Id of the issue to resolve.
@@ -643,6 +657,7 @@ pub async fn unresolve(
 	Ok(Json(enrich_issue(&mut conn, issue).await?))
 }
 
+/// Identifies an issue and the time to snooze it until.
 #[derive(Deserialize, ToSchema)]
 pub struct SnoozeArgs {
 	/// Id of the issue to snooze.
@@ -651,8 +666,10 @@ pub struct SnoozeArgs {
 	pub until: Timestamp,
 }
 
-/// Snooze an issue until a given time, suppressing it from demanding
-/// attention until then.
+/// Snooze an issue until a given time.
+///
+/// A snoozed issue stops demanding attention until the given time, after
+/// which it surfaces again on its own. Returns the updated issue.
 #[utoipa::path(
 	post,
 	path = "/snooze",
@@ -674,8 +691,10 @@ pub async fn snooze(
 	Ok(Json(enrich_issue(&mut conn, issue).await?))
 }
 
-/// Clear a snooze on an issue, making it demand attention again
-/// immediately.
+/// Clear a snooze on an issue.
+///
+/// Makes a previously snoozed issue demand attention again immediately,
+/// without waiting for its snooze time to pass. Returns the updated issue.
 #[utoipa::path(
 	post,
 	path = "/unsnooze",
@@ -725,6 +744,7 @@ impl From<IssueNote> for IssueNoteData {
 	}
 }
 
+/// A note to add to an issue.
 #[derive(Deserialize, ToSchema)]
 pub struct IssueAddNoteArgs {
 	/// Id of the issue to attach the note to.
@@ -762,6 +782,7 @@ pub async fn add_note(
 	Ok(Json(IssueNoteData::from(note)))
 }
 
+/// Identifies the issue whose notes to list.
 #[derive(Deserialize, ToSchema)]
 pub struct IssueListNotesArgs {
 	/// Id of the issue whose notes to list.
@@ -772,6 +793,9 @@ pub struct IssueListNotesArgs {
 }
 
 /// List the notes left on a specific issue.
+///
+/// Returns the issue's notes, most recent first, each with its author and
+/// creation time.
 #[utoipa::path(
 	post,
 	path = "/list_notes",
@@ -798,6 +822,7 @@ pub async fn list_notes(
 	Ok(Json(notes.into_iter().map(IssueNoteData::from).collect()))
 }
 
+/// Identifies a single note to delete from an issue.
 #[derive(Deserialize, ToSchema)]
 pub struct IssueDeleteNoteArgs {
 	/// Id of the note to delete.
@@ -805,6 +830,9 @@ pub struct IssueDeleteNoteArgs {
 }
 
 /// Permanently delete a note from an issue.
+///
+/// The note is removed outright; there is no undo. Deleting a note that
+/// doesn't exist succeeds without effect.
 #[utoipa::path(
 	post,
 	path = "/delete_note",
