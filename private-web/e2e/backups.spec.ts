@@ -360,12 +360,13 @@ test.describe("backups ready: stats + backup-now", () => {
 
 		await page.goto(`/groups/${group.id}/backups`);
 		const runs = page.getByRole("table").last();
-		// Shown exactly (from inspection), not the "~" approximate S3 proxy.
 		await expect(runs.getByText("4.0 KiB")).toBeVisible();
-		await expect(runs.getByText("~4.0 KiB")).toHaveCount(0);
+		// No S3 traffic reported and no snapshot id → Uploaded and Snapshot cells
+		// both fall back to "—".
+		await expect(runs.getByRole("cell", { name: "—" })).toHaveCount(2);
 	});
 
-	test("failed run shows expandable error detail and no upload size", async ({
+	test("failed run shows expandable error detail, no snapshot size, and no upload", async ({
 		page,
 		sql,
 	}) => {
@@ -394,9 +395,9 @@ test.describe("backups ready: stats + backup-now", () => {
 		const runs = page.getByRole("table").last();
 		await expect(runs.getByText("err-srv")).toBeVisible();
 		await expect(runs.getByText("failure")).toBeVisible();
-		// A failed run uploaded nothing and has no snapshot → "—" cells (Uploaded
-		// + Snapshot), not "unknown".
-		await expect(runs.getByRole("cell", { name: "—" }).first()).toBeVisible();
+		// A failed run has no size, no upload, and no snapshot → three "—" cells
+		// (Snapshot size, Uploaded, Snapshot), not "unknown".
+		await expect(runs.getByRole("cell", { name: "—" })).toHaveCount(3);
 
 		// Error detail is hidden until the row is expanded.
 		await expect(page.getByText(/disk quota exceeded/i)).toBeHidden();
@@ -404,7 +405,7 @@ test.describe("backups ready: stats + backup-now", () => {
 		await expect(page.getByText(/disk quota exceeded/i)).toBeVisible();
 	});
 
-	test("run with S3 traffic but no upload size shows ~payload and expandable traffic detail", async ({
+	test("run with S3 traffic but no reported size shows uploaded bytes, no snapshot size, and expandable traffic detail", async ({
 		page,
 		sql,
 	}) => {
@@ -420,15 +421,16 @@ test.describe("backups ready: stats + backup-now", () => {
 			status: "ready",
 			intervalSeconds: 3600,
 		});
-		// No explicit upload size, but the proxy tallied S3 traffic → the Uploaded
-		// column falls back to the payload-sent figure, marked approximate.
+		// No explicit size (device-reported or inspected), but the proxy tallied
+		// S3 traffic → the Uploaded column shows the payload-sent figure directly,
+		// while Snapshot size stays empty.
 		await seedBackupRun(sql, {
 			deviceId: device.id,
 			groupId: group.id,
 			serverId: server.id,
 			outcome: "success",
 			bytesUploaded: null,
-			s3SentPayloadBytes: 2048, // 2.0 KiB → the Uploaded approximation
+			s3SentPayloadBytes: 2048, // 2.0 KiB → shown in the Uploaded column
 			s3SentRawBytes: 3072, // 3.0 KiB
 			s3ReceivedPayloadBytes: 512, // 512 B
 			s3ReceivedRawBytes: 1024, // 1.0 KiB
@@ -437,8 +439,9 @@ test.describe("backups ready: stats + backup-now", () => {
 		await page.goto(`/groups/${group.id}/backups`);
 		const runs = page.getByRole("table").last();
 		await expect(runs.getByText("s3-srv")).toBeVisible();
-		// Uploaded falls back to the payload-sent figure, prefixed "~".
-		await expect(runs.getByText("~2.0 KiB")).toBeVisible();
+		await expect(runs.getByText("2.0 KiB")).toBeVisible();
+		// Snapshot size has nothing to show, nor does the (unseeded) snapshot id.
+		await expect(runs.getByRole("cell", { name: "—" })).toHaveCount(2);
 
 		// The S3 traffic breakdown is hidden until the row is expanded.
 		await expect(page.getByText(/s3 traffic/i)).toBeHidden();
@@ -446,6 +449,43 @@ test.describe("backups ready: stats + backup-now", () => {
 		await expect(page.getByText(/s3 traffic/i)).toBeVisible();
 		await expect(page.getByText(/2\.0 KiB payload \/ 3\.0 KiB raw/i)).toBeVisible();
 		await expect(page.getByText(/512 B payload \/ 1\.0 KiB raw/i)).toBeVisible();
+	});
+
+	test("run with both a snapshot size and S3 traffic shows them as distinct columns", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "both-sizes-group" });
+		const device = await seedDevice(sql);
+		const server = await seedServer(sql, {
+			name: "both-sizes-srv",
+			groupId: group.id,
+			deviceId: device.id,
+		});
+		await seedServerGroupBackupConfig(sql, {
+			groupId: group.id,
+			status: "ready",
+			intervalSeconds: 3600,
+		});
+		// The full snapshot is much larger than what kopia actually had to send,
+		// since it dedupes against data the server already has.
+		await seedBackupRun(sql, {
+			deviceId: device.id,
+			groupId: group.id,
+			serverId: server.id,
+			outcome: "success",
+			bytesUploaded: 1048576, // 1.0 MiB snapshot size
+			s3SentPayloadBytes: 2048, // 2.0 KiB actually sent
+			s3SentRawBytes: 3072,
+			s3ReceivedPayloadBytes: 512,
+			s3ReceivedRawBytes: 1024,
+		});
+
+		await page.goto(`/groups/${group.id}/backups`);
+		const runs = page.getByRole("table").last();
+		await expect(runs.getByText("both-sizes-srv")).toBeVisible();
+		await expect(runs.getByText("1.0 MiB")).toBeVisible();
+		await expect(runs.getByText("2.0 KiB")).toBeVisible();
 	});
 
 	test("backup-now writes a request row; cancel deletes it", async ({
