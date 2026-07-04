@@ -14,6 +14,22 @@ pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new().routes(routes!(create))
 }
 
+/// Report an event against the calling device's server.
+///
+/// Requires a device certificate with the server role (or admin). Used to
+/// push a status update — a healthcheck result, an alert condition, or a
+/// "condition cleared" notice — which canopy records as an issue and, if
+/// the server belongs to a group, may fold into an incident. An event
+/// with the same `source` and `ref` as an already-open issue on this
+/// server updates that issue instead of opening a new one.
+///
+/// The calling device must already be enrolled against exactly one
+/// server, otherwise the request fails with 412. The `source` value
+/// `"manual"` is reserved for operator-entered events and is rejected
+/// with 400 here, as is an empty `ref`.
+///
+/// Returns the issue the event was recorded against (existing or newly
+/// created).
 #[utoipa::path(
 	post,
 	path = "/events",

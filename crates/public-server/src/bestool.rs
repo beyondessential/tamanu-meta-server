@@ -8,9 +8,13 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::state::AppState;
 
+/// A single named SQL snippet from the bestool snippet library.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SnippetResponse {
+	/// Human-readable explanation of what the snippet does, if the author
+	/// provided one.
 	pub description: Option<String>,
+	/// The snippet's SQL text.
 	pub sql: String,
 }
 
@@ -18,6 +22,14 @@ pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new().routes(routes!(list_snippets))
 }
 
+/// List all current bestool SQL snippets.
+///
+/// Returns the library of named SQL snippets that devices running bestool
+/// fetch and run, keyed by snippet name. Only the current version of each
+/// snippet is included: if a snippet has been superseded by a newer one
+/// under the same name, only the newer version is returned, and
+/// soft-deleted snippets are omitted entirely. This endpoint does not
+/// require device authentication.
 #[utoipa::path(
 	get,
 	path = "/snippets",
