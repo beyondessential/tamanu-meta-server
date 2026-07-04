@@ -339,65 +339,68 @@ function OperatorCountChip({
 /// (centrals first within a rank). A thin grey vertical bar separates
 /// adjacent ranks, so operators can see at a glance how the group
 /// breaks down without naming each dot.
+// Every child of the strip — dot or rank separator — sits in an identical
+// fixed-size cell, so wrapped rows always align to the same column grid no
+// matter where the line breaks fall. Spacing comes from the container's
+// `gap`, not per-dot margins (StatusDot's inline right-margin is neutralised).
+const dotCellSx = {
+	display: "inline-flex",
+	width: "1em",
+	height: "1em",
+	alignItems: "center",
+	justifyContent: "center",
+	flex: "none",
+	"& > span": { marginRight: 0 },
+} as const;
+
 export function RankedDotStrip({ members }: { members: FacilityServerStatus[] }) {
 	const sorted = [...members].sort(compareServersByRankThenKind);
-	const chunks: Array<{ rank: string; entries: FacilityServerStatus[] }> = [];
+	const cells: React.ReactNode[] = [];
+	let prevRank: string | null = null;
 	for (const m of sorted) {
-		const key = m.rank ?? "_unranked";
-		const last = chunks[chunks.length - 1];
-		if (last && last.rank === key) last.entries.push(m);
-		else chunks.push({ rank: key, entries: [m] });
+		const rank = m.rank ?? "_unranked";
+		if (prevRank != null && rank !== prevRank) {
+			cells.push(
+				<Box
+					key={`sep-${rank}`}
+					component="span"
+					aria-hidden
+					sx={dotCellSx}
+				>
+					<Box
+						component="span"
+						sx={{ width: "1px", height: "0.9em", bgcolor: "text.disabled" }}
+					/>
+				</Box>,
+			);
+		}
+		prevRank = rank;
+		cells.push(
+			<Tooltip
+				key={m.id}
+				title={`${m.name || "(unnamed)"}${
+					m.rank ? ` · ${m.rank}` : ""
+				} · ${m.kind}`}
+			>
+				<Box component="span" sx={dotCellSx}>
+					<StatusDot
+						up={m.up}
+						health={m.health}
+						title={`${m.name}: ${m.up}${
+							m.health !== "healthy" ? ` (${m.health})` : ""
+						}`}
+					/>
+				</Box>
+			</Tooltip>,
+		);
 	}
 	return (
 		<Stack
 			direction="row"
 			spacing={0}
-			sx={{ flexWrap: "wrap", alignItems: "center", rowGap: "0.5em" }}
+			sx={{ flexWrap: "wrap", alignItems: "center", gap: "0.5em" }}
 		>
-			{chunks.map((chunk, idx) => (
-				<Box
-					key={chunk.rank}
-					component="span"
-					sx={{
-						display: "inline-flex",
-						flexWrap: "wrap",
-						alignItems: "center",
-						rowGap: "0.5em",
-					}}
-				>
-					{idx > 0 && (
-						<Box
-							component="span"
-							aria-hidden
-							sx={{
-								display: "inline-block",
-								width: "1px",
-								height: "0.9em",
-								mx: "0.25em",
-								bgcolor: "text.disabled",
-							}}
-						/>
-					)}
-					{chunk.entries.map((m) => (
-						<Tooltip
-							key={m.id}
-							title={`${m.name || "(unnamed)"}${
-								m.rank ? ` · ${m.rank}` : ""
-							} · ${m.kind}`}
-						>
-							<Box component="span" sx={{ display: "inline-flex" }}>
-								<StatusDot
-									up={m.up}
-									health={m.health}
-									title={`${m.name}: ${m.up}${
-										m.health !== "healthy" ? ` (${m.health})` : ""
-									}`}
-								/>
-							</Box>
-						</Tooltip>
-					))}
-				</Box>
-			))}
+			{cells}
 		</Stack>
 	);
 }
