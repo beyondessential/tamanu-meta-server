@@ -677,21 +677,18 @@ function RunRow({ run, members }: { run: BackupRun; members: ServerInfo[] }) {
 	const hasError = Boolean(run.error);
 	const hasS3 = hasS3Traffic(run);
 	const expandable = hasError || hasS3;
-	// bestool reports an explicit upload size for some backup types; when it's
-	// absent, canopy's own repo inspection fills in the snapshot's logical size
-	// (exact, but from a different source), and failing that the S3 payload-sent
-	// tally is the closest proxy (marked approximate).
+	// The snapshot's logical tree size, from whichever source reported it:
+	// bestool's own accounting, or (failing that) canopy's repo inspection.
+	// Both describe the same quantity — kopia doesn't re-upload bits the
+	// server already has, so this is usually larger than what actually went
+	// over the wire.
 	const fromInspect =
 		run.bytes_uploaded == null && run.snapshot_logical_bytes != null;
-	const uploadedApprox =
-		run.bytes_uploaded == null &&
-		run.snapshot_logical_bytes == null &&
-		run.s3_sent_payload_bytes != null;
-	const uploaded =
-		run.bytes_uploaded ??
-		run.snapshot_logical_bytes ??
-		run.s3_sent_payload_bytes ??
-		null;
+	const snapshotSize = run.bytes_uploaded ?? run.snapshot_logical_bytes ?? null;
+	// Bytes actually sent over the wire, from the SigV4 proxy's tally — the
+	// only genuine "uploaded" figure. Absent for backup types the proxy
+	// doesn't front, or before the first inspection.
+	const uploaded = run.s3_sent_payload_bytes ?? null;
 	return (
 		<>
 			<TableRow sx={expandable ? { "& > *": { borderBottom: "unset" } } : undefined}>
@@ -720,18 +717,23 @@ function RunRow({ run, members }: { run: BackupRun; members: ServerInfo[] }) {
 					/>
 				</TableCell>
 				<TableCell>
-					{uploaded == null ? (
+					{snapshotSize == null ? (
 						"—"
-					) : uploadedApprox ? (
-						<Tooltip title="Approximate: from S3 payload sent (no explicit upload size reported)">
-							<span>~{formatBytes(uploaded)}</span>
-						</Tooltip>
 					) : fromInspect ? (
 						<Tooltip title="From repo inspection (the device reported no size)">
-							<span>{formatBytes(uploaded)}</span>
+							<span>{formatBytes(snapshotSize)}</span>
 						</Tooltip>
 					) : (
-						formatBytes(uploaded)
+						formatBytes(snapshotSize)
+					)}
+				</TableCell>
+				<TableCell>
+					{uploaded == null ? (
+						"—"
+					) : (
+						<Tooltip title="Bytes sent to S3 (SigV4 proxy tally)">
+							<span>{formatBytes(uploaded)}</span>
+						</Tooltip>
 					)}
 				</TableCell>
 				<TableCell>
@@ -740,7 +742,7 @@ function RunRow({ run, members }: { run: BackupRun; members: ServerInfo[] }) {
 			</TableRow>
 			{expandable && (
 				<TableRow>
-					<TableCell colSpan={8} sx={{ py: 0, border: 0 }}>
+					<TableCell colSpan={9} sx={{ py: 0, border: 0 }}>
 						<Collapse in={open} timeout="auto" unmountOnExit>
 							{hasError && (
 								<Alert severity="error" variant="outlined" sx={{ my: 1 }}>
@@ -920,6 +922,7 @@ function RecentRunsPanel({
 								<TableCell>Type</TableCell>
 								<TableCell>Purpose</TableCell>
 								<TableCell>Outcome</TableCell>
+								<TableCell>Snapshot size</TableCell>
 								<TableCell>Uploaded</TableCell>
 								<TableCell>Snapshot</TableCell>
 							</TableRow>
