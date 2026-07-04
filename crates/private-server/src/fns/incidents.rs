@@ -1,5 +1,6 @@
 use axum::Json;
 use axum::extract::State;
+use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
 use commons_types::{Uuid, issue::ResolvedReason};
@@ -10,7 +11,6 @@ use database::tailscale_users::TailscaleUser as CachedTailscaleUser;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
-use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::fns::issues::{IssueData, enrich_issues, lookup_user};
 use crate::state::AppState;

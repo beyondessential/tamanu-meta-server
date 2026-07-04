@@ -1,9 +1,9 @@
 //! Smoke test: the public-server OpenAPI spec generates and exposes the
 //! handlers we expect. Mirrors the equivalent test in `private-server`.
 
+use canopy_utoipa_axum::router::OpenApiRouter;
 use public_server::openapi::ApiDoc;
 use utoipa::OpenApi;
-use utoipa_axum::router::OpenApiRouter;
 
 fn build_spec() -> serde_json::Value {
 	let (_router, openapi) = OpenApiRouter::with_openapi(ApiDoc::openapi())

@@ -2,12 +2,12 @@ use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 
 use axum::Router;
 use axum_client_ip::ClientIpSource;
+use canopy_utoipa_axum::router::OpenApiRouter;
 use clap::Parser;
 use commons_servers::{router, serve};
 use lloggs::{LoggingArgs, PreArgs};
 use public_server::state::AppState;
 use utoipa::OpenApi as _;
-use utoipa_axum::router::OpenApiRouter;
 use utoipa_swagger_ui::SwaggerUi;
 
 #[derive(Debug, Parser)]

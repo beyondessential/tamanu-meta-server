@@ -1,6 +1,6 @@
 #[cfg(feature = "ui")]
 use axum::extract::State;
-use utoipa_axum::router::OpenApiRouter;
+use canopy_utoipa_axum::router::OpenApiRouter;
 
 use crate::state::AppState;
 

@@ -1,5 +1,5 @@
+use canopy_utoipa_axum::router::OpenApiRouter;
 use serde::{Deserialize, Serialize};
-use utoipa_axum::router::OpenApiRouter;
 
 pub mod admins;
 pub mod backups;

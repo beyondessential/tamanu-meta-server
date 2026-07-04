@@ -1,0 +1,4 @@
+# This is a lightly-patched fork of the upstream utoipa-axum crate. rustfmt
+# resolves the nearest config per file, so this overrides the workspace's
+# `hard_tabs = true` and keeps the fork in upstream's default (4-space) style,
+# so diffs against upstream stay small. Our changes are marked `// CANOPY FORK:`.

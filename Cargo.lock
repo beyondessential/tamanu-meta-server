@@ -1292,6 +1292,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "canopy-utoipa-axum"
+version = "0.2.0"
+dependencies = [
+ "axum",
+ "paste",
+ "serde",
+ "tower-layer",
+ "tower-service",
+ "utoipa",
+]
+
+[[package]]
 name = "cbor-diag"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4679,6 +4691,7 @@ dependencies = [
  "base64 0.22.1",
  "bestool-postgres",
  "canopy-mcp",
+ "canopy-utoipa-axum",
  "chbs",
  "clap",
  "commons-errors",
@@ -4703,7 +4716,6 @@ dependencies = [
  "tower-http 0.7.0",
  "tracing",
  "utoipa",
- "utoipa-axum",
  "utoipa-swagger-ui",
  "uuid",
 ]
@@ -4774,6 +4786,7 @@ dependencies = [
  "axum-test",
  "base64 0.22.1",
  "canopy-mcp",
+ "canopy-utoipa-axum",
  "clap",
  "commons-errors",
  "commons-servers",
@@ -4804,7 +4817,6 @@ dependencies = [
  "tower-http 0.7.0",
  "tracing",
  "utoipa",
- "utoipa-axum",
  "utoipa-swagger-ui",
  "uuid",
 ]
@@ -6778,19 +6790,6 @@ dependencies = [
  "serde",
  "serde_json",
  "utoipa-gen",
-]
-
-[[package]]
-name = "utoipa-axum"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c25bae5bccc842449ec0c5ddc5cbb6a3a1eaeac4503895dc105a1138f8234a0"
-dependencies = [
- "axum",
- "paste",
- "tower-layer",
- "tower-service",
- "utoipa",
 ]
 
 [[package]]

@@ -1,7 +1,7 @@
 use axum::Json;
+use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
-use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::state::AppState;
 

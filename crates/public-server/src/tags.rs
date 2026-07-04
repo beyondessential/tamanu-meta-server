@@ -1,9 +1,9 @@
 use axum::{Json, extract::State};
+use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::device_auth::ServerDevice;
 use commons_types::server::TagMap;
 use database::{Db, servers::Server};
-use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::state::AppState;
 

@@ -11,6 +11,7 @@ use std::collections::{HashMap, HashSet};
 
 use axum::Json;
 use axum::extract::State;
+use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
 use commons_types::device::DeviceRole;
@@ -27,7 +28,6 @@ use database::{
 use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
-use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::state::AppState;
 

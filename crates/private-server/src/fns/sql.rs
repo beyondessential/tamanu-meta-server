@@ -5,6 +5,7 @@ use axum::extract::State;
 use bestool_postgres::error::format_db_error;
 use bestool_postgres::stringify::postgres_to_json_value;
 use bestool_postgres::text_cast::{CellRef, TextCaster};
+use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleUser;
 use database::sql_playground_history::SqlPlaygroundHistory;
@@ -12,7 +13,6 @@ use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
-use utoipa_axum::{router::OpenApiRouter, routes};
 use uuid::Uuid;
 
 use crate::fns::Page;

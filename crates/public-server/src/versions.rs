@@ -12,6 +12,7 @@ use axum::{
 	response::IntoResponse,
 	routing::{Router, get},
 };
+use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::device_auth::{AdminDevice, ReleaserDevice};
 use commons_types::version::{VersionRange, VersionStr};
@@ -34,7 +35,6 @@ use qrcode::{QrCode, render::svg};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "ui")]
 use tera::{Context, Tera};
-use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::state::AppState;
 

@@ -5,9 +5,9 @@
 //! No database or network is required — the spec is fully derived from compile-
 //! time annotations.
 
+use canopy_utoipa_axum::router::OpenApiRouter;
 use private_server::{fns, openapi::ApiDoc};
 use utoipa::OpenApi;
-use utoipa_axum::router::OpenApiRouter;
 
 fn main() {
 	let (_router, openapi) = OpenApiRouter::with_openapi(ApiDoc::openapi())

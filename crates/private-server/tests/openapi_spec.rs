@@ -1,8 +1,8 @@
 //! Smoke test: the OpenAPI spec generates and exposes one path per migrated module.
 
+use canopy_utoipa_axum::router::OpenApiRouter;
 use private_server::openapi::ApiDoc;
 use utoipa::OpenApi;
-use utoipa_axum::router::OpenApiRouter;
 
 fn build_spec() -> serde_json::Value {
 	let (_router, openapi) = OpenApiRouter::with_openapi(ApiDoc::openapi())

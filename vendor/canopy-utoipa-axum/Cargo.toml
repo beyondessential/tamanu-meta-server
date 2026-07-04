@@ -1,0 +1,39 @@
+# Vendored fork of utoipa-axum 0.2.0 (MIT OR Apache-2.0, upstream
+# https://github.com/juhaku/utoipa). The only functional change is in
+# `src/router.rs`: `routes()`, `nest()`, and `merge()` now panic when two
+# distinct types would register the same OpenAPI component schema name with
+# different definitions, instead of silently overwriting one with the other.
+# See the `// CANOPY FORK:` comments in router.rs. Keep this in sync with
+# upstream when bumping the version.
+[package]
+name = "canopy-utoipa-axum"
+description = "Utoipa's axum bindings (canopy fork: panics on schema-name collisions)"
+version = "0.2.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/juhaku/utoipa"
+authors = ["Juha Kukkonen <juha7kukkonen@gmail.com>"]
+
+[features]
+# The derive(Debug) on OpenApiRouter needs utoipa's own debug feature for
+# OpenApi's Debug impl; without forwarding, --all-features builds fail.
+debug = ["utoipa/debug"]
+
+# default-features can't be overridden through workspace inheritance, and the
+# servers already pull axum/utoipa with their default features on, so feature
+# unification lands in the same place regardless. We only add the `macros`
+# feature utoipa-axum's generated code needs.
+[dependencies]
+axum = { workspace = true }
+utoipa = { workspace = true, features = ["macros"] }
+tower-service = "0.3"
+tower-layer = "0.3.2"
+paste = "1.0"
+
+[dev-dependencies]
+axum = { workspace = true, features = ["json"] }
+utoipa = { workspace = true, features = ["macros"] }
+serde = { workspace = true, features = ["derive"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(doc_cfg)'] }
