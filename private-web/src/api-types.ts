@@ -67,6 +67,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backups/allow_restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Allow this server to restore for the next 24 hours.
+         * @description Opens the server's restore window so an operator can run an ad-hoc
+         *     `bestool canopy restore` on it: while the window is open the device can mint
+         *     read-only restore credentials for its group's backup repository. The window
+         *     auto-expires after 24 hours; calling again re-arms it from now. Returns the
+         *     new window. Restores are gated behind this deliberate opt-in because they
+         *     grant read access to the group's entire backup history.
+         */
+        post: operations["backups_allow_restore"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backups/cancel_maintenance": {
         parameters: {
             query?: never;
@@ -245,6 +270,29 @@ export interface paths {
          *     configuration.
          */
         post: operations["backups_delete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backups/disallow_restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop allowing this server to restore, immediately.
+         * @description Closes the server's restore window now, before its 24-hour expiry. Any
+         *     credentials already minted keep their (at most one hour) validity, but no
+         *     new restore credentials can be minted until an operator allows restores
+         *     again. Closing an already-closed window succeeds without effect.
+         */
+        post: operations["backups_disallow_restore"];
         delete?: never;
         options?: never;
         head?: never;
@@ -448,6 +496,27 @@ export interface paths {
          *     existing pending request rather than creating a duplicate.
          */
         post: operations["backups_request_now"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backups/restore_window": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The current restore-window state for a server.
+         * @description Reports until when the server may mint restore credentials for itself, or
+         *     `null` if restores are not currently allowed (never opened, or expired).
+         */
+        post: operations["backups_restore_window"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3657,6 +3726,12 @@ export interface components {
             /** @description The most recent backup runs across the group's member servers. */
             recent_runs: components["schemas"]["BackupRun"][];
             /**
+             * @description Member servers whose restore window is currently open, so the panel can
+             *     show which servers may restore right now and until when. Servers with no
+             *     open window are omitted.
+             */
+            restore_windows: components["schemas"]["RestoreWindowRow"][];
+            /**
              * Format: int64
              * @description Total raw S3 bytes downloaded from the bucket by the group's device
              *     backup runs so far this calendar month (UTC). Same undercount caveat
@@ -6041,6 +6116,33 @@ export interface components {
             /** @description The backup type to restore, for example `tamanu-postgres`. */
             type: string;
         };
+        /** @description A server's currently-open restore window, as shown in the group stats. */
+        RestoreWindowRow: {
+            /** @description Who opened the window (Tailscale login), if known. */
+            allowed_by?: string | null;
+            /**
+             * Format: date-time
+             * @description When the window closes; the server may mint restore credentials until
+             *     then.
+             */
+            allowed_until: string;
+            /**
+             * Format: uuid
+             * @description The server the window applies to.
+             */
+            server_id: string;
+        };
+        /** @description A single server's restore-window state, for the server detail page. */
+        RestoreWindowView: {
+            /** @description Who opened the current window (Tailscale login), if known. */
+            allowed_by?: string | null;
+            /**
+             * Format: date-time
+             * @description When the restore window closes, or `null` if restores are not currently
+             *     allowed for this server.
+             */
+            allowed_until?: string | null;
+        };
         /**
          * @description How many backups to keep at each retention tier once older snapshots are
          *     pruned. The organization enforces minimum floors (at least 7 daily, 4
@@ -7453,6 +7555,37 @@ export interface operations {
             };
         };
     };
+    backups_allow_restore: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RestoreWindowView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
     backups_cancel_maintenance: {
         parameters: {
             query?: never;
@@ -7721,6 +7854,27 @@ export interface operations {
             };
         };
     };
+    backups_disallow_restore: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     backups_get: {
         parameters: {
             query?: never;
@@ -7971,6 +8125,37 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    backups_restore_window: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RestoreWindowView"];
+                };
             };
             404: {
                 headers: {

@@ -64,6 +64,9 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(create_repo))
 		.routes(routes!(request_now))
 		.routes(routes!(cancel_request))
+		.routes(routes!(restore_window))
+		.routes(routes!(allow_restore))
+		.routes(routes!(disallow_restore))
 		.routes(routes!(request_maintenance))
 		.routes(routes!(cancel_maintenance))
 		.routes(routes!(stats))
@@ -357,6 +360,10 @@ pub struct BackupStatsView {
 	/// enabled state), so the "back up now" panel can offer the right types per
 	/// server and grey out servers that have declared none.
 	pub capabilities: Vec<ServerBackupCapabilityView>,
+	/// Member servers whose restore window is currently open, so the panel can
+	/// show which servers may restore right now and until when. Servers with no
+	/// open window are omitted.
+	pub restore_windows: Vec<RestoreWindowRow>,
 	/// Total raw S3 bytes uploaded to the bucket by the group's device backup
 	/// runs so far this calendar month (UTC). Repo maintenance/inspection
 	/// traffic isn't tallied anywhere, so this undercounts the bucket's
@@ -366,6 +373,46 @@ pub struct BackupStatsView {
 	/// backup runs so far this calendar month (UTC). Same undercount caveat
 	/// as `s3_month_sent_bytes`.
 	pub s3_month_received_bytes: i64,
+}
+
+/// A server's currently-open restore window, as shown in the group stats.
+#[derive(Serialize, ToSchema)]
+pub struct RestoreWindowRow {
+	/// The server the window applies to.
+	pub server_id: Uuid,
+	/// When the window closes; the server may mint restore credentials until
+	/// then.
+	pub allowed_until: Timestamp,
+	/// Who opened the window (Tailscale login), if known.
+	pub allowed_by: Option<String>,
+}
+
+/// A single server's restore-window state, for the server detail page.
+#[derive(Serialize, ToSchema)]
+pub struct RestoreWindowView {
+	/// When the restore window closes, or `null` if restores are not currently
+	/// allowed for this server.
+	pub allowed_until: Option<Timestamp>,
+	/// Who opened the current window (Tailscale login), if known.
+	pub allowed_by: Option<String>,
+}
+
+impl RestoreWindowView {
+	/// The window as reported to operators: reflects the stored values only
+	/// while the window is still open, so an expired window reads as closed.
+	fn of(server: &database::servers::Server) -> Self {
+		if server.restore_allowed() {
+			Self {
+				allowed_until: server.restore_allowed_until,
+				allowed_by: server.restore_allowed_by.clone(),
+			}
+		} else {
+			Self {
+				allowed_until: None,
+				allowed_by: None,
+			}
+		}
+	}
 }
 
 /// Effective scheduled interval (seconds) for a `(group, type)`: the per-group
@@ -1394,6 +1441,91 @@ pub async fn cancel_request(
 	Ok(Json(()))
 }
 
+/// The current restore-window state for a server.
+///
+/// Reports until when the server may mint restore credentials for itself, or
+/// `null` if restores are not currently allowed (never opened, or expired).
+#[utoipa::path(
+	post,
+	path = "/restore_window",
+	operation_id = "backups_restore_window",
+	tag = "backups",
+	security(("tailscale-admin" = [])),
+	request_body = ServerArgs,
+	responses(
+		(status = 200, body = RestoreWindowView),
+		(status = 404, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn restore_window(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<ServerArgs>,
+) -> Result<Json<RestoreWindowView>> {
+	let mut conn = state.db.get().await?;
+	let server = Server::get_by_id(&mut conn, args.server_id).await?;
+	Ok(Json(RestoreWindowView::of(&server)))
+}
+
+/// Allow this server to restore for the next 24 hours.
+///
+/// Opens the server's restore window so an operator can run an ad-hoc
+/// `bestool canopy restore` on it: while the window is open the device can mint
+/// read-only restore credentials for its group's backup repository. The window
+/// auto-expires after 24 hours; calling again re-arms it from now. Returns the
+/// new window. Restores are gated behind this deliberate opt-in because they
+/// grant read access to the group's entire backup history.
+#[utoipa::path(
+	post,
+	path = "/allow_restore",
+	operation_id = "backups_allow_restore",
+	tag = "backups",
+	security(("tailscale-admin" = [])),
+	request_body = ServerArgs,
+	responses(
+		(status = 200, body = RestoreWindowView),
+		(status = 404, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn allow_restore(
+	State(state): State<AppState>,
+	TailscaleAdmin(admin): TailscaleAdmin,
+	Json(args): Json<ServerArgs>,
+) -> Result<Json<RestoreWindowView>> {
+	let mut conn = state.db.get().await?;
+	let allowed_until =
+		Server::allow_restore(&mut conn, args.server_id, Some(&admin.login)).await?;
+	Ok(Json(RestoreWindowView {
+		allowed_until: Some(allowed_until),
+		allowed_by: Some(admin.login),
+	}))
+}
+
+/// Stop allowing this server to restore, immediately.
+///
+/// Closes the server's restore window now, before its 24-hour expiry. Any
+/// credentials already minted keep their (at most one hour) validity, but no
+/// new restore credentials can be minted until an operator allows restores
+/// again. Closing an already-closed window succeeds without effect.
+#[utoipa::path(
+	post,
+	path = "/disallow_restore",
+	operation_id = "backups_disallow_restore",
+	tag = "backups",
+	security(("tailscale-admin" = [])),
+	request_body = ServerArgs,
+	responses((status = 200)),
+)]
+pub async fn disallow_restore(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<ServerArgs>,
+) -> Result<Json<()>> {
+	let mut conn = state.db.get().await?;
+	Server::disallow_restore(&mut conn, args.server_id).await?;
+	Ok(Json(()))
+}
+
 /// Request an out-of-cycle full maintenance run for a group's backup
 /// repository.
 ///
@@ -1516,7 +1648,17 @@ pub async fn stats(
 		std::collections::HashMap::new();
 	let mut pending_requests = Vec::new();
 	let mut capabilities = Vec::new();
+	let mut restore_windows = Vec::new();
 	for server in &members {
+		if server.restore_allowed() {
+			if let Some(allowed_until) = server.restore_allowed_until {
+				restore_windows.push(RestoreWindowRow {
+					server_id: server.id,
+					allowed_until,
+					allowed_by: server.restore_allowed_by.clone(),
+				});
+			}
+		}
 		for req in BackupRequest::pending_for_server(&mut conn, server.id).await? {
 			pending_requests.push(PendingRequestRow {
 				server_id: req.server_id,
@@ -1569,6 +1711,7 @@ pub async fn stats(
 		recent_maintenance,
 		pending_requests,
 		capabilities,
+		restore_windows,
 		s3_month_sent_bytes,
 		s3_month_received_bytes,
 	}))

@@ -164,7 +164,7 @@
           "backup"
         ],
         "summary": "Mint short-lived S3 credentials for a backup or restore run.",
-        "description": "Issues temporary AWS credentials scoped to the backup storage of the\ncalling server's group, in the `credential_process` output format. With\n`purpose: backup` the credentials can upload and manage backup data but\ncannot destroy existing backups; with `purpose: restore` they are strictly\nread-only. They expire after at most one hour, so request a fresh set for\neach run rather than caching them. Every issuance is recorded for audit.\n\nThe storage coordinates the credentials apply to (bucket, prefix, region)\ncome from `GET /backup-target`.\n\nErrors: 409 when the server is not in a group, when the group's backup\nconfiguration is not ready, or when the requested type is neither an\nenabled capability of this server nor the subject of a pending\noperator-requested run of the given purpose; 412 when the device is not\nbound to a live server; 502 when the credential issuer is unavailable or\nnot configured.",
+        "description": "Issues temporary AWS credentials scoped to the backup storage of the\ncalling server's group, in the `credential_process` output format. With\n`purpose: backup` the credentials can upload and manage backup data but\ncannot destroy existing backups; with `purpose: restore` they are strictly\nread-only. They expire after at most one hour, so request a fresh set for\neach run rather than caching them. Every issuance is recorded for audit.\n\nThe storage coordinates the credentials apply to (bucket, prefix, region)\ncome from `GET /backup-target`.\n\nErrors: 409 when the server is not in a group, when the group's backup\nconfiguration is not ready, when a `backup` type is neither an enabled\ncapability of this server nor the subject of a pending \"backup now\" request,\nor when a `restore` is requested but the server's restore window is not\nopen; 412 when the device is not bound to a live server; 502 when the\ncredential issuer is unavailable or not configured.",
         "operationId": "mint_backup_credentials",
         "requestBody": {
           "content": {
@@ -188,7 +188,7 @@
             }
           },
           "409": {
-            "description": "Server ungrouped, no ready config, or type not enabled.",
+            "description": "Server ungrouped, no ready config, backup type not enabled, or restore window not open.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1237,7 +1237,7 @@
           },
           "type": {
             "type": "string",
-            "description": "The backup type the credentials are for (e.g. `tamanu-postgres`). The\ntype must be an enabled capability of this server, or the subject of a\npending operator-requested run matching `purpose`; otherwise the request\nis rejected with 409."
+            "description": "The backup type the credentials are for (e.g. `tamanu-postgres`). For a\n`backup`, the type must be an enabled capability of this server or the\nsubject of a pending \"backup now\" request; for a `restore`, the server's\nrestore window must be open (an operator allows restores for it in\ncanopy). Otherwise the request is rejected with 409."
           }
         }
       },

@@ -439,6 +439,87 @@ async fn request_now_upserts_and_cancel_deletes() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn allow_disallow_restore_window_round_trip() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group_id = seed_group(&mut conn).await;
+		let server_id = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO servers (id, host, kind, group_id) VALUES \
+				('{server_id}', 'https://e.test', 'central', '{group_id}');"
+		))
+		.await
+		.expect("seed server");
+
+		let args = serde_json::json!({ "server_id": server_id });
+
+		// Initially closed: no window, and stats lists no open windows.
+		let win = private
+			.post("/api/backups/restore_window")
+			.json(&args)
+			.await;
+		win.assert_status_ok();
+		assert!(
+			win.json::<serde_json::Value>()["allowed_until"].is_null(),
+			"restores start disallowed"
+		);
+
+		// Allow → the endpoint echoes a future expiry.
+		let allowed = private.post("/api/backups/allow_restore").json(&args).await;
+		allowed.assert_status_ok();
+		assert!(
+			allowed.json::<serde_json::Value>()["allowed_until"].is_string(),
+			"allow_restore opens the window"
+		);
+
+		// The window is visible via both the per-server getter and group stats.
+		let win = private
+			.post("/api/backups/restore_window")
+			.json(&args)
+			.await;
+		assert!(win.json::<serde_json::Value>()["allowed_until"].is_string());
+
+		let stats = private
+			.post("/api/backups/stats")
+			.json(&serde_json::json!({ "server_group_id": group_id }))
+			.await;
+		let windows = stats.json::<serde_json::Value>()["restore_windows"]
+			.as_array()
+			.cloned()
+			.unwrap();
+		assert_eq!(windows.len(), 1, "one open window");
+		assert_eq!(windows[0]["server_id"], serde_json::json!(server_id));
+
+		// Disallow → closed again, and dropped from stats.
+		private
+			.post("/api/backups/disallow_restore")
+			.json(&args)
+			.await
+			.assert_status_ok();
+		let win = private
+			.post("/api/backups/restore_window")
+			.json(&args)
+			.await;
+		assert!(
+			win.json::<serde_json::Value>()["allowed_until"].is_null(),
+			"disallow_restore closes the window"
+		);
+		let stats = private
+			.post("/api/backups/stats")
+			.json(&serde_json::json!({ "server_group_id": group_id }))
+			.await;
+		assert_eq!(
+			stats.json::<serde_json::Value>()["restore_windows"]
+				.as_array()
+				.unwrap()
+				.len(),
+			0,
+			"closed window is not listed"
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn request_maintenance_flags_and_cancel_clears() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let group_id = seed_group(&mut conn).await;

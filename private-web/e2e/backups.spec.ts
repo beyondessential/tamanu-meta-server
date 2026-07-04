@@ -1184,3 +1184,91 @@ test.describe("backups ready: repo maintenance panel", () => {
 		).toBeDisabled();
 	});
 });
+
+test.describe("restore window", () => {
+	test.beforeEach(async ({ sql }) => {
+		await resetSeededTables(sql);
+	});
+
+	test("group backups page: allow then disable restores for a server", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "restore-grp" });
+		const server = await seedServer(sql, {
+			name: "restore-srv",
+			groupId: group.id,
+		});
+		await seedServerBackupCapability(sql, { serverId: server.id });
+		await seedServerGroupBackupConfig(sql, {
+			groupId: group.id,
+			status: "ready",
+		});
+
+		await page.goto(`/groups/${group.id}/backups`);
+		const row = page.getByRole("row").filter({ hasText: "restore-srv" });
+
+		// Opening the window persists a future expiry attributed to the operator.
+		await row.getByRole("button", { name: /allow restores/i }).click();
+		await expect(row.getByText(/restores allowed until/i)).toBeVisible();
+		const opened = await sql.query<{
+			until: string | null;
+			by: string | null;
+		}>(
+			`SELECT restore_allowed_until AS until, restore_allowed_by AS by
+			 FROM servers WHERE id = $1`,
+			[server.id],
+		);
+		expect(opened[0]!.until).not.toBeNull();
+		expect(opened[0]!.by).toBe("admin@localhost");
+
+		// Disabling clears it again.
+		await row.getByRole("button", { name: /^disable$/i }).click();
+		await expect(
+			row.getByRole("button", { name: /allow restores/i }),
+		).toBeVisible();
+		const closed = await sql.query<{ until: string | null }>(
+			`SELECT restore_allowed_until AS until FROM servers WHERE id = $1`,
+			[server.id],
+		);
+		expect(closed[0]!.until).toBeNull();
+	});
+
+	test("server detail page: allow then disable restores", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "restore-detail-grp" });
+		const server = await seedServer(sql, {
+			name: "restore-detail-srv",
+			groupId: group.id,
+		});
+		await seedServerGroupBackupConfig(sql, {
+			groupId: group.id,
+			status: "ready",
+		});
+
+		await page.goto(`/servers/${server.id}`);
+		const backups = page.locator("#backups");
+
+		await backups.getByRole("button", { name: /allow restores/i }).click();
+		await expect(
+			backups.getByText(/restores are allowed for this server until/i),
+		).toBeVisible();
+		const opened = await sql.query<{ until: string | null }>(
+			`SELECT restore_allowed_until AS until FROM servers WHERE id = $1`,
+			[server.id],
+		);
+		expect(opened[0]!.until).not.toBeNull();
+
+		await backups.getByRole("button", { name: /^disable$/i }).click();
+		await expect(
+			backups.getByRole("button", { name: /allow restores/i }),
+		).toBeVisible();
+		const closed = await sql.query<{ until: string | null }>(
+			`SELECT restore_allowed_until AS until FROM servers WHERE id = $1`,
+			[server.id],
+		);
+		expect(closed[0]!.until).toBeNull();
+	});
+});

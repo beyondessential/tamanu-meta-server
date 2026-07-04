@@ -13,8 +13,9 @@
 //!
 //! All four resolve `device → live server → group_id → group backup config`
 //! identically: **412** when the device is bound to no live server, **409**
-//! when the server is ungrouped / has no `ready` config / the type is neither
-//! an enabled capability nor has a pending request, **502** when STS or kube
+//! when the server is ungrouped / has no `ready` config / (for a backup) the
+//! type is neither an enabled capability nor has a pending request / (for a
+//! restore) the server's restore window isn't open, **502** when STS or kube
 //! fails or isn't configured.
 
 use aws_sdk_sts::operation::RequestId as _;
@@ -102,28 +103,44 @@ async fn require_ready_config(
 	Ok(cfg)
 }
 
-/// The per-`(server, type)` credential-issuance gate. Mirrors what the
-/// heartbeat is willing to ask the device to run: a type may be issued creds
-/// when it's an enabled capability (on the auto-schedule), or when an on-demand
-/// request of this `purpose` is pending (an operator "backup now" / restore).
-/// Neither ⇒ 409.
-async fn require_issuable_capability(
+/// The per-`(server, type)` **backup**-issuance gate. Mirrors what the heartbeat
+/// is willing to ask the device to back up: a type may be issued backup creds
+/// when it's an enabled capability (on the auto-schedule) or has a pending
+/// operator "backup now" request. Neither ⇒ 409.
+async fn require_backupable_capability(
 	conn: &mut database::diesel_async::AsyncPgConnection,
 	server_id: Uuid,
 	r#type: &BackupType,
-	purpose: BackupPurpose,
 ) -> Result<()> {
 	let enabled = ServerBackupCapability::list_for_server(conn, server_id)
 		.await?
 		.into_iter()
 		.any(|c| &c.r#type == r#type && c.enabled);
-	if enabled || BackupRequest::exists(conn, server_id, r#type, purpose).await? {
+	if enabled || BackupRequest::exists(conn, server_id, r#type, BackupPurpose::Backup).await? {
 		Ok(())
 	} else {
 		Err(AppError::Conflict(format!(
-			"backup type {type} is not an enabled capability for this server, and no {purpose} is pending",
+			"backup type {type} is not an enabled capability for this server, and no backup is pending",
 			type = r#type
 		)))
+	}
+}
+
+/// The **restore**-issuance gate: an operator must have opened the server's
+/// time-boxed restore window. Restore creds are read access to the group's
+/// entire backup history, so an ad-hoc `bestool canopy restore` self-authorizes
+/// only while that deliberate window is open — it is not always available.
+/// (Canopy still drives *automated* restores separately, via the PGRO
+/// restore-replica path.) Window closed or expired ⇒ 409.
+fn require_restore_allowed(server: &Server) -> Result<()> {
+	if server.restore_allowed() {
+		Ok(())
+	} else {
+		Err(AppError::Conflict(
+			"restores are not currently allowed for this server; \
+			 enable restores for it in canopy (they stay open for 24 hours)"
+				.into(),
+		))
 	}
 }
 
@@ -202,10 +219,11 @@ async fn capabilities(
 /// restore run.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct BackupCredentialsArgs {
-	/// The backup type the credentials are for (e.g. `tamanu-postgres`). The
-	/// type must be an enabled capability of this server, or the subject of a
-	/// pending operator-requested run matching `purpose`; otherwise the request
-	/// is rejected with 409.
+	/// The backup type the credentials are for (e.g. `tamanu-postgres`). For a
+	/// `backup`, the type must be an enabled capability of this server or the
+	/// subject of a pending "backup now" request; for a `restore`, the server's
+	/// restore window must be open (an operator allows restores for it in
+	/// canopy). Otherwise the request is rejected with 409.
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
 	/// What the credentials will be used for. `backup` (the default) grants
@@ -323,11 +341,11 @@ pub fn backup_session_policy(bucket: &str, prefix: &str) -> String {
 /// come from `GET /backup-target`.
 ///
 /// Errors: 409 when the server is not in a group, when the group's backup
-/// configuration is not ready, or when the requested type is neither an
-/// enabled capability of this server nor the subject of a pending
-/// operator-requested run of the given purpose; 412 when the device is not
-/// bound to a live server; 502 when the credential issuer is unavailable or
-/// not configured.
+/// configuration is not ready, when a `backup` type is neither an enabled
+/// capability of this server nor the subject of a pending "backup now" request,
+/// or when a `restore` is requested but the server's restore window is not
+/// open; 412 when the device is not bound to a live server; 502 when the
+/// credential issuer is unavailable or not configured.
 #[utoipa::path(
 	post,
 	path = "/backup-credentials",
@@ -337,7 +355,7 @@ pub fn backup_session_policy(bucket: &str, prefix: &str) -> String {
 	request_body = BackupCredentialsArgs,
 	responses(
 		(status = 200, body = CredentialProcessOutput),
-		(status = 409, description = "Server ungrouped, no ready config, or type not enabled.", body = ProblemDetailsSchema),
+		(status = 409, description = "Server ungrouped, no ready config, backup type not enabled, or restore window not open.", body = ProblemDetailsSchema),
 		(status = 412, description = "Device is not bound to a live server.", body = ProblemDetailsSchema),
 		(status = 502, description = "STS issuance failed or is not configured.", body = ProblemDetailsSchema),
 	),
@@ -354,7 +372,12 @@ async fn credentials(
 	let server = resolve_server(&mut conn, device_id).await?;
 	let group_id = require_group(&server)?;
 	let cfg = require_ready_config(&mut conn, group_id).await?;
-	require_issuable_capability(&mut conn, server.id, &args.r#type, args.purpose).await?;
+	match args.purpose {
+		BackupPurpose::Backup => {
+			require_backupable_capability(&mut conn, server.id, &args.r#type).await?
+		}
+		BackupPurpose::Restore => require_restore_allowed(&server)?,
+	}
 
 	// Always attach a bucket-scoped session policy so the issued creds can only
 	// reach this group's bucket — redundant for a dedicated per-bucket role
