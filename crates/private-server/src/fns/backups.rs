@@ -357,12 +357,14 @@ pub struct BackupStatsView {
 	/// enabled state), so the "back up now" panel can offer the right types per
 	/// server and grey out servers that have declared none.
 	pub capabilities: Vec<ServerBackupCapabilityView>,
-	/// Total S3 bytes sent to (uploads) and received from (downloads) the
-	/// bucket by the group's device backup runs so far this calendar month
-	/// (UTC), raw wire bytes. Repo maintenance/inspection traffic isn't
-	/// tallied anywhere, so this undercounts the bucket's actual monthly S3
-	/// traffic.
+	/// Total raw S3 bytes uploaded to the bucket by the group's device backup
+	/// runs so far this calendar month (UTC). Repo maintenance/inspection
+	/// traffic isn't tallied anywhere, so this undercounts the bucket's
+	/// actual monthly S3 traffic.
 	pub s3_month_sent_bytes: i64,
+	/// Total raw S3 bytes downloaded from the bucket by the group's device
+	/// backup runs so far this calendar month (UTC). Same undercount caveat
+	/// as `s3_month_sent_bytes`.
 	pub s3_month_received_bytes: i64,
 }
 

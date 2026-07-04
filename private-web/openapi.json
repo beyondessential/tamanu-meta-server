@@ -6806,12 +6806,13 @@
           },
           "s3_month_received_bytes": {
             "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "description": "Total raw S3 bytes downloaded from the bucket by the group's device\nbackup runs so far this calendar month (UTC). Same undercount caveat\nas `s3_month_sent_bytes`."
           },
           "s3_month_sent_bytes": {
             "type": "integer",
             "format": "int64",
-            "description": "Total S3 bytes sent to (uploads) and received from (downloads) the\nbucket by the group's device backup runs so far this calendar month\n(UTC), raw wire bytes. Repo maintenance/inspection traffic isn't\ntallied anywhere, so this undercounts the bucket's actual monthly S3\ntraffic."
+            "description": "Total raw S3 bytes uploaded to the bucket by the group's device backup\nruns so far this calendar month (UTC). Repo maintenance/inspection\ntraffic isn't tallied anywhere, so this undercounts the bucket's\nactual monthly S3 traffic."
           },
           "stats": {
             "oneOf": [
