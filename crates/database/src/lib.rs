@@ -36,8 +36,9 @@ pub mod versions;
 pub mod views;
 
 pub use backups::{
-	BackupCredentialIssuance, BackupMaintenanceRun, BackupRecoveryVerification, BackupRepoSnapshot,
-	BackupRepoStats, BackupRequest, BackupRun, BackupTypeDefault, NewBackupCredentialIssuance,
+	BackupCredentialIssuance, BackupMaintenanceRun, BackupMaintenanceRunFilters,
+	BackupRecoveryVerification, BackupRepoSnapshot, BackupRepoStats, BackupRequest, BackupRun,
+	BackupRunFilters, BackupTypeDefault, MaintenanceOutcomeFilter, NewBackupCredentialIssuance,
 	NewBackupRun, NewBackupTypeDefault, NewServerGroupBackupConfig, NewServerGroupBackupSchedule,
 	RetentionPolicy, ServerBackupCapability, ServerGroupBackupConfig, ServerGroupBackupSchedule,
 };

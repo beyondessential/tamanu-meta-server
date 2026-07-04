@@ -18,7 +18,10 @@ use std::collections::HashMap;
 
 use commons_types::{
 	Uuid,
-	backup::{BackupConfigStatus, BackupPlacement, BackupRepoMode, RunOutcome},
+	backup::{
+		BackupConfigStatus, BackupPlacement, BackupRepoMode, BackupType, IntentDescriptor,
+		MaintenanceKind, RestoreIntent, RunOutcome,
+	},
 	issue::Severity,
 	server::{kind::ServerKind, rank::ServerRank},
 	status::{HealthState, ShortStatus},
@@ -27,11 +30,14 @@ use commons_types::{
 use database::{
 	backup::staleness::{StalenessVerdict, scan_rows},
 	backups::{
-		BackupMaintenanceRun, BackupRepoSnapshot, BackupRepoStats, BackupRun,
+		BackupMaintenanceRun, BackupMaintenanceRunFilters, BackupRepoSnapshot, BackupRepoStats,
+		BackupRun, BackupRunFilters, BackupTypeDefault, MaintenanceOutcomeFilter, RetentionPolicy,
 		ServerBackupCapability, ServerGroupBackupConfig, ServerGroupBackupSchedule,
 	},
+	devices::Device,
 	diesel_async::AsyncPgConnection,
 	issues::{Event, Incident, Issue, IssueListFilters},
+	restore::{BackupRestoreCheck, RestoreConsumerCapability, RestoreReplica},
 	server_groups::ServerGroup,
 	servers::Server,
 	slack_outbox::SlackOutbox,
@@ -58,6 +64,9 @@ const STUCK_MAINTENANCE_AFTER: SignedDuration = SignedDuration::from_hours(6);
 const FAILED_RUN_WINDOW: SignedDuration = SignedDuration::from_hours(24);
 /// Default cap on `find_servers` results.
 const DEFAULT_SERVER_LIMIT: u64 = 200;
+/// Default / max rows for `list_backup_runs` and `list_maintenance_runs`.
+const DEFAULT_RUN_LIMIT: i64 = 50;
+const MAX_RUN_LIMIT: i64 = 200;
 
 #[derive(Clone)]
 pub struct CanopyMcp {
@@ -165,6 +174,52 @@ pub struct FindIssuesArgs {
 pub struct IssueIdArgs {
 	/// The issue's id.
 	pub issue_id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ListBackupRunsArgs {
+	/// Restrict to one group's id.
+	pub group_id: Option<String>,
+	/// Restrict to one server's id.
+	pub server_id: Option<String>,
+	/// Filter by backup type, e.g. `tamanu-postgres`.
+	pub r#type: Option<String>,
+	/// Filter by outcome: `success` or `failure`.
+	pub outcome: Option<String>,
+	/// Only runs reported within this many days.
+	pub since_days: Option<u32>,
+	/// Max runs to return (default 50, capped at 200).
+	pub limit: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ListMaintenanceRunsArgs {
+	/// Restrict to one group's id.
+	pub group_id: Option<String>,
+	/// Filter by maintenance kind: `quick` or `full`.
+	pub kind: Option<String>,
+	/// Filter by outcome: `success`, `failure`, or `running` (still in flight).
+	pub outcome: Option<String>,
+	/// Only runs started within this many days.
+	pub since_days: Option<u32>,
+	/// Max runs to return (default 50, capped at 200).
+	pub limit: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct FindRestoreReplicasArgs {
+	/// Restrict to one group's id.
+	pub group_id: Option<String>,
+	/// Restrict to one restore consumer device's id.
+	pub consumer_device_id: Option<String>,
+	/// Only enabled declarations. Defaults to false (all).
+	pub enabled_only: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct RestoreReplicaIdArgs {
+	/// The replica declaration's id.
+	pub replica_id: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -515,6 +570,146 @@ struct IssueDetail {
 	snoozed_until: Option<Timestamp>,
 	recent_events: Vec<EventOut>,
 	incidents: Vec<IncidentRefOut>,
+}
+
+#[derive(Serialize)]
+struct BackupRunOut {
+	id: Uuid,
+	group_id: Uuid,
+	group_name: Option<String>,
+	server_id: Option<Uuid>,
+	server_name: Option<String>,
+	device_id: Uuid,
+	r#type: String,
+	purpose: String,
+	outcome: RunOutcome,
+	error: Option<String>,
+	bytes_uploaded: Option<i64>,
+	snapshot_id: Option<String>,
+	reported_at: Timestamp,
+	/// S3 traffic tallied by bestool's proxy for this run.
+	s3_sent_raw_bytes: Option<i64>,
+	s3_sent_payload_bytes: Option<i64>,
+	s3_received_raw_bytes: Option<i64>,
+	s3_received_payload_bytes: Option<i64>,
+	/// Logical size of this run's snapshot, as observed by canopy's own repo
+	/// inspection (distinct from `bytes_uploaded`, the device's own figure).
+	snapshot_logical_bytes: Option<i64>,
+}
+
+#[derive(Serialize)]
+struct BackupRunsList {
+	count: usize,
+	truncated: bool,
+	runs: Vec<BackupRunOut>,
+}
+
+#[derive(Serialize)]
+struct MaintenanceRunOut {
+	id: i64,
+	group_id: Uuid,
+	group_name: Option<String>,
+	kind: MaintenanceKind,
+	started_at: Timestamp,
+	finished_at: Option<Timestamp>,
+	/// `None` while the run is still in flight.
+	outcome: Option<RunOutcome>,
+	error: Option<String>,
+	bytes_reclaimed: Option<i64>,
+}
+
+#[derive(Serialize)]
+struct MaintenanceRunsList {
+	count: usize,
+	truncated: bool,
+	runs: Vec<MaintenanceRunOut>,
+}
+
+#[derive(Serialize)]
+struct RestoreReplicaOut {
+	id: Uuid,
+	consumer_device_id: Uuid,
+	consumer_name: Option<String>,
+	group_id: Uuid,
+	group_name: Option<String>,
+	/// `None` = declared against every current server in the group.
+	server_id: Option<Uuid>,
+	server_name: Option<String>,
+	r#type: String,
+	intent: String,
+	name: String,
+	overdue_after_seconds: Option<i64>,
+	enabled: bool,
+	/// The consumer no longer advertises this intent, so Canopy is not
+	/// dispatching this declaration. Mirrors the `gap` flag the operator UI
+	/// shows for the same reason (see `restore_replicas::to_views`).
+	gap: bool,
+	/// Timestamp of the latest healthy restore-verification report for this
+	/// exact `(server, type, intent)`. Only populated for server-scoped
+	/// declarations; a group-wide declaration (`server_id: null`) covers many
+	/// servers so has no single answer here — use `get_restore_replica` or
+	/// `find_backup_problems` for a specific server.
+	last_healthy_at: Option<Timestamp>,
+	created_at: Timestamp,
+	updated_at: Timestamp,
+}
+
+#[derive(Serialize)]
+struct RestoreReplicaList {
+	count: usize,
+	replicas: Vec<RestoreReplicaOut>,
+}
+
+#[derive(Serialize)]
+struct RestoreCheckOut {
+	id: i64,
+	server_id: Option<Uuid>,
+	server_name: Option<String>,
+	snapshot_id: Option<String>,
+	outcome: RunOutcome,
+	replica_healthy: bool,
+	error: Option<String>,
+	postgres_version: Option<String>,
+	observed_at: Timestamp,
+	reported_at: Timestamp,
+	health_details: Option<serde_json::Value>,
+}
+
+#[derive(Serialize)]
+struct RestoreReplicaDetail {
+	#[serde(flatten)]
+	replica: RestoreReplicaOut,
+	/// The consumer's advertised descriptor for this intent (description,
+	/// semantics, parameter schema): `None` when `gap` is true, since the
+	/// consumer doesn't currently advertise it.
+	intent_descriptor: Option<IntentDescriptor>,
+	/// Recent health reports for this replica, newest first.
+	recent_checks: Vec<RestoreCheckOut>,
+}
+
+#[derive(Serialize)]
+struct BackupDefaultOut {
+	r#type: String,
+	/// Seconds between scheduled runs; `null` = manual-only.
+	default_interval_seconds: Option<i64>,
+	default_retention: Option<RetentionPolicyOut>,
+	auto_enable: bool,
+	/// Whether this default opts out of the org retention floor (dangerous).
+	allow_below_floor: bool,
+}
+
+#[derive(Serialize)]
+struct RetentionPolicyOut {
+	keep_latest: i32,
+	keep_daily: i32,
+	keep_weekly: i32,
+	keep_monthly: i32,
+	keep_annual: i32,
+}
+
+#[derive(Serialize)]
+struct BackupDefaultsList {
+	defaults: Vec<BackupDefaultOut>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1348,6 +1543,283 @@ impl CanopyMcp {
 			incidents,
 		})
 	}
+
+	#[tool(
+		description = "List backup-run history across the fleet (or narrowed by group/server/type/outcome), \
+		               newest first. Each run carries its outcome, error (if failed), and its size / S3 \
+		               traffic figures. Use this to inspect what actually happened; use \
+		               find_backup_problems for the current alerting state."
+	)]
+	async fn list_backup_runs(
+		&self,
+		Parameters(args): Parameters<ListBackupRunsArgs>,
+	) -> Result<CallToolResult, McpError> {
+		let mut conn = self.conn().await?;
+		let group_id = parse_opt_uuid(&args.group_id, "group_id")?;
+		let server_id = parse_opt_uuid(&args.server_id, "server_id")?;
+		let r#type = args.r#type.as_deref().map(BackupType::from);
+		let outcome = parse_opt::<RunOutcome>(&args.outcome, "outcome")?;
+		let since = args.since_days.map(since_from_days);
+		let limit = args
+			.limit
+			.unwrap_or(DEFAULT_RUN_LIMIT)
+			.clamp(1, MAX_RUN_LIMIT);
+
+		let runs = BackupRun::list_filtered(
+			&mut conn,
+			BackupRunFilters {
+				group_id,
+				server_id,
+				r#type,
+				outcome,
+				since,
+			},
+			limit,
+		)
+		.await
+		.map_err(mcp_err)?;
+
+		let group_names = group_names(&mut conn, &unique(runs.iter().map(|r| r.group_id))).await?;
+		let server_names =
+			Server::names_by_ids(&mut conn, &unique(runs.iter().filter_map(|r| r.server_id)))
+				.await
+				.map_err(mcp_err)?;
+
+		let count = runs.len();
+		let truncated = count as i64 == limit;
+		let out = runs
+			.into_iter()
+			.map(|r| BackupRunOut {
+				id: r.id,
+				group_id: r.group_id,
+				group_name: group_names.get(&r.group_id).cloned(),
+				server_id: r.server_id,
+				server_name: r
+					.server_id
+					.and_then(|s| server_names.get(&s))
+					.and_then(|(n, _)| n.clone()),
+				device_id: r.device_id,
+				r#type: r.r#type.to_string(),
+				purpose: r.purpose.to_string(),
+				outcome: r.outcome,
+				error: r.error,
+				bytes_uploaded: r.bytes_uploaded,
+				snapshot_id: r.snapshot_id,
+				reported_at: r.reported_at,
+				s3_sent_raw_bytes: r.s3_sent_raw_bytes,
+				s3_sent_payload_bytes: r.s3_sent_payload_bytes,
+				s3_received_raw_bytes: r.s3_received_raw_bytes,
+				s3_received_payload_bytes: r.s3_received_payload_bytes,
+				snapshot_logical_bytes: r.snapshot_logical_bytes,
+			})
+			.collect();
+
+		ok_json(&BackupRunsList {
+			count,
+			truncated,
+			runs: out,
+		})
+	}
+
+	#[tool(
+		description = "List repo-maintenance run history across the fleet (or narrowed by group/kind/outcome), \
+		               newest first: kopia maintenance jobs, distinct from backup runs. Use \
+		               outcome=\"running\" to find jobs currently in flight."
+	)]
+	async fn list_maintenance_runs(
+		&self,
+		Parameters(args): Parameters<ListMaintenanceRunsArgs>,
+	) -> Result<CallToolResult, McpError> {
+		let mut conn = self.conn().await?;
+		let group_id = parse_opt_uuid(&args.group_id, "group_id")?;
+		let kind = parse_opt::<MaintenanceKind>(&args.kind, "kind")?;
+		let outcome = match args.outcome.as_deref() {
+			Some("running") => Some(MaintenanceOutcomeFilter::Running),
+			Some(s) => Some(MaintenanceOutcomeFilter::Outcome(
+				s.parse::<RunOutcome>()
+					.map_err(|_| McpError::invalid_params(format!("invalid outcome: {s}"), None))?,
+			)),
+			None => None,
+		};
+		let since = args.since_days.map(since_from_days);
+		let limit = args
+			.limit
+			.unwrap_or(DEFAULT_RUN_LIMIT)
+			.clamp(1, MAX_RUN_LIMIT);
+
+		let runs = BackupMaintenanceRun::list_filtered(
+			&mut conn,
+			BackupMaintenanceRunFilters {
+				group_id,
+				kind,
+				outcome,
+				since,
+			},
+			limit,
+		)
+		.await
+		.map_err(mcp_err)?;
+
+		let group_names = group_names(&mut conn, &unique(runs.iter().map(|r| r.group_id))).await?;
+
+		let count = runs.len();
+		let truncated = count as i64 == limit;
+		let out = runs
+			.into_iter()
+			.map(|r| MaintenanceRunOut {
+				id: r.id,
+				group_id: r.group_id,
+				group_name: group_names.get(&r.group_id).cloned(),
+				kind: r.kind,
+				started_at: r.started_at,
+				finished_at: r.finished_at,
+				outcome: r.outcome,
+				error: r.error,
+				bytes_reclaimed: r.bytes_reclaimed,
+			})
+			.collect();
+
+		ok_json(&MaintenanceRunsList {
+			count,
+			truncated,
+			runs: out,
+		})
+	}
+
+	#[tool(
+		description = "List managed-restore replica declarations (fleet-wide, or narrowed by group/consumer), \
+		               with the consumer's display name and whether the consumer currently advertises the \
+		               declared intent (`gap: true` means Canopy is not dispatching it — the declaration is \
+		               unsatisfiable until the consumer registers that intent again). Server-scoped \
+		               declarations also carry the latest healthy restore-verification timestamp for that \
+		               exact (server, type, intent); use get_restore_replica for the recent-checks history \
+		               and the consumer's full intent descriptor."
+	)]
+	async fn find_restore_replicas(
+		&self,
+		Parameters(args): Parameters<FindRestoreReplicasArgs>,
+	) -> Result<CallToolResult, McpError> {
+		let mut conn = self.conn().await?;
+		let group = parse_opt_uuid(&args.group_id, "group_id")?;
+		let consumer = parse_opt_uuid(&args.consumer_device_id, "consumer_device_id")?;
+		let enabled_only = args.enabled_only.unwrap_or(false);
+
+		let mut replicas = match group {
+			Some(g) => RestoreReplica::list_for_group(&mut conn, g)
+				.await
+				.map_err(mcp_err)?,
+			None => RestoreReplica::list_all(&mut conn).await.map_err(mcp_err)?,
+		};
+		replicas.retain(|r| {
+			consumer.is_none_or(|c| r.consumer_device_id == c) && (!enabled_only || r.enabled)
+		});
+
+		let replicas = self.restore_replica_outs(&mut conn, replicas).await?;
+		ok_json(&RestoreReplicaList {
+			count: replicas.len(),
+			replicas,
+		})
+	}
+
+	#[tool(
+		description = "Full detail for one managed-restore replica declaration: its config, the consumer's \
+		               full descriptor for the intent (parameters, semantics — `None` when the declaration \
+		               is a gap), and its recent restore-verification health reports."
+	)]
+	async fn get_restore_replica(
+		&self,
+		Parameters(args): Parameters<RestoreReplicaIdArgs>,
+	) -> Result<CallToolResult, McpError> {
+		let mut conn = self.conn().await?;
+		let id = parse_uuid(&args.replica_id, "replica_id")?;
+		let Ok(replica) = RestoreReplica::get(&mut conn, id).await else {
+			return Ok(not_found(format!("no restore replica with id {id}")));
+		};
+
+		let intent_descriptor =
+			RestoreConsumerCapability::list_for_consumer(&mut conn, replica.consumer_device_id)
+				.await
+				.map_err(mcp_err)?
+				.into_iter()
+				.find(|d| d.intent == replica.intent);
+
+		let relevant: Vec<BackupRestoreCheck> =
+			BackupRestoreCheck::list_recent_for_group(&mut conn, replica.group_id, 50)
+				.await
+				.map_err(mcp_err)?
+				.into_iter()
+				.filter(|c| c.replica_id == Some(replica.id))
+				.collect();
+		let check_server_names = Server::names_by_ids(
+			&mut conn,
+			&unique(relevant.iter().filter_map(|c| c.server_id)),
+		)
+		.await
+		.map_err(mcp_err)?;
+		let recent_checks = relevant
+			.into_iter()
+			.map(|c| RestoreCheckOut {
+				id: c.id,
+				server_id: c.server_id,
+				server_name: c
+					.server_id
+					.and_then(|s| check_server_names.get(&s))
+					.and_then(|(n, _)| n.clone()),
+				snapshot_id: c.snapshot_id,
+				outcome: c.outcome,
+				replica_healthy: c.replica_healthy,
+				error: c.error,
+				postgres_version: c.postgres_version,
+				observed_at: c.observed_at,
+				reported_at: c.reported_at,
+				health_details: c.health_details,
+			})
+			.collect();
+
+		let replica = self
+			.restore_replica_outs(&mut conn, vec![replica])
+			.await?
+			.into_iter()
+			.next()
+			.expect("exactly one replica");
+
+		ok_json(&RestoreReplicaDetail {
+			replica,
+			intent_descriptor,
+			recent_checks,
+		})
+	}
+
+	#[tool(
+		description = "Canopy-wide default schedule/retention per backup type — what a group inherits for a \
+		               type unless it sets its own schedule override (see get_group's `backups.schedules`)."
+	)]
+	async fn get_backup_defaults(
+		&self,
+		Parameters(_): Parameters<EmptyArgs>,
+	) -> Result<CallToolResult, McpError> {
+		let mut conn = self.conn().await?;
+		let rows = BackupTypeDefault::list(&mut conn).await.map_err(mcp_err)?;
+		let defaults = rows
+			.into_iter()
+			.map(|d| BackupDefaultOut {
+				r#type: d.r#type.to_string(),
+				default_interval_seconds: d.default_interval.map(|pg| pg.0.as_secs()),
+				default_retention: RetentionPolicy::from_json(&d.default_retention).map(|r| {
+					RetentionPolicyOut {
+						keep_latest: r.keep_latest,
+						keep_daily: r.keep_daily,
+						keep_weekly: r.keep_weekly,
+						keep_monthly: r.keep_monthly,
+						keep_annual: r.keep_annual,
+					}
+				}),
+				auto_enable: d.auto_enable,
+				allow_below_floor: d.allow_below_floor,
+			})
+			.collect();
+		ok_json(&BackupDefaultsList { defaults })
+	}
 }
 
 impl CanopyMcp {
@@ -1372,6 +1844,90 @@ impl CanopyMcp {
 			}
 		}
 		Ok(adoption)
+	}
+
+	/// Enrich replica rows with consumer/group/server display names, the `gap`
+	/// flag (the consumer no longer advertises the declared intent — mirrors
+	/// the operator UI's `restore_replicas::to_views`), and, for server-scoped
+	/// declarations, the latest healthy restore-verification timestamp for that
+	/// exact `(server, type, intent)` (from
+	/// `BackupRestoreCheck::latest_healthy_by_key_for_group`). Does not compute
+	/// an overdue verdict — that logic lives solely in
+	/// `database::restore::sweep_overdue`, which alone owns the once-vs-check
+	/// semantics distinction.
+	async fn restore_replica_outs(
+		&self,
+		conn: &mut AsyncPgConnection,
+		replicas: Vec<RestoreReplica>,
+	) -> Result<Vec<RestoreReplicaOut>, McpError> {
+		let consumer_ids = unique(replicas.iter().map(|r| r.consumer_device_id));
+		let consumer_names = Device::tailscale_names_by_ids(conn, &consumer_ids)
+			.await
+			.map_err(mcp_err)?;
+		let group_ids = unique(replicas.iter().map(|r| r.group_id));
+		let g_names = group_names(conn, &group_ids).await?;
+		let server_names =
+			Server::names_by_ids(conn, &unique(replicas.iter().filter_map(|r| r.server_id)))
+				.await
+				.map_err(mcp_err)?;
+
+		let mut caps: HashMap<Uuid, std::collections::HashSet<RestoreIntent>> = HashMap::new();
+		for id in &consumer_ids {
+			let set = RestoreConsumerCapability::list_for_consumer(conn, *id)
+				.await
+				.map_err(mcp_err)?
+				.into_iter()
+				.map(|d| d.intent)
+				.collect();
+			caps.insert(*id, set);
+		}
+
+		let mut healthy_by_group: HashMap<
+			Uuid,
+			HashMap<(Uuid, BackupType, RestoreIntent), Timestamp>,
+		> = HashMap::new();
+		for gid in &group_ids {
+			let map = BackupRestoreCheck::latest_healthy_by_key_for_group(conn, *gid)
+				.await
+				.map_err(mcp_err)?;
+			healthy_by_group.insert(*gid, map);
+		}
+
+		Ok(replicas
+			.into_iter()
+			.map(|r| {
+				let gap = !caps
+					.get(&r.consumer_device_id)
+					.is_some_and(|s| s.contains(&r.intent));
+				let last_healthy_at = r.server_id.and_then(|sid| {
+					healthy_by_group
+						.get(&r.group_id)
+						.and_then(|m| m.get(&(sid, r.r#type.clone(), r.intent.clone())))
+						.copied()
+				});
+				RestoreReplicaOut {
+					id: r.id,
+					consumer_device_id: r.consumer_device_id,
+					consumer_name: consumer_names.get(&r.consumer_device_id).cloned(),
+					group_id: r.group_id,
+					group_name: g_names.get(&r.group_id).cloned(),
+					server_id: r.server_id,
+					server_name: r
+						.server_id
+						.and_then(|s| server_names.get(&s))
+						.and_then(|(n, _)| n.clone()),
+					r#type: r.r#type.to_string(),
+					intent: r.intent.to_string(),
+					name: r.name,
+					overdue_after_seconds: r.overdue_after.map(|f| f.0.as_secs()),
+					enabled: r.enabled,
+					gap,
+					last_healthy_at,
+					created_at: r.created_at,
+					updated_at: r.updated_at,
+				}
+			})
+			.collect())
 	}
 }
 

@@ -903,6 +903,18 @@ pub struct NewBackupRun {
 	pub s3_received_payload_bytes: Option<i64>,
 }
 
+/// Multi-field filter for the fleet-wide backup-run history query. Each field
+/// is opt-in: `Default` matches every run.
+#[derive(Debug, Clone, Default)]
+pub struct BackupRunFilters {
+	pub group_id: Option<Uuid>,
+	pub server_id: Option<Uuid>,
+	pub r#type: Option<BackupType>,
+	pub outcome: Option<RunOutcome>,
+	/// When `Some`, restrict to runs reported at or after this time.
+	pub since: Option<Timestamp>,
+}
+
 impl BackupRun {
 	/// Record a reported run. A duplicate `id` (the client-minted run-uuid)
 	/// fails its own insert; that PK violation is surfaced as
@@ -1039,6 +1051,38 @@ impl BackupRun {
 			.map_err(AppError::from)
 	}
 
+	/// Fleet-wide run history, newest first, narrowed by whichever filters are
+	/// set. Backs the MCP `list_backup_runs` tool.
+	pub async fn list_filtered(
+		db: &mut AsyncPgConnection,
+		filters: BackupRunFilters,
+		limit: i64,
+	) -> Result<Vec<Self>> {
+		use crate::schema::backup_runs::dsl;
+
+		let mut q = dsl::backup_runs.into_boxed();
+		if let Some(gid) = filters.group_id {
+			q = q.filter(dsl::group_id.eq(gid));
+		}
+		if let Some(sid) = filters.server_id {
+			q = q.filter(dsl::server_id.eq(sid));
+		}
+		if let Some(ty) = &filters.r#type {
+			q = q.filter(dsl::type_.eq(ty.as_str()));
+		}
+		if let Some(outcome) = filters.outcome {
+			q = q.filter(dsl::outcome.eq(outcome));
+		}
+		if let Some(since) = filters.since {
+			q = q.filter(dsl::reported_at.ge(jiff_diesel::Timestamp::from(since)));
+		}
+		q.order(dsl::reported_at.desc())
+			.limit(limit)
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	/// Fill `snapshot_logical_bytes` from repo inspection for runs matched by
 	/// snapshot id, only where it is still unset — write-once, since a snapshot
 	/// is immutable. `sizes` maps a snapshot id to its observed logical size.
@@ -1118,6 +1162,25 @@ pub struct BackupMaintenanceRun {
 	pub bytes_reclaimed: Option<i64>,
 }
 
+/// Filter value for [`BackupMaintenanceRunFilters::outcome`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MaintenanceOutcomeFilter {
+	/// Still running (`outcome IS NULL`).
+	Running,
+	Outcome(RunOutcome),
+}
+
+/// Multi-field filter for the fleet-wide maintenance-run history query. Each
+/// field is opt-in: `Default` matches every run.
+#[derive(Debug, Clone, Default)]
+pub struct BackupMaintenanceRunFilters {
+	pub group_id: Option<Uuid>,
+	pub kind: Option<MaintenanceKind>,
+	pub outcome: Option<MaintenanceOutcomeFilter>,
+	/// When `Some`, restrict to runs started at or after this time.
+	pub since: Option<Timestamp>,
+}
+
 impl BackupMaintenanceRun {
 	/// Open a maintenance-run row at Job start; returns the new id for the
 	/// matching [`finish`](Self::finish).
@@ -1169,6 +1232,41 @@ impl BackupMaintenanceRun {
 		dsl::backup_maintenance_runs
 			.filter(dsl::group_id.eq(group_id))
 			.order(dsl::started_at.desc())
+			.limit(limit)
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// Fleet-wide maintenance-run history, newest first, narrowed by whichever
+	/// filters are set. Backs the MCP `list_maintenance_runs` tool.
+	pub async fn list_filtered(
+		db: &mut AsyncPgConnection,
+		filters: BackupMaintenanceRunFilters,
+		limit: i64,
+	) -> Result<Vec<Self>> {
+		use crate::schema::backup_maintenance_runs::dsl;
+
+		let mut q = dsl::backup_maintenance_runs.into_boxed();
+		if let Some(gid) = filters.group_id {
+			q = q.filter(dsl::group_id.eq(gid));
+		}
+		if let Some(kind) = filters.kind {
+			q = q.filter(dsl::kind.eq(kind));
+		}
+		match filters.outcome {
+			Some(MaintenanceOutcomeFilter::Running) => {
+				q = q.filter(dsl::outcome.is_null());
+			}
+			Some(MaintenanceOutcomeFilter::Outcome(o)) => {
+				q = q.filter(dsl::outcome.eq(Some(o)));
+			}
+			None => {}
+		}
+		if let Some(since) = filters.since {
+			q = q.filter(dsl::started_at.ge(jiff_diesel::Timestamp::from(since)));
+		}
+		q.order(dsl::started_at.desc())
 			.limit(limit)
 			.load(db)
 			.await
