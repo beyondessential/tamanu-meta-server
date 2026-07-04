@@ -52,7 +52,7 @@ pub use devices::{Device, DeviceConnection, DeviceKey, DeviceWithInfo};
 pub use recovery_vault::RecoveryVaultWrite;
 pub use restore::{
 	BackupRestoreCheck, NewBackupRestoreCheck, NewRestoreReplica, RestoreConsumerCapability,
-	RestoreReplica,
+	RestoreReplica, RestoreReplicaUpdate,
 };
 
 pub type Db = Pool<AsyncPgConnection>;

@@ -8,7 +8,7 @@ use database::diesel_async::AsyncPgConnection;
 use database::pg_duration::PgDuration;
 use database::{
 	BackupRestoreCheck, NewBackupRestoreCheck, NewRestoreReplica, RestoreConsumerCapability,
-	RestoreReplica,
+	RestoreReplica, RestoreReplicaUpdate,
 };
 use diesel::{sql_query, sql_types};
 use diesel_async::RunQueryDsl;
@@ -114,6 +114,22 @@ fn new_replica(
 		overdue_after: None,
 		params: serde_json::json!({}),
 		created_by: Some("op@example.com".into()),
+	}
+}
+
+/// An update payload that carries `r`'s current fields forward unchanged,
+/// so a test only needs to spell out the fields it's actually changing.
+fn update_from(r: &RestoreReplica) -> RestoreReplicaUpdate {
+	RestoreReplicaUpdate {
+		consumer_device_id: r.consumer_device_id,
+		group_id: r.group_id,
+		server_id: r.server_id,
+		r#type: r.r#type.clone(),
+		intent: r.intent.clone(),
+		name: r.name.clone(),
+		overdue_after: r.overdue_after,
+		params: r.params.clone(),
+		enabled: r.enabled,
 	}
 }
 
@@ -231,10 +247,13 @@ async fn update_and_delete() {
 		let updated = RestoreReplica::update(
 			&mut conn,
 			r.id,
-			"renamed",
-			Some(PgDuration(SignedDuration::from_secs(7200))),
-			serde_json::json!({"minimum_uptime": 60}),
-			false,
+			RestoreReplicaUpdate {
+				name: "renamed".into(),
+				overdue_after: Some(PgDuration(SignedDuration::from_secs(7200))),
+				params: serde_json::json!({"minimum_uptime": 60}),
+				enabled: false,
+				..update_from(&r)
+			},
 		)
 		.await
 		.expect("update");
@@ -303,9 +322,16 @@ async fn authorizes_only_with_enabled_matching_declaration() {
 		);
 
 		// Disabling the only declaration revokes authorization.
-		RestoreReplica::update(&mut conn, r.id, "n", None, serde_json::json!({}), false)
-			.await
-			.expect("disable");
+		RestoreReplica::update(
+			&mut conn,
+			r.id,
+			RestoreReplicaUpdate {
+				enabled: false,
+				..update_from(&r)
+			},
+		)
+		.await
+		.expect("disable");
 		assert!(
 			!RestoreReplica::authorizes(&mut conn, consumer, group, &tpg)
 				.await
@@ -647,6 +673,130 @@ async fn records_and_returns_arbitrary_health_details() {
 			.await
 			.expect("list");
 		assert!(recent.iter().any(|c| c.health_details.is_none()));
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn update_can_change_scope_including_intent() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn, "g").await;
+		let r = RestoreReplica::create(
+			&mut conn,
+			new_replica(consumer, group, None, RestoreIntent::from("verify"), "n"),
+		)
+		.await
+		.expect("create");
+
+		let updated = RestoreReplica::update(
+			&mut conn,
+			r.id,
+			RestoreReplicaUpdate {
+				intent: RestoreIntent::from("analytics"),
+				..update_from(&r)
+			},
+		)
+		.await
+		.expect("update intent");
+		assert_eq!(updated.intent, RestoreIntent::from("analytics"));
+
+		let got = RestoreReplica::get(&mut conn, r.id).await.expect("get");
+		assert_eq!(got.intent, RestoreIntent::from("analytics"), "persisted");
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn update_scope_collision_conflicts() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn, "g").await;
+		RestoreReplica::create(
+			&mut conn,
+			new_replica(consumer, group, None, RestoreIntent::from("verify"), "a"),
+		)
+		.await
+		.expect("create a");
+		let b = RestoreReplica::create(
+			&mut conn,
+			new_replica(consumer, group, None, RestoreIntent::from("analytics"), "b"),
+		)
+		.await
+		.expect("create b");
+
+		// Retargeting b's intent onto a's scope collides with a's group-wide
+		// declaration.
+		let result = RestoreReplica::update(
+			&mut conn,
+			b.id,
+			RestoreReplicaUpdate {
+				intent: RestoreIntent::from("verify"),
+				..update_from(&b)
+			},
+		)
+		.await;
+		assert!(
+			matches!(result, Err(AppError::Conflict(_))),
+			"got {result:?}"
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn update_moving_scope_recovers_stale_alert_at_old_key() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn, "g").await;
+		let server = insert_server(&mut conn, group).await;
+		let r = RestoreReplica::create(
+			&mut conn,
+			new_replica(
+				consumer,
+				group,
+				Some(server),
+				RestoreIntent::from("verify"),
+				"n",
+			),
+		)
+		.await
+		.expect("create");
+
+		// Raise an active alert at the declaration's (server, type, verify) key.
+		BackupRestoreCheck::record_report(
+			&mut conn,
+			new_check(
+				consumer,
+				group,
+				server,
+				RestoreIntent::from("verify"),
+				RunOutcome::Failure,
+				false,
+			),
+		)
+		.await
+		.expect("record failure");
+		assert_eq!(active_restore_issues(&mut conn, group).await, 1);
+
+		// Retargeting the declaration's intent moves it off that key. The sweep
+		// only walks current declarations, so without recovery this alert would
+		// never clear.
+		RestoreReplica::update(
+			&mut conn,
+			r.id,
+			RestoreReplicaUpdate {
+				intent: RestoreIntent::from("analytics"),
+				..update_from(&r)
+			},
+		)
+		.await
+		.expect("retarget intent");
+		assert_eq!(
+			active_restore_issues(&mut conn, group).await,
+			0,
+			"old-key alert is recovered on scope change"
+		);
 	})
 	.await;
 }
