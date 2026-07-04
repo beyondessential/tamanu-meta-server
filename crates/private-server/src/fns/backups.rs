@@ -77,46 +77,74 @@ pub fn routes() -> OpenApiRouter<AppState> {
 
 // ── Wire types ──────────────────────────────────────────────────────────────
 
-/// Per-`(group,type)` schedule + retention override. `expected_interval` None =
-/// manual-only (distinct from 0). `retention` None = inherit the type default.
+/// A schedule and retention override for one backup type of a server group.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ScheduleView {
+	/// Backup type this override applies to.
 	#[serde(rename = "type")]
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
+	/// Expected seconds between scheduled backups of this type; null means
+	/// manual-only (no schedule), which is distinct from an interval of zero.
 	#[schema(value_type = Option<i64>, format = "int64")]
 	pub expected_interval: Option<PgDuration>,
+	/// Retention policy override; null means inherit the canopy-wide default
+	/// for this backup type.
 	pub retention: Option<RetentionPolicy>,
-	/// Whether this override opts out of the org retention floor (dangerous).
+	/// Whether this override is allowed to fall below the organization's
+	/// minimum retention floor.
 	pub allow_below_floor: bool,
 }
 
-/// Full config + lifecycle for a group. Never includes the passphrase value.
+/// The full backup configuration and lifecycle state for a server group.
+/// Never includes the repository passphrase.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct BackupConfigView {
+	/// The server group this configuration belongs to.
 	pub server_group_id: Uuid,
+	/// Name of the S3 bucket backups are stored in.
 	pub bucket: String,
+	/// Key prefix within the bucket that this group's backups are stored
+	/// under; empty means the bucket root.
 	pub prefix: String,
+	/// AWS IAM role ARN used to issue upload credentials to devices; grants
+	/// write access only, not delete.
 	pub target_role_arn: String,
+	/// AWS IAM role ARN used for maintenance, inspection, and metrics
+	/// collection on the backup repository; grants full access, including
+	/// delete.
 	pub maintenance_role_arn: String,
+	/// AWS region the bucket is in, if set explicitly.
 	pub region: Option<String>,
+	/// How the repository's encryption passphrase is managed: generated
+	/// automatically by Canopy, or supplied by the operator when connecting
+	/// an existing repository.
 	#[schema(value_type = String)]
 	pub mode: BackupRepoMode,
+	/// Current lifecycle state of the backup repository: provisioning while
+	/// it's being created, ready once backups and restores can run.
 	#[schema(value_type = String)]
 	pub status: BackupConfigStatus,
-	/// `external` (BYO account) or `shared` (canopy-provisioned in the shared
-	/// account). Lets the UI distinguish the two onboarding paths.
+	/// Where the backup bucket lives: `external` if it was provisioned in the
+	/// deployment's own cloud account, or `shared` if Canopy provisioned it
+	/// automatically in a shared account. Distinguishes the two onboarding
+	/// paths.
 	#[schema(value_type = String)]
 	pub placement: BackupPlacement,
+	/// Error message from the most recent failed provisioning attempt, if
+	/// any.
 	pub last_init_error: Option<String>,
+	/// When this configuration was created.
 	pub created_at: Timestamp,
+	/// When this configuration was last updated.
 	pub updated_at: Timestamp,
-	/// When an operator has requested a one-off full maintenance run that the
-	/// scheduler hasn't picked up yet; `None` = no pending request.
+	/// When an operator requested an out-of-cycle full maintenance run that
+	/// hasn't started yet; null if none is pending.
 	pub force_full_maintenance_at: Option<Timestamp>,
-	/// Who requested the pending full-maintenance run (Tailscale login).
+	/// Identity of the operator who requested the pending full-maintenance
+	/// run (Tailscale login), if any.
 	pub force_full_maintenance_by: Option<String>,
-	/// Per-`(group,type)` schedule + retention overrides.
+	/// Per-backup-type schedule and retention overrides for this group.
 	pub schedules: Vec<ScheduleView>,
 }
 
@@ -155,117 +183,175 @@ impl BackupConfigView {
 	}
 }
 
-/// Fleet-overview row for the configured-groups listing.
+/// Summary of one server group's backup configuration, for the fleet-wide
+/// overview list.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct BackupConfigSummary {
+	/// The server group this configuration belongs to.
 	pub server_group_id: Uuid,
+	/// Name of the S3 bucket backups are stored in.
 	pub bucket: String,
+	/// How the repository's encryption passphrase is managed.
 	#[schema(value_type = String)]
 	pub mode: BackupRepoMode,
+	/// Current lifecycle state of the backup repository.
 	#[schema(value_type = String)]
 	pub status: BackupConfigStatus,
+	/// Error message from the most recent failed provisioning attempt, if
+	/// any.
 	pub last_init_error: Option<String>,
 }
 
+/// Identifies a server group.
 #[derive(Deserialize, ToSchema)]
 pub struct BackupsGroupArgs {
+	/// The server group to operate on.
 	pub server_group_id: Uuid,
 }
 
+/// Request to register a new external (bring-your-own-account) backup
+/// configuration for a group.
 #[derive(Deserialize, ToSchema)]
 pub struct CreateBackupConfigArgs {
+	/// The server group to configure.
 	pub server_group_id: Uuid,
+	/// Name of the S3 bucket to store backups in.
 	pub bucket: String,
+	/// Key prefix within the bucket to store this group's backups under;
+	/// defaults to empty (bucket root).
 	#[serde(default)]
 	pub prefix: String,
-	/// Device role: public-server assumes this to mint device creds (no delete).
+	/// AWS IAM role ARN used to issue upload credentials to devices; must not
+	/// grant delete permission.
 	pub target_role_arn: String,
-	/// Maintenance role: the backups pod assumes this for maintenance/inspection/
-	/// s3-metrics (s3:* + delete + CloudWatch).
+	/// AWS IAM role ARN used for maintenance, inspection, and metrics
+	/// collection on the bucket; requires full S3 access (including delete)
+	/// and CloudWatch access.
 	pub maintenance_role_arn: String,
+	/// AWS region the bucket is in, if not the default.
 	pub region: Option<String>,
+	/// How the repository's encryption passphrase should be managed:
+	/// generate one automatically, or use one supplied by the operator.
 	#[schema(value_type = String)]
 	pub mode: BackupRepoMode,
-	/// Passphrase mode only: the operator-supplied repo passphrase Canopy stores.
-	/// From-birth ignores this (Canopy generates one).
+	/// Repository passphrase to use; required when `mode` is `passphrase`,
+	/// ignored otherwise (Canopy generates one automatically).
 	pub passphrase: Option<String>,
 }
 
-/// Machine-facing config-as-a-resource upsert (ops/pulumi). `mode` is implicit
-/// — always from-birth — so the bucket must be empty and no passphrase is
-/// supplied (importing an existing repo stays an interactive operator action).
-/// `bucket`/`prefix` are the identity and immutable on re-apply; the role ARNs
-/// and region are reconciled to the request each time. **Schedule and retention
-/// are intentionally NOT part of this API** — they're per-`(group, type)` and
-/// managed through the operator UI (inheriting the canopy-wide type defaults).
+/// Request to declaratively create or update a group's backup configuration,
+/// for automated/infrastructure-as-code callers. Always creates the
+/// repository with an automatically generated passphrase; importing an
+/// existing repository is only supported through the interactive setup
+/// wizard. `bucket`/`prefix` identify the configuration and are immutable
+/// after creation; the role ARNs and region are reconciled to the request on
+/// every call. Schedule and retention are not configurable here — see the
+/// `/backups/set_schedule` endpoint.
 #[derive(Deserialize, ToSchema)]
 pub struct UpsertBackupConfigArgs {
+	/// The server group to configure.
 	pub server_group_id: Uuid,
+	/// Name of the S3 bucket to store backups in. Immutable once the
+	/// configuration is created.
 	pub bucket: String,
+	/// Key prefix within the bucket to store this group's backups under;
+	/// defaults to empty (bucket root). Immutable once the configuration is
+	/// created.
 	#[serde(default)]
 	pub prefix: String,
-	/// Device role: public-server assumes this to mint device creds (no delete).
+	/// AWS IAM role ARN used to issue upload credentials to devices; must not
+	/// grant delete permission.
 	pub target_role_arn: String,
-	/// Maintenance role: the backups pod assumes this for maintenance/inspection/
-	/// s3-metrics (s3:* + delete + CloudWatch).
+	/// AWS IAM role ARN used for maintenance, inspection, and metrics
+	/// collection on the bucket; requires full S3 access (including delete)
+	/// and CloudWatch access.
 	pub maintenance_role_arn: String,
+	/// AWS region the bucket is in, if not the default.
 	pub region: Option<String>,
 }
 
+/// Request to update a group's mutable backup configuration fields.
 #[derive(Deserialize, ToSchema)]
 pub struct UpdateBackupConfigArgs {
+	/// The server group to update.
 	pub server_group_id: Uuid,
-	/// New region (or None to clear). Changing the region is allowed but is
-	/// effectively a repo migration — the UI warns. Structural fields
-	/// (bucket/role/mode) are not editable here.
+	/// New AWS region for the bucket, or null to clear it. Changing the
+	/// region effectively migrates the backup repository to a new location.
+	/// Other configuration fields (bucket, roles, mode) cannot be changed
+	/// through this endpoint.
 	pub region: Option<String>,
 }
 
+/// Request to set (or override) the schedule and retention for one backup
+/// type of a server group.
 #[derive(Deserialize, ToSchema)]
 pub struct SetScheduleArgs {
+	/// The server group to configure.
 	pub server_group_id: Uuid,
+	/// Backup type this schedule and retention apply to.
 	#[serde(rename = "type")]
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
-	/// Seconds; None = manual-only (no schedule), distinct from 0.
+	/// Expected seconds between scheduled backups of this type; null means
+	/// manual-only (no schedule), which is distinct from an interval of zero.
 	#[schema(value_type = Option<i64>, format = "int64")]
 	pub expected_interval: Option<PgDuration>,
-	/// None = inherit the type default. A present policy is floor-validated
-	/// unless `allow_below_floor` is set.
+	/// Retention policy to apply; null means inherit the canopy-wide default
+	/// for this backup type. A specified policy is validated against the
+	/// organization's minimum retention floor unless `allow_below_floor` is
+	/// set.
 	pub retention: Option<RetentionPolicy>,
-	/// Dangerous: opt this override out of the org retention floor, allowing a
-	/// retention smaller than the org minimum. Defaults false.
+	/// Allows this override to specify retention below the organization's
+	/// minimum retention floor. Defaults to false.
 	#[serde(default)]
 	pub allow_below_floor: bool,
 }
 
+/// Identifies a one-off backup or restore request for a server.
 #[derive(Deserialize, ToSchema)]
 pub struct RequestArgs {
+	/// The server to back up or restore.
 	pub server_id: Uuid,
+	/// Backup type to run.
 	#[serde(rename = "type")]
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
+	/// Why this run is requested: `backup` to write new data, or `restore` to
+	/// read existing data.
 	#[schema(value_type = String)]
 	pub purpose: BackupPurpose,
 }
 
+/// A pending one-off backup or restore request.
 #[derive(Serialize, ToSchema)]
 pub struct PendingRequestRow {
+	/// The server the request is for.
 	pub server_id: Uuid,
+	/// Backup type requested.
 	#[serde(rename = "type")]
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
+	/// Why this run was requested: `backup` to write new data, or `restore`
+	/// to read existing data.
 	#[schema(value_type = String)]
 	pub purpose: BackupPurpose,
+	/// When the request was made.
 	pub requested_at: Timestamp,
+	/// Identity of the operator who made the request (Tailscale login), if
+	/// known.
 	pub requested_by: Option<String>,
 }
 
+/// Backup statistics and activity for a server group.
 #[derive(Serialize, ToSchema)]
 pub struct BackupStatsView {
+	/// Cached repository-level statistics, if available.
 	pub stats: Option<BackupRepoStats>,
+	/// The most recent backup runs across the group's member servers.
 	pub recent_runs: Vec<BackupRun>,
+	/// The most recent maintenance runs for the group's backup repository.
 	pub recent_maintenance: Vec<BackupMaintenanceRun>,
+	/// One-off backup/restore requests awaiting pickup.
 	pub pending_requests: Vec<PendingRequestRow>,
 	/// Backup types each member server has advertised it can run (with their
 	/// enabled state), so the "back up now" panel can offer the right types per
@@ -280,10 +366,6 @@ pub struct BackupStatsView {
 	pub s3_month_received_bytes: i64,
 }
 
-/// One `(server, type)` backup capability and whether the operator has it
-/// enabled. `enabled` toggles whether the scheduler issues credentials and
-/// schedules runs for the pair.
-///
 /// Effective scheduled interval (seconds) for a `(group, type)`: the per-group
 /// override if set, else the canopy-wide default. `None` = manual-only.
 async fn effective_interval_secs(
@@ -338,14 +420,22 @@ fn next_backup_at(
 	})
 }
 
+/// One backup type a server has advertised support for, whether the operator
+/// has enabled it, and its most recent activity. Enabling a capability is
+/// what makes the server eligible for issued backup credentials and
+/// scheduled runs of that type.
 #[derive(Serialize, ToSchema)]
 pub struct ServerBackupCapabilityView {
+	/// The server this capability belongs to.
 	pub server_id: Uuid,
+	/// Backup type this capability describes.
 	#[serde(rename = "type")]
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
+	/// Whether the operator has enabled scheduled backups of this type for
+	/// this server.
 	pub enabled: bool,
-	/// kopia snapshot id of this server+type's most recent successful backup,
+	/// Identifier of this server and type's most recent successful backup,
 	/// if any.
 	pub latest_snapshot_id: Option<String>,
 	/// When that snapshot was reported.
@@ -359,29 +449,40 @@ pub struct ServerBackupCapabilityView {
 	/// freshly-backed-up sibling.
 	pub next_backup_at: Option<Timestamp>,
 	/// `Some(issued_at)` when a backup of this type appears to be in flight:
-	/// credentials were issued under an hour ago and no run has been reported
-	/// since. `None` otherwise. Lets the UI show a "backing up…" state.
+	/// backup credentials were issued and are still valid, and no run has
+	/// been reported since they were issued. `None` otherwise. Lets the UI
+	/// show a "backing up…" state.
 	pub processing_since: Option<Timestamp>,
 }
 
+/// Identifies a server.
 #[derive(Deserialize, ToSchema)]
 pub struct ServerArgs {
+	/// The server to operate on.
 	pub server_id: Uuid,
 }
 
+/// Request to enable or disable a server's backup capability for one type.
 #[derive(Deserialize, ToSchema)]
 pub struct SetCapabilityArgs {
+	/// The server to update.
 	pub server_id: Uuid,
+	/// Backup type to enable or disable.
 	#[serde(rename = "type")]
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
+	/// Whether scheduled backups of this type should be enabled for this
+	/// server.
 	pub enabled: bool,
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────
 
-/// Full config + lifecycle for a group. `null` (200) when the group has no
-/// config (the zero-state); 404 only when the group itself doesn't exist.
+/// Get a group's backup configuration.
+///
+/// Returns the full configuration and lifecycle state for a server group.
+/// Returns `null` with a 200 status if the group has no backup configuration
+/// yet; 404 only if the group itself doesn't exist.
 #[utoipa::path(
 	post,
 	path = "/get",
@@ -409,7 +510,7 @@ pub async fn get(
 	Ok(Json(view))
 }
 
-/// All configured groups (fleet overview).
+/// List all groups with a backup configuration.
 #[utoipa::path(
 	post,
 	path = "/list",
@@ -437,9 +538,12 @@ pub async fn list(
 	))
 }
 
-/// Insert a config row (`status='provisioning'`). Does NOT create the repo —
-/// that's `create_repo`. 409 if the group already has a config; 404 if the
-/// group is missing.
+/// Register a new external (bring-your-own-account) backup configuration.
+///
+/// This only records the configuration, in a provisioning state; it does not
+/// create the backup repository itself — call the `/backups/create_repo`
+/// endpoint next. Returns 409 if the group already has a backup
+/// configuration, or 404 if the group doesn't exist.
 #[utoipa::path(
 	post,
 	path = "/create",
@@ -516,26 +620,29 @@ pub async fn create(
 	Ok(Json(BackupConfigView::build(&mut conn, config).await?))
 }
 
-/// Args for [`create_shared`]: just the group (+ optional region override).
-/// Canopy fills the bucket name and the shared role ARNs itself.
+/// Request to onboard a group onto Canopy's shared-account backups. Canopy
+/// fills in the bucket name and IAM roles automatically.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateSharedBackupConfigArgs {
+	/// The server group to onboard.
 	pub server_group_id: Uuid,
-	/// Region override; defaults to the shared-account default region.
+	/// AWS region override for the bucket; if omitted, Canopy uses its
+	/// default region for shared-account backups.
 	#[serde(default)]
 	pub region: Option<String>,
 }
 
-/// Onboard a group onto **shared-account** backups — for deployments with no AWS
-/// account of their own. Canopy auto-names a bucket
-/// (`bes-canopy-backup-<group>-<random>`), generates + stores the passphrase, and
-/// marks the config `provisioning`/`placement=shared` with **blank** role ARNs.
-/// The backups pod stamps the shared device/maintenance role ARNs + region (from
-/// its own `CANOPY_SHARED_BACKUP_*` env) and creates the bucket at init — so this
-/// endpoint needs no shared-account env (a missing pod env surfaces as
-/// `last_init_error`, not here). Unlike `create`/`upsert` (BYO), there's no
-/// caller-supplied bucket/roles and no probe. 502 only if the secret store
-/// (passphrase Secret) isn't configured.
+/// Onboard a group onto Canopy's shared-account backups.
+///
+/// Use this for deployments that don't have their own AWS account. Canopy
+/// generates a bucket name automatically, generates and stores the repository
+/// passphrase, and marks the configuration as provisioning with shared
+/// placement. The bucket and its access roles are provisioned asynchronously;
+/// any failure surfaces in the `last_init_error` field rather than in this
+/// call's response. Unlike the `/backups/create` and `/backups/upsert`
+/// endpoints (used for bring-your-own-account setups), the caller does not
+/// supply a bucket or role ARNs, and no bucket probe is performed. Returns
+/// 502 only if the server's secret storage isn't configured.
 #[utoipa::path(
 	post,
 	path = "/create_shared",
@@ -604,12 +711,16 @@ pub async fn create_shared(
 	Ok(Json(BackupConfigView::build(&mut conn, config).await?))
 }
 
-/// Machine-facing config-as-a-resource upsert for ops/pulumi: declaratively
-/// register/converge a group's backup config in one idempotent call (config +
-/// generated passphrase Secret + schedule/retention + auto-provision). Creating
-/// is from-birth onto an empty bucket only — a non-empty/existing-repo/
-/// inaccessible bucket is rejected. Re-applying reconciles the role ARNs,
-/// region, schedule and retention; `bucket`/`prefix` are immutable.
+/// Declaratively create or update a group's backup configuration.
+///
+/// Registers or converges a group's backup configuration in a single
+/// idempotent call, generating and storing the repository passphrase and (for
+/// a new configuration) provisioning the repository automatically. Creating a
+/// configuration only succeeds onto an empty, unclaimed bucket — a bucket
+/// that already holds a backup repository or other content, or one that
+/// can't be accessed, is rejected. Re-applying an existing configuration
+/// reconciles the role ARNs and region to match the request; `bucket` and
+/// `prefix` are immutable and any mismatch is rejected.
 #[utoipa::path(
 	post,
 	path = "/upsert",
@@ -750,38 +861,52 @@ pub async fn upsert(
 	Ok(Json(BackupConfigView::build(&mut conn, config).await?))
 }
 
+/// Request to inspect a bucket/prefix before configuring backups on it.
 #[derive(Deserialize, ToSchema)]
 pub struct ProbeArgs {
+	/// Name of the S3 bucket to inspect.
 	pub bucket: String,
+	/// Key prefix within the bucket to inspect; defaults to empty (bucket
+	/// root).
 	#[serde(default)]
 	pub prefix: String,
+	/// AWS region the bucket is in, if known.
 	pub region: Option<String>,
-	/// Maintenance role to assume for the inspect (full read).
+	/// AWS IAM role ARN to assume for the inspection (requires full read
+	/// access).
 	pub maintenance_role_arn: String,
-	/// Device/issuance role to also validate (assume both ways + read-only no-op).
-	/// Optional; the wizard supplies it so a device-role trust gap is caught before
-	/// saving rather than only when a device first backs up.
+	/// AWS IAM role ARN to additionally validate for device use (checked in
+	/// both directions with a read-only no-op). Optional; supplying it lets
+	/// the setup wizard catch a role configuration problem before saving,
+	/// rather than when a device first attempts a backup.
 	#[serde(default)]
 	pub target_role_arn: Option<String>,
 }
 
-/// Inspect-probe result for the wizard: what's at `bucket/prefix`, plus whether
-/// Canopy already has a config for it.
+/// Result of inspecting a bucket/prefix: what's currently stored there, and
+/// whether Canopy already has a configuration for it.
 #[derive(Serialize, ToSchema)]
 pub struct ProbeResponse {
+	/// What was found at the inspected location: empty, an existing backup
+	/// repository, other (non-backup) content, or inaccessible.
 	#[schema(value_type = String)]
 	pub state: crate::backup_probe::ProbeState,
-	/// Present for `inaccessible`: the assume/list failure.
+	/// Present when `state` is `inaccessible`: a description of the failure
+	/// encountered while trying to access the bucket.
 	pub error: Option<String>,
-	/// A few keys, for the `other_content` warning.
+	/// A few example object keys found, when `state` is `other_content`.
 	pub object_sample: Vec<String>,
-	/// Group id if a config already exists for this exact bucket+prefix.
+	/// The server group already configured for this exact bucket and prefix,
+	/// if any.
 	pub already_configured: Option<Uuid>,
 }
 
-/// Synchronous setup-wizard probe: assume the maintenance role and inspect the
-/// bucket/prefix (empty / kopia_repo / other_content / inaccessible), and report
-/// whether Canopy already has a config for it. Read-only; never mutates.
+/// Inspect a bucket/prefix for the backup setup wizard.
+///
+/// Assumes the maintenance role and reports what's there: empty, an existing
+/// backup repository, other (non-backup) content, or inaccessible — plus
+/// whether Canopy already has a configuration for this bucket and prefix.
+/// Read-only; it never creates or modifies anything.
 #[utoipa::path(
 	post,
 	path = "/probe",
@@ -822,9 +947,10 @@ pub async fn probe(
 	}))
 }
 
-/// Edit the non-structural config (region). Structural fields
-/// (bucket/role/mode) are create-only; interval/retention live on
-/// `set_schedule`.
+/// Update a group's mutable backup configuration fields (currently just the
+/// region). Structural fields — bucket, roles, mode — can only be set when
+/// the configuration is created; schedule and retention are managed through
+/// the `/backups/set_schedule` endpoint.
 #[utoipa::path(
 	post,
 	path = "/update",
@@ -853,8 +979,12 @@ pub async fn update(
 	Ok(Json(BackupConfigView::build(&mut conn, config).await?))
 }
 
-/// Set (or clear) the per-`(group,type)` schedule + retention. None interval =
-/// manual-only; a present retention is floor-validated (400 on violation).
+/// Set the schedule and retention override for one backup type of a group.
+///
+/// A null interval means manual-only backups (no schedule). A specified
+/// retention policy is validated against the organization's retention floor
+/// and rejected with 400 if it falls below it, unless `allow_below_floor` is
+/// set.
 #[utoipa::path(
 	post,
 	path = "/set_schedule",
@@ -907,16 +1037,19 @@ const FLOOR_RETENTION: RetentionPolicy = RetentionPolicy {
 	keep_annual: 0,
 };
 
+/// Identifies a server group's schedule override for a backup type.
 #[derive(Deserialize, ToSchema)]
 pub struct ClearScheduleArgs {
+	/// The server group to update.
 	pub server_group_id: Uuid,
+	/// Backup type whose schedule override to remove.
 	#[serde(rename = "type")]
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
 }
 
-/// Remove a per-`(group,type)` schedule override → revert that type to inheriting
-/// the canopy-wide default.
+/// Remove a group's schedule and retention override for a backup type,
+/// reverting it to the canopy-wide default.
 #[utoipa::path(
 	post,
 	path = "/clear_schedule",
@@ -941,17 +1074,22 @@ pub async fn clear_schedule(
 	Ok(Json(BackupConfigView::build(&mut conn, config).await?))
 }
 
-/// Effective schedule/retention for one enabled backup type of a group: the
-/// per-`(group,type)` override if present, else the canopy-wide default.
-/// `has_override` tells the UI whether it's inheriting or overriding.
+/// Effective schedule and retention for one backup type of a group, combining
+/// any per-group override with the canopy-wide default.
 #[derive(Serialize, ToSchema)]
 pub struct GroupTypeScheduleView {
+	/// Backup type this schedule and retention apply to.
 	#[serde(rename = "type")]
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
 	/// Seconds between scheduled runs; null = manual-only (no scheduled interval).
 	pub effective_interval: Option<i64>,
+	/// Retention policy that currently applies: the group's override if set,
+	/// else the canopy-wide default for this type, else the organization's
+	/// minimum retention floor.
 	pub effective_retention: RetentionPolicy,
+	/// Whether this group has an explicit override for this type, rather
+	/// than inheriting the canopy-wide default.
 	pub has_override: bool,
 	/// Whether the effective config opts out of the org retention floor — taken
 	/// from the override if present, else the type default.
@@ -962,11 +1100,12 @@ pub struct GroupTypeScheduleView {
 	pub next_run_at: Option<Timestamp>,
 }
 
-/// Per **declared** backup type (not just enabled), the group's effective
-/// schedule/retention (override or inherited default) — drives the per-type
-/// editor in the group panel. Includes non-scheduled (disabled) types, since a
-/// manual backup of one is still retained under its own type policy; those show
-/// a null `effective_interval` ("manual only").
+/// List the effective schedule and retention for every backup type a group's
+/// servers have declared support for (not just the ones currently enabled).
+///
+/// A type with no scheduled interval still appears, with a null
+/// `effective_interval`, since a manually run backup of that type is still
+/// retained under its own policy.
 #[utoipa::path(
 	post,
 	path = "/group_schedules",
@@ -1048,22 +1187,26 @@ pub async fn group_schedules(
 	Ok(Json(out))
 }
 
-/// Canopy-wide default schedule/retention for a backup type.
+/// Canopy-wide default schedule and retention for a backup type.
 #[derive(Serialize, ToSchema)]
 pub struct TypeDefaultView {
+	/// Backup type these defaults apply to.
 	#[serde(rename = "type")]
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
 	/// Seconds between scheduled runs; null = manual-only.
 	pub default_interval: Option<i64>,
+	/// Default retention policy for this type, if set.
 	pub default_retention: Option<RetentionPolicy>,
+	/// Whether a server's capability for this type is enabled by default
+	/// when first advertised.
 	pub auto_enable: bool,
 	/// Whether this default opts out of the org retention floor (dangerous).
 	pub allow_below_floor: bool,
 }
 
-/// List the canopy-wide per-type defaults (the "global" schedule/retention each
-/// group inherits unless it overrides a type).
+/// List the canopy-wide default schedule and retention for every backup
+/// type. Groups inherit these defaults unless they set a per-group override.
 #[utoipa::path(
 	post,
 	path = "/type_defaults",
@@ -1091,24 +1234,33 @@ pub async fn type_defaults(
 	))
 }
 
+/// Request to set the canopy-wide default schedule and retention for a
+/// backup type.
 #[derive(Deserialize, ToSchema)]
 pub struct SetTypeDefaultArgs {
+	/// Backup type these defaults apply to.
 	#[serde(rename = "type")]
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
 	/// Seconds between scheduled runs; null = manual-only.
 	#[schema(value_type = Option<i64>, format = "int64")]
 	pub default_interval: Option<PgDuration>,
+	/// Default retention policy for this type.
 	pub default_retention: RetentionPolicy,
+	/// Whether a server's capability for this type should be enabled by
+	/// default when first advertised.
 	#[serde(default)]
 	pub auto_enable: bool,
-	/// Dangerous: opt this default out of the org retention floor. Defaults false.
+	/// Allows this default to specify retention below the organization's
+	/// minimum retention floor. Defaults to false.
 	#[serde(default)]
 	pub allow_below_floor: bool,
 }
 
-/// Set the canopy-wide default schedule/retention for a backup type
-/// (floor-validated). Operators tune these in Settings → Backup defaults.
+/// Set the canopy-wide default schedule and retention for a backup type.
+/// A retention policy below the organization's retention floor is rejected
+/// with 400, unless `allow_below_floor` is set. Operators tune these in
+/// Settings → Backup defaults.
 #[utoipa::path(
 	post,
 	path = "/set_type_default",
@@ -1141,8 +1293,13 @@ pub async fn set_type_default(
 	Ok(Json(()))
 }
 
-/// Record intent for the init Job: set/keep `provisioning`, clear
-/// `last_init_error`. Idempotent retry. 409 if already `ready`.
+/// Trigger (or retry) provisioning of a group's backup repository.
+///
+/// Sets the configuration's status to provisioning and clears any previous
+/// error, so provisioning is retried asynchronously; a failure surfaces in
+/// the `last_init_error` field rather than in this call's response.
+/// Idempotent — safe to call again while provisioning is already in
+/// progress. Returns 409 if the repository is already ready.
 #[utoipa::path(
 	post,
 	path = "/create_repo",
@@ -1173,8 +1330,10 @@ pub async fn create_repo(
 	Ok(Json(BackupConfigView::build(&mut conn, config).await?))
 }
 
-/// One-off "backup now": upsert a `backup_requests` row keyed
-/// `(server_id, type, purpose)`. Idempotent (re-request refreshes the row).
+/// Request a one-off backup or restore for a server.
+///
+/// Idempotent per server, type, and purpose — re-requesting refreshes the
+/// existing pending request rather than creating a duplicate.
 #[utoipa::path(
 	post,
 	path = "/request_now",
@@ -1201,7 +1360,8 @@ pub async fn request_now(
 	Ok(Json(()))
 }
 
-/// Cancel a pending one-off request.
+/// Cancel a pending one-off backup or restore request for a server, type,
+/// and purpose. A no-op if none is pending.
 #[utoipa::path(
 	post,
 	path = "/cancel_request",
@@ -1221,9 +1381,12 @@ pub async fn cancel_request(
 	Ok(Json(()))
 }
 
-/// Request a one-off full maintenance run for a group. The scheduler picks it up
-/// on its next tick, bypassing the cadence jitter slot. Idempotent — re-request
-/// refreshes the pending flag. Requires the repo to be `ready`.
+/// Request an out-of-cycle full maintenance run for a group's backup
+/// repository.
+///
+/// It runs on the scheduler's next pass rather than waiting for its regular
+/// staggered interval. Idempotent — re-requesting keeps the request pending.
+/// Requires the repository to be ready; returns 409 otherwise.
 #[utoipa::path(
 	post,
 	path = "/request_maintenance",
@@ -1258,8 +1421,8 @@ pub async fn request_maintenance(
 	Ok(Json(BackupConfigView::build(&mut conn, config).await?))
 }
 
-/// Cancel a pending full-maintenance request the scheduler hasn't picked up yet.
-/// A no-op if there's none pending (or the run already started).
+/// Cancel a pending full-maintenance request. A no-op if none is pending, or
+/// if the run has already started.
 #[utoipa::path(
 	post,
 	path = "/cancel_maintenance",
@@ -1284,8 +1447,9 @@ pub async fn cancel_maintenance(
 	Ok(Json(BackupConfigView::build(&mut conn, config).await?))
 }
 
-/// Stats panel: cached repo stats + recent runs + recent maintenance + pending
-/// one-off requests (across the group's member servers).
+/// Get backup statistics for a group: cached repository stats, recent backup
+/// and maintenance runs, pending one-off requests, and each member server's
+/// declared backup capabilities.
 #[utoipa::path(
 	post,
 	path = "/stats",
@@ -1392,8 +1556,8 @@ pub async fn stats(
 	}))
 }
 
-/// A server's registered backup capabilities + their enabled state. Empty when
-/// the server has advertised none yet.
+/// List a server's backup capabilities and their enabled state. Empty if the
+/// server hasn't advertised any yet.
 #[utoipa::path(
 	post,
 	path = "/capabilities",
@@ -1451,7 +1615,7 @@ pub async fn capabilities(
 	Ok(Json(out))
 }
 
-/// Operator toggle of a `(server, type)` capability's enabled flag.
+/// Enable or disable a server's backup capability for one type.
 #[utoipa::path(
 	post,
 	path = "/set_capability",
@@ -1472,9 +1636,12 @@ pub async fn set_capability(
 	Ok(Json(()))
 }
 
-/// Delete a group's config row (decommission). The bucket and its object-locked
-/// objects persist; this only stops credential issuance and removes the
-/// Canopy-owned passphrase Secret (which must not outlive its config).
+/// Delete a group's backup configuration (decommission).
+///
+/// The bucket and its existing backups are left untouched — object lock
+/// prevents deletion — but this stops credential issuance for the group and
+/// deletes the stored repository passphrase, which must not outlive its
+/// configuration.
 #[utoipa::path(
 	post,
 	path = "/delete",
@@ -1501,17 +1668,20 @@ pub async fn delete(
 
 // ── recovery vault verification ceremony ───────────────────────────────────────────
 
-/// Status of the recovery vault verification ceremony.
+/// Status of the disaster-recovery verification ceremony: whether recovery
+/// is configured, and whether a fresh verification is due.
 #[derive(Serialize, ToSchema)]
 pub struct RecoveryStatusResponse {
 	/// Whether recovery recipients are configured on this server at all.
 	pub configured: bool,
-	/// The live recipient fingerprints (`age1…`).
+	/// Fingerprints of the currently configured recovery recipients (age
+	/// public keys).
 	pub recipients: Vec<String>,
+	/// When the recovery ceremony was last completed successfully, if ever.
 	pub last_verified_at: Option<Timestamp>,
 	/// The recipient set the last verification covered.
 	pub last_verified_recipients: Vec<String>,
-	/// Whether a (fresh) ceremony is due.
+	/// Whether a fresh verification ceremony is due.
 	pub due: bool,
 	/// Human-readable reason for the `due` value.
 	pub reason: String,
@@ -1521,24 +1691,32 @@ pub struct RecoveryStatusResponse {
 	pub last_write_bytes: Option<i64>,
 }
 
+/// A freshly issued recovery-verification challenge.
 #[derive(Serialize, ToSchema)]
 pub struct RecoveryChallengeResponse {
-	/// The challenge ciphertext (`age` to the recipients), base64-encoded. The
-	/// operator decrypts it offline with a held private key (`bestool crypto
-	/// decrypt` / `age`) and submits the plaintext to `recovery_verify`.
+	/// A single-use verification challenge encrypted to the recovery
+	/// recipients, base64-encoded. The operator decrypts this offline with a
+	/// held private key (any tool that supports the `age` encryption format)
+	/// and submits the decrypted plaintext to the `/backups/recovery_verify`
+	/// endpoint to prove the key is genuinely held.
 	pub ciphertext_base64: String,
-	/// The recipients this challenge was encrypted to.
+	/// The recovery recipients (age public keys) this challenge was
+	/// encrypted to.
 	pub recipients: Vec<String>,
 }
 
+/// Answer to an outstanding recovery-verification challenge.
 #[derive(Deserialize, ToSchema)]
 pub struct RecoveryVerifyArgs {
-	/// The decrypted challenge plaintext.
+	/// The plaintext obtained by decrypting the challenge from the
+	/// `/backups/recovery_challenge` endpoint.
 	pub answer: String,
 }
 
+/// Result of a successful recovery verification.
 #[derive(Serialize, ToSchema)]
 pub struct RecoveryVerifyResponse {
+	/// When the verification was recorded.
 	pub verified_at: Timestamp,
 }
 
@@ -1571,8 +1749,8 @@ fn recovery_due(
 	)
 }
 
-/// Report the recovery vault verification status (recipients, last verification, and
-/// whether a ceremony is due).
+/// Get the disaster-recovery verification status: configured recipients,
+/// when it was last verified, and whether a fresh verification is due.
 #[utoipa::path(
 	post,
 	path = "/recovery_status",
@@ -1607,9 +1785,13 @@ pub async fn recovery_status(
 	}))
 }
 
-/// Issue a verification challenge: a fresh nonce encrypted to the recovery recipients.
-/// The operator decrypts it offline (proving a private key is genuinely held) and
-/// posts the plaintext back to `recovery_verify`.
+/// Issue a fresh recovery-verification challenge: a nonce encrypted to the
+/// configured recovery recipients.
+///
+/// The operator decrypts it offline to prove a private key is genuinely
+/// held, then submits the plaintext to the `/backups/recovery_verify`
+/// endpoint. Returns 502 if recovery recipients aren't configured on this
+/// server.
 #[utoipa::path(
 	post,
 	path = "/recovery_challenge",
@@ -1646,9 +1828,11 @@ pub async fn recovery_challenge(
 	}))
 }
 
-/// Complete the ceremony: verify the operator's decrypted answer matches the
-/// outstanding challenge, then record the verification against the current
-/// recipient set.
+/// Complete the recovery-verification ceremony: check that the submitted
+/// answer matches the outstanding challenge issued by the
+/// `/backups/recovery_challenge` endpoint, then record the verification
+/// against the current recipient set. Returns 400 if there's no outstanding
+/// challenge, it has expired, or the answer is wrong.
 #[utoipa::path(
 	post,
 	path = "/recovery_verify",
