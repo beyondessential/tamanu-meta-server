@@ -3791,7 +3791,7 @@
           "restore_replicas"
         ],
         "summary": "Delete a restore replica declaration.",
-        "description": "Removes the declaration: the consumer stops being asked to maintain the\nreplica and loses the backup access the declaration granted. Requires the\ncaller to be on the admin allow-list. Responds 404 if the declaration\ndoes not exist.",
+        "description": "Removes the declaration: the consumer stops being asked to maintain the\nreplica and loses the backup access the declaration granted. Any active\nrestore-verification alert for the declaration's scope is recovered, since\nnothing tracks that scope any more. Requires the caller to be on the admin\nallow-list. Responds 404 if the declaration does not exist.",
         "operationId": "restore_replicas_delete",
         "requestBody": {
           "content": {
