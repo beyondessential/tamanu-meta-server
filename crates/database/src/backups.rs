@@ -1332,6 +1332,31 @@ impl BackupMaintenanceRun {
 			.map_err(AppError::from)
 	}
 
+	/// When the group's maintenance last completed *successfully*, or `None` if
+	/// it never has. Drives prompt post-maintenance inspection: maintenance
+	/// (retention pruning, compaction) changes what's actually in the repo, so
+	/// the stats/snapshot inventory should freshen soon after — mirroring
+	/// [`BackupRun::latest_backup_at_for_group`]'s "freshen after a backup"
+	/// role. A failed run doesn't change repo contents and is already surfaced
+	/// via the separate `MAINTENANCE_ERROR` alert, so only successes count
+	/// here (matching the success-only convention there).
+	pub async fn latest_successful_finished_at_for_group(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+	) -> Result<Option<Timestamp>> {
+		use crate::schema::backup_maintenance_runs::dsl;
+
+		let row: Option<Self> = dsl::backup_maintenance_runs
+			.filter(dsl::group_id.eq(group_id))
+			.filter(dsl::outcome.eq(RunOutcome::Success))
+			.order_by(dsl::finished_at.desc())
+			.first(db)
+			.await
+			.optional()
+			.map_err(AppError::from)?;
+		Ok(row.and_then(|r| r.finished_at))
+	}
+
 	/// Whether a run row still exists and is open (`outcome IS NULL`). Used by
 	/// the scheduler's crash-detection to mark a run failed when its Job
 	/// finished without ever reporting.
