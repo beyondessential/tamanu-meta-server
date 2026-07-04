@@ -18,33 +18,47 @@ use crate::fns::Page;
 use crate::fns::servers::{ServerInfo, decorate_with_status, fill_display_hosts, server_to_info};
 use crate::state::AppState;
 
+/// Full record for a device: its identity and role, every authentication
+/// key ever registered on it, its most recent connection, and a live
+/// Tailscale snapshot when one is available.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct DeviceInfo {
+	/// Core identity, role, and Tailscale attachment for the device.
 	pub device: DeviceData,
+	/// Every authentication key ever registered on this device, active or not.
 	pub keys: Vec<DeviceKeyInfo>,
+	/// The most recent connection seen from this device, if any.
 	pub latest_connection: Option<DeviceConnectionData>,
-	/// Live snapshot from the Tailscale control plane for a device
-	/// that's currently attached by `tailscale_node_id`. `None` if the
-	/// device has no tailnet attachment, the directory isn't
-	/// configured, or the node id isn't in the directory's cache.
+	/// Live snapshot from the Tailscale network for a device that's
+	/// currently attached to a tailnet node. Omitted if the device has
+	/// no tailnet attachment, the tailnet directory integration isn't
+	/// configured, or the node isn't found in the directory's cache.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub tailnet_live: Option<TailnetLiveInfo>,
 }
 
+/// A live snapshot of a device's corresponding node on the Tailscale
+/// network, fetched from the cached tailnet directory rather than stored
+/// on the device record itself.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct TailnetLiveInfo {
+	/// The Tailscale network's unique identifier for this node.
 	pub node_id: String,
+	/// The node's display name in the Tailscale admin console.
 	pub display_name: String,
+	/// The tailnet (Tailscale network) this node belongs to.
 	pub tailnet: String,
+	/// The node's current Tailscale IP addresses.
 	pub addresses: Vec<String>,
+	/// ACL tags applied to the node in Tailscale.
 	pub tags: Vec<String>,
-	/// When the Tailscale control plane last saw this node. `None` if
-	/// the API didn't carry a value (or it didn't parse).
+	/// When the Tailscale network last saw this node online. Omitted if
+	/// that information wasn't available.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub last_seen: Option<Timestamp>,
-	/// Derived: `last_seen` is within the last 5 minutes — Tailscale's
-	/// own "online" heuristic in the admin console. False when
-	/// `last_seen` is missing.
+	/// Whether the node has been seen within the last 5 minutes — the
+	/// same heuristic Tailscale's own admin console uses to mark a node
+	/// online. False when `last_seen` is missing.
 	pub online: bool,
 }
 
@@ -90,41 +104,62 @@ impl DeviceInfo {
 	}
 }
 
+/// Core identity and trust state of a device.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct DeviceData {
+	/// Unique identifier for the device.
 	pub id: Uuid,
+	/// When the device was first registered.
 	pub created_at: Timestamp,
+	/// When the device record was last changed.
 	pub updated_at: Timestamp,
+	/// The device's current role, which determines what it's trusted to
+	/// do (act as a monitored server, publish releases, administer the
+	/// fleet, or perform backup restores).
 	pub role: DeviceRole,
-	/// The Tailscale node ID this device is attached to, if any. The
-	/// live IP / display name corresponding to this id is in
-	/// [`DeviceInfo::tailnet_live`].
+	/// The Tailscale node this device is attached to, if any. The live
+	/// address and display name for this node, when available, are
+	/// included separately in the response's tailnet snapshot.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub tailscale_node_id: Option<String>,
+	/// The Tailscale display name recorded for the attached node, if any.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub tailscale_node_name: Option<String>,
+	/// The tailnet (Tailscale network) the attached node belongs to, if any.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub tailscale_tailnet: Option<String>,
 }
 
+/// An authentication key registered on a device.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct DeviceKeyInfo {
+	/// Unique identifier for this key.
 	pub id: Uuid,
+	/// The device this key belongs to.
 	pub device_id: Uuid,
+	/// Operator-assigned label for the key, if any.
 	pub name: Option<String>,
+	/// The key's public half, PEM-encoded.
 	pub pem_data: String,
+	/// When the key was added.
 	pub created_at: Timestamp,
 	/// Whether this key can currently authenticate. Inactive keys are kept for
 	/// history and can be re-enabled.
 	pub is_active: bool,
 }
 
+/// A single recorded connection from a device to the API.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct DeviceConnectionData {
+	/// Unique identifier for this connection record.
 	pub id: Uuid,
+	/// When the connection was recorded.
 	pub created_at: Timestamp,
+	/// The device that connected.
 	pub device_id: Uuid,
+	/// IP address the device connected from.
 	pub ip: String,
+	/// User-Agent header sent with the request, if any.
 	pub user_agent: Option<String>,
 }
 
@@ -219,11 +254,18 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(resolve_tailnet_identifier))
 }
 
+/// Identifies a single device by id.
 #[derive(Deserialize, ToSchema)]
 pub struct DeviceIdArgs {
+	/// The device to operate on.
 	pub device_id: Uuid,
 }
 
+/// Look up a single device by id.
+///
+/// Returns full device details: its identity and role, every key ever
+/// registered on it, its most recent connection, and a live Tailscale
+/// snapshot when available. Returns 404 if no device exists with that id.
 #[utoipa::path(
 	post,
 	path = "/get_device_by_id",
@@ -246,12 +288,21 @@ pub async fn get_device_by_id(
 	Ok(Json(info))
 }
 
+/// Pagination window for a paged listing endpoint.
 #[derive(Deserialize, ToSchema)]
 pub struct PaginationArgs {
+	/// Number of items to skip from the start of the result set.
 	pub offset: u64,
+	/// Maximum number of items to return. Endpoints that use this type
+	/// apply their own default when omitted.
 	pub limit: Option<u64>,
 }
 
+/// List the servers a device is currently associated with.
+///
+/// Returns the servers this device is currently bound to (usually zero or
+/// one), including reachability status and a best-effort display address
+/// for each.
 #[utoipa::path(
 	post,
 	path = "/get_servers_for_device",
@@ -275,6 +326,10 @@ pub async fn get_servers_for_device(
 	Ok(Json(infos))
 }
 
+/// List servers a device was previously associated with, but no longer is.
+///
+/// Useful for tracing a device's history when it has since been reassigned
+/// or replaced on a different server.
 #[utoipa::path(
 	post,
 	path = "/get_past_server_associations",
@@ -298,19 +353,33 @@ pub async fn get_past_server_associations(
 	Ok(Json(infos))
 }
 
+/// Pagination cursor for connection history, pointing to a specific
+/// connection record.
 #[derive(Deserialize, ToSchema)]
 pub struct HistoryCursor {
+	/// Timestamp of the connection to page before.
 	pub created_at: Timestamp,
+	/// Id of the connection to page before, used to break ties when
+	/// timestamps match.
 	pub id: Uuid,
 }
 
+/// Request parameters for listing a device's connection history.
 #[derive(Deserialize, ToSchema)]
 pub struct ConnectionHistoryArgs {
+	/// The device whose connection history to list.
 	pub device_id: Uuid,
+	/// Cursor to page backwards from. Omit to start from the most recent
+	/// connection.
 	pub before: Option<HistoryCursor>,
+	/// Maximum number of connections to return. Defaults to 100.
 	pub limit: Option<u64>,
 }
 
+/// List a device's connection history, most recent first.
+///
+/// Supports cursor-based pagination: pass the oldest entry from a previous
+/// page as `before` to continue further back in time.
 #[utoipa::path(
 	post,
 	path = "/connection_history",
@@ -343,6 +412,7 @@ pub async fn connection_history(
 	))
 }
 
+/// Count how many times a device has connected.
 #[utoipa::path(
 	post,
 	path = "/connection_count",
@@ -367,12 +437,20 @@ pub async fn connection_count(
 	))
 }
 
+/// Identifies a device and the role to trust it at.
 #[derive(Deserialize, ToSchema)]
 pub struct TrustArgs {
+	/// The device to update.
 	pub device_id: Uuid,
+	/// The role to assign to the device.
 	pub role: DeviceRole,
 }
 
+/// List registered devices, paginated.
+///
+/// Returns a page of the device registry, newest first, plus the total
+/// count for rendering a pager. Every registered device is included,
+/// whatever its role.
 #[utoipa::path(
 	post,
 	path = "/list_trusted",
@@ -407,8 +485,10 @@ pub async fn list_trusted(
 }
 
 /// Disable every active key on a device, so none of them can authenticate.
-/// The rows are kept (for history) and can be re-enabled individually. Tailnet
-/// identity, if any, is untouched — detach it separately.
+///
+/// The keys stay in the device's history and can be re-enabled individually.
+/// Any Tailscale identity attached to the device is untouched — detach it
+/// separately.
 #[utoipa::path(
 	post,
 	path = "/disable_all_keys",
@@ -430,6 +510,9 @@ pub async fn disable_all_keys(
 	Ok(Json(()))
 }
 
+/// Change the role a device is trusted at.
+///
+/// Immediately changes what the device is permitted to do system-wide.
 #[utoipa::path(
 	post,
 	path = "/update_role",
@@ -451,12 +534,14 @@ pub async fn update_role(
 	Ok(Json(()))
 }
 
+/// Request to mint a new device credential.
 #[derive(Deserialize, ToSchema)]
 pub struct ProvisionArgs {
 	/// Role to trust the device at.
 	pub role: DeviceRole,
-	/// Provision an additional credential onto this existing device. When
-	/// omitted, a new device is created at `role`.
+	/// Attach the new credential to this existing device instead of
+	/// creating a new one. When omitted, a new device is created at
+	/// `role`.
 	#[serde(default)]
 	pub device_id: Option<Uuid>,
 	/// Display name for the new key. Defaults to "Provisioned key".
@@ -468,7 +553,9 @@ pub struct ProvisionArgs {
 /// private key lives only inside `key_age_base64`; Canopy never persists it.
 #[derive(Serialize, ToSchema)]
 pub struct ProvisionedCredential {
+	/// The device the credential was issued for.
 	pub device_id: Uuid,
+	/// Unique identifier for the newly-created key record.
 	pub key_id: Uuid,
 	/// Lowercase hex SHA-256 of the stored public key, to correlate the
 	/// credential with the device's key list.
@@ -483,10 +570,14 @@ pub struct ProvisionedCredential {
 	pub passphrase: String,
 }
 
-/// Mint a device keypair server-side, store its public key as an active key on
-/// a new or existing device at the chosen role, and return the private key
-/// once, encrypted under a fresh passphrase (spec DPK). Canopy keeps only the
-/// public key; the private key is never persisted or logged.
+/// Generate a new device credential and return the private key once.
+///
+/// Generates a keypair, registers its public key as an active key on a new
+/// or existing device at the chosen role, and returns the private key
+/// encrypted under a freshly-generated passphrase. Canopy keeps only the
+/// public key — the private key is never stored or logged after this
+/// response. Returns 404 if `device_id` is given but doesn't match an
+/// existing device.
 #[utoipa::path(
 	post,
 	path = "/provision_credential",
@@ -572,8 +663,10 @@ pub async fn provision_credential(
 	}))
 }
 
+/// Request to register an existing public key on a device.
 #[derive(Deserialize, ToSchema)]
 pub struct AddKeyArgs {
+	/// The device to add the key to.
 	pub device_id: Uuid,
 	/// The device's public key, PEM-encoded `SubjectPublicKeyInfo`
 	/// (`-----BEGIN PUBLIC KEY-----`). Bare base64 (no armor) is also accepted.
@@ -584,8 +677,11 @@ pub struct AddKeyArgs {
 }
 
 /// Register an externally-generated public key as an active key on a device.
-/// Unlike `provision_credential`, Canopy never sees a private key here — the
-/// operator supplies the public half of a keypair they hold.
+///
+/// Unlike the `provision_credential` endpoint, Canopy never generates or
+/// sees a private key here — the operator supplies the public half of a
+/// keypair they already hold. Returns 400 if the supplied value isn't a
+/// valid public key, and 404 if the device doesn't exist.
 #[utoipa::path(
 	post,
 	path = "/add_key",
@@ -631,14 +727,18 @@ pub async fn add_key(
 	Ok(Json(DeviceInfo::from_db(info, &state).await))
 }
 
+/// Identifies a single device key by id.
 #[derive(Deserialize, ToSchema)]
 pub struct KeyIdArgs {
+	/// The key to operate on.
 	pub key_id: Uuid,
 }
 
-/// Disable a single key so it can no longer authenticate. The row is kept and
-/// can be re-enabled; disabling one key of several lets a device rotate keys
-/// with no gap (add the new key, then disable the old).
+/// Disable a single key so it can no longer authenticate.
+///
+/// The key record is kept and can be re-enabled later. Disabling one key
+/// while others remain active lets a device rotate keys with no downtime:
+/// add the new key first, then disable the old one.
 #[utoipa::path(
 	post,
 	path = "/deactivate_key",
@@ -657,7 +757,7 @@ pub async fn deactivate_key(
 	Ok(Json(()))
 }
 
-/// Re-enable a previously disabled key.
+/// Re-enable a previously disabled key so it can authenticate again.
 #[utoipa::path(
 	post,
 	path = "/reactivate_key",
@@ -676,11 +776,20 @@ pub async fn reactivate_key(
 	Ok(Json(()))
 }
 
+/// Free-text search query for devices.
 #[derive(Deserialize, ToSchema)]
 pub struct DeviceSearchArgs {
+	/// Search text, matched against key material, key names, connection
+	/// IP addresses, and Tailscale identity fields. Also resolved
+	/// against the live tailnet directory (when configured) to catch
+	/// devices identified by an IP, node id, or DNS name they haven't
+	/// connected with yet.
 	pub query: String,
 }
 
+/// Search for devices by key, name, IP address, or Tailscale identity.
+///
+/// Returns an empty list if the query is blank.
 #[utoipa::path(
 	post,
 	path = "/search",
@@ -744,12 +853,16 @@ pub async fn search(
 	Ok(Json(out))
 }
 
+/// Request to rename (or clear the name of) a device key.
 #[derive(Deserialize, ToSchema)]
 pub struct UpdateKeyNameArgs {
+	/// The key to rename.
 	pub key_id: Uuid,
+	/// New display name for the key, or null to clear it.
 	pub name: Option<String>,
 }
 
+/// Rename a device key, or clear its name.
 #[utoipa::path(
 	post,
 	path = "/update_key_name",
@@ -770,8 +883,10 @@ pub async fn update_key_name(
 	Ok(Json(()))
 }
 
+/// Request to attach a device to a Tailscale network node.
 #[derive(Deserialize, ToSchema)]
 pub struct AttachTailscaleArgs {
+	/// The device to attach a tailnet identity to.
 	pub device_id: Uuid,
 	/// Any of: a Tailscale CGNAT/ULA IP, a node id, or a DNS name —
 	/// the operator pastes whichever is most convenient from the
@@ -781,6 +896,11 @@ pub struct AttachTailscaleArgs {
 	pub identifier: String,
 }
 
+/// Attach a device to a Tailscale network node.
+///
+/// Resolves the given identifier against the cached tailnet directory and
+/// records the canonical node identity on the device. Returns the updated
+/// device record, including its live tailnet snapshot when available.
 #[utoipa::path(
 	post,
 	path = "/attach_tailscale",
@@ -826,6 +946,10 @@ pub async fn attach_tailscale(
 	Ok(Json(info))
 }
 
+/// Detach a device from its Tailscale network node.
+///
+/// Returns the updated device record, with its tailnet identity cleared.
+/// Returns 404 if the device doesn't exist.
 #[utoipa::path(
 	post,
 	path = "/detach_tailscale",
@@ -849,16 +973,28 @@ pub async fn detach_tailscale(
 	Ok(Json(info))
 }
 
+/// Request to merge two device records into one.
 #[derive(Deserialize, ToSchema)]
 pub struct MergeIntoArgs {
-	/// Device row to fold *into* the target — usually the
-	/// auto-discovered tailnet-only row.
+	/// The device to merge away — usually the automatically-discovered,
+	/// tailnet-only device that doesn't yet have its own certificate
+	/// key. This device is removed once the merge completes.
 	pub source_id: Uuid,
-	/// Device row that keeps existing — usually the existing mTLS
-	/// row that owns the device's server attachment and history.
+	/// The device that remains after the merge — usually the existing
+	/// device that already owns the server attachment and connection
+	/// history.
 	pub target_id: Uuid,
 }
 
+/// Merge one device record into another.
+///
+/// Combines keys, connections, and tailnet/server attachments onto the
+/// target device and removes the source. Used to reconcile a device that
+/// was auto-discovered via the tailnet directory with the device it
+/// actually corresponds to, once that device authenticates with its own
+/// key. Returns 409 if both devices independently hold a Tailscale
+/// identity or a server attachment, since the merge can't decide which one
+/// to keep.
 #[utoipa::path(
 	post,
 	path = "/merge_into",
@@ -883,20 +1019,26 @@ pub async fn merge_into(
 	Ok(Json(info))
 }
 
+/// A Tailscale identifier to resolve against the live tailnet directory.
 #[derive(Deserialize, ToSchema)]
 pub struct ResolveTailnetIdentifierArgs {
+	/// A Tailscale IP address, node id, or DNS name to look up.
 	pub identifier: String,
 }
 
+/// Result of resolving a Tailscale identifier.
 #[derive(Serialize, ToSchema)]
 pub struct ResolveTailnetIdentifierResponse {
+	/// The resolved node's live details, or null if the identifier
+	/// didn't match any node in the tailnet.
 	pub matched: Option<TailnetLiveInfo>,
 }
 
-/// Look up a Tailscale IP / node id / DNS name in the directory and
-/// return the canonical identity if found. Used by the attach UI's
-/// preview pane so the operator can confirm the resolved node before
-/// hitting attach.
+/// Look up a Tailscale IP address, node id, or DNS name.
+///
+/// Resolves the identifier against the live tailnet directory and returns
+/// its canonical node identity if found. Useful for confirming what an
+/// identifier resolves to before using it to attach a device.
 #[utoipa::path(
 	post,
 	path = "/resolve_tailnet_identifier",
