@@ -794,9 +794,11 @@ function CreateReplicaDialog({
  * of intent, e.g. retargeting a `verify` replica to `analytics`. Parameter
  * fields re-derive from the selected consumer+intent's current schema
  * whenever either changes, carrying forward values for parameter names that
- * still exist and dropping the rest. A scope change that collides with
- * another declaration, or a retargeted intent the new consumer doesn't
- * advertise, comes back as an inline error. */
+ * still exist and dropping the rest. When the selected consumer+intent has
+ * no schema (a gap), there are no fields to render and the stored parameter
+ * values are carried through unchanged, matching create's gap behaviour. A
+ * scope change that collides with another declaration comes back as an
+ * inline error. */
 function EditReplicaDialog({
 	groupId,
 	replica,
@@ -863,8 +865,14 @@ function EditReplicaDialog({
 		if (overdue_after_seconds != null && !Number.isFinite(overdue_after_seconds)) {
 			return setError("Overdue bound must be a number of hours");
 		}
-		const params = paramValuesToWire(paramSchema, paramValues);
-		if (typeof params === "string") return setError(params);
+		// With no schema (a gap intent) there are no param fields; carry the
+		// stored values through unchanged rather than wiping them.
+		let params: unknown = replica.params;
+		if (Object.keys(paramSchema).length > 0) {
+			const built = paramValuesToWire(paramSchema, paramValues);
+			if (typeof built === "string") return setError(built);
+			params = built;
+		}
 		setPending(true);
 		setError(null);
 		try {

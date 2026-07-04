@@ -325,7 +325,7 @@ async fn update_can_change_consumer_and_server_scope() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn update_rejects_unadvertised_intent() {
+async fn update_to_unadvertised_intent_creates_gap() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let group = insert_group(&mut conn).await;
 		let consumer = insert_consumer(&mut conn).await;
@@ -335,7 +335,9 @@ async fn update_rejects_unadvertised_intent() {
 		let id = create_replica(&private, consumer, group, "verify", serde_json::json!({})).await;
 
 		// Retargeting to `analytics`, which the consumer doesn't advertise, is
-		// rejected outright (unlike `create`, which would allow it as a gap).
+		// accepted with the params passing through unvalidated — same as create,
+		// which allows declaring ahead of the consumer registering support. The
+		// declaration surfaces as a gap.
 		private
 			.post("/api/restore_replicas/update")
 			.json(&serde_json::json!({
@@ -347,11 +349,22 @@ async fn update_rejects_unadvertised_intent() {
 				"intent": "analytics",
 				"name": "verify-decl",
 				"overdue_after_seconds": null,
-				"params": {},
+				"params": { "not_in_any_schema": "kept-as-is" },
 				"enabled": true,
 			}))
 			.await
-			.assert_status_bad_request();
+			.assert_status_ok();
+
+		let resp = private
+			.post("/api/restore_replicas/for_group")
+			.json(&serde_json::json!({ "server_group_id": group }))
+			.await;
+		resp.assert_status_ok();
+		let rows: Vec<serde_json::Value> = resp.json();
+		assert_eq!(rows.len(), 1, "got {rows:?}");
+		assert_eq!(rows[0]["intent"], "analytics");
+		assert_eq!(rows[0]["gap"], true, "unadvertised intent is a gap");
+		assert_eq!(rows[0]["params"]["not_in_any_schema"], "kept-as-is");
 	})
 	.await;
 }

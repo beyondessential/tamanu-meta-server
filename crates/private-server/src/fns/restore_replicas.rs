@@ -201,33 +201,18 @@ fn overdue_after_to_pg(seconds: Option<i64>) -> Option<PgDuration> {
 }
 
 /// Validate operator-supplied parameter values against the consumer's advertised
-/// schema for `intent`. If the intent is not advertised and `require_advertised`
-/// is `false`, there is no schema to check against, so the values are accepted
-/// as-is (used by `create`, which allows declaring ahead of the consumer
-/// registering support, surfaced as a gap). If `require_advertised` is `true`,
-/// an unadvertised intent is rejected outright (used by `update`, where the
-/// operator is explicitly retargeting a live declaration onto a consumer or
-/// intent that cannot currently serve it).
+/// schema for `intent`. If the intent is not advertised (a gap) there is no
+/// schema to check against, so the values are accepted as-is.
 async fn validate_params_for_intent(
 	conn: &mut AsyncPgConnection,
 	consumer_device_id: Uuid,
 	intent: &RestoreIntent,
 	params: &ParamValues,
-	require_advertised: bool,
 ) -> Result<()> {
 	let descriptors =
 		RestoreConsumerCapability::list_for_consumer(conn, consumer_device_id).await?;
-	match descriptors.iter().find(|d| &d.intent == intent) {
-		Some(desc) => {
-			validate_params(&desc.params, params)
-				.map_err(|e| AppError::BadRequest(e.to_string()))?;
-		}
-		None if require_advertised => {
-			return Err(AppError::BadRequest(format!(
-				"consumer does not currently advertise intent {intent:?}"
-			)));
-		}
-		None => {}
+	if let Some(desc) = descriptors.iter().find(|d| &d.intent == intent) {
+		validate_params(&desc.params, params).map_err(|e| AppError::BadRequest(e.to_string()))?;
 	}
 	Ok(())
 }
@@ -400,7 +385,6 @@ pub async fn create(
 		args.consumer_device_id,
 		&args.intent,
 		&args.params,
-		false,
 	)
 	.await?;
 	let replica = RestoreReplica::create(
@@ -428,15 +412,13 @@ pub async fn create(
 /// backup type, and intent can be retargeted in the same call as the name,
 /// overdue bound, parameter values, and enabled flag. Parameter values are
 /// validated against the *new* consumer+intent's advertised parameter schema;
-/// unlike `create`, an intent the new consumer doesn't currently advertise is
-/// rejected rather than accepted as a gap, since this is an explicit
-/// retargeting of a live declaration rather than an initial declaration made
-/// ahead of the consumer registering support. If the scope changes, any
-/// active restore-verification alert for the declaration's old scope is
-/// recovered. Requires the caller to be on the admin allow-list. Responds 400
-/// if a parameter value fails validation or the new intent isn't advertised,
-/// 404 if the declaration does not exist, and 409 if the new scope collides
-/// with another declaration.
+/// as with `create`, an intent the new consumer doesn't currently advertise
+/// is accepted and the values pass through unvalidated, leaving the
+/// declaration with a gap. If the scope changes, any active
+/// restore-verification alert for the declaration's old scope is recovered.
+/// Requires the caller to be on the admin allow-list. Responds 400 if a
+/// parameter value fails validation, 404 if the declaration does not exist,
+/// and 409 if the new scope collides with another declaration.
 #[utoipa::path(
 	post,
 	path = "/update",
@@ -461,7 +443,6 @@ pub async fn update(
 		args.consumer_device_id,
 		&args.intent,
 		&args.params,
-		true,
 	)
 	.await?;
 	let replica = RestoreReplica::update(

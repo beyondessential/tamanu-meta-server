@@ -1959,15 +1959,13 @@ export interface paths {
          *     backup type, and intent can be retargeted in the same call as the name,
          *     overdue bound, parameter values, and enabled flag. Parameter values are
          *     validated against the *new* consumer+intent's advertised parameter schema;
-         *     unlike `create`, an intent the new consumer doesn't currently advertise is
-         *     rejected rather than accepted as a gap, since this is an explicit
-         *     retargeting of a live declaration rather than an initial declaration made
-         *     ahead of the consumer registering support. If the scope changes, any
-         *     active restore-verification alert for the declaration's old scope is
-         *     recovered. Requires the caller to be on the admin allow-list. Responds 400
-         *     if a parameter value fails validation or the new intent isn't advertised,
-         *     404 if the declaration does not exist, and 409 if the new scope collides
-         *     with another declaration.
+         *     as with `create`, an intent the new consumer doesn't currently advertise
+         *     is accepted and the values pass through unvalidated, leaving the
+         *     declaration with a gap. If the scope changes, any active
+         *     restore-verification alert for the declaration's old scope is recovered.
+         *     Requires the caller to be on the admin allow-list. Responds 400 if a
+         *     parameter value fails validation, 404 if the declaration does not exist,
+         *     and 409 if the new scope collides with another declaration.
          */
         post: operations["restore_replicas_update"];
         delete?: never;
