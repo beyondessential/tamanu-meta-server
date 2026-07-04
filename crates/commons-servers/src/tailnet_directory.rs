@@ -12,7 +12,7 @@
 //! the internet edge by type-system construction.
 
 use std::{
-	collections::HashMap,
+	collections::{HashMap, HashSet},
 	net::IpAddr,
 	sync::Arc,
 	time::{Duration, Instant},
@@ -103,6 +103,92 @@ struct Cache {
 	by_ip: HashMap<IpAddr, DirectoryEntry>,
 	by_node_id: HashMap<String, DirectoryEntry>,
 	last_refresh: Option<Instant>,
+	/// Administrators derived from the tailnet policy's `bes.au/cap/canopy`
+	/// grants, recomputed on each successful policy read. Empty until the
+	/// first successful read; a failed read leaves the previous value in
+	/// place so a control-plane outage never withdraws policy-granted admin.
+	admin: AdminGrants,
+}
+
+/// The Canopy application capability whose `admin: true` payload confers
+/// administrative access, and the service tag a conferring grant must target.
+const CANOPY_ADMIN_CAP: &str = "bes.au/cap/canopy";
+const CANOPY_SERVICE_TAG: &str = "tag:server-canopy";
+
+/// Administrative access resolved from the tailnet policy.
+#[derive(Debug, Default, Clone)]
+struct AdminGrants {
+	/// Explicit logins granted admin, from group members and bare user
+	/// sources, lowercased for case-insensitive comparison.
+	logins: HashSet<String>,
+	/// True when a conferring grant's source covers every tailnet user
+	/// identity (`autogroup:member`).
+	all_members: bool,
+}
+
+/// The subset of the tailnet policy file this directory reads.
+#[derive(Debug, Deserialize)]
+struct PolicyFile {
+	#[serde(default)]
+	groups: HashMap<String, Vec<String>>,
+	#[serde(default)]
+	grants: Vec<Grant>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Grant {
+	#[serde(default)]
+	src: Vec<String>,
+	#[serde(default)]
+	dst: Vec<String>,
+	#[serde(default)]
+	app: HashMap<String, Vec<serde_json::Value>>,
+}
+
+/// Resolve the set of administrators a policy file confers through
+/// `bes.au/cap/canopy` grants targeting the Canopy service tag.
+fn resolve_admins(policy: &PolicyFile) -> AdminGrants {
+	let mut out = AdminGrants::default();
+	for grant in &policy.grants {
+		let confers = grant.app.get(CANOPY_ADMIN_CAP).is_some_and(|values| {
+			values
+				.iter()
+				.any(|v| v.get("admin").and_then(serde_json::Value::as_bool) == Some(true))
+		});
+		if !confers {
+			continue;
+		}
+		if !grant.dst.iter().any(|d| d == CANOPY_SERVICE_TAG) {
+			continue;
+		}
+		for src in &grant.src {
+			match src.as_str() {
+				"autogroup:member" => out.all_members = true,
+				// Tagged devices never reach the administrative surface, so a
+				// tagged source contributes no administrative login.
+				"autogroup:tagged" => {}
+				s if s.starts_with("autogroup:") => {
+					tracing::warn!(source = %s, "canopy admin grant uses an unsupported autogroup; ignoring");
+				}
+				s if s.starts_with("group:") => match policy.groups.get(s) {
+					Some(members) => {
+						out.logins
+							.extend(members.iter().map(|m| m.to_ascii_lowercase()));
+					}
+					None => {
+						tracing::warn!(group = %s, "canopy admin grant references an undefined group; ignoring");
+					}
+				},
+				s if s.contains('@') => {
+					out.logins.insert(s.to_ascii_lowercase());
+				}
+				s => {
+					tracing::warn!(source = %s, "canopy admin grant uses an unsupported source; ignoring");
+				}
+			}
+		}
+	}
+	out
 }
 
 #[derive(Debug, Default)]
@@ -168,6 +254,11 @@ impl TailnetDirectory {
 		};
 
 		directory.refresh().await?;
+		// Non-fatal: without the policy read (e.g. the OAuth client lacks the
+		// policy-file read scope) admin access falls back to the allowlist.
+		if let Err(e) = directory.refresh_policy().await {
+			tracing::warn!(error = %e, "initial tailnet policy read failed; admin access falls back to the allowlist");
+		}
 
 		let bg = directory.clone();
 		tokio::spawn(async move {
@@ -177,10 +268,22 @@ impl TailnetDirectory {
 				if let Err(e) = bg.refresh().await {
 					tracing::warn!(error = %e, "tailnet directory refresh failed");
 				}
+				if let Err(e) = bg.refresh_policy().await {
+					tracing::warn!(error = %e, "tailnet policy refresh failed");
+				}
 			}
 		});
 
 		Ok(directory)
+	}
+
+	/// True when the login is granted administrative access by the tailnet
+	/// policy — either explicitly (a group member or named user) or because
+	/// a conferring grant covers every tailnet member. Case-insensitive.
+	pub async fn is_admin_by_policy(&self, login: &str) -> bool {
+		let login = login.to_ascii_lowercase();
+		let cache = self.inner.cache.read().await;
+		cache.admin.all_members || cache.admin.logins.contains(&login)
 	}
 
 	/// Lookup a tailnet IP. Returns `None` for unknown IPs. On a miss the
@@ -369,6 +472,61 @@ impl TailnetDirectory {
 		Ok(())
 	}
 
+	/// Force-refresh the administrator set from the tailnet policy file.
+	pub async fn refresh_policy(&self) -> Result<()> {
+		let token = self.access_token().await?;
+		let url = format!(
+			"{}/api/v2/tailnet/{}/acl",
+			self.inner.config.api_base.trim_end_matches('/'),
+			self.inner.config.tailnet,
+		);
+		let resp = self
+			.inner
+			.client
+			.get(&url)
+			.bearer_auth(&token)
+			.header(reqwest::header::ACCEPT, "application/json")
+			.send()
+			.await
+			.map_err(|e| AppError::custom(format!("tailscale policy request: {e}")))?;
+
+		if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+			self.inner.oauth.write().await.token = None;
+			let token = self.access_token().await?;
+			let retry = self
+				.inner
+				.client
+				.get(&url)
+				.bearer_auth(&token)
+				.header(reqwest::header::ACCEPT, "application/json")
+				.send()
+				.await
+				.map_err(|e| AppError::custom(format!("tailscale policy retry: {e}")))?;
+			return self.ingest_policy(retry).await;
+		}
+
+		self.ingest_policy(resp).await
+	}
+
+	async fn ingest_policy(&self, resp: reqwest::Response) -> Result<()> {
+		if !resp.status().is_success() {
+			let status = resp.status();
+			let body = resp.text().await.unwrap_or_default();
+			return Err(AppError::custom(format!(
+				"tailscale policy: {status}: {body}"
+			)));
+		}
+		let policy: PolicyFile = resp
+			.json()
+			.await
+			.map_err(|e| AppError::custom(format!("decoding policy response: {e}")))?;
+
+		let admin = resolve_admins(&policy);
+		let mut cache = self.inner.cache.write().await;
+		cache.admin = admin;
+		Ok(())
+	}
+
 	async fn access_token(&self) -> Result<String> {
 		{
 			let state = self.inner.oauth.read().await;
@@ -438,6 +596,7 @@ impl TailnetDirectory {
 			by_ip,
 			by_node_id,
 			last_refresh: Some(Instant::now()),
+			admin: AdminGrants::default(),
 		};
 		Self {
 			inner: Arc::new(Inner {
@@ -516,6 +675,86 @@ mod tests {
 		assert!(!is_tailnet_ip(IpAddr::V6(
 			"2001:db8::1".parse::<Ipv6Addr>().unwrap()
 		)));
+	}
+
+	fn policy(json: serde_json::Value) -> PolicyFile {
+		serde_json::from_value(json).unwrap()
+	}
+
+	#[test]
+	fn group_source_resolves_to_members() {
+		let admins = resolve_admins(&policy(serde_json::json!({
+			"groups": { "group:ops": ["Felix@BES.au", "sam@bes.au"] },
+			"grants": [{
+				"app": { "bes.au/cap/canopy": [{ "admin": true }] },
+				"dst": ["tag:server-canopy"],
+				"src": ["group:ops"],
+			}],
+		})));
+		assert!(!admins.all_members);
+		assert!(admins.logins.contains("felix@bes.au"));
+		assert!(admins.logins.contains("sam@bes.au"));
+	}
+
+	#[test]
+	fn bare_user_and_autogroup_member_sources() {
+		let admins = resolve_admins(&policy(serde_json::json!({
+			"grants": [{
+				"app": { "bes.au/cap/canopy": [{ "admin": true }] },
+				"dst": ["tag:server-canopy"],
+				"src": ["dana@bes.au", "autogroup:member"],
+			}],
+		})));
+		assert!(admins.all_members);
+		assert!(admins.logins.contains("dana@bes.au"));
+	}
+
+	#[test]
+	fn grant_needs_the_service_tag_and_admin_true() {
+		// Wrong dst: not conferring.
+		let wrong_dst = resolve_admins(&policy(serde_json::json!({
+			"groups": { "group:ops": ["felix@bes.au"] },
+			"grants": [{
+				"app": { "bes.au/cap/canopy": [{ "admin": true }] },
+				"dst": ["tag:server-other"],
+				"src": ["group:ops"],
+			}],
+		})));
+		assert!(wrong_dst.logins.is_empty() && !wrong_dst.all_members);
+
+		// Payload without `admin: true`: not conferring.
+		let no_admin = resolve_admins(&policy(serde_json::json!({
+			"groups": { "group:ops": ["felix@bes.au"] },
+			"grants": [{
+				"app": { "bes.au/cap/canopy": [{ "admin": false }] },
+				"dst": ["tag:server-canopy"],
+				"src": ["group:ops"],
+			}],
+		})));
+		assert!(no_admin.logins.is_empty() && !no_admin.all_members);
+
+		// Different capability: not conferring.
+		let other_cap = resolve_admins(&policy(serde_json::json!({
+			"groups": { "group:ops": ["felix@bes.au"] },
+			"grants": [{
+				"app": { "bes.au/cap/other": [{ "admin": true }] },
+				"dst": ["tag:server-canopy"],
+				"src": ["group:ops"],
+			}],
+		})));
+		assert!(other_cap.logins.is_empty() && !other_cap.all_members);
+	}
+
+	#[test]
+	fn unsupported_sources_are_ignored() {
+		let admins = resolve_admins(&policy(serde_json::json!({
+			"grants": [{
+				"app": { "bes.au/cap/canopy": [{ "admin": true }] },
+				"dst": ["tag:server-canopy"],
+				"src": ["autogroup:tagged", "tag:server-canopy", "*", "autogroup:admin"],
+			}],
+		})));
+		assert!(admins.logins.is_empty() && !admins.all_members);
 	}
 
 	#[test]

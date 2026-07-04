@@ -5642,7 +5642,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description `true` if the caller's Tailscale identity is on the admin allow-list; `false` otherwise (including when no Tailscale identity is present). */
+            /** @description `true` if the caller's Tailscale identity is an administrator (on the admin allow-list, or granted admin by the tailnet policy); `false` otherwise (including when no Tailscale identity is present). */
             200: {
                 headers: {
                     [name: string]: unknown;

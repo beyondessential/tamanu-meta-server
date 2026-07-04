@@ -52,7 +52,7 @@ pub async fn server_versions_url() -> Result<Json<Option<String>>> {
 	path = "/is_current_user_admin",
 	tag = "commons",
 	responses(
-		(status = 200, description = "`true` if the caller's Tailscale identity is on the admin allow-list; `false` otherwise (including when no Tailscale identity is present).", body = bool, content_type = "application/json"),
+		(status = 200, description = "`true` if the caller's Tailscale identity is an administrator (on the admin allow-list, or granted admin by the tailnet policy); `false` otherwise (including when no Tailscale identity is present).", body = bool, content_type = "application/json"),
 	),
 )]
 pub async fn is_current_user_admin(

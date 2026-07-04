@@ -68,7 +68,7 @@ impl Modify for SecuritySchemes {
 			"tailscale-admin",
 			SecurityScheme::ApiKey(ApiKey::Header(ApiKeyValue::with_description(
 				"Tailscale-User-Login",
-				"Identity header injected by the Tailscale sidecar. The login value must also be present on the admins allow-list.",
+				"Identity header injected by the Tailscale sidecar. The login must additionally be an administrator: either on the admins allow-list, or granted admin by the tailnet policy.",
 			))),
 		);
 	}
