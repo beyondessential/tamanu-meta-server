@@ -8,25 +8,39 @@ import { Link as RouterLink } from "react-router-dom";
  * server is ungrouped, the group prefix is skipped entirely — no leading
  * separator.
  *
- * Pass `groupId` to make the group name a link to the group page. Leave
- * it off in contexts that are already wrapped in a link (list rows) —
+ * Pass `groupId` to make the group name a link to the group page, and/or
+ * `serverId` to make the server name a link to the server page. Leave
+ * both off in contexts that are already wrapped in a link (list rows) —
  * nested anchors are invalid.
  */
 export default function ServerNameWithGroup({
 	groupName,
 	groupId,
 	serverName,
+	serverId,
 	component = "span",
 }: {
 	groupName?: string | null;
 	groupId?: string | null;
 	serverName: string;
+	serverId?: string | null;
 	component?: React.ElementType;
 }) {
+	const serverPart = serverId ? (
+		<MuiLink
+			component={RouterLink}
+			to={`/servers/${serverId}`}
+			underline="hover"
+		>
+			{serverName}
+		</MuiLink>
+	) : (
+		serverName
+	);
 	if (!groupName) {
 		return (
 			<Box component={component} sx={{ display: "inline" }}>
-				{serverName}
+				{serverPart}
 			</Box>
 		);
 	}
@@ -51,7 +65,7 @@ export default function ServerNameWithGroup({
 				)}{" "}
 				·
 			</Typography>
-			{serverName}
+			{serverPart}
 		</Box>
 	);
 }

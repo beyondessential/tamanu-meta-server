@@ -5438,8 +5438,8 @@
         "tags": [
           "statuses"
         ],
-        "summary": "List the servers currently failing or warning one named healthcheck.",
-        "description": "Everything the per-healthcheck page needs: the catalog's configured\nseverity for `check` (if any) plus every live server whose **latest**\nstatus currently reports it as warning, failed, or broken — i.e. the\ncurrent, real-time failures, not a history of past issues/events. This\nis the data behind the `/healthchecks/:check` \"who's affected\" page,\nwhich doubles as an operator TODO list and as a way to correlate\nservers sharing the same issue during a fleet-wide incident.",
+        "summary": "List the servers whose latest status reports one named healthcheck.",
+        "description": "Everything the per-healthcheck page needs: the catalog's configured\nseverity for `check` (if any) plus every live server whose **latest**\nstatus reports it — the current, real-time picture, not a history of\npast issues/events, though each failing server carries a\n`failing_since` timestamp derived from its active issue. This is the\ndata behind the `/healthchecks/:check` \"who's affected\" page, which\ndoubles as an operator TODO list and as a way to correlate servers\nsharing the same issue during a fleet-wide incident.",
         "operationId": "status_check_attention",
         "requestBody": {
           "content": {
@@ -5453,7 +5453,7 @@
         },
         "responses": {
           "200": {
-            "description": "The check's catalog severity and the servers currently flagging it.",
+            "description": "The check's catalog severity and the servers currently reporting it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7002,7 +7002,7 @@
       },
       "CheckAttentionData": {
         "type": "object",
-        "description": "Response for [`check_attention`]: the queried check's catalog severity\n(if it has one yet) and every live server whose latest status is\ncurrently flagging it.",
+        "description": "Response for [`check_attention`]: the queried check's catalog severity\n(if it has one yet) and every live server whose latest status reports\nit, failing or healthy.",
         "required": [
           "check",
           "servers"
@@ -7017,7 +7017,7 @@
             "items": {
               "$ref": "#/components/schemas/CheckAttentionServerData"
             },
-            "description": "Servers currently flagging this check as a TODO list: failed\nbefore warning before broken (most urgent first), then by group\nname then server name."
+            "description": "Every live server whose latest status reports this check, at any\nresult, ordered as a TODO list: failed, warning, broken, passed,\nskipped (most urgent first), then by group name then server name.\nThe client filters out the passed/skipped tail unless the \"show\nhealthy\" toggle is on."
           },
           "severity": {
             "oneOf": [
@@ -7034,21 +7034,33 @@
       },
       "CheckAttentionServerData": {
         "type": "object",
-        "description": "One server currently flagging [`CheckAttentionData::check`], for\n[`check_attention`].",
+        "description": "One server whose latest status reports [`CheckAttentionData::check`],\nfor [`check_attention`].",
         "required": [
           "server_id",
           "server_name",
           "result",
+          "data",
           "status_created_at"
         ],
         "properties": {
+          "data": {
+            "description": "The check's full `health[]` entry from this server's latest status,\nverbatim (including the `check`/`healthy`/`result` keys), so the\nrow can expand to the same per-check detail the server page shows."
+          },
+          "failing_since": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this check started failing on this server: the `first_seen`\nof the still-active issue canopy filed at `(status,\nhealth/<check>)` when the check degraded. `None` for servers\ncurrently reporting the check healthy, and for failing servers\nwith no active issue on file (e.g. the issue was\noperator-resolved, or the ref is silenced so nothing was filed)."
+          },
           "group_id": {
             "type": [
               "string",
               "null"
             ],
             "format": "uuid",
-            "description": "The server's group id, if it belongs to one."
+            "description": "The server's group id, if it belongs to one — the UI links to\n`/groups/{group_id}`."
           },
           "group_name": {
             "type": [
@@ -7059,7 +7071,7 @@
           },
           "result": {
             "$ref": "#/components/schemas/CheckResult",
-            "description": "The check's result on this server's latest status. Always warning,\nfailed, or broken — passed/skipped checks never reach this endpoint."
+            "description": "The check's result on this server's latest status. The UI shows\nwarning/failed/broken servers by default and puts passed/skipped\nones behind a \"show healthy\" toggle."
           },
           "server_id": {
             "type": "string",

@@ -2,10 +2,14 @@ import {
 	Alert,
 	Box,
 	Chip,
+	Collapse,
+	FormControlLabel,
+	IconButton,
 	LinearProgress,
 	Link as MuiLink,
 	Paper,
 	Stack,
+	Switch,
 	Table,
 	TableBody,
 	TableCell,
@@ -14,35 +18,47 @@ import {
 	TableRow,
 	Typography,
 } from "@mui/material";
+import ExpandLessIcon from "@mui/icons-material/ExpandLess";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import { useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import { useApi } from "../api";
+import CheckExtrasList, { checkEntryExtras } from "../components/CheckExtras";
 import ServerNameWithGroup from "../components/ServerNameWithGroup";
 import SeverityChip from "../components/SeverityChip";
 import TimeAgo from "../components/TimeAgo";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { useReloadInterval } from "../hooks/useReloadInterval";
-import { type CheckAttentionServerData } from "../types";
+import { type CheckAttentionServerData, type CheckResult } from "../types";
 
-/// MUI chip colour per offending check result. Only warning/failed/broken
-/// ever reach here (see `Status::offending_checks` on the Rust side) —
-/// broken reads as a warning since it says nothing about the system under
-/// test, just the check itself.
-const CHECK_CHIP_COLOR: Record<string, "error" | "warning"> = {
+/// MUI chip colour per check result. Broken reads as a warning since it
+/// says nothing about the system under test, just the check itself;
+/// passed/skipped (visible behind the "show healthy" toggle) read calm.
+const CHECK_CHIP_COLOR: Record<
+	CheckResult,
+	"error" | "warning" | "success" | "default"
+> = {
 	failed: "error",
 	warning: "warning",
 	broken: "warning",
+	passed: "success",
+	skipped: "default",
 };
 
+const HEALTHY_RESULTS: readonly string[] = ["passed", "skipped"];
+
 /// Dedicated page for a single healthcheck: every live server whose
-/// *current* status flags it, most urgent first. Doubles as an operator
-/// TODO list for normalising those servers back to healthy, and as a way
-/// to see who's sharing the same issue during a fleet-wide incident.
+/// *current* status flags it, most urgent first, with the servers
+/// reporting it healthy behind a toggle. Doubles as an operator TODO
+/// list for normalising those servers back to healthy, and as a way to
+/// see who's sharing the same issue during a fleet-wide incident.
 /// Linked from wherever a check name shows up — server detail, issue
 /// rows, and the healthchecks settings catalog.
 export default function HealthcheckAttention() {
 	const { check } = useParams<{ check: string }>();
 	usePageTitle(check ?? "Healthcheck");
 	const tick = useReloadInterval(30_000, "canopy-data-changed");
+	const [showHealthy, setShowHealthy] = useState(false);
 	const result = useApi(
 		"statuses",
 		"check_attention",
@@ -75,60 +91,156 @@ export default function HealthcheckAttention() {
 				</Typography>
 			</Box>
 
+			<FormControlLabel
+				control={
+					<Switch
+						size="small"
+						checked={showHealthy}
+						onChange={(e) => setShowHealthy(e.target.checked)}
+					/>
+				}
+				label="Show healthy servers for this check"
+			/>
+
 			{result.status === "loading" || result.status === "idle" ? (
 				<LinearProgress />
 			) : result.status === "error" ? (
 				<Alert severity="error">{result.error.message}</Alert>
-			) : result.data.servers.length === 0 ? (
-				<Alert severity="success">
-					No servers currently flag <code>{check}</code>.
-				</Alert>
 			) : (
-				<Paper variant="outlined">
-					<TableContainer>
-						<Table size="small">
-							<TableHead>
-								<TableRow>
-									<TableCell>Server</TableCell>
-									<TableCell>Result</TableCell>
-									<TableCell>As of</TableCell>
-								</TableRow>
-							</TableHead>
-							<TableBody>
-								{result.data.servers.map((server) => (
-									<AttentionRow key={server.server_id} server={server} />
-								))}
-							</TableBody>
-						</Table>
-					</TableContainer>
-				</Paper>
+				<ServersTable
+					check={check ?? ""}
+					servers={result.data.servers}
+					showHealthy={showHealthy}
+				/>
 			)}
 		</Stack>
 	);
 }
 
-function AttentionRow({ server }: { server: CheckAttentionServerData }) {
+function ServersTable({
+	check,
+	servers,
+	showHealthy,
+}: {
+	check: string;
+	servers: CheckAttentionServerData[];
+	showHealthy: boolean;
+}) {
+	const visible = showHealthy
+		? servers
+		: servers.filter((s) => !HEALTHY_RESULTS.includes(s.result));
+
+	if (visible.length === 0) {
+		const healthyCount = servers.length;
+		return (
+			<Alert severity="success">
+				No servers currently flag <code>{check}</code>.
+				{healthyCount > 0 &&
+					` ${healthyCount} ${
+						healthyCount === 1 ? "server reports" : "servers report"
+					} it healthy — use the toggle above to see them.`}
+			</Alert>
+		);
+	}
+
 	return (
-		<TableRow hover>
-			<TableCell>
-				<MuiLink component={RouterLink} to={`/servers/${server.server_id}`}>
+		<Paper variant="outlined">
+			<TableContainer>
+				<Table size="small">
+					<TableHead>
+						<TableRow>
+							<TableCell width={40} />
+							<TableCell>Server</TableCell>
+							<TableCell>Result</TableCell>
+							<TableCell>Failing since</TableCell>
+							<TableCell>As of</TableCell>
+						</TableRow>
+					</TableHead>
+					<TableBody>
+						{visible.map((server) => (
+							<AttentionRow key={server.server_id} server={server} />
+						))}
+					</TableBody>
+				</Table>
+			</TableContainer>
+		</Paper>
+	);
+}
+
+/// One server row, expandable to the check's full `health[]` entry data —
+/// the same key/value rendering the server detail checks table uses.
+function AttentionRow({ server }: { server: CheckAttentionServerData }) {
+	const [expanded, setExpanded] = useState(false);
+	const entry =
+		typeof server.data === "object" &&
+		server.data !== null &&
+		!Array.isArray(server.data)
+			? (server.data as Record<string, unknown>)
+			: {};
+	const extras = checkEntryExtras(entry);
+	return (
+		<>
+			<TableRow hover>
+				<TableCell>
+					<IconButton
+						aria-label={expanded ? "Collapse" : "Expand"}
+						size="small"
+						onClick={() => setExpanded((v) => !v)}
+					>
+						{expanded ? (
+							<ExpandLessIcon fontSize="small" />
+						) : (
+							<ExpandMoreIcon fontSize="small" />
+						)}
+					</IconButton>
+				</TableCell>
+				<TableCell>
 					<ServerNameWithGroup
 						groupName={server.group_name}
+						groupId={server.group_id}
 						serverName={server.server_name || "(unnamed)"}
+						serverId={server.server_id}
 					/>
-				</MuiLink>
-			</TableCell>
-			<TableCell>
-				<Chip
-					label={server.result}
-					size="small"
-					variant="outlined"
-					color={CHECK_CHIP_COLOR[server.result] ?? "warning"}
-				/>
-			</TableCell>
-			<TableCell>
-				<TimeAgo timestamp={server.status_created_at} />
-			</TableCell>
-		</TableRow>
+				</TableCell>
+				<TableCell>
+					<Chip
+						label={server.result}
+						size="small"
+						variant="outlined"
+						color={CHECK_CHIP_COLOR[server.result as CheckResult] ?? "warning"}
+					/>
+				</TableCell>
+				<TableCell>
+					{server.failing_since ? (
+						<TimeAgo timestamp={server.failing_since} />
+					) : (
+						<Typography variant="body2" color="text.secondary">
+							—
+						</Typography>
+					)}
+				</TableCell>
+				<TableCell>
+					<TimeAgo timestamp={server.status_created_at} />
+				</TableCell>
+			</TableRow>
+			<TableRow>
+				<TableCell
+					colSpan={5}
+					sx={{ py: 0, border: expanded ? undefined : 0 }}
+				>
+					<Collapse in={expanded} timeout="auto" unmountOnExit>
+						<Box sx={{ py: 1 }}>
+							{extras.length > 0 ? (
+								<CheckExtrasList extras={extras} />
+							) : (
+								<Typography variant="body2" color="text.secondary">
+									No additional data reported for this check.
+								</Typography>
+							)}
+						</Box>
+					</Collapse>
+				</TableCell>
+			</TableRow>
+		</>
 	);
 }

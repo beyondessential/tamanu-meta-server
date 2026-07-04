@@ -305,6 +305,10 @@ export async function seedIssue(
 		resolved?: boolean;
 		resolvedBy?: string | null;
 		resolvedReason?: string | null;
+		/** ISO 8601 timestamp for `first_seen`. Defaults to NOW(). Set it in
+		 * the past to test "since when" displays (e.g. the per-healthcheck
+		 * page's failing-since column). */
+		firstSeen?: string;
 	},
 ): Promise<SeededIssue> {
 	const id = randomUUID();
@@ -312,7 +316,7 @@ export async function seedIssue(
 	await sql.query(
 		`INSERT INTO issues
 		 (id, server_id, server_group_id, device_id, source, ref, severity, message, description, active, first_seen, last_seen, resolved_at, resolved_by, resolved_reason)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW(), $11, $12, $13)`,
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11::timestamptz, NOW()), NOW(), $12, $13, $14)`,
 		[
 			id,
 			opts.serverId ?? null,
@@ -324,6 +328,7 @@ export async function seedIssue(
 			opts.message ?? "Issue message",
 			opts.description ?? null,
 			resolved ? false : (opts.active ?? true),
+			opts.firstSeen ?? null,
 			resolved ? new Date().toISOString() : null,
 			resolved ? (opts.resolvedBy ?? null) : null,
 			resolved ? (opts.resolvedReason ?? null) : null,

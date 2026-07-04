@@ -2790,14 +2790,15 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * List the servers currently failing or warning one named healthcheck.
+         * List the servers whose latest status reports one named healthcheck.
          * @description Everything the per-healthcheck page needs: the catalog's configured
          *     severity for `check` (if any) plus every live server whose **latest**
-         *     status currently reports it as warning, failed, or broken — i.e. the
-         *     current, real-time failures, not a history of past issues/events. This
-         *     is the data behind the `/healthchecks/:check` "who's affected" page,
-         *     which doubles as an operator TODO list and as a way to correlate
-         *     servers sharing the same issue during a fleet-wide incident.
+         *     status reports it — the current, real-time picture, not a history of
+         *     past issues/events, though each failing server carries a
+         *     `failing_since` timestamp derived from its active issue. This is the
+         *     data behind the `/healthchecks/:check` "who's affected" page, which
+         *     doubles as an operator TODO list and as a way to correlate servers
+         *     sharing the same issue during a fleet-wide incident.
          */
         post: operations["status_check_attention"];
         delete?: never;
@@ -3745,8 +3746,8 @@ export interface components {
         };
         /**
          * @description Response for [`check_attention`]: the queried check's catalog severity
-         *     (if it has one yet) and every live server whose latest status is
-         *     currently flagging it.
+         *     (if it has one yet) and every live server whose latest status reports
+         *     it, failing or healthy.
          */
         CheckAttentionData: {
             /**
@@ -3755,28 +3756,48 @@ export interface components {
              */
             check: string;
             /**
-             * @description Servers currently flagging this check as a TODO list: failed
-             *     before warning before broken (most urgent first), then by group
-             *     name then server name.
+             * @description Every live server whose latest status reports this check, at any
+             *     result, ordered as a TODO list: failed, warning, broken, passed,
+             *     skipped (most urgent first), then by group name then server name.
+             *     The client filters out the passed/skipped tail unless the "show
+             *     healthy" toggle is on.
              */
             servers: components["schemas"]["CheckAttentionServerData"][];
             severity?: null | components["schemas"]["Severity"];
         };
         /**
-         * @description One server currently flagging [`CheckAttentionData::check`], for
-         *     [`check_attention`].
+         * @description One server whose latest status reports [`CheckAttentionData::check`],
+         *     for [`check_attention`].
          */
         CheckAttentionServerData: {
             /**
+             * @description The check's full `health[]` entry from this server's latest status,
+             *     verbatim (including the `check`/`healthy`/`result` keys), so the
+             *     row can expand to the same per-check detail the server page shows.
+             */
+            data: unknown;
+            /**
+             * Format: date-time
+             * @description When this check started failing on this server: the `first_seen`
+             *     of the still-active issue canopy filed at `(status,
+             *     health/<check>)` when the check degraded. `None` for servers
+             *     currently reporting the check healthy, and for failing servers
+             *     with no active issue on file (e.g. the issue was
+             *     operator-resolved, or the ref is silenced so nothing was filed).
+             */
+            failing_since?: string | null;
+            /**
              * Format: uuid
-             * @description The server's group id, if it belongs to one.
+             * @description The server's group id, if it belongs to one — the UI links to
+             *     `/groups/{group_id}`.
              */
             group_id?: string | null;
             /** @description The server's group name, if it belongs to one. */
             group_name?: string | null;
             /**
-             * @description The check's result on this server's latest status. Always warning,
-             *     failed, or broken — passed/skipped checks never reach this endpoint.
+             * @description The check's result on this server's latest status. The UI shows
+             *     warning/failed/broken servers by default and puts passed/skipped
+             *     ones behind a "show healthy" toggle.
              */
             result: components["schemas"]["CheckResult"];
             /**
@@ -10966,7 +10987,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The check's catalog severity and the servers currently flagging it. */
+            /** @description The check's catalog severity and the servers currently reporting it. */
             200: {
                 headers: {
                     [name: string]: unknown;

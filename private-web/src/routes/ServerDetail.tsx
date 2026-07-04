@@ -37,13 +37,14 @@ import NotificationsActiveOutlinedIcon from "@mui/icons-material/NotificationsAc
 import NotificationsOffIcon from "@mui/icons-material/NotificationsOff";
 import NotificationsOffOutlinedIcon from "@mui/icons-material/NotificationsOffOutlined";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
-import { Fragment, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
 	Link as RouterLink,
 	useLocation,
 	useNavigate,
 	useParams,
 } from "react-router-dom";
+import CheckExtrasList, { checkEntryExtras } from "../components/CheckExtras";
 import ExternalUsersDetails, {
 	parseExternalUserSessions,
 } from "../components/ExternalUsersDetails";
@@ -1021,10 +1022,7 @@ function parseChecks(
 		if (typeof obj.result !== "string" && result === "failed" && overallHealthy) {
 			result = "warning";
 		}
-		const extras: Array<[string, unknown]> = Object.entries(obj).filter(
-			([k]) => k !== "check" && k !== "healthy" && k !== "result",
-		);
-		parsed.push({ check, result, extras });
+		parsed.push({ check, result, extras: checkEntryExtras(obj) });
 	}
 	// Most urgent first, then alphabetical by name. Stable: same input
 	// always produces the same visible order.
@@ -1109,34 +1107,7 @@ function CheckRow({
 						operators={operators}
 					/>
 				)}
-				{extras.length > 0 && (
-					<Box
-						component="dl"
-						sx={{
-							m: 0,
-							mt: 0.5,
-							display: "grid",
-							gridTemplateColumns: "max-content 1fr",
-							columnGap: 1.5,
-							rowGap: 0.25,
-							fontSize: "0.8em",
-						}}
-					>
-						{extras.map(([k, v]) => (
-							<Fragment key={k}>
-								<Box component="dt" sx={{ color: "text.secondary" }}>
-									{k}
-								</Box>
-								<Box
-									component="dd"
-									sx={{ m: 0, fontFamily: "monospace" }}
-								>
-									{renderCheckValue(v)}
-								</Box>
-							</Fragment>
-						))}
-					</Box>
-				)}
+				<CheckExtrasList extras={extras} />
 			</Box>
 			{isAdmin && (
 				<SilenceCheckButton
@@ -1424,12 +1395,6 @@ function SilenceScopeRow({
 			For {scopeLabel}
 		</Button>
 	);
-}
-
-function renderCheckValue(v: unknown): string {
-	if (typeof v === "string") return v;
-	if (v === null) return "null";
-	return JSON.stringify(v);
 }
 
 function StatusInfoFields({ status }: { status: ServerLastStatusData }) {
