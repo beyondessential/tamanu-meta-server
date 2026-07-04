@@ -800,3 +800,96 @@ async fn update_moving_scope_recovers_stale_alert_at_old_key() {
 	})
 	.await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn delete_recovers_stale_alert_for_removed_scope() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn, "g").await;
+		let server = insert_server(&mut conn, group).await;
+		let r = RestoreReplica::create(
+			&mut conn,
+			new_replica(
+				consumer,
+				group,
+				Some(server),
+				RestoreIntent::from("verify"),
+				"n",
+			),
+		)
+		.await
+		.expect("create");
+
+		// Raise an active alert at the declaration's (server, type, verify) key.
+		BackupRestoreCheck::record_report(
+			&mut conn,
+			new_check(
+				consumer,
+				group,
+				server,
+				RestoreIntent::from("verify"),
+				RunOutcome::Failure,
+				false,
+			),
+		)
+		.await
+		.expect("record failure");
+		assert_eq!(active_restore_issues(&mut conn, group).await, 1);
+
+		// Deleting the declaration removes the only thing tracking that key.
+		// The sweep only walks current declarations, so without recovery the
+		// alert would never clear.
+		RestoreReplica::delete(&mut conn, r.id)
+			.await
+			.expect("delete");
+		assert_eq!(
+			active_restore_issues(&mut conn, group).await,
+			0,
+			"the removed scope's alert is recovered on delete"
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn delete_group_wide_recovers_alerts_on_every_server() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn, "g").await;
+		let server_a = insert_server(&mut conn, group).await;
+		let server_b = insert_server(&mut conn, group).await;
+		let r = RestoreReplica::create(
+			&mut conn,
+			new_replica(consumer, group, None, RestoreIntent::from("verify"), "n"),
+		)
+		.await
+		.expect("create");
+
+		for sid in [server_a, server_b] {
+			BackupRestoreCheck::record_report(
+				&mut conn,
+				new_check(
+					consumer,
+					group,
+					sid,
+					RestoreIntent::from("verify"),
+					RunOutcome::Failure,
+					false,
+				),
+			)
+			.await
+			.expect("record failure");
+		}
+		assert_eq!(active_restore_issues(&mut conn, group).await, 2);
+
+		RestoreReplica::delete(&mut conn, r.id)
+			.await
+			.expect("delete");
+		assert_eq!(
+			active_restore_issues(&mut conn, group).await,
+			0,
+			"a group-wide declaration's alerts recover on every live server"
+		);
+	})
+	.await;
+}

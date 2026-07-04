@@ -1911,9 +1911,10 @@ export interface paths {
         /**
          * Delete a restore replica declaration.
          * @description Removes the declaration: the consumer stops being asked to maintain the
-         *     replica and loses the backup access the declaration granted. Requires the
-         *     caller to be on the admin allow-list. Responds 404 if the declaration
-         *     does not exist.
+         *     replica and loses the backup access the declaration granted. Any active
+         *     restore-verification alert for the declaration's scope is recovered, since
+         *     nothing tracks that scope any more. Requires the caller to be on the admin
+         *     allow-list. Responds 404 if the declaration does not exist.
          */
         post: operations["restore_replicas_delete"];
         delete?: never;

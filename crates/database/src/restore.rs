@@ -13,7 +13,7 @@ use diesel::{
 	prelude::*,
 	result::{DatabaseErrorKind, Error as DieselError},
 };
-use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 use jiff::Timestamp;
 use serde::Serialize;
 use uuid::Uuid;
@@ -244,15 +244,32 @@ impl RestoreReplica {
 		Ok(result)
 	}
 
+	/// Delete a declaration and recover any active restore-verification alert
+	/// keyed to its `(server, type, intent)` scope — the overdue sweep only
+	/// walks current declarations, so an alert left behind by a deleted one
+	/// would otherwise never clear. Runs in a single transaction so a failure
+	/// partway can't leave the row deleted with its alerts unrecovered.
 	pub async fn delete(db: &mut AsyncPgConnection, id: Uuid) -> Result<()> {
-		use crate::schema::restore_replicas::dsl;
-		let n = diesel::delete(dsl::restore_replicas.filter(dsl::id.eq(id)))
-			.execute(db)
+		db.transaction::<_, AppError, _>(async |conn| {
+			use crate::schema::restore_replicas::dsl;
+			let existing = Self::get(conn, id).await?;
+			let n = diesel::delete(dsl::restore_replicas.filter(dsl::id.eq(id)))
+				.execute(conn)
+				.await?;
+			if n == 0 {
+				return Err(AppError::DatabaseQuery(DieselError::NotFound));
+			}
+			recover_old_scope_alerts(
+				conn,
+				existing.group_id,
+				existing.server_id,
+				&existing.r#type,
+				&existing.intent,
+			)
 			.await?;
-		if n == 0 {
-			return Err(AppError::DatabaseQuery(DieselError::NotFound));
-		}
-		Ok(())
+			Ok(())
+		})
+		.await
 	}
 
 	/// Whether an enabled declaration covers `(consumer, group, type)` — the
@@ -412,11 +429,11 @@ fn restore_verification_ref(
 }
 
 /// Recover any active restore-verification alert keyed to a declaration's old
-/// `(server, type, intent)`, called when an update moves a declaration's
-/// scope elsewhere. Mirrors the recovery [`BackupRestoreCheck::record_report`]
-/// performs for a healthy report — [`raise_group_event`] with `active: false`.
-/// If the old key is still overdue under some other declaration, the next
-/// [`sweep_overdue`] pass re-raises it.
+/// `(server, type, intent)`, called when the declaration stops covering that
+/// scope (it was deleted, or its scope moved elsewhere). Mirrors the recovery
+/// [`BackupRestoreCheck::record_report`] performs for a healthy report —
+/// [`raise_group_event`] with `active: false`. If the old key is still overdue
+/// under some other declaration, the next [`sweep_overdue`] pass re-raises it.
 async fn recover_old_scope_alerts(
 	db: &mut AsyncPgConnection,
 	old_group_id: Uuid,
@@ -442,7 +459,7 @@ async fn recover_old_scope_alerts(
 			Severity::Info,
 			None,
 			&format!(
-				"Restore verification no longer tracked at this scope: {old_type} / {old_intent} for server {sid} (declaration scope changed)"
+				"Restore verification no longer tracked at this scope: {old_type} / {old_intent} for server {sid}"
 			),
 			false,
 		)
@@ -451,7 +468,6 @@ async fn recover_old_scope_alerts(
 
 	Ok(())
 }
-
 /// A restore-health report submitted by a restore consumer: proof (or
 /// disproof) that a backup snapshot actually restores into a healthy
 /// database — the strongest available signal of backup health. `snapshot_id`
