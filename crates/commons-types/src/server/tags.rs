@@ -63,8 +63,7 @@ impl utoipa::PartialSchema for TagMap {
 
 		let mut object = Object::with_type(SchemaType::Type(Type::Object));
 		object.description = Some(
-			"Free-form key/value tags, as a JSON object whose values are all strings."
-				.to_string(),
+			"Free-form key/value tags, as a JSON object whose values are all strings.".to_string(),
 		);
 		object.additional_properties = Some(Box::new(AdditionalProperties::RefOr(
 			utoipa::openapi::RefOr::T(utoipa::openapi::schema::Schema::Object(Object::with_type(
