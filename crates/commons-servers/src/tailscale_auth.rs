@@ -4,6 +4,8 @@ use database::{Db, admins::Admin, tailscale_users::TailscaleUser as CachedTailsc
 use diesel_async::AsyncPgConnection;
 use http::request::Parts;
 
+use crate::tailnet_directory::TailnetDirectory;
+
 const TAILSCALE_USER_LOGIN: &str = "Tailscale-User-Login";
 const TAILSCALE_USER_NAME: &str = "Tailscale-User-Name";
 const TAILSCALE_USER_PROFILE_PIC: &str = "Tailscale-User-Profile-Pic";
@@ -16,8 +18,24 @@ pub struct TailscaleUser {
 }
 
 impl TailscaleUser {
-	pub async fn is_admin(&self, db: &mut AsyncPgConnection) -> Result<bool, AppError> {
-		Admin::check_email(db, &self.login).await
+	/// Admin if the login is on the recorded allowlist, or the tailnet policy
+	/// grants it admin (see [`crate::tailnet_directory`]). The allowlist is
+	/// checked first, so an unreachable control plane can't lock out an
+	/// allowlisted admin.
+	pub async fn is_admin(
+		&self,
+		db: &mut AsyncPgConnection,
+		directory: Option<&TailnetDirectory>,
+	) -> Result<bool, AppError> {
+		if Admin::check_email(db, &self.login).await? {
+			return Ok(true);
+		}
+		if let Some(directory) = directory
+			&& directory.is_admin_by_policy(&self.login).await
+		{
+			return Ok(true);
+		}
+		Ok(false)
 	}
 }
 
@@ -113,6 +131,7 @@ pub struct TailscaleAdmin(pub TailscaleUser);
 impl<S> FromRequestParts<S> for TailscaleAdmin
 where
 	Db: FromRef<S>,
+	Option<TailnetDirectory>: FromRef<S>,
 	S: Send + Sync,
 {
 	type Rejection = AppError;
@@ -128,7 +147,8 @@ where
 			let user =
 				<TailscaleUser as FromRequestParts<S>>::from_request_parts(parts, state).await?;
 			let mut db = Db::from_ref(state).get().await?;
-			if !user.is_admin(&mut db).await? {
+			let directory = Option::<TailnetDirectory>::from_ref(state);
+			if !user.is_admin(&mut db, directory.as_ref()).await? {
 				return Err(AppError::AuthInsufficientPermissions {
 					required: "admin".into(),
 				});

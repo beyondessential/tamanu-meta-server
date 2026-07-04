@@ -1,0 +1,49 @@
+---
+id: ADM
+---
+
+# Administrative access
+
+The private server's administrative surface is restricted to administrators.
+Whether a caller is an administrator is decided at request time from the caller's authenticated tailnet identity.
+This concerns human operators of the administrative API and is distinct from the device administrator role (see [DTR](device-trust.md)).
+
+## Who is an administrator
+
+A caller is an administrator when either:
+
+- their login is on the recorded administrator allowlist, or
+- the tailnet policy grants them the Canopy administrator capability.
+
+The two sources are independent, and either alone suffices.
+An operator adds or removes an allowlist entry directly; the policy-granted set is authored in the tailnet policy and not editable through Canopy.
+
+## The administrator grant
+
+The tailnet policy confers administrative access through an application-capability grant.
+A grant confers administrative access when both hold:
+
+- its application capabilities include `bes.au/cap/canopy` with a value carrying `admin` set true, and
+- its destinations include the tag under which the Canopy service is published on the tailnet, `tag:server-canopy`.
+
+A capability value that does not carry `admin` set true confers no administrative access.
+The grant's sources name the principals who thereby become administrators.
+
+## Resolving grant sources
+
+Each source of an administrator-conferring grant is resolved, against the same policy, to the callers it covers:
+
+- A group resolves to its listed member logins.
+- A bare user login resolves to itself.
+- `autogroup:member` covers any caller bearing a tailnet user identity.
+- `autogroup:tagged` covers any caller identified only by a device tag.
+- Any other autogroup is not resolved and covers no caller.
+
+A caller holds policy-granted administrative access when their identity matches any resolved source of an administrator-conferring grant.
+The administrative surface admits only callers bearing a tailnet user identity, so a source resolving solely to tagged devices never yields administrative access in practice.
+
+## Freshness and availability
+
+Administrative status derived from the policy reflects the policy as of the most recent successful read, refreshed periodically.
+Reading the policy requires read access to the tailnet policy file.
+When the policy cannot be read, the recorded allowlist remains authoritative, so a control-plane outage never withdraws administrative access held through the allowlist.

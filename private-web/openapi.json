@@ -1536,7 +1536,7 @@
         "operationId": "is_current_user_admin",
         "responses": {
           "200": {
-            "description": "`true` if the caller's Tailscale identity is on the admin allow-list; `false` otherwise (including when no Tailscale identity is present).",
+            "description": "`true` if the caller's Tailscale identity is an administrator (on the admin allow-list, or granted admin by the tailnet policy); `false` otherwise (including when no Tailscale identity is present).",
             "content": {
               "application/json": {
                 "schema": {
@@ -12688,7 +12688,7 @@
         "type": "apiKey",
         "in": "header",
         "name": "Tailscale-User-Login",
-        "description": "Identity header injected by the Tailscale sidecar. The login value must also be present on the admins allow-list."
+        "description": "Identity header injected by the Tailscale sidecar. The login must additionally be an administrator: either on the admins allow-list, or granted admin by the tailnet policy."
       },
       "tailscale-user": {
         "type": "apiKey",
