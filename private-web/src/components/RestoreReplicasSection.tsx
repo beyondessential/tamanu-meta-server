@@ -119,20 +119,20 @@ export default function RestoreReplicasSection({
 		}
 	};
 
-	const onToggle = async (
-		id: string,
-		name: string,
-		overdueAfterSeconds: number | null | undefined,
-		params: unknown,
-		enabled: boolean,
-	) => {
+	// `update` replaces every field, so toggling `enabled` from the table
+	// carries the rest of the row through unchanged.
+	const onToggle = async (r: RestoreReplicaView, enabled: boolean) => {
 		try {
 			await callApi("restore_replicas", "update", {
-				id,
-				name,
-				overdue_after_seconds: overdueAfterSeconds ?? null,
-				// Preserve the stored parameter values; update replaces them wholesale.
-				params: (params ?? {}) as Record<string, unknown>,
+				id: r.id,
+				consumer_device_id: r.consumer_device_id,
+				group_id: r.group_id,
+				server_id: r.server_id,
+				type: r.type,
+				intent: r.intent,
+				name: r.name,
+				overdue_after_seconds: r.overdue_after_seconds,
+				params: r.params as Record<string, unknown>,
 				enabled,
 			});
 			reload();
@@ -228,15 +228,7 @@ export default function RestoreReplicasSection({
 										<Switch
 											checked={r.enabled}
 											disabled={!isAdmin}
-											onChange={(e) =>
-												onToggle(
-													r.id,
-													r.name,
-													r.overdue_after_seconds,
-													r.params,
-													e.target.checked,
-												)
-											}
+											onChange={(e) => onToggle(r, e.target.checked)}
 											slotProps={{ input: { "aria-label": `toggle ${r.name}` } }}
 										/>
 									</TableCell>
@@ -308,6 +300,7 @@ export default function RestoreReplicasSection({
 
 			{editingReplica && (
 				<EditReplicaDialog
+					groupId={groupId}
 					replica={editingReplica}
 					consumers={consumers.status === "ok" ? consumers.data : []}
 					onClose={() => setEditingReplica(null)}
@@ -464,6 +457,174 @@ function wireParamsToValues(
 	return out;
 }
 
+/** A group's servers (unarchived) and the backup types available to declare
+ * against, shared by the declare and edit dialogs. */
+function useGroupScopeData(groupId: string) {
+	const detail = useApi(
+		"server_groups",
+		"get",
+		{ server_group_id: groupId },
+		[groupId],
+	);
+	const typeDefaults = useApi("backups", "type_defaults");
+	const servers =
+		detail.status === "ok"
+			? detail.data.servers.filter((s) => !s.archived)
+			: [];
+	const typeOptions =
+		typeDefaults.status === "ok" && typeDefaults.data.length > 0
+			? typeDefaults.data.map((t) => t.type)
+			: ["tamanu-postgres"];
+	const groupName = detail.status === "ok" ? detail.data.group.name : "";
+	return { servers, typeOptions, groupName };
+}
+
+type ScopeServer = { id: string; name?: string | null; display_host?: string | null };
+
+/** The intents a consumer advertises, and the schema for the one currently
+ * selected — shared by the declare and edit dialogs so param fields re-derive
+ * consistently when the consumer or intent changes. */
+function useIntentSchema(
+	consumers: RestoreConsumerView[],
+	consumerId: string,
+	intent: string,
+) {
+	const selectedConsumer = consumers.find((c) => c.device_id === consumerId);
+	const intentOptions: IntentDescriptor[] = selectedConsumer?.intents ?? [];
+	const selectedDescriptor = intentOptions.find((d) => d.intent === intent);
+	const paramSchema: Record<string, ParamSpec> =
+		(selectedDescriptor?.params as Record<string, ParamSpec> | undefined) ?? {};
+	return { intentOptions, selectedDescriptor, paramSchema };
+}
+
+/** Consumer, server (or whole-group), type, and intent selects, shared by the
+ * declare and edit dialogs. The current `type`/`intent` value is always shown
+ * even if it falls outside the enumerated options — a declaration can carry a
+ * custom type or a gap intent the consumer no longer advertises. */
+function ScopeFields({
+	consumers,
+	servers,
+	typeOptions,
+	consumerId,
+	onConsumerChange,
+	serverId,
+	onServerChange,
+	type,
+	onTypeChange,
+	intent,
+	onIntentChange,
+	intentOptions,
+	description,
+}: {
+	consumers: RestoreConsumerView[];
+	servers: ScopeServer[];
+	typeOptions: string[];
+	consumerId: string;
+	onConsumerChange: (id: string) => void;
+	serverId: string;
+	onServerChange: (id: string) => void;
+	type: string;
+	onTypeChange: (type: string) => void;
+	intent: string;
+	onIntentChange: (intent: string) => void;
+	intentOptions: IntentDescriptor[];
+	description?: string | null;
+}) {
+	const typeSelectOptions = typeOptions.includes(type)
+		? typeOptions
+		: [...typeOptions, type].filter(Boolean);
+	const intentSelectOptions = intentOptions.some((d) => d.intent === intent)
+		? intentOptions
+		: [
+				...intentOptions,
+				...(intent
+					? [
+							{
+								intent,
+								description: null,
+								semantics: [],
+								params: {},
+							} as IntentDescriptor,
+						]
+					: []),
+			];
+
+	return (
+		<>
+			<FormControl fullWidth size="small">
+				<InputLabel id="consumer-label">Consumer</InputLabel>
+				<Select
+					labelId="consumer-label"
+					label="Consumer"
+					value={consumerId}
+					onChange={(e) => onConsumerChange(e.target.value)}
+				>
+					{consumers.map((c) => (
+						<MenuItem key={c.device_id} value={c.device_id}>
+							{c.name ?? c.device_id}
+						</MenuItem>
+					))}
+				</Select>
+			</FormControl>
+
+			<FormControl fullWidth size="small">
+				<InputLabel id="server-label">Server</InputLabel>
+				<Select
+					labelId="server-label"
+					label="Server"
+					value={serverId}
+					onChange={(e) => onServerChange(e.target.value)}
+				>
+					<MenuItem value="">All servers in the group</MenuItem>
+					{servers.map((s) => (
+						<MenuItem key={s.id} value={s.id}>
+							{s.name ?? s.display_host ?? s.id}
+						</MenuItem>
+					))}
+				</Select>
+			</FormControl>
+
+			<FormControl fullWidth size="small">
+				<InputLabel id="type-label">Type</InputLabel>
+				<Select
+					labelId="type-label"
+					label="Type"
+					value={type}
+					onChange={(e) => onTypeChange(e.target.value)}
+				>
+					{typeSelectOptions.map((t) => (
+						<MenuItem key={t} value={t}>
+							{t}
+						</MenuItem>
+					))}
+				</Select>
+			</FormControl>
+
+			<FormControl fullWidth size="small">
+				<InputLabel id="intent-label">Intent</InputLabel>
+				<Select
+					labelId="intent-label"
+					label="Intent"
+					value={intent}
+					onChange={(e) => onIntentChange(e.target.value)}
+				>
+					{intentSelectOptions.map((d) => (
+						<MenuItem key={d.intent} value={d.intent}>
+							{d.intent}
+						</MenuItem>
+					))}
+				</Select>
+			</FormControl>
+
+			{description && (
+				<Typography variant="body2" color="text.secondary">
+					{description}
+				</Typography>
+			)}
+		</>
+	);
+}
+
 function CreateReplicaDialog({
 	groupId,
 	onClose,
@@ -475,13 +636,7 @@ function CreateReplicaDialog({
 	onCreated: () => void;
 	consumers: RestoreConsumerView[];
 }) {
-	const detail = useApi(
-		"server_groups",
-		"get",
-		{ server_group_id: groupId },
-		[groupId],
-	);
-	const typeDefaults = useApi("backups", "type_defaults");
+	const { servers, typeOptions, groupName } = useGroupScopeData(groupId);
 
 	const [consumerId, setConsumerId] = useState("");
 	const [serverId, setServerId] = useState(""); // "" = whole group
@@ -494,19 +649,11 @@ function CreateReplicaDialog({
 	const [pending, setPending] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
-	const selectedConsumer = consumers.find((c) => c.device_id === consumerId);
-	const intentOptions: IntentDescriptor[] = selectedConsumer?.intents ?? [];
-	const selectedDescriptor = intentOptions.find((d) => d.intent === intent);
-	const paramSchema: Record<string, ParamSpec> =
-		(selectedDescriptor?.params as Record<string, ParamSpec> | undefined) ?? {};
-	const servers =
-		detail.status === "ok"
-			? detail.data.servers.filter((s) => !s.archived)
-			: [];
-	const typeOptions =
-		typeDefaults.status === "ok" && typeDefaults.data.length > 0
-			? typeDefaults.data.map((t) => t.type)
-			: ["tamanu-postgres"];
+	const { intentOptions, selectedDescriptor, paramSchema } = useIntentSchema(
+		consumers,
+		consumerId,
+		intent,
+	);
 
 	// Auto-select the sole consumer, if there's only one to choose from.
 	useEffect(() => {
@@ -531,7 +678,6 @@ function CreateReplicaDialog({
 
 	// Suggest a name from the group and (if picked) server, until the operator
 	// types their own.
-	const groupName = detail.status === "ok" ? detail.data.group.name : "";
 	const selectedServer = servers.find((s) => s.id === serverId);
 	const serverName = selectedServer
 		? (selectedServer.name ?? selectedServer.display_host ?? selectedServer.id)
@@ -580,79 +726,24 @@ function CreateReplicaDialog({
 			<DialogTitle>Declare restore replica</DialogTitle>
 			<DialogContent>
 				<Stack spacing={2} sx={{ mt: 1 }}>
-					<FormControl fullWidth size="small">
-						<InputLabel id="consumer-label">Consumer</InputLabel>
-						<Select
-							labelId="consumer-label"
-							label="Consumer"
-							value={consumerId}
-							onChange={(e) => {
-								setConsumerId(e.target.value);
-								setError(null);
-							}}
-						>
-							{consumers.map((c) => (
-								<MenuItem key={c.device_id} value={c.device_id}>
-									{c.name ?? c.device_id}
-								</MenuItem>
-							))}
-						</Select>
-					</FormControl>
-
-					<FormControl fullWidth size="small">
-						<InputLabel id="server-label">Server</InputLabel>
-						<Select
-							labelId="server-label"
-							label="Server"
-							value={serverId}
-							onChange={(e) => setServerId(e.target.value)}
-						>
-							<MenuItem value="">All servers in the group</MenuItem>
-							{servers.map((s) => (
-								<MenuItem key={s.id} value={s.id}>
-									{s.name ?? s.display_host ?? s.id}
-								</MenuItem>
-							))}
-						</Select>
-					</FormControl>
-
-					<FormControl fullWidth size="small">
-						<InputLabel id="type-label">Type</InputLabel>
-						<Select
-							labelId="type-label"
-							label="Type"
-							value={type}
-							onChange={(e) => setType(e.target.value)}
-						>
-							{typeOptions.map((t) => (
-								<MenuItem key={t} value={t}>
-									{t}
-								</MenuItem>
-							))}
-						</Select>
-					</FormControl>
-
-					<FormControl fullWidth size="small">
-						<InputLabel id="intent-label">Intent</InputLabel>
-						<Select
-							labelId="intent-label"
-							label="Intent"
-							value={intent}
-							onChange={(e) => setIntent(e.target.value)}
-						>
-							{intentOptions.map((d) => (
-								<MenuItem key={d.intent} value={d.intent}>
-									{d.intent}
-								</MenuItem>
-							))}
-						</Select>
-					</FormControl>
-
-					{selectedDescriptor?.description && (
-						<Typography variant="body2" color="text.secondary">
-							{selectedDescriptor.description}
-						</Typography>
-					)}
+					<ScopeFields
+						consumers={consumers}
+						servers={servers}
+						typeOptions={typeOptions}
+						consumerId={consumerId}
+						onConsumerChange={(id) => {
+							setConsumerId(id);
+							setError(null);
+						}}
+						serverId={serverId}
+						onServerChange={setServerId}
+						type={type}
+						onTypeChange={setType}
+						intent={intent}
+						onIntentChange={setIntent}
+						intentOptions={intentOptions}
+						description={selectedDescriptor?.description}
+					/>
 
 					<TextField
 						size="small"
@@ -698,32 +789,33 @@ function CreateReplicaDialog({
 	);
 }
 
-/** Edit a declared replica's non-structural fields (name, overdue bound,
- * parameters, enabled). Scope — consumer, group/server, type, intent — is
- * immutable, so this dialog doesn't offer it. Parameter fields come from the
- * consumer's current schema for the replica's intent, if it still advertises
- * one; for a gap declaration there's no schema to render fields for, so the
- * stored parameter values are carried through unchanged. */
+/** Edit every field of a declared replica, including its scope (consumer,
+ * server or whole-group, type, intent) — the most useful edit being a change
+ * of intent, e.g. retargeting a `verify` replica to `analytics`. Parameter
+ * fields re-derive from the selected consumer+intent's current schema
+ * whenever either changes, carrying forward values for parameter names that
+ * still exist and dropping the rest. A scope change that collides with
+ * another declaration, or a retargeted intent the new consumer doesn't
+ * advertise, comes back as an inline error. */
 function EditReplicaDialog({
+	groupId,
 	replica,
 	consumers,
 	onClose,
 	onUpdated,
 }: {
+	groupId: string;
 	replica: RestoreReplicaView;
 	consumers: RestoreConsumerView[];
 	onClose: () => void;
 	onUpdated: () => void;
 }) {
-	const selectedConsumer = consumers.find(
-		(c) => c.device_id === replica.consumer_device_id,
-	);
-	const selectedDescriptor = selectedConsumer?.intents.find(
-		(d) => d.intent === replica.intent,
-	);
-	const paramSchema: Record<string, ParamSpec> =
-		(selectedDescriptor?.params as Record<string, ParamSpec> | undefined) ?? {};
+	const { servers, typeOptions } = useGroupScopeData(groupId);
 
+	const [consumerId, setConsumerId] = useState(replica.consumer_device_id);
+	const [serverId, setServerId] = useState(replica.server_id ?? ""); // "" = whole group
+	const [type, setType] = useState(replica.type);
+	const [intent, setIntent] = useState(replica.intent);
 	const [name, setName] = useState(replica.name);
 	const [overdueHours, setOverdueHours] = useState(
 		replica.overdue_after_seconds != null
@@ -731,13 +823,39 @@ function EditReplicaDialog({
 			: "",
 	);
 	const [enabled, setEnabled] = useState(replica.enabled);
-	const [paramValues, setParamValues] = useState<Record<string, string>>(() =>
-		wireParamsToValues(paramSchema, replica.params),
-	);
+	const [paramValues, setParamValues] = useState<Record<string, string>>(() => {
+		const initialDescriptor = consumers
+			.find((c) => c.device_id === replica.consumer_device_id)
+			?.intents.find((d) => d.intent === replica.intent);
+		const initialSchema =
+			(initialDescriptor?.params as Record<string, ParamSpec> | undefined) ?? {};
+		return wireParamsToValues(initialSchema, replica.params);
+	});
 	const [pending, setPending] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
+	const { intentOptions, selectedDescriptor, paramSchema } = useIntentSchema(
+		consumers,
+		consumerId,
+		intent,
+	);
+
+	// Re-derive parameter values whenever the consumer or intent changes: keep
+	// values for parameter names the new schema still has, drop the rest.
+	useEffect(() => {
+		setParamValues((prev) => {
+			const next: Record<string, string> = {};
+			for (const key of Object.keys(paramSchema)) {
+				if (prev[key] !== undefined) next[key] = prev[key];
+			}
+			return next;
+		});
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [consumerId, intent]);
+
 	const onSubmit = async () => {
+		if (!consumerId) return setError("Pick a consumer");
+		if (!intent) return setError("Pick an intent the consumer advertises");
 		if (!name.trim()) return setError("Name cannot be empty");
 		const hours = overdueHours.trim();
 		const overdue_after_seconds =
@@ -745,17 +863,18 @@ function EditReplicaDialog({
 		if (overdue_after_seconds != null && !Number.isFinite(overdue_after_seconds)) {
 			return setError("Overdue bound must be a number of hours");
 		}
-		let params: unknown = replica.params;
-		if (Object.keys(paramSchema).length > 0) {
-			const built = paramValuesToWire(paramSchema, paramValues);
-			if (typeof built === "string") return setError(built);
-			params = built;
-		}
+		const params = paramValuesToWire(paramSchema, paramValues);
+		if (typeof params === "string") return setError(params);
 		setPending(true);
 		setError(null);
 		try {
 			await callApi("restore_replicas", "update", {
 				id: replica.id,
+				consumer_device_id: consumerId,
+				group_id: groupId,
+				server_id: serverId || null,
+				type,
+				intent,
 				name: name.trim(),
 				overdue_after_seconds,
 				params,
@@ -773,6 +892,25 @@ function EditReplicaDialog({
 			<DialogTitle>Edit restore replica</DialogTitle>
 			<DialogContent>
 				<Stack spacing={2} sx={{ mt: 1 }}>
+					<ScopeFields
+						consumers={consumers}
+						servers={servers}
+						typeOptions={typeOptions}
+						consumerId={consumerId}
+						onConsumerChange={(id) => {
+							setConsumerId(id);
+							setError(null);
+						}}
+						serverId={serverId}
+						onServerChange={setServerId}
+						type={type}
+						onTypeChange={setType}
+						intent={intent}
+						onIntentChange={setIntent}
+						intentOptions={intentOptions}
+						description={selectedDescriptor?.description}
+					/>
+
 					<TextField
 						size="small"
 						fullWidth
