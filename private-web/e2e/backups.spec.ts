@@ -513,8 +513,8 @@ test.describe("backups ready: stats + backup-now", () => {
 		const runs = page.getByRole("table").last();
 		await expect(runs.getByText("4.0 KiB")).toBeVisible();
 		// No S3 traffic reported and no snapshot id → Uploaded and Snapshot cells
-		// both fall back to "—".
-		await expect(runs.getByRole("cell", { name: "—" })).toHaveCount(2);
+		// both fall back to "—", plus the empty Duration column.
+		await expect(runs.getByRole("cell", { name: "—" })).toHaveCount(3);
 	});
 
 	test("failed run shows expandable error detail, no snapshot size, and no upload", async ({
@@ -546,9 +546,9 @@ test.describe("backups ready: stats + backup-now", () => {
 		const runs = page.getByRole("table").last();
 		await expect(runs.getByText("err-srv")).toBeVisible();
 		await expect(runs.getByText("failure")).toBeVisible();
-		// A failed run has no size, no upload, and no snapshot → three "—" cells
-		// (Snapshot size, Uploaded, Snapshot), not "unknown".
-		await expect(runs.getByRole("cell", { name: "—" })).toHaveCount(3);
+		// A failed run has no size, no upload, and no snapshot → four "—" cells
+		// (Snapshot size, Uploaded, Snapshot, Duration), not "unknown".
+		await expect(runs.getByRole("cell", { name: "—" })).toHaveCount(4);
 
 		// Error detail is hidden until the row is expanded.
 		await expect(page.getByText(/disk quota exceeded/i)).toBeHidden();
@@ -591,8 +591,9 @@ test.describe("backups ready: stats + backup-now", () => {
 		const runs = page.getByRole("table").last();
 		await expect(runs.getByText("s3-srv")).toBeVisible();
 		await expect(runs.getByText("2.0 KiB")).toBeVisible();
-		// Snapshot size has nothing to show, nor does the (unseeded) snapshot id.
-		await expect(runs.getByRole("cell", { name: "—" })).toHaveCount(2);
+		// Snapshot size has nothing to show, nor does the (unseeded) snapshot id,
+		// plus the empty Duration column.
+		await expect(runs.getByRole("cell", { name: "—" })).toHaveCount(3);
 
 		// The S3 traffic breakdown is hidden until the row is expanded. Scoped to
 		// the runs table: the repo-stats panel has its own always-visible
