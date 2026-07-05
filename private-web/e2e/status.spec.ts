@@ -19,7 +19,7 @@ test.describe("status page", () => {
 	test("renders the nav and redirects /", async ({ page }) => {
 		await page.goto("/");
 		await expect(page).toHaveURL(/\/status$/);
-		await expect(page).toHaveTitle("Canopy");
+		await expect(page).toHaveTitle("Status · Canopy");
 		await expect(page.getByRole("link", { name: "Status" })).toBeVisible();
 	});
 
