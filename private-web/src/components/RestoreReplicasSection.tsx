@@ -1046,9 +1046,7 @@ function CheckRow({ check }: { check: RestoreActivity }) {
 				</TableCell>
 				<TableCell>
 					{check.duration_seconds != null ? (
-						<Tooltip title="Time from restore credential issuance to report (measured by Canopy)">
-							<span>{humanSeconds(check.duration_seconds)}</span>
-						</Tooltip>
+						<span>{humanSeconds(check.duration_seconds)}</span>
 					) : (
 						"—"
 					)}
