@@ -443,6 +443,58 @@ pub fn slot_is_due(
 	secs_into_window >= slot && secs_into_window < slot + tick_secs
 }
 
+/// The number of seconds a per-group deadline is held clear of its window's
+/// tail, so a run that starts a couple of ticks after its target still records
+/// within the same window (see [`slot_deadline_due`]).
+const DEADLINE_END_GUARD: i64 = 120;
+
+/// Deadline-with-catch-up scheduling for periodic per-group work — use this
+/// instead of [`slot_is_due`] when *missing* the one-tick slot must not skip
+/// the whole period.
+///
+/// [`slot_is_due`] fires only on the single tick that lands inside a 60s slot;
+/// if that tick is missed (the per-minute loop drifts and its ticks are spaced
+/// slightly over a minute, the group is mid-op, or the process restarted across
+/// that minute) the work is deferred a whole `window`. For weekly work that
+/// means it can silently never run.
+///
+/// This instead treats the group's [`jitter_slot`] offset as a *deadline*
+/// within each epoch-anchored `window` and reports due once `now` has reached
+/// it — staying due on later ticks until a run actually happens. Concretely, due
+/// when either:
+///   - `now` has reached this window's target and the group hasn't run yet this
+///     window (`last` predates the window start), or
+///   - the last run is overdue by a full `window` (prompt catch-up after
+///     downtime, regardless of the slot).
+///
+/// `last` is the most recent run of this kind; `None` (never run) is due as soon
+/// as the current window's target passes. The target is held
+/// [`DEADLINE_END_GUARD`] seconds before the window boundary so a run caught a
+/// tick or two late still records within the window (otherwise a group whose
+/// offset landed in the final seconds would look un-run next window and slip to
+/// every-other-period). Still spreads the fleet: each group's target differs by
+/// its hash offset.
+pub fn slot_deadline_due(
+	group_id: Uuid,
+	window: Duration,
+	last: Option<Timestamp>,
+	now: Timestamp,
+) -> bool {
+	let window_secs = window.as_secs().max(1) as i64;
+	let offset = (jitter_slot(group_id, window).as_secs() as i64)
+		.min((window_secs - DEADLINE_END_GUARD).max(0));
+	let now_s = now.as_second();
+	let window_start = now_s - now_s.rem_euclid(window_secs);
+	let target = window_start + offset;
+	match last {
+		None => now_s >= target,
+		Some(last) => {
+			let last = last.as_second();
+			(now_s >= target && last < window_start) || now_s - last >= window_secs
+		}
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -477,6 +529,69 @@ mod tests {
 		if slot >= 1 {
 			assert!(!slot_is_due(g, window, tick, slot - 1));
 		}
+	}
+
+	#[test]
+	fn slot_deadline_fires_once_per_window_and_catches_up() {
+		let g = Uuid::from_u128(0x9e37_79b9_7f4a_7c15_f39c_c060_5ced_c834);
+		let window = Duration::from_secs(86400); // DAY
+		let window_secs = 86400i64;
+		let ts = |s: i64| Timestamp::from_second(s).unwrap();
+
+		// The effective (guarded) offset the function uses, and the room left to
+		// the window's end — used to keep every fixture instant inside the window
+		// regardless of where this group's hash lands.
+		let offset =
+			(jitter_slot(g, window).as_secs() as i64).min(window_secs - DEADLINE_END_GUARD);
+		assert!(offset >= 1, "fixture assumes a non-zero slot offset");
+		let room = window_secs - offset;
+		// A concrete window anchored to a DAY boundary (100 days after the epoch).
+		let window_start = 100 * window_secs;
+		let target = window_start + offset;
+
+		// Never run: not due before the target, due once it's reached.
+		assert!(!slot_deadline_due(g, window, None, ts(target - 1)));
+		assert!(slot_deadline_due(g, window, None, ts(target)));
+
+		// Ran earlier this same window → not due again this window (once-per-window,
+		// no double run even if the earlier run predated the slot).
+		assert!(!slot_deadline_due(
+			g,
+			window,
+			Some(ts(window_start + 5)),
+			ts(target + 1)
+		));
+
+		// Ran in the previous window → due once this window's target passes (the
+		// daily catch-up: yesterday's run doesn't block today's), but not before.
+		let prev = window_start - window_secs + offset;
+		assert!(!slot_deadline_due(
+			g,
+			window,
+			Some(ts(prev)),
+			ts(target - 1)
+		));
+		assert!(slot_deadline_due(g, window, Some(ts(prev)), ts(target)));
+
+		// The slot was missed for this window (no tick landed on it), but a later
+		// tick still fires it — the whole point, vs slot_is_due deferring a period.
+		let late = (room / 2).max(1);
+		assert!(slot_deadline_due(
+			g,
+			window,
+			Some(ts(prev)),
+			ts(target + late)
+		));
+
+		// Overdue by more than a full window fires regardless of the slot, even
+		// early in the window before the target (downtime recovery).
+		let stale = window_start - window_secs - 10;
+		assert!(slot_deadline_due(
+			g,
+			window,
+			Some(ts(stale)),
+			ts(window_start + 1)
+		));
 	}
 
 	#[test]

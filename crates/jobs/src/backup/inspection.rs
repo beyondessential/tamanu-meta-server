@@ -23,7 +23,7 @@
 
 use std::time::Duration;
 
-use commons_servers::backup_jobs::{effective_interval_for_group, slot_is_due};
+use commons_servers::backup_jobs::{effective_interval_for_group, slot_deadline_due};
 use database::{
 	BackupConfigStatus, BackupMaintenanceRun, BackupRepoSnapshot, BackupRun,
 	ServerGroupBackupConfig,
@@ -45,11 +45,6 @@ const TICK: Duration = Duration::from_secs(60);
 /// Floor for the per-group inspection cadence: inspect at least weekly even when
 /// a group's effective backup interval is longer (or absent).
 const INSPECT_FLOOR: Duration = Duration::from_secs(7 * 24 * 3600);
-
-fn secs_into(now: Timestamp, window: Duration) -> u64 {
-	let w = window.as_secs().max(1) as i64;
-	now.as_second().rem_euclid(w) as u64
-}
 
 /// Whether a backup has landed since the repo was last inspected — the signal to
 /// inspect promptly (so the stats panel freshens shortly after a backup,
@@ -182,8 +177,13 @@ async fn tick(worker: &Worker) -> Result<(), String> {
 			.await
 			.map_err(|e| e.to_string())?
 			.map_or(INSPECT_FLOOR, |i| i.max(INSPECT_FLOOR));
-		let into = secs_into(now, window);
-		if !due_after_backup && !due_after_maint && !slot_is_due(c.group_id, window, TICK, into) {
+		// Fallback cadence: fire on the first tick at/after the group's jittered
+		// deadline and keep firing until an inspection lands (catch-up), rather
+		// than only in a single 60s slot that a drifting/slow tick can skip.
+		if !due_after_backup
+			&& !due_after_maint
+			&& !slot_deadline_due(c.group_id, window, last_inspected, now)
+		{
 			continue;
 		}
 		spawn_inspect(worker, c.clone());

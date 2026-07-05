@@ -19,8 +19,8 @@
 use std::{collections::HashSet, time::Duration};
 
 use commons_servers::backup_jobs::{
-	JobKind, SharedBackupConfig, backup_bucket_billing_tags, effective_retention_for_group, is_due,
-	slot_is_due,
+	JobKind, SharedBackupConfig, backup_bucket_billing_tags, effective_retention_for_group,
+	slot_deadline_due,
 };
 use commons_types::backup::BackupPlacement;
 use database::{
@@ -44,11 +44,6 @@ use super::{
 const TICK: Duration = Duration::from_secs(60);
 const DAY: Duration = Duration::from_secs(24 * 3600);
 const WEEK: Duration = Duration::from_secs(7 * 24 * 3600);
-
-fn secs_into(now: Timestamp, window: Duration) -> u64 {
-	let w = window.as_secs().max(1) as i64;
-	now.as_second().rem_euclid(w) as u64
-}
 
 /// Build the `{type → policy}` retention map for a group: the effective
 /// `RetentionPolicy` per enabled backup type, serialised through JSON into the
@@ -88,20 +83,22 @@ fn kopia_env(
 }
 
 /// Decide which maintenance kind (if any) a group is due for this tick.
+///
+/// Full (weekly) takes priority over quick (daily) and subsumes it. Both use
+/// [`slot_deadline_due`], which fires on the first tick at or after the group's
+/// jittered per-period deadline and keeps firing until a run happens — so a
+/// missed slot no longer defers the work a whole period (the reason full
+/// maintenance could go weeks without running and quick slipped past daily).
 fn due_kind(
 	group_id: uuid::Uuid,
 	last_quick_or_full: Option<Timestamp>,
 	last_full: Option<Timestamp>,
 	now: Timestamp,
 ) -> Option<JobKind> {
-	let full_due =
-		is_due(WEEK, last_full, now) && slot_is_due(group_id, WEEK, TICK, secs_into(now, WEEK));
-	if full_due {
+	if slot_deadline_due(group_id, WEEK, last_full, now) {
 		return Some(JobKind::MaintFull);
 	}
-	let quick_due = is_due(DAY, last_quick_or_full, now)
-		&& slot_is_due(group_id, DAY, TICK, secs_into(now, DAY));
-	quick_due.then_some(JobKind::MaintQuick)
+	slot_deadline_due(group_id, DAY, last_quick_or_full, now).then_some(JobKind::MaintQuick)
 }
 
 /// Whether a config needs its init (repo-create) op run this tick. True iff the
@@ -542,16 +539,59 @@ mod tests {
 
 	#[test]
 	fn maintenance_due_logic() {
+		use commons_servers::backup_jobs::jitter_slot;
 		let g = uuid::Uuid::from_u128(3);
-		// Recent full + quick → nothing due (elapsed gate), independent of slot.
-		let now: Timestamp = "2026-06-16T12:00:00Z".parse().unwrap();
-		let recent: Timestamp = "2026-06-16T11:00:00Z".parse().unwrap();
-		assert_eq!(due_kind(g, Some(recent), Some(recent), now), None);
+		let week_secs = WEEK.as_secs() as i64;
+		let day_secs = DAY.as_secs() as i64;
+		let week_off = jitter_slot(g, WEEK).as_secs() as i64;
+		let day_off = jitter_slot(g, DAY).as_secs() as i64;
+		// Fixture sanity: this group's slots aren't in the guarded tail, so the
+		// targets derived below match what the scheduler computes.
+		assert!(week_off < week_secs - 120 && day_off < day_secs - 120);
+		let ts = |s: i64| Timestamp::from_second(s).unwrap();
 
-		// At the group's weekly slot with no prior full run, full is due (and
-		// subsumes quick).
-		let week_slot = commons_servers::backup_jobs::jitter_slot(g, WEEK).as_secs() as i64;
-		let at_slot = Timestamp::from_second(week_slot).unwrap();
-		assert_eq!(due_kind(g, None, None, at_slot), Some(JobKind::MaintFull));
+		// A WEEK boundary well after the epoch (also a DAY boundary: WEEK = 7·DAY).
+		let week_start = 3000 * week_secs;
+		let full_target = week_start + week_off;
+
+		// Just ran both → nothing due.
+		let now0 = ts(week_start + week_off + 12345);
+		assert_eq!(due_kind(g, Some(now0), Some(now0), now0), None);
+
+		// Never run, at the weekly deadline → full (which subsumes quick).
+		assert_eq!(
+			due_kind(g, None, None, ts(full_target)),
+			Some(JobKind::MaintFull)
+		);
+
+		// Full ran last week and this week's slot was missed (no tick landed on
+		// it); a later tick still catches it up rather than deferring another
+		// week — the bug this fix targets.
+		let late = ((week_secs - week_off) / 2).max(1);
+		let last_week_full = full_target - week_secs;
+		assert_eq!(
+			due_kind(
+				g,
+				Some(ts(last_week_full + 100)),
+				Some(ts(last_week_full)),
+				ts(full_target + late),
+			),
+			Some(JobKind::MaintFull),
+		);
+
+		// Full is current (ran yesterday, still this week), but quick's deadline
+		// for today has passed since → quick is due (and full isn't).
+		let day_start = week_start + 3 * day_secs; // mid-week day boundary
+		let full_ran_yesterday = day_start - day_secs + 500;
+		let now_q = ts(day_start + day_off + 10);
+		assert_eq!(
+			due_kind(
+				g,
+				Some(ts(full_ran_yesterday)),
+				Some(ts(full_ran_yesterday)),
+				now_q,
+			),
+			Some(JobKind::MaintQuick),
+		);
 	}
 }
