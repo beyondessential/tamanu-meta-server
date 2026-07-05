@@ -70,6 +70,11 @@ lto = true
 codegen-units = 1
 strip = "symbols"
 
+# compile dependencies with some optimisations to reduce disk pressure
+[profile.dev.package."*"]
+opt-level = 1
+
+# compile build scripts and macros quickly
 [profile.dev.build-override]
 opt-level = 0
 codegen-units = 1024
