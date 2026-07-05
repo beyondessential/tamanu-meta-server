@@ -38,7 +38,7 @@ jobs:
           rustup default stable
           rustup target add ${{ matrix.target }}
 
-      - uses: taiki-e/install-action@v2.81.10
+      - uses: taiki-e/install-action@v2.82.2
         with:
           tool: just
 
@@ -94,9 +94,9 @@ jobs:
         run: cp -r static .github/build-context/static
 
       - name: Setup buildkit
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@v4.1.0
 
-      - uses: docker/metadata-action@v6
+      - uses: docker/metadata-action@v6.1.0
         id: meta
         with:
           images: ghcr.io/beyondessential/canopy
@@ -138,7 +138,7 @@ jobs:
         run: rm -rf ops/.git
 
       - name: Connect to Tailscale
-        uses: tailscale/github-action@v4
+        uses: tailscale/github-action@v4.1.2
         with:
           oauth-client-id: ${{ vars.TS_OAUTH_CLIENT_ID }}
           audience: api.tailscale.com/${{ vars.TS_OAUTH_CLIENT_ID }}
