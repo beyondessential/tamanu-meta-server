@@ -209,8 +209,186 @@ async fn tags_endpoint_includes_effective_billing_labels() {
 			assert_eq!(tags.get("billing.product"), Some(&"tamanu".to_string()));
 			// Explicit group override honoured verbatim.
 			assert_eq!(tags.get("billing.deployment"), Some(&"acme".to_string()));
-			// Stage mapped from the highest-ranked member (production -> prod).
+			// Stage mapped from the requesting server's own rank (production -> prod).
 			assert_eq!(tags.get("billing.stage"), Some(&"prod".to_string()));
+		},
+	)
+	.await
+}
+
+/// A server's own stored `billing.*` tags win over both the group's tags and
+/// the computed defaults: an operator can pin any billing label on a specific
+/// server, including overriding the rank-derived stage.
+#[tokio::test(flavor = "multi_thread")]
+async fn tags_endpoint_server_billing_tags_win() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let group_id = Uuid::new_v4();
+			let server_id = Uuid::new_v4();
+			// Group pins product + stage; the server will override all three.
+			sql_query(
+				"INSERT INTO server_groups (id, name, tags) \
+				 VALUES ($1, 'Override Cluster', '{\"billing.product\": \"tamanu\", \"billing.stage\": \"prod\"}'::jsonb)",
+			)
+			.bind::<sql_types::Uuid, _>(group_id)
+			.execute(&mut conn)
+			.await
+			.unwrap();
+			sql_query(
+				"INSERT INTO servers (id, host, kind, rank, device_id, group_id, tags) \
+				 VALUES ($1, 'https://ov.example.com', 'central', 'production', $2, $3, \
+				 '{\"billing.product\": \"pgro\", \"billing.deployment\": \"custom-dep\", \"billing.stage\": \"staging\"}'::jsonb)",
+			)
+			.bind::<sql_types::Uuid, _>(server_id)
+			.bind::<sql_types::Uuid, _>(device_id)
+			.bind::<sql_types::Uuid, _>(group_id)
+			.execute(&mut conn)
+			.await
+			.unwrap();
+
+			let response = public
+				.get("/tags")
+				.add_header("mtls-certificate", &cert)
+				.await;
+			response.assert_status_ok();
+			let tags: HashMap<String, String> = response.json();
+			// Server tags win over the group tags and the computed rank default.
+			assert_eq!(tags.get("billing.product"), Some(&"pgro".to_string()));
+			assert_eq!(tags.get("billing.deployment"), Some(&"custom-dep".to_string()));
+			assert_eq!(tags.get("billing.stage"), Some(&"staging".to_string()));
+		},
+	)
+	.await
+}
+
+/// A group's stored `billing.*` tags win over the computed defaults when the
+/// server sets none of its own.
+#[tokio::test(flavor = "multi_thread")]
+async fn tags_endpoint_group_billing_tags_win_over_defaults() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let group_id = Uuid::new_v4();
+			let server_id = Uuid::new_v4();
+			// Group pins stage explicitly; server has a rank but no billing tags.
+			sql_query(
+				"INSERT INTO server_groups (id, name, tags) \
+				 VALUES ($1, 'Group Stage Cluster', '{\"billing.stage\": \"sandbox\"}'::jsonb)",
+			)
+			.bind::<sql_types::Uuid, _>(group_id)
+			.execute(&mut conn)
+			.await
+			.unwrap();
+			sql_query(
+				"INSERT INTO servers (id, host, kind, rank, device_id, group_id) \
+				 VALUES ($1, 'https://gs.example.com', 'central', 'production', $2, $3)",
+			)
+			.bind::<sql_types::Uuid, _>(server_id)
+			.bind::<sql_types::Uuid, _>(device_id)
+			.bind::<sql_types::Uuid, _>(group_id)
+			.execute(&mut conn)
+			.await
+			.unwrap();
+
+			let response = public
+				.get("/tags")
+				.add_header("mtls-certificate", &cert)
+				.await;
+			response.assert_status_ok();
+			let tags: HashMap<String, String> = response.json();
+			// Group's explicit stage wins over the rank-derived "prod".
+			assert_eq!(tags.get("billing.stage"), Some(&"sandbox".to_string()));
+		},
+	)
+	.await
+}
+
+/// `billing.stage` is derived from the requesting server's own rank, not the
+/// group's highest-ranked member: a `clone` server in a group that also holds
+/// a `production` server reports `billing.stage=clone`, never `prod`.
+#[tokio::test(flavor = "multi_thread")]
+async fn tags_endpoint_billing_stage_is_per_server_rank() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let group_id = Uuid::new_v4();
+			let clone_id = Uuid::new_v4();
+			let prod_id = Uuid::new_v4();
+			sql_query("INSERT INTO server_groups (id, name) VALUES ($1, 'Mixed Cluster')")
+				.bind::<sql_types::Uuid, _>(group_id)
+				.execute(&mut conn)
+				.await
+				.unwrap();
+			// A higher-ranked (production) sibling in the same group.
+			sql_query(
+				"INSERT INTO servers (id, host, kind, rank, group_id) \
+				 VALUES ($1, 'https://prod.example.com', 'central', 'production', $2)",
+			)
+			.bind::<sql_types::Uuid, _>(prod_id)
+			.bind::<sql_types::Uuid, _>(group_id)
+			.execute(&mut conn)
+			.await
+			.unwrap();
+			// The requesting server is a clone.
+			sql_query(
+				"INSERT INTO servers (id, host, kind, rank, device_id, group_id) \
+				 VALUES ($1, 'https://clone.example.com', 'central', 'clone', $2, $3)",
+			)
+			.bind::<sql_types::Uuid, _>(clone_id)
+			.bind::<sql_types::Uuid, _>(device_id)
+			.bind::<sql_types::Uuid, _>(group_id)
+			.execute(&mut conn)
+			.await
+			.unwrap();
+
+			let response = public
+				.get("/tags")
+				.add_header("mtls-certificate", &cert)
+				.await;
+			response.assert_status_ok();
+			let tags: HashMap<String, String> = response.json();
+			// The clone reports its own stage, not the group's production.
+			assert_eq!(tags.get("billing.stage"), Some(&"clone".to_string()));
+		},
+	)
+	.await
+}
+
+/// A grouped server with no rank set gets no `billing.stage` label — there's no
+/// stage to attribute its cost to — while the group-level labels still appear.
+#[tokio::test(flavor = "multi_thread")]
+async fn tags_endpoint_no_billing_stage_when_server_unranked() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let group_id = Uuid::new_v4();
+			let server_id = Uuid::new_v4();
+			sql_query("INSERT INTO server_groups (id, name) VALUES ($1, 'Unranked Cluster')")
+				.bind::<sql_types::Uuid, _>(group_id)
+				.execute(&mut conn)
+				.await
+				.unwrap();
+			sql_query(
+				"INSERT INTO servers (id, host, kind, device_id, group_id) \
+				 VALUES ($1, 'https://ur.example.com', 'central', $2, $3)",
+			)
+			.bind::<sql_types::Uuid, _>(server_id)
+			.bind::<sql_types::Uuid, _>(device_id)
+			.bind::<sql_types::Uuid, _>(group_id)
+			.execute(&mut conn)
+			.await
+			.unwrap();
+
+			let response = public
+				.get("/tags")
+				.add_header("mtls-certificate", &cert)
+				.await;
+			response.assert_status_ok();
+			let tags: HashMap<String, String> = response.json();
+			// Group-level labels still present, but no per-server stage.
+			assert_eq!(tags.get("billing.product"), Some(&"tamanu".to_string()));
+			assert_eq!(tags.get("billing.stage"), None);
 		},
 	)
 	.await
