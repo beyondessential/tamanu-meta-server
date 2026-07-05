@@ -306,6 +306,12 @@ pub struct RestoreCredentialsArgs {
 	/// The backup type to restore (e.g. `tamanu-postgres`).
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
+	/// Optional run-uuid the consumer minted for this restore, sent so the
+	/// issuance can be correlated to the consumer's later restore-health report.
+	/// Supplying it (and the same value in the report) lets Canopy attribute the
+	/// restore's duration and distinguish concurrent restores exactly, rather
+	/// than by time-window heuristics.
+	pub run_id: Option<Uuid>,
 }
 
 /// Read-only S3 credentials plus the repository passphrase for one group and
@@ -451,6 +457,7 @@ async fn credentials(
 			access_key_id: Some(access_key_id.clone()),
 			bucket: cfg.bucket.clone(),
 			prefix: cfg.prefix.clone(),
+			run_id: args.run_id,
 		},
 	)
 	.await?;
@@ -520,6 +527,11 @@ pub struct VerificationArgs {
 	/// (database statistics, whether indexes needed rebuilding, and so on).
 	/// Stored and displayed as-is.
 	pub health_details: Option<serde_json::Value>,
+	/// The run-uuid the consumer minted for this restore, matching the one it
+	/// sent on the restore-credentials request. Supplying it lets Canopy pair
+	/// this report to its issuance for a measured duration. Optional for older
+	/// consumers.
+	pub run_id: Option<Uuid>,
 }
 
 /// Report the outcome of a restore attempt and the replica's health.
@@ -580,6 +592,7 @@ async fn verification(
 			s3_received_raw_bytes: args.s3_received_raw_bytes,
 			s3_received_payload_bytes: args.s3_received_payload_bytes,
 			health_details: args.health_details,
+			run_id: args.run_id,
 		},
 	)
 	.await?;

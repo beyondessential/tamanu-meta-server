@@ -35,6 +35,7 @@ use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::run_pairing::{self, ReportRef, RunStatus};
 use crate::state::{AppState, RecoveryChallenge};
 
 /// Secret key the from-birth init Job writes the generated passphrase under.
@@ -347,22 +348,6 @@ pub struct PendingRequestRow {
 	pub requested_by: Option<String>,
 }
 
-/// State of a recent-runs row: a device-reported run, or a run inferred from a
-/// credential issuance that has no matching report.
-#[derive(Serialize, ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum RunStatus {
-	/// The device reported this run's outcome; `outcome` is populated.
-	Reported,
-	/// Inferred from a credential issuance whose credentials are still valid and
-	/// which has no matching report yet — a run believed to be in flight.
-	InProgress,
-	/// Inferred from a credential issuance whose credentials have expired with no
-	/// matching report. The run happened but its outcome was never reported (the
-	/// current state of manual `bestool canopy restore`, which doesn't report).
-	Unknown,
-}
-
 /// One row of the recent-runs view: either a device-reported [`BackupRun`] or a
 /// run inferred from a [`BackupCredentialIssuance`] that never matched a report.
 /// Duration, when present, is Canopy-measured wall-clock — the interval from the
@@ -418,31 +403,18 @@ pub struct RecentRun {
 	pub duration_seconds: Option<i64>,
 }
 
-/// Grace added to a credential's `expires_at` when deciding whether an issuance
-/// belongs to a run's issuance chain — absorbs report lag and clock skew.
-const CRED_GRACE_SECS: i64 = 15 * 60;
-
-/// How far back to look for issuances when building the recent-runs view. Bounds
-/// the merge for restore-only groups (which produce issuances but no runs).
-const ISSUANCE_LOOKBACK_SECS: i64 = 3 * 24 * 3600;
-
-/// Extra lookback before the oldest displayed run, so a long run's first issuance
-/// (minted before `reported_at`) is still fetched.
-const CHAIN_LOOKBACK_SECS: i64 = 2 * 3600;
-
-/// Key grouping issuances/runs that could belong to the same run.
-type RunKey = (Uuid, BackupType, BackupPurpose);
-
-fn run_key(device_id: Uuid, r#type: &BackupType, purpose: BackupPurpose) -> RunKey {
-	(device_id, r#type.clone(), purpose)
-}
-
 /// Merge device-reported runs with credential issuances into the recent-runs
-/// view. Reported runs win: each claims its issuance *chain* (a run re-mints
-/// creds roughly hourly, so its issuances overlap within the credential
-/// lifetime) to recover its start time and thus its duration. Issuances left
-/// unclaimed become inferred rows — in-flight while their creds are still valid,
+/// view. A run is paired with the issuances it was minted for to recover its
+/// start time (and thus its duration), and issuances with no matching report
+/// surface as inferred rows — in-flight while their creds are still valid,
 /// otherwise unreported past attempts (e.g. manual restores, which don't report).
+///
+/// Pairing is exact when the client stamped its run-uuid on the credential
+/// request (`run_id`): those issuances group by that id, so concurrent runs of
+/// the same type on one server never conflate. Issuances without a `run_id`
+/// (older clients) fall back to the time-window guesstimate in
+/// [`claim_chain_for_report`] — remove that fallback once `run_id` is mandatory
+/// on the credential call.
 fn build_recent_runs(
 	runs: Vec<BackupRun>,
 	issuances: Vec<BackupCredentialIssuance>,
@@ -450,148 +422,80 @@ fn build_recent_runs(
 	now: Timestamp,
 	limit: usize,
 ) -> Vec<RecentRun> {
-	use std::collections::HashMap;
+	// `runs` arrives newest-first from list_for_group, which the guesstimate
+	// fallback relies on (a later run claims the later chain).
+	let reports: Vec<ReportRef> = runs
+		.iter()
+		.map(|run| ReportRef {
+			run_id: Some(run.id),
+			key: run_pairing::run_key(run.device_id, &run.r#type, run.purpose),
+			reported_at: run.reported_at,
+		})
+		.collect();
+	let (starts, attempts) = run_pairing::pair_issuances(issuances, &reports);
 
-	// Issuances per key, ascending by issued_at, with a per-entry claimed flag.
-	let mut by_key: HashMap<RunKey, Vec<(BackupCredentialIssuance, bool)>> = HashMap::new();
-	for iss in issuances {
-		by_key
-			.entry(run_key(iss.device_id, &iss.r#type, iss.purpose))
-			.or_default()
-			.push((iss, false));
-	}
-	for chain in by_key.values_mut() {
-		chain.sort_by_key(|(i, _)| i.issued_at);
-	}
-
-	let mut rows: Vec<RecentRun> = Vec::new();
-
-	// Reported runs first — newest-first so a later run claims the later chain.
-	// (`runs` arrives newest-first from list_for_group.)
-	for run in runs {
-		let key = run_key(run.device_id, &run.r#type, run.purpose);
-		let started_at = by_key
-			.get_mut(&key)
-			.and_then(|chain| claim_chain_for_report(chain, run.reported_at));
-		let duration_seconds = started_at.map(|s| run.reported_at.as_second() - s.as_second());
-		rows.push(RecentRun {
-			key: format!("run-{}", run.id),
-			server_id: run.server_id,
-			r#type: run.r#type,
-			purpose: run.purpose,
-			status: RunStatus::Reported,
-			outcome: Some(run.outcome),
-			error: run.error,
-			bytes_uploaded: run.bytes_uploaded,
-			snapshot_id: run.snapshot_id,
-			snapshot_logical_bytes: run.snapshot_logical_bytes,
-			s3_sent_raw_bytes: run.s3_sent_raw_bytes,
-			s3_sent_payload_bytes: run.s3_sent_payload_bytes,
-			s3_received_raw_bytes: run.s3_received_raw_bytes,
-			s3_received_payload_bytes: run.s3_received_payload_bytes,
-			started_at,
-			reported_at: Some(run.reported_at),
-			at: run.reported_at,
-			duration_seconds,
-		});
-	}
-
-	// Whatever issuances remain become inferred attempt rows, one per contiguous
-	// chain (not one per re-mint).
-	for chain in by_key.into_values() {
-		let mut idx = 0;
-		while idx < chain.len() {
-			if chain[idx].1 {
-				idx += 1;
-				continue;
+	let mut rows: Vec<RecentRun> = runs
+		.into_iter()
+		.zip(starts)
+		.map(|(run, started_at)| {
+			let duration_seconds = started_at.map(|s| run.reported_at.as_second() - s.as_second());
+			RecentRun {
+				key: format!("run-{}", run.id),
+				server_id: run.server_id,
+				r#type: run.r#type,
+				purpose: run.purpose,
+				status: RunStatus::Reported,
+				outcome: Some(run.outcome),
+				error: run.error,
+				bytes_uploaded: run.bytes_uploaded,
+				snapshot_id: run.snapshot_id,
+				snapshot_logical_bytes: run.snapshot_logical_bytes,
+				s3_sent_raw_bytes: run.s3_sent_raw_bytes,
+				s3_sent_payload_bytes: run.s3_sent_payload_bytes,
+				s3_received_raw_bytes: run.s3_received_raw_bytes,
+				s3_received_payload_bytes: run.s3_received_payload_bytes,
+				started_at,
+				reported_at: Some(run.reported_at),
+				at: run.reported_at,
+				duration_seconds,
 			}
-			// Extend a contiguous run of unclaimed issuances.
-			let start = idx;
-			let mut end = idx;
-			let mut latest_expires = chain[idx].0.expires_at;
-			while end + 1 < chain.len()
-				&& !chain[end + 1].1
-				&& chain[end + 1].0.issued_at.as_second()
-					<= latest_expires.as_second() + CRED_GRACE_SECS
-			{
-				end += 1;
-				latest_expires = latest_expires.max(chain[end].0.expires_at);
-			}
-			let first = &chain[start].0;
-			let status = if now < latest_expires {
-				RunStatus::InProgress
-			} else {
-				RunStatus::Unknown
-			};
-			rows.push(RecentRun {
-				key: format!("issuance-{}", first.id),
-				server_id: device_to_server.get(&first.device_id).copied(),
-				r#type: first.r#type.clone(),
-				purpose: first.purpose,
-				status,
-				outcome: None,
-				error: None,
-				bytes_uploaded: None,
-				snapshot_id: None,
-				snapshot_logical_bytes: None,
-				s3_sent_raw_bytes: None,
-				s3_sent_payload_bytes: None,
-				s3_received_raw_bytes: None,
-				s3_received_payload_bytes: None,
-				started_at: Some(first.issued_at),
-				reported_at: None,
-				at: first.issued_at,
-				duration_seconds: None,
-			});
-			idx = end + 1;
+		})
+		.collect();
+
+	// Unreported issuances become inferred rows — but only for the group's member
+	// servers. Issuances minted for a restore-replica *consumer* device are
+	// tracked in the restore-checks table, not this backup panel.
+	for attempt in attempts {
+		if !device_to_server.contains_key(&attempt.first.device_id) {
+			continue;
 		}
+		let status = attempt.status(now);
+		let first = attempt.first;
+		rows.push(RecentRun {
+			key: format!("issuance-{}", first.id),
+			server_id: device_to_server.get(&first.device_id).copied(),
+			r#type: first.r#type,
+			purpose: first.purpose,
+			status,
+			outcome: None,
+			error: None,
+			bytes_uploaded: None,
+			snapshot_id: None,
+			snapshot_logical_bytes: None,
+			s3_sent_raw_bytes: None,
+			s3_sent_payload_bytes: None,
+			s3_received_raw_bytes: None,
+			s3_received_payload_bytes: None,
+			started_at: Some(first.issued_at),
+			reported_at: None,
+			at: first.issued_at,
+			duration_seconds: None,
+		});
 	}
 
 	rows.sort_by(|a, b| b.at.cmp(&a.at));
 	rows.truncate(limit);
 	rows
-}
-
-/// Claim the issuance chain for a reported run and return its start time (the
-/// earliest issuance in the chain). Walks back from the latest issuance at or
-/// before `reported_at` while consecutive issuances stay contiguous (a re-mint
-/// overlaps the prior creds' validity, within grace), stopping at the first gap.
-/// Returns `None` — claiming nothing — when the latest candidate's creds had
-/// already expired well before the report (so it belongs to no live chain).
-fn claim_chain_for_report(
-	chain: &mut [(BackupCredentialIssuance, bool)],
-	reported_at: Timestamp,
-) -> Option<Timestamp> {
-	// Latest unclaimed issuance with issued_at <= reported_at.
-	let top = chain
-		.iter()
-		.rposition(|(i, claimed)| !claimed && i.issued_at <= reported_at)?;
-	// The report must fall within the top issuance's validity (plus grace);
-	// otherwise this issuance isn't the tail of this run's chain.
-	if reported_at.as_second() > chain[top].0.expires_at.as_second() + CRED_GRACE_SECS {
-		return None;
-	}
-	let mut start = top;
-	while start > 0 {
-		let prev = start - 1;
-		if chain[prev].1 {
-			break;
-		}
-		// prev is contiguous if its creds' validity (plus grace) reaches the next
-		// issuance's start — i.e. it's a re-mint of the same ongoing run.
-		if chain[prev].0.expires_at.as_second() + CRED_GRACE_SECS
-			>= chain[start].0.issued_at.as_second()
-		{
-			start = prev;
-		} else {
-			break;
-		}
-	}
-	let started_at = chain[start].0.issued_at;
-	for entry in &mut chain[start..=top] {
-		entry.1 = true;
-	}
-	Some(started_at)
 }
 
 /// Backup statistics and activity for a server group.
@@ -1906,18 +1810,8 @@ pub async fn stats(
 		.iter()
 		.filter_map(|s| s.device_id.map(|d| (d, s.id)))
 		.collect();
-	let issuance_since_secs = {
-		let base = now.as_second() - ISSUANCE_LOOKBACK_SECS;
-		match reported_runs
-			.iter()
-			.map(|r| r.reported_at.as_second())
-			.min()
-		{
-			Some(oldest) => base.min(oldest - CHAIN_LOOKBACK_SECS),
-			None => base,
-		}
-	};
-	let issuance_since = Timestamp::from_second(issuance_since_secs).unwrap_or(now);
+	let issuance_since =
+		run_pairing::issuance_since(now, reported_runs.iter().map(|r| r.reported_at).min());
 	let issuances = BackupCredentialIssuance::list_for_group_since(
 		&mut conn,
 		args.server_group_id,
@@ -2396,6 +2290,22 @@ mod tests {
 			access_key_id: None,
 			bucket: String::new(),
 			prefix: String::new(),
+			run_id: None,
+		}
+	}
+
+	/// Like [`issuance`] but correlated to a specific run via `run_id`.
+	fn issuance_for(
+		id: i64,
+		device: Uuid,
+		purpose: BackupPurpose,
+		issued: i64,
+		expires: i64,
+		run_id: Uuid,
+	) -> BackupCredentialIssuance {
+		BackupCredentialIssuance {
+			run_id: Some(run_id),
+			..issuance(id, device, purpose, issued, expires)
 		}
 	}
 
@@ -2525,6 +2435,79 @@ mod tests {
 			.unwrap();
 		assert_eq!(reported.duration_seconds, None);
 		assert!(rows.iter().any(|r| matches!(r.status, RunStatus::Unknown)));
+	}
+
+	#[test]
+	fn concurrent_runs_with_distinct_run_ids_stay_separate() {
+		let d = Uuid::from_u128(7);
+		let rows = build_recent_runs(
+			vec![],
+			vec![
+				issuance_for(
+					1,
+					d,
+					BackupPurpose::Restore,
+					4900,
+					8500,
+					Uuid::from_u128(101),
+				),
+				issuance_for(
+					2,
+					d,
+					BackupPurpose::Restore,
+					4901,
+					8501,
+					Uuid::from_u128(102),
+				),
+			],
+			&device_map(d, 9),
+			ts(5000),
+			20,
+		);
+		// Same device+type+purpose, overlapping windows — but distinct run_ids, so
+		// they must not conflate into one row.
+		assert_eq!(rows.len(), 2);
+		assert!(
+			rows.iter()
+				.all(|r| matches!(r.status, RunStatus::InProgress))
+		);
+	}
+
+	#[test]
+	fn run_id_pairs_exactly_regardless_of_window() {
+		let d = Uuid::from_u128(8);
+		let rid = Uuid::from_u128(200);
+		// Issued long before the report with creds long expired — the time-window
+		// guesstimate would reject it, but the exact run_id still pairs.
+		let rows = build_recent_runs(
+			vec![run(200, d, BackupPurpose::Backup, 100_000)],
+			vec![issuance_for(1, d, BackupPurpose::Backup, 1000, 4600, rid)],
+			&device_map(d, 9),
+			ts(101_000),
+			20,
+		);
+		assert_eq!(rows.len(), 1);
+		assert!(matches!(rows[0].status, RunStatus::Reported));
+		assert_eq!(rows[0].duration_seconds, Some(99_000));
+	}
+
+	#[test]
+	fn inferred_rows_only_for_member_devices() {
+		let member = Uuid::from_u128(1);
+		let consumer = Uuid::from_u128(2);
+		let rows = build_recent_runs(
+			vec![],
+			vec![
+				issuance(1, member, BackupPurpose::Restore, 4900, 8500),
+				issuance(2, consumer, BackupPurpose::Restore, 4900, 8500),
+			],
+			// Only the member device maps to a server; the consumer device doesn't.
+			&device_map(member, 9),
+			ts(5000),
+			20,
+		);
+		assert_eq!(rows.len(), 1, "consumer-device issuance is excluded here");
+		assert_eq!(rows[0].server_id, Some(Uuid::from_u128(9)));
 	}
 }
 

@@ -368,3 +368,62 @@ async fn update_to_unadvertised_intent_creates_gap() {
 	})
 	.await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn checks_reports_duration_and_surfaces_unreported_restores() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group = insert_group(&mut conn).await;
+		let consumer = insert_consumer(&mut conn).await;
+		let member_device = Uuid::new_v4();
+		let server = Uuid::new_v4();
+		let reported_run = Uuid::new_v4();
+		let inflight_run = Uuid::new_v4();
+		let member_run = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO devices (id, role) VALUES ('{member_device}', 'server');
+			 INSERT INTO servers (id, host, kind, group_id, device_id) VALUES
+				('{server}', 'https://s.test', 'central', '{group}', '{member_device}');
+			 -- A reported check plus the issuance that started it 5 minutes before
+			 -- the report → the row carries a ~300s duration.
+			 INSERT INTO backup_restore_checks
+				(consumer_device_id, group_id, server_id, type, intent, outcome, replica_healthy, observed_at, reported_at, run_id)
+				VALUES ('{consumer}', '{group}', '{server}', 'tamanu-postgres', 'verify', 'success', true, now(), now(), '{reported_run}');
+			 INSERT INTO backup_credential_issuances
+				(device_id, group_id, type, issued_at, expires_at, purpose, sts_assumed_role, bucket, prefix, run_id)
+				VALUES ('{consumer}', '{group}', 'tamanu-postgres', now() - interval '300 seconds', now() + interval '3300 seconds', 'restore', 'arn:test', 'b', '', '{reported_run}');
+			 -- A consumer restore whose creds are still valid but which never
+			 -- reported → surfaces as in progress.
+			 INSERT INTO backup_credential_issuances
+				(device_id, group_id, type, issued_at, expires_at, purpose, sts_assumed_role, bucket, prefix, run_id)
+				VALUES ('{consumer}', '{group}', 'tamanu-postgres', now() - interval '30 seconds', now() + interval '3570 seconds', 'restore', 'arn:test', 'b', '', '{inflight_run}');
+			 -- A member-server restore issuance (manual restore) belongs to the
+			 -- backup panel, not this table.
+			 INSERT INTO backup_credential_issuances
+				(device_id, group_id, type, issued_at, expires_at, purpose, sts_assumed_role, bucket, prefix, run_id)
+				VALUES ('{member_device}', '{group}', 'tamanu-postgres', now() - interval '30 seconds', now() + interval '3570 seconds', 'restore', 'arn:test', 'b', '', '{member_run}');"
+		))
+		.await
+		.expect("seed restore activity");
+
+		let resp = private
+			.post("/api/restore_replicas/checks")
+			.json(&serde_json::json!({ "server_group_id": group }))
+			.await;
+		resp.assert_status_ok();
+		let body: serde_json::Value = resp.json();
+		let rows = body.as_array().unwrap();
+		// Reported check + in-flight consumer restore; the member-device issuance is
+		// excluded (it belongs to the backup panel).
+		assert_eq!(rows.len(), 2, "got {rows:?}");
+
+		let reported = rows.iter().find(|r| r["status"] == "reported").unwrap();
+		let dur = reported["duration_seconds"].as_i64().expect("duration");
+		assert!((250..=350).contains(&dur), "≈300s from issuance→report, got {dur}");
+		assert_eq!(reported["intent"], "verify");
+
+		let inflight = rows.iter().find(|r| r["status"] == "in_progress").unwrap();
+		assert!(inflight["server_id"].is_null(), "inferred row has no server");
+		assert!(inflight["duration_seconds"].is_null());
+	})
+	.await;
+}

@@ -600,6 +600,7 @@ async fn stats_includes_runs_and_pending_requests() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let group_id = seed_group(&mut conn).await;
 		let device_id = Uuid::new_v4();
+		let consumer_id = Uuid::new_v4();
 		let server_id = Uuid::new_v4();
 		let run_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
@@ -622,6 +623,13 @@ async fn stats_includes_runs_and_pending_requests() {
 				(device_id, group_id, type, issued_at, expires_at, purpose, sts_assumed_role, bucket, prefix) \
 				VALUES ('{device_id}', '{group_id}', 'tamanu-postgres', now() - interval '30 seconds', \
 					now() + interval '3570 seconds', 'restore', 'arn:test', 'b', '');
+			 -- A managed-restore *consumer* device's restore issuance belongs to the
+			 -- restore-checks table, not this backup panel — it must be excluded.
+			 INSERT INTO devices (id, role) VALUES ('{consumer_id}', 'backup-restore');
+			 INSERT INTO backup_credential_issuances \
+				(device_id, group_id, type, issued_at, expires_at, purpose, sts_assumed_role, bucket, prefix) \
+				VALUES ('{consumer_id}', '{group_id}', 'tamanu-postgres', now() - interval '30 seconds', \
+					now() + interval '3570 seconds', 'restore', 'arn:test', 'b', '');
 			 INSERT INTO backup_requests (server_id, type, purpose) VALUES \
 				('{server_id}', 'tamanu-postgres', 'backup');
 			 INSERT INTO server_backup_capabilities (server_id, type, enabled) VALUES \
@@ -638,6 +646,8 @@ async fn stats_includes_runs_and_pending_requests() {
 		let body: serde_json::Value = resp.json();
 		assert_eq!(body["stats"]["snapshot_count"], 12);
 		// The reported backup, plus an inferred in-flight restore from its issuance.
+		// The consumer device's restore issuance is excluded (it's shown in the
+		// restore-checks table instead).
 		let runs = body["recent_runs"].as_array().unwrap();
 		assert_eq!(runs.len(), 2);
 		// Newest first: the reported backup (reported now) sorts above the restore

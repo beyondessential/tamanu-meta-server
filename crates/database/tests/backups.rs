@@ -592,6 +592,7 @@ async fn issuance_snapshots_bucket_and_orders_newest_first() {
 			access_key_id: Some("ASIAEXAMPLE".into()),
 			bucket: bucket.into(),
 			prefix: String::new(),
+			run_id: None,
 		};
 
 		let first = BackupCredentialIssuance::record(&mut conn, mk("bucket-at-issue"))
@@ -632,6 +633,7 @@ async fn list_for_group_since_windows_and_orders() {
 			access_key_id: Some("ASIAEXAMPLE".into()),
 			bucket: "b".into(),
 			prefix: String::new(),
+			run_id: None,
 		};
 		BackupCredentialIssuance::record(&mut conn, mk())
 			.await

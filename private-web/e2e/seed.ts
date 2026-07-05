@@ -527,14 +527,16 @@ export async function seedBackupCredentialIssuance(
 		purpose?: "backup" | "restore";
 		issuedAgoSecs?: number;
 		ttlSecs?: number;
+		/** Optional run correlation id, matching a run/check's run_id. */
+		runId?: string | null;
 	},
 ): Promise<void> {
 	await sql.query(
 		`INSERT INTO backup_credential_issuances
-		 (device_id, group_id, type, issued_at, expires_at, purpose, sts_assumed_role, bucket, prefix)
+		 (device_id, group_id, type, issued_at, expires_at, purpose, sts_assumed_role, bucket, prefix, run_id)
 		 VALUES ($1, $2, $3, NOW() - ($4 || ' seconds')::interval,
 		         NOW() - ($4 || ' seconds')::interval + ($5 || ' seconds')::interval,
-		         $6, $7, $8, $9)`,
+		         $6, $7, $8, $9, $10)`,
 		[
 			opts.deviceId,
 			opts.groupId,
@@ -545,6 +547,7 @@ export async function seedBackupCredentialIssuance(
 			"arn:aws:iam::000:role/test",
 			"bes-test-bucket",
 			"",
+			opts.runId ?? null,
 		],
 	);
 }
@@ -732,12 +735,14 @@ export async function seedRestoreCheck(
 		healthDetails?: unknown;
 		/** ISO 8601; defaults to NOW(). */
 		observedAt?: string;
+		/** Optional run correlation id, matching a restore issuance's run_id. */
+		runId?: string | null;
 	},
 ): Promise<void> {
 	await sql.query(
 		`INSERT INTO backup_restore_checks
-		 (replica_id, consumer_device_id, group_id, server_id, type, intent, snapshot_id, outcome, error, replica_healthy, postgres_version, health_details, observed_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, COALESCE($13::timestamptz, NOW()))`,
+		 (replica_id, consumer_device_id, group_id, server_id, type, intent, snapshot_id, outcome, error, replica_healthy, postgres_version, health_details, observed_at, run_id)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, COALESCE($13::timestamptz, NOW()), $14)`,
 		[
 			opts.replicaId ?? null,
 			opts.consumerDeviceId,
@@ -752,6 +757,7 @@ export async function seedRestoreCheck(
 			opts.postgresVersion ?? null,
 			opts.healthDetails === undefined ? null : JSON.stringify(opts.healthDetails),
 			opts.observedAt ?? null,
+			opts.runId ?? null,
 		],
 	);
 }

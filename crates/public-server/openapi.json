@@ -1235,6 +1235,14 @@
             "$ref": "#/components/schemas/BackupPurpose",
             "description": "What the credentials will be used for. `backup` (the default) grants\nwrite access for uploading backups; `restore` grants strictly read-only\naccess. Either way the credentials are scoped to the group's backup\nstorage only."
           },
+          "run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Optional run-uuid the client minted for this run, sent so the issuance can\nbe correlated to the run's later `/backup-report`. Supplying it lets\nCanopy attribute the run's duration and distinguish concurrent runs of the\nsame type on one server exactly, rather than by time-window heuristics.\nUse the same value here and in the matching report."
+          },
           "type": {
             "type": "string",
             "description": "The backup type the credentials are for (e.g. `tamanu-postgres`). For a\n`backup`, the type must be an enabled capability of this server or the\nsubject of a pending \"backup now\" request; for a `restore`, the server's\nrestore window must be open (an operator allows restores for it in\ncanopy). Otherwise the request is rejected with 409."
@@ -1878,6 +1886,14 @@
             "format": "uuid",
             "description": "The server group whose backup repository to read."
           },
+          "run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Optional run-uuid the consumer minted for this restore, sent so the\nissuance can be correlated to the consumer's later restore-health report.\nSupplying it (and the same value in the report) lets Canopy attribute the\nrestore's duration and distinguish concurrent restores exactly, rather\nthan by time-window heuristics."
+          },
           "type": {
             "type": "string",
             "description": "The backup type to restore (e.g. `tamanu-postgres`)."
@@ -2117,6 +2133,14 @@
             ],
             "format": "uuid",
             "description": "The declaration this report concerns, taken from the worklist entry's\n`replica_id`. Optional so a report is still accepted when the\ndeclaration was retired while the restore was in flight."
+          },
+          "run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The run-uuid the consumer minted for this restore, matching the one it\nsent on the restore-credentials request. Supplying it lets Canopy pair\nthis report to its issuance for a measured duration. Optional for older\nconsumers."
           },
           "s3_received_payload_bytes": {
             "type": [

@@ -232,6 +232,12 @@ pub struct BackupCredentialsArgs {
 	/// storage only.
 	#[serde(default)]
 	pub purpose: BackupPurpose,
+	/// Optional run-uuid the client minted for this run, sent so the issuance can
+	/// be correlated to the run's later `/backup-report`. Supplying it lets
+	/// Canopy attribute the run's duration and distinguish concurrent runs of the
+	/// same type on one server exactly, rather than by time-window heuristics.
+	/// Use the same value here and in the matching report.
+	pub run_id: Option<Uuid>,
 }
 
 /// Short-lived AWS credentials in the AWS `credential_process` output format,
@@ -448,6 +454,7 @@ async fn credentials(
 			access_key_id: Some(access_key_id.clone()),
 			bucket: cfg.bucket.clone(),
 			prefix: cfg.prefix.clone(),
+			run_id: args.run_id,
 		},
 	)
 	.await?;

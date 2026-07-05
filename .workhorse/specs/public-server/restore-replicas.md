@@ -166,6 +166,7 @@ Canopy verifies the caller has an enabled declaration covering that `(group, typ
 
 The credentials permit reading the repo and nothing else; they cannot write, overwrite, or delete.
 Each issuance is audited.
+A consumer may include an optional run correlation identifier with a credential request; Canopy records it on the issuance so the run is tied to its later health report.
 Absence of a covering declaration is a definitive refusal, not a transient error, and a consumer surfaces it as a clear failure for the operator to diagnose by inspecting the declaration in Canopy.
 
 The 1-hour lifetime of an issued credential does not bound restore duration: a consumer refreshes credentials as needed across a long restore.
@@ -181,6 +182,7 @@ A report carries:
 - whether the restored database came up healthy, and its Postgres major version;
 - when the restore was observed;
 - the object-storage traffic the restore moved;
+- optionally, the same run correlation identifier used when the credentials were obtained, tying the report to its issuance;
 - optionally, arbitrary health data the consumer chooses to attach (e.g. cluster statistics, whether indexes needed fixing). Canopy stores and displays it as-is without interpreting it; specific fields may later be promoted to first-class, queryable form.
 
 When the intent carries the `url` semantic, the attached health data includes a link to the running replica, which Canopy surfaces to operators alongside the report.
@@ -191,6 +193,9 @@ A failure covers any stage: the restore itself, the database failing to come up,
 Only intents carrying `check` are expected to report; an intent without it is dispatched but produces no restore-health signal and is never alerted on.
 
 Reports are retained indefinitely as an audit trail.
+
+Canopy derives each restore's duration from the interval between its first credential issuance and its report.
+A restore for which credentials were issued but no report has arrived is shown as in progress while the credentials remain valid, otherwise as a restore whose outcome is unknown; this surfaces in-flight and terminated-without-report restores in the operator view, including those under intents that produce no health report.
 
 ## Alerting
 

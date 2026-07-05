@@ -828,6 +828,12 @@ pub struct BackupCredentialIssuance {
 	/// Key prefix within the bucket these credentials grant access to, as it
 	/// was at the time of issuance.
 	pub prefix: String,
+	/// The run this issuance was minted for, when the client supplied its
+	/// run-uuid on the credential request. Ties an issuance to its reported run
+	/// exactly (so duration and same-server concurrent runs are unambiguous).
+	/// `None` for older clients that don't send it, which fall back to
+	/// time-window matching.
+	pub run_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -848,6 +854,9 @@ pub struct NewBackupCredentialIssuance {
 	pub bucket: String,
 	/// Snapshot of `prefix` at issuance time.
 	pub prefix: String,
+	/// Optional run-uuid the client minted at run start, correlating this
+	/// issuance with the run it belongs to.
+	pub run_id: Option<Uuid>,
 }
 
 impl BackupCredentialIssuance {

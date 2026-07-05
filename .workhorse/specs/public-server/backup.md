@@ -35,6 +35,7 @@ Canopy issues short-lived credentials by assuming the group's dedicated cross-ac
 
 The credentials carry the storage role's identity for at most an hour; a device refreshes them as a run outruns that lifetime.
 Every issuance is recorded before the credentials are returned.
+A device may include the run identifier it minted (the same one it reports the run under) with the credential request; Canopy records it on the issuance so the issuance ties to the run, and derives the run's duration from the interval between the first such issuance and the report.
 
 A `(type, purpose)` is issuable only when the type is an enabled capability of the server, or an operator has queued a one-off request of that purpose for it; otherwise it is refused.
 The group's configuration must be ready: until then the endpoints refuse, so a half-provisioned group cannot be written to.

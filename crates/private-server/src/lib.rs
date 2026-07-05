@@ -2,6 +2,7 @@ pub mod backup_probe;
 pub mod fns;
 pub mod mcp;
 pub mod openapi;
+pub mod run_pairing;
 pub mod spa;
 pub mod state;
 
