@@ -1093,13 +1093,13 @@ checksum = "d86b93f97252c47b41663388e6d155714a9d0c398b99f1005cbc5f978b29f445"
 
 [[package]]
 name = "bestool-kopia"
-version = "0.2.0"
+version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd30e3b155c13e2657c9b740bb53715494588fc7eb5ae1f26d1577c4a34894ac"
+checksum = "f03d98bc1690b9adaa51b3e4416ce19c1bc8472a520a269a33224b64abfd4757"
 dependencies = [
  "bytes",
  "hex",
- "hmac 0.12.1",
+ "hmac 0.13.0",
  "http-body-util",
  "hyper 1.10.1",
  "hyper-rustls 0.27.9",
@@ -1109,7 +1109,7 @@ dependencies = [
  "rustls 0.23.40",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "tokio",
  "tracing",
  "whoami",
