@@ -1241,7 +1241,7 @@
               "null"
             ],
             "format": "uuid",
-            "description": "Optional run-uuid the client minted for this run, sent so the issuance can\nbe correlated to the run's later `/backup-report`. Supplying it lets\nCanopy attribute the run's duration and distinguish concurrent runs of the\nsame type on one server exactly, rather than by time-window heuristics.\nUse the same value here and in the matching report."
+            "description": "This must be the run-uuid the client minted for this run.\nThe field is optional only so older clients don't break; it WILL be made\nmandatory in future."
           },
           "type": {
             "type": "string",
@@ -1892,7 +1892,7 @@
               "null"
             ],
             "format": "uuid",
-            "description": "Optional run-uuid the consumer minted for this restore, sent so the\nissuance can be correlated to the consumer's later restore-health report.\nSupplying it (and the same value in the report) lets Canopy attribute the\nrestore's duration and distinguish concurrent restores exactly, rather\nthan by time-window heuristics."
+            "description": "This must be the run-uuid the client minted for this run.\nThe field is optional only so older clients don't break; it WILL be made\nmandatory in future."
           },
           "type": {
             "type": "string",
@@ -2140,7 +2140,7 @@
               "null"
             ],
             "format": "uuid",
-            "description": "The run-uuid the consumer minted for this restore, matching the one it\nsent on the restore-credentials request. Supplying it lets Canopy pair\nthis report to its issuance for a measured duration. Optional for older\nconsumers."
+            "description": "This must be the run-uuid the client minted for this run.\nThe field is optional only so older clients don't break; it WILL be made\nmandatory in future."
           },
           "s3_received_payload_bytes": {
             "type": [
