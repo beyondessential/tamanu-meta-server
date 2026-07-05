@@ -29,7 +29,7 @@ jobs:
         run: |
           rustup toolchain install --profile minimal --no-self-update stable
           rustup default stable
-      - uses: taiki-e/install-action@v2.81.10
+      - uses: taiki-e/install-action@v2.82.2
         with:
           tool: cargo-nextest,just
       - uses: Swatinem/rust-cache@v2
@@ -64,7 +64,7 @@ jobs:
           rustup toolchain install --profile minimal --no-self-update stable
           rustup default stable
           rustup component add clippy
-      - uses: taiki-e/install-action@v2.81.10
+      - uses: taiki-e/install-action@v2.82.2
         with:
           tool: just
       - uses: Swatinem/rust-cache@v2
@@ -82,7 +82,7 @@ jobs:
           rustup toolchain install --profile minimal --no-self-update stable
           rustup default stable
           rustup component add rustfmt
-      - uses: taiki-e/install-action@v2.81.10
+      - uses: taiki-e/install-action@v2.82.2
         with:
           tool: just
       - run: just fmt-check
