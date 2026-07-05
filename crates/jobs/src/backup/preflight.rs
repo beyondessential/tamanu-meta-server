@@ -16,12 +16,12 @@
 //! bypasses per-server `is_monitored`. AWS calls are not unit-tested here (no
 //! live AWS in CI); the pure logic — the Object-Lock assertion — is.
 
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 
 use aws_sdk_s3::types::ObjectLockRetentionMode;
 use aws_sdk_sts::error::{ProvideErrorMetadata, SdkError};
 use aws_sdk_sts::operation::RequestId;
-use commons_servers::backup_jobs::slot_is_due;
+use commons_servers::backup_jobs::slot_deadline_due;
 use commons_types::issue::Severity;
 use database::{
 	BackupConfigStatus, ServerGroupBackupConfig,
@@ -33,6 +33,7 @@ use tokio::{
 	time::sleep,
 };
 use tracing::{debug, error, warn};
+use uuid::Uuid;
 
 const TICK: Duration = Duration::from_secs(60);
 const DEEP_WINDOW: Duration = Duration::from_secs(3600);
@@ -100,13 +101,6 @@ async fn recover_identity_alert(
 		.await?;
 	}
 	Ok(())
-}
-
-/// Seconds elapsed into the current `window` for `now` — used with
-/// [`slot_is_due`] to fire a group's hourly deep check on the right minute tick.
-fn secs_into_window(now: Timestamp, window: Duration) -> u64 {
-	let w = window.as_secs().max(1) as i64;
-	(now.as_second().rem_euclid(w)) as u64
 }
 
 struct Aws {
@@ -298,6 +292,11 @@ pub fn spawn() -> JoinHandle<()> {
 			sts: aws_sdk_sts::Client::new(&config),
 			config,
 		};
+		// In-memory per-group anchor for the hourly deep check (no persisted
+		// last-check timestamp): lets a missed slot catch up on a later tick and
+		// keeps a slow predecessor group from pushing others past their slot.
+		// Resets on restart, re-firing at the next deadline.
+		let mut last_deep: HashMap<Uuid, Timestamp> = HashMap::new();
 
 		loop {
 			sleep(TICK).await;
@@ -344,11 +343,17 @@ pub fn spawn() -> JoinHandle<()> {
 				continue;
 			}
 
-			// Per-group deep checks on their hash-jittered hourly slot.
+			// Per-group deep checks on their hash-jittered hourly deadline, with
+			// catch-up on a later tick if this one drifts past the slot.
 			let now = Timestamp::now();
-			let into = secs_into_window(now, DEEP_WINDOW);
 			for cfg in &ready {
-				if slot_is_due(cfg.group_id, DEEP_WINDOW, TICK, into) {
+				if slot_deadline_due(
+					cfg.group_id,
+					DEEP_WINDOW,
+					last_deep.get(&cfg.group_id).copied(),
+					now,
+				) {
+					last_deep.insert(cfg.group_id, now);
 					debug!(group = %cfg.group_id, "running hourly preflight deep check");
 					deep_check_group(&mut db, &aws, cfg).await;
 				}

@@ -8,10 +8,13 @@
 //! CloudWatch grant), mirroring the assume→creds→client-builder pattern in
 //! [`super::preflight`].
 
-use std::{collections::BTreeSet, time::Duration};
+use std::{
+	collections::{BTreeSet, HashMap},
+	time::Duration,
+};
 
 use aws_sdk_cloudwatch::types::{Dimension, DimensionFilter, Statistic};
-use commons_servers::backup_jobs::slot_is_due;
+use commons_servers::backup_jobs::slot_deadline_due;
 use database::{BackupConfigStatus, BackupRepoStats, ServerGroupBackupConfig};
 use jiff::Timestamp;
 use tokio::{
@@ -19,6 +22,7 @@ use tokio::{
 	time::sleep,
 };
 use tracing::{debug, error, warn};
+use uuid::Uuid;
 
 struct Aws {
 	sts: aws_sdk_sts::Client,
@@ -28,11 +32,6 @@ struct Aws {
 const TICK: Duration = Duration::from_secs(60);
 const METRICS_WINDOW: Duration = Duration::from_secs(24 * 3600);
 const LOOKBACK_SECS: i64 = 3 * 24 * 3600; // BucketSizeBytes is daily; look back a few days.
-
-fn secs_into(now: Timestamp, window: Duration) -> u64 {
-	let w = window.as_secs().max(1) as i64;
-	now.as_second().rem_euclid(w) as u64
-}
 
 /// Latest `BucketSizeBytes` average for a bucket, or `None` if the metric is
 /// absent (best-effort).
@@ -136,7 +135,11 @@ async fn bucket_bytes(
 	Ok(total)
 }
 
-async fn tick(db: &mut diesel_async::AsyncPgConnection, aws: &Aws) -> Result<(), String> {
+async fn tick(
+	db: &mut diesel_async::AsyncPgConnection,
+	aws: &Aws,
+	last_run: &mut HashMap<Uuid, Timestamp>,
+) -> Result<(), String> {
 	let ready: Vec<ServerGroupBackupConfig> = ServerGroupBackupConfig::list(db)
 		.await
 		.map_err(|e| e.to_string())?
@@ -144,12 +147,23 @@ async fn tick(db: &mut diesel_async::AsyncPgConnection, aws: &Aws) -> Result<(),
 		.filter(|c| c.status == BackupConfigStatus::Ready)
 		.collect();
 	let now = Timestamp::now();
-	let into = secs_into(now, METRICS_WINDOW);
 
 	for c in &ready {
-		if !slot_is_due(c.group_id, METRICS_WINDOW, TICK, into) {
+		// Fire once per day at the group's jittered deadline, catching up on a
+		// later tick if this one drifts past the slot or a slow predecessor group
+		// pushed us late. The anchor is in-memory (best-effort daily metric with
+		// no persisted timestamp): it resets on restart, re-firing at the next
+		// deadline. Recorded on attempt, not success, so a persistently-failing
+		// group doesn't hammer CloudWatch every tick.
+		if !slot_deadline_due(
+			c.group_id,
+			METRICS_WINDOW,
+			last_run.get(&c.group_id).copied(),
+			now,
+		) {
 			continue;
 		}
+		last_run.insert(c.group_id, now);
 		match bucket_bytes(aws, c, now).await {
 			Ok(Some(bytes)) => {
 				if let Err(e) =
@@ -176,13 +190,14 @@ pub fn spawn() -> JoinHandle<()> {
 			sts: aws_sdk_sts::Client::new(&config),
 			config,
 		};
+		let mut last_run: HashMap<Uuid, Timestamp> = HashMap::new();
 		loop {
 			sleep(TICK).await;
 			let Ok(mut db) = pool.get().await else {
 				error!("Failed to get database connection");
 				continue;
 			};
-			if let Err(e) = tick(&mut db, &aws).await {
+			if let Err(e) = tick(&mut db, &aws, &mut last_run).await {
 				error!("s3-metrics tick failed: {e}");
 			}
 		}
