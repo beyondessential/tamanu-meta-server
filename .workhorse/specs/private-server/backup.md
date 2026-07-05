@@ -64,6 +64,9 @@ An operator may also request a one-off full maintenance run for a group, to recl
 
 The operator can see, per group: the repo's size and cost basis, recent runs with their outcomes and errors, recent maintenance, the latest snapshot per server, and any in-flight or pending one-off requests — including a pending on-demand full maintenance request and who made it.
 
+Each run's duration is the time from its first credential issuance to its report; a run that re-issues credentials while it runs is measured from the first issuance of the sequence.
+A run for which credentials were issued but no report has arrived is shown from that issuance: in progress while the credentials remain valid, otherwise as a run whose outcome is unknown. This makes runs that don't report — such as an ad-hoc restore — visible; a later report for the same run replaces its issuance-derived entry.
+
 ## Passphrase recovery
 
 Because Canopy owns the only copy of each passphrase, the ability to recover it without Canopy is verified, not assumed.

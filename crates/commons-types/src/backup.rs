@@ -36,8 +36,8 @@ macro_rules! text_enum {
 	) => {
 		$(#[$meta])*
 		#[derive(
-			Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, AsExpression, FromSqlRow,
-			utoipa::ToSchema,
+			Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, AsExpression,
+			FromSqlRow, utoipa::ToSchema,
 		)]
 		#[diesel(sql_type = Text)]
 		$vis enum $name {

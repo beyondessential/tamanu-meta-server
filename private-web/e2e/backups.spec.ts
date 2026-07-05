@@ -296,6 +296,66 @@ test.describe("backups ready: stats + backup-now", () => {
 		await expect(runs.getByText("stats-srv")).toBeVisible();
 	});
 
+	test("recent runs show a Canopy-measured duration and surface unreported restores", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "dur-group" });
+		const device = await seedDevice(sql);
+		const server = await seedServer(sql, {
+			name: "dur-srv",
+			groupId: group.id,
+			deviceId: device.id,
+		});
+		await seedServerGroupBackupConfig(sql, {
+			groupId: group.id,
+			status: "ready",
+			intervalSeconds: 3600,
+		});
+
+		// A reported backup, plus the credential issuance that started it 5 minutes
+		// before it reported → the row carries a 5m duration.
+		await seedBackupRun(sql, {
+			deviceId: device.id,
+			groupId: group.id,
+			serverId: server.id,
+			outcome: "success",
+		});
+		await seedBackupCredentialIssuance(sql, {
+			deviceId: device.id,
+			groupId: group.id,
+			purpose: "backup",
+			issuedAgoSecs: 300,
+		});
+		// A restore whose credentials are still valid but which never reported →
+		// shown as in progress (this is a manual `bestool canopy restore`).
+		await seedBackupCredentialIssuance(sql, {
+			deviceId: device.id,
+			groupId: group.id,
+			purpose: "restore",
+			issuedAgoSecs: 30,
+			ttlSecs: 3600,
+		});
+		// A restore whose credentials expired without a report → unknown outcome.
+		await seedBackupCredentialIssuance(sql, {
+			deviceId: device.id,
+			groupId: group.id,
+			type: "malaria-db",
+			purpose: "restore",
+			issuedAgoSecs: 7200,
+			ttlSecs: 3600,
+		});
+
+		await page.goto(`/groups/${group.id}/backups`);
+		const runs = page.getByRole("table").last();
+		// Duration column populated for the reported run.
+		await expect(runs.getByText("5m")).toBeVisible();
+		// The unreported restores surface with their inferred states.
+		await expect(runs.getByText("in progress")).toBeVisible();
+		await expect(runs.getByText("unknown")).toBeVisible();
+		await expect(runs.getByText("restore").first()).toBeVisible();
+	});
+
 	test("monthly S3 traffic totals this month's runs with an egress-cost tooltip", async ({
 		page,
 		sql,

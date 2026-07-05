@@ -17,7 +17,9 @@ use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
 use commons_types::{
 	Uuid,
-	backup::{BackupConfigStatus, BackupPlacement, BackupPurpose, BackupRepoMode, BackupType},
+	backup::{
+		BackupConfigStatus, BackupPlacement, BackupPurpose, BackupRepoMode, BackupType, RunOutcome,
+	},
 };
 use database::backups::BackupCredentialIssuance;
 use database::diesel_async::AsyncPgConnection;
@@ -345,13 +347,262 @@ pub struct PendingRequestRow {
 	pub requested_by: Option<String>,
 }
 
+/// State of a recent-runs row: a device-reported run, or a run inferred from a
+/// credential issuance that has no matching report.
+#[derive(Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RunStatus {
+	/// The device reported this run's outcome; `outcome` is populated.
+	Reported,
+	/// Inferred from a credential issuance whose credentials are still valid and
+	/// which has no matching report yet — a run believed to be in flight.
+	InProgress,
+	/// Inferred from a credential issuance whose credentials have expired with no
+	/// matching report. The run happened but its outcome was never reported (the
+	/// current state of manual `bestool canopy restore`, which doesn't report).
+	Unknown,
+}
+
+/// One row of the recent-runs view: either a device-reported [`BackupRun`] or a
+/// run inferred from a [`BackupCredentialIssuance`] that never matched a report.
+/// Duration, when present, is Canopy-measured wall-clock — the interval from the
+/// run's first credential issuance (its start) to its report (its end) — not a
+/// client-reported figure.
+#[derive(Serialize, ToSchema)]
+pub struct RecentRun {
+	/// Stable identity for UI keying: `run-<uuid>` for a reported run, or
+	/// `issuance-<id>` for an inferred attempt.
+	pub key: String,
+	/// The server this run was for, if known.
+	pub server_id: Option<Uuid>,
+	/// The backup type that ran.
+	#[serde(rename = "type")]
+	#[schema(value_type = String)]
+	pub r#type: BackupType,
+	/// Whether the run was a backup or a restore.
+	#[schema(value_type = String)]
+	pub purpose: BackupPurpose,
+	/// Whether this row is reported, in-flight, or an unreported past attempt.
+	pub status: RunStatus,
+	/// The reported outcome; only present when `status` is `reported`.
+	pub outcome: Option<RunOutcome>,
+	/// Error detail for a failed reported run, if any.
+	pub error: Option<String>,
+	/// Bytes the device reported uploading, if any (reported runs only).
+	pub bytes_uploaded: Option<i64>,
+	/// Snapshot the run produced, if any (reported runs only).
+	pub snapshot_id: Option<String>,
+	/// Logical snapshot size from repo inspection, if known (reported runs only).
+	pub snapshot_logical_bytes: Option<i64>,
+	/// Raw bytes sent to S3 during the run, if tallied (reported runs only).
+	pub s3_sent_raw_bytes: Option<i64>,
+	/// Payload bytes sent to S3 during the run, if tallied (reported runs only).
+	pub s3_sent_payload_bytes: Option<i64>,
+	/// Raw bytes received from S3 during the run, if tallied (reported runs only).
+	pub s3_received_raw_bytes: Option<i64>,
+	/// Payload bytes received from S3 during the run, if tallied (reported runs only).
+	pub s3_received_payload_bytes: Option<i64>,
+	/// When the run started, taken from its first matching credential issuance.
+	/// `None` when no issuance could be matched (e.g. a run predating issuance
+	/// recording).
+	pub started_at: Option<Timestamp>,
+	/// When the device reported the run. `None` for an inferred (unreported) row.
+	pub reported_at: Option<Timestamp>,
+	/// The row's effective time for sorting and display: `reported_at` when
+	/// reported, otherwise `started_at`.
+	pub at: Timestamp,
+	/// Canopy-measured run duration in seconds (report time minus first-issuance
+	/// time). `None` for an in-flight/unreported row or a run with no matching
+	/// issuance.
+	#[schema(value_type = Option<i64>, format = "int64")]
+	pub duration_seconds: Option<i64>,
+}
+
+/// Grace added to a credential's `expires_at` when deciding whether an issuance
+/// belongs to a run's issuance chain — absorbs report lag and clock skew.
+const CRED_GRACE_SECS: i64 = 15 * 60;
+
+/// How far back to look for issuances when building the recent-runs view. Bounds
+/// the merge for restore-only groups (which produce issuances but no runs).
+const ISSUANCE_LOOKBACK_SECS: i64 = 3 * 24 * 3600;
+
+/// Extra lookback before the oldest displayed run, so a long run's first issuance
+/// (minted before `reported_at`) is still fetched.
+const CHAIN_LOOKBACK_SECS: i64 = 2 * 3600;
+
+/// Key grouping issuances/runs that could belong to the same run.
+type RunKey = (Uuid, BackupType, BackupPurpose);
+
+fn run_key(device_id: Uuid, r#type: &BackupType, purpose: BackupPurpose) -> RunKey {
+	(device_id, r#type.clone(), purpose)
+}
+
+/// Merge device-reported runs with credential issuances into the recent-runs
+/// view. Reported runs win: each claims its issuance *chain* (a run re-mints
+/// creds roughly hourly, so its issuances overlap within the credential
+/// lifetime) to recover its start time and thus its duration. Issuances left
+/// unclaimed become inferred rows — in-flight while their creds are still valid,
+/// otherwise unreported past attempts (e.g. manual restores, which don't report).
+fn build_recent_runs(
+	runs: Vec<BackupRun>,
+	issuances: Vec<BackupCredentialIssuance>,
+	device_to_server: &std::collections::HashMap<Uuid, Uuid>,
+	now: Timestamp,
+	limit: usize,
+) -> Vec<RecentRun> {
+	use std::collections::HashMap;
+
+	// Issuances per key, ascending by issued_at, with a per-entry claimed flag.
+	let mut by_key: HashMap<RunKey, Vec<(BackupCredentialIssuance, bool)>> = HashMap::new();
+	for iss in issuances {
+		by_key
+			.entry(run_key(iss.device_id, &iss.r#type, iss.purpose))
+			.or_default()
+			.push((iss, false));
+	}
+	for chain in by_key.values_mut() {
+		chain.sort_by_key(|(i, _)| i.issued_at);
+	}
+
+	let mut rows: Vec<RecentRun> = Vec::new();
+
+	// Reported runs first — newest-first so a later run claims the later chain.
+	// (`runs` arrives newest-first from list_for_group.)
+	for run in runs {
+		let key = run_key(run.device_id, &run.r#type, run.purpose);
+		let started_at = by_key
+			.get_mut(&key)
+			.and_then(|chain| claim_chain_for_report(chain, run.reported_at));
+		let duration_seconds = started_at.map(|s| run.reported_at.as_second() - s.as_second());
+		rows.push(RecentRun {
+			key: format!("run-{}", run.id),
+			server_id: run.server_id,
+			r#type: run.r#type,
+			purpose: run.purpose,
+			status: RunStatus::Reported,
+			outcome: Some(run.outcome),
+			error: run.error,
+			bytes_uploaded: run.bytes_uploaded,
+			snapshot_id: run.snapshot_id,
+			snapshot_logical_bytes: run.snapshot_logical_bytes,
+			s3_sent_raw_bytes: run.s3_sent_raw_bytes,
+			s3_sent_payload_bytes: run.s3_sent_payload_bytes,
+			s3_received_raw_bytes: run.s3_received_raw_bytes,
+			s3_received_payload_bytes: run.s3_received_payload_bytes,
+			started_at,
+			reported_at: Some(run.reported_at),
+			at: run.reported_at,
+			duration_seconds,
+		});
+	}
+
+	// Whatever issuances remain become inferred attempt rows, one per contiguous
+	// chain (not one per re-mint).
+	for chain in by_key.into_values() {
+		let mut idx = 0;
+		while idx < chain.len() {
+			if chain[idx].1 {
+				idx += 1;
+				continue;
+			}
+			// Extend a contiguous run of unclaimed issuances.
+			let start = idx;
+			let mut end = idx;
+			let mut latest_expires = chain[idx].0.expires_at;
+			while end + 1 < chain.len()
+				&& !chain[end + 1].1
+				&& chain[end + 1].0.issued_at.as_second()
+					<= latest_expires.as_second() + CRED_GRACE_SECS
+			{
+				end += 1;
+				latest_expires = latest_expires.max(chain[end].0.expires_at);
+			}
+			let first = &chain[start].0;
+			let status = if now < latest_expires {
+				RunStatus::InProgress
+			} else {
+				RunStatus::Unknown
+			};
+			rows.push(RecentRun {
+				key: format!("issuance-{}", first.id),
+				server_id: device_to_server.get(&first.device_id).copied(),
+				r#type: first.r#type.clone(),
+				purpose: first.purpose,
+				status,
+				outcome: None,
+				error: None,
+				bytes_uploaded: None,
+				snapshot_id: None,
+				snapshot_logical_bytes: None,
+				s3_sent_raw_bytes: None,
+				s3_sent_payload_bytes: None,
+				s3_received_raw_bytes: None,
+				s3_received_payload_bytes: None,
+				started_at: Some(first.issued_at),
+				reported_at: None,
+				at: first.issued_at,
+				duration_seconds: None,
+			});
+			idx = end + 1;
+		}
+	}
+
+	rows.sort_by(|a, b| b.at.cmp(&a.at));
+	rows.truncate(limit);
+	rows
+}
+
+/// Claim the issuance chain for a reported run and return its start time (the
+/// earliest issuance in the chain). Walks back from the latest issuance at or
+/// before `reported_at` while consecutive issuances stay contiguous (a re-mint
+/// overlaps the prior creds' validity, within grace), stopping at the first gap.
+/// Returns `None` — claiming nothing — when the latest candidate's creds had
+/// already expired well before the report (so it belongs to no live chain).
+fn claim_chain_for_report(
+	chain: &mut [(BackupCredentialIssuance, bool)],
+	reported_at: Timestamp,
+) -> Option<Timestamp> {
+	// Latest unclaimed issuance with issued_at <= reported_at.
+	let top = chain
+		.iter()
+		.rposition(|(i, claimed)| !claimed && i.issued_at <= reported_at)?;
+	// The report must fall within the top issuance's validity (plus grace);
+	// otherwise this issuance isn't the tail of this run's chain.
+	if reported_at.as_second() > chain[top].0.expires_at.as_second() + CRED_GRACE_SECS {
+		return None;
+	}
+	let mut start = top;
+	while start > 0 {
+		let prev = start - 1;
+		if chain[prev].1 {
+			break;
+		}
+		// prev is contiguous if its creds' validity (plus grace) reaches the next
+		// issuance's start — i.e. it's a re-mint of the same ongoing run.
+		if chain[prev].0.expires_at.as_second() + CRED_GRACE_SECS
+			>= chain[start].0.issued_at.as_second()
+		{
+			start = prev;
+		} else {
+			break;
+		}
+	}
+	let started_at = chain[start].0.issued_at;
+	for entry in &mut chain[start..=top] {
+		entry.1 = true;
+	}
+	Some(started_at)
+}
+
 /// Backup statistics and activity for a server group.
 #[derive(Serialize, ToSchema)]
 pub struct BackupStatsView {
 	/// Cached repository-level statistics, if available.
 	pub stats: Option<BackupRepoStats>,
-	/// The most recent backup runs across the group's member servers.
-	pub recent_runs: Vec<BackupRun>,
+	/// The most recent backup and restore runs across the group's member servers,
+	/// including runs still in flight or inferred from credential issuances that
+	/// were never reported.
+	pub recent_runs: Vec<RecentRun>,
 	/// The most recent maintenance runs for the group's backup repository.
 	pub recent_maintenance: Vec<BackupMaintenanceRun>,
 	/// One-off backup/restore requests awaiting pickup.
@@ -1620,7 +1871,7 @@ pub async fn stats(
 	let group = ServerGroup::get_by_id(&mut conn, args.server_group_id).await?;
 
 	let stats = BackupRepoStats::get(&mut conn, args.server_group_id).await?;
-	let recent_runs =
+	let reported_runs =
 		BackupRun::list_for_group(&mut conn, args.server_group_id, RECENT_LIMIT).await?;
 	let recent_maintenance =
 		BackupMaintenanceRun::list_for_group(&mut conn, args.server_group_id, RECENT_LIMIT).await?;
@@ -1644,6 +1895,43 @@ pub async fn stats(
 	let device_by_server: std::collections::HashMap<Uuid, Option<Uuid>> =
 		members.iter().map(|s| (s.id, s.device_id)).collect();
 	let now = Timestamp::now();
+
+	// Merge reported runs with credential issuances into the recent-runs view:
+	// reported runs carry a Canopy-measured duration (first issuance → report),
+	// and issuances with no matching report surface as in-flight / unreported
+	// rows (so manual restores, which don't report, are still visible). Look back
+	// far enough to cover the oldest displayed run's issuance chain, and at least
+	// the standard lookback so a restore-only group (no runs) still shows rows.
+	let device_to_server: std::collections::HashMap<Uuid, Uuid> = members
+		.iter()
+		.filter_map(|s| s.device_id.map(|d| (d, s.id)))
+		.collect();
+	let issuance_since_secs = {
+		let base = now.as_second() - ISSUANCE_LOOKBACK_SECS;
+		match reported_runs
+			.iter()
+			.map(|r| r.reported_at.as_second())
+			.min()
+		{
+			Some(oldest) => base.min(oldest - CHAIN_LOOKBACK_SECS),
+			None => base,
+		}
+	};
+	let issuance_since = Timestamp::from_second(issuance_since_secs).unwrap_or(now);
+	let issuances = BackupCredentialIssuance::list_for_group_since(
+		&mut conn,
+		args.server_group_id,
+		issuance_since,
+		RECENT_LIMIT * 4,
+	)
+	.await?;
+	let recent_runs = build_recent_runs(
+		reported_runs,
+		issuances,
+		&device_to_server,
+		now,
+		RECENT_LIMIT as usize,
+	);
 	let mut intervals: std::collections::HashMap<BackupType, Option<i64>> =
 		std::collections::HashMap::new();
 	let mut pending_requests = Vec::new();
@@ -2082,6 +2370,161 @@ mod tests {
 		// Recent but recipient set changed → due.
 		let changed = verification(now.as_second() - 10, &["age1aaa"]);
 		assert!(recovery_due(Some(&changed), &recips, now).0);
+	}
+
+	fn ts(secs: i64) -> Timestamp {
+		Timestamp::from_second(secs).unwrap()
+	}
+
+	fn issuance(
+		id: i64,
+		device: Uuid,
+		purpose: BackupPurpose,
+		issued: i64,
+		expires: i64,
+	) -> BackupCredentialIssuance {
+		BackupCredentialIssuance {
+			id,
+			device_id: device,
+			group_id: Uuid::nil(),
+			r#type: BackupType::TamanuPostgres,
+			issued_at: ts(issued),
+			expires_at: ts(expires),
+			purpose,
+			sts_assumed_role: String::new(),
+			sts_request_id: None,
+			access_key_id: None,
+			bucket: String::new(),
+			prefix: String::new(),
+		}
+	}
+
+	fn run(id: u128, device: Uuid, purpose: BackupPurpose, reported: i64) -> BackupRun {
+		BackupRun {
+			id: Uuid::from_u128(id),
+			device_id: device,
+			group_id: Uuid::nil(),
+			server_id: Some(Uuid::from_u128(999)),
+			r#type: BackupType::TamanuPostgres,
+			purpose,
+			outcome: RunOutcome::Success,
+			error: None,
+			bytes_uploaded: None,
+			snapshot_id: None,
+			reported_at: ts(reported),
+			s3_sent_raw_bytes: None,
+			s3_sent_payload_bytes: None,
+			s3_received_raw_bytes: None,
+			s3_received_payload_bytes: None,
+			snapshot_logical_bytes: None,
+		}
+	}
+
+	fn device_map(device: Uuid, server: u128) -> std::collections::HashMap<Uuid, Uuid> {
+		std::collections::HashMap::from([(device, Uuid::from_u128(server))])
+	}
+
+	#[test]
+	fn reported_run_gets_duration_from_its_issuance() {
+		let d = Uuid::from_u128(1);
+		let rows = build_recent_runs(
+			vec![run(10, d, BackupPurpose::Backup, 4000)],
+			vec![issuance(1, d, BackupPurpose::Backup, 1000, 4600)],
+			&device_map(d, 9),
+			ts(5000),
+			20,
+		);
+		// The issuance is consumed by the run — no separate row.
+		assert_eq!(rows.len(), 1);
+		assert!(matches!(rows[0].status, RunStatus::Reported));
+		assert_eq!(rows[0].duration_seconds, Some(3000));
+		assert_eq!(rows[0].started_at, Some(ts(1000)));
+	}
+
+	#[test]
+	fn unreported_restore_within_window_is_in_progress() {
+		let d = Uuid::from_u128(2);
+		let rows = build_recent_runs(
+			vec![],
+			vec![issuance(1, d, BackupPurpose::Restore, 4900, 8500)],
+			&device_map(d, 9),
+			ts(5000),
+			20,
+		);
+		assert_eq!(rows.len(), 1);
+		assert!(matches!(rows[0].status, RunStatus::InProgress));
+		assert_eq!(rows[0].purpose, BackupPurpose::Restore);
+		assert_eq!(rows[0].server_id, Some(Uuid::from_u128(9)));
+		assert_eq!(rows[0].duration_seconds, None);
+	}
+
+	#[test]
+	fn unreported_restore_past_window_is_unknown() {
+		let d = Uuid::from_u128(3);
+		let rows = build_recent_runs(
+			vec![],
+			vec![issuance(1, d, BackupPurpose::Restore, 1000, 4600)],
+			&device_map(d, 9),
+			ts(5000),
+			20,
+		);
+		assert_eq!(rows.len(), 1);
+		assert!(matches!(rows[0].status, RunStatus::Unknown));
+	}
+
+	#[test]
+	fn reported_restore_wins_over_its_issuance() {
+		let d = Uuid::from_u128(4);
+		let rows = build_recent_runs(
+			vec![run(10, d, BackupPurpose::Restore, 4000)],
+			vec![issuance(1, d, BackupPurpose::Restore, 1000, 4600)],
+			&device_map(d, 9),
+			ts(5000),
+			20,
+		);
+		assert_eq!(rows.len(), 1, "no duplicate issuance-derived row");
+		assert!(matches!(rows[0].status, RunStatus::Reported));
+		assert_eq!(rows[0].duration_seconds, Some(3000));
+	}
+
+	#[test]
+	fn duration_spans_a_contiguous_remint_chain() {
+		let d = Uuid::from_u128(5);
+		let rows = build_recent_runs(
+			vec![run(10, d, BackupPurpose::Backup, 8000)],
+			vec![
+				issuance(1, d, BackupPurpose::Backup, 1000, 4600),
+				issuance(2, d, BackupPurpose::Backup, 4500, 8100),
+			],
+			&device_map(d, 9),
+			ts(9000),
+			20,
+		);
+		assert_eq!(rows.len(), 1);
+		// Duration runs from the *first* issuance of the chain, not the latest.
+		assert_eq!(rows[0].duration_seconds, Some(7000));
+		assert_eq!(rows[0].started_at, Some(ts(1000)));
+	}
+
+	#[test]
+	fn stale_issuance_across_a_gap_is_not_attributed() {
+		let d = Uuid::from_u128(6);
+		let rows = build_recent_runs(
+			vec![run(10, d, BackupPurpose::Backup, 8000)],
+			vec![issuance(1, d, BackupPurpose::Backup, 1000, 4600)],
+			&device_map(d, 9),
+			ts(9000),
+			20,
+		);
+		// The run can't claim the long-expired issuance, so it has no duration and
+		// the stale issuance surfaces on its own as an unreported (unknown) attempt.
+		assert_eq!(rows.len(), 2);
+		let reported = rows
+			.iter()
+			.find(|r| matches!(r.status, RunStatus::Reported))
+			.unwrap();
+		assert_eq!(reported.duration_seconds, None);
+		assert!(rows.iter().any(|r| matches!(r.status, RunStatus::Unknown)));
 	}
 }
 

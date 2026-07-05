@@ -610,6 +610,18 @@ async fn stats_includes_runs_and_pending_requests() {
 				VALUES ('{group_id}', 12, 3, 1000, 800);
 			 INSERT INTO backup_runs (id, device_id, group_id, server_id, type, purpose, outcome, bytes_uploaded) \
 				VALUES ('{run_id}', '{device_id}', '{group_id}', '{server_id}', 'tamanu-postgres', 'backup', 'success', 500);
+			 -- The issuance that started the backup 5 minutes before it reported, so
+			 -- the run carries a Canopy-measured duration of ~300s.
+			 INSERT INTO backup_credential_issuances \
+				(device_id, group_id, type, issued_at, expires_at, purpose, sts_assumed_role, bucket, prefix) \
+				VALUES ('{device_id}', '{group_id}', 'tamanu-postgres', now() - interval '300 seconds', \
+					now() + interval '3300 seconds', 'backup', 'arn:test', 'b', '');
+			 -- A restore whose credentials are still valid but which never reported:
+			 -- surfaces as an in-flight run (bestool's manual restore doesn't report).
+			 INSERT INTO backup_credential_issuances \
+				(device_id, group_id, type, issued_at, expires_at, purpose, sts_assumed_role, bucket, prefix) \
+				VALUES ('{device_id}', '{group_id}', 'tamanu-postgres', now() - interval '30 seconds', \
+					now() + interval '3570 seconds', 'restore', 'arn:test', 'b', '');
 			 INSERT INTO backup_requests (server_id, type, purpose) VALUES \
 				('{server_id}', 'tamanu-postgres', 'backup');
 			 INSERT INTO server_backup_capabilities (server_id, type, enabled) VALUES \
@@ -625,8 +637,26 @@ async fn stats_includes_runs_and_pending_requests() {
 		resp.assert_status_ok();
 		let body: serde_json::Value = resp.json();
 		assert_eq!(body["stats"]["snapshot_count"], 12);
-		assert_eq!(body["recent_runs"].as_array().unwrap().len(), 1);
-		assert_eq!(body["recent_runs"][0]["outcome"], "success");
+		// The reported backup, plus an inferred in-flight restore from its issuance.
+		let runs = body["recent_runs"].as_array().unwrap();
+		assert_eq!(runs.len(), 2);
+		// Newest first: the reported backup (reported now) sorts above the restore
+		// (started 30s ago).
+		assert_eq!(runs[0]["outcome"], "success");
+		assert_eq!(runs[0]["status"], "reported");
+		let duration = runs[0]["duration_seconds"].as_i64().expect("duration");
+		assert!(
+			(250..=350).contains(&duration),
+			"duration ~300s from issuance→report, got {duration}"
+		);
+		// The unreported restore is surfaced as in-flight with no outcome.
+		let restore = runs
+			.iter()
+			.find(|r| r["purpose"] == "restore")
+			.expect("restore row");
+		assert_eq!(restore["status"], "in_progress");
+		assert!(restore["outcome"].is_null());
+		assert!(restore["duration_seconds"].is_null());
 		assert_eq!(body["pending_requests"].as_array().unwrap().len(), 1);
 		assert_eq!(body["pending_requests"][0]["purpose"], "backup");
 		// The member's declared capabilities ride along so the "back up now"

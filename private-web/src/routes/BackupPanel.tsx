@@ -56,7 +56,7 @@ import {
 	type BackupConfigStatus,
 	type BackupConfigView,
 	type BackupMaintenanceRun,
-	type BackupRun,
+	type RecentRun,
 	type ServerInfo,
 } from "../types";
 
@@ -665,7 +665,7 @@ function serverLabel(
 }
 
 /// True when the run carries any of bestool's four S3 traffic tallies.
-function hasS3Traffic(run: BackupRun): boolean {
+function hasS3Traffic(run: RecentRun): boolean {
 	return (
 		run.s3_sent_raw_bytes != null ||
 		run.s3_sent_payload_bytes != null ||
@@ -674,9 +674,74 @@ function hasS3Traffic(run: BackupRun): boolean {
 	);
 }
 
+/// The outcome/status chip for a run row. A reported run shows success/failure;
+/// an inferred row shows in-progress (creds still valid, no report yet) or
+/// unknown (creds expired without a report — e.g. a manual restore, which bestool
+/// doesn't report).
+function RunOutcomeChip({ run }: { run: RecentRun }) {
+	if (run.status === "reported") {
+		return (
+			<Chip
+				size="small"
+				label={run.outcome}
+				color={run.outcome === "success" ? "success" : "error"}
+			/>
+		);
+	}
+	if (run.status === "in_progress") {
+		return (
+			<Tooltip
+				title={
+					<>
+						Credentials issued <TimeAgo timestamp={run.started_at ?? run.at} />;
+						awaiting the run report.
+					</>
+				}
+			>
+				<Chip
+					size="small"
+					color="info"
+					variant="outlined"
+					icon={<CircularProgress size={12} color="inherit" />}
+					label="in progress"
+				/>
+			</Tooltip>
+		);
+	}
+	return (
+		<Tooltip title="Credentials were issued but no run outcome was ever reported.">
+			<Chip size="small" variant="outlined" label="unknown" />
+		</Tooltip>
+	);
+}
+
+/// The run duration, measured Canopy-side as the interval from the run's first
+/// credential issuance (its start) to its report — the real wall-clock time, not
+/// a client-reported figure. In-flight rows show elapsed-so-far.
+function RunDurationCell({ run }: { run: RecentRun }) {
+	if (run.duration_seconds != null) {
+		return (
+			<Tooltip title="Time from first credential issuance to run report (measured by Canopy)">
+				<span>{humanSeconds(run.duration_seconds)}</span>
+			</Tooltip>
+		);
+	}
+	if (run.status === "in_progress" && run.started_at) {
+		const elapsed = Math.round(
+			(Date.now() - Date.parse(run.started_at)) / 1000,
+		);
+		return (
+			<Tooltip title="Elapsed since credentials were issued; the run hasn't reported yet">
+				<span>{humanSeconds(elapsed)} so far</span>
+			</Tooltip>
+		);
+	}
+	return <>—</>;
+}
+
 /// One row of the recent-runs table. Runs with an error or reported S3 traffic
 /// get an expand toggle that reveals the detail in a collapsible sub-row.
-function RunRow({ run, members }: { run: BackupRun; members: ServerInfo[] }) {
+function RunRow({ run, members }: { run: RecentRun; members: ServerInfo[] }) {
 	const [open, setOpen] = useState(false);
 	const hasError = Boolean(run.error);
 	const hasS3 = hasS3Traffic(run);
@@ -708,17 +773,16 @@ function RunRow({ run, members }: { run: BackupRun; members: ServerInfo[] }) {
 					)}
 				</TableCell>
 				<TableCell>
-					<TimeAgo timestamp={run.reported_at} />
+					<TimeAgo timestamp={run.at} />
 				</TableCell>
 				<TableCell>{serverLabel(members, run.server_id)}</TableCell>
 				<TableCell>{run.type}</TableCell>
 				<TableCell>{run.purpose}</TableCell>
 				<TableCell>
-					<Chip
-						size="small"
-						label={run.outcome}
-						color={run.outcome === "success" ? "success" : "error"}
-					/>
+					<RunOutcomeChip run={run} />
+				</TableCell>
+				<TableCell>
+					<RunDurationCell run={run} />
 				</TableCell>
 				<TableCell>
 					{snapshotSize == null ? (
@@ -746,7 +810,7 @@ function RunRow({ run, members }: { run: BackupRun; members: ServerInfo[] }) {
 			</TableRow>
 			{expandable && (
 				<TableRow>
-					<TableCell colSpan={9} sx={{ py: 0, border: 0 }}>
+					<TableCell colSpan={10} sx={{ py: 0, border: 0 }}>
 						<Collapse in={open} timeout="auto" unmountOnExit>
 							{hasError && (
 								<Alert severity="error" variant="outlined" sx={{ my: 1 }}>
@@ -775,7 +839,7 @@ function RunRow({ run, members }: { run: BackupRun; members: ServerInfo[] }) {
 
 /// S3 traffic the proxy tallied during a run, shown in the expand row: raw is
 /// the full HTTP message (incl. SigV4 chunk framing), payload the object data.
-function S3TrafficDetail({ run }: { run: BackupRun }) {
+function S3TrafficDetail({ run }: { run: RecentRun }) {
 	return (
 		<Stack spacing={0.5} sx={{ my: 1 }}>
 			<Typography variant="subtitle2">S3 traffic</Typography>
@@ -937,6 +1001,7 @@ function RecentRunsPanel({
 								<TableCell>Type</TableCell>
 								<TableCell>Purpose</TableCell>
 								<TableCell>Outcome</TableCell>
+								<TableCell>Duration</TableCell>
 								<TableCell>Snapshot size</TableCell>
 								<TableCell>Uploaded</TableCell>
 								<TableCell>Snapshot</TableCell>
@@ -944,7 +1009,7 @@ function RecentRunsPanel({
 						</TableHead>
 						<TableBody>
 							{stats.data.recent_runs.map((r) => (
-								<RunRow key={r.id} run={r} members={members} />
+								<RunRow key={r.key} run={r} members={members} />
 							))}
 						</TableBody>
 					</Table>

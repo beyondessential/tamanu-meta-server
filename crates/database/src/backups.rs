@@ -903,6 +903,28 @@ impl BackupCredentialIssuance {
 			.map_err(AppError::from)
 	}
 
+	/// Issuances for a group issued at or after `since`, newest-first. Backs the
+	/// recent-runs view: each issuance is a run *start*, paired with a reported run
+	/// (to derive its duration) or surfaced on its own (an unreported / in-flight
+	/// restore or backup).
+	pub async fn list_for_group_since(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+		since: Timestamp,
+		limit: i64,
+	) -> Result<Vec<Self>> {
+		use crate::schema::backup_credential_issuances::dsl;
+
+		dsl::backup_credential_issuances
+			.filter(dsl::group_id.eq(group_id))
+			.filter(dsl::issued_at.ge(jiff_diesel::Timestamp::from(since)))
+			.order(dsl::issued_at.desc())
+			.limit(limit)
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	/// Latest *backup-purpose* credential issuance per `(device, type)` within a
 	/// group, as `(issued_at, expires_at)`. Keyed `(device_id, type)`; restore
 	/// issuances are excluded. Used to infer an in-flight backup: creds still
