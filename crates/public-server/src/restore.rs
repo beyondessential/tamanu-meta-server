@@ -306,11 +306,9 @@ pub struct RestoreCredentialsArgs {
 	/// The backup type to restore (e.g. `tamanu-postgres`).
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
-	/// Optional run-uuid the consumer minted for this restore, sent so the
-	/// issuance can be correlated to the consumer's later restore-health report.
-	/// Supplying it (and the same value in the report) lets Canopy attribute the
-	/// restore's duration and distinguish concurrent restores exactly, rather
-	/// than by time-window heuristics.
+	/// This must be the run-uuid the client minted for this run.
+	/// The field is optional only so older clients don't break; it WILL be made
+	/// mandatory in future.
 	pub run_id: Option<Uuid>,
 }
 
@@ -527,10 +525,9 @@ pub struct VerificationArgs {
 	/// (database statistics, whether indexes needed rebuilding, and so on).
 	/// Stored and displayed as-is.
 	pub health_details: Option<serde_json::Value>,
-	/// The run-uuid the consumer minted for this restore, matching the one it
-	/// sent on the restore-credentials request. Supplying it lets Canopy pair
-	/// this report to its issuance for a measured duration. Optional for older
-	/// consumers.
+	/// This must be the run-uuid the client minted for this run.
+	/// The field is optional only so older clients don't break; it WILL be made
+	/// mandatory in future.
 	pub run_id: Option<Uuid>,
 }
 
