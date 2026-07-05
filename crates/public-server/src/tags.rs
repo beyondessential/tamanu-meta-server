@@ -26,11 +26,14 @@ pub fn routes() -> OpenApiRouter<AppState> {
 /// set tags under that prefix, so these never collide with tags you set
 /// yourself.
 ///
-/// When the server belongs to a group, the group's effective `billing.*`
-/// labels (`billing.product`, `billing.deployment`, and `billing.stage` when
-/// the group has ranked members) are also included, matching the labels canopy
-/// attributes to the group's cloud resources. These are the computed effective
-/// values, so they take precedence over any stored `billing.*` tags.
+/// When the server belongs to a group, the effective `billing.*` labels are
+/// also included, matching the labels canopy attributes to cloud resources:
+/// `billing.product` and `billing.deployment` from the group, and
+/// `billing.stage` derived from *this* server's own rank (omitted when the
+/// server has no rank). The stage is per-server, not the group's highest rank,
+/// so a `clone` server reports `billing.stage=clone` rather than the group's
+/// `prod`. These are the computed effective values, so they take precedence
+/// over any stored `billing.*` tags.
 ///
 /// - **401**: the request has no client certificate, or the certificate
 ///   doesn't match a known device.
@@ -65,15 +68,14 @@ pub async fn get_self(device: ServerDevice, State(db): State<Db>) -> Result<Json
 
 	// Overlay the group's effective billing labels, matching what canopy
 	// attributes to the group's cloud resources. The effective (computed)
-	// values win over any stored `billing.*` tags of the same key.
+	// values win over any stored `billing.*` tags of the same key. `billing.stage`
+	// is derived from *this* server's own rank, not the group's highest — a
+	// rank=clone server must report `billing.stage=clone`, never the group's
+	// `prod`, so its cost attributes to the right stage.
 	if let Some(group_id) = server.group_id {
 		let group = ServerGroup::get_by_id(&mut conn, group_id).await?;
-		let highest_rank = ServerGroup::highest_member_ranks(&mut conn, &[group_id])
-			.await?
-			.get(&group_id)
-			.copied();
 		for (key, value) in
-			BillingLabels::from_group(&group.tags, &group.name, highest_rank).into_tags()
+			BillingLabels::from_group(&group.tags, &group.name, server.rank).into_tags()
 		{
 			merged.0.insert(key, value);
 		}
