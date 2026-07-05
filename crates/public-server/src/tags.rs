@@ -28,12 +28,14 @@ pub fn routes() -> OpenApiRouter<AppState> {
 ///
 /// When the server belongs to a group, the effective `billing.*` labels are
 /// also included, matching the labels canopy attributes to cloud resources:
-/// `billing.product` and `billing.deployment` from the group, and
-/// `billing.stage` derived from *this* server's own rank (omitted when the
-/// server has no rank). The stage is per-server, not the group's highest rank,
-/// so a `clone` server reports `billing.stage=clone` rather than the group's
-/// `prod`. These are the computed effective values, so they take precedence
-/// over any stored `billing.*` tags.
+/// `billing.product`, `billing.deployment`, and `billing.stage` (the last
+/// derived from *this* server's own rank, and omitted when the server has no
+/// rank). The stage is per-server, not the group's highest rank, so a `clone`
+/// server reports `billing.stage=clone` rather than the group's `prod`.
+///
+/// These are only defaults: a stored `billing.*` tag is honoured over the
+/// computed value — the server's own tag first, then the group's. So an
+/// operator can pin any billing label on a specific server or the whole group.
 ///
 /// - **401**: the request has no client certificate, or the certificate
 ///   doesn't match a known device.
@@ -66,10 +68,12 @@ pub async fn get_self(device: ServerDevice, State(db): State<Db>) -> Result<Json
 	let server = servers.pop().ok_or(AppError::DeviceHasNoServer)?;
 	let mut merged = server.tags_for_device(&mut conn).await?;
 
-	// Overlay the group's effective billing labels, matching what canopy
-	// attributes to the group's cloud resources. The effective (computed)
-	// values win over any stored `billing.*` tags of the same key. `billing.stage`
-	// is derived from *this* server's own rank, not the group's highest — a
+	// Fill in the group's effective billing labels where the server doesn't
+	// already carry one, matching what canopy attributes to the group's cloud
+	// resources. `merged` already holds server tags overlaid on group tags, so a
+	// stored `billing.*` tag (server's own first, then the group's) is honoured
+	// and only the missing labels fall back to computed values. `billing.stage`
+	// is computed from *this* server's own rank, not the group's highest — a
 	// rank=clone server must report `billing.stage=clone`, never the group's
 	// `prod`, so its cost attributes to the right stage.
 	if let Some(group_id) = server.group_id {
@@ -77,7 +81,7 @@ pub async fn get_self(device: ServerDevice, State(db): State<Db>) -> Result<Json
 		for (key, value) in
 			BillingLabels::from_group(&group.tags, &group.name, server.rank).into_tags()
 		{
-			merged.0.insert(key, value);
+			merged.0.entry(key).or_insert(value);
 		}
 	}
 
