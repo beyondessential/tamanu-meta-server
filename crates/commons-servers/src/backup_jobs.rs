@@ -481,8 +481,8 @@ pub fn slot_deadline_due(
 	now: Timestamp,
 ) -> bool {
 	let window_secs = window.as_secs().max(1) as i64;
-	let offset =
-		(jitter_slot(group_id, window).as_secs() as i64).min((window_secs - DEADLINE_END_GUARD).max(0));
+	let offset = (jitter_slot(group_id, window).as_secs() as i64)
+		.min((window_secs - DEADLINE_END_GUARD).max(0));
 	let now_s = now.as_second();
 	let window_start = now_s - now_s.rem_euclid(window_secs);
 	let target = window_start + offset;
@@ -541,7 +541,8 @@ mod tests {
 		// The effective (guarded) offset the function uses, and the room left to
 		// the window's end — used to keep every fixture instant inside the window
 		// regardless of where this group's hash lands.
-		let offset = (jitter_slot(g, window).as_secs() as i64).min(window_secs - DEADLINE_END_GUARD);
+		let offset =
+			(jitter_slot(g, window).as_secs() as i64).min(window_secs - DEADLINE_END_GUARD);
 		assert!(offset >= 1, "fixture assumes a non-zero slot offset");
 		let room = window_secs - offset;
 		// A concrete window anchored to a DAY boundary (100 days after the epoch).
@@ -554,23 +555,43 @@ mod tests {
 
 		// Ran earlier this same window → not due again this window (once-per-window,
 		// no double run even if the earlier run predated the slot).
-		assert!(!slot_deadline_due(g, window, Some(ts(window_start + 5)), ts(target + 1)));
+		assert!(!slot_deadline_due(
+			g,
+			window,
+			Some(ts(window_start + 5)),
+			ts(target + 1)
+		));
 
 		// Ran in the previous window → due once this window's target passes (the
 		// daily catch-up: yesterday's run doesn't block today's), but not before.
 		let prev = window_start - window_secs + offset;
-		assert!(!slot_deadline_due(g, window, Some(ts(prev)), ts(target - 1)));
+		assert!(!slot_deadline_due(
+			g,
+			window,
+			Some(ts(prev)),
+			ts(target - 1)
+		));
 		assert!(slot_deadline_due(g, window, Some(ts(prev)), ts(target)));
 
 		// The slot was missed for this window (no tick landed on it), but a later
 		// tick still fires it — the whole point, vs slot_is_due deferring a period.
 		let late = (room / 2).max(1);
-		assert!(slot_deadline_due(g, window, Some(ts(prev)), ts(target + late)));
+		assert!(slot_deadline_due(
+			g,
+			window,
+			Some(ts(prev)),
+			ts(target + late)
+		));
 
 		// Overdue by more than a full window fires regardless of the slot, even
 		// early in the window before the target (downtime recovery).
 		let stale = window_start - window_secs - 10;
-		assert!(slot_deadline_due(g, window, Some(ts(stale)), ts(window_start + 1)));
+		assert!(slot_deadline_due(
+			g,
+			window,
+			Some(ts(stale)),
+			ts(window_start + 1)
+		));
 	}
 
 	#[test]

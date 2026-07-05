@@ -559,7 +559,10 @@ mod tests {
 		assert_eq!(due_kind(g, Some(now0), Some(now0), now0), None);
 
 		// Never run, at the weekly deadline → full (which subsumes quick).
-		assert_eq!(due_kind(g, None, None, ts(full_target)), Some(JobKind::MaintFull));
+		assert_eq!(
+			due_kind(g, None, None, ts(full_target)),
+			Some(JobKind::MaintFull)
+		);
 
 		// Full ran last week and this week's slot was missed (no tick landed on
 		// it); a later tick still catches it up rather than deferring another
