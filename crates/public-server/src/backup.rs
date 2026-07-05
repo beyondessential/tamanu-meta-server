@@ -232,11 +232,9 @@ pub struct BackupCredentialsArgs {
 	/// storage only.
 	#[serde(default)]
 	pub purpose: BackupPurpose,
-	/// Optional run-uuid the client minted for this run, sent so the issuance can
-	/// be correlated to the run's later `/backup-report`. Supplying it lets
-	/// Canopy attribute the run's duration and distinguish concurrent runs of the
-	/// same type on one server exactly, rather than by time-window heuristics.
-	/// Use the same value here and in the matching report.
+	/// This must be the run-uuid the client minted for this run.
+	/// The field is optional only so older clients don't break; it WILL be made
+	/// mandatory in future.
 	pub run_id: Option<Uuid>,
 }
 
