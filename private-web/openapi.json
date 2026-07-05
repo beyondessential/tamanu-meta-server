@@ -3797,8 +3797,8 @@
         "tags": [
           "restore_replicas"
         ],
-        "summary": "List recent restore-health reports for a group.",
-        "description": "Returns up to the 50 most recent restore-health reports submitted by\nconsumers for the given server group. Each report records whether a\nbackup snapshot restored successfully and whether the resulting replica\nwas healthy — the strongest available signal that the group's backups are\nactually restorable.",
+        "summary": "List recent restore activity for a group.",
+        "description": "Returns up to the 50 most recent restore-health reports submitted by\nconsumers for the given server group, plus restores inferred from credential\nissuances that never reported (in flight, or terminated without a report).\nEach reported check records whether a backup snapshot restored successfully\nand whether the resulting replica was healthy — the strongest available\nsignal that the group's backups are actually restorable. Reported checks\ncarry a Canopy-measured duration (issuance → report).",
         "operationId": "restore_replicas_checks",
         "requestBody": {
           "content": {
@@ -3818,7 +3818,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/BackupRestoreCheck"
+                    "$ref": "#/components/schemas/RestoreActivity"
                   }
                 }
               }
@@ -6625,14 +6625,6 @@
           }
         }
       },
-      "BackupPurpose": {
-        "type": "string",
-        "description": "Why a backup credential was issued, or what a reported run was for.\nDetermines the access the credential grants: a `backup` credential can\nwrite new data but not delete existing data, while a `restore`\ncredential is read-only.",
-        "enum": [
-          "backup",
-          "restore"
-        ]
-      },
       "BackupRepoStats": {
         "type": "object",
         "description": "Cached size and count statistics for a group's backup repository and its\nunderlying bucket. Populated by two independent processes: repository\ninspection fills the snapshot/source/logical/physical figures, and a\nseparate bucket-metrics collector fills `bucket_bytes`; either can be\nstale relative to the other.",
@@ -6693,253 +6685,6 @@
           }
         }
       },
-      "BackupRestoreCheck": {
-        "type": "object",
-        "description": "A restore-health report submitted by a restore consumer: proof (or\ndisproof) that a backup snapshot actually restores into a healthy\ndatabase — the strongest available signal of backup health. `snapshot_id`\nidentifies which snapshot was restored, if the report is snapshot-scoped.",
-        "required": [
-          "id",
-          "consumer_device_id",
-          "group_id",
-          "type",
-          "intent",
-          "outcome",
-          "replica_healthy",
-          "observed_at",
-          "reported_at"
-        ],
-        "properties": {
-          "consumer_device_id": {
-            "type": "string",
-            "format": "uuid",
-            "description": "The device (restore consumer) that submitted this report."
-          },
-          "error": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Error message reported for a failed restore, if any."
-          },
-          "group_id": {
-            "type": "string",
-            "format": "uuid",
-            "description": "The server group this report belongs to."
-          },
-          "health_details": {
-            "description": "Additional health data supplied by the consumer (for example,\ndatabase cluster statistics or whether indexes needed repair).\nPassed through and displayed as-is. `None` if none was supplied."
-          },
-          "id": {
-            "type": "integer",
-            "format": "int64",
-            "description": "Unique identifier for this report."
-          },
-          "intent": {
-            "type": "string",
-            "description": "The restore intent this report was performed for."
-          },
-          "observed_at": {
-            "type": "string",
-            "format": "date-time",
-            "description": "When the restore attempt this report describes actually took place."
-          },
-          "outcome": {
-            "type": "string",
-            "description": "Whether the restore attempt itself succeeded or failed."
-          },
-          "postgres_version": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The Postgres version of the restored database, if reported."
-          },
-          "replica_healthy": {
-            "type": "boolean",
-            "description": "Whether the restored database came up and passed its health checks.\nA report only counts as fully healthy when `outcome` is success and\nthis is also `true`."
-          },
-          "replica_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid",
-            "description": "The replica declaration this report is for, if it was made against\na declared replica. `None` for reports not tied to a declaration."
-          },
-          "reported_at": {
-            "type": "string",
-            "format": "date-time",
-            "description": "When this report was received."
-          },
-          "s3_received_payload_bytes": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "Bytes received from storage for this restore, counting only the\ndecoded object data (excludes response framing overhead)."
-          },
-          "s3_received_raw_bytes": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "Bytes received from storage for this restore, counting the full HTTP\nresponse including framing overhead."
-          },
-          "s3_sent_payload_bytes": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "Bytes sent to storage for this restore, counting only the decoded\nobject data (excludes request/signing overhead)."
-          },
-          "s3_sent_raw_bytes": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "Bytes sent to storage for this restore, counting the full HTTP\nrequest including signing/chunking overhead."
-          },
-          "server_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid",
-            "description": "The server this report is about, if any."
-          },
-          "snapshot_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The id of the snapshot that was restored, if the report is scoped to\na specific snapshot."
-          },
-          "type": {
-            "type": "string",
-            "description": "The backup type this report covers."
-          }
-        }
-      },
-      "BackupRun": {
-        "type": "object",
-        "description": "A backup or restore run reported by a device, with its outcome and any\nsize/traffic figures collected for it.",
-        "required": [
-          "id",
-          "device_id",
-          "group_id",
-          "type",
-          "purpose",
-          "outcome",
-          "reported_at"
-        ],
-        "properties": {
-          "bytes_uploaded": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "Number of bytes the device reports having uploaded for this run."
-          },
-          "device_id": {
-            "type": "string",
-            "format": "uuid",
-            "description": "ID of the device that performed and reported this run."
-          },
-          "error": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Error message reported for a failed run, if any."
-          },
-          "group_id": {
-            "type": "string",
-            "format": "uuid",
-            "description": "ID of the server group the run's backup repository belongs to."
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Unique id of this run, minted by the reporting device."
-          },
-          "outcome": {
-            "$ref": "#/components/schemas/RunOutcome",
-            "description": "Whether the run succeeded or failed."
-          },
-          "purpose": {
-            "$ref": "#/components/schemas/BackupPurpose",
-            "description": "Whether this run was a backup (upload) or a restore (download)."
-          },
-          "reported_at": {
-            "type": "string",
-            "format": "date-time",
-            "description": "When this run was reported."
-          },
-          "s3_received_payload_bytes": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "Bytes received from S3 for this run, counting only the decoded object\ndata (excludes response framing overhead)."
-          },
-          "s3_received_raw_bytes": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "Bytes received from S3 for this run, counting the full HTTP response\nincluding framing overhead."
-          },
-          "s3_sent_payload_bytes": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "Bytes sent to S3 for this run, counting only the decoded object data\n(excludes request/signing overhead)."
-          },
-          "s3_sent_raw_bytes": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "Bytes sent to S3 for this run, counting the full HTTP request including\nsigning/chunking overhead."
-          },
-          "server_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid",
-            "description": "ID of the server the run was performed for, if known."
-          },
-          "snapshot_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Id of the snapshot this run produced, if any."
-          },
-          "snapshot_logical_bytes": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "Logical (uncompressed) size of this run's snapshot, as independently\nobserved by repository inspection rather than reported by the device.\nDistinct from `bytes_uploaded`; filled in after the fact, once, and\nnever overwritten."
-          },
-          "type": {
-            "type": "string",
-            "description": "The backup type this run performed (e.g. `tamanu-postgres`)."
-          }
-        }
-      },
       "BackupStatsView": {
         "type": "object",
         "description": "Backup statistics and activity for a server group.",
@@ -6977,9 +6722,9 @@
           "recent_runs": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/BackupRun"
+              "$ref": "#/components/schemas/RecentRun"
             },
-            "description": "The most recent backup runs across the group's member servers."
+            "description": "The most recent backup and restore runs across the group's member servers,\nincluding runs still in flight or inferred from credential issuances that\nwere never reported."
           },
           "restore_windows": {
             "type": "array",
@@ -10200,6 +9945,145 @@
           }
         }
       },
+      "RecentRun": {
+        "type": "object",
+        "description": "One row of the recent-runs view: either a device-reported [`BackupRun`] or a\nrun inferred from a [`BackupCredentialIssuance`] that never matched a report.\nDuration, when present, is Canopy-measured wall-clock — the interval from the\nrun's first credential issuance (its start) to its report (its end) — not a\nclient-reported figure.",
+        "required": [
+          "key",
+          "type",
+          "purpose",
+          "status",
+          "at"
+        ],
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The row's effective time for sorting and display: `reported_at` when\nreported, otherwise `started_at`."
+          },
+          "bytes_uploaded": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Bytes the device reported uploading, if any (reported runs only)."
+          },
+          "duration_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Canopy-measured run duration in seconds (report time minus first-issuance\ntime). `None` for an in-flight/unreported row or a run with no matching\nissuance."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Error detail for a failed reported run, if any."
+          },
+          "key": {
+            "type": "string",
+            "description": "Stable identity for UI keying: `run-<uuid>` for a reported run, or\n`issuance-<id>` for an inferred attempt."
+          },
+          "outcome": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RunOutcome",
+                "description": "The reported outcome; only present when `status` is `reported`."
+              }
+            ]
+          },
+          "purpose": {
+            "type": "string",
+            "description": "Whether the run was a backup or a restore."
+          },
+          "reported_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the device reported the run. `None` for an inferred (unreported) row."
+          },
+          "s3_received_payload_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Payload bytes received from S3 during the run, if tallied (reported runs only)."
+          },
+          "s3_received_raw_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Raw bytes received from S3 during the run, if tallied (reported runs only)."
+          },
+          "s3_sent_payload_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Payload bytes sent to S3 during the run, if tallied (reported runs only)."
+          },
+          "s3_sent_raw_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Raw bytes sent to S3 during the run, if tallied (reported runs only)."
+          },
+          "server_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The server this run was for, if known."
+          },
+          "snapshot_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Snapshot the run produced, if any (reported runs only)."
+          },
+          "snapshot_logical_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Logical snapshot size from repo inspection, if known (reported runs only)."
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the run started, taken from its first matching credential issuance.\n`None` when no issuance could be matched (e.g. a run predating issuance\nrecording)."
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus",
+            "description": "Whether this row is reported, in-flight, or an unreported past attempt."
+          },
+          "type": {
+            "type": "string",
+            "description": "The backup type that ran."
+          }
+        }
+      },
       "RecoveryChallengeResponse": {
         "type": "object",
         "description": "A freshly issued recovery-verification challenge.",
@@ -10449,6 +10333,152 @@
           "duplicate",
           "flapping"
         ]
+      },
+      "RestoreActivity": {
+        "type": "object",
+        "description": "One row of the restore-activity view: either a consumer-reported restore\nhealth check, or a restore inferred from a credential issuance that never\nreported (in flight, or terminated without a report). Mirrors the backup\nrecent-runs view on the restore side.",
+        "required": [
+          "key",
+          "status",
+          "type",
+          "at"
+        ],
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Effective time for sorting/display: the report's observed time when\nreported, otherwise the issuance start."
+          },
+          "duration_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Canopy-measured restore duration in seconds (report received time minus\nfirst-issuance time). `None` for an in-flight/unreported row or a check\nwith no matching issuance."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Error detail for a failed reported restore, if any."
+          },
+          "health_details": {
+            "description": "Consumer-supplied health data, if any (reported checks only)."
+          },
+          "intent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The restore intent, when reported. Absent for inferred rows."
+          },
+          "key": {
+            "type": "string",
+            "description": "Stable identity for UI keying: `check-<id>` for a reported check, or\n`issuance-<id>` for an inferred restore."
+          },
+          "observed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the consumer observed the restore result (client-reported); reported\nchecks only."
+          },
+          "outcome": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The restore outcome; only present for a reported check."
+          },
+          "postgres_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "PostgreSQL version of the restored database, if reported."
+          },
+          "replica_healthy": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the restored replica came up healthy; only for a reported check."
+          },
+          "reported_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the consumer's report was received. `None` for an inferred row."
+          },
+          "s3_received_payload_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Payload bytes received from S3 during the restore, if reported."
+          },
+          "s3_received_raw_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Raw bytes received from S3 during the restore, if reported."
+          },
+          "s3_sent_payload_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Payload bytes sent to S3 during the restore, if reported."
+          },
+          "s3_sent_raw_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Raw bytes sent to S3 during the restore, if reported."
+          },
+          "server_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The server the restore is for, when reported. Absent for inferred rows\n(the issuance is minted per group+type, not per server)."
+          },
+          "snapshot_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The snapshot that was restored, if reported."
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the restore started, taken from its matching credential issuance.\n`None` when no issuance could be matched."
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus",
+            "description": "Reported, in-flight, or an unreported terminated restore."
+          },
+          "type": {
+            "type": "string",
+            "description": "The backup type restored."
+          }
+        }
       },
       "RestoreConsumerView": {
         "type": "object",
@@ -10814,6 +10844,15 @@
         "enum": [
           "success",
           "failure"
+        ]
+      },
+      "RunStatus": {
+        "type": "string",
+        "description": "State of an activity row: a device-reported run, or a run inferred from a\ncredential issuance that never matched a report.",
+        "enum": [
+          "reported",
+          "in_progress",
+          "unknown"
         ]
       },
       "SampleArgs": {

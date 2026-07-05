@@ -530,6 +530,11 @@ pub struct BackupRestoreCheck {
 	/// database cluster statistics or whether indexes needed repair).
 	/// Passed through and displayed as-is. `None` if none was supplied.
 	pub health_details: Option<serde_json::Value>,
+	/// The run this report belongs to, when the consumer stamped its run-uuid on
+	/// the restore-credentials request. Ties the report to its issuance exactly
+	/// (for Canopy-measured duration). `None` for older consumers, which fall
+	/// back to time-window matching.
+	pub run_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -554,6 +559,7 @@ pub struct NewBackupRestoreCheck {
 	pub s3_received_raw_bytes: Option<i64>,
 	pub s3_received_payload_bytes: Option<i64>,
 	pub health_details: Option<serde_json::Value>,
+	pub run_id: Option<Uuid>,
 }
 
 impl BackupRestoreCheck {

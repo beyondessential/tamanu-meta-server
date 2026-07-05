@@ -306,6 +306,10 @@ pub struct RestoreCredentialsArgs {
 	/// The backup type to restore (e.g. `tamanu-postgres`).
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
+	/// This must be the run-uuid the client minted for this run.
+	/// The field is optional only so older clients don't break; it WILL be made
+	/// mandatory in future.
+	pub run_id: Option<Uuid>,
 }
 
 /// Read-only S3 credentials plus the repository passphrase for one group and
@@ -451,6 +455,7 @@ async fn credentials(
 			access_key_id: Some(access_key_id.clone()),
 			bucket: cfg.bucket.clone(),
 			prefix: cfg.prefix.clone(),
+			run_id: args.run_id,
 		},
 	)
 	.await?;
@@ -520,6 +525,10 @@ pub struct VerificationArgs {
 	/// (database statistics, whether indexes needed rebuilding, and so on).
 	/// Stored and displayed as-is.
 	pub health_details: Option<serde_json::Value>,
+	/// This must be the run-uuid the client minted for this run.
+	/// The field is optional only so older clients don't break; it WILL be made
+	/// mandatory in future.
+	pub run_id: Option<Uuid>,
 }
 
 /// Report the outcome of a restore attempt and the replica's health.
@@ -580,6 +589,7 @@ async fn verification(
 			s3_received_raw_bytes: args.s3_received_raw_bytes,
 			s3_received_payload_bytes: args.s3_received_payload_bytes,
 			health_details: args.health_details,
+			run_id: args.run_id,
 		},
 	)
 	.await?;

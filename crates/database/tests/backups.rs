@@ -592,6 +592,7 @@ async fn issuance_snapshots_bucket_and_orders_newest_first() {
 			access_key_id: Some("ASIAEXAMPLE".into()),
 			bucket: bucket.into(),
 			prefix: String::new(),
+			run_id: None,
 		};
 
 		let first = BackupCredentialIssuance::record(&mut conn, mk("bucket-at-issue"))
@@ -611,6 +612,59 @@ async fn issuance_snapshots_bucket_and_orders_newest_first() {
 		assert_eq!(list.len(), 2);
 		assert_eq!(list[0].bucket, "later-bucket", "newest first");
 		assert_eq!(list[1].bucket, "bucket-at-issue");
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn list_for_group_since_windows_and_orders() {
+	TestDb::run(|mut conn, _url| async move {
+		let group_id = insert_group(&mut conn, "g").await;
+		let device_id = insert_device(&mut conn).await;
+
+		let mk = || NewBackupCredentialIssuance {
+			device_id,
+			group_id,
+			r#type: BackupType::TamanuPostgres,
+			expires_at: Timestamp::now() + SignedDuration::from_hours(1),
+			purpose: BackupPurpose::Restore,
+			sts_assumed_role: "arn:aws:iam::123456789012:role/canopy-backups-test".into(),
+			sts_request_id: None,
+			access_key_id: Some("ASIAEXAMPLE".into()),
+			bucket: "b".into(),
+			prefix: String::new(),
+			run_id: None,
+		};
+		BackupCredentialIssuance::record(&mut conn, mk())
+			.await
+			.unwrap();
+		tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+		BackupCredentialIssuance::record(&mut conn, mk())
+			.await
+			.unwrap();
+
+		// A window that starts in the past captures both, newest-first.
+		let recent = BackupCredentialIssuance::list_for_group_since(
+			&mut conn,
+			group_id,
+			Timestamp::now() - SignedDuration::from_hours(1),
+			10,
+		)
+		.await
+		.unwrap();
+		assert_eq!(recent.len(), 2);
+		assert!(recent[0].issued_at >= recent[1].issued_at, "newest first");
+
+		// A window that starts in the future excludes everything.
+		let none = BackupCredentialIssuance::list_for_group_since(
+			&mut conn,
+			group_id,
+			Timestamp::now() + SignedDuration::from_hours(1),
+			10,
+		)
+		.await
+		.unwrap();
+		assert!(none.is_empty());
 	})
 	.await;
 }

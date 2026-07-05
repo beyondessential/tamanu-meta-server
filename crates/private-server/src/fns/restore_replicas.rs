@@ -17,18 +17,22 @@ use commons_servers::tailscale_auth::TailscaleAdmin;
 use commons_types::device::DeviceRole;
 use commons_types::{
 	Uuid,
-	backup::{BackupType, IntentDescriptor, ParamValues, RestoreIntent, validate_params},
+	backup::{
+		BackupPurpose, BackupType, IntentDescriptor, ParamValues, RestoreIntent, RunOutcome,
+		validate_params,
+	},
 };
 use database::diesel_async::AsyncPgConnection;
 use database::pg_duration::PgDuration;
 use database::{
 	BackupRestoreCheck, NewRestoreReplica, RestoreConsumerCapability, RestoreReplica,
-	RestoreReplicaUpdate, devices::Device,
+	RestoreReplicaUpdate, backups::BackupCredentialIssuance, devices::Device, servers::Server,
 };
 use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::run_pairing::{self, ReportRef, RunStatus};
 use crate::state::AppState;
 
 pub fn routes() -> OpenApiRouter<AppState> {
@@ -326,13 +330,78 @@ pub async fn consumers(State(state): State<AppState>) -> Result<Json<Vec<Restore
 	Ok(Json(out))
 }
 
-/// List recent restore-health reports for a group.
+/// The cap on the recent restore-activity list.
+const RECENT_CHECKS_LIMIT: i64 = 50;
+
+/// One row of the restore-activity view: either a consumer-reported restore
+/// health check, or a restore inferred from a credential issuance that never
+/// reported (in flight, or terminated without a report). Mirrors the backup
+/// recent-runs view on the restore side.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct RestoreActivity {
+	/// Stable identity for UI keying: `check-<id>` for a reported check, or
+	/// `issuance-<id>` for an inferred restore.
+	pub key: String,
+	/// Reported, in-flight, or an unreported terminated restore.
+	pub status: RunStatus,
+	/// The server the restore is for, when reported. Absent for inferred rows
+	/// (the issuance is minted per group+type, not per server).
+	pub server_id: Option<Uuid>,
+	/// The backup type restored.
+	#[serde(rename = "type")]
+	#[schema(value_type = String)]
+	pub r#type: BackupType,
+	/// The restore intent, when reported. Absent for inferred rows.
+	#[schema(value_type = Option<String>)]
+	pub intent: Option<RestoreIntent>,
+	/// The restore outcome; only present for a reported check.
+	#[schema(value_type = Option<String>)]
+	pub outcome: Option<RunOutcome>,
+	/// Whether the restored replica came up healthy; only for a reported check.
+	pub replica_healthy: Option<bool>,
+	/// Error detail for a failed reported restore, if any.
+	pub error: Option<String>,
+	/// PostgreSQL version of the restored database, if reported.
+	pub postgres_version: Option<String>,
+	/// The snapshot that was restored, if reported.
+	pub snapshot_id: Option<String>,
+	/// Consumer-supplied health data, if any (reported checks only).
+	pub health_details: Option<serde_json::Value>,
+	/// Raw bytes sent to S3 during the restore, if reported.
+	pub s3_sent_raw_bytes: Option<i64>,
+	/// Payload bytes sent to S3 during the restore, if reported.
+	pub s3_sent_payload_bytes: Option<i64>,
+	/// Raw bytes received from S3 during the restore, if reported.
+	pub s3_received_raw_bytes: Option<i64>,
+	/// Payload bytes received from S3 during the restore, if reported.
+	pub s3_received_payload_bytes: Option<i64>,
+	/// When the consumer observed the restore result (client-reported); reported
+	/// checks only.
+	pub observed_at: Option<Timestamp>,
+	/// When the restore started, taken from its matching credential issuance.
+	/// `None` when no issuance could be matched.
+	pub started_at: Option<Timestamp>,
+	/// When the consumer's report was received. `None` for an inferred row.
+	pub reported_at: Option<Timestamp>,
+	/// Effective time for sorting/display: the report's observed time when
+	/// reported, otherwise the issuance start.
+	pub at: Timestamp,
+	/// Canopy-measured restore duration in seconds (report received time minus
+	/// first-issuance time). `None` for an in-flight/unreported row or a check
+	/// with no matching issuance.
+	#[schema(value_type = Option<i64>, format = "int64")]
+	pub duration_seconds: Option<i64>,
+}
+
+/// List recent restore activity for a group.
 ///
 /// Returns up to the 50 most recent restore-health reports submitted by
-/// consumers for the given server group. Each report records whether a
-/// backup snapshot restored successfully and whether the resulting replica
-/// was healthy — the strongest available signal that the group's backups are
-/// actually restorable.
+/// consumers for the given server group, plus restores inferred from credential
+/// issuances that never reported (in flight, or terminated without a report).
+/// Each reported check records whether a backup snapshot restored successfully
+/// and whether the resulting replica was healthy — the strongest available
+/// signal that the group's backups are actually restorable. Reported checks
+/// carry a Canopy-measured duration (issuance → report).
 #[utoipa::path(
 	post,
 	path = "/checks",
@@ -340,15 +409,112 @@ pub async fn consumers(State(state): State<AppState>) -> Result<Json<Vec<Restore
 	tag = "restore_replicas",
 	security(("tailscale-user" = [])),
 	request_body = RestoreReplicasGroupArgs,
-	responses((status = 200, body = Vec<BackupRestoreCheck>)),
+	responses((status = 200, body = Vec<RestoreActivity>)),
 )]
 pub async fn checks(
 	State(state): State<AppState>,
 	Json(args): Json<RestoreReplicasGroupArgs>,
-) -> Result<Json<Vec<BackupRestoreCheck>>> {
+) -> Result<Json<Vec<RestoreActivity>>> {
 	let mut conn = state.db_read.get().await?;
-	let rows =
-		BackupRestoreCheck::list_recent_for_group(&mut conn, args.server_group_id, 50).await?;
+	let group_id = args.server_group_id;
+	let now = Timestamp::now();
+
+	let checks =
+		BackupRestoreCheck::list_recent_for_group(&mut conn, group_id, RECENT_CHECKS_LIMIT).await?;
+
+	// Member-server devices run *manual* restores, tracked in the backup panel;
+	// this table is for restore *consumers*, so their issuances are the ones we
+	// pair here (the complement of the backup panel's member-device filter).
+	let member_devices: HashSet<Uuid> = Server::list_live_in_group(&mut conn, group_id)
+		.await?
+		.into_iter()
+		.filter_map(|s| s.device_id)
+		.collect();
+
+	let issuance_since =
+		run_pairing::issuance_since(now, checks.iter().map(|c| c.reported_at).min());
+	let issuances: Vec<_> = BackupCredentialIssuance::list_for_group_since(
+		&mut conn,
+		group_id,
+		issuance_since,
+		RECENT_CHECKS_LIMIT * 4,
+	)
+	.await?
+	.into_iter()
+	.filter(|i| i.purpose == BackupPurpose::Restore && !member_devices.contains(&i.device_id))
+	.collect();
+
+	// `list_recent_for_group` is newest-first, which the guesstimate fallback
+	// relies on.
+	let reports: Vec<ReportRef> = checks
+		.iter()
+		.map(|c| ReportRef {
+			run_id: c.run_id,
+			key: run_pairing::run_key(c.consumer_device_id, &c.r#type, BackupPurpose::Restore),
+			reported_at: c.reported_at,
+		})
+		.collect();
+	let (starts, attempts) = run_pairing::pair_issuances(issuances, &reports);
+
+	let mut rows: Vec<RestoreActivity> = checks
+		.into_iter()
+		.zip(starts)
+		.map(|(c, started_at)| {
+			let duration_seconds = started_at.map(|s| c.reported_at.as_second() - s.as_second());
+			RestoreActivity {
+				key: format!("check-{}", c.id),
+				status: RunStatus::Reported,
+				server_id: c.server_id,
+				r#type: c.r#type,
+				intent: Some(c.intent),
+				outcome: Some(c.outcome),
+				replica_healthy: Some(c.replica_healthy),
+				error: c.error,
+				postgres_version: c.postgres_version,
+				snapshot_id: c.snapshot_id,
+				health_details: c.health_details,
+				s3_sent_raw_bytes: c.s3_sent_raw_bytes,
+				s3_sent_payload_bytes: c.s3_sent_payload_bytes,
+				s3_received_raw_bytes: c.s3_received_raw_bytes,
+				s3_received_payload_bytes: c.s3_received_payload_bytes,
+				observed_at: Some(c.observed_at),
+				started_at,
+				reported_at: Some(c.reported_at),
+				at: c.observed_at,
+				duration_seconds,
+			}
+		})
+		.collect();
+
+	for attempt in attempts {
+		let status = attempt.status(now);
+		let first = attempt.first;
+		rows.push(RestoreActivity {
+			key: format!("issuance-{}", first.id),
+			status,
+			server_id: None,
+			r#type: first.r#type,
+			intent: None,
+			outcome: None,
+			replica_healthy: None,
+			error: None,
+			postgres_version: None,
+			snapshot_id: None,
+			health_details: None,
+			s3_sent_raw_bytes: None,
+			s3_sent_payload_bytes: None,
+			s3_received_raw_bytes: None,
+			s3_received_payload_bytes: None,
+			observed_at: None,
+			started_at: Some(first.issued_at),
+			reported_at: None,
+			at: first.issued_at,
+			duration_seconds: None,
+		});
+	}
+
+	rows.sort_by(|a, b| b.at.cmp(&a.at));
+	rows.truncate(RECENT_CHECKS_LIMIT as usize);
 	Ok(Json(rows))
 }
 

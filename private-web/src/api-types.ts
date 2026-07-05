@@ -1903,12 +1903,14 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * List recent restore-health reports for a group.
+         * List recent restore activity for a group.
          * @description Returns up to the 50 most recent restore-health reports submitted by
-         *     consumers for the given server group. Each report records whether a
-         *     backup snapshot restored successfully and whether the resulting replica
-         *     was healthy — the strongest available signal that the group's backups are
-         *     actually restorable.
+         *     consumers for the given server group, plus restores inferred from credential
+         *     issuances that never reported (in flight, or terminated without a report).
+         *     Each reported check records whether a backup snapshot restored successfully
+         *     and whether the resulting replica was healthy — the strongest available
+         *     signal that the group's backups are actually restorable. Reported checks
+         *     carry a Canopy-measured duration (issuance → report).
          */
         post: operations["restore_replicas_checks"];
         delete?: never;
@@ -3480,14 +3482,6 @@ export interface components {
             started_at: string;
         };
         /**
-         * @description Why a backup credential was issued, or what a reported run was for.
-         *     Determines the access the credential grants: a `backup` credential can
-         *     write new data but not delete existing data, while a `restore`
-         *     credential is read-only.
-         * @enum {string}
-         */
-        BackupPurpose: "backup" | "restore";
-        /**
          * @description Cached size and count statistics for a group's backup repository and its
          *     underlying bucket. Populated by two independent processes: repository
          *     inspection fills the snapshot/source/logical/physical figures, and a
@@ -3538,179 +3532,6 @@ export interface components {
              */
             source_count?: number | null;
         };
-        /**
-         * @description A restore-health report submitted by a restore consumer: proof (or
-         *     disproof) that a backup snapshot actually restores into a healthy
-         *     database — the strongest available signal of backup health. `snapshot_id`
-         *     identifies which snapshot was restored, if the report is snapshot-scoped.
-         */
-        BackupRestoreCheck: {
-            /**
-             * Format: uuid
-             * @description The device (restore consumer) that submitted this report.
-             */
-            consumer_device_id: string;
-            /** @description Error message reported for a failed restore, if any. */
-            error?: string | null;
-            /**
-             * Format: uuid
-             * @description The server group this report belongs to.
-             */
-            group_id: string;
-            /**
-             * @description Additional health data supplied by the consumer (for example,
-             *     database cluster statistics or whether indexes needed repair).
-             *     Passed through and displayed as-is. `None` if none was supplied.
-             */
-            health_details?: unknown;
-            /**
-             * Format: int64
-             * @description Unique identifier for this report.
-             */
-            id: number;
-            /** @description The restore intent this report was performed for. */
-            intent: string;
-            /**
-             * Format: date-time
-             * @description When the restore attempt this report describes actually took place.
-             */
-            observed_at: string;
-            /** @description Whether the restore attempt itself succeeded or failed. */
-            outcome: string;
-            /** @description The Postgres version of the restored database, if reported. */
-            postgres_version?: string | null;
-            /**
-             * @description Whether the restored database came up and passed its health checks.
-             *     A report only counts as fully healthy when `outcome` is success and
-             *     this is also `true`.
-             */
-            replica_healthy: boolean;
-            /**
-             * Format: uuid
-             * @description The replica declaration this report is for, if it was made against
-             *     a declared replica. `None` for reports not tied to a declaration.
-             */
-            replica_id?: string | null;
-            /**
-             * Format: date-time
-             * @description When this report was received.
-             */
-            reported_at: string;
-            /**
-             * Format: int64
-             * @description Bytes received from storage for this restore, counting only the
-             *     decoded object data (excludes response framing overhead).
-             */
-            s3_received_payload_bytes?: number | null;
-            /**
-             * Format: int64
-             * @description Bytes received from storage for this restore, counting the full HTTP
-             *     response including framing overhead.
-             */
-            s3_received_raw_bytes?: number | null;
-            /**
-             * Format: int64
-             * @description Bytes sent to storage for this restore, counting only the decoded
-             *     object data (excludes request/signing overhead).
-             */
-            s3_sent_payload_bytes?: number | null;
-            /**
-             * Format: int64
-             * @description Bytes sent to storage for this restore, counting the full HTTP
-             *     request including signing/chunking overhead.
-             */
-            s3_sent_raw_bytes?: number | null;
-            /**
-             * Format: uuid
-             * @description The server this report is about, if any.
-             */
-            server_id?: string | null;
-            /**
-             * @description The id of the snapshot that was restored, if the report is scoped to
-             *     a specific snapshot.
-             */
-            snapshot_id?: string | null;
-            /** @description The backup type this report covers. */
-            type: string;
-        };
-        /**
-         * @description A backup or restore run reported by a device, with its outcome and any
-         *     size/traffic figures collected for it.
-         */
-        BackupRun: {
-            /**
-             * Format: int64
-             * @description Number of bytes the device reports having uploaded for this run.
-             */
-            bytes_uploaded?: number | null;
-            /**
-             * Format: uuid
-             * @description ID of the device that performed and reported this run.
-             */
-            device_id: string;
-            /** @description Error message reported for a failed run, if any. */
-            error?: string | null;
-            /**
-             * Format: uuid
-             * @description ID of the server group the run's backup repository belongs to.
-             */
-            group_id: string;
-            /**
-             * Format: uuid
-             * @description Unique id of this run, minted by the reporting device.
-             */
-            id: string;
-            /** @description Whether the run succeeded or failed. */
-            outcome: components["schemas"]["RunOutcome"];
-            /** @description Whether this run was a backup (upload) or a restore (download). */
-            purpose: components["schemas"]["BackupPurpose"];
-            /**
-             * Format: date-time
-             * @description When this run was reported.
-             */
-            reported_at: string;
-            /**
-             * Format: int64
-             * @description Bytes received from S3 for this run, counting only the decoded object
-             *     data (excludes response framing overhead).
-             */
-            s3_received_payload_bytes?: number | null;
-            /**
-             * Format: int64
-             * @description Bytes received from S3 for this run, counting the full HTTP response
-             *     including framing overhead.
-             */
-            s3_received_raw_bytes?: number | null;
-            /**
-             * Format: int64
-             * @description Bytes sent to S3 for this run, counting only the decoded object data
-             *     (excludes request/signing overhead).
-             */
-            s3_sent_payload_bytes?: number | null;
-            /**
-             * Format: int64
-             * @description Bytes sent to S3 for this run, counting the full HTTP request including
-             *     signing/chunking overhead.
-             */
-            s3_sent_raw_bytes?: number | null;
-            /**
-             * Format: uuid
-             * @description ID of the server the run was performed for, if known.
-             */
-            server_id?: string | null;
-            /** @description Id of the snapshot this run produced, if any. */
-            snapshot_id?: string | null;
-            /**
-             * Format: int64
-             * @description Logical (uncompressed) size of this run's snapshot, as independently
-             *     observed by repository inspection rather than reported by the device.
-             *     Distinct from `bytes_uploaded`; filled in after the fact, once, and
-             *     never overwritten.
-             */
-            snapshot_logical_bytes?: number | null;
-            /** @description The backup type this run performed (e.g. `tamanu-postgres`). */
-            type: string;
-        };
         /** @description Backup statistics and activity for a server group. */
         BackupStatsView: {
             /**
@@ -3723,8 +3544,12 @@ export interface components {
             pending_requests: components["schemas"]["PendingRequestRow"][];
             /** @description The most recent maintenance runs for the group's backup repository. */
             recent_maintenance: components["schemas"]["BackupMaintenanceRun"][];
-            /** @description The most recent backup runs across the group's member servers. */
-            recent_runs: components["schemas"]["BackupRun"][];
+            /**
+             * @description The most recent backup and restore runs across the group's member servers,
+             *     including runs still in flight or inferred from credential issuances that
+             *     were never reported.
+             */
+            recent_runs: components["schemas"]["RecentRun"][];
             /**
              * @description Member servers whose restore window is currently open, so the panel can
              *     show which servers may restore right now and until when. Servers with no
@@ -5768,6 +5593,91 @@ export interface components {
              */
             passphrase: string;
         };
+        /**
+         * @description One row of the recent-runs view: either a device-reported [`BackupRun`] or a
+         *     run inferred from a [`BackupCredentialIssuance`] that never matched a report.
+         *     Duration, when present, is Canopy-measured wall-clock — the interval from the
+         *     run's first credential issuance (its start) to its report (its end) — not a
+         *     client-reported figure.
+         */
+        RecentRun: {
+            /**
+             * Format: date-time
+             * @description The row's effective time for sorting and display: `reported_at` when
+             *     reported, otherwise `started_at`.
+             */
+            at: string;
+            /**
+             * Format: int64
+             * @description Bytes the device reported uploading, if any (reported runs only).
+             */
+            bytes_uploaded?: number | null;
+            /**
+             * Format: int64
+             * @description Canopy-measured run duration in seconds (report time minus first-issuance
+             *     time). `None` for an in-flight/unreported row or a run with no matching
+             *     issuance.
+             */
+            duration_seconds?: number | null;
+            /** @description Error detail for a failed reported run, if any. */
+            error?: string | null;
+            /**
+             * @description Stable identity for UI keying: `run-<uuid>` for a reported run, or
+             *     `issuance-<id>` for an inferred attempt.
+             */
+            key: string;
+            outcome?: null | components["schemas"]["RunOutcome"];
+            /** @description Whether the run was a backup or a restore. */
+            purpose: string;
+            /**
+             * Format: date-time
+             * @description When the device reported the run. `None` for an inferred (unreported) row.
+             */
+            reported_at?: string | null;
+            /**
+             * Format: int64
+             * @description Payload bytes received from S3 during the run, if tallied (reported runs only).
+             */
+            s3_received_payload_bytes?: number | null;
+            /**
+             * Format: int64
+             * @description Raw bytes received from S3 during the run, if tallied (reported runs only).
+             */
+            s3_received_raw_bytes?: number | null;
+            /**
+             * Format: int64
+             * @description Payload bytes sent to S3 during the run, if tallied (reported runs only).
+             */
+            s3_sent_payload_bytes?: number | null;
+            /**
+             * Format: int64
+             * @description Raw bytes sent to S3 during the run, if tallied (reported runs only).
+             */
+            s3_sent_raw_bytes?: number | null;
+            /**
+             * Format: uuid
+             * @description The server this run was for, if known.
+             */
+            server_id?: string | null;
+            /** @description Snapshot the run produced, if any (reported runs only). */
+            snapshot_id?: string | null;
+            /**
+             * Format: int64
+             * @description Logical snapshot size from repo inspection, if known (reported runs only).
+             */
+            snapshot_logical_bytes?: number | null;
+            /**
+             * Format: date-time
+             * @description When the run started, taken from its first matching credential issuance.
+             *     `None` when no issuance could be matched (e.g. a run predating issuance
+             *     recording).
+             */
+            started_at?: string | null;
+            /** @description Whether this row is reported, in-flight, or an unreported past attempt. */
+            status: components["schemas"]["RunStatus"];
+            /** @description The backup type that ran. */
+            type: string;
+        };
         /** @description A freshly issued recovery-verification challenge. */
         RecoveryChallengeResponse: {
             /**
@@ -5925,6 +5835,93 @@ export interface components {
          * @enum {string}
          */
         ResolvedReason: "fixed" | "wont_fix" | "expected" | "duplicate" | "flapping";
+        /**
+         * @description One row of the restore-activity view: either a consumer-reported restore
+         *     health check, or a restore inferred from a credential issuance that never
+         *     reported (in flight, or terminated without a report). Mirrors the backup
+         *     recent-runs view on the restore side.
+         */
+        RestoreActivity: {
+            /**
+             * Format: date-time
+             * @description Effective time for sorting/display: the report's observed time when
+             *     reported, otherwise the issuance start.
+             */
+            at: string;
+            /**
+             * Format: int64
+             * @description Canopy-measured restore duration in seconds (report received time minus
+             *     first-issuance time). `None` for an in-flight/unreported row or a check
+             *     with no matching issuance.
+             */
+            duration_seconds?: number | null;
+            /** @description Error detail for a failed reported restore, if any. */
+            error?: string | null;
+            /** @description Consumer-supplied health data, if any (reported checks only). */
+            health_details?: unknown;
+            /** @description The restore intent, when reported. Absent for inferred rows. */
+            intent?: string | null;
+            /**
+             * @description Stable identity for UI keying: `check-<id>` for a reported check, or
+             *     `issuance-<id>` for an inferred restore.
+             */
+            key: string;
+            /**
+             * Format: date-time
+             * @description When the consumer observed the restore result (client-reported); reported
+             *     checks only.
+             */
+            observed_at?: string | null;
+            /** @description The restore outcome; only present for a reported check. */
+            outcome?: string | null;
+            /** @description PostgreSQL version of the restored database, if reported. */
+            postgres_version?: string | null;
+            /** @description Whether the restored replica came up healthy; only for a reported check. */
+            replica_healthy?: boolean | null;
+            /**
+             * Format: date-time
+             * @description When the consumer's report was received. `None` for an inferred row.
+             */
+            reported_at?: string | null;
+            /**
+             * Format: int64
+             * @description Payload bytes received from S3 during the restore, if reported.
+             */
+            s3_received_payload_bytes?: number | null;
+            /**
+             * Format: int64
+             * @description Raw bytes received from S3 during the restore, if reported.
+             */
+            s3_received_raw_bytes?: number | null;
+            /**
+             * Format: int64
+             * @description Payload bytes sent to S3 during the restore, if reported.
+             */
+            s3_sent_payload_bytes?: number | null;
+            /**
+             * Format: int64
+             * @description Raw bytes sent to S3 during the restore, if reported.
+             */
+            s3_sent_raw_bytes?: number | null;
+            /**
+             * Format: uuid
+             * @description The server the restore is for, when reported. Absent for inferred rows
+             *     (the issuance is minted per group+type, not per server).
+             */
+            server_id?: string | null;
+            /** @description The snapshot that was restored, if reported. */
+            snapshot_id?: string | null;
+            /**
+             * Format: date-time
+             * @description When the restore started, taken from its matching credential issuance.
+             *     `None` when no issuance could be matched.
+             */
+            started_at?: string | null;
+            /** @description Reported, in-flight, or an unreported terminated restore. */
+            status: components["schemas"]["RunStatus"];
+            /** @description The backup type restored. */
+            type: string;
+        };
         /**
          * @description A restore consumer and the restore intents it currently advertises.
          *
@@ -6194,6 +6191,12 @@ export interface components {
          * @enum {string}
          */
         RunOutcome: "success" | "failure";
+        /**
+         * @description State of an activity row: a device-reported run, or a run inferred from a
+         *     credential issuance that never matched a report.
+         * @enum {string}
+         */
+        RunStatus: "reported" | "in_progress" | "unknown";
         /** @description Request body identifying which healthcheck to sample data for. */
         SampleArgs: {
             /** @description The healthcheck name to sample. */
@@ -10007,7 +10010,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BackupRestoreCheck"][];
+                    "application/json": components["schemas"]["RestoreActivity"][];
                 };
             };
         };

@@ -1,6 +1,7 @@
 import { expect, test } from "./test-fixtures";
 import {
 	resetSeededTables,
+	seedBackupCredentialIssuance,
 	seedDevice,
 	seedRestoreCheck,
 	seedRestoreConsumerCapability,
@@ -40,6 +41,52 @@ test.describe("restore replicas", () => {
 		await expect(
 			page.getByText(/no restore replicas declared for this group/i),
 		).toBeVisible();
+	});
+
+	test("restore checks show a measured duration and an in-progress restore", async ({
+		page,
+		sql,
+	}) => {
+		const consumer = await seedDevice(sql, { role: "backup-restore" });
+		const groupId = await groupWithBackups(sql, "rr-duration");
+		const server = await seedServer(sql, { name: "rr-srv", groupId });
+		const reportedRun = "11111111-1111-1111-1111-111111111111";
+		const inflightRun = "22222222-2222-2222-2222-222222222222";
+
+		// A reported check plus the issuance that started it 5 minutes before it
+		// reported → the row carries a 5m duration.
+		await seedRestoreCheck(sql, {
+			consumerDeviceId: consumer.id,
+			groupId,
+			serverId: server.id,
+			intent: "verify",
+			outcome: "success",
+			replicaHealthy: true,
+			runId: reportedRun,
+		});
+		await seedBackupCredentialIssuance(sql, {
+			deviceId: consumer.id,
+			groupId,
+			purpose: "restore",
+			issuedAgoSecs: 300,
+			runId: reportedRun,
+		});
+		// A consumer restore still in flight (creds valid, no report yet).
+		await seedBackupCredentialIssuance(sql, {
+			deviceId: consumer.id,
+			groupId,
+			purpose: "restore",
+			issuedAgoSecs: 30,
+			ttlSecs: 3600,
+			runId: inflightRun,
+		});
+
+		await page.goto(`/groups/${groupId}/backups`);
+		await expect(page.getByText(/recent restore checks/i)).toBeVisible();
+		// The reported check's row shows its Canopy-measured duration.
+		await expect(page.getByRole("row", { name: /verify/ })).toContainText("5m");
+		// The unreported restore surfaces as in progress.
+		await expect(page.getByRole("row", { name: /in progress/i })).toBeVisible();
 	});
 
 	test("a seeded declaration renders; an unsupported intent is flagged as a gap", async ({

@@ -36,10 +36,12 @@ import {
 } from "@mui/material";
 import { useEffect, useState } from "react";
 import { ApiError, callApi, useApi } from "../api";
+import TimeAgo from "./TimeAgo";
+import { humanSeconds } from "../lib/humanDuration";
 import type {
-	BackupRestoreCheck,
 	IntentDescriptor,
 	ParamSpec,
+	RestoreActivity,
 	RestoreConsumerView,
 	RestoreReplicaView,
 } from "../types";
@@ -272,6 +274,7 @@ export default function RestoreReplicasSection({
 								<TableCell>Type</TableCell>
 								<TableCell>Intent</TableCell>
 								<TableCell>Outcome</TableCell>
+								<TableCell>Duration</TableCell>
 								<TableCell>PG version</TableCell>
 								<TableCell>Snapshot</TableCell>
 								<TableCell>Replica</TableCell>
@@ -279,7 +282,7 @@ export default function RestoreReplicasSection({
 						</TableHead>
 						<TableBody>
 							{checks.data.map((c) => (
-								<CheckRow key={c.id} check={c} />
+								<CheckRow key={c.key} check={c} />
 							))}
 						</TableBody>
 					</Table>
@@ -970,12 +973,47 @@ function EditReplicaDialog({
 	);
 }
 
-/** One restore-check row. When the consumer sent arbitrary `health_details`,
- * the row expands to reveal it as pretty-printed JSON; a `url` in the details is
- * surfaced as a link to the running replica. */
-function CheckRow({ check }: { check: BackupRestoreCheck }) {
+/** The outcome/status chip for a restore-activity row. A reported check shows
+ * healthy/failed; an inferred row shows in-progress (creds still valid, no report
+ * yet) or unknown (creds expired without a report). */
+function RestoreOutcomeChip({ check }: { check: RestoreActivity }) {
+	if (check.status === "reported") {
+		const ok = check.outcome === "success" && check.replica_healthy === true;
+		return (
+			<Chip
+				label={ok ? "healthy" : "failed"}
+				color={ok ? "success" : "error"}
+				size="small"
+			/>
+		);
+	}
+	if (check.status === "in_progress") {
+		return (
+			<Tooltip
+				title={
+					<>
+						Credentials issued <TimeAgo timestamp={check.started_at ?? check.at} />;
+						awaiting the restore report.
+					</>
+				}
+			>
+				<Chip size="small" color="info" variant="outlined" label="in progress" />
+			</Tooltip>
+		);
+	}
+	return (
+		<Tooltip title="Restore credentials were issued but no report was ever received.">
+			<Chip size="small" variant="outlined" label="unknown" />
+		</Tooltip>
+	);
+}
+
+/** One restore-activity row: a reported health check, or a restore inferred from
+ * a credential issuance that never reported. When the consumer sent arbitrary
+ * `health_details`, the row expands to reveal it as pretty-printed JSON; a `url`
+ * in the details is surfaced as a link to the running replica. */
+function CheckRow({ check }: { check: RestoreActivity }) {
 	const [open, setOpen] = useState(false);
-	const ok = check.outcome === "success" && check.replica_healthy;
 	const url = healthUrl(check.health_details);
 	const hasDetails =
 		check.health_details != null &&
@@ -997,16 +1035,23 @@ function CheckRow({ check }: { check: BackupRestoreCheck }) {
 						</IconButton>
 					)}
 				</TableCell>
-				<TableCell>{new Date(check.observed_at).toLocaleString()}</TableCell>
+				<TableCell>
+					<TimeAgo timestamp={check.at} />
+				</TableCell>
 				<TableCell>{check.server_id ? check.server_id.slice(0, 8) : "—"}</TableCell>
 				<TableCell>{check.type}</TableCell>
-				<TableCell>{check.intent}</TableCell>
+				<TableCell>{check.intent ?? "—"}</TableCell>
 				<TableCell>
-					<Chip
-						label={ok ? "healthy" : "failed"}
-						color={ok ? "success" : "error"}
-						size="small"
-					/>
+					<RestoreOutcomeChip check={check} />
+				</TableCell>
+				<TableCell>
+					{check.duration_seconds != null ? (
+						<Tooltip title="Time from restore credential issuance to report (measured by Canopy)">
+							<span>{humanSeconds(check.duration_seconds)}</span>
+						</Tooltip>
+					) : (
+						"—"
+					)}
 				</TableCell>
 				<TableCell>{check.postgres_version ?? "—"}</TableCell>
 				<TableCell>
@@ -1030,7 +1075,7 @@ function CheckRow({ check }: { check: BackupRestoreCheck }) {
 			</TableRow>
 			{hasDetails && (
 				<TableRow>
-					<TableCell sx={{ py: 0 }} colSpan={9}>
+					<TableCell sx={{ py: 0 }} colSpan={10}>
 						<Collapse in={open} timeout="auto" unmountOnExit>
 							<Box sx={{ my: 1 }}>
 								<Typography variant="caption" color="text.secondary">

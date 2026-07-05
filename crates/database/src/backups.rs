@@ -828,6 +828,12 @@ pub struct BackupCredentialIssuance {
 	/// Key prefix within the bucket these credentials grant access to, as it
 	/// was at the time of issuance.
 	pub prefix: String,
+	/// The run this issuance was minted for, when the client supplied its
+	/// run-uuid on the credential request. Ties an issuance to its reported run
+	/// exactly (so duration and same-server concurrent runs are unambiguous).
+	/// `None` for older clients that don't send it, which fall back to
+	/// time-window matching.
+	pub run_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -848,6 +854,9 @@ pub struct NewBackupCredentialIssuance {
 	pub bucket: String,
 	/// Snapshot of `prefix` at issuance time.
 	pub prefix: String,
+	/// Optional run-uuid the client minted at run start, correlating this
+	/// issuance with the run it belongs to.
+	pub run_id: Option<Uuid>,
 }
 
 impl BackupCredentialIssuance {
@@ -896,6 +905,28 @@ impl BackupCredentialIssuance {
 
 		dsl::backup_credential_issuances
 			.filter(dsl::group_id.eq(group_id))
+			.order(dsl::issued_at.desc())
+			.limit(limit)
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// Issuances for a group issued at or after `since`, newest-first. Backs the
+	/// recent-runs view: each issuance is a run *start*, paired with a reported run
+	/// (to derive its duration) or surfaced on its own (an unreported / in-flight
+	/// restore or backup).
+	pub async fn list_for_group_since(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+		since: Timestamp,
+		limit: i64,
+	) -> Result<Vec<Self>> {
+		use crate::schema::backup_credential_issuances::dsl;
+
+		dsl::backup_credential_issuances
+			.filter(dsl::group_id.eq(group_id))
+			.filter(dsl::issued_at.ge(jiff_diesel::Timestamp::from(since)))
 			.order(dsl::issued_at.desc())
 			.limit(limit)
 			.load(db)

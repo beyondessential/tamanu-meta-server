@@ -36,6 +36,7 @@ diesel::table! {
 		access_key_id -> Nullable<Text>,
 		bucket -> Text,
 		prefix -> Text,
+		run_id -> Nullable<Uuid>,
 	}
 }
 
@@ -117,6 +118,7 @@ diesel::table! {
 		s3_received_payload_bytes -> Nullable<Int8>,
 		reported_at -> Timestamptz,
 		health_details -> Nullable<Jsonb>,
+		run_id -> Nullable<Uuid>,
 	}
 }
 

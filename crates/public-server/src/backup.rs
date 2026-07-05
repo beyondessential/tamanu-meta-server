@@ -232,6 +232,10 @@ pub struct BackupCredentialsArgs {
 	/// storage only.
 	#[serde(default)]
 	pub purpose: BackupPurpose,
+	/// This must be the run-uuid the client minted for this run.
+	/// The field is optional only so older clients don't break; it WILL be made
+	/// mandatory in future.
+	pub run_id: Option<Uuid>,
 }
 
 /// Short-lived AWS credentials in the AWS `credential_process` output format,
@@ -448,6 +452,7 @@ async fn credentials(
 			access_key_id: Some(access_key_id.clone()),
 			bucket: cfg.bucket.clone(),
 			prefix: cfg.prefix.clone(),
+			run_id: args.run_id,
 		},
 	)
 	.await?;

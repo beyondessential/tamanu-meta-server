@@ -296,6 +296,66 @@ test.describe("backups ready: stats + backup-now", () => {
 		await expect(runs.getByText("stats-srv")).toBeVisible();
 	});
 
+	test("recent runs show a Canopy-measured duration and surface unreported restores", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "dur-group" });
+		const device = await seedDevice(sql);
+		const server = await seedServer(sql, {
+			name: "dur-srv",
+			groupId: group.id,
+			deviceId: device.id,
+		});
+		await seedServerGroupBackupConfig(sql, {
+			groupId: group.id,
+			status: "ready",
+			intervalSeconds: 3600,
+		});
+
+		// A reported backup, plus the credential issuance that started it 5 minutes
+		// before it reported → the row carries a 5m duration.
+		await seedBackupRun(sql, {
+			deviceId: device.id,
+			groupId: group.id,
+			serverId: server.id,
+			outcome: "success",
+		});
+		await seedBackupCredentialIssuance(sql, {
+			deviceId: device.id,
+			groupId: group.id,
+			purpose: "backup",
+			issuedAgoSecs: 300,
+		});
+		// A restore whose credentials are still valid but which never reported →
+		// shown as in progress (this is a manual `bestool canopy restore`).
+		await seedBackupCredentialIssuance(sql, {
+			deviceId: device.id,
+			groupId: group.id,
+			purpose: "restore",
+			issuedAgoSecs: 30,
+			ttlSecs: 3600,
+		});
+		// A restore whose credentials expired without a report → unknown outcome.
+		await seedBackupCredentialIssuance(sql, {
+			deviceId: device.id,
+			groupId: group.id,
+			type: "malaria-db",
+			purpose: "restore",
+			issuedAgoSecs: 7200,
+			ttlSecs: 3600,
+		});
+
+		await page.goto(`/groups/${group.id}/backups`);
+		const runs = page.getByRole("table").last();
+		// Duration column populated for the reported run.
+		await expect(runs.getByText("5m")).toBeVisible();
+		// The unreported restores surface with their inferred states.
+		await expect(runs.getByText("in progress")).toBeVisible();
+		await expect(runs.getByText("unknown")).toBeVisible();
+		await expect(runs.getByText("restore").first()).toBeVisible();
+	});
+
 	test("monthly S3 traffic totals this month's runs with an egress-cost tooltip", async ({
 		page,
 		sql,
@@ -453,8 +513,8 @@ test.describe("backups ready: stats + backup-now", () => {
 		const runs = page.getByRole("table").last();
 		await expect(runs.getByText("4.0 KiB")).toBeVisible();
 		// No S3 traffic reported and no snapshot id → Uploaded and Snapshot cells
-		// both fall back to "—".
-		await expect(runs.getByRole("cell", { name: "—" })).toHaveCount(2);
+		// both fall back to "—", plus the empty Duration column.
+		await expect(runs.getByRole("cell", { name: "—" })).toHaveCount(3);
 	});
 
 	test("failed run shows expandable error detail, no snapshot size, and no upload", async ({
@@ -486,9 +546,9 @@ test.describe("backups ready: stats + backup-now", () => {
 		const runs = page.getByRole("table").last();
 		await expect(runs.getByText("err-srv")).toBeVisible();
 		await expect(runs.getByText("failure")).toBeVisible();
-		// A failed run has no size, no upload, and no snapshot → three "—" cells
-		// (Snapshot size, Uploaded, Snapshot), not "unknown".
-		await expect(runs.getByRole("cell", { name: "—" })).toHaveCount(3);
+		// A failed run has no size, no upload, and no snapshot → four "—" cells
+		// (Snapshot size, Uploaded, Snapshot, Duration), not "unknown".
+		await expect(runs.getByRole("cell", { name: "—" })).toHaveCount(4);
 
 		// Error detail is hidden until the row is expanded.
 		await expect(page.getByText(/disk quota exceeded/i)).toBeHidden();
@@ -531,8 +591,9 @@ test.describe("backups ready: stats + backup-now", () => {
 		const runs = page.getByRole("table").last();
 		await expect(runs.getByText("s3-srv")).toBeVisible();
 		await expect(runs.getByText("2.0 KiB")).toBeVisible();
-		// Snapshot size has nothing to show, nor does the (unseeded) snapshot id.
-		await expect(runs.getByRole("cell", { name: "—" })).toHaveCount(2);
+		// Snapshot size has nothing to show, nor does the (unseeded) snapshot id,
+		// plus the empty Duration column.
+		await expect(runs.getByRole("cell", { name: "—" })).toHaveCount(3);
 
 		// The S3 traffic breakdown is hidden until the row is expanded. Scoped to
 		// the runs table: the repo-stats panel has its own always-visible

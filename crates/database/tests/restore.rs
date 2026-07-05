@@ -60,6 +60,7 @@ fn new_check(
 		s3_received_raw_bytes: None,
 		s3_received_payload_bytes: None,
 		health_details: None,
+		run_id: None,
 	}
 }
 
