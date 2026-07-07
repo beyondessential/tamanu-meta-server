@@ -159,7 +159,9 @@ impl HealthcheckSeverity {
 	/// expressions evaluated per push against the report's contents, so they
 	/// can't be resolved ahead of time and are ignored here. An unparseable
 	/// severity falls back to [`Severity::Warning`], same as `severity_for`.
-	pub async fn base_severity_map(db: &mut AsyncPgConnection) -> Result<BTreeMap<String, Severity>> {
+	pub async fn base_severity_map(
+		db: &mut AsyncPgConnection,
+	) -> Result<BTreeMap<String, Severity>> {
 		use crate::schema::healthcheck_severities::dsl;
 		let rows: Vec<(String, String)> = dsl::healthcheck_severities
 			.select((dsl::check_name, dsl::severity))
