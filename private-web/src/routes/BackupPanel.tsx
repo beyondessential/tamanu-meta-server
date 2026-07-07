@@ -750,14 +750,19 @@ function RunRow({ run, members }: { run: RecentRun; members: ServerInfo[] }) {
 	// bestool's own accounting, or (failing that) canopy's repo inspection.
 	// Both describe the same quantity — kopia doesn't re-upload bits the
 	// server already has, so this is usually larger than what actually went
-	// over the wire.
+	// over the wire. For a restore this is the size of the snapshot the run
+	// restored from: bestool reports the snapshot id, and inspection backfills
+	// the size onto the run.
 	const fromInspect =
 		run.bytes_uploaded == null && run.snapshot_logical_bytes != null;
 	const snapshotSize = run.bytes_uploaded ?? run.snapshot_logical_bytes ?? null;
-	// Bytes actually sent over the wire, from the SigV4 proxy's tally — the
-	// only genuine "uploaded" figure. Absent for backup types the proxy
-	// doesn't front, or before the first inspection.
-	const uploaded = run.s3_sent_payload_bytes ?? null;
+	// Bytes the run actually moved over the wire, from the SigV4 proxy's
+	// tally: payload sent for a backup (upload), payload received for a
+	// restore (download). Absent for runs the proxy didn't front.
+	const transfer =
+		run.purpose === "restore"
+			? (run.s3_received_payload_bytes ?? null)
+			: (run.s3_sent_payload_bytes ?? null);
 	return (
 		<>
 			<TableRow sx={expandable ? { "& > *": { borderBottom: "unset" } } : undefined}>
@@ -788,22 +793,20 @@ function RunRow({ run, members }: { run: RecentRun; members: ServerInfo[] }) {
 					{snapshotSize == null ? (
 						"—"
 					) : fromInspect ? (
-						<Tooltip title="From repo inspection (the device reported no size)">
+						<Tooltip
+							title={
+								run.purpose === "restore"
+									? "Size of the snapshot the restore used, from repo inspection"
+									: "From repo inspection (the device reported no size)"
+							}
+						>
 							<span>{formatBytes(snapshotSize)}</span>
 						</Tooltip>
 					) : (
 						formatBytes(snapshotSize)
 					)}
 				</TableCell>
-				<TableCell>
-					{uploaded == null ? (
-						"—"
-					) : (
-						<Tooltip title="Bytes sent to S3 (SigV4 proxy tally)">
-							<span>{formatBytes(uploaded)}</span>
-						</Tooltip>
-					)}
-				</TableCell>
+				<TableCell>{transfer == null ? "—" : formatBytes(transfer)}</TableCell>
 				<TableCell>
 					<SnapshotId id={run.snapshot_id} />
 				</TableCell>
@@ -1003,7 +1006,7 @@ function RecentRunsPanel({
 								<TableCell>Outcome</TableCell>
 								<TableCell>Duration</TableCell>
 								<TableCell>Snapshot size</TableCell>
-								<TableCell>Uploaded</TableCell>
+								<TableCell>Transfer</TableCell>
 								<TableCell>Snapshot</TableCell>
 							</TableRow>
 						</TableHead>

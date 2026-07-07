@@ -512,7 +512,7 @@ test.describe("backups ready: stats + backup-now", () => {
 		await page.goto(`/groups/${group.id}/backups`);
 		const runs = page.getByRole("table").last();
 		await expect(runs.getByText("4.0 KiB")).toBeVisible();
-		// No S3 traffic reported and no snapshot id → Uploaded and Snapshot cells
+		// No S3 traffic reported and no snapshot id → Transfer and Snapshot cells
 		// both fall back to "—", plus the empty Duration column.
 		await expect(runs.getByRole("cell", { name: "—" })).toHaveCount(3);
 	});
@@ -547,7 +547,7 @@ test.describe("backups ready: stats + backup-now", () => {
 		await expect(runs.getByText("err-srv")).toBeVisible();
 		await expect(runs.getByText("failure")).toBeVisible();
 		// A failed run has no size, no upload, and no snapshot → four "—" cells
-		// (Snapshot size, Uploaded, Snapshot, Duration), not "unknown".
+		// (Snapshot size, Transfer, Snapshot, Duration), not "unknown".
 		await expect(runs.getByRole("cell", { name: "—" })).toHaveCount(4);
 
 		// Error detail is hidden until the row is expanded.
@@ -573,7 +573,7 @@ test.describe("backups ready: stats + backup-now", () => {
 			intervalSeconds: 3600,
 		});
 		// No explicit size (device-reported or inspected), but the proxy tallied
-		// S3 traffic → the Uploaded column shows the payload-sent figure directly,
+		// S3 traffic → the Transfer column shows the payload-sent figure directly,
 		// while Snapshot size stays empty.
 		await seedBackupRun(sql, {
 			deviceId: device.id,
@@ -581,7 +581,7 @@ test.describe("backups ready: stats + backup-now", () => {
 			serverId: server.id,
 			outcome: "success",
 			bytesUploaded: null,
-			s3SentPayloadBytes: 2048, // 2.0 KiB → shown in the Uploaded column
+			s3SentPayloadBytes: 2048, // 2.0 KiB → shown in the Transfer column
 			s3SentRawBytes: 3072, // 3.0 KiB
 			s3ReceivedPayloadBytes: 512, // 512 B
 			s3ReceivedRawBytes: 1024, // 1.0 KiB
@@ -603,6 +603,52 @@ test.describe("backups ready: stats + backup-now", () => {
 		await expect(runs.getByText(/s3 traffic/i)).toBeVisible();
 		await expect(runs.getByText(/2\.0 KiB payload \/ 3\.0 KiB raw/i)).toBeVisible();
 		await expect(runs.getByText(/512 B payload \/ 1\.0 KiB raw/i)).toBeVisible();
+	});
+
+	test("restore run shows its download in the Transfer column and the restored snapshot's size", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "restore-run-group" });
+		const device = await seedDevice(sql);
+		const server = await seedServer(sql, {
+			name: "restore-run-srv",
+			groupId: group.id,
+			deviceId: device.id,
+		});
+		await seedServerGroupBackupConfig(sql, {
+			groupId: group.id,
+			status: "ready",
+			intervalSeconds: 3600,
+		});
+		// A reported restore: bestool sends the restored-from snapshot id and the
+		// proxy's traffic tallies (no bytes_uploaded — nothing is uploaded), and a
+		// later repo inspection backfills the snapshot's logical size by id.
+		await seedBackupRun(sql, {
+			deviceId: device.id,
+			groupId: group.id,
+			serverId: server.id,
+			purpose: "restore",
+			outcome: "success",
+			bytesUploaded: null,
+			snapshotId: "kfedcba9876543210fedc",
+			snapshotLogicalBytes: 8388608, // 8.0 MiB restored snapshot
+			s3SentPayloadBytes: 2048, // 2.0 KiB (kopia metadata chatter)
+			s3SentRawBytes: 3072,
+			s3ReceivedPayloadBytes: 4096, // 4.0 KiB → shown in the Transfer column
+			s3ReceivedRawBytes: 5120,
+		});
+
+		await page.goto(`/groups/${group.id}/backups`);
+		const runs = page.getByRole("table").last();
+		await expect(runs.getByRole("columnheader", { name: "Transfer" })).toBeVisible();
+		await expect(runs.getByText("restore")).toBeVisible();
+		// Transfer shows the download (received payload), not the upload…
+		await expect(runs.getByText("4.0 KiB")).toBeVisible();
+		// …which only appears in the collapsed S3-traffic detail.
+		await expect(runs.getByText("2.0 KiB")).toBeHidden();
+		// Snapshot size shows the restored snapshot's inspected size.
+		await expect(runs.getByText("8.0 MiB")).toBeVisible();
 	});
 
 	test("run with both a snapshot size and S3 traffic shows them as distinct columns", async ({
