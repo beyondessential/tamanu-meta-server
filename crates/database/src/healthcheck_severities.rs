@@ -14,7 +14,7 @@ use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use jiff::Timestamp;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use serde_json::Value as JsonValue;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 /// The severity policy for one named healthcheck. An entry is created
 /// automatically the first time a check with this name is reported, using
@@ -151,6 +151,27 @@ impl HealthcheckSeverity {
 			.get_result(db)
 			.await
 			.map_err(AppError::from)
+	}
+
+	/// The whole catalog as `check_name → base severity`, for building the
+	/// device-facing effective check-severity map. Deliberately reads only
+	/// the static `severity` column: conditional `rules` ladders are
+	/// expressions evaluated per push against the report's contents, so they
+	/// can't be resolved ahead of time and are ignored here. An unparseable
+	/// severity falls back to [`Severity::Warning`], same as `severity_for`.
+	pub async fn base_severity_map(
+		db: &mut AsyncPgConnection,
+	) -> Result<BTreeMap<String, Severity>> {
+		use crate::schema::healthcheck_severities::dsl;
+		let rows: Vec<(String, String)> = dsl::healthcheck_severities
+			.select((dsl::check_name, dsl::severity))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(rows
+			.into_iter()
+			.map(|(name, sev)| (name, sev.parse().unwrap_or(Severity::Warning)))
+			.collect())
 	}
 
 	pub async fn list(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {

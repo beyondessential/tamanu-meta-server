@@ -739,7 +739,7 @@
           "statuses"
         ],
         "summary": "Submit a status heartbeat for a server.",
-        "description": "Records a periodic status push against the server identified in the\npath: overall self-reported health, a per-check breakdown, and any\nfree-form extra data. Each failed or warning check opens (or keeps\nopen) an issue at that check's operator-configured severity, and each\npassed check closes any issue it previously opened; the server's\ntracked software version is also updated from the payload.\n\nThe calling device must be the one enrolled for this exact server (or\nhold the admin role). The response echoes back the stored status\nrecord, plus a `backup_now` list of backup types the server should\nback up immediately — devices should treat a non-empty list as a\nprompt to run those backups and report them afterwards.",
+        "description": "Records a periodic status push against the server identified in the\npath: overall self-reported health, a per-check breakdown, and any\nfree-form extra data. Each failed or warning check opens (or keeps\nopen) an issue at that check's operator-configured severity, and each\npassed check closes any issue it previously opened; the server's\ntracked software version is also updated from the payload.\n\nThe calling device must be the one enrolled for this exact server (or\nhold the admin role). The response echoes back the stored status\nrecord, plus a `backup_now` list of backup types the server should\nback up immediately — devices should treat a non-empty list as a\nprompt to run those backups and report them afterwards — and a\n`check_severities` map describing how canopy classifies each known\nhealthcheck for this server (`skip`/`warn`/`fail`).",
         "operationId": "submit_status",
         "parameters": [
           {
@@ -795,6 +795,80 @@
             }
           },
           "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "server-device": []
+          }
+        ]
+      }
+    },
+    "/status/{server_id}/check-severities": {
+      "get": {
+        "tags": [
+          "statuses"
+        ],
+        "summary": "Fetch the effective healthcheck severity mapping for a server.",
+        "description": "Returns, for every healthcheck canopy knows about, how a failure of that\ncheck is classified for this server: `skip` (the check is silenced for\nthis server — at server or group scope — or its severity is below\nwarning), `warn` (warning), or `fail` (error or critical). Keys are check\nnames as reported in `health[].check` on status pushes. Only the static\nseverity baseline is reflected; operator-defined conditional rules are\nevaluated per push and not included here. The same mapping also rides\nalong every status-push response as `check_severities`.\n\nThe calling device must be the one enrolled for this exact server (or\nhold the admin role).",
+        "operationId": "check_severities",
+        "parameters": [
+          {
+            "name": "server_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Effective handling for each known check, keyed by check name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "$ref": "#/components/schemas/CheckSeverity"
+                  },
+                  "propertyNames": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "404": {
             "description": "",
             "content": {
               "application/json": {
@@ -1343,6 +1417,15 @@
           "failed",
           "broken",
           "skipped"
+        ]
+      },
+      "CheckSeverity": {
+        "type": "string",
+        "description": "How a server should treat one of its healthchecks, distilled from\ncanopy's operator-side configuration (the severity catalog and the\nsilence lists) into a three-level device-facing vocabulary.",
+        "enum": [
+          "skip",
+          "warn",
+          "fail"
         ]
       },
       "CompleteArgs": {
@@ -2048,7 +2131,8 @@
           {
             "type": "object",
             "required": [
-              "backup_now"
+              "backup_now",
+              "check_severities"
             ],
             "properties": {
               "backup_now": {
@@ -2057,6 +2141,16 @@
                   "type": "string"
                 },
                 "description": "Backup types the server should back up now: operator-requested\none-offs plus scheduled backups that are due. Each serializes as a\nplain string (e.g. `\"tamanu-postgres\"`). The device should run each\nlisted type, then report via `POST /backup-report`; an empty list\nmeans nothing to do."
+              },
+              "check_severities": {
+                "type": "object",
+                "description": "The effective handling of every healthcheck canopy knows about, keyed\nby check name (as reported in `health[].check`): `skip` (silenced for\nthis server, or classified below warning), `warn` (warning), or `fail`\n(error or critical). Only the static severity baseline is reflected —\noperator-defined conditional rules are evaluated per push and not\nincluded. Checks absent from the map are new to canopy and default to\n`warn`. Clients that predate this field can safely ignore it; the\nsame mapping is served on demand at `GET /status/{server_id}/check-severities`.",
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/CheckSeverity"
+                },
+                "propertyNames": {
+                  "type": "string"
+                }
               }
             }
           }
