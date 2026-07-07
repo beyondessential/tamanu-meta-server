@@ -224,6 +224,31 @@ export function compareServersByRankThenKind<
 	return an.localeCompare(bn);
 }
 
+/// Group a flat server list into rank buckets in display order, with
+/// each bucket internally sorted by kind (centrals first) then name.
+/// Servers without a rank land in a trailing `null` bucket.
+export function groupServersByRank<
+	T extends { rank?: ServerRank | null; kind: ServerKind; name?: string | null },
+>(servers: readonly T[]): Array<[ServerRank | null, T[]]> {
+	const buckets = new Map<ServerRank | null, T[]>();
+	for (const s of servers) {
+		const rank = s.rank ?? null;
+		const list = buckets.get(rank);
+		if (list) list.push(s);
+		else buckets.set(rank, [s]);
+	}
+	const order: Array<ServerRank | null> = [...SERVER_RANK_ORDER, null];
+	const result: Array<[ServerRank | null, T[]]> = [];
+	for (const rank of order) {
+		const list = buckets.get(rank);
+		if (list && list.length > 0) {
+			list.sort(compareServersByRankThenKind);
+			result.push([rank, list]);
+		}
+	}
+	return result;
+}
+
 /// Operator-facing severity vocabulary, loud → quiet. Used for both
 /// display and selection (the API now restricts severities to these
 /// five — see commons-types::issue::Severity and the

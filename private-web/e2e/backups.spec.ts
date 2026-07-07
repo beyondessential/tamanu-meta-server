@@ -252,6 +252,58 @@ test.describe("backups ready: stats + backup-now", () => {
 			.toBe("true:2");
 	});
 
+	test("servers panel groups by rank then kind, like the group page", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "rank-order-group" });
+		// Seed out of display order: expected order is the production bucket
+		// (central before facility) then clone then dev, with rank subheaders —
+		// not insertion or alphabetical order.
+		await seedServer(sql, {
+			groupId: group.id,
+			name: "aaa-dev",
+			rank: "dev",
+		});
+		await seedServer(sql, {
+			groupId: group.id,
+			name: "aaa-prod-facility",
+			rank: "production",
+			kind: "facility",
+		});
+		await seedServer(sql, {
+			groupId: group.id,
+			name: "ccc-clone",
+			rank: "clone",
+		});
+		await seedServer(sql, {
+			groupId: group.id,
+			name: "zzz-prod-central",
+			rank: "production",
+			kind: "central",
+		});
+		await seedServerGroupBackupConfig(sql, {
+			groupId: group.id,
+			status: "ready",
+		});
+
+		await page.goto(`/groups/${group.id}/backups`);
+
+		const panel = page
+			.getByRole("heading", { name: "Servers", exact: true })
+			.locator("..");
+		await expect(panel.locator('a[href^="/servers/"]')).toHaveText([
+			"zzz-prod-central",
+			"aaa-prod-facility",
+			"ccc-clone",
+			"aaa-dev",
+		]);
+		// Rank subheaders bucket the rows, same as the group page.
+		await expect(panel.getByText("production", { exact: true })).toBeVisible();
+		await expect(panel.getByText("clone", { exact: true })).toBeVisible();
+		await expect(panel.getByText("dev", { exact: true })).toBeVisible();
+	});
+
 	test("stats render with unknown bucket bytes and recent runs", async ({
 		page,
 		sql,

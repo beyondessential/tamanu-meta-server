@@ -26,13 +26,10 @@ import {
 	BACKUP_STATUS_INTENT,
 	BACKUP_STATUS_LABEL,
 	type BackupConfigStatus,
-	SERVER_RANK_ORDER,
 	aggregateOperators,
-	compareServersByRankThenKind,
+	groupServersByRank,
 	type AggregatedOperator,
 	type IncidentData,
-	type ServerInfo,
-	type ServerRank,
 } from "../types";
 
 export default function GroupDetail() {
@@ -417,31 +414,6 @@ function ActiveIncidentCard({ incident }: { incident: IncidentData }) {
 			</Stack>
 		</Paper>
 	);
-}
-
-/// Group a flat server list into rank buckets in display order, with
-/// each bucket internally sorted by kind (centrals first) then name.
-/// Servers without a rank land in a trailing `null` bucket.
-function groupServersByRank(
-	servers: ServerInfo[],
-): Array<[ServerRank | null, ServerInfo[]]> {
-	const buckets = new Map<ServerRank | null, ServerInfo[]>();
-	for (const s of servers) {
-		const rank = s.rank ?? null;
-		const list = buckets.get(rank);
-		if (list) list.push(s);
-		else buckets.set(rank, [s]);
-	}
-	const order: Array<ServerRank | null> = [...SERVER_RANK_ORDER, null];
-	const result: Array<[ServerRank | null, ServerInfo[]]> = [];
-	for (const rank of order) {
-		const list = buckets.get(rank);
-		if (list && list.length > 0) {
-			list.sort(compareServersByRankThenKind);
-			result.push([rank, list]);
-		}
-	}
-	return result;
 }
 
 function ArchivedGroupBanner({
