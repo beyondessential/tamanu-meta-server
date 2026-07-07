@@ -5,11 +5,17 @@
 //! (so the issue and event rows exist), but
 //! [`crate::issues::re_evaluate_incident_membership`] treats them as a
 //! "should leave" reason, the same way it treats snoozed or unmonitored.
+//! Healthcheck silences (`(status, health/<check>)`) additionally drop the
+//! check out of the server's health rollup — see
+//! [`silenced_health_checks_for_servers`] and
+//! [`crate::statuses::Status::health_state_ignoring`].
 //!
 //! Two sibling tables (`server_silenced_refs`, `server_group_silenced_refs`)
 //! keep referential integrity tight without nullable FKs. A given issue is
 //! silenced if either applies (server-scope wins for the server itself,
 //! group-scope catches the whole group).
+
+use std::collections::{BTreeSet, HashMap};
 
 use commons_errors::{AppError, Result};
 use diesel::prelude::*;
@@ -19,6 +25,15 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::issues::{reevaluate_open_issues_for_group_ref, reevaluate_open_issues_for_server_ref};
+
+/// The `source` the public-server status ingestion files healthcheck
+/// issues under, so a silence on a healthcheck is `(status,
+/// health/<check>)`. Mirrors the public-server's `STATUS_SOURCE`.
+const STATUS_SOURCE: &str = "status";
+
+/// The ref prefix (with trailing separator) healthcheck issues use
+/// under [`STATUS_SOURCE`]. Mirrors the public-server's `HEALTH_REF`.
+const HEALTH_REF_PREFIX: &str = "health/";
 
 /// A silenced issue reference scoped to a single server: issues matching
 /// this `(source, ref)` on this server are still recorded, but are excluded
@@ -158,6 +173,100 @@ pub async fn silenced_refs_with_prefix(
 	}
 
 	Ok(refs)
+}
+
+/// Healthcheck names silenced for each of the given `(server, group)`
+/// pairs, at either scope: the `<check>` of every `(status,
+/// health/<check>)` silence entry that applies to the server. Pass each
+/// server's current group id (`None` for ungrouped). Two batch queries,
+/// one per scope table, regardless of how many servers are asked about.
+/// Servers with no applicable silences are absent from the map.
+///
+/// This feeds [`crate::statuses::Status::health_state_ignoring`]: a
+/// silenced check keeps recording results but is presented as skipped
+/// and doesn't count toward the server's health rollup.
+pub async fn silenced_health_checks_for_servers(
+	db: &mut AsyncPgConnection,
+	servers: &[(Uuid, Option<Uuid>)],
+) -> Result<HashMap<Uuid, BTreeSet<String>>> {
+	use crate::schema::{server_group_silenced_refs, server_silenced_refs};
+
+	let mut out: HashMap<Uuid, BTreeSet<String>> = HashMap::new();
+	if servers.is_empty() {
+		return Ok(out);
+	}
+
+	let like_pattern = format!("{HEALTH_REF_PREFIX}%");
+
+	let server_ids: Vec<Uuid> = servers.iter().map(|(id, _)| *id).collect();
+	let server_rows: Vec<(Uuid, String)> = server_silenced_refs::table
+		.select((server_silenced_refs::server_id, server_silenced_refs::ref_))
+		.filter(server_silenced_refs::server_id.eq_any(&server_ids))
+		.filter(server_silenced_refs::source.eq(STATUS_SOURCE))
+		.filter(server_silenced_refs::ref_.like(&like_pattern))
+		.load(db)
+		.await
+		.map_err(AppError::from)?;
+	for (server_id, r#ref) in server_rows {
+		if let Some(check) = r#ref.strip_prefix(HEALTH_REF_PREFIX) {
+			out.entry(server_id).or_default().insert(check.to_string());
+		}
+	}
+
+	let group_ids: Vec<Uuid> = servers
+		.iter()
+		.filter_map(|(_, group)| *group)
+		.collect::<BTreeSet<_>>()
+		.into_iter()
+		.collect();
+	if !group_ids.is_empty() {
+		let group_rows: Vec<(Uuid, String)> = server_group_silenced_refs::table
+			.select((
+				server_group_silenced_refs::server_group_id,
+				server_group_silenced_refs::ref_,
+			))
+			.filter(server_group_silenced_refs::server_group_id.eq_any(&group_ids))
+			.filter(server_group_silenced_refs::source.eq(STATUS_SOURCE))
+			.filter(server_group_silenced_refs::ref_.like(&like_pattern))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		let mut by_group: HashMap<Uuid, Vec<String>> = HashMap::new();
+		for (group_id, r#ref) in group_rows {
+			if let Some(check) = r#ref.strip_prefix(HEALTH_REF_PREFIX) {
+				by_group
+					.entry(group_id)
+					.or_default()
+					.push(check.to_string());
+			}
+		}
+		for (server_id, group_id) in servers {
+			if let Some(checks) = group_id.as_ref().and_then(|g| by_group.get(g)) {
+				out.entry(*server_id)
+					.or_default()
+					.extend(checks.iter().cloned());
+			}
+		}
+	}
+
+	Ok(out)
+}
+
+/// Single-server variant of [`silenced_health_checks_for_servers`],
+/// via [`silenced_refs_with_prefix`]. `group_id` is the server's
+/// current group; pass `None` if ungrouped.
+pub async fn silenced_health_checks_for_server(
+	db: &mut AsyncPgConnection,
+	server_id: Uuid,
+	group_id: Option<Uuid>,
+) -> Result<BTreeSet<String>> {
+	let refs = silenced_refs_with_prefix(db, server_id, group_id, STATUS_SOURCE, HEALTH_REF_PREFIX)
+		.await?;
+	Ok(refs
+		.iter()
+		.filter_map(|r| r.strip_prefix(HEALTH_REF_PREFIX))
+		.map(String::from)
+		.collect())
 }
 
 impl ServerSilencedRef {

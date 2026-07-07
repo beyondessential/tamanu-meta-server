@@ -75,6 +75,7 @@ import {
 	checkResultOf,
 	compareServersByRankThenKind,
 	groupServersByRank,
+	healthcheckNameFromRef,
 	healthcheckPath,
 	type CheckResult,
 	type DeviceInfo,
@@ -937,7 +938,15 @@ function ChecksTableBody({
 	serverSilences: ServerSilencedRef[];
 	groupSilences: ServerGroupSilencedRef[];
 }) {
-	const entries = parseChecks(health, overallHealthy);
+	// Silenced checks render skip-style and sort with the skipped tail —
+	// they don't count toward the server's health rollup (the backend
+	// applies the same exclusion to the headline HealthState).
+	const silencedChecks = new Set<string>();
+	for (const s of [...serverSilences, ...groupSilences]) {
+		const check = healthcheckNameFromRef(s.source, s.ref);
+		if (check !== null) silencedChecks.add(check);
+	}
+	const entries = parseChecks(health, overallHealthy, silencedChecks);
 	const [expanded, setExpanded] = useState(false);
 	if (entries.length === 0) return null;
 	const HIDE_AFTER = 5;
@@ -998,6 +1007,9 @@ function ChecksTableBody({
 type ParsedCheck = {
 	check: string;
 	result: CheckResult;
+	/** Whether the check's `(status, health/<check>)` ref is silenced at
+	 * either scope: presented skip-style and excluded from the rollup. */
+	silenced: boolean;
 	/** Everything other than the reserved `check` / `healthy` /
 	 * `result` keys, preserved in source order. */
 	extras: Array<[string, unknown]>;
@@ -1006,6 +1018,7 @@ type ParsedCheck = {
 function parseChecks(
 	health: ServerLastStatusData["health"],
 	overallHealthy: boolean,
+	silencedChecks: Set<string>,
 ): ParsedCheck[] {
 	if (!Array.isArray(health)) return [];
 	const parsed: ParsedCheck[] = [];
@@ -1022,15 +1035,23 @@ function parseChecks(
 		if (typeof obj.result !== "string" && result === "failed" && overallHealthy) {
 			result = "warning";
 		}
-		parsed.push({ check, result, extras: checkEntryExtras(obj) });
+		parsed.push({
+			check,
+			result,
+			silenced: silencedChecks.has(check),
+			extras: checkEntryExtras(obj),
+		});
 	}
-	// Most urgent first, then alphabetical by name. Stable: same input
-	// always produces the same visible order.
+	// Most urgent first, then alphabetical by name. Silenced checks sort
+	// as if skipped, whatever they reported. Stable: same input always
+	// produces the same visible order.
+	const sortResult = (e: ParsedCheck): CheckResult =>
+		e.silenced ? "skipped" : e.result;
 	parsed.sort((a, b) => {
-		if (a.result !== b.result) {
+		if (sortResult(a) !== sortResult(b)) {
 			return (
-				CHECK_RESULT_ORDER.indexOf(a.result) -
-				CHECK_RESULT_ORDER.indexOf(b.result)
+				CHECK_RESULT_ORDER.indexOf(sortResult(a)) -
+				CHECK_RESULT_ORDER.indexOf(sortResult(b))
 			);
 		}
 		return a.check.localeCompare(b.check);
@@ -1078,12 +1099,14 @@ function CheckRow({
 				borderRadius: 1,
 				alignItems: "flex-start",
 				bgcolor:
-					entry.result === "passed" || entry.result === "skipped"
+					entry.result === "passed" ||
+					entry.result === "skipped" ||
+					entry.silenced
 						? undefined
 						: "action.hover",
 			}}
 		>
-			<CheckResultIcon result={entry.result} />
+			<CheckResultIcon result={entry.result} silenced={entry.silenced} />
 			<Box sx={{ flex: 1, minWidth: 0 }}>
 				<Stack
 					direction="row"
@@ -1125,8 +1148,26 @@ function CheckRow({
 
 /** Per-check result icon for the checks table. Unlike the snapshot
  * panel this table has no computed severity to hand, so failed is a
- * flat red and warning a flat amber. */
-function CheckResultIcon({ result }: { result: CheckResult }) {
+ * flat red and warning a flat amber. A silenced check gets the same
+ * neutral grey treatment as a skipped one — its result still records,
+ * it just doesn't count toward the server's health. */
+function CheckResultIcon({
+	result,
+	silenced = false,
+}: {
+	result: CheckResult;
+	silenced?: boolean;
+}) {
+	if (silenced) {
+		return (
+			<Tooltip
+				title={`Silenced — reported ${result}, not counted toward server health`}
+				arrow
+			>
+				<NotificationsOffIcon fontSize="small" color="disabled" />
+			</Tooltip>
+		);
+	}
 	switch (result) {
 		case "passed":
 			return (

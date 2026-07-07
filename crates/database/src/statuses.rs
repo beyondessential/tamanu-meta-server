@@ -581,6 +581,22 @@ impl Status {
 	/// - otherwise [`HealthState::Healthy`] (passed and skipped
 	///   entries don't count against the server)
 	pub fn health_state(&self) -> HealthState {
+		self.health_state_ignoring(&Default::default())
+	}
+
+	/// Like [`Self::health_state`], but entries whose check name is in
+	/// `silenced_checks` are treated as skipped: an operator-silenced
+	/// check keeps recording its results, they just don't count toward
+	/// the server's health rollup. Callers get the set from
+	/// [`crate::silenced_refs::silenced_health_checks_for_servers`].
+	///
+	/// The legacy top-level `healthy: false` short-circuit still wins:
+	/// that flag predates per-check results, so a false can't be
+	/// attributed to (and excused by) any particular silenced check.
+	pub fn health_state_ignoring(
+		&self,
+		silenced_checks: &std::collections::BTreeSet<String>,
+	) -> HealthState {
 		if !self.healthy {
 			return HealthState::Unhealthy;
 		}
@@ -590,6 +606,11 @@ impl Status {
 				let Some(obj) = entry.as_object() else {
 					continue;
 				};
+				if let Some(check) = obj.get("check").and_then(|v| v.as_str())
+					&& silenced_checks.contains(check)
+				{
+					continue;
+				}
 				let Some(result) = CheckResult::from_entry(obj) else {
 					continue;
 				};
