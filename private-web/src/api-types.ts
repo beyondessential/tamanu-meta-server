@@ -3498,6 +3498,13 @@ export interface components {
              */
             bucket_bytes?: number | null;
             /**
+             * Format: date-time
+             * @description When `bucket_bytes` was last refreshed by the (daily) S3-metrics
+             *     collector, if ever. Tracked separately from `observed_at` because the
+             *     two figures are collected on independent cadences.
+             */
+            bucket_bytes_observed_at?: string | null;
+            /**
              * Format: uuid
              * @description ID of the server group these stats describe.
              */
@@ -3510,8 +3517,8 @@ export interface components {
             logical_bytes?: number | null;
             /**
              * Format: date-time
-             * @description When these stats were last refreshed. Whichever of the two collectors
-             *     wrote most recently.
+             * @description When the repo-derived figures (snapshot/source counts, logical/physical
+             *     bytes) were last refreshed by the inspection job.
              */
             observed_at: string;
             /**

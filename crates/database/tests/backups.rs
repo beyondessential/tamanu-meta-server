@@ -1237,7 +1237,11 @@ async fn repo_stats_split_writers_do_not_clobber() {
 			(Some(10), Some(3), Some(1000), Some(500), Some(777))
 		);
 
-		// Bucket-bytes writer must not clobber the repo fields.
+		let repo_observed_at = s.observed_at;
+		let bucket_observed_at = s.bucket_bytes_observed_at.unwrap();
+
+		// Bucket-bytes writer must not clobber the repo fields, and must bump
+		// only its own timestamp — not the inspection one.
 		BackupRepoStats::upsert_bucket_bytes(&mut conn, group_id, Some(888))
 			.await
 			.unwrap();
@@ -1247,8 +1251,15 @@ async fn repo_stats_split_writers_do_not_clobber() {
 			.unwrap();
 		assert_eq!(s.bucket_bytes, Some(888));
 		assert_eq!(s.snapshot_count, Some(10), "repo fields preserved");
+		assert_eq!(s.observed_at, repo_observed_at, "observed_at untouched");
+		assert!(
+			s.bucket_bytes_observed_at.unwrap() >= bucket_observed_at,
+			"bucket_bytes_observed_at bumped"
+		);
+		let bucket_observed_at = s.bucket_bytes_observed_at.unwrap();
 
-		// And the inspection writer must not clobber bucket_bytes.
+		// And the inspection writer must not clobber bucket_bytes or its
+		// timestamp.
 		BackupRepoStats::upsert_repo_fields(
 			&mut conn,
 			group_id,
@@ -1265,6 +1276,11 @@ async fn repo_stats_split_writers_do_not_clobber() {
 			.unwrap();
 		assert_eq!(s.snapshot_count, Some(11));
 		assert_eq!(s.bucket_bytes, Some(888), "bucket_bytes preserved");
+		assert_eq!(
+			s.bucket_bytes_observed_at,
+			Some(bucket_observed_at),
+			"bucket_bytes_observed_at preserved"
+		);
 	})
 	.await;
 }
