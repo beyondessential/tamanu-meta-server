@@ -336,6 +336,82 @@ async fn backfill_snapshot_logical_bytes_writes_once() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn snapshot_sizes_by_id_resolves_from_producing_backups_only() {
+	TestDb::run(|mut conn, _url| async move {
+		let group_id = insert_group(&mut conn, "g").await;
+		let other_group = insert_group(&mut conn, "other").await;
+		let server_id = insert_server(&mut conn, group_id).await;
+		let other_server = insert_server(&mut conn, other_group).await;
+		let device_id = insert_device(&mut conn).await;
+
+		// The backup that produced kopia-snap-1, sized by the device (42 from
+		// new_run's bytes_uploaded).
+		BackupRun::record(
+			&mut conn,
+			new_run(
+				Uuid::new_v4(),
+				device_id,
+				group_id,
+				Some(server_id),
+				BackupPurpose::Backup,
+				RunOutcome::Success,
+			),
+		)
+		.await
+		.expect("record backup");
+		// A restore of the same snapshot must not satisfy the lookup itself.
+		BackupRun::record(
+			&mut conn,
+			NewBackupRun {
+				bytes_uploaded: None,
+				..new_run(
+					Uuid::new_v4(),
+					device_id,
+					group_id,
+					Some(server_id),
+					BackupPurpose::Restore,
+					RunOutcome::Success,
+				)
+			},
+		)
+		.await
+		.expect("record restore");
+		// Same snapshot id in another group: out of scope.
+		BackupRun::record(
+			&mut conn,
+			new_run(
+				Uuid::new_v4(),
+				device_id,
+				other_group,
+				Some(other_server),
+				BackupPurpose::Backup,
+				RunOutcome::Success,
+			),
+		)
+		.await
+		.expect("record other-group backup");
+
+		let sizes =
+			BackupRun::snapshot_sizes_by_id(&mut conn, group_id, &["kopia-snap-1".to_string()])
+				.await
+				.expect("lookup");
+		assert_eq!(sizes.get("kopia-snap-1"), Some(&42));
+		assert_eq!(sizes.len(), 1);
+
+		// Unknown ids resolve to nothing; the empty query short-circuits.
+		let miss = BackupRun::snapshot_sizes_by_id(&mut conn, group_id, &["nope".to_string()])
+			.await
+			.expect("lookup miss");
+		assert!(miss.is_empty());
+		let none = BackupRun::snapshot_sizes_by_id(&mut conn, group_id, &[])
+			.await
+			.expect("empty lookup");
+		assert!(none.is_empty());
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn latest_sized_lists_only_runs_with_both_sizes() {
 	TestDb::run(|mut conn, _url| async move {
 		let group_id = insert_group(&mut conn, "g").await;
