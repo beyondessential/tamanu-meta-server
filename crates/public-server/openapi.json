@@ -739,7 +739,7 @@
           "statuses"
         ],
         "summary": "Submit a status heartbeat for a server.",
-        "description": "Records a periodic status push against the server identified in the\npath: overall self-reported health, a per-check breakdown, and any\nfree-form extra data. Each failed or warning check opens (or keeps\nopen) an issue at that check's operator-configured severity, and each\npassed check closes any issue it previously opened; the server's\ntracked software version is also updated from the payload.\n\nThe calling device must be the one enrolled for this exact server (or\nhold the admin role). The response carries only return-path\ninstructions: a `backup_now` list of backup types the server should\nback up immediately — devices should treat a non-empty list as a\nprompt to run those backups and report them afterwards — and a\n`check_severities` map describing how canopy classifies each known\nhealthcheck for this server (`skip`/`warn`/`fail`). The stored status\nrecord is not echoed back.",
+        "description": "Records a periodic status push against the server identified in the\npath: overall self-reported health, a per-check breakdown, and any\nfree-form extra data. Each failed or warning check opens (or keeps\nopen) an issue at that check's operator-configured severity, and each\npassed check closes any issue it previously opened; the server's\ntracked software version is also updated from the payload.\n\nThe calling device must be the one enrolled for this exact server (or\nhold the admin role). The response carries only return-path\ninstructions: a `backup_now` list of backup types the server should\nback up immediately — devices should treat a non-empty list as a\nprompt to run those backups and report them afterwards — a\n`check_severities` map describing how canopy classifies each known\nhealthcheck for this server (`skip`/`warn`/`fail`), and the server's\neffective `tags` (as served by `GET /tags`). The stored status record\nis not echoed back.",
         "operationId": "submit_status",
         "parameters": [
           {
@@ -2069,7 +2069,8 @@
         "description": "The status-push response: only the return-path instructions the device\ncan act on. The stored status record is deliberately not echoed back —\nthe device already has everything it sent.",
         "required": [
           "backup_now",
-          "check_severities"
+          "check_severities",
+          "tags"
         ],
         "properties": {
           "backup_now": {
@@ -2088,6 +2089,10 @@
             "propertyNames": {
               "type": "string"
             }
+          },
+          "tags": {
+            "$ref": "#/components/schemas/TagMap",
+            "description": "The server's effective tags: its own tags overlaid on its group's,\nplus the synthetic read-only `canopy:` tags and effective `billing.*`\nlabels. Identical to what the standalone `GET /tags` endpoint\nreturns — see that endpoint for the full contract. Clients that\npredate this field can safely ignore it."
           }
         }
       },
