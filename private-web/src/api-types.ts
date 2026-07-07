@@ -1934,7 +1934,8 @@ export interface paths {
          *     restore intents it currently advertises (each with its description,
          *     semantics flags, and parameter schema). Use this to discover which
          *     consumers and intents a declaration can target and which parameters each
-         *     intent accepts.
+         *     intent accepts. Defaults of `duration` and `bytes` parameters are
+         *     formatted as human-unit strings (e.g. `2h`, `20Gi`).
          */
         post: operations["restore_replicas_consumers"];
         delete?: never;
@@ -1956,12 +1957,15 @@ export interface paths {
          * Declare a managed restore replica.
          * @description Creates a declaration instructing the chosen consumer to maintain a
          *     restored replica of the given backup type for the given intent, and
-         *     records the calling operator as its creator. Parameter values are
-         *     validated against the consumer's advertised schema for the intent; if the
-         *     intent is not currently advertised, the values are accepted as-is and the
-         *     declaration is created with a gap. Requires the caller to be on the admin
-         *     allow-list. Responds 400 if a parameter value fails validation and 409 if
-         *     a matching declaration already exists.
+         *     records the calling operator as its creator. The overdue bound is a
+         *     human-friendly duration string (e.g. `2h 30m`); `duration` and `bytes`
+         *     parameter values likewise accept human-unit strings (e.g. `20Gi`), which
+         *     are resolved to raw seconds/bytes before validation against the consumer's
+         *     advertised schema for the intent and stored raw. If the intent is not
+         *     currently advertised, the values are accepted as-is and the declaration is
+         *     created with a gap. Requires the caller to be on the admin allow-list.
+         *     Responds 400 if the overdue bound or a parameter value fails to parse or
+         *     validate, and 409 if a matching declaration already exists.
          */
         post: operations["restore_replicas_create"];
         delete?: never;
@@ -2029,15 +2033,17 @@ export interface paths {
          * Update a restore replica declaration.
          * @description Replaces every field, including scope: the consumer, group, server,
          *     backup type, and intent can be retargeted in the same call as the name,
-         *     overdue bound, parameter values, and enabled flag. Parameter values are
-         *     validated against the *new* consumer+intent's advertised parameter schema;
-         *     as with `create`, an intent the new consumer doesn't currently advertise
-         *     is accepted and the values pass through unvalidated, leaving the
-         *     declaration with a gap. If the scope changes, any active
-         *     restore-verification alert for the declaration's old scope is recovered.
-         *     Requires the caller to be on the admin allow-list. Responds 400 if a
-         *     parameter value fails validation, 404 if the declaration does not exist,
-         *     and 409 if the new scope collides with another declaration.
+         *     overdue bound, parameter values, and enabled flag. The overdue bound and
+         *     `duration`/`bytes` parameter values accept human-unit strings (e.g.
+         *     `2h 30m`, `20Gi`), resolved to raw seconds/bytes and validated against the
+         *     *new* consumer+intent's advertised parameter schema; as with `create`, an
+         *     intent the new consumer doesn't currently advertise is accepted and the
+         *     values pass through unvalidated, leaving the declaration with a gap. If
+         *     the scope changes, any active restore-verification alert for the
+         *     declaration's old scope is recovered. Requires the caller to be on the
+         *     admin allow-list. Responds 400 if the overdue bound or a parameter value
+         *     fails to parse or validate, 404 if the declaration does not exist, and 409
+         *     if the new scope collides with another declaration.
          */
         post: operations["restore_replicas_update"];
         delete?: never;
@@ -5996,14 +6002,19 @@ export interface components {
             /** @description Operator-chosen display name for the declaration. */
             name: string;
             /**
-             * Format: int64
-             * @description Overdue bound in whole seconds: how long the replica may go without a
-             *     healthy restore report (or, for at-most-once intents, how long the
-             *     latest snapshot may go unverified) before it is considered overdue.
-             *     Null means no bound.
+             * @description Overdue bound as a human-friendly duration (e.g. `2h 30m` or `1d`):
+             *     how long the replica may go without a healthy restore report (or, for
+             *     at-most-once intents, how long the latest snapshot may go unverified)
+             *     before it is considered overdue. Null means no bound. The same format
+             *     is accepted back by `create` and `update`.
              */
-            overdue_after_seconds?: number | null;
-            /** @description Operator-supplied parameter values (name → value). */
+            overdue_after?: string | null;
+            /**
+             * @description Operator-supplied parameter values (name → value). Values of
+             *     `duration` and `bytes` parameters are formatted as human-friendly
+             *     strings (e.g. `2h 30m`, `20Gi`) when the intent's schema is known;
+             *     `create` and `update` accept these strings back.
+             */
             params: Record<string, never>;
             /**
              * Format: uuid
@@ -6041,13 +6052,15 @@ export interface components {
             /** @description Display name for the declaration. */
             name: string;
             /**
-             * Format: int64
-             * @description Overdue bound in whole seconds; omit or null for no bound.
+             * @description Overdue bound as a human-friendly duration (jiff's "friendly" format,
+             *     e.g. `2h 30m`, `36h`, `1d 12h`); omit, null, or blank for no bound.
              */
-            overdue_after_seconds?: number | null;
+            overdue_after?: string | null;
             /**
              * @description Parameter values for the intent (name → value), validated against the
-             *     consumer's advertised parameter schema. Defaults to empty.
+             *     consumer's advertised parameter schema. `duration` and `bytes`
+             *     parameters accept human-unit strings (e.g. `2h 30m`, `20Gi`) as well
+             *     as raw integer seconds/bytes. Defaults to empty.
              */
             params?: Record<string, never>;
             /**
@@ -6102,13 +6115,16 @@ export interface components {
             /** @description New display name for the declaration. */
             name: string;
             /**
-             * Format: int64
-             * @description New overdue bound in whole seconds; null removes the bound.
+             * @description New overdue bound as a human-friendly duration (jiff's "friendly"
+             *     format, e.g. `2h 30m`, `36h`, `1d 12h`); null or blank removes the
+             *     bound.
              */
-            overdue_after_seconds?: number | null;
+            overdue_after?: string | null;
             /**
              * @description New parameter values (name → value), validated against the intent's
-             *     advertised parameter schema. Defaults to empty.
+             *     advertised parameter schema. `duration` and `bytes` parameters accept
+             *     human-unit strings (e.g. `2h 30m`, `20Gi`) as well as raw integer
+             *     seconds/bytes. Defaults to empty.
              */
             params?: Record<string, never>;
             /**

@@ -471,6 +471,12 @@ pub enum ParamValidationError {
 		name: String,
 		expected: &'static str,
 	},
+	#[error("parameter {name:?}: {error}")]
+	Unit {
+		name: String,
+		#[source]
+		error: crate::units::UnitParseError,
+	},
 }
 
 /// Validate operator-supplied values against a schema. Every value must name a
@@ -508,6 +514,87 @@ pub fn validate_params(
 		}
 	}
 	Ok(())
+}
+
+/// Resolve human-unit string values into their raw stored form, per the
+/// schema: a string value for a `duration` parameter parses in jiff's
+/// "friendly" format (e.g. `2h 30m`) to whole seconds, and one for a `bytes`
+/// parameter parses as a 1024-based size (e.g. `20Gi`) to a byte count. Raw
+/// integer values pass through unchanged, as do values of other types and
+/// values for parameters the schema doesn't describe ([`validate_params`]
+/// deals with those separately).
+pub fn normalize_params(
+	schema: &ParamSchema,
+	values: &ParamValues,
+) -> Result<ParamValues, ParamValidationError> {
+	values
+		.iter()
+		.map(|(name, value)| {
+			let unit_err = |error| ParamValidationError::Unit {
+				name: name.clone(),
+				error,
+			};
+			let normalized = match (schema.get(name).map(|s| s.r#type), value.as_str()) {
+				(Some(ParamType::Duration), Some(text)) => {
+					crate::units::parse_duration_seconds(text)
+						.map_err(unit_err)?
+						.into()
+				}
+				(Some(ParamType::Bytes), Some(text)) => {
+					crate::units::parse_bytes(text).map_err(unit_err)?.into()
+				}
+				_ => value.clone(),
+			};
+			Ok((name.clone(), normalized))
+		})
+		.collect()
+}
+
+/// Format raw stored values as human-unit display strings, per the schema:
+/// a non-negative integer value of a `duration` parameter becomes a friendly
+/// duration string (e.g. `2h 30m`), and one of a `bytes` parameter becomes a
+/// Kubernetes-notation size (e.g. `20Gi`). Everything else passes through
+/// unchanged.
+pub fn display_params(schema: &ParamSchema, values: &ParamValues) -> ParamValues {
+	values
+		.iter()
+		.map(|(name, value)| {
+			let displayed = match (schema.get(name).map(|s| s.r#type), value.as_i64()) {
+				(Some(ParamType::Duration), Some(n)) if n >= 0 => {
+					crate::units::format_duration_seconds(n).into()
+				}
+				(Some(ParamType::Bytes), Some(n)) if n >= 0 => crate::units::format_bytes(n).into(),
+				_ => value.clone(),
+			};
+			(name.clone(), displayed)
+		})
+		.collect()
+}
+
+/// Format a schema's `duration`/`bytes` defaults as human-unit display
+/// strings, for operator-facing output; everything else passes through
+/// unchanged.
+pub fn display_param_defaults(schema: &ParamSchema) -> ParamSchema {
+	schema
+		.iter()
+		.map(|(name, spec)| {
+			let raw = spec.default.as_ref().and_then(|d| d.as_i64());
+			let default = match (spec.r#type, raw) {
+				(ParamType::Duration, Some(n)) if n >= 0 => {
+					Some(crate::units::format_duration_seconds(n).into())
+				}
+				(ParamType::Bytes, Some(n)) if n >= 0 => Some(crate::units::format_bytes(n).into()),
+				_ => spec.default.clone(),
+			};
+			(
+				name.clone(),
+				ParamSpec {
+					r#type: spec.r#type,
+					default,
+				},
+			)
+		})
+		.collect()
 }
 
 /// Resolve the values to send in the worklist: one entry per parameter the
@@ -614,6 +701,84 @@ mod tests {
 		assert_eq!(
 			serde_json::from_str::<ParamType>("\"boolean\"").unwrap(),
 			ParamType::Boolean
+		);
+	}
+
+	#[test]
+	fn normalize_params_resolves_unit_strings_to_raw_values() {
+		let values: ParamValues = serde_json::from_value(serde_json::json!({
+			"minimum_uptime": "2h 30m",
+			"max_size": "20G",
+			"anonymisation": true,
+		}))
+		.unwrap();
+		let normalized = normalize_params(&schema(), &values).unwrap();
+		assert_eq!(normalized["minimum_uptime"], serde_json::json!(9000));
+		assert_eq!(normalized["max_size"], serde_json::json!(20i64 << 30));
+		assert_eq!(normalized["anonymisation"], serde_json::json!(true));
+		assert!(validate_params(&schema(), &normalized).is_ok());
+	}
+
+	#[test]
+	fn normalize_params_passes_raw_integers_and_unknown_names_through() {
+		let values: ParamValues = serde_json::from_value(serde_json::json!({
+			"minimum_uptime": 3600,
+			"not_in_schema": "20G",
+		}))
+		.unwrap();
+		let normalized = normalize_params(&schema(), &values).unwrap();
+		assert_eq!(normalized["minimum_uptime"], serde_json::json!(3600));
+		assert_eq!(normalized["not_in_schema"], serde_json::json!("20G"));
+	}
+
+	#[test]
+	fn normalize_params_rejects_bad_unit_strings() {
+		for (name, value) in [
+			("minimum_uptime", "banana"),
+			("minimum_uptime", "1mo"),
+			("minimum_uptime", "-1h"),
+			("max_size", "20T"),
+			("max_size", "lots"),
+		] {
+			let values: ParamValues =
+				serde_json::from_value(serde_json::json!({ name: value })).unwrap();
+			let err = normalize_params(&schema(), &values).unwrap_err();
+			assert!(
+				matches!(err, ParamValidationError::Unit { .. }),
+				"{name}={value:?} gave {err:?}"
+			);
+		}
+	}
+
+	#[test]
+	fn display_params_formats_raw_values_as_unit_strings() {
+		let values: ParamValues = serde_json::from_value(serde_json::json!({
+			"minimum_uptime": 9000,
+			"max_size": 20i64 << 30,
+			"anonymisation": true,
+		}))
+		.unwrap();
+		let displayed = display_params(&schema(), &values);
+		assert_eq!(displayed["minimum_uptime"], serde_json::json!("2h 30m"));
+		assert_eq!(displayed["max_size"], serde_json::json!("20Gi"));
+		assert_eq!(displayed["anonymisation"], serde_json::json!(true));
+		// Displayed values normalize straight back to the raw ones.
+		let normalized = normalize_params(&schema(), &displayed).unwrap();
+		assert_eq!(normalized["minimum_uptime"], serde_json::json!(9000));
+		assert_eq!(normalized["max_size"], serde_json::json!(20i64 << 30));
+	}
+
+	#[test]
+	fn display_param_defaults_formats_duration_and_bytes_defaults() {
+		let displayed = display_param_defaults(&schema());
+		assert_eq!(
+			displayed["minimum_uptime"].default,
+			Some(serde_json::json!("2h"))
+		);
+		assert_eq!(displayed["max_size"].default, None);
+		assert_eq!(
+			displayed["anonymisation"].default,
+			Some(serde_json::json!(true))
 		);
 	}
 

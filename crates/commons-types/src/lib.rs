@@ -6,4 +6,5 @@ pub mod geo;
 pub mod issue;
 pub mod server;
 pub mod status;
+pub mod units;
 pub mod version;

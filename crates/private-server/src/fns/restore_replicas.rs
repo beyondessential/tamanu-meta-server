@@ -19,8 +19,9 @@ use commons_types::{
 	Uuid,
 	backup::{
 		BackupPurpose, BackupType, IntentDescriptor, ParamValues, RestoreIntent, RunOutcome,
-		validate_params,
+		display_param_defaults, display_params, normalize_params, validate_params,
 	},
+	units,
 };
 use database::diesel_async::AsyncPgConnection;
 use database::pg_duration::PgDuration;
@@ -74,12 +75,16 @@ pub struct RestoreReplicaView {
 	pub intent: RestoreIntent,
 	/// Operator-chosen display name for the declaration.
 	pub name: String,
-	/// Overdue bound in whole seconds: how long the replica may go without a
-	/// healthy restore report (or, for at-most-once intents, how long the
-	/// latest snapshot may go unverified) before it is considered overdue.
-	/// Null means no bound.
-	pub overdue_after_seconds: Option<i64>,
-	/// Operator-supplied parameter values (name → value).
+	/// Overdue bound as a human-friendly duration (e.g. `2h 30m` or `1d`):
+	/// how long the replica may go without a healthy restore report (or, for
+	/// at-most-once intents, how long the latest snapshot may go unverified)
+	/// before it is considered overdue. Null means no bound. The same format
+	/// is accepted back by `create` and `update`.
+	pub overdue_after: Option<String>,
+	/// Operator-supplied parameter values (name → value). Values of
+	/// `duration` and `bytes` parameters are formatted as human-friendly
+	/// strings (e.g. `2h 30m`, `20Gi`) when the intent's schema is known;
+	/// `create` and `update` accept these strings back.
 	#[schema(value_type = Object)]
 	pub params: serde_json::Value,
 	/// Whether the declaration is active. Disabled declarations are not
@@ -144,10 +149,13 @@ pub struct RestoreReplicasCreateArgs {
 	pub intent: RestoreIntent,
 	/// Display name for the declaration.
 	pub name: String,
-	/// Overdue bound in whole seconds; omit or null for no bound.
-	pub overdue_after_seconds: Option<i64>,
+	/// Overdue bound as a human-friendly duration (jiff's "friendly" format,
+	/// e.g. `2h 30m`, `36h`, `1d 12h`); omit, null, or blank for no bound.
+	pub overdue_after: Option<String>,
 	/// Parameter values for the intent (name → value), validated against the
-	/// consumer's advertised parameter schema. Defaults to empty.
+	/// consumer's advertised parameter schema. `duration` and `bytes`
+	/// parameters accept human-unit strings (e.g. `2h 30m`, `20Gi`) as well
+	/// as raw integer seconds/bytes. Defaults to empty.
 	#[serde(default)]
 	#[schema(value_type = Object)]
 	pub params: ParamValues,
@@ -180,10 +188,14 @@ pub struct RestoreReplicasUpdateArgs {
 	pub intent: RestoreIntent,
 	/// New display name for the declaration.
 	pub name: String,
-	/// New overdue bound in whole seconds; null removes the bound.
-	pub overdue_after_seconds: Option<i64>,
+	/// New overdue bound as a human-friendly duration (jiff's "friendly"
+	/// format, e.g. `2h 30m`, `36h`, `1d 12h`); null or blank removes the
+	/// bound.
+	pub overdue_after: Option<String>,
 	/// New parameter values (name → value), validated against the intent's
-	/// advertised parameter schema. Defaults to empty.
+	/// advertised parameter schema. `duration` and `bytes` parameters accept
+	/// human-unit strings (e.g. `2h 30m`, `20Gi`) as well as raw integer
+	/// seconds/bytes. Defaults to empty.
 	#[serde(default)]
 	#[schema(value_type = Object)]
 	pub params: ParamValues,
@@ -200,29 +212,42 @@ pub struct IdArgs {
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
-fn overdue_after_to_pg(seconds: Option<i64>) -> Option<PgDuration> {
-	seconds.map(|s| PgDuration(SignedDuration::from_secs(s)))
+/// Parse an operator-supplied overdue bound (jiff's "friendly" duration
+/// format, e.g. `2h 30m`) into the stored form; null or blank means no bound.
+/// A string that doesn't parse maps to 400.
+fn overdue_after_to_pg(overdue_after: Option<&str>) -> Result<Option<PgDuration>> {
+	let Some(text) = overdue_after.map(str::trim).filter(|t| !t.is_empty()) else {
+		return Ok(None);
+	};
+	let seconds = units::parse_duration_seconds(text)
+		.map_err(|e| AppError::BadRequest(format!("overdue bound: {e}")))?;
+	Ok(Some(PgDuration(SignedDuration::from_secs(seconds))))
 }
 
-/// Validate operator-supplied parameter values against the consumer's advertised
-/// schema for `intent`. If the intent is not advertised (a gap) there is no
-/// schema to check against, so the values are accepted as-is.
-async fn validate_params_for_intent(
+/// Resolve human-unit strings in operator-supplied parameter values to their
+/// raw stored form and validate them against the consumer's advertised schema
+/// for `intent`. If the intent is not advertised (a gap) there is no schema to
+/// resolve or check against, so the values are accepted as-is.
+async fn normalized_params_for_intent(
 	conn: &mut AsyncPgConnection,
 	consumer_device_id: Uuid,
 	intent: &RestoreIntent,
 	params: &ParamValues,
-) -> Result<()> {
+) -> Result<ParamValues> {
 	let descriptors =
 		RestoreConsumerCapability::list_for_consumer(conn, consumer_device_id).await?;
-	if let Some(desc) = descriptors.iter().find(|d| &d.intent == intent) {
-		validate_params(&desc.params, params).map_err(|e| AppError::BadRequest(e.to_string()))?;
-	}
-	Ok(())
+	let Some(desc) = descriptors.iter().find(|d| &d.intent == intent) else {
+		return Ok(params.clone());
+	};
+	let normalized =
+		normalize_params(&desc.params, params).map_err(|e| AppError::BadRequest(e.to_string()))?;
+	validate_params(&desc.params, &normalized).map_err(|e| AppError::BadRequest(e.to_string()))?;
+	Ok(normalized)
 }
 
 /// Build views from declarations, resolving consumer display names and the
-/// per-consumer capability set so `gap` can be computed.
+/// per-consumer capabilities so `gap` can be computed and stored `duration`/
+/// `bytes` parameter values can be shown as human-unit strings.
 async fn to_views(
 	conn: &mut AsyncPgConnection,
 	replicas: Vec<RestoreReplica>,
@@ -237,28 +262,34 @@ async fn to_views(
 			.map(|d| (d.id, d.tailscale_node_name))
 			.collect();
 
-	let mut caps: HashMap<Uuid, HashSet<RestoreIntent>> = HashMap::new();
+	let mut caps: HashMap<Uuid, Vec<IntentDescriptor>> = HashMap::new();
 	for id in consumer_ids {
-		let set: HashSet<RestoreIntent> = RestoreConsumerCapability::list_for_consumer(conn, id)
-			.await?
-			.into_iter()
-			.map(|d| d.intent)
-			.collect();
-		caps.insert(id, set);
+		let descriptors = RestoreConsumerCapability::list_for_consumer(conn, id).await?;
+		caps.insert(id, descriptors);
 	}
 
 	Ok(replicas
 		.into_iter()
 		.map(|r| {
-			let gap = !caps
+			let schema = caps
 				.get(&r.consumer_device_id)
-				.map(|s| s.contains(&r.intent))
-				.unwrap_or(false);
+				.and_then(|descs| descs.iter().find(|d| d.intent == r.intent))
+				.map(|d| &d.params);
+			// With no schema (a gap) the stored values pass through raw.
+			let params = match (schema, r.params) {
+				(Some(schema), serde_json::Value::Object(map)) => {
+					let values: ParamValues = map.into_iter().collect();
+					serde_json::to_value(display_params(schema, &values)).expect("params serialize")
+				}
+				(_, params) => params,
+			};
 			RestoreReplicaView {
+				gap: schema.is_none(),
 				consumer_name: names.get(&r.consumer_device_id).cloned().flatten(),
-				overdue_after_seconds: r.overdue_after.map(|f| f.0.as_secs()),
-				params: r.params,
-				gap,
+				overdue_after: r
+					.overdue_after
+					.map(|f| units::format_duration_seconds(f.0.as_secs())),
+				params,
 				id: r.id,
 				consumer_device_id: r.consumer_device_id,
 				group_id: r.group_id,
@@ -306,7 +337,8 @@ pub async fn for_group(
 /// restore intents it currently advertises (each with its description,
 /// semantics flags, and parameter schema). Use this to discover which
 /// consumers and intents a declaration can target and which parameters each
-/// intent accepts.
+/// intent accepts. Defaults of `duration` and `bytes` parameters are
+/// formatted as human-unit strings (e.g. `2h`, `20Gi`).
 #[utoipa::path(
 	post,
 	path = "/consumers",
@@ -320,7 +352,16 @@ pub async fn consumers(State(state): State<AppState>) -> Result<Json<Vec<Restore
 	let devices = Device::list_by_role(&mut conn, DeviceRole::BackupRestore).await?;
 	let mut out = Vec::with_capacity(devices.len());
 	for d in devices {
-		let intents = RestoreConsumerCapability::list_for_consumer(&mut conn, d.id).await?;
+		let intents = RestoreConsumerCapability::list_for_consumer(&mut conn, d.id)
+			.await?
+			.into_iter()
+			// `duration`/`bytes` defaults are shown to operators, so format
+			// them as human-unit strings like the declaration values.
+			.map(|mut desc| {
+				desc.params = display_param_defaults(&desc.params);
+				desc
+			})
+			.collect();
 		out.push(RestoreConsumerView {
 			device_id: d.id,
 			name: d.tailscale_node_name,
@@ -522,12 +563,15 @@ pub async fn checks(
 ///
 /// Creates a declaration instructing the chosen consumer to maintain a
 /// restored replica of the given backup type for the given intent, and
-/// records the calling operator as its creator. Parameter values are
-/// validated against the consumer's advertised schema for the intent; if the
-/// intent is not currently advertised, the values are accepted as-is and the
-/// declaration is created with a gap. Requires the caller to be on the admin
-/// allow-list. Responds 400 if a parameter value fails validation and 409 if
-/// a matching declaration already exists.
+/// records the calling operator as its creator. The overdue bound is a
+/// human-friendly duration string (e.g. `2h 30m`); `duration` and `bytes`
+/// parameter values likewise accept human-unit strings (e.g. `20Gi`), which
+/// are resolved to raw seconds/bytes before validation against the consumer's
+/// advertised schema for the intent and stored raw. If the intent is not
+/// currently advertised, the values are accepted as-is and the declaration is
+/// created with a gap. Requires the caller to be on the admin allow-list.
+/// Responds 400 if the overdue bound or a parameter value fails to parse or
+/// validate, and 409 if a matching declaration already exists.
 #[utoipa::path(
 	post,
 	path = "/create",
@@ -546,7 +590,7 @@ pub async fn create(
 	Json(args): Json<RestoreReplicasCreateArgs>,
 ) -> Result<Json<RestoreReplicaView>> {
 	let mut conn = state.db.get().await?;
-	validate_params_for_intent(
+	let params = normalized_params_for_intent(
 		&mut conn,
 		args.consumer_device_id,
 		&args.intent,
@@ -562,8 +606,8 @@ pub async fn create(
 			r#type: args.r#type,
 			intent: args.intent,
 			name: args.name,
-			overdue_after: overdue_after_to_pg(args.overdue_after_seconds),
-			params: serde_json::to_value(&args.params).expect("params serialize"),
+			overdue_after: overdue_after_to_pg(args.overdue_after.as_deref())?,
+			params: serde_json::to_value(&params).expect("params serialize"),
 			created_by: Some(admin.login),
 		},
 	)
@@ -576,15 +620,17 @@ pub async fn create(
 ///
 /// Replaces every field, including scope: the consumer, group, server,
 /// backup type, and intent can be retargeted in the same call as the name,
-/// overdue bound, parameter values, and enabled flag. Parameter values are
-/// validated against the *new* consumer+intent's advertised parameter schema;
-/// as with `create`, an intent the new consumer doesn't currently advertise
-/// is accepted and the values pass through unvalidated, leaving the
-/// declaration with a gap. If the scope changes, any active
-/// restore-verification alert for the declaration's old scope is recovered.
-/// Requires the caller to be on the admin allow-list. Responds 400 if a
-/// parameter value fails validation, 404 if the declaration does not exist,
-/// and 409 if the new scope collides with another declaration.
+/// overdue bound, parameter values, and enabled flag. The overdue bound and
+/// `duration`/`bytes` parameter values accept human-unit strings (e.g.
+/// `2h 30m`, `20Gi`), resolved to raw seconds/bytes and validated against the
+/// *new* consumer+intent's advertised parameter schema; as with `create`, an
+/// intent the new consumer doesn't currently advertise is accepted and the
+/// values pass through unvalidated, leaving the declaration with a gap. If
+/// the scope changes, any active restore-verification alert for the
+/// declaration's old scope is recovered. Requires the caller to be on the
+/// admin allow-list. Responds 400 if the overdue bound or a parameter value
+/// fails to parse or validate, 404 if the declaration does not exist, and 409
+/// if the new scope collides with another declaration.
 #[utoipa::path(
 	post,
 	path = "/update",
@@ -604,7 +650,7 @@ pub async fn update(
 	Json(args): Json<RestoreReplicasUpdateArgs>,
 ) -> Result<Json<RestoreReplicaView>> {
 	let mut conn = state.db.get().await?;
-	validate_params_for_intent(
+	let params = normalized_params_for_intent(
 		&mut conn,
 		args.consumer_device_id,
 		&args.intent,
@@ -621,8 +667,8 @@ pub async fn update(
 			r#type: args.r#type,
 			intent: args.intent,
 			name: args.name,
-			overdue_after: overdue_after_to_pg(args.overdue_after_seconds),
-			params: serde_json::to_value(&args.params).expect("params serialize"),
+			overdue_after: overdue_after_to_pg(args.overdue_after.as_deref())?,
+			params: serde_json::to_value(&params).expect("params serialize"),
 			enabled: args.enabled,
 		},
 	)

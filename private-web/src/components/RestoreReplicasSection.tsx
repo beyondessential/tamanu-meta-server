@@ -63,12 +63,6 @@ function formatError(err: unknown): string {
 	return String(err);
 }
 
-function overdueLabel(seconds: number | null | undefined): string {
-	if (seconds == null) return "no bound";
-	const hours = seconds / 3600;
-	return hours >= 1 ? `${hours}h` : `${seconds}s`;
-}
-
 /** Pull a string `url` out of a check's opaque health details, if present — the
  * link a `url`-semantic intent attaches to its running replica. */
 function healthUrl(details: unknown): string | null {
@@ -133,7 +127,7 @@ export default function RestoreReplicasSection({
 				type: r.type,
 				intent: r.intent,
 				name: r.name,
-				overdue_after_seconds: r.overdue_after_seconds,
+				overdue_after: r.overdue_after,
 				params: r.params as Record<string, unknown>,
 				enabled,
 			});
@@ -222,7 +216,7 @@ export default function RestoreReplicasSection({
 											)}
 										</Stack>
 									</TableCell>
-									<TableCell>{overdueLabel(r.overdue_after_seconds)}</TableCell>
+									<TableCell>{r.overdue_after ?? "no bound"}</TableCell>
 									<TableCell>
 										<ParamSummary params={r.params} />
 									</TableCell>
@@ -365,18 +359,24 @@ function ParamField({
 		);
 	}
 
-	const numeric =
-		spec.type === "integer" || spec.type === "bytes" || spec.type === "duration";
+	// Duration and size values are typed with human units and resolved to raw
+	// seconds/bytes by the backend.
 	const unit =
-		spec.type === "duration" ? "seconds" : spec.type === "bytes" ? "bytes" : "";
+		spec.type === "duration" ? "duration" : spec.type === "bytes" ? "size" : "";
+	const example =
+		spec.type === "duration"
+			? "e.g. 2h 30m"
+			: spec.type === "bytes"
+				? "e.g. 20Gi"
+				: "";
 	return (
 		<TextField
 			size="small"
 			fullWidth
-			type={numeric ? "number" : "text"}
+			type={spec.type === "integer" ? "number" : "text"}
 			label={unit ? `${name} (${unit})` : name}
-			placeholder={def != null ? String(def) : "optional"}
-			helperText={defHint}
+			placeholder={def != null ? String(def) : (example || "optional")}
+			helperText={example ? `${example} — ${defHint}` : defHint}
 			value={value}
 			onChange={(e) => onChange(e.target.value)}
 		/>
@@ -426,14 +426,16 @@ function paramValuesToWire(
 		if (raw == null || raw === "") continue;
 		if (spec.type === "boolean") {
 			out[key] = raw === "true";
-		} else if (
-			spec.type === "integer" ||
-			spec.type === "bytes" ||
-			spec.type === "duration"
-		) {
+		} else if (spec.type === "integer") {
 			const n = Number(raw);
 			if (!Number.isFinite(n)) return `Parameter "${key}" must be a number`;
 			out[key] = n;
+		} else if (spec.type === "bytes" || spec.type === "duration") {
+			// Duration and size values go over the wire as human-unit strings
+			// (e.g. "2h 30m", "20Gi"); the backend resolves them to raw
+			// seconds/bytes, or rejects them with an error shown inline.
+			if (raw.trim() === "") continue;
+			out[key] = raw.trim();
 		} else {
 			out[key] = raw;
 		}
@@ -647,7 +649,7 @@ function CreateReplicaDialog({
 	const [intent, setIntent] = useState("");
 	const [name, setName] = useState("");
 	const [nameEdited, setNameEdited] = useState(false);
-	const [overdueHours, setOverdueHours] = useState("");
+	const [overdue, setOverdue] = useState("");
 	const [paramValues, setParamValues] = useState<Record<string, string>>({});
 	const [pending, setPending] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -696,12 +698,9 @@ function CreateReplicaDialog({
 		if (!consumerId) return setError("Pick a consumer");
 		if (!intent) return setError("Pick an intent the consumer advertises");
 		if (!name.trim()) return setError("Name cannot be empty");
-		const hours = overdueHours.trim();
-		const overdue_after_seconds =
-			hours === "" ? null : Math.round(Number(hours) * 3600);
-		if (overdue_after_seconds != null && !Number.isFinite(overdue_after_seconds)) {
-			return setError("Overdue bound must be a number of hours");
-		}
+		// The backend parses the human-friendly duration (e.g. "2h 30m") and
+		// rejects anything invalid with an error shown inline.
+		const overdue_after = overdue.trim() === "" ? null : overdue.trim();
 		const params = paramValuesToWire(paramSchema, paramValues);
 		if (typeof params === "string") return setError(params);
 		setPending(true);
@@ -714,7 +713,7 @@ function CreateReplicaDialog({
 				type,
 				intent,
 				name: name.trim(),
-				overdue_after_seconds,
+				overdue_after,
 				params,
 			});
 			onCreated();
@@ -762,11 +761,11 @@ function CreateReplicaDialog({
 					<TextField
 						size="small"
 						fullWidth
-						type="number"
-						label="Overdue after (hours, optional)"
+						label="Overdue after (optional)"
 						placeholder="no bound"
-						value={overdueHours}
-						onChange={(e) => setOverdueHours(e.target.value)}
+						helperText="e.g. 2h 30m, 36h, 1d 12h"
+						value={overdue}
+						onChange={(e) => setOverdue(e.target.value)}
 					/>
 
 					<ParamFieldsEditor
@@ -822,11 +821,7 @@ function EditReplicaDialog({
 	const [type, setType] = useState(replica.type);
 	const [intent, setIntent] = useState(replica.intent);
 	const [name, setName] = useState(replica.name);
-	const [overdueHours, setOverdueHours] = useState(
-		replica.overdue_after_seconds != null
-			? String(replica.overdue_after_seconds / 3600)
-			: "",
-	);
+	const [overdue, setOverdue] = useState(replica.overdue_after ?? "");
 	const [enabled, setEnabled] = useState(replica.enabled);
 	const [paramValues, setParamValues] = useState<Record<string, string>>(() => {
 		const initialDescriptor = consumers
@@ -862,12 +857,9 @@ function EditReplicaDialog({
 		if (!consumerId) return setError("Pick a consumer");
 		if (!intent) return setError("Pick an intent the consumer advertises");
 		if (!name.trim()) return setError("Name cannot be empty");
-		const hours = overdueHours.trim();
-		const overdue_after_seconds =
-			hours === "" ? null : Math.round(Number(hours) * 3600);
-		if (overdue_after_seconds != null && !Number.isFinite(overdue_after_seconds)) {
-			return setError("Overdue bound must be a number of hours");
-		}
+		// The backend parses the human-friendly duration (e.g. "2h 30m") and
+		// rejects anything invalid with an error shown inline.
+		const overdue_after = overdue.trim() === "" ? null : overdue.trim();
 		// With no schema (a gap intent) there are no param fields; carry the
 		// stored values through unchanged rather than wiping them.
 		let params: unknown = replica.params;
@@ -887,7 +879,7 @@ function EditReplicaDialog({
 				type,
 				intent,
 				name: name.trim(),
-				overdue_after_seconds,
+				overdue_after,
 				params,
 				enabled,
 			});
@@ -933,11 +925,11 @@ function EditReplicaDialog({
 					<TextField
 						size="small"
 						fullWidth
-						type="number"
-						label="Overdue after (hours, optional)"
+						label="Overdue after (optional)"
 						placeholder="no bound"
-						value={overdueHours}
-						onChange={(e) => setOverdueHours(e.target.value)}
+						helperText="e.g. 2h 30m, 36h, 1d 12h"
+						value={overdue}
+						onChange={(e) => setOverdue(e.target.value)}
 					/>
 
 					<FormControlLabel
