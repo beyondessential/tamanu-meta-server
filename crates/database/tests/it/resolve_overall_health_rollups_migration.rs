@@ -10,7 +10,7 @@ use diesel_async::{RunQueryDsl, SimpleAsyncConnection as _};
 use uuid::Uuid;
 
 const MIGRATION_UP: &str = include_str!(
-	"../../../migrations/2026-05-28-100000-0000_resolve_overall_health_rollups/up.sql"
+	"../../../../migrations/2026-05-28-100000-0000_resolve_overall_health_rollups/up.sql"
 );
 
 #[tokio::test(flavor = "multi_thread")]

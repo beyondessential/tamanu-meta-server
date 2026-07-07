@@ -70,6 +70,14 @@ lto = true
 codegen-units = 1
 strip = "symbols"
 
+# Full debuginfo makes each integration-test binary ~720MB (86% DWARF), and
+# linking dozens of them writes ~50GB per rebuild — enough sustained I/O to
+# freeze the machine. Line tables keep file:line in backtraces at a fraction
+# of the size; override with CARGO_PROFILE_DEV_DEBUG=full when a debugger
+# session needs variable info.
+[profile.dev]
+debug = "line-tables-only"
+
 # compile dependencies with some optimisations to reduce disk pressure
 [profile.dev.package."*"]
 opt-level = 1

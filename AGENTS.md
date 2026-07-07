@@ -58,7 +58,8 @@ pub async fn add(
 - Test both success and error scenarios (especially 404 cases for non-existent resources)
 - For database tests, use direct model functions instead of HTTP endpoints
 - Always include `use database::ModelName;` imports in test files
-- Do not include `_test` suffix or prefix in test filenames in `tests/` directory
+- Integration tests are modules of a single `it` test binary per crate: files live in `tests/it/` and are declared with a `mod` line in `tests/it/main.rs`. Add new test files there — never as loose files directly under `tests/`, where each one links its own ~700MB binary and grinds the machine.
+- Do not include `_test` suffix or prefix in test filenames
 - Calling private-server endpoints in tests:
   - Endpoints are at `/api/<module>/<function>` (e.g. `/api/statuses/server_grouped_ids`)
   - Pass parameters via `.json(&serde_json::json!({"param_name": value}))`
