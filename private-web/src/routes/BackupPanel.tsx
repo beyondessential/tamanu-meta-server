@@ -38,7 +38,7 @@ import { Link as RouterLink, useParams } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import { useReloadInterval } from "../hooks/useReloadInterval";
 import { useIsAdmin } from "../hooks/useIsAdmin";
-import { humanSeconds } from "../lib/humanDuration";
+import { humanDuration, humanSeconds } from "../lib/humanDuration";
 import { formatBytes } from "../lib/formatBytes";
 import {
 	estimatedBucketCostTooltip,
@@ -1065,12 +1065,17 @@ function MaintRow({ run }: { run: BackupMaintenanceRun }) {
 					{run.finished_at ? <TimeAgo timestamp={run.finished_at} /> : "—"}
 				</TableCell>
 				<TableCell>
+					{run.finished_at
+						? humanDuration(run.started_at, run.finished_at)
+						: "—"}
+				</TableCell>
+				<TableCell>
 					{run.bytes_reclaimed == null ? "—" : formatBytes(run.bytes_reclaimed)}
 				</TableCell>
 			</TableRow>
 			{hasError && (
 				<TableRow>
-					<TableCell colSpan={6} sx={{ py: 0, border: 0 }}>
+					<TableCell colSpan={7} sx={{ py: 0, border: 0 }}>
 						<Collapse in={open} timeout="auto" unmountOnExit>
 							<Alert severity="error" variant="outlined" sx={{ my: 1 }}>
 								<Typography
@@ -1287,6 +1292,7 @@ function MaintenancePanel({
 										<TableCell>Kind</TableCell>
 										<TableCell>Outcome</TableCell>
 										<TableCell>Finished</TableCell>
+										<TableCell>Duration</TableCell>
 										<TableCell>
 											<Tooltip title="Approximate: kopia's garbage collection is two-phase, so a run can under-report until a later full run sweeps quarantined blobs">
 												<span>Reclaimed</span>
