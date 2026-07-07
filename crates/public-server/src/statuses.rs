@@ -14,6 +14,7 @@ use commons_types::{
 	backup::BackupType,
 	device::DeviceRole,
 	issue::Severity,
+	server::TagMap,
 	status::{CheckResult, CheckSeverity},
 	version::VersionStr,
 };
@@ -144,6 +145,12 @@ pub struct StatusResponse {
 	/// `warn`. Clients that predate this field can safely ignore it; the
 	/// same mapping is served on demand at `GET /status/{server_id}/check-severities`.
 	pub check_severities: BTreeMap<String, CheckSeverity>,
+	/// The server's effective tags: its own tags overlaid on its group's,
+	/// plus the synthetic read-only `canopy:` tags and effective `billing.*`
+	/// labels. Identical to what the standalone `GET /tags` endpoint
+	/// returns — see that endpoint for the full contract. Clients that
+	/// predate this field can safely ignore it.
+	pub tags: TagMap,
 }
 
 pub fn routes() -> OpenApiRouter<AppState> {
@@ -165,10 +172,11 @@ pub fn routes() -> OpenApiRouter<AppState> {
 /// hold the admin role). The response carries only return-path
 /// instructions: a `backup_now` list of backup types the server should
 /// back up immediately — devices should treat a non-empty list as a
-/// prompt to run those backups and report them afterwards — and a
+/// prompt to run those backups and report them afterwards — a
 /// `check_severities` map describing how canopy classifies each known
-/// healthcheck for this server (`skip`/`warn`/`fail`). The stored status
-/// record is not echoed back.
+/// healthcheck for this server (`skip`/`warn`/`fail`), and the server's
+/// effective `tags` (as served by `GET /tags`). The stored status record
+/// is not echoed back.
 #[utoipa::path(
 	post,
 	path = "/{server_id}",
@@ -237,9 +245,11 @@ async fn create(
 		create_legacy_status(&mut db, server_id, id, extra, version).await?;
 		let check_severities =
 			effective_check_severities(&mut db, server_id, server.group_id).await?;
+		let tags = crate::tags::effective_tags_for_server(&mut db, &server).await?;
 		return Ok(Json(StatusResponse {
 			backup_now,
 			check_severities,
+			tags,
 		}));
 	};
 
@@ -276,10 +286,12 @@ async fn create(
 	// Computed after the transaction so checks first seen on this very push
 	// (upserted into the catalog above) are already in the map.
 	let check_severities = effective_check_severities(&mut db, server_id, server.group_id).await?;
+	let effective_tags = crate::tags::effective_tags_for_server(&mut db, &server).await?;
 
 	Ok(Json(StatusResponse {
 		backup_now,
 		check_severities,
+		tags: effective_tags,
 	}))
 }
 
