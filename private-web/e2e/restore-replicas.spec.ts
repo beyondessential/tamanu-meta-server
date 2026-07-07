@@ -364,11 +364,12 @@ test.describe("restore replicas", () => {
 		// The sole consumer is auto-selected and its sole intent chosen, so the
 		// description and parameter fields for `analytics` render.
 		await expect(dialog.getByText("Keeps a queryable replica running.")).toBeVisible();
-		const uptime = dialog.getByLabel("minimum_uptime (seconds)");
+		const uptime = dialog.getByLabel("minimum_uptime (duration)");
 		await expect(uptime).toBeVisible();
 		await expect(dialog.getByLabel("anonymisation")).toBeVisible();
 
-		await uptime.fill("3600");
+		// Duration values are typed with human units and stored as raw seconds.
+		await uptime.fill("1h");
 		await dialog.getByLabel("Name").fill("with-params");
 		await dialog.getByRole("button", { name: /^declare$/i }).click();
 
@@ -404,12 +405,11 @@ test.describe("restore replicas", () => {
 
 		const dialog = page.getByRole("dialog");
 		await expect(dialog.getByLabel("Name")).toHaveValue("before-edit");
-		await expect(dialog.getByLabel("Overdue after (hours, optional)")).toHaveValue(
-			"1",
-		);
+		// The stored 3600s bound is displayed in the human-friendly format.
+		await expect(dialog.getByLabel("Overdue after (optional)")).toHaveValue("1h");
 
 		await dialog.getByLabel("Name").fill("after-edit");
-		await dialog.getByLabel("Overdue after (hours, optional)").fill("4");
+		await dialog.getByLabel("Overdue after (optional)").fill("4h");
 		await dialog.getByLabel("Enabled").click();
 		await dialog.getByRole("button", { name: /^save$/i }).click();
 
@@ -463,9 +463,10 @@ test.describe("restore replicas", () => {
 		await page.getByRole("button", { name: "edit param-edit" }).click();
 
 		const dialog = page.getByRole("dialog");
-		const uptime = dialog.getByLabel("minimum_uptime (seconds)");
-		await expect(uptime).toHaveValue("3600");
-		await uptime.fill("1800");
+		const uptime = dialog.getByLabel("minimum_uptime (duration)");
+		// The stored raw 3600 seconds display as a human-friendly duration.
+		await expect(uptime).toHaveValue("1h");
+		await uptime.fill("30m");
 		await dialog.getByRole("button", { name: /^save$/i }).click();
 
 		await expect(page.getByRole("row", { name: /param-edit/ })).toBeVisible();
@@ -474,6 +475,87 @@ test.describe("restore replicas", () => {
 		);
 		expect(rows).toHaveLength(1);
 		expect(rows[0]!.params.minimum_uptime).toBe(1800);
+	});
+
+	test("size params accept 1024-based units and display in Kubernetes notation", async ({
+		page,
+		sql,
+	}) => {
+		const consumer = await seedDevice(sql, { role: "backup-restore" });
+		await seedRestoreConsumerCapability(sql, {
+			deviceId: consumer.id,
+			intents: [
+				{
+					intent: "analytics",
+					description: "Keeps a queryable replica running.",
+					semantics: ["check", "url"],
+					params: {
+						minimum_uptime: { type: "duration", default: 7200 },
+						max_disk: { type: "bytes" },
+					},
+				},
+			],
+		});
+		const groupId = await groupWithBackups(sql, "size-group");
+
+		await page.goto(`/groups/${groupId}/backups`);
+		await page.getByRole("button", { name: /declare replica/i }).click();
+		const dialog = page.getByRole("dialog");
+
+		// Bare "20G" means 20Gi (1024-based), never 20×10⁹.
+		await dialog.getByLabel("max_disk (size)").fill("20G");
+		await dialog.getByLabel("minimum_uptime (duration)").fill("1h 30m");
+		await dialog.getByLabel("Name").fill("sized");
+		await dialog.getByRole("button", { name: /^declare$/i }).click();
+
+		const row = page.getByRole("row", { name: /sized/ });
+		await expect(row).toBeVisible();
+		// The table's param summary shows the display forms.
+		await expect(row).toContainText("max_disk=20Gi");
+		await expect(row).toContainText("minimum_uptime=1h 30m");
+
+		const rows = await sql.query<{
+			params: { max_disk?: number; minimum_uptime?: number };
+		}>("SELECT params FROM restore_replicas WHERE name = 'sized'");
+		expect(rows).toHaveLength(1);
+		expect(rows[0]!.params.max_disk).toBe(20 * 1024 ** 3);
+		expect(rows[0]!.params.minimum_uptime).toBe(5400);
+
+		// Reopening the edit dialog shows the display forms back in the fields.
+		await page.getByRole("button", { name: "edit sized" }).click();
+		const edit = page.getByRole("dialog");
+		await expect(edit.getByLabel("max_disk (size)")).toHaveValue("20Gi");
+		await expect(edit.getByLabel("minimum_uptime (duration)")).toHaveValue(
+			"1h 30m",
+		);
+	});
+
+	test("an invalid overdue bound is rejected inline and nothing is saved", async ({
+		page,
+		sql,
+	}) => {
+		const consumer = await seedDevice(sql, { role: "backup-restore" });
+		await seedRestoreConsumerCapability(sql, {
+			deviceId: consumer.id,
+			intents: ["verify"],
+		});
+		const groupId = await groupWithBackups(sql, "badunit-group");
+
+		await page.goto(`/groups/${groupId}/backups`);
+		await page.getByRole("button", { name: /declare replica/i }).click();
+		const dialog = page.getByRole("dialog");
+
+		await dialog.getByLabel("Name").fill("bad-bound");
+		await dialog.getByLabel("Overdue after (optional)").fill("banana");
+		await dialog.getByRole("button", { name: /^declare$/i }).click();
+
+		// The backend rejects the bound; the dialog stays open with the error.
+		await expect(dialog.getByRole("alert")).toBeVisible();
+		await expect(dialog).toBeVisible();
+		const rows = await sql.query<{ count: string }>(
+			"SELECT count(*) AS count FROM restore_replicas",
+		);
+		expect(Number(rows[0]!.count)).toBe(0);
 	});
 
 	test("editing a declaration's intent retargets it and re-derives its parameters", async ({

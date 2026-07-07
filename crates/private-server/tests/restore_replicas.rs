@@ -479,7 +479,10 @@ async fn create_resolves_unit_strings_and_stores_raw_values() {
 			.await
 			.expect("list replicas");
 		assert_eq!(stored.len(), 1);
-		assert_eq!(stored[0].overdue_after.as_ref().unwrap().0.as_secs(), 129600);
+		assert_eq!(
+			stored[0].overdue_after.as_ref().unwrap().0.as_secs(),
+			129600
+		);
 		assert_eq!(stored[0].params["minimum_uptime"], serde_json::json!(9000));
 		assert_eq!(
 			stored[0].params["max_size"],
@@ -548,10 +551,19 @@ async fn create_rejects_bad_unit_strings() {
 		advertise_sizing(&mut conn, consumer).await;
 
 		for (name, params) in [
-			("bad duration", serde_json::json!({ "minimum_uptime": "banana" })),
-			("calendar unit", serde_json::json!({ "minimum_uptime": "1mo" })),
+			(
+				"bad duration",
+				serde_json::json!({ "minimum_uptime": "banana" }),
+			),
+			(
+				"calendar unit",
+				serde_json::json!({ "minimum_uptime": "1mo" }),
+			),
 			("negative", serde_json::json!({ "minimum_uptime": "-1h" })),
-			("sub-second", serde_json::json!({ "minimum_uptime": "0.5s" })),
+			(
+				"sub-second",
+				serde_json::json!({ "minimum_uptime": "0.5s" }),
+			),
 			("bare number", serde_json::json!({ "minimum_uptime": "20" })),
 			("bad size unit", serde_json::json!({ "max_size": "20T" })),
 			("size junk", serde_json::json!({ "max_size": "lots" })),
