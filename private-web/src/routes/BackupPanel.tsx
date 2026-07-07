@@ -26,7 +26,7 @@ import {
 	Tooltip,
 	Typography,
 } from "@mui/material";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import BackupIcon from "@mui/icons-material/Backup";
 import RestoreIcon from "@mui/icons-material/SettingsBackupRestore";
 import DeleteIcon from "@mui/icons-material/Delete";
@@ -56,6 +56,7 @@ import {
 	type BackupConfigStatus,
 	type BackupConfigView,
 	type BackupMaintenanceRun,
+	groupServersByRank,
 	type RecentRun,
 	type ServerInfo,
 } from "../types";
@@ -1525,105 +1526,124 @@ function ServersPanel({
 							</TableRow>
 						</TableHead>
 						<TableBody>
-							{members.map((m) => {
-								const types = typesForServer(m.id);
-								if (types.length === 0) {
-									return (
-										<TableRow key={m.id}>
-											<TableCell>
-												<Stack spacing={0.5} sx={{ alignItems: "flex-start" }}>
-													{serverLink(m)}
-													{restoreControl(m.id)}
-												</Stack>
-											</TableCell>
-											<TableCell colSpan={3}>
-												<Typography variant="body2" color="text.secondary">
-													No backup types registered yet
+							{groupServersByRank(members).map(([rank, rankMembers]) => (
+								<Fragment key={rank ?? "_unranked"}>
+									{rank && (
+										<TableRow>
+											<TableCell
+												colSpan={5}
+												sx={{ borderBottom: "none", pb: 0 }}
+											>
+												<Typography
+													variant="overline"
+													color="text.secondary"
+												>
+													{rank}
 												</Typography>
 											</TableCell>
-											<TableCell align="right">
-												<Tooltip title="This server hasn't registered any backup types yet.">
-													{/* span so the tooltip works on the disabled button */}
-													<span>
-														<Button
-															size="small"
-															variant="outlined"
-															startIcon={<BackupIcon />}
-															disabled
-														>
-															Backup now
-														</Button>
-													</span>
-												</Tooltip>
-											</TableCell>
 										</TableRow>
-									);
-								}
-								return types.map((t, i) => {
-									const cap = capFor(m.id, t);
-									return (
-										<TableRow key={`${m.id}:${t}`}>
-											{i === 0 && (
-												<TableCell
-													rowSpan={types.length}
-													sx={{ verticalAlign: "top" }}
-												>
-													<Stack
-														spacing={0.5}
-														sx={{ alignItems: "flex-start" }}
-													>
-														{serverLink(m)}
-														{restoreControl(m.id)}
-													</Stack>
-												</TableCell>
-											)}
-											<TableCell>
-												<Stack
-													direction="row"
-													spacing={1}
-													sx={{ alignItems: "center" }}
-												>
-													<Typography
-														variant="body2"
-														sx={{ fontFamily: "monospace" }}
-													>
-														{t}
-													</Typography>
-													{cap?.enabled === false && (
-														<Tooltip title="Not on the backup schedule for this server (toggle it on in the server's Backups section). You can still back it up on demand.">
-															<Chip
-																size="small"
-																variant="outlined"
-																label="not scheduled"
-															/>
+									)}
+									{rankMembers.map((m) => {
+										const types = typesForServer(m.id);
+										if (types.length === 0) {
+											return (
+												<TableRow key={m.id}>
+													<TableCell>
+														<Stack spacing={0.5} sx={{ alignItems: "flex-start" }}>
+															{serverLink(m)}
+															{restoreControl(m.id)}
+														</Stack>
+													</TableCell>
+													<TableCell colSpan={3}>
+														<Typography variant="body2" color="text.secondary">
+															No backup types registered yet
+														</Typography>
+													</TableCell>
+													<TableCell align="right">
+														<Tooltip title="This server hasn't registered any backup types yet.">
+															{/* span so the tooltip works on the disabled button */}
+															<span>
+																<Button
+																	size="small"
+																	variant="outlined"
+																	startIcon={<BackupIcon />}
+																	disabled
+																>
+																	Backup now
+																</Button>
+															</span>
 														</Tooltip>
+													</TableCell>
+												</TableRow>
+											);
+										}
+										return types.map((t, i) => {
+											const cap = capFor(m.id, t);
+											return (
+												<TableRow key={`${m.id}:${t}`}>
+													{i === 0 && (
+														<TableCell
+															rowSpan={types.length}
+															sx={{ verticalAlign: "top" }}
+														>
+															<Stack
+																spacing={0.5}
+																sx={{ alignItems: "flex-start" }}
+															>
+																{serverLink(m)}
+																{restoreControl(m.id)}
+															</Stack>
+														</TableCell>
 													)}
-													<BackupProcessingChip
-														since={cap?.processing_since}
-													/>
-												</Stack>
-											</TableCell>
-											<TableCell>
-												{cap?.next_backup_at ? (
-													<TimeAgo timestamp={cap.next_backup_at} />
-												) : (
-													<Typography variant="body2" color="text.secondary">
-														—
-													</Typography>
-												)}
-											</TableCell>
-											<TableCell>
-												<LatestSnapshot
-													id={cap?.latest_snapshot_id}
-													at={cap?.latest_snapshot_at}
-													bytes={cap?.latest_snapshot_bytes}
-												/>
-											</TableCell>
-											<TableCell align="right">{actionCell(m.id, t)}</TableCell>
-										</TableRow>
-									);
-								});
-							})}
+													<TableCell>
+														<Stack
+															direction="row"
+															spacing={1}
+															sx={{ alignItems: "center" }}
+														>
+															<Typography
+																variant="body2"
+																sx={{ fontFamily: "monospace" }}
+															>
+																{t}
+															</Typography>
+															{cap?.enabled === false && (
+																<Tooltip title="Not on the backup schedule for this server (toggle it on in the server's Backups section). You can still back it up on demand.">
+																	<Chip
+																		size="small"
+																		variant="outlined"
+																		label="not scheduled"
+																	/>
+																</Tooltip>
+															)}
+															<BackupProcessingChip
+																since={cap?.processing_since}
+															/>
+														</Stack>
+													</TableCell>
+													<TableCell>
+														{cap?.next_backup_at ? (
+															<TimeAgo timestamp={cap.next_backup_at} />
+														) : (
+															<Typography variant="body2" color="text.secondary">
+																—
+															</Typography>
+														)}
+													</TableCell>
+													<TableCell>
+														<LatestSnapshot
+															id={cap?.latest_snapshot_id}
+															at={cap?.latest_snapshot_at}
+															bytes={cap?.latest_snapshot_bytes}
+														/>
+													</TableCell>
+													<TableCell align="right">{actionCell(m.id, t)}</TableCell>
+												</TableRow>
+											);
+										});
+									})}
+								</Fragment>
+							))}
 						</TableBody>
 					</Table>
 				</Box>

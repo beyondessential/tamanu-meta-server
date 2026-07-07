@@ -72,9 +72,9 @@ import { humanSeconds } from "../lib/humanDuration";
 import ServerNameWithGroup from "../components/ServerNameWithGroup";
 import {
 	CHECK_RESULT_ORDER,
-	SERVER_RANK_ORDER,
 	checkResultOf,
 	compareServersByRankThenKind,
+	groupServersByRank,
 	healthcheckPath,
 	type CheckResult,
 	type DeviceInfo,
@@ -86,7 +86,6 @@ import {
 	type ServerGroupSilencedRef,
 	type ServerInfo,
 	type ServerLastStatusData,
-	type ServerRank,
 	type ServerSilencedRef,
 	type ShortStatus,
 } from "../types";
@@ -1497,22 +1496,7 @@ function SiblingServers({
 	// reader scanning ServerDetail's sibling section sees the production
 	// peers up top and the dev scratch at the bottom in a predictable
 	// order. Unranked servers fall into a trailing `null` bucket.
-	const buckets = new Map<ServerRank | null, ServerDetailData["siblings"]>();
-	for (const sib of siblings) {
-		const rank = sib.rank ?? null;
-		const list = buckets.get(rank);
-		if (list) list.push(sib);
-		else buckets.set(rank, [sib]);
-	}
-	const order: Array<ServerRank | null> = [...SERVER_RANK_ORDER, null];
-	const groups: Array<[ServerRank | null, ServerDetailData["siblings"]]> = [];
-	for (const rank of order) {
-		const list = buckets.get(rank);
-		if (list && list.length > 0) {
-			list.sort(compareServersByRankThenKind);
-			groups.push([rank, list]);
-		}
-	}
+	const groups = groupServersByRank(siblings);
 
 	return (
 		<Box>
