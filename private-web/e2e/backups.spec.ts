@@ -666,7 +666,13 @@ test.describe("backups ready: stats + backup-now", () => {
 		await expect(restoreRow.getByText("2.0 KiB")).toBeHidden();
 		// Snapshot size shows the producing backup run's figure — the restore row
 		// itself was seeded without one, so this pins the lookup, not the backfill.
-		await expect(restoreRow.getByRole("cell", { name: "32.0 MiB" })).toBeVisible();
+		// The cell's accessible *name* is its tooltip (MUI Tooltip aria-labels the
+		// wrapped span), so select by that and assert the figure as its text.
+		await expect(
+			restoreRow.getByRole("cell", {
+				name: "Size of the snapshot the restore used",
+			}),
+		).toHaveText("32.0 MiB");
 	});
 
 	test("run with both a snapshot size and S3 traffic shows them as distinct columns", async ({
