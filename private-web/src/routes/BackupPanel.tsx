@@ -751,8 +751,8 @@ function RunRow({ run, members }: { run: RecentRun; members: ServerInfo[] }) {
 	// Both describe the same quantity — kopia doesn't re-upload bits the
 	// server already has, so this is usually larger than what actually went
 	// over the wire. For a restore this is the size of the snapshot the run
-	// restored from: bestool reports the snapshot id, and inspection backfills
-	// the size onto the run.
+	// restored from, resolved server-side from the backup run that produced it
+	// (by snapshot id) or inspection's backfill.
 	const fromInspect =
 		run.bytes_uploaded == null && run.snapshot_logical_bytes != null;
 	const snapshotSize = run.bytes_uploaded ?? run.snapshot_logical_bytes ?? null;
@@ -796,7 +796,7 @@ function RunRow({ run, members }: { run: RecentRun; members: ServerInfo[] }) {
 						<Tooltip
 							title={
 								run.purpose === "restore"
-									? "Size of the snapshot the restore used, from repo inspection"
+									? "Size of the snapshot the restore used"
 									: "From repo inspection (the device reported no size)"
 							}
 						>

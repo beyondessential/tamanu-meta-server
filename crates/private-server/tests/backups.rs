@@ -680,6 +680,61 @@ async fn stats_includes_runs_and_pending_requests() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn stats_restore_run_resolves_snapshot_size_from_the_producing_backup() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group_id = seed_group(&mut conn).await;
+		let device_id = Uuid::new_v4();
+		let server_id = Uuid::new_v4();
+		let backup_run_id = Uuid::new_v4();
+		let restore_run_id = Uuid::new_v4();
+		// The backup that produced snapshot snap-1 was sized when it ran; the
+		// restore that later used snap-1 has no size of its own (inspection has
+		// not swept since it reported). Its snapshot size must resolve from the
+		// producing backup immediately, not wait for the backfill.
+		conn.batch_execute(&format!(
+			"INSERT INTO devices (id, role) VALUES ('{device_id}', 'server');
+			 INSERT INTO servers (id, host, kind, group_id, device_id) VALUES \
+				('{server_id}', 'https://e.test', 'central', '{group_id}', '{device_id}');
+			 INSERT INTO backup_runs (id, device_id, group_id, server_id, type, purpose, outcome, \
+				bytes_uploaded, snapshot_id, reported_at) \
+				VALUES ('{backup_run_id}', '{device_id}', '{group_id}', '{server_id}', 'tamanu-postgres', \
+					'backup', 'success', 8192, 'snap-1', now() - interval '1 hour');
+			 INSERT INTO backup_runs (id, device_id, group_id, server_id, type, purpose, outcome, \
+				snapshot_id, s3_received_payload_bytes) \
+				VALUES ('{restore_run_id}', '{device_id}', '{group_id}', '{server_id}', 'tamanu-postgres', \
+					'restore', 'success', 'snap-1', 4096);"
+		))
+		.await
+		.expect("seed runs");
+
+		let resp = private
+			.post("/api/backups/stats")
+			.json(&serde_json::json!({ "server_group_id": group_id }))
+			.await;
+		resp.assert_status_ok();
+		let body: serde_json::Value = resp.json();
+		let runs = body["recent_runs"].as_array().unwrap();
+		let restore = runs
+			.iter()
+			.find(|r| r["purpose"] == "restore")
+			.expect("restore row");
+		assert_eq!(
+			restore["snapshot_logical_bytes"], 8192,
+			"restore resolves its source snapshot's size from the backup that produced it"
+		);
+		assert!(restore["bytes_uploaded"].is_null());
+		// The backup row keeps its own figures untouched.
+		let backup = runs
+			.iter()
+			.find(|r| r["purpose"] == "backup")
+			.expect("backup row");
+		assert_eq!(backup["bytes_uploaded"], 8192);
+		assert!(backup["snapshot_logical_bytes"].is_null());
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn group_schedules_reports_next_run_from_last_success_plus_interval() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let group_id = seed_group(&mut conn).await;

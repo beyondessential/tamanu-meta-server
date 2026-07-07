@@ -10056,7 +10056,7 @@
               "string",
               "null"
             ],
-            "description": "Snapshot the run produced, if any (reported runs only)."
+            "description": "Snapshot the run produced (backup) or used (restore), if any (reported\nruns only)."
           },
           "snapshot_logical_bytes": {
             "type": [
@@ -10064,7 +10064,7 @@
               "null"
             ],
             "format": "int64",
-            "description": "Logical snapshot size from repo inspection, if known (reported runs only)."
+            "description": "Logical size of the run's snapshot, if known (reported runs only). For\na backup this comes from repo inspection. For a restore it is resolved\nfrom the backup run that produced the snapshot (matched by snapshot id),\nfalling back to inspection's backfill onto the restore run itself."
           },
           "started_at": {
             "type": [

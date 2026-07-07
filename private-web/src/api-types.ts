@@ -5659,11 +5659,17 @@ export interface components {
              * @description The server this run was for, if known.
              */
             server_id?: string | null;
-            /** @description Snapshot the run produced, if any (reported runs only). */
+            /**
+             * @description Snapshot the run produced (backup) or used (restore), if any (reported
+             *     runs only).
+             */
             snapshot_id?: string | null;
             /**
              * Format: int64
-             * @description Logical snapshot size from repo inspection, if known (reported runs only).
+             * @description Logical size of the run's snapshot, if known (reported runs only). For
+             *     a backup this comes from repo inspection. For a restore it is resolved
+             *     from the backup run that produced the snapshot (matched by snapshot id),
+             *     falling back to inspection's backfill onto the restore run itself.
              */
             snapshot_logical_bytes?: number | null;
             /**

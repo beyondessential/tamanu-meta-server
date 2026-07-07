@@ -375,9 +375,13 @@ pub struct RecentRun {
 	pub error: Option<String>,
 	/// Bytes the device reported uploading, if any (reported runs only).
 	pub bytes_uploaded: Option<i64>,
-	/// Snapshot the run produced, if any (reported runs only).
+	/// Snapshot the run produced (backup) or used (restore), if any (reported
+	/// runs only).
 	pub snapshot_id: Option<String>,
-	/// Logical snapshot size from repo inspection, if known (reported runs only).
+	/// Logical size of the run's snapshot, if known (reported runs only). For
+	/// a backup this comes from repo inspection. For a restore it is resolved
+	/// from the backup run that produced the snapshot (matched by snapshot id),
+	/// falling back to inspection's backfill onto the restore run itself.
 	pub snapshot_logical_bytes: Option<i64>,
 	/// Raw bytes sent to S3 during the run, if tallied (reported runs only).
 	pub s3_sent_raw_bytes: Option<i64>,
@@ -409,6 +413,12 @@ pub struct RecentRun {
 /// surface as inferred rows — in-flight while their creds are still valid,
 /// otherwise unreported past attempts (e.g. manual restores, which don't report).
 ///
+/// `source_snapshot_sizes` maps snapshot ids to sizes already known from the
+/// backup runs that produced them (see [`BackupRun::snapshot_sizes_by_id`]);
+/// a restore run's snapshot size resolves from it first, so the figure shows
+/// immediately rather than waiting for inspection to backfill the restore
+/// run's own row (which stays as the fallback).
+///
 /// Pairing is exact when the client stamped its run-uuid on the credential
 /// request (`run_id`): those issuances group by that id, so concurrent runs of
 /// the same type on one server never conflate. Issuances without a `run_id`
@@ -419,6 +429,7 @@ fn build_recent_runs(
 	runs: Vec<BackupRun>,
 	issuances: Vec<BackupCredentialIssuance>,
 	device_to_server: &std::collections::HashMap<Uuid, Uuid>,
+	source_snapshot_sizes: &std::collections::HashMap<String, i64>,
 	now: Timestamp,
 	limit: usize,
 ) -> Vec<RecentRun> {
@@ -439,6 +450,15 @@ fn build_recent_runs(
 		.zip(starts)
 		.map(|(run, started_at)| {
 			let duration_seconds = started_at.map(|s| run.reported_at.as_second() - s.as_second());
+			let snapshot_logical_bytes = if run.purpose == BackupPurpose::Restore {
+				run.snapshot_id
+					.as_ref()
+					.and_then(|id| source_snapshot_sizes.get(id))
+					.copied()
+					.or(run.snapshot_logical_bytes)
+			} else {
+				run.snapshot_logical_bytes
+			};
 			RecentRun {
 				key: format!("run-{}", run.id),
 				server_id: run.server_id,
@@ -449,7 +469,7 @@ fn build_recent_runs(
 				error: run.error,
 				bytes_uploaded: run.bytes_uploaded,
 				snapshot_id: run.snapshot_id,
-				snapshot_logical_bytes: run.snapshot_logical_bytes,
+				snapshot_logical_bytes,
 				s3_sent_raw_bytes: run.s3_sent_raw_bytes,
 				s3_sent_payload_bytes: run.s3_sent_payload_bytes,
 				s3_received_raw_bytes: run.s3_received_raw_bytes,
@@ -1819,10 +1839,22 @@ pub async fn stats(
 		RECENT_LIMIT * 4,
 	)
 	.await?;
+	// A restore's snapshot was already sized when the backup that produced it
+	// ran (or was inspected), so resolve restore snapshot sizes from that data
+	// rather than waiting for inspection to backfill the restore run's row.
+	let restore_snapshot_ids: Vec<String> = reported_runs
+		.iter()
+		.filter(|r| r.purpose == BackupPurpose::Restore)
+		.filter_map(|r| r.snapshot_id.clone())
+		.collect();
+	let source_snapshot_sizes =
+		BackupRun::snapshot_sizes_by_id(&mut conn, args.server_group_id, &restore_snapshot_ids)
+			.await?;
 	let recent_runs = build_recent_runs(
 		reported_runs,
 		issuances,
 		&device_to_server,
+		&source_snapshot_sizes,
 		now,
 		RECENT_LIMIT as usize,
 	);
@@ -2334,6 +2366,10 @@ mod tests {
 		std::collections::HashMap::from([(device, Uuid::from_u128(server))])
 	}
 
+	fn no_sizes() -> std::collections::HashMap<String, i64> {
+		std::collections::HashMap::new()
+	}
+
 	#[test]
 	fn reported_run_gets_duration_from_its_issuance() {
 		let d = Uuid::from_u128(1);
@@ -2341,6 +2377,7 @@ mod tests {
 			vec![run(10, d, BackupPurpose::Backup, 4000)],
 			vec![issuance(1, d, BackupPurpose::Backup, 1000, 4600)],
 			&device_map(d, 9),
+			&no_sizes(),
 			ts(5000),
 			20,
 		);
@@ -2358,6 +2395,7 @@ mod tests {
 			vec![],
 			vec![issuance(1, d, BackupPurpose::Restore, 4900, 8500)],
 			&device_map(d, 9),
+			&no_sizes(),
 			ts(5000),
 			20,
 		);
@@ -2375,6 +2413,7 @@ mod tests {
 			vec![],
 			vec![issuance(1, d, BackupPurpose::Restore, 1000, 4600)],
 			&device_map(d, 9),
+			&no_sizes(),
 			ts(5000),
 			20,
 		);
@@ -2389,6 +2428,7 @@ mod tests {
 			vec![run(10, d, BackupPurpose::Restore, 4000)],
 			vec![issuance(1, d, BackupPurpose::Restore, 1000, 4600)],
 			&device_map(d, 9),
+			&no_sizes(),
 			ts(5000),
 			20,
 		);
@@ -2407,6 +2447,7 @@ mod tests {
 				issuance(2, d, BackupPurpose::Backup, 4500, 8100),
 			],
 			&device_map(d, 9),
+			&no_sizes(),
 			ts(9000),
 			20,
 		);
@@ -2423,6 +2464,7 @@ mod tests {
 			vec![run(10, d, BackupPurpose::Backup, 8000)],
 			vec![issuance(1, d, BackupPurpose::Backup, 1000, 4600)],
 			&device_map(d, 9),
+			&no_sizes(),
 			ts(9000),
 			20,
 		);
@@ -2461,6 +2503,7 @@ mod tests {
 				),
 			],
 			&device_map(d, 9),
+			&no_sizes(),
 			ts(5000),
 			20,
 		);
@@ -2483,12 +2526,74 @@ mod tests {
 			vec![run(200, d, BackupPurpose::Backup, 100_000)],
 			vec![issuance_for(1, d, BackupPurpose::Backup, 1000, 4600, rid)],
 			&device_map(d, 9),
+			&no_sizes(),
 			ts(101_000),
 			20,
 		);
 		assert_eq!(rows.len(), 1);
 		assert!(matches!(rows[0].status, RunStatus::Reported));
 		assert_eq!(rows[0].duration_seconds, Some(99_000));
+	}
+
+	#[test]
+	fn restore_snapshot_size_resolves_from_the_producing_backup() {
+		let d = Uuid::from_u128(9);
+		let mut restore = run(10, d, BackupPurpose::Restore, 4000);
+		restore.snapshot_id = Some("snap-a".into());
+		// The size the snapshot was recorded at when its backup ran/was inspected.
+		let sizes = std::collections::HashMap::from([("snap-a".to_string(), 8_192_i64)]);
+		let rows = build_recent_runs(
+			vec![restore],
+			vec![],
+			&device_map(d, 9),
+			&sizes,
+			ts(5000),
+			20,
+		);
+		assert_eq!(rows.len(), 1);
+		assert_eq!(
+			rows[0].snapshot_logical_bytes,
+			Some(8192),
+			"restore shows its source snapshot's size without inspection of its own row"
+		);
+	}
+
+	#[test]
+	fn restore_snapshot_size_falls_back_to_its_own_backfill() {
+		let d = Uuid::from_u128(9);
+		let mut restore = run(10, d, BackupPurpose::Restore, 4000);
+		restore.snapshot_id = Some("snap-a".into());
+		restore.snapshot_logical_bytes = Some(4096);
+		// No producing backup carries the size — the restore row's own
+		// (inspection-backfilled) figure still surfaces.
+		let rows = build_recent_runs(
+			vec![restore],
+			vec![],
+			&device_map(d, 9),
+			&no_sizes(),
+			ts(5000),
+			20,
+		);
+		assert_eq!(rows[0].snapshot_logical_bytes, Some(4096));
+	}
+
+	#[test]
+	fn backup_snapshot_size_ignores_the_lookup() {
+		let d = Uuid::from_u128(9);
+		let mut backup = run(10, d, BackupPurpose::Backup, 4000);
+		backup.snapshot_id = Some("snap-a".into());
+		// A backup's size is its own (device-reported or backfilled) figure; the
+		// source-snapshot lookup is restore-only.
+		let sizes = std::collections::HashMap::from([("snap-a".to_string(), 8_192_i64)]);
+		let rows = build_recent_runs(
+			vec![backup],
+			vec![],
+			&device_map(d, 9),
+			&sizes,
+			ts(5000),
+			20,
+		);
+		assert_eq!(rows[0].snapshot_logical_bytes, None);
 	}
 
 	#[test]
@@ -2503,6 +2608,7 @@ mod tests {
 			],
 			// Only the member device maps to a server; the consumer device doesn't.
 			&device_map(member, 9),
+			&no_sizes(),
 			ts(5000),
 			20,
 		);
