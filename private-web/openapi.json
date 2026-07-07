@@ -6641,6 +6641,14 @@
             "format": "int64",
             "description": "Total size of the underlying S3 bucket, in bytes, as reported by cloud\nstorage metrics. Can differ from `physical_bytes` (e.g. it includes\ncontent outside the repository, or reflects a different point in\ntime)."
           },
+          "bucket_bytes_observed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When `bucket_bytes` was last refreshed by the (daily) S3-metrics\ncollector, if ever. Tracked separately from `observed_at` because the\ntwo figures are collected on independent cadences."
+          },
           "group_id": {
             "type": "string",
             "format": "uuid",
@@ -6657,7 +6665,7 @@
           "observed_at": {
             "type": "string",
             "format": "date-time",
-            "description": "When these stats were last refreshed. Whichever of the two collectors\nwrote most recently."
+            "description": "When the repo-derived figures (snapshot/source counts, logical/physical\nbytes) were last refreshed by the inspection job."
           },
           "physical_bytes": {
             "type": [

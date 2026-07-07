@@ -856,6 +856,29 @@ function S3TrafficDetail({ run }: { run: RecentRun }) {
 	);
 }
 
+/// Tooltip for the bucket-bytes figure: the estimated storage cost plus where
+/// the number comes from. Unlike the kopia-reported stats above it (refreshed
+/// by repo inspection), it's read from CloudWatch's daily BucketSizeBytes
+/// metric once a day, so it can lag the other figures.
+function bucketBytesTooltip(
+	bucketBytes: number,
+	measuredAt: string | null | undefined,
+	region: string | null,
+) {
+	return (
+		<>
+			{estimatedBucketCostTooltip(bucketBytes, region)}
+			<br />
+			From CloudWatch storage metrics
+			{measuredAt != null
+				? `, measured ${new Date(measuredAt).toLocaleString()}`
+				: ""}
+			; collected about once a day, so this figure updates less often than the
+			repository stats above.
+		</>
+	);
+}
+
 /// Repository stats (top, beside the config summary). Read-only snapshot of the
 /// kopia repo's size/counts as of the last inspection.
 function RepoStatsPanel({
@@ -898,23 +921,24 @@ function RepoStatsPanel({
 								label="Physical bytes"
 								value={formatBytes(stats.data.stats.physical_bytes)}
 							/>
+							<Typography variant="caption" color="text.secondary">
+								Observed <TimeAgo timestamp={stats.data.stats.observed_at} />
+							</Typography>
 							<Typography variant="body2">
 								<strong>Bucket bytes:</strong>{" "}
 								{stats.data.stats.bucket_bytes == null ? (
 									"unknown"
 								) : (
 									<Tooltip
-										title={estimatedBucketCostTooltip(
+										title={bucketBytesTooltip(
 											stats.data.stats.bucket_bytes,
+											stats.data.stats.bucket_bytes_observed_at,
 											region,
 										)}
 									>
 										<span>{formatBytes(stats.data.stats.bucket_bytes)}</span>
 									</Tooltip>
 								)}
-							</Typography>
-							<Typography variant="caption" color="text.secondary">
-								Observed <TimeAgo timestamp={stats.data.stats.observed_at} />
 							</Typography>
 						</>
 					)}

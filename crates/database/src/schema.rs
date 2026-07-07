@@ -82,6 +82,7 @@ diesel::table! {
 		physical_bytes -> Nullable<Int8>,
 		bucket_bytes -> Nullable<Int8>,
 		observed_at -> Timestamptz,
+		bucket_bytes_observed_at -> Nullable<Timestamptz>,
 	}
 }
 

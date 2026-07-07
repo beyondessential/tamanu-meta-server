@@ -607,8 +607,8 @@ async fn stats_includes_runs_and_pending_requests() {
 			"INSERT INTO devices (id, role) VALUES ('{device_id}', 'server');
 			 INSERT INTO servers (id, host, kind, group_id, device_id) VALUES \
 				('{server_id}', 'https://e.test', 'central', '{group_id}', '{device_id}');
-			 INSERT INTO backup_repo_stats (group_id, snapshot_count, source_count, logical_bytes, physical_bytes) \
-				VALUES ('{group_id}', 12, 3, 1000, 800);
+			 INSERT INTO backup_repo_stats (group_id, snapshot_count, source_count, logical_bytes, physical_bytes, bucket_bytes, bucket_bytes_observed_at) \
+				VALUES ('{group_id}', 12, 3, 1000, 800, 2000, now() - interval '1 day');
 			 INSERT INTO backup_runs (id, device_id, group_id, server_id, type, purpose, outcome, bytes_uploaded) \
 				VALUES ('{run_id}', '{device_id}', '{group_id}', '{server_id}', 'tamanu-postgres', 'backup', 'success', 500);
 			 -- The issuance that started the backup 5 minutes before it reported, so
@@ -645,6 +645,10 @@ async fn stats_includes_runs_and_pending_requests() {
 		resp.assert_status_ok();
 		let body: serde_json::Value = resp.json();
 		assert_eq!(body["stats"]["snapshot_count"], 12);
+		assert_eq!(body["stats"]["bucket_bytes"], 2000);
+		// The bucket figure carries its own measurement timestamp, separate
+		// from the inspection-owned observed_at.
+		assert!(body["stats"]["bucket_bytes_observed_at"].is_string());
 		// The reported backup, plus an inferred in-flight restore from its issuance.
 		// The consumer device's restore issuance is excluded (it's shown in the
 		// restore-checks table instead).

@@ -151,8 +151,8 @@ async fn tick(
 	for c in &ready {
 		// Fire once per day at the group's jittered deadline, catching up on a
 		// later tick if this one drifts past the slot or a slow predecessor group
-		// pushed us late. The anchor is in-memory (best-effort daily metric with
-		// no persisted timestamp): it resets on restart, re-firing at the next
+		// pushed us late. The anchor is in-memory (`bucket_bytes_observed_at` is
+		// only persisted on success): it resets on restart, re-firing at the next
 		// deadline. Recorded on attempt, not success, so a persistently-failing
 		// group doesn't hammer CloudWatch every tick.
 		if !slot_deadline_due(

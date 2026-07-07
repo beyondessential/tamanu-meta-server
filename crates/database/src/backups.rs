@@ -1607,8 +1607,7 @@ impl BackupRepoSnapshot {
 
 	/// When the group's repo was last inspected (newest `observed_at` across its
 	/// sources), or `None` if never. This table is written *only* by the
-	/// inspection Job — unlike `backup_repo_stats.observed_at`, which the daily
-	/// s3-metrics writer also bumps — so it's the clean "last inspected" signal.
+	/// inspection Job, so it's the clean "last inspected" signal.
 	pub async fn last_inspected_at_for_group(
 		db: &mut AsyncPgConnection,
 		group_id: Uuid,
@@ -1657,10 +1656,19 @@ pub struct BackupRepoStats {
 	/// content outside the repository, or reflects a different point in
 	/// time).
 	pub bucket_bytes: Option<i64>,
-	/// When these stats were last refreshed. Whichever of the two collectors
-	/// wrote most recently.
+	/// When the repo-derived figures (snapshot/source counts, logical/physical
+	/// bytes) were last refreshed by the inspection job.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub observed_at: Timestamp,
+	/// When `bucket_bytes` was last refreshed by the (daily) S3-metrics
+	/// collector, if ever. Tracked separately from `observed_at` because the
+	/// two figures are collected on independent cadences.
+	#[diesel(
+		deserialize_as = jiff_diesel::NullableTimestamp,
+		serialize_as = jiff_diesel::NullableTimestamp,
+		treat_none_as_default_value = false
+	)]
+	pub bucket_bytes_observed_at: Option<Timestamp>,
 }
 
 impl BackupRepoStats {
@@ -1711,7 +1719,8 @@ impl BackupRepoStats {
 	}
 
 	/// Writer 2: the S3-metrics task. Touches only `bucket_bytes`
-	/// (+ `observed_at`), never the repo-derived fields.
+	/// (+ `bucket_bytes_observed_at`), never the repo-derived fields or their
+	/// `observed_at`.
 	pub async fn upsert_bucket_bytes(
 		db: &mut AsyncPgConnection,
 		group_id: Uuid,
@@ -1723,10 +1732,14 @@ impl BackupRepoStats {
 			.values((
 				dsl::group_id.eq(group_id),
 				dsl::bucket_bytes.eq(bucket_bytes),
+				dsl::bucket_bytes_observed_at.eq(now),
 			))
 			.on_conflict(dsl::group_id)
 			.do_update()
-			.set((dsl::bucket_bytes.eq(bucket_bytes), dsl::observed_at.eq(now)))
+			.set((
+				dsl::bucket_bytes.eq(bucket_bytes),
+				dsl::bucket_bytes_observed_at.eq(now),
+			))
 			.execute(db)
 			.await
 			.map_err(AppError::from)?;
