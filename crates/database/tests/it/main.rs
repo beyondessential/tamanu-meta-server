@@ -26,6 +26,6 @@ mod server_group_version_cache;
 mod server_restore_window;
 mod silenced_health_checks;
 mod slack_outbox_enqueue;
-mod statuses_device_fk;
 mod status_health_state;
+mod statuses_device_fk;
 mod tag_reserved_prefix;
