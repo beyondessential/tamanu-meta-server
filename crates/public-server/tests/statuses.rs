@@ -147,19 +147,13 @@ async fn submit_status() {
 			response.assert_status_ok();
 			response.assert_header("content-type", "application/json");
 
-			// Verify the returned status data
-			let returned_status: serde_json::Value = response.json();
-			assert!(returned_status.get("id").is_some());
+			// The response carries only the return-path fields; the stored
+			// status record is not echoed back.
+			let body: serde_json::Value = response.json();
 			assert_eq!(
-				returned_status.get("server_id").and_then(|v| v.as_str()),
-				Some(server_id.to_string().as_str())
+				body,
+				serde_json::json!({"backup_now": [], "check_severities": {}}),
 			);
-			assert_eq!(
-				returned_status.get("device_id").and_then(|v| v.as_str()),
-				Some(device_id.to_string().as_str())
-			);
-			let extra = returned_status.get("extra").expect("extra field");
-			assert_eq!(extra.get("uptime").and_then(|v| v.as_i64()), Some(3600));
 
 			// Verify the status was actually stored in the database
 			let db_status: StatusResult = sql_query(
@@ -212,21 +206,6 @@ async fn submit_status_with_geolocation() {
 				.await;
 			response.assert_status_ok();
 			response.assert_header("content-type", "application/json");
-
-			// Verify the returned status data
-			let returned_status: serde_json::Value = response.json();
-			assert!(returned_status.get("id").is_some());
-			assert_eq!(
-				returned_status.get("server_id").and_then(|v| v.as_str()),
-				Some(server_id.to_string().as_str())
-			);
-			assert_eq!(
-				returned_status.get("device_id").and_then(|v| v.as_str()),
-				Some(device_id.to_string().as_str())
-			);
-			let extra = returned_status.get("extra").expect("extra field");
-			assert_eq!(extra.get("uptime").and_then(|v| v.as_i64()), Some(7200));
-			assert_eq!(extra.get("version").and_then(|v| v.as_str()), Some("2.8.1"));
 
 			// Verify the status was actually stored in the database
 			let db_status: StatusResult = sql_query(
@@ -307,24 +286,6 @@ async fn submit_status_with_cloud() {
 				.await;
 			response.assert_status_ok();
 			response.assert_header("content-type", "application/json");
-
-			// Verify the returned status data
-			let returned_status: serde_json::Value = response.json();
-			assert!(returned_status.get("id").is_some());
-			assert_eq!(
-				returned_status.get("server_id").and_then(|v| v.as_str()),
-				Some(server_id.to_string().as_str())
-			);
-			assert_eq!(
-				returned_status.get("device_id").and_then(|v| v.as_str()),
-				Some(device_id.to_string().as_str())
-			);
-			let extra = returned_status.get("extra").expect("extra field");
-			assert_eq!(extra.get("uptime").and_then(|v| v.as_i64()), Some(4800));
-			assert_eq!(
-				extra.get("platform").and_then(|v| v.as_str()),
-				Some("Linux")
-			);
 
 			// Verify the status was actually stored in the database
 			let db_status: StatusResult = sql_query(
@@ -408,25 +369,6 @@ async fn submit_status_with_geolocation_and_cloud() {
 				.await;
 			response.assert_status_ok();
 			response.assert_header("content-type", "application/json");
-
-			// Verify the returned status data
-			let returned_status: serde_json::Value = response.json();
-			assert!(returned_status.get("id").is_some());
-			assert_eq!(
-				returned_status.get("server_id").and_then(|v| v.as_str()),
-				Some(server_id.to_string().as_str())
-			);
-			assert_eq!(
-				returned_status.get("device_id").and_then(|v| v.as_str()),
-				Some(device_id.to_string().as_str())
-			);
-			let extra = returned_status.get("extra").expect("extra field");
-			assert_eq!(extra.get("uptime").and_then(|v| v.as_i64()), Some(10000));
-			assert_eq!(extra.get("version").and_then(|v| v.as_str()), Some("3.0.0"));
-			assert_eq!(
-				extra.get("timezone").and_then(|v| v.as_str()),
-				Some("America/New_York")
-			);
 
 			// Verify the status was actually stored in the database
 			let db_status: StatusResult = sql_query(

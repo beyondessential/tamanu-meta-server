@@ -123,16 +123,11 @@ const HEALTH_REF: &str = "health";
 /// operators can silence the two independently.
 const BROKEN_REF: &str = "health-broken";
 
-/// The status-push response: the stored status record (its fields appear at
-/// the top level of the response object) plus `backup_now`, the backup types
-/// this server should back up *right now*. Clients that predate `backup_now`
-/// can safely ignore it.
+/// The status-push response: only the return-path instructions the device
+/// can act on. The stored status record is deliberately not echoed back —
+/// the device already has everything it sent.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct StatusResponse {
-	/// The status record as stored, flattened into the top level of the
-	/// response.
-	#[serde(flatten)]
-	pub status: Status,
 	/// Backup types the server should back up now: operator-requested
 	/// one-offs plus scheduled backups that are due. Each serializes as a
 	/// plain string (e.g. `"tamanu-postgres"`). The device should run each
@@ -167,12 +162,13 @@ pub fn routes() -> OpenApiRouter<AppState> {
 /// tracked software version is also updated from the payload.
 ///
 /// The calling device must be the one enrolled for this exact server (or
-/// hold the admin role). The response echoes back the stored status
-/// record, plus a `backup_now` list of backup types the server should
+/// hold the admin role). The response carries only return-path
+/// instructions: a `backup_now` list of backup types the server should
 /// back up immediately — devices should treat a non-empty list as a
 /// prompt to run those backups and report them afterwards — and a
 /// `check_severities` map describing how canopy classifies each known
-/// healthcheck for this server (`skip`/`warn`/`fail`).
+/// healthcheck for this server (`skip`/`warn`/`fail`). The stored status
+/// record is not echoed back.
 #[utoipa::path(
 	post,
 	path = "/{server_id}",
@@ -238,11 +234,10 @@ async fn create(
 		if !server.allow_legacy_status {
 			return Err(AppError::BadRequest("`health` array is required".into()));
 		}
-		let status = create_legacy_status(&mut db, server_id, id, extra, version).await?;
+		create_legacy_status(&mut db, server_id, id, extra, version).await?;
 		let check_severities =
 			effective_check_severities(&mut db, server_id, server.group_id).await?;
 		return Ok(Json(StatusResponse {
-			status,
 			backup_now,
 			check_severities,
 		}));
@@ -260,31 +255,29 @@ async fn create(
 
 	// Insert + file events atomically. NewEvent::save itself opens
 	// a transaction; diesel-async nests it as a SAVEPOINT.
-	let status = db
-		.transaction::<_, AppError, _>(async |conn| {
-			let status = NewStatus {
-				server_id,
-				device_id: Some(id),
-				version,
-				extra,
-				healthy,
-				health,
-			}
-			.save(conn)
-			.await?;
-
-			file_health_events(conn, server_id, Some(id), &status, &tags).await?;
-
-			Ok(status)
-		})
+	db.transaction::<_, AppError, _>(async |conn| {
+		let status = NewStatus {
+			server_id,
+			device_id: Some(id),
+			version,
+			extra,
+			healthy,
+			health,
+		}
+		.save(conn)
 		.await?;
+
+		file_health_events(conn, server_id, Some(id), &status, &tags).await?;
+
+		Ok(())
+	})
+	.await?;
 
 	// Computed after the transaction so checks first seen on this very push
 	// (upserted into the catalog above) are already in the map.
 	let check_severities = effective_check_severities(&mut db, server_id, server.group_id).await?;
 
 	Ok(Json(StatusResponse {
-		status,
 		backup_now,
 		check_severities,
 	}))
@@ -381,7 +374,7 @@ async fn create_legacy_status(
 	device_id: Uuid,
 	extra: serde_json::Value,
 	version: Option<VersionStr>,
-) -> Result<Status> {
+) -> Result<()> {
 	let (healthy, health) = match Status::latest_for_server(db, server_id).await? {
 		Some(prior) => (prior.healthy, prior.health),
 		None => (true, serde_json::Value::Array(Vec::new())),
@@ -395,7 +388,8 @@ async fn create_legacy_status(
 		health,
 	}
 	.save(db)
-	.await
+	.await?;
+	Ok(())
 }
 
 /// Resolve the server version to record on this status. Prefers the payload's
