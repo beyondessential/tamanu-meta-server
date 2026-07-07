@@ -562,12 +562,14 @@ export async function seedBackupRepoStats(
 		logicalBytes?: number | null;
 		physicalBytes?: number | null;
 		bucketBytes?: number | null;
+		/** ISO timestamp of the bucket-bytes measurement. */
+		bucketBytesObservedAt?: string | null;
 	},
 ): Promise<void> {
 	await sql.query(
 		`INSERT INTO backup_repo_stats
-		 (group_id, snapshot_count, source_count, logical_bytes, physical_bytes, bucket_bytes)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		 (group_id, snapshot_count, source_count, logical_bytes, physical_bytes, bucket_bytes, bucket_bytes_observed_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		[
 			opts.groupId,
 			opts.snapshotCount ?? null,
@@ -575,6 +577,7 @@ export async function seedBackupRepoStats(
 			opts.logicalBytes ?? null,
 			opts.physicalBytes ?? null,
 			opts.bucketBytes ?? null,
+			opts.bucketBytesObservedAt ?? null,
 		],
 	);
 }

@@ -289,6 +289,18 @@ test.describe("backups ready: stats + backup-now", () => {
 		await expect(page.getByText("42")).toBeVisible();
 		// bucket_bytes NULL → "unknown" shown, per the indicators rule.
 		await expect(page.getByText(/bucket bytes:\s*unknown/i)).toBeVisible();
+		// The "Observed" timestamp belongs to the kopia-reported repo stats, so
+		// it sits under "Physical bytes", above the bucket figure.
+		const statsPanel = page
+			.getByRole("heading", { name: /repository stats/i })
+			.locator("..");
+		const panelText = await statsPanel.innerText();
+		expect(panelText.indexOf("Observed")).toBeGreaterThan(
+			panelText.indexOf("Physical bytes"),
+		);
+		expect(panelText.indexOf("Observed")).toBeLessThan(
+			panelText.indexOf("Bucket bytes"),
+		);
 		await expect(page.getByText(/recent runs/i)).toBeVisible();
 		await expect(page.getByText("success")).toBeVisible();
 		// The run carries a server_id, so the table names which server it's from.
@@ -436,6 +448,7 @@ test.describe("backups ready: stats + backup-now", () => {
 		await seedBackupRepoStats(sql, {
 			groupId: group.id,
 			bucketBytes: 107374182400, // 100 GiB
+			bucketBytesObservedAt: new Date(Date.now() - 86_400_000).toISOString(),
 		});
 
 		await page.goto(`/groups/${group.id}/backups`);
@@ -445,6 +458,12 @@ test.describe("backups ready: stats + backup-now", () => {
 		const tooltip = page.getByRole("tooltip");
 		await expect(tooltip).toContainText("$2.50/month");
 		await expect(tooltip).toContainText("ap-southeast-2");
+		// The bucket figure comes from CloudWatch on its own daily cadence, so
+		// the tooltip carries its measurement time and says it updates less
+		// often than the kopia-reported stats.
+		await expect(tooltip).toContainText("From CloudWatch storage metrics");
+		await expect(tooltip).toContainText("measured");
+		await expect(tooltip).toContainText("about once a day");
 	});
 
 	test("recent run shows a truncated, copyable snapshot id", async ({
