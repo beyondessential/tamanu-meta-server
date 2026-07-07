@@ -65,6 +65,23 @@ async fn advertise_verify(conn: &mut AsyncPgConnection, consumer: Uuid) {
 		.expect("register caps");
 }
 
+/// Advertise a `sizing` intent accepting a duration `minimum_uptime` param
+/// (with a default) and a bytes `max_size` param.
+async fn advertise_sizing(conn: &mut AsyncPgConnection, consumer: Uuid) {
+	let descriptor: IntentDescriptor = serde_json::from_value(serde_json::json!({
+		"intent": "sizing",
+		"semantics": ["check"],
+		"params": {
+			"minimum_uptime": {"type": "duration", "default": 7200},
+			"max_size": {"type": "bytes"},
+		},
+	}))
+	.unwrap();
+	RestoreConsumerCapability::register(conn, consumer, &[descriptor])
+		.await
+		.expect("register caps");
+}
+
 /// Advertise both `verify` (no params) and `analytics` (boolean `anonymisation`)
 /// on the same consumer, so a declaration can be retargeted between them.
 async fn advertise_verify_and_analytics(conn: &mut AsyncPgConnection, consumer: Uuid) {
@@ -99,7 +116,7 @@ async fn create_rejects_wrong_typed_param() {
 				"type": "tamanu-postgres",
 				"intent": "analytics",
 				"name": "an-decl",
-				"overdue_after_seconds": null,
+				"overdue_after": null,
 				"params": { "anonymisation": "yes" },
 			}))
 			.await
@@ -124,7 +141,7 @@ async fn create_stores_valid_params_and_they_round_trip() {
 				"type": "tamanu-postgres",
 				"intent": "analytics",
 				"name": "an-decl",
-				"overdue_after_seconds": 7200,
+				"overdue_after": "2h",
 				"params": { "anonymisation": false },
 			}))
 			.await
@@ -137,9 +154,16 @@ async fn create_stores_valid_params_and_they_round_trip() {
 		resp.assert_status_ok();
 		let rows: Vec<serde_json::Value> = resp.json();
 		assert_eq!(rows.len(), 1, "got {rows:?}");
-		assert_eq!(rows[0]["overdue_after_seconds"], 7200);
+		assert_eq!(rows[0]["overdue_after"], "2h");
 		assert_eq!(rows[0]["params"]["anonymisation"], false);
 		assert_eq!(rows[0]["gap"], false, "advertised intent is not a gap");
+
+		// The bound is stored as a raw interval, not the display string.
+		let stored = database::RestoreReplica::list_for_group(&mut conn, group)
+			.await
+			.expect("list replicas");
+		assert_eq!(stored.len(), 1);
+		assert_eq!(stored[0].overdue_after.as_ref().unwrap().0.as_secs(), 7200);
 	})
 	.await;
 }
@@ -161,7 +185,7 @@ async fn create_replica(
 			"type": "tamanu-postgres",
 			"intent": intent,
 			"name": format!("{intent}-decl"),
-			"overdue_after_seconds": null,
+			"overdue_after": null,
 			"params": params,
 		}))
 		.await;
@@ -189,7 +213,7 @@ async fn update_changes_intent_and_round_trips() {
 				"type": "tamanu-postgres",
 				"intent": "analytics",
 				"name": "verify-decl",
-				"overdue_after_seconds": null,
+				"overdue_after": null,
 				"params": { "anonymisation": true },
 				"enabled": true,
 			}))
@@ -239,7 +263,7 @@ async fn update_scope_collision_conflicts() {
 				"type": "tamanu-postgres",
 				"intent": "verify",
 				"name": "analytics-decl",
-				"overdue_after_seconds": null,
+				"overdue_after": null,
 				"params": {},
 				"enabled": true,
 			}))
@@ -270,7 +294,7 @@ async fn update_revalidates_params_against_new_intent() {
 				"type": "tamanu-postgres",
 				"intent": "analytics",
 				"name": "verify-decl",
-				"overdue_after_seconds": null,
+				"overdue_after": null,
 				"params": { "anonymisation": "yes" },
 				"enabled": true,
 			}))
@@ -304,7 +328,7 @@ async fn update_can_change_consumer_and_server_scope() {
 				"type": "tamanu-postgres",
 				"intent": "verify",
 				"name": "verify-decl",
-				"overdue_after_seconds": null,
+				"overdue_after": null,
 				"params": {},
 				"enabled": true,
 			}))
@@ -348,7 +372,7 @@ async fn update_to_unadvertised_intent_creates_gap() {
 				"type": "tamanu-postgres",
 				"intent": "analytics",
 				"name": "verify-decl",
-				"overdue_after_seconds": null,
+				"overdue_after": null,
 				"params": { "not_in_any_schema": "kept-as-is" },
 				"enabled": true,
 			}))
@@ -424,6 +448,196 @@ async fn checks_reports_duration_and_surfaces_unreported_restores() {
 		let inflight = rows.iter().find(|r| r["status"] == "in_progress").unwrap();
 		assert!(inflight["server_id"].is_null(), "inferred row has no server");
 		assert!(inflight["duration_seconds"].is_null());
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn create_resolves_unit_strings_and_stores_raw_values() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group = insert_group(&mut conn).await;
+		let consumer = insert_consumer(&mut conn).await;
+		advertise_sizing(&mut conn, consumer).await;
+
+		private
+			.post("/api/restore_replicas/create")
+			.json(&serde_json::json!({
+				"consumer_device_id": consumer,
+				"group_id": group,
+				"server_id": null,
+				"type": "tamanu-postgres",
+				"intent": "sizing",
+				"name": "sizing-decl",
+				"overdue_after": "1d 12h",
+				"params": { "minimum_uptime": "2h 30m", "max_size": "20G" },
+			}))
+			.await
+			.assert_status_ok();
+
+		// Storage is raw: whole seconds and bytes, "20G" read as 1024-based.
+		let stored = database::RestoreReplica::list_for_group(&mut conn, group)
+			.await
+			.expect("list replicas");
+		assert_eq!(stored.len(), 1);
+		assert_eq!(stored[0].overdue_after.as_ref().unwrap().0.as_secs(), 129600);
+		assert_eq!(stored[0].params["minimum_uptime"], serde_json::json!(9000));
+		assert_eq!(
+			stored[0].params["max_size"],
+			serde_json::json!(20i64 * 1024 * 1024 * 1024)
+		);
+
+		// The view formats everything back as display strings.
+		let resp = private
+			.post("/api/restore_replicas/for_group")
+			.json(&serde_json::json!({ "server_group_id": group }))
+			.await;
+		resp.assert_status_ok();
+		let rows: Vec<serde_json::Value> = resp.json();
+		assert_eq!(rows.len(), 1, "got {rows:?}");
+		assert_eq!(rows[0]["overdue_after"], "1d 12h");
+		assert_eq!(rows[0]["params"]["minimum_uptime"], "2h 30m");
+		assert_eq!(rows[0]["params"]["max_size"], "20Gi");
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn create_accepts_raw_integers_for_unit_params() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group = insert_group(&mut conn).await;
+		let consumer = insert_consumer(&mut conn).await;
+		advertise_sizing(&mut conn, consumer).await;
+
+		// Raw integer seconds/bytes (as the view once returned, and as gap
+		// declarations still carry) are accepted unchanged.
+		private
+			.post("/api/restore_replicas/create")
+			.json(&serde_json::json!({
+				"consumer_device_id": consumer,
+				"group_id": group,
+				"server_id": null,
+				"type": "tamanu-postgres",
+				"intent": "sizing",
+				"name": "raw-decl",
+				"overdue_after": null,
+				"params": { "minimum_uptime": 5400, "max_size": 1536 },
+			}))
+			.await
+			.assert_status_ok();
+
+		let resp = private
+			.post("/api/restore_replicas/for_group")
+			.json(&serde_json::json!({ "server_group_id": group }))
+			.await;
+		resp.assert_status_ok();
+		let rows: Vec<serde_json::Value> = resp.json();
+		assert_eq!(rows.len(), 1, "got {rows:?}");
+		assert!(rows[0]["overdue_after"].is_null());
+		assert_eq!(rows[0]["params"]["minimum_uptime"], "1h 30m");
+		// 1536 bytes isn't an exact multiple of 1024, so it displays raw.
+		assert_eq!(rows[0]["params"]["max_size"], "1536");
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn create_rejects_bad_unit_strings() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group = insert_group(&mut conn).await;
+		let consumer = insert_consumer(&mut conn).await;
+		advertise_sizing(&mut conn, consumer).await;
+
+		for (name, params) in [
+			("bad duration", serde_json::json!({ "minimum_uptime": "banana" })),
+			("calendar unit", serde_json::json!({ "minimum_uptime": "1mo" })),
+			("negative", serde_json::json!({ "minimum_uptime": "-1h" })),
+			("sub-second", serde_json::json!({ "minimum_uptime": "0.5s" })),
+			("bare number", serde_json::json!({ "minimum_uptime": "20" })),
+			("bad size unit", serde_json::json!({ "max_size": "20T" })),
+			("size junk", serde_json::json!({ "max_size": "lots" })),
+		] {
+			let resp = private
+				.post("/api/restore_replicas/create")
+				.json(&serde_json::json!({
+					"consumer_device_id": consumer,
+					"group_id": group,
+					"server_id": null,
+					"type": "tamanu-postgres",
+					"intent": "sizing",
+					"name": "bad-decl",
+					"overdue_after": null,
+					"params": params,
+				}))
+				.await;
+			assert_eq!(resp.status_code(), 400, "case {name:?}");
+		}
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn create_rejects_bad_overdue_bound_and_allows_blank() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group = insert_group(&mut conn).await;
+		let consumer = insert_consumer(&mut conn).await;
+		advertise_verify(&mut conn, consumer).await;
+
+		private
+			.post("/api/restore_replicas/create")
+			.json(&serde_json::json!({
+				"consumer_device_id": consumer,
+				"group_id": group,
+				"server_id": null,
+				"type": "tamanu-postgres",
+				"intent": "verify",
+				"name": "bad-bound",
+				"overdue_after": "soon",
+				"params": {},
+			}))
+			.await
+			.assert_status_bad_request();
+
+		// A blank bound means no bound, same as null.
+		private
+			.post("/api/restore_replicas/create")
+			.json(&serde_json::json!({
+				"consumer_device_id": consumer,
+				"group_id": group,
+				"server_id": null,
+				"type": "tamanu-postgres",
+				"intent": "verify",
+				"name": "no-bound",
+				"overdue_after": "  ",
+				"params": {},
+			}))
+			.await
+			.assert_status_ok();
+
+		let stored = database::RestoreReplica::list_for_group(&mut conn, group)
+			.await
+			.expect("list replicas");
+		assert_eq!(stored.len(), 1);
+		assert!(stored[0].overdue_after.is_none());
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn consumers_format_unit_param_defaults_for_display() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let consumer = insert_consumer(&mut conn).await;
+		advertise_sizing(&mut conn, consumer).await;
+
+		let resp = private
+			.post("/api/restore_replicas/consumers")
+			.json(&serde_json::json!({}))
+			.await;
+		resp.assert_status_ok();
+		let rows: Vec<serde_json::Value> = resp.json();
+		assert_eq!(rows.len(), 1, "got {rows:?}");
+		let params = &rows[0]["intents"][0]["params"];
+		assert_eq!(params["minimum_uptime"]["default"], "2h");
+		assert!(params["max_size"].get("default").is_none());
 	})
 	.await;
 }
