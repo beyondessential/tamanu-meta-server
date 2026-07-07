@@ -484,8 +484,9 @@ export async function seedBackupRun(
 	return { id };
 }
 
-/** Seed a `backup_maintenance_runs` row. `finishedAgoSecs` backdates both
- * `started_at` and `finished_at`; omit `outcome` for an in-flight run. */
+/** Seed a `backup_maintenance_runs` row. `finishedAgoSecs` backdates
+ * `finished_at`, and `started_at` a further `durationSecs` (default 0) before
+ * that; omit `outcome` for an in-flight run. */
 export async function seedBackupMaintenanceRun(
 	sql: Sql,
 	opts: {
@@ -495,19 +496,24 @@ export async function seedBackupMaintenanceRun(
 		error?: string | null;
 		bytesReclaimed?: number | null;
 		finishedAgoSecs?: number;
+		durationSecs?: number;
 	},
 ): Promise<void> {
 	const ago = String(opts.finishedAgoSecs ?? 0);
+	const startedAgo = String(
+		(opts.finishedAgoSecs ?? 0) + (opts.durationSecs ?? 0),
+	);
 	const outcome = opts.outcome ?? null;
 	await sql.query(
 		`INSERT INTO backup_maintenance_runs
 		 (group_id, kind, started_at, finished_at, outcome, error, bytes_reclaimed)
 		 VALUES ($1, $2, NOW() - ($3 || ' seconds')::interval,
-		         CASE WHEN $4::text IS NULL THEN NULL ELSE NOW() - ($3 || ' seconds')::interval END,
-		         $4, $5, $6)`,
+		         CASE WHEN $5::text IS NULL THEN NULL ELSE NOW() - ($4 || ' seconds')::interval END,
+		         $5, $6, $7)`,
 		[
 			opts.groupId,
 			opts.kind ?? "full",
+			startedAgo,
 			ago,
 			outcome,
 			opts.error ?? null,

@@ -1080,7 +1080,7 @@ test.describe("backups ready: repo maintenance panel", () => {
 		await expect(panel.getByText(/no maintenance has run yet/i)).toBeVisible();
 	});
 
-	test("a successful run shows Healthy, last-success time, and reclaimed bytes", async ({
+	test("a successful run shows Healthy, last-success time, duration, and reclaimed bytes", async ({
 		page,
 		sql,
 	}) => {
@@ -1095,6 +1095,7 @@ test.describe("backups ready: repo maintenance panel", () => {
 			outcome: "success",
 			bytesReclaimed: 1048576, // 1.0 MiB
 			finishedAgoSecs: 3600,
+			durationSecs: 180, // renders as "3m"
 		});
 
 		await page.goto(`/groups/${group.id}/backups`);
@@ -1105,6 +1106,9 @@ test.describe("backups ready: repo maintenance panel", () => {
 		await expect(panel.getByText("Full", { exact: true })).toBeVisible();
 		// exact: the "Last successful maintenance" caption also contains "success".
 		await expect(panel.getByText("success", { exact: true })).toBeVisible();
+		await expect(
+			panel.getByRole("cell", { name: "3m", exact: true }),
+		).toBeVisible();
 		await expect(panel.getByText("1.0 MiB")).toBeVisible();
 	});
 
@@ -1159,6 +1163,10 @@ test.describe("backups ready: repo maintenance panel", () => {
 		// exact: the summary chip reads "Running" (capitalised); the row chip "running".
 		await expect(panel.getByText("running", { exact: true })).toBeVisible();
 		await expect(panel.getByText("Quick")).toBeVisible();
+		// The unfinished run has no Finished, Duration, or Reclaimed value.
+		await expect(
+			panel.getByRole("cell", { name: "—", exact: true }),
+		).toHaveCount(3);
 	});
 
 	test("an admin can queue and cancel an on-demand full maintenance run", async ({
