@@ -12235,7 +12235,8 @@
           "health",
           "extra",
           "operators",
-          "check_severities"
+          "check_severities",
+          "silenced_checks"
         ],
         "properties": {
           "check_severities": {
@@ -12321,6 +12322,14 @@
             "type": "string",
             "format": "uuid",
             "description": "Id of the server this status was reported by."
+          },
+          "silenced_checks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Check names currently silenced for this server (at server or\ngroup scope). These don't count toward `health_state` and the UI\nrenders them with its skipped affordance. Reflects the silence\nlist as of the request, not as of the snapshot's push.",
+            "uniqueItems": true
           },
           "timezone": {
             "type": [

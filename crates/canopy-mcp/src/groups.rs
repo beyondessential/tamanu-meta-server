@@ -162,9 +162,23 @@ impl CanopyMcp {
 			.await
 			.map_err(mcp_err)?;
 		let st_by: HashMap<Uuid, &Status> = statuses.iter().map(|s| (s.server_id, s)).collect();
+		let member_groups: Vec<(Uuid, Option<Uuid>)> =
+			members.iter().map(|s| (s.id, s.group_id)).collect();
+		let silenced =
+			database::silenced_refs::silenced_health_checks_for_servers(&mut conn, &member_groups)
+				.await
+				.map_err(mcp_err)?;
+		let no_silences = std::collections::BTreeSet::new();
 		let member_summaries = members
 			.iter()
-			.map(|s| summarize(s, st_by.get(&s.id).copied(), Some(group.name.clone())))
+			.map(|s| {
+				summarize(
+					s,
+					st_by.get(&s.id).copied(),
+					Some(group.name.clone()),
+					silenced.get(&s.id).unwrap_or(&no_silences),
+				)
+			})
 			.collect();
 
 		let config = ServerGroupBackupConfig::get(&mut conn, id)

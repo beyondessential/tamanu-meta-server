@@ -7112,6 +7112,13 @@ export interface components {
              * @description Id of the server this status was reported by.
              */
             server_id: string;
+            /**
+             * @description Check names currently silenced for this server (at server or
+             *     group scope). These don't count toward `health_state` and the UI
+             *     renders them with its skipped affordance. Reflects the silence
+             *     list as of the request, not as of the snapshot's push.
+             */
+            silenced_checks: string[];
             /** @description Reported system timezone. */
             timezone?: string | null;
             version?: null | components["schemas"]["VersionStr"];

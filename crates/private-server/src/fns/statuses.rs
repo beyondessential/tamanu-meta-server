@@ -220,6 +220,13 @@ pub async fn group_details(
 		.into_iter()
 		.map(|s| (s.server_id, s))
 		.collect();
+	// Operator-silenced healthchecks don't count toward member health.
+	let member_groups: Vec<(Uuid, Option<Uuid>)> =
+		servers.iter().map(|s| (s.id, s.group_id)).collect();
+	let silenced =
+		database::silenced_refs::silenced_health_checks_for_servers(&mut conn, &member_groups)
+			.await?;
+	let no_silences = BTreeSet::new();
 
 	// The card's headline version is the cached last reported version of the
 	// group's canonical member (highest rank, then highest kind), maintained by
@@ -244,11 +251,14 @@ pub async fn group_details(
 				}
 				_ => Vec::new(),
 			};
+			let silenced_checks = silenced.get(&s.id).unwrap_or(&no_silences);
 			FacilityServerStatus {
 				id: s.id,
 				name: s.name.clone().unwrap_or_default(),
 				up,
-				health: st.map(|s| s.health_state()).unwrap_or_default(),
+				health: st
+					.map(|s| s.health_state_ignoring(silenced_checks))
+					.unwrap_or_default(),
 				operators,
 				rank: s.rank,
 				kind: s.kind,
@@ -488,6 +498,11 @@ pub struct StatusSnapshotData {
 	/// omitted. An unhealthy check with no severity listed here should be
 	/// treated as a default (warning-level) severity.
 	pub check_severities: std::collections::HashMap<String, commons_types::issue::Severity>,
+	/// Check names currently silenced for this server (at server or
+	/// group scope). These don't count toward `health_state` and the UI
+	/// renders them with its skipped affordance. Reflects the silence
+	/// list as of the request, not as of the snapshot's push.
+	pub silenced_checks: BTreeSet<String>,
 }
 
 /// Selects a server and a point in time to fetch a status snapshot for.
@@ -534,6 +549,7 @@ pub async fn snapshot(
 	let Some(status) = status else {
 		return Ok(Json(None));
 	};
+	let server = Server::get_by_id(&mut conn, args.server_id).await?;
 
 	// If the deployment has no published versions yet, we just skip
 	// the distance computation rather than 404'ing the whole
@@ -574,8 +590,17 @@ pub async fn snapshot(
 	// Compute the per-unhealthy-check severity the rules engine would
 	// file at given this push. Healthy checks are omitted; the UI
 	// renders them with its 'passing' affordance regardless.
-	let check_severities = compute_check_severities(&mut conn, args.server_id, &status).await?;
-	let health_state = status.health_state();
+	let check_severities = compute_check_severities(&mut conn, &server, &status).await?;
+	// Operator-silenced healthchecks present as skipped and don't count
+	// toward the rollup, even on historical snapshots — a silence
+	// expresses current operator intent about the check, not the push.
+	let silenced_checks = database::silenced_refs::silenced_health_checks_for_server(
+		&mut conn,
+		server.id,
+		server.group_id,
+	)
+	.await?;
+	let health_state = status.health_state_ignoring(&silenced_checks);
 	let mut operators = status.operators();
 	enrich_operators(&mut conn, operators.iter_mut()).await?;
 
@@ -597,6 +622,7 @@ pub async fn snapshot(
 		extra: status.extra,
 		operators,
 		check_severities,
+		silenced_checks,
 	})))
 }
 
@@ -638,12 +664,11 @@ pub(crate) async fn enrich_operators(
 /// nothing.
 async fn compute_check_severities(
 	conn: &mut database::diesel_async::AsyncPgConnection,
-	server_id: Uuid,
+	server: &Server,
 	status: &Status,
 ) -> commons_errors::Result<std::collections::HashMap<String, commons_types::issue::Severity>> {
 	use commons_types::status::CheckResult;
 	use database::healthcheck_severities::{EvaluationContext, HealthcheckSeverity};
-	use database::servers::Server as DbServer;
 
 	let Some(arr) = status.health.as_array() else {
 		return Ok(Default::default());
@@ -682,7 +707,6 @@ async fn compute_check_severities(
 		return Ok(Default::default());
 	}
 
-	let server = DbServer::get_by_id(conn, server_id).await?;
 	let tag_map = server.tags_merged_with_group(conn).await?;
 	let tags: std::collections::HashMap<String, serde_json::Value> = tag_map
 		.0
@@ -704,8 +728,3 @@ async fn compute_check_severities(
 	}
 	Ok(out)
 }
-
-// Touch `Server` so the unused-import warning doesn't fire when this module
-// is compiled standalone in some configurations.
-#[allow(dead_code)]
-fn _server_touch(_s: Server) {}
