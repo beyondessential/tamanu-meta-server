@@ -621,20 +621,23 @@ test.describe("backups ready: stats + backup-now", () => {
 			status: "ready",
 			intervalSeconds: 3600,
 		});
-		// The backup that produced the snapshot, sized when it ran.
+		// The backup that produced the snapshot, sized when it ran. 32.0 MiB is
+		// seeded nowhere else, so seeing it on the restore row below proves the
+		// size came from this run via the lookup.
 		await seedBackupRun(sql, {
 			deviceId: device.id,
 			groupId: group.id,
 			serverId: server.id,
 			outcome: "success",
-			bytesUploaded: 8388608, // 8.0 MiB snapshot
+			bytesUploaded: 33554432, // 32.0 MiB snapshot
 			snapshotId: "kfedcba9876543210fedc",
 			reportedAgoSecs: 3600,
 		});
 		// A reported restore of that snapshot: bestool sends the restored-from
 		// snapshot id and the proxy's traffic tallies (no bytes_uploaded — nothing
-		// is uploaded), and no size of its own — the size resolves from the
-		// producing backup run, without waiting for an inspection backfill.
+		// is uploaded), and no size of its own (snapshot_logical_bytes unset) —
+		// the size resolves from the producing backup run, without waiting for an
+		// inspection backfill.
 		await seedBackupRun(sql, {
 			deviceId: device.id,
 			groupId: group.id,
@@ -645,21 +648,25 @@ test.describe("backups ready: stats + backup-now", () => {
 			snapshotId: "kfedcba9876543210fedc",
 			s3SentPayloadBytes: 2048, // 2.0 KiB (kopia metadata chatter)
 			s3SentRawBytes: 3072,
-			s3ReceivedPayloadBytes: 4096, // 4.0 KiB → shown in the Transfer column
-			s3ReceivedRawBytes: 5120,
+			s3ReceivedPayloadBytes: 8388608, // 8.0 MiB → shown in the Transfer column
+			s3ReceivedRawBytes: 9437184,
 		});
 
 		await page.goto(`/groups/${group.id}/backups`);
 		const runs = page.getByRole("table").last();
 		await expect(runs.getByRole("columnheader", { name: "Transfer" })).toBeVisible();
-		const restoreRow = runs.getByRole("row").filter({ hasText: "restore" });
-		// Transfer shows the download (received payload), not the upload…
-		await expect(restoreRow.getByText("4.0 KiB")).toBeVisible();
-		// …which only appears in the collapsed S3-traffic detail.
+		// Pick the restore row by its exact Purpose cell — the server name also
+		// contains "restore", so a bare hasText filter would match the backup row.
+		const restoreRow = runs
+			.getByRole("row")
+			.filter({ has: page.getByRole("cell", { name: "restore", exact: true }) });
+		// Transfer shows the download (received payload) in its own cell…
+		await expect(restoreRow.getByRole("cell", { name: "8.0 MiB" })).toBeVisible();
+		// …not the upload, which only appears in the collapsed S3-traffic detail.
 		await expect(restoreRow.getByText("2.0 KiB")).toBeHidden();
-		// Snapshot size shows the restored snapshot's size, looked up from the
-		// backup run that produced it.
-		await expect(restoreRow.getByText("8.0 MiB")).toBeVisible();
+		// Snapshot size shows the producing backup run's figure — the restore row
+		// itself was seeded without one, so this pins the lookup, not the backfill.
+		await expect(restoreRow.getByRole("cell", { name: "32.0 MiB" })).toBeVisible();
 	});
 
 	test("run with both a snapshot size and S3 traffic shows them as distinct columns", async ({
