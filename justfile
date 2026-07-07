@@ -20,7 +20,7 @@ default:
 
 # Check if the project compiles
 check:
-    cargo check
+    scripts/contain.sh cargo check
 
 # Build the project Docker image
 build-image:
@@ -49,36 +49,37 @@ watch-private-web:
 
 # Run all tests. Uses a throwaway RAM-backed Postgres (tmpfs + fsync off) via
 # scripts/ramdisk-pg.sh so the per-test CREATE/DROP DATABASE churn never hits
-# disk — fast, no I/O grind. Args pass straight to nextest, so `just test`,
-# `just test -p database`, and `just test some_name` all work. Use test-system
-# to run against $DATABASE_URL instead.
+# disk — fast, no I/O grind. The whole run (compile, postgres, tests) sits in
+# a resource-limited cgroup via scripts/contain.sh so it can't freeze the
+# machine. Args pass straight to nextest, so `just test`, `just test -p
+# database`, and `just test some_name` all work. Use test-system to run
+# against $DATABASE_URL instead.
 test *args:
-    scripts/ramdisk-pg.sh cargo nextest run --no-fail-fast {{ args }}
+    scripts/contain.sh scripts/ramdisk-pg.sh cargo nextest run --no-fail-fast {{ args }}
 
 # Run tests for a specific package (RAM-backed; see `test`)
 test-package package:
-    scripts/ramdisk-pg.sh cargo nextest run --no-fail-fast -p {{ package }}
+    scripts/contain.sh scripts/ramdisk-pg.sh cargo nextest run --no-fail-fast -p {{ package }}
 
 # Run a specific test (RAM-backed; see `test`)
 test-name name:
-    scripts/ramdisk-pg.sh cargo nextest run --no-fail-fast {{ name }}
+    scripts/contain.sh scripts/ramdisk-pg.sh cargo nextest run --no-fail-fast {{ name }}
 
 # Run tests with no capture (show output) (RAM-backed; see `test`)
 test-verbose:
-    scripts/ramdisk-pg.sh cargo nextest run --no-fail-fast --no-capture
+    scripts/contain.sh scripts/ramdisk-pg.sh cargo nextest run --no-fail-fast --no-capture
 
 # Run tests against your system Postgres ($DATABASE_URL) rather than the
 # throwaway RAM-backed one — e.g. to inspect the DB afterwards, or where
-# initdb/pg_ctl aren't available. Args pass through to nextest. Prefix with
-# `nice` to soften the I/O grind. `just test-system`, `just test-system -p
-# database`, `just test-system some_name`.
+# initdb/pg_ctl aren't available. Args pass through to nextest.
+# `just test-system`, `just test-system -p database`, `just test-system some_name`.
 test-system *args:
-    DATABASE_URL={{ DATABASE_URL }} cargo nextest run --no-fail-fast {{ args }}
+    DATABASE_URL={{ DATABASE_URL }} scripts/contain.sh cargo nextest run --no-fail-fast {{ args }}
 
 # Run any command against the throwaway RAM-backed Postgres (escape hatch for
 # things the test recipes don't cover).
 fast +cmd:
-    scripts/ramdisk-pg.sh {{ cmd }}
+    scripts/contain.sh scripts/ramdisk-pg.sh {{ cmd }}
 
 # Run the private-web Playwright end-to-end suite. Builds the
 # private-server + migrate binaries first (the e2e fixture spawns its
@@ -86,8 +87,8 @@ fast +cmd:
 # throwaway RAM-backed Postgres; the fixture creates its per-worker databases
 # on the cluster the wrapper points CANOPY_E2E_ADMIN_DATABASE_URL at.
 test-e2e:
-    cargo build --bin private-server --bin migrate
-    cd private-web && {{ justfile_directory() }}/scripts/ramdisk-pg.sh npm run test:e2e
+    scripts/contain.sh cargo build --bin private-server --bin migrate
+    cd private-web && {{ justfile_directory() }}/scripts/contain.sh {{ justfile_directory() }}/scripts/ramdisk-pg.sh npm run test:e2e
 
 # Same as `test-e2e` but launches Playwright's interactive UI runner.
 # Useful for stepping through failures and inspecting traces.
@@ -137,7 +138,7 @@ fmt-check:
 
 # Run clippy lints
 lint:
-    cargo clippy --all-features --all-targets
+    scripts/contain.sh cargo clippy --all-features --all-targets
 
 # Fix clippy warnings automatically where possible
 lint-fix:

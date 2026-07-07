@@ -1,0 +1,31 @@
+// All integration tests for this crate compile into this single binary.
+// One test target links (and writes to disk) once instead of once per
+// file, which keeps rebuilds from swamping the machine with I/O.
+// Nextest still runs every #[tokio::test] in parallel as usual.
+
+mod backfill_registered_at_migration;
+mod backup_detection;
+mod backups;
+mod check_severity_map;
+mod event_validation;
+mod healthcheck_severities;
+mod healthcheck_severity_rules;
+mod incident_close_severity;
+mod incident_get_with_issues;
+mod incident_severity_semantics;
+mod incident_stats;
+mod mcp_tokens;
+mod reachability_sweep;
+mod recovery_vault;
+mod resolve_overall_health_rollups_migration;
+mod restore;
+mod self_alerts;
+mod server_enrollment;
+mod server_group_archival;
+mod server_group_version_cache;
+mod server_restore_window;
+mod silenced_health_checks;
+mod slack_outbox_enqueue;
+mod status_health_state;
+mod statuses_device_fk;
+mod tag_reserved_prefix;
