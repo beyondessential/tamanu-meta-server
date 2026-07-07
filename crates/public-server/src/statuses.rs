@@ -11,7 +11,10 @@ use commons_servers::{
 	backup_jobs::backups_due_now_for_server, device_auth::ServerDevice, headers::VersionHeader,
 };
 use commons_types::{
-	backup::BackupType, device::DeviceRole, issue::Severity, status::CheckResult,
+	backup::BackupType,
+	device::DeviceRole,
+	issue::Severity,
+	status::{CheckResult, CheckSeverity},
 	version::VersionStr,
 };
 use database::{
@@ -21,6 +24,7 @@ use database::{
 	healthcheck_severities::{EvaluationContext, HealthcheckSeverity},
 	issues::{Issue, NewEvent},
 	servers::Server,
+	silenced_refs::silenced_refs_with_prefix,
 	statuses::{NewStatus, Status},
 };
 use jiff::Timestamp;
@@ -136,10 +140,21 @@ pub struct StatusResponse {
 	/// means nothing to do.
 	#[schema(value_type = Vec<String>)]
 	pub backup_now: Vec<BackupType>,
+	/// The effective handling of every healthcheck canopy knows about, keyed
+	/// by check name (as reported in `health[].check`): `skip` (silenced for
+	/// this server, or classified below warning), `warn` (warning), or `fail`
+	/// (error or critical). Only the static severity baseline is reflected —
+	/// operator-defined conditional rules are evaluated per push and not
+	/// included. Checks absent from the map are new to canopy and default to
+	/// `warn`. Clients that predate this field can safely ignore it; the
+	/// same mapping is served on demand at `GET /status/{server_id}/check-severities`.
+	pub check_severities: BTreeMap<String, CheckSeverity>,
 }
 
 pub fn routes() -> OpenApiRouter<AppState> {
-	OpenApiRouter::new().routes(routes!(create))
+	OpenApiRouter::new()
+		.routes(routes!(create))
+		.routes(routes!(check_severities))
 }
 
 /// Submit a status heartbeat for a server.
@@ -155,7 +170,9 @@ pub fn routes() -> OpenApiRouter<AppState> {
 /// hold the admin role). The response echoes back the stored status
 /// record, plus a `backup_now` list of backup types the server should
 /// back up immediately — devices should treat a non-empty list as a
-/// prompt to run those backups and report them afterwards.
+/// prompt to run those backups and report them afterwards — and a
+/// `check_severities` map describing how canopy classifies each known
+/// healthcheck for this server (`skip`/`warn`/`fail`).
 #[utoipa::path(
 	post,
 	path = "/{server_id}",
@@ -222,7 +239,13 @@ async fn create(
 			return Err(AppError::BadRequest("`health` array is required".into()));
 		}
 		let status = create_legacy_status(&mut db, server_id, id, extra, version).await?;
-		return Ok(Json(StatusResponse { status, backup_now }));
+		let check_severities =
+			effective_check_severities(&mut db, server_id, server.group_id).await?;
+		return Ok(Json(StatusResponse {
+			status,
+			backup_now,
+			check_severities,
+		}));
 	};
 
 	// Resolve the server's effective tag map outside the write transaction.
@@ -256,7 +279,93 @@ async fn create(
 		})
 		.await?;
 
-	Ok(Json(StatusResponse { status, backup_now }))
+	// Computed after the transaction so checks first seen on this very push
+	// (upserted into the catalog above) are already in the map.
+	let check_severities = effective_check_severities(&mut db, server_id, server.group_id).await?;
+
+	Ok(Json(StatusResponse {
+		status,
+		backup_now,
+		check_severities,
+	}))
+}
+
+/// Fetch the effective healthcheck severity mapping for a server.
+///
+/// Returns, for every healthcheck canopy knows about, how a failure of that
+/// check is classified for this server: `skip` (the check is silenced for
+/// this server — at server or group scope — or its severity is below
+/// warning), `warn` (warning), or `fail` (error or critical). Keys are check
+/// names as reported in `health[].check` on status pushes. Only the static
+/// severity baseline is reflected; operator-defined conditional rules are
+/// evaluated per push and not included here. The same mapping also rides
+/// along every status-push response as `check_severities`.
+///
+/// The calling device must be the one enrolled for this exact server (or
+/// hold the admin role).
+#[utoipa::path(
+	get,
+	path = "/{server_id}/check-severities",
+	operation_id = "check_severities",
+	tag = "statuses",
+	security(("server-device" = [])),
+	params(
+		("server_id" = Uuid, Path),
+	),
+	responses(
+		(status = 200, description = "Effective handling for each known check, keyed by check name.", body = BTreeMap<String, CheckSeverity>),
+		(status = 401, body = ProblemDetailsSchema),
+		(status = 403, body = ProblemDetailsSchema),
+		(status = 404, body = ProblemDetailsSchema),
+	),
+)]
+async fn check_severities(
+	Path(server_id): Path<Uuid>,
+	State(db): State<Db>,
+	device: ServerDevice,
+) -> Result<Json<BTreeMap<String, CheckSeverity>>> {
+	let mut db = db.get().await?;
+	let Device { role, id, .. } = device.0.0;
+
+	let server = Server::get_by_id(&mut db, server_id).await?;
+	if role != DeviceRole::Admin && server.device_id != Some(id) {
+		return Err(AppError::custom(
+			"device is not authorized to read this server's check severities",
+		));
+	}
+
+	let map = effective_check_severities(&mut db, server_id, server.group_id).await?;
+	Ok(Json(map))
+}
+
+/// Build the effective per-check severity map for a server: every check in
+/// the operator catalog mapped from its static base severity (error and
+/// above → `fail`, warning → `warn`, below warning → `skip`), then any check
+/// silenced for this server (at server or group scope) forced to `skip`.
+/// Conditional severity rules are deliberately not consulted — they depend
+/// on each push's contents, so only the static baseline can be mapped ahead
+/// of time.
+async fn effective_check_severities(
+	db: &mut AsyncPgConnection,
+	server_id: Uuid,
+	group_id: Option<Uuid>,
+) -> Result<BTreeMap<String, CheckSeverity>> {
+	let mut map: BTreeMap<String, CheckSeverity> = HealthcheckSeverity::base_severity_map(db)
+		.await?
+		.into_iter()
+		.map(|(name, severity)| (name, severity.into()))
+		.collect();
+
+	let health_prefix = format!("{HEALTH_REF}/");
+	for r#ref in
+		silenced_refs_with_prefix(db, server_id, group_id, STATUS_SOURCE, &health_prefix).await?
+	{
+		if let Some(check) = r#ref.strip_prefix(&health_prefix) {
+			map.insert(check.to_string(), CheckSeverity::Skip);
+		}
+	}
+
+	Ok(map)
 }
 
 /// Store a legacy-format push (no `health` array) for a server that's opted

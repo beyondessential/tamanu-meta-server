@@ -111,6 +111,55 @@ pub async fn is_silenced(
 	Ok(group_hit > 0)
 }
 
+/// All refs silenced for this server under `source` and starting with
+/// `ref_prefix`, combining the server's own silence list with its group's.
+/// `group_id` is the server's current group; pass `None` if the server is
+/// ungrouped. Used to build the device-facing effective check-severity map.
+/// May contain duplicates when a ref is silenced at both scopes.
+pub async fn silenced_refs_with_prefix(
+	db: &mut AsyncPgConnection,
+	server_id: Uuid,
+	group_id: Option<Uuid>,
+	source: &str,
+	ref_prefix: &str,
+) -> Result<Vec<String>> {
+	use crate::schema::{server_group_silenced_refs, server_silenced_refs};
+
+	debug_assert!(
+		!ref_prefix.contains(['%', '_', '\\']),
+		"prefix is used in a LIKE pattern and must not contain wildcards"
+	);
+
+	let mut refs: Vec<String> = server_silenced_refs::table
+		.select(server_silenced_refs::ref_)
+		.filter(
+			server_silenced_refs::server_id
+				.eq(server_id)
+				.and(server_silenced_refs::source.eq(source))
+				.and(server_silenced_refs::ref_.like(format!("{ref_prefix}%"))),
+		)
+		.load(db)
+		.await
+		.map_err(AppError::from)?;
+
+	if let Some(gid) = group_id {
+		let group_refs: Vec<String> = server_group_silenced_refs::table
+			.select(server_group_silenced_refs::ref_)
+			.filter(
+				server_group_silenced_refs::server_group_id
+					.eq(gid)
+					.and(server_group_silenced_refs::source.eq(source))
+					.and(server_group_silenced_refs::ref_.like(format!("{ref_prefix}%"))),
+			)
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		refs.extend(group_refs);
+	}
+
+	Ok(refs)
+}
+
 impl ServerSilencedRef {
 	/// Add a server-scoped silence and re-evaluate any currently-open
 	/// matching issues so they leave their incident. Idempotent: a

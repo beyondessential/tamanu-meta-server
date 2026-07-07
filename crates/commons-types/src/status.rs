@@ -2,6 +2,44 @@ use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
 
+use crate::issue::Severity;
+
+/// How a server should treat one of its healthchecks, distilled from
+/// canopy's operator-side configuration (the severity catalog and the
+/// silence lists) into a three-level device-facing vocabulary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum CheckSeverity {
+	/// This check's failures are ignored on the canopy side — it is
+	/// silenced for this server, or its severity is classified below
+	/// warning.
+	Skip,
+	/// This check's failures are treated as warnings.
+	Warn,
+	/// This check's failures are treated as errors (incident-opening).
+	Fail,
+}
+
+impl From<Severity> for CheckSeverity {
+	fn from(severity: Severity) -> Self {
+		match severity {
+			Severity::Critical | Severity::Error => Self::Fail,
+			Severity::Warning => Self::Warn,
+			Severity::Info | Severity::Debug => Self::Skip,
+		}
+	}
+}
+
+impl Display for CheckSeverity {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			CheckSeverity::Skip => write!(f, "skip"),
+			CheckSeverity::Warn => write!(f, "warn"),
+			CheckSeverity::Fail => write!(f, "fail"),
+		}
+	}
+}
+
 /// Reachability of a server, based on how recently it last reported a status update.
 #[derive(
 	Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, utoipa::ToSchema,
