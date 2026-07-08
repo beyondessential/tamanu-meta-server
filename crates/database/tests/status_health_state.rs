@@ -16,6 +16,7 @@ fn status(healthy: bool, health: serde_json::Value) -> Status {
 		extra: serde_json::json!({}),
 		healthy,
 		health,
+		client: "bestool".to_owned(),
 	}
 }
 

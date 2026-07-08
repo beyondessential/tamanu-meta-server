@@ -42,6 +42,13 @@ use crate::state::AppState;
 /// status data.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct StatusPayload {
+	/// The reporting agent this status is attributed to (e.g. `bestool`,
+	/// `seedling`). **Absent means `bestool`**, so agents that predate this
+	/// field keep reporting under their existing stream. Status is recorded
+	/// per (server, client), so concurrent agents on one host never overwrite
+	/// each other.
+	pub client: Option<String>,
+
 	/// Overall self-reported health of the server. **Absent means `true`**,
 	/// so senders that predate this field are never treated as unhealthy by
 	/// omission. Recorded for historical analysis and display, but **not
@@ -223,7 +230,7 @@ async fn create(
 	};
 
 	let raw = body.map(|j| j.0).unwrap_or(serde_json::Value::Null);
-	let (healthy, health, extra) = split_health_from_extra(raw)?;
+	let (healthy, client, health, extra) = split_health_from_extra(raw)?;
 
 	// The server version canopy tracks (and compares against the published
 	// version catalog) is the Tamanu version. Prefer the payload's
@@ -238,7 +245,7 @@ async fn create(
 		if !server.allow_legacy_status {
 			return Err(AppError::BadRequest("`health` array is required".into()));
 		}
-		let status = create_legacy_status(&mut db, server_id, id, extra, version).await?;
+		let status = create_legacy_status(&mut db, server_id, id, extra, version, client).await?;
 		let check_severities =
 			effective_check_severities(&mut db, server_id, server.group_id).await?;
 		return Ok(Json(StatusResponse {
@@ -269,6 +276,7 @@ async fn create(
 				extra,
 				healthy,
 				health,
+				client,
 			}
 			.save(conn)
 			.await?;
@@ -381,6 +389,7 @@ async fn create_legacy_status(
 	device_id: Uuid,
 	extra: serde_json::Value,
 	version: Option<VersionStr>,
+	client: String,
 ) -> Result<Status> {
 	let (healthy, health) = match Status::latest_for_server(db, server_id).await? {
 		Some(prior) => (prior.healthy, prior.health),
@@ -393,6 +402,7 @@ async fn create_legacy_status(
 		extra,
 		healthy,
 		health,
+		client,
 	}
 	.save(db)
 	.await
@@ -651,7 +661,7 @@ fn per_check_description(
 ///   verbatim.
 fn split_health_from_extra(
 	raw: serde_json::Value,
-) -> Result<(bool, Option<serde_json::Value>, serde_json::Value)> {
+) -> Result<(bool, String, Option<serde_json::Value>, serde_json::Value)> {
 	let mut obj = match raw {
 		serde_json::Value::Null => serde_json::Map::new(),
 		serde_json::Value::Object(m) => m,
@@ -668,12 +678,20 @@ fn split_health_from_extra(
 		Some(_) => return Err(AppError::BadRequest("`healthy` must be a boolean".into())),
 	};
 
+	// The reporting agent, defaulting to `bestool` so reporters that name none
+	// keep their existing stream.
+	let client = match obj.remove("client") {
+		None => "bestool".to_owned(),
+		Some(serde_json::Value::String(s)) => s,
+		Some(_) => return Err(AppError::BadRequest("`client` must be a string".into())),
+	};
+
 	// A push without a `health` key is the retired legacy format. We don't
 	// reject it here — the caller decides, per the server's
 	// `allow_legacy_status` flag, whether to accept it (reachability-only,
 	// carrying prior healthchecks forward) or 400 it.
 	let Some(health_value) = obj.remove("health") else {
-		return Ok((healthy, None, serde_json::Value::Object(obj)));
+		return Ok((healthy, client, None, serde_json::Value::Object(obj)));
 	};
 	let health_arr = match health_value {
 		serde_json::Value::Array(a) => a,
@@ -727,6 +745,7 @@ fn split_health_from_extra(
 
 	Ok((
 		healthy,
+		client,
 		Some(serde_json::Value::Array(health_arr)),
 		serde_json::Value::Object(obj),
 	))

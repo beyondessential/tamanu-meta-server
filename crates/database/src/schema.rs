@@ -538,6 +538,7 @@ diesel::table! {
 		device_id -> Nullable<Uuid>,
 		healthy -> Bool,
 		health -> Jsonb,
+		client -> Text,
 	}
 }
 

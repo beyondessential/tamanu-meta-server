@@ -91,6 +91,9 @@ pub struct Status {
 	/// `check` name and a result; any extra per-check fields are passed
 	/// through verbatim.
 	pub health: serde_json::Value,
+	/// The reporting agent this status is attributed to; `bestool` when the
+	/// report named none.
+	pub client: String,
 }
 
 #[derive(Debug, Insertable)]
@@ -104,6 +107,7 @@ pub struct NewStatus {
 	pub extra: serde_json::Value,
 	pub healthy: bool,
 	pub health: serde_json::Value,
+	pub client: String,
 }
 
 impl Default for NewStatus {
@@ -115,6 +119,7 @@ impl Default for NewStatus {
 			extra: serde_json::Value::Object(Default::default()),
 			healthy: true,
 			health: serde_json::Value::Array(Default::default()),
+			client: "bestool".to_owned(),
 		}
 	}
 }
@@ -162,6 +167,9 @@ impl Status {
 					// to avoid false-positive unhealthy events from this path.
 					healthy: true,
 					health: serde_json::Value::Array(Default::default()),
+					// Canopy-generated reachability status; attributed to the
+					// default client stream.
+					client: "bestool".to_owned(),
 				})
 			}
 			Err(err) => {

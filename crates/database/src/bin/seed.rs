@@ -864,6 +864,7 @@ async fn seed_statuses(
 				extra,
 				healthy,
 				health,
+				client: "bestool".to_owned(),
 			})
 			.execute(conn)
 			.await?;
