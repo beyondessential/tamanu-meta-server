@@ -739,7 +739,7 @@
           "statuses"
         ],
         "summary": "Submit a status heartbeat for a server.",
-        "description": "Records a periodic status push against the server identified in the\npath: overall self-reported health, a per-check breakdown, and any\nfree-form extra data. Each failed or warning check opens (or keeps\nopen) an issue at that check's operator-configured severity, and each\npassed check closes any issue it previously opened; the server's\ntracked software version is also updated from the payload.\n\nThe calling device must be the one enrolled for this exact server (or\nhold the admin role). The response echoes back the stored status\nrecord, plus a `backup_now` list of backup types the server should\nback up immediately — devices should treat a non-empty list as a\nprompt to run those backups and report them afterwards — and a\n`check_severities` map describing how canopy classifies each known\nhealthcheck for this server (`skip`/`warn`/`fail`).",
+        "description": "Records a periodic status push against the server identified in the\npath: overall self-reported health, a per-check breakdown, and any\nfree-form extra data. Each failed or warning check opens (or keeps\nopen) an issue at that check's operator-configured severity, and each\npassed check closes any issue it previously opened; the server's\ntracked software version is also updated from the payload.\n\nThe calling device must be the one enrolled for this exact server (or\nhold the admin role). The response carries only return-path\ninstructions: a `backup_now` list of backup types the server should\nback up immediately — devices should treat a non-empty list as a\nprompt to run those backups and report them afterwards — a\n`check_severities` map describing how canopy classifies each known\nhealthcheck for this server (`skip`/`warn`/`fail`), and the server's\neffective `tags` (as served by `GET /tags`). The stored status record\nis not echoed back.",
         "operationId": "submit_status",
         "parameters": [
           {
@@ -2033,64 +2033,6 @@
           }
         }
       },
-      "Status": {
-        "type": "object",
-        "description": "A stored status report from a server: one heartbeat's worth of\nself-reported health, version, and extra data.",
-        "required": [
-          "id",
-          "created_at",
-          "server_id",
-          "extra",
-          "healthy",
-          "health"
-        ],
-        "properties": {
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "description": "When this status was received."
-          },
-          "device_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid",
-            "description": "The device that submitted this status, or `null` for statuses\ngenerated internally (e.g. by the reachability sweep)."
-          },
-          "extra": {
-            "description": "Free-form extra data from the report (uptime, database version,\ntimezone, etc.), stored verbatim as a JSON object."
-          },
-          "health": {
-            "description": "Per-check breakdown, as an array of objects each with at least a\n`check` name and a result; any extra per-check fields are passed\nthrough verbatim."
-          },
-          "healthy": {
-            "type": "boolean",
-            "description": "Server's overall self-reported health. A report that omits this is\nrecorded as healthy."
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Unique identifier of this status record."
-          },
-          "server_id": {
-            "type": "string",
-            "format": "uuid",
-            "description": "The server this status was reported for."
-          },
-          "version": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/VersionStr",
-                "description": "The software version the server reported, if it reported one."
-              }
-            ]
-          }
-        }
-      },
       "StatusPayload": {
         "allOf": [
           {
@@ -2123,39 +2065,36 @@
         "description": "A status push: a server's periodic heartbeat carrying its self-reported\nhealth.\n\nBesides the reserved `healthy` and `health` keys described here, any\nadditional top-level fields are accepted and stored verbatim as extra\nstatus data."
       },
       "StatusResponse": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/Status",
-            "description": "The status record as stored, flattened into the top level of the\nresponse."
-          },
-          {
-            "type": "object",
-            "required": [
-              "backup_now",
-              "check_severities"
-            ],
-            "properties": {
-              "backup_now": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                },
-                "description": "Backup types the server should back up now: operator-requested\none-offs plus scheduled backups that are due. Each serializes as a\nplain string (e.g. `\"tamanu-postgres\"`). The device should run each\nlisted type, then report via `POST /backup-report`; an empty list\nmeans nothing to do."
-              },
-              "check_severities": {
-                "type": "object",
-                "description": "The effective handling of every healthcheck canopy knows about, keyed\nby check name (as reported in `health[].check`): `skip` (silenced for\nthis server, or classified below warning), `warn` (warning), or `fail`\n(error or critical). Only the static severity baseline is reflected —\noperator-defined conditional rules are evaluated per push and not\nincluded. Checks absent from the map are new to canopy and default to\n`warn`. Clients that predate this field can safely ignore it; the\nsame mapping is served on demand at `GET /status/{server_id}/check-severities`.",
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/CheckSeverity"
-                },
-                "propertyNames": {
-                  "type": "string"
-                }
-              }
-            }
-          }
+        "type": "object",
+        "description": "The status-push response: only the return-path instructions the device\ncan act on. The stored status record is deliberately not echoed back —\nthe device already has everything it sent.",
+        "required": [
+          "backup_now",
+          "check_severities",
+          "tags"
         ],
-        "description": "The status-push response: the stored status record (its fields appear at\nthe top level of the response object) plus `backup_now`, the backup types\nthis server should back up *right now*. Clients that predate `backup_now`\ncan safely ignore it."
+        "properties": {
+          "backup_now": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Backup types the server should back up now: operator-requested\none-offs plus scheduled backups that are due. Each serializes as a\nplain string (e.g. `\"tamanu-postgres\"`). The device should run each\nlisted type, then report via `POST /backup-report`; an empty list\nmeans nothing to do."
+          },
+          "check_severities": {
+            "type": "object",
+            "description": "The effective handling of every healthcheck canopy knows about, keyed\nby check name (as reported in `health[].check`): `skip` (silenced for\nthis server, or classified below warning), `warn` (warning), or `fail`\n(error or critical). Only the static severity baseline is reflected —\noperator-defined conditional rules are evaluated per push and not\nincluded. Checks absent from the map are new to canopy and default to\n`warn`. Clients that predate this field can safely ignore it; the\nsame mapping is served on demand at `GET /status/{server_id}/check-severities`.",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CheckSeverity"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "tags": {
+            "$ref": "#/components/schemas/TagMap",
+            "description": "The server's effective tags: its own tags overlaid on its group's,\nplus the synthetic read-only `canopy:` tags and effective `billing.*`\nlabels. Identical to what the standalone `GET /tags` endpoint\nreturns — see that endpoint for the full contract. Clients that\npredate this field can safely ignore it."
+          }
+        }
       },
       "TagMap": {
         "type": "object",
@@ -2356,11 +2295,6 @@
           "published",
           "yanked"
         ]
-      },
-      "VersionStr": {
-        "type": "string",
-        "description": "A semantic version string, e.g. `2.10.5`.",
-        "example": "2.10.5"
       },
       "ViewVersion": {
         "type": "object",

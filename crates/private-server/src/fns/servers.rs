@@ -294,10 +294,20 @@ pub(super) async fn decorate_with_status(
 	let statuses = Status::latest_for_servers(conn, &ids).await?;
 	let by_server: std::collections::HashMap<Uuid, &Status> =
 		statuses.iter().map(|s| (s.server_id, s)).collect();
+	// Operator-silenced healthchecks don't count toward the health dot.
+	let server_groups: Vec<(Uuid, Option<Uuid>)> =
+		infos.iter().map(|i| (i.id, i.group_id)).collect();
+	let silenced =
+		database::silenced_refs::silenced_health_checks_for_servers(conn, &server_groups).await?;
+	let no_silences = std::collections::BTreeSet::new();
 	for info in infos.iter_mut() {
 		let st = by_server.get(&info.id).copied();
+		let silenced_checks = silenced.get(&info.id).unwrap_or(&no_silences);
 		info.up = Some(st.map(|s| s.short_status()).unwrap_or_default());
-		info.health = Some(st.map(|s| s.health_state()).unwrap_or_default());
+		info.health = Some(
+			st.map(|s| s.health_state_ignoring(silenced_checks))
+				.unwrap_or_default(),
+		);
 	}
 	Ok(())
 }
@@ -594,9 +604,17 @@ pub async fn get_detail(
 		.as_ref()
 		.map(|s| s.short_status())
 		.unwrap_or_default();
+	// Operator-silenced healthchecks don't count toward the headline
+	// health chip; the checks table still shows them (as skipped).
+	let silenced_checks = database::silenced_refs::silenced_health_checks_for_server(
+		&mut conn,
+		server.id,
+		server.group_id,
+	)
+	.await?;
 	let health = status
 		.as_ref()
-		.map(|s| s.health_state())
+		.map(|s| s.health_state_ignoring(&silenced_checks))
 		.unwrap_or_default();
 
 	let device_with_info = if let Some(device_id) = device_id {

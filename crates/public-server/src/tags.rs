@@ -3,7 +3,7 @@ use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::{backup_jobs::BillingLabels, device_auth::ServerDevice};
 use commons_types::server::TagMap;
-use database::{Db, server_groups::ServerGroup, servers::Server};
+use database::{Db, diesel_async::AsyncPgConnection, server_groups::ServerGroup, servers::Server};
 
 use crate::state::AppState;
 
@@ -66,7 +66,18 @@ pub async fn get_self(device: ServerDevice, State(db): State<Db>) -> Result<Json
 		)));
 	}
 	let server = servers.pop().ok_or(AppError::DeviceHasNoServer)?;
-	let mut merged = server.tags_for_device(&mut conn).await?;
+	Ok(Json(effective_tags_for_server(&mut conn, &server).await?))
+}
+
+/// The device-facing effective tag set for a server: its own tags overlaid
+/// on its group's, plus the synthetic read-only `canopy:` tags and the
+/// effective `billing.*` labels. Shared between the standalone `GET /tags`
+/// endpoint and the status-push response, so the two always agree.
+pub async fn effective_tags_for_server(
+	conn: &mut AsyncPgConnection,
+	server: &Server,
+) -> Result<TagMap> {
+	let mut merged = server.tags_for_device(conn).await?;
 
 	// Fill in the group's effective billing labels where the server doesn't
 	// already carry one, matching what canopy attributes to the group's cloud
@@ -77,7 +88,7 @@ pub async fn get_self(device: ServerDevice, State(db): State<Db>) -> Result<Json
 	// rank=clone server must report `billing.stage=clone`, never the group's
 	// `prod`, so its cost attributes to the right stage.
 	if let Some(group_id) = server.group_id {
-		let group = ServerGroup::get_by_id(&mut conn, group_id).await?;
+		let group = ServerGroup::get_by_id(conn, group_id).await?;
 		for (key, value) in
 			BillingLabels::from_group(&group.tags, &group.name, server.rank).into_tags()
 		{
@@ -85,5 +96,5 @@ pub async fn get_self(device: ServerDevice, State(db): State<Db>) -> Result<Json
 		}
 	}
 
-	Ok(Json(merged))
+	Ok(merged)
 }

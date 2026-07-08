@@ -147,19 +147,18 @@ async fn submit_status() {
 			response.assert_status_ok();
 			response.assert_header("content-type", "application/json");
 
-			// Verify the returned status data
-			let returned_status: serde_json::Value = response.json();
-			assert!(returned_status.get("id").is_some());
+			// The response carries only the return-path fields; the stored
+			// status record is not echoed back. Tags for this bare ungrouped
+			// server are just the synthetic `canopy:kind`.
+			let body: serde_json::Value = response.json();
 			assert_eq!(
-				returned_status.get("server_id").and_then(|v| v.as_str()),
-				Some(server_id.to_string().as_str())
+				body,
+				serde_json::json!({
+					"backup_now": [],
+					"check_severities": {},
+					"tags": {"canopy:kind": "facility"},
+				}),
 			);
-			assert_eq!(
-				returned_status.get("device_id").and_then(|v| v.as_str()),
-				Some(device_id.to_string().as_str())
-			);
-			let extra = returned_status.get("extra").expect("extra field");
-			assert_eq!(extra.get("uptime").and_then(|v| v.as_i64()), Some(3600));
 
 			// Verify the status was actually stored in the database
 			let db_status: StatusResult = sql_query(
@@ -181,6 +180,71 @@ async fn submit_status() {
 			assert_eq!(
 				db_status.extra.get("uptime").and_then(|v| v.as_i64()),
 				Some(3600)
+			);
+		},
+	)
+	.await
+}
+
+/// The `tags` field on the status-push response must be exactly what the
+/// standalone `GET /tags` endpoint serves — same merge, same synthetic
+/// `canopy:` tags, same billing labels.
+#[tokio::test(flavor = "multi_thread")]
+async fn submit_status_returns_effective_tags_matching_tags_endpoint() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let group_id = Uuid::new_v4();
+			let server_id = Uuid::new_v4();
+			sql_query(
+				"INSERT INTO server_groups (id, name, tags) \
+				 VALUES ($1, 'status-tags-cluster', '{\"region\": \"au\", \"env\": \"group\"}'::jsonb)",
+			)
+			.bind::<sql_types::Uuid, _>(group_id)
+			.execute(&mut conn)
+			.await
+			.expect("insert group");
+			sql_query(
+				"INSERT INTO servers (id, host, kind, device_id, group_id, rank, tags) \
+				 VALUES ($1, 'https://tagged.example.com', 'central', $2, $3, 'production', \
+				 '{\"env\": \"server\"}'::jsonb)",
+			)
+			.bind::<sql_types::Uuid, _>(server_id)
+			.bind::<sql_types::Uuid, _>(device_id)
+			.bind::<sql_types::Uuid, _>(group_id)
+			.execute(&mut conn)
+			.await
+			.expect("insert server");
+
+			let tags_response = public
+				.get("/tags")
+				.add_header("mtls-certificate", &cert)
+				.await;
+			tags_response.assert_status_ok();
+			let standalone_tags: serde_json::Value = tags_response.json();
+
+			let response = public
+				.post(&format!("/status/{server_id}"))
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({ "health": [] }))
+				.await;
+			response.assert_status_ok();
+			let body: serde_json::Value = response.json();
+			assert_eq!(body.get("tags"), Some(&standalone_tags));
+
+			// Spot-check the merge itself so the equality above can't pass
+			// vacuously: server tag wins the collision, group tag carries
+			// through, and the synthetic tags are present.
+			let tags = body.get("tags").and_then(|t| t.as_object()).expect("tags");
+			assert_eq!(tags.get("env").and_then(|v| v.as_str()), Some("server"));
+			assert_eq!(tags.get("region").and_then(|v| v.as_str()), Some("au"));
+			assert_eq!(
+				tags.get("canopy:kind").and_then(|v| v.as_str()),
+				Some("central")
+			);
+			assert_eq!(
+				tags.get("canopy:group-id").and_then(|v| v.as_str()),
+				Some(group_id.to_string().as_str())
 			);
 		},
 	)
@@ -212,21 +276,6 @@ async fn submit_status_with_geolocation() {
 				.await;
 			response.assert_status_ok();
 			response.assert_header("content-type", "application/json");
-
-			// Verify the returned status data
-			let returned_status: serde_json::Value = response.json();
-			assert!(returned_status.get("id").is_some());
-			assert_eq!(
-				returned_status.get("server_id").and_then(|v| v.as_str()),
-				Some(server_id.to_string().as_str())
-			);
-			assert_eq!(
-				returned_status.get("device_id").and_then(|v| v.as_str()),
-				Some(device_id.to_string().as_str())
-			);
-			let extra = returned_status.get("extra").expect("extra field");
-			assert_eq!(extra.get("uptime").and_then(|v| v.as_i64()), Some(7200));
-			assert_eq!(extra.get("version").and_then(|v| v.as_str()), Some("2.8.1"));
 
 			// Verify the status was actually stored in the database
 			let db_status: StatusResult = sql_query(
@@ -307,24 +356,6 @@ async fn submit_status_with_cloud() {
 				.await;
 			response.assert_status_ok();
 			response.assert_header("content-type", "application/json");
-
-			// Verify the returned status data
-			let returned_status: serde_json::Value = response.json();
-			assert!(returned_status.get("id").is_some());
-			assert_eq!(
-				returned_status.get("server_id").and_then(|v| v.as_str()),
-				Some(server_id.to_string().as_str())
-			);
-			assert_eq!(
-				returned_status.get("device_id").and_then(|v| v.as_str()),
-				Some(device_id.to_string().as_str())
-			);
-			let extra = returned_status.get("extra").expect("extra field");
-			assert_eq!(extra.get("uptime").and_then(|v| v.as_i64()), Some(4800));
-			assert_eq!(
-				extra.get("platform").and_then(|v| v.as_str()),
-				Some("Linux")
-			);
 
 			// Verify the status was actually stored in the database
 			let db_status: StatusResult = sql_query(
@@ -408,25 +439,6 @@ async fn submit_status_with_geolocation_and_cloud() {
 				.await;
 			response.assert_status_ok();
 			response.assert_header("content-type", "application/json");
-
-			// Verify the returned status data
-			let returned_status: serde_json::Value = response.json();
-			assert!(returned_status.get("id").is_some());
-			assert_eq!(
-				returned_status.get("server_id").and_then(|v| v.as_str()),
-				Some(server_id.to_string().as_str())
-			);
-			assert_eq!(
-				returned_status.get("device_id").and_then(|v| v.as_str()),
-				Some(device_id.to_string().as_str())
-			);
-			let extra = returned_status.get("extra").expect("extra field");
-			assert_eq!(extra.get("uptime").and_then(|v| v.as_i64()), Some(10000));
-			assert_eq!(extra.get("version").and_then(|v| v.as_str()), Some("3.0.0"));
-			assert_eq!(
-				extra.get("timezone").and_then(|v| v.as_str()),
-				Some("America/New_York")
-			);
 
 			// Verify the status was actually stored in the database
 			let db_status: StatusResult = sql_query(
@@ -2666,7 +2678,6 @@ async fn status_is_recorded_and_scoped_per_client() {
 				.await;
 			response.assert_status_ok();
 			let body: serde_json::Value = response.json();
-			assert_eq!(body.get("client").and_then(|v| v.as_str()), Some("bestool"));
 			assert!(
 				body.get("backup_now").is_some(),
 				"bestool gets a backup_now list"
@@ -2686,10 +2697,6 @@ async fn status_is_recorded_and_scoped_per_client() {
 				.await;
 			response.assert_status_ok();
 			let body: serde_json::Value = response.json();
-			assert_eq!(
-				body.get("client").and_then(|v| v.as_str()),
-				Some("seedling")
-			);
 			assert!(
 				body.get("backup_now").is_none(),
 				"seedling is sent no backup_now"

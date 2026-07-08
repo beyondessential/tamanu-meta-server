@@ -14,6 +14,7 @@ import CloseIcon from "@mui/icons-material/Close";
 import CircleIcon from "@mui/icons-material/Circle";
 import ErrorIcon from "@mui/icons-material/Error";
 import InfoIcon from "@mui/icons-material/Info";
+import NotificationsOffIcon from "@mui/icons-material/NotificationsOff";
 import PreviewIcon from "@mui/icons-material/Preview";
 import RemoveCircleOutlinedIcon from "@mui/icons-material/RemoveCircleOutlined";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
@@ -121,6 +122,7 @@ function PanelBody({
 				health={snap.health}
 				severities={snap.check_severities}
 				operators={snap.operators}
+				silencedChecks={snap.silenced_checks}
 			/>
 			<ExtrasBlock extra={snap.extra} />
 		</Stack>
@@ -189,12 +191,16 @@ function ChecksBlock({
 	health,
 	severities,
 	operators,
+	silencedChecks,
 }: {
 	health: StatusSnapshotData["health"];
 	severities: StatusSnapshotData["check_severities"];
 	operators: StatusSnapshotData["operators"];
+	silencedChecks: StatusSnapshotData["silenced_checks"];
 }) {
-	const entries = parseChecks(health);
+	// Silenced checks render skip-style and sort with the skipped tail —
+	// the backend excludes them from `health_state` the same way.
+	const entries = parseChecks(health, new Set(silencedChecks));
 	if (entries.length === 0) return null;
 	return (
 		<Box>
@@ -229,7 +235,9 @@ function ChecksBlock({
 								borderRadius: 1,
 								alignItems: "flex-start",
 								bgcolor:
-									entry.result === "passed" || entry.result === "skipped"
+									entry.result === "passed" ||
+									entry.result === "skipped" ||
+									entry.silenced
 										? undefined
 										: "action.hover",
 							}}
@@ -237,6 +245,7 @@ function ChecksBlock({
 							<CheckIcon
 								result={entry.result}
 								severity={severities[entry.check] ?? null}
+								silenced={entry.silenced}
 							/>
 							<Box sx={{ flex: 1, minWidth: 0 }}>
 								<Typography variant="body2" sx={{ fontFamily: "monospace" }}>
@@ -286,10 +295,17 @@ function ExtrasBlock({ extra }: { extra: StatusSnapshotData["extra"] }) {
 type ParsedCheck = {
 	check: string;
 	result: CheckResult;
+	/** Whether the check is silenced (server or group scope), per the
+	 * snapshot's `silenced_checks`: presented skip-style and excluded
+	 * from the health rollup. */
+	silenced: boolean;
 	extras: Array<[string, unknown]>;
 };
 
-function parseChecks(health: StatusSnapshotData["health"]): ParsedCheck[] {
+function parseChecks(
+	health: StatusSnapshotData["health"],
+	silencedChecks: Set<string>,
+): ParsedCheck[] {
 	if (!Array.isArray(health)) return [];
 	const parsed: ParsedCheck[] = [];
 	for (const raw of health as unknown[]) {
@@ -298,13 +314,20 @@ function parseChecks(health: StatusSnapshotData["health"]): ParsedCheck[] {
 		const check = obj.check;
 		const result = checkResultOf(obj);
 		if (typeof check !== "string" || result === null) continue;
-		parsed.push({ check, result, extras: checkEntryExtras(obj) });
+		parsed.push({
+			check,
+			result,
+			silenced: silencedChecks.has(check),
+			extras: checkEntryExtras(obj),
+		});
 	}
+	const sortResult = (e: ParsedCheck): CheckResult =>
+		e.silenced ? "skipped" : e.result;
 	parsed.sort((a, b) => {
-		if (a.result !== b.result) {
+		if (sortResult(a) !== sortResult(b)) {
 			return (
-				CHECK_RESULT_ORDER.indexOf(a.result) -
-				CHECK_RESULT_ORDER.indexOf(b.result)
+				CHECK_RESULT_ORDER.indexOf(sortResult(a)) -
+				CHECK_RESULT_ORDER.indexOf(sortResult(b))
 			);
 		}
 		return a.check.localeCompare(b.check);
@@ -320,14 +343,28 @@ function parseChecks(health: StatusSnapshotData["health"]): ParsedCheck[] {
 /// yellow triangle, error → red ⊘, critical → red filled exclamation).
 /// Falls back to the warning icon when the severity is absent — the
 /// catalog hasn't been touched for this check yet, so we surface it
-/// at the default level rather than miscolouring it.
+/// at the default level rather than miscolouring it. Silenced checks
+/// get the same neutral grey treatment as skipped ones, whatever they
+/// reported — they don't count toward the server's health.
 function CheckIcon({
 	result,
 	severity,
+	silenced = false,
 }: {
 	result: CheckResult;
 	severity: Severity | null;
+	silenced?: boolean;
 }) {
+	if (silenced) {
+		return (
+			<Tooltip
+				title={`Silenced — reported ${result}, not counted toward server health`}
+				arrow
+			>
+				<NotificationsOffIcon fontSize="small" color="disabled" />
+			</Tooltip>
+		);
+	}
 	switch (result) {
 		case "passed":
 			return (

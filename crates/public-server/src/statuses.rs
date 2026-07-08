@@ -14,6 +14,7 @@ use commons_types::{
 	backup::BackupType,
 	device::DeviceRole,
 	issue::Severity,
+	server::TagMap,
 	status::{CheckResult, CheckSeverity},
 	version::VersionStr,
 };
@@ -130,16 +131,11 @@ const HEALTH_REF: &str = "health";
 /// operators can silence the two independently.
 const BROKEN_REF: &str = "health-broken";
 
-/// The status-push response: the stored status record (its fields appear at
-/// the top level of the response object) plus `backup_now`, the backup types
-/// this server should back up *right now*. Clients that predate `backup_now`
-/// can safely ignore it.
+/// The status-push response: only the return-path instructions the device
+/// can act on. The stored status record is deliberately not echoed back —
+/// the device already has everything it sent.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct StatusResponse {
-	/// The status record as stored, flattened into the top level of the
-	/// response.
-	#[serde(flatten)]
-	pub status: Status,
 	/// Backup types the server should back up now: operator-requested
 	/// one-offs plus scheduled backups that are due. Each serializes as a
 	/// plain string (e.g. `"tamanu-postgres"`). The device should run each
@@ -158,6 +154,12 @@ pub struct StatusResponse {
 	/// `warn`. Clients that predate this field can safely ignore it; the
 	/// same mapping is served on demand at `GET /status/{server_id}/check-severities`.
 	pub check_severities: BTreeMap<String, CheckSeverity>,
+	/// The server's effective tags: its own tags overlaid on its group's,
+	/// plus the synthetic read-only `canopy:` tags and effective `billing.*`
+	/// labels. Identical to what the standalone `GET /tags` endpoint
+	/// returns — see that endpoint for the full contract. Clients that
+	/// predate this field can safely ignore it.
+	pub tags: TagMap,
 }
 
 pub fn routes() -> OpenApiRouter<AppState> {
@@ -176,14 +178,16 @@ pub fn routes() -> OpenApiRouter<AppState> {
 /// tracked software version is also updated from the payload.
 ///
 /// The calling device must be the one enrolled for this exact server (or
-/// hold the admin role). The response echoes back the stored status
-/// record and a `check_severities` map describing how canopy classifies
-/// each known healthcheck for this server (`skip`/`warn`/`fail`). The
-/// `bestool` client (the agent that runs backups) additionally gets a
-/// `backup_now` list of backup types the server should back up
-/// immediately — it should treat a non-empty list as a prompt to run
-/// those backups and report them afterwards; other clients are sent no
-/// `backup_now` at all.
+/// hold the admin role). The response carries only return-path
+/// instructions, scoped to the reporting client: a `backup_now` list of
+/// backup types the server should back up immediately — sent only to the
+/// `bestool` client (the agent that runs backups), which should treat a
+/// non-empty list as a prompt to run those backups and report them
+/// afterwards; other clients get no `backup_now` at all — a
+/// `check_severities` map describing how canopy classifies each known
+/// healthcheck for this server (`skip`/`warn`/`fail`), and the server's
+/// effective `tags` (as served by `GET /tags`). The stored status record
+/// is not echoed back.
 #[utoipa::path(
 	post,
 	path = "/{server_id}",
@@ -254,13 +258,14 @@ async fn create(
 		if !server.allow_legacy_status {
 			return Err(AppError::BadRequest("`health` array is required".into()));
 		}
-		let status = create_legacy_status(&mut db, server_id, id, extra, version, client).await?;
+		create_legacy_status(&mut db, server_id, id, extra, version, client).await?;
 		let check_severities =
 			effective_check_severities(&mut db, server_id, server.group_id).await?;
+		let tags = crate::tags::effective_tags_for_server(&mut db, &server).await?;
 		return Ok(Json(StatusResponse {
-			status,
 			backup_now,
 			check_severities,
+			tags,
 		}));
 	};
 
@@ -276,39 +281,39 @@ async fn create(
 
 	// Insert + file events atomically. NewEvent::save itself opens
 	// a transaction; diesel-async nests it as a SAVEPOINT.
-	let status = db
-		.transaction::<_, AppError, _>(async |conn| {
-			let status = NewStatus {
-				server_id,
-				device_id: Some(id),
-				version,
-				extra,
-				healthy,
-				health,
-				client,
-			}
-			.save(conn)
-			.await?;
-
-			// Health issues derive from the authoritative client's checks
-			// only: another client's stream is stored and answered, but its
-			// checks must not open or close issues on the same refs.
-			if status.client == database::statuses::DEFAULT_CLIENT {
-				file_health_events(conn, server_id, Some(id), &status, &tags).await?;
-			}
-
-			Ok(status)
-		})
+	db.transaction::<_, AppError, _>(async |conn| {
+		let status = NewStatus {
+			server_id,
+			device_id: Some(id),
+			version,
+			extra,
+			healthy,
+			health,
+			client,
+		}
+		.save(conn)
 		.await?;
+
+		// Health issues derive from the authoritative client's checks
+		// only: another client's stream is stored and answered, but its
+		// checks must not open or close issues on the same refs.
+		if status.client == database::statuses::DEFAULT_CLIENT {
+			file_health_events(conn, server_id, Some(id), &status, &tags).await?;
+		}
+
+		Ok(())
+	})
+	.await?;
 
 	// Computed after the transaction so checks first seen on this very push
 	// (upserted into the catalog above) are already in the map.
 	let check_severities = effective_check_severities(&mut db, server_id, server.group_id).await?;
+	let effective_tags = crate::tags::effective_tags_for_server(&mut db, &server).await?;
 
 	Ok(Json(StatusResponse {
-		status,
 		backup_now,
 		check_severities,
+		tags: effective_tags,
 	}))
 }
 
@@ -404,7 +409,7 @@ async fn create_legacy_status(
 	extra: serde_json::Value,
 	version: Option<VersionStr>,
 	client: String,
-) -> Result<Status> {
+) -> Result<()> {
 	let (healthy, health) = match Status::latest_for_server(db, server_id).await? {
 		Some(prior) => (prior.healthy, prior.health),
 		None => (true, serde_json::Value::Array(Vec::new())),
@@ -419,7 +424,8 @@ async fn create_legacy_status(
 		client,
 	}
 	.save(db)
-	.await
+	.await?;
+	Ok(())
 }
 
 /// Resolve the server version to record on this status. Prefers the payload's

@@ -1,7 +1,10 @@
 import { expect, test } from "./test-fixtures";
 import {
 	resetSeededTables,
+	seedGroupSilencedRef,
 	seedServer,
+	seedServerGroup,
+	seedServerSilencedRef,
 	seedStatus,
 	seedVersion,
 } from "./seed";
@@ -130,5 +133,98 @@ test.describe("server detail checks table", () => {
 		const skippedY = (await skipped.boundingBox())!.y;
 		expect(failedY).toBeLessThan(passedY);
 		expect(passedY).toBeLessThan(skippedY);
+	});
+});
+
+test.describe("silenced healthchecks", () => {
+	test.beforeEach(async ({ sql }) => {
+		await resetSeededTables(sql);
+	});
+
+	test("a server-silenced failing check renders skip-style and doesn't count toward health", async ({
+		page,
+		sql,
+	}) => {
+		await seedVersion(sql, { major: 1, minor: 0, patch: 0 });
+		const server = await seedServer(sql, {
+			name: "hushed-server",
+			kind: "central",
+		});
+		// Named so alphabetical order would put the silenced check first:
+		// its position after the passing check proves silenced sorts with
+		// the skipped tail, not by name or by its raw failed result.
+		await seedStatus(sql, {
+			serverId: server.id,
+			healthy: true,
+			health: [
+				{ check: "a-silenced", result: "failed" },
+				{ check: "m-passes", result: "passed" },
+			],
+		});
+		await seedServerSilencedRef(sql, {
+			serverId: server.id,
+			ref: "health/a-silenced",
+		});
+
+		await page.goto(`/servers/${server.id}`);
+
+		// Headline rollup ignores the silenced failure.
+		await expect(page.getByText("Healthy", { exact: true })).toBeVisible();
+		await expect(
+			page.getByText("Unhealthy", { exact: true }),
+		).not.toBeVisible();
+
+		// The row is still listed and flagged as silenced. Exact matching:
+		// the Silenced refs section also shows the full
+		// "status/health/a-silenced" ref, which substring-matches.
+		await expect(
+			page.getByText("a-silenced", { exact: true }),
+		).toBeVisible();
+		await expect(page.getByText("silenced (server)")).toBeVisible();
+		await expect(
+			page.getByRole("button", { name: "Manage silence for a-silenced" }),
+		).toBeVisible();
+		// The neutral silenced icon renders three times for the row (result
+		// icon, silenced chip, admin silence button) and the red failure
+		// icon not at all — neither in the row nor the headline chip.
+		await expect(page.getByTestId("NotificationsOffIcon")).toHaveCount(3);
+		await expect(page.getByTestId("CancelIcon")).toHaveCount(0);
+
+		// And it sorts with the skipped tail, after passing checks.
+		const passed = page.getByText("m-passes", { exact: true });
+		const silenced = page.getByText("a-silenced", { exact: true });
+		const passedY = (await passed.boundingBox())!.y;
+		const silencedY = (await silenced.boundingBox())!.y;
+		expect(passedY).toBeLessThan(silencedY);
+	});
+
+	test("a group-silenced failing check doesn't count toward member health", async ({
+		page,
+		sql,
+	}) => {
+		await seedVersion(sql, { major: 1, minor: 0, patch: 0 });
+		const group = await seedServerGroup(sql, { name: "hushed-group" });
+		const server = await seedServer(sql, {
+			name: "grouped-hushed-server",
+			kind: "central",
+			groupId: group.id,
+		});
+		await seedStatus(sql, {
+			serverId: server.id,
+			healthy: true,
+			health: [{ check: "database", result: "failed" }],
+		});
+		await seedGroupSilencedRef(sql, {
+			groupId: group.id,
+			ref: "health/database",
+		});
+
+		await page.goto(`/servers/${server.id}`);
+
+		await expect(page.getByText("Healthy", { exact: true })).toBeVisible();
+		await expect(
+			page.getByText("Unhealthy", { exact: true }),
+		).not.toBeVisible();
+		await expect(page.getByText("silenced (group)")).toBeVisible();
 	});
 });

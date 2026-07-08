@@ -1259,6 +1259,52 @@ impl BackupRun {
 		Ok((totals.sent, totals.received))
 	}
 
+	/// The size of each named snapshot, resolved from the *backup* runs that
+	/// produced them: the device-reported size (`bytes_uploaded`) or, failing
+	/// that, the inspection-observed size (`snapshot_logical_bytes`) — the same
+	/// preference the recent-runs UI applies to the producing run itself. Keyed
+	/// by snapshot id; ids with no sized producing run are absent.
+	///
+	/// This is what lets a restore run show the size of the snapshot it used
+	/// immediately: the snapshot was sized when the backup that created it ran
+	/// (or was inspected), so there is no need to wait for inspection to
+	/// backfill the restore run's own row.
+	pub async fn snapshot_sizes_by_id(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+		snapshot_ids: &[String],
+	) -> Result<HashMap<String, i64>> {
+		use crate::schema::backup_runs::dsl;
+
+		if snapshot_ids.is_empty() {
+			return Ok(HashMap::new());
+		}
+
+		let rows: Vec<Self> = dsl::backup_runs
+			.filter(dsl::group_id.eq(group_id))
+			.filter(dsl::purpose.eq(BackupPurpose::Backup))
+			.filter(dsl::snapshot_id.eq_any(snapshot_ids))
+			.filter(
+				dsl::bytes_uploaded
+					.is_not_null()
+					.or(dsl::snapshot_logical_bytes.is_not_null()),
+			)
+			.distinct_on(dsl::snapshot_id)
+			.order_by((dsl::snapshot_id, dsl::reported_at.desc()))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		Ok(rows
+			.into_iter()
+			.filter_map(|r| {
+				let id = r.snapshot_id?;
+				let size = r.bytes_uploaded.or(r.snapshot_logical_bytes)?;
+				Some((id, size))
+			})
+			.collect())
+	}
+
 	/// Fill `snapshot_logical_bytes` from repo inspection for runs matched by
 	/// snapshot id, only where it is still unset — write-once, since a snapshot
 	/// is immutable. `sizes` maps a snapshot id to its observed logical size.

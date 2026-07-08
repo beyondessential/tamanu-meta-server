@@ -10,7 +10,7 @@ use diesel_async::{RunQueryDsl, SimpleAsyncConnection as _};
 use uuid::Uuid;
 
 const MIGRATION_UP: &str =
-	include_str!("../../../migrations/2026-06-03-150906-0000_backfill_registered_at/up.sql");
+	include_str!("../../../../migrations/2026-06-03-150906-0000_backfill_registered_at/up.sql");
 
 #[derive(diesel::QueryableByName)]
 struct RegisteredRow {

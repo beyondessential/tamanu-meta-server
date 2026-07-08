@@ -1388,3 +1388,127 @@ async fn snapshot_check_severities_cover_result_form() {
 	})
 	.await
 }
+
+/// A silenced healthcheck stops counting toward the server's health
+/// rollup (`get_detail`'s `health`), while the raw check result stays
+/// on `last_status.health` for display; unsilencing brings it back.
+#[tokio::test(flavor = "multi_thread")]
+async fn get_detail_health_excludes_silenced_checks() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO versions (id, major, minor, patch, status, changelog, created_at) VALUES
+			('00000000-0000-0000-0000-000000000001', 1, 0, 0, 'published', 'Test version', NOW());
+
+			INSERT INTO servers (id, name, host, rank, kind) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Silence Server', 'https://silence.example.com', 'production', 'central');
+
+			INSERT INTO statuses (server_id, version, healthy, health, extra, created_at) VALUES
+			('11111111-1111-1111-1111-111111111111', '1.0.0', true,
+			 '[{\"check\": \"postgres\", \"result\": \"failed\"}]'::jsonb, '{}'::jsonb, NOW())",
+		)
+		.await
+		.unwrap();
+
+		let detail = async || {
+			let response = private
+				.post("/api/servers/get_detail")
+				.json(&serde_json::json!({"server_id": "11111111-1111-1111-1111-111111111111"}))
+				.await;
+			response.assert_status_ok();
+			let body: serde_json::Value = response.json();
+			body
+		};
+
+		let body = detail().await;
+		assert_eq!(body["health"], "unhealthy");
+
+		conn.batch_execute(
+			"INSERT INTO server_silenced_refs (server_id, source, ref) VALUES
+			('11111111-1111-1111-1111-111111111111', 'status', 'health/postgres')",
+		)
+		.await
+		.unwrap();
+
+		let body = detail().await;
+		assert_eq!(body["health"], "healthy");
+		// The check keeps recording — only the rollup changes.
+		assert_eq!(
+			body["last_status"]["health"][0]["result"], "failed",
+			"raw check result must stay on the status payload"
+		);
+
+		conn.batch_execute("DELETE FROM server_silenced_refs").await.unwrap();
+		let body = detail().await;
+		assert_eq!(body["health"], "unhealthy");
+	})
+	.await
+}
+
+/// Group-scope silences apply to every member's health rollup on the
+/// group card.
+#[tokio::test(flavor = "multi_thread")]
+async fn group_details_member_health_excludes_group_silenced_checks() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			// group_details 404s via NoMatchingVersions when nothing is
+			// published, so seed a version like its other tests do.
+			"INSERT INTO versions (id, major, minor, patch, status, changelog, created_at) VALUES
+			('00000000-0000-0000-0000-000000000001', 1, 0, 0, 'published', 'Test version', NOW());
+
+			INSERT INTO server_groups (id, name) VALUES
+			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Silenced cluster');
+
+			INSERT INTO servers (id, name, host, rank, kind, group_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Member Server', 'https://member.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+
+			INSERT INTO statuses (server_id, version, healthy, health, extra, created_at) VALUES
+			('11111111-1111-1111-1111-111111111111', '1.0.0', true,
+			 '[{\"check\": \"disk\", \"result\": \"failed\"}]'::jsonb, '{}'::jsonb, NOW());
+
+			INSERT INTO server_group_silenced_refs (server_group_id, source, ref) VALUES
+			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'status', 'health/disk')",
+		)
+		.await
+		.unwrap();
+
+		let response = private
+			.post("/api/statuses/group_details")
+			.json(&serde_json::json!({"server_group_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}))
+			.await;
+		response.assert_status_ok();
+		let body: serde_json::Value = response.json();
+		assert_eq!(body["members"][0]["health"], "healthy");
+	})
+	.await
+}
+
+/// The snapshot endpoint reports which checks are silenced and excludes
+/// them from its `health_state` rollup.
+#[tokio::test(flavor = "multi_thread")]
+async fn snapshot_reports_and_excludes_silenced_checks() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO servers (id, name, host, rank, kind) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Snap Server', 'https://snap.example.com', 'production', 'central');
+
+			INSERT INTO statuses (server_id, version, healthy, health, extra, created_at) VALUES
+			('11111111-1111-1111-1111-111111111111', '1.0.0', true,
+			 '[{\"check\": \"postgres\", \"result\": \"failed\"}, {\"check\": \"disk\", \"result\": \"passed\"}]'::jsonb, '{}'::jsonb, NOW());
+
+			INSERT INTO server_silenced_refs (server_id, source, ref) VALUES
+			('11111111-1111-1111-1111-111111111111', 'status', 'health/postgres')",
+		)
+		.await
+		.unwrap();
+
+		let response = private
+			.post("/api/statuses/snapshot")
+			.json(&serde_json::json!({"server_id": "11111111-1111-1111-1111-111111111111"}))
+			.await;
+		response.assert_status_ok();
+		let body: serde_json::Value = response.json();
+		assert_eq!(body["health_state"], "healthy");
+		assert_eq!(body["silenced_checks"], serde_json::json!(["postgres"]));
+	})
+	.await
+}

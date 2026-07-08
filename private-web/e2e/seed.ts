@@ -262,6 +262,45 @@ export async function seedHealthcheckSeverity(
 	return { checkName: opts.checkName };
 }
 
+/** Server-scope silence for a `(source, ref)` pair, as the UI's
+ * silence button would create. For a healthcheck, pass
+ * `ref: "health/<check>"` (source defaults to "status"). */
+export async function seedServerSilencedRef(
+	sql: Sql,
+	opts: {
+		serverId: string;
+		ref: string;
+		source?: string;
+		createdBy?: string | null;
+	},
+): Promise<void> {
+	await sql.query(
+		`INSERT INTO server_silenced_refs (server_id, source, ref, created_by)
+		 VALUES ($1, $2, $3, $4)
+		 ON CONFLICT DO NOTHING`,
+		[opts.serverId, opts.source ?? "status", opts.ref, opts.createdBy ?? null],
+	);
+}
+
+/** Group-scope silence for a `(source, ref)` pair; see
+ * {@link seedServerSilencedRef}. */
+export async function seedGroupSilencedRef(
+	sql: Sql,
+	opts: {
+		groupId: string;
+		ref: string;
+		source?: string;
+		createdBy?: string | null;
+	},
+): Promise<void> {
+	await sql.query(
+		`INSERT INTO server_group_silenced_refs (server_group_id, source, ref, created_by)
+		 VALUES ($1, $2, $3, $4)
+		 ON CONFLICT DO NOTHING`,
+		[opts.groupId, opts.source ?? "status", opts.ref, opts.createdBy ?? null],
+	);
+}
+
 /** Cache row for a Tailscale user's display info, as the auth layer
  * would have upserted it. Used to test avatar/name enrichment. */
 export async function seedTailscaleUser(

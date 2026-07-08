@@ -97,3 +97,91 @@ fn result_passed_and_skipped_do_not_count() {
 		HealthState::Healthy,
 	);
 }
+
+/// A silenced failing check is treated as skipped: it doesn't drag the
+/// server to Unhealthy (or Warning), whatever form it was reported in.
+#[test]
+fn silenced_failing_check_does_not_count() {
+	let silenced = std::collections::BTreeSet::from(["b".to_string()]);
+	assert_eq!(
+		status(
+			true,
+			serde_json::json!([
+				{"check": "a", "result": "passed"},
+				{"check": "b", "result": "failed"},
+			])
+		)
+		.health_state_ignoring(&silenced),
+		HealthState::Healthy,
+	);
+	// Legacy per-check bool form.
+	assert_eq!(
+		status(
+			true,
+			serde_json::json!([
+				{"check": "a", "healthy": true},
+				{"check": "b", "healthy": false},
+			])
+		)
+		.health_state_ignoring(&silenced),
+		HealthState::Healthy,
+	);
+}
+
+/// Silencing one check doesn't excuse the others: an unsilenced failure
+/// still rolls up to Unhealthy.
+#[test]
+fn unsilenced_failing_check_still_counts() {
+	let silenced = std::collections::BTreeSet::from(["b".to_string()]);
+	assert_eq!(
+		status(
+			true,
+			serde_json::json!([
+				{"check": "b", "result": "failed"},
+				{"check": "c", "result": "failed"},
+			])
+		)
+		.health_state_ignoring(&silenced),
+		HealthState::Unhealthy,
+	);
+	assert_eq!(
+		status(
+			true,
+			serde_json::json!([
+				{"check": "b", "result": "failed"},
+				{"check": "c", "result": "warning"},
+			])
+		)
+		.health_state_ignoring(&silenced),
+		HealthState::Warning,
+	);
+}
+
+/// With no silences the two forms agree.
+#[test]
+fn empty_silence_set_matches_health_state() {
+	let st = status(
+		true,
+		serde_json::json!([
+			{"check": "a", "result": "warning"},
+			{"check": "b", "result": "failed"},
+		]),
+	);
+	assert_eq!(
+		st.health_state_ignoring(&Default::default()),
+		st.health_state(),
+	);
+}
+
+/// The legacy top-level `healthy: false` short-circuit predates
+/// per-check results, so it can't be attributed to a silenced check
+/// and still wins.
+#[test]
+fn top_level_false_ignores_silences() {
+	let silenced = std::collections::BTreeSet::from(["b".to_string()]);
+	assert_eq!(
+		status(false, serde_json::json!([{"check": "b", "healthy": false}]))
+			.health_state_ignoring(&silenced),
+		HealthState::Unhealthy,
+	);
+}

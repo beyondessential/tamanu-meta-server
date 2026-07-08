@@ -40,4 +40,4 @@ A client acts on the parts of the response it understands and ignores the rest; 
 
 The backup types due now go to the client that runs backups (`bestool`), not to one such as Seedling that does not.
 A client that reports health checks is told the severities Canopy applies to them.
-Each reporting client gets its own recorded status back.
+The response carries only such return-path instructions; the recorded status itself is not echoed back.
