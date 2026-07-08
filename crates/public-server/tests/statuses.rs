@@ -2643,3 +2643,73 @@ async fn submit_status_versionless_when_neither_present() {
 	)
 	.await
 }
+
+#[derive(QueryableByName)]
+struct ClientRow {
+	#[diesel(sql_type = sql_types::Text)]
+	client: String,
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn status_is_recorded_and_scoped_per_client() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+
+			// A push naming no client is attributed to bestool and gets the
+			// backup list.
+			let response = public
+				.post(&format!("/status/{server_id}"))
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({ "health": [] }))
+				.await;
+			response.assert_status_ok();
+			let body: serde_json::Value = response.json();
+			assert_eq!(body.get("client").and_then(|v| v.as_str()), Some("bestool"));
+			assert!(
+				body.get("backup_now").is_some(),
+				"bestool gets a backup_now list"
+			);
+			assert!(body.get("check_severities").is_some());
+
+			// A seedling push is kept as its own stream and is sent no
+			// backup_now at all.
+			let response = public
+				.post(&format!("/status/{server_id}"))
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({ "client": "seedling", "health": [] }))
+				.await;
+			response.assert_status_ok();
+			let body: serde_json::Value = response.json();
+			assert_eq!(
+				body.get("client").and_then(|v| v.as_str()),
+				Some("seedling")
+			);
+			assert!(
+				body.get("backup_now").is_none(),
+				"seedling is sent no backup_now"
+			);
+			assert!(body.get("check_severities").is_some());
+
+			// Both streams are stored distinctly for the one server.
+			let rows: Vec<ClientRow> =
+				sql_query("SELECT client FROM statuses WHERE server_id = $1 ORDER BY client")
+					.bind::<sql_types::Uuid, _>(server_id)
+					.get_results(&mut conn)
+					.await
+					.expect("fetch status clients");
+			let clients: Vec<&str> = rows.iter().map(|r| r.client.as_str()).collect();
+			assert_eq!(clients, ["bestool", "seedling"]);
+
+			// A non-string client is rejected.
+			let response = public
+				.post(&format!("/status/{server_id}"))
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({ "client": 42, "health": [] }))
+				.await;
+			response.assert_status_bad_request();
+		},
+	)
+	.await
+}

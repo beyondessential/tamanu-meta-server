@@ -144,9 +144,11 @@ pub struct StatusResponse {
 	/// one-offs plus scheduled backups that are due. Each serializes as a
 	/// plain string (e.g. `"tamanu-postgres"`). The device should run each
 	/// listed type, then report via `POST /backup-report`; an empty list
-	/// means nothing to do.
-	#[schema(value_type = Vec<String>)]
-	pub backup_now: Vec<BackupType>,
+	/// means nothing to do. Sent only to the client that runs backups
+	/// (`bestool`); omitted for other reporting clients.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	#[schema(value_type = Option<Vec<String>>)]
+	pub backup_now: Option<Vec<BackupType>>,
 	/// The effective handling of every healthcheck canopy knows about, keyed
 	/// by check name (as reported in `health[].check`): `skip` (silenced for
 	/// this server, or classified below warning), `warn` (warning), or `fail`
@@ -175,11 +177,13 @@ pub fn routes() -> OpenApiRouter<AppState> {
 ///
 /// The calling device must be the one enrolled for this exact server (or
 /// hold the admin role). The response echoes back the stored status
-/// record, plus a `backup_now` list of backup types the server should
-/// back up immediately — devices should treat a non-empty list as a
-/// prompt to run those backups and report them afterwards — and a
-/// `check_severities` map describing how canopy classifies each known
-/// healthcheck for this server (`skip`/`warn`/`fail`).
+/// record and a `check_severities` map describing how canopy classifies
+/// each known healthcheck for this server (`skip`/`warn`/`fail`). The
+/// `bestool` client (the agent that runs backups) additionally gets a
+/// `backup_now` list of backup types the server should back up
+/// immediately — it should treat a non-empty list as a prompt to run
+/// those backups and report them afterwards; other clients are sent no
+/// `backup_now` at all.
 #[utoipa::path(
 	post,
 	path = "/{server_id}",
@@ -219,18 +223,23 @@ async fn create(
 		));
 	}
 
-	// Tell the device which backup types to run now (operator one-offs +
-	// schedule-due), riding the heartbeat response. Empty for an ungrouped
-	// server or one whose group has no `ready` backup config.
-	let backup_now = match server.group_id {
-		Some(group_id) => {
-			backups_due_now_for_server(&mut db, server_id, group_id, Timestamp::now()).await?
-		}
-		None => Vec::new(),
-	};
-
 	let raw = body.map(|j| j.0).unwrap_or(serde_json::Value::Null);
 	let (healthy, client, health, extra) = split_health_from_extra(raw)?;
+
+	// Tell the device which backup types to run now (operator one-offs +
+	// schedule-due), riding the heartbeat response. Only the client that runs
+	// backups is told; others get no `backup_now` at all. Empty for an
+	// ungrouped server or one whose group has no `ready` backup config.
+	let backup_now = if client == "bestool" {
+		Some(match server.group_id {
+			Some(group_id) => {
+				backups_due_now_for_server(&mut db, server_id, group_id, Timestamp::now()).await?
+			}
+			None => Vec::new(),
+		})
+	} else {
+		None
+	};
 
 	// The server version canopy tracks (and compares against the published
 	// version catalog) is the Tamanu version. Prefer the payload's
