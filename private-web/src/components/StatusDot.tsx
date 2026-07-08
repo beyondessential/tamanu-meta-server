@@ -14,8 +14,8 @@ const STATUS_COLOR: Record<ShortStatus, string> = {
 // the server isn't talking to us).
 const HEALTH_OUTLINE: Record<HealthState, string | null> = {
 	healthy: null,
-	warning: "warning.main",
-	unhealthy: "error.main",
+	warning: "rgb(132, 223, 91)",
+	unhealthy: "success.main",
 };
 
 const REACHABLE: ReadonlySet<ShortStatus> = new Set(["up", "blip"]);
@@ -41,6 +41,12 @@ export default function StatusDot({
 }: StatusDotProps) {
 	const outlineColor =
 		health && REACHABLE.has(up) ? HEALTH_OUTLINE[health] : null;
+	// Errors swap the dot's fill and outline colours instead of stacking a
+	// red ring on top of the green "up" fill.
+	const bgColor =
+		health === "unhealthy" && REACHABLE.has(up)
+			? "error.main"
+			: STATUS_COLOR[up];
 	const dot = (
 		<Box
 			component="span"
@@ -49,16 +55,16 @@ export default function StatusDot({
 				width: size,
 				height: size,
 				borderRadius: "50%",
-				bgcolor: STATUS_COLOR[up],
+				bgcolor: bgColor,
 				opacity: dim ? 0.5 : 1,
 				marginRight: "0.5em",
 				verticalAlign: "middle",
 				// Outline rather than border: it draws *outside* the box so
 				// adjacent dots don't reflow when a server gains or loses a
 				// health ring.
-				outline: outlineColor ? "0.25em solid" : "none",
+				outline: outlineColor ? "0.2em solid" : "none",
 				outlineColor,
-				outlineOffset: outlineColor ? "-0.20em" : 0,
+				outlineOffset: outlineColor ? "-0.2em" : 0,
 			}}
 		/>
 	);
