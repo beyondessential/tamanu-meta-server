@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use commons_errors::{AppError, Result};
 use commons_types::backup::{BackupType, IntentDescriptor, RestoreIntent, RunOutcome, semantics};
-use commons_types::issue::Severity;
+use commons_types::status::CheckResult;
 use diesel::{
 	prelude::*,
 	result::{DatabaseErrorKind, Error as DieselError},
@@ -18,9 +18,9 @@ use jiff::Timestamp;
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::backup::alerts::raise_group_event;
 use crate::backup::refs;
 use crate::backups::BackupRun;
+use crate::issues::{CanopyCheckFiling, FilingScope, file_canopy_check};
 use crate::pg_duration::PgDuration;
 
 /// An operator's declaration that a restore consumer should maintain a
@@ -452,16 +452,20 @@ async fn recover_old_scope_alerts(
 
 	for sid in servers {
 		let r#ref = restore_verification_ref(sid, old_type, old_intent);
-		raise_group_event(
+		file_canopy_check(
 			db,
-			old_group_id,
-			&r#ref,
-			Severity::Info,
-			None,
-			&format!(
-				"Restore verification no longer tracked at this scope: {old_type} / {old_intent} for server {sid}"
-			),
-			false,
+			CanopyCheckFiling {
+				scope: FilingScope::Group(old_group_id),
+				check: &r#ref,
+				observed: CheckResult::Passed,
+				title: None,
+				message: &format!(
+					"Restore verification no longer tracked at this scope: {old_type} / {old_intent} for server {sid}"
+				),
+				detail: None,
+				default_ceiling: CheckResult::Failed,
+				default_escalates: false,
+			},
 		)
 		.await?;
 	}
@@ -591,32 +595,47 @@ impl BackupRestoreCheck {
 		if let Some(sid) = server_id {
 			let r#ref = restore_verification_ref(sid, &r#type, &intent);
 			if healthy {
-				raise_group_event(
+				file_canopy_check(
 					db,
-					group_id,
-					&r#ref,
-					Severity::Info,
-					None,
-					&format!("Restore verification healthy: {type} / {intent} for server {sid}"),
-					false,
+					CanopyCheckFiling {
+						scope: FilingScope::Group(group_id),
+						check: &r#ref,
+						observed: CheckResult::Passed,
+						title: None,
+						message: &format!(
+							"Restore verification healthy: {type} / {intent} for server {sid}"
+						),
+						detail: None,
+						default_ceiling: CheckResult::Failed,
+						default_escalates: false,
+					},
 				)
 				.await?;
 			} else {
-				let detail =
+				let error_detail =
 					error.unwrap_or_else(|| "restored database did not come up healthy".into());
 				let snap = snapshot_id
+					.clone()
 					.map(|s| format!(" (snapshot {s})"))
 					.unwrap_or_default();
-				raise_group_event(
+				file_canopy_check(
 					db,
-					group_id,
-					&r#ref,
-					Severity::Error,
-					Some("restore verification failed"),
-					&format!(
-						"Restore verification failed: {type} / {intent} for server {sid}{snap}: {detail}"
-					),
-					true,
+					CanopyCheckFiling {
+						scope: FilingScope::Group(group_id),
+						check: &r#ref,
+						observed: CheckResult::Failed,
+						title: Some("restore verification failed"),
+						message: &format!(
+							"Restore verification failed: {type} / {intent} for server {sid}{snap}: {error_detail}"
+						),
+						detail: Some(serde_json::json!({
+							"type": r#type.to_string(),
+							"intent": intent.to_string(),
+							"snapshot_id": snapshot_id,
+						})),
+						default_ceiling: CheckResult::Failed,
+						default_escalates: false,
+					},
 				)
 				.await?;
 			}
@@ -846,14 +865,22 @@ pub async fn sweep_overdue(db: &mut AsyncPgConnection) -> Result<usize> {
 					d.r#type, d.intent
 				)
 			};
-			raise_group_event(
+			file_canopy_check(
 				db,
-				d.group_id,
-				&r#ref,
-				Severity::Error,
-				Some("restore verification overdue"),
-				&message,
-				true,
+				CanopyCheckFiling {
+					scope: FilingScope::Group(d.group_id),
+					check: &r#ref,
+					observed: CheckResult::Failed,
+					title: Some("restore verification overdue"),
+					message: &message,
+					detail: Some(serde_json::json!({
+						"type": d.r#type.to_string(),
+						"intent": d.intent.to_string(),
+						"latest_snapshot_unverified": once,
+					})),
+					default_ceiling: CheckResult::Failed,
+					default_escalates: false,
+				},
 			)
 			.await?;
 			filed += 1;

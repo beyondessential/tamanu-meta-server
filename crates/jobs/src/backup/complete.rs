@@ -8,7 +8,7 @@
 
 use std::str::FromStr;
 
-use commons_types::{backup::BackupType, issue::Severity};
+use commons_types::{backup::BackupType, status::CheckResult};
 use database::{BackupConfigStatus, BackupMaintenanceRun, RunOutcome, ServerGroupBackupConfig};
 use diesel_async::AsyncPgConnection;
 use jiff::Timestamp;
@@ -56,19 +56,15 @@ pub(crate) async fn complete_init(
 	Ok(())
 }
 
-/// The CORRUPTION alert (severity, single-line description, active) implied by
-/// an inspect result's `verify_ok`. `verify_ok:false` → a Critical, active
-/// alert; `verify_ok:true` → an Info recovery (active false). Pure so the
-/// outcome→decision mapping is unit-testable.
-pub(crate) fn corruption_decision(verify_ok: bool) -> (Severity, Option<&'static str>, bool) {
+/// The CORRUPTION check observation (result, single-line title) implied
+/// by an inspect result's `verify_ok`. `verify_ok:false` → an observed
+/// failure; `verify_ok:true` → a recovery. Pure so the outcome→decision
+/// mapping is unit-testable.
+pub(crate) fn corruption_decision(verify_ok: bool) -> (CheckResult, Option<&'static str>) {
 	if verify_ok {
-		(Severity::Info, None, false)
+		(CheckResult::Passed, None)
 	} else {
-		(
-			Severity::Critical,
-			Some("backup repository verify failed"),
-			true,
-		)
+		(CheckResult::Failed, Some("backup repository verify failed"))
 	}
 }
 
@@ -116,15 +112,19 @@ pub(crate) async fn complete_inspect(
 		.await
 		.map_err(|err| err.to_string())?;
 
-	let (severity, description, active) = corruption_decision(outcome.verify_ok);
-	database::backup::alerts::raise_group_event(
+	let (observed, title) = corruption_decision(outcome.verify_ok);
+	database::issues::file_canopy_check(
 		db,
-		group_id,
-		database::backup::alerts::refs::CORRUPTION,
-		severity,
-		description,
-		"kopia snapshot verify",
-		active,
+		database::issues::CanopyCheckFiling {
+			scope: database::issues::FilingScope::Group(group_id),
+			check: database::backup::refs::CORRUPTION,
+			observed,
+			title,
+			message: "kopia snapshot verify",
+			detail: None,
+			default_ceiling: CheckResult::Failed,
+			default_escalates: true,
+		},
 	)
 	.await
 	.map_err(|err| err.to_string())?;
@@ -139,13 +139,9 @@ mod tests {
 	fn corruption_decision_maps_verify_ok() {
 		assert_eq!(
 			corruption_decision(false),
-			(
-				Severity::Critical,
-				Some("backup repository verify failed"),
-				true
-			)
+			(CheckResult::Failed, Some("backup repository verify failed"),)
 		);
-		assert_eq!(corruption_decision(true), (Severity::Info, None, false));
+		assert_eq!(corruption_decision(true), (CheckResult::Passed, None));
 	}
 
 	mod db {
@@ -324,7 +320,7 @@ mod tests {
 					 WHERE server_group_id = $1 AND \"ref\" = $2",
 				)
 				.bind::<sql_types::Uuid, _>(group_id)
-				.bind::<sql_types::Text, _>(database::backup::alerts::refs::CORRUPTION)
+				.bind::<sql_types::Text, _>(database::backup::refs::CORRUPTION)
 				.get_results(&mut conn)
 				.await
 				.expect("query corruption issues");

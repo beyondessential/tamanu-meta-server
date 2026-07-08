@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
 use clap::Parser;
-use commons_types::issue::Severity;
+use commons_types::status::CheckResult;
 use database::slack_outbox::{
 	KIND_INCIDENT_OPEN, KIND_INCIDENT_RESOLVE, KIND_SELF_ALERT_OPEN, KIND_SELF_ALERT_RESOLVE,
 	SlackOutbox,
@@ -263,7 +263,9 @@ async fn file_self_event(
 	database::self_alerts::raise(
 		conn,
 		database::self_alerts::SLACK_DELIVERY_FAILURE_REF,
-		Severity::Error,
+		CheckResult::Failed,
+		CheckResult::Failed,
+		false,
 		&format!("Slack delivery permanently failed ({})", row.kind),
 		&format!(
 			"outbox row {} (kind={}, incident={:?}): gave up after {attempts} attempts. Last error: {}. Last response: {}",

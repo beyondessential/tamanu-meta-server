@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use commons_errors::Result;
 use commons_types::{
 	backup::{BackupType, RunOutcome},
-	issue::Severity,
+	status::CheckResult,
 };
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -22,8 +22,8 @@ use jiff::{SignedDuration, Span, SpanRelativeTo, SpanRound, Timestamp, Unit};
 use uuid::Uuid;
 
 use crate::{
-	backup::{alerts::raise_group_event, refs},
-	issues::NewEvent,
+	backup::refs,
+	issues::{CanopyCheckFiling, FilingScope, file_canopy_check},
 	servers::Server,
 };
 
@@ -236,40 +236,56 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 		match verdict {
 			StalenessVerdict::Stale => {
 				let grace = row.grace();
-				NewEvent {
-					source: refs::CANOPY_SOURCE.into(),
-					r#ref: staleness_ref,
-					severity: Some(Severity::Error),
-					description: None,
-					message: format!(
-						"Server {label} has no successful {} backup newer than {} (last success {})",
-						row.r#type,
-						fmt_dur(grace),
-						row.last_success_at
-							.map(|t| t.to_string())
-							.unwrap_or_else(|| "never".into()),
-					),
-					active: Some(true),
-					occurred_at: Some(now),
-				}
-				.save(db, row.server_id, row.device_id)
+				file_canopy_check(
+					db,
+					CanopyCheckFiling {
+						scope: FilingScope::Server {
+							server_id: row.server_id,
+							device_id: row.device_id,
+						},
+						check: &staleness_ref,
+						observed: CheckResult::Failed,
+						title: None,
+						message: &format!(
+							"Server {label} has no successful {} backup newer than {} (last success {})",
+							row.r#type,
+							fmt_dur(grace),
+							row.last_success_at
+								.map(|t| t.to_string())
+								.unwrap_or_else(|| "never".into()),
+						),
+						detail: Some(serde_json::json!({
+							"type": row.r#type.to_string(),
+							"grace_secs": grace.as_secs(),
+							"last_success_at": row.last_success_at.map(|t| t.to_string()),
+						})),
+						default_ceiling: CheckResult::Failed,
+						default_escalates: false,
+					},
+				)
 				.await?;
 				filed += 1;
 			}
 			StalenessVerdict::Recovered => {
-				NewEvent {
-					source: refs::CANOPY_SOURCE.into(),
-					r#ref: staleness_ref,
-					severity: Some(Severity::Info),
-					description: None,
-					message: format!(
-						"Server {label} reported a successful {} backup again",
-						row.r#type
-					),
-					active: Some(false),
-					occurred_at: Some(now),
-				}
-				.save(db, row.server_id, row.device_id)
+				file_canopy_check(
+					db,
+					CanopyCheckFiling {
+						scope: FilingScope::Server {
+							server_id: row.server_id,
+							device_id: row.device_id,
+						},
+						check: &staleness_ref,
+						observed: CheckResult::Passed,
+						title: None,
+						message: &format!(
+							"Server {label} reported a successful {} backup again",
+							row.r#type
+						),
+						detail: None,
+						default_ceiling: CheckResult::Failed,
+						default_escalates: false,
+					},
+				)
 				.await?;
 				filed += 1;
 			}
@@ -278,24 +294,34 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 				// not Recovered — there's no recovery message for it). Only file
 				// while it's still never-backed-up.
 				//
-				// Warning, not Error: a server that has *never* backed up (freshly
-				// set up, or blocked by an upstream issue) shouldn't open an
-				// incident. A *missed* backup — a server that was backing up and
-				// stopped (`Stale`, above) — is the Error that pages.
-				NewEvent {
-					source: refs::CANOPY_SOURCE.into(),
-					r#ref: never_ref,
-					severity: Some(Severity::Warning),
-					description: None,
-					message: format!(
-						"Server {label} has never reported a successful {} backup (expected since {})",
-						row.r#type,
-						row.anchor(),
-					),
-					active: Some(true),
-					occurred_at: Some(now),
-				}
-				.save(db, row.server_id, row.device_id)
+				// Warning, not failure: a server that has *never* backed up
+				// (freshly set up, or blocked by an upstream issue) shouldn't
+				// open an incident. A *missed* backup — a server that was
+				// backing up and stopped (`Stale`, above) — is the failure
+				// that pages.
+				file_canopy_check(
+					db,
+					CanopyCheckFiling {
+						scope: FilingScope::Server {
+							server_id: row.server_id,
+							device_id: row.device_id,
+						},
+						check: &never_ref,
+						observed: CheckResult::Warning,
+						title: None,
+						message: &format!(
+							"Server {label} has never reported a successful {} backup (expected since {})",
+							row.r#type,
+							row.anchor(),
+						),
+						detail: Some(serde_json::json!({
+							"type": row.r#type.to_string(),
+							"expected_since": row.anchor().to_string(),
+						})),
+						default_ceiling: CheckResult::Warning,
+						default_escalates: false,
+					},
+				)
 				.await?;
 				filed += 1;
 			}
@@ -305,19 +331,25 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 				if row.last_success_at.is_some()
 					&& open_server_issue_active(db, row.server_id, &never_ref).await?
 				{
-					NewEvent {
-						source: refs::CANOPY_SOURCE.into(),
-						r#ref: never_ref,
-						severity: Some(Severity::Info),
-						description: None,
-						message: format!(
-							"Server {label} reported its first successful {} backup",
-							row.r#type
-						),
-						active: Some(false),
-						occurred_at: Some(now),
-					}
-					.save(db, row.server_id, row.device_id)
+					file_canopy_check(
+						db,
+						CanopyCheckFiling {
+							scope: FilingScope::Server {
+								server_id: row.server_id,
+								device_id: row.device_id,
+							},
+							check: &never_ref,
+							observed: CheckResult::Passed,
+							title: None,
+							message: &format!(
+								"Server {label} reported its first successful {} backup",
+								row.r#type
+							),
+							detail: None,
+							default_ceiling: CheckResult::Warning,
+							default_escalates: false,
+						},
+					)
 					.await?;
 					filed += 1;
 				}
@@ -365,32 +397,43 @@ async fn sweep_maintenance(db: &mut AsyncPgConnection, now: Timestamp) -> Result
 		let was_active = open_group_issue_active(db, group_id, refs::MAINTENANCE_STALE).await?;
 
 		if stale {
-			raise_group_event(
+			file_canopy_check(
 				db,
-				group_id,
-				refs::MAINTENANCE_STALE,
-				Severity::Error,
-				None,
-				&format!(
-					"No successful repo maintenance for {} (last {})",
-					fmt_dur(MAINTENANCE_STALE_AFTER),
-					latest_success
-						.map(|t| Timestamp::from(t).to_string())
-						.unwrap_or_else(|| "never".into()),
-				),
-				true,
+				CanopyCheckFiling {
+					scope: FilingScope::Group(group_id),
+					check: refs::MAINTENANCE_STALE,
+					observed: CheckResult::Failed,
+					title: None,
+					message: &format!(
+						"No successful repo maintenance for {} (last {})",
+						fmt_dur(MAINTENANCE_STALE_AFTER),
+						latest_success
+							.map(|t| Timestamp::from(t).to_string())
+							.unwrap_or_else(|| "never".into()),
+					),
+					detail: Some(serde_json::json!({
+						"threshold_secs": MAINTENANCE_STALE_AFTER.as_secs(),
+						"last_success_at": latest_success.map(|t| Timestamp::from(t).to_string()),
+					})),
+					default_ceiling: CheckResult::Failed,
+					default_escalates: false,
+				},
 			)
 			.await?;
 			filed += 1;
 		} else if !stale && was_active {
-			raise_group_event(
+			file_canopy_check(
 				db,
-				group_id,
-				refs::MAINTENANCE_STALE,
-				Severity::Info,
-				None,
-				"Repo maintenance completed successfully again",
-				false,
+				CanopyCheckFiling {
+					scope: FilingScope::Group(group_id),
+					check: refs::MAINTENANCE_STALE,
+					observed: CheckResult::Passed,
+					title: None,
+					message: "Repo maintenance completed successfully again",
+					detail: None,
+					default_ceiling: CheckResult::Failed,
+					default_escalates: false,
+				},
 			)
 			.await?;
 			filed += 1;
@@ -404,18 +447,25 @@ async fn sweep_maintenance(db: &mut AsyncPgConnection, now: Timestamp) -> Result
 		let err_active = open_group_issue_active(db, group_id, refs::MAINTENANCE_ERROR).await?;
 		match latest_completed {
 			Some(run) if run.outcome == Some(RunOutcome::Failure) => {
-				raise_group_event(
+				file_canopy_check(
 					db,
-					group_id,
-					refs::MAINTENANCE_ERROR,
-					Severity::Error,
-					None,
-					&format!(
-						"Repo maintenance ({}) failed: {}",
-						run.kind,
-						run.error.as_deref().unwrap_or("(no detail reported)"),
-					),
-					true,
+					CanopyCheckFiling {
+						scope: FilingScope::Group(group_id),
+						check: refs::MAINTENANCE_ERROR,
+						observed: CheckResult::Failed,
+						title: None,
+						message: &format!(
+							"Repo maintenance ({}) failed: {}",
+							run.kind,
+							run.error.as_deref().unwrap_or("(no detail reported)"),
+						),
+						detail: Some(serde_json::json!({
+							"kind": run.kind,
+							"error": run.error,
+						})),
+						default_ceiling: CheckResult::Failed,
+						default_escalates: false,
+					},
 				)
 				.await?;
 				filed += 1;
@@ -423,14 +473,18 @@ async fn sweep_maintenance(db: &mut AsyncPgConnection, now: Timestamp) -> Result
 			// Most recent finished run succeeded (or there is none): clear any
 			// open failure issue.
 			_ if err_active => {
-				raise_group_event(
+				file_canopy_check(
 					db,
-					group_id,
-					refs::MAINTENANCE_ERROR,
-					Severity::Info,
-					None,
-					"Repo maintenance completed successfully again",
-					false,
+					CanopyCheckFiling {
+						scope: FilingScope::Group(group_id),
+						check: refs::MAINTENANCE_ERROR,
+						observed: CheckResult::Passed,
+						title: None,
+						message: "Repo maintenance completed successfully again",
+						detail: None,
+						default_ceiling: CheckResult::Failed,
+						default_escalates: false,
+					},
 				)
 				.await?;
 				filed += 1;

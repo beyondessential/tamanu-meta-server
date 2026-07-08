@@ -1,19 +1,18 @@
 //! Backup-credentials detection / alerting (DB-driven half of the control
 //! plane). The persistent models live in [`crate::backups`]; this module owns
-//! the periodic *logic*: staleness, report-vs-inventory reconciliation, and
-//! the shared group-level alerting entrypoint.
+//! the periodic *logic*: staleness and report-vs-inventory reconciliation.
 //!
 //! - [`refs`] — the stable `(source, ref)` alert keys (a contract).
-//! - [`alerts`] — [`alerts::raise_group_event`], the single group-scoped
-//!   incident entrypoint (bypasses per-server `is_monitored`).
 //! - [`staleness`] — staleness scan over reported runs + maintenance staleness.
 //! - [`reconcile`] — reconcile device reports against repo inventory.
 //!
-//! The preflight (AWS-touching) lives in the `jobs` crate binary, not here —
-//! the `database` crate must not gain an AWS dependency — but its *alerting*
-//! reuses [`alerts::raise_group_event`].
+//! Alerting goes through [`crate::issues::file_canopy_check`], which grades
+//! each observation through the operator's check policy and bypasses the
+//! per-server `is_monitored` gate for group-scoped filings. The preflight
+//! (AWS-touching) lives in the `jobs` crate binary, not here — the
+//! `database` crate must not gain an AWS dependency — but its alerting uses
+//! the same path.
 
-pub mod alerts;
 pub mod reconcile;
 pub mod refs;
 pub mod staleness;

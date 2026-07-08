@@ -10,27 +10,44 @@
 //! [`crate::issues::raise_global_event`]).
 
 use commons_errors::Result;
-use commons_types::issue::Severity;
+use commons_types::status::CheckResult;
 use diesel_async::AsyncPgConnection;
 
-use crate::issues::{Issue, get_global_issue, raise_global_event};
+use crate::issues::{CanopyCheckFiling, FilingScope, Issue, file_canopy_check, get_global_issue};
 
 /// An operator-notification delivery permanently failed (the drainer gave up
 /// on an outbox row). No automatic recovery: stays until operator-resolved.
 pub const SLACK_DELIVERY_FAILURE_REF: &str = "slack-delivery-failure";
 
-/// Raise (or re-affirm) a self-alert. Files the coalescing canopy-wide
-/// issue; the incident machinery handles notification — a fresh
-/// error-or-worse condition opens (or joins) the canopy-wide incident,
-/// and repeated raises while alerting change nothing Slack-side.
+/// Raise (or re-affirm) a self-alert: file the coalescing canopy-wide
+/// check with the given observation, registering its catalog entry with
+/// the policy the condition warrants (first sight only — operator edits
+/// stick). The incident machinery handles notification — a fresh
+/// effective failure opens (or joins) the canopy-wide incident, and
+/// repeated raises while alerting change nothing Slack-side.
 pub async fn raise(
 	conn: &mut AsyncPgConnection,
 	r#ref: &str,
-	severity: Severity,
+	observed: CheckResult,
+	default_ceiling: CheckResult,
+	default_escalates: bool,
 	title: &str,
 	message: &str,
 ) -> Result<Issue> {
-	raise_global_event(conn, r#ref, severity, Some(title), message, true).await
+	file_canopy_check(
+		conn,
+		CanopyCheckFiling {
+			scope: FilingScope::Global,
+			check: r#ref,
+			observed,
+			title: Some(title),
+			message,
+			detail: None,
+			default_ceiling,
+			default_escalates,
+		},
+	)
+	.await
 }
 
 /// Recover a self-alert. Writes nothing when the alert isn't active. On
@@ -49,7 +66,22 @@ pub async fn recover(
 		return Ok(None);
 	}
 
-	let issue = raise_global_event(conn, r#ref, Severity::Info, None, message, false).await?;
+	// The catalog entry exists (the active issue implies a prior raise
+	// registered it), so the defaults here are inert.
+	let issue = file_canopy_check(
+		conn,
+		CanopyCheckFiling {
+			scope: FilingScope::Global,
+			check: r#ref,
+			observed: CheckResult::Passed,
+			title: None,
+			message,
+			detail: None,
+			default_ceiling: CheckResult::Warning,
+			default_escalates: false,
+		},
+	)
+	.await?;
 	Ok(Some(issue))
 }
 
