@@ -2,7 +2,6 @@ import { expect, test } from "./test-fixtures";
 import {
 	resetSeededTables,
 	seedCheckPolicy,
-	seedIssue,
 	seedServer,
 	seedServerGroup,
 	seedStatus,
@@ -222,18 +221,24 @@ test.describe("healthcheck attention page", () => {
 				{ check: "postgres", result: "failed", error: "connection refused" },
 			],
 		});
-		await seedIssue(sql, {
-			serverId: failing.id,
-			source: "status",
-			ref: "health/postgres",
-			message: "postgres check failing",
-			firstSeen: new Date(Date.now() - 3 * 3_600_000).toISOString(),
-		});
+		// The failing server's degradation streak started three hours ago;
+		// the other server's state row predates the check-state stamps
+		// (inactive, no streak), which renders the placeholder.
+		await sql.query(
+			`UPDATE issues SET degraded_since = NOW() - INTERVAL '3 hours'
+			 WHERE server_id = $1 AND ref = 'health/postgres'`,
+			[failing.id],
+		);
+		await sql.query(
+			`UPDATE issues SET active = false, degraded_since = NULL
+			 WHERE server_id = $1 AND ref = 'health/postgres'`,
+			[fresh.id],
+		);
 
 		await page.goto("/healthchecks/postgres");
 
-		// The issue-backed row shows a relative failing-since; the row
-		// without an issue shows the em-dash placeholder.
+		// The state-backed row shows a relative failing-since; the row
+		// without an active streak shows the em-dash placeholder.
 		await expect(page.getByText("3h ago")).toBeVisible();
 		await expect(page.getByText("—")).toBeVisible();
 	});
