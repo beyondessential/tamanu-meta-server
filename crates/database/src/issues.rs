@@ -5,7 +5,7 @@ use commons_types::issue::Severity;
 use commons_types::status::CheckResult;
 use diesel::prelude::*;
 use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
-use jiff::Timestamp;
+use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -146,7 +146,9 @@ pub struct Incident {
 	pub created_at: Timestamp,
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub updated_at: Timestamp,
-	pub server_group_id: Uuid,
+	/// The server group this incident targets, or `None` for a canopy-wide
+	/// incident (aggregating canopy-wide issues — self-alerts).
+	pub server_group_id: Option<Uuid>,
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub opened_at: Timestamp,
 	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
@@ -443,8 +445,15 @@ impl NewEvent {
 			//    `by = None`: this came from a device push, not an operator action.
 			//    Skipped when the server is ungrouped: incidents are group-keyed.
 			if let Some(gid) = server_group_id {
-				re_evaluate_incident_membership(conn, &issue, gid, monitored, effective_time, None)
-					.await?;
+				re_evaluate_incident_membership(
+					conn,
+					&issue,
+					IncidentTarget::Group(gid),
+					monitored,
+					effective_time,
+					None,
+				)
+				.await?;
 			}
 
 			Ok(issue)
@@ -566,7 +575,15 @@ pub async fn raise_group_event(
 		};
 
 		// 2. group-aware incident evaluation — monitored = true unconditionally.
-		re_evaluate_incident_membership(conn, &issue, group_id, true, now, None).await?;
+		re_evaluate_incident_membership(
+			conn,
+			&issue,
+			IncidentTarget::Group(group_id),
+			true,
+			now,
+			None,
+		)
+		.await?;
 
 		Ok(issue)
 	})
@@ -578,10 +595,9 @@ pub async fn raise_group_event(
 /// partial unique index. This is the state store for canopy monitoring
 /// its own operation (self-alerts).
 ///
-/// Mirrors [`raise_group_event`]'s find-or-create, but runs no incident
-/// evaluation: incidents are group-keyed until they gain a canopy-wide
-/// target, and self-alert notification goes straight to the Slack
-/// outbox (see `crate::self_alerts`).
+/// Mirrors [`raise_group_event`]'s find-or-create; incident evaluation
+/// runs against the global target, so canopy-wide issues get the full
+/// incident lifecycle (grace, escalation, resolution) like any other.
 pub async fn raise_global_event(
 	conn: &mut AsyncPgConnection,
 	r#ref: &str,
@@ -674,6 +690,10 @@ pub async fn raise_global_event(
 				.await?
 		};
 
+		// Global incident evaluation — always monitored.
+		re_evaluate_incident_membership(conn, &issue, IncidentTarget::Global, true, now, None)
+			.await?;
+
 		Ok(issue)
 	})
 	.await
@@ -737,7 +757,7 @@ pub async fn get_global_issue(conn: &mut AsyncPgConnection, r#ref: &str) -> Resu
 async fn re_evaluate_incident_membership(
 	conn: &mut AsyncPgConnection,
 	issue: &Issue,
-	server_group_id: Uuid,
+	target: IncidentTarget,
 	monitored: bool,
 	transition_time: Timestamp,
 	by: Option<&str>,
@@ -748,15 +768,16 @@ async fn re_evaluate_incident_membership(
 	let snoozed = issue.snoozed_until.map_or(false, |t| t > Timestamp::now());
 	// A group-scoped issue (server_id = None) can only be silenced at the
 	// group level; pass the nil server so only the group list is consulted.
+	// Canopy-wide issues have no silence scope (yet).
 	let silenced = crate::silenced_refs::is_silenced(
 		conn,
 		issue.server_id.unwrap_or(Uuid::nil()),
-		Some(server_group_id),
+		target.group_id(),
 		&issue.source,
 		&issue.r#ref,
 	)
 	.await?;
-	let group_open = group_has_open_incident(conn, server_group_id).await?;
+	let target_open = target_has_open_incident(conn, target).await?;
 
 	// Debug-severity issues are intentionally invisible to the incident
 	// workflow: they don't join, and any that are currently attached
@@ -775,12 +796,12 @@ async fn re_evaluate_incident_membership(
 		&& issue.active
 		&& issue.resolved_at.is_none()
 		&& !snoozed
-		&& (issue.severity.opens_incident() || group_open);
+		&& (issue.severity.opens_incident() || target_open);
 
 	match (was_in, should_join, should_leave) {
 		(false, true, _) => {
 			let (incident_id, newly_opened) =
-				find_or_open_incident(conn, server_group_id, transition_time).await?;
+				find_or_open_incident(conn, target, transition_time).await?;
 			diesel::insert_into(incident_issues::table)
 				.values((
 					incident_issues::incident_id.eq(incident_id),
@@ -790,7 +811,7 @@ async fn re_evaluate_incident_membership(
 				.execute(conn)
 				.await?;
 			if newly_opened {
-				enqueue_slack_open(conn, incident_id, server_group_id, issue).await?;
+				enqueue_slack_open(conn, incident_id, target, issue).await?;
 			} else if issue.severity == Severity::Critical {
 				// Two sub-cases when a Critical joins an existing incident:
 				//  - The original open is still pending in the outbox →
@@ -815,7 +836,7 @@ async fn re_evaluate_incident_membership(
 					.await
 					.optional()?;
 					if escalated.is_some() {
-						enqueue_slack_open(conn, incident_id, server_group_id, issue).await?;
+						enqueue_slack_open(conn, incident_id, target, issue).await?;
 					}
 				}
 			}
@@ -907,8 +928,8 @@ async fn re_evaluate_incident_membership(
 	Ok(())
 }
 
-/// Resolve the `(server_group_id, monitored)` pair an issue should be
-/// re-evaluated against, handling both server-scoped and group-scoped issues.
+/// Resolve the `(target, monitored)` pair an issue should be re-evaluated
+/// against, handling all three scopes.
 ///
 /// - Server-scoped (`server_id = Some`): look the server up; its `group_id`
 ///   and `is_monitored` drive the evaluation. `None` group → ungrouped, no
@@ -916,17 +937,20 @@ async fn re_evaluate_incident_membership(
 /// - Group-scoped (`server_group_id = Some`): use the group directly and force
 ///   `monitored = true` so the per-server gate never silences a control-plane
 ///   issue.
-async fn issue_group_and_monitored(
+/// - Canopy-wide (neither): the global target, always monitored.
+async fn issue_target_and_monitored(
 	conn: &mut AsyncPgConnection,
 	issue: &Issue,
-) -> Result<Option<(Uuid, bool)>> {
+) -> Result<Option<(IncidentTarget, bool)>> {
 	match (issue.server_id, issue.server_group_id) {
-		(_, Some(gid)) => Ok(Some((gid, true))),
+		(_, Some(gid)) => Ok(Some((IncidentTarget::Group(gid), true))),
 		(Some(sid), None) => {
 			let server = Server::get_by_id(conn, sid).await?;
-			Ok(server.group_id.map(|gid| (gid, server.is_monitored)))
+			Ok(server
+				.group_id
+				.map(|gid| (IncidentTarget::Group(gid), server.is_monitored)))
 		}
-		(None, None) => Ok(None),
+		(None, None) => Ok(Some((IncidentTarget::Global, true))),
 	}
 }
 
@@ -960,7 +984,15 @@ pub async fn reevaluate_open_issues_for_server(
 
 	let now = Timestamp::now();
 	for issue in open_issues {
-		re_evaluate_incident_membership(db, &issue, gid, monitored, now, None).await?;
+		re_evaluate_incident_membership(
+			db,
+			&issue,
+			IncidentTarget::Group(gid),
+			monitored,
+			now,
+			None,
+		)
+		.await?;
 	}
 	Ok(())
 }
@@ -995,7 +1027,15 @@ pub async fn reevaluate_open_issues_for_server_ref(
 
 	let now = Timestamp::now();
 	for issue in open_issues {
-		re_evaluate_incident_membership(db, &issue, gid, monitored, now, None).await?;
+		re_evaluate_incident_membership(
+			db,
+			&issue,
+			IncidentTarget::Group(gid),
+			monitored,
+			now,
+			None,
+		)
+		.await?;
 	}
 	Ok(())
 }
@@ -1047,7 +1087,15 @@ pub async fn reevaluate_open_issues_for_group_ref(
 			Some(sid) => monitored_by_server.get(&sid).copied().unwrap_or(true),
 			None => true,
 		};
-		re_evaluate_incident_membership(db, &issue, server_group_id, monitored, now, None).await?;
+		re_evaluate_incident_membership(
+			db,
+			&issue,
+			IncidentTarget::Group(server_group_id),
+			monitored,
+			now,
+			None,
+		)
+		.await?;
 	}
 	Ok(())
 }
@@ -1101,7 +1149,15 @@ pub async fn reconcile_open_incidents(db: &mut AsyncPgConnection) -> Result<(usi
 				// Group-scoped issue: resolve its group directly, bypass the
 				// per-server is_monitored gate (monitored = true).
 				(None, Some(gid)) => {
-					re_evaluate_incident_membership(conn, &issue, gid, true, now, None).await?;
+					re_evaluate_incident_membership(
+						conn,
+						&issue,
+						IncidentTarget::Group(gid),
+						true,
+						now,
+						None,
+					)
+					.await?;
 					evaluated += 1;
 				}
 				// Server-scoped issue: look up the server and its group.
@@ -1116,7 +1172,7 @@ pub async fn reconcile_open_incidents(db: &mut AsyncPgConnection) -> Result<(usi
 					re_evaluate_incident_membership(
 						conn,
 						&issue,
-						gid,
+						IncidentTarget::Group(gid),
 						server.is_monitored,
 						now,
 						None,
@@ -1124,7 +1180,19 @@ pub async fn reconcile_open_incidents(db: &mut AsyncPgConnection) -> Result<(usi
 					.await?;
 					evaluated += 1;
 				}
-				(None, None) => continue,
+				// Canopy-wide issue: the global target, always monitored.
+				(None, None) => {
+					re_evaluate_incident_membership(
+						conn,
+						&issue,
+						IncidentTarget::Global,
+						true,
+						now,
+						None,
+					)
+					.await?;
+					evaluated += 1;
+				}
 			}
 		}
 		Ok((by_id.len(), evaluated))
@@ -1146,18 +1214,45 @@ async fn is_issue_in_open_incident(db: &mut AsyncPgConnection, issue_id: Uuid) -
 	Ok(count > 0)
 }
 
-async fn group_has_open_incident(
+/// What an issue's incident contribution attaches to: its server's group,
+/// or canopy as a whole for canopy-wide issues (self-alerts). Issues on
+/// ungrouped servers have no target and no incident path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IncidentTarget {
+	Group(Uuid),
+	Global,
+}
+
+impl IncidentTarget {
+	/// The `incidents.server_group_id` value for this target.
+	fn group_id(self) -> Option<Uuid> {
+		match self {
+			Self::Group(gid) => Some(gid),
+			Self::Global => None,
+		}
+	}
+
+	/// The target an existing incident row belongs to.
+	pub fn of_incident(incident: &Incident) -> Self {
+		match incident.server_group_id {
+			Some(gid) => Self::Group(gid),
+			None => Self::Global,
+		}
+	}
+}
+
+async fn target_has_open_incident(
 	db: &mut AsyncPgConnection,
-	server_group_id: Uuid,
+	target: IncidentTarget,
 ) -> Result<bool> {
 	use crate::schema::incidents::dsl;
 
-	let count: i64 = dsl::incidents
-		.filter(dsl::server_group_id.eq(server_group_id))
-		.filter(dsl::closed_at.is_null())
-		.count()
-		.get_result(db)
-		.await?;
+	let mut q = dsl::incidents.filter(dsl::closed_at.is_null()).into_boxed();
+	q = match target {
+		IncidentTarget::Group(gid) => q.filter(dsl::server_group_id.eq(gid)),
+		IncidentTarget::Global => q.filter(dsl::server_group_id.is_null()),
+	};
+	let count: i64 = q.count().get_result(db).await?;
 	Ok(count > 0)
 }
 
@@ -1166,32 +1261,46 @@ async fn group_has_open_incident(
 /// whether a Slack `incident_open` outbox row should be enqueued (re-joining
 /// an existing incident shouldn't re-notify).
 ///
-/// Two parallel event pushes against the same group must not each insert a
-/// fresh incident row. We take a `FOR UPDATE` lock on the group's row
-/// up-front so the find-or-create pair serializes per-group. A unique
-/// partial index on `incidents (server_group_id) WHERE closed_at IS NULL`
-/// is the belt-and-braces backstop at the DB layer.
+/// Two parallel event pushes against the same target must not each insert
+/// a fresh incident row. For a group target we take a `FOR UPDATE` lock on
+/// the group's row up-front so the find-or-create pair serializes
+/// per-group; the global target has no row to lock, so it serializes on a
+/// transaction-scoped advisory lock instead. The unique partial indexes on
+/// open incidents are the belt-and-braces backstop at the DB layer.
 async fn find_or_open_incident(
 	db: &mut AsyncPgConnection,
-	server_group_id: Uuid,
+	target: IncidentTarget,
 	opened_at: Timestamp,
 ) -> Result<(Uuid, bool)> {
 	use crate::schema::{incidents, server_groups};
 
-	let _group_lock: Uuid = server_groups::table
-		.select(server_groups::id)
-		.filter(server_groups::id.eq(server_group_id))
-		.for_update()
-		.first(db)
-		.await?;
+	match target {
+		IncidentTarget::Group(gid) => {
+			let _group_lock: Uuid = server_groups::table
+				.select(server_groups::id)
+				.filter(server_groups::id.eq(gid))
+				.for_update()
+				.first(db)
+				.await?;
+		}
+		IncidentTarget::Global => {
+			// Arbitrary constant, stable across releases: the one global
+			// incident slot.
+			diesel::sql_query("SELECT pg_advisory_xact_lock(818_723_001)")
+				.execute(db)
+				.await?;
+		}
+	}
 
-	let open: Option<Incident> = incidents::table
+	let mut q = incidents::table
 		.select(Incident::as_select())
-		.filter(
-			incidents::server_group_id
-				.eq(server_group_id)
-				.and(incidents::closed_at.is_null()),
-		)
+		.filter(incidents::closed_at.is_null())
+		.into_boxed();
+	q = match target {
+		IncidentTarget::Group(gid) => q.filter(incidents::server_group_id.eq(gid)),
+		IncidentTarget::Global => q.filter(incidents::server_group_id.is_null()),
+	};
+	let open: Option<Incident> = q
 		.order(incidents::opened_at.desc())
 		.first(db)
 		.await
@@ -1202,7 +1311,7 @@ async fn find_or_open_incident(
 
 	let new_incident: Incident = diesel::insert_into(incidents::table)
 		.values((
-			incidents::server_group_id.eq(server_group_id),
+			incidents::server_group_id.eq(target.group_id()),
 			incidents::opened_at.eq(jiff_diesel::Timestamp::from(opened_at)),
 		))
 		.returning(Incident::as_select())
@@ -1211,18 +1320,30 @@ async fn find_or_open_incident(
 	Ok((new_incident.id, true))
 }
 
+/// Flap grace for canopy-wide incidents, mirroring the per-group
+/// `slack_open_delay` default (the global target has no config row).
+const GLOBAL_OPEN_GRACE: SignedDuration = SignedDuration::from_secs(3 * 60);
+
 async fn enqueue_slack_open(
 	conn: &mut AsyncPgConnection,
 	incident_id: Uuid,
-	server_group_id: Uuid,
+	target: IncidentTarget,
 	issue: &Issue,
 ) -> Result<()> {
-	let group = ServerGroup::get_by_id(conn, server_group_id).await?;
-	let server = match issue.server_id {
-		Some(sid) => Some(Server::get_by_id(conn, sid).await?),
-		None => None,
+	let (label, open_delay) = match target {
+		IncidentTarget::Group(gid) => {
+			let group = ServerGroup::get_by_id(conn, gid).await?;
+			let server = match issue.server_id {
+				Some(sid) => Some(Server::get_by_id(conn, sid).await?),
+				None => None,
+			};
+			(
+				format_group_label(&group, server.as_ref()),
+				group.slack_open_delay.0,
+			)
+		}
+		IncidentTarget::Global => ("Canopy".to_string(), GLOBAL_OPEN_GRACE),
 	};
-	let label = format_group_label(&group, server.as_ref());
 	let payload = crate::slack_outbox::vars::incident_open(
 		&label,
 		issue.severity,
@@ -1230,16 +1351,15 @@ async fn enqueue_slack_open(
 		&issue.r#ref,
 		&issue.message,
 	);
-	// Normally the row sits in the outbox for the group's
-	// `slack_open_delay` before the drainer can ship it — that's the
-	// flap-suppression window, so a transient open/close pair never
-	// reaches Slack. Critical bypasses this: it's the
-	// "stop-the-world" tier where operators have signalled they don't
-	// want any delay.
+	// Normally the row sits in the outbox for the target's open delay
+	// before the drainer can ship it — that's the flap-suppression
+	// window, so a transient open/close pair never reaches Slack.
+	// Critical bypasses this: it's the "stop-the-world" tier where
+	// operators have signalled they don't want any delay.
 	let deliver_after = if issue.severity == Severity::Critical {
 		Timestamp::now()
 	} else {
-		Timestamp::now() + group.slack_open_delay.0
+		Timestamp::now() + open_delay
 	};
 	crate::slack_outbox::SlackOutbox::enqueue(
 		conn,
@@ -1312,8 +1432,13 @@ async fn enqueue_slack_resolve_inner(
 	if cancelled > 0 {
 		return Ok(());
 	}
-	let group = ServerGroup::get_by_id(conn, incident.server_group_id).await?;
-	let label = format_group_label(&group, None);
+	let label = match incident.server_group_id {
+		Some(gid) => {
+			let group = ServerGroup::get_by_id(conn, gid).await?;
+			format_group_label(&group, None)
+		}
+		None => "Canopy".to_string(),
+	};
 	let payload = crate::slack_outbox::vars::incident_resolve(&label, by);
 	crate::slack_outbox::SlackOutbox::enqueue(
 		conn,
@@ -1586,8 +1711,8 @@ impl Issue {
 				.returning(Self::as_select())
 				.get_result(conn)
 				.await?;
-			if let Some((gid, monitored)) = issue_group_and_monitored(conn, &issue).await? {
-				re_evaluate_incident_membership(conn, &issue, gid, monitored, now, Some(by))
+			if let Some((target, monitored)) = issue_target_and_monitored(conn, &issue).await? {
+				re_evaluate_incident_membership(conn, &issue, target, monitored, now, Some(by))
 					.await?;
 			}
 			Ok(issue)
@@ -1610,8 +1735,8 @@ impl Issue {
 				.get_result(conn)
 				.await?;
 			// Unresolve rejoins; cascade close path doesn't fire here.
-			if let Some((gid, monitored)) = issue_group_and_monitored(conn, &issue).await? {
-				re_evaluate_incident_membership(conn, &issue, gid, monitored, now, None).await?;
+			if let Some((target, monitored)) = issue_target_and_monitored(conn, &issue).await? {
+				re_evaluate_incident_membership(conn, &issue, target, monitored, now, None).await?;
 			}
 			Ok(issue)
 		})
@@ -1639,8 +1764,8 @@ impl Issue {
 				.returning(Self::as_select())
 				.get_result(conn)
 				.await?;
-			if let Some((gid, monitored)) = issue_group_and_monitored(conn, &issue).await? {
-				re_evaluate_incident_membership(conn, &issue, gid, monitored, now, None).await?;
+			if let Some((target, monitored)) = issue_target_and_monitored(conn, &issue).await? {
+				re_evaluate_incident_membership(conn, &issue, target, monitored, now, None).await?;
 			}
 			Ok(issue)
 		})
@@ -1657,8 +1782,8 @@ impl Issue {
 				.returning(Self::as_select())
 				.get_result(conn)
 				.await?;
-			if let Some((gid, monitored)) = issue_group_and_monitored(conn, &issue).await? {
-				re_evaluate_incident_membership(conn, &issue, gid, monitored, now, None).await?;
+			if let Some((target, monitored)) = issue_target_and_monitored(conn, &issue).await? {
+				re_evaluate_incident_membership(conn, &issue, target, monitored, now, None).await?;
 			}
 			Ok(issue)
 		})
@@ -1981,7 +2106,7 @@ impl Incident {
 				.filter(incidents::id.eq(incident_id))
 				.first(conn)
 				.await?;
-			let gid = incident_loaded.server_group_id;
+			let target = IncidentTarget::of_incident(&incident_loaded);
 
 			let open_issue_ids: Vec<Uuid> = incident_issues::table
 				.select(incident_issues::issue_id)
@@ -2021,7 +2146,7 @@ impl Incident {
 					Some(sid) => Server::get_by_id(conn, sid).await?.is_monitored,
 					None => true,
 				};
-				re_evaluate_incident_membership(conn, &issue, gid, monitored, now, Some(by))
+				re_evaluate_incident_membership(conn, &issue, target, monitored, now, Some(by))
 					.await?;
 			}
 

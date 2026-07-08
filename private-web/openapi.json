@@ -8039,7 +8039,6 @@
         "description": "An operational incident: a group-scoped roll-up of related issues.\n\nAn incident opens when an issue on a server in the group crosses the\nseverity threshold, gathers further contributing issues while open, and\ncloses automatically once the last serious contributor clears. Operators\ncan additionally mark an incident resolved with a reason.",
         "required": [
           "id",
-          "server_group_id",
           "server_group_name",
           "opened_at",
           "issue_count",
@@ -8126,13 +8125,16 @@
             "description": "Reason given when resolving: one of `fixed`, `wont_fix`, `expected`,\n`duplicate`, or `flapping`."
           },
           "server_group_id": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "format": "uuid",
-            "description": "Identifier of the server group the incident belongs to."
+            "description": "Identifier of the server group the incident belongs to, or null for\na canopy-wide incident (aggregating canopy's self-alerts)."
           },
           "server_group_name": {
             "type": "string",
-            "description": "Display name of the group this incident rolls up to. Empty only if\nthe group no longer exists, which should not happen in normal\noperation."
+            "description": "Display name of the group this incident rolls up to — `Canopy` for\na canopy-wide incident. Empty only if the group no longer exists,\nwhich should not happen in normal operation."
           },
           "updated_at": {
             "type": "string",

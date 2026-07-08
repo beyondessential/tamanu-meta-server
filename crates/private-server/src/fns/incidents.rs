@@ -27,11 +27,12 @@ const DEFAULT_LIMIT: i64 = 100;
 pub struct IncidentData {
 	/// Unique identifier of the incident.
 	pub id: Uuid,
-	/// Identifier of the server group the incident belongs to.
-	pub server_group_id: Uuid,
-	/// Display name of the group this incident rolls up to. Empty only if
-	/// the group no longer exists, which should not happen in normal
-	/// operation.
+	/// Identifier of the server group the incident belongs to, or null for
+	/// a canopy-wide incident (aggregating canopy's self-alerts).
+	pub server_group_id: Option<Uuid>,
+	/// Display name of the group this incident rolls up to — `Canopy` for
+	/// a canopy-wide incident. Empty only if the group no longer exists,
+	/// which should not happen in normal operation.
 	pub server_group_name: String,
 	/// When the incident opened.
 	pub opened_at: Timestamp,
@@ -112,7 +113,7 @@ async fn enrich_incidents(
 	pool: &database::Db,
 	incidents: Vec<Incident>,
 ) -> Result<Vec<IncidentData>> {
-	let group_ids: Vec<Uuid> = incidents.iter().map(|i| i.server_group_id).collect();
+	let group_ids: Vec<Uuid> = incidents.iter().filter_map(|i| i.server_group_id).collect();
 	let incident_ids: Vec<Uuid> = incidents.iter().map(|i| i.id).collect();
 	let groups = ServerGroup::list_by_ids(conn, &group_ids).await?;
 	let group_names: std::collections::HashMap<Uuid, String> =
@@ -125,10 +126,10 @@ async fn enrich_incidents(
 	Ok(incidents
 		.into_iter()
 		.map(|i| {
-			let name = group_names
-				.get(&i.server_group_id)
-				.cloned()
-				.unwrap_or_default();
+			let name = match i.server_group_id {
+				Some(gid) => group_names.get(&gid).cloned().unwrap_or_default(),
+				None => "Canopy".to_string(),
+			};
 			let s = stats.get(&i.id).copied().unwrap_or_default();
 			let held_until = held.get(&i.id).copied();
 			IncidentData::from_with(i, name, &users, s, held_until)
@@ -141,7 +142,10 @@ async fn enrich_incident(
 	pool: &database::Db,
 	incident: Incident,
 ) -> Result<IncidentData> {
-	let group = ServerGroup::get_by_id(conn, incident.server_group_id).await?;
+	let group_name = match incident.server_group_id {
+		Some(gid) => ServerGroup::get_by_id(conn, gid).await?.name,
+		None => "Canopy".to_string(),
+	};
 	let user_logins = collect_incident_user_logins(std::slice::from_ref(&incident));
 	let users = CachedTailscaleUser::by_logins(conn, &user_logins).await?;
 	let mut stats = Incident::stats_for(pool, &[incident.id]).await?;
@@ -150,7 +154,7 @@ async fn enrich_incident(
 		database::slack_outbox::SlackOutbox::pending_opens_until(conn, &[incident.id]).await?;
 	let held_until = held.remove(&incident.id);
 	Ok(IncidentData::from_with(
-		incident, group.name, &users, s, held_until,
+		incident, group_name, &users, s, held_until,
 	))
 }
 

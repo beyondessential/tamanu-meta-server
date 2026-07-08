@@ -267,7 +267,7 @@ diesel::table! {
 		resolved_at -> Nullable<Timestamptz>,
 		resolved_by -> Nullable<Text>,
 		resolved_reason -> Nullable<Text>,
-		server_group_id -> Uuid,
+		server_group_id -> Nullable<Uuid>,
 		escalated_at -> Nullable<Timestamptz>,
 	}
 }

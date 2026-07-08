@@ -1,12 +1,13 @@
-//! Self-alert lifecycle: a raise files one coalescing canopy-wide issue and
-//! enqueues exactly one Slack open on the not-alerting → alerting transition
-//! (with flap grace below Critical, immediate at Critical); recovery inside
-//! the grace cancels the open and sends nothing; recovery after delivery
-//! enqueues the resolve; idle recovers write nothing.
+//! Self-alert lifecycle: a raise files one coalescing canopy-wide issue
+//! which opens a canopy-wide incident, enqueuing exactly one Slack open on
+//! the not-alerting → alerting transition (with flap grace below Critical,
+//! immediate at Critical); recovery inside the grace cancels the open and
+//! sends nothing; recovery after delivery enqueues the resolve; idle
+//! recovers write nothing.
 
 use commons_types::issue::Severity;
 use database::self_alerts;
-use database::slack_outbox::{KIND_SELF_ALERT_OPEN, KIND_SELF_ALERT_RESOLVE, SlackOutbox};
+use database::slack_outbox::{KIND_INCIDENT_OPEN, KIND_INCIDENT_RESOLVE, SlackOutbox};
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use jiff::Timestamp;
@@ -35,7 +36,8 @@ async fn raise_enqueues_once_and_flap_recovery_is_silent() {
 		);
 		assert!(outbox_rows(&mut conn).await.is_empty());
 
-		// First raise: issue + one open row, delayed by the grace (Error).
+		// First raise: issue + canopy-wide incident + one open row, delayed
+		// by the grace (Error).
 		let issue = self_alerts::raise(&mut conn, REF, Severity::Error, "title", "body")
 			.await
 			.expect("raise");
@@ -46,14 +48,17 @@ async fn raise_enqueues_once_and_flap_recovery_is_silent() {
 		let [open] = rows.as_slice() else {
 			panic!("exactly one outbox row, got {rows:?}");
 		};
-		assert_eq!(open.kind, KIND_SELF_ALERT_OPEN);
-		assert_eq!(open.incident_id, None);
+		assert_eq!(open.kind, KIND_INCIDENT_OPEN);
+		assert!(
+			open.incident_id.is_some(),
+			"the raise opened a canopy-wide incident"
+		);
 		assert_eq!(open.issue_id, Some(issue.id));
 		assert!(
 			open.deliver_after > Timestamp::now(),
 			"sub-Critical opens wait out the grace"
 		);
-		assert_eq!(open.payload["state"], "alert");
+		assert_eq!(open.payload["server"], "Canopy");
 		assert_eq!(open.payload["source_ref"], format!("canopy/{REF}"));
 
 		// Re-raise while alerting: no new outbox row.
@@ -105,8 +110,8 @@ async fn critical_ships_immediately_and_recovery_after_delivery_resolves() {
 		let rows = outbox_rows(&mut conn).await;
 		assert_eq!(rows.len(), 2);
 		let resolve = &rows[1];
-		assert_eq!(resolve.kind, KIND_SELF_ALERT_RESOLVE);
-		assert_eq!(resolve.payload["state"], "recovered");
+		assert_eq!(resolve.kind, KIND_INCIDENT_RESOLVE);
+		assert_eq!(resolve.payload["server"], "Canopy");
 		assert!(resolve.deliver_after <= Timestamp::now());
 
 		// Recovering again is a no-op.

@@ -69,7 +69,9 @@ pub struct IssueIdArgs {
 #[derive(Serialize)]
 struct IncidentSummary {
 	id: Uuid,
-	group_id: Uuid,
+	/// The server group the incident targets, or `null` for a canopy-wide
+	/// incident (aggregating canopy's self-alerts).
+	group_id: Option<Uuid>,
 	group_name: Option<String>,
 	/// `open` (not closed), `resolved` (operator-resolved), or `closed`.
 	status: &'static str,
@@ -120,7 +122,9 @@ struct IncidentIssueOut {
 #[derive(Serialize)]
 struct IncidentDetail {
 	id: Uuid,
-	group_id: Uuid,
+	/// The server group the incident targets, or `null` for a canopy-wide
+	/// incident (aggregating canopy's self-alerts).
+	group_id: Option<Uuid>,
 	group_name: Option<String>,
 	status: &'static str,
 	opened_at: Timestamp,
@@ -229,7 +233,7 @@ impl CanopyMcp {
 
 		let group_names = group_names(
 			&mut conn,
-			&unique(incidents.iter().map(|i| i.server_group_id)),
+			&unique(incidents.iter().filter_map(|i| i.server_group_id)),
 		)
 		.await?;
 		let ids: Vec<Uuid> = incidents.iter().map(|i| i.id).collect();
@@ -245,7 +249,9 @@ impl CanopyMcp {
 				IncidentSummary {
 					id: i.id,
 					group_id: i.server_group_id,
-					group_name: group_names.get(&i.server_group_id).cloned(),
+					group_name: i
+						.server_group_id
+						.and_then(|gid| group_names.get(&gid).cloned()),
 					status: incident_status(i),
 					opened_at: i.opened_at,
 					closed_at: i.closed_at,
@@ -281,9 +287,10 @@ impl CanopyMcp {
 		let Ok((incident, rows)) = Incident::get_with_issues(&mut conn, id).await else {
 			return Ok(not_found(format!("no incident with id {id}")));
 		};
-		let group = ServerGroup::get_by_id(&mut conn, incident.server_group_id)
-			.await
-			.ok();
+		let group = match incident.server_group_id {
+			Some(gid) => ServerGroup::get_by_id(&mut conn, gid).await.ok(),
+			None => None,
+		};
 		let published = SlackOutbox::delivered_open_ids(&mut conn, &[incident.id])
 			.await
 			.map_err(mcp_err)?

@@ -4483,13 +4483,14 @@ export interface components {
             resolved_reason?: string | null;
             /**
              * Format: uuid
-             * @description Identifier of the server group the incident belongs to.
+             * @description Identifier of the server group the incident belongs to, or null for
+             *     a canopy-wide incident (aggregating canopy's self-alerts).
              */
-            server_group_id: string;
+            server_group_id?: string | null;
             /**
-             * @description Display name of the group this incident rolls up to. Empty only if
-             *     the group no longer exists, which should not happen in normal
-             *     operation.
+             * @description Display name of the group this incident rolls up to — `Canopy` for
+             *     a canopy-wide incident. Empty only if the group no longer exists,
+             *     which should not happen in normal operation.
              */
             server_group_name: string;
             /**
