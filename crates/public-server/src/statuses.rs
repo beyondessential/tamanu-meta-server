@@ -234,7 +234,7 @@ async fn create(
 	// schedule-due), riding the heartbeat response. Only the client that runs
 	// backups is told; others get no `backup_now` at all. Empty for an
 	// ungrouped server or one whose group has no `ready` backup config.
-	let backup_now = if client == "bestool" {
+	let backup_now = if client == database::statuses::DEFAULT_CLIENT {
 		Some(match server.group_id {
 			Some(group_id) => {
 				backups_due_now_for_server(&mut db, server_id, group_id, Timestamp::now()).await?
@@ -701,7 +701,7 @@ fn split_health_from_extra(
 	// The reporting agent, defaulting to `bestool` so reporters that name none
 	// keep their existing stream.
 	let client = match obj.remove("client") {
-		None => "bestool".to_owned(),
+		None => database::statuses::DEFAULT_CLIENT.to_owned(),
 		Some(serde_json::Value::String(s)) => s,
 		Some(_) => return Err(AppError::BadRequest("`client` must be a string".into())),
 	};

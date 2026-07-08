@@ -32,6 +32,8 @@ The client is a label, not a second identity: authorisation stays the server bin
 Canopy records status per `(server, client)`, so two agents reporting for one server never overwrite each other: each keeps its own latest heartbeat, health checks, and history.
 
 A server is not treated as down while any of its clients is still reporting, so one agent going quiet does not by itself make the server look down.
+A quiet agent is still surfaced: when the server is reporting but its `bestool` client — the stream Canopy's health view reads — has gone quiet past the server's down threshold, Canopy raises an issue for that client, distinct from server reachability, and resolves it when the client reports again.
+A server that has never had a `bestool` client raises nothing.
 
 ## Response
 

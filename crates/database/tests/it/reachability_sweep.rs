@@ -1,7 +1,7 @@
 use commons_types::issue::Severity;
 use database::{
 	issues::Issue,
-	statuses::{CANOPY_SOURCE, REACHABILITY_REF, Status},
+	statuses::{CANOPY_SOURCE, CLIENT_STALE_REF, REACHABILITY_REF, Status},
 };
 use diesel::{QueryableByName, sql_query, sql_types};
 use diesel_async::RunQueryDsl;
@@ -65,6 +65,17 @@ async fn insert_status_at(
 
 async fn issue_for(conn: &mut diesel_async::AsyncPgConnection, server_id: Uuid) -> Option<Issue> {
 	Issue::list_by_source_ref(conn, CANOPY_SOURCE, REACHABILITY_REF, &[server_id])
+		.await
+		.expect("list issues")
+		.into_iter()
+		.next()
+}
+
+async fn stale_issue_for(
+	conn: &mut diesel_async::AsyncPgConnection,
+	server_id: Uuid,
+) -> Option<Issue> {
+	Issue::list_by_source_ref(conn, CANOPY_SOURCE, CLIENT_STALE_REF, &[server_id])
 		.await
 		.expect("list issues")
 		.into_iter()
@@ -254,16 +265,51 @@ async fn insert_status_for_client(
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn any_client_reporting_keeps_server_up() {
+async fn any_client_reporting_keeps_server_up_but_flags_the_quiet_client() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		// 10-min threshold; bestool has gone quiet (15 min) but seedling is
-		// still reporting (1 min) — the server is not down.
+		// still reporting (1 min) — the server is not down, but the quiet
+		// authoritative client gets its own issue.
 		let id = insert_server(&mut conn, "http://busy.invalid/", 600).await;
 		insert_status_for_client(&mut conn, id, 15, "bestool").await;
 		insert_status_for_client(&mut conn, id, 1, "seedling").await;
 		let filed = Status::sweep_reachability(&mut conn).await.expect("sweep");
+		assert_eq!(filed, 1);
+		assert!(issue_for(&mut conn, id).await.is_none());
+		let stale = stale_issue_for(&mut conn, id).await.expect("stale issue");
+		assert_eq!(stale.severity, Severity::Error);
+		assert!(stale.active);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn client_stale_issue_resolves_when_the_client_reports_again() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let id = insert_server(&mut conn, "http://revived.invalid/", 600).await;
+		insert_status_for_client(&mut conn, id, 15, "bestool").await;
+		insert_status_for_client(&mut conn, id, 1, "seedling").await;
+		Status::sweep_reachability(&mut conn).await.expect("sweep");
+		assert!(stale_issue_for(&mut conn, id).await.expect("filed").active);
+
+		insert_status_for_client(&mut conn, id, 0, "bestool").await;
+		Status::sweep_reachability(&mut conn).await.expect("sweep");
+		let stale = stale_issue_for(&mut conn, id).await.expect("still exists");
+		assert!(!stale.active);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn client_that_never_reported_raises_nothing() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		// A seedling-only host has no bestool stream to go quiet.
+		let id = insert_server(&mut conn, "http://seedling-only.invalid/", 600).await;
+		insert_status_for_client(&mut conn, id, 1, "seedling").await;
+		let filed = Status::sweep_reachability(&mut conn).await.expect("sweep");
 		assert_eq!(filed, 0);
 		assert!(issue_for(&mut conn, id).await.is_none());
+		assert!(stale_issue_for(&mut conn, id).await.is_none());
 	})
 	.await
 }

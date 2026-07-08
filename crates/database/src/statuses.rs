@@ -37,6 +37,14 @@ pub const REACHABILITY_REF: &str = "reachability";
 /// feed the status board, version tracking, or health issues.
 pub const DEFAULT_CLIENT: &str = "bestool";
 
+/// Ref value for the one authoritative-client-quiet issue per server. Filed
+/// when the server is still reporting (some client is fresh) but the
+/// [`DEFAULT_CLIENT`] stream has gone quiet past the server's down threshold,
+/// so a dead health reporter isn't masked by another agent keeping the server
+/// "up". Distinct from [`REACHABILITY_REF`], which covers the fully quiet
+/// server.
+pub const CLIENT_STALE_REF: &str = "client-stale/bestool";
+
 fn server_label(s: &Server) -> String {
 	s.name
 		.clone()
@@ -125,7 +133,7 @@ impl Default for NewStatus {
 			extra: serde_json::Value::Object(Default::default()),
 			healthy: true,
 			health: serde_json::Value::Array(Default::default()),
-			client: "bestool".to_owned(),
+			client: DEFAULT_CLIENT.to_owned(),
 		}
 	}
 }
@@ -175,7 +183,7 @@ impl Status {
 					health: serde_json::Value::Array(Default::default()),
 					// Canopy-generated reachability status; attributed to the
 					// default client stream.
-					client: "bestool".to_owned(),
+					client: DEFAULT_CLIENT.to_owned(),
 				})
 			}
 			Err(err) => {
@@ -265,6 +273,20 @@ impl Status {
 			.filter_map(|i| i.server_id.map(|sid| (sid, i)))
 			.collect();
 
+		// The authoritative client's own freshness, for the client-stale pass
+		// below (`latest_for_servers` is pinned to [`DEFAULT_CLIENT`]).
+		let bestool_statuses = Self::latest_for_servers(db, &server_ids).await?;
+		let bestool_map: std::collections::HashMap<Uuid, Status> = bestool_statuses
+			.into_iter()
+			.map(|s| (s.server_id, s))
+			.collect();
+		let stale_issues =
+			Issue::list_by_source_ref(db, CANOPY_SOURCE, CLIENT_STALE_REF, &server_ids).await?;
+		let stale_issue_map: std::collections::HashMap<Uuid, &Issue> = stale_issues
+			.iter()
+			.filter_map(|i| i.server_id.map(|sid| (sid, i)))
+			.collect();
+
 		let now = Timestamp::now();
 		let mut filed = 0usize;
 		for server in &monitored {
@@ -281,9 +303,9 @@ impl Status {
 			let existing = issue_map.get(&server.id).copied();
 
 			let event = match (down, existing) {
-				(false, None) => continue,
-				(false, Some(issue)) if !issue.active => continue,
-				(false, Some(_)) => NewEvent {
+				(false, None) => None,
+				(false, Some(issue)) if !issue.active => None,
+				(false, Some(_)) => Some(NewEvent {
 					source: CANOPY_SOURCE.into(),
 					r#ref: REACHABILITY_REF.into(),
 					severity: Some(Severity::Info),
@@ -291,8 +313,8 @@ impl Status {
 					message: format!("Server {} is reachable again", server_label(server)),
 					active: Some(false),
 					occurred_at: Some(now),
-				},
-				(true, _) => NewEvent {
+				}),
+				(true, _) => Some(NewEvent {
 					source: CANOPY_SOURCE.into(),
 					r#ref: REACHABILITY_REF.into(),
 					severity: Some(Severity::Error),
@@ -312,10 +334,60 @@ impl Status {
 					},
 					active: Some(true),
 					occurred_at: Some(now),
-				},
+				}),
 			};
-			event.save(db, server.id, None).await?;
-			filed += 1;
+			if let Some(event) = event {
+				event.save(db, server.id, None).await?;
+				filed += 1;
+			}
+
+			// Client-stale pass: the server-down issue above covers a fully
+			// quiet server; this covers the authoritative stream going quiet
+			// while another client keeps the server up.
+			if !down {
+				let bestool_elapsed: Option<SignedDuration> = bestool_map
+					.get(&server.id)
+					.map(|s| now.duration_since(s.created_at).abs());
+				let existing_stale = stale_issue_map.get(&server.id).copied();
+				let stale_event = match (bestool_elapsed, existing_stale) {
+					// Nothing in the window: either the client never existed
+					// (nothing went quiet) or it's been gone so long its rows
+					// aged out — in which case the already-open issue stays
+					// open until the client actually reports again.
+					(None, _) => None,
+					(Some(e), _) if e >= threshold => Some(NewEvent {
+						source: CANOPY_SOURCE.into(),
+						r#ref: CLIENT_STALE_REF.into(),
+						severity: Some(Severity::Error),
+						description: None,
+						message: format!(
+							"Client {DEFAULT_CLIENT} on server {} has not reported for {} (threshold {}), though the server is still reporting",
+							server_label(server),
+							format_secs(e.as_secs()),
+							format_secs(threshold.as_secs()),
+						),
+						active: Some(true),
+						occurred_at: Some(now),
+					}),
+					(Some(_), Some(issue)) if issue.active => Some(NewEvent {
+						source: CANOPY_SOURCE.into(),
+						r#ref: CLIENT_STALE_REF.into(),
+						severity: Some(Severity::Info),
+						description: None,
+						message: format!(
+							"Client {DEFAULT_CLIENT} on server {} is reporting again",
+							server_label(server),
+						),
+						active: Some(false),
+						occurred_at: Some(now),
+					}),
+					(Some(_), _) => None,
+				};
+				if let Some(event) = stale_event {
+					event.save(db, server.id, None).await?;
+					filed += 1;
+				}
+			}
 		}
 		Ok(filed)
 	}
