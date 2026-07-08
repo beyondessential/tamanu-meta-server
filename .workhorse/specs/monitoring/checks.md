@@ -5,7 +5,7 @@ id: CHK
 # Check state
 
 Canopy's monitoring is organised around checks: named conditions, each with a current result, reported by sources or determined by Canopy itself.
-This spec covers the check-state model — targets, sources, results, severities, and the operator controls over them.
+This spec covers the check-state model — targets, sources, results, policy, and the operator controls over them.
 How device reports arrive is the status contract (see [STA](../public-server/statuses.md)); how degraded checks aggregate into incidents is the incident spec (see [INC](incidents.md)).
 
 ## Targets
@@ -26,33 +26,52 @@ Reports arriving over the device API cannot use the reserved names.
 
 ## Results
 
-A check's result is one of:
+A check's result is one of, in decreasing order of urgency:
 
-- **passed** — the condition holds.
-- **warning** — the condition is degraded but not failing.
 - **failed** — the condition is failing.
+- **warning** — the condition is degraded but not failing.
 - **broken** — the check itself could not run; the condition is unconfirmed either way.
+- **passed** — the condition holds.
 - **skipped** — the check deliberately did not run.
+
+Every check has two results: the **observed** result, what the source reported, and the **effective** result, what policy makes of it.
+The observed result is always recorded as reported; everything Canopy acts on — issues, incidents, health rollups — follows the effective result.
+
+## Policy
+
+Policy is a transformation of results: for each check it maps the observed result to the effective one.
+There is one vocabulary on both sides — policy speaks in results, and what a source is told about its checks is the policy itself, not a projection of it.
+
+Fleet-wide policy lives in a catalog keyed by (source, check).
+An entry carries:
+
+- a **ceiling** — the maximum effective result, on the urgency ordering: a ceiling of `failed` changes nothing, `warning` grades failures as warnings, `passed` means recorded but never alerting, and `skipped` additionally tells the source not to bother running the check.
+- optional **rules** — conditional transforms evaluated against the check's own detail, the report's server-wide detail, and the server's effective tags; a rule can move a result in any direction, including upward: a warning graded as a failure, or a pass with a particular detail graded as a warning.
+- an **escalates** flag — an effective failure of this check notifies immediately, bypassing incident grace (see [INC](incidents.md)).
+
+A check is registered in the catalog with a ceiling of `warning` the first time it is reported; operators adjust from there.
+Canopy's own checks register with the policy their condition warrants instead of the default.
+
+### Scoped policy
+
+Beyond the fleet catalog, a transform can be scoped to a target: per server, per group, or Canopy-wide.
+Transforms apply in order — fleet catalog, then group, then server — each acting on the previous effective result, so the most specific scope has the last word.
+
+The operator interface presents one scoped policy: the **silence**, a scoped ceiling of `skipped`, recording who silenced and when.
+A silenced check keeps recording its observed results; its effective result is skipped, so it raises nothing and counts nowhere.
+The model admits arbitrary scoped transforms; surfaces beyond the silence are deliberately not offered yet.
 
 ## State
 
-For each (target, source, check) Canopy keeps exactly one state: the current result, the detail the source attached to the check's most recent report, when the check was first and most recently reported, and — while it is degraded — when the current degradation began.
+For each (target, source, check) Canopy keeps exactly one state: the observed and effective results, the detail the source attached to the check's most recent report, when the check was first and most recently reported, and — while it is degraded — when the current degradation began.
 All reported checks are kept, including passing ones, so that "every server reporting this check" is answerable without scanning history.
 
-A state whose result is warning or failed is an **issue**: it acquires a severity from the catalog and is eligible to contribute to incidents.
+A state whose effective result is warning or failed is an **issue**, eligible to contribute to incidents.
 "Degraded since" is the start of the current unbroken run of degradation; a recovery ends the run, and a later degradation starts a fresh one.
 
-A broken result neither confirms nor clears the check's previous definite result: while broken, the state retains the severity contribution and degraded-since of its last definite result, and additionally warns that the check itself is broken.
-The severity of brokenness defaults to warning and is configurable per check in the catalog.
-A definite result (passed, warning, or failed) ends the broken condition and replaces the retained contribution.
-
-## Severity catalog
-
-Check severities are configured in a catalog keyed by (source, check).
-A check is registered in the catalog at warning severity the first time it is reported; operators adjust from there.
-Each entry carries a base severity and optionally conditional rules, evaluated against the check's own detail, the report's server-wide detail, and the server's effective tags, so the same check can be graded differently by context.
-
-Canopy's own checks are catalogued like any other source's, so operators control the severity of Canopy-raised conditions (reachability, staleness, backup signals) the same way as device-reported ones.
+An effective broken result neither confirms nor clears the check's previous definite result: while broken, the state retains the contribution and degraded-since of its last definite effective result, and the brokenness itself additionally counts as a warning.
+A policy rule can grade brokenness differently — up to a failure where not being able to check is itself the failure, or down to a pass where a flaky check runner should not raise noise.
+A definite effective result (passed, warning, or failed) ends the broken condition and replaces the retained contribution.
 
 ## Reporting semantics
 
@@ -68,24 +87,23 @@ A server all of whose sources are stale is presented as unreachable.
 
 ## Health rollup
 
-A server's health is derived from its current check states across all sources: any failed check makes it unhealthy; otherwise any warning or broken check makes it degraded; otherwise it is healthy.
-Passed and skipped checks, and silenced checks, do not count against a server.
+A server's health is derived from its current effective results across all sources: any failure makes it unhealthy; otherwise any warning or brokenness makes it degraded; otherwise it is healthy.
+Passed and skipped checks do not count against a server.
 
 ## Operator controls
 
-**Silences** suppress a (source, check) at server, group, or Canopy-wide scope: matching checks are still recorded and their state kept current, but they present as skipped in health rollups, raise no severity, and never contribute to incidents.
-Silences record who created them and when.
+**Silences** are the scoped policy described above.
 
 **Snoozes** suppress one state until a chosen time, after which it contributes again if still degraded.
 
 **Resolution** is an operator marking one state as dealt with, recording who and why.
-A resolved state that is reported degraded again reopens: the resolution is cleared and the state contributes anew.
+A resolved state that degrades again reopens: the resolution is cleared and the state contributes anew.
 
 **Notes** attach free-form operator commentary to a state.
 
 ## Manual conditions
 
-Operators can raise a condition directly against a server, under the `manual` source, with a chosen check name, severity, and message.
+Operators can raise a condition directly against a server, under the `manual` source, with a chosen check name, result, and message, and optionally marked as escalating.
 A manual condition behaves as a reported check whose reporter is the operator: it stays active until an operator resolves it or raises it again as recovered.
 
 ## Monitoring gate

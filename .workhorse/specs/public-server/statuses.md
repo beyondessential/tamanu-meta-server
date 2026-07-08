@@ -37,6 +37,6 @@ It is recorded with its metadata like any other status, and is treated as the so
 
 The response to a push carries only what the pushing source needs; a source is sent nothing meant for another source, and relies on receiving nothing beyond its own concerns.
 
-- The effective severity of each check in the push, as resolved by the catalog, is returned to the source that pushed them.
+- Each check in the push is answered with the policy applied to it (see [CHK](../monitoring/checks.md), "Policy"), so a source sees how its reports are graded and can stop running checks whose policy is `skipped`.
 - Whether the server should start a backup now is returned only to the source that runs backups (`alertd`).
 - The server's effective tags, a server-wide fact, are returned to every source.

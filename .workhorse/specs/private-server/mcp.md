@@ -74,23 +74,23 @@ When the result is truncated to its bound, the result says so, so the client doe
 
 **Fleet summary** takes no input and returns a fleet-wide overview: server counts by kind and rank, the distribution of deployed versions, a rollup of server health, the number of groups, and a rollup of backup health.
 
-**Find backup problems** optionally narrows to one group, otherwise scans the whole fleet, and returns the current backup problems with a severity for each: server-and-type pairs whose last successful backup is overdue against its schedule, types that have never reported a backup, groups whose backup repository is in an error state, recent failed backup runs, and maintenance runs that appear stuck.
+**Find backup problems** optionally narrows to one group, otherwise scans the whole fleet, and returns the current backup problems graded by urgency: server-and-type pairs whose last successful backup is overdue against its schedule, types that have never reported a backup, groups whose backup repository is in an error state, recent failed backup runs, and maintenance runs that appear stuck.
 
 ### Incidents and issues
 
-An issue is a degraded check state (see [CHK](../monitoring/checks.md)): a condition on a server, a group, or Canopy itself, reported by a known source under a stable check name, carrying a severity and a current active state; an incident aggregates the issues active on a target over a span of time, from when it opened until it closes or an operator resolves it (see [INC](../monitoring/incidents.md)).
+An issue is a degraded check state (see [CHK](../monitoring/checks.md)): a condition on a server, a group, or Canopy itself, reported by a known source under a stable check name, carrying its observed and effective results and a current active state; an incident aggregates the issues active on a target over a span of time, from when it opened until it closes or an operator resolves it (see [INC](../monitoring/incidents.md)).
 
 **Find incidents** takes a look-back window (in days, defaulting to a week) and optionally one group, and returns the incidents that were open at any point within that window — those still open, plus those that closed no earlier than the window start.
 Each is returned with its target, its status (open, closed, or operator-resolved), when it opened, closed, and was resolved, who resolved it and why, whether it ever escalated, how long it was open, whether it was published, and how many issues it covers.
 A status filter can narrow the result to only open or only resolved incidents.
 
 The window includes incidents that flapped open and shut within their group's grace period and so never surfaced to anyone.
-Each incident therefore carries a **published** flag — true when it actually notified operators, which happens only when it stayed open past its group's grace period or it escalated (a critical issue joined, which bypasses the grace) — and the result reports how many of the returned incidents were published.
+Each incident therefore carries a **published** flag — true when it actually notified operators, which happens only when it stayed open past its target's grace period or it escalated (an escalating check's failure joined, which bypasses the grace) — and the result reports how many of the returned incidents were published.
 A summary or ranking of incidents should count published incidents rather than raw rows unless raw activity is explicitly wanted.
 
-**Get incident** takes an incident identifier and returns the incident with the issues attached to it: each issue's severity, source, check name, message, owning server, active state, and when it joined and (if applicable) left the incident.
+**Get incident** takes an incident identifier and returns the incident with the issues attached to it: each issue's effective result, source, check name, message, owning server, active state, and when it joined and (if applicable) left the incident.
 
-**Find issues** returns issues across the fleet, filtered by active state, by severity, by group, by server, and by recency (issues last seen within a look-back window).
+**Find issues** returns issues across the fleet, filtered by active state, by effective result, by group, by server, and by recency (issues last seen within a look-back window).
 
 **Get issue** takes an issue identifier and returns the issue with the incidents it is or was part of.
 

@@ -8,22 +8,22 @@ An incident is a span of trouble on a target: a server group, or Canopy as a who
 It aggregates the issues active on that target over its lifetime, from when it opens until it closes or an operator resolves it.
 At most one incident is open per target at a time.
 
-Issues and their severities are defined by the check-state model (see [CHK](checks.md)).
+Issues and effective results are defined by the check-state model (see [CHK](checks.md)).
 Issues on a server belong to the target of the server's group; issues on an ungrouped server belong to no target and cannot contribute to incidents.
 Group-targeted issues belong to that group's target; Canopy-wide issues belong to the Canopy target.
 
 ## Membership
 
-An incident opens when an issue at error severity or above becomes active on a target with no open incident.
-While an incident is open, every active issue on its target joins it, regardless of severity, so the incident carries the full context of what was wrong during its span.
+An incident opens when a check's effective result becomes failed on a target with no open incident.
+While an incident is open, every issue on its target joins it — effective warnings included — so the incident carries the full context of what was wrong during its span.
 
-An issue leaves the incident when it recovers, is resolved, snoozed, or silenced, when its severity drops to debug, or when its server stops being monitored.
-The incident closes when its last error-or-worse issue leaves; issues below error severity never hold an incident open.
+An issue leaves the incident when it stops being one: its effective result recovers (to passed or skipped, whether by report or by policy), it is resolved or snoozed, or its server stops being monitored.
+The incident closes when its last effective failure leaves; warnings never hold an incident open.
 
 The membership history — which issues joined and left, and when — is kept and presented as the incident's timeline.
 An issue can leave and rejoin the same incident.
 
-Operator actions that change what counts (monitoring toggles, group membership changes, silences, severity reconfiguration) re-evaluate the affected issues' incident membership.
+Operator actions that change what counts (monitoring toggles, group membership changes, policy and silence changes) re-evaluate the affected issues' incident membership.
 
 ## Notification
 
@@ -31,7 +31,7 @@ Operators are notified over the notification channel: group incidents to the gro
 
 An incident notifies when it has stayed open past its target's grace period; an incident that closes within grace never notifies.
 Whether an incident notified is recorded as its **published** flag, so flaps can be excluded from reporting.
-A critical issue joining notifies immediately, bypassing any remaining grace; if the incident has already notified, the critical join escalates it with a further notification, at most once per incident.
+An escalating check's effective failure (see [CHK](checks.md), "Policy") notifies immediately, bypassing any remaining grace; if the incident has already notified, the join escalates it with a further notification, at most once per incident.
 A notified incident notifies again when it closes.
 
 ## Resolution
