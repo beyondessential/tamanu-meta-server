@@ -61,11 +61,11 @@ pub struct StatusPayload {
 	/// controlled by an operator-managed catalog.
 	pub healthy: Option<bool>,
 
-	/// Per-check breakdown. **Required** — a push without a `health` array is
-	/// rejected with 400 (unless an operator has opted the server into the
-	/// legacy format, in which case such a push only refreshes reachability
-	/// and carries the previously reported checks forward). May be empty
-	/// (`[]`) for a server that genuinely runs no checks. Each entry must
+	/// Per-check breakdown. A push without a `health` array is the legacy
+	/// Tamanu direct-report format: it is treated as the `tamanu` source
+	/// reporting a single always-passing `tasks` heartbeat check. May be
+	/// empty (`[]`) for a source that genuinely runs no checks — which
+	/// recovers every check it previously reported. Each entry must
 	/// include a non-empty `check` name and exactly one of `result` /
 	/// `healthy`; any additional fields per check (latency, free disk %,
 	/// certificate expiry, etc.) are passed through verbatim and shown in the
@@ -127,6 +127,10 @@ const DEFAULT_SOURCE: &str = "alertd";
 /// The source legacy-format pushes (no `health` array) are attributed to:
 /// they come from Tamanu's own direct reporting, not from alertd.
 const LEGACY_SOURCE: &str = "tamanu";
+/// The synthetic check a legacy push reports: a liveness heartbeat,
+/// always passing on receipt. Its value is that it stops — a Tamanu
+/// server that goes quiet trips the source-staleness net.
+const LEGACY_CHECK: &str = "tasks";
 /// Source names a push may not claim: `canopy` is canopy's own
 /// determinations (reachability sweep etc.), `manual` is operator-entered.
 const RESERVED_SOURCES: &[&str] = &[database::statuses::CANOPY_SOURCE, "manual"];
@@ -200,7 +204,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 	),
 	request_body(
 		content = StatusPayload,
-		description = "Status push. A `health` array is required (it may be empty); a body without it is rejected with 400, unless the server has `allow_legacy_status` set, in which case the push refreshes reachability only and carries the last known healthchecks forward.",
+		description = "Status push. A body without a `health` array is the legacy Tamanu direct-report format, treated as the `tamanu` source reporting a single always-passing `tasks` heartbeat check.",
 	),
 	responses(
 		(status = 200, body = StatusResponse),
@@ -247,22 +251,17 @@ async fn create(
 	// reporters that predate carrying it in the body. Either may be absent.
 	let version = resolve_version(&extra, current_version.map(|v| v.0));
 
-	let Some(health) = health else {
-		// Legacy format (no `health` array). Off by default — only servers an
-		// operator has explicitly opted in via `allow_legacy_status` may use
-		// it, until their reporter speaks the new format.
-		if !server.allow_legacy_status {
-			return Err(AppError::BadRequest("`health` array is required".into()));
-		}
-		create_legacy_status(&mut db, server_id, id, extra, version).await?;
-		let check_severities =
-			effective_check_severities(&mut db, server_id, server.group_id, &source).await?;
-		let tags = crate::tags::effective_tags_for_server(&mut db, &server).await?;
-		return Ok(Json(StatusResponse {
-			backup_now,
-			check_severities,
-			tags,
-		}));
+	// Legacy format (no `health` array): Tamanu's direct reporting. It
+	// becomes a heartbeat from the `tamanu` source — a single `tasks`
+	// check that always passes on receipt — and flows through the normal
+	// path from here, so it records state, registers its catalog entry,
+	// and participates in source staleness like any source.
+	let (source, health) = match health {
+		Some(health) => (source, health),
+		None => (
+			LEGACY_SOURCE.to_string(),
+			serde_json::json!([{ "check": LEGACY_CHECK, "result": "passed" }]),
+		),
 	};
 
 	// Resolve the server's effective tag map outside the write transaction.
@@ -387,38 +386,6 @@ async fn effective_check_severities(
 	}
 
 	Ok(map)
-}
-
-/// Store a legacy-format push (no `health` array) for a server that's opted
-/// into [`Server::allow_legacy_status`]. The push only refreshes reachability:
-/// the new row carries the server's last known `healthy`/`health` forward
-/// (defaulting to "healthy, no checks" if the server has never reported the
-/// new format) rather than wiping them, and no health events are filed. So a
-/// server straddling an old and a new reporter doesn't flap its per-check
-/// issues every time the legacy endpoint pings.
-async fn create_legacy_status(
-	db: &mut AsyncPgConnection,
-	server_id: Uuid,
-	device_id: Uuid,
-	extra: serde_json::Value,
-	version: Option<VersionStr>,
-) -> Result<()> {
-	let (healthy, health) = match Status::latest_for_server(db, server_id).await? {
-		Some(prior) => (prior.healthy, prior.health),
-		None => (true, serde_json::Value::Array(Vec::new())),
-	};
-	NewStatus {
-		server_id,
-		device_id: Some(device_id),
-		version,
-		extra,
-		healthy,
-		health,
-		source: LEGACY_SOURCE.into(),
-	}
-	.save(db)
-	.await?;
-	Ok(())
 }
 
 /// Resolve the server version to record on this status. Prefers the payload's
@@ -757,10 +724,8 @@ fn split_health_from_extra(
 		Some(_) => return Err(AppError::BadRequest("`healthy` must be a boolean".into())),
 	};
 
-	// A push without a `health` key is the retired legacy format. We don't
-	// reject it here — the caller decides, per the server's
-	// `allow_legacy_status` flag, whether to accept it (reachability-only,
-	// carrying prior healthchecks forward) or 400 it.
+	// A push without a `health` key is the legacy Tamanu direct-report
+	// format; the caller transforms it into the tamanu/tasks heartbeat.
 	let Some(health_value) = obj.remove("health") else {
 		return Ok((source, healthy, None, serde_json::Value::Object(obj)));
 	};

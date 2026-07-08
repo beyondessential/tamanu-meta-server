@@ -1,0 +1,1 @@
+ALTER TABLE servers ADD COLUMN allow_legacy_status BOOLEAN NOT NULL DEFAULT FALSE;

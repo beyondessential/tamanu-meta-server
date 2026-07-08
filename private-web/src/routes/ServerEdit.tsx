@@ -65,9 +65,6 @@ function EditForm({ info }: { info: ServerInfo }) {
 	const [alertWhenDownMinutes, setAlertWhenDownMinutes] = useState<string>(
 		Math.max(1, Math.round(info.alert_when_down_for / 60)).toString(),
 	);
-	const [allowLegacyStatus, setAllowLegacyStatus] = useState(
-		info.allow_legacy_status,
-	);
 	const [groupId, setGroupId] = useState<string | null>(info.group_id);
 	const [deviceId, setDeviceId] = useState<string>(info.device_id ?? "");
 	const [cloud, setCloud] = useState<"" | "true" | "false">(
@@ -96,7 +93,6 @@ function EditForm({ info }: { info: ServerInfo }) {
 					? { lat: Number(lat), lon: Number(lon) }
 					: null,
 			is_monitored: isMonitored,
-			allow_legacy_status: allowLegacyStatus,
 			alert_when_down_for: Math.max(
 				60,
 				Math.round(Number(alertWhenDownMinutes) * 60),
@@ -248,22 +244,6 @@ function EditForm({ info }: { info: ServerInfo }) {
 					Raise this for flappy servers (so brief blips don't fire) or lower
 					it for critical servers that should page promptly. The value is
 					preserved while monitoring is off.
-				</Typography>
-
-				<FormControlLabel
-					control={
-						<Checkbox
-							checked={allowLegacyStatus}
-							onChange={(e) => setAllowLegacyStatus(e.target.checked)}
-							disabled={action.pending}
-						/>
-					}
-					label="Allow status from Tamanu"
-				/>
-				<Typography variant="caption" color="text.secondary">
-					Enable this only if Tamanu is the only thing reporting to Canopy.
-					When alertd is set up on that server, disable it so healthchecks
-					only come from one source.
 				</Typography>
 
 				<TextField

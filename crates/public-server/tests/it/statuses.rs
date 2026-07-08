@@ -715,34 +715,6 @@ async fn submit_status_rejects_non_bool_healthy() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn submit_status_rejects_missing_health() {
-	commons_tests::server::run_with_device_auth(
-		"server",
-		async |mut conn, cert, device_id, public, _| {
-			let server_id = insert_health_test_server(&mut conn, device_id).await;
-
-			// A push that carries no `health` array at all is rejected
-			// outright — even though `healthy` and other fields are valid.
-			let response = public
-				.post(&format!("/status/{}", server_id))
-				.add_header("mtls-certificate", &cert)
-				.json(&serde_json::json!({ "healthy": true, "uptime": 1 }))
-				.await;
-			response.assert_status_bad_request();
-
-			// An empty body (⇒ `{}`) is rejected for the same reason.
-			let response = public
-				.post(&format!("/status/{}", server_id))
-				.add_header("mtls-certificate", &cert)
-				.json(&serde_json::json!({}))
-				.await;
-			response.assert_status_bad_request();
-		},
-	)
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn submit_status_rejects_non_array_health() {
 	commons_tests::server::run_with_device_auth(
 		"server",
@@ -801,48 +773,67 @@ async fn submit_status_rejects_health_entry_missing_healthy() {
 }
 
 // -----------------------------------------------------------------
-// Legacy format opt-in (`servers.allow_legacy_status`).
+// Legacy format (no `health` array): the tamanu/tasks heartbeat.
 // -----------------------------------------------------------------
 
-async fn enable_legacy_status(conn: &mut diesel_async::AsyncPgConnection, server_id: Uuid) {
-	sql_query("UPDATE servers SET allow_legacy_status = TRUE WHERE id = $1")
-		.bind::<sql_types::Uuid, _>(server_id)
-		.execute(conn)
-		.await
-		.expect("enable legacy status");
-}
-
-/// Default (opt-out): a legacy push — no `health` array — is rejected even
-/// when the rest of the body is valid.
+/// A legacy push — no `health` array — is accepted unconditionally and
+/// transformed into the `tamanu` source reporting a single always-passing
+/// `tasks` heartbeat check, with the push's extras recorded verbatim.
 #[tokio::test(flavor = "multi_thread")]
-async fn submit_status_legacy_rejected_without_optin() {
+async fn submit_status_legacy_transforms_to_tamanu_heartbeat() {
 	commons_tests::server::run_with_device_auth(
 		"server",
 		async |mut conn, cert, device_id, public, _| {
 			let server_id = insert_health_test_server(&mut conn, device_id).await;
 
-			let response = public
-				.post(&format!("/status/{}", server_id))
-				.add_header("mtls-certificate", &cert)
-				.json(&serde_json::json!({ "healthy": true, "uptime": 5 }))
-				.await;
-			response.assert_status_bad_request();
+			post_status(
+				&public,
+				&cert,
+				server_id,
+				serde_json::json!({ "healthy": false, "uptime": 7 }),
+			)
+			.await;
+
+			let row = fetch_latest_health(&mut conn, server_id).await;
+			assert_eq!(
+				row.health,
+				serde_json::json!([{ "check": "tasks", "result": "passed" }]),
+			);
+			assert_eq!(row.extra.get("uptime").and_then(|v| v.as_i64()), Some(7));
+
+			// The heartbeat records healthy state under the tamanu source.
+			let tasks = fetch_issue(&mut conn, server_id, "tamanu", "health/tasks")
+				.await
+				.expect("heartbeat state recorded");
+			assert!(!tasks.active, "the heartbeat is not an issue");
+			assert!(fetch_open_incident(&mut conn, server_id).await.is_none());
+
+			#[derive(QueryableByName)]
+			struct SourceRow {
+				#[diesel(sql_type = sql_types::Text)]
+				source: String,
+			}
+			let row: SourceRow = sql_query(
+				"SELECT source FROM statuses WHERE server_id = $1 ORDER BY created_at DESC LIMIT 1",
+			)
+			.bind::<sql_types::Uuid, _>(server_id)
+			.get_result(&mut conn)
+			.await
+			.expect("status row");
+			assert_eq!(row.source, "tamanu");
 		},
 	)
 	.await
 }
 
-/// With the opt-in on, a legacy push is accepted but does not disturb the
-/// healthchecks: it carries the last real push's `health`/`healthy` forward
-/// and files no events, so a failing check filed by an earlier new-style push
-/// stays open instead of flapping closed.
+/// A legacy push must not disturb another source's checks: with per-source
+/// scoping, the tamanu heartbeat says nothing about alertd's open issues.
 #[tokio::test(flavor = "multi_thread")]
-async fn submit_status_legacy_allowed_carries_health_forward() {
+async fn submit_status_legacy_leaves_other_sources_alone() {
 	commons_tests::server::run_with_device_auth(
 		"server",
 		async |mut conn, cert, device_id, public, _| {
 			let server_id = insert_health_test_server(&mut conn, device_id).await;
-			enable_legacy_status(&mut conn, server_id).await;
 
 			// New-style push with a failing check files a per-check issue.
 			post_status(
@@ -858,9 +849,8 @@ async fn submit_status_legacy_allowed_carries_health_forward() {
 				.await
 				.expect("per-check issue filed");
 			assert!(before.active);
-			assert_eq!(count_issues_for_server(&mut conn, server_id).await, 1);
 
-			// Legacy push (no `health` array) only refreshes reachability.
+			// Legacy push: heartbeat under tamanu only.
 			post_status(
 				&public,
 				&cert,
@@ -869,57 +859,10 @@ async fn submit_status_legacy_allowed_carries_health_forward() {
 			)
 			.await;
 
-			// The disk issue is untouched — not closed by the legacy push.
 			let after = fetch_issue(&mut conn, server_id, "alertd", "health/disk")
 				.await
 				.expect("per-check issue still present");
 			assert!(after.active, "legacy push must not close the failing check");
-			assert_eq!(
-				count_issues_for_server(&mut conn, server_id).await,
-				1,
-				"legacy push must not file or close any issue"
-			);
-
-			// The newest row carries the prior healthchecks forward (so the
-			// snapshot keeps showing them) while recording the legacy extras.
-			let row = fetch_latest_health(&mut conn, server_id).await;
-			let arr = row.health.as_array().expect("health carried forward");
-			assert_eq!(arr.len(), 1);
-			assert_eq!(arr[0]["check"], "disk");
-			assert_eq!(arr[0]["free_pct"], 4);
-			assert_eq!(row.extra.get("uptime").and_then(|v| v.as_i64()), Some(99));
-		},
-	)
-	.await
-}
-
-/// A server that has only ever spoken the legacy format (no prior row to carry
-/// forward) is accepted and stored with an empty healthcheck set.
-#[tokio::test(flavor = "multi_thread")]
-async fn submit_status_legacy_allowed_without_prior_health() {
-	commons_tests::server::run_with_device_auth(
-		"server",
-		async |mut conn, cert, device_id, public, _| {
-			let server_id = insert_health_test_server(&mut conn, device_id).await;
-			enable_legacy_status(&mut conn, server_id).await;
-
-			post_status(
-				&public,
-				&cert,
-				server_id,
-				serde_json::json!({ "healthy": false, "uptime": 7 }),
-			)
-			.await;
-
-			let row = fetch_latest_health(&mut conn, server_id).await;
-			assert_eq!(row.health, serde_json::json!([]));
-			assert!(row.healthy, "no prior row ⇒ defaults to healthy");
-			assert_eq!(row.extra.get("uptime").and_then(|v| v.as_i64()), Some(7));
-			assert_eq!(
-				count_issues_for_server(&mut conn, server_id).await,
-				0,
-				"legacy push files no issues"
-			);
 		},
 	)
 	.await

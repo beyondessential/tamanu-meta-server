@@ -9279,7 +9279,6 @@
                 "kind",
                 "display_host",
                 "is_monitored",
-                "allow_legacy_status",
                 "alert_when_down_for",
                 "notes",
                 "tags",
@@ -9290,10 +9289,6 @@
                   "type": "integer",
                   "format": "int64",
                   "description": "Threshold in seconds for the reachability sweep to consider this\nserver down. Always positive; only consulted when `is_monitored`\nis `true`. The default at creation is 600 (10 minutes)."
-                },
-                "allow_legacy_status": {
-                  "type": "boolean",
-                  "description": "Whether this server may use the retired legacy `/status` format (a\npush with no `health` array). Off by default; when on, such a push\nonly refreshes reachability and carries prior healthchecks forward."
                 },
                 "archived": {
                   "type": "boolean",
@@ -10936,13 +10931,6 @@
             "format": "int64",
             "description": "New downtime threshold in seconds before this server is considered\ndown. Omit to leave unchanged."
           },
-          "allow_legacy_status": {
-            "type": [
-              "boolean",
-              "null"
-            ],
-            "description": "Whether to accept the retired legacy status format from this\nserver. Omit to leave unchanged."
-          },
           "cloud": {
             "type": [
               "boolean",
@@ -11377,7 +11365,6 @@
           "kind",
           "display_host",
           "is_monitored",
-          "allow_legacy_status",
           "alert_when_down_for",
           "notes",
           "tags",
@@ -11388,10 +11375,6 @@
             "type": "integer",
             "format": "int64",
             "description": "Threshold in seconds for the reachability sweep to consider this\nserver down. Always positive; only consulted when `is_monitored`\nis `true`. The default at creation is 600 (10 minutes)."
-          },
-          "allow_legacy_status": {
-            "type": "boolean",
-            "description": "Whether this server may use the retired legacy `/status` format (a\npush with no `health` array). Off by default; when on, such a push\nonly refreshes reachability and carries prior healthchecks forward."
           },
           "archived": {
             "type": "boolean",

@@ -616,7 +616,6 @@ async fn seed_servers(
 			cloud: None,
 			geolocation: None,
 			is_monitored: true,
-			allow_legacy_status: false,
 			alert_when_down_for: TEN_MINUTES,
 			notes: String::new(),
 			tags: TagMap::default(),

@@ -95,10 +95,6 @@ pub struct ServerInfo {
 	/// reachability sweep skips it and its issues don't contribute to
 	/// incidents.
 	pub is_monitored: bool,
-	/// Whether this server may use the retired legacy `/status` format (a
-	/// push with no `health` array). Off by default; when on, such a push
-	/// only refreshes reachability and carries prior healthchecks forward.
-	pub allow_legacy_status: bool,
 	/// Threshold in seconds for the reachability sweep to consider this
 	/// server down. Always positive; only consulted when `is_monitored`
 	/// is `true`. The default at creation is 600 (10 minutes).
@@ -229,10 +225,6 @@ pub struct ServerDataUpdate {
 	/// unchanged.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub is_monitored: Option<bool>,
-	/// Whether to accept the retired legacy status format from this
-	/// server. Omit to leave unchanged.
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub allow_legacy_status: Option<bool>,
 	/// New downtime threshold in seconds before this server is considered
 	/// down. Omit to leave unchanged.
 	#[serde(skip_serializing_if = "Option::is_none")]
@@ -271,7 +263,6 @@ pub(super) fn server_to_info(s: Server) -> ServerInfo {
 		cloud: s.cloud,
 		geolocation: s.geolocation,
 		is_monitored: s.is_monitored,
-		allow_legacy_status: s.allow_legacy_status,
 		alert_when_down_for: s.alert_when_down_for.0.as_secs(),
 		notes: s.notes,
 		tags: s.tags,
@@ -778,7 +769,6 @@ pub async fn update(
 		cloud: args.data.cloud,
 		geolocation: args.data.geolocation,
 		is_monitored: args.data.is_monitored,
-		allow_legacy_status: args.data.allow_legacy_status,
 		alert_when_down_for: args
 			.data
 			.alert_when_down_for
@@ -921,7 +911,6 @@ pub async fn create(
 		cloud: args.cloud,
 		geolocation: args.geolocation,
 		is_monitored: args.is_monitored.unwrap_or(true),
-		allow_legacy_status: false,
 		alert_when_down_for: PgDuration(jiff::SignedDuration::from_secs(
 			args.alert_when_down_for.unwrap_or(DEFAULT_ALERT_SECS),
 		)),
@@ -1248,7 +1237,6 @@ pub async fn attach_tailscale_device(
 			cloud: None,
 			geolocation: None,
 			is_monitored: None,
-			allow_legacy_status: None,
 			alert_when_down_for: None,
 			notes: None,
 			tags: None,

@@ -753,7 +753,7 @@
           }
         ],
         "requestBody": {
-          "description": "Status push. A `health` array is required (it may be empty); a body without it is rejected with 400, unless the server has `allow_legacy_status` set, in which case the push refreshes reachability only and carries the last known healthchecks forward.",
+          "description": "Status push. A body without a `health` array is the legacy Tamanu direct-report format, treated as the `tamanu` source reporting a single always-passing `tasks` heartbeat check.",
           "content": {
             "application/json": {
               "schema": {
@@ -2098,7 +2098,7 @@
                 "items": {
                   "$ref": "#/components/schemas/HealthCheck"
                 },
-                "description": "Per-check breakdown. **Required** — a push without a `health` array is\nrejected with 400 (unless an operator has opted the server into the\nlegacy format, in which case such a push only refreshes reachability\nand carries the previously reported checks forward). May be empty\n(`[]`) for a server that genuinely runs no checks. Each entry must\ninclude a non-empty `check` name and exactly one of `result` /\n`healthy`; any additional fields per check (latency, free disk %,\ncertificate expiry, etc.) are passed through verbatim and shown in the\nstatus UI.\n\nEvery check name seen — whatever its result — is added to the\noperator-facing check catalog, where the policy grading its results\ncan be reviewed and adjusted. A check whose effective result is\nfailed or warning opens (or keeps open) its issue; a broken check\nkeeps the same issue open, retaining a known failure's contribution\nwhile warning the check itself is broken; effective passed and\nskipped results open nothing and close prior issues."
+                "description": "Per-check breakdown. A push without a `health` array is the legacy\nTamanu direct-report format: it is treated as the `tamanu` source\nreporting a single always-passing `tasks` heartbeat check. May be\nempty (`[]`) for a source that genuinely runs no checks — which\nrecovers every check it previously reported. Each entry must\ninclude a non-empty `check` name and exactly one of `result` /\n`healthy`; any additional fields per check (latency, free disk %,\ncertificate expiry, etc.) are passed through verbatim and shown in the\nstatus UI.\n\nEvery check name seen — whatever its result — is added to the\noperator-facing check catalog, where the policy grading its results\ncan be reviewed and adjusted. A check whose effective result is\nfailed or warning opens (or keeps open) its issue; a broken check\nkeeps the same issue open, retaining a known failure's contribution\nwhile warning the check itself is broken; effective passed and\nskipped results open nothing and close prior issues."
               },
               "healthy": {
                 "type": [
