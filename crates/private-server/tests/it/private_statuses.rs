@@ -1078,15 +1078,15 @@ async fn check_attention_lists_servers_reporting_that_check_ordered_failed_first
 			('33333333-3333-3333-3333-333333333333', 'Healthy Server', 'https://healthy.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
 			('44444444-4444-4444-4444-444444444444', 'Other Check Server', 'https://other.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
 
-			INSERT INTO statuses (server_id, created_at, healthy, health) VALUES
-			('11111111-1111-1111-1111-111111111111', NOW(), true,
-				'[{\"check\":\"postgres\",\"result\":\"warning\"}]'::jsonb),
-			('22222222-2222-2222-2222-222222222222', NOW(), true,
-				'[{\"check\":\"postgres\",\"result\":\"failed\",\"free_pct\":2}]'::jsonb),
-			('33333333-3333-3333-3333-333333333333', NOW(), true,
-				'[{\"check\":\"postgres\",\"result\":\"passed\"}]'::jsonb),
-			('44444444-4444-4444-4444-444444444444', NOW(), true,
-				'[{\"check\":\"disk_space\",\"result\":\"failed\"}]'::jsonb)",
+			INSERT INTO issues (server_id, source, \"ref\", check_name, observed_result, effective_result, detail, severity, message, active, first_seen, last_seen, degraded_since, last_degraded_at) VALUES
+			('11111111-1111-1111-1111-111111111111', 'alertd', 'health/postgres', 'postgres', 'warning', 'warning',
+				'{\"check\":\"postgres\",\"result\":\"warning\"}'::jsonb, 'warning', 'warned', true, NOW(), NOW(), NOW(), NOW()),
+			('22222222-2222-2222-2222-222222222222', 'alertd', 'health/postgres', 'postgres', 'failed', 'failed',
+				'{\"check\":\"postgres\",\"result\":\"failed\",\"free_pct\":2}'::jsonb, 'error', 'failed', true, NOW(), NOW(), NOW(), NOW()),
+			('33333333-3333-3333-3333-333333333333', 'alertd', 'health/postgres', 'postgres', 'passed', 'passed',
+				'{\"check\":\"postgres\",\"result\":\"passed\"}'::jsonb, 'info', 'passing', false, NOW(), NOW(), NULL, NULL),
+			('44444444-4444-4444-4444-444444444444', 'alertd', 'health/disk_space', 'disk_space', 'failed', 'failed',
+				'{\"check\":\"disk_space\",\"result\":\"failed\"}'::jsonb, 'error', 'failed', true, NOW(), NOW(), NOW(), NOW())",
 		)
 		.await
 		.unwrap();
@@ -1123,14 +1123,14 @@ async fn check_attention_lists_servers_reporting_that_check_ordered_failed_first
 			data.servers[0].server_id,
 			"22222222-2222-2222-2222-222222222222"
 		);
-		// The full health[] entry rides along for the expandable row.
+		// The check's detail rides along for the expandable row.
 		assert_eq!(
 			data.servers[0].data,
 			serde_json::json!({"check": "postgres", "result": "failed", "free_pct": 2}),
 		);
-		assert_eq!(
-			data.servers[0].failing_since, None,
-			"no issue on file for this failure"
+		assert!(
+			data.servers[0].failing_since.is_some(),
+			"a degraded state row carries its streak start"
 		);
 
 		assert_eq!(data.servers[1].server_name, "Warning Server");
@@ -1151,20 +1151,14 @@ async fn check_attention_failing_since_comes_from_the_active_issue() {
 			('11111111-1111-1111-1111-111111111111', 'Failing Server', 'https://failing.example.com', 'production', 'central'),
 			('22222222-2222-2222-2222-222222222222', 'Recovered Issue Server', 'https://recovered.example.com', 'production', 'central');
 
-			INSERT INTO statuses (server_id, created_at, healthy, health) VALUES
-			('11111111-1111-1111-1111-111111111111', NOW(), true,
-				'[{\"check\":\"postgres\",\"result\":\"failed\"}]'::jsonb),
-			('22222222-2222-2222-2222-222222222222', NOW(), true,
-				'[{\"check\":\"postgres\",\"result\":\"failed\"}]'::jsonb);
-
-			-- Active issue: its first_seen is the failing-since timestamp.
-			INSERT INTO issues (server_id, source, \"ref\", severity, message, active, first_seen, last_seen) VALUES
-			('11111111-1111-1111-1111-111111111111', 'status', 'health/postgres', 'error',
-				'postgres check failing', true, NOW() - INTERVAL '3 hours', NOW()),
-			-- Inactive issue (check recovered then re-failed without a new
-			-- push being processed yet): must NOT be used.
-			('22222222-2222-2222-2222-222222222222', 'status', 'health/postgres', 'error',
-				'postgres check failing', false, NOW() - INTERVAL '9 hours', NOW() - INTERVAL '8 hours')",
+		-- Active state: its degraded_since is the failing-since timestamp.
+			INSERT INTO issues (server_id, source, \"ref\", check_name, observed_result, effective_result, severity, message, active, first_seen, last_seen, degraded_since, last_degraded_at) VALUES
+			('11111111-1111-1111-1111-111111111111', 'alertd', 'health/postgres', 'postgres', 'failed', 'failed', 'error',
+				'postgres check failing', true, NOW() - INTERVAL '3 hours', NOW(), NOW() - INTERVAL '3 hours', NOW()),
+			-- Recovered state (inactive): shows the last observed result but
+			-- carries no streak.
+			('22222222-2222-2222-2222-222222222222', 'alertd', 'health/postgres', 'postgres', 'failed', 'failed', 'error',
+				'postgres check failing', false, NOW() - INTERVAL '9 hours', NOW() - INTERVAL '8 hours', NULL, NOW() - INTERVAL '8 hours')",
 		)
 		.await
 		.unwrap();
@@ -1200,7 +1194,7 @@ async fn check_attention_failing_since_comes_from_the_active_issue() {
 			.unwrap();
 		assert_eq!(
 			recovered.failing_since, None,
-			"inactive issues don't provide failing_since"
+			"recovered state doesn't provide failing_since"
 		);
 	})
 	.await
@@ -1216,11 +1210,9 @@ async fn check_attention_excludes_ungrouped_and_archived_servers() {
 
 			UPDATE servers SET deleted_at = NOW() WHERE id = '22222222-2222-2222-2222-222222222222';
 
-			INSERT INTO statuses (server_id, created_at, healthy, health) VALUES
-			('11111111-1111-1111-1111-111111111111', NOW(), true,
-				'[{\"check\":\"postgres\",\"result\":\"failed\"}]'::jsonb),
-			('22222222-2222-2222-2222-222222222222', NOW(), true,
-				'[{\"check\":\"postgres\",\"result\":\"failed\"}]'::jsonb)",
+			INSERT INTO issues (server_id, source, \"ref\", check_name, observed_result, effective_result, severity, message, active, first_seen, last_seen, degraded_since, last_degraded_at) VALUES
+			('11111111-1111-1111-1111-111111111111', 'alertd', 'health/postgres', 'postgres', 'failed', 'failed', 'error', 'failed', true, NOW(), NOW(), NOW(), NOW()),
+			('22222222-2222-2222-2222-222222222222', 'alertd', 'health/postgres', 'postgres', 'failed', 'failed', 'error', 'failed', true, NOW(), NOW(), NOW(), NOW())",
 		)
 		.await
 		.unwrap();
@@ -1247,9 +1239,8 @@ async fn check_attention_returns_catalog_policy_and_ignores_non_matching_check()
 			"INSERT INTO check_policies (source, check_name, ceiling) VALUES ('alertd', 'postgres', 'failed');
 			INSERT INTO servers (id, name, host, rank, kind) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Failing Server', 'https://failing.example.com', 'production', 'central');
-			INSERT INTO statuses (server_id, created_at, healthy, health) VALUES
-			('11111111-1111-1111-1111-111111111111', NOW(), true,
-				'[{\"check\":\"postgres\",\"result\":\"failed\"}]'::jsonb)",
+			INSERT INTO issues (server_id, source, \"ref\", check_name, observed_result, effective_result, severity, message, active, first_seen, last_seen, degraded_since, last_degraded_at) VALUES
+			('11111111-1111-1111-1111-111111111111', 'alertd', 'health/postgres', 'postgres', 'failed', 'failed', 'error', 'failed', true, NOW(), NOW(), NOW(), NOW())",
 		)
 		.await
 		.unwrap();

@@ -1021,6 +1021,28 @@ pub async fn health_from_check_state(
 	Ok(out)
 }
 
+impl Issue {
+	/// Server-scoped check state for one check name, across every source
+	/// that reports it. The per-check attention page's data source: rows
+	/// carry the observed/effective results, the check's detail, and the
+	/// degraded-streak timestamps.
+	pub async fn check_state_for_check(
+		conn: &mut AsyncPgConnection,
+		check_name: &str,
+	) -> Result<Vec<Issue>> {
+		use crate::schema::issues::dsl;
+
+		dsl::issues
+			.select(Issue::as_select())
+			.filter(dsl::check_name.eq(check_name))
+			.filter(dsl::server_id.is_not_null())
+			.filter(dsl::observed_result.is_not_null())
+			.load(conn)
+			.await
+			.map_err(AppError::from)
+	}
+}
+
 /// The canopy-wide issue at `(canopy, ref)`, if it has ever been raised.
 pub async fn get_global_issue(conn: &mut AsyncPgConnection, r#ref: &str) -> Result<Option<Issue>> {
 	use crate::schema::issues::dsl;

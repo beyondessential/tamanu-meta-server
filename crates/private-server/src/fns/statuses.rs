@@ -289,22 +289,20 @@ pub struct CheckAttentionServerData {
 	pub group_id: Option<Uuid>,
 	/// The server's group name, if it belongs to one.
 	pub group_name: Option<String>,
-	/// The check's result on this server's latest status. The UI shows
+	/// The source that reports this check on this server. A server can
+	/// appear once per source when several report the same check name.
+	pub source: String,
+	/// The check's observed result on its latest report. The UI shows
 	/// warning/failed/broken servers by default and puts passed/skipped
 	/// ones behind a "show healthy" toggle.
 	pub result: CheckResult,
-	/// The check's full `health[]` entry from this server's latest status,
-	/// verbatim (including the `check`/`healthy`/`result` keys), so the
+	/// The check's own fields from its latest report, verbatim, so the
 	/// row can expand to the same per-check detail the server page shows.
 	pub data: serde_json::Value,
-	/// When this check started failing on this server: the `first_seen`
-	/// of the still-active issue canopy filed at `(status,
-	/// health/<check>)` when the check degraded. `None` for servers
-	/// currently reporting the check healthy, and for failing servers
-	/// with no active issue on file (e.g. the issue was
-	/// operator-resolved, or the ref is silenced so nothing was filed).
+	/// When the check's current degradation streak began. `None` for
+	/// servers currently reporting the check healthy.
 	pub failing_since: Option<Timestamp>,
-	/// When the reporting status was recorded.
+	/// When the check state last updated (the check's latest report).
 	pub status_created_at: Timestamp,
 }
 
@@ -354,16 +352,16 @@ fn check_result_rank(result: CheckResult) -> u8 {
 	}
 }
 
-/// List the servers whose latest status reports one named healthcheck.
+/// List the servers whose check state reports one named healthcheck.
 ///
 /// Everything the per-healthcheck page needs: the catalog's configured
-/// severity for `check` (if any) plus every live server whose **latest**
-/// status reports it — the current, real-time picture, not a history of
-/// past issues/events, though each failing server carries a
-/// `failing_since` timestamp derived from its active issue. This is the
-/// data behind the `/healthchecks/:check` "who's affected" page, which
-/// doubles as an operator TODO list and as a way to correlate servers
-/// sharing the same issue during a fleet-wide incident.
+/// policy for `check` (if any) plus every live server's current state for
+/// it, across every source that reports it — the real-time picture, with
+/// each degraded row carrying `failing_since` (the start of its current
+/// degradation streak). This is the data behind the
+/// `/healthchecks/:check` "who's affected" page, which doubles as an
+/// operator TODO list and as a way to correlate servers sharing the same
+/// issue during a fleet-wide incident.
 #[utoipa::path(
 	post,
 	path = "/check_attention",
@@ -371,7 +369,7 @@ fn check_result_rank(result: CheckResult) -> u8 {
 	tag = "statuses",
 	request_body = CheckAttentionArgs,
 	responses(
-		(status = 200, description = "The check's catalog severity and the servers currently reporting it.", body = CheckAttentionData),
+		(status = 200, description = "The check's catalog policy and the servers currently reporting it.", body = CheckAttentionData),
 		(status = 500, body = ProblemDetailsSchema),
 	),
 )]
@@ -380,11 +378,26 @@ pub async fn check_attention(
 	Json(args): Json<CheckAttentionArgs>,
 ) -> Result<Json<CheckAttentionData>> {
 	let mut conn = state.db_read.get().await?;
-	let reporting = Status::reporting_check_with_servers(&mut conn, &args.check).await?;
+	let states = Issue::check_state_for_check(&mut conn, &args.check).await?;
 
-	let group_ids: Vec<Uuid> = reporting
+	// Live servers only: archived servers and canopy's own row never
+	// appear on the attention list.
+	let server_ids: Vec<Uuid> = states
 		.iter()
-		.filter_map(|(s, _)| s.group_id)
+		.filter_map(|st| st.server_id)
+		.collect::<BTreeSet<_>>()
+		.into_iter()
+		.collect();
+	let live: HashMap<Uuid, database::servers::Server> =
+		database::servers::Server::get_by_ids(&mut conn, &server_ids)
+			.await?
+			.into_iter()
+			.filter(|s| s.deleted_at.is_none() && s.id != Uuid::nil())
+			.map(|s| (s.id, s))
+			.collect();
+	let group_ids: Vec<Uuid> = live
+		.values()
+		.filter_map(|s| s.group_id)
 		.collect::<BTreeSet<_>>()
 		.into_iter()
 		.collect();
@@ -394,39 +407,28 @@ pub async fn check_attention(
 		.map(|g| (g.id, g.name))
 		.collect();
 
-	// "Failing since" is the check state's degraded_since: when the
-	// current degradation streak began (recoveries clear it, so a
-	// re-failure starts a fresh one). This page correlates by check name
-	// across whichever source reports it, so the lookup ignores the
-	// source. first_seen is the legacy fallback for rows stamped before
-	// degraded_since existed.
-	let server_ids: Vec<Uuid> = reporting.iter().map(|(s, _)| s.id).collect();
-	let failing_since: HashMap<Uuid, Timestamp> =
-		Issue::list_by_ref(&mut conn, &format!("health/{}", args.check), &server_ids)
-			.await?
-			.into_iter()
-			.filter(|issue| issue.active)
-			.filter_map(|issue| {
-				issue
-					.server_id
-					.map(|sid| (sid, issue.degraded_since.unwrap_or(issue.first_seen)))
-			})
-			.collect();
-
-	let mut servers: Vec<CheckAttentionServerData> = reporting
+	let mut servers: Vec<CheckAttentionServerData> = states
 		.into_iter()
-		.filter_map(|(server, status)| {
-			let (result, entry) = status.check_entry(&args.check)?;
+		.filter_map(|st| {
+			let server = st.server_id.and_then(|sid| live.get(&sid))?;
+			let result = st.observed_result?;
 			let group_name = server.group_id.and_then(|g| group_names.get(&g).cloned());
+			// failing_since is the current degradation streak; recovered
+			// rows have none. first_seen is the fallback for rows stamped
+			// before degraded_since existed.
+			let failing_since = st
+				.active
+				.then_some(st.degraded_since.unwrap_or(st.first_seen));
 			Some(CheckAttentionServerData {
 				server_id: server.id,
 				server_name: server.name.clone().unwrap_or_default(),
 				group_id: server.group_id,
 				group_name,
+				source: st.source,
 				result,
-				data: serde_json::Value::Object(entry),
-				failing_since: failing_since.get(&server.id).copied(),
-				status_created_at: status.created_at,
+				data: st.detail.unwrap_or_else(|| serde_json::json!({})),
+				failing_since,
+				status_created_at: st.last_seen,
 			})
 		})
 		.collect();

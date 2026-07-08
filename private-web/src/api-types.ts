@@ -2854,15 +2854,15 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * List the servers whose latest status reports one named healthcheck.
+         * List the servers whose check state reports one named healthcheck.
          * @description Everything the per-healthcheck page needs: the catalog's configured
-         *     severity for `check` (if any) plus every live server whose **latest**
-         *     status reports it — the current, real-time picture, not a history of
-         *     past issues/events, though each failing server carries a
-         *     `failing_since` timestamp derived from its active issue. This is the
-         *     data behind the `/healthchecks/:check` "who's affected" page, which
-         *     doubles as an operator TODO list and as a way to correlate servers
-         *     sharing the same issue during a fleet-wide incident.
+         *     policy for `check` (if any) plus every live server's current state for
+         *     it, across every source that reports it — the real-time picture, with
+         *     each degraded row carrying `failing_since` (the start of its current
+         *     degradation streak). This is the data behind the
+         *     `/healthchecks/:check` "who's affected" page, which doubles as an
+         *     operator TODO list and as a way to correlate servers sharing the same
+         *     issue during a fleet-wide incident.
          */
         post: operations["status_check_attention"];
         delete?: never;
@@ -3681,19 +3681,14 @@ export interface components {
          */
         CheckAttentionServerData: {
             /**
-             * @description The check's full `health[]` entry from this server's latest status,
-             *     verbatim (including the `check`/`healthy`/`result` keys), so the
+             * @description The check's own fields from its latest report, verbatim, so the
              *     row can expand to the same per-check detail the server page shows.
              */
             data: unknown;
             /**
              * Format: date-time
-             * @description When this check started failing on this server: the `first_seen`
-             *     of the still-active issue canopy filed at `(status,
-             *     health/<check>)` when the check degraded. `None` for servers
-             *     currently reporting the check healthy, and for failing servers
-             *     with no active issue on file (e.g. the issue was
-             *     operator-resolved, or the ref is silenced so nothing was filed).
+             * @description When the check's current degradation streak began. `None` for
+             *     servers currently reporting the check healthy.
              */
             failing_since?: string | null;
             /**
@@ -3705,7 +3700,7 @@ export interface components {
             /** @description The server's group name, if it belongs to one. */
             group_name?: string | null;
             /**
-             * @description The check's result on this server's latest status. The UI shows
+             * @description The check's observed result on its latest report. The UI shows
              *     warning/failed/broken servers by default and puts passed/skipped
              *     ones behind a "show healthy" toggle.
              */
@@ -3718,8 +3713,13 @@ export interface components {
             /** @description The server's display name; empty string when the server has none. */
             server_name: string;
             /**
+             * @description The source that reports this check on this server. A server can
+             *     appear once per source when several report the same check name.
+             */
+            source: string;
+            /**
              * Format: date-time
-             * @description When the reporting status was recorded.
+             * @description When the check state last updated (the check's latest report).
              */
             status_created_at: string;
         };
@@ -11139,7 +11139,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The check's catalog severity and the servers currently reporting it. */
+            /** @description The check's catalog policy and the servers currently reporting it. */
             200: {
                 headers: {
                     [name: string]: unknown;
