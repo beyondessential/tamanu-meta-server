@@ -94,9 +94,12 @@ test.describe("manual conditions", () => {
 			.fill("Manually raised trouble");
 		await dialog.getByLabel("Message").fill("operator saw smoke");
 		await dialog.getByRole("button", { name: /^submit$/i }).click();
-
-		// The dialog closes and the issue appears in the server's list.
 		await expect(dialog).not.toBeVisible();
+
+		// The condition filed as a failure: it appears in the fleet issue
+		// list (the never-checked-in server page shows setup instructions,
+		// not an issues panel).
+		await page.goto("/incidents?showAll=1");
 		await expect(page.getByText("Manually raised trouble")).toBeVisible();
 	});
 });
