@@ -2062,12 +2062,13 @@ async fn submit_status_result_rule_on_check_result() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn submit_status_result_broken_files_separate_ref_at_warning() {
+async fn submit_status_result_broken_warns_on_the_check_ref() {
 	commons_tests::server::run_with_device_auth(
 		"server",
 		async |mut conn, cert, device_id, public, _| {
 			let server_id = insert_health_test_server(&mut conn, device_id).await;
-			// Catalog severity is irrelevant to broken checks.
+			// The ceiling grades definite results; a broken check with no
+			// prior contribution warns regardless.
 			set_check_severity(&mut conn, "db", "critical").await;
 
 			post_status(
@@ -2080,28 +2081,24 @@ async fn submit_status_result_broken_files_separate_ref_at_warning() {
 			)
 			.await;
 
-			let broken = fetch_issue(&mut conn, server_id, "alertd", "health-broken/db")
+			let issue = fetch_issue(&mut conn, server_id, "alertd", "health/db")
 				.await
-				.expect("broken issue filed");
-			assert_eq!(broken.severity, "warning");
-			assert!(broken.active);
+				.expect("broken files on the check's own ref");
+			assert_eq!(
+				issue.severity, "warning",
+				"nothing to retain: brokenness itself warns",
+			);
+			assert!(issue.active);
 			assert!(
-				broken
+				issue
 					.description
 					.as_ref()
 					.is_some_and(|d| d.contains("broken"))
 			);
-			assert!(broken.message.contains("config not found"));
-			// No failure issue, no incident.
-			assert!(
-				fetch_issue(&mut conn, server_id, "alertd", "health/db")
-					.await
-					.is_none(),
-				"broken must not file at the failure ref"
-			);
+			assert!(issue.message.contains("config not found"));
 			assert!(fetch_open_incident(&mut conn, server_id).await.is_none());
 
-			// Recovery closes the broken ref.
+			// Recovery closes it.
 			post_status(
 				&public,
 				&cert,
@@ -2111,24 +2108,26 @@ async fn submit_status_result_broken_files_separate_ref_at_warning() {
 				}),
 			)
 			.await;
-			let broken = fetch_issue(&mut conn, server_id, "alertd", "health-broken/db")
+			let issue = fetch_issue(&mut conn, server_id, "alertd", "health/db")
 				.await
-				.expect("broken issue still exists");
-			assert!(!broken.active);
-			assert!(broken.message.contains("no longer broken"));
+				.expect("issue still exists");
+			assert!(!issue.active);
+			assert!(issue.message.contains("recovered"));
 		},
 	)
 	.await
 }
 
-/// failed→broken: the failure issue stays open (the broken check can't
-/// confirm the failure either way) while a separate broken issue opens.
+/// failed→broken: the issue stays open at the failure's contribution
+/// (the broken check can't confirm the failure either way), and a later
+/// definite pass closes it.
 #[tokio::test(flavor = "multi_thread")]
-async fn submit_status_failed_then_broken_keeps_failure_open() {
+async fn submit_status_failed_then_broken_retains_the_failure() {
 	commons_tests::server::run_with_device_auth(
 		"server",
 		async |mut conn, cert, device_id, public, _| {
 			let server_id = insert_health_test_server(&mut conn, device_id).await;
+			set_check_severity(&mut conn, "db", "error").await;
 
 			post_status(
 				&public,
@@ -2149,16 +2148,27 @@ async fn submit_status_failed_then_broken_keeps_failure_open() {
 			)
 			.await;
 
-			let failure = fetch_issue(&mut conn, server_id, "alertd", "health/db")
+			let issue = fetch_issue(&mut conn, server_id, "alertd", "health/db")
 				.await
-				.expect("failure issue exists");
-			assert!(failure.active, "broken must not close the failure");
-			let broken = fetch_issue(&mut conn, server_id, "alertd", "health-broken/db")
-				.await
-				.expect("broken issue filed");
-			assert!(broken.active);
+				.expect("issue exists");
+			assert!(issue.active, "broken must not close the failure");
+			assert_eq!(
+				issue.severity, "error",
+				"the failure's contribution is retained while broken",
+			);
+			assert!(
+				issue
+					.description
+					.as_ref()
+					.is_some_and(|d| d.contains("broken")),
+				"the headline says the check is broken",
+			);
+			assert!(
+				fetch_open_incident(&mut conn, server_id).await.is_some(),
+				"the retained error keeps the incident open",
+			);
 
-			// passed closes both.
+			// passed closes it and the incident follows.
 			post_status(
 				&public,
 				&cert,
@@ -2168,14 +2178,11 @@ async fn submit_status_failed_then_broken_keeps_failure_open() {
 				}),
 			)
 			.await;
-			let failure = fetch_issue(&mut conn, server_id, "alertd", "health/db")
+			let issue = fetch_issue(&mut conn, server_id, "alertd", "health/db")
 				.await
-				.expect("failure issue exists");
-			assert!(!failure.active);
-			let broken = fetch_issue(&mut conn, server_id, "alertd", "health-broken/db")
-				.await
-				.expect("broken issue exists");
-			assert!(!broken.active);
+				.expect("issue exists");
+			assert!(!issue.active);
+			assert!(fetch_open_incident(&mut conn, server_id).await.is_none());
 		},
 	)
 	.await
@@ -2252,10 +2259,10 @@ async fn submit_status_result_skipped_closes_broken() {
 			)
 			.await;
 
-			let broken = fetch_issue(&mut conn, server_id, "alertd", "health-broken/cert")
+			let issue = fetch_issue(&mut conn, server_id, "alertd", "health/cert")
 				.await
-				.expect("broken issue exists");
-			assert!(!broken.active);
+				.expect("issue exists");
+			assert!(!issue.active);
 		},
 	)
 	.await

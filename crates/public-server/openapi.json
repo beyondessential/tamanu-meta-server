@@ -1544,7 +1544,7 @@
                   },
                   {
                     "$ref": "#/components/schemas/CheckResult",
-                    "description": "Outcome of the check: `passed`, `warning`, `failed`, `broken`, or\n`skipped`. Exactly one of `result` / `healthy` must be present per\nentry. `warning` and `failed` open an issue at the check's catalog\nseverity; `broken` (the check itself errored, not the system under\ntest) opens a separate issue at a fixed Warning severity without\nconfirming or clearing a known failure; `skipped` (a precondition was\nnot met) and `passed` open nothing and close prior issues."
+                    "description": "Outcome of the check: `passed`, `warning`, `failed`, `broken`, or\n`skipped`. Exactly one of `result` / `healthy` must be present per\nentry. `warning` and `failed` open the check's issue as graded by\nits policy; `broken` (the check itself errored, not the system under\ntest) neither confirms nor clears a known failure — the issue stays\nopen, retaining its contribution; `skipped` (a precondition was\nnot met) and `passed` open nothing and close prior issues."
                   }
                 ]
               }
@@ -2082,7 +2082,7 @@
                 "items": {
                   "$ref": "#/components/schemas/HealthCheck"
                 },
-                "description": "Per-check breakdown. **Required** — a push without a `health` array is\nrejected with 400 (unless an operator has opted the server into the\nlegacy format, in which case such a push only refreshes reachability\nand carries the previously reported checks forward). May be empty\n(`[]`) for a server that genuinely runs no checks. Each entry must\ninclude a non-empty `check` name and exactly one of `result` /\n`healthy`; any additional fields per check (latency, free disk %,\ncertificate expiry, etc.) are passed through verbatim and shown in the\nstatus UI.\n\nEvery check name seen — whatever its result — is added to the\noperator-facing check catalog, where the severity assigned to its\nfailures can be reviewed and adjusted. A failed or warning check opens\n(or keeps open) an issue for that check at the catalog's current\nseverity; a broken check opens a separate issue at a fixed Warning\nseverity; passed and skipped results open nothing and close prior\nissues."
+                "description": "Per-check breakdown. **Required** — a push without a `health` array is\nrejected with 400 (unless an operator has opted the server into the\nlegacy format, in which case such a push only refreshes reachability\nand carries the previously reported checks forward). May be empty\n(`[]`) for a server that genuinely runs no checks. Each entry must\ninclude a non-empty `check` name and exactly one of `result` /\n`healthy`; any additional fields per check (latency, free disk %,\ncertificate expiry, etc.) are passed through verbatim and shown in the\nstatus UI.\n\nEvery check name seen — whatever its result — is added to the\noperator-facing check catalog, where the policy grading its results\ncan be reviewed and adjusted. A check whose effective result is\nfailed or warning opens (or keeps open) its issue; a broken check\nkeeps the same issue open, retaining a known failure's contribution\nwhile warning the check itself is broken; effective passed and\nskipped results open nothing and close prior issues."
               },
               "healthy": {
                 "type": [

@@ -72,12 +72,12 @@ pub struct StatusPayload {
 	/// status UI.
 	///
 	/// Every check name seen — whatever its result — is added to the
-	/// operator-facing check catalog, where the severity assigned to its
-	/// failures can be reviewed and adjusted. A failed or warning check opens
-	/// (or keeps open) an issue for that check at the catalog's current
-	/// severity; a broken check opens a separate issue at a fixed Warning
-	/// severity; passed and skipped results open nothing and close prior
-	/// issues.
+	/// operator-facing check catalog, where the policy grading its results
+	/// can be reviewed and adjusted. A check whose effective result is
+	/// failed or warning opens (or keeps open) its issue; a broken check
+	/// keeps the same issue open, retaining a known failure's contribution
+	/// while warning the check itself is broken; effective passed and
+	/// skipped results open nothing and close prior issues.
 	pub health: Vec<HealthCheck>,
 
 	/// Free-form additional data (uptime, database version, timezone,
@@ -103,10 +103,10 @@ pub struct HealthCheck {
 	pub check: String,
 	/// Outcome of the check: `passed`, `warning`, `failed`, `broken`, or
 	/// `skipped`. Exactly one of `result` / `healthy` must be present per
-	/// entry. `warning` and `failed` open an issue at the check's catalog
-	/// severity; `broken` (the check itself errored, not the system under
-	/// test) opens a separate issue at a fixed Warning severity without
-	/// confirming or clearing a known failure; `skipped` (a precondition was
+	/// entry. `warning` and `failed` open the check's issue as graded by
+	/// its policy; `broken` (the check itself errored, not the system under
+	/// test) neither confirms nor clears a known failure — the issue stays
+	/// open, retaining its contribution; `skipped` (a precondition was
 	/// not met) and `passed` open nothing and close prior issues.
 	pub result: Option<CheckResult>,
 	/// Legacy pass/fail form: `true` means `passed`, `false` means `failed`.
@@ -130,15 +130,11 @@ const LEGACY_SOURCE: &str = "tamanu";
 /// Source names a push may not claim: `canopy` is canopy's own
 /// determinations (reachability sweep etc.), `manual` is operator-entered.
 const RESERVED_SOURCES: &[&str] = &[database::statuses::CANOPY_SOURCE, "manual"];
-/// Prefix for per-check refs. Each failed check is filed at
-/// `(<source>, health/<check_name>)`.
+/// Prefix for per-check refs. Each check is filed at
+/// `(<source>, health/<check_name>)` — one thread per check, brokenness
+/// included (a broken check retains the previous definite result's
+/// contribution while additionally warning that the check is broken).
 const HEALTH_REF: &str = "health";
-/// Prefix for broken-check refs. A check reporting `result: broken`
-/// files at `(<source>, health-broken/<check_name>)` — a separate ref
-/// from the check's failure issue, so a known failure can stay open
-/// (unconfirmed either way) while the check itself is broken, and so
-/// operators can silence the two independently.
-const BROKEN_REF: &str = "health-broken";
 
 /// The status-push response: only the return-path instructions the device
 /// can act on. The stored status record is deliberately not echoed back —
@@ -442,11 +438,10 @@ fn resolve_version(extra: &serde_json::Value, header: Option<VersionStr>) -> Opt
 /// Per-push event filing. Warning/failed checks land at
 /// `(status, health/<check>)`; recoveries close those issues. Broken
 /// checks (`result: broken` — the check itself errored, not the
-/// system under test) land at `(status, health-broken/<check>)` at a
-/// fixed Warning; a broken check neither confirms nor clears a known
-/// failure, so its `health/<check>` issue stays open. Skipped checks
+/// system under test) neither confirm nor clear a known failure: the
+/// check's issue stays open, retaining its contribution. Skipped checks
 /// (`result: skipped` — precondition not met) file nothing and close
-/// both refs.
+/// the check's issue.
 ///
 /// Each check's effective result comes from applying the operator-owned
 /// `check_policies` catalog entry for `(source, check)` (see
@@ -483,13 +478,9 @@ async fn file_health_events(
 	let empty_map = serde_json::Map::new();
 	let status_extra = status.extra.as_object().unwrap_or(&empty_map);
 
-	// Grade every check in the push through its policy. Observed broken
-	// stays on its own thread below and is not graded here.
+	// Grade every check in the push through its policy.
 	let mut effective: BTreeMap<&String, GradedResult> = BTreeMap::new();
 	for (check, result) in &curr_check_results {
-		if matches!(result, CheckResult::Broken) {
-			continue;
-		}
 		let entry = find_health_entry(&status.health, check);
 		// Strip the reserved `check` / `healthy` keys, and replace any
 		// wire-form `result` with the normalised value so rules see a
@@ -511,20 +502,34 @@ async fn file_health_events(
 		effective.insert(check, graded);
 	}
 
-	// Per-check opens: effective warning and failed file on the same ref
-	// (one thread per check; the filed severity is what differs).
+	// Per-check opens: every degraded effective result files on the one
+	// ref per check. An effective broken result neither confirms nor
+	// clears the previous definite result: the filing retains the open
+	// issue's contribution (its current severity), or warns that the
+	// check is broken when there was nothing to retain.
 	for (check, graded) in &effective {
-		let severity = match graded.effective {
-			CheckResult::Failed if graded.escalates => Severity::Critical,
-			CheckResult::Failed => Severity::Error,
-			CheckResult::Warning | CheckResult::Broken => Severity::Warning,
+		let (severity, described) = match graded.effective {
+			CheckResult::Failed if graded.escalates => (Severity::Critical, "failed"),
+			CheckResult::Failed => (Severity::Error, "failed"),
+			CheckResult::Warning => (Severity::Warning, "warned"),
+			CheckResult::Broken => {
+				let retained = Issue::list_by_source_ref(
+					conn,
+					&status.source,
+					&format!("{HEALTH_REF}/{check}"),
+					&[server_id],
+				)
+				.await?
+				.into_iter()
+				.next()
+				.filter(|i| i.active)
+				.map(|i| i.severity)
+				.unwrap_or(Severity::Warning);
+				(retained, "is broken")
+			}
 			CheckResult::Passed | CheckResult::Skipped => continue,
 		};
 		let entry = find_health_entry(&status.health, check);
-		let described = match graded.effective {
-			CheckResult::Warning => "warned",
-			_ => "failed",
-		};
 		let stamp = CheckStateStamp {
 			check: (*check).clone(),
 			observed: curr_check_results[*check],
@@ -544,46 +549,18 @@ async fn file_health_events(
 		.await?;
 	}
 
-	// Broken opens: separate ref, fixed Warning. A broken check is a
-	// monitoring blind spot — actionable (fix the check), but not the
-	// system under test failing, so it doesn't inherit the catalog
-	// severity and can't open incidents.
-	for (check, _) in curr_check_results
-		.iter()
-		.filter(|(_, r)| matches!(r, CheckResult::Broken))
-	{
-		let entry = find_health_entry(&status.health, check);
-		let stamp = CheckStateStamp {
-			check: check.clone(),
-			observed: CheckResult::Broken,
-			effective: CheckResult::Broken,
-			detail: entry.cloned().map(serde_json::Value::Object),
-		};
-		NewEvent {
-			source: status.source.clone(),
-			r#ref: format!("{BROKEN_REF}/{check}"),
-			severity: Some(Severity::Warning),
-			description: Some(format!("Health check '{check}' is broken")),
-			message: per_check_description(entry).unwrap_or_default(),
-			active: Some(true),
-			occurred_at,
-		}
-		.save_with_state(conn, server_id, device_id, Some(&stamp))
-		.await?;
-	}
-
 	// Per-check closes are derived from the issues that are actually
 	// open, not from the previous status row: an issue can stay open
 	// across pushes that don't re-file it (failed → broken keeps the
 	// failure open), so the previous push alone can't tell us what
 	// needs closing.
 
-	// Failure closes: an open `health/<check>` closes when the check's
-	// effective result is now passed or skipped, or the check is
-	// unmentioned ("trust the reporter"). Observed broken does NOT close
-	// a prior failure — the check can't confirm the failure either way
-	// while it's broken. Scoped to the pushing source: one source's push
-	// says nothing about another's checks.
+	// Closes: an open `health/<check>` closes when the check's effective
+	// result is now passed or skipped, or the check is unmentioned
+	// ("trust the reporter"). Effective broken keeps it open — the check
+	// can't confirm its condition either way while broken. Scoped to the
+	// pushing source: one source's push says nothing about another's
+	// checks.
 	let health_prefix = format!("{HEALTH_REF}/");
 	for r#ref in
 		Issue::active_refs_with_prefix(conn, server_id, &status.source, &health_prefix).await?
@@ -592,11 +569,10 @@ async fn file_health_events(
 			continue;
 		};
 		let curr = curr_check_results.get(check);
-		let keeps_open = matches!(curr, Some(CheckResult::Broken))
-			|| matches!(
-				effective.get(&check.to_string()).map(|g| g.effective),
-				Some(CheckResult::Warning | CheckResult::Failed | CheckResult::Broken)
-			);
+		let keeps_open = matches!(
+			effective.get(&check.to_string()).map(|g| g.effective),
+			Some(CheckResult::Warning | CheckResult::Failed | CheckResult::Broken)
+		);
 		if keeps_open {
 			continue;
 		}
@@ -622,43 +598,6 @@ async fn file_health_events(
 			severity: Some(Severity::Info),
 			description: None,
 			message,
-			active: Some(false),
-			occurred_at,
-		}
-		.save_with_state(conn, server_id, device_id, Some(&stamp))
-		.await?;
-	}
-
-	// Broken closes: any result other than broken (or absence) means
-	// the check itself is no longer broken.
-	let broken_prefix = format!("{BROKEN_REF}/");
-	for r#ref in
-		Issue::active_refs_with_prefix(conn, server_id, &status.source, &broken_prefix).await?
-	{
-		let Some(check) = r#ref.strip_prefix(&broken_prefix) else {
-			continue;
-		};
-		if matches!(curr_check_results.get(check), Some(CheckResult::Broken)) {
-			continue;
-		}
-		let observed = curr_check_results
-			.get(check)
-			.copied()
-			.unwrap_or(CheckResult::Passed);
-		let stamp = CheckStateStamp {
-			check: check.to_string(),
-			observed,
-			effective: observed,
-			detail: find_health_entry(&status.health, check)
-				.cloned()
-				.map(serde_json::Value::Object),
-		};
-		NewEvent {
-			source: status.source.clone(),
-			r#ref: format!("{BROKEN_REF}/{check}"),
-			severity: Some(Severity::Info),
-			description: None,
-			message: format!("Health check '{check}' is no longer broken"),
 			active: Some(false),
 			occurred_at,
 		}
