@@ -31,6 +31,12 @@ pub const CANOPY_SOURCE: &str = "canopy";
 /// same issue row.
 pub const REACHABILITY_REF: &str = "reachability";
 
+/// The client stream canopy's own views read: `bestool` is the agent whose
+/// heartbeats carry the authoritative health checks and version. Other
+/// clients' streams are stored and answered per client, but do not (yet)
+/// feed the status board, version tracking, or health issues.
+pub const DEFAULT_CLIENT: &str = "bestool";
+
 fn server_label(s: &Server) -> String {
 	s.name
 		.clone()
@@ -245,7 +251,9 @@ impl Status {
 		}
 
 		let server_ids: Vec<Uuid> = monitored.iter().map(|s| s.id).collect();
-		let statuses = Self::latest_for_servers(db, &server_ids).await?;
+		// Any-client freshness: a server is reachable while any of its
+		// clients is still reporting.
+		let statuses = Self::last_report_for_servers(db, &server_ids).await?;
 		let status_map: std::collections::HashMap<Uuid, Status> =
 			statuses.into_iter().map(|s| (s.server_id, s)).collect();
 		let existing_issues =
@@ -368,6 +376,7 @@ impl Status {
 			.filter(
 				server_id
 					.eq(server)
+					.and(client.eq(DEFAULT_CLIENT))
 					.and(created_at.ge(diesel::dsl::sql("NOW() - INTERVAL '7 days'")))
 					.and(id.ne(Uuid::nil())),
 			)
@@ -393,6 +402,7 @@ impl Status {
 			.filter(
 				server_id
 					.eq(server)
+					.and(client.eq(DEFAULT_CLIENT))
 					.and(created_at.le(jiff_diesel::Timestamp::from(at)))
 					.and(id.ne(Uuid::nil())),
 			)
@@ -418,6 +428,7 @@ impl Status {
 			.filter(
 				server_id
 					.eq(server)
+					.and(client.eq(DEFAULT_CLIENT))
 					.and(version.is_not_null())
 					.and(id.ne(Uuid::nil())),
 			)
@@ -441,6 +452,36 @@ impl Status {
 		// status row in the 7-day window for each server. The LIMIT 1 under
 		// the lateral join reads one row per weekly partition through the
 		// (server_id, created_at DESC) composite index.
+		let query = diesel::sql_query(
+			"SELECT st.* FROM unnest($1) AS s(id) \
+			 CROSS JOIN LATERAL ( \
+				SELECT * FROM statuses \
+				WHERE server_id = s.id \
+				AND client = $2 \
+				AND created_at >= NOW() - INTERVAL '7 days' \
+				AND id != '00000000-0000-0000-0000-000000000000' \
+				ORDER BY created_at DESC LIMIT 1 \
+			 ) st",
+		)
+		.bind::<diesel::sql_types::Array<diesel::sql_types::Uuid>, _>(server_ids)
+		.bind::<diesel::sql_types::Text, _>(DEFAULT_CLIENT);
+
+		query.load::<Status>(db).await.map_err(AppError::from)
+	}
+
+	/// Most recent report per server from **any** client, for freshness
+	/// decisions only: a server is reporting while any of its clients is,
+	/// so one agent going quiet does not by itself make the server look
+	/// down. The returned row belongs to whichever client reported last —
+	/// read its timestamp, not its content.
+	pub async fn last_report_for_servers(
+		db: &mut AsyncPgConnection,
+		server_ids: &[Uuid],
+	) -> Result<Vec<Status>> {
+		if server_ids.is_empty() {
+			return Ok(Vec::new());
+		}
+
 		let query = diesel::sql_query(
 			"SELECT st.* FROM unnest($1) AS s(id) \
 			 CROSS JOIN LATERAL ( \

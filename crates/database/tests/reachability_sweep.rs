@@ -232,3 +232,69 @@ async fn sweep_closes_issue_when_server_returns() {
 	})
 	.await
 }
+
+async fn insert_status_for_client(
+	conn: &mut diesel_async::AsyncPgConnection,
+	server_id: Uuid,
+	minutes_ago: i32,
+	client: &str,
+) {
+	sql_query(
+		r#"
+			INSERT INTO statuses (server_id, created_at, extra, client)
+			VALUES ($1, NOW() - ($2 || ' minutes')::INTERVAL, '{}'::jsonb, $3)
+		"#,
+	)
+	.bind::<sql_types::Uuid, _>(server_id)
+	.bind::<sql_types::Text, _>(minutes_ago.to_string())
+	.bind::<sql_types::Text, _>(client)
+	.execute(conn)
+	.await
+	.expect("insert status");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn any_client_reporting_keeps_server_up() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		// 10-min threshold; bestool has gone quiet (15 min) but seedling is
+		// still reporting (1 min) — the server is not down.
+		let id = insert_server(&mut conn, "http://busy.invalid/", 600).await;
+		insert_status_for_client(&mut conn, id, 15, "bestool").await;
+		insert_status_for_client(&mut conn, id, 1, "seedling").await;
+		let filed = Status::sweep_reachability(&mut conn).await.expect("sweep");
+		assert_eq!(filed, 0);
+		assert!(issue_for(&mut conn, id).await.is_none());
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn content_reads_stay_on_the_default_client_stream() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		// A newer seedling heartbeat must not become the "latest status" that
+		// canopy's views read health and version from.
+		let id = insert_server(&mut conn, "http://mixed.invalid/", 600).await;
+		insert_status_for_client(&mut conn, id, 5, "bestool").await;
+		insert_status_for_client(&mut conn, id, 1, "seedling").await;
+
+		let latest = Status::latest_for_server(&mut conn, id)
+			.await
+			.expect("query")
+			.expect("has a bestool status");
+		assert_eq!(latest.client, "bestool");
+
+		let latest_many = Status::latest_for_servers(&mut conn, &[id])
+			.await
+			.expect("query");
+		assert_eq!(latest_many.len(), 1);
+		assert_eq!(latest_many[0].client, "bestool");
+
+		// Freshness, by contrast, sees the most recent report of any client.
+		let last_report = Status::last_report_for_servers(&mut conn, &[id])
+			.await
+			.expect("query");
+		assert_eq!(last_report.len(), 1);
+		assert_eq!(last_report[0].client, "seedling");
+	})
+	.await
+}

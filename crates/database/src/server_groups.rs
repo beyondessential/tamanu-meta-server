@@ -235,10 +235,10 @@ impl ServerGroup {
 				.map_err(AppError::from)?;
 
 			if !member_ids.is_empty() {
-				// A member is "gone" iff it's absent from `latest_for_servers`
-				// (no status in the last 7 days). Allow the cascade only when
-				// every live member is gone; any recent reporter blocks it.
-				let recent = Status::latest_for_servers(conn, &member_ids).await?;
+				// A member is "gone" iff no client of it has reported in the
+				// last 7 days. Allow the cascade only when every live member
+				// is gone; any recent reporter blocks it.
+				let recent = Status::last_report_for_servers(conn, &member_ids).await?;
 				if !recent.is_empty() {
 					return Err(AppError::Conflict(format!(
 						"group {group_id} has {} server(s) that reported within the last \
