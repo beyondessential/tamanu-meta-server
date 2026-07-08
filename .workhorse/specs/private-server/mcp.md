@@ -94,7 +94,7 @@ A summary or ranking of incidents should count published incidents rather than r
 
 **Get issue** takes an issue identifier and returns the issue with the incidents it is or was part of.
 
-**Get check documentation** takes a source and check name and returns the check's operator-authored documentation (see [CHK](../monitoring/checks.md), "Documentation"): what the check observes, what each result means, and how to solve a failure.
+**Get check documentation** takes a source and check name and returns the check's operator-authored markdown documentation (see [CHK](../monitoring/checks.md), "Documentation"), which by convention covers what the check observes, what each result means, and how to solve a failure.
 A client investigating an issue consults this before deriving a check's meaning from other sources.
 
 ## Result semantics

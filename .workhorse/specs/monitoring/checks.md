@@ -63,7 +63,8 @@ The model admits arbitrary scoped transforms; surfaces beyond the silence are de
 
 ## Documentation
 
-Each catalogued (source, check) can carry operator-authored documentation, written in markdown in three sections: a general description of what the check observes, what each result means — what makes it fail as opposed to warn — and hints for solving a failure.
+Each catalogued (source, check) can carry operator-authored documentation: a single markdown document.
+By convention it covers three things — a general description of what the check observes, what each result means (what makes it fail as opposed to warn), and hints for solving a failure — and the editor seeds new documentation with a template of those sections; Canopy attaches no meaning to the document's structure.
 Operators author and edit the documentation in the operator UI; it is presented alongside the check wherever its state is presented, and is available over the MCP interface (see [MCP](../private-server/mcp.md)) so agents work from curated knowledge about a check rather than deriving it.
 Canopy's own checks ship with their documentation.
 
