@@ -108,6 +108,11 @@ impl CanopyMcp {
 			.await
 			.map_err(mcp_err)?;
 		let st_by: HashMap<Uuid, &Status> = statuses.iter().map(|s| (s.server_id, s)).collect();
+		let server_groups: Vec<(Uuid, Option<Uuid>)> =
+			servers.iter().map(|s| (s.id, s.group_id)).collect();
+		let state_health = database::issues::health_from_check_state(&mut conn, &server_groups)
+			.await
+			.map_err(mcp_err)?;
 
 		let mut counts = Counts::default();
 		let mut health = HealthRollup::default();
@@ -120,7 +125,7 @@ impl CanopyMcp {
 			let st = st_by.get(&s.id).copied();
 			match st.map_or(ShortStatus::Gone, |s| s.short_status()) {
 				ShortStatus::Down | ShortStatus::Gone => health.unreachable += 1,
-				_ => match st.map_or(HealthState::default(), |s| s.health_state()) {
+				_ => match state_health.get(&s.id).copied().unwrap_or_default() {
 					HealthState::Healthy => health.healthy += 1,
 					HealthState::Warning => health.warning += 1,
 					HealthState::Unhealthy => health.unhealthy += 1,

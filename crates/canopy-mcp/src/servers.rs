@@ -1,7 +1,7 @@
 //! `find_servers` / `get_server` tools, and the [`ServerSummary`] shape
 //! reused by the groups module for member listings.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 
 use commons_types::{
 	Uuid,
@@ -169,11 +169,9 @@ impl CanopyMcp {
 			.map_err(mcp_err)?;
 		let server_groups: Vec<(Uuid, Option<Uuid>)> =
 			servers.iter().map(|s| (s.id, s.group_id)).collect();
-		let silenced =
-			database::silenced_refs::silenced_health_checks_for_servers(&mut conn, &server_groups)
-				.await
-				.map_err(mcp_err)?;
-		let no_silences = BTreeSet::new();
+		let health = database::issues::health_from_check_state(&mut conn, &server_groups)
+			.await
+			.map_err(mcp_err)?;
 
 		let summaries: Vec<ServerSummary> = servers
 			.iter()
@@ -182,7 +180,7 @@ impl CanopyMcp {
 					s,
 					st_by.get(&s.id).copied(),
 					group_names.get(&s.id).cloned().flatten(),
-					silenced.get(&s.id).unwrap_or(&no_silences),
+					health.get(&s.id).copied().unwrap_or_default(),
 				)
 			})
 			.collect();
@@ -243,20 +241,21 @@ impl CanopyMcp {
 			});
 		}
 
-		// Operator-silenced healthchecks don't count toward the health
-		// rollup; `checks` still carries their raw results verbatim.
-		let silenced_checks = database::silenced_refs::silenced_health_checks_for_server(
-			&mut conn,
-			server.id,
-			server.group_id,
-		)
-		.await
-		.map_err(mcp_err)?;
+		// Health rolls up current check state across every source
+		// (silenced checks skipped in the rollup); `checks` still carries
+		// the latest push's raw results verbatim.
+		let health =
+			database::issues::health_from_check_state(&mut conn, &[(server.id, server.group_id)])
+				.await
+				.map_err(mcp_err)?
+				.get(&server.id)
+				.copied()
+				.unwrap_or_default();
 
 		let latest_status = latest.as_ref().map(|s| StatusOut {
 			reported_at: s.created_at,
 			version: version.clone(),
-			health: s.health_state_ignoring(&silenced_checks),
+			health,
 			healthy: s.healthy,
 			reachability: s.short_status(),
 			platform: s.platform(),
@@ -281,9 +280,7 @@ impl CanopyMcp {
 			reachability: latest
 				.as_ref()
 				.map_or(ShortStatus::Gone, |s| s.short_status()),
-			health: latest.as_ref().map_or(HealthState::default(), |s| {
-				s.health_state_ignoring(&silenced_checks)
-			}),
+			health,
 			latest_status,
 			backups,
 		})
@@ -291,13 +288,13 @@ impl CanopyMcp {
 }
 
 /// Shared with the groups module, for member listings on [`crate::groups::GroupDetail`].
-/// `silenced_checks` is the server's silenced healthcheck set (server +
-/// group scope) — those checks don't count toward `health`.
+/// `health` is the server's check-state rollup (silenced checks already
+/// skipped).
 pub(crate) fn summarize(
 	s: &Server,
 	st: Option<&Status>,
 	group_name: Option<String>,
-	silenced_checks: &BTreeSet<String>,
+	health: HealthState,
 ) -> ServerSummary {
 	ServerSummary {
 		id: s.id,
@@ -312,9 +309,7 @@ pub(crate) fn summarize(
 		last_seen: st.map(|s| s.created_at),
 		version: st.and_then(|s| s.version.clone()),
 		reachability: st.map_or(ShortStatus::Gone, |s| s.short_status()),
-		health: st.map_or(HealthState::default(), |s| {
-			s.health_state_ignoring(silenced_checks)
-		}),
+		health,
 	}
 }
 

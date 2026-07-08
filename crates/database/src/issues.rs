@@ -932,6 +932,95 @@ pub async fn file_check(conn: &mut AsyncPgConnection, filing: CheckFiling<'_>) -
 	}
 }
 
+/// Per-server health rollup from current check state: the worst
+/// effective result across every source's checks on the server — any
+/// failure ⇒ unhealthy, otherwise any warning or brokenness ⇒ warning,
+/// otherwise healthy. Silenced checks are skipped. Servers with no
+/// check state are absent from the map (callers default them healthy,
+/// matching the "no signal" semantics).
+pub async fn health_from_check_state(
+	conn: &mut AsyncPgConnection,
+	servers: &[(Uuid, Option<Uuid>)],
+) -> Result<std::collections::HashMap<Uuid, commons_types::status::HealthState>> {
+	use crate::schema::{issues, server_group_silenced_refs, server_silenced_refs};
+	use commons_types::status::HealthState;
+	use std::collections::{HashMap, HashSet};
+
+	let mut out: HashMap<Uuid, HealthState> = HashMap::new();
+	if servers.is_empty() {
+		return Ok(out);
+	}
+	let server_ids: Vec<Uuid> = servers.iter().map(|(id, _)| *id).collect();
+	let group_of: HashMap<Uuid, Option<Uuid>> = servers.iter().copied().collect();
+
+	let rows: Vec<(Option<Uuid>, String, String, Option<String>)> = issues::table
+		.select((
+			issues::server_id,
+			issues::source,
+			issues::ref_,
+			issues::effective_result,
+		))
+		.filter(issues::server_id.eq_any(&server_ids))
+		.filter(issues::check_name.is_not_null())
+		.filter(issues::effective_result.is_not_null())
+		.load(conn)
+		.await?;
+
+	let server_silences: HashSet<(Uuid, String, String)> = server_silenced_refs::table
+		.select((
+			server_silenced_refs::server_id,
+			server_silenced_refs::source,
+			server_silenced_refs::ref_,
+		))
+		.filter(server_silenced_refs::server_id.eq_any(&server_ids))
+		.load::<(Uuid, String, String)>(conn)
+		.await?
+		.into_iter()
+		.collect();
+	let group_ids: Vec<Uuid> = group_of.values().filter_map(|g| *g).collect();
+	let group_silences: HashSet<(Uuid, String, String)> = if group_ids.is_empty() {
+		HashSet::new()
+	} else {
+		server_group_silenced_refs::table
+			.select((
+				server_group_silenced_refs::server_group_id,
+				server_group_silenced_refs::source,
+				server_group_silenced_refs::ref_,
+			))
+			.filter(server_group_silenced_refs::server_group_id.eq_any(&group_ids))
+			.load::<(Uuid, String, String)>(conn)
+			.await?
+			.into_iter()
+			.collect()
+	};
+
+	for (server_id, source, r#ref, effective) in rows {
+		let Some(server_id) = server_id else {
+			continue;
+		};
+		let key = (server_id, source, r#ref);
+		if server_silences.contains(&key) {
+			continue;
+		}
+		if let Some(Some(gid)) = group_of.get(&server_id)
+			&& group_silences.contains(&(*gid, key.1.clone(), key.2.clone()))
+		{
+			continue;
+		}
+		let contribution = match effective.as_deref().and_then(|e| e.parse().ok()) {
+			Some(CheckResult::Failed) => HealthState::Unhealthy,
+			Some(CheckResult::Warning | CheckResult::Broken) => HealthState::Warning,
+			_ => continue,
+		};
+		let entry = out.entry(server_id).or_insert(HealthState::Healthy);
+		if contribution == HealthState::Unhealthy || *entry == HealthState::Healthy {
+			*entry = contribution;
+		}
+	}
+
+	Ok(out)
+}
+
 /// The canopy-wide issue at `(canopy, ref)`, if it has ever been raised.
 pub async fn get_global_issue(conn: &mut AsyncPgConnection, r#ref: &str) -> Result<Option<Issue>> {
 	use crate::schema::issues::dsl;

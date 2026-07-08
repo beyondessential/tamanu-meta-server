@@ -219,13 +219,12 @@ pub async fn group_details(
 		.into_iter()
 		.map(|s| (s.server_id, s))
 		.collect();
-	// Operator-silenced healthchecks don't count toward member health.
+	// Member health rolls up current check state across every source
+	// (silenced checks already skipped in the rollup).
 	let member_groups: Vec<(Uuid, Option<Uuid>)> =
 		servers.iter().map(|s| (s.id, s.group_id)).collect();
-	let silenced =
-		database::silenced_refs::silenced_health_checks_for_servers(&mut conn, &member_groups)
-			.await?;
-	let no_silences = BTreeSet::new();
+	let member_health =
+		database::issues::health_from_check_state(&mut conn, &member_groups).await?;
 
 	// The card's headline version is the cached last reported version of the
 	// group's canonical member (highest rank, then highest kind), maintained by
@@ -250,14 +249,11 @@ pub async fn group_details(
 				}
 				_ => Vec::new(),
 			};
-			let silenced_checks = silenced.get(&s.id).unwrap_or(&no_silences);
 			FacilityServerStatus {
 				id: s.id,
 				name: s.name.clone().unwrap_or_default(),
 				up,
-				health: st
-					.map(|s| s.health_state_ignoring(silenced_checks))
-					.unwrap_or_default(),
+				health: member_health.get(&s.id).copied().unwrap_or_default(),
 				operators,
 				rank: s.rank,
 				kind: s.kind,

@@ -234,6 +234,45 @@ export async function seedStatus(
 		 RETURNING created_at`,
 		params,
 	);
+
+	// Mirror ingestion: each check in the push has a check-state row, which
+	// is what the health rollup and attention pages read. Degraded checks
+	// carry the degraded-streak stamps; healthy ones record inactive state.
+	for (const entry of (opts.health ?? []) as Record<string, unknown>[]) {
+		const check = entry.check;
+		if (typeof check !== "string") continue;
+		const result =
+			typeof entry.result === "string"
+				? entry.result
+				: typeof entry.healthy === "boolean"
+					? entry.healthy
+						? "passed"
+						: "failed"
+					: null;
+		if (result === null) continue;
+		const degraded = ["failed", "warning", "broken"].includes(result);
+		const severity =
+			result === "failed" ? "error" : degraded ? "warning" : "info";
+		await sql.query(
+			`INSERT INTO issues
+			 (server_id, source, ref, check_name, observed_result, effective_result, detail, severity, message, active, first_seen, last_seen, degraded_since, last_degraded_at)
+			 VALUES ($1, 'alertd', $2, $3, $4, $4, $5::jsonb, $6, $7, $8, NOW(), NOW(), $9, $10)
+			 ON CONFLICT DO NOTHING`,
+			[
+				opts.serverId,
+				`health/${check}`,
+				check,
+				result,
+				JSON.stringify(entry),
+				severity,
+				`Health check '${check}' ${degraded ? "degraded" : "recorded"}`,
+				degraded,
+				degraded ? new Date().toISOString() : null,
+				degraded ? new Date().toISOString() : null,
+			],
+		);
+	}
+
 	return { id, createdAt: String(rows[0]!.created_at) };
 }
 

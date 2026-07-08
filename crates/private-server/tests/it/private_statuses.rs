@@ -1405,7 +1405,10 @@ async fn get_detail_health_excludes_silenced_checks() {
 
 			INSERT INTO statuses (server_id, version, healthy, health, extra, created_at) VALUES
 			('11111111-1111-1111-1111-111111111111', '1.0.0', true,
-			 '[{\"check\": \"postgres\", \"result\": \"failed\"}]'::jsonb, '{}'::jsonb, NOW())",
+			 '[{\"check\": \"postgres\", \"result\": \"failed\"}]'::jsonb, '{}'::jsonb, NOW());
+
+			INSERT INTO issues (server_id, source, ref, check_name, observed_result, effective_result, severity, message, active, first_seen, last_seen, degraded_since, last_degraded_at) VALUES
+			('11111111-1111-1111-1111-111111111111', 'alertd', 'health/postgres', 'postgres', 'failed', 'failed', 'error', 'postgres failed', true, NOW(), NOW(), NOW(), NOW())",
 		)
 		.await
 		.unwrap();
@@ -1425,7 +1428,7 @@ async fn get_detail_health_excludes_silenced_checks() {
 
 		conn.batch_execute(
 			"INSERT INTO server_silenced_refs (server_id, source, ref) VALUES
-			('11111111-1111-1111-1111-111111111111', 'status', 'health/postgres')",
+			('11111111-1111-1111-1111-111111111111', 'alertd', 'health/postgres')",
 		)
 		.await
 		.unwrap();
@@ -1466,8 +1469,11 @@ async fn group_details_member_health_excludes_group_silenced_checks() {
 			('11111111-1111-1111-1111-111111111111', '1.0.0', true,
 			 '[{\"check\": \"disk\", \"result\": \"failed\"}]'::jsonb, '{}'::jsonb, NOW());
 
+			INSERT INTO issues (server_id, source, ref, check_name, observed_result, effective_result, severity, message, active, first_seen, last_seen, degraded_since, last_degraded_at) VALUES
+			('11111111-1111-1111-1111-111111111111', 'alertd', 'health/disk', 'disk', 'failed', 'failed', 'error', 'disk failed', true, NOW(), NOW(), NOW(), NOW());
+
 			INSERT INTO server_group_silenced_refs (server_group_id, source, ref) VALUES
-			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'status', 'health/disk')",
+			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'alertd', 'health/disk')",
 		)
 		.await
 		.unwrap();
