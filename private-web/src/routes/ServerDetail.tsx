@@ -781,6 +781,7 @@ function InfoSection({
 			{status && (
 				<ChecksTable
 					health={status.health}
+					statusSource={status.source}
 					overallHealthy={status.healthy}
 					operators={status.operators}
 					serverId={server.id}
@@ -866,6 +867,7 @@ function HealthIndicator({
  * so a single component can't gate the hook on `groupId`. */
 function ChecksTable(props: {
 	health: ServerLastStatusData["health"];
+	statusSource: string;
 	overallHealthy: boolean;
 	operators: OperatorPresence[];
 	serverId: string;
@@ -901,6 +903,7 @@ function ChecksTable(props: {
 
 function ChecksTableGrouped(props: {
 	health: ServerLastStatusData["health"];
+	statusSource: string;
 	overallHealthy: boolean;
 	operators: OperatorPresence[];
 	serverId: string;
@@ -921,6 +924,7 @@ function ChecksTableGrouped(props: {
 
 function ChecksTableBody({
 	health,
+	statusSource,
 	overallHealthy,
 	operators,
 	serverId,
@@ -930,6 +934,7 @@ function ChecksTableBody({
 	groupSilences,
 }: {
 	health: ServerLastStatusData["health"];
+	statusSource: string;
 	overallHealthy: boolean;
 	operators: OperatorPresence[];
 	serverId: string;
@@ -962,11 +967,11 @@ function ChecksTableBody({
 					const refName = `health/${entry.check}`;
 					const serverSilence =
 						serverSilences.find(
-							(s) => s.source === "status" && s.ref === refName,
+							(s) => s.source === statusSource && s.ref === refName,
 						) ?? null;
 					const groupSilence =
 						groupSilences.find(
-							(s) => s.source === "status" && s.ref === refName,
+							(s) => s.source === statusSource && s.ref === refName,
 						) ?? null;
 					return (
 						<CheckRow
@@ -975,6 +980,7 @@ function ChecksTableBody({
 							operators={operators}
 							serverId={serverId}
 							groupId={groupId}
+							statusSource={statusSource}
 							onSilenced={onSilenced}
 							serverSilence={serverSilence}
 							groupSilence={groupSilence}
@@ -1064,6 +1070,7 @@ function CheckRow({
 	operators,
 	serverId,
 	groupId,
+	statusSource,
 	onSilenced,
 	serverSilence,
 	groupSilence,
@@ -1072,6 +1079,7 @@ function CheckRow({
 	operators: OperatorPresence[];
 	serverId: string;
 	groupId: string | null;
+	statusSource: string;
 	onSilenced: () => void;
 	serverSilence: ServerSilencedRef | null;
 	groupSilence: ServerGroupSilencedRef | null;
@@ -1137,6 +1145,7 @@ function CheckRow({
 					check={entry.check}
 					serverId={serverId}
 					groupId={groupId}
+					source={statusSource}
 					onSilenced={onSilenced}
 					serverSilence={serverSilence}
 					groupSilence={groupSilence}
@@ -1258,6 +1267,7 @@ function SilenceCheckButton({
 	check,
 	serverId,
 	groupId,
+	source,
 	onSilenced,
 	serverSilence,
 	groupSilence,
@@ -1265,6 +1275,7 @@ function SilenceCheckButton({
 	check: string;
 	serverId: string;
 	groupId: string | null;
+	source: string;
 	onSilenced: () => void;
 	serverSilence: ServerSilencedRef | null;
 	groupSilence: ServerGroupSilencedRef | null;
@@ -1321,8 +1332,11 @@ function SilenceCheckButton({
 			>
 				<Box sx={{ p: 1.5, maxWidth: 360 }}>
 					<Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-						Permanently ignore <code>status/{refName}</code>. The check still
-						records, but no longer triggers or joins incidents.
+						Permanently ignore <code>
+							{source}/{refName}
+						</code>
+						. The check still records, but no longer triggers or joins
+						incidents.
 					</Typography>
 					<Stack spacing={0.75}>
 						<SilenceScopeRow
@@ -1332,7 +1346,7 @@ function SilenceCheckButton({
 								handle(() =>
 									silenceServer.call({
 										server_id: serverId,
-										source: "status",
+										source,
 										ref: refName,
 									}),
 								)
@@ -1341,7 +1355,7 @@ function SilenceCheckButton({
 								handle(() =>
 									unsilenceServer.call({
 										server_id: serverId,
-										source: "status",
+										source,
 										ref: refName,
 									}),
 								)
@@ -1355,7 +1369,7 @@ function SilenceCheckButton({
 									handle(() =>
 										silenceGroup.call({
 											server_group_id: groupId,
-											source: "status",
+											source,
 											ref: refName,
 										}),
 									)
@@ -1364,7 +1378,7 @@ function SilenceCheckButton({
 									handle(() =>
 										unsilenceGroup.call({
 											server_group_id: groupId,
-											source: "status",
+											source,
 											ref: refName,
 										}),
 									)

@@ -6645,6 +6645,11 @@ export interface components {
             platform?: string | null;
             /** @description PostgreSQL version the server reported, if any. */
             postgres?: string | null;
+            /**
+             * @description The source that pushed this status (e.g. `alertd`). Silences on
+             *     the checks it carries are keyed by this source.
+             */
+            source: string;
             /** @description Timezone the server reported, if any. */
             timezone?: string | null;
             version?: null | components["schemas"]["VersionStr"];

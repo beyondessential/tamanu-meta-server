@@ -155,6 +155,9 @@ pub struct ServerLastStatusData {
 	/// Per-check health breakdown from this push. Empty for reports
 	/// predating structured per-check health.
 	pub health: JsonValue,
+	/// The source that pushed this status (e.g. `alertd`). Silences on
+	/// the checks it carries are keyed by this source.
+	pub source: String,
 	/// Additional endpoint-defined data included with this status push.
 	pub extra: JsonValue,
 	/// Operators identified as connected to the server as of this push,
@@ -670,6 +673,7 @@ pub async fn get_detail(
 				.and_then(|s| s.as_str().map(|s| s.to_string())),
 			healthy: st.healthy,
 			health: st.health.clone(),
+			source: st.source.clone(),
 			extra: st.extra.clone(),
 			operators,
 		})
