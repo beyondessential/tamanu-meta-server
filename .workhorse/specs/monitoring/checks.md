@@ -61,6 +61,12 @@ The operator interface presents one scoped policy: the **silence**, a scoped cei
 A silenced check keeps recording its observed results; its effective result is skipped, so it raises nothing and counts nowhere.
 The model admits arbitrary scoped transforms; surfaces beyond the silence are deliberately not offered yet.
 
+## Documentation
+
+Each catalogued (source, check) can carry operator-authored documentation, written in markdown in three sections: a general description of what the check observes, what each result means — what makes it fail as opposed to warn — and hints for solving a failure.
+Operators author and edit the documentation in the operator UI; it is presented alongside the check wherever its state is presented, and is available over the MCP interface (see [MCP](../private-server/mcp.md)) so agents work from curated knowledge about a check rather than deriving it.
+Canopy's own checks ship with their documentation.
+
 ## State
 
 For each (target, source, check) Canopy keeps exactly one state: the observed and effective results, the detail the source attached to the check's most recent report, when the check was first and most recently reported, and — while it is degraded — when the current degradation began.

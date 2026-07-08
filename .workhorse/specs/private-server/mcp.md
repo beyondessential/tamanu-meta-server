@@ -94,6 +94,9 @@ A summary or ranking of incidents should count published incidents rather than r
 
 **Get issue** takes an issue identifier and returns the issue with the incidents it is or was part of.
 
+**Get check documentation** takes a source and check name and returns the check's operator-authored documentation (see [CHK](../monitoring/checks.md), "Documentation"): what the check observes, what each result means, and how to solve a failure.
+A client investigating an issue consults this before deriving a check's meaning from other sources.
+
 ## Result semantics
 
 A server's reported status reflects reports received within the recent-activity window; a server silent beyond that window reads as not recently seen rather than as a stale "up".
