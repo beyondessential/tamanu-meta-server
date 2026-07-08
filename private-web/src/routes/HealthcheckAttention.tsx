@@ -23,26 +23,12 @@ import { useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import { useApi } from "../api";
 import CheckExtrasList, { checkEntryExtras } from "../components/CheckExtras";
+import CheckResultChip from "../components/CheckResultChip";
 import ServerNameWithGroup from "../components/ServerNameWithGroup";
-import SeverityChip from "../components/SeverityChip";
 import TimeAgo from "../components/TimeAgo";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { useReloadInterval } from "../hooks/useReloadInterval";
 import { type CheckAttentionServerData, type CheckResult } from "../types";
-
-/// MUI chip colour per check result. Broken reads as a warning since it
-/// says nothing about the system under test, just the check itself;
-/// passed/skipped (visible behind the "show healthy" toggle) read calm.
-const CHECK_CHIP_COLOR: Record<
-	CheckResult,
-	"error" | "warning" | "success" | "default"
-> = {
-	failed: "error",
-	warning: "warning",
-	broken: "warning",
-	passed: "success",
-	skipped: "default",
-};
 
 const HEALTHY_RESULTS: readonly string[] = ["passed", "skipped"];
 
@@ -75,8 +61,17 @@ export default function HealthcheckAttention() {
 					<Typography variant="h6" component="h2" sx={{ fontFamily: "monospace" }}>
 						{check}
 					</Typography>
-					{result.status === "ok" && result.data.severity && (
-						<SeverityChip severity={result.data.severity} />
+					{result.status === "ok" && result.data.ceiling && (
+						<CheckResultChip result={result.data.ceiling as CheckResult} />
+					)}
+					{result.status === "ok" && result.data.escalates && (
+						<Chip
+							label="escalates"
+							color="error"
+							size="small"
+							variant="outlined"
+							title="An effective failure notifies immediately, bypassing the incident grace period"
+						/>
 					)}
 				</Stack>
 				<Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
@@ -85,7 +80,7 @@ export default function HealthcheckAttention() {
 						component={RouterLink}
 						to={`/settings/healthchecks/${encodeURIComponent(check ?? "")}`}
 					>
-						Configure severity / rules
+						Configure ceiling / rules
 					</MuiLink>
 				</Typography>
 			</Box>
@@ -202,11 +197,9 @@ function AttentionRow({ server }: { server: CheckAttentionServerData }) {
 					/>
 				</TableCell>
 				<TableCell>
-					<Chip
-						label={server.result}
-						size="small"
+					<CheckResultChip
+						result={server.result as CheckResult}
 						variant="outlined"
-						color={CHECK_CHIP_COLOR[server.result as CheckResult] ?? "warning"}
 					/>
 				</TableCell>
 				<TableCell>

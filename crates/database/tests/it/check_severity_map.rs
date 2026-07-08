@@ -1,10 +1,10 @@
-//! Queries backing the device-facing effective check-severity map:
-//! `HealthcheckSeverity::base_severity_map` (static catalog severities,
+//! Queries backing the device-facing effective check map:
+//! `CheckPolicy::ceiling_map_for_source` (static policy ceilings,
 //! ignoring conditional rules) and `silenced_refs::silenced_refs_with_prefix`
-//! (server- plus group-scope silences under a source/ref prefix).
+//! (server- plus group-scope silences under a ref prefix).
 
-use commons_types::issue::Severity;
-use database::healthcheck_severities::{HealthcheckSeverity, IfLadder};
+use commons_types::status::CheckResult;
+use database::check_policies::{CheckPolicy, IfLadder};
 use database::silenced_refs::{
 	ServerGroupSilencedRef, ServerSilencedRef, silenced_refs_with_prefix,
 };
@@ -38,51 +38,70 @@ async fn insert_server(conn: &mut diesel_async::AsyncPgConnection, group_id: Opt
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn base_severity_map_returns_static_severities() {
+async fn ceiling_map_returns_static_ceilings_for_one_source() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		for check in ["disk_space", "cert_expiry", "chatty"] {
-			HealthcheckSeverity::upsert_default(&mut conn, check)
+			CheckPolicy::upsert_default(&mut conn, "alertd", check)
 				.await
 				.expect("seed");
 		}
-		HealthcheckSeverity::update(&mut conn, "disk_space", Severity::Error, None, "alice")
+		CheckPolicy::upsert_default(&mut conn, "seedling", "other_source_check")
 			.await
-			.expect("update disk_space");
-		HealthcheckSeverity::update(&mut conn, "chatty", Severity::Info, None, "alice")
-			.await
-			.expect("update chatty");
+			.expect("seed other source");
+		CheckPolicy::update(
+			&mut conn,
+			"alertd",
+			"disk_space",
+			CheckResult::Failed,
+			false,
+			None,
+			"alice",
+		)
+		.await
+		.expect("update disk_space");
+		CheckPolicy::update(
+			&mut conn,
+			"alertd",
+			"chatty",
+			CheckResult::Passed,
+			false,
+			None,
+			"alice",
+		)
+		.await
+		.expect("update chatty");
 
-		let map = HealthcheckSeverity::base_severity_map(&mut conn)
+		let map = CheckPolicy::ceiling_map_for_source(&mut conn, "alertd")
 			.await
 			.expect("map");
-		assert_eq!(map.len(), 3);
-		assert_eq!(map.get("disk_space"), Some(&Severity::Error));
-		assert_eq!(map.get("cert_expiry"), Some(&Severity::Warning));
-		assert_eq!(map.get("chatty"), Some(&Severity::Info));
+		assert_eq!(map.len(), 3, "only the requested source's checks");
+		assert_eq!(map.get("disk_space"), Some(&CheckResult::Failed));
+		assert_eq!(map.get("cert_expiry"), Some(&CheckResult::Warning));
+		assert_eq!(map.get("chatty"), Some(&CheckResult::Passed));
 	})
 	.await
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn base_severity_map_ignores_conditional_rules() {
+async fn ceiling_map_ignores_conditional_rules() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		HealthcheckSeverity::upsert_default(&mut conn, "ruled")
+		CheckPolicy::upsert_default(&mut conn, "alertd", "ruled")
 			.await
 			.expect("seed");
 		let ladder: IfLadder = serde_json::from_value(json!({"if": [
-			{"==": [{"var": "check.result"}, "failed"]}, "critical",
+			{"==": [{"var": "check.result"}, "failed"]}, "failed",
 		]}))
 		.expect("parse ladder");
-		HealthcheckSeverity::update_rules(&mut conn, "ruled", Some(&ladder), "alice")
+		CheckPolicy::update_rules(&mut conn, "alertd", "ruled", Some(&ladder), "alice")
 			.await
 			.expect("set rules");
 
-		// The expression could raise a failure to critical at push time, but
-		// the static map must only reflect the base severity column.
-		let map = HealthcheckSeverity::base_severity_map(&mut conn)
+		// The expression could grade a failure through at push time, but
+		// the static map must only reflect the ceiling column.
+		let map = CheckPolicy::ceiling_map_for_source(&mut conn, "alertd")
 			.await
 			.expect("map");
-		assert_eq!(map.get("ruled"), Some(&Severity::Warning));
+		assert_eq!(map.get("ruled"), Some(&CheckResult::Warning));
 	})
 	.await
 }

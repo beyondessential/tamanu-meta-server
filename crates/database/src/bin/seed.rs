@@ -18,13 +18,14 @@ use commons_types::{
 	geo::GeoPoint,
 	issue::{ResolvedReason, Severity},
 	server::{TagMap, kind::ServerKind, rank::ServerRank},
+	status::CheckResult,
 	version::{VersionStatus, VersionStr},
 };
 use database::{
 	Device, DeviceKey,
 	admins::Admin,
+	check_policies::CheckPolicy,
 	devices::NewDeviceConnection,
-	healthcheck_severities::HealthcheckSeverity,
 	issues::{Incident, Issue, NewEvent},
 	notes::{IncidentNote, IssueNote},
 	pg_duration::PgDuration,
@@ -59,7 +60,6 @@ const TRUNCATE_TABLES: &[&str] = &[
 	"issue_notes",
 	"incident_issues",
 	"incidents",
-	"events",
 	"issues",
 	"server_silenced_refs",
 	"server_group_silenced_refs",
@@ -70,7 +70,7 @@ const TRUNCATE_TABLES: &[&str] = &[
 	"server_groups",
 	"version_known_issues",
 	"versions",
-	"healthcheck_severities",
+	"check_policies",
 	"admins",
 ];
 
@@ -323,49 +323,62 @@ async fn seed_healthchecks(conn: &mut AsyncPgConnection, admins: &[String]) -> R
 		"certificate_expiry",
 		"backup_freshness",
 	] {
-		HealthcheckSeverity::upsert_default(conn, check).await?;
+		CheckPolicy::upsert_default(conn, "alertd", check).await?;
 	}
 
 	let reviewer = &admins[0];
-	HealthcheckSeverity::update(
+	CheckPolicy::update(
 		conn,
+		"alertd",
 		"database_connectivity",
-		Severity::Critical,
+		CheckResult::Failed,
+		true,
 		Some("DB down means the server is effectively offline."),
 		reviewer,
 	)
 	.await?;
-	HealthcheckSeverity::update(
+	CheckPolicy::update(
 		conn,
+		"alertd",
 		"disk_space",
-		Severity::Error,
+		CheckResult::Failed,
+		false,
 		Some("Page when disk is critically low."),
 		reviewer,
 	)
 	.await?;
-	HealthcheckSeverity::update(conn, "backup_freshness", Severity::Info, None, reviewer).await?;
+	CheckPolicy::update(
+		conn,
+		"alertd",
+		"backup_freshness",
+		CheckResult::Passed,
+		false,
+		None,
+		reviewer,
+	)
+	.await?;
 
-	// A conditional rules ladder: escalate sync_lag based on how far behind it is.
-	use database::healthcheck_severities::{Condition, IfLadder, Var};
+	// A conditional rules ladder: grade sync_lag by how far behind it is.
+	use database::check_policies::{Condition, IfLadder, Var};
 	let ladder = IfLadder {
 		branches: vec![
 			(
 				Condition::Gt(
 					"check.lag_seconds".parse::<Var>().expect("var parses"),
-					serde_json::json!(3600),
+					serde_json::json!(600),
 				),
-				Severity::Critical,
+				CheckResult::Failed,
 			),
 			(
 				Condition::Gt(
 					"check.lag_seconds".parse::<Var>().expect("var parses"),
-					serde_json::json!(600),
+					serde_json::json!(60),
 				),
-				Severity::Error,
+				CheckResult::Warning,
 			),
 		],
 	};
-	HealthcheckSeverity::update_rules(conn, "sync_lag", Some(&ladder), reviewer).await?;
+	CheckPolicy::update_rules(conn, "alertd", "sync_lag", Some(&ladder), reviewer).await?;
 
 	Ok(())
 }
@@ -1166,7 +1179,7 @@ async fn report(conn: &mut AsyncPgConnection) -> Result<()> {
 		"admins",
 		"versions",
 		"version_known_issues",
-		"healthcheck_severities",
+		"check_policies",
 		"devices",
 		"device_keys",
 		"device_connections",
@@ -1175,7 +1188,6 @@ async fn report(conn: &mut AsyncPgConnection) -> Result<()> {
 		"server_enrollment_tokens",
 		"statuses",
 		"issues",
-		"events",
 		"incidents",
 		"incident_issues",
 		"issue_notes",

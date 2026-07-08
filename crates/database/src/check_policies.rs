@@ -1,14 +1,23 @@
-//! Operator-owned catalog of healthcheck names → the severity to file
-//! their failures at.
+//! Operator-owned catalog of check policies: per (source, check), how an
+//! observed result transforms into the effective result Canopy acts on.
+//!
+//! An entry carries a **ceiling** (the maximum effective result on the
+//! urgency ordering — `failed` changes nothing, `warning` grades failures
+//! as warnings, `passed` means recorded but never alerting, `skipped`
+//! additionally tells the source not to bother running the check),
+//! optional conditional **rules** (transforms in any direction, evaluated
+//! against the check's detail, the report's server-wide detail, and the
+//! server's tags), and an **escalates** flag (an effective failure of
+//! this check notifies immediately, bypassing incident grace).
 //!
 //! Ingestion (in the public-server status handler) calls
-//! [`HealthcheckSeverity::upsert_default`] for every check name seen on
-//! a push, then [`HealthcheckSeverity::severity_for`] when filing a
-//! failing per-check issue. Operators read and edit the catalog via the
-//! private-server `/api/healthchecks` endpoints.
+//! [`CheckPolicy::upsert_default`] for every check seen on a push, then
+//! [`CheckPolicy::apply`] to grade each observed result. Operators read
+//! and edit the catalog via the private-server `/api/healthchecks`
+//! endpoints.
 
 use commons_errors::{AppError, Result};
-use commons_types::{issue::Severity, status::CheckResult};
+use commons_types::status::CheckResult;
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use jiff::Timestamp;
@@ -16,21 +25,38 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use serde_json::Value as JsonValue;
 use std::collections::{BTreeMap, HashMap};
 
-/// The severity policy for one named healthcheck. An entry is created
-/// automatically the first time a check with this name is reported, using
-/// a default policy; operators then review and adjust how that check's
-/// failures should be classified going forward.
+/// The policy for one (source, check). An entry is created automatically
+/// the first time a source reports a check with this name, at the default
+/// ceiling; operators then review and adjust how that check's results are
+/// graded going forward.
 #[derive(Clone, Debug, Serialize, Deserialize, Queryable, Selectable, utoipa::ToSchema)]
-#[diesel(table_name = crate::schema::healthcheck_severities)]
+#[diesel(table_name = crate::schema::check_policies)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct HealthcheckSeverity {
-	/// The healthcheck's name, as reported in status pushes. Uniquely
-	/// identifies this policy.
+pub struct CheckPolicy {
+	/// The source that reports this check. Together with `check_name`,
+	/// uniquely identifies this policy.
+	pub source: String,
+	/// The check's name, as reported in status pushes.
 	pub check_name: String,
-	/// The severity assigned to a failure of this check when no conditional
-	/// rule (see `rules`) overrides it.
+	/// The maximum effective result for this check when no conditional
+	/// rule (see `rules`) overrides it: an observed result more urgent
+	/// than the ceiling grades down to it.
 	#[diesel(deserialize_as = String, serialize_as = String)]
-	pub severity: Severity,
+	#[schema(value_type = String)]
+	pub ceiling: CheckResult,
+	/// Whether an effective failure of this check notifies immediately,
+	/// bypassing the incident grace period.
+	pub escalates: bool,
+	/// Optional conditional rules that can grade a result differently —
+	/// in any direction — depending on the details of the check, the
+	/// surrounding status report, or the server's tags. `None` means no
+	/// conditional rules are configured and the ceiling always applies.
+	/// When present, the rules are evaluated in order and the first
+	/// matching one wins; if none match, the ceiling applies.
+	#[schema(value_type = Option<serde_json::Value>)]
+	pub rules: Option<JsonValue>,
+	/// Free-form operator notes about this check.
+	pub notes: Option<String>,
 	/// When this check was first observed and this policy entry was created.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub first_seen: Timestamp,
@@ -41,32 +67,36 @@ pub struct HealthcheckSeverity {
 	/// The operator who last reviewed this policy. `None` if it has never
 	/// been reviewed.
 	pub reviewed_by: Option<String>,
-	/// Free-form operator notes about this check.
-	pub notes: Option<String>,
 	/// When this policy was last modified.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub updated_at: Timestamp,
-	/// Optional conditional rules that can assign a different severity
-	/// depending on the details of the failing check, the surrounding status
-	/// report, or the server's tags. `None` means no conditional rules are
-	/// configured and `severity` always applies. When present, the rules are
-	/// evaluated in order and the first matching one wins; if none match,
-	/// `severity` is used as the fallback.
-	#[schema(value_type = Option<serde_json::Value>)]
-	pub rules: Option<JsonValue>,
 }
 
-impl HealthcheckSeverity {
-	/// Insert a row for `check_name` with default values (severity =
-	/// warning, reviewed_at = NULL) if and only if no row exists yet.
-	/// Idempotent: safe to call on every status push for every check
-	/// seen, including healthy ones. Concurrent pushes are serialised
-	/// by Postgres via `ON CONFLICT DO NOTHING`.
-	pub async fn upsert_default(db: &mut AsyncPgConnection, check_name: &str) -> Result<()> {
-		use crate::schema::healthcheck_severities::dsl;
-		diesel::insert_into(dsl::healthcheck_severities)
-			.values(dsl::check_name.eq(check_name))
-			.on_conflict(dsl::check_name)
+/// The outcome of applying a check's policy to an observed result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GradedResult {
+	/// The effective result after the policy transform.
+	pub effective: CheckResult,
+	/// Whether this check's effective failures escalate (notify
+	/// immediately, bypassing incident grace).
+	pub escalates: bool,
+}
+
+impl CheckPolicy {
+	/// Insert a row for `(source, check_name)` with default values
+	/// (ceiling = warning) if and only if no row exists yet. Idempotent:
+	/// safe to call on every status push for every check seen, including
+	/// healthy ones. Concurrent pushes are serialised by Postgres via
+	/// `ON CONFLICT DO NOTHING`.
+	pub async fn upsert_default(
+		db: &mut AsyncPgConnection,
+		source: &str,
+		check_name: &str,
+	) -> Result<()> {
+		use crate::schema::check_policies::dsl;
+		diesel::insert_into(dsl::check_policies)
+			.values((dsl::source.eq(source), dsl::check_name.eq(check_name)))
+			.on_conflict((dsl::source, dsl::check_name))
 			.do_nothing()
 			.execute(db)
 			.await
@@ -74,57 +104,60 @@ impl HealthcheckSeverity {
 		Ok(())
 	}
 
-	/// Look up the effective severity for a `check_name` reporting
-	/// `result` (warning or failed — the only kinds that file at the
-	/// catalog severity), given the supplied evaluation context. If
-	/// the row has a `rules` ladder it's evaluated against the context
-	/// first; the first matching branch's severity wins. Otherwise (no
-	/// ladder, no matching branch, or malformed JSON) the fallback
-	/// depends on the result kind: warning-result checks land at fixed
-	/// [`Severity::Warning`]; failed checks use the row's base
-	/// `severity` column. The catalog column is thus "the severity of
-	/// this check's failures" — warnings only deviate from Warning via
-	/// an explicit rule (which can condition on `check.result`).
+	/// Apply the `(source, check_name)` policy to an `observed` result:
+	/// if the entry has a `rules` ladder and a branch matches the
+	/// supplied evaluation context, that branch's result wins (any
+	/// direction — rules can upgrade as well as downgrade); otherwise the
+	/// observed result is capped at the entry's ceiling.
 	///
-	/// Falls back to `Severity::Warning` if no row exists yet — in
-	/// practice the status handler upserts before reading, so this
-	/// branch only covers the genuine race / programmer-error case.
-	pub async fn severity_for(
+	/// Falls back to the default policy (ceiling = warning, no
+	/// escalation) if no row exists yet — in practice the status handler
+	/// upserts before reading, so this branch only covers the genuine
+	/// race / programmer-error case.
+	pub async fn apply(
 		db: &mut AsyncPgConnection,
+		source: &str,
 		check_name: &str,
-		result: CheckResult,
+		observed: CheckResult,
 		ctx: &EvaluationContext<'_>,
-	) -> Result<Severity> {
-		use crate::schema::healthcheck_severities::dsl;
-		let row: Option<(String, Option<JsonValue>)> = dsl::healthcheck_severities
-			.select((dsl::severity, dsl::rules))
-			.filter(dsl::check_name.eq(check_name))
+	) -> Result<GradedResult> {
+		use crate::schema::check_policies::dsl;
+		let row: Option<(String, bool, Option<JsonValue>)> = dsl::check_policies
+			.select((dsl::ceiling, dsl::escalates, dsl::rules))
+			.filter(dsl::source.eq(source).and(dsl::check_name.eq(check_name)))
 			.first(db)
 			.await
 			.optional()?;
-		let Some((sev_str, rules_json)) = row else {
-			return Ok(Severity::Warning);
+		let Some((ceiling_str, escalates, rules_json)) = row else {
+			return Ok(GradedResult {
+				effective: observed.capped_at(CheckResult::Warning),
+				escalates: false,
+			});
 		};
-		let base = sev_str.parse().unwrap_or(Severity::Warning);
+		let ceiling = ceiling_str.parse().unwrap_or(CheckResult::Warning);
 		if let Some(rules) = rules_json {
 			match serde_json::from_value::<IfLadder>(rules) {
 				Ok(ladder) => {
-					if let Some(s) = ladder.evaluate(ctx) {
-						return Ok(s);
+					if let Some(result) = ladder.evaluate(ctx) {
+						return Ok(GradedResult {
+							effective: result,
+							escalates,
+						});
 					}
 				}
 				Err(err) => {
 					tracing::warn!(
+						source,
 						check_name,
 						?err,
-						"failed to parse healthcheck severity rules; falling back to base"
+						"failed to parse check policy rules; falling back to ceiling"
 					);
 				}
 			}
 		}
-		Ok(match result {
-			CheckResult::Warning => Severity::Warning,
-			_ => base,
+		Ok(GradedResult {
+			effective: observed.capped_at(ceiling),
+			escalates,
 		})
 	}
 
@@ -133,113 +166,142 @@ impl HealthcheckSeverity {
 	/// rules also counts as a review for the catalog row.
 	pub async fn update_rules(
 		db: &mut AsyncPgConnection,
+		source: &str,
 		check_name: &str,
 		rules: Option<&IfLadder>,
 		by: &str,
 	) -> Result<Self> {
-		use crate::schema::healthcheck_severities::dsl;
+		use crate::schema::check_policies::dsl;
 		let now = Timestamp::now();
 		let rules_json: Option<JsonValue> =
 			rules.map(|l| serde_json::to_value(l).expect("IfLadder always serialises"));
-		diesel::update(dsl::healthcheck_severities.filter(dsl::check_name.eq(check_name)))
-			.set((
-				dsl::rules.eq(rules_json),
-				dsl::reviewed_at.eq(jiff_diesel::Timestamp::from(now)),
-				dsl::reviewed_by.eq(by),
-			))
-			.returning(Self::as_select())
-			.get_result(db)
-			.await
-			.map_err(AppError::from)
+		diesel::update(
+			dsl::check_policies.filter(dsl::source.eq(source).and(dsl::check_name.eq(check_name))),
+		)
+		.set((
+			dsl::rules.eq(rules_json),
+			dsl::reviewed_at.eq(jiff_diesel::Timestamp::from(now)),
+			dsl::reviewed_by.eq(by),
+		))
+		.returning(Self::as_select())
+		.get_result(db)
+		.await
+		.map_err(AppError::from)
 	}
 
-	/// The whole catalog as `check_name → base severity`, for building the
-	/// device-facing effective check-severity map. Deliberately reads only
-	/// the static `severity` column: conditional `rules` ladders are
-	/// expressions evaluated per push against the report's contents, so they
-	/// can't be resolved ahead of time and are ignored here. An unparseable
-	/// severity falls back to [`Severity::Warning`], same as `severity_for`.
-	pub async fn base_severity_map(
+	/// One source's catalog as `check_name → ceiling`, for building the
+	/// device-facing effective check map. Deliberately reads only the
+	/// static `ceiling` column: conditional `rules` ladders are
+	/// expressions evaluated per push against the report's contents, so
+	/// they can't be resolved ahead of time and are ignored here. An
+	/// unparseable ceiling falls back to warning, same as [`Self::apply`].
+	pub async fn ceiling_map_for_source(
 		db: &mut AsyncPgConnection,
-	) -> Result<BTreeMap<String, Severity>> {
-		use crate::schema::healthcheck_severities::dsl;
-		let rows: Vec<(String, String)> = dsl::healthcheck_severities
-			.select((dsl::check_name, dsl::severity))
+		source: &str,
+	) -> Result<BTreeMap<String, CheckResult>> {
+		use crate::schema::check_policies::dsl;
+		let rows: Vec<(String, String)> = dsl::check_policies
+			.select((dsl::check_name, dsl::ceiling))
+			.filter(dsl::source.eq(source))
 			.load(db)
 			.await
 			.map_err(AppError::from)?;
 		Ok(rows
 			.into_iter()
-			.map(|(name, sev)| (name, sev.parse().unwrap_or(Severity::Warning)))
+			.map(|(name, ceiling)| (name, ceiling.parse().unwrap_or(CheckResult::Warning)))
 			.collect())
 	}
 
 	pub async fn list(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
-		use crate::schema::healthcheck_severities::dsl;
-		dsl::healthcheck_severities
+		use crate::schema::check_policies::dsl;
+		dsl::check_policies
 			.select(Self::as_select())
-			.order(dsl::check_name.asc())
+			.order((dsl::source.asc(), dsl::check_name.asc()))
 			.load(db)
 			.await
 			.map_err(AppError::from)
 	}
 
-	/// The catalog row for a single check name, or `None` if no server has
-	/// ever reported it (so ingestion has never upserted a row).
-	pub async fn get(db: &mut AsyncPgConnection, check_name: &str) -> Result<Option<Self>> {
-		use crate::schema::healthcheck_severities::dsl;
-		dsl::healthcheck_severities
+	/// The catalog row for a single (source, check), or `None` if that
+	/// source has never reported it (so ingestion has never upserted a
+	/// row).
+	pub async fn get(
+		db: &mut AsyncPgConnection,
+		source: &str,
+		check_name: &str,
+	) -> Result<Option<Self>> {
+		use crate::schema::check_policies::dsl;
+		dsl::check_policies
 			.select(Self::as_select())
-			.filter(dsl::check_name.eq(check_name))
+			.filter(dsl::source.eq(source).and(dsl::check_name.eq(check_name)))
 			.first(db)
 			.await
 			.optional()
 			.map_err(AppError::from)
 	}
 
-	/// Update the severity (and optionally notes) for a check, stamping
-	/// `reviewed_at = NOW()` and `reviewed_by = by`. Even a no-op save
-	/// (same severity) marks the row reviewed — operators can ack
-	/// a check without changing it.
+	/// The catalog rows for a check name across every source that
+	/// reports it. Pages that correlate by check name alone (the
+	/// per-check attention view) use this.
+	pub async fn get_by_name(db: &mut AsyncPgConnection, check_name: &str) -> Result<Vec<Self>> {
+		use crate::schema::check_policies::dsl;
+		dsl::check_policies
+			.select(Self::as_select())
+			.filter(dsl::check_name.eq(check_name))
+			.order(dsl::source.asc())
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// Update the ceiling, escalation flag, and optionally notes for a
+	/// check, stamping `reviewed_at = NOW()` and `reviewed_by = by`. Even
+	/// a no-op save marks the row reviewed — operators can ack a check
+	/// without changing it.
 	pub async fn update(
 		db: &mut AsyncPgConnection,
+		source: &str,
 		check_name: &str,
-		severity: Severity,
+		ceiling: CheckResult,
+		escalates: bool,
 		notes: Option<&str>,
 		by: &str,
 	) -> Result<Self> {
-		use crate::schema::healthcheck_severities::dsl;
+		use crate::schema::check_policies::dsl;
 		let now = Timestamp::now();
-		diesel::update(dsl::healthcheck_severities.filter(dsl::check_name.eq(check_name)))
-			.set((
-				dsl::severity.eq(severity),
-				dsl::notes.eq(notes),
-				dsl::reviewed_at.eq(jiff_diesel::Timestamp::from(now)),
-				dsl::reviewed_by.eq(by),
-			))
-			.returning(Self::as_select())
-			.get_result(db)
-			.await
-			.map_err(AppError::from)
+		diesel::update(
+			dsl::check_policies.filter(dsl::source.eq(source).and(dsl::check_name.eq(check_name))),
+		)
+		.set((
+			dsl::ceiling.eq(ceiling.to_string()),
+			dsl::escalates.eq(escalates),
+			dsl::notes.eq(notes),
+			dsl::reviewed_at.eq(jiff_diesel::Timestamp::from(now)),
+			dsl::reviewed_by.eq(by),
+		))
+		.returning(Self::as_select())
+		.get_result(db)
+		.await
+		.map_err(AppError::from)
 	}
 }
 
 // ── Rule model: JsonLogic-encoded if-ladder ────────────────────────────────
 
-/// A JsonLogic `if`-ladder evaluating to a Severity string.
+/// A JsonLogic `if`-ladder evaluating to a [`CheckResult`] string.
 ///
-/// Wire shape: `{"if": [c1, s1, c2, s2, …, cN, sN]}` — even-length
+/// Wire shape: `{"if": [c1, r1, c2, r2, …, cN, rN]}` — even-length
 /// argument list, every odd-index entry is a [`Condition`], every
-/// even-index entry is a Severity literal. No trailing else: when no
+/// even-index entry is a result literal. No trailing else: when no
 /// branch matches, [`Self::evaluate`] returns `None` and the calling
-/// `severity_for` falls through to the row's `severity` column.
+/// [`CheckPolicy::apply`] falls through to the entry's ceiling.
 ///
 /// Empty ladders are forbidden by the deserialiser; the API layer
 /// normalises them to `None` (clearing the `rules` column) before
 /// hitting the database.
 #[derive(Clone, Debug, PartialEq)]
 pub struct IfLadder {
-	pub branches: Vec<(Condition, Severity)>,
+	pub branches: Vec<(Condition, CheckResult)>,
 }
 
 /// One predicate inside an [`IfLadder`] branch. Maps 1:1 with a single
@@ -277,8 +339,8 @@ pub struct EvaluationContext<'a> {
 	/// Top-level status extras (`statuses.extra`). Bestool sends
 	/// `bestoolVersion`, `tamanuVersion`, `uptimeSecs`, etc.
 	pub status_extra: &'a serde_json::Map<String, JsonValue>,
-	/// The failing check's own fields (the `health[i]` object minus
-	/// `check` and `healthy`).
+	/// The check's own fields (the `health[i]` object minus `check` and
+	/// `healthy`).
 	pub check_extra: &'a serde_json::Map<String, JsonValue>,
 	/// Server's resolved tag map (merged server + group). Each value is
 	/// already wrapped as `JsonValue::String` for uniform comparison.
@@ -286,13 +348,13 @@ pub struct EvaluationContext<'a> {
 }
 
 impl IfLadder {
-	/// Returns the first matching branch's severity, or `None` if no
-	/// branch matches. The caller falls back to the catalog's base
-	/// severity in that case.
-	pub fn evaluate(&self, ctx: &EvaluationContext) -> Option<Severity> {
+	/// Returns the first matching branch's result, or `None` if no
+	/// branch matches. The caller falls back to the entry's ceiling in
+	/// that case.
+	pub fn evaluate(&self, ctx: &EvaluationContext) -> Option<CheckResult> {
 		self.branches
 			.iter()
-			.find_map(|(c, s)| c.matches(ctx).then_some(*s))
+			.find_map(|(c, r)| c.matches(ctx).then_some(*r))
 	}
 }
 
@@ -499,9 +561,9 @@ impl<'de> Deserialize<'de> for Condition {
 impl Serialize for IfLadder {
 	fn serialize<S: Serializer>(&self, ser: S) -> std::result::Result<S::Ok, S::Error> {
 		let mut args: Vec<JsonValue> = Vec::with_capacity(self.branches.len() * 2);
-		for (c, s) in &self.branches {
+		for (c, r) in &self.branches {
 			args.push(serde_json::to_value(c).map_err(serde::ser::Error::custom)?);
-			args.push(JsonValue::String(s.to_string()));
+			args.push(JsonValue::String(r.to_string()));
 		}
 		serde_json::json!({ "if": args }).serialize(ser)
 	}
@@ -534,7 +596,7 @@ impl<'de> Deserialize<'de> for IfLadder {
 		}
 		if args.len() % 2 != 0 {
 			return Err(de::Error::custom(
-				"'if' args must have even length (alternating condition, severity); \
+				"'if' args must have even length (alternating condition, result); \
 				 a trailing else is not allowed",
 			));
 		}
@@ -542,13 +604,13 @@ impl<'de> Deserialize<'de> for IfLadder {
 		for chunk in args.chunks_exact(2) {
 			let cond: Condition =
 				serde_json::from_value(chunk[0].clone()).map_err(de::Error::custom)?;
-			let sev_str = chunk[1].as_str().ok_or_else(|| {
-				de::Error::custom("each odd-indexed 'if' arg must be a severity string")
+			let result_str = chunk[1].as_str().ok_or_else(|| {
+				de::Error::custom("each odd-indexed 'if' arg must be a result string")
 			})?;
-			let sev: Severity = sev_str
+			let result: CheckResult = result_str
 				.parse()
-				.map_err(|_| de::Error::custom(format!("invalid severity '{sev_str}'")))?;
-			branches.push((cond, sev));
+				.map_err(|_| de::Error::custom(format!("invalid result '{result_str}'")))?;
+			branches.push((cond, result));
 		}
 		Ok(IfLadder { branches })
 	}

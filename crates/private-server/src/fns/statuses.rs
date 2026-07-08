@@ -6,7 +6,6 @@ use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleUser;
 use commons_types::{
-	issue::Severity,
 	server::{
 		cards::{FacilityServerStatus, ServerGroupCard},
 		rank::ServerRank,
@@ -15,7 +14,7 @@ use commons_types::{
 	version::VersionStr,
 };
 use database::{
-	devices::DeviceConnection, healthcheck_severities::HealthcheckSeverity, issues::Issue,
+	check_policies::CheckPolicy, devices::DeviceConnection, issues::Issue,
 	server_groups::ServerGroup, servers::Server, statuses::Status,
 	tailscale_users::TailscaleUser as CachedTailscaleUser, versions::Version,
 };
@@ -321,7 +320,7 @@ pub struct CheckAttentionArgs {
 	pub check: String,
 }
 
-/// Response for [`check_attention`]: the queried check's catalog severity
+/// Response for [`check_attention`]: the queried check's catalog policy
 /// (if it has one yet) and every live server whose latest status reports
 /// it, failing or healthy.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -329,9 +328,14 @@ pub struct CheckAttentionData {
 	/// The check name that was queried, echoed back so the page can
 	/// render its heading without re-decoding the request.
 	pub check: String,
-	/// The catalog's configured base severity for this check, or `None`
-	/// if no server has ever reported it yet (so it has no catalog row).
-	pub severity: Option<Severity>,
+	/// The most urgent configured policy ceiling for this check across
+	/// the sources that report it, or `None` if no server has ever
+	/// reported it yet (so it has no catalog row).
+	#[schema(value_type = Option<String>)]
+	pub ceiling: Option<CheckResult>,
+	/// Whether any source's policy for this check escalates its
+	/// effective failures.
+	pub escalates: bool,
 	/// Every live server whose latest status reports this check, at any
 	/// result, ordered as a TODO list: failed, warning, broken, passed,
 	/// skipped (most urgent first), then by group name then server name.
@@ -433,13 +437,17 @@ pub async fn check_attention(
 			.then_with(|| a.server_name.cmp(&b.server_name))
 	});
 
-	let severity = HealthcheckSeverity::get(&mut conn, &args.check)
-		.await?
-		.map(|row| row.severity);
+	let policies = CheckPolicy::get_by_name(&mut conn, &args.check).await?;
+	let ceiling = policies
+		.iter()
+		.map(|row| row.ceiling)
+		.min_by_key(|c| c.urgency_rank());
+	let escalates = policies.iter().any(|row| row.escalates);
 
 	Ok(Json(CheckAttentionData {
 		check: args.check,
-		severity,
+		ceiling,
+		escalates,
 		servers,
 	}))
 }
@@ -652,20 +660,20 @@ pub(crate) async fn enrich_operators(
 	Ok(())
 }
 
-/// For every warning/failed check on `status`, resolve the catalog +
-/// rules severity given the snapshot's actual extras and the server's
-/// resolved tag map. Mirrors the public-server ingestion path
-/// (`file_health_events`) so the UI displays what *would* be filed.
-/// Broken checks aren't included — they file at a fixed Warning and
-/// the UI renders them from the result directly; passed/skipped file
-/// nothing.
+/// For every warning/failed check on `status`, resolve the policy +
+/// rules grading given the snapshot's actual extras and the server's
+/// resolved tag map, expressed as the severity ingestion would file.
+/// Mirrors the public-server ingestion path (`file_health_events`) so
+/// the UI displays what *would* be filed. Broken checks aren't included
+/// — they file at a fixed Warning and the UI renders them from the
+/// result directly.
 async fn compute_check_severities(
 	conn: &mut database::diesel_async::AsyncPgConnection,
 	server: &Server,
 	status: &Status,
 ) -> commons_errors::Result<std::collections::HashMap<String, commons_types::issue::Severity>> {
 	use commons_types::status::CheckResult;
-	use database::healthcheck_severities::{EvaluationContext, HealthcheckSeverity};
+	use database::check_policies::{CheckPolicy, EvaluationContext};
 
 	let Some(arr) = status.health.as_array() else {
 		return Ok(Default::default());
@@ -720,7 +728,13 @@ async fn compute_check_severities(
 			check_extra: &check_extra,
 			tags: &tags,
 		};
-		let sev = HealthcheckSeverity::severity_for(conn, &name, result, &ctx).await?;
+		let graded = CheckPolicy::apply(conn, &status.source, &name, result, &ctx).await?;
+		let sev = match graded.effective {
+			CheckResult::Failed if graded.escalates => commons_types::issue::Severity::Critical,
+			CheckResult::Failed => commons_types::issue::Severity::Error,
+			CheckResult::Warning | CheckResult::Broken => commons_types::issue::Severity::Warning,
+			CheckResult::Passed | CheckResult::Skipped => continue,
+		};
 		out.insert(name, sev);
 	}
 	Ok(out)

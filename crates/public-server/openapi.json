@@ -818,7 +818,7 @@
           "statuses"
         ],
         "summary": "Fetch the effective healthcheck severity mapping for a server.",
-        "description": "Returns, for every healthcheck canopy knows about, how a failure of that\ncheck is classified for this server: `skip` (the check is silenced for\nthis server — at server or group scope — or its severity is below\nwarning), `warn` (warning), or `fail` (error or critical). Keys are check\nnames as reported in `health[].check` on status pushes. Only the static\nseverity baseline is reflected; operator-defined conditional rules are\nevaluated per push and not included here. The same mapping also rides\nalong every status-push response as `check_severities`.\n\nThe calling device must be the one enrolled for this exact server (or\nhold the admin role).",
+        "description": "Returns, for every healthcheck the `alertd` source reports, how that\ncheck is handled for this server: `skip` (the check is silenced for\nthis server — at server or group scope — or its policy ceiling means it\nnever alerts), `warn` (graded at most a warning), or `fail` (failures\ncount as failures). Keys are check names as reported in\n`health[].check` on status pushes. Only the static policy ceiling is\nreflected; operator-defined conditional rules are evaluated per push\nand not included here. The same mapping also rides along every\nstatus-push response as `check_severities`, scoped to the pushing\nsource.\n\nThe calling device must be the one enrolled for this exact server (or\nhold the admin role).",
         "operationId": "check_severities",
         "parameters": [
           {

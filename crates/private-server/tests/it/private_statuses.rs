@@ -1046,7 +1046,7 @@ struct CheckAttentionServer {
 #[derive(Debug, Deserialize)]
 struct CheckAttentionResponse {
 	check: String,
-	severity: Option<String>,
+	ceiling: Option<String>,
 	servers: Vec<CheckAttentionServer>,
 }
 
@@ -1060,7 +1060,7 @@ async fn check_attention_empty_database() {
 		r.assert_status_ok();
 		let data: CheckAttentionResponse = r.json();
 		assert_eq!(data.check, "postgres");
-		assert_eq!(data.severity, None);
+		assert_eq!(data.ceiling, None);
 		assert!(data.servers.is_empty());
 	})
 	.await
@@ -1099,7 +1099,7 @@ async fn check_attention_lists_servers_reporting_that_check_ordered_failed_first
 		let data: CheckAttentionResponse = r.json();
 
 		assert_eq!(data.check, "postgres");
-		assert_eq!(data.severity, None, "no catalog row was ever created");
+		assert_eq!(data.ceiling, None, "no catalog row was ever created");
 		assert_eq!(
 			data.servers.len(),
 			3,
@@ -1241,10 +1241,10 @@ async fn check_attention_excludes_ungrouped_and_archived_servers() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn check_attention_returns_catalog_severity_and_ignores_non_matching_check() {
+async fn check_attention_returns_catalog_policy_and_ignores_non_matching_check() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO healthcheck_severities (check_name, severity) VALUES ('postgres', 'error');
+			"INSERT INTO check_policies (source, check_name, ceiling) VALUES ('alertd', 'postgres', 'failed');
 			INSERT INTO servers (id, name, host, rank, kind) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Failing Server', 'https://failing.example.com', 'production', 'central');
 			INSERT INTO statuses (server_id, created_at, healthy, health) VALUES
@@ -1261,7 +1261,7 @@ async fn check_attention_returns_catalog_severity_and_ignores_non_matching_check
 			.await;
 		r.assert_status_ok();
 		let data: CheckAttentionResponse = r.json();
-		assert_eq!(data.severity, Some("error".to_string()));
+		assert_eq!(data.ceiling, Some("failed".to_string()));
 		assert_eq!(data.servers.len(), 1);
 
 		// A different, never-reported check name: no servers, but the
@@ -1273,7 +1273,7 @@ async fn check_attention_returns_catalog_severity_and_ignores_non_matching_check
 		r.assert_status_ok();
 		let data: CheckAttentionResponse = r.json();
 		assert_eq!(data.check, "unrelated_check");
-		assert_eq!(data.severity, None);
+		assert_eq!(data.ceiling, None);
 		assert!(data.servers.is_empty());
 	})
 	.await
@@ -1282,18 +1282,18 @@ async fn check_attention_returns_catalog_severity_and_ignores_non_matching_check
 #[tokio::test(flavor = "multi_thread")]
 async fn snapshot_surfaces_per_check_severity() {
 	commons_tests::server::run(async |mut conn, _, private| {
-		// Seed catalog: catalog_only stays at the default warning;
-		// elevated has its base severity bumped to error so the snapshot
-		// returns the operator-set value, not the legacy heuristic;
-		// version_gated has a rules ladder firing on a specific
-		// status.bestoolVersion.
+		// Seed catalog: catalog_only stays at the default warning
+		// ceiling; elevated has its ceiling lifted to failed so the
+		// snapshot returns the operator-set grading; version_gated has a
+		// rules ladder firing on a specific status.bestoolVersion, and
+		// escalates.
 		conn.batch_execute(
-			"INSERT INTO healthcheck_severities (check_name, severity) VALUES \
-				('catalog_only', 'warning'), \
-				('elevated', 'error'), \
-				('version_gated', 'warning'); \
-			 UPDATE healthcheck_severities \
-				SET rules = '{\"if\":[{\"in_range\":[{\"var\":\"status.bestoolVersion\"},\">=1.0.0 <2.0.0\"]},\"critical\"]}'::jsonb \
+			"INSERT INTO check_policies (source, check_name, ceiling, escalates) VALUES \
+				('alertd', 'catalog_only', 'warning', FALSE), \
+				('alertd', 'elevated', 'failed', FALSE), \
+				('alertd', 'version_gated', 'warning', TRUE); \
+			 UPDATE check_policies \
+				SET rules = '{\"if\":[{\"in_range\":[{\"var\":\"status.bestoolVersion\"},\">=1.0.0 <2.0.0\"]},\"failed\"]}'::jsonb \
 				WHERE check_name = 'version_gated';",
 		)
 		.await
@@ -1325,7 +1325,8 @@ async fn snapshot_surfaces_per_check_severity() {
 		assert_eq!(severities["catalog_only"], "warning");
 		assert_eq!(severities["elevated"], "error");
 		// version_gated's rule fires because bestoolVersion 1.5.0 is in
-		// the >=1.0.0 <2.0.0 range — Critical wins over the base.
+		// the >=1.0.0 <2.0.0 range — graded failed, and the entry
+		// escalates, so it presents as critical.
 		assert_eq!(severities["version_gated"], "critical");
 		// Passing checks must not appear in the map.
 		assert!(
@@ -1342,9 +1343,9 @@ async fn snapshot_check_severities_cover_result_form() {
 		// `elevated` has its catalog base bumped to error: a failed
 		// result uses it, a warning result ignores it (fixed Warning).
 		conn.batch_execute(
-			"INSERT INTO healthcheck_severities (check_name, severity) VALUES \
-				('elevated', 'error'), \
-				('degraded', 'error');",
+			"INSERT INTO check_policies (source, check_name, ceiling) VALUES \
+				('alertd', 'elevated', 'failed'), \
+				('alertd', 'degraded', 'failed');",
 		)
 		.await
 		.unwrap();
@@ -1376,7 +1377,7 @@ async fn snapshot_check_severities_cover_result_form() {
 		assert_eq!(severities["elevated"], "error");
 		assert_eq!(
 			severities["degraded"], "warning",
-			"warning result lands at fixed Warning regardless of catalog base"
+			"a warning observation is already below the ceiling"
 		);
 		// Broken/skipped/passed don't go through the rules engine.
 		for check in ["busted", "absent", "fine"] {

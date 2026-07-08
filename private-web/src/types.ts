@@ -119,7 +119,7 @@ export type DeviceConnectionData = Solidify<Schemas["DeviceConnectionData"]>;
 export type DeviceInfo = Solidify<Schemas["DeviceInfo"]>;
 export type TailnetLiveInfo = Solidify<Schemas["TailnetLiveInfo"]>;
 
-export type HealthcheckSeverityData = Solidify<Schemas["HealthcheckSeverityData"]>;
+export type CheckPolicyData = Solidify<Schemas["CheckPolicyData"]>;
 export type HealthcheckSample = Solidify<Schemas["HealthcheckSample"]>;
 export type HealthcheckSampleResponse = Solidify<Schemas["HealthcheckSampleResponse"]>;
 
@@ -293,6 +293,34 @@ export const CHECK_RESULT_ORDER: CheckResult[] = [
 	"skipped",
 ];
 
+/// Short one-line description of what each effective result means for
+/// the incident workflow. Used as the CheckResultChip tooltip and in
+/// rule-outcome dropdowns so operators see the semantic meaning at the
+/// point of choice.
+export const CHECK_RESULT_INTENT: Record<CheckResult, string> = {
+	failed: "Failing — opens (or holds open) an incident",
+	warning: "Degraded — joins an open incident; doesn't open one",
+	broken: "The check itself couldn't run; counts as a warning",
+	passed: "Healthy — raises nothing",
+	skipped: "Didn't run — raises nothing",
+};
+
+/// A policy ceiling: the maximum effective result for a check. `broken`
+/// is not a valid ceiling — it describes the check runner, not a grade.
+export type Ceiling = Exclude<CheckResult, "broken">;
+
+/// Ceiling vocabulary for the policy editor, loud → quiet.
+export const CEILINGS: Ceiling[] = ["failed", "warning", "passed", "skipped"];
+
+/// Short one-line description of what each ceiling does to a check's
+/// observed results.
+export const CEILING_INTENT: Record<Ceiling, string> = {
+	failed: "Failures count in full and can open incidents",
+	warning: "Failures grade down to warnings; never opens incidents",
+	passed: "Recorded but never alerts",
+	skipped: "Never alerts, and the reporting agent may stop running the check",
+};
+
 /// Normalise a raw `health[]` entry to its result. Mirror of the Rust
 /// `CheckResult::from_entry`: prefer a valid `result` string (an
 /// unknown string is null, NOT reinterpreted via `healthy`), else the
@@ -320,16 +348,16 @@ export function healthcheckPath(check: string): string {
 	return `/healthchecks/${encodeURIComponent(check)}`;
 }
 
-/// The check name embedded in a status-sourced issue/event's `ref`
-/// (`health/<check>` — see the public-server `STATUS_SOURCE` constant),
-/// or `null` for issues filed by any other source (backups, manual,
-/// canopy reachability, …), which don't reference a healthcheck.
+/// The check name embedded in a health issue's `ref` (`health/<check>`,
+/// filed under whichever source reports the check), or `null` for
+/// issues whose ref isn't a healthcheck (backups, manual, canopy
+/// reachability, …).
 export function healthcheckNameFromRef(
-	source: string,
+	_source: string,
 	ref: string,
 ): string | null {
 	const prefix = "health/";
-	if (source !== "status" || !ref.startsWith(prefix)) return null;
+	if (!ref.startsWith(prefix)) return null;
 	return ref.slice(prefix.length);
 }
 

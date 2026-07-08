@@ -47,7 +47,7 @@ function randomLabel(prefix: string): string {
  * statement with CASCADE. */
 export async function resetSeededTables(sql: Sql): Promise<void> {
 	await sql.query(
-		"TRUNCATE statuses, issues, device_keys, servers, server_groups, devices, versions, tailscale_users, healthcheck_severities, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, recovery_vault_writes RESTART IDENTITY CASCADE",
+		"TRUNCATE statuses, issues, device_keys, servers, server_groups, devices, versions, tailscale_users, check_policies, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, recovery_vault_writes RESTART IDENTITY CASCADE",
 	);
 	// The truncate takes the migration-seeded nil "Canopy" server with it;
 	// self-alerts attach to that row, so put it back.
@@ -237,34 +237,44 @@ export async function seedStatus(
 	return { id, createdAt: String(rows[0]!.created_at) };
 }
 
-export interface SeededHealthcheckSeverity {
+export interface SeededCheckPolicy {
+	source: string;
 	checkName: string;
 }
 
-/** Catalog row for a healthcheck name, as ingestion would have upserted
- * (plus an operator-set severity). Upserts so tests can call it without
+/** Policy row for a (source, check), as ingestion would have upserted
+ * (plus an operator-set ceiling). Upserts so tests can call it without
  * worrying whether ingestion already created a default row. */
-export async function seedHealthcheckSeverity(
+export async function seedCheckPolicy(
 	sql: Sql,
 	opts: {
 		checkName: string;
-		severity?: string;
+		source?: string;
+		ceiling?: string;
+		escalates?: boolean;
 		notes?: string | null;
 	},
-): Promise<SeededHealthcheckSeverity> {
+): Promise<SeededCheckPolicy> {
+	const source = opts.source ?? "alertd";
 	await sql.query(
-		`INSERT INTO healthcheck_severities (check_name, severity, notes)
-		 VALUES ($1, $2, $3)
-		 ON CONFLICT (check_name)
-		 DO UPDATE SET severity = EXCLUDED.severity, notes = EXCLUDED.notes`,
-		[opts.checkName, opts.severity ?? "warning", opts.notes ?? null],
+		`INSERT INTO check_policies (source, check_name, ceiling, escalates, notes)
+		 VALUES ($1, $2, $3, $4, $5)
+		 ON CONFLICT (source, check_name)
+		 DO UPDATE SET ceiling = EXCLUDED.ceiling, escalates = EXCLUDED.escalates, notes = EXCLUDED.notes`,
+		[
+			source,
+			opts.checkName,
+			opts.ceiling ?? "warning",
+			opts.escalates ?? false,
+			opts.notes ?? null,
+		],
 	);
-	return { checkName: opts.checkName };
+	return { source, checkName: opts.checkName };
 }
 
 /** Server-scope silence for a `(source, ref)` pair, as the UI's
  * silence button would create. For a healthcheck, pass
- * `ref: "health/<check>"` (source defaults to "status"). */
+ * `ref: "health/<check>"` (source defaults to "alertd"). */
 export async function seedServerSilencedRef(
 	sql: Sql,
 	opts: {
@@ -278,7 +288,7 @@ export async function seedServerSilencedRef(
 		`INSERT INTO server_silenced_refs (server_id, source, ref, created_by)
 		 VALUES ($1, $2, $3, $4)
 		 ON CONFLICT DO NOTHING`,
-		[opts.serverId, opts.source ?? "status", opts.ref, opts.createdBy ?? null],
+		[opts.serverId, opts.source ?? "alertd", opts.ref, opts.createdBy ?? null],
 	);
 }
 
@@ -297,7 +307,7 @@ export async function seedGroupSilencedRef(
 		`INSERT INTO server_group_silenced_refs (server_group_id, source, ref, created_by)
 		 VALUES ($1, $2, $3, $4)
 		 ON CONFLICT DO NOTHING`,
-		[opts.groupId, opts.source ?? "status", opts.ref, opts.createdBy ?? null],
+		[opts.groupId, opts.source ?? "alertd", opts.ref, opts.createdBy ?? null],
 	);
 }
 
@@ -361,7 +371,7 @@ export async function seedIssue(
 			opts.serverId ?? null,
 			opts.serverGroupId ?? null,
 			opts.deviceId ?? null,
-			opts.source ?? "status",
+			opts.source ?? "alertd",
 			opts.ref ?? "health",
 			opts.severity ?? "error",
 			opts.message ?? "Issue message",

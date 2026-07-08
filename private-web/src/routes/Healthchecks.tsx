@@ -21,11 +21,11 @@ import {
 import { useMemo, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { ApiError, useApi, useApiAction } from "../api";
-import SeverityChip from "../components/SeverityChip";
+import CheckResultChip from "../components/CheckResultChip";
 import TimeAgo from "../components/TimeAgo";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
-import { SEVERITIES, type HealthcheckSeverityData, type Severity } from "../types";
+import { CEILINGS, type Ceiling, type CheckPolicyData } from "../types";
 
 export default function Healthchecks() {
 	usePageTitle("Healthchecks");
@@ -33,7 +33,7 @@ export default function Healthchecks() {
 	const list = useApi("healthchecks", "list");
 	const [onlyPending, setOnlyPending] = useState(false);
 
-	const rows: HealthcheckSeverityData[] = list.status === "ok" ? list.data : [];
+	const rows: CheckPolicyData[] = list.status === "ok" ? list.data : [];
 	const pendingCount = useMemo(
 		() => rows.filter((r) => r.pending_review).length,
 		[rows],
@@ -50,9 +50,10 @@ export default function Healthchecks() {
 					Healthchecks
 				</Typography>
 				<Typography variant="body2" color="text.secondary">
-					Catalog of healthcheck names reported by servers and the severity
-					each check's failures are filed at. New checks land here at the
-					default <strong>warning</strong> severity, marked pending review.
+					Catalog of healthchecks, one entry per reporting source and check
+					name, with the ceiling each check's results are graded at. New
+					checks land here at the default <strong>warning</strong> ceiling,
+					marked pending review.
 				</Typography>
 			</Box>
 
@@ -94,8 +95,9 @@ export default function Healthchecks() {
 						<Table size="small">
 							<TableHead>
 								<TableRow>
+									<TableCell>Source</TableCell>
 									<TableCell>Check name</TableCell>
-									<TableCell>Severity</TableCell>
+									<TableCell>Ceiling</TableCell>
 									<TableCell>First seen</TableCell>
 									<TableCell>Reviewed</TableCell>
 								</TableRow>
@@ -103,7 +105,7 @@ export default function Healthchecks() {
 							<TableBody>
 								{visible.map((row) => (
 									<HealthcheckRow
-										key={row.check_name}
+										key={`${row.source}:${row.check_name}`}
 										row={row}
 										canEdit={isAdmin}
 										onChanged={() => list.reload()}
@@ -123,25 +125,29 @@ function HealthcheckRow({
 	canEdit,
 	onChanged,
 }: {
-	row: HealthcheckSeverityData;
+	row: CheckPolicyData;
 	canEdit: boolean;
 	onChanged: () => void;
 }) {
 	const update = useApiAction("healthchecks", "update");
-	const [localSeverity, setLocalSeverity] = useState<Severity>(row.severity);
+	const [localCeiling, setLocalCeiling] = useState<Ceiling>(row.ceiling as Ceiling);
+	const [localEscalates, setLocalEscalates] = useState(row.escalates);
 
 	const save = async () => {
 		try {
 			await update.call({
+				source: row.source,
 				check_name: row.check_name,
-				severity: localSeverity,
+				ceiling: localCeiling,
+				escalates: localEscalates,
 				notes: row.notes,
 			});
 			onChanged();
 		} catch {
-			// Revert the dropdown selection on failure so the row's
+			// Revert the editor selection on failure so the row's
 			// rendered state matches the server's.
-			setLocalSeverity(row.severity);
+			setLocalCeiling(row.ceiling as Ceiling);
+			setLocalEscalates(row.escalates);
 		}
 	};
 
@@ -149,6 +155,7 @@ function HealthcheckRow({
 
 	return (
 		<TableRow hover>
+			<TableCell sx={{ fontFamily: "monospace" }}>{row.source}</TableCell>
 			<TableCell sx={{ fontFamily: "monospace" }}>
 				<RouterLink to={`/settings/healthchecks/${row.check_name}`}>{row.check_name}</RouterLink>
 			</TableCell>
@@ -161,28 +168,46 @@ function HealthcheckRow({
 							</RouterLink>
 						</Typography>
 						<Typography variant="caption" color="text.secondary">
-							· base
+							· ceiling
 						</Typography>
-						<SeverityChip severity={row.severity} />
+						<CheckResultChip result={row.ceiling as Ceiling} />
+						{row.escalates && <EscalatesChip />}
 					</Stack>
 				) : (
 					<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
 						{canEdit ? (
-							<Select
-								size="small"
-								value={localSeverity}
-								onChange={(e) => setLocalSeverity(e.target.value as Severity)}
-								disabled={update.pending}
-								sx={{ minWidth: 120 }}
-							>
-								{SEVERITIES.map((s) => (
-									<MenuItem key={s} value={s}>
-										<SeverityChip severity={s} />
-									</MenuItem>
-								))}
-							</Select>
+							<>
+								<Select
+									size="small"
+									value={localCeiling}
+									onChange={(e) => setLocalCeiling(e.target.value as Ceiling)}
+									disabled={update.pending}
+									sx={{ minWidth: 120 }}
+								>
+									{CEILINGS.map((c) => (
+										<MenuItem key={c} value={c}>
+											<CheckResultChip result={c} />
+										</MenuItem>
+									))}
+								</Select>
+								<FormControlLabel
+									control={
+										<Switch
+											size="small"
+											checked={localEscalates}
+											onChange={(e) => setLocalEscalates(e.target.checked)}
+											disabled={update.pending}
+										/>
+									}
+									label="escalates"
+									slotProps={{ typography: { variant: "caption" } }}
+								/>
+							</>
 						) : (
-							<SeverityChip severity={row.severity} />
+							<>
+								<CheckResultChip result={row.ceiling as Ceiling} />
+								{row.escalates && <EscalatesChip />}
+							</>
 						)}
 						{canEdit && (
 							<Button
@@ -226,6 +251,18 @@ function HealthcheckRow({
 				)}
 			</TableCell>
 		</TableRow>
+	);
+}
+
+function EscalatesChip() {
+	return (
+		<Chip
+			label="escalates"
+			color="error"
+			size="small"
+			variant="outlined"
+			title="An effective failure notifies immediately, bypassing the incident grace period"
+		/>
 	);
 }
 

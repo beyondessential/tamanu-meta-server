@@ -30,6 +30,20 @@ impl From<Severity> for CheckSeverity {
 	}
 }
 
+impl From<CheckResult> for CheckSeverity {
+	/// Distill a policy ceiling into the device-facing vocabulary: a
+	/// `failed` ceiling means failures count as failures, `warning` and
+	/// `broken` cap below that, and `passed`/`skipped` mean the check
+	/// never alerts (so the device may skip it).
+	fn from(ceiling: CheckResult) -> Self {
+		match ceiling {
+			CheckResult::Failed => Self::Fail,
+			CheckResult::Warning | CheckResult::Broken => Self::Warn,
+			CheckResult::Passed | CheckResult::Skipped => Self::Skip,
+		}
+	}
+}
+
 impl Display for CheckSeverity {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {
@@ -109,6 +123,32 @@ impl CheckResult {
 	}
 }
 
+impl CheckResult {
+	/// Position on the urgency ordering used by policy ceilings and
+	/// display sorting: failed > warning > broken > passed > skipped
+	/// (lower rank = more urgent).
+	pub fn urgency_rank(self) -> u8 {
+		match self {
+			CheckResult::Failed => 0,
+			CheckResult::Warning => 1,
+			CheckResult::Broken => 2,
+			CheckResult::Passed => 3,
+			CheckResult::Skipped => 4,
+		}
+	}
+
+	/// Cap this result at `ceiling` on the urgency ordering: a result
+	/// more urgent than the ceiling grades down to it; anything at or
+	/// below the ceiling passes through unchanged.
+	pub fn capped_at(self, ceiling: CheckResult) -> CheckResult {
+		if self.urgency_rank() < ceiling.urgency_rank() {
+			ceiling
+		} else {
+			self
+		}
+	}
+}
+
 impl Display for CheckResult {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {
@@ -118,6 +158,20 @@ impl Display for CheckResult {
 			CheckResult::Broken => write!(f, "broken"),
 			CheckResult::Skipped => write!(f, "skipped"),
 		}
+	}
+}
+
+impl TryFrom<String> for CheckResult {
+	type Error = String;
+
+	fn try_from(value: String) -> Result<Self, String> {
+		value.parse()
+	}
+}
+
+impl From<CheckResult> for String {
+	fn from(result: CheckResult) -> Self {
+		result.to_string()
 	}
 }
 

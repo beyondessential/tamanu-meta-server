@@ -8,6 +8,7 @@ import {
 	DialogActions,
 	DialogContent,
 	DialogTitle,
+	FormControlLabel,
 	IconButton,
 	InputAdornment,
 	LinearProgress,
@@ -15,6 +16,7 @@ import {
 	Paper,
 	Select,
 	Stack,
+	Switch,
 	Table,
 	TableBody,
 	TableCell,
@@ -33,23 +35,26 @@ import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { useMemo, useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import { ApiError, useApi, useApiAction } from "../api";
-import SeverityChip from "../components/SeverityChip";
+import CheckResultChip from "../components/CheckResultChip";
 import TimeAgo from "../components/TimeAgo";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { evaluate as evalCondition } from "../lib/healthcheck-rule-eval";
 import {
-	SEVERITIES,
-	SEVERITY_INTENT,
+	CEILINGS,
+	CEILING_INTENT,
+	CHECK_RESULT_INTENT,
+	CHECK_RESULT_ORDER,
 	healthcheckPath,
+	type Ceiling,
+	type CheckPolicyData,
+	type CheckResult,
 	type HealthcheckSample,
-	type HealthcheckSeverityData,
-	type Severity,
 } from "../types";
 
 // ── Constrained JsonLogic shape ───────────────────────────────────────────
 //
-// The Rust deserialiser only accepts {if: [c1, s1, c2, s2, …]} ladders
+// The Rust deserialiser only accepts {if: [c1, r1, c2, r2, …]} ladders
 // where each condition is {<op>: [{var: "<dotted>"}, <value>]}. The
 // helpers below parse the raw JSON returned by the API into the typed
 // shape this page edits, and serialize it back for /update_rules.
@@ -71,7 +76,7 @@ interface Branch {
 	varPath: string;
 	op: RuleOp;
 	value: unknown;
-	severity: Severity;
+	result: CheckResult;
 }
 
 function parseRules(raw: unknown): { branches: Branch[]; error: string | null } {
@@ -90,20 +95,23 @@ function parseRules(raw: unknown): { branches: Branch[]; error: string | null } 
 	const branches: Branch[] = [];
 	for (let i = 0; i < args.length; i += 2) {
 		const condRaw = args[i];
-		const sevRaw = args[i + 1];
+		const resultRaw = args[i + 1];
 		const cond = parseCondition(condRaw);
 		if (cond.error) return { branches: [], error: `branch ${i / 2}: ${cond.error}` };
-		if (typeof sevRaw !== "string" || !(SEVERITIES as readonly string[]).includes(sevRaw)) {
+		if (
+			typeof resultRaw !== "string" ||
+			!(CHECK_RESULT_ORDER as readonly string[]).includes(resultRaw)
+		) {
 			return {
 				branches: [],
-				error: `branch ${i / 2}: invalid severity '${String(sevRaw)}'`,
+				error: `branch ${i / 2}: invalid result '${String(resultRaw)}'`,
 			};
 		}
 		branches.push({
 			varPath: cond.varPath,
 			op: cond.op,
 			value: cond.value,
-			severity: sevRaw as Severity,
+			result: resultRaw as CheckResult,
 		});
 	}
 	return { branches, error: null };
@@ -149,7 +157,7 @@ function serializeRules(branches: Branch[]): unknown | null {
 	const args: unknown[] = [];
 	for (const b of branches) {
 		args.push({ [b.op]: [{ var: b.varPath }, b.value] });
-		args.push(b.severity);
+		args.push(b.result);
 	}
 	return { if: args };
 }
@@ -185,8 +193,8 @@ export default function HealthcheckDetail() {
 	const isAdmin = useIsAdmin() === true;
 	const list = useApi("healthchecks", "list");
 
-	const row: HealthcheckSeverityData | undefined =
-		list.status === "ok" ? list.data.find((r) => r.check_name === checkName) : undefined;
+	const rows: CheckPolicyData[] =
+		list.status === "ok" ? list.data.filter((r) => r.check_name === checkName) : [];
 
 	return (
 		<Stack spacing={2}>
@@ -208,24 +216,31 @@ export default function HealthcheckDetail() {
 				<LinearProgress />
 			) : list.status === "error" ? (
 				<Alert severity="error">{list.error.message}</Alert>
-			) : row == null ? (
+			) : rows.length === 0 ? (
 				<Alert severity="warning">
 					No healthcheck named <code>{checkName}</code> in the catalog yet — it'll
 					appear here once a server reports it.
 				</Alert>
 			) : (
-				<>
-					<RowMetadata row={row} />
-					<BaseSeverityCard row={row} canEdit={isAdmin} onChanged={list.reload} />
-					<NotesCard row={row} canEdit={isAdmin} onChanged={list.reload} />
-					<RulesCard row={row} canEdit={isAdmin} onChanged={list.reload} />
-				</>
+				rows.map((row) => (
+					<Stack key={row.source} spacing={2}>
+						{rows.length > 1 && (
+							<Typography variant="subtitle2" sx={{ fontFamily: "monospace" }}>
+								source: {row.source}
+							</Typography>
+						)}
+						<RowMetadata row={row} />
+						<CeilingCard row={row} canEdit={isAdmin} onChanged={list.reload} />
+						<NotesCard row={row} canEdit={isAdmin} onChanged={list.reload} />
+						<RulesCard row={row} canEdit={isAdmin} onChanged={list.reload} />
+					</Stack>
+				))
 			)}
 		</Stack>
 	);
 }
 
-function RowMetadata({ row }: { row: HealthcheckSeverityData }) {
+function RowMetadata({ row }: { row: CheckPolicyData }) {
 	return (
 		<Stack
 			direction="row"
@@ -248,56 +263,77 @@ function RowMetadata({ row }: { row: HealthcheckSeverityData }) {
 	);
 }
 
-function BaseSeverityCard({
+function CeilingCard({
 	row,
 	canEdit,
 	onChanged,
 }: {
-	row: HealthcheckSeverityData;
+	row: CheckPolicyData;
 	canEdit: boolean;
 	onChanged: () => void;
 }) {
 	const update = useApiAction("healthchecks", "update");
-	const [severity, setSeverity] = useState<Severity>(row.severity);
+	const [ceiling, setCeiling] = useState<Ceiling>(row.ceiling as Ceiling);
+	const [escalates, setEscalates] = useState(row.escalates);
 	const save = async () => {
 		try {
-			await update.call({ check_name: row.check_name, severity, notes: row.notes });
+			await update.call({
+				source: row.source,
+				check_name: row.check_name,
+				ceiling,
+				escalates,
+				notes: row.notes,
+			});
 			onChanged();
 		} catch {
-			setSeverity(row.severity);
+			setCeiling(row.ceiling as Ceiling);
+			setEscalates(row.escalates);
 		}
 	};
 	return (
 		<Paper variant="outlined" sx={{ p: 2 }}>
 			<Typography variant="subtitle1" gutterBottom>
-				Base severity
+				Ceiling
 			</Typography>
 			<Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-				Used when this check fails and no rule below matches.
+				The maximum effective result for this check when no rule below
+				matches: anything more urgent grades down to it.
 			</Typography>
 			<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
 				{canEdit ? (
 					<Select
 						size="small"
-						value={severity}
-						onChange={(e) => setSeverity(e.target.value as Severity)}
+						value={ceiling}
+						onChange={(e) => setCeiling(e.target.value as Ceiling)}
 						disabled={update.pending}
 						sx={{ minWidth: 320 }}
 					>
-						{SEVERITIES.map((s) => (
-							<MenuItem key={s} value={s}>
+						{CEILINGS.map((c) => (
+							<MenuItem key={c} value={c}>
 								<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-									<SeverityChip severity={s} />
+									<CheckResultChip result={c} />
 									<Typography variant="caption" color="text.secondary">
-										{SEVERITY_INTENT[s]}
+										{CEILING_INTENT[c]}
 									</Typography>
 								</Stack>
 							</MenuItem>
 						))}
 					</Select>
 				) : (
-					<SeverityChip severity={row.severity} />
+					<CheckResultChip result={row.ceiling as Ceiling} />
 				)}
+				<FormControlLabel
+					control={
+						<Switch
+							size="small"
+							checked={escalates}
+							onChange={(e) => setEscalates(e.target.checked)}
+							disabled={!canEdit || update.pending}
+						/>
+					}
+					label="Escalates: an effective failure notifies immediately, bypassing the incident grace period"
+					slotProps={{ typography: { variant: "caption" } }}
+				/>
 				{canEdit && (
 					<Button size="small" variant="outlined" onClick={save} disabled={update.pending}>
 						Save
@@ -318,7 +354,7 @@ function NotesCard({
 	canEdit,
 	onChanged,
 }: {
-	row: HealthcheckSeverityData;
+	row: CheckPolicyData;
 	canEdit: boolean;
 	onChanged: () => void;
 }) {
@@ -327,8 +363,10 @@ function NotesCard({
 	const save = async () => {
 		try {
 			await update.call({
+				source: row.source,
 				check_name: row.check_name,
-				severity: row.severity,
+				ceiling: row.ceiling,
+				escalates: row.escalates,
 				notes: notes || null,
 			});
 			onChanged();
@@ -374,7 +412,7 @@ function RulesCard({
 	canEdit,
 	onChanged,
 }: {
-	row: HealthcheckSeverityData;
+	row: CheckPolicyData;
 	canEdit: boolean;
 	onChanged: () => void;
 }) {
@@ -404,7 +442,11 @@ function RulesCard({
 
 	const save = async () => {
 		try {
-			await update.call({ check_name: row.check_name, rules: serializeRules(branches) });
+			await update.call({
+				source: row.source,
+				check_name: row.check_name,
+				rules: serializeRules(branches),
+			});
 			onChanged();
 		} catch {
 			// keep local state for retry
@@ -413,7 +455,7 @@ function RulesCard({
 	const deleteAll = async () => {
 		setBranches([]);
 		try {
-			await update.call({ check_name: row.check_name, rules: null });
+			await update.call({ source: row.source, check_name: row.check_name, rules: null });
 			onChanged();
 		} catch {
 			setBranches(parsed.branches);
@@ -438,8 +480,9 @@ function RulesCard({
 				)}
 			</Stack>
 			<Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-				Evaluated top-to-bottom on every failing push for this check. First matching
-				branch's severity wins; if none match, the base severity above is used.
+				Evaluated top-to-bottom on every push for this check. The first matching
+				branch's result wins — rules can grade in either direction; if none
+				match, the observed result is capped at the ceiling above.
 			</Typography>
 			{sample ? (
 				<Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: "block" }}>
@@ -456,11 +499,11 @@ function RulesCard({
 			{parsed.error && (
 				<Alert severity="warning" sx={{ mb: 1 }}>
 					Stored rules are malformed ({parsed.error}) — ingestion falls back to the
-					base severity until you save valid rules from this page.
+					ceiling until you save valid rules from this page.
 				</Alert>
 			)}
 			{branches.length === 0 ? (
-				<Alert severity="info">No rules. The base severity is used for every push.</Alert>
+				<Alert severity="info">No rules. The ceiling applies to every push.</Alert>
 			) : (
 				<TableContainer>
 					<Table size="small">
@@ -468,7 +511,7 @@ function RulesCard({
 							<TableRow>
 								<TableCell width={40}>#</TableCell>
 								<TableCell>Condition</TableCell>
-								<TableCell>Severity</TableCell>
+								<TableCell>Result</TableCell>
 								{canEdit && <TableCell width={150} />}
 							</TableRow>
 						</TableHead>
@@ -480,7 +523,7 @@ function RulesCard({
 										{b.varPath} {OP_LABEL[b.op]} {valueToInputText(b.value)}
 									</TableCell>
 									<TableCell>
-										<SeverityChip severity={b.severity} />
+										<CheckResultChip result={b.result} />
 									</TableCell>
 									{canEdit && (
 										<TableCell>
@@ -610,7 +653,7 @@ function BranchDialog({
 	const [valueText, setValueText] = useState(
 		initial ? valueToInputText(initial.value) : "",
 	);
-	const [severity, setSeverity] = useState<Severity>(initial?.severity ?? "error");
+	const [result, setResult] = useState<CheckResult>(initial?.result ?? "failed");
 	const varValid = VAR_PATTERN.test(varPath);
 
 	// Did the sample carry a value for this exact var path? Powers the
@@ -636,7 +679,7 @@ function BranchDialog({
 			varPath,
 			op,
 			value: parseValueInput(valueText),
-			severity,
+			result,
 		});
 	};
 
@@ -730,18 +773,18 @@ function BranchDialog({
 					</Stack>
 					<TextField
 						select
-						label="Severity"
+						label="Result"
 						size="small"
-						value={severity}
-						onChange={(e) => setSeverity(e.target.value as Severity)}
+						value={result}
+						onChange={(e) => setResult(e.target.value as CheckResult)}
 						sx={{ minWidth: 320 }}
 					>
-						{SEVERITIES.map((s) => (
-							<MenuItem key={s} value={s}>
+						{CHECK_RESULT_ORDER.map((r) => (
+							<MenuItem key={r} value={r}>
 								<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-									<SeverityChip severity={s} />
+									<CheckResultChip result={r} />
 									<Typography variant="caption" color="text.secondary">
-										{SEVERITY_INTENT[s]}
+										{CHECK_RESULT_INTENT[r]}
 									</Typography>
 								</Stack>
 							</MenuItem>
@@ -753,7 +796,7 @@ function BranchDialog({
 							varPath={varPath}
 							op={op}
 							valueText={valueText}
-							severity={severity}
+							result={result}
 						/>
 					)}
 				</Stack>
@@ -773,13 +816,13 @@ function PreviewBox({
 	varPath,
 	op,
 	valueText,
-	severity,
+	result: branchResult,
 }: {
 	sample: HealthcheckSample;
 	varPath: string;
 	op: RuleOp;
 	valueText: string;
-	severity: Severity;
+	result: CheckResult;
 }) {
 	const result = useMemo(
 		() =>
@@ -802,11 +845,11 @@ function PreviewBox({
 				</Typography>
 				{result.matched ? (
 					<Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
-						<Typography variant="body2">would file at</Typography>
-						<SeverityChip severity={severity} />
+						<Typography variant="body2">would grade to</Typography>
+						<CheckResultChip result={branchResult} />
 					</Stack>
 				) : (
-					<Typography variant="body2">would not match → base severity used</Typography>
+					<Typography variant="body2">would not match → ceiling applies</Typography>
 				)}
 			</Stack>
 			<Typography

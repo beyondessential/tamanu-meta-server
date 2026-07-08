@@ -81,29 +81,40 @@ struct IncidentRow {
 	id: Uuid,
 }
 
-/// Pre-seed (or update) a catalog row so a check's failure severity is
-/// known up-front. v1 ingestion would otherwise auto-insert at the
-/// default Warning, which only opens an incident when one already
-/// exists. Tests that want to exercise Error-class behaviour seed
-/// here.
+/// Pre-seed (or update) a policy row so a check's grading is known
+/// up-front, expressed in the old severity vocabulary the tests speak:
+/// critical → failed + escalates, error → failed, warning → warning,
+/// info → passed, debug → skipped. Ingestion would otherwise
+/// auto-insert at the default warning ceiling, which only opens an
+/// incident when one already exists.
 async fn set_check_severity(
 	conn: &mut diesel_async::AsyncPgConnection,
 	check_name: &str,
 	severity: &str,
 ) {
+	let (ceiling, escalates) = match severity {
+		"critical" => ("failed", true),
+		"error" => ("failed", false),
+		"warning" => ("warning", false),
+		"info" => ("passed", false),
+		"debug" => ("skipped", false),
+		other => panic!("unknown severity {other}"),
+	};
 	sql_query(
-		"INSERT INTO healthcheck_severities (check_name, severity, reviewed_at, reviewed_by) \
-		 VALUES ($1, $2, NOW(), 'test') \
-		 ON CONFLICT (check_name) DO UPDATE \
-		 SET severity = EXCLUDED.severity, \
+		"INSERT INTO check_policies (source, check_name, ceiling, escalates, reviewed_at, reviewed_by) \
+		 VALUES ('alertd', $1, $2, $3, NOW(), 'test') \
+		 ON CONFLICT (source, check_name) DO UPDATE \
+		 SET ceiling = EXCLUDED.ceiling, \
+		     escalates = EXCLUDED.escalates, \
 		     reviewed_at = EXCLUDED.reviewed_at, \
 		     reviewed_by = EXCLUDED.reviewed_by",
 	)
 	.bind::<sql_types::Text, _>(check_name)
-	.bind::<sql_types::Text, _>(severity)
+	.bind::<sql_types::Text, _>(ceiling)
+	.bind::<sql_types::Bool, _>(escalates)
 	.execute(conn)
 	.await
-	.expect("seed catalog severity");
+	.expect("seed catalog policy");
 }
 
 async fn fetch_open_incident(
@@ -1532,7 +1543,9 @@ async fn submit_status_keeps_incident_open_when_failure_swaps() {
 #[derive(QueryableByName, Debug)]
 struct CatalogRow {
 	#[diesel(sql_type = sql_types::Text)]
-	severity: String,
+	source: String,
+	#[diesel(sql_type = sql_types::Text)]
+	ceiling: String,
 	#[diesel(sql_type = sql_types::Bool)]
 	pending_review: bool,
 }
@@ -1542,8 +1555,8 @@ async fn fetch_catalog(
 	check_name: &str,
 ) -> Option<CatalogRow> {
 	sql_query(
-		"SELECT severity, reviewed_at IS NULL AS pending_review \
-		 FROM healthcheck_severities WHERE check_name = $1",
+		"SELECT source, ceiling, reviewed_at IS NULL AS pending_review \
+		 FROM check_policies WHERE check_name = $1",
 	)
 	.bind::<sql_types::Text, _>(check_name)
 	.get_result(conn)
@@ -1582,13 +1595,15 @@ async fn submit_status_seeds_catalog_for_new_checks() {
 			let failing = fetch_catalog(&mut conn, "brand_new_check")
 				.await
 				.expect("failing check seeded in catalog");
-			assert_eq!(failing.severity, "warning");
+			assert_eq!(failing.source, "alertd");
+			assert_eq!(failing.ceiling, "warning");
 			assert!(failing.pending_review);
 
 			let passing = fetch_catalog(&mut conn, "passing_check")
 				.await
 				.expect("passing check seeded in catalog");
-			assert_eq!(passing.severity, "warning");
+			assert_eq!(passing.source, "alertd");
+			assert_eq!(passing.ceiling, "warning");
 			assert!(passing.pending_review);
 		},
 	)
@@ -1638,14 +1653,14 @@ async fn set_check_rules(
 ) {
 	// Ensure the catalog row exists.
 	sql_query(
-		"INSERT INTO healthcheck_severities (check_name) VALUES ($1) \
-		 ON CONFLICT (check_name) DO NOTHING",
+		"INSERT INTO check_policies (source, check_name) VALUES ('alertd', $1) \
+		 ON CONFLICT (source, check_name) DO NOTHING",
 	)
 	.bind::<sql_types::Text, _>(check_name)
 	.execute(conn)
 	.await
 	.expect("ensure catalog row");
-	sql_query("UPDATE healthcheck_severities SET rules = $1::jsonb WHERE check_name = $2")
+	sql_query("UPDATE check_policies SET rules = $1::jsonb WHERE check_name = $2")
 		.bind::<sql_types::Text, _>(rules.to_string())
 		.bind::<sql_types::Text, _>(check_name)
 		.execute(conn)
@@ -1679,7 +1694,7 @@ async fn submit_status_rule_on_check_extra_overrides_base() {
 				&mut conn,
 				"disk_space",
 				serde_json::json!({"if": [
-					{">": [{"var": "check.used_pct"}, 90]}, "critical"
+					{">": [{"var": "check.used_pct"}, 90]}, "failed"
 				]}),
 			)
 			.await;
@@ -1697,7 +1712,7 @@ async fn submit_status_rule_on_check_extra_overrides_base() {
 			let issue = fetch_issue(&mut conn, server_id, "alertd", "health/disk_space")
 				.await
 				.expect("per-check issue filed");
-			assert_eq!(issue.severity, "critical");
+			assert_eq!(issue.severity, "error");
 
 			// Below-threshold push falls back to base (default warning).
 			post_status(
@@ -1795,7 +1810,7 @@ async fn submit_status_rule_on_server_tag() {
 				&mut conn,
 				"cert_expiry",
 				serde_json::json!({"if": [
-					{"==": [{"var": "tag.environment"}, "prod"]}, "error"
+					{"==": [{"var": "tag.environment"}, "prod"]}, "failed"
 				]}),
 			)
 			.await;
@@ -1833,7 +1848,7 @@ async fn submit_status_tiered_ladder() {
 				&mut conn,
 				"cert_expiry",
 				serde_json::json!({"if": [
-					{"<": [{"var": "check.days_remaining"}, 7]},  "error",
+					{"<": [{"var": "check.days_remaining"}, 7]},  "failed",
 					{"<": [{"var": "check.days_remaining"}, 30]}, "warning"
 				]}),
 			)
@@ -2008,7 +2023,8 @@ async fn submit_status_result_warning_ignores_catalog_severity() {
 }
 
 /// Custom rules can condition on the normalised `check.result` — and
-/// they win over both the fixed-Warning default and the catalog base.
+/// they win over both the observed result and the ceiling. A warning
+/// graded down to passed files nothing at all.
 #[tokio::test(flavor = "multi_thread")]
 async fn submit_status_result_rule_on_check_result() {
 	commons_tests::server::run_with_device_auth(
@@ -2019,7 +2035,7 @@ async fn submit_status_result_rule_on_check_result() {
 				&mut conn,
 				"db",
 				serde_json::json!({"if": [
-					{"==": [{"var": "check.result"}, "warning"]}, "info"
+					{"==": [{"var": "check.result"}, "warning"]}, "passed"
 				]}),
 			)
 			.await;
@@ -2034,10 +2050,12 @@ async fn submit_status_result_rule_on_check_result() {
 			)
 			.await;
 
-			let issue = fetch_issue(&mut conn, server_id, "alertd", "health/db")
-				.await
-				.expect("per-check issue filed");
-			assert_eq!(issue.severity, "info", "rule overrides the fixed default");
+			assert!(
+				fetch_issue(&mut conn, server_id, "alertd", "health/db")
+					.await
+					.is_none(),
+				"a warning graded to passed files nothing",
+			);
 		},
 	)
 	.await
@@ -2312,7 +2330,7 @@ async fn submit_status_result_all_kinds_upsert_catalog() {
 				check_name: String,
 			}
 			let rows: Vec<NameRow> =
-				sql_query("SELECT check_name FROM healthcheck_severities ORDER BY check_name")
+				sql_query("SELECT check_name FROM check_policies ORDER BY check_name")
 					.get_results(&mut conn)
 					.await
 					.expect("list catalog");

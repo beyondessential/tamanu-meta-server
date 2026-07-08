@@ -7,10 +7,10 @@ use serde_json::json;
 async fn list_returns_catalog_rows_with_pending_review_flag() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO healthcheck_severities (check_name, severity) VALUES \
-				('disk_space', 'warning'), \
-				('reviewed_check', 'error'); \
-			 UPDATE healthcheck_severities \
+			"INSERT INTO check_policies (source, check_name, ceiling) VALUES \
+				('alertd', 'disk_space', 'warning'), \
+				('alertd', 'reviewed_check', 'failed'); \
+			 UPDATE check_policies \
 			   SET reviewed_at = NOW(), reviewed_by = 'alice@example.com' \
 			   WHERE check_name = 'reviewed_check';",
 		)
@@ -26,14 +26,15 @@ async fn list_returns_catalog_rows_with_pending_review_flag() {
 		let body: Vec<serde_json::Value> = response.json();
 		assert_eq!(body.len(), 2);
 
-		// Ordered by check_name.
+		// Ordered by source then check_name.
+		assert_eq!(body[0]["source"], "alertd");
 		assert_eq!(body[0]["check_name"], "disk_space");
-		assert_eq!(body[0]["severity"], "warning");
+		assert_eq!(body[0]["ceiling"], "warning");
 		assert_eq!(body[0]["pending_review"], true);
 		assert!(body[0]["reviewed_at"].is_null());
 
 		assert_eq!(body[1]["check_name"], "reviewed_check");
-		assert_eq!(body[1]["severity"], "error");
+		assert_eq!(body[1]["ceiling"], "failed");
 		assert_eq!(body[1]["pending_review"], false);
 		assert_eq!(body[1]["reviewed_by"], "alice@example.com");
 	})
@@ -41,10 +42,10 @@ async fn list_returns_catalog_rows_with_pending_review_flag() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn update_changes_severity_and_stamps_review_metadata() {
+async fn update_changes_policy_and_stamps_review_metadata() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO healthcheck_severities (check_name) VALUES ('disk_space');",
+			"INSERT INTO check_policies (source, check_name) VALUES ('alertd', 'disk_space');",
 		)
 		.await
 		.unwrap();
@@ -52,15 +53,18 @@ async fn update_changes_severity_and_stamps_review_metadata() {
 		let response = private
 			.post("/api/healthchecks/update")
 			.json(&json!({
+				"source": "alertd",
 				"check_name": "disk_space",
-				"severity": "error"
+				"ceiling": "failed",
+				"escalates": true
 			}))
 			.await;
 		response.assert_status_ok();
 
 		let body: serde_json::Value = response.json();
 		assert_eq!(body["check_name"], "disk_space");
-		assert_eq!(body["severity"], "error");
+		assert_eq!(body["ceiling"], "failed");
+		assert_eq!(body["escalates"], true);
 		assert_eq!(body["pending_review"], false);
 		assert!(
 			!body["reviewed_at"].is_null(),
@@ -73,10 +77,10 @@ async fn update_changes_severity_and_stamps_review_metadata() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn update_rejects_unknown_severity() {
+async fn update_rejects_unknown_ceiling() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO healthcheck_severities (check_name) VALUES ('disk_space');",
+			"INSERT INTO check_policies (source, check_name) VALUES ('alertd', 'disk_space');",
 		)
 		.await
 		.unwrap();
@@ -84,8 +88,9 @@ async fn update_rejects_unknown_severity() {
 		let response = private
 			.post("/api/healthchecks/update")
 			.json(&json!({
+				"source": "alertd",
 				"check_name": "disk_space",
-				"severity": "extremely_critical"
+				"ceiling": "extremely_critical"
 			}))
 			.await;
 		response.assert_status_not_ok();
@@ -94,20 +99,21 @@ async fn update_rejects_unknown_severity() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn update_marks_reviewed_even_when_severity_unchanged() {
+async fn update_marks_reviewed_even_when_policy_unchanged() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO healthcheck_severities (check_name) VALUES ('noisy_check');",
+			"INSERT INTO check_policies (source, check_name) VALUES ('alertd', 'noisy_check');",
 		)
 		.await
 		.unwrap();
 
-		// Pass the same default severity to ack without changing.
+		// Pass the same default policy to ack without changing.
 		let response = private
 			.post("/api/healthchecks/update")
 			.json(&json!({
+				"source": "alertd",
 				"check_name": "noisy_check",
-				"severity": "warning"
+				"ceiling": "warning"
 			}))
 			.await;
 		response.assert_status_ok();
@@ -126,11 +132,11 @@ async fn update_marks_reviewed_even_when_severity_unchanged() {
 async fn list_returns_rules_and_rule_count() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO healthcheck_severities (check_name, rules) VALUES \
-				('no_rules', NULL), \
-				('one_rule', '{\"if\": [{\"==\": [{\"var\": \"check.x\"}, 1]}, \"error\"]}'::jsonb), \
-				('two_rules', '{\"if\": [{\"==\": [{\"var\": \"check.x\"}, 1]}, \"error\", {\"==\": [{\"var\": \"check.x\"}, 2]}, \"warning\"]}'::jsonb), \
-				('garbage_rules', '{\"and\": [true]}'::jsonb);",
+			"INSERT INTO check_policies (source, check_name, rules) VALUES \
+				('alertd', 'no_rules', NULL), \
+				('alertd', 'one_rule', '{\"if\": [{\"==\": [{\"var\": \"check.x\"}, 1]}, \"failed\"]}'::jsonb), \
+				('alertd', 'two_rules', '{\"if\": [{\"==\": [{\"var\": \"check.x\"}, 1]}, \"failed\", {\"==\": [{\"var\": \"check.x\"}, 2]}, \"warning\"]}'::jsonb), \
+				('alertd', 'garbage_rules', '{\"and\": [true]}'::jsonb);",
 		)
 		.await
 		.unwrap();
@@ -165,7 +171,7 @@ async fn list_returns_rules_and_rule_count() {
 async fn update_rules_accepts_valid_ladder() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO healthcheck_severities (check_name) VALUES ('disk_space');",
+			"INSERT INTO check_policies (source, check_name) VALUES ('alertd', 'disk_space');",
 		)
 		.await
 		.unwrap();
@@ -173,9 +179,10 @@ async fn update_rules_accepts_valid_ladder() {
 		let response = private
 			.post("/api/healthchecks/update_rules")
 			.json(&json!({
+				"source": "alertd",
 				"check_name": "disk_space",
 				"rules": {"if": [
-					{">": [{"var": "check.used_pct"}, 95]}, "critical"
+					{">": [{"var": "check.used_pct"}, 95]}, "failed"
 				]}
 			}))
 			.await;
@@ -193,15 +200,15 @@ async fn update_rules_accepts_valid_ladder() {
 async fn update_rules_with_null_clears_the_column() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO healthcheck_severities (check_name, rules) VALUES \
-				('disk_space', '{\"if\": [{\"==\": [{\"var\": \"check.x\"}, 1]}, \"error\"]}'::jsonb);",
+			"INSERT INTO check_policies (source, check_name, rules) VALUES \
+				('alertd', 'disk_space', '{\"if\": [{\"==\": [{\"var\": \"check.x\"}, 1]}, \"failed\"]}'::jsonb);",
 		)
 		.await
 		.unwrap();
 
 		let response = private
 			.post("/api/healthchecks/update_rules")
-			.json(&json!({"check_name": "disk_space", "rules": null}))
+			.json(&json!({"source": "alertd", "check_name": "disk_space", "rules": null}))
 			.await;
 		response.assert_status_ok();
 		let body: serde_json::Value = response.json();
@@ -215,7 +222,7 @@ async fn update_rules_with_null_clears_the_column() {
 async fn update_rules_normalises_empty_ladder_to_null() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO healthcheck_severities (check_name) VALUES ('disk_space');",
+			"INSERT INTO check_policies (source, check_name) VALUES ('alertd', 'disk_space');",
 		)
 		.await
 		.unwrap();
@@ -223,7 +230,7 @@ async fn update_rules_normalises_empty_ladder_to_null() {
 		// normalise it to null at write time.
 		let response = private
 			.post("/api/healthchecks/update_rules")
-			.json(&json!({"check_name": "disk_space", "rules": {"if": []}}))
+			.json(&json!({"source": "alertd", "check_name": "disk_space", "rules": {"if": []}}))
 			.await;
 		// Either the API rejects an empty ladder OR normalises it. Both
 		// land at `rule_count == 0` and a null rules column.
@@ -242,20 +249,20 @@ async fn update_rules_normalises_empty_ladder_to_null() {
 async fn update_rules_rejects_malformed_shapes() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO healthcheck_severities (check_name) VALUES ('disk_space');",
+			"INSERT INTO check_policies (source, check_name) VALUES ('alertd', 'disk_space');",
 		)
 		.await
 		.unwrap();
 		let cases: &[(serde_json::Value, &str)] = &[
 			(json!({"and": [true]}), "AND composition"),
-			(json!({"if": [{"if": [true, true]}, "error"]}), "nested if"),
+			(json!({"if": [{"if": [true, true]}, "failed"]}), "nested if"),
 			(
-				json!({"if": [{"==": [{"var": "BAD.x"}, 1]}, "error"]}),
+				json!({"if": [{"==": [{"var": "BAD.x"}, 1]}, "failed"]}),
 				"unknown var namespace",
 			),
 			(
-				json!({"if": [{"==": [{"var": "check.x"}, 1]}, "not_a_severity"]}),
-				"bad severity",
+				json!({"if": [{"==": [{"var": "check.x"}, 1]}, "not_a_result"]}),
+				"bad result",
 			),
 			(
 				json!({"if": [{"in_range": [{"var": "status.v"}, "not-a-range"]}, "warning"]}),
@@ -265,7 +272,7 @@ async fn update_rules_rejects_malformed_shapes() {
 		for (rules, label) in cases {
 			let response = private
 				.post("/api/healthchecks/update_rules")
-				.json(&json!({"check_name": "disk_space", "rules": rules}))
+				.json(&json!({"source": "alertd", "check_name": "disk_space", "rules": rules}))
 				.await;
 			assert!(
 				!response.status_code().is_success(),
@@ -282,7 +289,7 @@ async fn update_rules_rejects_malformed_shapes() {
 async fn sample_returns_null_when_no_server_has_reported_the_check() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO healthcheck_severities (check_name) VALUES ('uncharted_check');",
+			"INSERT INTO check_policies (source, check_name) VALUES ('alertd', 'uncharted_check');",
 		)
 		.await
 		.unwrap();

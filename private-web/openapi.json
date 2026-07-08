@@ -2512,18 +2512,18 @@
         "tags": [
           "healthchecks"
         ],
-        "summary": "List the healthcheck severity catalog.",
-        "description": "Returns every known healthcheck name together with its current\nseverity policy, ordered by name. An entry exists for every check name\nany server has ever reported; new checks are added automatically the\nfirst time they're seen, with a default policy pending review.",
+        "summary": "List the check policy catalog.",
+        "description": "Returns every known (source, check) together with its current policy,\nordered by source then name. An entry exists for every check any\nsource has ever reported; new checks are added automatically the\nfirst time they're seen, with a default policy pending review.",
         "operationId": "healthcheck_list",
         "responses": {
           "200": {
-            "description": "Catalog rows ordered by check_name.",
+            "description": "Catalog rows ordered by source then check_name.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/HealthcheckSeverityData"
+                    "$ref": "#/components/schemas/CheckPolicyData"
                   }
                 }
               }
@@ -2669,8 +2669,8 @@
         "tags": [
           "healthchecks"
         ],
-        "summary": "Update a healthcheck's severity policy.",
-        "description": "Sets the base severity (and optionally notes) for the given check, and\nmarks it as reviewed by the caller. Saving with the same severity as\nbefore still counts as a review, so an operator can acknowledge a\ncheck without changing its policy.",
+        "summary": "Update a check's policy.",
+        "description": "Sets the ceiling and escalation flag (and optionally notes) for the\ngiven (source, check), and marks it as reviewed by the caller. Saving\nwith the same values as before still counts as a review, so an\noperator can acknowledge a check without changing its policy.",
         "operationId": "healthcheck_update",
         "requestBody": {
           "content": {
@@ -2688,7 +2688,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HealthcheckSeverityData"
+                  "$ref": "#/components/schemas/CheckPolicyData"
                 }
               }
             }
@@ -2726,8 +2726,8 @@
         "tags": [
           "healthchecks"
         ],
-        "summary": "Replace a healthcheck's conditional severity rules.",
-        "description": "Stores a new set of conditional rules for the given check (or removes\nthem, if `rules` is `null`), and marks the check as reviewed by the\ncaller. Returns 400 if `rules` doesn't parse as a valid ladder — for\nexample an unknown comparison operator, a malformed variable\nreference, or an odd number of entries.",
+        "summary": "Replace a check's conditional rules.",
+        "description": "Stores a new set of conditional rules for the given (source, check)\n(or removes them, if `rules` is `null`), and marks the check as\nreviewed by the caller. Returns 400 if `rules` doesn't parse as a\nvalid ladder — for example an unknown comparison operator, a\nmalformed variable reference, or an odd number of entries.",
         "operationId": "healthcheck_update_rules",
         "requestBody": {
           "content": {
@@ -2745,7 +2745,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HealthcheckSeverityData"
+                  "$ref": "#/components/schemas/CheckPolicyData"
                 }
               }
             }
@@ -6860,15 +6860,27 @@
       },
       "CheckAttentionData": {
         "type": "object",
-        "description": "Response for [`check_attention`]: the queried check's catalog severity\n(if it has one yet) and every live server whose latest status reports\nit, failing or healthy.",
+        "description": "Response for [`check_attention`]: the queried check's catalog policy\n(if it has one yet) and every live server whose latest status reports\nit, failing or healthy.",
         "required": [
           "check",
+          "escalates",
           "servers"
         ],
         "properties": {
+          "ceiling": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The most urgent configured policy ceiling for this check across\nthe sources that report it, or `None` if no server has ever\nreported it yet (so it has no catalog row)."
+          },
           "check": {
             "type": "string",
             "description": "The check name that was queried, echoed back so the page can\nrender its heading without re-decoding the request."
+          },
+          "escalates": {
+            "type": "boolean",
+            "description": "Whether any source's policy for this check escalates its\neffective failures."
           },
           "servers": {
             "type": "array",
@@ -6876,17 +6888,6 @@
               "$ref": "#/components/schemas/CheckAttentionServerData"
             },
             "description": "Every live server whose latest status reports this check, at any\nresult, ordered as a TODO list: failed, warning, broken, passed,\nskipped (most urgent first), then by group name then server name.\nThe client filters out the passed/skipped tail unless the \"show\nhealthy\" toggle is on."
-          },
-          "severity": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/Severity",
-                "description": "The catalog's configured base severity for this check, or `None`\nif no server has ever reported it yet (so it has no catalog row)."
-              }
-            ]
           }
         }
       },
@@ -6944,6 +6945,83 @@
             "type": "string",
             "format": "date-time",
             "description": "When the reporting status was recorded."
+          }
+        }
+      },
+      "CheckPolicyData": {
+        "type": "object",
+        "description": "One (source, check)'s policy: the ceiling capping its effective\nresult, the escalation flag, plus optional conditional rules that can\ngrade a given report differently.",
+        "required": [
+          "source",
+          "check_name",
+          "ceiling",
+          "escalates",
+          "first_seen",
+          "updated_at",
+          "pending_review",
+          "rule_count"
+        ],
+        "properties": {
+          "ceiling": {
+            "type": "string",
+            "description": "The maximum effective result for this check when no conditional\nrule (see `rules`) overrides it: an observed result more urgent\nthan the ceiling grades down to it. One of `failed`, `warning`,\n`passed`, or `skipped` (`skipped` also tells the reporting source\nit may stop running the check)."
+          },
+          "check_name": {
+            "type": "string",
+            "description": "The healthcheck's name, exactly as reported by monitored servers."
+          },
+          "escalates": {
+            "type": "boolean",
+            "description": "Whether an effective failure of this check notifies immediately,\nbypassing the incident grace period."
+          },
+          "first_seen": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this check was first reported and this policy entry was\ncreated."
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Free-form operator notes about this check."
+          },
+          "pending_review": {
+            "type": "boolean",
+            "description": "`true` if no operator has reviewed this policy yet."
+          },
+          "reviewed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When an operator last reviewed or updated this policy. `null` if\nit has never been reviewed."
+          },
+          "reviewed_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The operator who last reviewed this policy. `null` if it has\nnever been reviewed."
+          },
+          "rule_count": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Number of condition/result branches in `rules`; `0` when\n`rules` is `null` or couldn't be parsed. Lets a caller tell\nwhether conditional rules exist without parsing `rules` itself.",
+            "minimum": 0
+          },
+          "rules": {
+            "description": "Conditional rules that can grade a report to a different result\nthan the ceiling would — in any direction — depending on the\ncheck's own fields, the surrounding status report, or the\nreporting server's tags. `null` means no conditional rules are\nconfigured, and the ceiling always applies.\n\nWhen present, this is a single-key object shaped like\n`{\"if\": [condition_1, result_1, condition_2, result_2, ...]}`.\nConditions are tried in order, and the result paired with the\nfirst matching condition is used; if none match, the observed\nresult capped at the ceiling is used instead. There's no explicit\n\"else\" branch — the ceiling fallback plays that role — so the\narray must have an even number of entries and at least one pair.\n\nEach condition is a single-key object naming a comparison\noperator — one of `==`, `!=`, `<`, `<=`, `>`, `>=`, or `in_range`\n— whose value is a two-element array: a variable reference and a\nvalue to compare it against. A variable reference has the shape\n`{\"var\": \"<namespace>.<field>\"}`, where `<namespace>` is one of\n`check` (a field on the failing check itself), `status` (a\ntop-level field on the status report that contained it), or\n`tag` (a tag on the reporting server, merged with its group's\ntags). `in_range` compares a version-like string against a\nsemantic version range (e.g. `\">=1.2.0 <2.0.0\"`). If the named\nvariable isn't present in the data being evaluated, the condition\ndoesn't match. A `rules` value that doesn't parse into this shape\nis treated the same as `null` (no conditional rules)."
+          },
+          "source": {
+            "type": "string",
+            "description": "The source that reports this check."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this policy was last modified."
           }
         }
       },
@@ -7845,95 +7923,37 @@
           }
         }
       },
-      "HealthcheckSeverityData": {
-        "type": "object",
-        "description": "A named healthcheck's alerting policy: the base severity assigned to\nits failures, plus optional conditional rules that can override that\nseverity based on the details of a given failure.",
-        "required": [
-          "check_name",
-          "severity",
-          "first_seen",
-          "updated_at",
-          "pending_review",
-          "rule_count"
-        ],
-        "properties": {
-          "check_name": {
-            "type": "string",
-            "description": "The healthcheck's name, exactly as reported by monitored servers."
-          },
-          "first_seen": {
-            "type": "string",
-            "format": "date-time",
-            "description": "When this check was first reported and this policy entry was\ncreated."
-          },
-          "notes": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Free-form operator notes about this check."
-          },
-          "pending_review": {
-            "type": "boolean",
-            "description": "`true` if no operator has reviewed this policy yet."
-          },
-          "reviewed_at": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time",
-            "description": "When an operator last reviewed or updated this policy. `null` if\nit has never been reviewed."
-          },
-          "reviewed_by": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The operator who last reviewed this policy. `null` if it has\nnever been reviewed."
-          },
-          "rule_count": {
-            "type": "integer",
-            "format": "int32",
-            "description": "Number of condition/severity branches in `rules`; `0` when\n`rules` is `null` or couldn't be parsed. Lets a caller tell\nwhether conditional rules exist without parsing `rules` itself.",
-            "minimum": 0
-          },
-          "rules": {
-            "description": "Conditional rules that can assign a different severity than\n`severity`, depending on the failing check's own fields, the\nsurrounding status report, or the reporting server's tags. `null`\nmeans no conditional rules are configured, and `severity` always\napplies.\n\nWhen present, this is a single-key object shaped like\n`{\"if\": [condition_1, severity_1, condition_2, severity_2, ...]}`.\nConditions are tried in order, and the severity paired with the\nfirst matching condition is used; if none match, the base\n`severity` is used instead. There's no explicit \"else\" branch —\nthe fallback to `severity` plays that role — so the array must\nhave an even number of entries and at least one pair.\n\nEach condition is a single-key object naming a comparison\noperator — one of `==`, `!=`, `<`, `<=`, `>`, `>=`, or `in_range`\n— whose value is a two-element array: a variable reference and a\nvalue to compare it against. A variable reference has the shape\n`{\"var\": \"<namespace>.<field>\"}`, where `<namespace>` is one of\n`check` (a field on the failing check itself), `status` (a\ntop-level field on the status report that contained it), or\n`tag` (a tag on the reporting server, merged with its group's\ntags). `in_range` compares a version-like string against a\nsemantic version range (e.g. `\">=1.2.0 <2.0.0\"`). If the named\nvariable isn't present in the data being evaluated, the condition\ndoesn't match. A `rules` value that doesn't parse into this shape\nis treated the same as `null` (no conditional rules)."
-          },
-          "severity": {
-            "$ref": "#/components/schemas/Severity",
-            "description": "The severity assigned to a failure of this check when no\nconditional rule (see `rules`) overrides it."
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time",
-            "description": "When this policy was last modified."
-          }
-        }
-      },
       "HealthcheckUpdateArgs": {
         "type": "object",
-        "description": "Request body for updating a healthcheck's base severity policy.",
+        "description": "Request body for updating a check's base policy.",
         "required": [
+          "source",
           "check_name",
-          "severity"
+          "ceiling"
         ],
         "properties": {
+          "ceiling": {
+            "type": "string",
+            "description": "The ceiling to apply to this check's observed results when no\nconditional rule overrides it: one of `failed`, `warning`,\n`passed`, or `skipped`."
+          },
           "check_name": {
             "type": "string",
             "description": "The healthcheck name to update; must already exist in the\ncatalog."
           },
+          "escalates": {
+            "type": "boolean",
+            "description": "Whether an effective failure of this check should notify\nimmediately, bypassing the incident grace period."
+          },
           "notes": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Operator notes to store alongside the new severity. Omitting this\nor sending `null` clears any existing notes — there's no way to\nleave them unchanged implicitly, so resend the current value to\nkeep it."
+            "description": "Operator notes to store alongside the new policy. Omitting this\nor sending `null` clears any existing notes — there's no way to\nleave them unchanged implicitly, so resend the current value to\nkeep it."
           },
-          "severity": {
-            "$ref": "#/components/schemas/Severity",
-            "description": "The severity to assign to this check's failures when no\nconditional rule overrides it."
+          "source": {
+            "type": "string",
+            "description": "The source whose check to update."
           }
         }
       },
@@ -12441,8 +12461,9 @@
       },
       "UpdateRulesArgs": {
         "type": "object",
-        "description": "Request body for replacing a healthcheck's conditional severity rules.",
+        "description": "Request body for replacing a check's conditional rules.",
         "required": [
+          "source",
           "check_name"
         ],
         "properties": {
@@ -12451,7 +12472,11 @@
             "description": "The healthcheck name whose rules to replace; must already exist\nin the catalog."
           },
           "rules": {
-            "description": "The new conditional rules to store, or `null` to remove all\nconditional rules and rely solely on the base severity. Same\nshape as the `rules` field returned when listing checks. A ladder\nwith no condition/severity pairs is treated the same as `null`."
+            "description": "The new conditional rules to store, or `null` to remove all\nconditional rules and rely solely on the ceiling. Same shape as\nthe `rules` field returned when listing checks. A ladder with no\ncondition/result pairs is treated the same as `null`."
+          },
+          "source": {
+            "type": "string",
+            "description": "The source whose check's rules to replace."
           }
         }
       },

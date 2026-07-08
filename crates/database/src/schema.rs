@@ -170,6 +170,21 @@ diesel::table! {
 }
 
 diesel::table! {
+	check_policies (source, check_name) {
+		source -> Text,
+		check_name -> Text,
+		ceiling -> Text,
+		escalates -> Bool,
+		rules -> Nullable<Jsonb>,
+		notes -> Nullable<Text>,
+		first_seen -> Timestamptz,
+		reviewed_at -> Nullable<Timestamptz>,
+		reviewed_by -> Nullable<Text>,
+		updated_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
 	chrome_releases (version) {
 		version -> Text,
 		release_date -> Text,
@@ -220,19 +235,6 @@ diesel::table! {
 		tailscale_node_id -> Nullable<Text>,
 		tailscale_node_name -> Nullable<Text>,
 		tailscale_tailnet -> Nullable<Text>,
-	}
-}
-
-diesel::table! {
-	healthcheck_severities (check_name) {
-		check_name -> Text,
-		severity -> Text,
-		first_seen -> Timestamptz,
-		reviewed_at -> Nullable<Timestamptz>,
-		reviewed_by -> Nullable<Text>,
-		notes -> Nullable<Text>,
-		updated_at -> Timestamptz,
-		rules -> Nullable<Jsonb>,
 	}
 }
 
@@ -627,12 +629,12 @@ diesel::allow_tables_to_appear_in_same_query!(
 	backup_runs,
 	backup_type_defaults,
 	bestool_snippets,
+	check_policies,
 	chrome_releases,
 	device_connections,
 	device_keys,
 	device_server_associations,
 	devices,
-	healthcheck_severities,
 	incident_issues,
 	incident_notes,
 	incidents,

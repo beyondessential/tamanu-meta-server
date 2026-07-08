@@ -1,7 +1,7 @@
 import { expect, test } from "./test-fixtures";
 import {
 	resetSeededTables,
-	seedHealthcheckSeverity,
+	seedCheckPolicy,
 	seedIssue,
 	seedServer,
 	seedServerGroup,
@@ -238,7 +238,7 @@ test.describe("healthcheck attention page", () => {
 		await expect(page.getByText("—")).toBeVisible();
 	});
 
-	test("shows the catalog severity when one is configured", async ({
+	test("shows the catalog ceiling when one is configured", async ({
 		page,
 		sql,
 	}) => {
@@ -247,13 +247,19 @@ test.describe("healthcheck attention page", () => {
 			serverId: server.id,
 			health: [{ check: "disk_space", result: "failed", free_pct: 2 }],
 		});
-		await seedHealthcheckSeverity(sql, {
+		await seedCheckPolicy(sql, {
 			checkName: "disk_space",
-			severity: "critical",
+			ceiling: "failed",
+			escalates: true,
 		});
 
 		await page.goto("/healthchecks/disk_space");
-		await expect(page.getByText("critical", { exact: true })).toBeVisible();
+		// The heading chip renders the configured ceiling, plus the
+		// escalates marker.
+		await expect(
+			page.getByRole("heading", { name: "disk_space" }),
+		).toBeVisible();
+		await expect(page.getByText("escalates", { exact: true })).toBeVisible();
 	});
 
 	test("URL-encodes check names with special characters", async ({

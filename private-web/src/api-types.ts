@@ -1265,10 +1265,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * List the healthcheck severity catalog.
-         * @description Returns every known healthcheck name together with its current
-         *     severity policy, ordered by name. An entry exists for every check name
-         *     any server has ever reported; new checks are added automatically the
+         * List the check policy catalog.
+         * @description Returns every known (source, check) together with its current policy,
+         *     ordered by source then name. An entry exists for every check any
+         *     source has ever reported; new checks are added automatically the
          *     first time they're seen, with a default policy pending review.
          */
         post: operations["healthcheck_list"];
@@ -1337,11 +1337,11 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Update a healthcheck's severity policy.
-         * @description Sets the base severity (and optionally notes) for the given check, and
-         *     marks it as reviewed by the caller. Saving with the same severity as
-         *     before still counts as a review, so an operator can acknowledge a
-         *     check without changing its policy.
+         * Update a check's policy.
+         * @description Sets the ceiling and escalation flag (and optionally notes) for the
+         *     given (source, check), and marks it as reviewed by the caller. Saving
+         *     with the same values as before still counts as a review, so an
+         *     operator can acknowledge a check without changing its policy.
          */
         post: operations["healthcheck_update"];
         delete?: never;
@@ -1360,12 +1360,12 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Replace a healthcheck's conditional severity rules.
-         * @description Stores a new set of conditional rules for the given check (or removes
-         *     them, if `rules` is `null`), and marks the check as reviewed by the
-         *     caller. Returns 400 if `rules` doesn't parse as a valid ladder — for
-         *     example an unknown comparison operator, a malformed variable
-         *     reference, or an odd number of entries.
+         * Replace a check's conditional rules.
+         * @description Stores a new set of conditional rules for the given (source, check)
+         *     (or removes them, if `rules` is `null`), and marks the check as
+         *     reviewed by the caller. Returns 400 if `rules` doesn't parse as a
+         *     valid ladder — for example an unknown comparison operator, a
+         *     malformed variable reference, or an odd number of entries.
          */
         post: operations["healthcheck_update_rules"];
         delete?: never;
@@ -3644,16 +3644,27 @@ export interface components {
             check: string;
         };
         /**
-         * @description Response for [`check_attention`]: the queried check's catalog severity
+         * @description Response for [`check_attention`]: the queried check's catalog policy
          *     (if it has one yet) and every live server whose latest status reports
          *     it, failing or healthy.
          */
         CheckAttentionData: {
             /**
+             * @description The most urgent configured policy ceiling for this check across
+             *     the sources that report it, or `None` if no server has ever
+             *     reported it yet (so it has no catalog row).
+             */
+            ceiling?: string | null;
+            /**
              * @description The check name that was queried, echoed back so the page can
              *     render its heading without re-decoding the request.
              */
             check: string;
+            /**
+             * @description Whether any source's policy for this check escalates its
+             *     effective failures.
+             */
+            escalates: boolean;
             /**
              * @description Every live server whose latest status reports this check, at any
              *     result, ordered as a TODO list: failed, warning, broken, passed,
@@ -3662,7 +3673,6 @@ export interface components {
              *     healthy" toggle is on.
              */
             servers: components["schemas"]["CheckAttentionServerData"][];
-            severity?: null | components["schemas"]["Severity"];
         };
         /**
          * @description One server whose latest status reports [`CheckAttentionData::check`],
@@ -3711,6 +3721,93 @@ export interface components {
              * @description When the reporting status was recorded.
              */
             status_created_at: string;
+        };
+        /**
+         * @description One (source, check)'s policy: the ceiling capping its effective
+         *     result, the escalation flag, plus optional conditional rules that can
+         *     grade a given report differently.
+         */
+        CheckPolicyData: {
+            /**
+             * @description The maximum effective result for this check when no conditional
+             *     rule (see `rules`) overrides it: an observed result more urgent
+             *     than the ceiling grades down to it. One of `failed`, `warning`,
+             *     `passed`, or `skipped` (`skipped` also tells the reporting source
+             *     it may stop running the check).
+             */
+            ceiling: string;
+            /** @description The healthcheck's name, exactly as reported by monitored servers. */
+            check_name: string;
+            /**
+             * @description Whether an effective failure of this check notifies immediately,
+             *     bypassing the incident grace period.
+             */
+            escalates: boolean;
+            /**
+             * Format: date-time
+             * @description When this check was first reported and this policy entry was
+             *     created.
+             */
+            first_seen: string;
+            /** @description Free-form operator notes about this check. */
+            notes?: string | null;
+            /** @description `true` if no operator has reviewed this policy yet. */
+            pending_review: boolean;
+            /**
+             * Format: date-time
+             * @description When an operator last reviewed or updated this policy. `null` if
+             *     it has never been reviewed.
+             */
+            reviewed_at?: string | null;
+            /**
+             * @description The operator who last reviewed this policy. `null` if it has
+             *     never been reviewed.
+             */
+            reviewed_by?: string | null;
+            /**
+             * Format: int32
+             * @description Number of condition/result branches in `rules`; `0` when
+             *     `rules` is `null` or couldn't be parsed. Lets a caller tell
+             *     whether conditional rules exist without parsing `rules` itself.
+             */
+            rule_count: number;
+            /**
+             * @description Conditional rules that can grade a report to a different result
+             *     than the ceiling would — in any direction — depending on the
+             *     check's own fields, the surrounding status report, or the
+             *     reporting server's tags. `null` means no conditional rules are
+             *     configured, and the ceiling always applies.
+             *
+             *     When present, this is a single-key object shaped like
+             *     `{"if": [condition_1, result_1, condition_2, result_2, ...]}`.
+             *     Conditions are tried in order, and the result paired with the
+             *     first matching condition is used; if none match, the observed
+             *     result capped at the ceiling is used instead. There's no explicit
+             *     "else" branch — the ceiling fallback plays that role — so the
+             *     array must have an even number of entries and at least one pair.
+             *
+             *     Each condition is a single-key object naming a comparison
+             *     operator — one of `==`, `!=`, `<`, `<=`, `>`, `>=`, or `in_range`
+             *     — whose value is a two-element array: a variable reference and a
+             *     value to compare it against. A variable reference has the shape
+             *     `{"var": "<namespace>.<field>"}`, where `<namespace>` is one of
+             *     `check` (a field on the failing check itself), `status` (a
+             *     top-level field on the status report that contained it), or
+             *     `tag` (a tag on the reporting server, merged with its group's
+             *     tags). `in_range` compares a version-like string against a
+             *     semantic version range (e.g. `">=1.2.0 <2.0.0"`). If the named
+             *     variable isn't present in the data being evaluated, the condition
+             *     doesn't match. A `rules` value that doesn't parse into this shape
+             *     is treated the same as `null` (no conditional rules).
+             */
+            rules?: unknown;
+            /** @description The source that reports this check. */
+            source: string;
+            /**
+             * Format: date-time
+             * @description When this policy was last modified.
+             */
+            updated_at: string;
         };
         /**
          * @description Outcome of a single health check reported in a server's status update.
@@ -4239,102 +4336,33 @@ export interface components {
             check_name: string;
             sample?: null | components["schemas"]["HealthcheckSample"];
         };
-        /**
-         * @description A named healthcheck's alerting policy: the base severity assigned to
-         *     its failures, plus optional conditional rules that can override that
-         *     severity based on the details of a given failure.
-         */
-        HealthcheckSeverityData: {
-            /** @description The healthcheck's name, exactly as reported by monitored servers. */
-            check_name: string;
-            /**
-             * Format: date-time
-             * @description When this check was first reported and this policy entry was
-             *     created.
-             */
-            first_seen: string;
-            /** @description Free-form operator notes about this check. */
-            notes?: string | null;
-            /** @description `true` if no operator has reviewed this policy yet. */
-            pending_review: boolean;
-            /**
-             * Format: date-time
-             * @description When an operator last reviewed or updated this policy. `null` if
-             *     it has never been reviewed.
-             */
-            reviewed_at?: string | null;
-            /**
-             * @description The operator who last reviewed this policy. `null` if it has
-             *     never been reviewed.
-             */
-            reviewed_by?: string | null;
-            /**
-             * Format: int32
-             * @description Number of condition/severity branches in `rules`; `0` when
-             *     `rules` is `null` or couldn't be parsed. Lets a caller tell
-             *     whether conditional rules exist without parsing `rules` itself.
-             */
-            rule_count: number;
-            /**
-             * @description Conditional rules that can assign a different severity than
-             *     `severity`, depending on the failing check's own fields, the
-             *     surrounding status report, or the reporting server's tags. `null`
-             *     means no conditional rules are configured, and `severity` always
-             *     applies.
-             *
-             *     When present, this is a single-key object shaped like
-             *     `{"if": [condition_1, severity_1, condition_2, severity_2, ...]}`.
-             *     Conditions are tried in order, and the severity paired with the
-             *     first matching condition is used; if none match, the base
-             *     `severity` is used instead. There's no explicit "else" branch —
-             *     the fallback to `severity` plays that role — so the array must
-             *     have an even number of entries and at least one pair.
-             *
-             *     Each condition is a single-key object naming a comparison
-             *     operator — one of `==`, `!=`, `<`, `<=`, `>`, `>=`, or `in_range`
-             *     — whose value is a two-element array: a variable reference and a
-             *     value to compare it against. A variable reference has the shape
-             *     `{"var": "<namespace>.<field>"}`, where `<namespace>` is one of
-             *     `check` (a field on the failing check itself), `status` (a
-             *     top-level field on the status report that contained it), or
-             *     `tag` (a tag on the reporting server, merged with its group's
-             *     tags). `in_range` compares a version-like string against a
-             *     semantic version range (e.g. `">=1.2.0 <2.0.0"`). If the named
-             *     variable isn't present in the data being evaluated, the condition
-             *     doesn't match. A `rules` value that doesn't parse into this shape
-             *     is treated the same as `null` (no conditional rules).
-             */
-            rules?: unknown;
-            /**
-             * @description The severity assigned to a failure of this check when no
-             *     conditional rule (see `rules`) overrides it.
-             */
-            severity: components["schemas"]["Severity"];
-            /**
-             * Format: date-time
-             * @description When this policy was last modified.
-             */
-            updated_at: string;
-        };
-        /** @description Request body for updating a healthcheck's base severity policy. */
+        /** @description Request body for updating a check's base policy. */
         HealthcheckUpdateArgs: {
+            /**
+             * @description The ceiling to apply to this check's observed results when no
+             *     conditional rule overrides it: one of `failed`, `warning`,
+             *     `passed`, or `skipped`.
+             */
+            ceiling: string;
             /**
              * @description The healthcheck name to update; must already exist in the
              *     catalog.
              */
             check_name: string;
             /**
-             * @description Operator notes to store alongside the new severity. Omitting this
+             * @description Whether an effective failure of this check should notify
+             *     immediately, bypassing the incident grace period.
+             */
+            escalates?: boolean;
+            /**
+             * @description Operator notes to store alongside the new policy. Omitting this
              *     or sending `null` clears any existing notes — there's no way to
              *     leave them unchanged implicitly, so resend the current value to
              *     keep it.
              */
             notes?: string | null;
-            /**
-             * @description The severity to assign to this check's failures when no
-             *     conditional rule overrides it.
-             */
-            severity: components["schemas"]["Severity"];
+            /** @description The source whose check to update. */
+            source: string;
         };
         /** @description Pagination parameters for browsing the shared query history. */
         HistoryArgs: {
@@ -7150,7 +7178,7 @@ export interface components {
             /** @description New display name for the key, or null to clear it. */
             name?: string | null;
         };
-        /** @description Request body for replacing a healthcheck's conditional severity rules. */
+        /** @description Request body for replacing a check's conditional rules. */
         UpdateRulesArgs: {
             /**
              * @description The healthcheck name whose rules to replace; must already exist
@@ -7159,11 +7187,13 @@ export interface components {
             check_name: string;
             /**
              * @description The new conditional rules to store, or `null` to remove all
-             *     conditional rules and rely solely on the base severity. Same
-             *     shape as the `rules` field returned when listing checks. A ladder
-             *     with no condition/severity pairs is treated the same as `null`.
+             *     conditional rules and rely solely on the ceiling. Same shape as
+             *     the `rules` field returned when listing checks. A ladder with no
+             *     condition/result pairs is treated the same as `null`.
              */
             rules?: unknown;
+            /** @description The source whose check's rules to replace. */
+            source: string;
         };
         /** @description Identifies a version and the publication status to set on it. */
         UpdateStatusArgs: {
@@ -9054,13 +9084,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Catalog rows ordered by check_name. */
+            /** @description Catalog rows ordered by source then check_name. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HealthcheckSeverityData"][];
+                    "application/json": components["schemas"]["CheckPolicyData"][];
                 };
             };
             401: {
@@ -9176,7 +9206,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HealthcheckSeverityData"];
+                    "application/json": components["schemas"]["CheckPolicyData"];
                 };
             };
             401: {
@@ -9216,7 +9246,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HealthcheckSeverityData"];
+                    "application/json": components["schemas"]["CheckPolicyData"];
                 };
             };
             400: {

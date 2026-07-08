@@ -20,9 +20,9 @@ use commons_types::{
 };
 use database::{
 	Db,
+	check_policies::{CheckPolicy, EvaluationContext, GradedResult},
 	devices::Device,
 	diesel_async::{AsyncConnection, AsyncPgConnection},
-	healthcheck_severities::{EvaluationContext, HealthcheckSeverity},
 	issues::{Issue, NewEvent},
 	servers::Server,
 	silenced_refs::silenced_refs_with_prefix,
@@ -260,7 +260,7 @@ async fn create(
 		}
 		create_legacy_status(&mut db, server_id, id, extra, version).await?;
 		let check_severities =
-			effective_check_severities(&mut db, server_id, server.group_id).await?;
+			effective_check_severities(&mut db, server_id, server.group_id, &source).await?;
 		let tags = crate::tags::effective_tags_for_server(&mut db, &server).await?;
 		return Ok(Json(StatusResponse {
 			backup_now,
@@ -289,7 +289,7 @@ async fn create(
 			extra,
 			healthy,
 			health,
-			source,
+			source: source.clone(),
 		}
 		.save(conn)
 		.await?;
@@ -302,7 +302,8 @@ async fn create(
 
 	// Computed after the transaction so checks first seen on this very push
 	// (upserted into the catalog above) are already in the map.
-	let check_severities = effective_check_severities(&mut db, server_id, server.group_id).await?;
+	let check_severities =
+		effective_check_severities(&mut db, server_id, server.group_id, &source).await?;
 	let effective_tags = crate::tags::effective_tags_for_server(&mut db, &server).await?;
 
 	Ok(Json(StatusResponse {
@@ -314,14 +315,16 @@ async fn create(
 
 /// Fetch the effective healthcheck severity mapping for a server.
 ///
-/// Returns, for every healthcheck canopy knows about, how a failure of that
-/// check is classified for this server: `skip` (the check is silenced for
-/// this server — at server or group scope — or its severity is below
-/// warning), `warn` (warning), or `fail` (error or critical). Keys are check
-/// names as reported in `health[].check` on status pushes. Only the static
-/// severity baseline is reflected; operator-defined conditional rules are
-/// evaluated per push and not included here. The same mapping also rides
-/// along every status-push response as `check_severities`.
+/// Returns, for every healthcheck the `alertd` source reports, how that
+/// check is handled for this server: `skip` (the check is silenced for
+/// this server — at server or group scope — or its policy ceiling means it
+/// never alerts), `warn` (graded at most a warning), or `fail` (failures
+/// count as failures). Keys are check names as reported in
+/// `health[].check` on status pushes. Only the static policy ceiling is
+/// reflected; operator-defined conditional rules are evaluated per push
+/// and not included here. The same mapping also rides along every
+/// status-push response as `check_severities`, scoped to the pushing
+/// source.
 ///
 /// The calling device must be the one enrolled for this exact server (or
 /// hold the admin role).
@@ -356,26 +359,28 @@ async fn check_severities(
 		));
 	}
 
-	let map = effective_check_severities(&mut db, server_id, server.group_id).await?;
+	let map =
+		effective_check_severities(&mut db, server_id, server.group_id, DEFAULT_SOURCE).await?;
 	Ok(Json(map))
 }
 
-/// Build the effective per-check severity map for a server: every check in
-/// the operator catalog mapped from its static base severity (error and
-/// above → `fail`, warning → `warn`, below warning → `skip`), then any check
-/// silenced for this server (at server or group scope) forced to `skip`.
-/// Conditional severity rules are deliberately not consulted — they depend
-/// on each push's contents, so only the static baseline can be mapped ahead
-/// of time.
+/// Build the effective per-check map for a server and source: every check
+/// in the source's catalog mapped from its static policy ceiling (`failed`
+/// → `fail`, `warning`/`broken` → `warn`, `passed`/`skipped` → `skip`),
+/// then any check silenced for this server (at server or group scope)
+/// forced to `skip`. Conditional rules are deliberately not consulted —
+/// they depend on each push's contents, so only the static ceiling can be
+/// mapped ahead of time.
 async fn effective_check_severities(
 	db: &mut AsyncPgConnection,
 	server_id: Uuid,
 	group_id: Option<Uuid>,
+	source: &str,
 ) -> Result<BTreeMap<String, CheckSeverity>> {
-	let mut map: BTreeMap<String, CheckSeverity> = HealthcheckSeverity::base_severity_map(db)
+	let mut map: BTreeMap<String, CheckSeverity> = CheckPolicy::ceiling_map_for_source(db, source)
 		.await?
 		.into_iter()
-		.map(|(name, severity)| (name, severity.into()))
+		.map(|(name, ceiling)| (name, ceiling.into()))
 		.collect();
 
 	let health_prefix = format!("{HEALTH_REF}/");
@@ -443,14 +448,19 @@ fn resolve_version(extra: &serde_json::Value, header: Option<VersionStr>) -> Opt
 /// (`result: skipped` — precondition not met) file nothing and close
 /// both refs.
 ///
-/// Severity for each warning/failed check comes from the
-/// operator-owned `healthcheck_severities` catalog (see
-/// [`HealthcheckSeverity::severity_for`] for the rules/fallback
-/// contract). Every check seen on a push — whatever its result —
-/// upserts a default catalog row so new checks are visible to
-/// operators immediately at the default Warning severity.
-/// `status.healthy` is intentionally not consulted: the catalog is
-/// canopy's single source of truth for per-check severity.
+/// Each check's effective result comes from applying the operator-owned
+/// `check_policies` catalog entry for `(source, check)` (see
+/// [`CheckPolicy::apply`] for the rules/ceiling contract) to the
+/// observed result. Every check seen on a push — whatever its result —
+/// upserts a default catalog row so new checks are visible to operators
+/// immediately at the default warning ceiling. `status.healthy` is
+/// intentionally not consulted: the catalog is canopy's single source
+/// of truth for per-check grading.
+///
+/// Until issues themselves carry results, the effective result maps to
+/// the issue severity: failed → error (critical when the policy
+/// escalates), warning and broken → warning; passed and skipped file
+/// nothing and close prior issues.
 async fn file_health_events(
 	conn: &mut AsyncPgConnection,
 	server_id: Uuid,
@@ -462,22 +472,24 @@ async fn file_health_events(
 	let occurred_at = Some(status.created_at);
 
 	// Upsert a catalog row for every check name seen on this push,
-	// whatever its result. New checks land at default Warning;
-	// operators can review and adjust from the /healthchecks page.
+	// whatever its result. New checks land at the default warning
+	// ceiling; operators can review and adjust from the /healthchecks
+	// page.
 	for check_name in curr_check_results.keys() {
-		HealthcheckSeverity::upsert_default(conn, check_name).await?;
+		CheckPolicy::upsert_default(conn, &status.source, check_name).await?;
 	}
 
 	// Status-level extras are shared across every per-check evaluation.
 	let empty_map = serde_json::Map::new();
 	let status_extra = status.extra.as_object().unwrap_or(&empty_map);
 
-	// Per-check opens: warning and failed file on the same ref (one
-	// thread per check; the filed severity is what differs).
-	for (check, result) in curr_check_results
-		.iter()
-		.filter(|(_, r)| matches!(r, CheckResult::Warning | CheckResult::Failed))
-	{
+	// Grade every check in the push through its policy. Observed broken
+	// stays on its own thread below and is not graded here.
+	let mut effective: BTreeMap<&String, GradedResult> = BTreeMap::new();
+	for (check, result) in &curr_check_results {
+		if matches!(result, CheckResult::Broken) {
+			continue;
+		}
 		let entry = find_health_entry(&status.health, check);
 		// Strip the reserved `check` / `healthy` keys, and replace any
 		// wire-form `result` with the normalised value so rules see a
@@ -495,8 +507,21 @@ async fn file_health_events(
 			check_extra: &check_extra,
 			tags,
 		};
-		let severity = HealthcheckSeverity::severity_for(conn, check, *result, &ctx).await?;
-		let described = match result {
+		let graded = CheckPolicy::apply(conn, &status.source, check, *result, &ctx).await?;
+		effective.insert(check, graded);
+	}
+
+	// Per-check opens: effective warning and failed file on the same ref
+	// (one thread per check; the filed severity is what differs).
+	for (check, graded) in &effective {
+		let severity = match graded.effective {
+			CheckResult::Failed if graded.escalates => Severity::Critical,
+			CheckResult::Failed => Severity::Error,
+			CheckResult::Warning | CheckResult::Broken => Severity::Warning,
+			CheckResult::Passed | CheckResult::Skipped => continue,
+		};
+		let entry = find_health_entry(&status.health, check);
+		let described = match graded.effective {
 			CheckResult::Warning => "warned",
 			_ => "failed",
 		};
@@ -541,11 +566,12 @@ async fn file_health_events(
 	// failure open), so the previous push alone can't tell us what
 	// needs closing.
 
-	// Failure closes: an open `health/<check>` closes when the check
-	// is now passed, skipped, or unmentioned ("trust the reporter").
-	// Broken does NOT close a prior failure — the check can't confirm
-	// the failure either way while it's broken. Scoped to the pushing
-	// source: one source's push says nothing about another's checks.
+	// Failure closes: an open `health/<check>` closes when the check's
+	// effective result is now passed or skipped, or the check is
+	// unmentioned ("trust the reporter"). Observed broken does NOT close
+	// a prior failure — the check can't confirm the failure either way
+	// while it's broken. Scoped to the pushing source: one source's push
+	// says nothing about another's checks.
 	let health_prefix = format!("{HEALTH_REF}/");
 	for r#ref in
 		Issue::active_refs_with_prefix(conn, server_id, &status.source, &health_prefix).await?
@@ -554,10 +580,12 @@ async fn file_health_events(
 			continue;
 		};
 		let curr = curr_check_results.get(check);
-		if matches!(
-			curr,
-			Some(CheckResult::Warning | CheckResult::Failed | CheckResult::Broken)
-		) {
+		let keeps_open = matches!(curr, Some(CheckResult::Broken))
+			|| matches!(
+				effective.get(&check.to_string()).map(|g| g.effective),
+				Some(CheckResult::Warning | CheckResult::Failed | CheckResult::Broken)
+			);
+		if keeps_open {
 			continue;
 		}
 		let message = if matches!(curr, Some(CheckResult::Skipped)) {
