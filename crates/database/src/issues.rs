@@ -2,6 +2,7 @@
 
 use commons_errors::{AppError, Result};
 use commons_types::issue::Severity;
+use commons_types::status::CheckResult;
 use diesel::prelude::*;
 use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 use jiff::Timestamp;
@@ -85,6 +86,44 @@ pub struct Issue {
 	/// excluded from incidents and notifications even while still active.
 	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
 	pub snoozed_until: Option<Timestamp>,
+	/// The check this issue tracks, for issues that are check state (the
+	/// ref minus its namespace prefix). `None` for issues that predate the
+	/// check-state model or that no filing has stamped yet.
+	pub check_name: Option<String>,
+	/// The result the source reported on the latest filing, before policy.
+	#[diesel(deserialize_as = MaybeCheckResult, serialize_as = Option<String>)]
+	pub observed_result: Option<CheckResult>,
+	/// What policy made of the latest observed result. This is the result
+	/// canopy acts on; the transitional `severity` is derived from it.
+	#[diesel(deserialize_as = MaybeCheckResult, serialize_as = Option<String>)]
+	pub effective_result: Option<CheckResult>,
+	/// The check's own fields from the latest report, verbatim (minus the
+	/// reserved keys), for display alongside the state.
+	pub detail: Option<serde_json::Value>,
+}
+
+/// Diesel helper: a nullable text column read as an optional
+/// [`CheckResult`], treating unparseable text as `None` rather than
+/// failing the whole row load.
+pub struct MaybeCheckResult(Option<CheckResult>);
+
+impl From<MaybeCheckResult> for Option<CheckResult> {
+	fn from(v: MaybeCheckResult) -> Self {
+		v.0
+	}
+}
+
+impl
+	diesel::deserialize::Queryable<
+		diesel::sql_types::Nullable<diesel::sql_types::Text>,
+		diesel::pg::Pg,
+	> for MaybeCheckResult
+{
+	type Row = Option<String>;
+
+	fn build(row: Option<String>) -> diesel::deserialize::Result<Self> {
+		Ok(Self(row.and_then(|s| s.parse().ok())))
+	}
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Queryable, Selectable, Associations)]
@@ -181,6 +220,19 @@ pub struct IssueListFilters {
 	pub since: Option<Timestamp>,
 }
 
+/// The check-state stamp accompanying a filing that is a check result:
+/// which check, both sides of the policy transform, and the check's own
+/// detail from the report. Filings that aren't check results (sweeps,
+/// manual events, device event pushes) carry no stamp and leave the
+/// state columns null until they migrate onto the check-state model.
+#[derive(Debug, Clone)]
+pub struct CheckStateStamp {
+	pub check: String,
+	pub observed: CheckResult,
+	pub effective: CheckResult,
+	pub detail: Option<serde_json::Value>,
+}
+
 impl NewEvent {
 	/// Persist this event push:
 	/// 1. find-or-create the issue keyed by (server_id, source, ref),
@@ -203,6 +255,19 @@ impl NewEvent {
 		db: &mut AsyncPgConnection,
 		server_id: Uuid,
 		device_id: Option<Uuid>,
+	) -> Result<Issue> {
+		self.save_with_state(db, server_id, device_id, None).await
+	}
+
+	/// [`Self::save`], stamping the issue's check-state columns from a
+	/// check result. Status ingestion passes the stamp; everything else
+	/// files via [`Self::save`].
+	pub async fn save_with_state(
+		self,
+		db: &mut AsyncPgConnection,
+		server_id: Uuid,
+		device_id: Option<Uuid>,
+		state: Option<&CheckStateStamp>,
 	) -> Result<Issue> {
 		use crate::schema::issues;
 
@@ -260,6 +325,17 @@ impl NewEvent {
 				// operator-resolved issue clears the resolved_* fields (issue is back
 				// in unresolved state).
 				let clear_resolved = active && existing.resolved_at.is_some();
+				if let Some(stamp) = state {
+					diesel::update(issues::table.filter(issues::id.eq(existing.id)))
+						.set((
+							issues::check_name.eq(&stamp.check),
+							issues::observed_result.eq(stamp.observed.to_string()),
+							issues::effective_result.eq(stamp.effective.to_string()),
+							issues::detail.eq(&stamp.detail),
+						))
+						.execute(conn)
+						.await?;
+				}
 				let issue = diesel::update(issues::table.filter(issues::id.eq(existing.id)))
 					.set((
 						issues::device_id.eq(device_id),
@@ -307,6 +383,10 @@ impl NewEvent {
 						issues::active.eq(active),
 						issues::first_seen.eq(jiff_diesel::Timestamp::from(effective_time)),
 						issues::last_seen.eq(jiff_diesel::Timestamp::from(effective_time)),
+						issues::check_name.eq(state.map(|s| s.check.as_str())),
+						issues::observed_result.eq(state.map(|s| s.observed.to_string())),
+						issues::effective_result.eq(state.map(|s| s.effective.to_string())),
+						issues::detail.eq(state.and_then(|s| s.detail.as_ref())),
 					))
 					.returning(Issue::as_select())
 					.get_result(conn)

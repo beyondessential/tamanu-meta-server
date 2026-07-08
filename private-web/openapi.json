@@ -8376,6 +8376,13 @@
             "type": "boolean",
             "description": "Whether the underlying condition is still ongoing. `false` once the\ncondition has stopped recurring."
           },
+          "check_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The check this issue tracks, when it is check state (health-check\nissues). Absent for issues that aren't check results yet."
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -8388,6 +8395,9 @@
             ],
             "description": "Short headline describing the issue, if one was given."
           },
+          "detail": {
+            "description": "The check's own fields from the latest report, verbatim."
+          },
           "device_id": {
             "type": [
               "string",
@@ -8395,6 +8405,13 @@
             ],
             "format": "uuid",
             "description": "Id of the device that reported the underlying event, if the issue\noriginated from a device push rather than a manual entry."
+          },
+          "effective_result": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What policy made of the latest observed result — the result canopy\nacts on."
           },
           "first_seen": {
             "type": "string",
@@ -8421,6 +8438,13 @@
           "message": {
             "type": "string",
             "description": "Latest human-readable message describing the issue's state."
+          },
+          "observed_result": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The result the source reported on the latest filing, before policy."
           },
           "ref": {
             "type": "string",

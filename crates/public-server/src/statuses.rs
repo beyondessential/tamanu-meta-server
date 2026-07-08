@@ -23,7 +23,7 @@ use database::{
 	check_policies::{CheckPolicy, EvaluationContext, GradedResult},
 	devices::Device,
 	diesel_async::{AsyncConnection, AsyncPgConnection},
-	issues::{Issue, NewEvent},
+	issues::{CheckStateStamp, Issue, NewEvent},
 	servers::Server,
 	silenced_refs::silenced_refs_with_prefix,
 	statuses::{NewStatus, Status},
@@ -525,6 +525,12 @@ async fn file_health_events(
 			CheckResult::Warning => "warned",
 			_ => "failed",
 		};
+		let stamp = CheckStateStamp {
+			check: (*check).clone(),
+			observed: curr_check_results[*check],
+			effective: graded.effective,
+			detail: entry.cloned().map(serde_json::Value::Object),
+		};
 		NewEvent {
 			source: status.source.clone(),
 			r#ref: format!("{HEALTH_REF}/{check}"),
@@ -534,7 +540,7 @@ async fn file_health_events(
 			active: Some(true),
 			occurred_at,
 		}
-		.save(conn, server_id, device_id)
+		.save_with_state(conn, server_id, device_id, Some(&stamp))
 		.await?;
 	}
 
@@ -547,6 +553,12 @@ async fn file_health_events(
 		.filter(|(_, r)| matches!(r, CheckResult::Broken))
 	{
 		let entry = find_health_entry(&status.health, check);
+		let stamp = CheckStateStamp {
+			check: check.clone(),
+			observed: CheckResult::Broken,
+			effective: CheckResult::Broken,
+			detail: entry.cloned().map(serde_json::Value::Object),
+		};
 		NewEvent {
 			source: status.source.clone(),
 			r#ref: format!("{BROKEN_REF}/{check}"),
@@ -556,7 +568,7 @@ async fn file_health_events(
 			active: Some(true),
 			occurred_at,
 		}
-		.save(conn, server_id, device_id)
+		.save_with_state(conn, server_id, device_id, Some(&stamp))
 		.await?;
 	}
 
@@ -593,6 +605,17 @@ async fn file_health_events(
 		} else {
 			format!("Health check '{check}' recovered")
 		};
+		let entry = find_health_entry(&status.health, check);
+		let observed = curr.copied().unwrap_or(CheckResult::Passed);
+		let stamp = CheckStateStamp {
+			check: check.to_string(),
+			observed,
+			effective: effective
+				.get(&check.to_string())
+				.map(|g| g.effective)
+				.unwrap_or(observed),
+			detail: entry.cloned().map(serde_json::Value::Object),
+		};
 		NewEvent {
 			source: status.source.clone(),
 			r#ref,
@@ -602,7 +625,7 @@ async fn file_health_events(
 			active: Some(false),
 			occurred_at,
 		}
-		.save(conn, server_id, device_id)
+		.save_with_state(conn, server_id, device_id, Some(&stamp))
 		.await?;
 	}
 
@@ -618,6 +641,18 @@ async fn file_health_events(
 		if matches!(curr_check_results.get(check), Some(CheckResult::Broken)) {
 			continue;
 		}
+		let observed = curr_check_results
+			.get(check)
+			.copied()
+			.unwrap_or(CheckResult::Passed);
+		let stamp = CheckStateStamp {
+			check: check.to_string(),
+			observed,
+			effective: observed,
+			detail: find_health_entry(&status.health, check)
+				.cloned()
+				.map(serde_json::Value::Object),
+		};
 		NewEvent {
 			source: status.source.clone(),
 			r#ref: format!("{BROKEN_REF}/{check}"),
@@ -627,7 +662,7 @@ async fn file_health_events(
 			active: Some(false),
 			occurred_at,
 		}
-		.save(conn, server_id, device_id)
+		.save_with_state(conn, server_id, device_id, Some(&stamp))
 		.await?;
 	}
 

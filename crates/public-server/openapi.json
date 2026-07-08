@@ -1604,6 +1604,13 @@
             "type": "boolean",
             "description": "Whether the condition behind this issue is still ongoing. Set to\n`false` when the source reports the condition has cleared."
           },
+          "check_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The check this issue tracks, for issues that are check state (the\nref minus its namespace prefix). `None` for issues that predate the\ncheck-state model or that no filing has stamped yet."
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -1616,6 +1623,9 @@
             ],
             "description": "A short, single-line title for the issue, shown as its headline in\nthe UI and in Slack notifications. `None` if no title was given."
           },
+          "detail": {
+            "description": "The check's own fields from the latest report, verbatim (minus the\nreserved keys), for display alongside the state."
+          },
           "device_id": {
             "type": [
               "string",
@@ -1623,6 +1633,17 @@
             ],
             "format": "uuid",
             "description": "The device that reported this issue, if it was raised by a device\npush. `None` for issues raised by an operator or by the platform\nitself."
+          },
+          "effective_result": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CheckResult",
+                "description": "What policy made of the latest observed result. This is the result\ncanopy acts on; the transitional `severity` is derived from it."
+              }
+            ]
           },
           "first_seen": {
             "type": "string",
@@ -1642,6 +1663,17 @@
           "message": {
             "type": "string",
             "description": "The full body text describing the issue."
+          },
+          "observed_result": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CheckResult",
+                "description": "The result the source reported on the latest filing, before policy."
+              }
+            ]
           },
           "ref": {
             "type": "string",

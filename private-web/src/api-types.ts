@@ -4649,18 +4649,30 @@ export interface components {
              */
             active: boolean;
             /**
+             * @description The check this issue tracks, when it is check state (health-check
+             *     issues). Absent for issues that aren't check results yet.
+             */
+            check_name?: string | null;
+            /**
              * Format: date-time
              * @description When this issue record was created.
              */
             created_at: string;
             /** @description Short headline describing the issue, if one was given. */
             description?: string | null;
+            /** @description The check's own fields from the latest report, verbatim. */
+            detail?: unknown;
             /**
              * Format: uuid
              * @description Id of the device that reported the underlying event, if the issue
              *     originated from a device push rather than a manual entry.
              */
             device_id?: string | null;
+            /**
+             * @description What policy made of the latest observed result — the result canopy
+             *     acts on.
+             */
+            effective_result?: string | null;
             /**
              * Format: date-time
              * @description When the issue was first raised.
@@ -4683,6 +4695,8 @@ export interface components {
             last_seen: string;
             /** @description Latest human-readable message describing the issue's state. */
             message: string;
+            /** @description The result the source reported on the latest filing, before policy. */
+            observed_result?: string | null;
             /**
              * @description Identifier used to match new incoming events to this issue; unique
              *     within its source and server.

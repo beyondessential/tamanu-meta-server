@@ -303,6 +303,10 @@ diesel::table! {
 		resolved_reason -> Nullable<Text>,
 		snoozed_until -> Nullable<Timestamptz>,
 		server_group_id -> Nullable<Uuid>,
+		check_name -> Nullable<Text>,
+		observed_result -> Nullable<Text>,
+		effective_result -> Nullable<Text>,
+		detail -> Nullable<Jsonb>,
 	}
 }
 

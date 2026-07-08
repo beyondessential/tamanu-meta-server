@@ -6,6 +6,7 @@ use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
 use commons_types::{
 	Uuid,
 	issue::{ResolvedReason, Severity},
+	status::CheckResult,
 };
 use database::issues::{
 	Incident, Issue, IssueFilter, IssueIncidentRef, IssueListFilters, NewEvent,
@@ -84,6 +85,18 @@ pub struct IssueData {
 	pub created_at: Timestamp,
 	/// When this issue record was last updated.
 	pub updated_at: Timestamp,
+	/// The check this issue tracks, when it is check state (health-check
+	/// issues). Absent for issues that aren't check results yet.
+	pub check_name: Option<String>,
+	/// The result the source reported on the latest filing, before policy.
+	#[schema(value_type = Option<String>)]
+	pub observed_result: Option<CheckResult>,
+	/// What policy made of the latest observed result — the result canopy
+	/// acts on.
+	#[schema(value_type = Option<String>)]
+	pub effective_result: Option<CheckResult>,
+	/// The check's own fields from the latest report, verbatim.
+	pub detail: Option<serde_json::Value>,
 	/// Incidents this issue is or was attached to, most recent first. Empty
 	/// for issues that never escalated into an incident.
 	pub incidents: Vec<IssueIncidentLink>,
@@ -148,6 +161,10 @@ impl IssueData {
 			snoozed_until: i.snoozed_until,
 			created_at: i.created_at,
 			updated_at: i.updated_at,
+			check_name: i.check_name,
+			observed_result: i.observed_result,
+			effective_result: i.effective_result,
+			detail: i.detail,
 			incidents: e.incidents,
 		}
 	}

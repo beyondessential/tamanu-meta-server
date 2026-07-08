@@ -2790,3 +2790,78 @@ async fn source_field_validation() {
 	)
 	.await
 }
+
+/// Filings stamp the issue's check-state columns: the observed result,
+/// the policy-effective result (which can diverge), and the check's
+/// detail from the push.
+#[tokio::test(flavor = "multi_thread")]
+async fn filings_stamp_check_state_columns() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+			// Ceiling warning (the default) grades failures down: observed
+			// and effective diverge.
+			public
+				.post(&format!("/status/{server_id}"))
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"health": [{ "check": "db", "result": "failed", "latency_ms": 42 }],
+				}))
+				.await
+				.assert_status_ok();
+
+			#[derive(QueryableByName, Debug)]
+			struct StateRow {
+				#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
+				check_name: Option<String>,
+				#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
+				observed_result: Option<String>,
+				#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
+				effective_result: Option<String>,
+				#[diesel(sql_type = sql_types::Nullable<sql_types::Jsonb>)]
+				detail: Option<serde_json::Value>,
+			}
+			let fetch = async |conn: &mut diesel_async::AsyncPgConnection| -> StateRow {
+				sql_query(
+					"SELECT check_name, observed_result, effective_result, detail \
+					 FROM issues WHERE server_id = $1 AND ref = 'health/db'",
+				)
+				.bind::<sql_types::Uuid, _>(server_id)
+				.get_result(conn)
+				.await
+				.expect("issue row")
+			};
+
+			let row = fetch(&mut conn).await;
+			assert_eq!(row.check_name.as_deref(), Some("db"));
+			assert_eq!(row.observed_result.as_deref(), Some("failed"));
+			assert_eq!(
+				row.effective_result.as_deref(),
+				Some("warning"),
+				"default warning ceiling grades the failure down",
+			);
+			assert_eq!(
+				row.detail
+					.as_ref()
+					.and_then(|d| d.get("latency_ms"))
+					.and_then(|v| v.as_i64()),
+				Some(42),
+			);
+
+			// Recovery stamps the pass.
+			public
+				.post(&format!("/status/{server_id}"))
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"health": [{ "check": "db", "result": "passed" }],
+				}))
+				.await
+				.assert_status_ok();
+			let row = fetch(&mut conn).await;
+			assert_eq!(row.observed_result.as_deref(), Some("passed"));
+			assert_eq!(row.effective_result.as_deref(), Some("passed"));
+		},
+	)
+	.await
+}
