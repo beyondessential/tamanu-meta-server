@@ -2674,11 +2674,15 @@ async fn status_is_recorded_and_scoped_per_client() {
 			assert!(body.get("check_severities").is_some());
 
 			// A seedling push is kept as its own stream and is sent no
-			// backup_now at all.
+			// backup_now at all. Its failing check must not open an issue:
+			// health issues derive from the bestool stream only.
 			let response = public
 				.post(&format!("/status/{server_id}"))
 				.add_header("mtls-certificate", &cert)
-				.json(&serde_json::json!({ "client": "seedling", "health": [] }))
+				.json(&serde_json::json!({
+					"client": "seedling",
+					"health": [{ "check": "seedling_proxy", "result": "failed" }],
+				}))
 				.await;
 			response.assert_status_ok();
 			let body: serde_json::Value = response.json();
@@ -2701,6 +2705,9 @@ async fn status_is_recorded_and_scoped_per_client() {
 					.expect("fetch status clients");
 			let clients: Vec<&str> = rows.iter().map(|r| r.client.as_str()).collect();
 			assert_eq!(clients, ["bestool", "seedling"]);
+
+			// The seedling stream's failing check filed nothing.
+			assert_eq!(count_issues_for_server(&mut conn, server_id).await, 0);
 
 			// A non-string client is rejected.
 			let response = public

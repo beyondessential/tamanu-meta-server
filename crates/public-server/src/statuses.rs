@@ -290,7 +290,12 @@ async fn create(
 			.save(conn)
 			.await?;
 
-			file_health_events(conn, server_id, Some(id), &status, &tags).await?;
+			// Health issues derive from the authoritative client's checks
+			// only: another client's stream is stored and answered, but its
+			// checks must not open or close issues on the same refs.
+			if status.client == database::statuses::DEFAULT_CLIENT {
+				file_health_events(conn, server_id, Some(id), &status, &tags).await?;
+			}
 
 			Ok(status)
 		})
