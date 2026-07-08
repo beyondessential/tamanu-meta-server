@@ -6,7 +6,7 @@
 //! - [`staleness`] — staleness scan over reported runs + maintenance staleness.
 //! - [`reconcile`] — reconcile device reports against repo inventory.
 //!
-//! Alerting goes through [`crate::issues::file_canopy_check`], which grades
+//! Alerting goes through [`crate::issues::file_check`], which grades
 //! each observation through the operator's check policy and bypasses the
 //! per-server `is_monitored` gate for group-scoped filings. The preflight
 //! (AWS-touching) lives in the `jobs` crate binary, not here — the

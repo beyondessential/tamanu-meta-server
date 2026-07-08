@@ -23,7 +23,7 @@ use uuid::Uuid;
 
 use crate::{
 	backup::refs,
-	issues::{CanopyCheckFiling, FilingScope, file_canopy_check},
+	issues::{CheckFiling, FilingScope, file_check},
 	servers::Server,
 };
 
@@ -236,9 +236,10 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 		match verdict {
 			StalenessVerdict::Stale => {
 				let grace = row.grace();
-				file_canopy_check(
+				file_check(
 					db,
-					CanopyCheckFiling {
+					CheckFiling {
+						source: crate::statuses::CANOPY_SOURCE,
 						scope: FilingScope::Server {
 							server_id: row.server_id,
 							device_id: row.device_id,
@@ -267,9 +268,10 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 				filed += 1;
 			}
 			StalenessVerdict::Recovered => {
-				file_canopy_check(
+				file_check(
 					db,
-					CanopyCheckFiling {
+					CheckFiling {
+						source: crate::statuses::CANOPY_SOURCE,
 						scope: FilingScope::Server {
 							server_id: row.server_id,
 							device_id: row.device_id,
@@ -299,9 +301,10 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 				// open an incident. A *missed* backup — a server that was
 				// backing up and stopped (`Stale`, above) — is the failure
 				// that pages.
-				file_canopy_check(
+				file_check(
 					db,
-					CanopyCheckFiling {
+					CheckFiling {
+						source: crate::statuses::CANOPY_SOURCE,
 						scope: FilingScope::Server {
 							server_id: row.server_id,
 							device_id: row.device_id,
@@ -331,9 +334,10 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 				if row.last_success_at.is_some()
 					&& open_server_issue_active(db, row.server_id, &never_ref).await?
 				{
-					file_canopy_check(
+					file_check(
 						db,
-						CanopyCheckFiling {
+						CheckFiling {
+							source: crate::statuses::CANOPY_SOURCE,
 							scope: FilingScope::Server {
 								server_id: row.server_id,
 								device_id: row.device_id,
@@ -397,9 +401,10 @@ async fn sweep_maintenance(db: &mut AsyncPgConnection, now: Timestamp) -> Result
 		let was_active = open_group_issue_active(db, group_id, refs::MAINTENANCE_STALE).await?;
 
 		if stale {
-			file_canopy_check(
+			file_check(
 				db,
-				CanopyCheckFiling {
+				CheckFiling {
+					source: crate::statuses::CANOPY_SOURCE,
 					scope: FilingScope::Group(group_id),
 					check: refs::MAINTENANCE_STALE,
 					observed: CheckResult::Failed,
@@ -422,9 +427,10 @@ async fn sweep_maintenance(db: &mut AsyncPgConnection, now: Timestamp) -> Result
 			.await?;
 			filed += 1;
 		} else if !stale && was_active {
-			file_canopy_check(
+			file_check(
 				db,
-				CanopyCheckFiling {
+				CheckFiling {
+					source: crate::statuses::CANOPY_SOURCE,
 					scope: FilingScope::Group(group_id),
 					check: refs::MAINTENANCE_STALE,
 					observed: CheckResult::Passed,
@@ -447,9 +453,10 @@ async fn sweep_maintenance(db: &mut AsyncPgConnection, now: Timestamp) -> Result
 		let err_active = open_group_issue_active(db, group_id, refs::MAINTENANCE_ERROR).await?;
 		match latest_completed {
 			Some(run) if run.outcome == Some(RunOutcome::Failure) => {
-				file_canopy_check(
+				file_check(
 					db,
-					CanopyCheckFiling {
+					CheckFiling {
+						source: crate::statuses::CANOPY_SOURCE,
 						scope: FilingScope::Group(group_id),
 						check: refs::MAINTENANCE_ERROR,
 						observed: CheckResult::Failed,
@@ -473,9 +480,10 @@ async fn sweep_maintenance(db: &mut AsyncPgConnection, now: Timestamp) -> Result
 			// Most recent finished run succeeded (or there is none): clear any
 			// open failure issue.
 			_ if err_active => {
-				file_canopy_check(
+				file_check(
 					db,
-					CanopyCheckFiling {
+					CheckFiling {
+						source: crate::statuses::CANOPY_SOURCE,
 						scope: FilingScope::Group(group_id),
 						check: refs::MAINTENANCE_ERROR,
 						observed: CheckResult::Passed,

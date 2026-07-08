@@ -38,7 +38,7 @@ use uuid::Uuid;
 
 use crate::{
 	backup::{refs, staleness::ScanRow},
-	issues::{CanopyCheckFiling, FilingScope, file_canopy_check},
+	issues::{CheckFiling, FilingScope, file_check},
 	servers::Server,
 };
 
@@ -105,9 +105,10 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 			// missing). Only conclude this when the repo inventory is fresh
 			// enough.
 			(true, false) if inventory_fresh => {
-				file_canopy_check(
+				file_check(
 					db,
-					CanopyCheckFiling {
+					CheckFiling {
+						source: crate::statuses::CANOPY_SOURCE,
 						scope: FilingScope::Group(row.group_id),
 						check: &missing_ref,
 						observed: CheckResult::Failed,
@@ -130,9 +131,10 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 			// Both agree it's fine → clear any open missing alert.
 			(true, true) => {
 				if open_group_active(db, row.group_id, &missing_ref).await? {
-					file_canopy_check(
+					file_check(
 						db,
-						CanopyCheckFiling {
+						CheckFiling {
+							source: crate::statuses::CANOPY_SOURCE,
 							scope: FilingScope::Group(row.group_id),
 							check: &missing_ref,
 							observed: CheckResult::Passed,
@@ -155,9 +157,10 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 			// broken. Per-server warning (non-paging).
 			(false, true) => {
 				let server = Server::get_by_id(db, row.server_id).await?;
-				file_canopy_check(
+				file_check(
 					db,
-					CanopyCheckFiling {
+					CheckFiling {
+						source: crate::statuses::CANOPY_SOURCE,
 						scope: FilingScope::Server {
 							server_id: row.server_id,
 							device_id: row.device_id,
@@ -195,9 +198,10 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 		match sized.get(&(row.server_id, row.r#type.clone())) {
 			Some(&(reported, observed)) if reported != observed => {
 				let server = Server::get_by_id(db, row.server_id).await?;
-				file_canopy_check(
+				file_check(
 					db,
-					CanopyCheckFiling {
+					CheckFiling {
+						source: crate::statuses::CANOPY_SOURCE,
 						scope: FilingScope::Server {
 							server_id: row.server_id,
 							device_id: row.device_id,
@@ -240,9 +244,10 @@ async fn clear_size_mismatch(
 	if !crate::backup::staleness::open_server_issue_active(db, row.server_id, size_ref).await? {
 		return Ok(0);
 	}
-	file_canopy_check(
+	file_check(
 		db,
-		CanopyCheckFiling {
+		CheckFiling {
+			source: crate::statuses::CANOPY_SOURCE,
 			scope: FilingScope::Server {
 				server_id: row.server_id,
 				device_id: row.device_id,
@@ -273,9 +278,10 @@ async fn clear_report_gap(
 	if !crate::backup::staleness::open_server_issue_active(db, row.server_id, gap_ref).await? {
 		return Ok(0);
 	}
-	file_canopy_check(
+	file_check(
 		db,
-		CanopyCheckFiling {
+		CheckFiling {
+			source: crate::statuses::CANOPY_SOURCE,
 			scope: FilingScope::Server {
 				server_id: row.server_id,
 				device_id: row.device_id,

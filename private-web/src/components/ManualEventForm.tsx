@@ -2,13 +2,19 @@ import {
 	Alert as MuiAlert,
 	Box,
 	Button,
+	FormControlLabel,
 	MenuItem,
 	Stack,
+	Switch,
 	TextField,
 } from "@mui/material";
 import { useState } from "react";
 import { useApiAction } from "../api";
-import { SEVERITIES, type Severity } from "../types";
+
+/// Results an operator can raise a manual condition at: a failure can
+/// open an incident; a warning joins one for context only.
+const MANUAL_RESULTS = ["failed", "warning"] as const;
+type ManualResult = (typeof MANUAL_RESULTS)[number];
 
 export default function ManualEventForm({
 	serverId,
@@ -17,7 +23,8 @@ export default function ManualEventForm({
 	serverId: string;
 	onSubmitted?: () => void;
 }) {
-	const [severity, setSeverity] = useState<Severity>("error");
+	const [result, setResult] = useState<ManualResult>("failed");
+	const [escalates, setEscalates] = useState(false);
 	const [message, setMessage] = useState("");
 	const [description, setDescription] = useState("");
 
@@ -30,7 +37,8 @@ export default function ManualEventForm({
 				// Each manual submission is its own issue. Operators that need to
 				// add context to an existing issue use the notes panel instead.
 				ref: crypto.randomUUID(),
-				severity,
+				result,
+				escalates,
 				description: description.trim() === "" ? null : description.trim(),
 				message,
 			});
@@ -46,20 +54,34 @@ export default function ManualEventForm({
 
 	return (
 		<Stack spacing={2} sx={{ pt: 1 }}>
-			<TextField
-				select
-				label="Severity"
-				size="small"
-				value={severity}
-				onChange={(e) => setSeverity(e.target.value as Severity)}
-				sx={{ minWidth: 140, alignSelf: "flex-start" }}
-			>
-				{SEVERITIES.map((s) => (
-					<MenuItem key={s} value={s}>
-						{s}
-					</MenuItem>
-				))}
-			</TextField>
+			<Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
+				<TextField
+					select
+					label="Result"
+					size="small"
+					value={result}
+					onChange={(e) => setResult(e.target.value as ManualResult)}
+					sx={{ minWidth: 140 }}
+				>
+					{MANUAL_RESULTS.map((r) => (
+						<MenuItem key={r} value={r}>
+							{r}
+						</MenuItem>
+					))}
+				</TextField>
+				{result === "failed" && (
+					<FormControlLabel
+						control={
+							<Switch
+								checked={escalates}
+								onChange={(e) => setEscalates(e.target.checked)}
+								size="small"
+							/>
+						}
+						label="Notify immediately"
+					/>
+				)}
+			</Stack>
 			<TextField
 				label="Description (short)"
 				size="small"

@@ -50,7 +50,7 @@ pub const RECONCILE_MISSING: &str = "backup-reconcile-missing";
 
 /// Repo corruption / poisoning detected by the inspection Job. Group-scoped,
 /// registers as an escalating failure. Raised by the inspection-Job component
-/// via [`crate::issues::file_canopy_check`]; this constant is the contract.
+/// via [`crate::issues::file_check`]; this constant is the contract.
 pub const CORRUPTION: &str = "backup-corruption";
 
 /// Canopy's own `sts:GetCallerIdentity` failed — the shared IRSA identity is

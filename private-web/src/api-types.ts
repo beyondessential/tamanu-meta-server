@@ -1749,10 +1749,11 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Manually record an event against a server, creating or updating an issue.
-         * @description Finds or creates an issue keyed by the server and the given `ref`,
-         *     appends this event to it, and returns the resulting issue. Returns 400
-         *     if `ref` is empty or if `description` contains a newline.
+         * Manually raise (or clear) a condition against a server.
+         * @description Finds or creates an issue keyed by the server and the given `ref`
+         *     under the `manual` source, grades the chosen result through the
+         *     condition's catalog policy, and returns the resulting issue. Returns
+         *     400 if `ref` is empty or if `description` contains a newline.
          */
         post: operations["submit_manual_event"];
         delete?: never;
@@ -7036,39 +7037,41 @@ export interface components {
              */
             version_distance?: number | null;
         };
-        /** @description A manually entered event to record against a server. */
+        /** @description A manually raised condition to record against a server. */
         SubmitManualEventArgs: {
             /**
              * @description Whether the underlying condition is currently active. Defaults to
-             *     `true` when omitted.
+             *     `true` when omitted; `false` records it as cleared regardless of
+             *     `result`.
              */
             active?: boolean | null;
             /**
-             * @description Short, single-line headline for the event. Must not contain
+             * @description Short, single-line headline for the condition. Must not contain
              *     newlines — use `message` for multi-line detail.
              */
             description?: string | null;
-            /** @description Human-readable message describing the event. May be multi-line. */
+            /**
+             * @description Whether the condition's failures should notify immediately,
+             *     bypassing the incident grace period. Only consulted the first time
+             *     a `ref` is seen (it seeds the condition's catalog entry); adjust
+             *     later from the healthchecks catalog.
+             */
+            escalates?: boolean | null;
+            /** @description Human-readable message describing the condition. May be multi-line. */
             message: string;
             /**
-             * Format: date-time
-             * @description When the underlying condition actually occurred, if different from
-             *     the time of submission. Defaults to now when omitted.
-             */
-            occurredAt?: string | null;
-            /**
-             * @description Identifier for the underlying condition. Events with the same `ref`
-             *     on the same server are coalesced into the same issue rather than
-             *     opening a new one each time; use a fresh unique value if that
-             *     deduplication isn't wanted.
+             * @description Identifier for the underlying condition. Reports with the same
+             *     `ref` on the same server update the same issue rather than opening
+             *     a new one each time; use a fresh unique value if that deduplication
+             *     isn't wanted.
              */
             ref: string;
+            result?: null | components["schemas"]["CheckResult"];
             /**
              * Format: uuid
-             * @description Id of the server the event applies to.
+             * @description Id of the server the condition applies to.
              */
             serverId: string;
-            severity?: null | components["schemas"]["Severity"];
         };
         /** @description Fleet-wide summary of software versions currently running in production. */
         SummaryData: {

@@ -3462,8 +3462,8 @@
         "tags": [
           "issues"
         ],
-        "summary": "Manually record an event against a server, creating or updating an issue.",
-        "description": "Finds or creates an issue keyed by the server and the given `ref`,\nappends this event to it, and returns the resulting issue. Returns 400\nif `ref` is empty or if `description` contains a newline.",
+        "summary": "Manually raise (or clear) a condition against a server.",
+        "description": "Finds or creates an issue keyed by the server and the given `ref`\nunder the `manual` source, grades the chosen result through the\ncondition's catalog policy, and returns the resulting issue. Returns\n400 if `ref` is empty or if `description` contains a newline.",
         "operationId": "submit_manual_event",
         "requestBody": {
           "content": {
@@ -12184,7 +12184,7 @@
       },
       "SubmitManualEventArgs": {
         "type": "object",
-        "description": "A manually entered event to record against a server.",
+        "description": "A manually raised condition to record against a server.",
         "required": [
           "serverId",
           "ref",
@@ -12196,46 +12196,45 @@
               "boolean",
               "null"
             ],
-            "description": "Whether the underlying condition is currently active. Defaults to\n`true` when omitted."
+            "description": "Whether the underlying condition is currently active. Defaults to\n`true` when omitted; `false` records it as cleared regardless of\n`result`."
           },
           "description": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Short, single-line headline for the event. Must not contain\nnewlines — use `message` for multi-line detail."
+            "description": "Short, single-line headline for the condition. Must not contain\nnewlines — use `message` for multi-line detail."
+          },
+          "escalates": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the condition's failures should notify immediately,\nbypassing the incident grace period. Only consulted the first time\na `ref` is seen (it seeds the condition's catalog entry); adjust\nlater from the healthchecks catalog."
           },
           "message": {
             "type": "string",
-            "description": "Human-readable message describing the event. May be multi-line."
-          },
-          "occurredAt": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time",
-            "description": "When the underlying condition actually occurred, if different from\nthe time of submission. Defaults to now when omitted."
+            "description": "Human-readable message describing the condition. May be multi-line."
           },
           "ref": {
             "type": "string",
-            "description": "Identifier for the underlying condition. Events with the same `ref`\non the same server are coalesced into the same issue rather than\nopening a new one each time; use a fresh unique value if that\ndeduplication isn't wanted."
+            "description": "Identifier for the underlying condition. Reports with the same\n`ref` on the same server update the same issue rather than opening\na new one each time; use a fresh unique value if that deduplication\nisn't wanted."
           },
-          "serverId": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Id of the server the event applies to."
-          },
-          "severity": {
+          "result": {
             "oneOf": [
               {
                 "type": "null"
               },
               {
-                "$ref": "#/components/schemas/Severity",
-                "description": "Severity to record. If omitted, a default severity is used."
+                "$ref": "#/components/schemas/CheckResult",
+                "description": "The condition's result: `failed` (can open an incident) or\n`warning` (context only). Defaults to `failed`. `passed` records\nthe condition as cleared, same as `active: false`."
               }
             ]
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id of the server the condition applies to."
           }
         }
       },

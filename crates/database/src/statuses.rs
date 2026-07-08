@@ -293,9 +293,10 @@ impl Status {
 					},
 				),
 			};
-			crate::issues::file_canopy_check(
+			crate::issues::file_check(
 				db,
-				crate::issues::CanopyCheckFiling {
+				crate::issues::CheckFiling {
+					source: CANOPY_SOURCE,
 					scope: crate::issues::FilingScope::Server {
 						server_id: server.id,
 						device_id: None,

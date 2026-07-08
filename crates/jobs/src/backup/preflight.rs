@@ -12,7 +12,7 @@
 //! (issuance) path is validated at onboarding by private-server's probe, not
 //! here; later drift surfaces as real device backups failing.
 //!
-//! Alerts go through `database::issues::file_canopy_check`, which
+//! Alerts go through `database::issues::file_check`, which
 //! bypasses per-server `is_monitored`. AWS calls are not unit-tested here (no
 //! live AWS in CI); the pure logic — the Object-Lock assertion — is.
 
@@ -26,7 +26,7 @@ use commons_types::status::CheckResult;
 use database::{
 	BackupConfigStatus, ServerGroupBackupConfig,
 	backup::refs,
-	issues::{CanopyCheckFiling, FilingScope, file_canopy_check},
+	issues::{CheckFiling, FilingScope, file_check},
 };
 use jiff::Timestamp;
 use tokio::{
@@ -93,9 +93,10 @@ async fn recover_identity_alert(
 		Issue::active_group_ids_by_source_ref(db, refs::CANOPY_SOURCE, refs::PREFLIGHT_IDENTITY)
 			.await?
 	{
-		file_canopy_check(
+		file_check(
 			db,
-			CanopyCheckFiling {
+			CheckFiling {
+				source: database::statuses::CANOPY_SOURCE,
 				scope: FilingScope::Group(group_id),
 				check: refs::PREFLIGHT_IDENTITY,
 				observed: CheckResult::Passed,
@@ -238,9 +239,10 @@ async fn deep_check_group(
 ) {
 	match run_deep_check(aws, cfg).await {
 		Ok(()) => {
-			let _ = file_canopy_check(
+			let _ = file_check(
 				db,
-				CanopyCheckFiling {
+				CheckFiling {
+					source: database::statuses::CANOPY_SOURCE,
 					scope: FilingScope::Group(cfg.group_id),
 					check: refs::PREFLIGHT_ASSUME,
 					observed: CheckResult::Passed,
@@ -255,9 +257,10 @@ async fn deep_check_group(
 		}
 		Err(msg) => {
 			error!(group = %cfg.group_id, "preflight assume failed: {msg}");
-			let _ = file_canopy_check(
+			let _ = file_check(
 				db,
-				CanopyCheckFiling {
+				CheckFiling {
+					source: database::statuses::CANOPY_SOURCE,
 					scope: FilingScope::Group(cfg.group_id),
 					check: refs::PREFLIGHT_ASSUME,
 					observed: CheckResult::Failed,
@@ -273,9 +276,10 @@ async fn deep_check_group(
 	}
 	match check_object_lock(aws, cfg).await {
 		Ok(()) => {
-			let _ = file_canopy_check(
+			let _ = file_check(
 				db,
-				CanopyCheckFiling {
+				CheckFiling {
+					source: database::statuses::CANOPY_SOURCE,
 					scope: FilingScope::Group(cfg.group_id),
 					check: refs::PREFLIGHT_OBJECT_LOCK,
 					observed: CheckResult::Passed,
@@ -290,9 +294,10 @@ async fn deep_check_group(
 		}
 		Err(msg) => {
 			error!(group = %cfg.group_id, "object-lock check failed: {msg}");
-			let _ = file_canopy_check(
+			let _ = file_check(
 				db,
-				CanopyCheckFiling {
+				CheckFiling {
+					source: database::statuses::CANOPY_SOURCE,
 					scope: FilingScope::Group(cfg.group_id),
 					check: refs::PREFLIGHT_OBJECT_LOCK,
 					observed: CheckResult::Failed,

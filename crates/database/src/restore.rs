@@ -20,7 +20,7 @@ use uuid::Uuid;
 
 use crate::backup::refs;
 use crate::backups::BackupRun;
-use crate::issues::{CanopyCheckFiling, FilingScope, file_canopy_check};
+use crate::issues::{CheckFiling, FilingScope, file_check};
 use crate::pg_duration::PgDuration;
 
 /// An operator's declaration that a restore consumer should maintain a
@@ -452,9 +452,10 @@ async fn recover_old_scope_alerts(
 
 	for sid in servers {
 		let r#ref = restore_verification_ref(sid, old_type, old_intent);
-		file_canopy_check(
+		file_check(
 			db,
-			CanopyCheckFiling {
+			CheckFiling {
+				source: crate::statuses::CANOPY_SOURCE,
 				scope: FilingScope::Group(old_group_id),
 				check: &r#ref,
 				observed: CheckResult::Passed,
@@ -595,9 +596,10 @@ impl BackupRestoreCheck {
 		if let Some(sid) = server_id {
 			let r#ref = restore_verification_ref(sid, &r#type, &intent);
 			if healthy {
-				file_canopy_check(
+				file_check(
 					db,
-					CanopyCheckFiling {
+					CheckFiling {
+						source: crate::statuses::CANOPY_SOURCE,
 						scope: FilingScope::Group(group_id),
 						check: &r#ref,
 						observed: CheckResult::Passed,
@@ -618,9 +620,10 @@ impl BackupRestoreCheck {
 					.clone()
 					.map(|s| format!(" (snapshot {s})"))
 					.unwrap_or_default();
-				file_canopy_check(
+				file_check(
 					db,
-					CanopyCheckFiling {
+					CheckFiling {
+						source: crate::statuses::CANOPY_SOURCE,
 						scope: FilingScope::Group(group_id),
 						check: &r#ref,
 						observed: CheckResult::Failed,
@@ -865,9 +868,10 @@ pub async fn sweep_overdue(db: &mut AsyncPgConnection) -> Result<usize> {
 					d.r#type, d.intent
 				)
 			};
-			file_canopy_check(
+			file_check(
 				db,
-				CanopyCheckFiling {
+				CheckFiling {
+					source: crate::statuses::CANOPY_SOURCE,
 					scope: FilingScope::Group(d.group_id),
 					check: &r#ref,
 					observed: CheckResult::Failed,

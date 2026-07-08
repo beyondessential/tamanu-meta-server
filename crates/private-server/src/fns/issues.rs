@@ -9,7 +9,8 @@ use commons_types::{
 	status::CheckResult,
 };
 use database::issues::{
-	Incident, Issue, IssueFilter, IssueIncidentRef, IssueListFilters, NewEvent,
+	CheckFiling, FilingScope, Incident, Issue, IssueFilter, IssueIncidentRef, IssueListFilters,
+	MANUAL_SOURCE, file_check,
 };
 use database::notes::IssueNote;
 use database::servers::Server;
@@ -446,42 +447,48 @@ pub async fn list_for_server(
 	Ok(Json(enrich_issues(&mut conn, issues).await?))
 }
 
-/// A manually entered event to record against a server.
+/// A manually raised condition to record against a server.
 #[derive(Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SubmitManualEventArgs {
-	/// Id of the server the event applies to.
+	/// Id of the server the condition applies to.
 	pub server_id: Uuid,
-	/// Identifier for the underlying condition. Events with the same `ref`
-	/// on the same server are coalesced into the same issue rather than
-	/// opening a new one each time; use a fresh unique value if that
-	/// deduplication isn't wanted.
+	/// Identifier for the underlying condition. Reports with the same
+	/// `ref` on the same server update the same issue rather than opening
+	/// a new one each time; use a fresh unique value if that deduplication
+	/// isn't wanted.
 	#[serde(rename = "ref")]
 	pub r#ref: String,
-	/// Severity to record. If omitted, a default severity is used.
+	/// The condition's result: `failed` (can open an incident) or
+	/// `warning` (context only). Defaults to `failed`. `passed` records
+	/// the condition as cleared, same as `active: false`.
 	#[serde(default)]
-	pub severity: Option<Severity>,
-	/// Short, single-line headline for the event. Must not contain
+	pub result: Option<CheckResult>,
+	/// Whether the condition's failures should notify immediately,
+	/// bypassing the incident grace period. Only consulted the first time
+	/// a `ref` is seen (it seeds the condition's catalog entry); adjust
+	/// later from the healthchecks catalog.
+	#[serde(default)]
+	pub escalates: Option<bool>,
+	/// Short, single-line headline for the condition. Must not contain
 	/// newlines — use `message` for multi-line detail.
 	#[serde(default)]
 	pub description: Option<String>,
-	/// Human-readable message describing the event. May be multi-line.
+	/// Human-readable message describing the condition. May be multi-line.
 	pub message: String,
 	/// Whether the underlying condition is currently active. Defaults to
-	/// `true` when omitted.
+	/// `true` when omitted; `false` records it as cleared regardless of
+	/// `result`.
 	#[serde(default)]
 	pub active: Option<bool>,
-	/// When the underlying condition actually occurred, if different from
-	/// the time of submission. Defaults to now when omitted.
-	#[serde(default)]
-	pub occurred_at: Option<Timestamp>,
 }
 
-/// Manually record an event against a server, creating or updating an issue.
+/// Manually raise (or clear) a condition against a server.
 ///
-/// Finds or creates an issue keyed by the server and the given `ref`,
-/// appends this event to it, and returns the resulting issue. Returns 400
-/// if `ref` is empty or if `description` contains a newline.
+/// Finds or creates an issue keyed by the server and the given `ref`
+/// under the `manual` source, grades the chosen result through the
+/// condition's catalog policy, and returns the resulting issue. Returns
+/// 400 if `ref` is empty or if `description` contains a newline.
 #[utoipa::path(
 	post,
 	path = "/submit_manual_event",
@@ -502,17 +509,32 @@ pub async fn submit_manual_event(
 		return Err(AppError::custom("ref is required"));
 	}
 
-	let event = NewEvent {
-		source: "manual".to_string(),
-		r#ref: args.r#ref,
-		severity: args.severity,
-		description: args.description,
-		message: args.message,
-		active: args.active,
-		occurred_at: args.occurred_at,
+	let observed = if args.active == Some(false) {
+		CheckResult::Passed
+	} else {
+		args.result.unwrap_or(CheckResult::Failed)
 	};
 	let mut conn = state.db.get().await?;
-	let issue = event.save(&mut conn, args.server_id, None).await?;
+	let issue = file_check(
+		&mut conn,
+		CheckFiling {
+			source: MANUAL_SOURCE,
+			scope: FilingScope::Server {
+				server_id: args.server_id,
+				device_id: None,
+			},
+			check: &args.r#ref,
+			observed,
+			title: args.description.as_deref(),
+			message: &args.message,
+			detail: None,
+			// The operator's chosen result passes through ungraded; the
+			// escalation choice seeds the catalog entry on first sight.
+			default_ceiling: CheckResult::Failed,
+			default_escalates: args.escalates.unwrap_or(false),
+		},
+	)
+	.await?;
 	Ok(Json(enrich_issue(&mut conn, issue).await?))
 }
 

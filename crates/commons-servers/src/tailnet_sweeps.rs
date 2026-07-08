@@ -6,7 +6,7 @@ use commons_errors::Result;
 use commons_types::{Uuid, status::CheckResult};
 use database::{
 	devices::Device,
-	issues::{CanopyCheckFiling, FilingScope, Issue, file_canopy_check},
+	issues::{CheckFiling, FilingScope, Issue, file_check},
 };
 use diesel_async::AsyncPgConnection;
 
@@ -89,9 +89,10 @@ pub async fn sweep_key_expiry(
 			),
 		};
 
-		file_canopy_check(
+		file_check(
 			db,
-			CanopyCheckFiling {
+			CheckFiling {
+				source: TAILSCALE_SOURCE,
 				scope: FilingScope::Server {
 					server_id: *server_id,
 					device_id: Some(device.id),

@@ -113,9 +113,10 @@ pub(crate) async fn complete_inspect(
 		.map_err(|err| err.to_string())?;
 
 	let (observed, title) = corruption_decision(outcome.verify_ok);
-	database::issues::file_canopy_check(
+	database::issues::file_check(
 		db,
-		database::issues::CanopyCheckFiling {
+		database::issues::CheckFiling {
+			source: database::statuses::CANOPY_SOURCE,
 			scope: database::issues::FilingScope::Group(group_id),
 			check: database::backup::refs::CORRUPTION,
 			observed,

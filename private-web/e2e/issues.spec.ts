@@ -1,6 +1,7 @@
 import {
 	resetSeededTables,
 	seedIssue,
+	seedServer,
 	seedServerGroup,
 } from "./seed";
 import { expect, test } from "./test-fixtures";
@@ -57,5 +58,45 @@ test.describe("group-scoped issue rendering", () => {
 		await expect(
 			page.getByRole("button", { name: /for this server/i }),
 		).toHaveCount(0);
+	});
+});
+
+// The manual-condition form speaks the result vocabulary: an operator
+// raises a failed (optionally escalating) or warning condition, which
+// files under the manual source and grades through the catalog.
+test.describe("manual conditions", () => {
+	test.beforeEach(async ({ sql }) => {
+		await resetSeededTables(sql);
+	});
+
+	test("raising a failed condition from the server page files an issue", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "ManualGroup" });
+		const server = await seedServer(sql, {
+			name: "manual-target",
+			kind: "central",
+			groupId: group.id,
+		});
+
+		await page.goto(`/servers/${server.id}`);
+		await page.getByRole("button", { name: /new incident/i }).click();
+
+		const dialog = page.getByRole("dialog");
+		await expect(dialog.getByLabel("Result")).toBeVisible();
+		// A failed condition offers the immediate-notify (escalates) toggle.
+		await expect(
+			dialog.getByRole("switch", { name: /notify immediately/i }),
+		).toBeVisible();
+		await dialog
+			.getByLabel("Description (short)")
+			.fill("Manually raised trouble");
+		await dialog.getByLabel("Message").fill("operator saw smoke");
+		await dialog.getByRole("button", { name: /^submit$/i }).click();
+
+		// The dialog closes and the issue appears in the server's list.
+		await expect(dialog).not.toBeVisible();
+		await expect(page.getByText("Manually raised trouble")).toBeVisible();
 	});
 });

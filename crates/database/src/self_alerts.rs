@@ -13,7 +13,7 @@ use commons_errors::Result;
 use commons_types::status::CheckResult;
 use diesel_async::AsyncPgConnection;
 
-use crate::issues::{CanopyCheckFiling, FilingScope, Issue, file_canopy_check, get_global_issue};
+use crate::issues::{CheckFiling, FilingScope, Issue, file_check, get_global_issue};
 
 /// An operator-notification delivery permanently failed (the drainer gave up
 /// on an outbox row). No automatic recovery: stays until operator-resolved.
@@ -34,9 +34,10 @@ pub async fn raise(
 	title: &str,
 	message: &str,
 ) -> Result<Issue> {
-	file_canopy_check(
+	file_check(
 		conn,
-		CanopyCheckFiling {
+		CheckFiling {
+			source: crate::statuses::CANOPY_SOURCE,
 			scope: FilingScope::Global,
 			check: r#ref,
 			observed,
@@ -68,9 +69,10 @@ pub async fn recover(
 
 	// The catalog entry exists (the active issue implies a prior raise
 	// registered it), so the defaults here are inert.
-	let issue = file_canopy_check(
+	let issue = file_check(
 		conn,
-		CanopyCheckFiling {
+		CheckFiling {
+			source: crate::statuses::CANOPY_SOURCE,
 			scope: FilingScope::Global,
 			check: r#ref,
 			observed: CheckResult::Passed,

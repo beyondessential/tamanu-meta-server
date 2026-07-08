@@ -775,15 +775,23 @@ pub enum FilingScope {
 	Global,
 }
 
-/// One canopy-determined check result to file: reachability, backup
-/// health, key expiry, self-monitoring, and the like.
+/// The source operator-raised manual conditions file under.
+pub const MANUAL_SOURCE: &str = "manual";
+
+/// One canopy-determined or operator-raised check result to file:
+/// reachability, backup health, key expiry, self-monitoring, manual
+/// conditions, and the like.
 #[derive(Debug, Clone)]
-pub struct CanopyCheckFiling<'a> {
+pub struct CheckFiling<'a> {
+	/// The reserved source this filing belongs to: [`MANUAL_SOURCE`] for
+	/// operator-raised conditions (server scope only), `canopy` for
+	/// canopy's own determinations.
+	pub source: &'a str,
 	pub scope: FilingScope,
 	/// The check's stable name (doubles as the issue ref under the
-	/// `canopy` source): a contract with stored silences.
+	/// source): a contract with stored silences.
 	pub check: &'a str,
-	/// What canopy observed this pass. Policy grades it from there.
+	/// What was observed this pass. Policy grades it from there.
 	pub observed: CheckResult,
 	/// Single-line headline for degraded filings.
 	pub title: Option<&'a str>,
@@ -798,22 +806,27 @@ pub struct CanopyCheckFiling<'a> {
 	pub default_escalates: bool,
 }
 
-/// File one canopy-determined check result: register its catalog entry
-/// (first sight only), grade the observation through the operator's
-/// policy, and upsert the check state at the right scope — driving
-/// incident membership exactly like a device-reported check.
+/// File one canopy-determined or operator-raised check result: register
+/// its catalog entry (first sight only), grade the observation through
+/// the operator's policy, and upsert the check state at the right scope
+/// — driving incident membership exactly like a device-reported check.
+///
+/// Group- and canopy-wide scopes are canopy's own (their raise paths
+/// file under the `canopy` source); manual conditions are server-scoped.
 ///
 /// Until issues themselves carry results, the effective result maps to
 /// the issue severity the same way status ingestion does: failed →
 /// error (critical when the policy escalates), warning/broken →
 /// warning; passed and skipped record healthy state and close.
-pub async fn file_canopy_check(
-	conn: &mut AsyncPgConnection,
-	filing: CanopyCheckFiling<'_>,
-) -> Result<Issue> {
+pub async fn file_check(conn: &mut AsyncPgConnection, filing: CheckFiling<'_>) -> Result<Issue> {
 	use crate::check_policies::{CheckPolicy, EvaluationContext};
 
-	let source = crate::statuses::CANOPY_SOURCE;
+	let source = filing.source;
+	debug_assert!(
+		matches!(filing.scope, FilingScope::Server { .. })
+			|| source == crate::statuses::CANOPY_SOURCE,
+		"group- and canopy-wide filings are canopy's own",
+	);
 	CheckPolicy::register(
 		conn,
 		source,
@@ -825,7 +838,11 @@ pub async fn file_canopy_check(
 
 	// Rule-evaluation context: the check's detail (with the normalised
 	// result injected, mirroring status ingestion), no report-wide
-	// extras, and the server's tags where there is a server.
+	// extras, and the server's tags where there is a server. Filings
+	// whose observation policy shouldn't touch (an operator explicitly
+	// raising a manual condition) still flow through so the catalog row
+	// and stamps exist, but manual entries register at a failed ceiling
+	// so the operator's chosen result passes through ungraded by default.
 	let mut check_extra = filing
 		.detail
 		.as_ref()
@@ -876,7 +893,7 @@ pub async fn file_canopy_check(
 			device_id,
 		} => {
 			NewEvent {
-				source: source.into(),
+				source: source.to_string(),
 				r#ref: filing.check.to_string(),
 				severity: Some(severity),
 				description: description.map(str::to_string),

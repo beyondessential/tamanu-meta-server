@@ -98,7 +98,7 @@ async fn incident_groups_at_server_group() {
 			.json(&serde_json::json!({
 				"serverId": server_b_id,
 				"ref": "x",
-				"severity": "error",
+				"result": "failed",
 				"message": "trouble in B",
 			}))
 			.await;
@@ -160,7 +160,7 @@ async fn ungrouped_server_event_skips_incident() {
 			.json(&serde_json::json!({
 				"serverId": server_id,
 				"ref": "x",
-				"severity": "error",
+				"result": "failed",
 				"message": "no group yet",
 			}))
 			.await;
@@ -200,7 +200,7 @@ async fn assigning_group_opens_pending_incident() {
 			.json(&serde_json::json!({
 				"serverId": server_id,
 				"ref": "stuck",
-				"severity": "error",
+				"result": "failed",
 				"message": "waiting to be grouped",
 			}))
 			.await;
@@ -258,7 +258,7 @@ async fn issue_reopen_keeps_identity_and_joins_new_incident() {
 			.json(&serde_json::json!({
 				"serverId": server_id,
 				"ref": "x",
-				"severity": "error",
+				"result": "failed",
 				"message": "trouble",
 			}))
 			.await;
@@ -277,7 +277,7 @@ async fn issue_reopen_keeps_identity_and_joins_new_incident() {
 			.json(&serde_json::json!({
 				"serverId": server_id,
 				"ref": "x",
-				"severity": "error",
+				"result": "failed",
 				"active": false,
 				"message": "ok",
 			}))
@@ -298,7 +298,8 @@ async fn issue_reopen_keeps_identity_and_joins_new_incident() {
 			.json(&serde_json::json!({
 				"serverId": server_id,
 				"ref": "x",
-				"severity": "critical",
+				"result": "failed",
+				"escalates": true,
 				"message": "back",
 			}))
 			.await;
@@ -349,7 +350,7 @@ async fn low_severity_issue_joins_existing_open_incident() {
 			.json(&serde_json::json!({
 				"serverId": server_id,
 				"ref": "a",
-				"severity": "error",
+				"result": "failed",
 				"message": "primary trouble",
 			}))
 			.await
@@ -362,7 +363,7 @@ async fn low_severity_issue_joins_existing_open_incident() {
 			.json(&serde_json::json!({
 				"serverId": server_id,
 				"ref": "b",
-				"severity": "warning",
+				"result": "warning",
 				"message": "ride-along",
 			}))
 			.await
@@ -405,7 +406,7 @@ async fn low_severity_alone_does_not_open_incident() {
 			.json(&serde_json::json!({
 				"serverId": server_id,
 				"ref": "b",
-				"severity": "warning",
+				"result": "warning",
 				"message": "minor",
 			}))
 			.await
@@ -443,7 +444,7 @@ async fn severity_downgrade_keeps_issue_in_incident() {
 			.json(&serde_json::json!({
 				"serverId": server_id,
 				"ref": "x",
-				"severity": "error",
+				"result": "failed",
 				"message": "trouble",
 			}))
 			.await
@@ -455,7 +456,7 @@ async fn severity_downgrade_keeps_issue_in_incident() {
 			.json(&serde_json::json!({
 				"serverId": server_id,
 				"ref": "x",
-				"severity": "warning",
+				"result": "warning",
 				"message": "less bad now",
 			}))
 			.await
@@ -494,7 +495,7 @@ async fn open_issue(
 		.json(&serde_json::json!({
 			"serverId": server_id,
 			"ref": "x",
-			"severity": "error",
+			"result": "failed",
 			"message": "trouble",
 		}))
 		.await;
@@ -598,7 +599,7 @@ async fn reopen_via_device_clears_resolved_fields() {
 				.json(&serde_json::json!({
 					"source": "watchdog",
 					"ref": "x",
-					"severity": "error",
+					"result": "failed",
 					"message": "trouble",
 				}))
 				.await;
@@ -625,7 +626,7 @@ async fn reopen_via_device_clears_resolved_fields() {
 				.json(&serde_json::json!({
 					"source": "watchdog",
 					"ref": "x",
-					"severity": "error",
+					"result": "failed",
 					"message": "back again",
 				}))
 				.await;
@@ -676,7 +677,8 @@ async fn snooze_leaves_incident_and_blocks_rejoin() {
 			.json(&serde_json::json!({
 				"serverId": server_id,
 				"ref": "x",
-				"severity": "critical",
+				"result": "failed",
+				"escalates": true,
 				"message": "still flapping",
 			}))
 			.await
@@ -737,7 +739,7 @@ async fn unmonitored_server_event_does_not_open_incident() {
 			.json(&serde_json::json!({
 				"serverId": server_id,
 				"ref": "ignored",
-				"severity": "error",
+				"result": "failed",
 				"message": "should not open an incident",
 			}))
 			.await;
@@ -785,7 +787,7 @@ async fn enabling_monitoring_opens_pending_incident() {
 			.json(&serde_json::json!({
 				"serverId": server_id,
 				"ref": "stuck",
-				"severity": "error",
+				"result": "failed",
 				"message": "waiting to be re-enabled",
 			}))
 			.await;
@@ -878,7 +880,7 @@ async fn silencing_server_ref_closes_only_matching_open_incident() {
 			.json(&serde_json::json!({
 				"serverId": server_id,
 				"ref": "other",
-				"severity": "error",
+				"result": "failed",
 				"message": "second contributor",
 			}))
 			.await;
@@ -1001,7 +1003,7 @@ async fn group_silence_blocks_events_from_all_members() {
 				.json(&serde_json::json!({
 					"serverId": sid,
 					"ref": "noisy",
-					"severity": "error",
+					"result": "failed",
 					"message": "should not fire",
 				}))
 				.await;
@@ -1020,7 +1022,7 @@ async fn group_silence_blocks_events_from_all_members() {
 			.json(&serde_json::json!({
 				"serverId": server_a,
 				"ref": "other",
-				"severity": "error",
+				"result": "failed",
 				"message": "should still fire",
 			}))
 			.await;
