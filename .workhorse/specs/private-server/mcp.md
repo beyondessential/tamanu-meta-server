@@ -78,22 +78,21 @@ When the result is truncated to its bound, the result says so, so the client doe
 
 ### Incidents and issues
 
-An issue is a per-server (or per-group) condition raised from a known source under a stable reference, carrying a severity, a current active state, and a history of events; an incident aggregates the issues active for a group over a span of time, from when it opened until it closes or an operator resolves it.
+An issue is a degraded check state (see [CHK](../monitoring/checks.md)): a condition on a server, a group, or Canopy itself, reported by a known source under a stable check name, carrying a severity and a current active state; an incident aggregates the issues active on a target over a span of time, from when it opened until it closes or an operator resolves it (see [INC](../monitoring/incidents.md)).
 
 **Find incidents** takes a look-back window (in days, defaulting to a week) and optionally one group, and returns the incidents that were open at any point within that window — those still open, plus those that closed no earlier than the window start.
-Each is returned with its group, its status (open, closed, or operator-resolved), when it opened, closed, and was resolved, who resolved it and why, whether it ever escalated, how long it was open, whether it was published, and how many issues and events it covers.
+Each is returned with its target, its status (open, closed, or operator-resolved), when it opened, closed, and was resolved, who resolved it and why, whether it ever escalated, how long it was open, whether it was published, and how many issues it covers.
 A status filter can narrow the result to only open or only resolved incidents.
 
 The window includes incidents that flapped open and shut within their group's grace period and so never surfaced to anyone.
 Each incident therefore carries a **published** flag — true when it actually notified operators, which happens only when it stayed open past its group's grace period or it escalated (a critical issue joined, which bypasses the grace) — and the result reports how many of the returned incidents were published.
-The raw event count an incident accumulated is not a measure of its duration or severity: a high count can belong to a sub-minute flap.
 A summary or ranking of incidents should count published incidents rather than raw rows unless raw activity is explicitly wanted.
 
-**Get incident** takes an incident identifier and returns the incident with the issues attached to it: each issue's severity, source, reference, message, owning server, active state, and when it joined and (if applicable) left the incident.
+**Get incident** takes an incident identifier and returns the incident with the issues attached to it: each issue's severity, source, check name, message, owning server, active state, and when it joined and (if applicable) left the incident.
 
 **Find issues** returns issues across the fleet, filtered by active state, by severity, by group, by server, and by recency (issues last seen within a look-back window).
 
-**Get issue** takes an issue identifier and returns the issue with its recent events and the incidents it is or was part of.
+**Get issue** takes an issue identifier and returns the issue with the incidents it is or was part of.
 
 ## Result semantics
 
