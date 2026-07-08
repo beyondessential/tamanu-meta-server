@@ -5,7 +5,6 @@ use std::{
 
 use commons_errors::{AppError, Result};
 use commons_types::{
-	issue::Severity,
 	server::rank::ServerRank,
 	status::{CheckResult, HealthState, ShortStatus},
 	version::VersionStr,
@@ -19,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use crate::issues::{Issue, NewEvent};
+use crate::issues::Issue;
 use crate::servers::Server;
 
 /// Source value canopy uses when it files reachability issues on behalf of a
@@ -270,24 +269,16 @@ impl Status {
 			};
 			let existing = issue_map.get(&server.id).copied();
 
-			let event = match (down, existing) {
+			let (observed, message) = match (down, existing) {
 				(false, None) => continue,
 				(false, Some(issue)) if !issue.active => continue,
-				(false, Some(_)) => NewEvent {
-					source: CANOPY_SOURCE.into(),
-					r#ref: REACHABILITY_REF.into(),
-					severity: Some(Severity::Info),
-					description: None,
-					message: format!("Server {} is reachable again", server_label(server)),
-					active: Some(false),
-					occurred_at: Some(now),
-				},
-				(true, _) => NewEvent {
-					source: CANOPY_SOURCE.into(),
-					r#ref: REACHABILITY_REF.into(),
-					severity: Some(Severity::Error),
-					description: None,
-					message: match elapsed {
+				(false, Some(_)) => (
+					CheckResult::Passed,
+					format!("Server {} is reachable again", server_label(server)),
+				),
+				(true, _) => (
+					CheckResult::Failed,
+					match elapsed {
 						Some(e) => format!(
 							"Server {} has not reported for {} (threshold {})",
 							server_label(server),
@@ -300,11 +291,28 @@ impl Status {
 							format_secs(threshold.as_secs()),
 						),
 					},
-					active: Some(true),
-					occurred_at: Some(now),
-				},
+				),
 			};
-			event.save(db, server.id, None).await?;
+			crate::issues::file_canopy_check(
+				db,
+				crate::issues::CanopyCheckFiling {
+					scope: crate::issues::FilingScope::Server {
+						server_id: server.id,
+						device_id: None,
+					},
+					check: REACHABILITY_REF,
+					observed,
+					title: Some("Server unreachable"),
+					message: &message,
+					detail: Some(serde_json::json!({
+						"elapsed_secs": elapsed.map(|e| e.as_secs()),
+						"threshold_secs": threshold.as_secs(),
+					})),
+					default_ceiling: CheckResult::Failed,
+					default_escalates: false,
+				},
+			)
+			.await?;
 			filed += 1;
 		}
 		Ok(filed)

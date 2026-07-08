@@ -234,15 +234,61 @@ pub struct IssueListFilters {
 
 /// The check-state stamp accompanying a filing that is a check result:
 /// which check, both sides of the policy transform, and the check's own
-/// detail from the report. Filings that aren't check results (sweeps,
-/// manual events, device event pushes) carry no stamp and leave the
-/// state columns null until they migrate onto the check-state model.
+/// detail from the report. Filings that aren't check results (device
+/// event pushes, producers not yet on the check-state model) carry no
+/// stamp and leave the state columns null.
 #[derive(Debug, Clone)]
 pub struct CheckStateStamp {
 	pub check: String,
 	pub observed: CheckResult,
 	pub effective: CheckResult,
 	pub detail: Option<serde_json::Value>,
+}
+
+/// Write a filing's check-state stamp onto its issue row, maintaining the
+/// degraded-streak timestamps: `degraded_since` holds while degraded
+/// (starting a fresh streak on the healthy → degraded transition, using
+/// `prior` — the row's value before this filing), clears on recovery;
+/// `last_degraded_at` never clears. Returns the updated row.
+async fn stamp_check_state(
+	conn: &mut AsyncPgConnection,
+	issue_id: Uuid,
+	prior: Option<(Option<Timestamp>, Option<Timestamp>)>,
+	stamp: &CheckStateStamp,
+	at: Timestamp,
+) -> Result<Issue> {
+	use crate::schema::issues;
+
+	let degraded = matches!(
+		stamp.effective,
+		CheckResult::Warning | CheckResult::Failed | CheckResult::Broken
+	);
+	let (prior_degraded_since, prior_last_degraded) = prior.unwrap_or((None, None));
+	let degraded_since = if degraded {
+		Some(jiff_diesel::Timestamp::from(
+			prior_degraded_since.unwrap_or(at),
+		))
+	} else {
+		None
+	};
+	let last_degraded_at = if degraded {
+		Some(jiff_diesel::Timestamp::from(at))
+	} else {
+		prior_last_degraded.map(jiff_diesel::Timestamp::from)
+	};
+	diesel::update(issues::table.filter(issues::id.eq(issue_id)))
+		.set((
+			issues::check_name.eq(&stamp.check),
+			issues::observed_result.eq(stamp.observed.to_string()),
+			issues::effective_result.eq(stamp.effective.to_string()),
+			issues::detail.eq(&stamp.detail),
+			issues::degraded_since.eq(degraded_since),
+			issues::last_degraded_at.eq(last_degraded_at),
+		))
+		.returning(Issue::as_select())
+		.get_result(conn)
+		.await
+		.map_err(AppError::from)
 }
 
 impl NewEvent {
@@ -338,33 +384,14 @@ impl NewEvent {
 				// in unresolved state).
 				let clear_resolved = active && existing.resolved_at.is_some();
 				if let Some(stamp) = state {
-					let degraded = matches!(
-						stamp.effective,
-						CheckResult::Warning | CheckResult::Failed | CheckResult::Broken
-					);
-					let degraded_since = if degraded {
-						Some(jiff_diesel::Timestamp::from(
-							existing.degraded_since.unwrap_or(effective_time),
-						))
-					} else {
-						None
-					};
-					let last_degraded_at = if degraded {
-						Some(jiff_diesel::Timestamp::from(effective_time))
-					} else {
-						existing.last_degraded_at.map(jiff_diesel::Timestamp::from)
-					};
-					diesel::update(issues::table.filter(issues::id.eq(existing.id)))
-						.set((
-							issues::check_name.eq(&stamp.check),
-							issues::observed_result.eq(stamp.observed.to_string()),
-							issues::effective_result.eq(stamp.effective.to_string()),
-							issues::detail.eq(&stamp.detail),
-							issues::degraded_since.eq(degraded_since),
-							issues::last_degraded_at.eq(last_degraded_at),
-						))
-						.execute(conn)
-						.await?;
+					stamp_check_state(
+						conn,
+						existing.id,
+						Some((existing.degraded_since, existing.last_degraded_at)),
+						stamp,
+						effective_time,
+					)
+					.await?;
 				}
 				let issue = diesel::update(issues::table.filter(issues::id.eq(existing.id)))
 					.set((
@@ -401,7 +428,7 @@ impl NewEvent {
 					.await?;
 				issue
 			} else {
-				diesel::insert_into(issues::table)
+				let inserted: Issue = diesel::insert_into(issues::table)
 					.values((
 						issues::server_id.eq(server_id),
 						issues::device_id.eq(device_id),
@@ -413,32 +440,16 @@ impl NewEvent {
 						issues::active.eq(active),
 						issues::first_seen.eq(jiff_diesel::Timestamp::from(effective_time)),
 						issues::last_seen.eq(jiff_diesel::Timestamp::from(effective_time)),
-						issues::check_name.eq(state.map(|s| s.check.as_str())),
-						issues::observed_result.eq(state.map(|s| s.observed.to_string())),
-						issues::effective_result.eq(state.map(|s| s.effective.to_string())),
-						issues::detail.eq(state.and_then(|s| s.detail.as_ref())),
-						issues::degraded_since.eq(state
-							.filter(|s| {
-								matches!(
-									s.effective,
-									CheckResult::Warning
-										| CheckResult::Failed | CheckResult::Broken
-								)
-							})
-							.map(|_| jiff_diesel::Timestamp::from(effective_time))),
-						issues::last_degraded_at.eq(state
-							.filter(|s| {
-								matches!(
-									s.effective,
-									CheckResult::Warning
-										| CheckResult::Failed | CheckResult::Broken
-								)
-							})
-							.map(|_| jiff_diesel::Timestamp::from(effective_time))),
 					))
 					.returning(Issue::as_select())
 					.get_result(conn)
-					.await?
+					.await?;
+				match state {
+					Some(stamp) => {
+						stamp_check_state(conn, inserted.id, None, stamp, effective_time).await?
+					}
+					None => inserted,
+				}
 			};
 
 			// 2. (re-)evaluate incident contribution against the new issue state.
@@ -489,6 +500,31 @@ pub async fn raise_group_event(
 	message: &str,
 	active: bool,
 ) -> Result<Issue> {
+	raise_group_event_with_state(
+		conn,
+		group_id,
+		r#ref,
+		severity,
+		description,
+		message,
+		active,
+		None,
+	)
+	.await
+}
+
+/// [`raise_group_event`], stamping the issue's check-state columns.
+#[allow(clippy::too_many_arguments)]
+pub async fn raise_group_event_with_state(
+	conn: &mut AsyncPgConnection,
+	group_id: Uuid,
+	r#ref: &str,
+	severity: Severity,
+	description: Option<&str>,
+	message: &str,
+	active: bool,
+	state: Option<&CheckStateStamp>,
+) -> Result<Issue> {
 	use crate::schema::issues;
 
 	if let Some(d) = description
@@ -517,6 +553,9 @@ pub async fn raise_group_event(
 			.await
 			.optional()?;
 
+		let prior_state = existing
+			.as_ref()
+			.map(|e| (e.degraded_since, e.last_degraded_at));
 		let issue: Issue = if let Some(existing) = existing {
 			let new_last_seen = if now > existing.last_seen {
 				now
@@ -574,6 +613,11 @@ pub async fn raise_group_event(
 				.await?
 		};
 
+		let issue = match state {
+			Some(stamp) => stamp_check_state(conn, issue.id, prior_state, stamp, now).await?,
+			None => issue,
+		};
+
 		// 2. group-aware incident evaluation — monitored = true unconditionally.
 		re_evaluate_incident_membership(
 			conn,
@@ -606,6 +650,19 @@ pub async fn raise_global_event(
 	message: &str,
 	active: bool,
 ) -> Result<Issue> {
+	raise_global_event_with_state(conn, r#ref, severity, description, message, active, None).await
+}
+
+/// [`raise_global_event`], stamping the issue's check-state columns.
+pub async fn raise_global_event_with_state(
+	conn: &mut AsyncPgConnection,
+	r#ref: &str,
+	severity: Severity,
+	description: Option<&str>,
+	message: &str,
+	active: bool,
+	state: Option<&CheckStateStamp>,
+) -> Result<Issue> {
 	use crate::schema::issues;
 
 	if let Some(d) = description
@@ -634,6 +691,9 @@ pub async fn raise_global_event(
 			.await
 			.optional()?;
 
+		let prior_state = existing
+			.as_ref()
+			.map(|e| (e.degraded_since, e.last_degraded_at));
 		let issue: Issue = if let Some(existing) = existing {
 			let new_last_seen = if now > existing.last_seen {
 				now
@@ -690,6 +750,11 @@ pub async fn raise_global_event(
 				.await?
 		};
 
+		let issue = match state {
+			Some(stamp) => stamp_check_state(conn, issue.id, prior_state, stamp, now).await?,
+			None => issue,
+		};
+
 		// Global incident evaluation — always monitored.
 		re_evaluate_incident_membership(conn, &issue, IncidentTarget::Global, true, now, None)
 			.await?;
@@ -697,6 +762,157 @@ pub async fn raise_global_event(
 		Ok(issue)
 	})
 	.await
+}
+
+/// Where a canopy-determined check's state attaches.
+#[derive(Debug, Clone, Copy)]
+pub enum FilingScope {
+	Server {
+		server_id: Uuid,
+		device_id: Option<Uuid>,
+	},
+	Group(Uuid),
+	Global,
+}
+
+/// One canopy-determined check result to file: reachability, backup
+/// health, key expiry, self-monitoring, and the like.
+#[derive(Debug, Clone)]
+pub struct CanopyCheckFiling<'a> {
+	pub scope: FilingScope,
+	/// The check's stable name (doubles as the issue ref under the
+	/// `canopy` source): a contract with stored silences.
+	pub check: &'a str,
+	/// What canopy observed this pass. Policy grades it from there.
+	pub observed: CheckResult,
+	/// Single-line headline for degraded filings.
+	pub title: Option<&'a str>,
+	pub message: &'a str,
+	/// The check's own fields, available to policy rules as `check.*`
+	/// and displayed alongside the state.
+	pub detail: Option<serde_json::Value>,
+	/// The policy this check registers with on first sight — the ceiling
+	/// and escalation its condition warrants. Operator edits stick;
+	/// these only seed the catalog row.
+	pub default_ceiling: CheckResult,
+	pub default_escalates: bool,
+}
+
+/// File one canopy-determined check result: register its catalog entry
+/// (first sight only), grade the observation through the operator's
+/// policy, and upsert the check state at the right scope — driving
+/// incident membership exactly like a device-reported check.
+///
+/// Until issues themselves carry results, the effective result maps to
+/// the issue severity the same way status ingestion does: failed →
+/// error (critical when the policy escalates), warning/broken →
+/// warning; passed and skipped record healthy state and close.
+pub async fn file_canopy_check(
+	conn: &mut AsyncPgConnection,
+	filing: CanopyCheckFiling<'_>,
+) -> Result<Issue> {
+	use crate::check_policies::{CheckPolicy, EvaluationContext};
+
+	let source = crate::statuses::CANOPY_SOURCE;
+	CheckPolicy::register(
+		conn,
+		source,
+		filing.check,
+		filing.default_ceiling,
+		filing.default_escalates,
+	)
+	.await?;
+
+	// Rule-evaluation context: the check's detail (with the normalised
+	// result injected, mirroring status ingestion), no report-wide
+	// extras, and the server's tags where there is a server.
+	let mut check_extra = filing
+		.detail
+		.as_ref()
+		.and_then(|d| d.as_object().cloned())
+		.unwrap_or_default();
+	check_extra.insert(
+		"result".into(),
+		serde_json::Value::String(filing.observed.to_string()),
+	);
+	let status_extra = serde_json::Map::new();
+	let tags: std::collections::HashMap<String, serde_json::Value> = match filing.scope {
+		FilingScope::Server { server_id, .. } => {
+			let server = Server::get_by_id(conn, server_id).await?;
+			server
+				.tags_merged_with_group(conn)
+				.await?
+				.0
+				.into_iter()
+				.map(|(k, v)| (k, serde_json::Value::String(v)))
+				.collect()
+		}
+		_ => Default::default(),
+	};
+	let ctx = EvaluationContext {
+		status_extra: &status_extra,
+		check_extra: &check_extra,
+		tags: &tags,
+	};
+	let graded = CheckPolicy::apply(conn, source, filing.check, filing.observed, &ctx).await?;
+
+	let (severity, active) = match graded.effective {
+		CheckResult::Failed if graded.escalates => (Severity::Critical, true),
+		CheckResult::Failed => (Severity::Error, true),
+		CheckResult::Warning | CheckResult::Broken => (Severity::Warning, true),
+		CheckResult::Passed | CheckResult::Skipped => (Severity::Info, false),
+	};
+	let description = if active { filing.title } else { None };
+	let stamp = CheckStateStamp {
+		check: filing.check.to_string(),
+		observed: filing.observed,
+		effective: graded.effective,
+		detail: filing.detail.clone(),
+	};
+
+	match filing.scope {
+		FilingScope::Server {
+			server_id,
+			device_id,
+		} => {
+			NewEvent {
+				source: source.into(),
+				r#ref: filing.check.to_string(),
+				severity: Some(severity),
+				description: description.map(str::to_string),
+				message: filing.message.to_string(),
+				active: Some(active),
+				occurred_at: None,
+			}
+			.save_with_state(conn, server_id, device_id, Some(&stamp))
+			.await
+		}
+		FilingScope::Group(gid) => {
+			raise_group_event_with_state(
+				conn,
+				gid,
+				filing.check,
+				severity,
+				description,
+				filing.message,
+				active,
+				Some(&stamp),
+			)
+			.await
+		}
+		FilingScope::Global => {
+			raise_global_event_with_state(
+				conn,
+				filing.check,
+				severity,
+				description,
+				filing.message,
+				active,
+				Some(&stamp),
+			)
+			.await
+		}
+	}
 }
 
 /// The canopy-wide issue at `(canopy, ref)`, if it has ever been raised.
