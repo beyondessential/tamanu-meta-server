@@ -1616,6 +1616,14 @@
             "format": "date-time",
             "description": "When this issue was first created."
           },
+          "degraded_since": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the current degradation streak began, for state that is\ncurrently degraded (effective warning/failed/broken). `None` while\nhealthy; a recovery clears it and a later degradation starts a\nfresh streak."
+          },
           "description": {
             "type": [
               "string",
@@ -1654,6 +1662,14 @@
             "type": "string",
             "format": "uuid",
             "description": "Unique identifier for this issue."
+          },
+          "last_degraded_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this state last filed degraded. Never cleared: distinguishes\na recovered issue (worth listing) from always-healthy check state."
           },
           "last_seen": {
             "type": "string",

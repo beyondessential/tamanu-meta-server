@@ -307,6 +307,8 @@ diesel::table! {
 		observed_result -> Nullable<Text>,
 		effective_result -> Nullable<Text>,
 		detail -> Nullable<Jsonb>,
+		degraded_since -> Nullable<Timestamptz>,
+		last_degraded_at -> Nullable<Timestamptz>,
 	}
 }
 

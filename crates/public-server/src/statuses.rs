@@ -502,16 +502,61 @@ async fn file_health_events(
 		effective.insert(check, graded);
 	}
 
-	// Per-check opens: every degraded effective result files on the one
-	// ref per check. An effective broken result neither confirms nor
-	// clears the previous definite result: the filing retains the open
-	// issue's contribution (its current severity), or warns that the
-	// check is broken when there was nothing to retain.
-	for (check, graded) in &effective {
-		let (severity, described) = match graded.effective {
-			CheckResult::Failed if graded.escalates => (Severity::Critical, "failed"),
-			CheckResult::Failed => (Severity::Error, "failed"),
-			CheckResult::Warning => (Severity::Warning, "warned"),
+	// The pushing source's previously-open issues: consulted for close
+	// messages ("recovered" vs "was never trouble") and for the
+	// unmentioned-check closes below.
+	let health_prefix = format!("{HEALTH_REF}/");
+	let previously_active: std::collections::BTreeSet<String> =
+		Issue::active_refs_with_prefix(conn, server_id, &status.source, &health_prefix)
+			.await?
+			.into_iter()
+			.filter_map(|r| {
+				r.strip_prefix(&health_prefix)
+					.map(|check| check.to_string())
+			})
+			.collect();
+
+	// File every check in the push — passing ones included, so the state
+	// row records the current result and when it was last reported. An
+	// effective broken result neither confirms nor clears the previous
+	// definite result: the filing retains the open issue's contribution
+	// (its current severity), or warns that the check is broken when
+	// there was nothing to retain.
+	//
+	// Degraded checks file before recoveries: when one failure swaps for
+	// another in a single push, the incoming failure must join the open
+	// incident before the outgoing one leaves, or the incident closes
+	// and reopens as two.
+	let filing_order = effective.iter().filter(|(_, g)| {
+		matches!(
+			g.effective,
+			CheckResult::Warning | CheckResult::Failed | CheckResult::Broken
+		)
+	});
+	let filing_order = filing_order.chain(
+		effective
+			.iter()
+			.filter(|(_, g)| matches!(g.effective, CheckResult::Passed | CheckResult::Skipped)),
+	);
+	for (check, graded) in filing_order {
+		let was_active = previously_active.contains(*check);
+		let (severity, active, description, message) = match graded.effective {
+			CheckResult::Failed => (
+				if graded.escalates {
+					Severity::Critical
+				} else {
+					Severity::Error
+				},
+				true,
+				Some(format!("Health check '{check}' failed")),
+				None,
+			),
+			CheckResult::Warning => (
+				Severity::Warning,
+				true,
+				Some(format!("Health check '{check}' warned")),
+				None,
+			),
 			CheckResult::Broken => {
 				let retained = Issue::list_by_source_ref(
 					conn,
@@ -525,9 +570,33 @@ async fn file_health_events(
 				.filter(|i| i.active)
 				.map(|i| i.severity)
 				.unwrap_or(Severity::Warning);
-				(retained, "is broken")
+				(
+					retained,
+					true,
+					Some(format!("Health check '{check}' is broken")),
+					None,
+				)
 			}
-			CheckResult::Passed | CheckResult::Skipped => continue,
+			CheckResult::Passed => (
+				Severity::Info,
+				false,
+				None,
+				Some(if was_active {
+					format!("Health check '{check}' recovered")
+				} else {
+					format!("Health check '{check}' passing")
+				}),
+			),
+			CheckResult::Skipped => (
+				Severity::Info,
+				false,
+				None,
+				Some(if was_active {
+					format!("Health check '{check}' is now skipped")
+				} else {
+					format!("Health check '{check}' skipped")
+				}),
+			),
 		};
 		let entry = find_health_entry(&status.health, check);
 		let stamp = CheckStateStamp {
@@ -540,64 +609,37 @@ async fn file_health_events(
 			source: status.source.clone(),
 			r#ref: format!("{HEALTH_REF}/{check}"),
 			severity: Some(severity),
-			description: Some(format!("Health check '{check}' {described}")),
-			message: per_check_description(entry).unwrap_or_default(),
-			active: Some(true),
+			description,
+			message: message
+				.or_else(|| per_check_description(entry))
+				.unwrap_or_default(),
+			active: Some(active),
 			occurred_at,
 		}
 		.save_with_state(conn, server_id, device_id, Some(&stamp))
 		.await?;
 	}
 
-	// Per-check closes are derived from the issues that are actually
-	// open, not from the previous status row: an issue can stay open
-	// across pushes that don't re-file it (failed → broken keeps the
-	// failure open), so the previous push alone can't tell us what
-	// needs closing.
-
-	// Closes: an open `health/<check>` closes when the check's effective
-	// result is now passed or skipped, or the check is unmentioned
-	// ("trust the reporter"). Effective broken keeps it open — the check
-	// can't confirm its condition either way while broken. Scoped to the
-	// pushing source: one source's push says nothing about another's
-	// checks.
-	let health_prefix = format!("{HEALTH_REF}/");
-	for r#ref in
-		Issue::active_refs_with_prefix(conn, server_id, &status.source, &health_prefix).await?
-	{
-		let Some(check) = r#ref.strip_prefix(&health_prefix) else {
-			continue;
-		};
-		let curr = curr_check_results.get(check);
-		let keeps_open = matches!(
-			effective.get(&check.to_string()).map(|g| g.effective),
-			Some(CheckResult::Warning | CheckResult::Failed | CheckResult::Broken)
-		);
-		if keeps_open {
+	// Unmentioned closes: a check the source previously reported but
+	// omits from this push has recovered ("trust the reporter"). Scoped
+	// to the pushing source: one source's push says nothing about
+	// another's checks.
+	for check in &previously_active {
+		if curr_check_results.contains_key(check) {
 			continue;
 		}
-		let message = if matches!(curr, Some(CheckResult::Skipped)) {
-			format!("Health check '{check}' is now skipped")
-		} else {
-			format!("Health check '{check}' recovered")
-		};
-		let entry = find_health_entry(&status.health, check);
-		let observed = curr.copied().unwrap_or(CheckResult::Passed);
 		let stamp = CheckStateStamp {
-			check: check.to_string(),
-			observed,
-			effective: effective
-				.get(&check.to_string())
-				.map(|g| g.effective)
-				.unwrap_or(observed),
-			detail: entry.cloned().map(serde_json::Value::Object),
+			check: check.clone(),
+			observed: CheckResult::Passed,
+			effective: CheckResult::Passed,
+			detail: None,
 		};
 		NewEvent {
 			source: status.source.clone(),
-			r#ref,
+			r#ref: format!("{HEALTH_REF}/{check}"),
 			severity: Some(Severity::Info),
 			description: None,
-			message,
+			message: format!("Health check '{check}' recovered"),
 			active: Some(false),
 			occurred_at,
 		}

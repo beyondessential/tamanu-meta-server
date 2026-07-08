@@ -100,6 +100,16 @@ pub struct Issue {
 	/// The check's own fields from the latest report, verbatim (minus the
 	/// reserved keys), for display alongside the state.
 	pub detail: Option<serde_json::Value>,
+	/// When the current degradation streak began, for state that is
+	/// currently degraded (effective warning/failed/broken). `None` while
+	/// healthy; a recovery clears it and a later degradation starts a
+	/// fresh streak.
+	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
+	pub degraded_since: Option<Timestamp>,
+	/// When this state last filed degraded. Never cleared: distinguishes
+	/// a recovered issue (worth listing) from always-healthy check state.
+	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
+	pub last_degraded_at: Option<Timestamp>,
 }
 
 /// Diesel helper: a nullable text column read as an optional
@@ -326,12 +336,30 @@ impl NewEvent {
 				// in unresolved state).
 				let clear_resolved = active && existing.resolved_at.is_some();
 				if let Some(stamp) = state {
+					let degraded = matches!(
+						stamp.effective,
+						CheckResult::Warning | CheckResult::Failed | CheckResult::Broken
+					);
+					let degraded_since = if degraded {
+						Some(jiff_diesel::Timestamp::from(
+							existing.degraded_since.unwrap_or(effective_time),
+						))
+					} else {
+						None
+					};
+					let last_degraded_at = if degraded {
+						Some(jiff_diesel::Timestamp::from(effective_time))
+					} else {
+						existing.last_degraded_at.map(jiff_diesel::Timestamp::from)
+					};
 					diesel::update(issues::table.filter(issues::id.eq(existing.id)))
 						.set((
 							issues::check_name.eq(&stamp.check),
 							issues::observed_result.eq(stamp.observed.to_string()),
 							issues::effective_result.eq(stamp.effective.to_string()),
 							issues::detail.eq(&stamp.detail),
+							issues::degraded_since.eq(degraded_since),
+							issues::last_degraded_at.eq(last_degraded_at),
 						))
 						.execute(conn)
 						.await?;
@@ -387,6 +415,24 @@ impl NewEvent {
 						issues::observed_result.eq(state.map(|s| s.observed.to_string())),
 						issues::effective_result.eq(state.map(|s| s.effective.to_string())),
 						issues::detail.eq(state.and_then(|s| s.detail.as_ref())),
+						issues::degraded_since.eq(state
+							.filter(|s| {
+								matches!(
+									s.effective,
+									CheckResult::Warning
+										| CheckResult::Failed | CheckResult::Broken
+								)
+							})
+							.map(|_| jiff_diesel::Timestamp::from(effective_time))),
+						issues::last_degraded_at.eq(state
+							.filter(|s| {
+								matches!(
+									s.effective,
+									CheckResult::Warning
+										| CheckResult::Failed | CheckResult::Broken
+								)
+							})
+							.map(|_| jiff_diesel::Timestamp::from(effective_time))),
 					))
 					.returning(Issue::as_select())
 					.get_result(conn)
@@ -1309,6 +1355,9 @@ impl Issue {
 		let mut q = dsl::issues
 			.select(Self::as_select())
 			.filter(dsl::device_id.eq(device_id))
+			// Healthy check state (rows that never degraded) isn't an
+			// issue; it has its own read surfaces.
+			.filter(dsl::active.eq(true).or(dsl::last_degraded_at.is_not_null()))
 			.into_boxed();
 		if filter == IssueFilter::ActiveOnly {
 			q = q
@@ -1333,6 +1382,9 @@ impl Issue {
 		let mut q = dsl::issues
 			.select(Self::as_select())
 			.filter(dsl::server_id.eq(server_id))
+			// Healthy check state (rows that never degraded) isn't an
+			// issue; it has its own read surfaces.
+			.filter(dsl::active.eq(true).or(dsl::last_degraded_at.is_not_null()))
 			.into_boxed();
 		if filter == IssueFilter::ActiveOnly {
 			q = q
@@ -1372,6 +1424,9 @@ impl Issue {
 					.is_not_null()
 					.or(dsl::server_group_id.is_not_null()),
 			)
+			// Healthy check state (rows that never degraded) isn't an
+			// issue; it has its own read surfaces.
+			.filter(dsl::active.eq(true).or(dsl::last_degraded_at.is_not_null()))
 			.into_boxed();
 		if filters.active_only {
 			q = q

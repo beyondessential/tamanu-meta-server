@@ -12,10 +12,10 @@ async fn list_issues_for_device_and_server() {
 				('{device_id}', '\\x6b6579'::bytea, 'k', true);
 			 INSERT INTO servers (id, host, kind, device_id) VALUES \
 				('{server_id}', 'https://example.com', 'central', '{device_id}');
-			 INSERT INTO issues (server_id, device_id, source, \"ref\", severity, message, active, first_seen, last_seen) VALUES \
-				('{server_id}', '{device_id}', 'src', 'a', 'error',    'newest', true,  '2026-05-03T10:00:00Z', '2026-05-03T10:00:00Z'),
-				('{server_id}', '{device_id}', 'src', 'b', 'warning',  'older',  true,  '2026-05-01T10:00:00Z', '2026-05-01T10:00:00Z'),
-				('{server_id}', '{device_id}', 'src', 'c', 'info',     'gone',   false, '2026-05-02T10:00:00Z', '2026-05-02T10:00:00Z');"
+			 INSERT INTO issues (server_id, device_id, source, \"ref\", severity, message, active, first_seen, last_seen, last_degraded_at) VALUES \
+				('{server_id}', '{device_id}', 'src', 'a', 'error',    'newest', true,  '2026-05-03T10:00:00Z', '2026-05-03T10:00:00Z', '2026-05-03T10:00:00Z'),
+				('{server_id}', '{device_id}', 'src', 'b', 'warning',  'older',  true,  '2026-05-01T10:00:00Z', '2026-05-01T10:00:00Z', '2026-05-01T10:00:00Z'),
+				('{server_id}', '{device_id}', 'src', 'c', 'info',     'gone',   false, '2026-05-02T10:00:00Z', '2026-05-02T10:00:00Z', '2026-05-02T10:00:00Z');"
 		))
 		.await
 		.expect("seed");

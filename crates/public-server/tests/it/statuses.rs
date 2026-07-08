@@ -1057,13 +1057,12 @@ async fn submit_status_unhealthy_with_checks_opens_incident() {
 				assert_eq!(i.severity, "error", "{check}");
 				assert!(i.active, "{check}");
 			}
-			// Passing check shouldn't manifest as a resolved-from-birth issue.
-			assert!(
-				fetch_issue(&mut conn, server_id, "alertd", "health/tls")
-					.await
-					.is_none(),
-				"passing check must not create an issue"
-			);
+			// Passing checks get a state row too — but an inactive one that
+			// never degraded, which the issue listings exclude.
+			let tls = fetch_issue(&mut conn, server_id, "alertd", "health/tls")
+				.await
+				.expect("passing check records state");
+			assert!(!tls.active, "passing state is not an active issue");
 			// Per-check failures at the catalog's Error severity open an incident.
 			assert!(fetch_open_incident(&mut conn, server_id).await.is_some());
 		},
@@ -2050,11 +2049,12 @@ async fn submit_status_result_rule_on_check_result() {
 			)
 			.await;
 
+			let db = fetch_issue(&mut conn, server_id, "alertd", "health/db")
+				.await
+				.expect("state row recorded");
 			assert!(
-				fetch_issue(&mut conn, server_id, "alertd", "health/db")
-					.await
-					.is_none(),
-				"a warning graded to passed files nothing",
+				!db.active,
+				"a warning graded to passed records healthy state, not an issue",
 			);
 		},
 	)

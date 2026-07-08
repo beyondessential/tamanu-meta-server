@@ -363,10 +363,13 @@ export async function seedIssue(
 ): Promise<SeededIssue> {
 	const id = randomUUID();
 	const resolved = opts.resolved ?? false;
+	const active = resolved ? false : (opts.active ?? true);
+	// Every seeded issue was degraded at some point — that's what makes it
+	// an issue rather than healthy check state, which the listings exclude.
 	await sql.query(
 		`INSERT INTO issues
-		 (id, server_id, server_group_id, device_id, source, ref, severity, message, description, active, first_seen, last_seen, resolved_at, resolved_by, resolved_reason)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11::timestamptz, NOW()), NOW(), $12, $13, $14)`,
+		 (id, server_id, server_group_id, device_id, source, ref, severity, message, description, active, first_seen, last_seen, resolved_at, resolved_by, resolved_reason, degraded_since, last_degraded_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11::timestamptz, NOW()), NOW(), $12, $13, $14, $15, NOW())`,
 		[
 			id,
 			opts.serverId ?? null,
@@ -377,11 +380,12 @@ export async function seedIssue(
 			opts.severity ?? "error",
 			opts.message ?? "Issue message",
 			opts.description ?? null,
-			resolved ? false : (opts.active ?? true),
+			active,
 			opts.firstSeen ?? null,
 			resolved ? new Date().toISOString() : null,
 			resolved ? (opts.resolvedBy ?? null) : null,
 			resolved ? (opts.resolvedReason ?? null) : null,
+			active ? (opts.firstSeen ?? new Date().toISOString()) : null,
 		],
 	);
 	return { id };
