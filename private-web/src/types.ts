@@ -125,7 +125,6 @@ export type HealthcheckSampleResponse = Solidify<Schemas["HealthcheckSampleRespo
 
 export type IssueData = Solidify<Schemas["IssueData"]>;
 export type IssueIncidentLink = Solidify<Schemas["IssueIncidentLink"]>;
-export type EventData = Solidify<Schemas["EventData"]>;
 export type IncidentData = Solidify<Schemas["IncidentData"]>;
 export type IncidentIssueData = Solidify<Schemas["IncidentIssueData"]>;
 export type IncidentWithIssues = Solidify<Schemas["IncidentWithIssues"]>;

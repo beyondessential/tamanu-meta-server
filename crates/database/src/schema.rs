@@ -224,22 +224,6 @@ diesel::table! {
 }
 
 diesel::table! {
-	events (id) {
-		id -> Uuid,
-		created_at -> Timestamptz,
-		occurred_at -> Nullable<Timestamptz>,
-		issue_id -> Uuid,
-		severity -> Text,
-		description -> Nullable<Text>,
-		message -> Text,
-		active -> Bool,
-		hash -> Bytea,
-		occurrences -> Int4,
-		last_seen -> Timestamptz,
-	}
-}
-
-diesel::table! {
 	healthcheck_severities (check_name) {
 		check_name -> Text,
 		severity -> Text,
@@ -604,7 +588,6 @@ diesel::joinable!(device_connections -> devices (device_id));
 diesel::joinable!(device_keys -> devices (device_id));
 diesel::joinable!(device_server_associations -> devices (device_id));
 diesel::joinable!(device_server_associations -> servers (server_id));
-diesel::joinable!(events -> issues (issue_id));
 diesel::joinable!(incident_issues -> incidents (incident_id));
 diesel::joinable!(incident_issues -> issues (issue_id));
 diesel::joinable!(incident_notes -> incidents (incident_id));
@@ -649,7 +632,6 @@ diesel::allow_tables_to_appear_in_same_query!(
 	device_keys,
 	device_server_associations,
 	devices,
-	events,
 	healthcheck_severities,
 	incident_issues,
 	incident_notes,

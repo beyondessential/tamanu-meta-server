@@ -2,8 +2,8 @@
 //! counting. `incident_issues` is keyed on `(incident_id, issue_id,
 //! joined_at)`, so an issue that leaves and rejoins the same incident
 //! produces multiple rows for the same pair. Without dedup, the issue
-//! count inflates by the number of rejoins, and the event/note counts
-//! get multiplied by the same factor.
+//! count inflates by the number of rejoins, and the note counts get
+//! multiplied by the same factor.
 
 use database::issues::Incident;
 use diesel_async::SimpleAsyncConnection as _;
@@ -17,8 +17,6 @@ async fn stats_for_dedupes_repeat_join_rows() {
 		let device_id = Uuid::new_v4();
 		let issue_id = Uuid::new_v4();
 		let incident_id = Uuid::new_v4();
-		let event_a = Uuid::new_v4();
-		let event_b = Uuid::new_v4();
 		let issue_note = Uuid::new_v4();
 		let incident_note = Uuid::new_v4();
 
@@ -33,11 +31,6 @@ async fn stats_for_dedupes_repeat_join_rows() {
 				('{issue_id}', '{server_id}', '{device_id}', 'test', 'r', 'error', 'm', true, NOW(), NOW()); \
 			 INSERT INTO incidents (id, server_group_id, opened_at) \
 			   VALUES ('{incident_id}', '{group_id}', NOW()); \
-			 INSERT INTO events \
-				(id, issue_id, severity, message, active, hash, occurrences, last_seen) \
-			   VALUES \
-				('{event_a}', '{issue_id}', 'error', 'one', true, '\\x01'::bytea, 7, NOW()), \
-				('{event_b}', '{issue_id}', 'error', 'two', true, '\\x02'::bytea, 1, NOW()); \
 			 INSERT INTO issue_notes (id, issue_id, author, body) \
 			   VALUES ('{issue_note}', '{issue_id}', 'op', 'jn'); \
 			 INSERT INTO incident_notes (id, incident_id, author, body) \
@@ -59,10 +52,6 @@ async fn stats_for_dedupes_repeat_join_rows() {
 			.expect("stats_for");
 		let s = stats.get(&incident_id).expect("stats present");
 		assert_eq!(s.issue_count, 1, "one distinct issue despite 5 join rows");
-		assert_eq!(
-			s.event_count, 2,
-			"two event rows, not multiplied by 5 join rows"
-		);
 		assert_eq!(
 			s.note_count, 2,
 			"one incident_note + one issue_note, not 1 + 5"
@@ -88,7 +77,6 @@ async fn stats_for_handles_missing_and_empty_inputs() {
 			.expect("phantom");
 		let s = stats.get(&phantom).expect("phantom entry");
 		assert_eq!(s.issue_count, 0);
-		assert_eq!(s.event_count, 0);
 		assert_eq!(s.note_count, 0);
 	})
 	.await

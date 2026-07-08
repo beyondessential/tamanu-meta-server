@@ -3263,43 +3263,6 @@
         ]
       }
     },
-    "/api/issues/list_events": {
-      "post": {
-        "tags": [
-          "issues"
-        ],
-        "summary": "List the events recorded against a specific issue, most recent first.",
-        "description": "Returns a page of events along with the total number of events recorded\nfor the issue, for pagination with `offset`/`limit`.",
-        "operationId": "list_events",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ListEventsArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Page_EventData"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-user": []
-          }
-        ]
-      }
-    },
     "/api/issues/list_for_device": {
       "post": {
         "tags": [
@@ -7541,74 +7504,6 @@
           }
         }
       },
-      "EventData": {
-        "type": "object",
-        "description": "A single recorded occurrence of an issue's underlying condition — one\npush from a device or a manually submitted event.",
-        "required": [
-          "id",
-          "issue_id",
-          "created_at",
-          "severity",
-          "message",
-          "active",
-          "occurrences",
-          "last_seen"
-        ],
-        "properties": {
-          "active": {
-            "type": "boolean",
-            "description": "Whether the underlying condition was active as of this event."
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "description": "When this event was recorded on the server."
-          },
-          "description": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Short headline for this event, if one was given."
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Unique identifier for this event."
-          },
-          "issue_id": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Id of the issue this event belongs to."
-          },
-          "last_seen": {
-            "type": "string",
-            "format": "date-time",
-            "description": "When this condition was last seen recurring."
-          },
-          "message": {
-            "type": "string",
-            "description": "Human-readable message describing this event."
-          },
-          "occurred_at": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time",
-            "description": "When the underlying condition actually occurred, if reported\nseparately from the time it was recorded."
-          },
-          "occurrences": {
-            "type": "integer",
-            "format": "int32",
-            "description": "Number of times this same condition has repeated and been coalesced\ninto this event rather than creating a new one."
-          },
-          "severity": {
-            "$ref": "#/components/schemas/Severity",
-            "description": "Severity reported for this event."
-          }
-        }
-      },
       "ExecuteArgs": {
         "type": "object",
         "description": "Request body for running a query in the SQL playground.",
@@ -8128,7 +8023,6 @@
           "server_group_name",
           "opened_at",
           "issue_count",
-          "event_count",
           "note_count",
           "created_at",
           "updated_at"
@@ -8146,11 +8040,6 @@
             "type": "string",
             "format": "date-time",
             "description": "When the incident record was created."
-          },
-          "event_count": {
-            "type": "integer",
-            "format": "int64",
-            "description": "Total number of events across all contributing issues."
           },
           "id": {
             "type": "string",
@@ -8933,36 +8822,6 @@
           }
         }
       },
-      "ListEventsArgs": {
-        "type": "object",
-        "description": "Selects an issue and a page of its events.",
-        "required": [
-          "issue_id"
-        ],
-        "properties": {
-          "issue_id": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Id of the issue whose events to list."
-          },
-          "limit": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "Maximum number of events to return. Defaults to 100 when omitted."
-          },
-          "offset": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "Number of events to skip, for pagination. Defaults to 0."
-          }
-        }
-      },
       "ListForDeviceArgs": {
         "type": "object",
         "description": "Filters for listing the issues raised by one device.",
@@ -9338,94 +9197,6 @@
                       "description": "Live snapshot from the Tailscale network for a device that's\ncurrently attached to a tailnet node. Omitted if the device has\nno tailnet attachment, the tailnet directory integration isn't\nconfigured, or the node isn't found in the directory's cache."
                     }
                   ]
-                }
-              }
-            },
-            "description": "The items in this page."
-          },
-          "total": {
-            "type": "integer",
-            "format": "int64",
-            "description": "The total number of items across all pages, not just this one — use\nthis to render page counts without a separate request.",
-            "minimum": 0
-          }
-        }
-      },
-      "Page_EventData": {
-        "type": "object",
-        "description": "A single page of a paginated list response.",
-        "required": [
-          "items",
-          "total"
-        ],
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "description": "A single recorded occurrence of an issue's underlying condition — one\npush from a device or a manually submitted event.",
-              "required": [
-                "id",
-                "issue_id",
-                "created_at",
-                "severity",
-                "message",
-                "active",
-                "occurrences",
-                "last_seen"
-              ],
-              "properties": {
-                "active": {
-                  "type": "boolean",
-                  "description": "Whether the underlying condition was active as of this event."
-                },
-                "created_at": {
-                  "type": "string",
-                  "format": "date-time",
-                  "description": "When this event was recorded on the server."
-                },
-                "description": {
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "description": "Short headline for this event, if one was given."
-                },
-                "id": {
-                  "type": "string",
-                  "format": "uuid",
-                  "description": "Unique identifier for this event."
-                },
-                "issue_id": {
-                  "type": "string",
-                  "format": "uuid",
-                  "description": "Id of the issue this event belongs to."
-                },
-                "last_seen": {
-                  "type": "string",
-                  "format": "date-time",
-                  "description": "When this condition was last seen recurring."
-                },
-                "message": {
-                  "type": "string",
-                  "description": "Human-readable message describing this event."
-                },
-                "occurred_at": {
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "format": "date-time",
-                  "description": "When the underlying condition actually occurred, if reported\nseparately from the time it was recorded."
-                },
-                "occurrences": {
-                  "type": "integer",
-                  "format": "int32",
-                  "description": "Number of times this same condition has repeated and been coalesced\ninto this event rather than creating a new one."
-                },
-                "severity": {
-                  "$ref": "#/components/schemas/Severity",
-                  "description": "Severity reported for this event."
                 }
               }
             },

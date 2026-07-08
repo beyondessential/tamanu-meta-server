@@ -18,7 +18,6 @@ import BugReportIcon from "@mui/icons-material/BugReport";
 import CheckCircleOutlinedIcon from "@mui/icons-material/CheckCircleOutlined";
 import NotesIcon from "@mui/icons-material/StickyNote2";
 import RefreshIcon from "@mui/icons-material/Refresh";
-import TimelineIcon from "@mui/icons-material/Timeline";
 import { useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
@@ -302,11 +301,6 @@ function Header({
 							icon={<BugReportIcon fontSize="inherit" />}
 							value={incident.issue_count ?? 0}
 							noun="issue"
-						/>
-						<Stat
-							icon={<TimelineIcon fontSize="inherit" />}
-							value={incident.event_count ?? 0}
-							noun="event"
 						/>
 						<Stat
 							icon={<NotesIcon fontSize="inherit" />}

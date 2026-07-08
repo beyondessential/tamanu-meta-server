@@ -8,7 +8,7 @@ use commons_types::{
 	issue::{ResolvedReason, Severity},
 };
 use database::issues::{
-	Event, Incident, Issue, IssueFilter, IssueIncidentRef, IssueListFilters, NewEvent,
+	Incident, Issue, IssueFilter, IssueIncidentRef, IssueListFilters, NewEvent,
 };
 use database::notes::IssueNote;
 use database::servers::Server;
@@ -17,7 +17,6 @@ use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::fns::Page;
 use crate::state::AppState;
 
 const DEFAULT_LIMIT: i64 = 100;
@@ -261,57 +260,11 @@ pub(crate) async fn enrich_issue(
 	))
 }
 
-/// A single recorded occurrence of an issue's underlying condition — one
-/// push from a device or a manually submitted event.
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct EventData {
-	/// Unique identifier for this event.
-	pub id: Uuid,
-	/// Id of the issue this event belongs to.
-	pub issue_id: Uuid,
-	/// When this event was recorded on the server.
-	pub created_at: Timestamp,
-	/// When the underlying condition actually occurred, if reported
-	/// separately from the time it was recorded.
-	pub occurred_at: Option<Timestamp>,
-	/// Severity reported for this event.
-	pub severity: Severity,
-	/// Short headline for this event, if one was given.
-	pub description: Option<String>,
-	/// Human-readable message describing this event.
-	pub message: String,
-	/// Whether the underlying condition was active as of this event.
-	pub active: bool,
-	/// Number of times this same condition has repeated and been coalesced
-	/// into this event rather than creating a new one.
-	pub occurrences: i32,
-	/// When this condition was last seen recurring.
-	pub last_seen: Timestamp,
-}
-
-impl From<Event> for EventData {
-	fn from(e: Event) -> Self {
-		Self {
-			id: e.id,
-			issue_id: e.issue_id,
-			created_at: e.created_at,
-			occurred_at: e.occurred_at,
-			severity: e.severity,
-			description: e.description,
-			message: e.message,
-			active: e.active,
-			occurrences: e.occurrences,
-			last_seen: e.last_seen,
-		}
-	}
-}
-
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
 		.routes(routes!(list))
 		.routes(routes!(list_for_device))
 		.routes(routes!(list_for_server))
-		.routes(routes!(list_events))
 		.routes(routes!(submit_manual_event))
 		.routes(routes!(resolve))
 		.routes(routes!(unresolve))
@@ -474,51 +427,6 @@ pub async fn list_for_server(
 	)
 	.await?;
 	Ok(Json(enrich_issues(&mut conn, issues).await?))
-}
-
-/// Selects an issue and a page of its events.
-#[derive(Deserialize, ToSchema)]
-pub struct ListEventsArgs {
-	/// Id of the issue whose events to list.
-	pub issue_id: Uuid,
-	/// Number of events to skip, for pagination. Defaults to 0.
-	#[serde(default)]
-	pub offset: Option<i64>,
-	/// Maximum number of events to return. Defaults to 100 when omitted.
-	#[serde(default)]
-	pub limit: Option<i64>,
-}
-
-/// List the events recorded against a specific issue, most recent first.
-///
-/// Returns a page of events along with the total number of events recorded
-/// for the issue, for pagination with `offset`/`limit`.
-#[utoipa::path(
-	post,
-	path = "/list_events",
-	tag = "issues",
-	security(("tailscale-user" = [])),
-	request_body = ListEventsArgs,
-	responses(
-		(status = 200, body = Page<EventData>),
-	),
-)]
-pub async fn list_events(
-	State(state): State<AppState>,
-	_user: TailscaleUser,
-	Json(args): Json<ListEventsArgs>,
-) -> Result<Json<Page<EventData>>> {
-	let mut conn = state.db_read.get().await?;
-	let total = Event::count_for_issue(&mut conn, args.issue_id).await? as u64;
-	let events = Event::list_for_issue(
-		&mut conn,
-		args.issue_id,
-		args.offset.unwrap_or(0),
-		args.limit.unwrap_or(DEFAULT_LIMIT),
-	)
-	.await?;
-	let items = events.into_iter().map(EventData::from).collect();
-	Ok(Json(Page { items, total }))
 }
 
 /// A manually entered event to record against a server.

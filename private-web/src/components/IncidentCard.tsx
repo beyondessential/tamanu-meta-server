@@ -1,7 +1,6 @@
 import { Box, Stack, Tooltip, Typography } from "@mui/material";
 import BugReportIcon from "@mui/icons-material/BugReport";
 import NotesIcon from "@mui/icons-material/StickyNote2";
-import TimelineIcon from "@mui/icons-material/Timeline";
 import { Link as RouterLink } from "react-router-dom";
 import TimeAgo from "./TimeAgo";
 import { useIsNotificationHeld } from "../hooks/useIsNotificationHeld";
@@ -62,12 +61,7 @@ export default function IncidentCard({ incident }: { incident: IncidentData }) {
 						value={incident.issue_count ?? 0}
 						noun="issue"
 					/>
-					<Stat
-						icon={<TimelineIcon fontSize="inherit" />}
-						value={incident.event_count ?? 0}
-						noun="event"
-					/>
-					<Stat
+						<Stat
 						icon={<NotesIcon fontSize="inherit" />}
 						value={incident.note_count ?? 0}
 						noun="note"

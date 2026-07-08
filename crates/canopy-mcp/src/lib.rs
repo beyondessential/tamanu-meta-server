@@ -78,8 +78,8 @@ impl ServerHandler for CanopyMcp {
 			 flapping that was recorded but never surfaced. When summarizing or ranking, count \
 			 `published` incidents (also given as `published_count`), not raw rows: an incident is \
 			 published only if it outlived the group's grace window (~3 min default) or escalated. \
-			 `event_count` is raw event churn, not duration or severity — a huge count can be a \
-			 sub-minute flap, usually a twitchy threshold rather than a real outage."
+			 A count dominated by unpublished short-lived incidents usually means a twitchy \
+			 threshold rather than a real outage."
 				.into(),
 		);
 		info.capabilities = ServerCapabilities::builder().enable_tools().build();

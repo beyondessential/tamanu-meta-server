@@ -150,33 +150,20 @@ async fn submit_event_dedups_by_ref() {
 			assert_eq!(row.server_id, server_id);
 			assert_eq!(row.severity, "critical");
 			assert_eq!(row.message, "less than 1% free");
-
-			#[derive(QueryableByName)]
-			struct Counts {
-				#[diesel(sql_type = sql_types::BigInt)]
-				event_count: i64,
-			}
-			let counts: Counts =
-				sql_query("SELECT COUNT(*) AS event_count FROM events WHERE issue_id = $1")
-					.bind::<sql_types::Uuid, _>(Uuid::parse_str(&first_id).unwrap())
-					.get_result(&mut conn)
-					.await
-					.expect("count events");
-			assert_eq!(counts.event_count, 2, "different content → two event rows");
 		},
 	)
 	.await
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn submit_event_coalesces_identical_pushes() {
+async fn submit_event_repeated_pushes_fold_into_one_issue() {
 	commons_tests::server::run_with_device_auth(
 		"server",
 		async |mut conn, cert, device_id, public, _| {
 			provision_server(&mut conn, device_id).await;
 
-			// Three identical pushes.
-			let mut issue_id = String::new();
+			// Three identical pushes fold into the one issue.
+			let mut ids = Vec::new();
 			for _ in 0..3 {
 				let r = public
 					.post("/events")
@@ -188,27 +175,20 @@ async fn submit_event_coalesces_identical_pushes() {
 					}))
 					.await;
 				r.assert_status_ok();
-				issue_id = r.json::<serde_json::Value>().get("id").unwrap().as_str().unwrap().to_string();
+				ids.push(
+					r.json::<serde_json::Value>()
+						.get("id")
+						.unwrap()
+						.as_str()
+						.unwrap()
+						.to_string(),
+				);
 			}
 
-			#[derive(QueryableByName)]
-			struct Counts {
-				#[diesel(sql_type = sql_types::BigInt)]
-				event_count: i64,
-				#[diesel(sql_type = sql_types::Integer)]
-				latest_occurrences: i32,
-			}
-			let counts: Counts = sql_query(
-				"SELECT \
-					(SELECT COUNT(*) FROM events WHERE issue_id = $1) AS event_count, \
-					(SELECT occurrences FROM events WHERE issue_id = $1 ORDER BY created_at DESC LIMIT 1) AS latest_occurrences",
-			)
-			.bind::<sql_types::Uuid, _>(Uuid::parse_str(&issue_id).unwrap())
-			.get_result(&mut conn)
-			.await
-			.expect("count");
-			assert_eq!(counts.event_count, 1, "identical pushes collapse into one row");
-			assert_eq!(counts.latest_occurrences, 3);
+			ids.dedup();
+			assert_eq!(ids.len(), 1, "repeat pushes fold into one issue");
+			let row = issue_by_id(&mut conn, Uuid::parse_str(&ids[0]).unwrap()).await;
+			assert_eq!(row.message, "same content");
 		},
 	)
 	.await

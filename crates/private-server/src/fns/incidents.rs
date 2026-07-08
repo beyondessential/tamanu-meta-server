@@ -52,8 +52,6 @@ pub struct IncidentData {
 	pub resolved_reason: Option<String>,
 	/// Number of distinct issues that have ever contributed to the incident.
 	pub issue_count: i64,
-	/// Total number of events across all contributing issues.
-	pub event_count: i64,
 	/// Combined count of notes on the incident itself plus notes on all its
 	/// contributing issues.
 	pub note_count: i64,
@@ -91,7 +89,6 @@ impl IncidentData {
 			resolved_by_pic: res_pic,
 			resolved_reason: i.resolved_reason,
 			issue_count: stats.issue_count,
-			event_count: stats.event_count,
 			note_count: stats.note_count,
 			notification_held_until,
 			created_at: i.created_at,

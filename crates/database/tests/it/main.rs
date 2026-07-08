@@ -17,7 +17,6 @@ mod incident_stats;
 mod mcp_tokens;
 mod reachability_sweep;
 mod recovery_vault;
-mod resolve_overall_health_rollups_migration;
 mod restore;
 mod self_alerts;
 mod server_enrollment;

@@ -1710,7 +1710,7 @@
       },
       "NewEvent": {
         "type": "object",
-        "description": "A single occurrence to report against an issue, sent either by a device\nor by an operator. If an issue with the same `source` and `ref` is\nalready open, this occurrence is folded into it (bumping its last-seen\ntime, and coalescing into the latest recorded event when the content is\nidentical); otherwise a new issue is created.",
+        "description": "A single occurrence to report against an issue, sent either by a device\nor by an operator. If an issue with the same `source` and `ref` is\nalready open, this occurrence is folded into it (updating its state and\nbumping its last-seen time); otherwise a new issue is created.",
         "required": [
           "source",
           "ref",

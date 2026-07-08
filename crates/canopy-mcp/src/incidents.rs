@@ -2,7 +2,7 @@
 
 use commons_types::{Uuid, issue::Severity};
 use database::{
-	issues::{Event, Incident, Issue, IssueListFilters},
+	issues::{Incident, Issue, IssueListFilters},
 	server_groups::ServerGroup,
 	servers::Server,
 	slack_outbox::SlackOutbox,
@@ -88,9 +88,6 @@ struct IncidentSummary {
 	/// How long the incident was (or has been) open, in seconds.
 	open_duration_secs: i64,
 	issue_count: i64,
-	/// Raw count of status events the incident accumulated. NOT a measure of
-	/// duration or severity — a high count can be a sub-minute flap.
-	event_count: i64,
 }
 
 #[derive(Serialize)]
@@ -165,18 +162,6 @@ struct IssueList {
 }
 
 #[derive(Serialize)]
-struct EventOut {
-	created_at: Timestamp,
-	occurred_at: Option<Timestamp>,
-	severity: Severity,
-	description: Option<String>,
-	message: String,
-	active: bool,
-	occurrences: i32,
-	last_seen: Timestamp,
-}
-
-#[derive(Serialize)]
 struct IncidentRefOut {
 	incident_id: Uuid,
 	opened_at: Timestamp,
@@ -201,7 +186,6 @@ struct IssueDetail {
 	resolved_by: Option<String>,
 	resolved_reason: Option<String>,
 	snoozed_until: Option<Timestamp>,
-	recent_events: Vec<EventOut>,
 	incidents: Vec<IncidentRefOut>,
 }
 
@@ -217,11 +201,10 @@ impl CanopyMcp {
 		               but never surfaced to anyone. An incident is `published` only if its Slack \
 		               open notice was delivered: it stayed open past the group's grace window \
 		               (slack_open_delay, ~3 min by default) OR it escalated (a critical issue \
-		               joined, which bypasses the grace). `event_count` is raw status-event churn \
-		               and does NOT track duration or severity — a high-event incident can be a \
-		               sub-minute flap. A high count dominated by unpublished short-lived rows \
-		               usually means a twitchy alert/health-check threshold, not a real outage. \
-		               `published_count` gives the surfaced subset directly."
+		               joined, which bypasses the grace). A count dominated by unpublished \
+		               short-lived incidents usually means a twitchy alert/health-check \
+		               threshold, not a real outage. `published_count` gives the surfaced \
+		               subset directly."
 	)]
 	async fn find_incidents(
 		&self,
@@ -273,7 +256,6 @@ impl CanopyMcp {
 					published: published.contains(&i.id),
 					open_duration_secs: open_duration_secs(i),
 					issue_count: s.map_or(0, |s| s.issue_count),
-					event_count: s.map_or(0, |s| s.event_count),
 				}
 			})
 			.collect();
@@ -356,7 +338,7 @@ impl CanopyMcp {
 
 	#[tool(
 		description = "List issues across the fleet, filtered by active state, severity, group, \
-		               server, and recency. Issues are the per-(server,source,ref) events that make \
+		               server, and recency. Issues are the per-(server,source,ref) conditions that make \
 		               up incidents."
 	)]
 	async fn find_issues(
@@ -401,8 +383,7 @@ impl CanopyMcp {
 	}
 
 	#[tool(
-		description = "Full detail for one issue: its fields, recent events, and the incidents it \
-		               is or was part of."
+		description = "Full detail for one issue: its fields and the incidents it is or was part of."
 	)]
 	async fn get_issue(
 		&self,
@@ -413,9 +394,6 @@ impl CanopyMcp {
 		let Ok(issue) = Issue::get_by_id(&mut conn, id).await else {
 			return Ok(not_found(format!("no issue with id {id}")));
 		};
-		let events = Event::list_for_issue(&mut conn, id, 0, 20)
-			.await
-			.map_err(mcp_err)?;
 		let inc = Incident::for_issues(&mut conn, &[id])
 			.await
 			.map_err(mcp_err)?;
@@ -428,19 +406,6 @@ impl CanopyMcp {
 			None => None,
 		};
 
-		let recent_events = events
-			.iter()
-			.map(|e| EventOut {
-				created_at: e.created_at,
-				occurred_at: e.occurred_at,
-				severity: e.severity,
-				description: e.description.clone(),
-				message: e.message.clone(),
-				active: e.active,
-				occurrences: e.occurrences,
-				last_seen: e.last_seen,
-			})
-			.collect();
 		let incidents = inc
 			.get(&id)
 			.into_iter()
@@ -469,7 +434,6 @@ impl CanopyMcp {
 			resolved_by: issue.resolved_by.clone(),
 			resolved_reason: issue.resolved_reason.clone(),
 			snoozed_until: issue.snoozed_until,
-			recent_events,
 			incidents,
 		})
 	}

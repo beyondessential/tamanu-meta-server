@@ -6,7 +6,6 @@ use diesel::prelude::*;
 use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{devices::Device, server_groups::ServerGroup, servers::Server};
@@ -89,30 +88,6 @@ pub struct Issue {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Queryable, Selectable, Associations)]
-#[diesel(belongs_to(Issue))]
-#[diesel(table_name = crate::schema::events)]
-#[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct Event {
-	pub id: Uuid,
-	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
-	pub created_at: Timestamp,
-	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
-	pub occurred_at: Option<Timestamp>,
-	pub issue_id: Uuid,
-	#[diesel(deserialize_as = String, serialize_as = String)]
-	pub severity: Severity,
-	/// Single-line title/subject. See [`NewEvent::description`].
-	pub description: Option<String>,
-	/// Body / long detail. See [`NewEvent::message`].
-	pub message: String,
-	pub active: bool,
-	pub hash: Vec<u8>,
-	pub occurrences: i32,
-	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
-	pub last_seen: Timestamp,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Queryable, Selectable, Associations)]
 #[diesel(belongs_to(ServerGroup, foreign_key = server_group_id))]
 #[diesel(table_name = crate::schema::incidents)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -151,9 +126,8 @@ pub struct IncidentIssue {
 
 /// A single occurrence to report against an issue, sent either by a device
 /// or by an operator. If an issue with the same `source` and `ref` is
-/// already open, this occurrence is folded into it (bumping its last-seen
-/// time, and coalescing into the latest recorded event when the content is
-/// identical); otherwise a new issue is created.
+/// already open, this occurrence is folded into it (updating its state and
+/// bumping its last-seen time); otherwise a new issue is created.
 #[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct NewEvent {
@@ -207,35 +181,18 @@ pub struct IssueListFilters {
 	pub since: Option<Timestamp>,
 }
 
-fn hash_event(
-	severity: Severity,
-	active: bool,
-	message: &str,
-	description: Option<&str>,
-) -> Vec<u8> {
-	let mut h = Sha256::new();
-	h.update(severity.to_string().as_bytes());
-	h.update([0]);
-	h.update([u8::from(active)]);
-	h.update([0]);
-	h.update(message.as_bytes());
-	h.update([0]);
-	h.update(description.unwrap_or("").as_bytes());
-	h.finalize().to_vec()
-}
-
 impl NewEvent {
 	/// Persist this event push:
 	/// 1. find-or-create the issue keyed by (server_id, source, ref),
-	/// 2. append the event or coalesce into the latest matching one,
-	/// 3. if the server is in a group: (re)evaluate incident contribution.
+	///    updating its state from this report,
+	/// 2. if the server is in a group: (re)evaluate incident contribution.
 	///
 	/// `server_id` is the server the issue is attached to: derived from the
 	/// device for public submissions, supplied by the operator for manual.
 	/// `device_id` is `None` for manual events.
 	///
 	/// Issues from an **ungrouped** server are still recorded — the issue
-	/// and event rows go in just like any other push — but the incident
+	/// row goes in just like any other push — but the incident
 	/// flow is skipped (`server_group_id` would have nowhere to point).
 	/// When the operator later assigns the server to a group,
 	/// [`Server::assign_to_group`] runs `reevaluate_open_issues_for_server`
@@ -247,7 +204,7 @@ impl NewEvent {
 		server_id: Uuid,
 		device_id: Option<Uuid>,
 	) -> Result<Issue> {
-		use crate::schema::{events, issues};
+		use crate::schema::issues;
 
 		// description is the single-line title; reject multi-line input
 		// up front so the UI never has to fight with a multi-line
@@ -266,7 +223,6 @@ impl NewEvent {
 		let now = Timestamp::now();
 		let effective_time = self.occurred_at.unwrap_or(now);
 		let description = self.description.as_deref();
-		let hash = hash_event(severity, active, &self.message, description);
 
 		// Look up the server's group up-front; needed by the incident-open
 		// path. If `None`, we still record the issue/event but skip
@@ -357,46 +313,7 @@ impl NewEvent {
 					.await?
 			};
 
-			// 2. coalesce into latest event or insert new.
-			let latest_event: Option<Event> = events::table
-				.select(Event::as_select())
-				.filter(events::issue_id.eq(issue.id))
-				.order(events::created_at.desc())
-				.first(conn)
-				.await
-				.optional()?;
-
-			let coalesce = matches!(&latest_event, Some(e) if e.hash == hash);
-			if let (true, Some(latest)) = (coalesce, latest_event) {
-				let new_last = if effective_time > latest.last_seen {
-					effective_time
-				} else {
-					latest.last_seen
-				};
-				diesel::update(events::table.filter(events::id.eq(latest.id)))
-					.set((
-						events::occurrences.eq(latest.occurrences + 1),
-						events::last_seen.eq(jiff_diesel::Timestamp::from(new_last)),
-					))
-					.execute(conn)
-					.await?;
-			} else {
-				diesel::insert_into(events::table)
-					.values((
-						events::issue_id.eq(issue.id),
-						events::occurred_at.eq(self.occurred_at.map(jiff_diesel::Timestamp::from)),
-						events::severity.eq(severity),
-						events::description.eq(description),
-						events::message.eq(&self.message),
-						events::active.eq(active),
-						events::hash.eq(&hash),
-						events::last_seen.eq(jiff_diesel::Timestamp::from(effective_time)),
-					))
-					.execute(conn)
-					.await?;
-			}
-
-			// 3. (re-)evaluate incident contribution against the new issue state.
+			// 2. (re-)evaluate incident contribution against the new issue state.
 			//    `by = None`: this came from a device push, not an operator action.
 			//    Skipped when the server is ungrouped: incidents are group-keyed.
 			if let Some(gid) = server_group_id {
@@ -418,8 +335,8 @@ impl NewEvent {
 /// Mirrors [`NewEvent::save`] but keys the issue on
 /// `(server_group_id, source, ref)` instead of `(server_id, …)`:
 /// 1. find-or-create the group-scoped issue (server_id = NULL),
-/// 2. append the event or coalesce into the latest matching one,
-/// 3. run incident membership evaluation with `monitored = true` so the
+///    updating its state from this report,
+/// 2. run incident membership evaluation with `monitored = true` so the
 ///    incident opens/pages regardless of any member server's monitored flag.
 ///
 /// Recovery is the same `(source, ref)` with `active = false` at a lower
@@ -427,8 +344,7 @@ impl NewEvent {
 /// identical lifecycle to the per-server path.
 ///
 /// `description` is an optional single-line headline (rejected if multi-line);
-/// `message` is the body. Both feed the dedup hash, so a repeated identical
-/// alert coalesces into one event with a bumped occurrence count.
+/// `message` is the body.
 pub async fn raise_group_event(
 	conn: &mut AsyncPgConnection,
 	group_id: Uuid,
@@ -438,7 +354,7 @@ pub async fn raise_group_event(
 	message: &str,
 	active: bool,
 ) -> Result<Issue> {
-	use crate::schema::{events, issues};
+	use crate::schema::issues;
 
 	if let Some(d) = description
 		&& d.contains('\n')
@@ -450,7 +366,6 @@ pub async fn raise_group_event(
 
 	let source = crate::statuses::CANOPY_SOURCE;
 	let now = Timestamp::now();
-	let hash = hash_event(severity, active, message, description);
 
 	conn.transaction::<_, AppError, _>(async |conn| {
 		// 1. find-or-create the group-scoped issue.
@@ -524,45 +439,7 @@ pub async fn raise_group_event(
 				.await?
 		};
 
-		// 2. coalesce into latest event or insert new.
-		let latest_event: Option<Event> = events::table
-			.select(Event::as_select())
-			.filter(events::issue_id.eq(issue.id))
-			.order(events::created_at.desc())
-			.first(conn)
-			.await
-			.optional()?;
-
-		let coalesce = matches!(&latest_event, Some(e) if e.hash == hash);
-		if let (true, Some(latest)) = (coalesce, latest_event) {
-			let new_last = if now > latest.last_seen {
-				now
-			} else {
-				latest.last_seen
-			};
-			diesel::update(events::table.filter(events::id.eq(latest.id)))
-				.set((
-					events::occurrences.eq(latest.occurrences + 1),
-					events::last_seen.eq(jiff_diesel::Timestamp::from(new_last)),
-				))
-				.execute(conn)
-				.await?;
-		} else {
-			diesel::insert_into(events::table)
-				.values((
-					events::issue_id.eq(issue.id),
-					events::severity.eq(severity),
-					events::description.eq(description),
-					events::message.eq(message),
-					events::active.eq(active),
-					events::hash.eq(&hash),
-					events::last_seen.eq(jiff_diesel::Timestamp::from(now)),
-				))
-				.execute(conn)
-				.await?;
-		}
-
-		// 3. group-aware incident evaluation — monitored = true unconditionally.
+		// 2. group-aware incident evaluation — monitored = true unconditionally.
 		re_evaluate_incident_membership(conn, &issue, group_id, true, now, None).await?;
 
 		Ok(issue)
@@ -1537,7 +1414,6 @@ pub struct IssueIncidentRef {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct IncidentStats {
 	pub issue_count: i64,
-	pub event_count: i64,
 	/// `incident_notes` for this incident + `issue_notes` across all linked issues.
 	pub note_count: i64,
 }
@@ -1549,18 +1425,18 @@ impl Incident {
 	/// `incident_issues` is keyed on `(incident_id, issue_id, joined_at)`,
 	/// so an issue that leaves and rejoins the same incident produces
 	/// multiple rows for the same pair. Counts must dedupe on the pair
-	/// before joining to `events` or `issue_notes`, otherwise every event
-	/// or note gets multiplied by the rejoin count.
+	/// before joining to `issue_notes`, otherwise every note gets
+	/// multiplied by the rejoin count.
 	///
 	/// Strategy: pull the distinct `(incident_id, issue_id)` pairs first,
-	/// then run the per-issue event/note counts and the direct
-	/// incident_notes count concurrently. Takes the pool (`&Db`) so the
-	/// parallel futures don't fight over one mutable conn handle.
+	/// then run the per-issue note counts and the direct incident_notes
+	/// count concurrently. Takes the pool (`&Db`) so the parallel futures
+	/// don't fight over one mutable conn handle.
 	pub async fn stats_for(
 		pool: &crate::Db,
 		incident_ids: &[Uuid],
 	) -> Result<std::collections::HashMap<Uuid, IncidentStats>> {
-		use crate::schema::{events, incident_issues, incident_notes, issue_notes};
+		use crate::schema::{incident_issues, incident_notes, issue_notes};
 		use diesel::dsl::count_star;
 		use std::collections::{HashMap, HashSet};
 
@@ -1602,19 +1478,6 @@ impl Incident {
 			.into_iter()
 			.collect();
 
-		let f_events = async {
-			if unique_issue_ids.is_empty() {
-				return Result::<Vec<(Uuid, i64)>>::Ok(Vec::new());
-			}
-			let mut c = pool.get().await?;
-			events::table
-				.group_by(events::issue_id)
-				.select((events::issue_id, count_star()))
-				.filter(events::issue_id.eq_any(&unique_issue_ids))
-				.load::<(Uuid, i64)>(&mut c)
-				.await
-				.map_err(AppError::from)
-		};
 		let f_inotes = async {
 			let mut c = pool.get().await?;
 			incident_notes::table
@@ -1638,16 +1501,13 @@ impl Incident {
 				.await
 				.map_err(AppError::from)
 		};
-		let (event_rows, inote_rows, jnote_rows) =
-			futures::try_join!(f_events, f_inotes, f_jnotes)?;
+		let (inote_rows, jnote_rows) = futures::try_join!(f_inotes, f_jnotes)?;
 
-		let events_per_issue: HashMap<Uuid, i64> = event_rows.into_iter().collect();
 		let notes_per_issue: HashMap<Uuid, i64> = jnote_rows.into_iter().collect();
 
 		for (incident_id, issues) in &issues_by_incident {
 			let entry = out.entry(*incident_id).or_default();
 			for issue_id in issues {
-				entry.event_count += events_per_issue.get(issue_id).copied().unwrap_or(0);
 				entry.note_count += notes_per_issue.get(issue_id).copied().unwrap_or(0);
 			}
 		}
@@ -1656,38 +1516,6 @@ impl Incident {
 		}
 
 		Ok(out)
-	}
-}
-
-impl Event {
-	pub async fn list_for_issue(
-		db: &mut AsyncPgConnection,
-		issue_id: Uuid,
-		offset: i64,
-		limit: i64,
-	) -> Result<Vec<Self>> {
-		use crate::schema::events::dsl;
-
-		dsl::events
-			.select(Self::as_select())
-			.filter(dsl::issue_id.eq(issue_id))
-			.order(dsl::created_at.desc())
-			.offset(offset)
-			.limit(limit)
-			.load(db)
-			.await
-			.map_err(AppError::from)
-	}
-
-	pub async fn count_for_issue(db: &mut AsyncPgConnection, issue_id: Uuid) -> Result<i64> {
-		use crate::schema::events::dsl;
-
-		dsl::events
-			.filter(dsl::issue_id.eq(issue_id))
-			.count()
-			.get_result(db)
-			.await
-			.map_err(AppError::from)
 	}
 }
 

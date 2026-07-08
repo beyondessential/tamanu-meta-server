@@ -349,8 +349,6 @@ async fn seed_incidents(conn: &mut impl SimpleAsyncConnection) {
 		 INSERT INTO issues (id, created_at, updated_at, server_id, source, ref, severity, description, message, active, first_seen, last_seen) VALUES \
 			('{ISSUE1}', NOW(), NOW(), '{ISRV}', 'test', 'r1', 'error', 'Disk full', 'disk usage 98%', true, NOW() - interval '2 days', NOW() - interval '1 hour'), \
 			('{ISSUE2}', NOW(), NOW(), '{ISRV}', 'test', 'r2', 'warning', NULL, 'slow query', false, NOW() - interval '10 days', NOW() - interval '9 days'); \
-		 INSERT INTO events (id, created_at, issue_id, severity, message, active, hash, occurrences, last_seen) VALUES \
-			(gen_random_uuid(), NOW() - interval '1 hour', '{ISSUE1}', 'error', 'disk usage 98%', true, '\\x00'::bytea, 3, NOW() - interval '1 hour'); \
 		 INSERT INTO incidents (id, created_at, updated_at, server_group_id, opened_at, closed_at) VALUES \
 			('{INC_OPEN}', NOW(), NOW(), '{IGROUP}', NOW() - interval '2 days', NULL), \
 			('{INC_CLOSED}', NOW(), NOW(), '{IGROUP}', NOW() - interval '5 days', NOW() - interval '3 days'); \
@@ -472,14 +470,13 @@ async fn issues_filter_and_detail() {
 		let w = warnings["issues"].as_array().unwrap();
 		assert!(!w.is_empty() && w.iter().all(|i| i["severity"] == "warning"));
 
-		// Detail: events + the incident it belongs to.
+		// Detail: the issue's fields + the incident it belongs to.
 		let detail = call_tool!(
 			private,
 			"get_issue",
 			serde_json::json!({ "issue_id": ISSUE1 })
 		);
 		assert_eq!(detail["severity"], "error");
-		assert!(!detail["recent_events"].as_array().unwrap().is_empty());
 		let inc_ids: Vec<String> = detail["incidents"]
 			.as_array()
 			.unwrap()

@@ -1632,27 +1632,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/issues/list_events": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * List the events recorded against a specific issue, most recent first.
-         * @description Returns a page of events along with the total number of events recorded
-         *     for the issue, for pagination with `offset`/`limit`.
-         */
-        post: operations["list_events"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/issues/list_for_device": {
         parameters: {
             query?: never;
@@ -4052,52 +4031,6 @@ export interface components {
              */
             ticket: string;
         };
-        /**
-         * @description A single recorded occurrence of an issue's underlying condition — one
-         *     push from a device or a manually submitted event.
-         */
-        EventData: {
-            /** @description Whether the underlying condition was active as of this event. */
-            active: boolean;
-            /**
-             * Format: date-time
-             * @description When this event was recorded on the server.
-             */
-            created_at: string;
-            /** @description Short headline for this event, if one was given. */
-            description?: string | null;
-            /**
-             * Format: uuid
-             * @description Unique identifier for this event.
-             */
-            id: string;
-            /**
-             * Format: uuid
-             * @description Id of the issue this event belongs to.
-             */
-            issue_id: string;
-            /**
-             * Format: date-time
-             * @description When this condition was last seen recurring.
-             */
-            last_seen: string;
-            /** @description Human-readable message describing this event. */
-            message: string;
-            /**
-             * Format: date-time
-             * @description When the underlying condition actually occurred, if reported
-             *     separately from the time it was recorded.
-             */
-            occurred_at?: string | null;
-            /**
-             * Format: int32
-             * @description Number of times this same condition has repeated and been coalesced
-             *     into this event rather than creating a new one.
-             */
-            occurrences: number;
-            /** @description Severity reported for this event. */
-            severity: components["schemas"]["Severity"];
-        };
         /** @description Request body for running a query in the SQL playground. */
         ExecuteArgs: {
             /** @description The query to execute. */
@@ -4472,11 +4405,6 @@ export interface components {
              * @description When the incident record was created.
              */
             created_at: string;
-            /**
-             * Format: int64
-             * @description Total number of events across all contributing issues.
-             */
-            event_count: number;
             /**
              * Format: uuid
              * @description Unique identifier of the incident.
@@ -5000,24 +4928,6 @@ export interface components {
              */
             limit?: number | null;
         };
-        /** @description Selects an issue and a page of its events. */
-        ListEventsArgs: {
-            /**
-             * Format: uuid
-             * @description Id of the issue whose events to list.
-             */
-            issue_id: string;
-            /**
-             * Format: int64
-             * @description Maximum number of events to return. Defaults to 100 when omitted.
-             */
-            limit?: number | null;
-            /**
-             * Format: int64
-             * @description Number of events to skip, for pagination. Defaults to 0.
-             */
-            offset?: number | null;
-        };
         /** @description Filters for listing the issues raised by one device. */
         ListForDeviceArgs: {
             /**
@@ -5243,58 +5153,6 @@ export interface components {
                 keys: components["schemas"]["DeviceKeyInfo"][];
                 latest_connection?: null | components["schemas"]["DeviceConnectionData"];
                 tailnet_live?: null | components["schemas"]["TailnetLiveInfo"];
-            }[];
-            /**
-             * Format: int64
-             * @description The total number of items across all pages, not just this one — use
-             *     this to render page counts without a separate request.
-             */
-            total: number;
-        };
-        /** @description A single page of a paginated list response. */
-        Page_EventData: {
-            /** @description The items in this page. */
-            items: {
-                /** @description Whether the underlying condition was active as of this event. */
-                active: boolean;
-                /**
-                 * Format: date-time
-                 * @description When this event was recorded on the server.
-                 */
-                created_at: string;
-                /** @description Short headline for this event, if one was given. */
-                description?: string | null;
-                /**
-                 * Format: uuid
-                 * @description Unique identifier for this event.
-                 */
-                id: string;
-                /**
-                 * Format: uuid
-                 * @description Id of the issue this event belongs to.
-                 */
-                issue_id: string;
-                /**
-                 * Format: date-time
-                 * @description When this condition was last seen recurring.
-                 */
-                last_seen: string;
-                /** @description Human-readable message describing this event. */
-                message: string;
-                /**
-                 * Format: date-time
-                 * @description When the underlying condition actually occurred, if reported
-                 *     separately from the time it was recorded.
-                 */
-                occurred_at?: string | null;
-                /**
-                 * Format: int32
-                 * @description Number of times this same condition has repeated and been coalesced
-                 *     into this event rather than creating a new one.
-                 */
-                occurrences: number;
-                /** @description Severity reported for this event. */
-                severity: components["schemas"]["Severity"];
             }[];
             /**
              * Format: int64
@@ -9679,29 +9537,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IssueData"][];
-                };
-            };
-        };
-    };
-    list_events: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ListEventsArgs"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Page_EventData"];
                 };
             };
         };
