@@ -335,10 +335,11 @@ export async function seedIssue(
 	sql: Sql,
 	opts: {
 		/** Server-scoped issue. Mutually exclusive with `serverGroupId` — the
-		 * `issues` scope CHECK requires exactly one set. */
+		 * `issues` scope CHECK allows at most one set. */
 		serverId?: string | null;
 		/** Group-scoped issue (e.g. a backup issue spanning the group). When set,
-		 * leave `serverId` unset so the row satisfies the scope constraint. */
+		 * leave `serverId` unset so the row satisfies the scope constraint.
+		 * Leaving both unset seeds a canopy-wide issue (a self-alert). */
 		serverGroupId?: string | null;
 		source?: string;
 		ref?: string;

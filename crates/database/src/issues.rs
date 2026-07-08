@@ -447,6 +447,131 @@ pub async fn raise_group_event(
 	.await
 }
 
+/// Open (or recover) a **canopy-wide** issue: one scoped to neither a
+/// server nor a group, keyed `(source = canopy, ref)` under the global
+/// partial unique index. This is the state store for canopy monitoring
+/// its own operation (self-alerts).
+///
+/// Mirrors [`raise_group_event`]'s find-or-create, but runs no incident
+/// evaluation: incidents are group-keyed until they gain a canopy-wide
+/// target, and self-alert notification goes straight to the Slack
+/// outbox (see `crate::self_alerts`).
+pub async fn raise_global_event(
+	conn: &mut AsyncPgConnection,
+	r#ref: &str,
+	severity: Severity,
+	description: Option<&str>,
+	message: &str,
+	active: bool,
+) -> Result<Issue> {
+	use crate::schema::issues;
+
+	if let Some(d) = description
+		&& d.contains('\n')
+	{
+		return Err(AppError::BadRequest(
+			"description must be a single line (no newlines); use `message` for body text".into(),
+		));
+	}
+
+	let source = crate::statuses::CANOPY_SOURCE;
+	let now = Timestamp::now();
+
+	conn.transaction::<_, AppError, _>(async |conn| {
+		let existing: Option<Issue> = issues::table
+			.select(Issue::as_select())
+			.filter(
+				issues::server_id
+					.is_null()
+					.and(issues::server_group_id.is_null())
+					.and(issues::source.eq(source))
+					.and(issues::ref_.eq(r#ref)),
+			)
+			.for_update()
+			.first(conn)
+			.await
+			.optional()?;
+
+		let issue: Issue = if let Some(existing) = existing {
+			let new_last_seen = if now > existing.last_seen {
+				now
+			} else {
+				existing.last_seen
+			};
+			let clear_resolved = active && existing.resolved_at.is_some();
+			diesel::update(issues::table.filter(issues::id.eq(existing.id)))
+				.set((
+					issues::severity.eq(severity),
+					issues::description.eq(description),
+					issues::message.eq(message),
+					issues::active.eq(active),
+					issues::last_seen.eq(jiff_diesel::Timestamp::from(new_last_seen)),
+					issues::resolved_at.eq(diesel::dsl::sql::<
+						diesel::sql_types::Nullable<diesel::sql_types::Timestamptz>,
+					>(if clear_resolved {
+						"NULL"
+					} else {
+						"issues.resolved_at"
+					})),
+					issues::resolved_by.eq(diesel::dsl::sql::<
+						diesel::sql_types::Nullable<diesel::sql_types::Text>,
+					>(if clear_resolved {
+						"NULL"
+					} else {
+						"issues.resolved_by"
+					})),
+					issues::resolved_reason.eq(diesel::dsl::sql::<
+						diesel::sql_types::Nullable<diesel::sql_types::Text>,
+					>(if clear_resolved {
+						"NULL"
+					} else {
+						"issues.resolved_reason"
+					})),
+				))
+				.returning(Issue::as_select())
+				.get_result(conn)
+				.await?
+		} else {
+			diesel::insert_into(issues::table)
+				.values((
+					issues::source.eq(source),
+					issues::ref_.eq(r#ref),
+					issues::severity.eq(severity),
+					issues::description.eq(description),
+					issues::message.eq(message),
+					issues::active.eq(active),
+					issues::first_seen.eq(jiff_diesel::Timestamp::from(now)),
+					issues::last_seen.eq(jiff_diesel::Timestamp::from(now)),
+				))
+				.returning(Issue::as_select())
+				.get_result(conn)
+				.await?
+		};
+
+		Ok(issue)
+	})
+	.await
+}
+
+/// The canopy-wide issue at `(canopy, ref)`, if it has ever been raised.
+pub async fn get_global_issue(conn: &mut AsyncPgConnection, r#ref: &str) -> Result<Option<Issue>> {
+	use crate::schema::issues::dsl;
+
+	dsl::issues
+		.select(Issue::as_select())
+		.filter(
+			dsl::server_id
+				.is_null()
+				.and(dsl::server_group_id.is_null())
+				.and(dsl::source.eq(crate::statuses::CANOPY_SOURCE))
+				.and(dsl::ref_.eq(r#ref)),
+		)
+		.first(conn)
+		.await
+		.optional()
+		.map_err(AppError::from)
+}
+
 /// Compute whether the issue *should* currently be contributing to an
 /// open incident, and apply join/leave accordingly. The rules:
 ///
@@ -1159,9 +1284,14 @@ impl Issue {
 
 		let mut q = dsl::issues
 			.select(Self::as_select())
-			// Self-alerts (the nil "Canopy" server's issues) have their own
-			// surface (`crate::self_alerts`); they are not fleet issues.
-			.filter(dsl::server_id.is_distinct_from(Uuid::nil()))
+			// Canopy-wide issues (self-alerts: neither server- nor
+			// group-scoped) have their own surface (`crate::self_alerts`);
+			// they are not fleet issues.
+			.filter(
+				dsl::server_id
+					.is_not_null()
+					.or(dsl::server_group_id.is_not_null()),
+			)
 			.into_boxed();
 		if filters.active_only {
 			q = q

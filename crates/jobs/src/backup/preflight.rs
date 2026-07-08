@@ -318,7 +318,7 @@ pub fn spawn() -> JoinHandle<()> {
 				};
 
 			// Shared check (every tick): IRSA identity resolves. Filed ONCE
-			// against the nil/meta server — a broken shared identity is one
+			// as a canopy-wide self-alert — a broken shared identity is one
 			// fact about canopy, not one per group, and paging N groups at
 			// once for it helps nobody.
 			let identity_ok = aws.sts.get_caller_identity().send().await;
@@ -402,35 +402,26 @@ mod tests {
 			.await
 			.expect("seed legacy alert");
 
-			// Filing twice coalesces into the one nil/meta-server issue.
+			// Filing twice coalesces into the one canopy-wide issue.
 			file_identity_alert(&mut conn, "sts:GetCallerIdentity failed: boom")
 				.await
 				.expect("file");
 			file_identity_alert(&mut conn, "sts:GetCallerIdentity failed: boom")
 				.await
 				.expect("file again");
-			let nil_issues = Issue::list_by_source_ref(
-				&mut conn,
-				refs::CANOPY_SOURCE,
-				refs::PREFLIGHT_IDENTITY,
-				&[Uuid::nil()],
-			)
-			.await
-			.expect("list");
-			assert_eq!(nil_issues.len(), 1, "one coalescing meta-server issue");
-			assert!(nil_issues[0].active);
+			let global = database::issues::get_global_issue(&mut conn, refs::PREFLIGHT_IDENTITY)
+				.await
+				.expect("get")
+				.expect("one coalescing canopy-wide issue");
+			assert!(global.active);
 
-			// Recovery clears the meta-server issue AND the legacy one.
+			// Recovery clears the canopy-wide issue AND the legacy one.
 			recover_identity_alert(&mut conn).await.expect("recover");
-			let nil_issues = Issue::list_by_source_ref(
-				&mut conn,
-				refs::CANOPY_SOURCE,
-				refs::PREFLIGHT_IDENTITY,
-				&[Uuid::nil()],
-			)
-			.await
-			.expect("list");
-			assert!(!nil_issues[0].active, "meta-server alert recovered");
+			let global = database::issues::get_global_issue(&mut conn, refs::PREFLIGHT_IDENTITY)
+				.await
+				.expect("get")
+				.expect("issue still exists");
+			assert!(!global.active, "canopy-wide alert recovered");
 			assert!(
 				Issue::active_group_ids_by_source_ref(
 					&mut conn,

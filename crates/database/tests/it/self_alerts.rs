@@ -1,4 +1,4 @@
-//! Self-alert lifecycle: a raise files one coalescing nil-server issue and
+//! Self-alert lifecycle: a raise files one coalescing canopy-wide issue and
 //! enqueues exactly one Slack open on the not-alerting → alerting transition
 //! (with flap grace below Critical, immediate at Critical); recovery inside
 //! the grace cancels the open and sends nothing; recovery after delivery
@@ -10,7 +10,6 @@ use database::slack_outbox::{KIND_SELF_ALERT_OPEN, KIND_SELF_ALERT_RESOLVE, Slac
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use jiff::Timestamp;
-use uuid::Uuid;
 
 const REF: &str = "test-self-alert";
 
@@ -40,7 +39,8 @@ async fn raise_enqueues_once_and_flap_recovery_is_silent() {
 		let issue = self_alerts::raise(&mut conn, REF, Severity::Error, "title", "body")
 			.await
 			.expect("raise");
-		assert_eq!(issue.server_id, Some(Uuid::nil()));
+		assert_eq!(issue.server_id, None);
+		assert_eq!(issue.server_group_id, None);
 		assert!(issue.active);
 		let rows = outbox_rows(&mut conn).await;
 		let [open] = rows.as_slice() else {
@@ -164,7 +164,7 @@ async fn self_alert_issues_are_excluded_from_the_fleet_listing() {
 			.expect("list");
 		assert!(
 			fleet.is_empty(),
-			"nil-server issues must not appear in the fleet listing: {fleet:?}"
+			"canopy-wide issues must not appear in the fleet listing: {fleet:?}"
 		);
 		let alerts = self_alerts::list(&mut conn, 50).await.expect("alerts");
 		assert_eq!(alerts.len(), 1);

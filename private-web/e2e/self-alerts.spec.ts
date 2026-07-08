@@ -3,9 +3,9 @@ import { expect, test } from "./test-fixtures";
 
 const NIL = "00000000-0000-0000-0000-000000000000";
 
-// Self-alerts (issues on the nil "Canopy" server) get their own surface: a
-// banner on every page and the /alerts view. They must NOT appear in the
-// fleet issue listing on /incidents.
+// Self-alerts (canopy-wide issues, scoped to neither server nor group)
+// get their own surface: a banner on every page and the /alerts view.
+// They must NOT appear in the fleet issue listing on /incidents.
 test.describe("self-alerts", () => {
 	test.beforeEach(async ({ sql }) => {
 		await resetSeededTables(sql);
@@ -16,7 +16,6 @@ test.describe("self-alerts", () => {
 		sql,
 	}) => {
 		await seedIssue(sql, {
-			serverId: NIL,
 			source: "canopy",
 			ref: "mcp-token-expiry",
 			severity: "error",
@@ -40,7 +39,6 @@ test.describe("self-alerts", () => {
 		sql,
 	}) => {
 		await seedIssue(sql, {
-			serverId: NIL,
 			source: "canopy",
 			ref: "preflight-identity",
 			severity: "critical",
@@ -58,7 +56,6 @@ test.describe("self-alerts", () => {
 
 	test("resolve clears the banner", async ({ page, sql }) => {
 		await seedIssue(sql, {
-			serverId: NIL,
 			source: "canopy",
 			ref: "slack-delivery-failure",
 			severity: "error",

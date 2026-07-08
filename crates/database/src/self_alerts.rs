@@ -2,9 +2,9 @@
 //!
 //! Spec: `.workhorse/specs/private-server/self-alerts.md` (id `SELF`).
 //!
-//! Each condition is one coalescing issue on the nil "Canopy" server —
-//! which is never grouped, so these never touch the per-group incident
-//! flow. Notification goes straight to the Slack outbox instead
+//! Each condition is one coalescing canopy-wide issue — scoped to
+//! neither a server nor a group, so these never touch the per-group
+//! incident flow. Notification goes straight to the Slack outbox instead
 //! ([`crate::slack_outbox::KIND_SELF_ALERT_OPEN`] /
 //! [`KIND_SELF_ALERT_RESOLVE`](crate::slack_outbox::KIND_SELF_ALERT_RESOLVE)),
 //! with the same flap grace incidents get: sub-Critical raises wait out
@@ -15,11 +15,9 @@ use commons_errors::Result;
 use commons_types::issue::Severity;
 use diesel_async::AsyncPgConnection;
 use jiff::{SignedDuration, Timestamp};
-use uuid::Uuid;
 
-use crate::issues::{Issue, NewEvent};
+use crate::issues::{Issue, get_global_issue, raise_global_event};
 use crate::slack_outbox::{KIND_SELF_ALERT_OPEN, KIND_SELF_ALERT_RESOLVE, SlackOutbox, vars};
-use crate::statuses::CANOPY_SOURCE;
 
 /// An operator-notification delivery permanently failed (the drainer gave up
 /// on an outbox row). No automatic recovery: stays until operator-resolved.
@@ -29,8 +27,8 @@ pub const SLACK_DELIVERY_FAILURE_REF: &str = "slack-delivery-failure";
 /// `slack_open_delay` default.
 pub const GRACE: SignedDuration = SignedDuration::from_secs(3 * 60);
 
-/// Raise (or re-affirm) a self-alert. Files the coalescing event against the
-/// nil server; on the not-alerting → alerting transition — including a
+/// Raise (or re-affirm) a self-alert. Files the coalescing canopy-wide
+/// issue; on the not-alerting → alerting transition — including a
 /// re-raise of an issue an operator resolved while the condition still held —
 /// enqueues the Slack notification. Repeated raises while alerting change
 /// nothing Slack-side.
@@ -46,17 +44,7 @@ pub async fn raise(
 		.map(|i| i.active && i.resolved_at.is_none())
 		.unwrap_or(false);
 
-	let issue = NewEvent {
-		source: CANOPY_SOURCE.into(),
-		r#ref: r#ref.into(),
-		severity: Some(severity),
-		description: Some(title.into()),
-		message: message.into(),
-		active: Some(true),
-		occurred_at: None,
-	}
-	.save(conn, Uuid::nil(), None)
-	.await?;
+	let issue = raise_global_event(conn, r#ref, severity, Some(title), message, true).await?;
 
 	if !was_alerting {
 		let deliver_after = if severity == Severity::Critical {
@@ -96,17 +84,7 @@ pub async fn recover(
 	}
 	let was_alerting = existing.resolved_at.is_none();
 
-	let issue = NewEvent {
-		source: CANOPY_SOURCE.into(),
-		r#ref: r#ref.into(),
-		severity: Some(Severity::Info),
-		description: None,
-		message: message.into(),
-		active: Some(false),
-		occurred_at: None,
-	}
-	.save(conn, Uuid::nil(), None)
-	.await?;
+	let issue = raise_global_event(conn, r#ref, Severity::Info, None, message, false).await?;
 
 	if was_alerting {
 		let cancelled = SlackOutbox::cancel_pending_self_alert_open(
@@ -133,16 +111,11 @@ pub async fn recover(
 
 /// The one issue for this condition, if it has ever been raised.
 pub async fn current(conn: &mut AsyncPgConnection, r#ref: &str) -> Result<Option<Issue>> {
-	Ok(
-		Issue::list_by_source_ref(conn, CANOPY_SOURCE, r#ref, &[Uuid::nil()])
-			.await?
-			.into_iter()
-			.next(),
-	)
+	get_global_issue(conn, r#ref).await
 }
 
-/// All self-alert issues (the nil server's), newest activity first. The
-/// operator UI's alerts view; the fleet issue listings exclude these.
+/// All self-alert issues (the canopy-wide ones), newest activity first.
+/// The operator UI's alerts view; the fleet issue listings exclude these.
 pub async fn list(conn: &mut AsyncPgConnection, limit: i64) -> Result<Vec<Issue>> {
 	use crate::schema::issues::dsl;
 	use diesel::prelude::*;
@@ -150,7 +123,7 @@ pub async fn list(conn: &mut AsyncPgConnection, limit: i64) -> Result<Vec<Issue>
 
 	dsl::issues
 		.select(Issue::as_select())
-		.filter(dsl::server_id.eq(Some(Uuid::nil())))
+		.filter(dsl::server_id.is_null().and(dsl::server_group_id.is_null()))
 		.order(dsl::last_seen.desc())
 		.limit(limit)
 		.load(conn)
