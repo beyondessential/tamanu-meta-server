@@ -2058,6 +2058,13 @@
                   "null"
                 ],
                 "description": "Overall self-reported health of the server. **Absent means `true`**,\nso senders that predate this field are never treated as unhealthy by\nomission. Recorded for historical analysis and display, but **not\nconsulted for incident or severity decisions** — those are derived\nfrom the per-check results in `health`, with each check's severity\ncontrolled by an operator-managed catalog."
+              },
+              "source": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The name of the source pushing this status: the reporting agent, e.g.\n`alertd`. Multiple sources may report on one server, each with its own\nset of checks; a source's push only opens and recovers its own checks.\n\n**Transitionally optional: this field will become mandatory.** A push\nwithout a `source` is attributed to `alertd`; new reporters must send\ntheir own name. Must be a non-empty string; the names `canopy` and\n`manual` are reserved for canopy itself and are rejected."
               }
             }
           }

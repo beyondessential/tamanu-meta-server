@@ -62,13 +62,13 @@ async fn resolves_server_and_group_scopes_in_batch() {
 		let ungrouped = insert_server(&mut conn, None).await;
 		let unsilenced = insert_server(&mut conn, Some(group)).await;
 
-		ServerSilencedRef::add(&mut conn, grouped, "status", "health/postgres", None)
+		ServerSilencedRef::add(&mut conn, grouped, "alertd", "health/postgres", None)
 			.await
 			.unwrap();
-		ServerSilencedRef::add(&mut conn, ungrouped, "status", "health/disk", None)
+		ServerSilencedRef::add(&mut conn, ungrouped, "alertd", "health/disk", None)
 			.await
 			.unwrap();
-		ServerGroupSilencedRef::add(&mut conn, group, "status", "health/uploads", None)
+		ServerGroupSilencedRef::add(&mut conn, group, "alertd", "health/uploads", None)
 			.await
 			.unwrap();
 
@@ -102,9 +102,10 @@ async fn resolves_server_and_group_scopes_in_batch() {
 	.await
 }
 
-/// Only `(status, health/<check>)` silences are healthcheck silences:
-/// other sources and non-health refs (e.g. canopy reachability) don't
-/// leak into the set.
+/// Only `health/<check>` silences are healthcheck silences — whichever
+/// source they were filed under, since checks are keyed per reporting
+/// source. Non-health refs (e.g. canopy reachability) don't leak into
+/// the set.
 #[tokio::test(flavor = "multi_thread")]
 async fn ignores_non_healthcheck_silences() {
 	TestDb::run(async |mut conn, _url| {
@@ -113,17 +114,21 @@ async fn ignores_non_healthcheck_silences() {
 		ServerSilencedRef::add(&mut conn, server, "canopy", "reachability", None)
 			.await
 			.unwrap();
-		ServerSilencedRef::add(&mut conn, server, "backups", "health/postgres", None)
+		ServerSilencedRef::add(&mut conn, server, "seedling", "health/postgres", None)
 			.await
 			.unwrap();
-		ServerSilencedRef::add(&mut conn, server, "status", "something-else", None)
+		ServerSilencedRef::add(&mut conn, server, "alertd", "something-else", None)
 			.await
 			.unwrap();
 
 		let map = silenced_health_checks_for_servers(&mut conn, &[(server, None)])
 			.await
 			.unwrap();
-		assert_eq!(map.get(&server), None);
+		assert_eq!(
+			map.get(&server),
+			Some(&checks(&["postgres"])),
+			"a health/ silence counts under any source; non-health refs don't",
+		);
 	})
 	.await
 }
@@ -134,7 +139,7 @@ async fn unsilencing_removes_the_check() {
 	TestDb::run(async |mut conn, _url| {
 		let server = insert_server(&mut conn, None).await;
 
-		ServerSilencedRef::add(&mut conn, server, "status", "health/postgres", None)
+		ServerSilencedRef::add(&mut conn, server, "alertd", "health/postgres", None)
 			.await
 			.unwrap();
 		assert_eq!(
@@ -144,7 +149,7 @@ async fn unsilencing_removes_the_check() {
 			checks(&["postgres"]),
 		);
 
-		ServerSilencedRef::remove(&mut conn, server, "status", "health/postgres")
+		ServerSilencedRef::remove(&mut conn, server, "alertd", "health/postgres")
 			.await
 			.unwrap();
 		assert_eq!(

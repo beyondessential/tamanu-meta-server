@@ -43,6 +43,16 @@ use crate::state::AppState;
 /// status data.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct StatusPayload {
+	/// The name of the source pushing this status: the reporting agent, e.g.
+	/// `alertd`. Multiple sources may report on one server, each with its own
+	/// set of checks; a source's push only opens and recovers its own checks.
+	///
+	/// **Transitionally optional: this field will become mandatory.** A push
+	/// without a `source` is attributed to `alertd`; new reporters must send
+	/// their own name. Must be a non-empty string; the names `canopy` and
+	/// `manual` are reserved for canopy itself and are rejected.
+	pub source: Option<String>,
+
 	/// Overall self-reported health of the server. **Absent means `true`**,
 	/// so senders that predate this field are never treated as unhealthy by
 	/// omission. Recorded for historical analysis and display, but **not
@@ -110,15 +120,21 @@ pub struct HealthCheck {
 	pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
-/// `source` value for the events filed below. Distinct from
-/// `canopy` (reachability sweep) so operators can tell apart "we
-/// couldn't reach you" from "you told us you're sick".
-const STATUS_SOURCE: &str = "status";
+/// The source a push is attributed to when it names none: the reporter
+/// deployed before the `source` field existed. Also the migration value for
+/// pre-source history. Transitional — the field will become mandatory.
+const DEFAULT_SOURCE: &str = "alertd";
+/// The source legacy-format pushes (no `health` array) are attributed to:
+/// they come from Tamanu's own direct reporting, not from alertd.
+const LEGACY_SOURCE: &str = "tamanu";
+/// Source names a push may not claim: `canopy` is canopy's own
+/// determinations (reachability sweep etc.), `manual` is operator-entered.
+const RESERVED_SOURCES: &[&str] = &[database::statuses::CANOPY_SOURCE, "manual"];
 /// Prefix for per-check refs. Each failed check is filed at
-/// `(status, health/<check_name>)`.
+/// `(<source>, health/<check_name>)`.
 const HEALTH_REF: &str = "health";
 /// Prefix for broken-check refs. A check reporting `result: broken`
-/// files at `(status, health-broken/<check_name>)` — a separate ref
+/// files at `(<source>, health-broken/<check_name>)` — a separate ref
 /// from the check's failure issue, so a known failure can stay open
 /// (unconfirmed either way) while the check itself is broken, and so
 /// operators can silence the two independently.
@@ -227,7 +243,7 @@ async fn create(
 	};
 
 	let raw = body.map(|j| j.0).unwrap_or(serde_json::Value::Null);
-	let (healthy, health, extra) = split_health_from_extra(raw)?;
+	let (source, healthy, health, extra) = split_health_from_extra(raw)?;
 
 	// The server version canopy tracks (and compares against the published
 	// version catalog) is the Tamanu version. Prefer the payload's
@@ -273,6 +289,7 @@ async fn create(
 			extra,
 			healthy,
 			health,
+			source,
 		}
 		.save(conn)
 		.await?;
@@ -362,9 +379,7 @@ async fn effective_check_severities(
 		.collect();
 
 	let health_prefix = format!("{HEALTH_REF}/");
-	for r#ref in
-		silenced_refs_with_prefix(db, server_id, group_id, STATUS_SOURCE, &health_prefix).await?
-	{
+	for r#ref in silenced_refs_with_prefix(db, server_id, group_id, &health_prefix).await? {
 		if let Some(check) = r#ref.strip_prefix(&health_prefix) {
 			map.insert(check.to_string(), CheckSeverity::Skip);
 		}
@@ -398,6 +413,7 @@ async fn create_legacy_status(
 		extra,
 		healthy,
 		health,
+		source: LEGACY_SOURCE.into(),
 	}
 	.save(db)
 	.await?;
@@ -485,7 +501,7 @@ async fn file_health_events(
 			_ => "failed",
 		};
 		NewEvent {
-			source: STATUS_SOURCE.into(),
+			source: status.source.clone(),
 			r#ref: format!("{HEALTH_REF}/{check}"),
 			severity: Some(severity),
 			description: Some(format!("Health check '{check}' {described}")),
@@ -507,7 +523,7 @@ async fn file_health_events(
 	{
 		let entry = find_health_entry(&status.health, check);
 		NewEvent {
-			source: STATUS_SOURCE.into(),
+			source: status.source.clone(),
 			r#ref: format!("{BROKEN_REF}/{check}"),
 			severity: Some(Severity::Warning),
 			description: Some(format!("Health check '{check}' is broken")),
@@ -528,10 +544,11 @@ async fn file_health_events(
 	// Failure closes: an open `health/<check>` closes when the check
 	// is now passed, skipped, or unmentioned ("trust the reporter").
 	// Broken does NOT close a prior failure — the check can't confirm
-	// the failure either way while it's broken.
+	// the failure either way while it's broken. Scoped to the pushing
+	// source: one source's push says nothing about another's checks.
 	let health_prefix = format!("{HEALTH_REF}/");
 	for r#ref in
-		Issue::active_refs_with_prefix(conn, server_id, STATUS_SOURCE, &health_prefix).await?
+		Issue::active_refs_with_prefix(conn, server_id, &status.source, &health_prefix).await?
 	{
 		let Some(check) = r#ref.strip_prefix(&health_prefix) else {
 			continue;
@@ -549,7 +566,7 @@ async fn file_health_events(
 			format!("Health check '{check}' recovered")
 		};
 		NewEvent {
-			source: STATUS_SOURCE.into(),
+			source: status.source.clone(),
 			r#ref,
 			severity: Some(Severity::Info),
 			description: None,
@@ -565,7 +582,7 @@ async fn file_health_events(
 	// the check itself is no longer broken.
 	let broken_prefix = format!("{BROKEN_REF}/");
 	for r#ref in
-		Issue::active_refs_with_prefix(conn, server_id, STATUS_SOURCE, &broken_prefix).await?
+		Issue::active_refs_with_prefix(conn, server_id, &status.source, &broken_prefix).await?
 	{
 		let Some(check) = r#ref.strip_prefix(&broken_prefix) else {
 			continue;
@@ -574,7 +591,7 @@ async fn file_health_events(
 			continue;
 		}
 		NewEvent {
-			source: STATUS_SOURCE.into(),
+			source: status.source.clone(),
 			r#ref: format!("{BROKEN_REF}/{check}"),
 			severity: Some(Severity::Info),
 			description: None,
@@ -639,11 +656,15 @@ fn per_check_description(
 	(!lines.is_empty()).then(|| lines.join("\n"))
 }
 
-/// Pulls the reserved `healthy` and `health` keys out of the incoming
-/// status body and returns them alongside the rest of the payload
+/// Pulls the reserved `source`, `healthy`, and `health` keys out of the
+/// incoming status body and returns them alongside the rest of the payload
 /// (`extra`). Validates types per the contract:
 ///
-/// - missing or `null` body → `healthy = true`, `health = []`, `extra = {}`
+/// - missing or `null` body → `source = alertd`, `healthy = true`,
+///   `health = []`, `extra = {}`
+/// - `source` absent ⇒ `alertd` (transitional — the field will become
+///   mandatory); present must be a non-empty string and not one of the
+///   reserved names (`canopy`, `manual`)
 /// - `healthy` absent ⇒ `true` (legacy compat — non-negotiable, this is
 ///   what stops every legacy server from false-positiving unhealthy on
 ///   the day we deploy)
@@ -657,13 +678,31 @@ fn per_check_description(
 ///   verbatim.
 fn split_health_from_extra(
 	raw: serde_json::Value,
-) -> Result<(bool, Option<serde_json::Value>, serde_json::Value)> {
+) -> Result<(String, bool, Option<serde_json::Value>, serde_json::Value)> {
 	let mut obj = match raw {
 		serde_json::Value::Null => serde_json::Map::new(),
 		serde_json::Value::Object(m) => m,
 		_ => {
 			return Err(AppError::BadRequest(
 				"status body must be a JSON object (or null/empty)".into(),
+			));
+		}
+	};
+
+	let source = match obj.remove("source") {
+		None => DEFAULT_SOURCE.to_string(),
+		Some(serde_json::Value::String(s)) if !s.is_empty() => {
+			if RESERVED_SOURCES.iter().any(|r| s.eq_ignore_ascii_case(r)) {
+				return Err(AppError::BadRequest(format!(
+					"`source` must not be a reserved name ({})",
+					RESERVED_SOURCES.join(", "),
+				)));
+			}
+			s
+		}
+		Some(_) => {
+			return Err(AppError::BadRequest(
+				"`source` must be a non-empty string".into(),
 			));
 		}
 	};
@@ -679,7 +718,7 @@ fn split_health_from_extra(
 	// `allow_legacy_status` flag, whether to accept it (reachability-only,
 	// carrying prior healthchecks forward) or 400 it.
 	let Some(health_value) = obj.remove("health") else {
-		return Ok((healthy, None, serde_json::Value::Object(obj)));
+		return Ok((source, healthy, None, serde_json::Value::Object(obj)));
 	};
 	let health_arr = match health_value {
 		serde_json::Value::Array(a) => a,
@@ -732,6 +771,7 @@ fn split_health_from_extra(
 	}
 
 	Ok((
+		source,
 		healthy,
 		Some(serde_json::Value::Array(health_arr)),
 		serde_json::Value::Object(obj),

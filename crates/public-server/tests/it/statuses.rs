@@ -843,7 +843,7 @@ async fn submit_status_legacy_allowed_carries_health_forward() {
 				}),
 			)
 			.await;
-			let before = fetch_issue(&mut conn, server_id, "status", "health/disk")
+			let before = fetch_issue(&mut conn, server_id, "alertd", "health/disk")
 				.await
 				.expect("per-check issue filed");
 			assert!(before.active);
@@ -859,7 +859,7 @@ async fn submit_status_legacy_allowed_carries_health_forward() {
 			.await;
 
 			// The disk issue is untouched — not closed by the legacy push.
-			let after = fetch_issue(&mut conn, server_id, "status", "health/disk")
+			let after = fetch_issue(&mut conn, server_id, "alertd", "health/disk")
 				.await
 				.expect("per-check issue still present");
 			assert!(after.active, "legacy push must not close the failing check");
@@ -976,7 +976,7 @@ async fn submit_status_warning_check_only() {
 			)
 			.await;
 
-			let per_check = fetch_issue(&mut conn, server_id, "status", "health/disk")
+			let per_check = fetch_issue(&mut conn, server_id, "alertd", "health/disk")
 				.await
 				.expect("per-check issue filed");
 			assert_eq!(per_check.severity, "warning");
@@ -992,7 +992,7 @@ async fn submit_status_warning_check_only() {
 
 			// Rollup is retired — never filed in any case.
 			assert!(
-				fetch_issue(&mut conn, server_id, "status", "health")
+				fetch_issue(&mut conn, server_id, "alertd", "health")
 					.await
 					.is_none()
 			);
@@ -1033,14 +1033,14 @@ async fn submit_status_unhealthy_with_checks_opens_incident() {
 
 			// The (status, health) rollup was retired — only per-check issues now.
 			assert!(
-				fetch_issue(&mut conn, server_id, "status", "health")
+				fetch_issue(&mut conn, server_id, "alertd", "health")
 					.await
 					.is_none(),
 				"rollup issue must not be created"
 			);
 
 			for check in ["database", "disk"] {
-				let i = fetch_issue(&mut conn, server_id, "status", &format!("health/{check}"))
+				let i = fetch_issue(&mut conn, server_id, "alertd", &format!("health/{check}"))
 					.await
 					.unwrap_or_else(|| panic!("per-check issue for {check} missing"));
 				assert_eq!(i.severity, "error", "{check}");
@@ -1048,7 +1048,7 @@ async fn submit_status_unhealthy_with_checks_opens_incident() {
 			}
 			// Passing check shouldn't manifest as a resolved-from-birth issue.
 			assert!(
-				fetch_issue(&mut conn, server_id, "status", "health/tls")
+				fetch_issue(&mut conn, server_id, "alertd", "health/tls")
 					.await
 					.is_none(),
 				"passing check must not create an issue"
@@ -1079,7 +1079,7 @@ async fn submit_status_unhealthy_no_checks_files_nothing() {
 			// failures to file individual issues against, so the unhealthy flag
 			// on its own produces nothing.
 			assert!(
-				fetch_issue(&mut conn, server_id, "status", "health")
+				fetch_issue(&mut conn, server_id, "alertd", "health")
 					.await
 					.is_none(),
 				"rollup issue must not be created"
@@ -1136,7 +1136,7 @@ async fn submit_status_with_all_failing_checks_silenced_opens_no_incident() {
 			// Per-check issues exist (silence doesn't gate row creation)
 			// but the silence prevents them from joining an incident.
 			for check in ["database", "disk"] {
-				let i = fetch_issue(&mut conn, server_id, "status", &format!("health/{check}"))
+				let i = fetch_issue(&mut conn, server_id, "alertd", &format!("health/{check}"))
 					.await
 					.unwrap_or_else(|| panic!("per-check issue for {check} missing"));
 				assert!(i.active, "{check}");
@@ -1186,13 +1186,13 @@ async fn submit_status_with_partial_silence_opens_incident_for_unsilenced() {
 			let row = fetch_latest_health(&mut conn, server_id).await;
 			assert!(!row.healthy);
 			assert!(
-				fetch_issue(&mut conn, server_id, "status", "health")
+				fetch_issue(&mut conn, server_id, "alertd", "health")
 					.await
 					.is_none(),
 				"rollup must not be created"
 			);
 			// Disk is unsilenced and configured at Error severity → opens an incident.
-			let disk = fetch_issue(&mut conn, server_id, "status", "health/disk")
+			let disk = fetch_issue(&mut conn, server_id, "alertd", "health/disk")
 				.await
 				.expect("disk issue filed");
 			assert_eq!(disk.severity, "error");
@@ -1226,7 +1226,7 @@ async fn submit_status_per_check_severity_is_catalog_driven() {
 				}),
 			)
 			.await;
-			let after_first = fetch_issue(&mut conn, server_id, "status", "health/disk")
+			let after_first = fetch_issue(&mut conn, server_id, "alertd", "health/disk")
 				.await
 				.expect("per-check issue");
 			assert_eq!(after_first.severity, "warning");
@@ -1243,14 +1243,14 @@ async fn submit_status_per_check_severity_is_catalog_driven() {
 				}),
 			)
 			.await;
-			let disk = fetch_issue(&mut conn, server_id, "status", "health/disk")
+			let disk = fetch_issue(&mut conn, server_id, "alertd", "health/disk")
 				.await
 				.expect("per-check issue still present");
 			assert_eq!(disk.severity, "warning");
 			assert!(disk.active, "still failing, must stay active");
 
 			assert!(
-				fetch_issue(&mut conn, server_id, "status", "health")
+				fetch_issue(&mut conn, server_id, "alertd", "health")
 					.await
 					.is_none(),
 				"rollup is retired and must not exist"
@@ -1288,7 +1288,7 @@ async fn submit_status_check_recovery_explicit() {
 			)
 			.await;
 
-			let issue = fetch_issue(&mut conn, server_id, "status", "health/db")
+			let issue = fetch_issue(&mut conn, server_id, "alertd", "health/db")
 				.await
 				.expect("per-check issue exists");
 			assert!(!issue.active, "explicit healthy=true closes the issue");
@@ -1327,7 +1327,7 @@ async fn submit_status_check_recovery_via_drop() {
 			)
 			.await;
 
-			let issue = fetch_issue(&mut conn, server_id, "status", "health/db")
+			let issue = fetch_issue(&mut conn, server_id, "alertd", "health/db")
 				.await
 				.expect("per-check issue exists");
 			assert!(!issue.active);
@@ -1432,7 +1432,7 @@ async fn submit_status_reachability_to_health_handoff() {
 			)
 			.await;
 
-			let per_check = fetch_issue(&mut conn, server_id, "status", "health/db")
+			let per_check = fetch_issue(&mut conn, server_id, "alertd", "health/db")
 				.await
 				.expect("per-check issue opened");
 			assert!(per_check.active);
@@ -1516,11 +1516,11 @@ async fn submit_status_keeps_incident_open_when_failure_swaps() {
 				"same incident, not a close+reopen flicker"
 			);
 
-			let db = fetch_issue(&mut conn, server_id, "status", "health/db")
+			let db = fetch_issue(&mut conn, server_id, "alertd", "health/db")
 				.await
 				.expect("db issue");
 			assert!(!db.active, "db has recovered");
-			let disk = fetch_issue(&mut conn, server_id, "status", "health/disk")
+			let disk = fetch_issue(&mut conn, server_id, "alertd", "health/disk")
 				.await
 				.expect("disk issue");
 			assert!(disk.active, "disk is new failure");
@@ -1617,7 +1617,7 @@ async fn submit_status_uses_catalog_severity_on_failure() {
 			)
 			.await;
 
-			let issue = fetch_issue(&mut conn, server_id, "status", "health/tunable_check")
+			let issue = fetch_issue(&mut conn, server_id, "alertd", "health/tunable_check")
 				.await
 				.expect("per-check issue filed");
 			assert_eq!(issue.severity, "critical");
@@ -1694,7 +1694,7 @@ async fn submit_status_rule_on_check_extra_overrides_base() {
 				}),
 			)
 			.await;
-			let issue = fetch_issue(&mut conn, server_id, "status", "health/disk_space")
+			let issue = fetch_issue(&mut conn, server_id, "alertd", "health/disk_space")
 				.await
 				.expect("per-check issue filed");
 			assert_eq!(issue.severity, "critical");
@@ -1710,7 +1710,7 @@ async fn submit_status_rule_on_check_extra_overrides_base() {
 				}),
 			)
 			.await;
-			let issue = fetch_issue(&mut conn, server_id, "status", "health/disk_space")
+			let issue = fetch_issue(&mut conn, server_id, "alertd", "health/disk_space")
 				.await
 				.expect("per-check issue still present");
 			assert_eq!(issue.severity, "warning");
@@ -1751,7 +1751,7 @@ async fn submit_status_rule_on_bestool_version_range() {
 				}),
 			)
 			.await;
-			let issue = fetch_issue(&mut conn, server_id, "status", "health/tamanu_service")
+			let issue = fetch_issue(&mut conn, server_id, "alertd", "health/tamanu_service")
 				.await
 				.expect("per-check issue filed");
 			assert_eq!(issue.severity, "warning");
@@ -1768,7 +1768,7 @@ async fn submit_status_rule_on_bestool_version_range() {
 				}),
 			)
 			.await;
-			let issue = fetch_issue(&mut conn, server_id, "status", "health/tamanu_service")
+			let issue = fetch_issue(&mut conn, server_id, "alertd", "health/tamanu_service")
 				.await
 				.expect("per-check issue still present");
 			assert_eq!(issue.severity, "error");
@@ -1810,7 +1810,7 @@ async fn submit_status_rule_on_server_tag() {
 				}),
 			)
 			.await;
-			let issue = fetch_issue(&mut conn, server_id, "status", "health/cert_expiry")
+			let issue = fetch_issue(&mut conn, server_id, "alertd", "health/cert_expiry")
 				.await
 				.expect("per-check issue filed");
 			assert_eq!(
@@ -1850,7 +1850,7 @@ async fn submit_status_tiered_ladder() {
 				}),
 			)
 			.await;
-			let issue = fetch_issue(&mut conn, server_id, "status", "health/cert_expiry")
+			let issue = fetch_issue(&mut conn, server_id, "alertd", "health/cert_expiry")
 				.await
 				.expect("issue");
 			assert_eq!(issue.severity, "error");
@@ -1866,7 +1866,7 @@ async fn submit_status_tiered_ladder() {
 				}),
 			)
 			.await;
-			let issue = fetch_issue(&mut conn, server_id, "status", "health/cert_expiry")
+			let issue = fetch_issue(&mut conn, server_id, "alertd", "health/cert_expiry")
 				.await
 				.expect("issue");
 			assert_eq!(issue.severity, "warning");
@@ -1953,7 +1953,7 @@ async fn submit_status_result_failed_uses_catalog_severity() {
 			)
 			.await;
 
-			let issue = fetch_issue(&mut conn, server_id, "status", "health/db")
+			let issue = fetch_issue(&mut conn, server_id, "alertd", "health/db")
 				.await
 				.expect("per-check issue filed");
 			assert_eq!(issue.severity, "error");
@@ -1990,7 +1990,7 @@ async fn submit_status_result_warning_ignores_catalog_severity() {
 			)
 			.await;
 
-			let issue = fetch_issue(&mut conn, server_id, "status", "health/db")
+			let issue = fetch_issue(&mut conn, server_id, "alertd", "health/db")
 				.await
 				.expect("per-check issue filed");
 			assert_eq!(issue.severity, "warning");
@@ -2034,7 +2034,7 @@ async fn submit_status_result_rule_on_check_result() {
 			)
 			.await;
 
-			let issue = fetch_issue(&mut conn, server_id, "status", "health/db")
+			let issue = fetch_issue(&mut conn, server_id, "alertd", "health/db")
 				.await
 				.expect("per-check issue filed");
 			assert_eq!(issue.severity, "info", "rule overrides the fixed default");
@@ -2062,7 +2062,7 @@ async fn submit_status_result_broken_files_separate_ref_at_warning() {
 			)
 			.await;
 
-			let broken = fetch_issue(&mut conn, server_id, "status", "health-broken/db")
+			let broken = fetch_issue(&mut conn, server_id, "alertd", "health-broken/db")
 				.await
 				.expect("broken issue filed");
 			assert_eq!(broken.severity, "warning");
@@ -2076,7 +2076,7 @@ async fn submit_status_result_broken_files_separate_ref_at_warning() {
 			assert!(broken.message.contains("config not found"));
 			// No failure issue, no incident.
 			assert!(
-				fetch_issue(&mut conn, server_id, "status", "health/db")
+				fetch_issue(&mut conn, server_id, "alertd", "health/db")
 					.await
 					.is_none(),
 				"broken must not file at the failure ref"
@@ -2093,7 +2093,7 @@ async fn submit_status_result_broken_files_separate_ref_at_warning() {
 				}),
 			)
 			.await;
-			let broken = fetch_issue(&mut conn, server_id, "status", "health-broken/db")
+			let broken = fetch_issue(&mut conn, server_id, "alertd", "health-broken/db")
 				.await
 				.expect("broken issue still exists");
 			assert!(!broken.active);
@@ -2131,11 +2131,11 @@ async fn submit_status_failed_then_broken_keeps_failure_open() {
 			)
 			.await;
 
-			let failure = fetch_issue(&mut conn, server_id, "status", "health/db")
+			let failure = fetch_issue(&mut conn, server_id, "alertd", "health/db")
 				.await
 				.expect("failure issue exists");
 			assert!(failure.active, "broken must not close the failure");
-			let broken = fetch_issue(&mut conn, server_id, "status", "health-broken/db")
+			let broken = fetch_issue(&mut conn, server_id, "alertd", "health-broken/db")
 				.await
 				.expect("broken issue filed");
 			assert!(broken.active);
@@ -2150,11 +2150,11 @@ async fn submit_status_failed_then_broken_keeps_failure_open() {
 				}),
 			)
 			.await;
-			let failure = fetch_issue(&mut conn, server_id, "status", "health/db")
+			let failure = fetch_issue(&mut conn, server_id, "alertd", "health/db")
 				.await
 				.expect("failure issue exists");
 			assert!(!failure.active);
-			let broken = fetch_issue(&mut conn, server_id, "status", "health-broken/db")
+			let broken = fetch_issue(&mut conn, server_id, "alertd", "health-broken/db")
 				.await
 				.expect("broken issue exists");
 			assert!(!broken.active);
@@ -2189,7 +2189,7 @@ async fn submit_status_result_skipped_closes_failure_with_message() {
 			)
 			.await;
 
-			let issue = fetch_issue(&mut conn, server_id, "status", "health/cert")
+			let issue = fetch_issue(&mut conn, server_id, "alertd", "health/cert")
 				.await
 				.expect("per-check issue exists");
 			assert!(!issue.active, "skipped closes the failure");
@@ -2234,7 +2234,7 @@ async fn submit_status_result_skipped_closes_broken() {
 			)
 			.await;
 
-			let broken = fetch_issue(&mut conn, server_id, "status", "health-broken/cert")
+			let broken = fetch_issue(&mut conn, server_id, "alertd", "health-broken/cert")
 				.await
 				.expect("broken issue exists");
 			assert!(!broken.active);
@@ -2273,7 +2273,7 @@ async fn submit_status_legacy_to_result_transition() {
 			)
 			.await;
 
-			let issue = fetch_issue(&mut conn, server_id, "status", "health/db")
+			let issue = fetch_issue(&mut conn, server_id, "alertd", "health/db")
 				.await
 				.expect("per-check issue exists");
 			assert!(!issue.active, "result form closes legacy-form failure");
@@ -2651,6 +2651,123 @@ async fn submit_status_versionless_when_neither_present() {
 				None,
 				"no tamanuVersion and no X-Version ⇒ versionless status"
 			);
+		},
+	)
+	.await
+}
+
+/// Two sources reporting disjoint check sets for the same server must not
+/// close each other's issues: a push's "unmentioned means recovered" only
+/// applies to the pushing source's own checks.
+#[tokio::test(flavor = "multi_thread")]
+async fn multi_source_pushes_do_not_flap() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+
+			// Source-less push: attributed to alertd, files its failure there.
+			public
+				.post(&format!("/status/{server_id}"))
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({ "health": [{ "check": "db", "result": "failed" }] }))
+				.await
+				.assert_status_ok();
+			assert!(
+				fetch_issue(&mut conn, server_id, "alertd", "health/db")
+					.await
+					.expect("alertd issue filed")
+					.active
+			);
+
+			// A second source pushes a disjoint check set: its own failure
+			// files under its name, and alertd's open issue is untouched.
+			public
+				.post(&format!("/status/{server_id}"))
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"source": "seedling",
+					"health": [{ "check": "disk", "result": "failed" }],
+				}))
+				.await
+				.assert_status_ok();
+			assert!(
+				fetch_issue(&mut conn, server_id, "seedling", "health/disk")
+					.await
+					.expect("seedling issue filed")
+					.active
+			);
+			assert!(
+				fetch_issue(&mut conn, server_id, "alertd", "health/db")
+					.await
+					.expect("alertd issue still present")
+					.active,
+				"another source's push must not recover alertd's checks",
+			);
+
+			// The second source recovering only closes its own issue.
+			public
+				.post(&format!("/status/{server_id}"))
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({ "source": "seedling", "health": [] }))
+				.await
+				.assert_status_ok();
+			assert!(
+				!fetch_issue(&mut conn, server_id, "seedling", "health/disk")
+					.await
+					.expect("seedling issue closed")
+					.active
+			);
+			assert!(
+				fetch_issue(&mut conn, server_id, "alertd", "health/db")
+					.await
+					.expect("alertd issue survives")
+					.active
+			);
+
+			// Each stored status row records the source that pushed it.
+			#[derive(QueryableByName)]
+			struct SourceRow {
+				#[diesel(sql_type = sql_types::Text)]
+				source: String,
+			}
+			let sources: Vec<SourceRow> = sql_query(
+				"SELECT source FROM statuses WHERE server_id = $1 ORDER BY created_at, source",
+			)
+			.bind::<sql_types::Uuid, _>(server_id)
+			.load(&mut conn)
+			.await
+			.expect("load status sources");
+			let sources: Vec<&str> = sources.iter().map(|r| r.source.as_str()).collect();
+			assert_eq!(sources, ["alertd", "seedling", "seedling"]);
+		},
+	)
+	.await
+}
+
+/// The `source` field must be a non-empty, non-reserved string when present.
+#[tokio::test(flavor = "multi_thread")]
+async fn source_field_validation() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+
+			for source in ["canopy", "Manual", ""] {
+				public
+					.post(&format!("/status/{server_id}"))
+					.add_header("mtls-certificate", &cert)
+					.json(&serde_json::json!({ "source": source, "health": [] }))
+					.await
+					.assert_status_bad_request();
+			}
+
+			public
+				.post(&format!("/status/{server_id}"))
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({ "source": 42, "health": [] }))
+				.await
+				.assert_status_bad_request();
 		},
 	)
 	.await

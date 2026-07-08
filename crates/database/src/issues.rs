@@ -1403,6 +1403,26 @@ impl Issue {
 			.map_err(AppError::from)
 	}
 
+	/// Like [`Self::list_by_source_ref`], but matching the ref under any
+	/// source. Healthcheck refs (`health/<check>`) are keyed per reporting
+	/// source; consumers that correlate by check name alone use this.
+	pub async fn list_by_ref(
+		db: &mut AsyncPgConnection,
+		ref_: &str,
+		server_ids: &[Uuid],
+	) -> Result<Vec<Self>> {
+		use crate::schema::issues::dsl;
+		if server_ids.is_empty() {
+			return Ok(Vec::new());
+		}
+		dsl::issues
+			.select(Self::as_select())
+			.filter(dsl::ref_.eq(ref_).and(dsl::server_id.eq_any(server_ids)))
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	/// Mark an issue as operator-resolved. Triggers incident-membership
 	/// re-evaluation (typically: leaves the incident).
 	pub async fn resolve(

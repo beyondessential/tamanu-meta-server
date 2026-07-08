@@ -91,6 +91,9 @@ pub struct Status {
 	/// `check` name and a result; any extra per-check fields are passed
 	/// through verbatim.
 	pub health: serde_json::Value,
+	/// The source that pushed this status: the named reporter (e.g.
+	/// `alertd`), or `canopy` for statuses generated internally.
+	pub source: String,
 }
 
 #[derive(Debug, Insertable)]
@@ -104,6 +107,7 @@ pub struct NewStatus {
 	pub extra: serde_json::Value,
 	pub healthy: bool,
 	pub health: serde_json::Value,
+	pub source: String,
 }
 
 impl Default for NewStatus {
@@ -115,6 +119,7 @@ impl Default for NewStatus {
 			extra: serde_json::Value::Object(Default::default()),
 			healthy: true,
 			health: serde_json::Value::Array(Default::default()),
+			source: CANOPY_SOURCE.into(),
 		}
 	}
 }
@@ -162,6 +167,7 @@ impl Status {
 					// to avoid false-positive unhealthy events from this path.
 					healthy: true,
 					health: serde_json::Value::Array(Default::default()),
+					source: CANOPY_SOURCE.into(),
 				})
 			}
 			Err(err) => {

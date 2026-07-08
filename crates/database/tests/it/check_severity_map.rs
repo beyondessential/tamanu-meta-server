@@ -94,36 +94,47 @@ async fn silenced_refs_with_prefix_combines_scopes_and_filters() {
 		let server_id = insert_server(&mut conn, Some(group_id)).await;
 		let other_server_id = insert_server(&mut conn, None).await;
 
-		ServerSilencedRef::add(&mut conn, server_id, "status", "health/flaky", None)
+		ServerSilencedRef::add(&mut conn, server_id, "alertd", "health/flaky", None)
 			.await
 			.expect("server silence");
-		ServerGroupSilencedRef::add(&mut conn, group_id, "status", "health/groupwide", None)
+		ServerGroupSilencedRef::add(&mut conn, group_id, "alertd", "health/groupwide", None)
 			.await
 			.expect("group silence");
-		// None of these may leak into the result: wrong source, wrong ref
-		// prefix (broken issues are a separate thread), wrong server.
-		ServerSilencedRef::add(&mut conn, server_id, "canopy", "health/wrong-source", None)
-			.await
-			.expect("other-source silence");
-		ServerSilencedRef::add(&mut conn, server_id, "status", "health-broken/flaky", None)
+		// A silence under any source matches: healthcheck refs are keyed
+		// per reporting source, and this helper correlates by check name.
+		ServerSilencedRef::add(
+			&mut conn,
+			server_id,
+			"seedling",
+			"health/other-source",
+			None,
+		)
+		.await
+		.expect("other-source silence");
+		// None of these may leak into the result: wrong ref prefix (broken
+		// issues are a separate thread), wrong server.
+		ServerSilencedRef::add(&mut conn, server_id, "alertd", "health-broken/flaky", None)
 			.await
 			.expect("broken silence");
-		ServerSilencedRef::add(&mut conn, other_server_id, "status", "health/other", None)
+		ServerSilencedRef::add(&mut conn, other_server_id, "alertd", "health/other", None)
 			.await
 			.expect("other-server silence");
 
-		let mut refs =
-			silenced_refs_with_prefix(&mut conn, server_id, Some(group_id), "status", "health/")
-				.await
-				.expect("refs");
+		let mut refs = silenced_refs_with_prefix(&mut conn, server_id, Some(group_id), "health/")
+			.await
+			.expect("refs");
 		refs.sort();
-		assert_eq!(refs, vec!["health/flaky", "health/groupwide"]);
+		assert_eq!(
+			refs,
+			vec!["health/flaky", "health/groupwide", "health/other-source"]
+		);
 
 		// Ungrouped lookup only sees the server-scope silences.
-		let refs = silenced_refs_with_prefix(&mut conn, server_id, None, "status", "health/")
+		let mut refs = silenced_refs_with_prefix(&mut conn, server_id, None, "health/")
 			.await
 			.expect("refs without group");
-		assert_eq!(refs, vec!["health/flaky"]);
+		refs.sort();
+		assert_eq!(refs, vec!["health/flaky", "health/other-source"]);
 	})
 	.await
 }

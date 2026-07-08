@@ -88,16 +88,16 @@ async fn endpoint_maps_catalog_severities_and_silences() {
 			// Silences: flaky at server scope, groupwide at group scope; a
 			// silence on disk_space's *broken* thread must not skip the
 			// check itself.
-			ServerSilencedRef::add(&mut conn, server_id, "status", "health/flaky", None)
+			ServerSilencedRef::add(&mut conn, server_id, "alertd", "health/flaky", None)
 				.await
 				.expect("server silence");
-			ServerGroupSilencedRef::add(&mut conn, group_id, "status", "health/groupwide", None)
+			ServerGroupSilencedRef::add(&mut conn, group_id, "alertd", "health/groupwide", None)
 				.await
 				.expect("group silence");
 			ServerSilencedRef::add(
 				&mut conn,
 				server_id,
-				"status",
+				"alertd",
 				"health-broken/disk_space",
 				None,
 			)
@@ -134,7 +134,7 @@ async fn endpoint_works_for_ungrouped_server() {
 		async |mut conn, cert, device_id, public, _| {
 			let server_id = insert_server(&mut conn, Some(device_id), None).await;
 			seed_catalog(&mut conn, "disk_space", "error", None).await;
-			ServerSilencedRef::add(&mut conn, server_id, "status", "health/disk_space", None)
+			ServerSilencedRef::add(&mut conn, server_id, "alertd", "health/disk_space", None)
 				.await
 				.expect("silence");
 
@@ -160,7 +160,7 @@ async fn status_response_carries_check_severities() {
 
 			seed_catalog(&mut conn, "disk_space", "error", None).await;
 			seed_catalog(&mut conn, "cert_expiry", "critical", None).await;
-			ServerSilencedRef::add(&mut conn, server_id, "status", "health/cert_expiry", None)
+			ServerSilencedRef::add(&mut conn, server_id, "alertd", "health/cert_expiry", None)
 				.await
 				.expect("silence");
 

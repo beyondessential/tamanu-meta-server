@@ -126,8 +126,7 @@ just the `psql` client. On macOS there's no `/dev/shm`, so it falls back to disk
 `CANOPY_TEST_PG_ROLE`.
 
 To run against your **system** Postgres instead (to inspect the DB afterwards,
-or where `initdb` isn't available), use `just test-system [nextest args]` —
-prefix with `nice` to soften the I/O grind.
+or where `initdb` isn't available), use `just test-system [nextest args]`.
 
 ## Version Control
 - If the working copy is a jujutsu repo (a `.jj` directory exists at the repo root), prefer `jj` commands over `git` for VCS operations (status, diff, log, commit/describe, etc.). The repo may be colocated with git, but `jj` is the source of truth for local work.

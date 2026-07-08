@@ -395,22 +395,19 @@ pub async fn check_attention(
 		.collect();
 
 	// "Failing since" comes from the issue the public-server status
-	// handler files at `(status, health/<check>)` when a check degrades:
+	// handler files at `(<source>, health/<check>)` when a check degrades:
 	// an active issue's first_seen is exactly when the current failure
 	// streak began (recoveries close the issue, so a re-failure starts a
-	// fresh one).
+	// fresh one). This page correlates by check name across whichever
+	// source reports it, so the lookup ignores the source.
 	let server_ids: Vec<Uuid> = reporting.iter().map(|(s, _)| s.id).collect();
-	let failing_since: HashMap<Uuid, Timestamp> = Issue::list_by_source_ref(
-		&mut conn,
-		"status",
-		&format!("health/{}", args.check),
-		&server_ids,
-	)
-	.await?
-	.into_iter()
-	.filter(|issue| issue.active)
-	.filter_map(|issue| issue.server_id.map(|sid| (sid, issue.first_seen)))
-	.collect();
+	let failing_since: HashMap<Uuid, Timestamp> =
+		Issue::list_by_ref(&mut conn, &format!("health/{}", args.check), &server_ids)
+			.await?
+			.into_iter()
+			.filter(|issue| issue.active)
+			.filter_map(|issue| issue.server_id.map(|sid| (sid, issue.first_seen)))
+			.collect();
 
 	let mut servers: Vec<CheckAttentionServerData> = reporting
 		.into_iter()

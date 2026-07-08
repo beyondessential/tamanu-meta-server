@@ -864,6 +864,7 @@ async fn seed_statuses(
 				extra,
 				healthy,
 				health,
+				source: "alertd".into(),
 			})
 			.execute(conn)
 			.await?;
