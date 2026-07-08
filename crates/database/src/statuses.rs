@@ -30,6 +30,11 @@ pub const CANOPY_SOURCE: &str = "canopy";
 /// same issue row.
 pub const REACHABILITY_REF: &str = "reachability";
 
+/// Ref prefix for the per-(server, source) staleness checks canopy files
+/// when a reporting source stops reporting: `stale/<source>`, e.g.
+/// `stale/alertd`. A contract with stored silences and policy rows.
+pub const STALE_REF_PREFIX: &str = "stale/";
+
 fn server_label(s: &Server) -> String {
 	s.name
 		.clone()
@@ -220,18 +225,26 @@ impl Status {
 		Ok(())
 	}
 
-	/// Sweep every server's most recent status. For each monitored server
-	/// (`is_monitored = true`) whose freshness has crossed the per-server
-	/// `alert_when_down_for` threshold, file (or close) a canopy-sourced
-	/// issue keyed by [`REACHABILITY_REF`].
+	/// Sweep every monitored server (`is_monitored = true`) for staleness
+	/// against its per-server `alert_when_down_for` threshold, on two
+	/// levels:
 	///
-	/// Most servers report by pushing their own status to the public-server
-	/// (so their `device_id` is non-null); the pingtask only handles legacy
-	/// foreign servers without a registered device. Both paths feed the same
-	/// `statuses` table, so this sweep doesn't care which one is in play.
+	/// - **Reachability**: the server's most recent status row, from any
+	///   source. Every source's report (and every pingtask probe) lands a
+	///   status row, so this goes stale exactly when *all* of the server's
+	///   sources are stale — the server is unreachable. Filed (or closed)
+	///   as a canopy-sourced check keyed by [`REACHABILITY_REF`]. This arm
+	///   also covers servers that have never reported at all, and legacy
+	///   foreign servers without a registered device that only the
+	///   pingtask reaches.
+	/// - **Per-source staleness**: a source that has reported checks on a
+	///   server is expected to keep reporting. When its most recent report
+	///   is older than the threshold, file a `stale/<source>` check (see
+	///   [`STALE_REF_PREFIX`]) — catching one reporter going quiet while
+	///   others keep the server reachable.
 	///
 	/// Returns the number of events filed in this pass.
-	pub async fn sweep_reachability(db: &mut AsyncPgConnection) -> Result<usize> {
+	pub async fn sweep_staleness(db: &mut AsyncPgConnection) -> Result<usize> {
 		let servers = Server::get_all(db, 0, None).await?;
 		let monitored: Vec<&Server> = servers
 			.iter()
@@ -310,6 +323,102 @@ impl Status {
 						"threshold_secs": threshold.as_secs(),
 					})),
 					default_ceiling: CheckResult::Failed,
+					default_escalates: false,
+				},
+			)
+			.await?;
+			filed += 1;
+		}
+
+		filed += Self::sweep_source_staleness(db, &monitored, now).await?;
+		Ok(filed)
+	}
+
+	/// The per-source arm of [`Self::sweep_staleness`]: file (or close) a
+	/// `stale/<source>` check for each (monitored server, reporting source)
+	/// whose most recent report has crossed the server's threshold.
+	///
+	/// Freshness comes from check state, not the statuses history: every
+	/// report re-stamps `last_seen` on the state rows of the checks it
+	/// mentions, so [`Issue::source_freshness`] is both the set of sources
+	/// expected to report and when each last did. Registered at a warning
+	/// ceiling — one quiet reporter degrades a server, full unreachability
+	/// is the reachability arm's failure.
+	async fn sweep_source_staleness(
+		db: &mut AsyncPgConnection,
+		monitored: &[&Server],
+		now: Timestamp,
+	) -> Result<usize> {
+		let server_map: std::collections::HashMap<Uuid, &Server> =
+			monitored.iter().map(|s| (s.id, *s)).collect();
+		let server_ids: Vec<Uuid> = monitored.iter().map(|s| s.id).collect();
+		let freshness = Issue::source_freshness(db, &server_ids).await?;
+		if freshness.is_empty() {
+			return Ok(0);
+		}
+
+		let refs: Vec<String> = freshness
+			.iter()
+			.map(|(_, source, _)| format!("{STALE_REF_PREFIX}{source}"))
+			.collect::<std::collections::BTreeSet<_>>()
+			.into_iter()
+			.collect();
+		let existing = Issue::list_by_source_refs(db, CANOPY_SOURCE, &refs, &server_ids).await?;
+		let existing_map: std::collections::HashMap<(Uuid, &str), &Issue> = existing
+			.iter()
+			.filter_map(|i| i.server_id.map(|sid| ((sid, i.r#ref.as_str()), i)))
+			.collect();
+
+		let mut filed = 0usize;
+		for (server_id, source, last_seen) in &freshness {
+			let Some(server) = server_map.get(server_id) else {
+				continue;
+			};
+			let threshold = server.alert_when_down_for.0;
+			let elapsed = now.duration_since(*last_seen).abs();
+			let stale = elapsed >= threshold;
+			let check = format!("{STALE_REF_PREFIX}{source}");
+			let existing = existing_map.get(&(*server_id, check.as_str())).copied();
+
+			let (observed, message) = match (stale, existing) {
+				(false, None) => continue,
+				(false, Some(issue)) if !issue.active => continue,
+				(false, Some(_)) => (
+					CheckResult::Passed,
+					format!(
+						"Source {source} on server {} is reporting again",
+						server_label(server),
+					),
+				),
+				(true, _) => (
+					CheckResult::Failed,
+					format!(
+						"Source {source} on server {} has not reported for {} (threshold {})",
+						server_label(server),
+						format_secs(elapsed.as_secs()),
+						format_secs(threshold.as_secs()),
+					),
+				),
+			};
+			crate::issues::file_check(
+				db,
+				crate::issues::CheckFiling {
+					source: CANOPY_SOURCE,
+					scope: crate::issues::FilingScope::Server {
+						server_id: *server_id,
+						device_id: None,
+					},
+					check: &check,
+					observed,
+					title: Some("Source stopped reporting"),
+					message: &message,
+					detail: Some(serde_json::json!({
+						"source": source,
+						"last_reported": last_seen.to_string(),
+						"elapsed_secs": elapsed.as_secs(),
+						"threshold_secs": threshold.as_secs(),
+					})),
+					default_ceiling: CheckResult::Warning,
 					default_escalates: false,
 				},
 			)

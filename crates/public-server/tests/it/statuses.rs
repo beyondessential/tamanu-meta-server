@@ -1354,7 +1354,7 @@ async fn submit_status_reachability_to_health_handoff() {
 			// Initial state: server silent → reachability sweep files a
 			// canopy/reachability issue at Critical (severity for `Gone`),
 			// which opens an incident on the server's group.
-			database::statuses::Status::sweep_reachability(&mut conn)
+			database::statuses::Status::sweep_staleness(&mut conn)
 				.await
 				.expect("reachability sweep");
 			let reach_before = fetch_issue(&mut conn, server_id, "canopy", "reachability")
@@ -1400,7 +1400,7 @@ async fn submit_status_reachability_to_health_handoff() {
 			// Reachability sweep runs again. Server's latest status is fresh
 			// so the sweep closes the reachability issue. The incident must
 			// stay open because the per-check issue is still contributing.
-			database::statuses::Status::sweep_reachability(&mut conn)
+			database::statuses::Status::sweep_staleness(&mut conn)
 				.await
 				.expect("reachability sweep (recovery)");
 

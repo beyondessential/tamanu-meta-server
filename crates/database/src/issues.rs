@@ -2014,6 +2014,72 @@ impl Issue {
 			.map_err(AppError::from)
 	}
 
+	/// Like [`Self::list_by_source_ref`], but matching any of several refs
+	/// at once. Used by the staleness sweep, whose per-source check refs
+	/// are only known at runtime.
+	pub async fn list_by_source_refs(
+		db: &mut AsyncPgConnection,
+		source: &str,
+		refs: &[String],
+		server_ids: &[Uuid],
+	) -> Result<Vec<Self>> {
+		use crate::schema::issues::dsl;
+		if server_ids.is_empty() || refs.is_empty() {
+			return Ok(Vec::new());
+		}
+		dsl::issues
+			.select(Self::as_select())
+			.filter(
+				dsl::source
+					.eq(source)
+					.and(dsl::ref_.eq_any(refs))
+					.and(dsl::server_id.eq_any(server_ids)),
+			)
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// Most recent check-state stamp per (server, reporting source): every
+	/// report a source pushes re-stamps `last_seen` on the state rows of
+	/// the checks it mentions, so the max per source is when that source
+	/// last reported — maintained incrementally by ingestion, with no scan
+	/// of the statuses history. The reserved sources are excluded (canopy
+	/// and manual filings aren't reports), as are rows never stamped by
+	/// the check-state model.
+	pub async fn source_freshness(
+		db: &mut AsyncPgConnection,
+		server_ids: &[Uuid],
+	) -> Result<Vec<(Uuid, String, Timestamp)>> {
+		use crate::schema::issues::dsl;
+		if server_ids.is_empty() {
+			return Ok(Vec::new());
+		}
+		let rows: Vec<(Uuid, String, jiff_diesel::Timestamp)> = dsl::issues
+			.filter(
+				dsl::server_id
+					.eq_any(server_ids)
+					.and(
+						dsl::source
+							.ne_all([crate::statuses::CANOPY_SOURCE, crate::issues::MANUAL_SOURCE]),
+					)
+					.and(dsl::check_name.is_not_null()),
+			)
+			.group_by((dsl::server_id, dsl::source))
+			.select((
+				dsl::server_id.assume_not_null(),
+				dsl::source,
+				diesel::dsl::max(dsl::last_seen).assume_not_null(),
+			))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(rows
+			.into_iter()
+			.map(|(server, source, seen)| (server, source, seen.into()))
+			.collect())
+	}
+
 	/// Like [`Self::list_by_source_ref`], but matching the ref under any
 	/// source. Healthcheck refs (`health/<check>`) are keyed per reporting
 	/// source; consumers that correlate by check name alone use this.

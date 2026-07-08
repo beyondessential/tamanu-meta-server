@@ -4,13 +4,12 @@
 //! a separate pod per check.
 //!
 //! Sweeps run each tick:
-//! - **reachability** — look at every monitored server's latest status row and
-//!   file (or close) the `(source=canopy, ref=reachability)` issue. Severity
-//!   escalates as the server stays unreported — Notice → Warning at the
-//!   sub-incident tiers, then Error (opens an incident) at "Down", then
-//!   Critical at "Gone". Independent of pingtask: most servers push their own
-//!   status, so the sweep operates on the resulting `statuses` rows regardless
-//!   of which path produced them.
+//! - **staleness** — look at every monitored server's report freshness against
+//!   its down threshold and file (or close) the `(source=canopy,
+//!   ref=reachability)` check when nothing at all is reporting, plus a
+//!   `stale/<source>` check per reporting source that has gone quiet.
+//!   Independent of pingtask: most servers push their own status, so the sweep
+//!   operates on the resulting rows regardless of which path produced them.
 //! - **backup staleness + reconcile** — `database::backup::sweep`: stale
 //!   reported runs / maintenance, and report-vs-inventory reconciliation.
 //! - **tailnet key-expiry** — when the Tailscale directory is configured.
@@ -109,10 +108,10 @@ pub fn spawn() -> JoinHandle<()> {
 				continue;
 			};
 
-			match Status::sweep_reachability(&mut db).await {
+			match Status::sweep_staleness(&mut db).await {
 				Ok(0) => {}
-				Ok(n) => debug!("filed {n} reachability events"),
-				Err(err) => error!("reachability sweep failed: {err}"),
+				Ok(n) => debug!("filed {n} staleness events"),
+				Err(err) => error!("staleness sweep failed: {err}"),
 			}
 
 			// Backup staleness + report-vs-inventory reconciliation: another
