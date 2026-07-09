@@ -580,6 +580,7 @@ async fn file_health_events(
 			check: (*check).clone(),
 			observed: curr_check_results[*check],
 			effective: graded.effective,
+			escalates: graded.escalates,
 			detail: entry.cloned().map(serde_json::Value::Object),
 		};
 		NewEvent {
@@ -609,6 +610,7 @@ async fn file_health_events(
 			check: check.clone(),
 			observed: CheckResult::Passed,
 			effective: CheckResult::Passed,
+			escalates: false,
 			detail: None,
 		};
 		NewEvent {

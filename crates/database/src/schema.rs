@@ -309,6 +309,7 @@ diesel::table! {
 		detail -> Nullable<Jsonb>,
 		degraded_since -> Nullable<Timestamptz>,
 		last_degraded_at -> Nullable<Timestamptz>,
+		escalates -> Bool,
 	}
 }
 

@@ -110,6 +110,32 @@ pub struct Issue {
 	/// a recovered issue (worth listing) from always-healthy check state.
 	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
 	pub last_degraded_at: Option<Timestamp>,
+	/// Whether this check's policy escalates: an effective failure
+	/// notifies immediately, bypassing incident grace. Stamped from the
+	/// catalog on every filing.
+	pub escalates: bool,
+}
+
+impl Issue {
+	/// Does this state open an incident on its own? An effective failure
+	/// does; anything less joins an already-open incident but doesn't
+	/// create (or hold open) one. Stateless rows (never stamped by the
+	/// check-state model) fall back to the severity vocabulary.
+	pub fn opens_incident(&self) -> bool {
+		match self.effective_result {
+			Some(result) => result == CheckResult::Failed,
+			None => self.severity.opens_incident(),
+		}
+	}
+
+	/// Is this state an escalating failure right now — one whose
+	/// notification bypasses the incident grace period?
+	pub fn escalates_now(&self) -> bool {
+		match self.effective_result {
+			Some(result) => result == CheckResult::Failed && self.escalates,
+			None => self.severity == Severity::Critical,
+		}
+	}
 }
 
 /// Diesel helper: a nullable text column read as an optional
@@ -242,6 +268,8 @@ pub struct CheckStateStamp {
 	pub check: String,
 	pub observed: CheckResult,
 	pub effective: CheckResult,
+	/// Whether the check's policy escalates (see [`Issue::escalates`]).
+	pub escalates: bool,
 	pub detail: Option<serde_json::Value>,
 }
 
@@ -281,6 +309,7 @@ async fn stamp_check_state(
 			issues::check_name.eq(&stamp.check),
 			issues::observed_result.eq(stamp.observed.to_string()),
 			issues::effective_result.eq(stamp.effective.to_string()),
+			issues::escalates.eq(stamp.escalates),
 			issues::detail.eq(&stamp.detail),
 			issues::degraded_since.eq(degraded_since),
 			issues::last_degraded_at.eq(last_degraded_at),
@@ -900,6 +929,7 @@ pub async fn file_check(conn: &mut AsyncPgConnection, filing: CheckFiling<'_>) -
 		check: filing.check.to_string(),
 		observed: filing.observed,
 		effective: graded.effective,
+		escalates: graded.escalates,
 		detail: filing.detail.clone(),
 	};
 
@@ -1084,26 +1114,26 @@ pub async fn get_global_issue(conn: &mut AsyncPgConnection, r#ref: &str) -> Resu
 /// open incident, and apply join/leave accordingly. The rules:
 ///
 /// - **Leave**: `!active || resolved || snoozed || silenced || !monitored`.
-///   Severity downgrade alone does *not* remove an issue — once
+///   A result downgrade alone does *not* remove an issue — once
 ///   contributing, it stays until it's actually gone or explicitly
 ///   suppressed. Flipping the server to unmonitored *does* remove it: the
 ///   operator has said they're not watching this server, so its issues
-///   stop counting. The same applies if `(source, ref)` is on the server
-///   or group silence list — see [`crate::silenced_refs`].
+///   stop counting. The same applies if the check is silenced at server
+///   or group scope — see [`crate::silenced_refs`].
 /// - **Join**: not leaving, AND one of:
-///   - severity ≥ floor (`error`), so this issue is high-priority enough to
-///     create a new incident on its own; or
-///   - the group already has an open incident — then any active issue,
-///     even low-severity ones, joins it. The threshold only governs
-///     incident *creation*; once an incident is in progress everything else
-///     piles in for context.
-/// - **Close**: the incident auto-closes when the last contributor at
-///   severity ≥ error leaves. Low-severity contributors that joined
-///   because the group had an open incident stay attached (so the audit
-///   trail and Slack thread retain them) but **do not** hold the incident
-///   open by themselves. Without this asymmetry, a check that's stuck
-///   firing at warning could keep an incident open indefinitely after the
-///   higher-severity contributor that opened it has long since gone away.
+///   - the state opens incidents on its own — an effective failure (see
+///     [`Issue::opens_incident`]); or
+///   - the target already has an open incident — then any active issue,
+///     warnings included, joins it. The threshold only governs incident
+///     *creation*; once an incident is in progress everything else piles
+///     in for context.
+/// - **Close**: the incident auto-closes when the last effective-failure
+///   contributor leaves. Lesser contributors that joined because the
+///   target had an open incident stay attached (so the audit trail and
+///   Slack thread retain them) but **do not** hold the incident open by
+///   themselves. Without this asymmetry, a check that's stuck firing at
+///   warning could keep an incident open indefinitely after the failure
+///   that opened it has long since gone away.
 ///
 /// `monitored` reflects the server's `is_monitored()` at call time. When
 /// `false`, the issue is treated as a "leave": this is what makes
@@ -1158,7 +1188,7 @@ async fn re_evaluate_incident_membership(
 		&& issue.active
 		&& issue.resolved_at.is_none()
 		&& !snoozed
-		&& (issue.severity.opens_incident() || target_open);
+		&& (issue.opens_incident() || target_open);
 
 	match (was_in, should_join, should_leave) {
 		(false, true, _) => {
@@ -1174,8 +1204,8 @@ async fn re_evaluate_incident_membership(
 				.await?;
 			if newly_opened {
 				enqueue_slack_open(conn, incident_id, target, issue).await?;
-			} else if issue.severity == Severity::Critical {
-				// Two sub-cases when a Critical joins an existing incident:
+			} else if issue.escalates_now() {
+				// Two sub-cases when an escalating failure joins an existing incident:
 				//  - The original open is still pending in the outbox →
 				//    accelerate so the "incident opened" message lands
 				//    immediately. No second message: the open hasn't been
@@ -1244,10 +1274,11 @@ async fn re_evaluate_incident_membership(
 			.execute(conn)
 			.await?;
 
-			// Only count contributors that are *currently* at a severity
-			// that opens an incident. Low-severity issues stay attached
-			// for context but don't hold the incident open on their own;
-			// see the function doc-comment for the rationale.
+			// Only count contributors that *currently* open an incident
+			// (effective failures; stateless rows fall back to their
+			// severity). Lesser contributors stay attached for context but
+			// don't hold the incident open on their own; see the function
+			// doc-comment for the rationale.
 			let opens_incident_severities: Vec<String> = Severity::OPENS_INCIDENT
 				.iter()
 				.map(|s| s.to_string())
@@ -1259,7 +1290,13 @@ async fn re_evaluate_incident_membership(
 					incident_issues::incident_id
 						.eq(open_link.incident_id)
 						.and(incident_issues::left_at.is_null())
-						.and(issues::severity.eq_any(&opens_incident_severities)),
+						.and(
+							issues::effective_result
+								.eq("failed")
+								.or(issues::effective_result
+									.is_null()
+									.and(issues::severity.eq_any(&opens_incident_severities))),
+						),
 				)
 				.count()
 				.get_result(conn)
@@ -1716,9 +1753,9 @@ async fn enqueue_slack_open(
 	// Normally the row sits in the outbox for the target's open delay
 	// before the drainer can ship it — that's the flap-suppression
 	// window, so a transient open/close pair never reaches Slack.
-	// Critical bypasses this: it's the "stop-the-world" tier where
-	// operators have signalled they don't want any delay.
-	let deliver_after = if issue.severity == Severity::Critical {
+	// An escalating failure bypasses this: the operator has marked the
+	// check's policy as escalating — they don't want any delay.
+	let deliver_after = if issue.escalates_now() {
 		Timestamp::now()
 	} else {
 		Timestamp::now() + open_delay
