@@ -309,7 +309,7 @@ test.describe("healthcheck attention page", () => {
 		await expect(editor).toHaveValue(/## Solve/);
 
 		await editor.fill("## Description\n\nDisk space watcher.");
-		await page.getByRole("button", { name: "Save", exact: true }).click();
+		await page.getByRole("button", { name: "Save documentation" }).click();
 
 		// The saved document renders as markdown.
 		await expect(

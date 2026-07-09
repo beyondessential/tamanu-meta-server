@@ -496,7 +496,7 @@ function DocumentationCard({
 							onClick={save}
 							disabled={update.pending}
 						>
-							Save
+							Save documentation
 						</Button>
 						<Button
 							size="small"
