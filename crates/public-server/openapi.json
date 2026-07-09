@@ -739,7 +739,7 @@
           "statuses"
         ],
         "summary": "Submit a status heartbeat for a server.",
-        "description": "Records a periodic status push against the server identified in the\npath: overall self-reported health, a per-check breakdown, and any\nfree-form extra data. Each failed or warning check opens (or keeps\nopen) an issue at that check's operator-configured severity, and each\npassed check closes any issue it previously opened; the server's\ntracked software version is also updated from the payload.\n\nThe calling device must be the one enrolled for this exact server (or\nhold the admin role). The response carries only return-path\ninstructions: a `backup_now` list of backup types the server should\nback up immediately — devices should treat a non-empty list as a\nprompt to run those backups and report them afterwards — a\n`check_severities` map describing how canopy classifies each known\nhealthcheck for this server (`skip`/`warn`/`fail`), and the server's\neffective `tags` (as served by `GET /tags`). The stored status record\nis not echoed back.",
+        "description": "Records a periodic status push against the server identified in the\npath: overall self-reported health, a per-check breakdown, and any\nfree-form extra data. Each failed or warning check opens (or keeps\nopen) an issue at that check's operator-configured severity, and each\npassed check closes any issue it previously opened; the server's\ntracked software version is also updated from the payload.\n\nThe calling device must be the one enrolled for this exact server (or\nhold the admin role). The response carries only return-path\ninstructions, scoped to the reporting client: a `backup_now` list of\nbackup types the server should back up immediately — sent only to the\n`bestool` client (the agent that runs backups), which should treat a\nnon-empty list as a prompt to run those backups and report them\nafterwards; other clients get no `backup_now` at all — a\n`check_severities` map describing how canopy classifies each known\nhealthcheck for this server (`skip`/`warn`/`fail`), and the server's\neffective `tags` (as served by `GET /tags`). The stored status record\nis not echoed back.",
         "operationId": "submit_status",
         "parameters": [
           {
@@ -2045,6 +2045,13 @@
               "health"
             ],
             "properties": {
+              "client": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The reporting agent this status is attributed to (e.g. `bestool`,\n`seedling`). **Absent means `bestool`**, so agents that predate this\nfield keep reporting under their existing stream. Status is recorded\nper (server, client), so concurrent agents on one host never overwrite\neach other."
+              },
               "health": {
                 "type": "array",
                 "items": {
@@ -2068,17 +2075,19 @@
         "type": "object",
         "description": "The status-push response: only the return-path instructions the device\ncan act on. The stored status record is deliberately not echoed back —\nthe device already has everything it sent.",
         "required": [
-          "backup_now",
           "check_severities",
           "tags"
         ],
         "properties": {
           "backup_now": {
-            "type": "array",
+            "type": [
+              "array",
+              "null"
+            ],
             "items": {
               "type": "string"
             },
-            "description": "Backup types the server should back up now: operator-requested\none-offs plus scheduled backups that are due. Each serializes as a\nplain string (e.g. `\"tamanu-postgres\"`). The device should run each\nlisted type, then report via `POST /backup-report`; an empty list\nmeans nothing to do."
+            "description": "Backup types the server should back up now: operator-requested\none-offs plus scheduled backups that are due. Each serializes as a\nplain string (e.g. `\"tamanu-postgres\"`). The device should run each\nlisted type, then report via `POST /backup-report`; an empty list\nmeans nothing to do. Sent only to the client that runs backups\n(`bestool`); omitted for other reporting clients."
           },
           "check_severities": {
             "type": "object",
