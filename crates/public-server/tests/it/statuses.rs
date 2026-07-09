@@ -2401,6 +2401,40 @@ async fn status_signals_backup_now_for_due_schedule() {
 	.await
 }
 
+/// Only alertd runs backups: pushes from any other source (a named one,
+/// or the legacy tamanu heartbeat) never receive the signal even when a
+/// backup is due.
+#[tokio::test(flavor = "multi_thread")]
+async fn status_backup_now_only_for_alertd() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let (server_id, group_id) = seed_server_in_group(&mut conn, device_id).await;
+			seed_backup_config(&mut conn, group_id, "ready").await;
+			enable_backup_capability(&mut conn, server_id, "tamanu-postgres").await;
+
+			// A named non-alertd source.
+			let resp = public
+				.post(&format!("/status/{server_id}"))
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({ "source": "seedling", "health": [] }))
+				.await;
+			resp.assert_status_ok();
+			assert!(backup_now(&resp.json()).is_empty());
+
+			// The legacy (no health array) push, attributed to tamanu.
+			let resp = public
+				.post(&format!("/status/{server_id}"))
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({ "healthy": true }))
+				.await;
+			resp.assert_status_ok();
+			assert!(backup_now(&resp.json()).is_empty());
+		},
+	)
+	.await
+}
+
 /// A recent successful backup is within the interval ⇒ not due ⇒ no signal.
 #[tokio::test(flavor = "multi_thread")]
 async fn status_no_backup_now_when_recent_success() {

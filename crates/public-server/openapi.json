@@ -1817,7 +1817,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Backup types the server should back up now: operator-requested\none-offs plus scheduled backups that are due. Each serializes as a\nplain string (e.g. `\"tamanu-postgres\"`). The device should run each\nlisted type, then report via `POST /backup-report`; an empty list\nmeans nothing to do."
+            "description": "Backup types the server should back up now: operator-requested\none-offs plus scheduled backups that are due. Each serializes as a\nplain string (e.g. `\"tamanu-postgres\"`). The device should run each\nlisted type, then report via `POST /backup-report`; an empty list\nmeans nothing to do. Only sent to `alertd` pushes (the agent that\nruns backups); other sources always receive an empty list."
           },
           "check_severities": {
             "type": "object",

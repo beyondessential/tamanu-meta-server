@@ -148,7 +148,8 @@ pub struct StatusResponse {
 	/// one-offs plus scheduled backups that are due. Each serializes as a
 	/// plain string (e.g. `"tamanu-postgres"`). The device should run each
 	/// listed type, then report via `POST /backup-report`; an empty list
-	/// means nothing to do.
+	/// means nothing to do. Only sent to `alertd` pushes (the agent that
+	/// runs backups); other sources always receive an empty list.
 	#[schema(value_type = Vec<String>)]
 	pub backup_now: Vec<BackupType>,
 	/// The effective handling of every healthcheck canopy knows about, keyed
@@ -231,16 +232,6 @@ async fn create(
 		));
 	}
 
-	// Tell the device which backup types to run now (operator one-offs +
-	// schedule-due), riding the heartbeat response. Empty for an ungrouped
-	// server or one whose group has no `ready` backup config.
-	let backup_now = match server.group_id {
-		Some(group_id) => {
-			backups_due_now_for_server(&mut db, server_id, group_id, Timestamp::now()).await?
-		}
-		None => Vec::new(),
-	};
-
 	let raw = body.map(|j| j.0).unwrap_or(serde_json::Value::Null);
 	let (source, healthy, health, extra) = split_health_from_extra(raw)?;
 
@@ -293,6 +284,18 @@ async fn create(
 		Ok(())
 	})
 	.await?;
+
+	// Tell the device which backup types to run now (operator one-offs +
+	// schedule-due), riding the heartbeat response. Only alertd runs
+	// backups — other sources (the tamanu heartbeat, seedling) would
+	// treat an instruction they can't act on as noise at best. Empty for
+	// an ungrouped server or one whose group has no `ready` backup config.
+	let backup_now = match server.group_id {
+		Some(group_id) if source == DEFAULT_SOURCE => {
+			backups_due_now_for_server(&mut db, server_id, group_id, Timestamp::now()).await?
+		}
+		_ => Vec::new(),
+	};
 
 	// Computed after the transaction so checks first seen on this very push
 	// (upserted into the catalog above) are already in the map.
