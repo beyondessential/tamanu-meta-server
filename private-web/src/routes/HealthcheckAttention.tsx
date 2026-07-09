@@ -1,4 +1,7 @@
 import {
+	Accordion,
+	AccordionDetails,
+	AccordionSummary,
 	Alert,
 	Box,
 	Chip,
@@ -23,6 +26,7 @@ import { useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import { useApi } from "../api";
 import CheckExtrasList, { checkEntryExtras } from "../components/CheckExtras";
+import Markdown from "../components/Markdown";
 import CheckResultChip from "../components/CheckResultChip";
 import ServerNameWithGroup from "../components/ServerNameWithGroup";
 import TimeAgo from "../components/TimeAgo";
@@ -80,10 +84,21 @@ export default function HealthcheckAttention() {
 						component={RouterLink}
 						to={`/settings/healthchecks/${encodeURIComponent(check ?? "")}`}
 					>
-						Configure ceiling / rules
+						Configure ceiling / rules / documentation
 					</MuiLink>
 				</Typography>
 			</Box>
+
+			{result.status === "ok" && result.data.documentation && (
+				<Accordion variant="outlined" disableGutters>
+					<AccordionSummary expandIcon={<ExpandMoreIcon />}>
+						<Typography variant="subtitle2">About this check</Typography>
+					</AccordionSummary>
+					<AccordionDetails>
+						<Markdown>{result.data.documentation}</Markdown>
+					</AccordionDetails>
+				</Accordion>
+			)}
 
 			<FormControlLabel
 				control={

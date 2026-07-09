@@ -1350,6 +1350,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/healthchecks/update_documentation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replace a check's documentation.
+         * @description Stores the markdown document presented alongside the check wherever
+         *     its state appears, and over MCP. Sending `null` or a blank document
+         *     clears it. Doesn't mark the policy as reviewed — documenting a check
+         *     is not the same as reviewing its grading.
+         */
+        post: operations["healthcheck_update_documentation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/healthchecks/update_rules": {
         parameters: {
             query?: never;
@@ -3660,6 +3683,11 @@ export interface components {
              */
             check: string;
             /**
+             * @description Operator-authored documentation for this check (markdown). When
+             *     several sources report it, the first documented catalog row wins.
+             */
+            documentation?: string | null;
+            /**
              * @description Whether any source's policy for this check escalates its
              *     effective failures.
              */
@@ -3737,6 +3765,13 @@ export interface components {
             ceiling: string;
             /** @description The healthcheck's name, exactly as reported by monitored servers. */
             check_name: string;
+            /**
+             * @description Operator-authored documentation for this check: a single markdown
+             *     document. By convention it covers what the check observes, what
+             *     each result means, and hints for solving a failure, but no
+             *     structure is enforced. `null` when nobody has documented it yet.
+             */
+            documentation?: string | null;
             /**
              * @description Whether an effective failure of this check notifies immediately,
              *     bypassing the incident grace period.
@@ -7155,6 +7190,18 @@ export interface components {
             /** @description Exact version string to update (e.g. `"1.2.3"`). */
             version: string;
         };
+        /** @description Request body for replacing a check's documentation. */
+        UpdateDocumentationArgs: {
+            /**
+             * @description The healthcheck name to document; must already exist in the
+             *     catalog.
+             */
+            check_name: string;
+            /** @description The new markdown document, or `null` (or blank) to clear it. */
+            documentation?: string | null;
+            /** @description The source whose check to document. */
+            source: string;
+        };
         /** @description Request to rename (or clear the name of) a device key. */
         UpdateKeyNameArgs: {
             /**
@@ -9184,6 +9231,46 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["HealthcheckUpdateArgs"];
+            };
+        };
+        responses: {
+            /** @description Updated catalog row. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CheckPolicyData"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    healthcheck_update_documentation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateDocumentationArgs"];
             };
         };
         responses: {

@@ -330,6 +330,9 @@ pub struct CheckAttentionData {
 	/// Whether any source's policy for this check escalates its
 	/// effective failures.
 	pub escalates: bool,
+	/// Operator-authored documentation for this check (markdown). When
+	/// several sources report it, the first documented catalog row wins.
+	pub documentation: Option<String>,
 	/// Every live server whose latest status reports this check, at any
 	/// result, ordered as a TODO list: failed, warning, broken, passed,
 	/// skipped (most urgent first), then by group name then server name.
@@ -445,11 +448,13 @@ pub async fn check_attention(
 		.map(|row| row.ceiling)
 		.min_by_key(|c| c.urgency_rank());
 	let escalates = policies.iter().any(|row| row.escalates);
+	let documentation = policies.iter().find_map(|row| row.documentation.clone());
 
 	Ok(Json(CheckAttentionData {
 		check: args.check,
 		ceiling,
 		escalates,
+		documentation,
 		servers,
 	}))
 }

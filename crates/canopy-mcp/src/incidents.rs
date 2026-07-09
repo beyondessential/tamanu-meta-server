@@ -62,6 +62,25 @@ pub struct FindIssuesArgs {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct CheckDocArgs {
+	/// The source that reports the check (e.g. `alertd`, `canopy`).
+	pub source: String,
+	/// The check's name.
+	pub check_name: String,
+}
+
+#[derive(Serialize)]
+struct CheckDocOut {
+	source: String,
+	check_name: String,
+	ceiling: CheckResult,
+	escalates: bool,
+	/// Operator-authored markdown, or `null` if nobody has documented
+	/// this check yet.
+	documentation: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct IssueIdArgs {
 	/// The issue's id.
 	pub issue_id: String,
@@ -457,6 +476,36 @@ impl CanopyMcp {
 			resolved_reason: issue.resolved_reason.clone(),
 			snoozed_until: issue.snoozed_until,
 			incidents,
+		})
+	}
+
+	#[tool(
+		description = "Get the operator-authored documentation for a (source, check): what the \
+		               check observes, what each result means, and hints for solving a failure. \
+		               Prefer this curated knowledge over inferring what a check does from its \
+		               name. Also returns the check's current policy (ceiling, escalates)."
+	)]
+	async fn get_check_documentation(
+		&self,
+		Parameters(args): Parameters<CheckDocArgs>,
+	) -> Result<CallToolResult, McpError> {
+		use database::check_policies::CheckPolicy;
+		let mut conn = self.conn().await?;
+		let Some(policy) = CheckPolicy::get(&mut conn, &args.source, &args.check_name)
+			.await
+			.map_err(mcp_err)?
+		else {
+			return Ok(not_found(format!(
+				"no catalog entry for ({}, {}) — that source has never reported that check",
+				args.source, args.check_name
+			)));
+		};
+		ok_json(&CheckDocOut {
+			source: policy.source,
+			check_name: policy.check_name,
+			ceiling: policy.ceiling,
+			escalates: policy.escalates,
+			documentation: policy.documentation,
 		})
 	}
 }

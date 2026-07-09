@@ -25,6 +25,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(list))
 		.routes(routes!(update))
 		.routes(routes!(update_rules))
+		.routes(routes!(update_documentation))
 		.routes(routes!(sample))
 		.routes(routes!(tag_keys))
 }
@@ -61,6 +62,11 @@ pub struct CheckPolicyData {
 	pub notes: Option<String>,
 	/// When this policy was last modified.
 	pub updated_at: Timestamp,
+	/// Operator-authored documentation for this check: a single markdown
+	/// document. By convention it covers what the check observes, what
+	/// each result means, and hints for solving a failure, but no
+	/// structure is enforced. `null` when nobody has documented it yet.
+	pub documentation: Option<String>,
 	/// `true` if no operator has reviewed this policy yet.
 	pub pending_review: bool,
 	/// Conditional rules that can grade a report to a different result
@@ -119,6 +125,7 @@ impl From<CheckPolicy> for CheckPolicyData {
 			reviewed_by: h.reviewed_by,
 			notes: h.notes,
 			updated_at: h.updated_at,
+			documentation: h.documentation,
 			pending_review,
 			rules: h.rules,
 			rule_count,
@@ -221,6 +228,55 @@ pub async fn update(
 		&admin.0.login,
 	)
 	.await?;
+	Ok(Json(row.into()))
+}
+
+/// Request body for replacing a check's documentation.
+#[derive(Deserialize, ToSchema)]
+pub struct UpdateDocumentationArgs {
+	/// The source whose check to document.
+	pub source: String,
+	/// The healthcheck name to document; must already exist in the
+	/// catalog.
+	pub check_name: String,
+	/// The new markdown document, or `null` (or blank) to clear it.
+	#[serde(default)]
+	pub documentation: Option<String>,
+}
+
+/// Replace a check's documentation.
+///
+/// Stores the markdown document presented alongside the check wherever
+/// its state appears, and over MCP. Sending `null` or a blank document
+/// clears it. Doesn't mark the policy as reviewed — documenting a check
+/// is not the same as reviewing its grading.
+#[utoipa::path(
+	post,
+	path = "/update_documentation",
+	operation_id = "healthcheck_update_documentation",
+	tag = "healthchecks",
+	security(("tailscale-admin" = [])),
+	request_body = UpdateDocumentationArgs,
+	responses(
+		(status = 200, description = "Updated catalog row.", body = CheckPolicyData),
+		(status = 401, body = ProblemDetailsSchema),
+		(status = 403, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn update_documentation(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<UpdateDocumentationArgs>,
+) -> Result<Json<CheckPolicyData>> {
+	let documentation = args
+		.documentation
+		.as_deref()
+		.map(str::trim)
+		.filter(|d| !d.is_empty());
+	let mut conn = state.db.get().await?;
+	let row =
+		CheckPolicy::update_documentation(&mut conn, &args.source, &args.check_name, documentation)
+			.await?;
 	Ok(Json(row.into()))
 }
 

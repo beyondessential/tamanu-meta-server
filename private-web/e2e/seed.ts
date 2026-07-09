@@ -289,20 +289,22 @@ export async function seedCheckPolicy(
 		ceiling?: string;
 		escalates?: boolean;
 		notes?: string | null;
+		documentation?: string | null;
 	},
 ): Promise<SeededCheckPolicy> {
 	const source = opts.source ?? "alertd";
 	await sql.query(
-		`INSERT INTO check_policies (source, check_name, ceiling, escalates, notes)
-		 VALUES ($1, $2, $3, $4, $5)
+		`INSERT INTO check_policies (source, check_name, ceiling, escalates, notes, documentation)
+		 VALUES ($1, $2, $3, $4, $5, $6)
 		 ON CONFLICT (source, check_name)
-		 DO UPDATE SET ceiling = EXCLUDED.ceiling, escalates = EXCLUDED.escalates, notes = EXCLUDED.notes`,
+		 DO UPDATE SET ceiling = EXCLUDED.ceiling, escalates = EXCLUDED.escalates, notes = EXCLUDED.notes, documentation = EXCLUDED.documentation`,
 		[
 			source,
 			opts.checkName,
 			opts.ceiling ?? "warning",
 			opts.escalates ?? false,
 			opts.notes ?? null,
+			opts.documentation ?? null,
 		],
 	);
 	return { source, checkName: opts.checkName };

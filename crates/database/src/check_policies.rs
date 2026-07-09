@@ -71,6 +71,12 @@ pub struct CheckPolicy {
 	/// When this policy was last modified.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub updated_at: Timestamp,
+	/// Operator-authored documentation for this check: a single markdown
+	/// document, presented wherever the check's state is presented and
+	/// over MCP. By convention it covers what the check observes, what
+	/// each result means, and hints for solving a failure; canopy
+	/// attaches no meaning to its structure.
+	pub documentation: Option<String>,
 }
 
 /// The outcome of applying a check's policy to an observed result.
@@ -217,6 +223,26 @@ impl CheckPolicy {
 			effective,
 			escalates: fleet.escalates,
 		})
+	}
+
+	/// Replace the documentation for a check (or clear it with `None`).
+	/// Doesn't stamp the review columns — documenting a check is not the
+	/// same as reviewing its policy.
+	pub async fn update_documentation(
+		db: &mut AsyncPgConnection,
+		source: &str,
+		check_name: &str,
+		documentation: Option<&str>,
+	) -> Result<Self> {
+		use crate::schema::check_policies::dsl;
+		diesel::update(
+			dsl::check_policies.filter(dsl::source.eq(source).and(dsl::check_name.eq(check_name))),
+		)
+		.set(dsl::documentation.eq(documentation))
+		.returning(Self::as_select())
+		.get_result(db)
+		.await
+		.map_err(AppError::from)
 	}
 
 	/// Replace the conditional-rules ladder for a check (or clear it

@@ -181,6 +181,7 @@ diesel::table! {
 		reviewed_at -> Nullable<Timestamptz>,
 		reviewed_by -> Nullable<Text>,
 		updated_at -> Timestamptz,
+		documentation -> Nullable<Text>,
 	}
 }
 

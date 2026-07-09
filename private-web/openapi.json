@@ -2721,6 +2721,63 @@
         ]
       }
     },
+    "/api/healthchecks/update_documentation": {
+      "post": {
+        "tags": [
+          "healthchecks"
+        ],
+        "summary": "Replace a check's documentation.",
+        "description": "Stores the markdown document presented alongside the check wherever\nits state appears, and over MCP. Sending `null` or a blank document\nclears it. Doesn't mark the policy as reviewed — documenting a check\nis not the same as reviewing its grading.",
+        "operationId": "healthcheck_update_documentation",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateDocumentationArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated catalog row.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckPolicyData"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/healthchecks/update_rules": {
       "post": {
         "tags": [
@@ -6878,6 +6935,13 @@
             "type": "string",
             "description": "The check name that was queried, echoed back so the page can\nrender its heading without re-decoding the request."
           },
+          "documentation": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Operator-authored documentation for this check (markdown). When\nseveral sources report it, the first documented catalog row wins."
+          },
           "escalates": {
             "type": "boolean",
             "description": "Whether any source's policy for this check escalates its\neffective failures."
@@ -6974,6 +7038,13 @@
           "check_name": {
             "type": "string",
             "description": "The healthcheck's name, exactly as reported by monitored servers."
+          },
+          "documentation": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Operator-authored documentation for this check: a single markdown\ndocument. By convention it covers what the check observes, what\neach result means, and hints for solving a failure, but no\nstructure is enforced. `null` when nobody has documented it yet."
           },
           "escalates": {
             "type": "boolean",
@@ -12456,6 +12527,31 @@
           "version": {
             "type": "string",
             "description": "Exact version string to update (e.g. `\"1.2.3\"`)."
+          }
+        }
+      },
+      "UpdateDocumentationArgs": {
+        "type": "object",
+        "description": "Request body for replacing a check's documentation.",
+        "required": [
+          "source",
+          "check_name"
+        ],
+        "properties": {
+          "check_name": {
+            "type": "string",
+            "description": "The healthcheck name to document; must already exist in the\ncatalog."
+          },
+          "documentation": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The new markdown document, or `null` (or blank) to clear it."
+          },
+          "source": {
+            "type": "string",
+            "description": "The source whose check to document."
           }
         }
       },

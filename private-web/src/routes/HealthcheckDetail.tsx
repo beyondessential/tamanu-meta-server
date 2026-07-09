@@ -33,6 +33,7 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import EditIcon from "@mui/icons-material/Edit";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { useMemo, useState } from "react";
+import Markdown from "../components/Markdown";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import { ApiError, useApi, useApiAction } from "../api";
 import CheckResultChip from "../components/CheckResultChip";
@@ -231,6 +232,11 @@ export default function HealthcheckDetail() {
 						)}
 						<RowMetadata row={row} />
 						<CeilingCard row={row} canEdit={isAdmin} onChanged={list.reload} />
+						<DocumentationCard
+							row={row}
+							canEdit={isAdmin}
+							onChanged={list.reload}
+						/>
 						<NotesCard row={row} canEdit={isAdmin} onChanged={list.reload} />
 						<RulesCard row={row} canEdit={isAdmin} onChanged={list.reload} />
 					</Stack>
@@ -395,6 +401,117 @@ function NotesCard({
 						Save notes
 					</Button>
 				</Box>
+			)}
+			{update.error && (
+				<Alert severity="error" sx={{ mt: 1 }}>
+					{formatError(update.error)}
+				</Alert>
+			)}
+		</Paper>
+	);
+}
+
+/** Template seeding a fresh document. Convention only — the sections
+ * guide authors; nothing enforces the structure. */
+const DOC_TEMPLATE = `## Description
+
+What this check observes, and on which part of the system.
+
+## Results
+
+- **fail** — 
+- **warn** — 
+- **skip** — 
+
+## Solve
+
+Steps to investigate and fix a failure.
+`;
+
+function DocumentationCard({
+	row,
+	canEdit,
+	onChanged,
+}: {
+	row: CheckPolicyData;
+	canEdit: boolean;
+	onChanged: () => void;
+}) {
+	const update = useApiAction("healthchecks", "update_documentation");
+	const [editing, setEditing] = useState(false);
+	const [draft, setDraft] = useState<string>("");
+	const startEditing = () => {
+		setDraft(row.documentation ?? DOC_TEMPLATE);
+		setEditing(true);
+	};
+	const save = async () => {
+		try {
+			await update.call({
+				source: row.source,
+				check_name: row.check_name,
+				documentation: draft.trim() === "" ? null : draft,
+			});
+			setEditing(false);
+			onChanged();
+		} catch {
+			// Leave the editor open so the user can retry.
+		}
+	};
+	return (
+		<Paper variant="outlined" sx={{ p: 2 }}>
+			<Stack
+				direction="row"
+				sx={{ alignItems: "center", justifyContent: "space-between" }}
+			>
+				<Typography variant="subtitle1" gutterBottom>
+					Documentation
+				</Typography>
+				{canEdit && !editing && (
+					<Button size="small" variant="outlined" onClick={startEditing}>
+						{row.documentation ? "Edit" : "Write documentation"}
+					</Button>
+				)}
+			</Stack>
+			{editing ? (
+				<>
+					<TextField
+						multiline
+						minRows={10}
+						fullWidth
+						size="small"
+						value={draft}
+						onChange={(e) => setDraft(e.target.value)}
+						disabled={update.pending}
+						slotProps={{
+							htmlInput: { style: { fontFamily: "monospace" } },
+						}}
+					/>
+					<Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+						<Button
+							size="small"
+							variant="contained"
+							onClick={save}
+							disabled={update.pending}
+						>
+							Save
+						</Button>
+						<Button
+							size="small"
+							onClick={() => setEditing(false)}
+							disabled={update.pending}
+						>
+							Cancel
+						</Button>
+					</Stack>
+				</>
+			) : row.documentation ? (
+				<Markdown>{row.documentation}</Markdown>
+			) : (
+				<Typography variant="body2" color="text.secondary">
+					Nobody has documented this check yet. What does it observe, what
+					does each result mean, and how does one fix a failure? Shown
+					wherever the check appears, and to agents over MCP.
+				</Typography>
 			)}
 			{update.error && (
 				<Alert severity="error" sx={{ mt: 1 }}>

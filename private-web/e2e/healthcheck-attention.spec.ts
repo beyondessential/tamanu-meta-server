@@ -267,6 +267,62 @@ test.describe("healthcheck attention page", () => {
 		await expect(page.getByText("escalates", { exact: true })).toBeVisible();
 	});
 
+	test("shows operator documentation in an expandable panel", async ({
+		page,
+		sql,
+	}) => {
+		const server = await seedServer(sql, { name: "Doc Facility" });
+		await seedStatus(sql, {
+			serverId: server.id,
+			health: [{ check: "disk_space", result: "failed" }],
+		});
+		await seedCheckPolicy(sql, {
+			checkName: "disk_space",
+			documentation:
+				"## Description\n\nWatches free disk space.\n\n## Solve\n\nClear old backups.",
+		});
+
+		await page.goto("/healthchecks/disk_space");
+		await page.getByText("About this check").click();
+		await expect(page.getByText("Watches free disk space.")).toBeVisible();
+		await expect(page.getByText("Clear old backups.")).toBeVisible();
+	});
+
+	test("documentation is written from the healthcheck settings page, seeded with the template", async ({
+		page,
+		sql,
+	}) => {
+		await seedCheckPolicy(sql, { checkName: "disk_space" });
+
+		await page.goto("/settings/healthchecks/disk_space");
+		await expect(
+			page.getByText("Nobody has documented this check yet", { exact: false }),
+		).toBeVisible();
+		await page.getByRole("button", { name: "Write documentation" }).click();
+
+		// The editor seeds the conventional template.
+		const editor = page.getByRole("textbox", {
+			name: "Documentation markdown",
+		});
+		await expect(editor).toHaveValue(/## Description/);
+		await expect(editor).toHaveValue(/## Results/);
+		await expect(editor).toHaveValue(/## Solve/);
+
+		await editor.fill("## Description\n\nDisk space watcher.");
+		await page.getByRole("button", { name: "Save", exact: true }).click();
+
+		// The saved document renders as markdown.
+		await expect(
+			page.getByRole("heading", { name: "Description" }),
+		).toBeVisible();
+		await expect(page.getByText("Disk space watcher.")).toBeVisible();
+
+		const rows = await sql.query<{ documentation: string | null }>(
+			"SELECT documentation FROM check_policies WHERE source = 'alertd' AND check_name = 'disk_space'",
+		);
+		expect(rows[0]!.documentation).toContain("Disk space watcher.");
+	});
+
 	test("URL-encodes check names with special characters", async ({
 		page,
 		sql,
