@@ -34,6 +34,10 @@ struct IssueRow {
 	description: Option<String>,
 	#[diesel(sql_type = sql_types::Bool)]
 	is_resolved: bool,
+	#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
+	observed_result: Option<String>,
+	#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
+	effective_result: Option<String>,
 }
 
 async fn fetch_issue(
@@ -44,7 +48,8 @@ async fn fetch_issue(
 ) -> Option<IssueRow> {
 	sql_query(
 		r#"
-		SELECT severity, active, message, description, (resolved_at IS NOT NULL) AS is_resolved
+		SELECT severity, active, message, description, (resolved_at IS NOT NULL) AS is_resolved,
+			observed_result, effective_result
 		FROM issues
 		WHERE server_id = $1 AND source = $2 AND ref = $3
 "#,
@@ -1057,11 +1062,11 @@ async fn submit_status_with_all_failing_checks_silenced_opens_no_incident() {
 			// Pre-silence both failing checks at server scope.
 			for check in ["database", "disk"] {
 				sql_query(
-					"INSERT INTO server_silenced_refs (server_id, source, ref) \
-					 VALUES ($1, 'status', $2)",
+					"INSERT INTO scoped_check_policies (server_id, source, check_name, ceiling) \
+					 VALUES ($1, 'alertd', $2, 'skipped')",
 				)
 				.bind::<sql_types::Uuid, _>(server_id)
-				.bind::<sql_types::Text, _>(format!("health/{check}"))
+				.bind::<sql_types::Text, _>(check)
 				.execute(&mut conn)
 				.await
 				.expect("seed silence");
@@ -1086,13 +1091,16 @@ async fn submit_status_with_all_failing_checks_silenced_opens_no_incident() {
 			let row = fetch_latest_health(&mut conn, server_id).await;
 			assert!(!row.healthy);
 
-			// Per-check issues exist (silence doesn't gate row creation)
-			// but the silence prevents them from joining an incident.
+			// Check state still records (silence doesn't gate row creation)
+			// with the observation intact, but the silence grades the
+			// effective result to skipped so nothing raises.
 			for check in ["database", "disk"] {
 				let i = fetch_issue(&mut conn, server_id, "alertd", &format!("health/{check}"))
 					.await
-					.unwrap_or_else(|| panic!("per-check issue for {check} missing"));
-				assert!(i.active, "{check}");
+					.unwrap_or_else(|| panic!("per-check state for {check} missing"));
+				assert!(!i.active, "{check} is silenced, so it must not raise");
+				assert_eq!(i.observed_result.as_deref(), Some("failed"), "{check}");
+				assert_eq!(i.effective_result.as_deref(), Some("skipped"), "{check}");
 			}
 			assert!(fetch_open_incident(&mut conn, server_id).await.is_none());
 		},
@@ -1111,8 +1119,8 @@ async fn submit_status_with_partial_silence_opens_incident_for_unsilenced() {
 
 			// Silence only one of the two failing checks.
 			sql_query(
-				"INSERT INTO server_silenced_refs (server_id, source, ref) \
-				 VALUES ($1, 'status', 'health/database')",
+				"INSERT INTO scoped_check_policies (server_id, source, check_name, ceiling) \
+				 VALUES ($1, 'alertd', 'database', 'skipped')",
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
 			.execute(&mut conn)

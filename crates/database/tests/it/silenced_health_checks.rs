@@ -102,22 +102,22 @@ async fn resolves_server_and_group_scopes_in_batch() {
 	.await
 }
 
-/// Only `health/<check>` silences are healthcheck silences — whichever
-/// source they were filed under, since checks are keyed per reporting
-/// source. Non-health refs (e.g. canopy reachability) don't leak into
-/// the set.
+/// Every silence under a reporting source is a check silence, whichever
+/// source it was filed under — but the reserved sources (canopy's own
+/// determinations, manual conditions) aren't source-reported checks and
+/// don't leak into the set.
 #[tokio::test(flavor = "multi_thread")]
-async fn ignores_non_healthcheck_silences() {
+async fn ignores_reserved_source_silences() {
 	TestDb::run(async |mut conn, _url| {
 		let server = insert_server(&mut conn, None).await;
 
 		ServerSilencedRef::add(&mut conn, server, "canopy", "reachability", None)
 			.await
 			.unwrap();
-		ServerSilencedRef::add(&mut conn, server, "seedling", "health/postgres", None)
+		ServerSilencedRef::add(&mut conn, server, "manual", "ad-hoc", None)
 			.await
 			.unwrap();
-		ServerSilencedRef::add(&mut conn, server, "alertd", "something-else", None)
+		ServerSilencedRef::add(&mut conn, server, "seedling", "health/postgres", None)
 			.await
 			.unwrap();
 
@@ -127,7 +127,7 @@ async fn ignores_non_healthcheck_silences() {
 		assert_eq!(
 			map.get(&server),
 			Some(&checks(&["postgres"])),
-			"a health/ silence counts under any source; non-health refs don't",
+			"a check silence counts under any reporting source; reserved sources don't",
 		);
 	})
 	.await

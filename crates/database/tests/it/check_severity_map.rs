@@ -130,11 +130,12 @@ async fn silenced_refs_with_prefix_combines_scopes_and_filters() {
 		)
 		.await
 		.expect("other-source silence");
-		// None of these may leak into the result: wrong ref prefix (broken
-		// issues are a separate thread), wrong server.
-		ServerSilencedRef::add(&mut conn, server_id, "alertd", "health-broken/flaky", None)
+		// None of these may leak into the result: reserved-source silences
+		// present at their bare refs (outside the health/ namespace), and
+		// silences on other servers don't apply here at all.
+		ServerSilencedRef::add(&mut conn, server_id, "canopy", "reachability", None)
 			.await
-			.expect("broken silence");
+			.expect("canopy silence");
 		ServerSilencedRef::add(&mut conn, other_server_id, "alertd", "health/other", None)
 			.await
 			.expect("other-server silence");

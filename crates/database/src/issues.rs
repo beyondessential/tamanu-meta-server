@@ -853,25 +853,41 @@ pub async fn file_check(conn: &mut AsyncPgConnection, filing: CheckFiling<'_>) -
 		serde_json::Value::String(filing.observed.to_string()),
 	);
 	let status_extra = serde_json::Map::new();
-	let tags: std::collections::HashMap<String, serde_json::Value> = match filing.scope {
+	let (tags, scope_server, scope_group): (
+		std::collections::HashMap<String, serde_json::Value>,
+		Option<Uuid>,
+		Option<Uuid>,
+	) = match filing.scope {
 		FilingScope::Server { server_id, .. } => {
 			let server = Server::get_by_id(conn, server_id).await?;
-			server
+			let group_id = server.group_id;
+			let tags = server
 				.tags_merged_with_group(conn)
 				.await?
 				.0
 				.into_iter()
 				.map(|(k, v)| (k, serde_json::Value::String(v)))
-				.collect()
+				.collect();
+			(tags, Some(server_id), group_id)
 		}
-		_ => Default::default(),
+		FilingScope::Group(group_id) => (Default::default(), None, Some(group_id)),
+		FilingScope::Global => (Default::default(), None, None),
 	};
 	let ctx = EvaluationContext {
 		status_extra: &status_extra,
 		check_extra: &check_extra,
 		tags: &tags,
 	};
-	let graded = CheckPolicy::apply(conn, source, filing.check, filing.observed, &ctx).await?;
+	let graded = CheckPolicy::apply_scoped(
+		conn,
+		source,
+		filing.check,
+		filing.observed,
+		&ctx,
+		scope_server,
+		scope_group,
+	)
+	.await?;
 
 	let (severity, active) = match graded.effective {
 		CheckResult::Failed if graded.escalates => (Severity::Critical, true),
@@ -942,7 +958,7 @@ pub async fn health_from_check_state(
 	conn: &mut AsyncPgConnection,
 	servers: &[(Uuid, Option<Uuid>)],
 ) -> Result<std::collections::HashMap<Uuid, commons_types::status::HealthState>> {
-	use crate::schema::{issues, server_group_silenced_refs, server_silenced_refs};
+	use crate::schema::{issues, scoped_check_policies};
 	use commons_types::status::HealthState;
 	use std::collections::{HashMap, HashSet};
 
@@ -953,11 +969,11 @@ pub async fn health_from_check_state(
 	let server_ids: Vec<Uuid> = servers.iter().map(|(id, _)| *id).collect();
 	let group_of: HashMap<Uuid, Option<Uuid>> = servers.iter().copied().collect();
 
-	let rows: Vec<(Option<Uuid>, String, String, Option<String>)> = issues::table
+	let rows: Vec<(Option<Uuid>, String, Option<String>, Option<String>)> = issues::table
 		.select((
 			issues::server_id,
 			issues::source,
-			issues::ref_,
+			issues::check_name,
 			issues::effective_result,
 		))
 		.filter(issues::server_id.eq_any(&server_ids))
@@ -966,39 +982,41 @@ pub async fn health_from_check_state(
 		.load(conn)
 		.await?;
 
-	let server_silences: HashSet<(Uuid, String, String)> = server_silenced_refs::table
-		.select((
-			server_silenced_refs::server_id,
-			server_silenced_refs::source,
-			server_silenced_refs::ref_,
-		))
-		.filter(server_silenced_refs::server_id.eq_any(&server_ids))
-		.load::<(Uuid, String, String)>(conn)
-		.await?
-		.into_iter()
-		.collect();
 	let group_ids: Vec<Uuid> = group_of.values().filter_map(|g| *g).collect();
-	let group_silences: HashSet<(Uuid, String, String)> = if group_ids.is_empty() {
-		HashSet::new()
-	} else {
-		server_group_silenced_refs::table
+	let silence_rows: Vec<(Option<Uuid>, Option<Uuid>, String, String)> =
+		scoped_check_policies::table
 			.select((
-				server_group_silenced_refs::server_group_id,
-				server_group_silenced_refs::source,
-				server_group_silenced_refs::ref_,
+				scoped_check_policies::server_id,
+				scoped_check_policies::server_group_id,
+				scoped_check_policies::source,
+				scoped_check_policies::check_name,
 			))
-			.filter(server_group_silenced_refs::server_group_id.eq_any(&group_ids))
-			.load::<(Uuid, String, String)>(conn)
-			.await?
-			.into_iter()
-			.collect()
-	};
+			.filter(scoped_check_policies::ceiling.eq("skipped"))
+			.filter(
+				scoped_check_policies::server_id
+					.eq_any(&server_ids)
+					.or(scoped_check_policies::server_group_id.eq_any(&group_ids)),
+			)
+			.load(conn)
+			.await?;
+	let mut server_silences: HashSet<(Uuid, String, String)> = HashSet::new();
+	let mut group_silences: HashSet<(Uuid, String, String)> = HashSet::new();
+	for (server_id, group_id, source, check) in silence_rows {
+		if let Some(sid) = server_id {
+			server_silences.insert((sid, source, check));
+		} else if let Some(gid) = group_id {
+			group_silences.insert((gid, source, check));
+		}
+	}
 
-	for (server_id, source, r#ref, effective) in rows {
+	for (server_id, source, check_name, effective) in rows {
 		let Some(server_id) = server_id else {
 			continue;
 		};
-		let key = (server_id, source, r#ref);
+		let Some(check_name) = check_name else {
+			continue;
+		};
+		let key = (server_id, source, check_name);
 		if server_silences.contains(&key) {
 			continue;
 		}

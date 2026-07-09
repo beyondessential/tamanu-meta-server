@@ -47,7 +47,7 @@ function randomLabel(prefix: string): string {
  * statement with CASCADE. */
 export async function resetSeededTables(sql: Sql): Promise<void> {
 	await sql.query(
-		"TRUNCATE statuses, issues, device_keys, servers, server_groups, devices, versions, tailscale_users, check_policies, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, recovery_vault_writes RESTART IDENTITY CASCADE",
+		"TRUNCATE statuses, issues, device_keys, servers, server_groups, devices, versions, tailscale_users, check_policies, scoped_check_policies, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, recovery_vault_writes RESTART IDENTITY CASCADE",
 	);
 	// The truncate takes the migration-seeded nil "Canopy" server with it;
 	// self-alerts attach to that row, so put it back.
@@ -311,9 +311,16 @@ export async function seedCheckPolicy(
 	return { source, checkName: opts.checkName };
 }
 
+/** The check name a silence ref maps to in scoped-policy storage:
+ * refs of source-reported checks carry the `health/` prefix. */
+function refToCheck(ref: string): string {
+	return ref.startsWith("health/") ? ref.slice("health/".length) : ref;
+}
+
 /** Server-scope silence for a `(source, ref)` pair, as the UI's
- * silence button would create. For a healthcheck, pass
- * `ref: "health/<check>"` (source defaults to "alertd"). */
+ * silence button would create: a scoped check policy with a skipped
+ * ceiling. For a healthcheck, pass `ref: "health/<check>"` (source
+ * defaults to "alertd"). */
 export async function seedServerSilencedRef(
 	sql: Sql,
 	opts: {
@@ -324,10 +331,15 @@ export async function seedServerSilencedRef(
 	},
 ): Promise<void> {
 	await sql.query(
-		`INSERT INTO server_silenced_refs (server_id, source, ref, created_by)
-		 VALUES ($1, $2, $3, $4)
+		`INSERT INTO scoped_check_policies (server_id, source, check_name, ceiling, created_by)
+		 VALUES ($1, $2, $3, 'skipped', $4)
 		 ON CONFLICT DO NOTHING`,
-		[opts.serverId, opts.source ?? "alertd", opts.ref, opts.createdBy ?? null],
+		[
+			opts.serverId,
+			opts.source ?? "alertd",
+			refToCheck(opts.ref),
+			opts.createdBy ?? null,
+		],
 	);
 }
 
@@ -343,10 +355,15 @@ export async function seedGroupSilencedRef(
 	},
 ): Promise<void> {
 	await sql.query(
-		`INSERT INTO server_group_silenced_refs (server_group_id, source, ref, created_by)
-		 VALUES ($1, $2, $3, $4)
+		`INSERT INTO scoped_check_policies (server_group_id, source, check_name, ceiling, created_by)
+		 VALUES ($1, $2, $3, 'skipped', $4)
 		 ON CONFLICT DO NOTHING`,
-		[opts.groupId, opts.source ?? "alertd", opts.ref, opts.createdBy ?? null],
+		[
+			opts.groupId,
+			opts.source ?? "alertd",
+			refToCheck(opts.ref),
+			opts.createdBy ?? null,
+		],
 	);
 }
 

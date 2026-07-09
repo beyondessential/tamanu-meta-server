@@ -61,8 +61,7 @@ const TRUNCATE_TABLES: &[&str] = &[
 	"incident_issues",
 	"incidents",
 	"issues",
-	"server_silenced_refs",
-	"server_group_silenced_refs",
+	"scoped_check_policies",
 	"device_server_associations",
 	"device_connections",
 	"device_keys",
@@ -1192,8 +1191,7 @@ async fn report(conn: &mut AsyncPgConnection) -> Result<()> {
 		"issue_notes",
 		"incident_notes",
 		"slack_outbox",
-		"server_silenced_refs",
-		"server_group_silenced_refs",
+		"scoped_check_policies",
 	];
 
 	eprintln!("seed: row counts");

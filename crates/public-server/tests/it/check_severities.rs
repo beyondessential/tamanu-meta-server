@@ -86,23 +86,17 @@ async fn endpoint_maps_catalog_severities_and_silences() {
 			.await;
 
 			// Silences: flaky at server scope, groupwide at group scope; a
-			// silence on disk_space's *broken* thread must not skip the
-			// check itself.
+			// silence on a canopy check (a reserved source, outside the
+			// health/ namespace) must not leak into alertd's map.
 			ServerSilencedRef::add(&mut conn, server_id, "alertd", "health/flaky", None)
 				.await
 				.expect("server silence");
 			ServerGroupSilencedRef::add(&mut conn, group_id, "alertd", "health/groupwide", None)
 				.await
 				.expect("group silence");
-			ServerSilencedRef::add(
-				&mut conn,
-				server_id,
-				"alertd",
-				"health-broken/disk_space",
-				None,
-			)
-			.await
-			.expect("broken silence");
+			ServerSilencedRef::add(&mut conn, server_id, "canopy", "reachability", None)
+				.await
+				.expect("canopy silence");
 
 			let response = public
 				.get(&format!("/status/{server_id}/check-severities"))

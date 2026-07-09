@@ -730,7 +730,16 @@ async fn compute_check_severities(
 			check_extra: &check_extra,
 			tags: &tags,
 		};
-		let graded = CheckPolicy::apply(conn, &status.source, &name, result, &ctx).await?;
+		let graded = CheckPolicy::apply_scoped(
+			conn,
+			&status.source,
+			&name,
+			result,
+			&ctx,
+			Some(server.id),
+			server.group_id,
+		)
+		.await?;
 		let sev = match graded.effective {
 			CheckResult::Failed if graded.escalates => commons_types::issue::Severity::Critical,
 			CheckResult::Failed => commons_types::issue::Severity::Error,

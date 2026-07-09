@@ -1418,8 +1418,8 @@ async fn get_detail_health_excludes_silenced_checks() {
 		assert_eq!(body["health"], "unhealthy");
 
 		conn.batch_execute(
-			"INSERT INTO server_silenced_refs (server_id, source, ref) VALUES
-			('11111111-1111-1111-1111-111111111111', 'alertd', 'health/postgres')",
+			"INSERT INTO scoped_check_policies (server_id, source, check_name, ceiling) VALUES
+			('11111111-1111-1111-1111-111111111111', 'alertd', 'postgres', 'skipped')",
 		)
 		.await
 		.unwrap();
@@ -1432,7 +1432,9 @@ async fn get_detail_health_excludes_silenced_checks() {
 			"raw check result must stay on the status payload"
 		);
 
-		conn.batch_execute("DELETE FROM server_silenced_refs").await.unwrap();
+		conn.batch_execute("DELETE FROM scoped_check_policies")
+			.await
+			.unwrap();
 		let body = detail().await;
 		assert_eq!(body["health"], "unhealthy");
 	})
@@ -1463,8 +1465,8 @@ async fn group_details_member_health_excludes_group_silenced_checks() {
 			INSERT INTO issues (server_id, source, ref, check_name, observed_result, effective_result, severity, message, active, first_seen, last_seen, degraded_since, last_degraded_at) VALUES
 			('11111111-1111-1111-1111-111111111111', 'alertd', 'health/disk', 'disk', 'failed', 'failed', 'error', 'disk failed', true, NOW(), NOW(), NOW(), NOW());
 
-			INSERT INTO server_group_silenced_refs (server_group_id, source, ref) VALUES
-			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'alertd', 'health/disk')",
+			INSERT INTO scoped_check_policies (server_group_id, source, check_name, ceiling) VALUES
+			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'alertd', 'disk', 'skipped')",
 		)
 		.await
 		.unwrap();
@@ -1493,8 +1495,8 @@ async fn snapshot_reports_and_excludes_silenced_checks() {
 			('11111111-1111-1111-1111-111111111111', '1.0.0', true,
 			 '[{\"check\": \"postgres\", \"result\": \"failed\"}, {\"check\": \"disk\", \"result\": \"passed\"}]'::jsonb, '{}'::jsonb, NOW());
 
-			INSERT INTO server_silenced_refs (server_id, source, ref) VALUES
-			('11111111-1111-1111-1111-111111111111', 'status', 'health/postgres')",
+			INSERT INTO scoped_check_policies (server_id, source, check_name, ceiling) VALUES
+			('11111111-1111-1111-1111-111111111111', 'alertd', 'postgres', 'skipped')",
 		)
 		.await
 		.unwrap();

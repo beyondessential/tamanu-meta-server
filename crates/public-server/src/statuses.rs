@@ -289,7 +289,7 @@ async fn create(
 		.save(conn)
 		.await?;
 
-		file_health_events(conn, server_id, Some(id), &status, &tags).await?;
+		file_health_events(conn, server_id, server.group_id, Some(id), &status, &tags).await?;
 
 		Ok(())
 	})
@@ -426,6 +426,7 @@ fn resolve_version(extra: &serde_json::Value, header: Option<VersionStr>) -> Opt
 async fn file_health_events(
 	conn: &mut AsyncPgConnection,
 	server_id: Uuid,
+	group_id: Option<Uuid>,
 	device_id: Option<Uuid>,
 	status: &Status,
 	tags: &std::collections::HashMap<String, serde_json::Value>,
@@ -465,7 +466,16 @@ async fn file_health_events(
 			check_extra: &check_extra,
 			tags,
 		};
-		let graded = CheckPolicy::apply(conn, &status.source, check, *result, &ctx).await?;
+		let graded = CheckPolicy::apply_scoped(
+			conn,
+			&status.source,
+			check,
+			*result,
+			&ctx,
+			Some(server_id),
+			group_id,
+		)
+		.await?;
 		effective.insert(check, graded);
 	}
 

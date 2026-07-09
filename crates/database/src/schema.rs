@@ -364,6 +364,21 @@ diesel::table! {
 }
 
 diesel::table! {
+	scoped_check_policies (id) {
+		id -> Uuid,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
+		source -> Text,
+		check_name -> Text,
+		server_id -> Nullable<Uuid>,
+		server_group_id -> Nullable<Uuid>,
+		ceiling -> Nullable<Text>,
+		rules -> Nullable<Jsonb>,
+		created_by -> Nullable<Text>,
+	}
+}
+
+diesel::table! {
 	server_backup_capabilities (server_id, type_) {
 		server_id -> Uuid,
 		#[sql_name = "type"]
@@ -431,17 +446,6 @@ diesel::table! {
 }
 
 diesel::table! {
-	server_group_silenced_refs (server_group_id, source, ref_) {
-		server_group_id -> Uuid,
-		source -> Text,
-		#[sql_name = "ref"]
-		ref_ -> Text,
-		created_at -> Timestamptz,
-		created_by -> Nullable<Text>,
-	}
-}
-
-diesel::table! {
 	server_groups (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
@@ -453,17 +457,6 @@ diesel::table! {
 		version_server_id -> Nullable<Uuid>,
 		effective_version -> Nullable<Text>,
 		deleted_at -> Nullable<Timestamptz>,
-	}
-}
-
-diesel::table! {
-	server_silenced_refs (server_id, source, ref_) {
-		server_id -> Uuid,
-		source -> Text,
-		#[sql_name = "ref"]
-		ref_ -> Text,
-		created_at -> Timestamptz,
-		created_by -> Nullable<Text>,
 	}
 }
 
@@ -607,13 +600,13 @@ diesel::joinable!(restore_consumer_capabilities -> devices (consumer_device_id))
 diesel::joinable!(restore_replicas -> devices (consumer_device_id));
 diesel::joinable!(restore_replicas -> server_groups (group_id));
 diesel::joinable!(restore_replicas -> servers (server_id));
+diesel::joinable!(scoped_check_policies -> server_groups (server_group_id));
+diesel::joinable!(scoped_check_policies -> servers (server_id));
 diesel::joinable!(server_backup_capabilities -> servers (server_id));
 diesel::joinable!(server_enrollment_challenges -> servers (server_id));
 diesel::joinable!(server_enrollment_tokens -> servers (server_id));
 diesel::joinable!(server_group_backup_config -> server_groups (group_id));
 diesel::joinable!(server_group_backup_schedule -> server_groups (group_id));
-diesel::joinable!(server_group_silenced_refs -> server_groups (server_group_id));
-diesel::joinable!(server_silenced_refs -> servers (server_id));
 diesel::joinable!(servers -> devices (device_id));
 diesel::joinable!(slack_outbox -> incident_notes (note_id));
 diesel::joinable!(slack_outbox -> incidents (incident_id));
@@ -649,14 +642,13 @@ diesel::allow_tables_to_appear_in_same_query!(
 	recovery_vault_writes,
 	restore_consumer_capabilities,
 	restore_replicas,
+	scoped_check_policies,
 	server_backup_capabilities,
 	server_enrollment_challenges,
 	server_enrollment_tokens,
 	server_group_backup_config,
 	server_group_backup_schedule,
-	server_group_silenced_refs,
 	server_groups,
-	server_silenced_refs,
 	servers,
 	slack_outbox,
 	sql_playground_history,

@@ -24,6 +24,7 @@ use jiff::Timestamp;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use serde_json::Value as JsonValue;
 use std::collections::{BTreeMap, HashMap};
+use uuid::Uuid;
 
 /// The policy for one (source, check). An entry is created automatically
 /// the first time a source reports a check with this name, at the default
@@ -188,6 +189,36 @@ impl CheckPolicy {
 		})
 	}
 
+	/// [`Self::apply`], then the scoped transforms that cover the filing's
+	/// target: fleet catalog, then group, then server — each acting on
+	/// the previous effective result, so the most specific scope has the
+	/// last word. A canopy-wide filing (no server, no group) chains the
+	/// canopy-wide scoped transform instead.
+	///
+	/// A scoped silence is a skipped ceiling in this chain: whatever the
+	/// fleet grading said, the effective result lands at skipped.
+	pub async fn apply_scoped(
+		db: &mut AsyncPgConnection,
+		source: &str,
+		check_name: &str,
+		observed: CheckResult,
+		ctx: &EvaluationContext<'_>,
+		server_id: Option<Uuid>,
+		group_id: Option<Uuid>,
+	) -> Result<GradedResult> {
+		let fleet = Self::apply(db, source, check_name, observed, ctx).await?;
+		let scoped =
+			ScopedCheckPolicy::chain_for(db, source, check_name, server_id, group_id).await?;
+		let mut effective = fleet.effective;
+		for transform in &scoped {
+			effective = transform.transform(effective, ctx);
+		}
+		Ok(GradedResult {
+			effective,
+			escalates: fleet.escalates,
+		})
+	}
+
 	/// Replace the conditional-rules ladder for a check (or clear it
 	/// with `None`). Stamps `reviewed_at` / `reviewed_by`, so editing
 	/// rules also counts as a review for the catalog row.
@@ -310,6 +341,246 @@ impl CheckPolicy {
 		.get_result(db)
 		.await
 		.map_err(AppError::from)
+	}
+}
+
+/// The scope a scoped transform (or silence) attaches to: a server, a
+/// server group, or canopy-wide — mirroring check targets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PolicyScope {
+	Server(Uuid),
+	Group(Uuid),
+	Global,
+}
+
+/// A result transform scoped to one target, applied after the fleet
+/// catalog: fleet, then group, then server, each acting on the previous
+/// effective result. Either side may be present — a ceiling, a rules
+/// ladder, or both (rules first, then the ceiling caps their outcome).
+///
+/// The operator-facing **silence** is a scoped ceiling of `skipped`:
+/// the check keeps recording observed results but its effective result
+/// is skipped, so it raises nothing and counts nowhere. Arbitrary
+/// scoped transforms are admitted here; the UI only offers silences.
+#[derive(Clone, Debug, Serialize, Deserialize, Queryable, Selectable, utoipa::ToSchema)]
+#[diesel(table_name = crate::schema::scoped_check_policies)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct ScopedCheckPolicy {
+	/// Unique identifier of this scoped transform.
+	pub id: Uuid,
+	/// When this transform was created.
+	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
+	pub created_at: Timestamp,
+	/// When this transform was last modified.
+	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
+	pub updated_at: Timestamp,
+	/// The source whose check this transform applies to.
+	pub source: String,
+	/// The check this transform applies to.
+	pub check_name: String,
+	/// Set for a server-scoped transform.
+	pub server_id: Option<Uuid>,
+	/// Set for a group-scoped transform. Both `server_id` and
+	/// `server_group_id` unset means canopy-wide scope.
+	pub server_group_id: Option<Uuid>,
+	/// Scoped ceiling: caps the effective result arriving from the
+	/// previous transform in the chain. `skipped` is the silence.
+	pub ceiling: Option<String>,
+	/// Scoped conditional rules, same shape as the fleet catalog's.
+	#[schema(value_type = Option<serde_json::Value>)]
+	pub rules: Option<JsonValue>,
+	/// The operator who created this transform. `None` if not recorded.
+	pub created_by: Option<String>,
+}
+
+impl ScopedCheckPolicy {
+	fn scope_filter(scope: PolicyScope) -> (Option<Uuid>, Option<Uuid>) {
+		match scope {
+			PolicyScope::Server(id) => (Some(id), None),
+			PolicyScope::Group(id) => (None, Some(id)),
+			PolicyScope::Global => (None, None),
+		}
+	}
+
+	/// The transform at exactly this (scope, source, check), if any.
+	pub async fn get(
+		db: &mut AsyncPgConnection,
+		scope: PolicyScope,
+		source: &str,
+		check_name: &str,
+	) -> Result<Option<Self>> {
+		use crate::schema::scoped_check_policies::dsl;
+		let (server, group) = Self::scope_filter(scope);
+		dsl::scoped_check_policies
+			.select(Self::as_select())
+			.filter(
+				dsl::source
+					.eq(source)
+					.and(dsl::check_name.eq(check_name))
+					.and(dsl::server_id.is_not_distinct_from(server))
+					.and(dsl::server_group_id.is_not_distinct_from(group)),
+			)
+			.first(db)
+			.await
+			.optional()
+			.map_err(AppError::from)
+	}
+
+	/// Upsert a silence: a skipped ceiling at this scope. An existing
+	/// transform at the same (scope, source, check) keeps its rules; its
+	/// ceiling becomes skipped. Idempotent.
+	pub async fn silence(
+		db: &mut AsyncPgConnection,
+		scope: PolicyScope,
+		source: &str,
+		check_name: &str,
+		created_by: Option<&str>,
+	) -> Result<Self> {
+		use crate::schema::scoped_check_policies::dsl;
+		let (server, group) = Self::scope_filter(scope);
+		if let Some(existing) = Self::get(db, scope, source, check_name).await? {
+			return diesel::update(dsl::scoped_check_policies.filter(dsl::id.eq(existing.id)))
+				.set((
+					dsl::ceiling.eq(CheckResult::Skipped.to_string()),
+					dsl::updated_at.eq(jiff_diesel::Timestamp::from(Timestamp::now())),
+				))
+				.returning(Self::as_select())
+				.get_result(db)
+				.await
+				.map_err(AppError::from);
+		}
+		diesel::insert_into(dsl::scoped_check_policies)
+			.values((
+				dsl::source.eq(source),
+				dsl::check_name.eq(check_name),
+				dsl::server_id.eq(server),
+				dsl::server_group_id.eq(group),
+				dsl::ceiling.eq(CheckResult::Skipped.to_string()),
+				dsl::created_by.eq(created_by),
+			))
+			.returning(Self::as_select())
+			.get_result(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// Remove a silence at this scope: the row is deleted when the
+	/// silence was all it carried, or just the skipped ceiling is lifted
+	/// when scoped rules remain. A no-op if nothing is silenced there.
+	pub async fn unsilence(
+		db: &mut AsyncPgConnection,
+		scope: PolicyScope,
+		source: &str,
+		check_name: &str,
+	) -> Result<()> {
+		use crate::schema::scoped_check_policies::dsl;
+		let Some(existing) = Self::get(db, scope, source, check_name).await? else {
+			return Ok(());
+		};
+		if existing.ceiling.as_deref() != Some("skipped") {
+			return Ok(());
+		}
+		if existing.rules.is_some() {
+			diesel::update(dsl::scoped_check_policies.filter(dsl::id.eq(existing.id)))
+				.set((
+					dsl::ceiling.eq(None::<String>),
+					dsl::updated_at.eq(jiff_diesel::Timestamp::from(Timestamp::now())),
+				))
+				.execute(db)
+				.await
+				.map_err(AppError::from)?;
+		} else {
+			diesel::delete(dsl::scoped_check_policies.filter(dsl::id.eq(existing.id)))
+				.execute(db)
+				.await
+				.map_err(AppError::from)?;
+		}
+		Ok(())
+	}
+
+	/// All silences (skipped-ceiling transforms) at one scope, newest
+	/// first.
+	pub async fn list_silences(
+		db: &mut AsyncPgConnection,
+		scope: PolicyScope,
+	) -> Result<Vec<Self>> {
+		use crate::schema::scoped_check_policies::dsl;
+		let (server, group) = Self::scope_filter(scope);
+		dsl::scoped_check_policies
+			.select(Self::as_select())
+			.filter(
+				dsl::server_id
+					.is_not_distinct_from(server)
+					.and(dsl::server_group_id.is_not_distinct_from(group))
+					.and(dsl::ceiling.eq(CheckResult::Skipped.to_string())),
+			)
+			.order(dsl::created_at.desc())
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// The scoped transforms that apply to a filing, in application
+	/// order. A server filing chains group then server; a group filing
+	/// its group row; a canopy-wide filing the global row.
+	pub async fn chain_for(
+		db: &mut AsyncPgConnection,
+		source: &str,
+		check_name: &str,
+		server_id: Option<Uuid>,
+		group_id: Option<Uuid>,
+	) -> Result<Vec<Self>> {
+		use crate::schema::scoped_check_policies::dsl;
+		let mut query = dsl::scoped_check_policies
+			.select(Self::as_select())
+			.filter(dsl::source.eq(source).and(dsl::check_name.eq(check_name)))
+			.into_boxed();
+		query = match (server_id, group_id) {
+			(None, None) => {
+				query.filter(dsl::server_id.is_null().and(dsl::server_group_id.is_null()))
+			}
+			(server, group) => query.filter(
+				dsl::server_id
+					.is_not_distinct_from(server)
+					.and(dsl::server_id.is_not_null())
+					.or(dsl::server_group_id
+						.is_not_distinct_from(group)
+						.and(dsl::server_group_id.is_not_null())),
+			),
+		};
+		let mut rows: Vec<Self> = query.load(db).await.map_err(AppError::from)?;
+		// Group scope applies before server scope: the most specific
+		// transform has the last word.
+		rows.sort_by_key(|r| r.server_id.is_some());
+		Ok(rows)
+	}
+
+	/// Apply this transform to the effective result arriving from the
+	/// previous step in the chain: rules first (a matching branch's
+	/// result replaces the input), then the ceiling caps the outcome.
+	pub fn transform(&self, input: CheckResult, ctx: &EvaluationContext<'_>) -> CheckResult {
+		let mut result = input;
+		if let Some(rules) = &self.rules {
+			match serde_json::from_value::<IfLadder>(rules.clone()) {
+				Ok(ladder) => {
+					if let Some(matched) = ladder.evaluate(ctx) {
+						result = matched;
+					}
+				}
+				Err(err) => {
+					tracing::warn!(
+						source = self.source,
+						check_name = self.check_name,
+						?err,
+						"failed to parse scoped policy rules; ignoring them"
+					);
+				}
+			}
+		}
+		if let Some(ceiling) = self.ceiling.as_deref().and_then(|c| c.parse().ok()) {
+			result = result.capped_at(ceiling);
+		}
+		result
 	}
 }
 

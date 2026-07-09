@@ -18,6 +18,7 @@ mod mcp_tokens;
 mod reachability_sweep;
 mod recovery_vault;
 mod restore;
+mod scoped_check_policies;
 mod self_alerts;
 mod server_enrollment;
 mod server_group_archival;
