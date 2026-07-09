@@ -592,25 +592,28 @@ async fn reopen_via_device_clears_resolved_fields() {
 			.await
 			.expect("seed");
 
-			// Device opens the issue.
-			let opened = public
-				.post("/events")
+			// Device opens the issue by pushing a failing check.
+			public
+				.post(&format!("/status/{server_id}"))
 				.add_header("mtls-certificate", &cert)
 				.json(&serde_json::json!({
-					"source": "watchdog",
-					"ref": "x",
-					"result": "failed",
-					"message": "trouble",
+					"health": [ { "check": "x", "result": "failed" } ],
 				}))
-				.await;
-			opened.assert_status_ok();
-			let issue_id = opened
-				.json::<serde_json::Value>()
-				.get("id")
-				.unwrap()
-				.as_str()
-				.unwrap()
-				.to_string();
+				.await
+				.assert_status_ok();
+			let issue = database::issues::Issue::list_by_source_ref(
+				&mut conn,
+				"alertd",
+				"health/x",
+				&[server_id],
+			)
+			.await
+			.expect("list issues")
+			.into_iter()
+			.next()
+			.expect("issue opened by the failing check");
+			assert!(issue.active);
+			let issue_id = issue.id.to_string();
 
 			// Human resolves.
 			private
@@ -620,24 +623,32 @@ async fn reopen_via_device_clears_resolved_fields() {
 				.assert_status_ok();
 
 			// Device pushes again — should clear resolved_* (Sentry-style reopen).
-			let reopened = public
-				.post("/events")
+			public
+				.post(&format!("/status/{server_id}"))
 				.add_header("mtls-certificate", &cert)
 				.json(&serde_json::json!({
-					"source": "watchdog",
-					"ref": "x",
-					"result": "failed",
-					"message": "back again",
+					"health": [ { "check": "x", "result": "failed" } ],
 				}))
-				.await;
-			reopened.assert_status_ok();
-			let body: serde_json::Value = reopened.json();
+				.await
+				.assert_status_ok();
+			let reopened = database::issues::Issue::list_by_source_ref(
+				&mut conn,
+				"alertd",
+				"health/x",
+				&[server_id],
+			)
+			.await
+			.expect("list issues")
+			.into_iter()
+			.next()
+			.expect("issue still present after reopen");
+			assert!(reopened.active);
 			assert!(
-				body.get("resolved_at").map_or(true, |v| v.is_null()),
+				reopened.resolved_at.is_none(),
 				"reopen should clear resolved_at"
 			);
-			assert!(body.get("resolved_by").map_or(true, |v| v.is_null()));
-			assert!(body.get("resolved_reason").map_or(true, |v| v.is_null()));
+			assert!(reopened.resolved_by.is_none());
+			assert!(reopened.resolved_reason.is_none());
 		},
 	)
 	.await;

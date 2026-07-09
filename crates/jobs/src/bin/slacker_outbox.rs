@@ -55,19 +55,10 @@ const WATCHDOG_CHECK_EVERY: Duration = Duration::from_secs(30);
 /// Partial configuration is a hard error at startup — silently dropping rows
 /// for an unconfigured kind is exactly how we missed an entire month of
 /// resolve notifications previously, so a noisy startup failure is preferred.
-///
-/// `SLACK_WEBHOOK_SELF_ALERT_URL` is deliberately outside that all-or-none
-/// set: it postdates deployed configuration, and folding it in would
-/// hard-fail every existing deploy on upgrade. Unset while incident hooks
-/// are configured, self-alert rows are marked delivered without posting and
-/// a warning is logged at startup — the alerts are still recorded and shown
-/// in the operator UI. Fold it into the strict set once ops config carries
-/// it everywhere.
 #[derive(Clone, Debug, Default)]
 struct Config {
 	open: Option<String>,
 	resolve: Option<String>,
-	self_alert: Option<String>,
 	private_url: Option<String>,
 }
 
@@ -76,7 +67,6 @@ impl Config {
 		Self::build(
 			std::env::var("SLACK_WEBHOOK_OPEN_URL").ok(),
 			std::env::var("SLACK_WEBHOOK_RESOLVE_URL").ok(),
-			std::env::var("SLACK_WEBHOOK_SELF_ALERT_URL").ok(),
 			std::env::var("PRIVATE_URL").ok(),
 		)
 	}
@@ -84,7 +74,6 @@ impl Config {
 	fn build(
 		open: Option<String>,
 		resolve: Option<String>,
-		self_alert: Option<String>,
 		private_url: Option<String>,
 	) -> miette::Result<Self> {
 		let inputs: [(&str, &Option<String>); 2] = [
@@ -92,7 +81,7 @@ impl Config {
 			("SLACK_WEBHOOK_RESOLVE_URL", &resolve),
 		];
 		let set_count = inputs.iter().filter(|(_, v)| v.is_some()).count();
-		if set_count == 0 && self_alert.is_none() {
+		if set_count == 0 {
 			return Ok(Self::default());
 		}
 		if set_count != 0 && set_count != inputs.len() {
@@ -118,22 +107,23 @@ impl Config {
 		Ok(Self {
 			open,
 			resolve,
-			self_alert,
 			private_url: Some(private_url),
 		})
 	}
 
 	fn any_hook(&self) -> bool {
-		self.open.is_some() || self.resolve.is_some() || self.self_alert.is_some()
+		self.open.is_some() || self.resolve.is_some()
 	}
 
-	/// `Ok(Some(url))` — post there; `Ok(None)` — known kind whose optional
-	/// hook is unset (mark delivered without posting); `Err` — unknown kind.
+	/// `Ok(Some(url))` — post there; `Ok(None)` — known kind with no hook
+	/// (mark delivered without posting); `Err` — unknown kind.
 	fn url_for(&self, kind: &str) -> Result<Option<&str>, ()> {
 		match kind {
 			KIND_INCIDENT_OPEN => Ok(self.open.as_deref()),
 			KIND_INCIDENT_RESOLVE => Ok(self.resolve.as_deref()),
-			KIND_SELF_ALERT_OPEN | KIND_SELF_ALERT_RESOLVE => Ok(self.self_alert.as_deref()),
+			// Legacy: nothing enqueues self-alert rows anymore; stragglers
+			// from before an upgrade drain as delivered without posting.
+			KIND_SELF_ALERT_OPEN | KIND_SELF_ALERT_RESOLVE => Ok(None),
 			_ => Err(()),
 		}
 	}
@@ -153,11 +143,6 @@ fn spawn(cfg: Config) -> JoinHandle<()> {
 	let pool = database::init();
 	if !cfg.any_hook() {
 		info!("no SLACK_WEBHOOK_*_URL set; slack outbox drainer running in no-op mode");
-	} else if cfg.self_alert.is_none() {
-		warn!(
-			"SLACK_WEBHOOK_SELF_ALERT_URL unset; self-alerts will be recorded and \
-			 shown in the operator UI but not sent to Slack"
-		);
 	}
 	let client = reqwest::Client::builder()
 		.timeout(REQUEST_TIMEOUT)
@@ -363,11 +348,11 @@ async fn deliver(
 			});
 		}
 		Ok(Some(url)) => url,
-		// The self-alert hook is optional (see Config docs): unset means
-		// record-only. Incident kinds unset while any hook is configured
-		// stay a hard error — that silence has bitten before.
+		// Legacy self-alert rows have no hook anymore: drain them as
+		// delivered without posting. Incident kinds unset while any hook
+		// is configured stay a hard error — that silence has bitten before.
 		Ok(None) if row.kind == KIND_SELF_ALERT_OPEN || row.kind == KIND_SELF_ALERT_RESOLVE => {
-			debug!(id = %row.id, kind = %row.kind, "self-alert hook unset; row marked delivered without posting");
+			debug!(id = %row.id, kind = %row.kind, "legacy self-alert row; marked delivered without posting");
 			return Ok(String::new());
 		}
 		Ok(None) => {
@@ -483,7 +468,6 @@ mod tests {
 		let err = Config::build(
 			Some("http://example/open".into()),
 			None,
-			None,
 			Some("https://canopy.test".into()),
 		)
 		.expect_err("must require every incident SLACK_WEBHOOK_*_URL when any is set");
@@ -499,7 +483,6 @@ mod tests {
 			Some("http://example/open".into()),
 			Some("http://example/resolve".into()),
 			None,
-			None,
 		)
 		.expect_err("must require PRIVATE_URL");
 		assert!(err.to_string().contains("PRIVATE_URL"));
@@ -507,7 +490,7 @@ mod tests {
 
 	#[test]
 	fn config_ok_when_no_hooks_set_even_without_private_url() {
-		let cfg = Config::build(None, None, None, None).expect("no-op mode is fine");
+		let cfg = Config::build(None, None, None).expect("no-op mode is fine");
 		assert!(!cfg.any_hook());
 	}
 
@@ -516,7 +499,6 @@ mod tests {
 		let cfg = Config::build(
 			Some("http://example/open".into()),
 			Some("http://example/resolve".into()),
-			Some("http://example/self-alert".into()),
 			Some("https://canopy.test".into()),
 		)
 		.expect("complete config is fine");
@@ -529,14 +511,8 @@ mod tests {
 			cfg.url_for(KIND_INCIDENT_RESOLVE),
 			Ok(Some("http://example/resolve"))
 		);
-		assert_eq!(
-			cfg.url_for(KIND_SELF_ALERT_OPEN),
-			Ok(Some("http://example/self-alert"))
-		);
-		assert_eq!(
-			cfg.url_for(KIND_SELF_ALERT_RESOLVE),
-			Ok(Some("http://example/self-alert"))
-		);
+		assert_eq!(cfg.url_for(KIND_SELF_ALERT_OPEN), Ok(None));
+		assert_eq!(cfg.url_for(KIND_SELF_ALERT_RESOLVE), Ok(None));
 		assert_eq!(cfg.url_for("mystery"), Err(()));
 	}
 
@@ -555,7 +531,6 @@ mod tests {
 		let cfg = Config {
 			open: Some(url),
 			resolve: None,
-			self_alert: None,
 			private_url: Some("https://canopy.example.ts.net".into()),
 		};
 		let mut r = row(
@@ -601,7 +576,6 @@ mod tests {
 		let cfg = Config {
 			open: Some(url),
 			resolve: None,
-			self_alert: None,
 			private_url: Some("https://new.example/".into()),
 		};
 		let mut r = row(
@@ -641,7 +615,6 @@ mod tests {
 		let cfg = Config {
 			open: Some("http://127.0.0.1:1/open-should-not-be-hit".into()),
 			resolve: Some(resolve_url),
-			self_alert: None,
 			private_url: Some("https://canopy.test".into()),
 		};
 		let r = row(
@@ -671,7 +644,6 @@ mod tests {
 		let cfg = Config {
 			open: Some(url),
 			resolve: None,
-			self_alert: None,
 			private_url: Some("https://canopy.test".into()),
 		};
 		let r = row(KIND_INCIDENT_OPEN, serde_json::json!({}));
@@ -695,7 +667,6 @@ mod tests {
 		let cfg = Config {
 			open: Some("http://127.0.0.1:1/should-not-be-hit".into()),
 			resolve: Some("http://127.0.0.1:1/should-not-be-hit".into()),
-			self_alert: None,
 			private_url: Some("https://canopy.test".into()),
 		};
 		let r = row("bogus_kind", serde_json::json!({}));
@@ -709,14 +680,13 @@ mod tests {
 	}
 
 	#[tokio::test(flavor = "multi_thread")]
-	async fn deliver_self_alert_without_hook_is_a_per_kind_noop() {
-		// The self-alert hook is optional: with incident hooks configured
-		// but SLACK_WEBHOOK_SELF_ALERT_URL unset, self-alert rows are
-		// marked delivered without posting rather than erroring forever.
+	async fn deliver_legacy_self_alert_row_is_a_per_kind_noop() {
+		// Nothing enqueues self-alert rows anymore, but stragglers from
+		// before an upgrade must drain as delivered rather than erroring
+		// forever.
 		let cfg = Config {
 			open: Some("http://127.0.0.1:1/should-not-be-hit".into()),
 			resolve: Some("http://127.0.0.1:1/should-not-be-hit".into()),
-			self_alert: None,
 			private_url: Some("https://canopy.test".into()),
 		};
 		let mut r = row(KIND_SELF_ALERT_OPEN, serde_json::json!({}));
@@ -725,53 +695,6 @@ mod tests {
 			.await
 			.expect("per-kind noop ok");
 		assert_eq!(body, "");
-	}
-
-	#[tokio::test(flavor = "multi_thread")]
-	async fn deliver_routes_self_alert_kinds_and_links_to_alerts() {
-		let (url, server, recorded) = one_shot_server();
-		let cfg = Config {
-			open: Some("http://127.0.0.1:1/open-should-not-be-hit".into()),
-			resolve: Some("http://127.0.0.1:1/resolve-should-not-be-hit".into()),
-			self_alert: Some(url),
-			private_url: Some("https://canopy.example.ts.net".into()),
-		};
-		let mut r = row(
-			KIND_SELF_ALERT_OPEN,
-			serde_json::json!({
-				"state": "alert",
-				"severity": "Critical",
-				"source_ref": "canopy/preflight-identity",
-				"title": "Canopy IRSA identity broken",
-				"message": "boom",
-			}),
-		);
-		r.incident_id = None;
-		deliver(&reqwest::Client::new(), &cfg, &r)
-			.await
-			.expect("deliver ok");
-		server.join().unwrap();
-
-		let got = recorded.lock().unwrap().clone().expect("got a request");
-		assert_eq!(got["state"], "alert");
-		assert_eq!(got["source_ref"], "canopy/preflight-identity");
-		assert_eq!(
-			got["link"], "https://canopy.example.ts.net/alerts",
-			"self-alert rows link to the alerts view, not an incident",
-		);
-	}
-
-	#[tokio::test(flavor = "multi_thread")]
-	async fn config_accepts_missing_self_alert_hook() {
-		let cfg = Config::build(
-			Some("http://example/open".into()),
-			Some("http://example/resolve".into()),
-			None,
-			Some("https://canopy.test".into()),
-		)
-		.expect("self-alert hook is optional");
-		assert!(cfg.any_hook());
-		assert_eq!(cfg.url_for(KIND_SELF_ALERT_OPEN), Ok(None));
 	}
 
 	#[tokio::test(flavor = "multi_thread")]

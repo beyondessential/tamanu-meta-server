@@ -4095,7 +4095,7 @@
           "self_alerts"
         ],
         "summary": "Mark a self-alert as resolved.",
-        "description": "Records that an operator has resolved the given self-alert and cancels\nits notification if one is still pending delivery (e.g. inside the\ninitial grace period before a low-severity alert is sent). Returns 404\nif no self-alert with that id exists.",
+        "description": "Records that an operator has resolved the given self-alert. Returns 404\nif no self-alert with that id exists.",
         "operationId": "self_alerts_resolve",
         "requestBody": {
           "content": {
@@ -4109,7 +4109,7 @@
         },
         "responses": {
           "200": {
-            "description": "Alert marked operator-resolved; a pending notification is cancelled."
+            "description": "Alert marked operator-resolved."
           },
           "401": {
             "description": "",

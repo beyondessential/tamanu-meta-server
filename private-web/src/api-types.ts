@@ -2089,9 +2089,7 @@ export interface paths {
         put?: never;
         /**
          * Mark a self-alert as resolved.
-         * @description Records that an operator has resolved the given self-alert and cancels
-         *     its notification if one is still pending delivery (e.g. inside the
-         *     initial grace period before a low-severity alert is sent). Returns 404
+         * @description Records that an operator has resolved the given self-alert. Returns 404
          *     if no self-alert with that id exists.
          */
         post: operations["self_alerts_resolve"];
@@ -10134,7 +10132,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Alert marked operator-resolved; a pending notification is cancelled. */
+            /** @description Alert marked operator-resolved. */
             200: {
                 headers: {
                     [name: string]: unknown;

@@ -6,15 +6,12 @@
 //! POST a flat JSON object keyed by the declared variable names — no
 //! `blocks`, no `text`.
 //!
-//! Three workflows:
+//! Two workflows:
 //! - `incident_open`: variables `server`, `severity`, `source_ref`, `message`, `link`
 //! - `incident_resolve`: variables `server`, `by`, `link`. `by` is either the
 //!   resolving operator's login, or — when the incident retired on its own —
 //!   "the healthcheck recovering" (it describes the event, not an actor: the
 //!   check went healthy again, which does not imply nobody intervened).
-//! - self-alert (both `self_alert_open` and `self_alert_resolve` kinds):
-//!   variables `state`, `severity`, `source_ref`, `title`, `message`, `link` —
-//!   one workflow serves raise and recovery, told apart by `state`.
 //!
 //! Note: `link` is **not** rendered here. It's pure config (incident_id is
 //! already on the row, and `PRIVATE_URL` is operator-set), so the drainer
@@ -45,29 +42,6 @@ pub fn incident_open(
 		"server": server_label,
 		"severity": title_case(&severity.to_string()),
 		"source_ref": format!("{source}/{issue_ref}"),
-		"message": message,
-	})
-}
-
-/// Self-alert raise. `title` is the issue's single-line description.
-pub fn self_alert_open(severity: Severity, issue_ref: &str, title: &str, message: &str) -> Value {
-	json!({
-		"state": "alert",
-		"severity": title_case(&severity.to_string()),
-		"source_ref": format!("canopy/{issue_ref}"),
-		"title": title,
-		"message": message,
-	})
-}
-
-/// Self-alert recovery. Same variable set as the raise so one Workflow
-/// Builder workflow serves both.
-pub fn self_alert_resolve(issue_ref: &str, message: &str) -> Value {
-	json!({
-		"state": "recovered",
-		"severity": "Info",
-		"source_ref": format!("canopy/{issue_ref}"),
-		"title": "recovered",
 		"message": message,
 	})
 }

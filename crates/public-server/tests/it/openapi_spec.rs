@@ -38,7 +38,6 @@ fn spec_has_one_path_per_module() {
 	let spec = build_spec();
 	let paths = &spec["paths"];
 	for p in [
-		"/events",
 		"/servers",
 		"/bestool/snippets",
 		"/status/{server_id}",

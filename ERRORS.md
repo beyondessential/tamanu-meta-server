@@ -64,14 +64,9 @@ Issued when authentication fails for unspecified reasons.
 
 ## Device has no server
 
-Issued when a device tries to submit an event but is not registered against
-any server. Devices must be linked to a server (`servers.device_id`) before
-they can report issues.
-
-## Source manual forbidden
-
-Issued when an event submission to the public API uses `source = "manual"`.
-That source is reserved for operator-submitted events via the private API.
+Issued when a device calls an endpoint that acts on "its" server but is not
+registered against any server. Devices must be linked to a server
+(`servers.device_id`) first.
 
 ## Auth: tailnet directory unavailable
 

@@ -93,9 +93,6 @@ pub enum AppError {
 	#[error("device is not registered against any server")]
 	DeviceHasNoServer,
 
-	#[error("source 'manual' is reserved for operator submissions")]
-	SourceManualForbidden,
-
 	#[error("tailnet directory is unavailable")]
 	AuthTailnetDirectoryUnavailable,
 
@@ -207,7 +204,6 @@ impl AppError {
 			Self::AuthInsufficientPermissions { .. } => StatusCode::FORBIDDEN,
 			Self::AuthFailed { .. } => StatusCode::UNAUTHORIZED,
 			Self::DeviceHasNoServer => StatusCode::PRECONDITION_FAILED,
-			Self::SourceManualForbidden => StatusCode::BAD_REQUEST,
 			Self::AuthTailnetDirectoryUnavailable => StatusCode::SERVICE_UNAVAILABLE,
 			Self::AuthTailnetNodeNotPermitted => StatusCode::FORBIDDEN,
 			Self::TaggedDeviceNotAllowed => StatusCode::FORBIDDEN,
@@ -259,7 +255,6 @@ impl AppError {
 						Self::AuthInsufficientPermissions { .. } => "auth-insufficient-permissions",
 						Self::AuthFailed { .. } => "auth-failed",
 						Self::DeviceHasNoServer => "device-has-no-server",
-						Self::SourceManualForbidden => "source-manual-forbidden",
 						Self::AuthTailnetDirectoryUnavailable =>
 							"auth-tailnet-directory-unavailable",
 						Self::AuthTailnetNodeNotPermitted => "auth-tailnet-node-not-permitted",

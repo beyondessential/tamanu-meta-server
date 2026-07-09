@@ -145,9 +145,7 @@ pub struct SelfAlertsResolveArgs {
 
 /// Mark a self-alert as resolved.
 ///
-/// Records that an operator has resolved the given self-alert and cancels
-/// its notification if one is still pending delivery (e.g. inside the
-/// initial grace period before a low-severity alert is sent). Returns 404
+/// Records that an operator has resolved the given self-alert. Returns 404
 /// if no self-alert with that id exists.
 #[utoipa::path(
 	post,
@@ -157,7 +155,7 @@ pub struct SelfAlertsResolveArgs {
 	security(("tailscale-admin" = [])),
 	request_body = SelfAlertsResolveArgs,
 	responses(
-		(status = 200, description = "Alert marked operator-resolved; a pending notification is cancelled."),
+		(status = 200, description = "Alert marked operator-resolved."),
 		(status = 401, body = ProblemDetailsSchema),
 		(status = 403, body = ProblemDetailsSchema),
 		(status = 404, body = ProblemDetailsSchema),
@@ -170,13 +168,5 @@ pub async fn resolve(
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
 	Issue::resolve(&mut conn, args.id, &admin.login, ResolvedReason::Fixed).await?;
-	// If the alert's Slack open is still inside its grace window, the
-	// operator has dealt with it before anyone needed paging.
-	database::slack_outbox::SlackOutbox::cancel_pending_self_alert_open(
-		&mut conn,
-		args.id,
-		"cancelled: self-alert operator-resolved before the open had been delivered to Slack",
-	)
-	.await?;
 	Ok(Json(()))
 }

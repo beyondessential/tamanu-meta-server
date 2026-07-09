@@ -7,7 +7,6 @@ use crate::state::AppState;
 pub mod artifacts;
 pub mod backup;
 pub mod bestool;
-pub mod events;
 pub mod mcp;
 pub mod openapi;
 #[cfg(feature = "ui")]
@@ -27,7 +26,6 @@ pub mod versions;
 pub fn routes() -> OpenApiRouter<AppState> {
 	#[cfg_attr(not(feature = "ui"), expect(unused_mut))]
 	let mut router = OpenApiRouter::new()
-		.merge(events::routes())
 		.merge(backup::routes())
 		.merge(restore::routes())
 		.nest("/artifacts", artifacts::routes())
