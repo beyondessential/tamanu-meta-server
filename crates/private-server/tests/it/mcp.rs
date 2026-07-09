@@ -346,9 +346,9 @@ async fn seed_incidents(conn: &mut impl SimpleAsyncConnection) {
 		"INSERT INTO server_groups (id, name) VALUES ('{IGROUP}', 'Inc Group'); \
 		 INSERT INTO servers (id, host, name, kind, group_id, is_monitored) VALUES \
 			('{ISRV}', 'https://inc', 'Inc Server', 'central', '{IGROUP}', true); \
-		 INSERT INTO issues (id, created_at, updated_at, server_id, source, ref, check_name, observed_result, effective_result, severity, description, message, active, first_seen, last_seen, last_degraded_at) VALUES \
-			('{ISSUE1}', NOW(), NOW(), '{ISRV}', 'test', 'r1', 'r1', 'failed', 'failed', 'error', 'Disk full', 'disk usage 98%', true, NOW() - interval '2 days', NOW() - interval '1 hour', NOW() - interval '1 hour'), \
-			('{ISSUE2}', NOW(), NOW(), '{ISRV}', 'test', 'r2', 'r2', 'warning', 'warning', 'warning', NULL, 'slow query', false, NOW() - interval '10 days', NOW() - interval '9 days', NOW() - interval '9 days'); \
+		 INSERT INTO issues (id, created_at, updated_at, server_id, source, ref, check_name, observed_result, effective_result, description, message, active, first_seen, last_seen, last_degraded_at) VALUES \
+			('{ISSUE1}', NOW(), NOW(), '{ISRV}', 'test', 'r1', 'r1', 'failed', 'failed', 'Disk full', 'disk usage 98%', true, NOW() - interval '2 days', NOW() - interval '1 hour', NOW() - interval '1 hour'), \
+			('{ISSUE2}', NOW(), NOW(), '{ISRV}', 'test', 'r2', 'r2', 'warning', 'warning', NULL, 'slow query', false, NOW() - interval '10 days', NOW() - interval '9 days', NOW() - interval '9 days'); \
 		 INSERT INTO incidents (id, created_at, updated_at, server_group_id, opened_at, closed_at) VALUES \
 			('{INC_OPEN}', NOW(), NOW(), '{IGROUP}', NOW() - interval '2 days', NULL), \
 			('{INC_CLOSED}', NOW(), NOW(), '{IGROUP}', NOW() - interval '5 days', NOW() - interval '3 days'); \

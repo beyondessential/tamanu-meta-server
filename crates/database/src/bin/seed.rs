@@ -16,7 +16,7 @@ use commons_errors::{AppError, Result};
 use commons_types::{
 	device::DeviceRole,
 	geo::GeoPoint,
-	issue::{ResolvedReason, Severity},
+	issue::ResolvedReason,
 	server::{TagMap, kind::ServerKind, rank::ServerRank},
 	status::CheckResult,
 	version::{VersionStatus, VersionStr},
@@ -979,21 +979,32 @@ async fn seed_issues_and_incidents(
 		server_id: Uuid,
 		source: &str,
 		r#ref: &str,
-		severity: Severity,
+		result: CheckResult,
+		escalates: bool,
 		description: &str,
 		message: &str,
 		occurred_at: Timestamp,
 	) -> Result<Issue> {
+		let stamp = database::issues::CheckStateStamp {
+			check: r#ref.to_string(),
+			observed: result,
+			effective: result,
+			escalates,
+			detail: None,
+		};
+		let active = matches!(
+			result,
+			CheckResult::Failed | CheckResult::Warning | CheckResult::Broken
+		);
 		NewEvent {
 			source: source.to_string(),
 			r#ref: r#ref.to_string(),
-			severity: Some(severity),
 			description: Some(description.to_string()),
 			message: message.to_string(),
-			active: Some(true),
+			active: Some(active),
 			occurred_at: Some(occurred_at),
 		}
-		.save(conn, server_id, None)
+		.save_with_state(conn, server_id, None, Some(&stamp))
 		.await
 	}
 
@@ -1003,7 +1014,8 @@ async fn seed_issues_and_incidents(
 		servers.unhealthy_facility,
 		"healthcheck",
 		"database_connectivity",
-		Severity::Critical,
+		CheckResult::Failed,
+		true,
 		"Database connection refused",
 		"The server cannot reach its PostgreSQL instance (connection refused). \
 		 Sync and API requests are failing.",
@@ -1019,7 +1031,8 @@ async fn seed_issues_and_incidents(
 			servers.unhealthy_facility,
 			"healthcheck",
 			"database_connectivity",
-			Severity::Critical,
+			CheckResult::Failed,
+			true,
 			"Database connection refused",
 			"The server cannot reach its PostgreSQL instance (connection refused). \
 			 Sync and API requests are failing.",
@@ -1035,7 +1048,8 @@ async fn seed_issues_and_incidents(
 		servers.healthy_central,
 		"healthcheck",
 		"certificate_expiry",
-		Severity::Warning,
+		CheckResult::Warning,
+		false,
 		"TLS certificate expiring soon",
 		"The TLS certificate expires in 9 days.",
 		now - SignedDuration::from_mins(30),
@@ -1049,7 +1063,8 @@ async fn seed_issues_and_incidents(
 		servers.warning_facility,
 		"healthcheck",
 		"sync_lag",
-		Severity::Error,
+		CheckResult::Failed,
+		false,
 		"Sync lag exceeds threshold",
 		"Sync lag has been above 30 minutes for the last hour.",
 		now - SignedDuration::from_mins(60),
@@ -1063,7 +1078,8 @@ async fn seed_issues_and_incidents(
 		servers.warning_facility,
 		"healthcheck",
 		"disk_space",
-		Severity::Error,
+		CheckResult::Failed,
+		false,
 		"Disk almost full",
 		"Disk usage crossed 95% earlier; has since recovered.",
 		now - SignedDuration::from_hours(6),
@@ -1071,26 +1087,28 @@ async fn seed_issues_and_incidents(
 	.await?;
 	Issue::resolve(conn, transient.id, &admins[1], ResolvedReason::Fixed).await?;
 
-	// An info-level issue on the ungrouped server (recorded, no incident).
+	// A warning on the ungrouped server (recorded, no incident).
 	push(
 		conn,
 		servers.ungrouped,
 		"app",
 		"slow-query",
-		Severity::Info,
+		CheckResult::Warning,
+		false,
 		"Slow query detected",
 		"A report query took 12s; investigate indexing.",
 		now - SignedDuration::from_hours(2),
 	)
 	.await?;
 
-	// A debug-level issue (never participates in incidents).
+	// A skipped-graded condition (recorded, never participates).
 	push(
 		conn,
 		servers.demo_server,
 		"app",
 		"debug-trace",
-		Severity::Debug,
+		CheckResult::Skipped,
+		false,
 		"Verbose trace captured",
 		"Captured a debug trace during a demo session.",
 		now - SignedDuration::from_hours(1),

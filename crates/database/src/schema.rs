@@ -292,7 +292,6 @@ diesel::table! {
 		source -> Text,
 		#[sql_name = "ref"]
 		ref_ -> Text,
-		severity -> Text,
 		description -> Nullable<Text>,
 		message -> Text,
 		active -> Bool,

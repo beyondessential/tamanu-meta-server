@@ -1,4 +1,4 @@
-use commons_types::issue::Severity;
+use commons_types::status::CheckResult;
 use database::{
 	issues::Issue,
 	statuses::{CANOPY_SOURCE, REACHABILITY_REF, STALE_REF_PREFIX, Status},
@@ -85,9 +85,9 @@ async fn insert_check_state(
 		r#"
 			INSERT INTO issues
 			(server_id, source, ref, check_name, observed_result, effective_result,
-			 severity, message, active, first_seen, last_seen)
+			 message, active, first_seen, last_seen)
 			VALUES ($1, $2, 'health/' || $3, $3, 'passed', 'passed',
-			 'info', 'seeded', false,
+			 'seeded', false,
 			 NOW() - ($4 || ' minutes')::INTERVAL, NOW() - ($4 || ' minutes')::INTERVAL)
 		"#,
 	)
@@ -126,7 +126,7 @@ async fn sweep_files_error_when_threshold_crossed() {
 		let filed = Status::sweep_staleness(&mut conn).await.expect("sweep");
 		assert_eq!(filed, 1);
 		let issue = issue_for(&mut conn, id).await.expect("issue exists");
-		assert_eq!(issue.severity, Severity::Error);
+		assert_eq!(issue.effective_result, Some(CheckResult::Failed));
 		assert!(issue.active);
 	})
 	.await
@@ -153,7 +153,7 @@ async fn sweep_files_when_no_status_ever() {
 		let filed = Status::sweep_staleness(&mut conn).await.expect("sweep");
 		assert_eq!(filed, 1);
 		let issue = issue_for(&mut conn, id).await.expect("issue exists");
-		assert_eq!(issue.severity, Severity::Error);
+		assert_eq!(issue.effective_result, Some(CheckResult::Failed));
 		assert!(issue.active);
 		assert!(
 			issue.message.contains("has never reported"),
@@ -279,7 +279,6 @@ async fn sweep_files_stale_source_at_warning() {
 			.await
 			.expect("stale issue exists");
 		assert!(stale.active);
-		assert_eq!(stale.severity, Severity::Warning);
 		assert_eq!(
 			stale.observed_result,
 			Some(commons_types::status::CheckResult::Failed)

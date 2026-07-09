@@ -13,7 +13,6 @@ use commons_servers::{
 use commons_types::{
 	backup::BackupType,
 	device::DeviceRole,
-	issue::Severity,
 	server::TagMap,
 	status::{CheckResult, CheckSeverity},
 	version::VersionStr,
@@ -496,9 +495,9 @@ async fn file_health_events(
 	// File every check in the push — passing ones included, so the state
 	// row records the current result and when it was last reported. An
 	// effective broken result neither confirms nor clears the previous
-	// definite result: the filing retains the open issue's contribution
-	// (its current severity), or warns that the check is broken when
-	// there was nothing to retain.
+	// definite result: the filing retains an open effective failure's
+	// contribution, or counts as a warning when there was nothing to
+	// retain (broken contributes as a warning in the rollups).
 	//
 	// Degraded checks file before recoveries: when one failure swaps for
 	// another in a single push, the incoming failure must join the open
@@ -517,19 +516,17 @@ async fn file_health_events(
 	);
 	for (check, graded) in filing_order {
 		let was_active = previously_active.contains(*check);
-		let (severity, active, description, message) = match graded.effective {
+		let (effective, escalates, active, description, message) = match graded.effective {
 			CheckResult::Failed => (
-				if graded.escalates {
-					Severity::Critical
-				} else {
-					Severity::Error
-				},
+				CheckResult::Failed,
+				graded.escalates,
 				true,
 				Some(format!("Health check '{check}' failed")),
 				None,
 			),
 			CheckResult::Warning => (
-				Severity::Warning,
+				CheckResult::Warning,
+				graded.escalates,
 				true,
 				Some(format!("Health check '{check}' warned")),
 				None,
@@ -544,18 +541,22 @@ async fn file_health_events(
 				.await?
 				.into_iter()
 				.next()
-				.filter(|i| i.active)
-				.map(|i| i.severity)
-				.unwrap_or(Severity::Warning);
+				.filter(|i| i.active && i.effective_result == Some(CheckResult::Failed));
+				let (effective, escalates) = match retained {
+					Some(prior) => (CheckResult::Failed, prior.escalates),
+					None => (CheckResult::Broken, graded.escalates),
+				};
 				(
-					retained,
+					effective,
+					escalates,
 					true,
 					Some(format!("Health check '{check}' is broken")),
 					None,
 				)
 			}
 			CheckResult::Passed => (
-				Severity::Info,
+				CheckResult::Passed,
+				graded.escalates,
 				false,
 				None,
 				Some(if was_active {
@@ -565,7 +566,8 @@ async fn file_health_events(
 				}),
 			),
 			CheckResult::Skipped => (
-				Severity::Info,
+				CheckResult::Skipped,
+				graded.escalates,
 				false,
 				None,
 				Some(if was_active {
@@ -579,14 +581,13 @@ async fn file_health_events(
 		let stamp = CheckStateStamp {
 			check: (*check).clone(),
 			observed: curr_check_results[*check],
-			effective: graded.effective,
-			escalates: graded.escalates,
+			effective,
+			escalates,
 			detail: entry.cloned().map(serde_json::Value::Object),
 		};
 		NewEvent {
 			source: status.source.clone(),
 			r#ref: format!("{HEALTH_REF}/{check}"),
-			severity: Some(severity),
 			description,
 			message: message
 				.or_else(|| per_check_description(entry))
@@ -616,7 +617,6 @@ async fn file_health_events(
 		NewEvent {
 			source: status.source.clone(),
 			r#ref: format!("{HEALTH_REF}/{check}"),
-			severity: Some(Severity::Info),
 			description: None,
 			message: format!("Health check '{check}' recovered"),
 			active: Some(false),

@@ -1,13 +1,14 @@
-//! Severity semantics for the incident workflow:
+//! Result semantics for the incident workflow:
 //!
-//! - **Debug** never participates in incidents — neither joining a new
-//!   one nor staying attached if a contributor's severity drops to
-//!   Debug after the fact.
-//! - **Critical** opens the incident (or joins it) without sitting in
-//!   the per-group `slack_open_delay` holding window: the outbox row's
-//!   `deliver_after` is pulled forward to NOW().
+//! - A **skipped** effective result never participates in incidents —
+//!   neither joining a new one nor staying attached once a contributor
+//!   grades to skipped after the fact.
+//! - An **escalating failure** opens the incident (or joins it) without
+//!   sitting in the per-group `slack_open_delay` holding window: the
+//!   outbox row's `deliver_after` is pulled forward to NOW().
 
-use commons_types::issue::{ResolvedReason, Severity};
+use commons_types::issue::ResolvedReason;
+use commons_types::status::CheckResult;
 use database::issues::{Incident, NewEvent};
 use database::slack_outbox::{KIND_INCIDENT_OPEN, SlackOutbox};
 use diesel::{QueryableByName, sql_query, sql_types};
@@ -39,20 +40,30 @@ async fn save_event(
 	conn: &mut diesel_async::AsyncPgConnection,
 	server_id: Uuid,
 	r#ref: &str,
-	severity: Severity,
-	active: bool,
+	result: CheckResult,
+	escalates: bool,
 	message: &str,
 ) {
+	let active = matches!(
+		result,
+		CheckResult::Failed | CheckResult::Warning | CheckResult::Broken
+	);
+	let stamp = database::issues::CheckStateStamp {
+		check: r#ref.into(),
+		observed: result,
+		effective: result,
+		escalates,
+		detail: None,
+	};
 	NewEvent {
 		source: "test".into(),
 		r#ref: r#ref.into(),
-		severity: Some(severity),
 		description: None,
 		message: message.into(),
 		active: Some(active),
 		occurred_at: None,
 	}
-	.save(conn, server_id, None)
+	.save_with_state(conn, server_id, None, Some(&stamp))
 	.await
 	.expect("save event");
 }
@@ -111,8 +122,8 @@ async fn debug_issue_does_not_join_open_incidents() {
 			&mut conn,
 			server_id,
 			"real-error",
-			Severity::Error,
-			true,
+			CheckResult::Failed,
+			false,
 			"boom",
 		)
 		.await;
@@ -128,8 +139,8 @@ async fn debug_issue_does_not_join_open_incidents() {
 			&mut conn,
 			server_id,
 			"debug-noise",
-			Severity::Debug,
-			true,
+			CheckResult::Skipped,
+			false,
 			"low signal",
 		)
 		.await;
@@ -155,8 +166,8 @@ async fn issue_downgraded_to_debug_leaves_incident_on_next_evaluation() {
 			&mut conn,
 			server_id,
 			"main-error",
-			Severity::Error,
-			true,
+			CheckResult::Failed,
+			false,
 			"boom",
 		)
 		.await;
@@ -164,8 +175,8 @@ async fn issue_downgraded_to_debug_leaves_incident_on_next_evaluation() {
 			&mut conn,
 			server_id,
 			"noisy",
-			Severity::Warning,
-			true,
+			CheckResult::Warning,
+			false,
 			"noise",
 		)
 		.await;
@@ -176,8 +187,8 @@ async fn issue_downgraded_to_debug_leaves_incident_on_next_evaluation() {
 			&mut conn,
 			server_id,
 			"noisy",
-			Severity::Debug,
-			true,
+			CheckResult::Skipped,
+			false,
 			"demoted",
 		)
 		.await;
@@ -200,7 +211,7 @@ async fn critical_open_sets_deliver_after_to_now() {
 			&mut conn,
 			server_id,
 			"crit",
-			Severity::Critical,
+			CheckResult::Failed,
 			true,
 			"red alert",
 		)
@@ -229,8 +240,8 @@ async fn non_critical_open_still_honours_holding_window() {
 			&mut conn,
 			server_id,
 			"boom",
-			Severity::Error,
-			true,
+			CheckResult::Failed,
+			false,
 			"less urgent",
 		)
 		.await;
@@ -261,8 +272,8 @@ async fn critical_joining_existing_open_accelerates_pending_delivery() {
 			&mut conn,
 			server_id,
 			"warmup",
-			Severity::Error,
-			true,
+			CheckResult::Failed,
+			false,
 			"boom",
 		)
 		.await;
@@ -284,7 +295,7 @@ async fn critical_joining_existing_open_accelerates_pending_delivery() {
 			&mut conn,
 			server_id,
 			"crit",
-			Severity::Critical,
+			CheckResult::Failed,
 			true,
 			"red alert",
 		)
@@ -315,8 +326,8 @@ async fn critical_join_after_delivered_open_fires_escalation_open() {
 			&mut conn,
 			server_id,
 			"warmup",
-			Severity::Error,
-			true,
+			CheckResult::Failed,
+			false,
 			"boom",
 		)
 		.await;
@@ -341,7 +352,7 @@ async fn critical_join_after_delivered_open_fires_escalation_open() {
 			&mut conn,
 			server_id,
 			"crit",
-			Severity::Critical,
+			CheckResult::Failed,
 			true,
 			"red alert",
 		)
@@ -405,8 +416,8 @@ async fn repeated_critical_joins_do_not_re_fire_escalation() {
 			&mut conn,
 			server_id,
 			"warmup",
-			Severity::Error,
-			true,
+			CheckResult::Failed,
+			false,
 			"boom",
 		)
 		.await;
@@ -426,7 +437,7 @@ async fn repeated_critical_joins_do_not_re_fire_escalation() {
 			&mut conn,
 			server_id,
 			"crit-1",
-			Severity::Critical,
+			CheckResult::Failed,
 			true,
 			"red alert",
 		)
@@ -436,7 +447,7 @@ async fn repeated_critical_joins_do_not_re_fire_escalation() {
 			&mut conn,
 			server_id,
 			"crit-2",
-			Severity::Critical,
+			CheckResult::Failed,
 			true,
 			"also red",
 		)
@@ -475,8 +486,8 @@ async fn debug_filing_still_records_the_issue_row() {
 			&mut conn,
 			server_id,
 			"logspam",
-			Severity::Debug,
-			true,
+			CheckResult::Skipped,
+			false,
 			"verbose",
 		)
 		.await;

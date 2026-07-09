@@ -1,10 +1,10 @@
 //! The auto-close path in `re_evaluate_incident_membership` counts only
-//! severity ≥ error contributors when deciding whether an incident still
-//! has reason to stay open. Lower-severity issues that joined while the
+//! effective-failure contributors when deciding whether an incident
+//! still has reason to stay open. Lesser issues that joined while the
 //! incident was open stay attached (audit trail / Slack context) but
 //! don't hold the incident open by themselves.
 
-use commons_types::issue::Severity;
+use commons_types::status::CheckResult;
 use database::issues::{Incident, NewEvent};
 use database::slack_outbox::{KIND_INCIDENT_OPEN, KIND_INCIDENT_RESOLVE, SlackOutbox};
 use diesel::{QueryableByName, sql_query, sql_types};
@@ -36,20 +36,30 @@ async fn save_event(
 	conn: &mut diesel_async::AsyncPgConnection,
 	server_id: Uuid,
 	r#ref: &str,
-	severity: Severity,
-	active: bool,
+	result: CheckResult,
+	escalates: bool,
 	message: &str,
 ) {
+	let active = matches!(
+		result,
+		CheckResult::Failed | CheckResult::Warning | CheckResult::Broken
+	);
+	let stamp = database::issues::CheckStateStamp {
+		check: r#ref.into(),
+		observed: result,
+		effective: result,
+		escalates,
+		detail: None,
+	};
 	NewEvent {
 		source: "test".into(),
 		r#ref: r#ref.into(),
-		severity: Some(severity),
 		description: None,
 		message: message.into(),
 		active: Some(active),
 		occurred_at: None,
 	}
-	.save(conn, server_id, None)
+	.save_with_state(conn, server_id, None, Some(&stamp))
 	.await
 	.expect("save event");
 }
@@ -109,8 +119,8 @@ async fn warning_does_not_hold_incident_open_after_error_resolves() {
 			&mut conn,
 			server_id,
 			"error-ref",
-			Severity::Error,
-			true,
+			CheckResult::Failed,
+			false,
 			"boom",
 		)
 		.await;
@@ -130,8 +140,8 @@ async fn warning_does_not_hold_incident_open_after_error_resolves() {
 			&mut conn,
 			server_id,
 			"warning-ref",
-			Severity::Warning,
-			true,
+			CheckResult::Warning,
+			false,
 			"noise",
 		)
 		.await;
@@ -150,7 +160,7 @@ async fn warning_does_not_hold_incident_open_after_error_resolves() {
 			&mut conn,
 			server_id,
 			"error-ref",
-			Severity::Info,
+			CheckResult::Passed,
 			false,
 			"recovered",
 		)
@@ -183,15 +193,31 @@ async fn incident_stays_open_while_a_second_error_contributor_is_alive() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let server_id = insert_grouped_server(&mut conn, "http://two-errors.invalid/").await;
 
-		save_event(&mut conn, server_id, "error-a", Severity::Error, true, "a").await;
-		save_event(&mut conn, server_id, "error-b", Severity::Error, true, "b").await;
+		save_event(
+			&mut conn,
+			server_id,
+			"error-a",
+			CheckResult::Failed,
+			false,
+			"a",
+		)
+		.await;
+		save_event(
+			&mut conn,
+			server_id,
+			"error-b",
+			CheckResult::Failed,
+			false,
+			"b",
+		)
+		.await;
 
 		// Resolve only one.
 		save_event(
 			&mut conn,
 			server_id,
 			"error-a",
-			Severity::Info,
+			CheckResult::Passed,
 			false,
 			"recovered",
 		)
@@ -221,8 +247,8 @@ async fn stranded_warning_resolve_does_not_re_enqueue_slack() {
 			&mut conn,
 			server_id,
 			"error-ref",
-			Severity::Error,
-			true,
+			CheckResult::Failed,
+			false,
 			"boom",
 		)
 		.await;
@@ -237,8 +263,8 @@ async fn stranded_warning_resolve_does_not_re_enqueue_slack() {
 			&mut conn,
 			server_id,
 			"warning-ref",
-			Severity::Warning,
-			true,
+			CheckResult::Warning,
+			false,
 			"noise",
 		)
 		.await;
@@ -248,7 +274,7 @@ async fn stranded_warning_resolve_does_not_re_enqueue_slack() {
 			&mut conn,
 			server_id,
 			"error-ref",
-			Severity::Info,
+			CheckResult::Passed,
 			false,
 			"recovered",
 		)
@@ -261,7 +287,7 @@ async fn stranded_warning_resolve_does_not_re_enqueue_slack() {
 			&mut conn,
 			server_id,
 			"warning-ref",
-			Severity::Info,
+			CheckResult::Passed,
 			false,
 			"settled",
 		)

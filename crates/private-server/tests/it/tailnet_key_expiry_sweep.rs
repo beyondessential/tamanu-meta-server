@@ -10,7 +10,6 @@ use commons_servers::{
 };
 use commons_tests::db::TestDb;
 use commons_tests::diesel_async::{AsyncPgConnection, SimpleAsyncConnection};
-use commons_types::issue::Severity;
 use database::issues::Issue;
 use uuid::Uuid;
 
@@ -73,7 +72,11 @@ async fn sweep_opens_critical_issue_when_key_expiry_enabled() {
 		assert_eq!(filed, 1);
 
 		let issue = issue_for(&mut conn, server_id).await.expect("issue");
-		assert_eq!(issue.severity, Severity::Critical);
+		assert_eq!(
+			issue.effective_result,
+			Some(commons_types::status::CheckResult::Failed)
+		);
+		assert!(issue.escalates);
 		assert_eq!(issue.device_id, Some(device_id));
 		assert!(issue.active);
 	})

@@ -2,32 +2,19 @@ use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
 
-use crate::issue::Severity;
-
 /// How a server should treat one of its healthchecks, distilled from
-/// canopy's operator-side configuration (the severity catalog and the
-/// silence lists) into a three-level device-facing vocabulary.
+/// canopy's operator-side configuration (the policy catalog and the
+/// silences) into a three-level device-facing vocabulary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum CheckSeverity {
 	/// This check's failures are ignored on the canopy side — it is
-	/// silenced for this server, or its severity is classified below
-	/// warning.
+	/// silenced for this server, or its policy grades it below warning.
 	Skip,
 	/// This check's failures are treated as warnings.
 	Warn,
 	/// This check's failures are treated as errors (incident-opening).
 	Fail,
-}
-
-impl From<Severity> for CheckSeverity {
-	fn from(severity: Severity) -> Self {
-		match severity {
-			Severity::Critical | Severity::Error => Self::Fail,
-			Severity::Warning => Self::Warn,
-			Severity::Info | Severity::Debug => Self::Skip,
-		}
-	}
 }
 
 impl From<CheckResult> for CheckSeverity {

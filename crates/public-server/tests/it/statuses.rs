@@ -24,8 +24,8 @@ struct HealthResult {
 
 #[derive(QueryableByName, Debug)]
 struct IssueRow {
-	#[diesel(sql_type = sql_types::Text)]
-	severity: String,
+	#[diesel(sql_type = sql_types::Bool)]
+	escalates: bool,
 	#[diesel(sql_type = sql_types::Bool)]
 	active: bool,
 	#[diesel(sql_type = sql_types::Text)]
@@ -48,7 +48,7 @@ async fn fetch_issue(
 ) -> Option<IssueRow> {
 	sql_query(
 		r#"
-		SELECT severity, active, message, description, (resolved_at IS NOT NULL) AS is_resolved,
+		SELECT escalates, active, message, description, (resolved_at IS NOT NULL) AS is_resolved,
 			observed_result, effective_result
 		FROM issues
 		WHERE server_id = $1 AND source = $2 AND ref = $3
@@ -938,7 +938,7 @@ async fn submit_status_warning_check_only() {
 			let per_check = fetch_issue(&mut conn, server_id, "alertd", "health/disk")
 				.await
 				.expect("per-check issue filed");
-			assert_eq!(per_check.severity, "warning");
+			assert_eq!(per_check.effective_result.as_deref(), Some("warning"));
 			assert!(per_check.active);
 			assert!(!per_check.is_resolved);
 			assert!(
@@ -1002,7 +1002,8 @@ async fn submit_status_unhealthy_with_checks_opens_incident() {
 				let i = fetch_issue(&mut conn, server_id, "alertd", &format!("health/{check}"))
 					.await
 					.unwrap_or_else(|| panic!("per-check issue for {check} missing"));
-				assert_eq!(i.severity, "error", "{check}");
+				assert_eq!(i.effective_result.as_deref(), Some("failed"), "{check}");
+				assert!(!i.escalates, "{check}");
 				assert!(i.active, "{check}");
 			}
 			// Passing checks get a state row too — but an inactive one that
@@ -1156,7 +1157,8 @@ async fn submit_status_with_partial_silence_opens_incident_for_unsilenced() {
 			let disk = fetch_issue(&mut conn, server_id, "alertd", "health/disk")
 				.await
 				.expect("disk issue filed");
-			assert_eq!(disk.severity, "error");
+			assert_eq!(disk.effective_result.as_deref(), Some("failed"));
+			assert!(!disk.escalates);
 			assert!(fetch_open_incident(&mut conn, server_id).await.is_some());
 		},
 	)
@@ -1190,7 +1192,7 @@ async fn submit_status_per_check_severity_is_catalog_driven() {
 			let after_first = fetch_issue(&mut conn, server_id, "alertd", "health/disk")
 				.await
 				.expect("per-check issue");
-			assert_eq!(after_first.severity, "warning");
+			assert_eq!(after_first.effective_result.as_deref(), Some("warning"));
 
 			// Second push: bestool reports overall healthy. Same severity —
 			// the catalog is the source of truth, not the top-level flag.
@@ -1207,7 +1209,7 @@ async fn submit_status_per_check_severity_is_catalog_driven() {
 			let disk = fetch_issue(&mut conn, server_id, "alertd", "health/disk")
 				.await
 				.expect("per-check issue still present");
-			assert_eq!(disk.severity, "warning");
+			assert_eq!(disk.effective_result.as_deref(), Some("warning"));
 			assert!(disk.active, "still failing, must stay active");
 
 			assert!(
@@ -1585,7 +1587,8 @@ async fn submit_status_uses_catalog_severity_on_failure() {
 			let issue = fetch_issue(&mut conn, server_id, "alertd", "health/tunable_check")
 				.await
 				.expect("per-check issue filed");
-			assert_eq!(issue.severity, "critical");
+			assert_eq!(issue.effective_result.as_deref(), Some("failed"));
+			assert!(issue.escalates);
 		},
 	)
 	.await
@@ -1662,7 +1665,9 @@ async fn submit_status_rule_on_check_extra_overrides_base() {
 			let issue = fetch_issue(&mut conn, server_id, "alertd", "health/disk_space")
 				.await
 				.expect("per-check issue filed");
-			assert_eq!(issue.severity, "error");
+			assert_eq!(issue.effective_result.as_deref(), Some("failed"));
+
+			assert!(!issue.escalates);
 
 			// Below-threshold push falls back to base (default warning).
 			post_status(
@@ -1678,7 +1683,7 @@ async fn submit_status_rule_on_check_extra_overrides_base() {
 			let issue = fetch_issue(&mut conn, server_id, "alertd", "health/disk_space")
 				.await
 				.expect("per-check issue still present");
-			assert_eq!(issue.severity, "warning");
+			assert_eq!(issue.effective_result.as_deref(), Some("warning"));
 		},
 	)
 	.await
@@ -1719,7 +1724,7 @@ async fn submit_status_rule_on_bestool_version_range() {
 			let issue = fetch_issue(&mut conn, server_id, "alertd", "health/tamanu_service")
 				.await
 				.expect("per-check issue filed");
-			assert_eq!(issue.severity, "warning");
+			assert_eq!(issue.effective_result.as_deref(), Some("warning"));
 
 			// Outside range → falls back to base (error).
 			post_status(
@@ -1736,7 +1741,8 @@ async fn submit_status_rule_on_bestool_version_range() {
 			let issue = fetch_issue(&mut conn, server_id, "alertd", "health/tamanu_service")
 				.await
 				.expect("per-check issue still present");
-			assert_eq!(issue.severity, "error");
+			assert_eq!(issue.effective_result.as_deref(), Some("failed"));
+			assert!(!issue.escalates);
 		},
 	)
 	.await
@@ -1779,7 +1785,8 @@ async fn submit_status_rule_on_server_tag() {
 				.await
 				.expect("per-check issue filed");
 			assert_eq!(
-				issue.severity, "error",
+				issue.effective_result.as_deref(),
+				Some("failed"),
 				"tag.environment=prod fires the rule"
 			);
 		},
@@ -1818,7 +1825,9 @@ async fn submit_status_tiered_ladder() {
 			let issue = fetch_issue(&mut conn, server_id, "alertd", "health/cert_expiry")
 				.await
 				.expect("issue");
-			assert_eq!(issue.severity, "error");
+			assert_eq!(issue.effective_result.as_deref(), Some("failed"));
+
+			assert!(!issue.escalates);
 
 			// Within 30 days but not 7 → warning.
 			post_status(
@@ -1834,7 +1843,7 @@ async fn submit_status_tiered_ladder() {
 			let issue = fetch_issue(&mut conn, server_id, "alertd", "health/cert_expiry")
 				.await
 				.expect("issue");
-			assert_eq!(issue.severity, "warning");
+			assert_eq!(issue.effective_result.as_deref(), Some("warning"));
 		},
 	)
 	.await
@@ -1921,7 +1930,8 @@ async fn submit_status_result_failed_uses_catalog_severity() {
 			let issue = fetch_issue(&mut conn, server_id, "alertd", "health/db")
 				.await
 				.expect("per-check issue filed");
-			assert_eq!(issue.severity, "error");
+			assert_eq!(issue.effective_result.as_deref(), Some("failed"));
+			assert!(!issue.escalates);
 			assert!(issue.active);
 			assert!(
 				issue
@@ -1958,7 +1968,7 @@ async fn submit_status_result_warning_ignores_catalog_severity() {
 			let issue = fetch_issue(&mut conn, server_id, "alertd", "health/db")
 				.await
 				.expect("per-check issue filed");
-			assert_eq!(issue.severity, "warning");
+			assert_eq!(issue.effective_result.as_deref(), Some("warning"));
 			assert!(issue.active);
 			assert!(
 				issue
@@ -2036,8 +2046,9 @@ async fn submit_status_result_broken_warns_on_the_check_ref() {
 				.await
 				.expect("broken files on the check's own ref");
 			assert_eq!(
-				issue.severity, "warning",
-				"nothing to retain: brokenness itself warns",
+				issue.effective_result.as_deref(),
+				Some("broken"),
+				"nothing to retain: brokenness itself counts as a warning",
 			);
 			assert!(issue.active);
 			assert!(
@@ -2104,7 +2115,8 @@ async fn submit_status_failed_then_broken_retains_the_failure() {
 				.expect("issue exists");
 			assert!(issue.active, "broken must not close the failure");
 			assert_eq!(
-				issue.severity, "error",
+				issue.effective_result.as_deref(),
+				Some("failed"),
 				"the failure's contribution is retained while broken",
 			);
 			assert!(

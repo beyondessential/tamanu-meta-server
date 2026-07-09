@@ -1,7 +1,6 @@
 //! Issues, events, incidents.
 
 use commons_errors::{AppError, Result};
-use commons_types::issue::Severity;
 use commons_types::status::CheckResult;
 use diesel::prelude::*;
 use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
@@ -55,9 +54,6 @@ pub struct Issue {
 	#[diesel(column_name = "ref_")]
 	#[serde(rename = "ref")]
 	pub r#ref: String,
-	/// The issue's current severity.
-	#[diesel(deserialize_as = String, serialize_as = String)]
-	pub severity: Severity,
 	/// A short, single-line title for the issue, shown as its headline in
 	/// the UI and in Slack notifications. `None` if no title was given.
 	pub description: Option<String>,
@@ -119,22 +115,15 @@ pub struct Issue {
 impl Issue {
 	/// Does this state open an incident on its own? An effective failure
 	/// does; anything less joins an already-open incident but doesn't
-	/// create (or hold open) one. Stateless rows (never stamped by the
-	/// check-state model) fall back to the severity vocabulary.
+	/// create (or hold open) one.
 	pub fn opens_incident(&self) -> bool {
-		match self.effective_result {
-			Some(result) => result == CheckResult::Failed,
-			None => self.severity.opens_incident(),
-		}
+		self.effective_result == Some(CheckResult::Failed)
 	}
 
 	/// Is this state an escalating failure right now — one whose
 	/// notification bypasses the incident grace period?
 	pub fn escalates_now(&self) -> bool {
-		match self.effective_result {
-			Some(result) => result == CheckResult::Failed && self.escalates,
-			None => self.severity == Severity::Critical,
-		}
+		self.opens_incident() && self.escalates
 	}
 }
 
@@ -216,9 +205,6 @@ pub struct NewEvent {
 	/// Required — mint a UUID if deduplication isn't needed.
 	#[serde(rename = "ref")]
 	pub r#ref: String,
-	/// Severity of this event. Defaults to a standard severity if omitted.
-	#[serde(default)]
-	pub severity: Option<Severity>,
 	/// A short, single-line title for this event, shown as the issue's
 	/// headline in the UI and as the subject of any Slack notification.
 	/// Must not contain newlines. Use `message` for the full body text.
@@ -371,7 +357,6 @@ impl NewEvent {
 			));
 		}
 
-		let severity = self.severity.unwrap_or_default();
 		let active = self.active.unwrap_or(true);
 		let now = Timestamp::now();
 		let effective_time = self.occurred_at.unwrap_or(now);
@@ -426,7 +411,6 @@ impl NewEvent {
 				let issue = diesel::update(issues::table.filter(issues::id.eq(existing.id)))
 					.set((
 						issues::device_id.eq(device_id),
-						issues::severity.eq(severity),
 						issues::description.eq(description),
 						issues::message.eq(&self.message),
 						issues::active.eq(active),
@@ -464,7 +448,6 @@ impl NewEvent {
 						issues::device_id.eq(device_id),
 						issues::source.eq(&self.source),
 						issues::ref_.eq(&self.r#ref),
-						issues::severity.eq(severity),
 						issues::description.eq(description),
 						issues::message.eq(&self.message),
 						issues::active.eq(active),
@@ -525,31 +508,18 @@ pub async fn raise_group_event(
 	conn: &mut AsyncPgConnection,
 	group_id: Uuid,
 	r#ref: &str,
-	severity: Severity,
 	description: Option<&str>,
 	message: &str,
 	active: bool,
 ) -> Result<Issue> {
-	raise_group_event_with_state(
-		conn,
-		group_id,
-		r#ref,
-		severity,
-		description,
-		message,
-		active,
-		None,
-	)
-	.await
+	raise_group_event_with_state(conn, group_id, r#ref, description, message, active, None).await
 }
 
 /// [`raise_group_event`], stamping the issue's check-state columns.
-#[allow(clippy::too_many_arguments)]
 pub async fn raise_group_event_with_state(
 	conn: &mut AsyncPgConnection,
 	group_id: Uuid,
 	r#ref: &str,
-	severity: Severity,
 	description: Option<&str>,
 	message: &str,
 	active: bool,
@@ -595,7 +565,6 @@ pub async fn raise_group_event_with_state(
 			let clear_resolved = active && existing.resolved_at.is_some();
 			diesel::update(issues::table.filter(issues::id.eq(existing.id)))
 				.set((
-					issues::severity.eq(severity),
 					issues::description.eq(description),
 					issues::message.eq(message),
 					issues::active.eq(active),
@@ -631,7 +600,6 @@ pub async fn raise_group_event_with_state(
 					issues::server_group_id.eq(group_id),
 					issues::source.eq(source),
 					issues::ref_.eq(r#ref),
-					issues::severity.eq(severity),
 					issues::description.eq(description),
 					issues::message.eq(message),
 					issues::active.eq(active),
@@ -675,19 +643,17 @@ pub async fn raise_group_event_with_state(
 pub async fn raise_global_event(
 	conn: &mut AsyncPgConnection,
 	r#ref: &str,
-	severity: Severity,
 	description: Option<&str>,
 	message: &str,
 	active: bool,
 ) -> Result<Issue> {
-	raise_global_event_with_state(conn, r#ref, severity, description, message, active, None).await
+	raise_global_event_with_state(conn, r#ref, description, message, active, None).await
 }
 
 /// [`raise_global_event`], stamping the issue's check-state columns.
 pub async fn raise_global_event_with_state(
 	conn: &mut AsyncPgConnection,
 	r#ref: &str,
-	severity: Severity,
 	description: Option<&str>,
 	message: &str,
 	active: bool,
@@ -733,7 +699,6 @@ pub async fn raise_global_event_with_state(
 			let clear_resolved = active && existing.resolved_at.is_some();
 			diesel::update(issues::table.filter(issues::id.eq(existing.id)))
 				.set((
-					issues::severity.eq(severity),
 					issues::description.eq(description),
 					issues::message.eq(message),
 					issues::active.eq(active),
@@ -768,7 +733,6 @@ pub async fn raise_global_event_with_state(
 				.values((
 					issues::source.eq(source),
 					issues::ref_.eq(r#ref),
-					issues::severity.eq(severity),
 					issues::description.eq(description),
 					issues::message.eq(message),
 					issues::active.eq(active),
@@ -919,12 +883,10 @@ pub async fn file_check(conn: &mut AsyncPgConnection, filing: CheckFiling<'_>) -
 	)
 	.await?;
 
-	let (severity, active) = match graded.effective {
-		CheckResult::Failed if graded.escalates => (Severity::Critical, true),
-		CheckResult::Failed => (Severity::Error, true),
-		CheckResult::Warning | CheckResult::Broken => (Severity::Warning, true),
-		CheckResult::Passed | CheckResult::Skipped => (Severity::Info, false),
-	};
+	let active = matches!(
+		graded.effective,
+		CheckResult::Failed | CheckResult::Warning | CheckResult::Broken
+	);
 	let description = if active { filing.title } else { None };
 	let stamp = CheckStateStamp {
 		check: filing.check.to_string(),
@@ -942,7 +904,6 @@ pub async fn file_check(conn: &mut AsyncPgConnection, filing: CheckFiling<'_>) -
 			NewEvent {
 				source: source.to_string(),
 				r#ref: filing.check.to_string(),
-				severity: Some(severity),
 				description: description.map(str::to_string),
 				message: filing.message.to_string(),
 				active: Some(active),
@@ -956,7 +917,6 @@ pub async fn file_check(conn: &mut AsyncPgConnection, filing: CheckFiling<'_>) -
 				conn,
 				gid,
 				filing.check,
-				severity,
 				description,
 				filing.message,
 				active,
@@ -968,7 +928,6 @@ pub async fn file_check(conn: &mut AsyncPgConnection, filing: CheckFiling<'_>) -
 			raise_global_event_with_state(
 				conn,
 				filing.check,
-				severity,
 				description,
 				filing.message,
 				active,
@@ -1172,19 +1131,9 @@ async fn re_evaluate_incident_membership(
 	.await?;
 	let target_open = target_has_open_incident(conn, target).await?;
 
-	// Debug-severity issues are intentionally invisible to the incident
-	// workflow: they don't join, and any that are currently attached
-	// (because their catalog/rule severity dropped to Debug after they
-	// joined) get treated as a leave on next re-evaluation.
-	let is_debug = issue.severity == Severity::Debug;
-	let should_leave = is_debug
-		|| !issue.active
-		|| issue.resolved_at.is_some()
-		|| snoozed
-		|| silenced
-		|| !monitored;
-	let should_join = !is_debug
-		&& monitored
+	let should_leave =
+		!issue.active || issue.resolved_at.is_some() || snoozed || silenced || !monitored;
+	let should_join = monitored
 		&& !silenced
 		&& issue.active
 		&& issue.resolved_at.is_none()
@@ -1276,14 +1225,9 @@ async fn re_evaluate_incident_membership(
 			.await?;
 
 			// Only count contributors that *currently* open an incident
-			// (effective failures; stateless rows fall back to their
-			// severity). Lesser contributors stay attached for context but
-			// don't hold the incident open on their own; see the function
-			// doc-comment for the rationale.
-			let opens_incident_severities: Vec<String> = Severity::OPENS_INCIDENT
-				.iter()
-				.map(|s| s.to_string())
-				.collect();
+			// (effective failures). Lesser contributors stay attached for
+			// context but don't hold the incident open on their own; see
+			// the function doc-comment for the rationale.
 			use crate::schema::issues;
 			let remaining_open: i64 = incident_issues::table
 				.inner_join(issues::table.on(issues::id.eq(incident_issues::issue_id)))
@@ -1291,23 +1235,17 @@ async fn re_evaluate_incident_membership(
 					incident_issues::incident_id
 						.eq(open_link.incident_id)
 						.and(incident_issues::left_at.is_null())
-						.and(
-							issues::effective_result
-								.eq("failed")
-								.or(issues::effective_result
-									.is_null()
-									.and(issues::severity.eq_any(&opens_incident_severities))),
-						),
+						.and(issues::effective_result.eq("failed")),
 				)
 				.count()
 				.get_result(conn)
 				.await?;
 			if remaining_open == 0 {
 				// Filter on `closed_at IS NULL` so that when a stranded
-				// low-severity contributor eventually leaves an already-
-				// closed incident (because the severity-filter close above
-				// already retired it), we skip both the no-op update and
-				// the double Slack resolve.
+				// lesser contributor eventually leaves an already-closed
+				// incident (because the failure-filter close above already
+				// retired it), we skip both the no-op update and the
+				// double Slack resolve.
 				let closed: Option<Incident> = diesel::update(
 					incidents::table
 						.filter(incidents::id.eq(open_link.incident_id))
@@ -1744,9 +1682,18 @@ async fn enqueue_slack_open(
 		}
 		IncidentTarget::Global => ("Canopy".to_string(), GLOBAL_OPEN_GRACE),
 	};
+	// The deployed Slack workflow's trigger declares a `severity`
+	// variable; feed it the result-derived urgency label.
+	let urgency = if issue.escalates_now() {
+		"Critical"
+	} else if issue.opens_incident() {
+		"Error"
+	} else {
+		"Warning"
+	};
 	let payload = crate::slack_outbox::vars::incident_open(
 		&label,
-		issue.severity,
+		urgency,
 		&issue.source,
 		&issue.r#ref,
 		&issue.message,

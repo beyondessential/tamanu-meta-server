@@ -311,13 +311,15 @@ mod tests {
 
 				#[derive(diesel::QueryableByName)]
 				struct CorruptionRow {
-					#[diesel(sql_type = sql_types::Text)]
-					severity: String,
+					#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
+					effective_result: Option<String>,
+					#[diesel(sql_type = sql_types::Bool)]
+					escalates: bool,
 					#[diesel(sql_type = sql_types::Bool)]
 					active: bool,
 				}
 				let rows: Vec<CorruptionRow> = sql_query(
-					"SELECT severity, active FROM issues \
+					"SELECT effective_result, escalates, active FROM issues \
 					 WHERE server_group_id = $1 AND \"ref\" = $2",
 				)
 				.bind::<sql_types::Uuid, _>(group_id)
@@ -326,7 +328,8 @@ mod tests {
 				.await
 				.expect("query corruption issues");
 				assert_eq!(rows.len(), 1, "exactly one corruption issue");
-				assert_eq!(rows[0].severity, "critical");
+				assert_eq!(rows[0].effective_result.as_deref(), Some("failed"));
+				assert!(rows[0].escalates);
 				assert!(rows[0].active, "corruption issue is active");
 			})
 			.await;

@@ -5,7 +5,7 @@
 //! incident transitions, an outbox row exists with the expected `kind` and
 //! a non-empty `payload`.
 
-use commons_types::issue::{ResolvedReason, Severity};
+use commons_types::{issue::ResolvedReason, status::CheckResult};
 use database::{
 	issues::{Incident, Issue, NewEvent},
 	slack_outbox::{KIND_INCIDENT_OPEN, KIND_INCIDENT_RESOLVE, SlackOutbox},
@@ -118,16 +118,25 @@ async fn mark_open_delivered(conn: &mut diesel_async::AsyncPgConnection, inciden
 async fn opening_incident_enqueues_slack_open_row() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let server_id = insert_server(&mut conn, "http://open.invalid/").await;
+		let stamp = database::issues::CheckStateStamp {
+			check: "ref-1".into(),
+			observed: CheckResult::Failed,
+			effective: CheckResult::Failed,
+			escalates: false,
+			detail: None,
+		};
 		let event = NewEvent {
 			source: "test".into(),
 			r#ref: "ref-1".into(),
-			severity: Some(Severity::Error),
 			description: None,
 			message: "boom".into(),
 			active: Some(true),
 			occurred_at: None,
 		};
-		let issue = event.save(&mut conn, server_id, None).await.expect("save");
+		let issue = event
+			.save_with_state(&mut conn, server_id, None, Some(&stamp))
+			.await
+			.expect("save");
 
 		// The save call should have opened an incident *and* enqueued an
 		// `incident_open` outbox row.
@@ -186,16 +195,25 @@ async fn resolving_incident_after_open_delivered_enqueues_resolve_row() {
 	// yet; everything past that point is the historical behaviour.
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let server_id = insert_server(&mut conn, "http://resolve.invalid/").await;
+		let stamp = database::issues::CheckStateStamp {
+			check: "ref-2".into(),
+			observed: CheckResult::Failed,
+			effective: CheckResult::Failed,
+			escalates: false,
+			detail: None,
+		};
 		let event = NewEvent {
 			source: "test".into(),
 			r#ref: "ref-2".into(),
-			severity: Some(Severity::Error),
 			description: None,
 			message: "boom".into(),
 			active: Some(true),
 			occurred_at: None,
 		};
-		event.save(&mut conn, server_id, None).await.expect("save");
+		event
+			.save_with_state(&mut conn, server_id, None, Some(&stamp))
+			.await
+			.expect("save");
 		let incident = Incident::list_for_server(&mut conn, server_id, false, 10)
 			.await
 			.expect("list incidents")
@@ -232,16 +250,25 @@ async fn resolving_before_open_ships_cancels_open_and_skips_resolve() {
 	// (given-up, with a reason in `last_error`) for the audit trail.
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let server_id = insert_server(&mut conn, "http://flap.invalid/").await;
+		let stamp = database::issues::CheckStateStamp {
+			check: "ref-flap".into(),
+			observed: CheckResult::Failed,
+			effective: CheckResult::Failed,
+			escalates: false,
+			detail: None,
+		};
 		let event = NewEvent {
 			source: "test".into(),
 			r#ref: "ref-flap".into(),
-			severity: Some(Severity::Error),
 			description: None,
 			message: "boom".into(),
 			active: Some(true),
 			occurred_at: None,
 		};
-		event.save(&mut conn, server_id, None).await.expect("save");
+		event
+			.save_with_state(&mut conn, server_id, None, Some(&stamp))
+			.await
+			.expect("save");
 		let incident = Incident::list_for_server(&mut conn, server_id, false, 10)
 			.await
 			.expect("list incidents")
@@ -303,16 +330,25 @@ async fn cascade_close_via_issue_resolve_attributes_to_operator() {
 	// `None` through the cascade path and lost the attribution.
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let server_id = insert_server(&mut conn, "http://attribute.invalid/").await;
+		let stamp = database::issues::CheckStateStamp {
+			check: "ref-only".into(),
+			observed: CheckResult::Failed,
+			effective: CheckResult::Failed,
+			escalates: false,
+			detail: None,
+		};
 		let event = NewEvent {
 			source: "test".into(),
 			r#ref: "ref-only".into(),
-			severity: Some(Severity::Error),
 			description: None,
 			message: "boom".into(),
 			active: Some(true),
 			occurred_at: None,
 		};
-		let issue = event.save(&mut conn, server_id, None).await.expect("save");
+		let issue = event
+			.save_with_state(&mut conn, server_id, None, Some(&stamp))
+			.await
+			.expect("save");
 		let incident = Incident::list_for_server(&mut conn, server_id, false, 10)
 			.await
 			.expect("list incidents")
@@ -355,17 +391,23 @@ async fn nil_server_events_do_not_open_incidents() {
 	// group-level incident — which means the Slack drainer can never
 	// loop back into itself by re-firing on a canopy-self failure.
 	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let stamp = database::issues::CheckStateStamp {
+			check: "slack-delivery-failure".into(),
+			observed: CheckResult::Failed,
+			effective: CheckResult::Failed,
+			escalates: false,
+			detail: None,
+		};
 		let event = NewEvent {
 			source: "canopy".into(),
 			r#ref: "slack-delivery-failure".into(),
-			severity: Some(Severity::Error),
 			description: None,
 			message: "boom".into(),
 			active: Some(true),
 			occurred_at: None,
 		};
 		event
-			.save(&mut conn, Uuid::nil(), None)
+			.save_with_state(&mut conn, Uuid::nil(), None, Some(&stamp))
 			.await
 			.expect("save");
 
@@ -384,16 +426,25 @@ async fn nil_server_events_do_not_open_incidents() {
 async fn mark_given_up_removes_row_from_claim_pending() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let server_id = insert_server(&mut conn, "http://giveup.invalid/").await;
+		let stamp = database::issues::CheckStateStamp {
+			check: "ref-g".into(),
+			observed: CheckResult::Failed,
+			effective: CheckResult::Failed,
+			escalates: false,
+			detail: None,
+		};
 		let event = NewEvent {
 			source: "test".into(),
 			r#ref: "ref-g".into(),
-			severity: Some(Severity::Error),
 			description: None,
 			message: "boom".into(),
 			active: Some(true),
 			occurred_at: None,
 		};
-		event.save(&mut conn, server_id, None).await.expect("save");
+		event
+			.save_with_state(&mut conn, server_id, None, Some(&stamp))
+			.await
+			.expect("save");
 		// `event.save` enqueues an open whose deliver_after sits
 		// `slack_open_delay` in the future. Drop it back to the past so
 		// claim_pending will return the row immediately.
@@ -428,16 +479,25 @@ async fn claim_pending_skips_rows_whose_deliver_after_is_in_the_future() {
 	// claimable. This is the core flap-suppression mechanism.
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let server_id = insert_server(&mut conn, "http://delayed.invalid/").await;
+		let stamp = database::issues::CheckStateStamp {
+			check: "ref-d".into(),
+			observed: CheckResult::Failed,
+			effective: CheckResult::Failed,
+			escalates: false,
+			detail: None,
+		};
 		let event = NewEvent {
 			source: "test".into(),
 			r#ref: "ref-d".into(),
-			severity: Some(Severity::Error),
 			description: None,
 			message: "boom".into(),
 			active: Some(true),
 			occurred_at: None,
 		};
-		event.save(&mut conn, server_id, None).await.expect("save");
+		event
+			.save_with_state(&mut conn, server_id, None, Some(&stamp))
+			.await
+			.expect("save");
 		let pending_before = SlackOutbox::claim_pending(&mut conn, 10)
 			.await
 			.expect("claim");
@@ -470,16 +530,25 @@ async fn open_delay_honours_per_group_slack_open_delay() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let server_id =
 			insert_server_with_delay(&mut conn, "http://nowait.invalid/", Some(0)).await;
+		let stamp = database::issues::CheckStateStamp {
+			check: "ref-zero".into(),
+			observed: CheckResult::Failed,
+			effective: CheckResult::Failed,
+			escalates: false,
+			detail: None,
+		};
 		let event = NewEvent {
 			source: "test".into(),
 			r#ref: "ref-zero".into(),
-			severity: Some(Severity::Error),
 			description: None,
 			message: "boom".into(),
 			active: Some(true),
 			occurred_at: None,
 		};
-		event.save(&mut conn, server_id, None).await.expect("save");
+		event
+			.save_with_state(&mut conn, server_id, None, Some(&stamp))
+			.await
+			.expect("save");
 
 		let claimable = SlackOutbox::claim_pending(&mut conn, 10)
 			.await
@@ -509,17 +578,23 @@ async fn pending_opens_until_filters_to_undelivered_in_window() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		// Held incident: default-delay group → open sits 3 min in the future.
 		let held_server = insert_server(&mut conn, "http://held.invalid/").await;
+		let stamp = database::issues::CheckStateStamp {
+			check: "ref-held".into(),
+			observed: CheckResult::Failed,
+			effective: CheckResult::Failed,
+			escalates: false,
+			detail: None,
+		};
 		let event = NewEvent {
 			source: "test".into(),
 			r#ref: "ref-held".into(),
-			severity: Some(Severity::Error),
 			description: None,
 			message: "boom".into(),
 			active: Some(true),
 			occurred_at: None,
 		};
 		event
-			.save(&mut conn, held_server, None)
+			.save_with_state(&mut conn, held_server, None, Some(&stamp))
 			.await
 			.expect("save held");
 		let held_incident = Incident::list_for_server(&mut conn, held_server, false, 10)
@@ -529,17 +604,23 @@ async fn pending_opens_until_filters_to_undelivered_in_window() {
 
 		// Delivered incident: open already shipped → not held any more.
 		let delivered_server = insert_server(&mut conn, "http://delivered.invalid/").await;
+		let stamp = database::issues::CheckStateStamp {
+			check: "ref-delivered".into(),
+			observed: CheckResult::Failed,
+			effective: CheckResult::Failed,
+			escalates: false,
+			detail: None,
+		};
 		let event = NewEvent {
 			source: "test".into(),
 			r#ref: "ref-delivered".into(),
-			severity: Some(Severity::Error),
 			description: None,
 			message: "boom".into(),
 			active: Some(true),
 			occurred_at: None,
 		};
 		event
-			.save(&mut conn, delivered_server, None)
+			.save_with_state(&mut conn, delivered_server, None, Some(&stamp))
 			.await
 			.expect("save delivered");
 		let delivered_incident = Incident::list_for_server(&mut conn, delivered_server, false, 10)
@@ -578,17 +659,23 @@ async fn expire_deliver_after(conn: &mut diesel_async::AsyncPgConnection) {
 async fn rejoining_open_incident_does_not_re_enqueue_open() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let server_id = insert_server(&mut conn, "http://rejoin.invalid/").await;
+		let stamp_a = database::issues::CheckStateStamp {
+			check: "ref-a".into(),
+			observed: CheckResult::Failed,
+			effective: CheckResult::Failed,
+			escalates: false,
+			detail: None,
+		};
 		let event_a = NewEvent {
 			source: "test".into(),
 			r#ref: "ref-a".into(),
-			severity: Some(Severity::Error),
 			description: None,
 			message: "first".into(),
 			active: Some(true),
 			occurred_at: None,
 		};
 		event_a
-			.save(&mut conn, server_id, None)
+			.save_with_state(&mut conn, server_id, None, Some(&stamp_a))
 			.await
 			.expect("save a");
 		let incident = Incident::list_for_server(&mut conn, server_id, false, 10)
@@ -599,17 +686,23 @@ async fn rejoining_open_incident_does_not_re_enqueue_open() {
 			.expect("incident");
 
 		// Second active issue, same server: joins the existing incident.
+		let stamp_b = database::issues::CheckStateStamp {
+			check: "ref-b".into(),
+			observed: CheckResult::Failed,
+			effective: CheckResult::Failed,
+			escalates: false,
+			detail: None,
+		};
 		let event_b = NewEvent {
 			source: "test".into(),
 			r#ref: "ref-b".into(),
-			severity: Some(Severity::Error),
 			description: None,
 			message: "second".into(),
 			active: Some(true),
 			occurred_at: None,
 		};
 		event_b
-			.save(&mut conn, server_id, None)
+			.save_with_state(&mut conn, server_id, None, Some(&stamp_b))
 			.await
 			.expect("save b");
 

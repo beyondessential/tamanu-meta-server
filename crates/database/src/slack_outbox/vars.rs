@@ -20,27 +20,20 @@
 //! (public-server, private-server, reachability job) doesn't have to know
 //! the operator-facing URL.
 
-use commons_types::issue::Severity;
 use serde_json::{Value, json};
 
-fn title_case(s: &str) -> String {
-	let mut chars = s.chars();
-	match chars.next() {
-		Some(c) => c.to_uppercase().chain(chars).collect(),
-		None => String::new(),
-	}
-}
-
+/// `urgency` is the result-derived label for the workflow's `severity`
+/// variable: Critical (escalating failure), Error (failure), Warning.
 pub fn incident_open(
 	server_label: &str,
-	severity: Severity,
+	urgency: &str,
 	source: &str,
 	issue_ref: &str,
 	message: &str,
 ) -> Value {
 	json!({
 		"server": server_label,
-		"severity": title_case(&severity.to_string()),
+		"severity": urgency,
 		"source_ref": format!("{source}/{issue_ref}"),
 		"message": message,
 	})

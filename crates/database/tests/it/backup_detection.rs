@@ -15,7 +15,7 @@
 
 use commons_tests::db::TestDb;
 use commons_types::backup::BackupType;
-use commons_types::issue::Severity;
+use commons_types::status::CheckResult;
 use database::backup::refs;
 use database::backup::staleness::{ScanRow, StalenessVerdict};
 use database::diesel_async::AsyncPgConnection;
@@ -209,8 +209,8 @@ async fn insert_backup_success_aged(
 /// if any.
 #[derive(QueryableByName, Debug)]
 struct IssueRow {
-	#[diesel(sql_type = sql_types::Text)]
-	severity: String,
+	#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
+	effective_result: Option<String>,
 	#[diesel(sql_type = sql_types::Bool)]
 	active: bool,
 }
@@ -221,7 +221,7 @@ async fn server_issue(
 	r#ref: &str,
 ) -> Option<IssueRow> {
 	sql_query(
-		"SELECT severity, active FROM issues \
+		"SELECT effective_result, active FROM issues \
 		 WHERE server_id = $1 AND source = $2 AND \"ref\" = $3",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
@@ -238,7 +238,7 @@ async fn group_issue(
 	r#ref: &str,
 ) -> Option<IssueRow> {
 	sql_query(
-		"SELECT severity, active FROM issues \
+		"SELECT effective_result, active FROM issues \
 		 WHERE server_group_id = $1 AND source = $2 AND \"ref\" = $3",
 	)
 	.bind::<sql_types::Uuid, _>(group_id)
@@ -440,7 +440,7 @@ async fn sweep_files_staleness_for_monitored_server_with_old_success() {
 		let issue = server_issue(&mut conn, server_id, &sref)
 			.await
 			.expect("staleness issue filed");
-		assert_eq!(issue.severity, Severity::Error.to_string());
+		assert_eq!(issue.effective_result.as_deref(), Some("failed"));
 		assert!(issue.active, "staleness issue is active");
 		// Error opens an incident; monitored server contributes.
 		assert_eq!(
@@ -478,7 +478,7 @@ async fn sweep_files_never_for_server_that_never_succeeded() {
 			.expect("never issue filed");
 		// Never-reported is a warning (so first-time setup doesn't open an
 		// incident); a *missed* backup is the error that pages.
-		assert_eq!(issue.severity, Severity::Warning.to_string());
+		assert_eq!(issue.effective_result.as_deref(), Some("warning"));
 		assert!(issue.active);
 		// Staleness ref must NOT be filed when there's never been a success.
 		assert!(
@@ -584,9 +584,9 @@ async fn reconcile_files_report_gap_when_snapshot_fresh_but_no_report() {
 			.await
 			.expect("report-gap issue filed");
 		assert_eq!(
-			issue.severity,
-			Severity::Warning.to_string(),
-			"report-gap is Warning (non-paging)",
+			issue.effective_result.as_deref(),
+			Some("warning"),
+			"report-gap is a warning (non-paging)",
 		);
 		assert!(issue.active);
 		// Warning never opens an incident on its own.
@@ -649,7 +649,7 @@ async fn reconcile_files_missing_when_report_fresh_but_no_snapshot() {
 		let issue = group_issue(&mut conn, group_id, &mref)
 			.await
 			.expect("reconcile-missing issue filed (group-scoped)");
-		assert_eq!(issue.severity, Severity::Error.to_string());
+		assert_eq!(issue.effective_result.as_deref(), Some("failed"));
 		assert!(issue.active);
 		// Group-level Error opens an incident.
 		assert_eq!(
@@ -727,7 +727,7 @@ async fn reconcile_clears_report_gap_when_report_and_snapshot_agree() {
 			!issue.active,
 			"report-gap cleared once report and snapshot agree"
 		);
-		assert_eq!(issue.severity, Severity::Info.to_string());
+		assert_eq!(issue.effective_result.as_deref(), Some("passed"));
 	})
 	.await;
 }
@@ -776,9 +776,9 @@ async fn reconcile_files_size_mismatch_when_reported_size_differs_from_repo() {
 			.await
 			.expect("size-mismatch issue filed");
 		assert_eq!(
-			issue.severity,
-			Severity::Warning.to_string(),
-			"size-mismatch is Warning (non-paging)",
+			issue.effective_result.as_deref(),
+			Some("warning"),
+			"size-mismatch is a warning (non-paging)",
 		);
 		assert!(issue.active);
 		assert_eq!(
@@ -868,7 +868,7 @@ async fn reconcile_clears_size_mismatch_when_latest_sizes_agree() {
 			!issue.active,
 			"size-mismatch cleared once latest sizes agree"
 		);
-		assert_eq!(issue.severity, Severity::Info.to_string());
+		assert_eq!(issue.effective_result.as_deref(), Some("passed"));
 	})
 	.await;
 }
@@ -885,14 +885,21 @@ async fn group_event_pages_even_when_all_members_unmonitored() {
 		let _s1 = insert_server(&mut conn, group_id, false).await;
 		let _s2 = insert_server(&mut conn, group_id, false).await;
 
-		let issue = database::issues::raise_group_event(
+		let stamp = database::issues::CheckStateStamp {
+			check: refs::CORRUPTION.into(),
+			observed: CheckResult::Failed,
+			effective: CheckResult::Failed,
+			escalates: true,
+			detail: None,
+		};
+		let issue = database::issues::raise_group_event_with_state(
 			&mut conn,
 			group_id,
 			refs::CORRUPTION,
-			Severity::Critical,
 			None,
 			"repo corruption detected",
 			true,
+			Some(&stamp),
 		)
 		.await
 		.expect("raise group event");
@@ -912,16 +919,23 @@ async fn group_event_pages_even_when_all_members_unmonitored() {
 			.expect("list incidents");
 		assert_eq!(open.len(), 1, "exactly one open incident on the group");
 
-		// Recovery: same (source, ref) with active=false at lower severity
-		// leaves the incident and closes it.
-		database::issues::raise_group_event(
+		// Recovery: same (source, ref) with active=false and a passed
+		// result leaves the incident and closes it.
+		let stamp = database::issues::CheckStateStamp {
+			check: refs::CORRUPTION.into(),
+			observed: CheckResult::Passed,
+			effective: CheckResult::Passed,
+			escalates: true,
+			detail: None,
+		};
+		database::issues::raise_group_event_with_state(
 			&mut conn,
 			group_id,
 			refs::CORRUPTION,
-			Severity::Info,
 			None,
 			"repo corruption cleared",
 			false,
+			Some(&stamp),
 		)
 		.await
 		.expect("clear group event");
@@ -974,7 +988,7 @@ async fn sweep_files_maintenance_error_when_latest_run_failed_then_clears_on_suc
 		let issue = group_issue(&mut conn, group_id, refs::MAINTENANCE_ERROR)
 			.await
 			.expect("maintenance-error issue filed");
-		assert_eq!(issue.severity, Severity::Error.to_string());
+		assert_eq!(issue.effective_result.as_deref(), Some("failed"));
 		assert!(issue.active, "failure issue is active");
 		assert_eq!(
 			group_issue_open_links(&mut conn, group_id, refs::MAINTENANCE_ERROR).await,

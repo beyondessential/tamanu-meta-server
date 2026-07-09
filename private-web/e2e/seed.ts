@@ -251,12 +251,10 @@ export async function seedStatus(
 					: null;
 		if (result === null) continue;
 		const degraded = ["failed", "warning", "broken"].includes(result);
-		const severity =
-			result === "failed" ? "error" : degraded ? "warning" : "info";
 		await sql.query(
 			`INSERT INTO issues
-			 (server_id, source, ref, check_name, observed_result, effective_result, detail, severity, message, active, first_seen, last_seen, degraded_since, last_degraded_at)
-			 VALUES ($1, 'alertd', $2, $3, $4, $4, $5::jsonb, $6, $7, $8, NOW(), NOW(), $9, $10)
+			 (server_id, source, ref, check_name, observed_result, effective_result, detail, message, active, first_seen, last_seen, degraded_since, last_degraded_at)
+			 VALUES ($1, 'alertd', $2, $3, $4, $4, $5::jsonb, $6, $7, NOW(), NOW(), $8, $9)
 			 ON CONFLICT DO NOTHING`,
 			[
 				opts.serverId,
@@ -264,7 +262,6 @@ export async function seedStatus(
 				check,
 				result,
 				JSON.stringify(entry),
-				severity,
 				`Health check '${check}' ${degraded ? "degraded" : "recorded"}`,
 				degraded,
 				degraded ? new Date().toISOString() : null,
@@ -422,8 +419,8 @@ export async function seedIssue(
 	const active = resolved ? false : (opts.active ?? true);
 	const severity = opts.severity ?? "error";
 	// Mirror the filing path's result stamping so seeded rows look like
-	// real check state: active rows degraded per their severity, closed
-	// rows recovered. Critical marks the policy as escalating.
+	// real check state: active rows degraded per the legacy severity the
+	// caller speaks, closed rows recovered. Critical means escalating.
 	const result = !active
 		? "passed"
 		: severity === "warning"
@@ -434,8 +431,8 @@ export async function seedIssue(
 	// an issue rather than healthy check state, which the listings exclude.
 	await sql.query(
 		`INSERT INTO issues
-		 (id, server_id, server_group_id, device_id, source, ref, check_name, observed_result, effective_result, escalates, severity, message, description, active, first_seen, last_seen, resolved_at, resolved_by, resolved_reason, degraded_since, last_degraded_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, $9, $10, $11, $12, $13, COALESCE($14::timestamptz, NOW()), NOW(), $15, $16, $17, $18, NOW())`,
+		 (id, server_id, server_group_id, device_id, source, ref, check_name, observed_result, effective_result, escalates, message, description, active, first_seen, last_seen, resolved_at, resolved_by, resolved_reason, degraded_since, last_degraded_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, $9, $10, $11, $12, COALESCE($13::timestamptz, NOW()), NOW(), $14, $15, $16, $17, NOW())`,
 		[
 			id,
 			opts.serverId ?? null,
@@ -446,7 +443,6 @@ export async function seedIssue(
 			check,
 			result,
 			severity === "critical",
-			severity,
 			opts.message ?? "Issue message",
 			opts.description ?? null,
 			active,

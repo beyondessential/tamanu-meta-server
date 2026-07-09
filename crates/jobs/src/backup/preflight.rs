@@ -406,7 +406,6 @@ mod tests {
 
 	#[tokio::test(flavor = "multi_thread")]
 	async fn identity_alert_files_once_and_recovers_legacy_fanout() {
-		use commons_types::issue::Severity;
 		use database::issues::{Issue, raise_group_event};
 		use diesel_async::SimpleAsyncConnection as _;
 		use uuid::Uuid;
@@ -424,7 +423,6 @@ mod tests {
 				&mut conn,
 				group,
 				refs::PREFLIGHT_IDENTITY,
-				Severity::Critical,
 				Some("Canopy IRSA identity broken"),
 				"legacy fan-out alert",
 				true,

@@ -1344,7 +1344,7 @@
       },
       "CheckSeverity": {
         "type": "string",
-        "description": "How a server should treat one of its healthchecks, distilled from\ncanopy's operator-side configuration (the severity catalog and the\nsilence lists) into a three-level device-facing vocabulary.",
+        "description": "How a server should treat one of its healthchecks, distilled from\ncanopy's operator-side configuration (the policy catalog and the\nsilences) into a three-level device-facing vocabulary.",
         "enum": [
           "skip",
           "warn",
