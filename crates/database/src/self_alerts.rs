@@ -19,18 +19,32 @@ use crate::issues::{CheckFiling, FilingScope, Issue, file_check, get_global_issu
 /// on an outbox row). No automatic recovery: stays until operator-resolved.
 pub const SLACK_DELIVERY_FAILURE_REF: &str = "slack-delivery-failure";
 
+pub const SLACK_DELIVERY_FAILURE_DOC: &str = "## Description
+
+The Slack outbox drainer gave up delivering a notification after exhausting its retries — operators may be missing incident notices.
+
+## Results
+
+- **fail** — at least one outbox row was abandoned; recovers when a later delivery succeeds.
+
+## Solve
+
+Check the abandoned row's last error and response in the slack_outbox table, and the webhook URLs in the drainer's configuration. Slack workflow-trigger changes are the usual cause.";
+
 /// Raise (or re-affirm) a self-alert: file the coalescing canopy-wide
 /// check with the given observation, registering its catalog entry with
 /// the policy the condition warrants (first sight only — operator edits
 /// stick). The incident machinery handles notification — a fresh
 /// effective failure opens (or joins) the canopy-wide incident, and
 /// repeated raises while alerting change nothing Slack-side.
+#[allow(clippy::too_many_arguments)]
 pub async fn raise(
 	conn: &mut AsyncPgConnection,
 	r#ref: &str,
 	observed: CheckResult,
 	default_ceiling: CheckResult,
 	default_escalates: bool,
+	documentation: Option<&str>,
 	title: &str,
 	message: &str,
 ) -> Result<Issue> {
@@ -46,6 +60,7 @@ pub async fn raise(
 			detail: None,
 			default_ceiling,
 			default_escalates,
+			documentation,
 		},
 	)
 	.await
@@ -81,6 +96,7 @@ pub async fn recover(
 			detail: None,
 			default_ceiling: CheckResult::Warning,
 			default_escalates: false,
+			documentation: None,
 		},
 	)
 	.await?;

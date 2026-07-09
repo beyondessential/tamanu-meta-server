@@ -19,6 +19,18 @@ pub const TAILSCALE_SOURCE: &str = "canopy";
 /// `(server, device)` pair.
 pub const KEY_EXPIRY_REF: &str = "tailscale-key-expiry";
 
+pub const KEY_EXPIRY_DOC: &str = "## Description
+
+The server's Tailscale node key is nearing expiry (and key expiry isn't disabled for the node). When it lapses, the device drops off the tailnet and canopy loses its management path.
+
+## Results
+
+- **fail** — the node key expires within the alert lead. Escalates: an expired key severs connectivity. Recovers when the key is rotated or expiry is disabled.
+
+## Solve
+
+Re-authenticate the node (`tailscale up`) or disable key expiry for it in the Tailscale admin console.";
+
 /// Sweep every tailnet-attached device that's wired to at least one
 /// server, and file (or close) the key-expiry check per `(server,
 /// device)` pair based on the node's `keyExpiryDisabled`. The check
@@ -107,6 +119,7 @@ pub async fn sweep_key_expiry(
 				})),
 				default_ceiling: CheckResult::Failed,
 				default_escalates: true,
+				documentation: Some(KEY_EXPIRY_DOC),
 			},
 		)
 		.await?;

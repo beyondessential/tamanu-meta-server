@@ -125,6 +125,7 @@ pub(crate) async fn complete_inspect(
 			detail: None,
 			default_ceiling: CheckResult::Failed,
 			default_escalates: true,
+			documentation: Some(database::backup::refs::CORRUPTION_DOC),
 		},
 	)
 	.await

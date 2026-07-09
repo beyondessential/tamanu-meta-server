@@ -35,6 +35,30 @@ pub const REACHABILITY_REF: &str = "reachability";
 /// `stale/alertd`. A contract with stored silences and policy rows.
 pub const STALE_REF_PREFIX: &str = "stale/";
 
+pub const REACHABILITY_DOC: &str = "## Description
+
+Nothing is reaching canopy about this server: no source has reported and no ping has succeeded within the server's down threshold. This is the all-sources-stale signal — the server is presented as unreachable.
+
+## Results
+
+- **fail** — no status from any source within the threshold (or ever); recovers as soon as anything reports.
+
+## Solve
+
+Check whether the server itself is down, its network/VPN path to canopy, and whether its reporting agents are running. The per-source `stale/<source>` checks narrow down which reporter went quiet first.";
+
+pub const STALE_DOC: &str = "## Description
+
+A source that has been reporting on this server has gone quiet: its most recent report is older than the server's down threshold, while other paths may still reach canopy.
+
+## Results
+
+- **warn** — the source's last report crossed the threshold; recovers when it reports again.
+
+## Solve
+
+Check that the reporting agent for this source is running on the server and can reach canopy. If the source was deliberately decommissioned, silence this check for the server.";
+
 fn server_label(s: &Server) -> String {
 	s.name
 		.clone()
@@ -324,6 +348,7 @@ impl Status {
 					})),
 					default_ceiling: CheckResult::Failed,
 					default_escalates: false,
+					documentation: Some(REACHABILITY_DOC),
 				},
 			)
 			.await?;
@@ -420,6 +445,7 @@ impl Status {
 					})),
 					default_ceiling: CheckResult::Warning,
 					default_escalates: false,
+					documentation: Some(STALE_DOC),
 				},
 			)
 			.await?;

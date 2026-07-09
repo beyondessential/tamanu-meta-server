@@ -530,6 +530,7 @@ pub async fn submit_manual_event(
 			// escalation choice seeds the catalog entry on first sight.
 			default_ceiling: CheckResult::Failed,
 			default_escalates: args.escalates.unwrap_or(false),
+			documentation: None,
 		},
 	)
 	.await?;

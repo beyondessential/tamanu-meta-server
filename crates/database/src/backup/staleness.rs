@@ -262,6 +262,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 						})),
 						default_ceiling: CheckResult::Failed,
 						default_escalates: false,
+						documentation: Some(refs::STALENESS_DOC),
 					},
 				)
 				.await?;
@@ -286,6 +287,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 						detail: None,
 						default_ceiling: CheckResult::Failed,
 						default_escalates: false,
+						documentation: Some(refs::STALENESS_DOC),
 					},
 				)
 				.await?;
@@ -323,6 +325,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 						})),
 						default_ceiling: CheckResult::Warning,
 						default_escalates: false,
+						documentation: Some(refs::NEVER_DOC),
 					},
 				)
 				.await?;
@@ -352,6 +355,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 							detail: None,
 							default_ceiling: CheckResult::Warning,
 							default_escalates: false,
+							documentation: Some(refs::NEVER_DOC),
 						},
 					)
 					.await?;
@@ -422,6 +426,7 @@ async fn sweep_maintenance(db: &mut AsyncPgConnection, now: Timestamp) -> Result
 					})),
 					default_ceiling: CheckResult::Failed,
 					default_escalates: false,
+					documentation: Some(refs::MAINTENANCE_STALE_DOC),
 				},
 			)
 			.await?;
@@ -439,6 +444,7 @@ async fn sweep_maintenance(db: &mut AsyncPgConnection, now: Timestamp) -> Result
 					detail: None,
 					default_ceiling: CheckResult::Failed,
 					default_escalates: false,
+					documentation: Some(refs::MAINTENANCE_STALE_DOC),
 				},
 			)
 			.await?;
@@ -472,6 +478,7 @@ async fn sweep_maintenance(db: &mut AsyncPgConnection, now: Timestamp) -> Result
 						})),
 						default_ceiling: CheckResult::Failed,
 						default_escalates: false,
+						documentation: Some(refs::MAINTENANCE_ERROR_DOC),
 					},
 				)
 				.await?;
@@ -492,6 +499,7 @@ async fn sweep_maintenance(db: &mut AsyncPgConnection, now: Timestamp) -> Result
 						detail: None,
 						default_ceiling: CheckResult::Failed,
 						default_escalates: false,
+						documentation: Some(refs::MAINTENANCE_ERROR_DOC),
 					},
 				)
 				.await?;

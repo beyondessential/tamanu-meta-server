@@ -71,6 +71,7 @@ async fn file_identity_alert(
 		CheckResult::Failed,
 		CheckResult::Failed,
 		true,
+		Some(refs::PREFLIGHT_IDENTITY_DOC),
 		"Canopy IRSA identity broken",
 		msg,
 	)
@@ -105,6 +106,7 @@ async fn recover_identity_alert(
 				detail: None,
 				default_ceiling: CheckResult::Failed,
 				default_escalates: true,
+				documentation: Some(refs::PREFLIGHT_IDENTITY_DOC),
 			},
 		)
 		.await?;
@@ -251,6 +253,7 @@ async fn deep_check_group(
 					detail: None,
 					default_ceiling: CheckResult::Failed,
 					default_escalates: false,
+					documentation: Some(refs::PREFLIGHT_ASSUME_DOC),
 				},
 			)
 			.await;
@@ -269,6 +272,7 @@ async fn deep_check_group(
 					detail: None,
 					default_ceiling: CheckResult::Failed,
 					default_escalates: false,
+					documentation: Some(refs::PREFLIGHT_ASSUME_DOC),
 				},
 			)
 			.await;
@@ -288,6 +292,7 @@ async fn deep_check_group(
 					detail: None,
 					default_ceiling: CheckResult::Failed,
 					default_escalates: true,
+					documentation: Some(refs::PREFLIGHT_OBJECT_LOCK_DOC),
 				},
 			)
 			.await;
@@ -306,6 +311,7 @@ async fn deep_check_group(
 					detail: None,
 					default_ceiling: CheckResult::Failed,
 					default_escalates: true,
+					documentation: Some(refs::PREFLIGHT_OBJECT_LOCK_DOC),
 				},
 			)
 			.await;

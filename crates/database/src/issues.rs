@@ -798,6 +798,10 @@ pub struct CheckFiling<'a> {
 	/// these only seed the catalog row.
 	pub default_ceiling: CheckResult,
 	pub default_escalates: bool,
+	/// The documentation canopy's own checks ship with, seeded into the
+	/// catalog on first sight (never overwriting operator edits). See
+	/// the CHK spec's Documentation section for the convention.
+	pub documentation: Option<&'a str>,
 }
 
 /// File one canopy-determined or operator-raised check result: register
@@ -827,6 +831,7 @@ pub async fn file_check(conn: &mut AsyncPgConnection, filing: CheckFiling<'_>) -
 		filing.check,
 		filing.default_ceiling,
 		filing.default_escalates,
+		filing.documentation,
 	)
 	.await?;
 

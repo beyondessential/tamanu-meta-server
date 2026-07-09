@@ -53,6 +53,7 @@ fn filing(server_id: Uuid, check: &str, observed: CheckResult) -> CheckFiling<'_
 		detail: None,
 		default_ceiling: CheckResult::Failed,
 		default_escalates: false,
+		documentation: None,
 	}
 }
 
@@ -146,6 +147,7 @@ async fn server_scoped_rule_can_upgrade_past_the_fleet_ceiling() {
 			"tiered",
 			CheckResult::Warning,
 			false,
+			None,
 		)
 		.await
 		.expect("register");

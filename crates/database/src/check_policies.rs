@@ -111,16 +111,18 @@ impl CheckPolicy {
 		Ok(())
 	}
 
-	/// Insert a row for `(source, check_name)` with the given policy if
-	/// and only if no row exists yet. Canopy's own checks register with
-	/// the policy their condition warrants instead of the default warning
-	/// ceiling; operator edits stick (this never overwrites).
+	/// Insert a row for `(source, check_name)` with the given policy —
+	/// and, for canopy's own checks, shipped documentation — if and only
+	/// if no row exists yet. Canopy's own checks register with the policy
+	/// their condition warrants instead of the default warning ceiling;
+	/// operator edits stick (this never overwrites).
 	pub async fn register(
 		db: &mut AsyncPgConnection,
 		source: &str,
 		check_name: &str,
 		ceiling: CheckResult,
 		escalates: bool,
+		documentation: Option<&str>,
 	) -> Result<()> {
 		use crate::schema::check_policies::dsl;
 		diesel::insert_into(dsl::check_policies)
@@ -129,6 +131,7 @@ impl CheckPolicy {
 				dsl::check_name.eq(check_name),
 				dsl::ceiling.eq(ceiling.to_string()),
 				dsl::escalates.eq(escalates),
+				dsl::documentation.eq(documentation),
 			))
 			.on_conflict((dsl::source, dsl::check_name))
 			.do_nothing()

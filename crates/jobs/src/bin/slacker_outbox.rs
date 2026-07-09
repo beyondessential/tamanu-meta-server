@@ -251,6 +251,7 @@ async fn file_self_event(
 		CheckResult::Failed,
 		CheckResult::Failed,
 		false,
+		Some(database::self_alerts::SLACK_DELIVERY_FAILURE_DOC),
 		&format!("Slack delivery permanently failed ({})", row.kind),
 		&format!(
 			"outbox row {} (kind={}, incident={:?}): gave up after {attempts} attempts. Last error: {}. Last response: {}",

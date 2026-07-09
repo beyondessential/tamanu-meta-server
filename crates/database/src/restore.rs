@@ -466,6 +466,7 @@ async fn recover_old_scope_alerts(
 				detail: None,
 				default_ceiling: CheckResult::Failed,
 				default_escalates: false,
+				documentation: Some(refs::RESTORE_VERIFICATION_DOC),
 			},
 		)
 		.await?;
@@ -610,6 +611,7 @@ impl BackupRestoreCheck {
 						detail: None,
 						default_ceiling: CheckResult::Failed,
 						default_escalates: false,
+						documentation: Some(refs::RESTORE_VERIFICATION_DOC),
 					},
 				)
 				.await?;
@@ -638,6 +640,7 @@ impl BackupRestoreCheck {
 						})),
 						default_ceiling: CheckResult::Failed,
 						default_escalates: false,
+						documentation: Some(refs::RESTORE_VERIFICATION_DOC),
 					},
 				)
 				.await?;
@@ -884,6 +887,7 @@ pub async fn sweep_overdue(db: &mut AsyncPgConnection) -> Result<usize> {
 					})),
 					default_ceiling: CheckResult::Failed,
 					default_escalates: false,
+					documentation: Some(refs::RESTORE_VERIFICATION_DOC),
 				},
 			)
 			.await?;

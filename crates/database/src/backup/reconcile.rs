@@ -123,6 +123,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 						})),
 						default_ceiling: CheckResult::Failed,
 						default_escalates: false,
+						documentation: Some(refs::RECONCILE_MISSING_DOC),
 					},
 				)
 				.await?;
@@ -146,6 +147,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 							detail: None,
 							default_ceiling: CheckResult::Failed,
 							default_escalates: false,
+							documentation: Some(refs::RECONCILE_MISSING_DOC),
 						},
 					)
 					.await?;
@@ -177,6 +179,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 						})),
 						default_ceiling: CheckResult::Warning,
 						default_escalates: false,
+						documentation: Some(refs::RECONCILE_REPORT_GAP_DOC),
 					},
 				)
 				.await?;
@@ -220,6 +223,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 						})),
 						default_ceiling: CheckResult::Warning,
 						default_escalates: false,
+						documentation: Some(refs::RECONCILE_SIZE_MISMATCH_DOC),
 					},
 				)
 				.await?;
@@ -262,6 +266,7 @@ async fn clear_size_mismatch(
 			detail: None,
 			default_ceiling: CheckResult::Warning,
 			default_escalates: false,
+			documentation: Some(refs::RECONCILE_SIZE_MISMATCH_DOC),
 		},
 	)
 	.await?;
@@ -296,6 +301,7 @@ async fn clear_report_gap(
 			detail: None,
 			default_ceiling: CheckResult::Warning,
 			default_escalates: false,
+			documentation: Some(refs::RECONCILE_REPORT_GAP_DOC),
 		},
 	)
 	.await?;
