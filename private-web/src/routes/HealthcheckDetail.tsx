@@ -483,7 +483,10 @@ function DocumentationCard({
 						onChange={(e) => setDraft(e.target.value)}
 						disabled={update.pending}
 						slotProps={{
-							htmlInput: { style: { fontFamily: "monospace" } },
+							htmlInput: {
+								style: { fontFamily: "monospace" },
+								"aria-label": "Documentation markdown",
+							},
 						}}
 					/>
 					<Stack direction="row" spacing={1} sx={{ mt: 1 }}>
