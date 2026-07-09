@@ -23,7 +23,7 @@ import MessageView from "./MessageView";
 import NotesList, { AddNoteButton } from "./NotesList";
 import ResolverAvatar from "./ResolverAvatar";
 import ServerNameWithGroup from "./ServerNameWithGroup";
-import SeverityChip from "./SeverityChip";
+import CheckResultChip from "./CheckResultChip";
 import StatusSnapshotPanel, { StatusSnapshotButton } from "./StatusSnapshot";
 import TimeAgo from "./TimeAgo";
 import {
@@ -31,6 +31,7 @@ import {
 	RESOLVED_REASON_LABEL,
 	healthcheckNameFromRef,
 	healthcheckPath,
+	type CheckResult,
 	type IssueData,
 	type IssueIncidentLink,
 	type ResolvedReason,
@@ -52,7 +53,7 @@ function headline(issue: IssueData): string {
  * incident links), the message body, action buttons and the notes panel.
  * When collapsed, only the header row is visible —
  * even the action buttons are hidden. Header layout:
- * `[toggle] [server] [headline] [resolver-avatar?] [snapshot] [severity] [time]`.
+ * `[toggle] [server] [headline] [resolver-avatar?] [snapshot] [result] [time]`.
  * The headline is struck through when the issue is inactive or resolved.
  * The server is always shown because incidents can span child servers in
  * a group — relying on a page H1 to identify the server is insufficient.
@@ -219,9 +220,11 @@ function Header({
 					tooltip="Status snapshot when this issue was last seen"
 				/>
 			</Box>
-			<Box sx={{ flexShrink: 0 }}>
-				<SeverityChip severity={issue.severity} />
-			</Box>
+			{issue.effective_result && (
+				<Box sx={{ flexShrink: 0 }}>
+					<CheckResultChip result={issue.effective_result as CheckResult} />
+				</Box>
+			)}
 			<Typography
 				variant="body2"
 				color="text.secondary"

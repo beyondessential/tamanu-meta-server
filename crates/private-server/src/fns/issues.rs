@@ -3,11 +3,7 @@ use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
-use commons_types::{
-	Uuid,
-	issue::{ResolvedReason, Severity},
-	status::CheckResult,
-};
+use commons_types::{Uuid, issue::ResolvedReason, status::CheckResult};
 use database::issues::{
 	CheckFiling, FilingScope, Incident, Issue, IssueFilter, IssueIncidentRef, IssueListFilters,
 	MANUAL_SOURCE, file_check,
@@ -53,8 +49,9 @@ pub struct IssueData {
 	/// within its source and server.
 	#[serde(rename = "ref")]
 	pub r#ref: String,
-	/// Current severity level of the issue.
-	pub severity: Severity,
+	/// Whether the check's policy escalates: an effective failure notifies
+	/// immediately, bypassing incident grace.
+	pub escalates: bool,
 	/// Short headline describing the issue, if one was given.
 	pub description: Option<String>,
 	/// Latest human-readable message describing the issue's state.
@@ -148,7 +145,7 @@ impl IssueData {
 			device_id: i.device_id,
 			source: i.source,
 			r#ref: i.r#ref,
-			severity: i.severity,
+			escalates: i.escalates,
 			description: i.description,
 			message: i.message,
 			active: i.active,
@@ -308,10 +305,11 @@ pub struct IssueListArgs {
 	/// ones. Defaults to `true` (active issues only) when omitted.
 	#[serde(default)]
 	pub active_only: Option<bool>,
-	/// Restrict to issues at one of these severity levels. Omit to include
-	/// all severities.
+	/// Restrict to issues whose latest effective result is one of these.
+	/// Omit to include all results.
 	#[serde(default)]
-	pub severities: Option<Vec<Severity>>,
+	#[schema(value_type = Option<Vec<String>>)]
+	pub results: Option<Vec<CheckResult>>,
 	/// Restrict to issues whose server belongs to this group.
 	#[serde(default)]
 	pub server_group_id: Option<Uuid>,
@@ -346,7 +344,7 @@ pub async fn list(
 		&mut conn,
 		IssueListFilters {
 			active_only: args.active_only.unwrap_or(true),
-			severities: args.severities,
+			results: args.results,
 			server_group_id: args.server_group_id,
 			since: None,
 		},

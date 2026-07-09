@@ -346,9 +346,9 @@ async fn seed_incidents(conn: &mut impl SimpleAsyncConnection) {
 		"INSERT INTO server_groups (id, name) VALUES ('{IGROUP}', 'Inc Group'); \
 		 INSERT INTO servers (id, host, name, kind, group_id, is_monitored) VALUES \
 			('{ISRV}', 'https://inc', 'Inc Server', 'central', '{IGROUP}', true); \
-		 INSERT INTO issues (id, created_at, updated_at, server_id, source, ref, severity, description, message, active, first_seen, last_seen, last_degraded_at) VALUES \
-			('{ISSUE1}', NOW(), NOW(), '{ISRV}', 'test', 'r1', 'error', 'Disk full', 'disk usage 98%', true, NOW() - interval '2 days', NOW() - interval '1 hour', NOW() - interval '1 hour'), \
-			('{ISSUE2}', NOW(), NOW(), '{ISRV}', 'test', 'r2', 'warning', NULL, 'slow query', false, NOW() - interval '10 days', NOW() - interval '9 days', NOW() - interval '9 days'); \
+		 INSERT INTO issues (id, created_at, updated_at, server_id, source, ref, check_name, observed_result, effective_result, severity, description, message, active, first_seen, last_seen, last_degraded_at) VALUES \
+			('{ISSUE1}', NOW(), NOW(), '{ISRV}', 'test', 'r1', 'r1', 'failed', 'failed', 'error', 'Disk full', 'disk usage 98%', true, NOW() - interval '2 days', NOW() - interval '1 hour', NOW() - interval '1 hour'), \
+			('{ISSUE2}', NOW(), NOW(), '{ISRV}', 'test', 'r2', 'r2', 'warning', 'warning', 'warning', NULL, 'slow query', false, NOW() - interval '10 days', NOW() - interval '9 days', NOW() - interval '9 days'); \
 		 INSERT INTO incidents (id, created_at, updated_at, server_group_id, opened_at, closed_at) VALUES \
 			('{INC_OPEN}', NOW(), NOW(), '{IGROUP}', NOW() - interval '2 days', NULL), \
 			('{INC_CLOSED}', NOW(), NOW(), '{IGROUP}', NOW() - interval '5 days', NOW() - interval '3 days'); \
@@ -434,7 +434,7 @@ async fn incidents_window_status_and_detail() {
 		let issues = detail["issues"].as_array().unwrap();
 		assert_eq!(issues.len(), 1);
 		assert_eq!(issues[0]["issue_id"], ISSUE1);
-		assert_eq!(issues[0]["severity"], "error");
+		assert_eq!(issues[0]["effective_result"], "failed");
 		assert_eq!(issues[0]["ref"], "r1");
 		assert_eq!(issues[0]["server_name"], "Inc Server");
 	})
@@ -461,14 +461,14 @@ async fn issues_filter_and_detail() {
 		let all_ids = ids_of(&all, "issues");
 		assert!(all_ids.contains(&ISSUE2.to_string()));
 
-		// severity filter.
+		// result filter.
 		let warnings = call_tool!(
 			private,
 			"find_issues",
-			serde_json::json!({ "active_only": false, "severities": ["warning"] })
+			serde_json::json!({ "active_only": false, "results": ["warning"] })
 		);
 		let w = warnings["issues"].as_array().unwrap();
-		assert!(!w.is_empty() && w.iter().all(|i| i["severity"] == "warning"));
+		assert!(!w.is_empty() && w.iter().all(|i| i["effective_result"] == "warning"));
 
 		// Detail: the issue's fields + the incident it belongs to.
 		let detail = call_tool!(
@@ -476,7 +476,7 @@ async fn issues_filter_and_detail() {
 			"get_issue",
 			serde_json::json!({ "issue_id": ISSUE1 })
 		);
-		assert_eq!(detail["severity"], "error");
+		assert_eq!(detail["effective_result"], "failed");
 		let inc_ids: Vec<String> = detail["incidents"]
 			.as_array()
 			.unwrap()

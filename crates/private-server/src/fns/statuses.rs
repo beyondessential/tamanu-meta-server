@@ -500,11 +500,11 @@ pub struct StatusSnapshotData {
 	/// with display name and profile picture filled in where known. Not
 	/// filtered by recency — reflects this specific point-in-time snapshot.
 	pub operators: Vec<OperatorPresence>,
-	/// For each currently-unhealthy check in this push, the severity it
-	/// would be filed at if it turned into an issue. Healthy checks are
-	/// omitted. An unhealthy check with no severity listed here should be
-	/// treated as a default (warning-level) severity.
-	pub check_severities: std::collections::HashMap<String, commons_types::issue::Severity>,
+	/// For each currently-unhealthy check in this push, the effective
+	/// result its policy grades it to. Healthy checks are omitted. An
+	/// unhealthy check not listed here should be treated as warning.
+	#[schema(value_type = std::collections::HashMap<String, String>)]
+	pub check_results: std::collections::HashMap<String, commons_types::status::CheckResult>,
 	/// Check names currently silenced for this server (at server or
 	/// group scope). These don't count toward `health_state` and the UI
 	/// renders them with its skipped affordance. Reflects the silence
@@ -597,7 +597,7 @@ pub async fn snapshot(
 	// Compute the per-unhealthy-check severity the rules engine would
 	// file at given this push. Healthy checks are omitted; the UI
 	// renders them with its 'passing' affordance regardless.
-	let check_severities = compute_check_severities(&mut conn, &server, &status).await?;
+	let check_results = compute_check_results(&mut conn, &server, &status).await?;
 	// Operator-silenced healthchecks present as skipped and don't count
 	// toward the rollup, even on historical snapshots — a silence
 	// expresses current operator intent about the check, not the push.
@@ -628,7 +628,7 @@ pub async fn snapshot(
 		health: status.health,
 		extra: status.extra,
 		operators,
-		check_severities,
+		check_results,
 		silenced_checks,
 	})))
 }
@@ -664,16 +664,15 @@ pub(crate) async fn enrich_operators(
 
 /// For every warning/failed check on `status`, resolve the policy +
 /// rules grading given the snapshot's actual extras and the server's
-/// resolved tag map, expressed as the severity ingestion would file.
-/// Mirrors the public-server ingestion path (`file_health_events`) so
-/// the UI displays what *would* be filed. Broken checks aren't included
-/// — they file at a fixed Warning and the UI renders them from the
-/// result directly.
-async fn compute_check_severities(
+/// resolved tag map: the effective result ingestion would file. Mirrors
+/// the public-server ingestion path (`file_health_events`) so the UI
+/// displays what *would* be filed. Broken checks aren't included — they
+/// file as warnings and the UI renders them from the result directly.
+async fn compute_check_results(
 	conn: &mut database::diesel_async::AsyncPgConnection,
 	server: &Server,
 	status: &Status,
-) -> commons_errors::Result<std::collections::HashMap<String, commons_types::issue::Severity>> {
+) -> commons_errors::Result<std::collections::HashMap<String, commons_types::status::CheckResult>> {
 	use commons_types::status::CheckResult;
 	use database::check_policies::{CheckPolicy, EvaluationContext};
 
@@ -740,13 +739,10 @@ async fn compute_check_severities(
 			server.group_id,
 		)
 		.await?;
-		let sev = match graded.effective {
-			CheckResult::Failed if graded.escalates => commons_types::issue::Severity::Critical,
-			CheckResult::Failed => commons_types::issue::Severity::Error,
-			CheckResult::Warning | CheckResult::Broken => commons_types::issue::Severity::Warning,
+		match graded.effective {
 			CheckResult::Passed | CheckResult::Skipped => continue,
+			effective => out.insert(name, effective),
 		};
-		out.insert(name, sev);
 	}
 	Ok(out)
 }

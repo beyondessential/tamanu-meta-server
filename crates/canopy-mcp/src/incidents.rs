@@ -1,6 +1,6 @@
 //! `find_incidents` / `get_incident` / `find_issues` / `get_issue` tools.
 
-use commons_types::{Uuid, issue::Severity};
+use commons_types::{Uuid, status::CheckResult};
 use database::{
 	issues::{Incident, Issue, IssueListFilters},
 	server_groups::ServerGroup,
@@ -48,8 +48,9 @@ pub struct IncidentIdArgs {
 pub struct FindIssuesArgs {
 	/// Only currently-active, unresolved issues. Default true.
 	pub active_only: Option<bool>,
-	/// Filter to these severities: `critical`, `error`, `warning`, `info`, `debug`.
-	pub severities: Option<Vec<String>>,
+	/// Filter to issues whose latest effective result is one of these:
+	/// `failed`, `warning`, `broken`, `passed`, `skipped`.
+	pub results: Option<Vec<String>>,
 	/// Restrict to issues whose server is in this group's id.
 	pub group_id: Option<String>,
 	/// Restrict to one server's id.
@@ -104,7 +105,13 @@ struct IncidentList {
 #[derive(Serialize)]
 struct IncidentIssueOut {
 	issue_id: Uuid,
-	severity: Severity,
+	/// What the source reported on the latest filing, before policy.
+	observed_result: Option<CheckResult>,
+	/// What policy made of it — the result canopy acts on.
+	effective_result: Option<CheckResult>,
+	/// Whether the check's policy escalates (an effective failure
+	/// notifies immediately, bypassing incident grace).
+	escalates: bool,
 	source: String,
 	r#ref: String,
 	description: Option<String>,
@@ -149,7 +156,9 @@ struct IssueSummary {
 	group_id: Option<Uuid>,
 	source: String,
 	r#ref: String,
-	severity: Severity,
+	observed_result: Option<CheckResult>,
+	effective_result: Option<CheckResult>,
+	escalates: bool,
 	description: Option<String>,
 	message: String,
 	active: bool,
@@ -180,7 +189,9 @@ struct IssueDetail {
 	group_id: Option<Uuid>,
 	source: String,
 	r#ref: String,
-	severity: Severity,
+	observed_result: Option<CheckResult>,
+	effective_result: Option<CheckResult>,
+	escalates: bool,
 	description: Option<String>,
 	message: String,
 	active: bool,
@@ -306,7 +317,9 @@ impl CanopyMcp {
 			.iter()
 			.map(|(link, iss)| IncidentIssueOut {
 				issue_id: iss.id,
-				severity: iss.severity,
+				observed_result: iss.observed_result,
+				effective_result: iss.effective_result,
+				escalates: iss.escalates,
 				source: iss.source.clone(),
 				r#ref: iss.r#ref.clone(),
 				description: iss.description.clone(),
@@ -344,16 +357,16 @@ impl CanopyMcp {
 	}
 
 	#[tool(
-		description = "List issues across the fleet, filtered by active state, severity, group, \
-		               server, and recency. Issues are the per-(server,source,ref) conditions that make \
-		               up incidents."
+		description = "List issues across the fleet, filtered by active state, effective result, \
+		               group, server, and recency. Issues are the per-(server,source,check) conditions \
+		               that make up incidents."
 	)]
 	async fn find_issues(
 		&self,
 		Parameters(args): Parameters<FindIssuesArgs>,
 	) -> Result<CallToolResult, McpError> {
 		let mut conn = self.conn().await?;
-		let severities = parse_severities(&args.severities)?;
+		let results = parse_results(&args.results)?;
 		let group = parse_opt_uuid(&args.group_id, "group_id")?;
 		let server = parse_opt_uuid(&args.server_id, "server_id")?;
 		let since = args.since_days.map(since_from_days);
@@ -363,7 +376,7 @@ impl CanopyMcp {
 			&mut conn,
 			IssueListFilters {
 				active_only: args.active_only.unwrap_or(true),
-				severities,
+				results,
 				server_group_id: group,
 				since,
 			},
@@ -431,7 +444,9 @@ impl CanopyMcp {
 			group_id: issue.server_group_id,
 			source: issue.source.clone(),
 			r#ref: issue.r#ref.clone(),
-			severity: issue.severity,
+			observed_result: issue.observed_result,
+			effective_result: issue.effective_result,
+			escalates: issue.escalates,
 			description: issue.description.clone(),
 			message: issue.message.clone(),
 			active: issue.active,
@@ -462,14 +477,16 @@ fn incident_status(i: &Incident) -> &'static str {
 	}
 }
 
-fn parse_severities(v: &Option<Vec<String>>) -> Result<Option<Vec<Severity>>, McpError> {
+fn parse_results(v: &Option<Vec<String>>) -> Result<Option<Vec<CheckResult>>, McpError> {
 	match v {
 		Some(list) if !list.is_empty() => {
 			let mut out = Vec::with_capacity(list.len());
 			for s in list {
-				out.push(s.parse::<Severity>().map_err(|_| {
-					McpError::invalid_params(format!("invalid severity: {s}"), None)
-				})?);
+				out.push(
+					s.parse::<CheckResult>().map_err(|_| {
+						McpError::invalid_params(format!("invalid result: {s}"), None)
+					})?,
+				);
 			}
 			Ok(Some(out))
 		}
@@ -491,7 +508,9 @@ fn issue_summary(
 		group_id: i.server_group_id,
 		source: i.source.clone(),
 		r#ref: i.r#ref.clone(),
-		severity: i.severity,
+		observed_result: i.observed_result,
+		effective_result: i.effective_result,
+		escalates: i.escalates,
 		description: i.description.clone(),
 		message: i.message.clone(),
 		active: i.active,

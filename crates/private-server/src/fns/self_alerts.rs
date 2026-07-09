@@ -9,7 +9,8 @@ use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
 use commons_types::Uuid;
-use commons_types::issue::{ResolvedReason, Severity};
+use commons_types::issue::ResolvedReason;
+use commons_types::status::CheckResult;
 use database::issues::Issue;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -35,9 +36,15 @@ pub struct SelfAlertView {
 	/// `mcp-token-expiry`. Stable across repeated raises of the same
 	/// condition.
 	pub r#ref: String,
-	/// How severe the condition is, from `critical` (most severe) down to
-	/// `debug` (least).
-	pub severity: Severity,
+	/// What canopy observed on the latest raise, before policy.
+	#[schema(value_type = Option<String>)]
+	pub observed_result: Option<CheckResult>,
+	/// What policy made of it — the result canopy acts on.
+	#[schema(value_type = Option<String>)]
+	pub effective_result: Option<CheckResult>,
+	/// Whether this condition's policy escalates: an effective failure
+	/// notifies immediately, bypassing incident grace.
+	pub escalates: bool,
 	/// Single-line headline.
 	pub title: Option<String>,
 	/// Full detail message describing the condition.
@@ -63,7 +70,9 @@ impl From<Issue> for SelfAlertView {
 		Self {
 			id: i.id,
 			r#ref: i.r#ref,
-			severity: i.severity,
+			observed_result: i.observed_result,
+			effective_result: i.effective_result,
+			escalates: i.escalates,
 			title: i.description,
 			message: i.message,
 			active: i.active,

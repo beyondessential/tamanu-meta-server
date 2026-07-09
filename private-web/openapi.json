@@ -8369,7 +8369,7 @@
           "server_host",
           "source",
           "ref",
-          "severity",
+          "escalates",
           "message",
           "active",
           "first_seen",
@@ -8419,6 +8419,10 @@
               "null"
             ],
             "description": "What policy made of the latest observed result — the result canopy\nacts on."
+          },
+          "escalates": {
+            "type": "boolean",
+            "description": "Whether the check's policy escalates: an effective failure notifies\nimmediately, bypassing incident grace."
           },
           "first_seen": {
             "type": "string",
@@ -8527,10 +8531,6 @@
             ],
             "description": "Display name of the affected server, when one is set. Falls back to\n`server_host` when absent."
           },
-          "severity": {
-            "$ref": "#/components/schemas/Severity",
-            "description": "Current severity level of the issue."
-          },
           "snoozed_until": {
             "type": [
               "string",
@@ -8625,6 +8625,16 @@
             "format": "int64",
             "description": "Maximum number of issues to return. Defaults to 100 when omitted."
           },
+          "results": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Restrict to issues whose latest effective result is one of these.\nOmit to include all results."
+          },
           "serverGroupId": {
             "type": [
               "string",
@@ -8632,16 +8642,6 @@
             ],
             "format": "uuid",
             "description": "Restrict to issues whose server belongs to this group."
-          },
-          "severities": {
-            "type": [
-              "array",
-              "null"
-            ],
-            "items": {
-              "$ref": "#/components/schemas/Severity"
-            },
-            "description": "Restrict to issues at one of these severity levels. Omit to include\nall severities."
           }
         }
       },
@@ -10766,7 +10766,7 @@
         "required": [
           "id",
           "ref",
-          "severity",
+          "escalates",
           "message",
           "active",
           "first_seen",
@@ -10776,6 +10776,17 @@
           "active": {
             "type": "boolean",
             "description": "Whether the underlying condition is still ongoing. Becomes `false`\nonce the condition has cleared on its own, independently of whether\nan operator has resolved the alert."
+          },
+          "effective_result": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What policy made of it — the result canopy acts on."
+          },
+          "escalates": {
+            "type": "boolean",
+            "description": "Whether this condition's policy escalates: an effective failure\nnotifies immediately, bypassing incident grace."
           },
           "first_seen": {
             "type": "string",
@@ -10796,6 +10807,13 @@
             "type": "string",
             "description": "Full detail message describing the condition."
           },
+          "observed_result": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What canopy observed on the latest raise, before policy."
+          },
           "ref": {
             "type": "string",
             "description": "The stable identifier of the underlying condition, e.g.\n`mcp-token-expiry`. Stable across repeated raises of the same\ncondition."
@@ -10814,10 +10832,6 @@
               "null"
             ],
             "description": "The login of the operator who resolved this alert, or `null` if it\nhas not been resolved."
-          },
-          "severity": {
-            "$ref": "#/components/schemas/Severity",
-            "description": "How severe the condition is, from `critical` (most severe) down to\n`debug` (least)."
           },
           "title": {
             "type": [
@@ -11840,17 +11854,6 @@
           }
         }
       },
-      "Severity": {
-        "type": "string",
-        "description": "Canopy's severity vocabulary, narrowed from RFC 5424 to a five-level\nset with operator semantics:\n\n- `Debug`: never participates in incidents (filed for the audit\n  trail / per-server view only).\n- `Info`, `Warning`: join an open incident for context but don't\n  open one or keep one open on their own.\n- `Error`: opens an incident; sits in the per-group `slack_open_delay`\n  holding window before the Slack notification ships.\n- `Critical`: opens an incident and bypasses the holding window —\n  the Slack notification is enqueued for immediate delivery.\n\nStored as text in Postgres; validated as this enum at the API layer.\nDefault is `Error` (the most common severity for a deliberately\nfiled event). The legacy syslog severities `emergency` / `alert` /\n`notice` have been retired — see the\n`2026-05-29-000000-0000_restrict_severities` migration; the\n`FromStr` impl still accepts them as aliases for forward-compat with\nany device that hasn't been updated.",
-        "enum": [
-          "critical",
-          "error",
-          "warning",
-          "info",
-          "debug"
-        ]
-      },
       "ShortStatus": {
         "type": "string",
         "description": "Reachability of a server, based on how recently it last reported a status update.",
@@ -12045,15 +12048,15 @@
           "health",
           "extra",
           "operators",
-          "check_severities",
+          "check_results",
           "silenced_checks"
         ],
         "properties": {
-          "check_severities": {
+          "check_results": {
             "type": "object",
-            "description": "For each currently-unhealthy check in this push, the severity it\nwould be filed at if it turned into an issue. Healthy checks are\nomitted. An unhealthy check with no severity listed here should be\ntreated as a default (warning-level) severity.",
+            "description": "For each currently-unhealthy check in this push, the effective\nresult its policy grades it to. Healthy checks are omitted. An\nunhealthy check not listed here should be treated as warning.",
             "additionalProperties": {
-              "$ref": "#/components/schemas/Severity"
+              "type": "string"
             },
             "propertyNames": {
               "type": "string"

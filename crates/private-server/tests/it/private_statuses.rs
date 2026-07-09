@@ -1271,7 +1271,7 @@ async fn check_attention_returns_catalog_policy_and_ignores_non_matching_check()
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn snapshot_surfaces_per_check_severity() {
+async fn snapshot_surfaces_per_check_results() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		// Seed catalog: catalog_only stays at the default warning
 		// ceiling; elevated has its ceiling lifted to failed so the
@@ -1312,24 +1312,23 @@ async fn snapshot_surfaces_per_check_severity() {
 			.await;
 		r.assert_status_ok();
 		let body: serde_json::Value = r.json();
-		let severities = &body["check_severities"];
-		assert_eq!(severities["catalog_only"], "warning");
-		assert_eq!(severities["elevated"], "error");
+		let results = &body["check_results"];
+		assert_eq!(results["catalog_only"], "warning");
+		assert_eq!(results["elevated"], "failed");
 		// version_gated's rule fires because bestoolVersion 1.5.0 is in
-		// the >=1.0.0 <2.0.0 range — graded failed, and the entry
-		// escalates, so it presents as critical.
-		assert_eq!(severities["version_gated"], "critical");
+		// the >=1.0.0 <2.0.0 range — graded failed.
+		assert_eq!(results["version_gated"], "failed");
 		// Passing checks must not appear in the map.
 		assert!(
-			severities.get("passing").is_none(),
-			"healthy checks are omitted; got {severities}",
+			results.get("passing").is_none(),
+			"healthy checks are omitted; got {results}",
 		);
 	})
 	.await
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn snapshot_check_severities_cover_result_form() {
+async fn snapshot_check_results_cover_result_form() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		// `elevated` has its catalog base bumped to error: a failed
 		// result uses it, a warning result ignores it (fixed Warning).
@@ -1364,17 +1363,17 @@ async fn snapshot_check_severities_cover_result_form() {
 			.await;
 		r.assert_status_ok();
 		let body: serde_json::Value = r.json();
-		let severities = &body["check_severities"];
-		assert_eq!(severities["elevated"], "error");
+		let results = &body["check_results"];
+		assert_eq!(results["elevated"], "failed");
 		assert_eq!(
-			severities["degraded"], "warning",
+			results["degraded"], "warning",
 			"a warning observation is already below the ceiling"
 		);
 		// Broken/skipped/passed don't go through the rules engine.
 		for check in ["busted", "absent", "fine"] {
 			assert!(
-				severities.get(check).is_none(),
-				"{check} must be omitted; got {severities}",
+				results.get(check).is_none(),
+				"{check} must be omitted; got {results}",
 			);
 		}
 	})

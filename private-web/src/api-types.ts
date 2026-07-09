@@ -4674,6 +4674,11 @@ export interface components {
              */
             effective_result?: string | null;
             /**
+             * @description Whether the check's policy escalates: an effective failure notifies
+             *     immediately, bypassing incident grace.
+             */
+            escalates: boolean;
+            /**
              * Format: date-time
              * @description When the issue was first raised.
              */
@@ -4747,8 +4752,6 @@ export interface components {
              *     `server_host` when absent.
              */
             server_name?: string | null;
-            /** @description Current severity level of the issue. */
-            severity: components["schemas"]["Severity"];
             /**
              * Format: date-time
              * @description If set, the issue is snoozed and won't demand attention again until
@@ -4816,15 +4819,15 @@ export interface components {
              */
             limit?: number | null;
             /**
+             * @description Restrict to issues whose latest effective result is one of these.
+             *     Omit to include all results.
+             */
+            results?: string[] | null;
+            /**
              * Format: uuid
              * @description Restrict to issues whose server belongs to this group.
              */
             serverGroupId?: string | null;
-            /**
-             * @description Restrict to issues at one of these severity levels. Omit to include
-             *     all severities.
-             */
-            severities?: components["schemas"]["Severity"][] | null;
         };
         /** @description Filters for listing the issues raised against one server. */
         IssueListForServerArgs: {
@@ -6173,6 +6176,13 @@ export interface components {
              *     an operator has resolved the alert.
              */
             active: boolean;
+            /** @description What policy made of it — the result canopy acts on. */
+            effective_result?: string | null;
+            /**
+             * @description Whether this condition's policy escalates: an effective failure
+             *     notifies immediately, bypassing incident grace.
+             */
+            escalates: boolean;
             /**
              * Format: date-time
              * @description When this condition was first raised.
@@ -6190,6 +6200,8 @@ export interface components {
             last_seen: string;
             /** @description Full detail message describing the condition. */
             message: string;
+            /** @description What canopy observed on the latest raise, before policy. */
+            observed_result?: string | null;
             /**
              * @description The stable identifier of the underlying condition, e.g.
              *     `mcp-token-expiry`. Stable across repeated raises of the same
@@ -6207,11 +6219,6 @@ export interface components {
              *     has not been resolved.
              */
             resolved_by?: string | null;
-            /**
-             * @description How severe the condition is, from `critical` (most severe) down to
-             *     `debug` (least).
-             */
-            severity: components["schemas"]["Severity"];
             /** @description Single-line headline. */
             title?: string | null;
         };
@@ -6783,29 +6790,6 @@ export interface components {
             type: string;
         };
         /**
-         * @description Canopy's severity vocabulary, narrowed from RFC 5424 to a five-level
-         *     set with operator semantics:
-         *
-         *     - `Debug`: never participates in incidents (filed for the audit
-         *       trail / per-server view only).
-         *     - `Info`, `Warning`: join an open incident for context but don't
-         *       open one or keep one open on their own.
-         *     - `Error`: opens an incident; sits in the per-group `slack_open_delay`
-         *       holding window before the Slack notification ships.
-         *     - `Critical`: opens an incident and bypasses the holding window —
-         *       the Slack notification is enqueued for immediate delivery.
-         *
-         *     Stored as text in Postgres; validated as this enum at the API layer.
-         *     Default is `Error` (the most common severity for a deliberately
-         *     filed event). The legacy syslog severities `emergency` / `alert` /
-         *     `notice` have been retired — see the
-         *     `2026-05-29-000000-0000_restrict_severities` migration; the
-         *     `FromStr` impl still accepts them as aliases for forward-compat with
-         *     any device that hasn't been updated.
-         * @enum {string}
-         */
-        Severity: "critical" | "error" | "warning" | "info" | "debug";
-        /**
          * @description Reachability of a server, based on how recently it last reported a status update.
          * @enum {string}
          */
@@ -6935,13 +6919,12 @@ export interface components {
          */
         StatusSnapshotData: {
             /**
-             * @description For each currently-unhealthy check in this push, the severity it
-             *     would be filed at if it turned into an issue. Healthy checks are
-             *     omitted. An unhealthy check with no severity listed here should be
-             *     treated as a default (warning-level) severity.
+             * @description For each currently-unhealthy check in this push, the effective
+             *     result its policy grades it to. Healthy checks are omitted. An
+             *     unhealthy check not listed here should be treated as warning.
              */
-            check_severities: {
-                [key: string]: components["schemas"]["Severity"];
+            check_results: {
+                [key: string]: string;
             };
             /**
              * Format: date-time

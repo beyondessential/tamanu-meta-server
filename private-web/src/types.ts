@@ -78,7 +78,6 @@ export type ServerRank = Solidify<Schemas["ServerRank"]>;
 export type VersionStatus = Solidify<Schemas["VersionStatus"]>;
 export type DeviceRole = Solidify<Schemas["DeviceRole"]>;
 export type ProvisionedCredential = Solidify<Schemas["ProvisionedCredential"]>;
-export type Severity = Solidify<Schemas["Severity"]>;
 export type ResolvedReason = Solidify<Schemas["ResolvedReason"]>;
 
 export type VersionStr = Solidify<Schemas["VersionStr"]>;
@@ -247,30 +246,6 @@ export function groupServersByRank<
 	}
 	return result;
 }
-
-/// Operator-facing severity vocabulary, loud → quiet. Used for both
-/// display and selection (the API now restricts severities to these
-/// five — see commons-types::issue::Severity and the
-/// 2026-05-29-restrict_severities migration).
-export const SEVERITIES: Severity[] = [
-	"critical",
-	"error",
-	"warning",
-	"info",
-	"debug",
-];
-
-/// Short one-line description of how each severity participates in the
-/// incident workflow. Used in dropdown helper text and as the
-/// SeverityChip tooltip so operators see the semantic meaning at the
-/// point of choice.
-export const SEVERITY_INTENT: Record<Severity, string> = {
-	critical: "Opens an incident immediately (no holding period)",
-	error: "Opens an incident (after the group's holding period)",
-	warning: "Joins an open incident; doesn't open one on its own",
-	info: "Joins an open incident; doesn't open one on its own",
-	debug: "Not shown in incidents",
-};
 
 /// Per-check result vocabulary. Hand-written mirror of the Rust
 /// `commons_types::status::CheckResult` (the source of truth) — the

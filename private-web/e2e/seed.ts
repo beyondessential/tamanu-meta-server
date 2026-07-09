@@ -420,12 +420,22 @@ export async function seedIssue(
 	const id = randomUUID();
 	const resolved = opts.resolved ?? false;
 	const active = resolved ? false : (opts.active ?? true);
+	const severity = opts.severity ?? "error";
+	// Mirror the filing path's result stamping so seeded rows look like
+	// real check state: active rows degraded per their severity, closed
+	// rows recovered. Critical marks the policy as escalating.
+	const result = !active
+		? "passed"
+		: severity === "warning"
+			? "warning"
+			: "failed";
+	const check = (opts.ref ?? "health").replace(/^health\//, "");
 	// Every seeded issue was degraded at some point — that's what makes it
 	// an issue rather than healthy check state, which the listings exclude.
 	await sql.query(
 		`INSERT INTO issues
-		 (id, server_id, server_group_id, device_id, source, ref, severity, message, description, active, first_seen, last_seen, resolved_at, resolved_by, resolved_reason, degraded_since, last_degraded_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11::timestamptz, NOW()), NOW(), $12, $13, $14, $15, NOW())`,
+		 (id, server_id, server_group_id, device_id, source, ref, check_name, observed_result, effective_result, escalates, severity, message, description, active, first_seen, last_seen, resolved_at, resolved_by, resolved_reason, degraded_since, last_degraded_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, $9, $10, $11, $12, $13, COALESCE($14::timestamptz, NOW()), NOW(), $15, $16, $17, $18, NOW())`,
 		[
 			id,
 			opts.serverId ?? null,
@@ -433,7 +443,10 @@ export async function seedIssue(
 			opts.deviceId ?? null,
 			opts.source ?? "alertd",
 			opts.ref ?? "health",
-			opts.severity ?? "error",
+			check,
+			result,
+			severity === "critical",
+			severity,
 			opts.message ?? "Issue message",
 			opts.description ?? null,
 			active,

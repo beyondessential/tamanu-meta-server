@@ -66,7 +66,14 @@ async fn manual_event_submit_creates_issue_without_device() {
 		let body: serde_json::Value = resp.json();
 		assert_eq!(body.get("source").and_then(|v| v.as_str()), Some("manual"));
 		assert!(body.get("device_id").map_or(true, |v| v.is_null()));
-		assert_eq!(body.get("severity").and_then(|v| v.as_str()), Some("error"));
+		assert_eq!(
+			body.get("observed_result").and_then(|v| v.as_str()),
+			Some("failed")
+		);
+		assert_eq!(
+			body.get("effective_result").and_then(|v| v.as_str()),
+			Some("failed")
+		);
 	})
 	.await;
 }

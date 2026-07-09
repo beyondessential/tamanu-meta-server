@@ -251,7 +251,8 @@ pub enum IssueFilter {
 #[derive(Debug, Clone, Default)]
 pub struct IssueListFilters {
 	pub active_only: bool,
-	pub severities: Option<Vec<Severity>>,
+	/// Restrict to issues whose latest effective result is one of these.
+	pub results: Option<Vec<CheckResult>>,
 	/// Restrict to issues whose server belongs to this group.
 	pub server_group_id: Option<Uuid>,
 	/// When `Some`, restrict to issues last seen at or after this time.
@@ -1927,7 +1928,8 @@ impl Issue {
 	/// - `active_only`: when true, only `active = true` *and* unresolved
 	///   issues — operator-resolved items don't count even if the source
 	///   keeps pushing them.
-	/// - `severities`: when `Some` and non-empty, restrict to those.
+	/// - `results`: when `Some` and non-empty, restrict to issues whose
+	///   latest effective result is one of those.
 	/// - `server_group_id`: when `Some`, restrict to issues whose server is
 	///   in that group. A direct `IN (SELECT id FROM servers WHERE group_id = $)`.
 	pub async fn list(
@@ -1957,9 +1959,9 @@ impl Issue {
 				.filter(dsl::active.eq(true))
 				.filter(dsl::resolved_at.is_null());
 		}
-		if let Some(sevs) = filters.severities.as_ref().filter(|v| !v.is_empty()) {
-			let strs: Vec<String> = sevs.iter().map(|s| s.to_string()).collect();
-			q = q.filter(dsl::severity.eq_any(strs));
+		if let Some(results) = filters.results.as_ref().filter(|v| !v.is_empty()) {
+			let strs: Vec<String> = results.iter().map(|r| r.to_string()).collect();
+			q = q.filter(dsl::effective_result.eq_any(strs));
 		}
 		if let Some(gid) = filters.server_group_id {
 			let server_ids: Vec<Uuid> = servers::table
