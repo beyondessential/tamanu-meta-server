@@ -21,7 +21,7 @@ aws-sdk-s3 = "1.136.0"
 aws-sdk-sts = "1.107.0"
 aws-smithy-mocks = "0.2.6"
 axum = "0.8.9"
-axum-test = "20.0.0"
+axum-test = "21.0.0"
 # bestool-kopia's SigV4 re-signing proxy (S3P spec). The proxy feature uses the
 # workspace's `aws-lc-rs` rustls provider.
 bestool-kopia = { version = "0.4.0", features = ["proxy"] }
