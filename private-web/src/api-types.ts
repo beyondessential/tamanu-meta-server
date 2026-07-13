@@ -3683,10 +3683,12 @@ export interface components {
              */
             check: string;
             /**
-             * @description Operator-authored documentation for this check (markdown). When
-             *     several sources report it, the first documented catalog row wins.
+             * @description Operator-authored documentation for this check (markdown), per
+             *     reporting source: documentation is keyed per (source, check), and
+             *     this page aggregates every source reporting the check name.
+             *     Sources without documentation are absent.
              */
-            documentation?: string | null;
+            documentation: components["schemas"]["CheckAttentionDoc"][];
             /**
              * @description Whether any source's policy for this check escalates its
              *     effective failures.
@@ -3700,6 +3702,16 @@ export interface components {
              *     healthy" toggle is on.
              */
             servers: components["schemas"]["CheckAttentionServerData"][];
+        };
+        /** @description One source's operator-authored documentation for a check. */
+        CheckAttentionDoc: {
+            /** @description The markdown document. */
+            documentation: string;
+            /**
+             * @description The source whose (source, check) catalog entry this document
+             *     belongs to.
+             */
+            source: string;
         };
         /**
          * @description One server whose latest status reports [`CheckAttentionData::check`],

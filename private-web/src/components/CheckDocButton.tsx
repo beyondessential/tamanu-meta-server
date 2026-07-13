@@ -24,9 +24,10 @@ export default function CheckDocButton({
 	source,
 	check,
 }: {
-	/** The source whose catalog entry to prefer when several sources
-	 * report the same check name. */
-	source?: string;
+	/** The source that reports this check. Documentation is keyed per
+	 * (source, check); only that exact entry is shown — a same-named
+	 * check from another source may describe something else entirely. */
+	source: string;
 	check: string;
 }) {
 	const [anchor, setAnchor] = useState<HTMLElement | null>(null);
@@ -63,7 +64,7 @@ export default function CheckDocButton({
 
 /** Mounted only while the popover is open, so the catalog fetch is
  * lazy: nothing is requested until the operator first asks. */
-function DocContent({ source, check }: { source?: string; check: string }) {
+function DocContent({ source, check }: { source: string; check: string }) {
 	const list = useApi("healthchecks", "list");
 	if (list.status === "loading" || list.status === "idle") {
 		return <LinearProgress sx={{ width: 200 }} />;
@@ -75,14 +76,12 @@ function DocContent({ source, check }: { source?: string; check: string }) {
 			</Typography>
 		);
 	}
-	// Prefer the reporting source's entry; else any documented one (the
-	// same rule as the attention page when several sources report a
-	// check by the same name).
-	const rows = list.data.filter((r) => r.check_name === check);
+	// Documentation is keyed per (source, check): only the reporting
+	// source's own entry applies. A same-named check from another source
+	// may describe something else entirely, so no fallback.
 	const documentation =
-		rows.find((r) => r.source === source)?.documentation ??
-		rows.find((r) => r.documentation)?.documentation ??
-		null;
+		list.data.find((r) => r.source === source && r.check_name === check)
+			?.documentation ?? null;
 	return (
 		<Box>
 			{documentation ? (

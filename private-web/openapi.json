@@ -6921,6 +6921,7 @@
         "required": [
           "check",
           "escalates",
+          "documentation",
           "servers"
         ],
         "properties": {
@@ -6936,11 +6937,11 @@
             "description": "The check name that was queried, echoed back so the page can\nrender its heading without re-decoding the request."
           },
           "documentation": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Operator-authored documentation for this check (markdown). When\nseveral sources report it, the first documented catalog row wins."
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CheckAttentionDoc"
+            },
+            "description": "Operator-authored documentation for this check (markdown), per\nreporting source: documentation is keyed per (source, check), and\nthis page aggregates every source reporting the check name.\nSources without documentation are absent."
           },
           "escalates": {
             "type": "boolean",
@@ -6952,6 +6953,24 @@
               "$ref": "#/components/schemas/CheckAttentionServerData"
             },
             "description": "Every live server whose latest status reports this check, at any\nresult, ordered as a TODO list: failed, warning, broken, passed,\nskipped (most urgent first), then by group name then server name.\nThe client filters out the passed/skipped tail unless the \"show\nhealthy\" toggle is on."
+          }
+        }
+      },
+      "CheckAttentionDoc": {
+        "type": "object",
+        "description": "One source's operator-authored documentation for a check.",
+        "required": [
+          "source",
+          "documentation"
+        ],
+        "properties": {
+          "documentation": {
+            "type": "string",
+            "description": "The markdown document."
+          },
+          "source": {
+            "type": "string",
+            "description": "The source whose (source, check) catalog entry this document\nbelongs to."
           }
         }
       },

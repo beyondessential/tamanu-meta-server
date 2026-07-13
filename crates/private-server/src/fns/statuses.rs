@@ -330,15 +330,27 @@ pub struct CheckAttentionData {
 	/// Whether any source's policy for this check escalates its
 	/// effective failures.
 	pub escalates: bool,
-	/// Operator-authored documentation for this check (markdown). When
-	/// several sources report it, the first documented catalog row wins.
-	pub documentation: Option<String>,
+	/// Operator-authored documentation for this check (markdown), per
+	/// reporting source: documentation is keyed per (source, check), and
+	/// this page aggregates every source reporting the check name.
+	/// Sources without documentation are absent.
+	pub documentation: Vec<CheckAttentionDoc>,
 	/// Every live server whose latest status reports this check, at any
 	/// result, ordered as a TODO list: failed, warning, broken, passed,
 	/// skipped (most urgent first), then by group name then server name.
 	/// The client filters out the passed/skipped tail unless the "show
 	/// healthy" toggle is on.
 	pub servers: Vec<CheckAttentionServerData>,
+}
+
+/// One source's operator-authored documentation for a check.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct CheckAttentionDoc {
+	/// The source whose (source, check) catalog entry this document
+	/// belongs to.
+	pub source: String,
+	/// The markdown document.
+	pub documentation: String,
 }
 
 /// Rank used to order [`CheckAttentionServerData::result`] most-urgent
@@ -448,7 +460,15 @@ pub async fn check_attention(
 		.map(|row| row.ceiling)
 		.min_by_key(|c| c.urgency_rank());
 	let escalates = policies.iter().any(|row| row.escalates);
-	let documentation = policies.iter().find_map(|row| row.documentation.clone());
+	let documentation = policies
+		.iter()
+		.filter_map(|row| {
+			Some(CheckAttentionDoc {
+				source: row.source.clone(),
+				documentation: row.documentation.clone()?,
+			})
+		})
+		.collect();
 
 	Ok(Json(CheckAttentionData {
 		check: args.check,

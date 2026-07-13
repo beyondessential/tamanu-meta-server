@@ -119,6 +119,14 @@ test.describe("server detail checks table", () => {
 			documentation:
 				"## Description\n\nWatches the PostgreSQL connection.\n\n## Solve\n\nCheck pg_hba.conf.",
 		});
+		// Another source documents a same-named "disk" check: that document
+		// must NOT leak into alertd's undocumented one below — documentation
+		// is keyed per (source, check).
+		await seedCheckPolicy(sql, {
+			checkName: "disk",
+			source: "seedling",
+			documentation: "## Description\n\nSeedling's unrelated disk check.",
+		});
 
 		await page.goto(`/servers/${server.id}`);
 		await page
@@ -132,12 +140,16 @@ test.describe("server detail checks table", () => {
 		).toBeVisible();
 
 		// An undocumented check still gets the affordance, prompting for
-		// the missing document instead of hiding the icon.
+		// the missing document instead of hiding the icon — and another
+		// source's same-named document doesn't leak in.
 		await page.keyboard.press("Escape");
 		await page.getByRole("button", { name: "Documentation for disk" }).click();
 		await expect(
 			page.getByText("Nobody has documented this check yet."),
 		).toBeVisible();
+		await expect(
+			page.getByText("Seedling's unrelated disk check."),
+		).not.toBeVisible();
 		await expect(page.getByRole("link", { name: "Write it" })).toBeVisible();
 	});
 

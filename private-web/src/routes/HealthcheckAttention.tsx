@@ -89,16 +89,24 @@ export default function HealthcheckAttention() {
 				</Typography>
 			</Box>
 
-			{result.status === "ok" && result.data.documentation && (
-				<Accordion variant="outlined" disableGutters>
-					<AccordionSummary expandIcon={<ExpandMoreIcon />}>
-						<Typography variant="subtitle2">About this check</Typography>
-					</AccordionSummary>
-					<AccordionDetails>
-						<Markdown>{result.data.documentation}</Markdown>
-					</AccordionDetails>
-				</Accordion>
-			)}
+			{/* Documentation is per (source, check); this page aggregates
+			    every source reporting the check name, so each documented
+			    source gets its own panel, labelled when there are several. */}
+			{result.status === "ok" &&
+				result.data.documentation.map((doc) => (
+					<Accordion key={doc.source} variant="outlined" disableGutters>
+						<AccordionSummary expandIcon={<ExpandMoreIcon />}>
+							<Typography variant="subtitle2">
+								About this check
+								{result.data.documentation.length > 1 &&
+									` (as reported by ${doc.source})`}
+							</Typography>
+						</AccordionSummary>
+						<AccordionDetails>
+							<Markdown>{doc.documentation}</Markdown>
+						</AccordionDetails>
+					</Accordion>
+				))}
 
 			<FormControlLabel
 				control={
