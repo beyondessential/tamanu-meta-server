@@ -7923,7 +7923,7 @@
       },
       "HealthcheckSample": {
         "type": "object",
-        "description": "A real-world sample of the data a conditional rule can reference for a\ngiven healthcheck, taken from the most recent status report (across\nall servers) that included it.",
+        "description": "A real-world sample of the data a conditional rule can reference for a\ngiven healthcheck, taken from the most recent status report (across\nall servers) from the check's own source that included it.",
         "required": [
           "status_extra",
           "check_extra",
@@ -10757,12 +10757,17 @@
         "type": "object",
         "description": "Request body identifying which healthcheck to sample data for.",
         "required": [
+          "source",
           "check_name"
         ],
         "properties": {
           "check_name": {
             "type": "string",
             "description": "The healthcheck name to sample."
+          },
+          "source": {
+            "type": "string",
+            "description": "The source that reports the check. A check's identity is the\n(source, check) pair; another source's same-named check may carry\nentirely different fields."
           }
         }
       },

@@ -295,7 +295,7 @@ async fn sample_returns_null_when_no_server_has_reported_the_check() {
 		.unwrap();
 		let response = private
 			.post("/api/healthchecks/sample")
-			.json(&json!({"check_name": "uncharted_check"}))
+			.json(&json!({"source": "alertd", "check_name": "uncharted_check"}))
 			.await;
 		response.assert_status_ok();
 		let body: serde_json::Value = response.json();
@@ -325,7 +325,7 @@ async fn sample_materialises_latest_push_for_this_check() {
 
 		let response = private
 			.post("/api/healthchecks/sample")
-			.json(&json!({"check_name": "disk_space"}))
+			.json(&json!({"source": "alertd", "check_name": "disk_space"}))
 			.await;
 		response.assert_status_ok();
 		let body: serde_json::Value = response.json();
@@ -378,7 +378,7 @@ async fn sample_normalises_result_form_entries() {
 
 		let response = private
 			.post("/api/healthchecks/sample")
-			.json(&json!({"check_name": "queue_depth"}))
+			.json(&json!({"source": "alertd", "check_name": "queue_depth"}))
 			.await;
 		response.assert_status_ok();
 		let body: serde_json::Value = response.json();
@@ -409,7 +409,7 @@ async fn sample_picks_the_most_recent_push_across_servers() {
 
 		let response = private
 			.post("/api/healthchecks/sample")
-			.json(&json!({"check_name": "cert_expiry"}))
+			.json(&json!({"source": "alertd", "check_name": "cert_expiry"}))
 			.await;
 		response.assert_status_ok();
 		let body: serde_json::Value = response.json();

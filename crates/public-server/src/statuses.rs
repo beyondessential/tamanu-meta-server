@@ -24,7 +24,7 @@ use database::{
 	diesel_async::{AsyncConnection, AsyncPgConnection},
 	issues::{CheckStateStamp, Issue, NewEvent},
 	servers::Server,
-	silenced_refs::silenced_refs_with_prefix,
+	silenced_refs::silenced_health_checks_for_server,
 	statuses::{NewStatus, Status},
 };
 use jiff::Timestamp;
@@ -380,11 +380,10 @@ async fn effective_check_severities(
 		.map(|(name, ceiling)| (name, ceiling.into()))
 		.collect();
 
-	let health_prefix = format!("{HEALTH_REF}/");
-	for r#ref in silenced_refs_with_prefix(db, server_id, group_id, &health_prefix).await? {
-		if let Some(check) = r#ref.strip_prefix(&health_prefix) {
-			map.insert(check.to_string(), CheckSeverity::Skip);
-		}
+	// Silences are keyed per (source, check): only this source's own
+	// silences force its checks to skip.
+	for check in silenced_health_checks_for_server(db, server_id, group_id, source).await? {
+		map.insert(check, CheckSeverity::Skip);
 	}
 
 	Ok(map)

@@ -4324,7 +4324,7 @@ export interface components {
         /**
          * @description A real-world sample of the data a conditional rule can reference for a
          *     given healthcheck, taken from the most recent status report (across
-         *     all servers) that included it.
+         *     all servers) from the check's own source that included it.
          */
         HealthcheckSample: {
             /**
@@ -6161,6 +6161,12 @@ export interface components {
         SampleArgs: {
             /** @description The healthcheck name to sample. */
             check_name: string;
+            /**
+             * @description The source that reports the check. A check's identity is the
+             *     (source, check) pair; another source's same-named check may carry
+             *     entirely different fields.
+             */
+            source: string;
         };
         /**
          * @description Request body for creating a new snippet, or saving a new version of an

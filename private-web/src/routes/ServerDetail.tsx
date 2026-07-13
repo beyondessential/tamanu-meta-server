@@ -946,9 +946,12 @@ function ChecksTableBody({
 }) {
 	// Silenced checks render skip-style and sort with the skipped tail —
 	// they don't count toward the server's health rollup (the backend
-	// applies the same exclusion to the headline HealthState).
+	// applies the same exclusion to the headline HealthState). Only this
+	// status's own source's silences apply: a silence on another source's
+	// same-named check is about a different check.
 	const silencedChecks = new Set<string>();
 	for (const s of [...serverSilences, ...groupSilences]) {
+		if (s.source !== statusSource) continue;
 		const check = healthcheckNameFromRef(s.source, s.ref);
 		if (check !== null) silencedChecks.add(check);
 	}

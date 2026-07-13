@@ -1,12 +1,13 @@
 //! Queries backing the device-facing effective check map:
 //! `CheckPolicy::ceiling_map_for_source` (static policy ceilings,
-//! ignoring conditional rules) and `silenced_refs::silenced_refs_with_prefix`
-//! (server- plus group-scope silences under a ref prefix).
+//! ignoring conditional rules) and
+//! `silenced_refs::silenced_health_checks_for_server` (server- plus
+//! group-scope silences under one reporting source).
 
 use commons_types::status::CheckResult;
 use database::check_policies::{CheckPolicy, IfLadder};
 use database::silenced_refs::{
-	ServerGroupSilencedRef, ServerSilencedRef, silenced_refs_with_prefix,
+	ServerGroupSilencedRef, ServerSilencedRef, silenced_health_checks_for_server,
 };
 use diesel::{sql_query, sql_types};
 use diesel_async::RunQueryDsl;
@@ -107,7 +108,7 @@ async fn ceiling_map_ignores_conditional_rules() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn silenced_refs_with_prefix_combines_scopes_and_filters() {
+async fn silenced_checks_combine_scopes_and_stay_per_source() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let group_id = insert_group(&mut conn).await;
 		let server_id = insert_server(&mut conn, Some(group_id)).await;
@@ -119,8 +120,9 @@ async fn silenced_refs_with_prefix_combines_scopes_and_filters() {
 		ServerGroupSilencedRef::add(&mut conn, group_id, "alertd", "health/groupwide", None)
 			.await
 			.expect("group silence");
-		// A silence under any source matches: healthcheck refs are keyed
-		// per reporting source, and this helper correlates by check name.
+		// None of these may leak into alertd's set: a check's identity is
+		// the (source, check) pair, so another source's silence never
+		// applies; nor do canopy's own silences or other servers'.
 		ServerSilencedRef::add(
 			&mut conn,
 			server_id,
@@ -130,9 +132,6 @@ async fn silenced_refs_with_prefix_combines_scopes_and_filters() {
 		)
 		.await
 		.expect("other-source silence");
-		// None of these may leak into the result: reserved-source silences
-		// present at their bare refs (outside the health/ namespace), and
-		// silences on other servers don't apply here at all.
 		ServerSilencedRef::add(&mut conn, server_id, "canopy", "reachability", None)
 			.await
 			.expect("canopy silence");
@@ -140,21 +139,20 @@ async fn silenced_refs_with_prefix_combines_scopes_and_filters() {
 			.await
 			.expect("other-server silence");
 
-		let mut refs = silenced_refs_with_prefix(&mut conn, server_id, Some(group_id), "health/")
-			.await
-			.expect("refs");
-		refs.sort();
+		let checks =
+			silenced_health_checks_for_server(&mut conn, server_id, Some(group_id), "alertd")
+				.await
+				.expect("checks");
 		assert_eq!(
-			refs,
-			vec!["health/flaky", "health/groupwide", "health/other-source"]
+			checks.into_iter().collect::<Vec<_>>(),
+			vec!["flaky", "groupwide"]
 		);
 
 		// Ungrouped lookup only sees the server-scope silences.
-		let mut refs = silenced_refs_with_prefix(&mut conn, server_id, None, "health/")
+		let checks = silenced_health_checks_for_server(&mut conn, server_id, None, "alertd")
 			.await
-			.expect("refs without group");
-		refs.sort();
-		assert_eq!(refs, vec!["health/flaky", "health/other-source"]);
+			.expect("checks without group");
+		assert_eq!(checks.into_iter().collect::<Vec<_>>(), vec!["flaky"]);
 	})
 	.await
 }

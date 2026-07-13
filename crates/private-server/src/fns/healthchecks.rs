@@ -352,13 +352,17 @@ pub async fn update_rules(
 /// Request body identifying which healthcheck to sample data for.
 #[derive(Deserialize, ToSchema)]
 pub struct SampleArgs {
+	/// The source that reports the check. A check's identity is the
+	/// (source, check) pair; another source's same-named check may carry
+	/// entirely different fields.
+	pub source: String,
 	/// The healthcheck name to sample.
 	pub check_name: String,
 }
 
 /// A real-world sample of the data a conditional rule can reference for a
 /// given healthcheck, taken from the most recent status report (across
-/// all servers) that included it.
+/// all servers) from the check's own source that included it.
 #[derive(Serialize, ToSchema)]
 pub struct HealthcheckSample {
 	/// Additional top-level fields submitted with the status report that
@@ -418,7 +422,9 @@ pub async fn sample(
 	Json(args): Json<SampleArgs>,
 ) -> Result<Json<HealthcheckSampleResponse>> {
 	let mut conn = state.db.get().await?;
-	let Some(status) = Status::latest_for_check_name(&mut conn, &args.check_name).await? else {
+	let Some(status) =
+		Status::latest_for_check_name(&mut conn, &args.source, &args.check_name).await?
+	else {
 		return Ok(Json(HealthcheckSampleResponse {
 			check_name: args.check_name,
 			sample: None,

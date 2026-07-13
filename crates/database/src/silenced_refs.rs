@@ -12,7 +12,7 @@
 //! source-reported checks, while the scoped-policy storage is keyed by
 //! bare check name. The mapping is applied on the way in and out.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 
 use commons_errors::Result;
 use diesel::prelude::*;
@@ -111,110 +111,37 @@ pub async fn is_silenced(
 	))
 }
 
-/// All refs silenced for this server under any source and starting with
-/// `ref_prefix`, combining the server's own silences with its group's.
-/// `group_id` is the server's current group; pass `None` if the server is
-/// ungrouped. Used to build the device-facing effective check-severity map.
-/// May contain duplicates when a ref is silenced at both scopes.
-pub async fn silenced_refs_with_prefix(
-	db: &mut AsyncPgConnection,
-	server_id: Uuid,
-	group_id: Option<Uuid>,
-	ref_prefix: &str,
-) -> Result<Vec<String>> {
-	let mut refs: Vec<String> =
-		ScopedCheckPolicy::list_silences(db, PolicyScope::Server(server_id))
-			.await?
-			.into_iter()
-			.map(|p| check_to_ref(&p.source, &p.check_name))
-			.collect();
-	if let Some(gid) = group_id {
-		refs.extend(
-			ScopedCheckPolicy::list_silences(db, PolicyScope::Group(gid))
-				.await?
-				.into_iter()
-				.map(|p| check_to_ref(&p.source, &p.check_name)),
-		);
-	}
-	refs.retain(|r| r.starts_with(ref_prefix));
-	Ok(refs)
-}
-
-/// Healthcheck names silenced for each of the given `(server, group)`
-/// pairs, at either scope, whichever source they were silenced under.
-/// Pass each server's current group id (`None` for ungrouped). One batch
-/// query regardless of how many servers are asked about. Servers with no
-/// applicable silences are absent from the map.
+/// Check names silenced for a server under one reporting source, at
+/// either server or group scope. `group_id` is the server's current
+/// group; pass `None` if ungrouped. A check's identity is the (source,
+/// check) pair, so a silence on another source's same-named check never
+/// applies.
 ///
-/// This feeds [`crate::statuses::Status::health_state_ignoring`]: a
-/// silenced check keeps recording results but is presented as skipped
-/// and doesn't count toward the server's health rollup.
-pub async fn silenced_health_checks_for_servers(
-	db: &mut AsyncPgConnection,
-	servers: &[(Uuid, Option<Uuid>)],
-) -> Result<HashMap<Uuid, BTreeSet<String>>> {
-	use crate::schema::scoped_check_policies::dsl;
-
-	let mut out: HashMap<Uuid, BTreeSet<String>> = HashMap::new();
-	if servers.is_empty() {
-		return Ok(out);
-	}
-
-	let server_ids: Vec<Uuid> = servers.iter().map(|(id, _)| *id).collect();
-	let group_ids: Vec<Uuid> = servers
-		.iter()
-		.filter_map(|(_, group)| *group)
-		.collect::<BTreeSet<_>>()
-		.into_iter()
-		.collect();
-
-	// Health rollups match by check name across every reporting source;
-	// canopy/manual silences aren't source-reported checks and don't
-	// belong in the ignore-set.
-	let rows: Vec<(Option<Uuid>, Option<Uuid>, String)> = dsl::scoped_check_policies
-		.select((dsl::server_id, dsl::server_group_id, dsl::check_name))
-		.filter(dsl::ceiling.eq("skipped"))
-		.filter(dsl::source.ne_all([CANOPY_SOURCE, MANUAL_SOURCE]))
-		.filter(
-			dsl::server_id
-				.eq_any(&server_ids)
-				.or(dsl::server_group_id.eq_any(&group_ids)),
-		)
-		.load(db)
-		.await?;
-
-	let mut by_group: HashMap<Uuid, Vec<String>> = HashMap::new();
-	for (server_id, group_id, check) in rows {
-		if let Some(sid) = server_id {
-			out.entry(sid).or_default().insert(check);
-		} else if let Some(gid) = group_id {
-			by_group.entry(gid).or_default().push(check);
-		}
-	}
-	for (server_id, group_id) in servers {
-		if let Some(checks) = group_id.as_ref().and_then(|g| by_group.get(g)) {
-			out.entry(*server_id)
-				.or_default()
-				.extend(checks.iter().cloned());
-		}
-	}
-
-	Ok(out)
-}
-
-/// Single-server variant of [`silenced_health_checks_for_servers`].
-/// `group_id` is the server's current group; pass `None` if ungrouped.
+/// This feeds [`crate::statuses::Status::health_state_ignoring`] (a
+/// status row's checks all belong to the row's one source) and the
+/// device-facing effective check map: a silenced check keeps recording
+/// results but is presented as skipped and doesn't count toward the
+/// server's health rollup.
 pub async fn silenced_health_checks_for_server(
 	db: &mut AsyncPgConnection,
 	server_id: Uuid,
 	group_id: Option<Uuid>,
+	source: &str,
 ) -> Result<BTreeSet<String>> {
-	Ok(
-		silenced_health_checks_for_servers(db, &[(server_id, group_id)])
-			.await?
-			.remove(&server_id)
-			.unwrap_or_default(),
-	)
+	use crate::schema::scoped_check_policies::dsl;
+
+	let rows: Vec<String> = dsl::scoped_check_policies
+		.select(dsl::check_name)
+		.filter(dsl::ceiling.eq("skipped"))
+		.filter(dsl::source.eq(source))
+		.filter(
+			dsl::server_id.eq(server_id).or(dsl::server_group_id
+				.is_not_distinct_from(group_id)
+				.and(dsl::server_group_id.is_not_null())),
+		)
+		.load(db)
+		.await?;
+	Ok(rows.into_iter().collect())
 }
 
 impl ServerSilencedRef {

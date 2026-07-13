@@ -601,10 +601,13 @@ pub async fn snapshot(
 	// Operator-silenced healthchecks present as skipped and don't count
 	// toward the rollup, even on historical snapshots — a silence
 	// expresses current operator intent about the check, not the push.
+	// Scoped to the push's own source: a silence on another source's
+	// same-named check is about a different check.
 	let silenced_checks = database::silenced_refs::silenced_health_checks_for_server(
 		&mut conn,
 		server.id,
 		server.group_id,
+		&status.source,
 	)
 	.await?;
 	let health_state = status.health_state_ignoring(&silenced_checks);

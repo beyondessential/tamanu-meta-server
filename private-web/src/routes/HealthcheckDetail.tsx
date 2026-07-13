@@ -552,7 +552,10 @@ function RulesCard({
 	// the most recent status push (across all servers) that reported
 	// this check. Powers the Add/Edit dialog's autocomplete + validation.
 	// Fetched lazily; the dialog handles a null sample gracefully.
-	const sampleResp = useApi("healthchecks", "sample", { check_name: row.check_name });
+	const sampleResp = useApi("healthchecks", "sample", {
+		source: row.source,
+		check_name: row.check_name,
+	});
 	const sample: HealthcheckSample | null =
 		sampleResp.status === "ok" ? (sampleResp.data.sample ?? null) : null;
 
