@@ -23,6 +23,7 @@ import MessageView from "./MessageView";
 import NotesList, { AddNoteButton } from "./NotesList";
 import ResolverAvatar from "./ResolverAvatar";
 import ServerNameWithGroup from "./ServerNameWithGroup";
+import CheckDocButton from "./CheckDocButton";
 import CheckResultChip from "./CheckResultChip";
 import StatusSnapshotPanel, { StatusSnapshotButton } from "./StatusSnapshot";
 import TimeAgo from "./TimeAgo";
@@ -225,6 +226,14 @@ function Header({
 					<CheckResultChip result={issue.effective_result as CheckResult} />
 				</Box>
 			)}
+			{headerCheckName(issue) && (
+				<Box sx={{ flexShrink: 0 }}>
+					<CheckDocButton
+						source={issue.source}
+						check={headerCheckName(issue) as string}
+					/>
+				</Box>
+			)}
 			<Typography
 				variant="body2"
 				color="text.secondary"
@@ -234,6 +243,13 @@ function Header({
 			</Typography>
 		</Stack>
 	);
+}
+
+/** The check this issue tracks, for the header's documentation button:
+ * the stamped check name, or derived from the ref for rows that predate
+ * the check-state model. */
+function headerCheckName(issue: IssueData): string | null {
+	return issue.check_name ?? healthcheckNameFromRef(issue.source, issue.ref);
 }
 
 /** Header time slot. For closed issues, gives the closure context — reason

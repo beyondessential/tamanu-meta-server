@@ -1,5 +1,6 @@
 import {
 	resetSeededTables,
+	seedCheckPolicy,
 	seedIssue,
 	seedServer,
 	seedServerGroup,
@@ -9,6 +10,38 @@ import { expect, test } from "./test-fixtures";
 // Group-scoped issues (server_id NULL, server_group_id set) must not render a
 // per-server link (`/servers/null`) or a per-server silence action — both only
 // make sense for server-scoped issues.
+test.describe("issue check documentation", () => {
+	test.beforeEach(async ({ sql }) => {
+		await resetSeededTables(sql);
+	});
+
+	test("the ? button on an issue row pops up the check's documentation", async ({
+		page,
+		sql,
+	}) => {
+		const server = await seedServer(sql, { name: "doc-issue-server" });
+		await seedIssue(sql, {
+			serverId: server.id,
+			ref: "health/postgres",
+			message: "postgres is down",
+		});
+		await seedCheckPolicy(sql, {
+			checkName: "postgres",
+			documentation:
+				"## Description\n\nWatches the PostgreSQL connection.\n\n## Solve\n\nCheck pg_hba.conf.",
+		});
+
+		await page.goto("/incidents?showAll=1");
+		await expect(page.getByText("postgres is down")).toBeVisible();
+		await page
+			.getByRole("button", { name: "Documentation for postgres" })
+			.click();
+		await expect(
+			page.getByText("Watches the PostgreSQL connection."),
+		).toBeVisible();
+	});
+});
+
 test.describe("group-scoped issue rendering", () => {
 	test.beforeEach(async ({ sql }) => {
 		await resetSeededTables(sql);

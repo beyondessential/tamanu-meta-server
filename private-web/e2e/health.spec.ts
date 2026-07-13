@@ -1,5 +1,6 @@
 import { expect, test } from "./test-fixtures";
 import {
+	seedCheckPolicy,
 	resetSeededTables,
 	seedGroupSilencedRef,
 	seedServer,
@@ -95,6 +96,49 @@ test.describe("server detail checks table", () => {
 		// The failing entry surfaces its extras as a key/value line.
 		await expect(page.getByText("hint")).toBeVisible();
 		await expect(page.getByText("free_pct: 2")).toBeVisible();
+	});
+
+	test("the ? button pops up the check's rendered documentation", async ({
+		page,
+		sql,
+	}) => {
+		await seedVersion(sql, { major: 1, minor: 0, patch: 0 });
+		const server = await seedServer(sql, {
+			name: "documented-server",
+			kind: "central",
+		});
+		await seedStatus(sql, {
+			serverId: server.id,
+			health: [
+				{ check: "postgres", result: "failed" },
+				{ check: "disk", result: "passed" },
+			],
+		});
+		await seedCheckPolicy(sql, {
+			checkName: "postgres",
+			documentation:
+				"## Description\n\nWatches the PostgreSQL connection.\n\n## Solve\n\nCheck pg_hba.conf.",
+		});
+
+		await page.goto(`/servers/${server.id}`);
+		await page
+			.getByRole("button", { name: "Documentation for postgres" })
+			.click();
+		await expect(
+			page.getByText("Watches the PostgreSQL connection."),
+		).toBeVisible();
+		await expect(
+			page.getByRole("link", { name: "Edit documentation" }),
+		).toBeVisible();
+
+		// An undocumented check still gets the affordance, prompting for
+		// the missing document instead of hiding the icon.
+		await page.keyboard.press("Escape");
+		await page.getByRole("button", { name: "Documentation for disk" }).click();
+		await expect(
+			page.getByText("Nobody has documented this check yet."),
+		).toBeVisible();
+		await expect(page.getByRole("link", { name: "Write it" })).toBeVisible();
 	});
 
 	test("sorts skipped checks last, after passing ones", async ({

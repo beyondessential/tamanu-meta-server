@@ -45,6 +45,7 @@ import {
 	useNavigate,
 	useParams,
 } from "react-router-dom";
+import CheckDocButton from "../components/CheckDocButton";
 import CheckExtrasList, { checkEntryExtras } from "../components/CheckExtras";
 import ExternalUsersDetails, {
 	parseExternalUserSessions,
@@ -1127,6 +1128,7 @@ function CheckRow({
 							{entry.check}
 						</MuiLink>
 					</Typography>
+					<CheckDocButton source={statusSource} check={entry.check} />
 					<SilencedChip
 						serverSilence={serverSilence}
 						groupSilence={groupSilence}
