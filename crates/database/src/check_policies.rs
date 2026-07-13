@@ -327,20 +327,6 @@ impl CheckPolicy {
 			.map_err(AppError::from)
 	}
 
-	/// The catalog rows for a check name across every source that
-	/// reports it. Pages that correlate by check name alone (the
-	/// per-check attention view) use this.
-	pub async fn get_by_name(db: &mut AsyncPgConnection, check_name: &str) -> Result<Vec<Self>> {
-		use crate::schema::check_policies::dsl;
-		dsl::check_policies
-			.select(Self::as_select())
-			.filter(dsl::check_name.eq(check_name))
-			.order(dsl::source.asc())
-			.load(db)
-			.await
-			.map_err(AppError::from)
-	}
-
 	/// Update the ceiling, escalation flag, and optionally notes for a
 	/// check, stamping `reviewed_at = NOW()` and `reviewed_by = by`. Even
 	/// a no-op save marks the row reviewed — operators can ack a check

@@ -289,9 +289,6 @@ pub struct CheckAttentionServerData {
 	pub group_id: Option<Uuid>,
 	/// The server's group name, if it belongs to one.
 	pub group_name: Option<String>,
-	/// The source that reports this check on this server. A server can
-	/// appear once per source when several report the same check name.
-	pub source: String,
 	/// The check's observed result on its latest report. The UI shows
 	/// warning/failed/broken servers by default and puts passed/skipped
 	/// ones behind a "show healthy" toggle.
@@ -309,6 +306,10 @@ pub struct CheckAttentionServerData {
 /// Request body for [`check_attention`].
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct CheckAttentionArgs {
+	/// The source that reports the check. A check's identity is the
+	/// (source, check) pair — a same-named check from another source is
+	/// a different check.
+	pub source: String,
 	/// The healthcheck name to look up, exactly as reported by devices in
 	/// `health[].check` (an arbitrary, device/plugin-defined string).
 	pub check: String,
@@ -319,38 +320,26 @@ pub struct CheckAttentionArgs {
 /// it, failing or healthy.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct CheckAttentionData {
-	/// The check name that was queried, echoed back so the page can
-	/// render its heading without re-decoding the request.
+	/// The source that was queried, echoed back with `check` so the page
+	/// can render its heading without re-decoding the request.
+	pub source: String,
+	/// The check name that was queried.
 	pub check: String,
-	/// The most urgent configured policy ceiling for this check across
-	/// the sources that report it, or `None` if no server has ever
-	/// reported it yet (so it has no catalog row).
+	/// The configured policy ceiling for this (source, check), or `None`
+	/// if the source has never reported it (so it has no catalog row).
 	#[schema(value_type = Option<String>)]
 	pub ceiling: Option<CheckResult>,
-	/// Whether any source's policy for this check escalates its
-	/// effective failures.
+	/// Whether this check's policy escalates its effective failures.
 	pub escalates: bool,
-	/// Operator-authored documentation for this check (markdown), per
-	/// reporting source: documentation is keyed per (source, check), and
-	/// this page aggregates every source reporting the check name.
-	/// Sources without documentation are absent.
-	pub documentation: Vec<CheckAttentionDoc>,
-	/// Every live server whose latest status reports this check, at any
-	/// result, ordered as a TODO list: failed, warning, broken, passed,
-	/// skipped (most urgent first), then by group name then server name.
-	/// The client filters out the passed/skipped tail unless the "show
-	/// healthy" toggle is on.
+	/// Operator-authored documentation for this (source, check)
+	/// (markdown), or `None` if nobody has written it yet.
+	pub documentation: Option<String>,
+	/// Every live server whose latest state from this source reports
+	/// this check, at any result, ordered as a TODO list: failed,
+	/// warning, broken, passed, skipped (most urgent first), then by
+	/// group name then server name. The client filters out the
+	/// passed/skipped tail unless the "show healthy" toggle is on.
 	pub servers: Vec<CheckAttentionServerData>,
-}
-
-/// One source's operator-authored documentation for a check.
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct CheckAttentionDoc {
-	/// The source whose (source, check) catalog entry this document
-	/// belongs to.
-	pub source: String,
-	/// The markdown document.
-	pub documentation: String,
 }
 
 /// Rank used to order [`CheckAttentionServerData::result`] most-urgent
@@ -367,16 +356,16 @@ fn check_result_rank(result: CheckResult) -> u8 {
 	}
 }
 
-/// List the servers whose check state reports one named healthcheck.
+/// List the servers whose check state reports one (source, check).
 ///
 /// Everything the per-healthcheck page needs: the catalog's configured
-/// policy for `check` (if any) plus every live server's current state for
-/// it, across every source that reports it — the real-time picture, with
-/// each degraded row carrying `failing_since` (the start of its current
-/// degradation streak). This is the data behind the
-/// `/healthchecks/:check` "who's affected" page, which doubles as an
-/// operator TODO list and as a way to correlate servers sharing the same
-/// issue during a fleet-wide incident.
+/// policy for the (source, check) (if any) plus every live server's
+/// current state for it — the real-time picture, with each degraded row
+/// carrying `failing_since` (the start of its current degradation
+/// streak). This is the data behind the `/healthchecks/:source/:check`
+/// "who's affected" page, which doubles as an operator TODO list and as
+/// a way to correlate servers sharing the same issue during a
+/// fleet-wide incident.
 #[utoipa::path(
 	post,
 	path = "/check_attention",
@@ -393,7 +382,7 @@ pub async fn check_attention(
 	Json(args): Json<CheckAttentionArgs>,
 ) -> Result<Json<CheckAttentionData>> {
 	let mut conn = state.db_read.get().await?;
-	let states = Issue::check_state_for_check(&mut conn, &args.check).await?;
+	let states = Issue::check_state_for_check(&mut conn, &args.source, &args.check).await?;
 
 	// Live servers only: archived servers and canopy's own row never
 	// appear on the attention list.
@@ -439,7 +428,6 @@ pub async fn check_attention(
 				server_name: server.name.clone().unwrap_or_default(),
 				group_id: server.group_id,
 				group_name,
-				source: st.source,
 				result,
 				data: st.detail.unwrap_or_else(|| serde_json::json!({})),
 				failing_since,
@@ -454,27 +442,14 @@ pub async fn check_attention(
 			.then_with(|| a.server_name.cmp(&b.server_name))
 	});
 
-	let policies = CheckPolicy::get_by_name(&mut conn, &args.check).await?;
-	let ceiling = policies
-		.iter()
-		.map(|row| row.ceiling)
-		.min_by_key(|c| c.urgency_rank());
-	let escalates = policies.iter().any(|row| row.escalates);
-	let documentation = policies
-		.iter()
-		.filter_map(|row| {
-			Some(CheckAttentionDoc {
-				source: row.source.clone(),
-				documentation: row.documentation.clone()?,
-			})
-		})
-		.collect();
+	let policy = CheckPolicy::get(&mut conn, &args.source, &args.check).await?;
 
 	Ok(Json(CheckAttentionData {
+		source: args.source,
 		check: args.check,
-		ceiling,
-		escalates,
-		documentation,
+		ceiling: policy.as_ref().map(|p| p.ceiling),
+		escalates: policy.as_ref().is_some_and(|p| p.escalates),
+		documentation: policy.and_then(|p| p.documentation),
 		servers,
 	}))
 }

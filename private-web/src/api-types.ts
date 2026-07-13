@@ -2875,15 +2875,15 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * List the servers whose check state reports one named healthcheck.
+         * List the servers whose check state reports one (source, check).
          * @description Everything the per-healthcheck page needs: the catalog's configured
-         *     policy for `check` (if any) plus every live server's current state for
-         *     it, across every source that reports it — the real-time picture, with
-         *     each degraded row carrying `failing_since` (the start of its current
-         *     degradation streak). This is the data behind the
-         *     `/healthchecks/:check` "who's affected" page, which doubles as an
-         *     operator TODO list and as a way to correlate servers sharing the same
-         *     issue during a fleet-wide incident.
+         *     policy for the (source, check) (if any) plus every live server's
+         *     current state for it — the real-time picture, with each degraded row
+         *     carrying `failing_since` (the start of its current degradation
+         *     streak). This is the data behind the `/healthchecks/:source/:check`
+         *     "who's affected" page, which doubles as an operator TODO list and as
+         *     a way to correlate servers sharing the same issue during a
+         *     fleet-wide incident.
          */
         post: operations["status_check_attention"];
         delete?: never;
@@ -3664,6 +3664,12 @@ export interface components {
              *     `health[].check` (an arbitrary, device/plugin-defined string).
              */
             check: string;
+            /**
+             * @description The source that reports the check. A check's identity is the
+             *     (source, check) pair — a same-named check from another source is
+             *     a different check.
+             */
+            source: string;
         };
         /**
          * @description Response for [`check_attention`]: the queried check's catalog policy
@@ -3672,44 +3678,30 @@ export interface components {
          */
         CheckAttentionData: {
             /**
-             * @description The most urgent configured policy ceiling for this check across
-             *     the sources that report it, or `None` if no server has ever
-             *     reported it yet (so it has no catalog row).
+             * @description The configured policy ceiling for this (source, check), or `None`
+             *     if the source has never reported it (so it has no catalog row).
              */
             ceiling?: string | null;
-            /**
-             * @description The check name that was queried, echoed back so the page can
-             *     render its heading without re-decoding the request.
-             */
+            /** @description The check name that was queried. */
             check: string;
             /**
-             * @description Operator-authored documentation for this check (markdown), per
-             *     reporting source: documentation is keyed per (source, check), and
-             *     this page aggregates every source reporting the check name.
-             *     Sources without documentation are absent.
+             * @description Operator-authored documentation for this (source, check)
+             *     (markdown), or `None` if nobody has written it yet.
              */
-            documentation: components["schemas"]["CheckAttentionDoc"][];
-            /**
-             * @description Whether any source's policy for this check escalates its
-             *     effective failures.
-             */
+            documentation?: string | null;
+            /** @description Whether this check's policy escalates its effective failures. */
             escalates: boolean;
             /**
-             * @description Every live server whose latest status reports this check, at any
-             *     result, ordered as a TODO list: failed, warning, broken, passed,
-             *     skipped (most urgent first), then by group name then server name.
-             *     The client filters out the passed/skipped tail unless the "show
-             *     healthy" toggle is on.
+             * @description Every live server whose latest state from this source reports
+             *     this check, at any result, ordered as a TODO list: failed,
+             *     warning, broken, passed, skipped (most urgent first), then by
+             *     group name then server name. The client filters out the
+             *     passed/skipped tail unless the "show healthy" toggle is on.
              */
             servers: components["schemas"]["CheckAttentionServerData"][];
-        };
-        /** @description One source's operator-authored documentation for a check. */
-        CheckAttentionDoc: {
-            /** @description The markdown document. */
-            documentation: string;
             /**
-             * @description The source whose (source, check) catalog entry this document
-             *     belongs to.
+             * @description The source that was queried, echoed back with `check` so the page
+             *     can render its heading without re-decoding the request.
              */
             source: string;
         };
@@ -3750,11 +3742,6 @@ export interface components {
             server_id: string;
             /** @description The server's display name; empty string when the server has none. */
             server_name: string;
-            /**
-             * @description The source that reports this check on this server. A server can
-             *     appear once per source when several report the same check name.
-             */
-            source: string;
             /**
              * Format: date-time
              * @description When the check state last updated (the check's latest report).

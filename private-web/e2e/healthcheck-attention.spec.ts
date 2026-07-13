@@ -15,7 +15,7 @@ test.describe("healthcheck attention page", () => {
 	test("renders an empty state when no server flags the check", async ({
 		page,
 	}) => {
-		await page.goto("/healthchecks/postgres");
+		await page.goto("/healthchecks/alertd/postgres");
 		await expect(
 			page.getByText("No servers currently flag"),
 		).toBeVisible();
@@ -68,7 +68,7 @@ test.describe("healthcheck attention page", () => {
 			health: [{ check: "disk_space", result: "failed", free_pct: 3 }],
 		});
 
-		await page.goto("/healthchecks/postgres");
+		await page.goto("/healthchecks/alertd/postgres");
 
 		const failingLink = page.getByRole("link", { name: "Korolevu Facility" });
 		const warningLink = page.getByRole("link", { name: "Sigatoka Facility" });
@@ -123,7 +123,7 @@ test.describe("healthcheck attention page", () => {
 			health: [{ check: "postgres", result: "passed", latency_ms: 12 }],
 		});
 
-		await page.goto("/healthchecks/postgres");
+		await page.goto("/healthchecks/alertd/postgres");
 		await expect(
 			page.getByRole("link", { name: "Mendi Facility" }),
 		).toBeVisible();
@@ -174,7 +174,7 @@ test.describe("healthcheck attention page", () => {
 			health: [{ check: "disk_space", result: "warning" }],
 		});
 
-		await page.goto("/healthchecks/disk_space");
+		await page.goto("/healthchecks/alertd/disk_space");
 		await expect(
 			page.getByRole("link", { name: "Labasa Facility" }),
 		).toBeVisible();
@@ -235,7 +235,7 @@ test.describe("healthcheck attention page", () => {
 			[fresh.id],
 		);
 
-		await page.goto("/healthchecks/postgres");
+		await page.goto("/healthchecks/alertd/postgres");
 
 		// The state-backed row shows a relative failing-since; the row
 		// without an active streak shows the em-dash placeholder.
@@ -258,7 +258,7 @@ test.describe("healthcheck attention page", () => {
 			escalates: true,
 		});
 
-		await page.goto("/healthchecks/disk_space");
+		await page.goto("/healthchecks/alertd/disk_space");
 		// The heading chip renders the configured ceiling, plus the
 		// escalates marker.
 		await expect(
@@ -282,7 +282,7 @@ test.describe("healthcheck attention page", () => {
 				"## Description\n\nWatches free disk space.\n\n## Solve\n\nClear old backups.",
 		});
 
-		await page.goto("/healthchecks/disk_space");
+		await page.goto("/healthchecks/alertd/disk_space");
 		await page.getByText("About this check").click();
 		await expect(page.getByText("Watches free disk space.")).toBeVisible();
 		await expect(page.getByText("Clear old backups.")).toBeVisible();
@@ -334,7 +334,7 @@ test.describe("healthcheck attention page", () => {
 			health: [{ check: checkName, result: "failed" }],
 		});
 
-		await page.goto(`/healthchecks/${encodeURIComponent(checkName)}`);
+		await page.goto(`/healthchecks/alertd/${encodeURIComponent(checkName)}`);
 		await expect(
 			page.getByRole("heading", { name: checkName }),
 		).toBeVisible();
@@ -360,6 +360,6 @@ test.describe("healthcheck attention page", () => {
 		const checkLink = page.getByRole("link", { name: "postgres" });
 		await expect(checkLink).toBeVisible();
 		await checkLink.click();
-		await expect(page).toHaveURL(/\/healthchecks\/postgres$/);
+		await expect(page).toHaveURL(/\/healthchecks\/alertd\/postgres$/);
 	});
 });

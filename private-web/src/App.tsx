@@ -185,7 +185,7 @@ export default function App() {
 					<Route path="/alerts" element={<SelfAlerts />} />
 					<Route path="/incidents" element={<Incidents />} />
 					<Route path="/incidents/:id" element={<IncidentDetail />} />
-					<Route path="/healthchecks/:check" element={<HealthcheckAttention />} />
+					<Route path="/healthchecks/:source/:check" element={<HealthcheckAttention />} />
 					<Route path="/versions" element={<Versions />} />
 					<Route path="/versions/:version" element={<VersionDetail />} />
 					<Route path="/servers" element={<Servers />}>

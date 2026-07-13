@@ -36,23 +36,24 @@ import { type CheckAttentionServerData, type CheckResult } from "../types";
 
 const HEALTHY_RESULTS: readonly string[] = ["passed", "skipped"];
 
-/// Dedicated page for a single healthcheck: every live server whose
-/// *current* status flags it, most urgent first, with the servers
+/// Dedicated page for a single healthcheck — one (source, check), since
+/// that pair is the check's identity: every live server whose *current*
+/// state from that source flags it, most urgent first, with the servers
 /// reporting it healthy behind a toggle. Doubles as an operator TODO
 /// list for normalising those servers back to healthy, and as a way to
 /// see who's sharing the same issue during a fleet-wide incident.
 /// Linked from wherever a check name shows up — server detail, issue
 /// rows, and the healthchecks settings catalog.
 export default function HealthcheckAttention() {
-	const { check } = useParams<{ check: string }>();
+	const { source, check } = useParams<{ source: string; check: string }>();
 	usePageTitle(check ?? "Healthcheck");
 	const tick = useReloadInterval(30_000, "canopy-data-changed");
 	const [showHealthy, setShowHealthy] = useState(false);
 	const result = useApi(
 		"statuses",
 		"check_attention",
-		{ check: check ?? "" },
-		[check, tick],
+		{ source: source ?? "", check: check ?? "" },
+		[source, check, tick],
 	);
 
 	return (
@@ -64,6 +65,9 @@ export default function HealthcheckAttention() {
 				<Stack direction="row" spacing={1} sx={{ alignItems: "center", mt: 0.5 }}>
 					<Typography variant="h6" component="h2" sx={{ fontFamily: "monospace" }}>
 						{check}
+					</Typography>
+					<Typography variant="body2" color="text.secondary">
+						reported by {source}
 					</Typography>
 					{result.status === "ok" && result.data.ceiling && (
 						<CheckResultChip result={result.data.ceiling as CheckResult} />
@@ -79,7 +83,8 @@ export default function HealthcheckAttention() {
 					)}
 				</Stack>
 				<Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-					Servers whose latest status currently flags this check.{" "}
+					Servers whose latest report from this source currently flags this
+					check.{" "}
 					<MuiLink
 						component={RouterLink}
 						to={`/settings/healthchecks/${encodeURIComponent(check ?? "")}`}
@@ -89,24 +94,16 @@ export default function HealthcheckAttention() {
 				</Typography>
 			</Box>
 
-			{/* Documentation is per (source, check); this page aggregates
-			    every source reporting the check name, so each documented
-			    source gets its own panel, labelled when there are several. */}
-			{result.status === "ok" &&
-				result.data.documentation.map((doc) => (
-					<Accordion key={doc.source} variant="outlined" disableGutters>
-						<AccordionSummary expandIcon={<ExpandMoreIcon />}>
-							<Typography variant="subtitle2">
-								About this check
-								{result.data.documentation.length > 1 &&
-									` (as reported by ${doc.source})`}
-							</Typography>
-						</AccordionSummary>
-						<AccordionDetails>
-							<Markdown>{doc.documentation}</Markdown>
-						</AccordionDetails>
-					</Accordion>
-				))}
+			{result.status === "ok" && result.data.documentation && (
+				<Accordion variant="outlined" disableGutters>
+					<AccordionSummary expandIcon={<ExpandMoreIcon />}>
+						<Typography variant="subtitle2">About this check</Typography>
+					</AccordionSummary>
+					<AccordionDetails>
+						<Markdown>{result.data.documentation}</Markdown>
+					</AccordionDetails>
+				</Accordion>
+			)}
 
 			<FormControlLabel
 				control={

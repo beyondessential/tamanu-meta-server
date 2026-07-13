@@ -206,11 +206,6 @@ export default function HealthcheckDetail() {
 				<Typography variant="h6" component="h2" sx={{ fontFamily: "monospace" }}>
 					{checkName}
 				</Typography>
-				<Typography variant="body2">
-					<RouterLink to={healthcheckPath(checkName ?? "")}>
-						See servers currently flagging this check
-					</RouterLink>
-				</Typography>
 			</Box>
 
 			{list.status === "loading" || list.status === "idle" ? (
@@ -230,6 +225,18 @@ export default function HealthcheckDetail() {
 								source: {row.source}
 							</Typography>
 						)}
+						<Typography variant="body2">
+							<RouterLink to={healthcheckPath(row.source, row.check_name)}>
+								See servers currently flagging this check
+								{rows.length > 1 && ` (as reported by ${row.source})`}
+							</RouterLink>
+						</Typography>
+						<Typography variant="body2">
+							<RouterLink to={healthcheckPath(row.source, row.check_name)}>
+								See servers currently flagging this check
+								{rows.length > 1 && ` (as reported by ${row.source})`}
+							</RouterLink>
+						</Typography>
 						<RowMetadata row={row} />
 						<CeilingCard row={row} canEdit={isAdmin} onChanged={list.reload} />
 						<DocumentationCard

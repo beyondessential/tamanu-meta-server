@@ -1124,7 +1124,7 @@ function CheckRow({
 					useFlexGap
 				>
 					<Typography variant="body2" sx={{ fontFamily: "monospace" }}>
-						<MuiLink component={RouterLink} to={healthcheckPath(entry.check)}>
+						<MuiLink component={RouterLink} to={healthcheckPath(statusSource, entry.check)}>
 							{entry.check}
 						</MuiLink>
 					</Typography>

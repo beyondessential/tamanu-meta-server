@@ -318,9 +318,11 @@ export function checkResultOf(
 /// Route to the per-healthcheck "who's affected" page for `check`. Check
 /// names are arbitrary strings reported by devices (not restricted to
 /// URL-safe characters), so every link builder must go through this
-/// instead of interpolating the name directly.
-export function healthcheckPath(check: string): string {
-	return `/healthchecks/${encodeURIComponent(check)}`;
+/// instead of interpolating the name directly. A check's identity is
+/// the (source, check) pair — same-named checks from different sources
+/// are different checks.
+export function healthcheckPath(source: string, check: string): string {
+	return `/healthchecks/${encodeURIComponent(source)}/${encodeURIComponent(check)}`;
 }
 
 /// The check name embedded in a health issue's `ref` (`health/<check>`,

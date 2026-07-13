@@ -5592,8 +5592,8 @@
         "tags": [
           "statuses"
         ],
-        "summary": "List the servers whose check state reports one named healthcheck.",
-        "description": "Everything the per-healthcheck page needs: the catalog's configured\npolicy for `check` (if any) plus every live server's current state for\nit, across every source that reports it — the real-time picture, with\neach degraded row carrying `failing_since` (the start of its current\ndegradation streak). This is the data behind the\n`/healthchecks/:check` \"who's affected\" page, which doubles as an\noperator TODO list and as a way to correlate servers sharing the same\nissue during a fleet-wide incident.",
+        "summary": "List the servers whose check state reports one (source, check).",
+        "description": "Everything the per-healthcheck page needs: the catalog's configured\npolicy for the (source, check) (if any) plus every live server's\ncurrent state for it — the real-time picture, with each degraded row\ncarrying `failing_since` (the start of its current degradation\nstreak). This is the data behind the `/healthchecks/:source/:check`\n\"who's affected\" page, which doubles as an operator TODO list and as\na way to correlate servers sharing the same issue during a\nfleet-wide incident.",
         "operationId": "status_check_attention",
         "requestBody": {
           "content": {
@@ -6906,12 +6906,17 @@
         "type": "object",
         "description": "Request body for [`check_attention`].",
         "required": [
+          "source",
           "check"
         ],
         "properties": {
           "check": {
             "type": "string",
             "description": "The healthcheck name to look up, exactly as reported by devices in\n`health[].check` (an arbitrary, device/plugin-defined string)."
+          },
+          "source": {
+            "type": "string",
+            "description": "The source that reports the check. A check's identity is the\n(source, check) pair — a same-named check from another source is\na different check."
           }
         }
       },
@@ -6919,9 +6924,9 @@
         "type": "object",
         "description": "Response for [`check_attention`]: the queried check's catalog policy\n(if it has one yet) and every live server whose latest status reports\nit, failing or healthy.",
         "required": [
+          "source",
           "check",
           "escalates",
-          "documentation",
           "servers"
         ],
         "properties": {
@@ -6930,47 +6935,33 @@
               "string",
               "null"
             ],
-            "description": "The most urgent configured policy ceiling for this check across\nthe sources that report it, or `None` if no server has ever\nreported it yet (so it has no catalog row)."
+            "description": "The configured policy ceiling for this (source, check), or `None`\nif the source has never reported it (so it has no catalog row)."
           },
           "check": {
             "type": "string",
-            "description": "The check name that was queried, echoed back so the page can\nrender its heading without re-decoding the request."
+            "description": "The check name that was queried."
           },
           "documentation": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/CheckAttentionDoc"
-            },
-            "description": "Operator-authored documentation for this check (markdown), per\nreporting source: documentation is keyed per (source, check), and\nthis page aggregates every source reporting the check name.\nSources without documentation are absent."
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Operator-authored documentation for this (source, check)\n(markdown), or `None` if nobody has written it yet."
           },
           "escalates": {
             "type": "boolean",
-            "description": "Whether any source's policy for this check escalates its\neffective failures."
+            "description": "Whether this check's policy escalates its effective failures."
           },
           "servers": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/CheckAttentionServerData"
             },
-            "description": "Every live server whose latest status reports this check, at any\nresult, ordered as a TODO list: failed, warning, broken, passed,\nskipped (most urgent first), then by group name then server name.\nThe client filters out the passed/skipped tail unless the \"show\nhealthy\" toggle is on."
-          }
-        }
-      },
-      "CheckAttentionDoc": {
-        "type": "object",
-        "description": "One source's operator-authored documentation for a check.",
-        "required": [
-          "source",
-          "documentation"
-        ],
-        "properties": {
-          "documentation": {
-            "type": "string",
-            "description": "The markdown document."
+            "description": "Every live server whose latest state from this source reports\nthis check, at any result, ordered as a TODO list: failed,\nwarning, broken, passed, skipped (most urgent first), then by\ngroup name then server name. The client filters out the\npassed/skipped tail unless the \"show healthy\" toggle is on."
           },
           "source": {
             "type": "string",
-            "description": "The source whose (source, check) catalog entry this document\nbelongs to."
+            "description": "The source that was queried, echoed back with `check` so the page\ncan render its heading without re-decoding the request."
           }
         }
       },
@@ -6980,7 +6971,6 @@
         "required": [
           "server_id",
           "server_name",
-          "source",
           "result",
           "data",
           "status_created_at"
@@ -7024,10 +7014,6 @@
           "server_name": {
             "type": "string",
             "description": "The server's display name; empty string when the server has none."
-          },
-          "source": {
-            "type": "string",
-            "description": "The source that reports this check on this server. A server can\nappear once per source when several report the same check name."
           },
           "status_created_at": {
             "type": "string",

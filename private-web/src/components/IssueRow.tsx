@@ -593,7 +593,7 @@ function IssueMeta({ issue }: { issue: IssueData }) {
 				sx={{ fontFamily: "monospace", fontSize: "0.9em" }}
 			>
 				{checkName ? (
-					<MuiLink component={RouterLink} to={healthcheckPath(checkName)}>
+					<MuiLink component={RouterLink} to={healthcheckPath(issue.source, checkName)}>
 						{issue.ref}
 					</MuiLink>
 				) : (
