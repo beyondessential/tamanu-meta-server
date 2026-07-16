@@ -328,7 +328,9 @@ independently reported by more than one reviewer and are consolidated here.
 - **`AppError::custom` where a typed variant exists** (L11, L15, L16, L17):
   client-input errors surface as 500s, diverging from the checked-in OpenAPI
   contracts and polluting 5xx alerting. A pass mapping these to `BadRequest`/
-  `NotFound` would align the whole `fns` tree.
+  `NotFound` would align the whole `fns` tree. A structured proposal for the
+  additional `AppError` variants this needs — and a call-site migration map — is
+  in [`apperror-variants-analysis.md`](./apperror-variants-analysis.md).
 - **`security` annotation without the matching extractor** (H9, M15, M16): the
   OpenAPI spec advertises auth that the handler does not enforce in release
   builds. Worth an audit sweep across every annotated handler.
