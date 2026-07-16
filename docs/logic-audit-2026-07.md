@@ -318,6 +318,11 @@ independently reported by more than one reviewer and are consolidated here.
 
 ## Cross-cutting patterns worth a systemic fix
 
+The narrower patterns below are reframed at the altitude where a single
+mechanism retires each whole class — including two larger themes (fail-open
+monitoring defaults; a shared resilient job-loop harness) that subsume several
+of these — in [`cross-cutting-concerns.md`](./cross-cutting-concerns.md).
+
 - **Filter-after-LIMIT in the MCP layer** (M7, M8, M9, L14): several read tools
   apply a Rust-side `.retain`/`.filter` after a SQL `LIMIT`, so the limit bites
   the unfiltered set. Push these predicates into the queries.
