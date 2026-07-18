@@ -137,6 +137,22 @@ async fn fetch_open_incident(
 	.ok()
 }
 
+/// Recovery leaves the incident lingering (close-side grace) rather than
+/// closing it on the spot; backdate the stamp past any window and sweep,
+/// the test-speed way to let the linger elapse.
+async fn expire_linger(conn: &mut diesel_async::AsyncPgConnection) {
+	sql_query(
+		"UPDATE incidents SET closing_at = closing_at - INTERVAL '1 hour' \
+		 WHERE closing_at IS NOT NULL",
+	)
+	.execute(conn)
+	.await
+	.expect("expire linger");
+	database::issues::sweep_lingering_incidents(conn)
+		.await
+		.expect("linger sweep");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn submit_status() {
 	commons_tests::server::run_with_device_auth(
@@ -1340,6 +1356,7 @@ async fn submit_status_full_recovery_closes_incident() {
 			)
 			.await;
 
+			expire_linger(&mut conn).await;
 			assert!(
 				fetch_open_incident(&mut conn, server_id).await.is_none(),
 				"incident must auto-close when every contributing issue resolves"
@@ -2145,6 +2162,7 @@ async fn submit_status_failed_then_broken_retains_the_failure() {
 				.await
 				.expect("issue exists");
 			assert!(!issue.active);
+			expire_linger(&mut conn).await;
 			assert!(fetch_open_incident(&mut conn, server_id).await.is_none());
 		},
 	)

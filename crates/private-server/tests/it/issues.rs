@@ -299,6 +299,19 @@ async fn issue_reopen_keeps_identity_and_joins_new_incident() {
 			.to_string();
 		assert_eq!(issue_id_1, issue_id_2, "same identity through inactive");
 
+		// The recovery leaves the incident lingering; let the window
+		// elapse so the reopen below is a genuinely new incident rather
+		// than a rejoin of the lingering one.
+		conn.batch_execute(
+			"UPDATE incidents SET closing_at = closing_at - INTERVAL '1 hour' \
+			 WHERE closing_at IS NOT NULL",
+		)
+		.await
+		.expect("expire linger");
+		database::issues::sweep_lingering_incidents(&mut conn)
+			.await
+			.expect("linger sweep");
+
 		// 3. Reopen — same identity, severity ≥ error.
 		let r3 = private
 			.post("/api/issues/submit_manual_event")

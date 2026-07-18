@@ -209,6 +209,13 @@ pub struct ServerGroupsCreateArgs {
 	#[serde(default)]
 	#[schema(value_type = Option<i64>, format = "int64")]
 	pub slack_open_delay: Option<database::pg_duration::PgDuration>,
+	/// Optional linger window, in whole seconds: how long an incident stays
+	/// open after its last failure recovers, so a failure returning within
+	/// the window continues the same incident instead of opening (and
+	/// notifying about) a new one. Omit to accept the default.
+	#[serde(default)]
+	#[schema(value_type = Option<i64>, format = "int64")]
+	pub slack_close_delay: Option<database::pg_duration::PgDuration>,
 }
 
 /// Create a server group.
@@ -240,6 +247,7 @@ pub async fn create(
 			notes: args.notes,
 			tags: args.tags,
 			slack_open_delay: args.slack_open_delay,
+			slack_close_delay: args.slack_close_delay,
 		},
 	)
 	.await?;

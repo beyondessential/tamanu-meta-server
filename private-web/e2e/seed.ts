@@ -69,29 +69,35 @@ export async function seedServerGroup(
 		tags?: Record<string, string>;
 		/** Slack open cooldown in seconds. Omit to keep the migration default. */
 		slackOpenDelaySeconds?: number;
+		/** Incident linger window in seconds. Omit to keep the migration default. */
+		slackCloseDelaySeconds?: number;
 	} = {},
 ): Promise<SeededServerGroup> {
 	const id = randomUUID();
 	const name = opts.name ?? randomLabel("group");
+	const columns = ["id", "name", "notes", "tags"];
+	const values: unknown[] = [
+		id,
+		name,
+		opts.notes ?? "",
+		JSON.stringify(opts.tags ?? {}),
+	];
+	const exprs = ["$1", "$2", "$3", "$4::jsonb"];
 	if (opts.slackOpenDelaySeconds !== undefined) {
-		await sql.query(
-			`INSERT INTO server_groups (id, name, notes, tags, slack_open_delay)
-			 VALUES ($1, $2, $3, $4::jsonb, make_interval(secs => $5))`,
-			[
-				id,
-				name,
-				opts.notes ?? "",
-				JSON.stringify(opts.tags ?? {}),
-				opts.slackOpenDelaySeconds,
-			],
-		);
-	} else {
-		await sql.query(
-			`INSERT INTO server_groups (id, name, notes, tags)
-			 VALUES ($1, $2, $3, $4::jsonb)`,
-			[id, name, opts.notes ?? "", JSON.stringify(opts.tags ?? {})],
-		);
+		columns.push("slack_open_delay");
+		values.push(opts.slackOpenDelaySeconds);
+		exprs.push(`make_interval(secs => $${values.length})`);
 	}
+	if (opts.slackCloseDelaySeconds !== undefined) {
+		columns.push("slack_close_delay");
+		values.push(opts.slackCloseDelaySeconds);
+		exprs.push(`make_interval(secs => $${values.length})`);
+	}
+	await sql.query(
+		`INSERT INTO server_groups (${columns.join(", ")})
+		 VALUES (${exprs.join(", ")})`,
+		values,
+	);
 	return { id, name };
 }
 

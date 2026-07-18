@@ -270,6 +270,7 @@ diesel::table! {
 		resolved_reason -> Nullable<Text>,
 		server_group_id -> Nullable<Uuid>,
 		escalated_at -> Nullable<Timestamptz>,
+		closing_at -> Nullable<Timestamptz>,
 	}
 }
 
@@ -458,6 +459,7 @@ diesel::table! {
 		version_server_id -> Nullable<Uuid>,
 		effective_version -> Nullable<Text>,
 		deleted_at -> Nullable<Timestamptz>,
+		slack_close_delay -> Interval,
 	}
 }
 

@@ -1,8 +1,8 @@
 # Close–reopen noise: linger and trend-based damping
 
 Exploration of how to reduce close-then-immediately-reopen alert noise, on
-top of the incident-pipeline rework (CHK/INC/STA). Nothing here is
-implemented yet; the staging section at the end is the recommendation.
+top of the incident-pipeline rework (CHK/INC/STA). Stage 1 (the static
+linger) is implemented; the staging section at the end tracks the rest.
 
 ## The problem: grace is one-sided
 
@@ -190,10 +190,13 @@ policy already has.
 
 ## Staging
 
-1. **Static linger.** Small, symmetric with the existing grace, immediate
-   relief, and fixes the fast-flapper silence hole. Spec change to INC,
-   `closing_at` on incidents, drainer gate, monitor-pod sweep, group knob +
-   UI field.
+1. **Static linger.** ✅ Implemented. Small, symmetric with the existing
+   grace, immediate relief, and fixes the fast-flapper silence hole. Spec
+   change to INC, `closing_at` on incidents, drainer gate, monitor-pod
+   sweep, group knob (`slack_close_delay`, default 5 minutes) + UI field.
+   Only report-driven recoveries linger: operator suppression (resolve,
+   snooze, silence, monitoring-off) closes immediately — an explicit
+   action isn't a flap.
 2. **Transition aggregates.** Recorded at filing time, invisible to
    behaviour; surfaced read-only as a stability indicator on the check
    attention page and over MCP. Independently useful for triage even if

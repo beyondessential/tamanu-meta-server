@@ -524,6 +524,7 @@ async fn seed_groups(conn: &mut AsyncPgConnection) -> Result<SeededGroups> {
 			notes: "Production deployments across the Pacific facilities.".to_string(),
 			tags: tags(&[("region", "pacific"), ("tier", "production")]),
 			slack_open_delay: Some(PgDuration(SignedDuration::from_secs(300))),
+			slack_close_delay: None,
 		},
 	)
 	.await?;
@@ -535,6 +536,7 @@ async fn seed_groups(conn: &mut AsyncPgConnection) -> Result<SeededGroups> {
 			notes: "Mixed production + clone for the highlands rollout.".to_string(),
 			tags: tags(&[("region", "highlands")]),
 			slack_open_delay: None,
+			slack_close_delay: None,
 		},
 	)
 	.await?;
@@ -546,6 +548,7 @@ async fn seed_groups(conn: &mut AsyncPgConnection) -> Result<SeededGroups> {
 			notes: "Demo and training environments — noisy, low priority.".to_string(),
 			tags: tags(&[("env", "demo")]),
 			slack_open_delay: Some(PgDuration(SignedDuration::from_secs(1800))),
+			slack_close_delay: None,
 		},
 	)
 	.await?;
@@ -557,6 +560,7 @@ async fn seed_groups(conn: &mut AsyncPgConnection) -> Result<SeededGroups> {
 			notes: "Deliberately empty so adding the first server is testable.".to_string(),
 			tags: TagMap::default(),
 			slack_open_delay: None,
+			slack_close_delay: None,
 		},
 	)
 	.await?;

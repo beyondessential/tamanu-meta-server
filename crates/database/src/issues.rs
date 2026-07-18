@@ -174,6 +174,13 @@ pub struct Incident {
 	pub resolved_reason: Option<String>,
 	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
 	pub escalated_at: Option<Timestamp>,
+	/// When the incident's last effective failure left and lingering began.
+	/// `None` while a failure is live. A failure returning clears it (the
+	/// same incident continues); otherwise the linger sweep closes the
+	/// incident once this is older than the target's linger window,
+	/// backdating `closed_at` to it. Not cleared by the close itself.
+	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
+	pub closing_at: Option<Timestamp>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Queryable, Selectable, Associations)]
@@ -1095,13 +1102,22 @@ pub async fn get_global_issue(conn: &mut AsyncPgConnection, r#ref: &str) -> Resu
 ///     warnings included, joins it. The threshold only governs incident
 ///     *creation*; once an incident is in progress everything else piles
 ///     in for context.
-/// - **Close**: the incident auto-closes when the last effective-failure
-///   contributor leaves. Lesser contributors that joined because the
-///   target had an open incident stay attached (so the audit trail and
-///   Slack thread retain them) but **do not** hold the incident open by
-///   themselves. Without this asymmetry, a check that's stuck firing at
-///   warning could keep an incident open indefinitely after the failure
-///   that opened it has long since gone away.
+/// - **Close**: when the last effective-failure contributor leaves, the
+///   incident starts **lingering** (`closing_at` stamped) rather than
+///   closing: a failure returning within the target's linger window clears
+///   the stamp and the same incident continues, so a red check that blips
+///   green doesn't turn one span of trouble into a resolve/re-open pair.
+///   The linger sweep ([`sweep_lingering_incidents`]) closes it once the
+///   window elapses, backdating the close to when the failure left. Only a
+///   leave caused by the check actually recovering lingers: resolution,
+///   snooze, silence, and monitoring-off are explicit operator actions,
+///   not flaps, and close immediately — as does a zero linger window.
+///   Lesser contributors that joined because
+///   the target had an open incident stay attached (so the audit trail and
+///   Slack thread retain them) but **do not** hold the incident open (or
+///   lingering) by themselves. Without this asymmetry, a check that's
+///   stuck firing at warning could keep an incident open indefinitely
+///   after the failure that opened it has long since gone away.
 ///
 /// `monitored` reflects the server's `is_monitored()` at call time. When
 /// `false`, the issue is treated as a "leave": this is what makes
@@ -1160,6 +1176,18 @@ async fn re_evaluate_incident_membership(
 				))
 				.execute(conn)
 				.await?;
+			// An effective failure joining a lingering incident ends the
+			// lingering: the trouble is back, the same incident continues.
+			if !newly_opened && issue.opens_incident() {
+				diesel::update(
+					incidents::table
+						.filter(incidents::id.eq(incident_id))
+						.filter(incidents::closing_at.is_not_null()),
+				)
+				.set(incidents::closing_at.eq(None::<jiff_diesel::Timestamp>))
+				.execute(conn)
+				.await?;
+			}
 			if newly_opened {
 				enqueue_slack_open(conn, incident_id, target, issue).await?;
 			} else if issue.escalates_now() {
@@ -1249,27 +1277,80 @@ async fn re_evaluate_incident_membership(
 				.get_result(conn)
 				.await?;
 			if remaining_open == 0 {
-				// Filter on `closed_at IS NULL` so that when a stranded
-				// lesser contributor eventually leaves an already-closed
-				// incident (because the failure-filter close above already
-				// retired it), we skip both the no-op update and the
-				// double Slack resolve.
-				let closed: Option<Incident> = diesel::update(
-					incidents::table
-						.filter(incidents::id.eq(open_link.incident_id))
-						.filter(incidents::closed_at.is_null()),
-				)
-				.set(incidents::closed_at.eq(jiff_diesel::Timestamp::from(transition_time)))
-				.returning(Incident::as_select())
-				.get_result(conn)
-				.await
-				.optional()?;
-				if let Some(closed) = closed {
-					enqueue_slack_resolve_inner(conn, &closed, by).await?;
+				// Linger damps *reporter* flapping: only a leave caused by
+				// the check actually recovering (inactive, with no operator
+				// suppression in play) waits out the window. Resolution,
+				// snooze, silence, and monitoring-off are explicit operator
+				// actions — not flaps — and close immediately, Slack resolve
+				// attributed where `by` is known. A zero window is the
+				// operator opting out of lingering.
+				let check_recovery = !issue.active
+					&& issue.resolved_at.is_none()
+					&& !snoozed && !silenced
+					&& monitored;
+				let window = linger_window(conn, target).await?;
+				if by.is_some() || !check_recovery || window.is_zero() {
+					//
+					// Filter on `closed_at IS NULL` so that when a stranded
+					// lesser contributor eventually leaves an already-closed
+					// incident (because the failure-filter close above already
+					// retired it), we skip both the no-op update and the
+					// double Slack resolve.
+					let closed: Option<Incident> = diesel::update(
+						incidents::table
+							.filter(incidents::id.eq(open_link.incident_id))
+							.filter(incidents::closed_at.is_null()),
+					)
+					.set(incidents::closed_at.eq(jiff_diesel::Timestamp::from(transition_time)))
+					.returning(Incident::as_select())
+					.get_result(conn)
+					.await
+					.optional()?;
+					if let Some(closed) = closed {
+						enqueue_slack_resolve_inner(conn, &closed, by).await?;
+					}
+				} else {
+					// Start lingering: record when the last effective failure
+					// left. Stamped once — a lesser contributor leaving an
+					// already-lingering incident doesn't move the mark — and
+					// the linger sweep closes the incident when the stamp
+					// outlives the window (see `sweep_lingering_incidents`).
+					diesel::update(
+						incidents::table
+							.filter(incidents::id.eq(open_link.incident_id))
+							.filter(incidents::closed_at.is_null())
+							.filter(incidents::closing_at.is_null()),
+					)
+					.set(incidents::closing_at.eq(jiff_diesel::Timestamp::from(transition_time)))
+					.execute(conn)
+					.await?;
 				}
 			}
 		}
-		_ => {}
+		_ => {
+			// A member issue re-filing as an effective failure while its
+			// incident lingers ends the lingering — the trouble is back. A
+			// leave-and-rejoin lands in the join arm above; this catches the
+			// member that never left, e.g. a warning contributor re-graded
+			// to failed.
+			if was_in && should_join && !should_leave && issue.opens_incident() {
+				let member_of: Vec<Uuid> = incident_issues::table
+					.select(incident_issues::incident_id)
+					.filter(incident_issues::issue_id.eq(issue.id))
+					.filter(incident_issues::left_at.is_null())
+					.load(conn)
+					.await?;
+				diesel::update(
+					incidents::table
+						.filter(incidents::id.eq_any(member_of))
+						.filter(incidents::closed_at.is_null())
+						.filter(incidents::closing_at.is_not_null()),
+				)
+				.set(incidents::closing_at.eq(None::<jiff_diesel::Timestamp>))
+				.execute(conn)
+				.await?;
+			}
+		}
 	}
 	Ok(())
 }
@@ -1545,6 +1626,87 @@ pub async fn reconcile_open_incidents(db: &mut AsyncPgConnection) -> Result<(usi
 	})
 	.await
 }
+/// Close incidents whose linger window has expired: `closing_at` (when the
+/// last effective failure left) has outlived the target's window without a
+/// failure returning. The close is backdated to `closing_at` — the linger
+/// is damping machinery, not part of the incident's span — and the Slack
+/// cancel-or-resolve runs exactly as an immediate close would have:
+/// a never-shipped open is cancelled (the flap stays silent), a shipped
+/// open gets its resolve.
+///
+/// Runs on the monitor pod's minute cadence. Each close is its own
+/// transaction, re-checked under a row lock: a failure rejoining (which
+/// clears `closing_at`) or an operator resolve (which sets `closed_at`)
+/// between the scan and the lock wins. Belt-and-braces, a lingering
+/// incident that somehow still has a live effective-failure member is
+/// un-lingered instead of closed.
+///
+/// Returns the number of incidents closed.
+pub async fn sweep_lingering_incidents(db: &mut AsyncPgConnection) -> Result<usize> {
+	use crate::schema::{incident_issues, incidents, issues};
+
+	let now = Timestamp::now();
+	let candidates: Vec<Incident> = incidents::table
+		.select(Incident::as_select())
+		.filter(incidents::closed_at.is_null())
+		.filter(incidents::closing_at.is_not_null())
+		.load(db)
+		.await?;
+
+	let mut closed = 0usize;
+	for candidate in candidates {
+		let did_close = db
+			.transaction::<_, AppError, _>(async |conn| {
+				let incident: Option<Incident> = incidents::table
+					.select(Incident::as_select())
+					.filter(incidents::id.eq(candidate.id))
+					.filter(incidents::closed_at.is_null())
+					.for_update()
+					.first(conn)
+					.await
+					.optional()?;
+				let Some(incident) = incident else {
+					return Ok(false);
+				};
+				let Some(closing_at) = incident.closing_at else {
+					return Ok(false);
+				};
+				let target = IncidentTarget::of_incident(&incident);
+				if closing_at + linger_window(conn, target).await? > now {
+					return Ok(false);
+				}
+				let live_failures: i64 = incident_issues::table
+					.inner_join(issues::table.on(issues::id.eq(incident_issues::issue_id)))
+					.filter(incident_issues::incident_id.eq(incident.id))
+					.filter(incident_issues::left_at.is_null())
+					.filter(issues::effective_result.eq("failed"))
+					.count()
+					.get_result(conn)
+					.await?;
+				if live_failures > 0 {
+					diesel::update(incidents::table.filter(incidents::id.eq(incident.id)))
+						.set(incidents::closing_at.eq(None::<jiff_diesel::Timestamp>))
+						.execute(conn)
+						.await?;
+					return Ok(false);
+				}
+				let closed_incident: Incident =
+					diesel::update(incidents::table.filter(incidents::id.eq(incident.id)))
+						.set(incidents::closed_at.eq(jiff_diesel::Timestamp::from(closing_at)))
+						.returning(Incident::as_select())
+						.get_result(conn)
+						.await?;
+				enqueue_slack_resolve_inner(conn, &closed_incident, None).await?;
+				Ok(true)
+			})
+			.await?;
+		if did_close {
+			closed += 1;
+		}
+	}
+	Ok(closed)
+}
+
 async fn is_issue_in_open_incident(db: &mut AsyncPgConnection, issue_id: Uuid) -> Result<bool> {
 	use crate::schema::incident_issues;
 
@@ -1669,6 +1831,22 @@ async fn find_or_open_incident(
 /// Flap grace for canopy-wide incidents, mirroring the per-group
 /// `slack_open_delay` default (the global target has no config row).
 const GLOBAL_OPEN_GRACE: SignedDuration = SignedDuration::from_secs(3 * 60);
+
+/// Linger window for canopy-wide incidents, mirroring the per-group
+/// `slack_close_delay` default (the global target has no config row).
+const GLOBAL_CLOSE_GRACE: SignedDuration = SignedDuration::from_secs(5 * 60);
+
+/// The target's linger window: how long an incident outlives its last
+/// effective failure before it closes.
+async fn linger_window(
+	conn: &mut AsyncPgConnection,
+	target: IncidentTarget,
+) -> Result<SignedDuration> {
+	Ok(match target {
+		IncidentTarget::Group(gid) => ServerGroup::get_by_id(conn, gid).await?.slack_close_delay.0,
+		IncidentTarget::Global => GLOBAL_CLOSE_GRACE,
+	})
+}
 
 async fn enqueue_slack_open(
 	conn: &mut AsyncPgConnection,

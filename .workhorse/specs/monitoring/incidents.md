@@ -18,7 +18,12 @@ An incident opens when a check's effective result becomes failed on a target wit
 While an incident is open, every issue on its target joins it — effective warnings included — so the incident carries the full context of what was wrong during its span.
 
 An issue leaves the incident when it stops being one: its effective result recovers (to passed or skipped, whether by report or by policy), it is resolved or snoozed, or its server stops being monitored.
-The incident closes when its last effective failure leaves; warnings never hold an incident open.
+Warnings never hold an incident open.
+
+When the last effective failure leaves because its result recovered, the incident does not close immediately: it **lingers** for its target's linger window, remaining the target's open incident.
+A check whose effective result becomes failed during the window — a fresh failure or the same one returning — ends the lingering and the incident continues.
+An incident whose linger window elapses without an effective failure closes, recording the close as of when its last effective failure left.
+Lingering damps reporter flapping, not operator action: a last failure leaving through resolution, snooze, silence, or its server's monitoring being turned off closes the incident immediately.
 
 The membership history — which issues joined and left, and when — is kept and presented as the incident's timeline.
 An issue can leave and rejoin the same incident.
@@ -29,7 +34,8 @@ Operator actions that change what counts (monitoring toggles, group membership c
 
 Operators are notified over the notification channel: group incidents to the group's configured channel, Canopy-wide incidents to the operator channel.
 
-An incident notifies when it has stayed open past its target's grace period; an incident that closes within grace never notifies.
+An incident notifies when it has stayed open past its target's grace period; the notification additionally waits out any lingering, so it is sent only while an effective failure is live.
+An incident that closes before its notification was sent never notifies.
 Whether an incident notified is recorded as its **published** flag, so flaps can be excluded from reporting.
 An escalating check's effective failure (see [CHK](checks.md), "Policy") notifies immediately, bypassing any remaining grace; if the incident has already notified, the join escalates it with a further notification, at most once per incident.
 A notified incident notifies again when it closes.

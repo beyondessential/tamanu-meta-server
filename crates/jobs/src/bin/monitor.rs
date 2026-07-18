@@ -114,6 +114,15 @@ pub fn spawn() -> JoinHandle<()> {
 				Err(err) => error!("staleness sweep failed: {err}"),
 			}
 
+			// Incidents whose linger window has expired: the last effective
+			// failure left, nothing came back, close them and ship the
+			// pending Slack cancel-or-resolve.
+			match database::issues::sweep_lingering_incidents(&mut db).await {
+				Ok(0) => {}
+				Ok(n) => debug!("closed {n} lingering incident(s)"),
+				Err(err) => error!("incident linger sweep failed: {err}"),
+			}
+
 			// Backup staleness + report-vs-inventory reconciliation: another
 			// minute-cadence DB-only sweep, so it rides this loop rather than a
 			// separate pod.

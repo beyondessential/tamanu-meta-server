@@ -9613,6 +9613,14 @@
             ],
             "description": "New free-form operator notes for the group."
           },
+          "slack_close_delay": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "New incident linger window, in seconds."
+          },
           "slack_open_delay": {
             "type": [
               "integer",
@@ -11210,7 +11218,8 @@
           "created_at",
           "updated_at",
           "name",
-          "slack_open_delay"
+          "slack_open_delay",
+          "slack_close_delay"
         ],
         "properties": {
           "created_at": {
@@ -11249,6 +11258,11 @@
           "notes": {
             "type": "string",
             "description": "Free-form operator notes about this group."
+          },
+          "slack_close_delay": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How long, in seconds, an incident lingers after its last failure\nrecovers before it closes and the resolved notification is sent. A\nfailure returning within this window continues the same incident\ninstead of opening (and notifying about) a new one — the close-side\nmirror of `slack_open_delay`, for a red check that briefly blips\ngreen."
           },
           "slack_open_delay": {
             "type": "integer",
@@ -11377,6 +11391,14 @@
           "notes": {
             "type": "string",
             "description": "Free-form notes about the group. Defaults to empty."
+          },
+          "slack_close_delay": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Optional linger window, in whole seconds: how long an incident stays\nopen after its last failure recovers, so a failure returning within\nthe window continues the same incident instead of opening (and\nnotifying about) a new one. Omit to accept the default."
           },
           "slack_open_delay": {
             "type": [

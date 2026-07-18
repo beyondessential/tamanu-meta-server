@@ -193,30 +193,38 @@ test.describe("group edit page", () => {
 		expect(rows[0]!.tags).toEqual({ env: "prod", tier: "1" });
 	});
 
-	test("editing the Slack cooldown minutes persists as the right interval", async ({
+	test("editing the Slack cooldown and linger minutes persists as the right intervals", async ({
 		page,
 		sql,
 	}) => {
-		// Seeded at 3 minutes (180s); UI works in minutes; bumping to 5
-		// should round-trip through the API as 300 seconds in the DB.
+		// Seeded at 3 minutes open / 4 minutes linger; UI works in minutes;
+		// bumping to 5 and 7 should round-trip through the API as seconds
+		// in the DB.
 		const group = await seedServerGroup(sql, {
 			name: "cooldown-group",
 			slackOpenDelaySeconds: 180,
+			slackCloseDelaySeconds: 240,
 		});
 
 		await page.goto(`/groups/${group.id}/edit`);
 
-		const minutesInput = page.getByLabel(/^minutes$/i);
-		await expect(minutesInput).toHaveValue("3");
-		await minutesInput.fill("5");
+		// Two "minutes" fields: the open cooldown first, the linger second.
+		const openInput = page.getByLabel(/^minutes$/i).first();
+		const lingerInput = page.getByLabel(/^minutes$/i).nth(1);
+		await expect(openInput).toHaveValue("3");
+		await expect(lingerInput).toHaveValue("4");
+		await openInput.fill("5");
+		await lingerInput.fill("7");
 		await page.getByRole("button", { name: /^save$/i }).click();
 		await page.waitForURL(`**/groups/${group.id}`);
 
-		const rows = await sql.query<{ secs: string }>(
-			"SELECT EXTRACT(EPOCH FROM slack_open_delay)::text AS secs \
+		const rows = await sql.query<{ open: string; close: string }>(
+			"SELECT EXTRACT(EPOCH FROM slack_open_delay)::text AS open, \
+			        EXTRACT(EPOCH FROM slack_close_delay)::text AS close \
 			 FROM server_groups WHERE id = $1",
 			[group.id],
 		);
-		expect(Number(rows[0]!.secs)).toBe(300);
+		expect(Number(rows[0]!.open)).toBe(300);
+		expect(Number(rows[0]!.close)).toBe(420);
 	});
 });
