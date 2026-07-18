@@ -188,6 +188,61 @@ policy already has.
 - **Cheapness.** Everything stays minute-cadence and DB-only: in-place
   aggregate updates on the filing path, no history scans in the hot loop.
 
+## Off-the-shelf options considered
+
+Surveyed (July 2026) for something to host alongside canopy — or embed —
+instead of building the analysis/damping ourselves. Two distinct layers to
+buy: the *notification pipeline* and the *analysis*.
+
+### Pipeline services (forward alerts to them, they decide what notifies)
+
+- **Prometheus Alertmanager** (Go, tiny, battle-tested): grouping,
+  inhibition, silences, throttling. Its `group_interval` batching absorbs
+  some flapping, but it has explicitly declined flap detection for years
+  (prometheus/alertmanager#204), has no per-alert adaptive behaviour, and
+  no history-based anything.
+- **Alerta** (Python): the closest conceptual match — ships an
+  `is_flapping(window, count)` plugin utility and a transient-alert plugin
+  that grades flapping alerts down so notifiers skip them. But it is a
+  whole parallel alert store + UI + API.
+- **Keep** (Python/TypeScript, multi-service deployment): dedup,
+  correlation, enrichment platform; the AI correlation sits behind paid
+  tiers, and flap damping specifically isn't a feature.
+- **Grafana OnCall OSS**: archived March 2026, read-only — off the table.
+
+All of these sit between "alert fired" and "notification sent". Plugging
+one in means forwarding incident opens/closes as alerts and letting it
+decide what ships — which outsources notification decisioning but does
+nothing about the *record*: incidents would still fragment in our database
+on every blip, `published`/escalation state would still reset per row, and
+the MCP/UI/timeline surfaces would still show N incidents for one span of
+trouble. The noise problem lives in the incident model, not just in Slack
+delivery, so the fix has to live there too (which the linger does). Running
+a second alert brain alongside canopy's own — with its own store, silences,
+and UI — costs more operational surface than the ~200 lines of damping
+logic it would replace, and the bespoke Slack-workflow contract would need
+adapting either way.
+
+### Analysis libraries (embed, keep the pipeline ours)
+
+- **augurs** (Rust, MIT/Apache, maintained under the Grafana org):
+  seasonality detection (MSTL), changepoint detection (Bayesian online
+  changepoint via the `changepoint` crate), outlier detection (MAD/DBSCAN),
+  forecasting (ETS/Prophet). In-process, no service to run.
+- **changepoint** (Rust): BOCPD directly, if only that is wanted.
+
+This is the sweet spot for stages 3–4: canopy keeps every decision and all
+explainability, and buys the statistics — "is this check's degradation
+periodic?" (seasonality over the duty-cycle aggregate) and "did its
+behaviour just change?" (changepoint over the flip rate, a natural
+alert-now / suppress-now signal). The flap-detection algorithm itself
+(Nagios/Icinga's weighted state-change ratio) is ~50 lines and not worth a
+dependency.
+
+**Conclusion**: nothing plugs in at the incident layer without ceding the
+incident model; adopt augurs as an embedded dependency when stage 3 lands,
+and keep the pipeline ours.
+
 ## Staging
 
 1. **Static linger.** ✅ Implemented. Small, symmetric with the existing
