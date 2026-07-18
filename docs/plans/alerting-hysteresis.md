@@ -225,11 +225,24 @@ adapting either way.
 
 ### Analysis libraries (embed, keep the pipeline ours)
 
-- **augurs** (Rust, MIT/Apache, maintained under the Grafana org):
-  seasonality detection (MSTL), changepoint detection (Bayesian online
+- **augurs** (Rust, MIT/Apache, under the Grafana org): seasonality
+  detection, MSTL decomposition, changepoint detection (Bayesian online
   changepoint via the `changepoint` crate), outlier detection (MAD/DBSCAN),
   forecasting (ETS/Prophet). In-process, no service to run.
-- **changepoint** (Rust): BOCPD directly, if only that is wanted.
+  Maintenance check (July 2026): alive but quiet — v0.10.2 released
+  February 2026 (266 releases to date), commits through July 2026 though
+  mostly bot dependency bumps, one primary human maintainer (a Grafana
+  engineer; the README says explicitly it is *not* an official Grafana
+  project and still pre-1.0), ~575 stars, a dozen open issues with slow
+  responses. Fine as a leaf dependency, not as architecture.
+- **changepoint** (Rust, MIT, promised-ai): BOCPD directly, if only that
+  is wanted; small and stable, last release October 2025.
+
+Vendor risk is low either way: the pieces damping actually needs —
+periodogram seasonality, BOCPD, MAD — are small, textbook algorithms on
+tiny inputs (per-check aggregates, not raw series), so if upstream stalls
+the crates can be pinned or the ~few hundred relevant lines vendored. The
+heavyweight parts of augurs (Prophet, DTW, clustering) would go unused.
 
 This is the sweet spot for stages 3–4: canopy keeps every decision and all
 explainability, and buys the statistics — "is this check's degradation
