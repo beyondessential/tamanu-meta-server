@@ -464,6 +464,46 @@ export async function seedIssue(
 	return { id };
 }
 
+export interface SeededIncident {
+	id: string;
+}
+
+/** Seed an open incident directly, optionally lingering (`closingAt` set:
+ * its last effective failure recovered then and it closes if things stay
+ * quiet) and optionally linking issues into its timeline. */
+export async function seedIncident(
+	sql: Sql,
+	opts: {
+		/** Group the incident targets; null/absent seeds a canopy-wide one. */
+		serverGroupId?: string | null;
+		/** ISO 8601; defaults to NOW(). */
+		openedAt?: string;
+		/** ISO 8601; sets the incident lingering since this time. */
+		closingAt?: string | null;
+		/** Issues to link, each with optional join/leave times. */
+		issues?: Array<{
+			issueId: string;
+			joinedAt?: string;
+			leftAt?: string | null;
+		}>;
+	} = {},
+): Promise<SeededIncident> {
+	const id = randomUUID();
+	await sql.query(
+		`INSERT INTO incidents (id, server_group_id, opened_at, closing_at)
+		 VALUES ($1, $2, COALESCE($3::timestamptz, NOW()), $4::timestamptz)`,
+		[id, opts.serverGroupId ?? null, opts.openedAt ?? null, opts.closingAt ?? null],
+	);
+	for (const link of opts.issues ?? []) {
+		await sql.query(
+			`INSERT INTO incident_issues (incident_id, issue_id, joined_at, left_at)
+			 VALUES ($1, $2, COALESCE($3::timestamptz, NOW()), $4::timestamptz)`,
+			[id, link.issueId, link.joinedAt ?? null, link.leftAt ?? null],
+		);
+	}
+	return { id };
+}
+
 export interface SeededVersion {
 	id: string;
 	major: number;

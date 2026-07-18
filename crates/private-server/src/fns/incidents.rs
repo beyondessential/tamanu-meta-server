@@ -63,6 +63,13 @@ pub struct IncidentData {
 	/// Lets a client distinguish "open but quietly held" from "open and
 	/// operators have been notified".
 	pub notification_held_until: Option<Timestamp>,
+	/// When set, the incident is lingering: its last effective failure
+	/// recovered at this time, and the incident stays open for the group's
+	/// linger window in case the failure comes back (which would continue
+	/// this incident rather than open a new one). Null while a failure is
+	/// live, and always null on a closed incident. Lets a client
+	/// distinguish "open and failing" from "open but currently recovered".
+	pub lingering_since: Option<Timestamp>,
 	/// When the incident record was created.
 	pub created_at: Timestamp,
 	/// When the incident record was last modified.
@@ -78,6 +85,11 @@ impl IncidentData {
 		notification_held_until: Option<Timestamp>,
 	) -> Self {
 		let (res_name, res_pic) = lookup_user(users, i.resolved_by.as_deref());
+		let lingering_since = if i.closed_at.is_none() {
+			i.closing_at
+		} else {
+			None
+		};
 		Self {
 			id: i.id,
 			server_group_id: i.server_group_id,
@@ -92,6 +104,7 @@ impl IncidentData {
 			issue_count: stats.issue_count,
 			note_count: stats.note_count,
 			notification_held_until,
+			lingering_since,
 			created_at: i.created_at,
 			updated_at: i.updated_at,
 		}

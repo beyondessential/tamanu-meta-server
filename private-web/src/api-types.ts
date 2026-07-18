@@ -4477,6 +4477,16 @@ export interface components {
              */
             issue_count: number;
             /**
+             * Format: date-time
+             * @description When set, the incident is lingering: its last effective failure
+             *     recovered at this time, and the incident stays open for the group's
+             *     linger window in case the failure comes back (which would continue
+             *     this incident rather than open a new one). Null while a failure is
+             *     live, and always null on a closed incident. Lets a client
+             *     distinguish "open and failing" from "open but currently recovered".
+             */
+            lingering_since?: string | null;
+            /**
              * Format: int64
              * @description Combined count of notes on the incident itself plus notes on all its
              *     contributing issues.

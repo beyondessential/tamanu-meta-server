@@ -8151,6 +8151,14 @@
             "format": "int64",
             "description": "Number of distinct issues that have ever contributed to the incident."
           },
+          "lingering_since": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When set, the incident is lingering: its last effective failure\nrecovered at this time, and the incident stays open for the group's\nlinger window in case the failure comes back (which would continue\nthis incident rather than open a new one). Null while a failure is\nlive, and always null on a closed incident. Lets a client\ndistinguish \"open and failing\" from \"open but currently recovered\"."
+          },
           "note_count": {
             "type": "integer",
             "format": "int64",

@@ -30,13 +30,17 @@ import {
 	SERVER_RANK_ORDER,
 	aggregateOperators,
 	compareServersByRankThenKind,
+	isIncidentLingering,
 } from "../types";
 
-/// Held vs loud: a group has an open incident, but the Slack notice is
-/// still inside the per-group cooldown window (held) or has already fired
-/// or been cancelled (loud). Drives the warning-vs-error colouring on the
-/// Status page and elsewhere.
-export type IncidentLoudness = "held" | "loud";
+/// How an open incident should read at a glance:
+/// - "loud": failing, and the Slack notice has fired (or been given up on);
+/// - "held": failing, but the notice is still inside the per-group cooldown
+///   window — nobody has been paged yet;
+/// - "lingering": every failure has recovered, and the incident is waiting
+///   out the group's linger window in case one comes back.
+/// Drives the error/warning/info colouring on the Status page and elsewhere.
+export type IncidentLoudness = "held" | "loud" | "lingering";
 
 export default function Status() {
 	usePageTitle("Status");
@@ -56,10 +60,14 @@ export default function Status() {
 					.filter((i) => i.server_group_id != null)
 					.map((i): [string, IncidentLoudness] => [
 						i.server_group_id as string,
-						i.notification_held_until &&
-						Date.parse(i.notification_held_until) > now
-							? "held"
-							: "loud",
+						// Lingering wins: the group is currently green, so
+						// painting it red/yellow would overstate the trouble.
+						isIncidentLingering(i)
+							? "lingering"
+							: i.notification_held_until &&
+									Date.parse(i.notification_held_until) > now
+								? "held"
+								: "loud",
 					])
 			: [],
 	);
@@ -193,13 +201,17 @@ function GroupCardLoader({
 
 	// Held incidents tone the border down to warning so an operator can see
 	// at a glance "yes there's a thing, but Slack hasn't been told yet — it
-	// might still self-resolve". Loud incidents stay full red.
+	// might still self-resolve". Lingering incidents tone down further to
+	// info: everything has recovered and the incident is just waiting out
+	// its linger window. Loud incidents stay full red.
 	const borderColor =
 		openIncident === "loud"
 			? "error.main"
 			: openIncident === "held"
 				? "warning.main"
-				: undefined;
+				: openIncident === "lingering"
+					? "info.main"
+					: undefined;
 
 	// Active operator presence anywhere in the group tints the card, so
 	// "someone is already on it" reads at a glance — especially useful
@@ -302,6 +314,15 @@ function GroupCard({
 					{openIncident === "held" && (
 						<Tooltip title="Open incident; Slack notice is still inside the per-group cooldown window">
 							<Chip label="incident (held)" color="warning" size="small" />
+						</Tooltip>
+					)}
+					{openIncident === "lingering" && (
+						<Tooltip title="Open incident whose failures have all recovered; it closes if they stay quiet through the linger window">
+							<Chip
+								label="incident (recovering)"
+								color="info"
+								size="small"
+							/>
 						</Tooltip>
 					)}
 				</Stack>
