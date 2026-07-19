@@ -115,7 +115,6 @@ export function DutyHeatmap({
 }: {
 	cells: StabilityData["duty_cycle"];
 }) {
-	const theme = useTheme();
 	if (cells.length !== 168 || cells.every((c) => c.observations === 0)) {
 		return null;
 	}
@@ -132,7 +131,7 @@ export function DutyHeatmap({
 				}}
 			>
 				{DAYS.map((day, d) => (
-					<Row key={day} day={day} row={d} cells={cells} theme={theme} />
+					<Row key={day} day={day} row={d} cells={cells} />
 				))}
 				{/* Hour ticks under the grid. */}
 				<Box />
@@ -155,13 +154,12 @@ function Row({
 	day,
 	row,
 	cells,
-	theme,
 }: {
 	day: string;
 	row: number;
 	cells: StabilityData["duty_cycle"];
-	theme: ReturnType<typeof useTheme>;
 }) {
+	const theme = useTheme();
 	return (
 		<>
 			<Typography
