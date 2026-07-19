@@ -51,7 +51,15 @@ jobs:
       - name: Build binaries
         run: just build-servers-release ${{ matrix.target }}
         env:
-          RUSTFLAGS: "-C target-feature=+crt-static"
+          # Statically link glibc so the binaries run in the minimal
+          # busybox:glibc runtime image. glibc's NSS functions (getaddrinfo for
+          # DNS, getpwuid_r for username lookup) dlopen libnss_*.so at runtime
+          # and so can't be fully baked into a static binary — ld warns about
+          # this via rustc's linker_messages lint. It's benign here: the
+          # runtime image ships the matching glibc shared libs, so resolution
+          # works. Silence the (expected, prod-only) warnings to keep the build
+          # log clean.
+          RUSTFLAGS: "-C target-feature=+crt-static -A linker_messages"
 
       - name: Prepare artifacts
         run: |
