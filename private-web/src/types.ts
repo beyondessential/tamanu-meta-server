@@ -89,9 +89,9 @@ export type ServerGroupCard = Solidify<Schemas["ServerGroupCard"]>;
 export type ServerGroup = Solidify<Schemas["ServerGroup"]>;
 export type GroupDetail = Solidify<Schemas["GroupDetail"]>;
 export type SummaryData = Solidify<Schemas["SummaryData"]>;
-export type CheckAttentionData = Solidify<Schemas["CheckAttentionData"]>;
-export type CheckAttentionServerData = Solidify<
-	Schemas["CheckAttentionServerData"]
+export type CheckDetailData = Solidify<Schemas["CheckDetailData"]>;
+export type CheckDetailServerData = Solidify<
+	Schemas["CheckDetailServerData"]
 >;
 export type TagMap = Solidify<Schemas["TagMap"]>;
 

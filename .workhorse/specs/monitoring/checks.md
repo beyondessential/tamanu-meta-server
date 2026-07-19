@@ -89,7 +89,7 @@ The record holds:
 - an hour-of-week profile of how often the check is observed degraded, weighted towards recent weeks, so a load-dependent check (degraded during working hours, healthy overnight) is distinguishable from one degraded around the clock.
 
 From the ring, Canopy derives and presents how often the state has flapped recently and how long its degraded runs and healthy gaps typically last.
-The record is presented alongside the check on the per-check attention page and is available over the MCP interface (see [MCP](../private-server/mcp.md)).
+The record is presented alongside the check on its check detail page and is available over the MCP interface (see [MCP](../private-server/mcp.md)).
 Nothing beyond the record is kept: it is a fixed-size summary per state, not a history.
 
 An effective broken result neither confirms nor clears the check's previous definite result: while broken, the state retains the contribution and degraded-since of its last definite effective result, and the brokenness itself additionally counts as a warning.

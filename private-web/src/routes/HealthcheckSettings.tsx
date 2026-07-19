@@ -188,7 +188,7 @@ function valueToInputText(value: unknown): string {
 
 // ── Page ──────────────────────────────────────────────────────────────────
 
-export default function HealthcheckDetail() {
+export default function HealthcheckSettings() {
 	const { checkName } = useParams<{ checkName: string }>();
 	usePageTitle(checkName ?? "Healthcheck");
 	const isAdmin = useIsAdmin() === true;

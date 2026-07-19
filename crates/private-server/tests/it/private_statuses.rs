@@ -1029,11 +1029,11 @@ async fn snapshot_server_without_statuses_returns_null() {
 }
 
 // -----------------------------------------------------------------
-// check_attention endpoint: servers currently flagging one named check
+// check_detail endpoint: servers currently flagging one named check
 // -----------------------------------------------------------------
 
 #[derive(Debug, Deserialize)]
-struct CheckAttentionServer {
+struct CheckDetailServer {
 	server_id: String,
 	server_name: String,
 	group_id: Option<String>,
@@ -1044,21 +1044,21 @@ struct CheckAttentionServer {
 }
 
 #[derive(Debug, Deserialize)]
-struct CheckAttentionResponse {
+struct CheckDetailResponse {
 	check: String,
 	ceiling: Option<String>,
-	servers: Vec<CheckAttentionServer>,
+	servers: Vec<CheckDetailServer>,
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn check_attention_empty_database() {
+async fn check_detail_empty_database() {
 	commons_tests::server::run(async |_conn, _, private| {
 		let r = private
-			.post("/api/statuses/check_attention")
+			.post("/api/statuses/check_detail")
 			.json(&serde_json::json!({"source": "alertd", "check": "postgres"}))
 			.await;
 		r.assert_status_ok();
-		let data: CheckAttentionResponse = r.json();
+		let data: CheckDetailResponse = r.json();
 		assert_eq!(data.check, "postgres");
 		assert_eq!(data.ceiling, None);
 		assert!(data.servers.is_empty());
@@ -1067,7 +1067,7 @@ async fn check_attention_empty_database() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn check_attention_lists_servers_reporting_that_check_ordered_failed_first() {
+async fn check_detail_lists_servers_reporting_that_check_ordered_failed_first() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
 			"INSERT INTO server_groups (id, name) VALUES
@@ -1092,11 +1092,11 @@ async fn check_attention_lists_servers_reporting_that_check_ordered_failed_first
 		.unwrap();
 
 		let r = private
-			.post("/api/statuses/check_attention")
+			.post("/api/statuses/check_detail")
 			.json(&serde_json::json!({"source": "alertd", "check": "postgres"}))
 			.await;
 		r.assert_status_ok();
-		let data: CheckAttentionResponse = r.json();
+		let data: CheckDetailResponse = r.json();
 
 		assert_eq!(data.check, "postgres");
 		assert_eq!(data.ceiling, None, "no catalog row was ever created");
@@ -1144,7 +1144,7 @@ async fn check_attention_lists_servers_reporting_that_check_ordered_failed_first
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn check_attention_failing_since_comes_from_the_active_issue() {
+async fn check_detail_failing_since_comes_from_the_active_issue() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
 			"INSERT INTO servers (id, name, host, rank, kind) VALUES
@@ -1164,11 +1164,11 @@ async fn check_attention_failing_since_comes_from_the_active_issue() {
 		.unwrap();
 
 		let r = private
-			.post("/api/statuses/check_attention")
+			.post("/api/statuses/check_detail")
 			.json(&serde_json::json!({"source": "alertd", "check": "postgres"}))
 			.await;
 		r.assert_status_ok();
-		let data: CheckAttentionResponse = r.json();
+		let data: CheckDetailResponse = r.json();
 		assert_eq!(data.servers.len(), 2);
 
 		let failing = data
@@ -1201,7 +1201,7 @@ async fn check_attention_failing_since_comes_from_the_active_issue() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn check_attention_excludes_ungrouped_and_archived_servers() {
+async fn check_detail_excludes_ungrouped_and_archived_servers() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
 			"INSERT INTO servers (id, name, host, rank, kind, group_id) VALUES
@@ -1218,11 +1218,11 @@ async fn check_attention_excludes_ungrouped_and_archived_servers() {
 		.unwrap();
 
 		let r = private
-			.post("/api/statuses/check_attention")
+			.post("/api/statuses/check_detail")
 			.json(&serde_json::json!({"source": "alertd", "check": "postgres"}))
 			.await;
 		r.assert_status_ok();
-		let data: CheckAttentionResponse = r.json();
+		let data: CheckDetailResponse = r.json();
 
 		assert_eq!(data.servers.len(), 1, "the archived server is excluded");
 		assert_eq!(data.servers[0].server_name, "Standalone Failing");
@@ -1233,7 +1233,7 @@ async fn check_attention_excludes_ungrouped_and_archived_servers() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn check_attention_returns_catalog_policy_and_ignores_non_matching_check() {
+async fn check_detail_returns_catalog_policy_and_ignores_non_matching_check() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
 			"INSERT INTO check_policies (source, check_name, ceiling) VALUES ('alertd', 'postgres', 'failed');
@@ -1247,22 +1247,22 @@ async fn check_attention_returns_catalog_policy_and_ignores_non_matching_check()
 
 		// The check this server is actually failing.
 		let r = private
-			.post("/api/statuses/check_attention")
+			.post("/api/statuses/check_detail")
 			.json(&serde_json::json!({"source": "alertd", "check": "postgres"}))
 			.await;
 		r.assert_status_ok();
-		let data: CheckAttentionResponse = r.json();
+		let data: CheckDetailResponse = r.json();
 		assert_eq!(data.ceiling, Some("failed".to_string()));
 		assert_eq!(data.servers.len(), 1);
 
 		// A different, never-reported check name: no servers, but the
 		// catalog lookup still runs (and correctly finds nothing).
 		let r = private
-			.post("/api/statuses/check_attention")
+			.post("/api/statuses/check_detail")
 			.json(&serde_json::json!({"source": "alertd", "check": "unrelated_check"}))
 			.await;
 		r.assert_status_ok();
-		let data: CheckAttentionResponse = r.json();
+		let data: CheckDetailResponse = r.json();
 		assert_eq!(data.check, "unrelated_check");
 		assert_eq!(data.ceiling, None);
 		assert!(data.servers.is_empty());

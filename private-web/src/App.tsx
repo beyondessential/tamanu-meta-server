@@ -31,8 +31,8 @@ import DevicesSearch from "./routes/DevicesSearch";
 import GroupDetail from "./routes/GroupDetail";
 import GroupEdit from "./routes/GroupEdit";
 import GroupsList from "./routes/GroupsList";
-import HealthcheckAttention from "./routes/HealthcheckAttention";
-import HealthcheckDetail from "./routes/HealthcheckDetail";
+import CheckDetail from "./routes/CheckDetail";
+import HealthcheckSettings from "./routes/HealthcheckSettings";
 import Healthchecks from "./routes/Healthchecks";
 import IncidentDetail from "./routes/IncidentDetail";
 import Incidents from "./routes/Incidents";
@@ -185,7 +185,7 @@ export default function App() {
 					<Route path="/alerts" element={<SelfAlerts />} />
 					<Route path="/incidents" element={<Incidents />} />
 					<Route path="/incidents/:id" element={<IncidentDetail />} />
-					<Route path="/healthchecks/:source/:check" element={<HealthcheckAttention />} />
+					<Route path="/healthchecks/:source/:check" element={<CheckDetail />} />
 					<Route path="/versions" element={<Versions />} />
 					<Route path="/versions/:version" element={<VersionDetail />} />
 					<Route path="/servers" element={<Servers />}>
@@ -221,7 +221,7 @@ export default function App() {
 						<Route path="healthchecks" element={<Healthchecks />} />
 						<Route
 							path="healthchecks/:checkName"
-							element={<HealthcheckDetail />}
+							element={<HealthcheckSettings />}
 						/>
 						<Route path="restore-consumers" element={<RestoreConsumers />} />
 						<Route path="mcp-tokens" element={<McpTokens />} />

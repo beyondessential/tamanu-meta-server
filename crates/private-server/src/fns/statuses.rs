@@ -93,7 +93,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(server_grouped_ids))
 		.routes(routes!(group_details))
 		.routes(routes!(snapshot))
-		.routes(routes!(check_attention))
+		.routes(routes!(check_detail))
 }
 
 /// Get a fleet-wide summary of software versions running in production.
@@ -276,10 +276,10 @@ pub async fn group_details(
 	}))
 }
 
-/// One server whose latest status reports [`CheckAttentionData::check`],
-/// for [`check_attention`].
+/// One server whose latest status reports [`CheckDetailData::check`],
+/// for [`check_detail`].
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct CheckAttentionServerData {
+pub struct CheckDetailServerData {
 	/// The server's id — the UI links to `/servers/{server_id}`.
 	pub server_id: Uuid,
 	/// The server's display name; empty string when the server has none.
@@ -307,9 +307,9 @@ pub struct CheckAttentionServerData {
 	pub stability: Option<database::stability::StabilityData>,
 }
 
-/// Request body for [`check_attention`].
+/// Request body for [`check_detail`].
 #[derive(Debug, Deserialize, ToSchema)]
-pub struct CheckAttentionArgs {
+pub struct CheckDetailArgs {
 	/// The source that reports the check. A check's identity is the
 	/// (source, check) pair — a same-named check from another source is
 	/// a different check.
@@ -319,11 +319,11 @@ pub struct CheckAttentionArgs {
 	pub check: String,
 }
 
-/// Response for [`check_attention`]: the queried check's catalog policy
+/// Response for [`check_detail`]: the queried check's catalog policy
 /// (if it has one yet) and every live server whose latest status reports
 /// it, failing or healthy.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct CheckAttentionData {
+pub struct CheckDetailData {
 	/// The source that was queried, echoed back with `check` so the page
 	/// can render its heading without re-decoding the request.
 	pub source: String,
@@ -343,10 +343,10 @@ pub struct CheckAttentionData {
 	/// warning, broken, passed, skipped (most urgent first), then by
 	/// group name then server name. The client filters out the
 	/// passed/skipped tail unless the "show healthy" toggle is on.
-	pub servers: Vec<CheckAttentionServerData>,
+	pub servers: Vec<CheckDetailServerData>,
 }
 
-/// Rank used to order [`CheckAttentionServerData::result`] most-urgent
+/// Rank used to order [`CheckDetailServerData::result`] most-urgent
 /// first: failed, then warning, then broken, with the healthy tail
 /// (passed, then skipped) last. Mirrors the private-web
 /// `CHECK_RESULT_ORDER` display order.
@@ -372,24 +372,24 @@ fn check_result_rank(result: CheckResult) -> u8 {
 /// fleet-wide incident.
 #[utoipa::path(
 	post,
-	path = "/check_attention",
-	operation_id = "status_check_attention",
+	path = "/check_detail",
+	operation_id = "status_check_detail",
 	tag = "statuses",
-	request_body = CheckAttentionArgs,
+	request_body = CheckDetailArgs,
 	responses(
-		(status = 200, description = "The check's catalog policy and the servers currently reporting it.", body = CheckAttentionData),
+		(status = 200, description = "The check's catalog policy and the servers currently reporting it.", body = CheckDetailData),
 		(status = 500, body = ProblemDetailsSchema),
 	),
 )]
-pub async fn check_attention(
+pub async fn check_detail(
 	State(state): State<AppState>,
-	Json(args): Json<CheckAttentionArgs>,
-) -> Result<Json<CheckAttentionData>> {
+	Json(args): Json<CheckDetailArgs>,
+) -> Result<Json<CheckDetailData>> {
 	let mut conn = state.db_read.get().await?;
 	let states = Issue::check_state_for_check(&mut conn, &args.source, &args.check).await?;
 
 	// Live servers only: archived servers and canopy's own row never
-	// appear on the attention list.
+	// appear on the check detail page.
 	let server_ids: Vec<Uuid> = states
 		.iter()
 		.filter_map(|st| st.server_id)
@@ -420,7 +420,7 @@ pub async fn check_attention(
 		database::stability::CheckStability::for_issue_ids(&mut conn, &issue_ids).await?;
 	let now = jiff::Timestamp::now();
 
-	let mut servers: Vec<CheckAttentionServerData> = states
+	let mut servers: Vec<CheckDetailServerData> = states
 		.into_iter()
 		.filter_map(|st| {
 			let server = st.server_id.and_then(|sid| live.get(&sid))?;
@@ -435,7 +435,7 @@ pub async fn check_attention(
 			let stability = stability
 				.get(&st.id)
 				.map(|row| database::stability::StabilityData::from_row(row, now));
-			Some(CheckAttentionServerData {
+			Some(CheckDetailServerData {
 				server_id: server.id,
 				server_name: server.name.clone().unwrap_or_default(),
 				group_id: server.group_id,
@@ -457,7 +457,7 @@ pub async fn check_attention(
 
 	let policy = CheckPolicy::get(&mut conn, &args.source, &args.check).await?;
 
-	Ok(Json(CheckAttentionData {
+	Ok(Json(CheckDetailData {
 		source: args.source,
 		check: args.check,
 		ceiling: policy.as_ref().map(|p| p.ceiling),

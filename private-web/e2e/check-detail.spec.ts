@@ -8,7 +8,7 @@ import {
 	seedStatus,
 } from "./seed";
 
-test.describe("healthcheck attention page", () => {
+test.describe("check detail page", () => {
 	test.beforeEach(async ({ sql }) => {
 		await resetSeededTables(sql);
 	});
@@ -404,19 +404,22 @@ test.describe("stability record", () => {
 		await expect(row.getByText("4 flips/24h")).toBeVisible();
 
 		await row.getByRole("button", { name: /expand/i }).click();
+		// Scoped to the expanded row's panel — the fleet stability section
+		// above the table shows the same numbers with its own heatmap.
+		const panel = page.locator("table");
 		await expect(
-			page.getByText(/observed 20 times \(12 degraded\)/i),
+			panel.getByText(/observed 20 times \(12 degraded\)/i),
 		).toBeVisible();
 		await expect(
-			page.getByText(/4 state changes in 24 h, 4 in 7 days/i),
+			panel.getByText(/4 state changes in 24 h, 4 in 7 days/i),
 		).toBeVisible();
-		await expect(page.getByTestId("duty-cell")).toHaveCount(168);
+		await expect(panel.getByTestId("duty-cell")).toHaveCount(168);
 		// The two seeded buckets carry their degraded fractions.
 		await expect(
-			page.locator('[data-testid="duty-cell"][data-fraction="0.8"]'),
+			panel.locator('[data-testid="duty-cell"][data-fraction="0.8"]'),
 		).toHaveCount(1);
 		await expect(
-			page.locator('[data-testid="duty-cell"][data-fraction="0.1"]'),
+			panel.locator('[data-testid="duty-cell"][data-fraction="0.1"]'),
 		).toHaveCount(1);
 	});
 
@@ -434,5 +437,67 @@ test.describe("stability record", () => {
 		await page.goto("/healthchecks/alertd/postgres");
 		const row = page.getByRole("row", { name: /quiet facility/i });
 		await expect(row.getByText("no record")).toBeVisible();
+	});
+});
+
+test.describe("fleet stability", () => {
+	test.beforeEach(async ({ sql }) => {
+		await resetSeededTables(sql);
+	});
+
+	test("rolls every server's record into one heatmap", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "Rollup Coast" });
+		const a = await seedServer(sql, { name: "Server A", groupId: group.id });
+		const b = await seedServer(sql, { name: "Server B", groupId: group.id });
+		await seedStatus(sql, {
+			serverId: a.id,
+			health: [{ check: "postgres", result: "failed" }],
+		});
+		await seedStatus(sql, {
+			serverId: b.id,
+			health: [{ check: "postgres", result: "passed" }],
+		});
+		const minsAgo = (m: number) =>
+			new Date(Date.now() - m * 60_000).toISOString();
+		await seedCheckStability(sql, {
+			serverId: a.id,
+			check: "postgres",
+			observations: 10,
+			degradedObservations: 6,
+			transitions: [
+				{ at: minsAgo(90), degraded: true },
+				{ at: minsAgo(30), degraded: false },
+			],
+			dutyBuckets: { 5: [10, 6] },
+		});
+		await seedCheckStability(sql, {
+			serverId: b.id,
+			check: "postgres",
+			observations: 10,
+			degradedObservations: 0,
+			transitions: [],
+			dutyBuckets: { 5: [10, 0] },
+		});
+
+		await page.goto("/healthchecks/alertd/postgres");
+		await expect(
+			page.getByRole("heading", { name: "Fleet stability" }),
+		).toBeVisible();
+		// Both servers contribute: the shared bucket blends to 6/20.
+		await expect(
+			page.getByText(/across 2 servers with a record/i),
+		).toBeVisible();
+		await expect(
+			page.getByText(/2 state changes in 24 h, 2 in 7 days, on 1 server/i),
+		).toBeVisible();
+		const fleet = page
+			.getByRole("heading", { name: "Fleet stability" })
+			.locator("..");
+		await expect(
+			fleet.locator('[data-testid="duty-cell"][data-fraction="0.3"]'),
+		).toHaveCount(1);
 	});
 });

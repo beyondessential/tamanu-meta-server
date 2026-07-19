@@ -2865,7 +2865,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/statuses/check_attention": {
+    "/api/statuses/check_detail": {
         parameters: {
             query?: never;
             header?: never;
@@ -2885,7 +2885,7 @@ export interface paths {
          *     a way to correlate servers sharing the same issue during a
          *     fleet-wide incident.
          */
-        post: operations["status_check_attention"];
+        post: operations["status_check_detail"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3657,8 +3657,8 @@ export interface components {
             /** @description Label value. */
             value: string;
         };
-        /** @description Request body for [`check_attention`]. */
-        CheckAttentionArgs: {
+        /** @description Request body for [`check_detail`]. */
+        CheckDetailArgs: {
             /**
              * @description The healthcheck name to look up, exactly as reported by devices in
              *     `health[].check` (an arbitrary, device/plugin-defined string).
@@ -3672,11 +3672,11 @@ export interface components {
             source: string;
         };
         /**
-         * @description Response for [`check_attention`]: the queried check's catalog policy
+         * @description Response for [`check_detail`]: the queried check's catalog policy
          *     (if it has one yet) and every live server whose latest status reports
          *     it, failing or healthy.
          */
-        CheckAttentionData: {
+        CheckDetailData: {
             /**
              * @description The configured policy ceiling for this (source, check), or `None`
              *     if the source has never reported it (so it has no catalog row).
@@ -3698,7 +3698,7 @@ export interface components {
              *     group name then server name. The client filters out the
              *     passed/skipped tail unless the "show healthy" toggle is on.
              */
-            servers: components["schemas"]["CheckAttentionServerData"][];
+            servers: components["schemas"]["CheckDetailServerData"][];
             /**
              * @description The source that was queried, echoed back with `check` so the page
              *     can render its heading without re-decoding the request.
@@ -3706,10 +3706,10 @@ export interface components {
             source: string;
         };
         /**
-         * @description One server whose latest status reports [`CheckAttentionData::check`],
-         *     for [`check_attention`].
+         * @description One server whose latest status reports [`CheckDetailData::check`],
+         *     for [`check_detail`].
          */
-        CheckAttentionServerData: {
+        CheckDetailServerData: {
             /**
              * @description The check's own fields from its latest report, verbatim, so the
              *     row can expand to the same per-check detail the server page shows.
@@ -11307,7 +11307,7 @@ export interface operations {
             };
         };
     };
-    status_check_attention: {
+    status_check_detail: {
         parameters: {
             query?: never;
             header?: never;
@@ -11316,7 +11316,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CheckAttentionArgs"];
+                "application/json": components["schemas"]["CheckDetailArgs"];
             };
         };
         responses: {
@@ -11326,7 +11326,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CheckAttentionData"];
+                    "application/json": components["schemas"]["CheckDetailData"];
                 };
             };
             500: {

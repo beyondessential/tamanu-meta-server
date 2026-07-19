@@ -1047,7 +1047,7 @@ pub async fn health_from_check_state(
 
 impl Issue {
 	/// Server-scoped check state for one (source, check). The per-check
-	/// attention page's data source: rows carry the observed/effective
+	/// detail page's data source: rows carry the observed/effective
 	/// results, the check's detail, and the degraded-streak timestamps.
 	/// A check's identity is the pair — a same-named check from another
 	/// source is a different check.

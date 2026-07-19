@@ -26,33 +26,37 @@ import { useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import { useApi } from "../api";
 import CheckExtrasList, { checkEntryExtras } from "../components/CheckExtras";
-import CheckStabilityPanel from "../components/CheckStabilityPanel";
+import CheckStabilityPanel, {
+	FleetStabilitySummary,
+} from "../components/CheckStabilityPanel";
 import Markdown from "../components/Markdown";
 import CheckResultChip from "../components/CheckResultChip";
 import ServerNameWithGroup from "../components/ServerNameWithGroup";
 import TimeAgo from "../components/TimeAgo";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { useReloadInterval } from "../hooks/useReloadInterval";
-import { type CheckAttentionServerData, type CheckResult } from "../types";
+import { type CheckDetailServerData, type CheckResult } from "../types";
 
 const HEALTHY_RESULTS: readonly string[] = ["passed", "skipped"];
 
-/// Dedicated page for a single healthcheck — one (source, check), since
-/// that pair is the check's identity: every live server whose *current*
-/// state from that source flags it, most urgent first, with the servers
-/// reporting it healthy behind a toggle. Doubles as an operator TODO
-/// list for normalising those servers back to healthy, and as a way to
-/// see who's sharing the same issue during a fleet-wide incident.
+/// Detail page for a single healthcheck — one (source, check), since
+/// that pair is the check's identity. Three sections: the operator
+/// documentation, the check's fleet-wide stability rollup, and the
+/// needs-attention list — every live server whose *current* state from
+/// that source flags it, most urgent first, with the servers reporting
+/// it healthy behind a toggle. The attention list doubles as an operator
+/// TODO list for normalising those servers back to healthy, and as a way
+/// to see who's sharing the same issue during a fleet-wide incident.
 /// Linked from wherever a check name shows up — server detail, issue
 /// rows, and the healthchecks settings catalog.
-export default function HealthcheckAttention() {
+export default function CheckDetail() {
 	const { source, check } = useParams<{ source: string; check: string }>();
 	usePageTitle(check ?? "Healthcheck");
 	const tick = useReloadInterval(30_000, "canopy-data-changed");
 	const [showHealthy, setShowHealthy] = useState(false);
 	const result = useApi(
 		"statuses",
-		"check_attention",
+		"check_detail",
 		{ source: source ?? "", check: check ?? "" },
 		[source, check, tick],
 	);
@@ -84,8 +88,6 @@ export default function HealthcheckAttention() {
 					)}
 				</Stack>
 				<Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-					Servers whose latest report from this source currently flags this
-					check.{" "}
 					<MuiLink
 						component={RouterLink}
 						to={`/settings/healthchecks/${encodeURIComponent(check ?? "")}`}
@@ -106,6 +108,19 @@ export default function HealthcheckAttention() {
 				</Accordion>
 			)}
 
+			{result.status === "ok" && (
+				<FleetStability servers={result.data.servers} />
+			)}
+
+			<Box>
+				<Typography variant="h6" component="h2">
+					Needs attention
+				</Typography>
+				<Typography variant="body2" color="text.secondary">
+					Servers whose latest report from this source currently flags this
+					check, most urgent first.
+				</Typography>
+			</Box>
 			<FormControlLabel
 				control={
 					<Switch
@@ -132,13 +147,30 @@ export default function HealthcheckAttention() {
 	);
 }
 
+/// The check's stability across the whole fleet: one heatmap over every
+/// server's duty profile (healthy reporters included), so a shared
+/// load-dependent pattern reads at a glance even when no single server
+/// stands out. Hidden until at least one server has a record.
+function FleetStability({ servers }: { servers: CheckDetailServerData[] }) {
+	const records = servers.flatMap((s) => (s.stability ? [s.stability] : []));
+	if (records.length === 0) return null;
+	return (
+		<Box>
+			<Typography variant="h6" component="h2" sx={{ mb: 1 }}>
+				Fleet stability
+			</Typography>
+			<FleetStabilitySummary records={records} />
+		</Box>
+	);
+}
+
 function ServersTable({
 	check,
 	servers,
 	showHealthy,
 }: {
 	check: string;
-	servers: CheckAttentionServerData[];
+	servers: CheckDetailServerData[];
 	showHealthy: boolean;
 }) {
 	const visible = showHealthy
@@ -185,7 +217,7 @@ function ServersTable({
 
 /// One server row, expandable to the check's full `health[]` entry data —
 /// the same key/value rendering the server detail checks table uses.
-function AttentionRow({ server }: { server: CheckAttentionServerData }) {
+function AttentionRow({ server }: { server: CheckDetailServerData }) {
 	const [expanded, setExpanded] = useState(false);
 	const entry =
 		typeof server.data === "object" &&
@@ -267,7 +299,7 @@ function AttentionRow({ server }: { server: CheckAttentionServerData }) {
 function StabilityCell({
 	stability,
 }: {
-	stability: CheckAttentionServerData["stability"];
+	stability: CheckDetailServerData["stability"];
 }) {
 	if (!stability) {
 		return (

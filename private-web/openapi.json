@@ -5587,19 +5587,19 @@
         }
       }
     },
-    "/api/statuses/check_attention": {
+    "/api/statuses/check_detail": {
       "post": {
         "tags": [
           "statuses"
         ],
         "summary": "List the servers whose check state reports one (source, check).",
         "description": "Everything the per-healthcheck page needs: the catalog's configured\npolicy for the (source, check) (if any) plus every live server's\ncurrent state for it — the real-time picture, with each degraded row\ncarrying `failing_since` (the start of its current degradation\nstreak). This is the data behind the `/healthchecks/:source/:check`\n\"who's affected\" page, which doubles as an operator TODO list and as\na way to correlate servers sharing the same issue during a\nfleet-wide incident.",
-        "operationId": "status_check_attention",
+        "operationId": "status_check_detail",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CheckAttentionArgs"
+                "$ref": "#/components/schemas/CheckDetailArgs"
               }
             }
           },
@@ -5611,7 +5611,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CheckAttentionData"
+                  "$ref": "#/components/schemas/CheckDetailData"
                 }
               }
             }
@@ -6902,9 +6902,9 @@
           }
         }
       },
-      "CheckAttentionArgs": {
+      "CheckDetailArgs": {
         "type": "object",
-        "description": "Request body for [`check_attention`].",
+        "description": "Request body for [`check_detail`].",
         "required": [
           "source",
           "check"
@@ -6920,9 +6920,9 @@
           }
         }
       },
-      "CheckAttentionData": {
+      "CheckDetailData": {
         "type": "object",
-        "description": "Response for [`check_attention`]: the queried check's catalog policy\n(if it has one yet) and every live server whose latest status reports\nit, failing or healthy.",
+        "description": "Response for [`check_detail`]: the queried check's catalog policy\n(if it has one yet) and every live server whose latest status reports\nit, failing or healthy.",
         "required": [
           "source",
           "check",
@@ -6955,7 +6955,7 @@
           "servers": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/CheckAttentionServerData"
+              "$ref": "#/components/schemas/CheckDetailServerData"
             },
             "description": "Every live server whose latest state from this source reports\nthis check, at any result, ordered as a TODO list: failed,\nwarning, broken, passed, skipped (most urgent first), then by\ngroup name then server name. The client filters out the\npassed/skipped tail unless the \"show healthy\" toggle is on."
           },
@@ -6965,9 +6965,9 @@
           }
         }
       },
-      "CheckAttentionServerData": {
+      "CheckDetailServerData": {
         "type": "object",
-        "description": "One server whose latest status reports [`CheckAttentionData::check`],\nfor [`check_attention`].",
+        "description": "One server whose latest status reports [`CheckDetailData::check`],\nfor [`check_detail`].",
         "required": [
           "server_id",
           "server_name",

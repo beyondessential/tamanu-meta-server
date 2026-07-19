@@ -52,18 +52,69 @@ export default function CheckStabilityPanel({
 					</>
 				)}
 			</Typography>
-			<DutyHeatmap stability={stability} />
-			<Typography variant="caption" color="text.secondary">
-				Share of observations degraded per hour of week (UTC), leaning towards
-				recent weeks. Hollow cells have no observations.
-			</Typography>
+			<DutyHeatmap cells={stability.duty_cycle} />
+			<HeatmapCaption />
 		</Stack>
 	);
 }
 
-function DutyHeatmap({ stability }: { stability: StabilityData }) {
+/// Fleet-level rollup of a check's stability across every server on the
+/// page: summed duty profiles into one heatmap, plus aggregate flap
+/// counts. Renders nothing when no server has a record yet.
+export function FleetStabilitySummary({
+	records,
+}: {
+	records: StabilityData[];
+}) {
+	if (records.length === 0) return null;
+	const flips24 = records.reduce((n, r) => n + r.stats.flips_24h, 0);
+	const flips7d = records.reduce((n, r) => n + r.stats.flips_7d, 0);
+	const flappedServers = records.filter((r) => r.stats.flips_7d > 0).length;
+	const cells = Array.from({ length: 168 }, (_, i) => ({
+		observations: records.reduce(
+			(n, r) => n + (r.duty_cycle[i]?.observations ?? 0),
+			0,
+		),
+		degraded: records.reduce((n, r) => n + (r.duty_cycle[i]?.degraded ?? 0), 0),
+	}));
+	return (
+		<Stack spacing={1}>
+			<Typography variant="body2" color="text.secondary">
+				Across {records.length} server{records.length === 1 ? "" : "s"} with a
+				record:{" "}
+				{flips7d > 0 ? (
+					<>
+						{flips24} state change{flips24 === 1 ? "" : "s"} in 24 h, {flips7d}{" "}
+						in 7 days, on {flappedServers} server
+						{flappedServers === 1 ? "" : "s"}.
+					</>
+				) : (
+					<>no state changes in the last 7 days.</>
+				)}
+			</Typography>
+			<DutyHeatmap cells={cells} />
+			<HeatmapCaption />
+		</Stack>
+	);
+}
+
+export function HeatmapCaption() {
+	return (
+		<Typography variant="caption" color="text.secondary">
+			Share of observations degraded per hour of week (UTC), leaning towards
+			recent weeks. Hollow cells have no observations.
+		</Typography>
+	);
+}
+
+/// The 7×24 hour-of-week heatmap on its own, for reuse by fleet-level
+/// rollups. Renders nothing without a full, non-empty profile.
+export function DutyHeatmap({
+	cells,
+}: {
+	cells: StabilityData["duty_cycle"];
+}) {
 	const theme = useTheme();
-	const cells = stability.duty_cycle;
 	if (cells.length !== 168 || cells.every((c) => c.observations === 0)) {
 		return null;
 	}
