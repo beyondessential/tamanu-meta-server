@@ -47,7 +47,7 @@ function randomLabel(prefix: string): string {
  * statement with CASCADE. */
 export async function resetSeededTables(sql: Sql): Promise<void> {
 	await sql.query(
-		"TRUNCATE statuses, issues, device_keys, servers, server_groups, devices, versions, tailscale_users, healthcheck_severities, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, recovery_vault_writes RESTART IDENTITY CASCADE",
+		"TRUNCATE statuses, issues, device_keys, servers, server_groups, devices, versions, tailscale_users, check_policies, scoped_check_policies, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, recovery_vault_writes RESTART IDENTITY CASCADE",
 	);
 	// The truncate takes the migration-seeded nil "Canopy" server with it;
 	// self-alerts attach to that row, so put it back.
@@ -234,37 +234,92 @@ export async function seedStatus(
 		 RETURNING created_at`,
 		params,
 	);
+
+	// Mirror ingestion: each check in the push has a check-state row, which
+	// is what the health rollup and attention pages read. Degraded checks
+	// carry the degraded-streak stamps; healthy ones record inactive state.
+	for (const entry of (opts.health ?? []) as Record<string, unknown>[]) {
+		const check = entry.check;
+		if (typeof check !== "string") continue;
+		const result =
+			typeof entry.result === "string"
+				? entry.result
+				: typeof entry.healthy === "boolean"
+					? entry.healthy
+						? "passed"
+						: "failed"
+					: null;
+		if (result === null) continue;
+		const degraded = ["failed", "warning", "broken"].includes(result);
+		await sql.query(
+			`INSERT INTO issues
+			 (server_id, source, ref, check_name, observed_result, effective_result, detail, message, active, first_seen, last_seen, degraded_since, last_degraded_at)
+			 VALUES ($1, 'alertd', $2, $3, $4, $4, $5::jsonb, $6, $7, NOW(), NOW(), $8, $9)
+			 ON CONFLICT DO NOTHING`,
+			[
+				opts.serverId,
+				`health/${check}`,
+				check,
+				result,
+				JSON.stringify(entry),
+				`Health check '${check}' ${degraded ? "degraded" : "recorded"}`,
+				degraded,
+				degraded ? new Date().toISOString() : null,
+				degraded ? new Date().toISOString() : null,
+			],
+		);
+	}
+
 	return { id, createdAt: String(rows[0]!.created_at) };
 }
 
-export interface SeededHealthcheckSeverity {
+export interface SeededCheckPolicy {
+	source: string;
 	checkName: string;
 }
 
-/** Catalog row for a healthcheck name, as ingestion would have upserted
- * (plus an operator-set severity). Upserts so tests can call it without
+/** Policy row for a (source, check), as ingestion would have upserted
+ * (plus an operator-set ceiling). Upserts so tests can call it without
  * worrying whether ingestion already created a default row. */
-export async function seedHealthcheckSeverity(
+export async function seedCheckPolicy(
 	sql: Sql,
 	opts: {
 		checkName: string;
-		severity?: string;
+		source?: string;
+		ceiling?: string;
+		escalates?: boolean;
 		notes?: string | null;
+		documentation?: string | null;
 	},
-): Promise<SeededHealthcheckSeverity> {
+): Promise<SeededCheckPolicy> {
+	const source = opts.source ?? "alertd";
 	await sql.query(
-		`INSERT INTO healthcheck_severities (check_name, severity, notes)
-		 VALUES ($1, $2, $3)
-		 ON CONFLICT (check_name)
-		 DO UPDATE SET severity = EXCLUDED.severity, notes = EXCLUDED.notes`,
-		[opts.checkName, opts.severity ?? "warning", opts.notes ?? null],
+		`INSERT INTO check_policies (source, check_name, ceiling, escalates, notes, documentation)
+		 VALUES ($1, $2, $3, $4, $5, $6)
+		 ON CONFLICT (source, check_name)
+		 DO UPDATE SET ceiling = EXCLUDED.ceiling, escalates = EXCLUDED.escalates, notes = EXCLUDED.notes, documentation = EXCLUDED.documentation`,
+		[
+			source,
+			opts.checkName,
+			opts.ceiling ?? "warning",
+			opts.escalates ?? false,
+			opts.notes ?? null,
+			opts.documentation ?? null,
+		],
 	);
-	return { checkName: opts.checkName };
+	return { source, checkName: opts.checkName };
+}
+
+/** The check name a silence ref maps to in scoped-policy storage:
+ * refs of source-reported checks carry the `health/` prefix. */
+function refToCheck(ref: string): string {
+	return ref.startsWith("health/") ? ref.slice("health/".length) : ref;
 }
 
 /** Server-scope silence for a `(source, ref)` pair, as the UI's
- * silence button would create. For a healthcheck, pass
- * `ref: "health/<check>"` (source defaults to "status"). */
+ * silence button would create: a scoped check policy with a skipped
+ * ceiling. For a healthcheck, pass `ref: "health/<check>"` (source
+ * defaults to "alertd"). */
 export async function seedServerSilencedRef(
 	sql: Sql,
 	opts: {
@@ -275,10 +330,15 @@ export async function seedServerSilencedRef(
 	},
 ): Promise<void> {
 	await sql.query(
-		`INSERT INTO server_silenced_refs (server_id, source, ref, created_by)
-		 VALUES ($1, $2, $3, $4)
+		`INSERT INTO scoped_check_policies (server_id, source, check_name, ceiling, created_by)
+		 VALUES ($1, $2, $3, 'skipped', $4)
 		 ON CONFLICT DO NOTHING`,
-		[opts.serverId, opts.source ?? "status", opts.ref, opts.createdBy ?? null],
+		[
+			opts.serverId,
+			opts.source ?? "alertd",
+			refToCheck(opts.ref),
+			opts.createdBy ?? null,
+		],
 	);
 }
 
@@ -294,10 +354,15 @@ export async function seedGroupSilencedRef(
 	},
 ): Promise<void> {
 	await sql.query(
-		`INSERT INTO server_group_silenced_refs (server_group_id, source, ref, created_by)
-		 VALUES ($1, $2, $3, $4)
+		`INSERT INTO scoped_check_policies (server_group_id, source, check_name, ceiling, created_by)
+		 VALUES ($1, $2, $3, 'skipped', $4)
 		 ON CONFLICT DO NOTHING`,
-		[opts.groupId, opts.source ?? "status", opts.ref, opts.createdBy ?? null],
+		[
+			opts.groupId,
+			opts.source ?? "alertd",
+			refToCheck(opts.ref),
+			opts.createdBy ?? null,
+		],
 	);
 }
 
@@ -325,10 +390,11 @@ export async function seedIssue(
 	sql: Sql,
 	opts: {
 		/** Server-scoped issue. Mutually exclusive with `serverGroupId` — the
-		 * `issues` scope CHECK requires exactly one set. */
+		 * `issues` scope CHECK allows at most one set. */
 		serverId?: string | null;
 		/** Group-scoped issue (e.g. a backup issue spanning the group). When set,
-		 * leave `serverId` unset so the row satisfies the scope constraint. */
+		 * leave `serverId` unset so the row satisfies the scope constraint.
+		 * Leaving both unset seeds a canopy-wide issue (a self-alert). */
 		serverGroupId?: string | null;
 		source?: string;
 		ref?: string;
@@ -352,25 +418,41 @@ export async function seedIssue(
 ): Promise<SeededIssue> {
 	const id = randomUUID();
 	const resolved = opts.resolved ?? false;
+	const active = resolved ? false : (opts.active ?? true);
+	const severity = opts.severity ?? "error";
+	// Mirror the filing path's result stamping so seeded rows look like
+	// real check state: active rows degraded per the legacy severity the
+	// caller speaks, closed rows recovered. Critical means escalating.
+	const result = !active
+		? "passed"
+		: severity === "warning"
+			? "warning"
+			: "failed";
+	const check = (opts.ref ?? "health").replace(/^health\//, "");
+	// Every seeded issue was degraded at some point — that's what makes it
+	// an issue rather than healthy check state, which the listings exclude.
 	await sql.query(
 		`INSERT INTO issues
-		 (id, server_id, server_group_id, device_id, source, ref, severity, message, description, active, first_seen, last_seen, resolved_at, resolved_by, resolved_reason)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11::timestamptz, NOW()), NOW(), $12, $13, $14)`,
+		 (id, server_id, server_group_id, device_id, source, ref, check_name, observed_result, effective_result, escalates, message, description, active, first_seen, last_seen, resolved_at, resolved_by, resolved_reason, degraded_since, last_degraded_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, $9, $10, $11, $12, COALESCE($13::timestamptz, NOW()), NOW(), $14, $15, $16, $17, NOW())`,
 		[
 			id,
 			opts.serverId ?? null,
 			opts.serverGroupId ?? null,
 			opts.deviceId ?? null,
-			opts.source ?? "status",
+			opts.source ?? "alertd",
 			opts.ref ?? "health",
-			opts.severity ?? "error",
+			check,
+			result,
+			severity === "critical",
 			opts.message ?? "Issue message",
 			opts.description ?? null,
-			resolved ? false : (opts.active ?? true),
+			active,
 			opts.firstSeen ?? null,
 			resolved ? new Date().toISOString() : null,
 			resolved ? (opts.resolvedBy ?? null) : null,
 			resolved ? (opts.resolvedReason ?? null) : null,
+			active ? (opts.firstSeen ?? new Date().toISOString()) : null,
 		],
 	);
 	return { id };

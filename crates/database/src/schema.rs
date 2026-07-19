@@ -170,6 +170,22 @@ diesel::table! {
 }
 
 diesel::table! {
+	check_policies (source, check_name) {
+		source -> Text,
+		check_name -> Text,
+		ceiling -> Text,
+		escalates -> Bool,
+		rules -> Nullable<Jsonb>,
+		notes -> Nullable<Text>,
+		first_seen -> Timestamptz,
+		reviewed_at -> Nullable<Timestamptz>,
+		reviewed_by -> Nullable<Text>,
+		updated_at -> Timestamptz,
+		documentation -> Nullable<Text>,
+	}
+}
+
+diesel::table! {
 	chrome_releases (version) {
 		version -> Text,
 		release_date -> Text,
@@ -224,35 +240,6 @@ diesel::table! {
 }
 
 diesel::table! {
-	events (id) {
-		id -> Uuid,
-		created_at -> Timestamptz,
-		occurred_at -> Nullable<Timestamptz>,
-		issue_id -> Uuid,
-		severity -> Text,
-		description -> Nullable<Text>,
-		message -> Text,
-		active -> Bool,
-		hash -> Bytea,
-		occurrences -> Int4,
-		last_seen -> Timestamptz,
-	}
-}
-
-diesel::table! {
-	healthcheck_severities (check_name) {
-		check_name -> Text,
-		severity -> Text,
-		first_seen -> Timestamptz,
-		reviewed_at -> Nullable<Timestamptz>,
-		reviewed_by -> Nullable<Text>,
-		notes -> Nullable<Text>,
-		updated_at -> Timestamptz,
-		rules -> Nullable<Jsonb>,
-	}
-}
-
-diesel::table! {
 	incident_issues (incident_id, issue_id, joined_at) {
 		incident_id -> Uuid,
 		issue_id -> Uuid,
@@ -281,7 +268,7 @@ diesel::table! {
 		resolved_at -> Nullable<Timestamptz>,
 		resolved_by -> Nullable<Text>,
 		resolved_reason -> Nullable<Text>,
-		server_group_id -> Uuid,
+		server_group_id -> Nullable<Uuid>,
 		escalated_at -> Nullable<Timestamptz>,
 	}
 }
@@ -306,7 +293,6 @@ diesel::table! {
 		source -> Text,
 		#[sql_name = "ref"]
 		ref_ -> Text,
-		severity -> Text,
 		description -> Nullable<Text>,
 		message -> Text,
 		active -> Bool,
@@ -317,6 +303,13 @@ diesel::table! {
 		resolved_reason -> Nullable<Text>,
 		snoozed_until -> Nullable<Timestamptz>,
 		server_group_id -> Nullable<Uuid>,
+		check_name -> Nullable<Text>,
+		observed_result -> Nullable<Text>,
+		effective_result -> Nullable<Text>,
+		detail -> Nullable<Jsonb>,
+		degraded_since -> Nullable<Timestamptz>,
+		last_degraded_at -> Nullable<Timestamptz>,
+		escalates -> Bool,
 	}
 }
 
@@ -368,6 +361,21 @@ diesel::table! {
 		created_at -> Timestamptz,
 		updated_at -> Timestamptz,
 		params -> Jsonb,
+	}
+}
+
+diesel::table! {
+	scoped_check_policies (id) {
+		id -> Uuid,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
+		source -> Text,
+		check_name -> Text,
+		server_id -> Nullable<Uuid>,
+		server_group_id -> Nullable<Uuid>,
+		ceiling -> Nullable<Text>,
+		rules -> Nullable<Jsonb>,
+		created_by -> Nullable<Text>,
 	}
 }
 
@@ -439,17 +447,6 @@ diesel::table! {
 }
 
 diesel::table! {
-	server_group_silenced_refs (server_group_id, source, ref_) {
-		server_group_id -> Uuid,
-		source -> Text,
-		#[sql_name = "ref"]
-		ref_ -> Text,
-		created_at -> Timestamptz,
-		created_by -> Nullable<Text>,
-	}
-}
-
-diesel::table! {
 	server_groups (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
@@ -461,17 +458,6 @@ diesel::table! {
 		version_server_id -> Nullable<Uuid>,
 		effective_version -> Nullable<Text>,
 		deleted_at -> Nullable<Timestamptz>,
-	}
-}
-
-diesel::table! {
-	server_silenced_refs (server_id, source, ref_) {
-		server_id -> Uuid,
-		source -> Text,
-		#[sql_name = "ref"]
-		ref_ -> Text,
-		created_at -> Timestamptz,
-		created_by -> Nullable<Text>,
 	}
 }
 
@@ -495,7 +481,6 @@ diesel::table! {
 		is_monitored -> Bool,
 		deleted_at -> Nullable<Timestamptz>,
 		registered_at -> Nullable<Timestamptz>,
-		allow_legacy_status -> Bool,
 		restore_allowed_until -> Nullable<Timestamptz>,
 		restore_allowed_by -> Nullable<Text>,
 	}
@@ -538,6 +523,7 @@ diesel::table! {
 		device_id -> Nullable<Uuid>,
 		healthy -> Bool,
 		health -> Jsonb,
+		source -> Text,
 	}
 }
 
@@ -603,7 +589,6 @@ diesel::joinable!(device_connections -> devices (device_id));
 diesel::joinable!(device_keys -> devices (device_id));
 diesel::joinable!(device_server_associations -> devices (device_id));
 diesel::joinable!(device_server_associations -> servers (server_id));
-diesel::joinable!(events -> issues (issue_id));
 diesel::joinable!(incident_issues -> incidents (incident_id));
 diesel::joinable!(incident_issues -> issues (issue_id));
 diesel::joinable!(incident_notes -> incidents (incident_id));
@@ -616,13 +601,13 @@ diesel::joinable!(restore_consumer_capabilities -> devices (consumer_device_id))
 diesel::joinable!(restore_replicas -> devices (consumer_device_id));
 diesel::joinable!(restore_replicas -> server_groups (group_id));
 diesel::joinable!(restore_replicas -> servers (server_id));
+diesel::joinable!(scoped_check_policies -> server_groups (server_group_id));
+diesel::joinable!(scoped_check_policies -> servers (server_id));
 diesel::joinable!(server_backup_capabilities -> servers (server_id));
 diesel::joinable!(server_enrollment_challenges -> servers (server_id));
 diesel::joinable!(server_enrollment_tokens -> servers (server_id));
 diesel::joinable!(server_group_backup_config -> server_groups (group_id));
 diesel::joinable!(server_group_backup_schedule -> server_groups (group_id));
-diesel::joinable!(server_group_silenced_refs -> server_groups (server_group_id));
-diesel::joinable!(server_silenced_refs -> servers (server_id));
 diesel::joinable!(servers -> devices (device_id));
 diesel::joinable!(slack_outbox -> incident_notes (note_id));
 diesel::joinable!(slack_outbox -> incidents (incident_id));
@@ -643,13 +628,12 @@ diesel::allow_tables_to_appear_in_same_query!(
 	backup_runs,
 	backup_type_defaults,
 	bestool_snippets,
+	check_policies,
 	chrome_releases,
 	device_connections,
 	device_keys,
 	device_server_associations,
 	devices,
-	events,
-	healthcheck_severities,
 	incident_issues,
 	incident_notes,
 	incidents,
@@ -659,14 +643,13 @@ diesel::allow_tables_to_appear_in_same_query!(
 	recovery_vault_writes,
 	restore_consumer_capabilities,
 	restore_replicas,
+	scoped_check_policies,
 	server_backup_capabilities,
 	server_enrollment_challenges,
 	server_enrollment_tokens,
 	server_group_backup_config,
 	server_group_backup_schedule,
-	server_group_silenced_refs,
 	server_groups,
-	server_silenced_refs,
 	servers,
 	slack_outbox,
 	sql_playground_history,

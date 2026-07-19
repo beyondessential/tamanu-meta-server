@@ -90,15 +90,6 @@ pub struct Server {
 	/// `alert_when_down_for` threshold is preserved while unmonitored, so
 	/// turning monitoring back on doesn't lose the configured value.
 	pub is_monitored: bool,
-	/// Opt-in to accepting the older status-report format that doesn't
-	/// include a healthchecks array. Off by default, in which case a push in
-	/// the old format is rejected. When `true`, an old-format push is
-	/// accepted but only refreshes reachability — it carries the server's
-	/// last known healthchecks forward instead of clearing them, so a server
-	/// that's switching between old and new reporters doesn't flap its
-	/// health issues. Turn this off once the server reports in the current
-	/// format.
-	pub allow_legacy_status: bool,
 	/// How long, in seconds, a server's status may go without an update
 	/// before it's considered unreachable and an issue is filed. Increase
 	/// it for servers with flaky connectivity; decrease it for critical
@@ -825,7 +816,6 @@ fn test_server_serialization() {
 		cloud: None,
 		geolocation: None,
 		is_monitored: true,
-		allow_legacy_status: false,
 		alert_when_down_for: TEN_MINUTES,
 		notes: String::new(),
 		tags: TagMap::default(),
@@ -847,7 +837,6 @@ fn test_server_serialization() {
   "device_id": "00000000-0000-0000-0000-000000000000",
   "public_name": "Test Server",
   "is_monitored": true,
-  "allow_legacy_status": false,
   "alert_when_down_for": 600,
   "notes": "",
   "tags": {}
@@ -890,7 +879,6 @@ impl From<NewServer> for Server {
 			cloud: None,
 			geolocation: None,
 			is_monitored: true,
-			allow_legacy_status: false,
 			alert_when_down_for: TEN_MINUTES,
 			notes: String::new(),
 			tags: TagMap::default(),
@@ -937,8 +925,6 @@ pub struct PartialServer {
 	pub geolocation: Option<Option<GeoPoint>>,
 	/// New monitored state for the server.
 	pub is_monitored: Option<bool>,
-	/// New legacy-status-format opt-in for the server.
-	pub allow_legacy_status: Option<bool>,
 	/// New downtime threshold for the server, in seconds.
 	#[schema(value_type = Option<i64>)]
 	#[diesel(serialize_as = PgDuration)]

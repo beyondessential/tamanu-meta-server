@@ -193,12 +193,24 @@ impl McpToken {
 /// refs, this is a contract: silences and Slack messages reference it.
 pub const EXPIRY_REF: &str = "mcp-token-expiry";
 
+pub const EXPIRY_DOC: &str = "## Description
+
+One or more MCP access tokens (bearer tokens agents use against the public /mcp endpoint) are inside the rotation lead window of their fixed one-year expiry.
+
+## Results
+
+- **fail** — an un-revoked token expires soon (or has expired); recovers once every such token is rotated or revoked.
+
+## Solve
+
+Mint a replacement token in Settings, update the agent using the old one, then revoke it. The message lists each expiring token by name and minter.";
+
 /// Rotation alert, run from the monitor loop: a [self-alert](crate::self_alerts)
 /// — one coalescing record, one notification per raise/recovery, never one per
 /// group. Active while any un-revoked token is inside [`EXPIRY_ALERT_LEAD`] of
 /// its expiry; recovers when none are. Idle sweeps write nothing.
 pub async fn sweep_token_expiry(db: &mut AsyncPgConnection) -> Result<usize> {
-	use commons_types::issue::Severity;
+	use commons_types::status::CheckResult;
 
 	let expiring = McpToken::expiring_soon(db).await?;
 
@@ -236,7 +248,10 @@ pub async fn sweep_token_expiry(db: &mut AsyncPgConnection) -> Result<usize> {
 	crate::self_alerts::raise(
 		db,
 		EXPIRY_REF,
-		Severity::Error,
+		CheckResult::Failed,
+		CheckResult::Failed,
+		false,
+		Some(EXPIRY_DOC),
 		"MCP access token nearing expiry",
 		&message,
 	)

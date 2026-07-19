@@ -30,15 +30,15 @@
 use std::collections::HashMap;
 
 use commons_errors::Result;
-use commons_types::{backup::BackupType, issue::Severity};
+use commons_types::{backup::BackupType, status::CheckResult};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use jiff::{SignedDuration, Timestamp};
 use uuid::Uuid;
 
 use crate::{
-	backup::{alerts::raise_group_event, refs, staleness::ScanRow},
-	issues::NewEvent,
+	backup::{refs, staleness::ScanRow},
+	issues::{CheckFiling, FilingScope, file_check},
 	servers::Server,
 };
 
@@ -105,17 +105,26 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 			// missing). Only conclude this when the repo inventory is fresh
 			// enough.
 			(true, false) if inventory_fresh => {
-				raise_group_event(
+				file_check(
 					db,
-					row.group_id,
-					&missing_ref,
-					Severity::Error,
-					None,
-					&format!(
-						"Server {} reported a successful {} backup but no matching repo snapshot landed",
-						row.server_id, row.r#type,
-					),
-					true,
+					CheckFiling {
+						source: crate::statuses::CANOPY_SOURCE,
+						scope: FilingScope::Group(row.group_id),
+						check: &missing_ref,
+						observed: CheckResult::Failed,
+						title: None,
+						message: &format!(
+							"Server {} reported a successful {} backup but no matching repo snapshot landed",
+							row.server_id, row.r#type,
+						),
+						detail: Some(serde_json::json!({
+							"type": row.r#type.to_string(),
+							"server_id": row.server_id,
+						})),
+						default_ceiling: CheckResult::Failed,
+						default_escalates: false,
+						documentation: Some(refs::RECONCILE_MISSING_DOC),
+					},
 				)
 				.await?;
 				filed += 1;
@@ -123,47 +132,63 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 			// Both agree it's fine → clear any open missing alert.
 			(true, true) => {
 				if open_group_active(db, row.group_id, &missing_ref).await? {
-					raise_group_event(
+					file_check(
 						db,
-						row.group_id,
-						&missing_ref,
-						Severity::Info,
-						None,
-						&format!(
-							"Server {} backup report and repo snapshot agree again",
-							row.server_id
-						),
-						false,
+						CheckFiling {
+							source: crate::statuses::CANOPY_SOURCE,
+							scope: FilingScope::Group(row.group_id),
+							check: &missing_ref,
+							observed: CheckResult::Passed,
+							title: None,
+							message: &format!(
+								"Server {} backup report and repo snapshot agree again",
+								row.server_id
+							),
+							detail: None,
+							default_ceiling: CheckResult::Failed,
+							default_escalates: false,
+							documentation: Some(refs::RECONCILE_MISSING_DOC),
+						},
 					)
 					.await?;
 					filed += 1;
 				}
-				filed += clear_report_gap(db, row, &gap_ref, now).await?;
+				filed += clear_report_gap(db, row, &gap_ref).await?;
 			}
 			// Snapshot landed but no recent report → the reporting path is
-			// broken. Per-server Warning (non-paging).
+			// broken. Per-server warning (non-paging).
 			(false, true) => {
 				let server = Server::get_by_id(db, row.server_id).await?;
-				NewEvent {
-					source: refs::CANOPY_SOURCE.into(),
-					r#ref: gap_ref,
-					severity: Some(Severity::Warning),
-					description: None,
-					message: format!(
-						"A fresh {} repo snapshot exists for {} but no backup run was reported",
-						row.r#type, server.id,
-					),
-					active: Some(true),
-					occurred_at: Some(now),
-				}
-				.save(db, row.server_id, row.device_id)
+				file_check(
+					db,
+					CheckFiling {
+						source: crate::statuses::CANOPY_SOURCE,
+						scope: FilingScope::Server {
+							server_id: row.server_id,
+							device_id: row.device_id,
+						},
+						check: &gap_ref,
+						observed: CheckResult::Warning,
+						title: None,
+						message: &format!(
+							"A fresh {} repo snapshot exists for {} but no backup run was reported",
+							row.r#type, server.id,
+						),
+						detail: Some(serde_json::json!({
+							"type": row.r#type.to_string(),
+						})),
+						default_ceiling: CheckResult::Warning,
+						default_escalates: false,
+						documentation: Some(refs::RECONCILE_REPORT_GAP_DOC),
+					},
+				)
 				.await?;
 				filed += 1;
 			}
 			// Neither fresh → the staleness scan owns it; clear stale reconcile
 			// alerts.
 			(false, false) => {
-				filed += clear_report_gap(db, row, &gap_ref, now).await?;
+				filed += clear_report_gap(db, row, &gap_ref).await?;
 			}
 			// (true, false) but the repo inventory is stale: skip the missing
 			// verdict.
@@ -176,25 +201,37 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 		match sized.get(&(row.server_id, row.r#type.clone())) {
 			Some(&(reported, observed)) if reported != observed => {
 				let server = Server::get_by_id(db, row.server_id).await?;
-				NewEvent {
-					source: refs::CANOPY_SOURCE.into(),
-					r#ref: size_ref,
-					severity: Some(Severity::Warning),
-					description: None,
-					message: format!(
-						"Server {} reported a {} snapshot size of {reported} bytes but the repo holds {observed}",
-						server.id, row.r#type,
-					),
-					active: Some(true),
-					occurred_at: Some(now),
-				}
-				.save(db, row.server_id, row.device_id)
+				file_check(
+					db,
+					CheckFiling {
+						source: crate::statuses::CANOPY_SOURCE,
+						scope: FilingScope::Server {
+							server_id: row.server_id,
+							device_id: row.device_id,
+						},
+						check: &size_ref,
+						observed: CheckResult::Warning,
+						title: None,
+						message: &format!(
+							"Server {} reported a {} snapshot size of {reported} bytes but the repo holds {observed}",
+							server.id, row.r#type,
+						),
+						detail: Some(serde_json::json!({
+							"type": row.r#type.to_string(),
+							"reported_bytes": reported,
+							"observed_bytes": observed,
+						})),
+						default_ceiling: CheckResult::Warning,
+						default_escalates: false,
+						documentation: Some(refs::RECONCILE_SIZE_MISMATCH_DOC),
+					},
+				)
 				.await?;
 				filed += 1;
 			}
 			// Agree, or no comparable run → clear any open mismatch.
 			_ => {
-				filed += clear_size_mismatch(db, row, &size_ref, now).await?;
+				filed += clear_size_mismatch(db, row, &size_ref).await?;
 			}
 		}
 	}
@@ -207,24 +244,31 @@ async fn clear_size_mismatch(
 	db: &mut AsyncPgConnection,
 	row: &ScanRow,
 	size_ref: &str,
-	now: Timestamp,
 ) -> Result<usize> {
 	if !crate::backup::staleness::open_server_issue_active(db, row.server_id, size_ref).await? {
 		return Ok(0);
 	}
-	NewEvent {
-		source: refs::CANOPY_SOURCE.into(),
-		r#ref: size_ref.to_string(),
-		severity: Some(Severity::Info),
-		description: None,
-		message: format!(
-			"Reported and repo {} snapshot sizes for {} agree again",
-			row.r#type, row.server_id
-		),
-		active: Some(false),
-		occurred_at: Some(now),
-	}
-	.save(db, row.server_id, row.device_id)
+	file_check(
+		db,
+		CheckFiling {
+			source: crate::statuses::CANOPY_SOURCE,
+			scope: FilingScope::Server {
+				server_id: row.server_id,
+				device_id: row.device_id,
+			},
+			check: size_ref,
+			observed: CheckResult::Passed,
+			title: None,
+			message: &format!(
+				"Reported and repo {} snapshot sizes for {} agree again",
+				row.r#type, row.server_id
+			),
+			detail: None,
+			default_ceiling: CheckResult::Warning,
+			default_escalates: false,
+			documentation: Some(refs::RECONCILE_SIZE_MISMATCH_DOC),
+		},
+	)
 	.await?;
 	Ok(1)
 }
@@ -235,24 +279,31 @@ async fn clear_report_gap(
 	db: &mut AsyncPgConnection,
 	row: &ScanRow,
 	gap_ref: &str,
-	now: Timestamp,
 ) -> Result<usize> {
 	if !crate::backup::staleness::open_server_issue_active(db, row.server_id, gap_ref).await? {
 		return Ok(0);
 	}
-	NewEvent {
-		source: refs::CANOPY_SOURCE.into(),
-		r#ref: gap_ref.to_string(),
-		severity: Some(Severity::Info),
-		description: None,
-		message: format!(
-			"Backup reporting for {} ({}) recovered",
-			row.server_id, row.r#type
-		),
-		active: Some(false),
-		occurred_at: Some(now),
-	}
-	.save(db, row.server_id, row.device_id)
+	file_check(
+		db,
+		CheckFiling {
+			source: crate::statuses::CANOPY_SOURCE,
+			scope: FilingScope::Server {
+				server_id: row.server_id,
+				device_id: row.device_id,
+			},
+			check: gap_ref,
+			observed: CheckResult::Passed,
+			title: None,
+			message: &format!(
+				"Backup reporting for {} ({}) recovered",
+				row.server_id, row.r#type
+			),
+			detail: None,
+			default_ceiling: CheckResult::Warning,
+			default_escalates: false,
+			documentation: Some(refs::RECONCILE_REPORT_GAP_DOC),
+		},
+	)
 	.await?;
 	Ok(1)
 }

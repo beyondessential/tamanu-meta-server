@@ -9,7 +9,6 @@ mod backup_secrets;
 mod check_severities;
 mod device_key_auth;
 mod error_scenarios;
-mod events;
 mod health;
 mod index;
 mod mcp;

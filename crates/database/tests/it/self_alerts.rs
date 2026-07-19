@@ -1,18 +1,40 @@
-//! Self-alert lifecycle: a raise files one coalescing nil-server issue and
-//! enqueues exactly one Slack open on the not-alerting → alerting transition
-//! (with flap grace below Critical, immediate at Critical); recovery inside
+//! Self-alert lifecycle: a raise files one coalescing canopy-wide issue
+//! which opens a canopy-wide incident, enqueuing exactly one Slack open on
+//! the not-alerting → alerting transition (with flap grace for
+//! non-escalating checks, immediate for escalating ones); recovery inside
 //! the grace cancels the open and sends nothing; recovery after delivery
 //! enqueues the resolve; idle recovers write nothing.
 
-use commons_types::issue::Severity;
+use commons_types::status::CheckResult;
 use database::self_alerts;
-use database::slack_outbox::{KIND_SELF_ALERT_OPEN, KIND_SELF_ALERT_RESOLVE, SlackOutbox};
+use database::slack_outbox::{KIND_INCIDENT_OPEN, KIND_INCIDENT_RESOLVE, SlackOutbox};
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use jiff::Timestamp;
-use uuid::Uuid;
 
 const REF: &str = "test-self-alert";
+
+/// Raise REF as a failure; `escalates` picks the registered policy tier
+/// (escalating ≙ the old Critical, immediate notify; otherwise graced).
+/// Each test runs on a fresh database, so the first raise registers the
+/// catalog entry at the given tier.
+async fn raise_with(
+	conn: &mut diesel_async::AsyncPgConnection,
+	escalates: bool,
+) -> database::issues::Issue {
+	self_alerts::raise(
+		conn,
+		REF,
+		CheckResult::Failed,
+		CheckResult::Failed,
+		escalates,
+		None,
+		"title",
+		"body",
+	)
+	.await
+	.expect("raise")
+}
 
 async fn outbox_rows(conn: &mut diesel_async::AsyncPgConnection) -> Vec<SlackOutbox> {
 	use database::schema::slack_outbox::dsl;
@@ -36,30 +58,31 @@ async fn raise_enqueues_once_and_flap_recovery_is_silent() {
 		);
 		assert!(outbox_rows(&mut conn).await.is_empty());
 
-		// First raise: issue + one open row, delayed by the grace (Error).
-		let issue = self_alerts::raise(&mut conn, REF, Severity::Error, "title", "body")
-			.await
-			.expect("raise");
-		assert_eq!(issue.server_id, Some(Uuid::nil()));
+		// First raise: issue + canopy-wide incident + one open row, delayed
+		// by the grace (non-escalating).
+		let issue = raise_with(&mut conn, false).await;
+		assert_eq!(issue.server_id, None);
+		assert_eq!(issue.server_group_id, None);
 		assert!(issue.active);
 		let rows = outbox_rows(&mut conn).await;
 		let [open] = rows.as_slice() else {
 			panic!("exactly one outbox row, got {rows:?}");
 		};
-		assert_eq!(open.kind, KIND_SELF_ALERT_OPEN);
-		assert_eq!(open.incident_id, None);
+		assert_eq!(open.kind, KIND_INCIDENT_OPEN);
+		assert!(
+			open.incident_id.is_some(),
+			"the raise opened a canopy-wide incident"
+		);
 		assert_eq!(open.issue_id, Some(issue.id));
 		assert!(
 			open.deliver_after > Timestamp::now(),
-			"sub-Critical opens wait out the grace"
+			"non-escalating opens wait out the grace"
 		);
-		assert_eq!(open.payload["state"], "alert");
+		assert_eq!(open.payload["server"], "Canopy");
 		assert_eq!(open.payload["source_ref"], format!("canopy/{REF}"));
 
 		// Re-raise while alerting: no new outbox row.
-		self_alerts::raise(&mut conn, REF, Severity::Error, "title", "body")
-			.await
-			.expect("re-raise");
+		raise_with(&mut conn, false).await;
 		assert_eq!(outbox_rows(&mut conn).await.len(), 1);
 
 		// Recover inside the grace: open cancelled, no resolve enqueued.
@@ -72,25 +95,21 @@ async fn raise_enqueues_once_and_flap_recovery_is_silent() {
 		assert!(rows[0].gave_up_at.is_some(), "pending open cancelled");
 
 		// Raise again: a fresh transition, a fresh open.
-		self_alerts::raise(&mut conn, REF, Severity::Error, "title", "body")
-			.await
-			.expect("raise again");
+		raise_with(&mut conn, false).await;
 		assert_eq!(outbox_rows(&mut conn).await.len(), 2);
 	})
 	.await
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn critical_ships_immediately_and_recovery_after_delivery_resolves() {
+async fn escalating_ships_immediately_and_recovery_after_delivery_resolves() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		self_alerts::raise(&mut conn, REF, Severity::Critical, "title", "body")
-			.await
-			.expect("raise");
+		raise_with(&mut conn, true).await;
 		let rows = outbox_rows(&mut conn).await;
 		assert_eq!(rows.len(), 1);
 		assert!(
 			rows[0].deliver_after <= Timestamp::now(),
-			"critical skips the grace"
+			"an escalating check skips the grace"
 		);
 
 		// Simulate the drainer shipping the open, then recover: a resolve
@@ -105,8 +124,8 @@ async fn critical_ships_immediately_and_recovery_after_delivery_resolves() {
 		let rows = outbox_rows(&mut conn).await;
 		assert_eq!(rows.len(), 2);
 		let resolve = &rows[1];
-		assert_eq!(resolve.kind, KIND_SELF_ALERT_RESOLVE);
-		assert_eq!(resolve.payload["state"], "recovered");
+		assert_eq!(resolve.kind, KIND_INCIDENT_RESOLVE);
+		assert_eq!(resolve.payload["server"], "Canopy");
 		assert!(resolve.deliver_after <= Timestamp::now());
 
 		// Recovering again is a no-op.
@@ -126,9 +145,7 @@ async fn operator_resolved_but_persisting_condition_re_notifies() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
 		use database::issues::Issue;
 
-		let issue = self_alerts::raise(&mut conn, REF, Severity::Critical, "title", "body")
-			.await
-			.expect("raise");
+		let issue = raise_with(&mut conn, true).await;
 		assert_eq!(outbox_rows(&mut conn).await.len(), 1);
 
 		// An operator resolves it, but the condition still holds: the next
@@ -142,9 +159,7 @@ async fn operator_resolved_but_persisting_condition_re_notifies() {
 		)
 		.await
 		.expect("operator resolve");
-		self_alerts::raise(&mut conn, REF, Severity::Critical, "title", "body")
-			.await
-			.expect("re-raise");
+		raise_with(&mut conn, true).await;
 		assert_eq!(outbox_rows(&mut conn).await.len(), 2);
 	})
 	.await
@@ -155,16 +170,14 @@ async fn self_alert_issues_are_excluded_from_the_fleet_listing() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
 		use database::issues::Issue;
 
-		self_alerts::raise(&mut conn, REF, Severity::Error, "title", "body")
-			.await
-			.expect("raise");
+		raise_with(&mut conn, false).await;
 
 		let fleet = Issue::list(&mut conn, Default::default(), 100)
 			.await
 			.expect("list");
 		assert!(
 			fleet.is_empty(),
-			"nil-server issues must not appear in the fleet listing: {fleet:?}"
+			"canopy-wide issues must not appear in the fleet listing: {fleet:?}"
 		);
 		let alerts = self_alerts::list(&mut conn, 50).await.expect("alerts");
 		assert_eq!(alerts.len(), 1);

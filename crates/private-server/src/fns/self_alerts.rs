@@ -9,7 +9,8 @@ use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
 use commons_types::Uuid;
-use commons_types::issue::{ResolvedReason, Severity};
+use commons_types::issue::ResolvedReason;
+use commons_types::status::CheckResult;
 use database::issues::Issue;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -35,9 +36,15 @@ pub struct SelfAlertView {
 	/// `mcp-token-expiry`. Stable across repeated raises of the same
 	/// condition.
 	pub r#ref: String,
-	/// How severe the condition is, from `critical` (most severe) down to
-	/// `debug` (least).
-	pub severity: Severity,
+	/// What canopy observed on the latest raise, before policy.
+	#[schema(value_type = Option<String>)]
+	pub observed_result: Option<CheckResult>,
+	/// What policy made of it — the result canopy acts on.
+	#[schema(value_type = Option<String>)]
+	pub effective_result: Option<CheckResult>,
+	/// Whether this condition's policy escalates: an effective failure
+	/// notifies immediately, bypassing incident grace.
+	pub escalates: bool,
 	/// Single-line headline.
 	pub title: Option<String>,
 	/// Full detail message describing the condition.
@@ -63,7 +70,9 @@ impl From<Issue> for SelfAlertView {
 		Self {
 			id: i.id,
 			r#ref: i.r#ref,
-			severity: i.severity,
+			observed_result: i.observed_result,
+			effective_result: i.effective_result,
+			escalates: i.escalates,
 			title: i.description,
 			message: i.message,
 			active: i.active,
@@ -145,9 +154,7 @@ pub struct SelfAlertsResolveArgs {
 
 /// Mark a self-alert as resolved.
 ///
-/// Records that an operator has resolved the given self-alert and cancels
-/// its notification if one is still pending delivery (e.g. inside the
-/// initial grace period before a low-severity alert is sent). Returns 404
+/// Records that an operator has resolved the given self-alert. Returns 404
 /// if no self-alert with that id exists.
 #[utoipa::path(
 	post,
@@ -157,7 +164,7 @@ pub struct SelfAlertsResolveArgs {
 	security(("tailscale-admin" = [])),
 	request_body = SelfAlertsResolveArgs,
 	responses(
-		(status = 200, description = "Alert marked operator-resolved; a pending notification is cancelled."),
+		(status = 200, description = "Alert marked operator-resolved."),
 		(status = 401, body = ProblemDetailsSchema),
 		(status = 403, body = ProblemDetailsSchema),
 		(status = 404, body = ProblemDetailsSchema),
@@ -170,13 +177,5 @@ pub async fn resolve(
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
 	Issue::resolve(&mut conn, args.id, &admin.login, ResolvedReason::Fixed).await?;
-	// If the alert's Slack open is still inside its grace window, the
-	// operator has dealt with it before anyone needed paging.
-	database::slack_outbox::SlackOutbox::cancel_pending_self_alert_open(
-		&mut conn,
-		args.id,
-		"cancelled: self-alert operator-resolved before the open had been delivered to Slack",
-	)
-	.await?;
 	Ok(Json(()))
 }

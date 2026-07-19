@@ -20,7 +20,7 @@ async fn seed_issue_and_incident(
 		.json(&serde_json::json!({
 			"serverId": server_id,
 			"ref": "x",
-			"severity": "error",
+			"result": "failed",
 			"message": "trouble",
 		}))
 		.await;

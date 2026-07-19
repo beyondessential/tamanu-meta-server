@@ -1,4 +1,7 @@
 import {
+	Accordion,
+	AccordionDetails,
+	AccordionSummary,
 	Alert,
 	Box,
 	Chip,
@@ -23,46 +26,34 @@ import { useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import { useApi } from "../api";
 import CheckExtrasList, { checkEntryExtras } from "../components/CheckExtras";
+import Markdown from "../components/Markdown";
+import CheckResultChip from "../components/CheckResultChip";
 import ServerNameWithGroup from "../components/ServerNameWithGroup";
-import SeverityChip from "../components/SeverityChip";
 import TimeAgo from "../components/TimeAgo";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { useReloadInterval } from "../hooks/useReloadInterval";
 import { type CheckAttentionServerData, type CheckResult } from "../types";
 
-/// MUI chip colour per check result. Broken reads as a warning since it
-/// says nothing about the system under test, just the check itself;
-/// passed/skipped (visible behind the "show healthy" toggle) read calm.
-const CHECK_CHIP_COLOR: Record<
-	CheckResult,
-	"error" | "warning" | "success" | "default"
-> = {
-	failed: "error",
-	warning: "warning",
-	broken: "warning",
-	passed: "success",
-	skipped: "default",
-};
-
 const HEALTHY_RESULTS: readonly string[] = ["passed", "skipped"];
 
-/// Dedicated page for a single healthcheck: every live server whose
-/// *current* status flags it, most urgent first, with the servers
+/// Dedicated page for a single healthcheck — one (source, check), since
+/// that pair is the check's identity: every live server whose *current*
+/// state from that source flags it, most urgent first, with the servers
 /// reporting it healthy behind a toggle. Doubles as an operator TODO
 /// list for normalising those servers back to healthy, and as a way to
 /// see who's sharing the same issue during a fleet-wide incident.
 /// Linked from wherever a check name shows up — server detail, issue
 /// rows, and the healthchecks settings catalog.
 export default function HealthcheckAttention() {
-	const { check } = useParams<{ check: string }>();
+	const { source, check } = useParams<{ source: string; check: string }>();
 	usePageTitle(check ?? "Healthcheck");
 	const tick = useReloadInterval(30_000, "canopy-data-changed");
 	const [showHealthy, setShowHealthy] = useState(false);
 	const result = useApi(
 		"statuses",
 		"check_attention",
-		{ check: check ?? "" },
-		[check, tick],
+		{ source: source ?? "", check: check ?? "" },
+		[source, check, tick],
 	);
 
 	return (
@@ -75,20 +66,44 @@ export default function HealthcheckAttention() {
 					<Typography variant="h6" component="h2" sx={{ fontFamily: "monospace" }}>
 						{check}
 					</Typography>
-					{result.status === "ok" && result.data.severity && (
-						<SeverityChip severity={result.data.severity} />
+					<Typography variant="body2" color="text.secondary">
+						reported by {source}
+					</Typography>
+					{result.status === "ok" && result.data.ceiling && (
+						<CheckResultChip result={result.data.ceiling as CheckResult} />
+					)}
+					{result.status === "ok" && result.data.escalates && (
+						<Chip
+							label="escalates"
+							color="error"
+							size="small"
+							variant="outlined"
+							title="An effective failure notifies immediately, bypassing the incident grace period"
+						/>
 					)}
 				</Stack>
 				<Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-					Servers whose latest status currently flags this check.{" "}
+					Servers whose latest report from this source currently flags this
+					check.{" "}
 					<MuiLink
 						component={RouterLink}
 						to={`/settings/healthchecks/${encodeURIComponent(check ?? "")}`}
 					>
-						Configure severity / rules
+						Configure ceiling / rules / documentation
 					</MuiLink>
 				</Typography>
 			</Box>
+
+			{result.status === "ok" && result.data.documentation && (
+				<Accordion variant="outlined" disableGutters>
+					<AccordionSummary expandIcon={<ExpandMoreIcon />}>
+						<Typography variant="subtitle2">About this check</Typography>
+					</AccordionSummary>
+					<AccordionDetails>
+						<Markdown>{result.data.documentation}</Markdown>
+					</AccordionDetails>
+				</Accordion>
+			)}
 
 			<FormControlLabel
 				control={
@@ -202,11 +217,9 @@ function AttentionRow({ server }: { server: CheckAttentionServerData }) {
 					/>
 				</TableCell>
 				<TableCell>
-					<Chip
-						label={server.result}
-						size="small"
+					<CheckResultChip
+						result={server.result as CheckResult}
 						variant="outlined"
-						color={CHECK_CHIP_COLOR[server.result as CheckResult] ?? "warning"}
 					/>
 				</TableCell>
 				<TableCell>

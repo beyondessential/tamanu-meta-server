@@ -3,13 +3,12 @@
 //! persisted device rows and files / closes the relevant issues.
 
 use commons_errors::Result;
-use commons_types::{Uuid, issue::Severity};
+use commons_types::{Uuid, status::CheckResult};
 use database::{
 	devices::Device,
-	issues::{Issue, NewEvent},
+	issues::{CheckFiling, FilingScope, Issue, file_check},
 };
 use diesel_async::AsyncPgConnection;
-use jiff::Timestamp;
 
 use crate::tailnet_directory::TailnetDirectory;
 
@@ -20,9 +19,23 @@ pub const TAILSCALE_SOURCE: &str = "canopy";
 /// `(server, device)` pair.
 pub const KEY_EXPIRY_REF: &str = "tailscale-key-expiry";
 
+pub const KEY_EXPIRY_DOC: &str = "## Description
+
+The server's Tailscale node key is nearing expiry (and key expiry isn't disabled for the node). When it lapses, the device drops off the tailnet and canopy loses its management path.
+
+## Results
+
+- **fail** — the node key expires within the alert lead. Escalates: an expired key severs connectivity. Recovers when the key is rotated or expiry is disabled.
+
+## Solve
+
+Re-authenticate the node (`tailscale up`) or disable key expiry for it in the Tailscale admin console.";
+
 /// Sweep every tailnet-attached device that's wired to at least one
-/// server, and file (or close) a Critical issue per `(server, device)`
-/// pair based on the node's `keyExpiryDisabled`.
+/// server, and file (or close) the key-expiry check per `(server,
+/// device)` pair based on the node's `keyExpiryDisabled`. The check
+/// registers as an escalating failure — losing contact with a node is
+/// stop-the-world — but operators can regrade it from the catalog.
 ///
 /// Tailnet-attached devices with no server are intentionally skipped:
 /// the tailnet hosts plenty of nodes that aren't canopy-managed
@@ -51,7 +64,6 @@ pub async fn sweep_key_expiry(
 		.filter_map(|i| i.server_id.map(|sid| (sid, i)))
 		.collect();
 
-	let now = Timestamp::now();
 	let mut filed = 0usize;
 	for (device, server_id, node_id) in &pairs {
 		let entry = snapshot.get(node_id);
@@ -65,39 +77,52 @@ pub async fn sweep_key_expiry(
 			continue;
 		};
 
-		let event = match (entry.key_expiry_disabled, existing_issue) {
+		let (observed, title, message) = match (entry.key_expiry_disabled, existing_issue) {
 			// Healthy state, no issue: nothing to do.
 			(true, None) => continue,
 			// Healthy state, issue already inactive: nothing to do.
 			(true, Some(issue)) if !issue.active => continue,
 			// Healthy state, but an active issue exists: close it.
-			(true, Some(_)) => NewEvent {
-				source: TAILSCALE_SOURCE.into(),
-				r#ref: KEY_EXPIRY_REF.into(),
-				severity: Some(Severity::Info),
-				description: None,
-				message: format!("Tailscale key expiry disabled for {}", entry.node_name,),
-				active: Some(false),
-				occurred_at: Some(now),
-			},
-			// Unhealthy state: file or refresh a critical issue.
-			(false, _) => NewEvent {
-				source: TAILSCALE_SOURCE.into(),
-				r#ref: KEY_EXPIRY_REF.into(),
-				severity: Some(Severity::Critical),
-				description: Some(format!("Tailscale key will expire for {}", entry.node_name,)),
-				message: format!(
+			(true, Some(_)) => (
+				CheckResult::Passed,
+				None,
+				format!("Tailscale key expiry disabled for {}", entry.node_name),
+			),
+			// Unhealthy state: file or refresh the failure.
+			(false, _) => (
+				CheckResult::Failed,
+				Some(format!("Tailscale key will expire for {}", entry.node_name)),
+				format!(
 					"Tailnet node {} ({}) has key expiry enabled. When the \
 					 node's key expires, it will drop off the tailnet and \
 					 canopy will lose contact.",
 					entry.node_name, entry.node_id,
 				),
-				active: Some(true),
-				occurred_at: Some(now),
-			},
+			),
 		};
 
-		event.save(db, *server_id, Some(device.id)).await?;
+		file_check(
+			db,
+			CheckFiling {
+				source: TAILSCALE_SOURCE,
+				scope: FilingScope::Server {
+					server_id: *server_id,
+					device_id: Some(device.id),
+				},
+				check: KEY_EXPIRY_REF,
+				observed,
+				title: title.as_deref(),
+				message: &message,
+				detail: Some(serde_json::json!({
+					"node_id": entry.node_id,
+					"node_name": entry.node_name,
+				})),
+				default_ceiling: CheckResult::Failed,
+				default_escalates: true,
+				documentation: Some(KEY_EXPIRY_DOC),
+			},
+		)
+		.await?;
 		filed += 1;
 	}
 

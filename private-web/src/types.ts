@@ -78,7 +78,6 @@ export type ServerRank = Solidify<Schemas["ServerRank"]>;
 export type VersionStatus = Solidify<Schemas["VersionStatus"]>;
 export type DeviceRole = Solidify<Schemas["DeviceRole"]>;
 export type ProvisionedCredential = Solidify<Schemas["ProvisionedCredential"]>;
-export type Severity = Solidify<Schemas["Severity"]>;
 export type ResolvedReason = Solidify<Schemas["ResolvedReason"]>;
 
 export type VersionStr = Solidify<Schemas["VersionStr"]>;
@@ -119,13 +118,12 @@ export type DeviceConnectionData = Solidify<Schemas["DeviceConnectionData"]>;
 export type DeviceInfo = Solidify<Schemas["DeviceInfo"]>;
 export type TailnetLiveInfo = Solidify<Schemas["TailnetLiveInfo"]>;
 
-export type HealthcheckSeverityData = Solidify<Schemas["HealthcheckSeverityData"]>;
+export type CheckPolicyData = Solidify<Schemas["CheckPolicyData"]>;
 export type HealthcheckSample = Solidify<Schemas["HealthcheckSample"]>;
 export type HealthcheckSampleResponse = Solidify<Schemas["HealthcheckSampleResponse"]>;
 
 export type IssueData = Solidify<Schemas["IssueData"]>;
 export type IssueIncidentLink = Solidify<Schemas["IssueIncidentLink"]>;
-export type EventData = Solidify<Schemas["EventData"]>;
 export type IncidentData = Solidify<Schemas["IncidentData"]>;
 export type IncidentIssueData = Solidify<Schemas["IncidentIssueData"]>;
 export type IncidentWithIssues = Solidify<Schemas["IncidentWithIssues"]>;
@@ -249,30 +247,6 @@ export function groupServersByRank<
 	return result;
 }
 
-/// Operator-facing severity vocabulary, loud → quiet. Used for both
-/// display and selection (the API now restricts severities to these
-/// five — see commons-types::issue::Severity and the
-/// 2026-05-29-restrict_severities migration).
-export const SEVERITIES: Severity[] = [
-	"critical",
-	"error",
-	"warning",
-	"info",
-	"debug",
-];
-
-/// Short one-line description of how each severity participates in the
-/// incident workflow. Used in dropdown helper text and as the
-/// SeverityChip tooltip so operators see the semantic meaning at the
-/// point of choice.
-export const SEVERITY_INTENT: Record<Severity, string> = {
-	critical: "Opens an incident immediately (no holding period)",
-	error: "Opens an incident (after the group's holding period)",
-	warning: "Joins an open incident; doesn't open one on its own",
-	info: "Joins an open incident; doesn't open one on its own",
-	debug: "Not shown in incidents",
-};
-
 /// Per-check result vocabulary. Hand-written mirror of the Rust
 /// `commons_types::status::CheckResult` (the source of truth) — the
 /// private API ships `health[]` as raw JSON, so this never appears in
@@ -293,6 +267,34 @@ export const CHECK_RESULT_ORDER: CheckResult[] = [
 	"passed",
 	"skipped",
 ];
+
+/// Short one-line description of what each effective result means for
+/// the incident workflow. Used as the CheckResultChip tooltip and in
+/// rule-outcome dropdowns so operators see the semantic meaning at the
+/// point of choice.
+export const CHECK_RESULT_INTENT: Record<CheckResult, string> = {
+	failed: "Failing — opens (or holds open) an incident",
+	warning: "Degraded — joins an open incident; doesn't open one",
+	broken: "The check itself couldn't run; counts as a warning",
+	passed: "Healthy — raises nothing",
+	skipped: "Didn't run — raises nothing",
+};
+
+/// A policy ceiling: the maximum effective result for a check. `broken`
+/// is not a valid ceiling — it describes the check runner, not a grade.
+export type Ceiling = Exclude<CheckResult, "broken">;
+
+/// Ceiling vocabulary for the policy editor, loud → quiet.
+export const CEILINGS: Ceiling[] = ["failed", "warning", "passed", "skipped"];
+
+/// Short one-line description of what each ceiling does to a check's
+/// observed results.
+export const CEILING_INTENT: Record<Ceiling, string> = {
+	failed: "Failures count in full and can open incidents",
+	warning: "Failures grade down to warnings; never opens incidents",
+	passed: "Recorded but never alerts",
+	skipped: "Never alerts, and the reporting agent may stop running the check",
+};
 
 /// Normalise a raw `health[]` entry to its result. Mirror of the Rust
 /// `CheckResult::from_entry`: prefer a valid `result` string (an
@@ -316,21 +318,23 @@ export function checkResultOf(
 /// Route to the per-healthcheck "who's affected" page for `check`. Check
 /// names are arbitrary strings reported by devices (not restricted to
 /// URL-safe characters), so every link builder must go through this
-/// instead of interpolating the name directly.
-export function healthcheckPath(check: string): string {
-	return `/healthchecks/${encodeURIComponent(check)}`;
+/// instead of interpolating the name directly. A check's identity is
+/// the (source, check) pair — same-named checks from different sources
+/// are different checks.
+export function healthcheckPath(source: string, check: string): string {
+	return `/healthchecks/${encodeURIComponent(source)}/${encodeURIComponent(check)}`;
 }
 
-/// The check name embedded in a status-sourced issue/event's `ref`
-/// (`health/<check>` — see the public-server `STATUS_SOURCE` constant),
-/// or `null` for issues filed by any other source (backups, manual,
-/// canopy reachability, …), which don't reference a healthcheck.
+/// The check name embedded in a health issue's `ref` (`health/<check>`,
+/// filed under whichever source reports the check), or `null` for
+/// issues whose ref isn't a healthcheck (backups, manual, canopy
+/// reachability, …).
 export function healthcheckNameFromRef(
-	source: string,
+	_source: string,
 	ref: string,
 ): string | null {
 	const prefix = "health/";
-	if (source !== "status" || !ref.startsWith(prefix)) return null;
+	if (!ref.startsWith(prefix)) return null;
 	return ref.slice(prefix.length);
 }
 

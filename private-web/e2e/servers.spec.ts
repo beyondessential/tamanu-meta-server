@@ -121,36 +121,31 @@ test.describe("server edit page", () => {
 		await expect(page.getByLabel(/^Name(\s*\*)?$/i)).toHaveValue(server.name);
 	});
 
-	test("toggling 'Allow status from Tamanu' on persists to the server", async ({
+	test("saving a renamed server persists the change", async ({
 		page,
 		sql,
 	}) => {
 		// Saving requires a group, so seed one and put the server in it.
-		const group = await seedServerGroup(sql, { name: "legacy-group" });
+		const group = await seedServerGroup(sql, { name: "edit-group" });
 		const server = await seedServer(sql, {
-			name: "legacy-target",
+			name: "edit-save-target",
 			groupId: group.id,
 		});
 
 		await page.goto(`/servers/${server.id}/edit`);
 
-		// Off by default for a freshly-seeded server.
-		const toggle = page.getByRole("checkbox", {
-			name: "Allow status from Tamanu",
-		});
-		await expect(toggle).not.toBeChecked();
-
-		await toggle.check();
+		const nameField = page.getByLabel(/^Name(\s*\*)?$/i);
+		await nameField.fill("edit-save-renamed");
 		await page.getByRole("button", { name: /^save$/i }).click();
 
 		// Save navigates to the detail page.
 		await page.waitForURL(`**/servers/${server.id}`);
 
-		const rows = await sql.query<{ allow_legacy_status: boolean }>(
-			"SELECT allow_legacy_status FROM servers WHERE id = $1",
+		const rows = await sql.query<{ name: string }>(
+			"SELECT name FROM servers WHERE id = $1",
 			[server.id],
 		);
-		expect(rows[0]!.allow_legacy_status).toBe(true);
+		expect(rows[0]!.name).toBe("edit-save-renamed");
 	});
 });
 

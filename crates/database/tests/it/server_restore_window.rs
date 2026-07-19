@@ -18,7 +18,6 @@ fn new_server() -> Server {
 		cloud: None,
 		geolocation: None,
 		is_monitored: true,
-		allow_legacy_status: false,
 		alert_when_down_for: PgDuration(SignedDuration::from_secs(600)),
 		notes: String::new(),
 		tags: TagMap::default(),

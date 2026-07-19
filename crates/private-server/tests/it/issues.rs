@@ -12,10 +12,10 @@ async fn list_issues_for_device_and_server() {
 				('{device_id}', '\\x6b6579'::bytea, 'k', true);
 			 INSERT INTO servers (id, host, kind, device_id) VALUES \
 				('{server_id}', 'https://example.com', 'central', '{device_id}');
-			 INSERT INTO issues (server_id, device_id, source, \"ref\", severity, message, active, first_seen, last_seen) VALUES \
-				('{server_id}', '{device_id}', 'src', 'a', 'error',    'newest', true,  '2026-05-03T10:00:00Z', '2026-05-03T10:00:00Z'),
-				('{server_id}', '{device_id}', 'src', 'b', 'warning',  'older',  true,  '2026-05-01T10:00:00Z', '2026-05-01T10:00:00Z'),
-				('{server_id}', '{device_id}', 'src', 'c', 'info',     'gone',   false, '2026-05-02T10:00:00Z', '2026-05-02T10:00:00Z');"
+			 INSERT INTO issues (server_id, device_id, source, \"ref\", check_name, observed_result, effective_result, message, active, first_seen, last_seen, last_degraded_at) VALUES \
+				('{server_id}', '{device_id}', 'src', 'a', 'a', 'failed',  'failed',  'newest', true,  '2026-05-03T10:00:00Z', '2026-05-03T10:00:00Z', '2026-05-03T10:00:00Z'),
+				('{server_id}', '{device_id}', 'src', 'b', 'b', 'warning', 'warning', 'older',  true,  '2026-05-01T10:00:00Z', '2026-05-01T10:00:00Z', '2026-05-01T10:00:00Z'),
+				('{server_id}', '{device_id}', 'src', 'c', 'c', 'passed',  'passed',  'gone',   false, '2026-05-02T10:00:00Z', '2026-05-02T10:00:00Z', '2026-05-02T10:00:00Z');"
 		))
 		.await
 		.expect("seed");
@@ -66,7 +66,14 @@ async fn manual_event_submit_creates_issue_without_device() {
 		let body: serde_json::Value = resp.json();
 		assert_eq!(body.get("source").and_then(|v| v.as_str()), Some("manual"));
 		assert!(body.get("device_id").map_or(true, |v| v.is_null()));
-		assert_eq!(body.get("severity").and_then(|v| v.as_str()), Some("error"));
+		assert_eq!(
+			body.get("observed_result").and_then(|v| v.as_str()),
+			Some("failed")
+		);
+		assert_eq!(
+			body.get("effective_result").and_then(|v| v.as_str()),
+			Some("failed")
+		);
 	})
 	.await;
 }
@@ -98,7 +105,7 @@ async fn incident_groups_at_server_group() {
 			.json(&serde_json::json!({
 				"serverId": server_b_id,
 				"ref": "x",
-				"severity": "error",
+				"result": "failed",
 				"message": "trouble in B",
 			}))
 			.await;
@@ -160,7 +167,7 @@ async fn ungrouped_server_event_skips_incident() {
 			.json(&serde_json::json!({
 				"serverId": server_id,
 				"ref": "x",
-				"severity": "error",
+				"result": "failed",
 				"message": "no group yet",
 			}))
 			.await;
@@ -200,7 +207,7 @@ async fn assigning_group_opens_pending_incident() {
 			.json(&serde_json::json!({
 				"serverId": server_id,
 				"ref": "stuck",
-				"severity": "error",
+				"result": "failed",
 				"message": "waiting to be grouped",
 			}))
 			.await;
@@ -258,7 +265,7 @@ async fn issue_reopen_keeps_identity_and_joins_new_incident() {
 			.json(&serde_json::json!({
 				"serverId": server_id,
 				"ref": "x",
-				"severity": "error",
+				"result": "failed",
 				"message": "trouble",
 			}))
 			.await;
@@ -277,7 +284,7 @@ async fn issue_reopen_keeps_identity_and_joins_new_incident() {
 			.json(&serde_json::json!({
 				"serverId": server_id,
 				"ref": "x",
-				"severity": "error",
+				"result": "failed",
 				"active": false,
 				"message": "ok",
 			}))
@@ -298,7 +305,8 @@ async fn issue_reopen_keeps_identity_and_joins_new_incident() {
 			.json(&serde_json::json!({
 				"serverId": server_id,
 				"ref": "x",
-				"severity": "critical",
+				"result": "failed",
+				"escalates": true,
 				"message": "back",
 			}))
 			.await;
@@ -349,7 +357,7 @@ async fn low_severity_issue_joins_existing_open_incident() {
 			.json(&serde_json::json!({
 				"serverId": server_id,
 				"ref": "a",
-				"severity": "error",
+				"result": "failed",
 				"message": "primary trouble",
 			}))
 			.await
@@ -362,7 +370,7 @@ async fn low_severity_issue_joins_existing_open_incident() {
 			.json(&serde_json::json!({
 				"serverId": server_id,
 				"ref": "b",
-				"severity": "warning",
+				"result": "warning",
 				"message": "ride-along",
 			}))
 			.await
@@ -405,7 +413,7 @@ async fn low_severity_alone_does_not_open_incident() {
 			.json(&serde_json::json!({
 				"serverId": server_id,
 				"ref": "b",
-				"severity": "warning",
+				"result": "warning",
 				"message": "minor",
 			}))
 			.await
@@ -443,7 +451,7 @@ async fn severity_downgrade_keeps_issue_in_incident() {
 			.json(&serde_json::json!({
 				"serverId": server_id,
 				"ref": "x",
-				"severity": "error",
+				"result": "failed",
 				"message": "trouble",
 			}))
 			.await
@@ -455,7 +463,7 @@ async fn severity_downgrade_keeps_issue_in_incident() {
 			.json(&serde_json::json!({
 				"serverId": server_id,
 				"ref": "x",
-				"severity": "warning",
+				"result": "warning",
 				"message": "less bad now",
 			}))
 			.await
@@ -470,79 +478,6 @@ async fn severity_downgrade_keeps_issue_in_incident() {
 		let items: Vec<serde_json::Value> = resp.json();
 		assert_eq!(items.len(), 1, "downgrade should not close the incident");
 		assert!(items[0].get("closed_at").map_or(true, |v| v.is_null()));
-	})
-	.await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn list_events_returns_event_log() {
-	commons_tests::server::run(async |mut conn, _public, private| {
-		let server_id = Uuid::new_v4();
-		conn.batch_execute(&format!(
-			"INSERT INTO servers (id, host, kind) VALUES \
-				('{server_id}', 'https://example.com', 'central');"
-		))
-		.await
-		.expect("seed");
-
-		// Three distinct events.
-		for (sev, msg) in [("error", "a"), ("error", "b"), ("warning", "b")] {
-			private
-				.post("/api/issues/submit_manual_event")
-				.json(&serde_json::json!({
-					"serverId": server_id,
-					"ref": "x",
-					"severity": sev,
-					"message": msg,
-				}))
-				.await
-				.assert_status_ok();
-		}
-
-		// Find the issue.
-		let issues = private
-			.post("/api/issues/list_for_server")
-			.json(&serde_json::json!({ "server_id": server_id }))
-			.await;
-		issues.assert_status_ok();
-		let items: Vec<serde_json::Value> = issues.json();
-		assert_eq!(items.len(), 1);
-		let issue_id = items[0].get("id").unwrap().as_str().unwrap();
-
-		let events = private
-			.post("/api/issues/list_events")
-			.json(&serde_json::json!({ "issue_id": issue_id }))
-			.await;
-		events.assert_status_ok();
-		let page: serde_json::Value = events.json();
-		let items = page.get("items").and_then(|v| v.as_array()).unwrap();
-		assert_eq!(items.len(), 3, "each distinct push is its own event row");
-		assert_eq!(page.get("total").and_then(|v| v.as_u64()), Some(3));
-
-		// Pagination: limit=2 returns 2 items but total still reflects 3.
-		let page1 = private
-			.post("/api/issues/list_events")
-			.json(&serde_json::json!({ "issue_id": issue_id, "offset": 0, "limit": 2 }))
-			.await;
-		page1.assert_status_ok();
-		let page1: serde_json::Value = page1.json();
-		assert_eq!(
-			page1.get("items").and_then(|v| v.as_array()).unwrap().len(),
-			2
-		);
-		assert_eq!(page1.get("total").and_then(|v| v.as_u64()), Some(3));
-
-		let page2 = private
-			.post("/api/issues/list_events")
-			.json(&serde_json::json!({ "issue_id": issue_id, "offset": 2, "limit": 2 }))
-			.await;
-		page2.assert_status_ok();
-		let page2: serde_json::Value = page2.json();
-		assert_eq!(
-			page2.get("items").and_then(|v| v.as_array()).unwrap().len(),
-			1
-		);
-		assert_eq!(page2.get("total").and_then(|v| v.as_u64()), Some(3));
 	})
 	.await;
 }
@@ -567,7 +502,7 @@ async fn open_issue(
 		.json(&serde_json::json!({
 			"serverId": server_id,
 			"ref": "x",
-			"severity": "error",
+			"result": "failed",
 			"message": "trouble",
 		}))
 		.await;
@@ -664,25 +599,28 @@ async fn reopen_via_device_clears_resolved_fields() {
 			.await
 			.expect("seed");
 
-			// Device opens the issue.
-			let opened = public
-				.post("/events")
+			// Device opens the issue by pushing a failing check.
+			public
+				.post(&format!("/status/{server_id}"))
 				.add_header("mtls-certificate", &cert)
 				.json(&serde_json::json!({
-					"source": "watchdog",
-					"ref": "x",
-					"severity": "error",
-					"message": "trouble",
+					"health": [ { "check": "x", "result": "failed" } ],
 				}))
-				.await;
-			opened.assert_status_ok();
-			let issue_id = opened
-				.json::<serde_json::Value>()
-				.get("id")
-				.unwrap()
-				.as_str()
-				.unwrap()
-				.to_string();
+				.await
+				.assert_status_ok();
+			let issue = database::issues::Issue::list_by_source_ref(
+				&mut conn,
+				"alertd",
+				"health/x",
+				&[server_id],
+			)
+			.await
+			.expect("list issues")
+			.into_iter()
+			.next()
+			.expect("issue opened by the failing check");
+			assert!(issue.active);
+			let issue_id = issue.id.to_string();
 
 			// Human resolves.
 			private
@@ -692,24 +630,32 @@ async fn reopen_via_device_clears_resolved_fields() {
 				.assert_status_ok();
 
 			// Device pushes again — should clear resolved_* (Sentry-style reopen).
-			let reopened = public
-				.post("/events")
+			public
+				.post(&format!("/status/{server_id}"))
 				.add_header("mtls-certificate", &cert)
 				.json(&serde_json::json!({
-					"source": "watchdog",
-					"ref": "x",
-					"severity": "error",
-					"message": "back again",
+					"health": [ { "check": "x", "result": "failed" } ],
 				}))
-				.await;
-			reopened.assert_status_ok();
-			let body: serde_json::Value = reopened.json();
+				.await
+				.assert_status_ok();
+			let reopened = database::issues::Issue::list_by_source_ref(
+				&mut conn,
+				"alertd",
+				"health/x",
+				&[server_id],
+			)
+			.await
+			.expect("list issues")
+			.into_iter()
+			.next()
+			.expect("issue still present after reopen");
+			assert!(reopened.active);
 			assert!(
-				body.get("resolved_at").map_or(true, |v| v.is_null()),
+				reopened.resolved_at.is_none(),
 				"reopen should clear resolved_at"
 			);
-			assert!(body.get("resolved_by").map_or(true, |v| v.is_null()));
-			assert!(body.get("resolved_reason").map_or(true, |v| v.is_null()));
+			assert!(reopened.resolved_by.is_none());
+			assert!(reopened.resolved_reason.is_none());
 		},
 	)
 	.await;
@@ -749,7 +695,8 @@ async fn snooze_leaves_incident_and_blocks_rejoin() {
 			.json(&serde_json::json!({
 				"serverId": server_id,
 				"ref": "x",
-				"severity": "critical",
+				"result": "failed",
+				"escalates": true,
 				"message": "still flapping",
 			}))
 			.await
@@ -810,7 +757,7 @@ async fn unmonitored_server_event_does_not_open_incident() {
 			.json(&serde_json::json!({
 				"serverId": server_id,
 				"ref": "ignored",
-				"severity": "error",
+				"result": "failed",
 				"message": "should not open an incident",
 			}))
 			.await;
@@ -858,7 +805,7 @@ async fn enabling_monitoring_opens_pending_incident() {
 			.json(&serde_json::json!({
 				"serverId": server_id,
 				"ref": "stuck",
-				"severity": "error",
+				"result": "failed",
 				"message": "waiting to be re-enabled",
 			}))
 			.await;
@@ -951,7 +898,7 @@ async fn silencing_server_ref_closes_only_matching_open_incident() {
 			.json(&serde_json::json!({
 				"serverId": server_id,
 				"ref": "other",
-				"severity": "error",
+				"result": "failed",
 				"message": "second contributor",
 			}))
 			.await;
@@ -1074,7 +1021,7 @@ async fn group_silence_blocks_events_from_all_members() {
 				.json(&serde_json::json!({
 					"serverId": sid,
 					"ref": "noisy",
-					"severity": "error",
+					"result": "failed",
 					"message": "should not fire",
 				}))
 				.await;
@@ -1093,7 +1040,7 @@ async fn group_silence_blocks_events_from_all_members() {
 			.json(&serde_json::json!({
 				"serverId": server_a,
 				"ref": "other",
-				"severity": "error",
+				"result": "failed",
 				"message": "should still fire",
 			}))
 			.await;

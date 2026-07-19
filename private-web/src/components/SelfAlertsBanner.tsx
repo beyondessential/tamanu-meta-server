@@ -2,14 +2,12 @@ import { Alert, AlertTitle, Stack } from "@mui/material";
 import { Link as RouterLink } from "react-router-dom";
 import { Link } from "@mui/material";
 import { useApi } from "../api";
-import type { Severity } from "../types";
-
-function alertSeverity(s: Severity): "error" | "warning" | "info" {
-	switch (s) {
-		case "critical":
-		case "error":
+function alertSeverity(result: string | null): "error" | "warning" | "info" {
+	switch (result) {
+		case "failed":
 			return "error";
 		case "warning":
+		case "broken":
 			return "warning";
 		default:
 			return "info";
@@ -26,7 +24,7 @@ export default function SelfAlertsBanner({ reloadTick }: { reloadTick: number })
 	return (
 		<Stack spacing={1} sx={{ px: 3, pt: 2 }}>
 			{active.data.map((alert) => (
-				<Alert key={alert.id} severity={alertSeverity(alert.severity)}>
+				<Alert key={alert.id} severity={alertSeverity(alert.effective_result)}>
 					<AlertTitle sx={{ mb: 0 }}>
 						Canopy: {alert.title ?? alert.ref}
 					</AlertTitle>

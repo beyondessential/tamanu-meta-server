@@ -3,12 +3,10 @@ use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
-use commons_types::{
-	Uuid,
-	issue::{ResolvedReason, Severity},
-};
+use commons_types::{Uuid, issue::ResolvedReason, status::CheckResult};
 use database::issues::{
-	Event, Incident, Issue, IssueFilter, IssueIncidentRef, IssueListFilters, NewEvent,
+	CheckFiling, FilingScope, Incident, Issue, IssueFilter, IssueIncidentRef, IssueListFilters,
+	MANUAL_SOURCE, file_check,
 };
 use database::notes::IssueNote;
 use database::servers::Server;
@@ -17,7 +15,6 @@ use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::fns::Page;
 use crate::state::AppState;
 
 const DEFAULT_LIMIT: i64 = 100;
@@ -52,8 +49,9 @@ pub struct IssueData {
 	/// within its source and server.
 	#[serde(rename = "ref")]
 	pub r#ref: String,
-	/// Current severity level of the issue.
-	pub severity: Severity,
+	/// Whether the check's policy escalates: an effective failure notifies
+	/// immediately, bypassing incident grace.
+	pub escalates: bool,
 	/// Short headline describing the issue, if one was given.
 	pub description: Option<String>,
 	/// Latest human-readable message describing the issue's state.
@@ -85,6 +83,18 @@ pub struct IssueData {
 	pub created_at: Timestamp,
 	/// When this issue record was last updated.
 	pub updated_at: Timestamp,
+	/// The check this issue tracks, when it is check state (health-check
+	/// issues). Absent for issues that aren't check results yet.
+	pub check_name: Option<String>,
+	/// The result the source reported on the latest filing, before policy.
+	#[schema(value_type = Option<String>)]
+	pub observed_result: Option<CheckResult>,
+	/// What policy made of the latest observed result — the result canopy
+	/// acts on.
+	#[schema(value_type = Option<String>)]
+	pub effective_result: Option<CheckResult>,
+	/// The check's own fields from the latest report, verbatim.
+	pub detail: Option<serde_json::Value>,
 	/// Incidents this issue is or was attached to, most recent first. Empty
 	/// for issues that never escalated into an incident.
 	pub incidents: Vec<IssueIncidentLink>,
@@ -135,7 +145,7 @@ impl IssueData {
 			device_id: i.device_id,
 			source: i.source,
 			r#ref: i.r#ref,
-			severity: i.severity,
+			escalates: i.escalates,
 			description: i.description,
 			message: i.message,
 			active: i.active,
@@ -149,6 +159,10 @@ impl IssueData {
 			snoozed_until: i.snoozed_until,
 			created_at: i.created_at,
 			updated_at: i.updated_at,
+			check_name: i.check_name,
+			observed_result: i.observed_result,
+			effective_result: i.effective_result,
+			detail: i.detail,
 			incidents: e.incidents,
 		}
 	}
@@ -261,57 +275,11 @@ pub(crate) async fn enrich_issue(
 	))
 }
 
-/// A single recorded occurrence of an issue's underlying condition — one
-/// push from a device or a manually submitted event.
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct EventData {
-	/// Unique identifier for this event.
-	pub id: Uuid,
-	/// Id of the issue this event belongs to.
-	pub issue_id: Uuid,
-	/// When this event was recorded on the server.
-	pub created_at: Timestamp,
-	/// When the underlying condition actually occurred, if reported
-	/// separately from the time it was recorded.
-	pub occurred_at: Option<Timestamp>,
-	/// Severity reported for this event.
-	pub severity: Severity,
-	/// Short headline for this event, if one was given.
-	pub description: Option<String>,
-	/// Human-readable message describing this event.
-	pub message: String,
-	/// Whether the underlying condition was active as of this event.
-	pub active: bool,
-	/// Number of times this same condition has repeated and been coalesced
-	/// into this event rather than creating a new one.
-	pub occurrences: i32,
-	/// When this condition was last seen recurring.
-	pub last_seen: Timestamp,
-}
-
-impl From<Event> for EventData {
-	fn from(e: Event) -> Self {
-		Self {
-			id: e.id,
-			issue_id: e.issue_id,
-			created_at: e.created_at,
-			occurred_at: e.occurred_at,
-			severity: e.severity,
-			description: e.description,
-			message: e.message,
-			active: e.active,
-			occurrences: e.occurrences,
-			last_seen: e.last_seen,
-		}
-	}
-}
-
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
 		.routes(routes!(list))
 		.routes(routes!(list_for_device))
 		.routes(routes!(list_for_server))
-		.routes(routes!(list_events))
 		.routes(routes!(submit_manual_event))
 		.routes(routes!(resolve))
 		.routes(routes!(unresolve))
@@ -337,10 +305,11 @@ pub struct IssueListArgs {
 	/// ones. Defaults to `true` (active issues only) when omitted.
 	#[serde(default)]
 	pub active_only: Option<bool>,
-	/// Restrict to issues at one of these severity levels. Omit to include
-	/// all severities.
+	/// Restrict to issues whose latest effective result is one of these.
+	/// Omit to include all results.
 	#[serde(default)]
-	pub severities: Option<Vec<Severity>>,
+	#[schema(value_type = Option<Vec<String>>)]
+	pub results: Option<Vec<CheckResult>>,
 	/// Restrict to issues whose server belongs to this group.
 	#[serde(default)]
 	pub server_group_id: Option<Uuid>,
@@ -375,7 +344,7 @@ pub async fn list(
 		&mut conn,
 		IssueListFilters {
 			active_only: args.active_only.unwrap_or(true),
-			severities: args.severities,
+			results: args.results,
 			server_group_id: args.server_group_id,
 			since: None,
 		},
@@ -476,87 +445,48 @@ pub async fn list_for_server(
 	Ok(Json(enrich_issues(&mut conn, issues).await?))
 }
 
-/// Selects an issue and a page of its events.
-#[derive(Deserialize, ToSchema)]
-pub struct ListEventsArgs {
-	/// Id of the issue whose events to list.
-	pub issue_id: Uuid,
-	/// Number of events to skip, for pagination. Defaults to 0.
-	#[serde(default)]
-	pub offset: Option<i64>,
-	/// Maximum number of events to return. Defaults to 100 when omitted.
-	#[serde(default)]
-	pub limit: Option<i64>,
-}
-
-/// List the events recorded against a specific issue, most recent first.
-///
-/// Returns a page of events along with the total number of events recorded
-/// for the issue, for pagination with `offset`/`limit`.
-#[utoipa::path(
-	post,
-	path = "/list_events",
-	tag = "issues",
-	security(("tailscale-user" = [])),
-	request_body = ListEventsArgs,
-	responses(
-		(status = 200, body = Page<EventData>),
-	),
-)]
-pub async fn list_events(
-	State(state): State<AppState>,
-	_user: TailscaleUser,
-	Json(args): Json<ListEventsArgs>,
-) -> Result<Json<Page<EventData>>> {
-	let mut conn = state.db_read.get().await?;
-	let total = Event::count_for_issue(&mut conn, args.issue_id).await? as u64;
-	let events = Event::list_for_issue(
-		&mut conn,
-		args.issue_id,
-		args.offset.unwrap_or(0),
-		args.limit.unwrap_or(DEFAULT_LIMIT),
-	)
-	.await?;
-	let items = events.into_iter().map(EventData::from).collect();
-	Ok(Json(Page { items, total }))
-}
-
-/// A manually entered event to record against a server.
+/// A manually raised condition to record against a server.
 #[derive(Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SubmitManualEventArgs {
-	/// Id of the server the event applies to.
+	/// Id of the server the condition applies to.
 	pub server_id: Uuid,
-	/// Identifier for the underlying condition. Events with the same `ref`
-	/// on the same server are coalesced into the same issue rather than
-	/// opening a new one each time; use a fresh unique value if that
-	/// deduplication isn't wanted.
+	/// Identifier for the underlying condition. Reports with the same
+	/// `ref` on the same server update the same issue rather than opening
+	/// a new one each time; use a fresh unique value if that deduplication
+	/// isn't wanted.
 	#[serde(rename = "ref")]
 	pub r#ref: String,
-	/// Severity to record. If omitted, a default severity is used.
+	/// The condition's result: `failed` (can open an incident) or
+	/// `warning` (context only). Defaults to `failed`. `passed` records
+	/// the condition as cleared, same as `active: false`.
 	#[serde(default)]
-	pub severity: Option<Severity>,
-	/// Short, single-line headline for the event. Must not contain
+	pub result: Option<CheckResult>,
+	/// Whether the condition's failures should notify immediately,
+	/// bypassing the incident grace period. Only consulted the first time
+	/// a `ref` is seen (it seeds the condition's catalog entry); adjust
+	/// later from the healthchecks catalog.
+	#[serde(default)]
+	pub escalates: Option<bool>,
+	/// Short, single-line headline for the condition. Must not contain
 	/// newlines — use `message` for multi-line detail.
 	#[serde(default)]
 	pub description: Option<String>,
-	/// Human-readable message describing the event. May be multi-line.
+	/// Human-readable message describing the condition. May be multi-line.
 	pub message: String,
 	/// Whether the underlying condition is currently active. Defaults to
-	/// `true` when omitted.
+	/// `true` when omitted; `false` records it as cleared regardless of
+	/// `result`.
 	#[serde(default)]
 	pub active: Option<bool>,
-	/// When the underlying condition actually occurred, if different from
-	/// the time of submission. Defaults to now when omitted.
-	#[serde(default)]
-	pub occurred_at: Option<Timestamp>,
 }
 
-/// Manually record an event against a server, creating or updating an issue.
+/// Manually raise (or clear) a condition against a server.
 ///
-/// Finds or creates an issue keyed by the server and the given `ref`,
-/// appends this event to it, and returns the resulting issue. Returns 400
-/// if `ref` is empty or if `description` contains a newline.
+/// Finds or creates an issue keyed by the server and the given `ref`
+/// under the `manual` source, grades the chosen result through the
+/// condition's catalog policy, and returns the resulting issue. Returns
+/// 400 if `ref` is empty or if `description` contains a newline.
 #[utoipa::path(
 	post,
 	path = "/submit_manual_event",
@@ -577,17 +507,33 @@ pub async fn submit_manual_event(
 		return Err(AppError::custom("ref is required"));
 	}
 
-	let event = NewEvent {
-		source: "manual".to_string(),
-		r#ref: args.r#ref,
-		severity: args.severity,
-		description: args.description,
-		message: args.message,
-		active: args.active,
-		occurred_at: args.occurred_at,
+	let observed = if args.active == Some(false) {
+		CheckResult::Passed
+	} else {
+		args.result.unwrap_or(CheckResult::Failed)
 	};
 	let mut conn = state.db.get().await?;
-	let issue = event.save(&mut conn, args.server_id, None).await?;
+	let issue = file_check(
+		&mut conn,
+		CheckFiling {
+			source: MANUAL_SOURCE,
+			scope: FilingScope::Server {
+				server_id: args.server_id,
+				device_id: None,
+			},
+			check: &args.r#ref,
+			observed,
+			title: args.description.as_deref(),
+			message: &args.message,
+			detail: None,
+			// The operator's chosen result passes through ungraded; the
+			// escalation choice seeds the catalog entry on first sight.
+			default_ceiling: CheckResult::Failed,
+			default_escalates: args.escalates.unwrap_or(false),
+			documentation: None,
+		},
+	)
+	.await?;
 	Ok(Json(enrich_issue(&mut conn, issue).await?))
 }
 

@@ -37,22 +37,22 @@ async fn insert_server(
 	server_id
 }
 
-/// Seed a catalog row at a given severity, optionally with a conditional
+/// Seed a policy row at a given ceiling, optionally with a conditional
 /// rules ladder (which the mapping must ignore).
 async fn seed_catalog(
 	conn: &mut diesel_async::AsyncPgConnection,
 	check_name: &str,
-	severity: &str,
+	ceiling: &str,
 	rules: Option<serde_json::Value>,
 ) {
 	sql_query(
-		"INSERT INTO healthcheck_severities (check_name, severity, rules, reviewed_at, reviewed_by) \
-		 VALUES ($1, $2, $3, NOW(), 'test') \
-		 ON CONFLICT (check_name) DO UPDATE \
-		 SET severity = EXCLUDED.severity, rules = EXCLUDED.rules",
+		"INSERT INTO check_policies (source, check_name, ceiling, rules, reviewed_at, reviewed_by) \
+		 VALUES ('alertd', $1, $2, $3, NOW(), 'test') \
+		 ON CONFLICT (source, check_name) DO UPDATE \
+		 SET ceiling = EXCLUDED.ceiling, rules = EXCLUDED.rules",
 	)
 	.bind::<sql_types::Text, _>(check_name)
-	.bind::<sql_types::Text, _>(severity)
+	.bind::<sql_types::Text, _>(ceiling)
 	.bind::<sql_types::Nullable<sql_types::Jsonb>, _>(rules)
 	.execute(conn)
 	.await
@@ -67,42 +67,36 @@ async fn endpoint_maps_catalog_severities_and_silences() {
 			let group_id = insert_group(&mut conn).await;
 			let server_id = insert_server(&mut conn, Some(device_id), Some(group_id)).await;
 
-			seed_catalog(&mut conn, "disk_space", "error", None).await;
+			seed_catalog(&mut conn, "disk_space", "failed", None).await;
 			seed_catalog(&mut conn, "cert_expiry", "warning", None).await;
-			seed_catalog(&mut conn, "chatty", "info", None).await;
-			seed_catalog(&mut conn, "verbose", "debug", None).await;
-			seed_catalog(&mut conn, "flaky", "critical", None).await;
-			seed_catalog(&mut conn, "groupwide", "error", None).await;
-			// A conditional ladder that would escalate to critical at push
+			seed_catalog(&mut conn, "chatty", "passed", None).await;
+			seed_catalog(&mut conn, "verbose", "skipped", None).await;
+			seed_catalog(&mut conn, "flaky", "failed", None).await;
+			seed_catalog(&mut conn, "groupwide", "failed", None).await;
+			// A conditional ladder that would grade up to failed at push
 			// time must not leak into the static mapping.
 			seed_catalog(
 				&mut conn,
 				"ruled",
 				"warning",
 				Some(serde_json::json!({"if": [
-					{"==": [{"var": "check.result"}, "failed"]}, "critical",
+					{"==": [{"var": "check.result"}, "failed"]}, "failed",
 				]})),
 			)
 			.await;
 
 			// Silences: flaky at server scope, groupwide at group scope; a
-			// silence on disk_space's *broken* thread must not skip the
-			// check itself.
-			ServerSilencedRef::add(&mut conn, server_id, "status", "health/flaky", None)
+			// silence on a canopy check (a reserved source, outside the
+			// health/ namespace) must not leak into alertd's map.
+			ServerSilencedRef::add(&mut conn, server_id, "alertd", "health/flaky", None)
 				.await
 				.expect("server silence");
-			ServerGroupSilencedRef::add(&mut conn, group_id, "status", "health/groupwide", None)
+			ServerGroupSilencedRef::add(&mut conn, group_id, "alertd", "health/groupwide", None)
 				.await
 				.expect("group silence");
-			ServerSilencedRef::add(
-				&mut conn,
-				server_id,
-				"status",
-				"health-broken/disk_space",
-				None,
-			)
-			.await
-			.expect("broken silence");
+			ServerSilencedRef::add(&mut conn, server_id, "canopy", "reachability", None)
+				.await
+				.expect("canopy silence");
 
 			let response = public
 				.get(&format!("/status/{server_id}/check-severities"))
@@ -133,8 +127,8 @@ async fn endpoint_works_for_ungrouped_server() {
 		"server",
 		async |mut conn, cert, device_id, public, _| {
 			let server_id = insert_server(&mut conn, Some(device_id), None).await;
-			seed_catalog(&mut conn, "disk_space", "error", None).await;
-			ServerSilencedRef::add(&mut conn, server_id, "status", "health/disk_space", None)
+			seed_catalog(&mut conn, "disk_space", "failed", None).await;
+			ServerSilencedRef::add(&mut conn, server_id, "alertd", "health/disk_space", None)
 				.await
 				.expect("silence");
 
@@ -158,9 +152,9 @@ async fn status_response_carries_check_severities() {
 			let group_id = insert_group(&mut conn).await;
 			let server_id = insert_server(&mut conn, Some(device_id), Some(group_id)).await;
 
-			seed_catalog(&mut conn, "disk_space", "error", None).await;
-			seed_catalog(&mut conn, "cert_expiry", "critical", None).await;
-			ServerSilencedRef::add(&mut conn, server_id, "status", "health/cert_expiry", None)
+			seed_catalog(&mut conn, "disk_space", "failed", None).await;
+			seed_catalog(&mut conn, "cert_expiry", "failed", None).await;
+			ServerSilencedRef::add(&mut conn, server_id, "alertd", "health/cert_expiry", None)
 				.await
 				.expect("silence");
 

@@ -49,8 +49,8 @@ pub const MAINTENANCE_ERROR: &str = "backup-maintenance-error";
 pub const RECONCILE_MISSING: &str = "backup-reconcile-missing";
 
 /// Repo corruption / poisoning detected by the inspection Job. Group-scoped,
-/// `Critical`. Raised by the inspection-Job component via
-/// [`crate::backup::alerts::raise_group_event`]; this constant is the contract.
+/// registers as an escalating failure. Raised by the inspection-Job component
+/// via [`crate::issues::file_check`]; this constant is the contract.
 pub const CORRUPTION: &str = "backup-corruption";
 
 /// Canopy's own `sts:GetCallerIdentity` failed — the shared IRSA identity is
@@ -71,3 +71,149 @@ pub const PREFLIGHT_OBJECT_LOCK: &str = "preflight-object-lock";
 /// restorability check. Group-scoped, `Error`. Routed through the same
 /// group-level helper.
 pub const RESTORE_VERIFICATION: &str = "restore-verification";
+
+// --- shipped documentation (seeded into the catalog on first filing) ---
+
+pub const STALENESS_DOC: &str = "## Description
+
+The server has backed this type up successfully before, but not recently: the latest success is older than twice the expected interval for the type.
+
+## Results
+
+- **fail** — no successful run within 2\u{d7} the expected interval; recovers on the next successful run.
+
+## Solve
+
+Check the device's bestool logs for failed or stuck runs, confirm the backup schedule is enabled for the group, and run the backup manually (`bestool canopy backup`) to see the error first-hand. Credential or bucket problems usually show as separate preflight checks.";
+
+pub const NEVER_DOC: &str = "## Description
+
+The server is expected to back this type up but has never reported a single successful run, and it has been enrolled long enough that one should have happened.
+
+## Results
+
+- **fail** — no success ever, past the enrolment/schedule grace; recovers on the first successful run.
+
+## Solve
+
+Confirm bestool is installed and enrolled on the server, the backup type is enabled for its group, and run `bestool canopy backup` manually to surface the error.";
+
+pub const RECONCILE_REPORT_GAP_DOC: &str = "## Description
+
+A fresh snapshot for this server exists in the repository, but no recent run report reached canopy — the backup works, the reporting path doesn't.
+
+## Results
+
+- **warn** — snapshot fresh, report missing; recovers when a run report arrives.
+
+## Solve
+
+Check the device's connectivity to canopy and its bestool logs for failed report submissions. The data is safe; only visibility is degraded.";
+
+pub const RECONCILE_SIZE_MISMATCH_DOC: &str = "## Description
+
+The device reported a snapshot size that disagrees with the size the same snapshot occupies in the repository.
+
+## Results
+
+- **warn** — sizes disagree (compared only when both are known and non-zero).
+
+## Solve
+
+Usually a reporting bug or a partially-uploaded snapshot. Compare the run report against `kopia snapshot list` for the source, and re-run the backup if the repo-side size looks truncated.";
+
+pub const MAINTENANCE_STALE_DOC: &str = "## Description
+
+The group's repository maintenance (compaction, blob GC) hasn't succeeded within its cadence.
+
+## Results
+
+- **fail** — last successful maintenance run is older than the cadence threshold; recovers on the next success.
+
+## Solve
+
+Check the maintenance job's logs for the group. A repository that misses maintenance grows unbounded but stays fully restorable.";
+
+pub const MAINTENANCE_ERROR_DOC: &str = "## Description
+
+The group's most recently finished repository maintenance run failed (distinct from maintenance being absent).
+
+## Results
+
+- **fail** — latest finished run errored; clears when a newer run finishes successfully.
+
+## Solve
+
+Read the run's error in the group's backups panel. Common causes: credential expiry mid-run and repository lock contention.";
+
+pub const RECONCILE_MISSING_DOC: &str = "## Description
+
+A run reported success but no matching snapshot landed in the repository — the device's report and the repo disagree.
+
+## Results
+
+- **fail** — reported snapshot absent from the repo.
+
+## Solve
+
+Treat the backup as not having happened. Check the device's kopia logs for upload failures after the snapshot was cut, and re-run the backup.";
+
+pub const CORRUPTION_DOC: &str = "## Description
+
+The repository inspection job detected corruption or poisoning in the group's backup repository.
+
+## Results
+
+- **fail** — inspection found corrupt or unreadable data. Escalates: this is a threat to restorability itself.
+
+## Solve
+
+Do not run maintenance (it may GC evidence). Inspect the repository with kopia directly, identify the damaged blobs and affected snapshots, and restore repository health from object-lock history if needed.";
+
+pub const PREFLIGHT_IDENTITY_DOC: &str = "## Description
+
+Canopy's own AWS identity (`sts:GetCallerIdentity` under the shared IRSA role) failed — no backup credential can be minted for anyone.
+
+## Results
+
+- **fail** — the identity call errors. Escalates: every backup and restore across the fleet is blocked.
+
+## Solve
+
+Check the canopy deployment's IRSA annotation and the AWS-side trust policy; recent cluster or account changes are the usual cause.";
+
+pub const PREFLIGHT_ASSUME_DOC: &str = "## Description
+
+Cross-account `AssumeRole` (or the read-only no-op S3 probe) failed for this group's backup or restore leg.
+
+## Results
+
+- **fail** — the group's role can't be assumed or can't reach its bucket.
+
+## Solve
+
+Check the group's target role ARN and its trust policy against canopy's identity, and the bucket policy on the target account.";
+
+pub const PREFLIGHT_OBJECT_LOCK_DOC: &str = "## Description
+
+The group's backup bucket has missing or weakened Object-Lock protection (mode absent, or retention under 30 days).
+
+## Results
+
+- **fail** — protection below the floor. Escalates: backups are no longer ransomware-resistant.
+
+## Solve
+
+Restore the bucket's Object-Lock configuration to GOVERNANCE mode with at least 30 days retention. Investigate who changed it — this setting should never weaken.";
+
+pub const RESTORE_VERIFICATION_DOC: &str = "## Description
+
+The managed restore replica for this (server, type, intent) reported a failed or stale restorability check.
+
+## Results
+
+- **fail** — the replica couldn't restore or verify the latest snapshot.
+
+## Solve
+
+Check the restore consumer's report detail: restore errors point at the snapshot or credentials, staleness at the consumer itself.";

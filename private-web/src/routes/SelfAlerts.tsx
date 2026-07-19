@@ -12,15 +12,15 @@ import { useState } from "react";
 import { useApi, useApiAction } from "../api";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { useIsAdmin } from "../hooks/useIsAdmin";
-import type { Severity } from "../types";
-
-function chipColor(s: Severity): "error" | "warning" | "info" | "default" {
-	switch (s) {
-		case "critical":
-		case "error":
+function chipColor(result: string | null): "error" | "warning" | "info" | "default" {
+	switch (result) {
+		case "failed":
 			return "error";
 		case "warning":
+		case "broken":
 			return "warning";
+		case "skipped":
+			return "default";
 		default:
 			return "info";
 	}
@@ -74,7 +74,11 @@ export default function SelfAlerts() {
 					<Paper key={a.id} variant="outlined" sx={{ p: 2 }}>
 						<Stack spacing={1}>
 							<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-								<Chip size="small" color={chipColor(a.severity)} label={a.severity} />
+								<Chip
+									size="small"
+									color={chipColor(a.effective_result)}
+									label={a.effective_result ?? (a.active ? "active" : "recovered")}
+								/>
 								<Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
 									{a.title ?? a.ref}
 								</Typography>

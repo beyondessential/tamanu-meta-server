@@ -8,7 +8,7 @@
 
 use std::str::FromStr;
 
-use commons_types::{backup::BackupType, issue::Severity};
+use commons_types::{backup::BackupType, status::CheckResult};
 use database::{BackupConfigStatus, BackupMaintenanceRun, RunOutcome, ServerGroupBackupConfig};
 use diesel_async::AsyncPgConnection;
 use jiff::Timestamp;
@@ -56,19 +56,15 @@ pub(crate) async fn complete_init(
 	Ok(())
 }
 
-/// The CORRUPTION alert (severity, single-line description, active) implied by
-/// an inspect result's `verify_ok`. `verify_ok:false` → a Critical, active
-/// alert; `verify_ok:true` → an Info recovery (active false). Pure so the
-/// outcome→decision mapping is unit-testable.
-pub(crate) fn corruption_decision(verify_ok: bool) -> (Severity, Option<&'static str>, bool) {
+/// The CORRUPTION check observation (result, single-line title) implied
+/// by an inspect result's `verify_ok`. `verify_ok:false` → an observed
+/// failure; `verify_ok:true` → a recovery. Pure so the outcome→decision
+/// mapping is unit-testable.
+pub(crate) fn corruption_decision(verify_ok: bool) -> (CheckResult, Option<&'static str>) {
 	if verify_ok {
-		(Severity::Info, None, false)
+		(CheckResult::Passed, None)
 	} else {
-		(
-			Severity::Critical,
-			Some("backup repository verify failed"),
-			true,
-		)
+		(CheckResult::Failed, Some("backup repository verify failed"))
 	}
 }
 
@@ -116,15 +112,21 @@ pub(crate) async fn complete_inspect(
 		.await
 		.map_err(|err| err.to_string())?;
 
-	let (severity, description, active) = corruption_decision(outcome.verify_ok);
-	database::backup::alerts::raise_group_event(
+	let (observed, title) = corruption_decision(outcome.verify_ok);
+	database::issues::file_check(
 		db,
-		group_id,
-		database::backup::alerts::refs::CORRUPTION,
-		severity,
-		description,
-		"kopia snapshot verify",
-		active,
+		database::issues::CheckFiling {
+			source: database::statuses::CANOPY_SOURCE,
+			scope: database::issues::FilingScope::Group(group_id),
+			check: database::backup::refs::CORRUPTION,
+			observed,
+			title,
+			message: "kopia snapshot verify",
+			detail: None,
+			default_ceiling: CheckResult::Failed,
+			default_escalates: true,
+			documentation: Some(database::backup::refs::CORRUPTION_DOC),
+		},
 	)
 	.await
 	.map_err(|err| err.to_string())?;
@@ -139,13 +141,9 @@ mod tests {
 	fn corruption_decision_maps_verify_ok() {
 		assert_eq!(
 			corruption_decision(false),
-			(
-				Severity::Critical,
-				Some("backup repository verify failed"),
-				true
-			)
+			(CheckResult::Failed, Some("backup repository verify failed"),)
 		);
-		assert_eq!(corruption_decision(true), (Severity::Info, None, false));
+		assert_eq!(corruption_decision(true), (CheckResult::Passed, None));
 	}
 
 	mod db {
@@ -314,22 +312,25 @@ mod tests {
 
 				#[derive(diesel::QueryableByName)]
 				struct CorruptionRow {
-					#[diesel(sql_type = sql_types::Text)]
-					severity: String,
+					#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
+					effective_result: Option<String>,
+					#[diesel(sql_type = sql_types::Bool)]
+					escalates: bool,
 					#[diesel(sql_type = sql_types::Bool)]
 					active: bool,
 				}
 				let rows: Vec<CorruptionRow> = sql_query(
-					"SELECT severity, active FROM issues \
+					"SELECT effective_result, escalates, active FROM issues \
 					 WHERE server_group_id = $1 AND \"ref\" = $2",
 				)
 				.bind::<sql_types::Uuid, _>(group_id)
-				.bind::<sql_types::Text, _>(database::backup::alerts::refs::CORRUPTION)
+				.bind::<sql_types::Text, _>(database::backup::refs::CORRUPTION)
 				.get_results(&mut conn)
 				.await
 				.expect("query corruption issues");
 				assert_eq!(rows.len(), 1, "exactly one corruption issue");
-				assert_eq!(rows[0].severity, "critical");
+				assert_eq!(rows[0].effective_result.as_deref(), Some("failed"));
+				assert!(rows[0].escalates);
 				assert!(rows[0].active, "corruption issue is active");
 			})
 			.await;

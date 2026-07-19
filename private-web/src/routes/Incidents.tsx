@@ -20,7 +20,7 @@ import { useApi } from "../api";
 import IncidentCard from "../components/IncidentCard";
 import IssueRow from "../components/IssueRow";
 import { usePageTitle } from "../hooks/usePageTitle";
-import { SEVERITIES, type Severity } from "../types";
+import { CHECK_RESULT_ORDER, type CheckResult } from "../types";
 
 const DEFAULT_LIMIT = 200;
 
@@ -37,9 +37,9 @@ export default function Incidents() {
 	// common case).
 	const [params, setParams] = useSearchParams();
 	const activeOnly = params.get("showAll") !== "1";
-	const severities = (params.get("severity") ?? "")
+	const results = (params.get("result") ?? "")
 		.split(",")
-		.filter((s) => s.length > 0) as Severity[];
+		.filter((s) => s.length > 0) as CheckResult[];
 	const groupId = params.get("group") ?? "";
 
 	const updateParam = (key: string, value: string | null) => {
@@ -54,8 +54,8 @@ export default function Incidents() {
 		);
 	};
 	const setActiveOnly = (v: boolean) => updateParam("showAll", v ? null : "1");
-	const setSeverities = (v: Severity[]) =>
-		updateParam("severity", v.length === 0 ? null : v.join(","));
+	const setResults = (v: CheckResult[]) =>
+		updateParam("result", v.length === 0 ? null : v.join(","));
 	const setGroupId = (v: string) => updateParam("group", v === "" ? null : v);
 
 	const incidents = useApi(
@@ -70,11 +70,11 @@ export default function Incidents() {
 		"list",
 		{
 			activeOnly,
-			severities: severities.length === 0 ? null : severities,
+			results: results.length === 0 ? null : results,
 			serverGroupId: groupId === "" ? null : groupId,
 			limit: DEFAULT_LIMIT,
 		},
-		[refreshTick, activeOnly, severities.join(","), groupId],
+		[refreshTick, activeOnly, results.join(","), groupId],
 	);
 
 	return (
@@ -111,8 +111,8 @@ export default function Incidents() {
 			<FilterBar
 				activeOnly={activeOnly}
 				setActiveOnly={setActiveOnly}
-				severities={severities}
-				setSeverities={setSeverities}
+				results={results}
+				setResults={setResults}
 				groupId={groupId}
 				setGroupId={setGroupId}
 				groups={groups}
@@ -143,8 +143,8 @@ export default function Incidents() {
 function FilterBar({
 	activeOnly,
 	setActiveOnly,
-	severities,
-	setSeverities,
+	results,
+	setResults,
 	groupId,
 	setGroupId,
 	groups,
@@ -152,8 +152,8 @@ function FilterBar({
 }: {
 	activeOnly: boolean;
 	setActiveOnly: (v: boolean) => void;
-	severities: Severity[];
-	setSeverities: (v: Severity[]) => void;
+	results: CheckResult[];
+	setResults: (v: CheckResult[]) => void;
 	groupId: string;
 	setGroupId: (v: string) => void;
 	groups: ReturnType<typeof useApi<"server_groups", "list">>;
@@ -180,31 +180,31 @@ function FilterBar({
 				<TextField
 					select
 					size="small"
-					label="Severities"
-					value={severities}
+					label="Results"
+					value={results}
 					onChange={(e) => {
 						const v = e.target.value;
-						setSeverities(
+						setResults(
 							typeof v === "string"
-								? (v.split(",") as Severity[])
-								: (v as Severity[]),
+								? (v.split(",") as CheckResult[])
+								: (v as CheckResult[]),
 						);
 					}}
 					slotProps={{
 						select: {
 							multiple: true,
 							renderValue: (selected) =>
-								(selected as Severity[]).length === 0
+								(selected as CheckResult[]).length === 0
 									? "All"
-									: (selected as Severity[]).join(", "),
+									: (selected as CheckResult[]).join(", "),
 						},
 					}}
 					sx={{ minWidth: 200 }}
 				>
-					{SEVERITIES.map((s) => (
-						<MenuItem key={s} value={s}>
-							<Checkbox checked={severities.includes(s)} size="small" />
-							<ListItemText primary={s} />
+					{CHECK_RESULT_ORDER.map((r) => (
+						<MenuItem key={r} value={r}>
+							<Checkbox checked={results.includes(r)} size="small" />
+							<ListItemText primary={r} />
 						</MenuItem>
 					))}
 				</TextField>

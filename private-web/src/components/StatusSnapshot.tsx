@@ -12,7 +12,6 @@ import CancelIcon from "@mui/icons-material/Cancel";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import CloseIcon from "@mui/icons-material/Close";
 import CircleIcon from "@mui/icons-material/Circle";
-import ErrorIcon from "@mui/icons-material/Error";
 import InfoIcon from "@mui/icons-material/Info";
 import NotificationsOffIcon from "@mui/icons-material/NotificationsOff";
 import PreviewIcon from "@mui/icons-material/Preview";
@@ -28,11 +27,10 @@ import TimeAgo from "./TimeAgo";
 import TimezoneTooltip from "./TimezoneTooltip";
 import VersionIndicator from "./VersionIndicator";
 import {
+	CHECK_RESULT_INTENT,
 	CHECK_RESULT_ORDER,
-	SEVERITY_INTENT,
 	checkResultOf,
 	type CheckResult,
-	type Severity,
 	type StatusSnapshotData,
 } from "../types";
 
@@ -120,7 +118,7 @@ function PanelBody({
 			<CuratedFields snap={snap} />
 			<ChecksBlock
 				health={snap.health}
-				severities={snap.check_severities}
+				results={snap.check_results}
 				operators={snap.operators}
 				silencedChecks={snap.silenced_checks}
 			/>
@@ -189,12 +187,12 @@ function Field({
 
 function ChecksBlock({
 	health,
-	severities,
+	results,
 	operators,
 	silencedChecks,
 }: {
 	health: StatusSnapshotData["health"];
-	severities: StatusSnapshotData["check_severities"];
+	results: StatusSnapshotData["check_results"];
 	operators: StatusSnapshotData["operators"];
 	silencedChecks: StatusSnapshotData["silenced_checks"];
 }) {
@@ -244,7 +242,9 @@ function ChecksBlock({
 						>
 							<CheckIcon
 								result={entry.result}
-								severity={severities[entry.check] ?? null}
+								effective={
+									(results[entry.check] as CheckResult | undefined) ?? null
+								}
 								silenced={entry.silenced}
 							/>
 							<Box sx={{ flex: 1, minWidth: 0 }}>
@@ -348,11 +348,11 @@ function parseChecks(
 /// reported — they don't count toward the server's health.
 function CheckIcon({
 	result,
-	severity,
+	effective,
 	silenced = false,
 }: {
 	result: CheckResult;
-	severity: Severity | null;
+	effective: CheckResult | null;
 	silenced?: boolean;
 }) {
 	if (silenced) {
@@ -391,34 +391,33 @@ function CheckIcon({
 		case "failed":
 			break;
 	}
-	const sev: Severity = severity ?? "warning";
-	const tooltip = `${result} at ${sev} — ${SEVERITY_INTENT[sev]}`;
-	switch (sev) {
-		case "critical":
-			return (
-				<Tooltip title={tooltip} arrow>
-					<ErrorIcon fontSize="small" color="error" />
-				</Tooltip>
-			);
-		case "error":
+	// A degraded observation renders by what policy grades it to.
+	const eff: CheckResult = effective ?? "warning";
+	const tooltip =
+		result === eff
+			? `${result} — ${CHECK_RESULT_INTENT[eff]}`
+			: `${result}, graded ${eff} — ${CHECK_RESULT_INTENT[eff]}`;
+	switch (eff) {
+		case "failed":
 			return (
 				<Tooltip title={tooltip} arrow>
 					<CancelIcon fontSize="small" color="error" />
 				</Tooltip>
 			);
 		case "warning":
+		case "broken":
 			return (
 				<Tooltip title={tooltip} arrow>
 					<WarningAmberIcon fontSize="small" color="warning" />
 				</Tooltip>
 			);
-		case "info":
+		case "passed":
 			return (
 				<Tooltip title={tooltip} arrow>
 					<InfoIcon fontSize="small" color="info" />
 				</Tooltip>
 			);
-		case "debug":
+		case "skipped":
 			return (
 				<Tooltip title={tooltip} arrow>
 					<CircleIcon fontSize="small" color="disabled" sx={{ fontSize: 12 }} />

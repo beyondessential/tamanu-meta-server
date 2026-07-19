@@ -1,8 +1,8 @@
 //! `find_incidents` / `get_incident` / `find_issues` / `get_issue` tools.
 
-use commons_types::{Uuid, issue::Severity};
+use commons_types::{Uuid, status::CheckResult};
 use database::{
-	issues::{Event, Incident, Issue, IssueListFilters},
+	issues::{Incident, Issue, IssueListFilters},
 	server_groups::ServerGroup,
 	servers::Server,
 	slack_outbox::SlackOutbox,
@@ -48,8 +48,9 @@ pub struct IncidentIdArgs {
 pub struct FindIssuesArgs {
 	/// Only currently-active, unresolved issues. Default true.
 	pub active_only: Option<bool>,
-	/// Filter to these severities: `critical`, `error`, `warning`, `info`, `debug`.
-	pub severities: Option<Vec<String>>,
+	/// Filter to issues whose latest effective result is one of these:
+	/// `failed`, `warning`, `broken`, `passed`, `skipped`.
+	pub results: Option<Vec<String>>,
 	/// Restrict to issues whose server is in this group's id.
 	pub group_id: Option<String>,
 	/// Restrict to one server's id.
@@ -61,6 +62,25 @@ pub struct FindIssuesArgs {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct CheckDocArgs {
+	/// The source that reports the check (e.g. `alertd`, `canopy`).
+	pub source: String,
+	/// The check's name.
+	pub check_name: String,
+}
+
+#[derive(Serialize)]
+struct CheckDocOut {
+	source: String,
+	check_name: String,
+	ceiling: CheckResult,
+	escalates: bool,
+	/// Operator-authored markdown, or `null` if nobody has documented
+	/// this check yet.
+	documentation: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct IssueIdArgs {
 	/// The issue's id.
 	pub issue_id: String,
@@ -69,7 +89,9 @@ pub struct IssueIdArgs {
 #[derive(Serialize)]
 struct IncidentSummary {
 	id: Uuid,
-	group_id: Uuid,
+	/// The server group the incident targets, or `null` for a canopy-wide
+	/// incident (aggregating canopy's self-alerts).
+	group_id: Option<Uuid>,
 	group_name: Option<String>,
 	/// `open` (not closed), `resolved` (operator-resolved), or `closed`.
 	status: &'static str,
@@ -88,9 +110,6 @@ struct IncidentSummary {
 	/// How long the incident was (or has been) open, in seconds.
 	open_duration_secs: i64,
 	issue_count: i64,
-	/// Raw count of status events the incident accumulated. NOT a measure of
-	/// duration or severity — a high count can be a sub-minute flap.
-	event_count: i64,
 }
 
 #[derive(Serialize)]
@@ -105,7 +124,13 @@ struct IncidentList {
 #[derive(Serialize)]
 struct IncidentIssueOut {
 	issue_id: Uuid,
-	severity: Severity,
+	/// What the source reported on the latest filing, before policy.
+	observed_result: Option<CheckResult>,
+	/// What policy made of it — the result canopy acts on.
+	effective_result: Option<CheckResult>,
+	/// Whether the check's policy escalates (an effective failure
+	/// notifies immediately, bypassing incident grace).
+	escalates: bool,
 	source: String,
 	r#ref: String,
 	description: Option<String>,
@@ -123,7 +148,9 @@ struct IncidentIssueOut {
 #[derive(Serialize)]
 struct IncidentDetail {
 	id: Uuid,
-	group_id: Uuid,
+	/// The server group the incident targets, or `null` for a canopy-wide
+	/// incident (aggregating canopy's self-alerts).
+	group_id: Option<Uuid>,
 	group_name: Option<String>,
 	status: &'static str,
 	opened_at: Timestamp,
@@ -148,7 +175,9 @@ struct IssueSummary {
 	group_id: Option<Uuid>,
 	source: String,
 	r#ref: String,
-	severity: Severity,
+	observed_result: Option<CheckResult>,
+	effective_result: Option<CheckResult>,
+	escalates: bool,
 	description: Option<String>,
 	message: String,
 	active: bool,
@@ -162,18 +191,6 @@ struct IssueSummary {
 struct IssueList {
 	count: usize,
 	issues: Vec<IssueSummary>,
-}
-
-#[derive(Serialize)]
-struct EventOut {
-	created_at: Timestamp,
-	occurred_at: Option<Timestamp>,
-	severity: Severity,
-	description: Option<String>,
-	message: String,
-	active: bool,
-	occurrences: i32,
-	last_seen: Timestamp,
 }
 
 #[derive(Serialize)]
@@ -191,7 +208,9 @@ struct IssueDetail {
 	group_id: Option<Uuid>,
 	source: String,
 	r#ref: String,
-	severity: Severity,
+	observed_result: Option<CheckResult>,
+	effective_result: Option<CheckResult>,
+	escalates: bool,
 	description: Option<String>,
 	message: String,
 	active: bool,
@@ -201,7 +220,6 @@ struct IssueDetail {
 	resolved_by: Option<String>,
 	resolved_reason: Option<String>,
 	snoozed_until: Option<Timestamp>,
-	recent_events: Vec<EventOut>,
 	incidents: Vec<IncidentRefOut>,
 }
 
@@ -217,11 +235,10 @@ impl CanopyMcp {
 		               but never surfaced to anyone. An incident is `published` only if its Slack \
 		               open notice was delivered: it stayed open past the group's grace window \
 		               (slack_open_delay, ~3 min by default) OR it escalated (a critical issue \
-		               joined, which bypasses the grace). `event_count` is raw status-event churn \
-		               and does NOT track duration or severity — a high-event incident can be a \
-		               sub-minute flap. A high count dominated by unpublished short-lived rows \
-		               usually means a twitchy alert/health-check threshold, not a real outage. \
-		               `published_count` gives the surfaced subset directly."
+		               joined, which bypasses the grace). A count dominated by unpublished \
+		               short-lived incidents usually means a twitchy alert/health-check \
+		               threshold, not a real outage. `published_count` gives the surfaced \
+		               subset directly."
 	)]
 	async fn find_incidents(
 		&self,
@@ -246,7 +263,7 @@ impl CanopyMcp {
 
 		let group_names = group_names(
 			&mut conn,
-			&unique(incidents.iter().map(|i| i.server_group_id)),
+			&unique(incidents.iter().filter_map(|i| i.server_group_id)),
 		)
 		.await?;
 		let ids: Vec<Uuid> = incidents.iter().map(|i| i.id).collect();
@@ -262,7 +279,9 @@ impl CanopyMcp {
 				IncidentSummary {
 					id: i.id,
 					group_id: i.server_group_id,
-					group_name: group_names.get(&i.server_group_id).cloned(),
+					group_name: i
+						.server_group_id
+						.and_then(|gid| group_names.get(&gid).cloned()),
 					status: incident_status(i),
 					opened_at: i.opened_at,
 					closed_at: i.closed_at,
@@ -273,7 +292,6 @@ impl CanopyMcp {
 					published: published.contains(&i.id),
 					open_duration_secs: open_duration_secs(i),
 					issue_count: s.map_or(0, |s| s.issue_count),
-					event_count: s.map_or(0, |s| s.event_count),
 				}
 			})
 			.collect();
@@ -299,9 +317,10 @@ impl CanopyMcp {
 		let Ok((incident, rows)) = Incident::get_with_issues(&mut conn, id).await else {
 			return Ok(not_found(format!("no incident with id {id}")));
 		};
-		let group = ServerGroup::get_by_id(&mut conn, incident.server_group_id)
-			.await
-			.ok();
+		let group = match incident.server_group_id {
+			Some(gid) => ServerGroup::get_by_id(&mut conn, gid).await.ok(),
+			None => None,
+		};
 		let published = SlackOutbox::delivered_open_ids(&mut conn, &[incident.id])
 			.await
 			.map_err(mcp_err)?
@@ -317,7 +336,9 @@ impl CanopyMcp {
 			.iter()
 			.map(|(link, iss)| IncidentIssueOut {
 				issue_id: iss.id,
-				severity: iss.severity,
+				observed_result: iss.observed_result,
+				effective_result: iss.effective_result,
+				escalates: iss.escalates,
 				source: iss.source.clone(),
 				r#ref: iss.r#ref.clone(),
 				description: iss.description.clone(),
@@ -355,16 +376,16 @@ impl CanopyMcp {
 	}
 
 	#[tool(
-		description = "List issues across the fleet, filtered by active state, severity, group, \
-		               server, and recency. Issues are the per-(server,source,ref) events that make \
-		               up incidents."
+		description = "List issues across the fleet, filtered by active state, effective result, \
+		               group, server, and recency. Issues are the per-(server,source,check) conditions \
+		               that make up incidents."
 	)]
 	async fn find_issues(
 		&self,
 		Parameters(args): Parameters<FindIssuesArgs>,
 	) -> Result<CallToolResult, McpError> {
 		let mut conn = self.conn().await?;
-		let severities = parse_severities(&args.severities)?;
+		let results = parse_results(&args.results)?;
 		let group = parse_opt_uuid(&args.group_id, "group_id")?;
 		let server = parse_opt_uuid(&args.server_id, "server_id")?;
 		let since = args.since_days.map(since_from_days);
@@ -374,7 +395,7 @@ impl CanopyMcp {
 			&mut conn,
 			IssueListFilters {
 				active_only: args.active_only.unwrap_or(true),
-				severities,
+				results,
 				server_group_id: group,
 				since,
 			},
@@ -401,8 +422,7 @@ impl CanopyMcp {
 	}
 
 	#[tool(
-		description = "Full detail for one issue: its fields, recent events, and the incidents it \
-		               is or was part of."
+		description = "Full detail for one issue: its fields and the incidents it is or was part of."
 	)]
 	async fn get_issue(
 		&self,
@@ -413,9 +433,6 @@ impl CanopyMcp {
 		let Ok(issue) = Issue::get_by_id(&mut conn, id).await else {
 			return Ok(not_found(format!("no issue with id {id}")));
 		};
-		let events = Event::list_for_issue(&mut conn, id, 0, 20)
-			.await
-			.map_err(mcp_err)?;
 		let inc = Incident::for_issues(&mut conn, &[id])
 			.await
 			.map_err(mcp_err)?;
@@ -428,19 +445,6 @@ impl CanopyMcp {
 			None => None,
 		};
 
-		let recent_events = events
-			.iter()
-			.map(|e| EventOut {
-				created_at: e.created_at,
-				occurred_at: e.occurred_at,
-				severity: e.severity,
-				description: e.description.clone(),
-				message: e.message.clone(),
-				active: e.active,
-				occurrences: e.occurrences,
-				last_seen: e.last_seen,
-			})
-			.collect();
 		let incidents = inc
 			.get(&id)
 			.into_iter()
@@ -459,7 +463,9 @@ impl CanopyMcp {
 			group_id: issue.server_group_id,
 			source: issue.source.clone(),
 			r#ref: issue.r#ref.clone(),
-			severity: issue.severity,
+			observed_result: issue.observed_result,
+			effective_result: issue.effective_result,
+			escalates: issue.escalates,
 			description: issue.description.clone(),
 			message: issue.message.clone(),
 			active: issue.active,
@@ -469,8 +475,37 @@ impl CanopyMcp {
 			resolved_by: issue.resolved_by.clone(),
 			resolved_reason: issue.resolved_reason.clone(),
 			snoozed_until: issue.snoozed_until,
-			recent_events,
 			incidents,
+		})
+	}
+
+	#[tool(
+		description = "Get the operator-authored documentation for a (source, check): what the \
+		               check observes, what each result means, and hints for solving a failure. \
+		               Prefer this curated knowledge over inferring what a check does from its \
+		               name. Also returns the check's current policy (ceiling, escalates)."
+	)]
+	async fn get_check_documentation(
+		&self,
+		Parameters(args): Parameters<CheckDocArgs>,
+	) -> Result<CallToolResult, McpError> {
+		use database::check_policies::CheckPolicy;
+		let mut conn = self.conn().await?;
+		let Some(policy) = CheckPolicy::get(&mut conn, &args.source, &args.check_name)
+			.await
+			.map_err(mcp_err)?
+		else {
+			return Ok(not_found(format!(
+				"no catalog entry for ({}, {}) — that source has never reported that check",
+				args.source, args.check_name
+			)));
+		};
+		ok_json(&CheckDocOut {
+			source: policy.source,
+			check_name: policy.check_name,
+			ceiling: policy.ceiling,
+			escalates: policy.escalates,
+			documentation: policy.documentation,
 		})
 	}
 }
@@ -491,14 +526,16 @@ fn incident_status(i: &Incident) -> &'static str {
 	}
 }
 
-fn parse_severities(v: &Option<Vec<String>>) -> Result<Option<Vec<Severity>>, McpError> {
+fn parse_results(v: &Option<Vec<String>>) -> Result<Option<Vec<CheckResult>>, McpError> {
 	match v {
 		Some(list) if !list.is_empty() => {
 			let mut out = Vec::with_capacity(list.len());
 			for s in list {
-				out.push(s.parse::<Severity>().map_err(|_| {
-					McpError::invalid_params(format!("invalid severity: {s}"), None)
-				})?);
+				out.push(
+					s.parse::<CheckResult>().map_err(|_| {
+						McpError::invalid_params(format!("invalid result: {s}"), None)
+					})?,
+				);
 			}
 			Ok(Some(out))
 		}
@@ -520,7 +557,9 @@ fn issue_summary(
 		group_id: i.server_group_id,
 		source: i.source.clone(),
 		r#ref: i.r#ref.clone(),
-		severity: i.severity,
+		observed_result: i.observed_result,
+		effective_result: i.effective_result,
+		escalates: i.escalates,
 		description: i.description.clone(),
 		message: i.message.clone(),
 		active: i.active,

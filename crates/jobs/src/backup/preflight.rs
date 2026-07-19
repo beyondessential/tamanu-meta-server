@@ -12,7 +12,7 @@
 //! (issuance) path is validated at onboarding by private-server's probe, not
 //! here; later drift surfaces as real device backups failing.
 //!
-//! Alerts go through the group-level path (`database::backup::alerts`), which
+//! Alerts go through `database::issues::file_check`, which
 //! bypasses per-server `is_monitored`. AWS calls are not unit-tested here (no
 //! live AWS in CI); the pure logic — the Object-Lock assertion — is.
 
@@ -22,10 +22,11 @@ use aws_sdk_s3::types::ObjectLockRetentionMode;
 use aws_sdk_sts::error::{ProvideErrorMetadata, SdkError};
 use aws_sdk_sts::operation::RequestId;
 use commons_servers::backup_jobs::slot_deadline_due;
-use commons_types::issue::Severity;
+use commons_types::status::CheckResult;
 use database::{
 	BackupConfigStatus, ServerGroupBackupConfig,
-	backup::alerts::{raise_group_event, refs},
+	backup::refs,
+	issues::{CheckFiling, FilingScope, file_check},
 };
 use jiff::Timestamp;
 use tokio::{
@@ -58,7 +59,8 @@ fn validate_object_lock(
 	}
 }
 
-/// Raise the shared-identity self-alert (Critical → notifies immediately).
+/// Raise the shared-identity self-alert (registers as an escalating
+/// failure → notifies immediately).
 async fn file_identity_alert(
 	db: &mut diesel_async::AsyncPgConnection,
 	msg: &str,
@@ -66,7 +68,10 @@ async fn file_identity_alert(
 	database::self_alerts::raise(
 		db,
 		refs::PREFLIGHT_IDENTITY,
-		Severity::Critical,
+		CheckResult::Failed,
+		CheckResult::Failed,
+		true,
+		Some(refs::PREFLIGHT_IDENTITY_DOC),
 		"Canopy IRSA identity broken",
 		msg,
 	)
@@ -89,14 +94,20 @@ async fn recover_identity_alert(
 		Issue::active_group_ids_by_source_ref(db, refs::CANOPY_SOURCE, refs::PREFLIGHT_IDENTITY)
 			.await?
 	{
-		raise_group_event(
+		file_check(
 			db,
-			group_id,
-			refs::PREFLIGHT_IDENTITY,
-			Severity::Info,
-			None,
-			"caller identity ok",
-			false,
+			CheckFiling {
+				source: database::statuses::CANOPY_SOURCE,
+				scope: FilingScope::Group(group_id),
+				check: refs::PREFLIGHT_IDENTITY,
+				observed: CheckResult::Passed,
+				title: None,
+				message: "caller identity ok",
+				detail: None,
+				default_ceiling: CheckResult::Failed,
+				default_escalates: true,
+				documentation: Some(refs::PREFLIGHT_IDENTITY_DOC),
+			},
 		)
 		.await?;
 	}
@@ -230,54 +241,78 @@ async fn deep_check_group(
 ) {
 	match run_deep_check(aws, cfg).await {
 		Ok(()) => {
-			let _ = raise_group_event(
+			let _ = file_check(
 				db,
-				cfg.group_id,
-				refs::PREFLIGHT_ASSUME,
-				Severity::Info,
-				None,
-				"maintenance-role access ok",
-				false,
+				CheckFiling {
+					source: database::statuses::CANOPY_SOURCE,
+					scope: FilingScope::Group(cfg.group_id),
+					check: refs::PREFLIGHT_ASSUME,
+					observed: CheckResult::Passed,
+					title: None,
+					message: "maintenance-role access ok",
+					detail: None,
+					default_ceiling: CheckResult::Failed,
+					default_escalates: false,
+					documentation: Some(refs::PREFLIGHT_ASSUME_DOC),
+				},
 			)
 			.await;
 		}
 		Err(msg) => {
 			error!(group = %cfg.group_id, "preflight assume failed: {msg}");
-			let _ = raise_group_event(
+			let _ = file_check(
 				db,
-				cfg.group_id,
-				refs::PREFLIGHT_ASSUME,
-				Severity::Error,
-				Some("backup maintenance-role access failed"),
-				&msg,
-				true,
+				CheckFiling {
+					source: database::statuses::CANOPY_SOURCE,
+					scope: FilingScope::Group(cfg.group_id),
+					check: refs::PREFLIGHT_ASSUME,
+					observed: CheckResult::Failed,
+					title: Some("backup maintenance-role access failed"),
+					message: &msg,
+					detail: None,
+					default_ceiling: CheckResult::Failed,
+					default_escalates: false,
+					documentation: Some(refs::PREFLIGHT_ASSUME_DOC),
+				},
 			)
 			.await;
 		}
 	}
 	match check_object_lock(aws, cfg).await {
 		Ok(()) => {
-			let _ = raise_group_event(
+			let _ = file_check(
 				db,
-				cfg.group_id,
-				refs::PREFLIGHT_OBJECT_LOCK,
-				Severity::Info,
-				None,
-				"object lock ok",
-				false,
+				CheckFiling {
+					source: database::statuses::CANOPY_SOURCE,
+					scope: FilingScope::Group(cfg.group_id),
+					check: refs::PREFLIGHT_OBJECT_LOCK,
+					observed: CheckResult::Passed,
+					title: None,
+					message: "object lock ok",
+					detail: None,
+					default_ceiling: CheckResult::Failed,
+					default_escalates: true,
+					documentation: Some(refs::PREFLIGHT_OBJECT_LOCK_DOC),
+				},
 			)
 			.await;
 		}
 		Err(msg) => {
 			error!(group = %cfg.group_id, "object-lock check failed: {msg}");
-			let _ = raise_group_event(
+			let _ = file_check(
 				db,
-				cfg.group_id,
-				refs::PREFLIGHT_OBJECT_LOCK,
-				Severity::Critical,
-				Some("bucket Object-Lock missing or weakened"),
-				&msg,
-				true,
+				CheckFiling {
+					source: database::statuses::CANOPY_SOURCE,
+					scope: FilingScope::Group(cfg.group_id),
+					check: refs::PREFLIGHT_OBJECT_LOCK,
+					observed: CheckResult::Failed,
+					title: Some("bucket Object-Lock missing or weakened"),
+					message: &msg,
+					detail: None,
+					default_ceiling: CheckResult::Failed,
+					default_escalates: true,
+					documentation: Some(refs::PREFLIGHT_OBJECT_LOCK_DOC),
+				},
 			)
 			.await;
 		}
@@ -318,7 +353,7 @@ pub fn spawn() -> JoinHandle<()> {
 				};
 
 			// Shared check (every tick): IRSA identity resolves. Filed ONCE
-			// against the nil/meta server — a broken shared identity is one
+			// as a canopy-wide self-alert — a broken shared identity is one
 			// fact about canopy, not one per group, and paging N groups at
 			// once for it helps nobody.
 			let identity_ok = aws.sts.get_caller_identity().send().await;
@@ -377,7 +412,7 @@ mod tests {
 
 	#[tokio::test(flavor = "multi_thread")]
 	async fn identity_alert_files_once_and_recovers_legacy_fanout() {
-		use database::issues::Issue;
+		use database::issues::{Issue, raise_group_event};
 		use diesel_async::SimpleAsyncConnection as _;
 		use uuid::Uuid;
 
@@ -394,7 +429,6 @@ mod tests {
 				&mut conn,
 				group,
 				refs::PREFLIGHT_IDENTITY,
-				Severity::Critical,
 				Some("Canopy IRSA identity broken"),
 				"legacy fan-out alert",
 				true,
@@ -402,35 +436,26 @@ mod tests {
 			.await
 			.expect("seed legacy alert");
 
-			// Filing twice coalesces into the one nil/meta-server issue.
+			// Filing twice coalesces into the one canopy-wide issue.
 			file_identity_alert(&mut conn, "sts:GetCallerIdentity failed: boom")
 				.await
 				.expect("file");
 			file_identity_alert(&mut conn, "sts:GetCallerIdentity failed: boom")
 				.await
 				.expect("file again");
-			let nil_issues = Issue::list_by_source_ref(
-				&mut conn,
-				refs::CANOPY_SOURCE,
-				refs::PREFLIGHT_IDENTITY,
-				&[Uuid::nil()],
-			)
-			.await
-			.expect("list");
-			assert_eq!(nil_issues.len(), 1, "one coalescing meta-server issue");
-			assert!(nil_issues[0].active);
+			let global = database::issues::get_global_issue(&mut conn, refs::PREFLIGHT_IDENTITY)
+				.await
+				.expect("get")
+				.expect("one coalescing canopy-wide issue");
+			assert!(global.active);
 
-			// Recovery clears the meta-server issue AND the legacy one.
+			// Recovery clears the canopy-wide issue AND the legacy one.
 			recover_identity_alert(&mut conn).await.expect("recover");
-			let nil_issues = Issue::list_by_source_ref(
-				&mut conn,
-				refs::CANOPY_SOURCE,
-				refs::PREFLIGHT_IDENTITY,
-				&[Uuid::nil()],
-			)
-			.await
-			.expect("list");
-			assert!(!nil_issues[0].active, "meta-server alert recovered");
+			let global = database::issues::get_global_issue(&mut conn, refs::PREFLIGHT_IDENTITY)
+				.await
+				.expect("get")
+				.expect("issue still exists");
+			assert!(!global.active, "canopy-wide alert recovered");
 			assert!(
 				Issue::active_group_ids_by_source_ref(
 					&mut conn,

@@ -16,15 +16,16 @@ use commons_errors::{AppError, Result};
 use commons_types::{
 	device::DeviceRole,
 	geo::GeoPoint,
-	issue::{ResolvedReason, Severity},
+	issue::ResolvedReason,
 	server::{TagMap, kind::ServerKind, rank::ServerRank},
+	status::CheckResult,
 	version::{VersionStatus, VersionStr},
 };
 use database::{
 	Device, DeviceKey,
 	admins::Admin,
+	check_policies::CheckPolicy,
 	devices::NewDeviceConnection,
-	healthcheck_severities::HealthcheckSeverity,
 	issues::{Incident, Issue, NewEvent},
 	notes::{IncidentNote, IssueNote},
 	pg_duration::PgDuration,
@@ -59,10 +60,8 @@ const TRUNCATE_TABLES: &[&str] = &[
 	"issue_notes",
 	"incident_issues",
 	"incidents",
-	"events",
 	"issues",
-	"server_silenced_refs",
-	"server_group_silenced_refs",
+	"scoped_check_policies",
 	"device_server_associations",
 	"device_connections",
 	"device_keys",
@@ -70,7 +69,7 @@ const TRUNCATE_TABLES: &[&str] = &[
 	"server_groups",
 	"version_known_issues",
 	"versions",
-	"healthcheck_severities",
+	"check_policies",
 	"admins",
 ];
 
@@ -323,49 +322,62 @@ async fn seed_healthchecks(conn: &mut AsyncPgConnection, admins: &[String]) -> R
 		"certificate_expiry",
 		"backup_freshness",
 	] {
-		HealthcheckSeverity::upsert_default(conn, check).await?;
+		CheckPolicy::upsert_default(conn, "alertd", check).await?;
 	}
 
 	let reviewer = &admins[0];
-	HealthcheckSeverity::update(
+	CheckPolicy::update(
 		conn,
+		"alertd",
 		"database_connectivity",
-		Severity::Critical,
+		CheckResult::Failed,
+		true,
 		Some("DB down means the server is effectively offline."),
 		reviewer,
 	)
 	.await?;
-	HealthcheckSeverity::update(
+	CheckPolicy::update(
 		conn,
+		"alertd",
 		"disk_space",
-		Severity::Error,
+		CheckResult::Failed,
+		false,
 		Some("Page when disk is critically low."),
 		reviewer,
 	)
 	.await?;
-	HealthcheckSeverity::update(conn, "backup_freshness", Severity::Info, None, reviewer).await?;
+	CheckPolicy::update(
+		conn,
+		"alertd",
+		"backup_freshness",
+		CheckResult::Passed,
+		false,
+		None,
+		reviewer,
+	)
+	.await?;
 
-	// A conditional rules ladder: escalate sync_lag based on how far behind it is.
-	use database::healthcheck_severities::{Condition, IfLadder, Var};
+	// A conditional rules ladder: grade sync_lag by how far behind it is.
+	use database::check_policies::{Condition, IfLadder, Var};
 	let ladder = IfLadder {
 		branches: vec![
 			(
 				Condition::Gt(
 					"check.lag_seconds".parse::<Var>().expect("var parses"),
-					serde_json::json!(3600),
+					serde_json::json!(600),
 				),
-				Severity::Critical,
+				CheckResult::Failed,
 			),
 			(
 				Condition::Gt(
 					"check.lag_seconds".parse::<Var>().expect("var parses"),
-					serde_json::json!(600),
+					serde_json::json!(60),
 				),
-				Severity::Error,
+				CheckResult::Warning,
 			),
 		],
 	};
-	HealthcheckSeverity::update_rules(conn, "sync_lag", Some(&ladder), reviewer).await?;
+	CheckPolicy::update_rules(conn, "alertd", "sync_lag", Some(&ladder), reviewer).await?;
 
 	Ok(())
 }
@@ -603,7 +615,6 @@ async fn seed_servers(
 			cloud: None,
 			geolocation: None,
 			is_monitored: true,
-			allow_legacy_status: false,
 			alert_when_down_for: TEN_MINUTES,
 			notes: String::new(),
 			tags: TagMap::default(),
@@ -864,6 +875,7 @@ async fn seed_statuses(
 				extra,
 				healthy,
 				health,
+				source: "alertd".into(),
 			})
 			.execute(conn)
 			.await?;
@@ -967,21 +979,32 @@ async fn seed_issues_and_incidents(
 		server_id: Uuid,
 		source: &str,
 		r#ref: &str,
-		severity: Severity,
+		result: CheckResult,
+		escalates: bool,
 		description: &str,
 		message: &str,
 		occurred_at: Timestamp,
 	) -> Result<Issue> {
+		let stamp = database::issues::CheckStateStamp {
+			check: r#ref.to_string(),
+			observed: result,
+			effective: result,
+			escalates,
+			detail: None,
+		};
+		let active = matches!(
+			result,
+			CheckResult::Failed | CheckResult::Warning | CheckResult::Broken
+		);
 		NewEvent {
 			source: source.to_string(),
 			r#ref: r#ref.to_string(),
-			severity: Some(severity),
 			description: Some(description.to_string()),
 			message: message.to_string(),
-			active: Some(true),
+			active: Some(active),
 			occurred_at: Some(occurred_at),
 		}
-		.save(conn, server_id, None)
+		.save_with_state(conn, server_id, None, Some(&stamp))
 		.await
 	}
 
@@ -991,7 +1014,8 @@ async fn seed_issues_and_incidents(
 		servers.unhealthy_facility,
 		"healthcheck",
 		"database_connectivity",
-		Severity::Critical,
+		CheckResult::Failed,
+		true,
 		"Database connection refused",
 		"The server cannot reach its PostgreSQL instance (connection refused). \
 		 Sync and API requests are failing.",
@@ -1007,7 +1031,8 @@ async fn seed_issues_and_incidents(
 			servers.unhealthy_facility,
 			"healthcheck",
 			"database_connectivity",
-			Severity::Critical,
+			CheckResult::Failed,
+			true,
 			"Database connection refused",
 			"The server cannot reach its PostgreSQL instance (connection refused). \
 			 Sync and API requests are failing.",
@@ -1023,7 +1048,8 @@ async fn seed_issues_and_incidents(
 		servers.healthy_central,
 		"healthcheck",
 		"certificate_expiry",
-		Severity::Warning,
+		CheckResult::Warning,
+		false,
 		"TLS certificate expiring soon",
 		"The TLS certificate expires in 9 days.",
 		now - SignedDuration::from_mins(30),
@@ -1037,7 +1063,8 @@ async fn seed_issues_and_incidents(
 		servers.warning_facility,
 		"healthcheck",
 		"sync_lag",
-		Severity::Error,
+		CheckResult::Failed,
+		false,
 		"Sync lag exceeds threshold",
 		"Sync lag has been above 30 minutes for the last hour.",
 		now - SignedDuration::from_mins(60),
@@ -1051,7 +1078,8 @@ async fn seed_issues_and_incidents(
 		servers.warning_facility,
 		"healthcheck",
 		"disk_space",
-		Severity::Error,
+		CheckResult::Failed,
+		false,
 		"Disk almost full",
 		"Disk usage crossed 95% earlier; has since recovered.",
 		now - SignedDuration::from_hours(6),
@@ -1059,26 +1087,28 @@ async fn seed_issues_and_incidents(
 	.await?;
 	Issue::resolve(conn, transient.id, &admins[1], ResolvedReason::Fixed).await?;
 
-	// An info-level issue on the ungrouped server (recorded, no incident).
+	// A warning on the ungrouped server (recorded, no incident).
 	push(
 		conn,
 		servers.ungrouped,
 		"app",
 		"slow-query",
-		Severity::Info,
+		CheckResult::Warning,
+		false,
 		"Slow query detected",
 		"A report query took 12s; investigate indexing.",
 		now - SignedDuration::from_hours(2),
 	)
 	.await?;
 
-	// A debug-level issue (never participates in incidents).
+	// A skipped-graded condition (recorded, never participates).
 	push(
 		conn,
 		servers.demo_server,
 		"app",
 		"debug-trace",
-		Severity::Debug,
+		CheckResult::Skipped,
+		false,
 		"Verbose trace captured",
 		"Captured a debug trace during a demo session.",
 		now - SignedDuration::from_hours(1),
@@ -1165,7 +1195,7 @@ async fn report(conn: &mut AsyncPgConnection) -> Result<()> {
 		"admins",
 		"versions",
 		"version_known_issues",
-		"healthcheck_severities",
+		"check_policies",
 		"devices",
 		"device_keys",
 		"device_connections",
@@ -1174,14 +1204,12 @@ async fn report(conn: &mut AsyncPgConnection) -> Result<()> {
 		"server_enrollment_tokens",
 		"statuses",
 		"issues",
-		"events",
 		"incidents",
 		"incident_issues",
 		"issue_notes",
 		"incident_notes",
 		"slack_outbox",
-		"server_silenced_refs",
-		"server_group_silenced_refs",
+		"scoped_check_policies",
 	];
 
 	eprintln!("seed: row counts");

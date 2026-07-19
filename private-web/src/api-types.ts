@@ -1265,10 +1265,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * List the healthcheck severity catalog.
-         * @description Returns every known healthcheck name together with its current
-         *     severity policy, ordered by name. An entry exists for every check name
-         *     any server has ever reported; new checks are added automatically the
+         * List the check policy catalog.
+         * @description Returns every known (source, check) together with its current policy,
+         *     ordered by source then name. An entry exists for every check any
+         *     source has ever reported; new checks are added automatically the
          *     first time they're seen, with a default policy pending review.
          */
         post: operations["healthcheck_list"];
@@ -1337,13 +1337,36 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Update a healthcheck's severity policy.
-         * @description Sets the base severity (and optionally notes) for the given check, and
-         *     marks it as reviewed by the caller. Saving with the same severity as
-         *     before still counts as a review, so an operator can acknowledge a
-         *     check without changing its policy.
+         * Update a check's policy.
+         * @description Sets the ceiling and escalation flag (and optionally notes) for the
+         *     given (source, check), and marks it as reviewed by the caller. Saving
+         *     with the same values as before still counts as a review, so an
+         *     operator can acknowledge a check without changing its policy.
          */
         post: operations["healthcheck_update"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/healthchecks/update_documentation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replace a check's documentation.
+         * @description Stores the markdown document presented alongside the check wherever
+         *     its state appears, and over MCP. Sending `null` or a blank document
+         *     clears it. Doesn't mark the policy as reviewed — documenting a check
+         *     is not the same as reviewing its grading.
+         */
+        post: operations["healthcheck_update_documentation"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1360,12 +1383,12 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Replace a healthcheck's conditional severity rules.
-         * @description Stores a new set of conditional rules for the given check (or removes
-         *     them, if `rules` is `null`), and marks the check as reviewed by the
-         *     caller. Returns 400 if `rules` doesn't parse as a valid ladder — for
-         *     example an unknown comparison operator, a malformed variable
-         *     reference, or an odd number of entries.
+         * Replace a check's conditional rules.
+         * @description Stores a new set of conditional rules for the given (source, check)
+         *     (or removes them, if `rules` is `null`), and marks the check as
+         *     reviewed by the caller. Returns 400 if `rules` doesn't parse as a
+         *     valid ladder — for example an unknown comparison operator, a
+         *     malformed variable reference, or an odd number of entries.
          */
         post: operations["healthcheck_update_rules"];
         delete?: never;
@@ -1632,27 +1655,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/issues/list_events": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * List the events recorded against a specific issue, most recent first.
-         * @description Returns a page of events along with the total number of events recorded
-         *     for the issue, for pagination with `offset`/`limit`.
-         */
-        post: operations["list_events"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/issues/list_for_device": {
         parameters: {
             query?: never;
@@ -1770,10 +1772,11 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Manually record an event against a server, creating or updating an issue.
-         * @description Finds or creates an issue keyed by the server and the given `ref`,
-         *     appends this event to it, and returns the resulting issue. Returns 400
-         *     if `ref` is empty or if `description` contains a newline.
+         * Manually raise (or clear) a condition against a server.
+         * @description Finds or creates an issue keyed by the server and the given `ref`
+         *     under the `manual` source, grades the chosen result through the
+         *     condition's catalog policy, and returns the resulting issue. Returns
+         *     400 if `ref` is empty or if `description` contains a newline.
          */
         post: operations["submit_manual_event"];
         delete?: never;
@@ -2109,9 +2112,7 @@ export interface paths {
         put?: never;
         /**
          * Mark a self-alert as resolved.
-         * @description Records that an operator has resolved the given self-alert and cancels
-         *     its notification if one is still pending delivery (e.g. inside the
-         *     initial grace period before a low-severity alert is sent). Returns 404
+         * @description Records that an operator has resolved the given self-alert. Returns 404
          *     if no self-alert with that id exists.
          */
         post: operations["self_alerts_resolve"];
@@ -2874,15 +2875,15 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * List the servers whose latest status reports one named healthcheck.
+         * List the servers whose check state reports one (source, check).
          * @description Everything the per-healthcheck page needs: the catalog's configured
-         *     severity for `check` (if any) plus every live server whose **latest**
-         *     status reports it — the current, real-time picture, not a history of
-         *     past issues/events, though each failing server carries a
-         *     `failing_since` timestamp derived from its active issue. This is the
-         *     data behind the `/healthchecks/:check` "who's affected" page, which
-         *     doubles as an operator TODO list and as a way to correlate servers
-         *     sharing the same issue during a fleet-wide incident.
+         *     policy for the (source, check) (if any) plus every live server's
+         *     current state for it — the real-time picture, with each degraded row
+         *     carrying `failing_since` (the start of its current degradation
+         *     streak). This is the data behind the `/healthchecks/:source/:check`
+         *     "who's affected" page, which doubles as an operator TODO list and as
+         *     a way to correlate servers sharing the same issue during a
+         *     fleet-wide incident.
          */
         post: operations["status_check_attention"];
         delete?: never;
@@ -3663,27 +3664,46 @@ export interface components {
              *     `health[].check` (an arbitrary, device/plugin-defined string).
              */
             check: string;
+            /**
+             * @description The source that reports the check. A check's identity is the
+             *     (source, check) pair — a same-named check from another source is
+             *     a different check.
+             */
+            source: string;
         };
         /**
-         * @description Response for [`check_attention`]: the queried check's catalog severity
+         * @description Response for [`check_attention`]: the queried check's catalog policy
          *     (if it has one yet) and every live server whose latest status reports
          *     it, failing or healthy.
          */
         CheckAttentionData: {
             /**
-             * @description The check name that was queried, echoed back so the page can
-             *     render its heading without re-decoding the request.
+             * @description The configured policy ceiling for this (source, check), or `None`
+             *     if the source has never reported it (so it has no catalog row).
              */
+            ceiling?: string | null;
+            /** @description The check name that was queried. */
             check: string;
             /**
-             * @description Every live server whose latest status reports this check, at any
-             *     result, ordered as a TODO list: failed, warning, broken, passed,
-             *     skipped (most urgent first), then by group name then server name.
-             *     The client filters out the passed/skipped tail unless the "show
-             *     healthy" toggle is on.
+             * @description Operator-authored documentation for this (source, check)
+             *     (markdown), or `None` if nobody has written it yet.
+             */
+            documentation?: string | null;
+            /** @description Whether this check's policy escalates its effective failures. */
+            escalates: boolean;
+            /**
+             * @description Every live server whose latest state from this source reports
+             *     this check, at any result, ordered as a TODO list: failed,
+             *     warning, broken, passed, skipped (most urgent first), then by
+             *     group name then server name. The client filters out the
+             *     passed/skipped tail unless the "show healthy" toggle is on.
              */
             servers: components["schemas"]["CheckAttentionServerData"][];
-            severity?: null | components["schemas"]["Severity"];
+            /**
+             * @description The source that was queried, echoed back with `check` so the page
+             *     can render its heading without re-decoding the request.
+             */
+            source: string;
         };
         /**
          * @description One server whose latest status reports [`CheckAttentionData::check`],
@@ -3691,19 +3711,14 @@ export interface components {
          */
         CheckAttentionServerData: {
             /**
-             * @description The check's full `health[]` entry from this server's latest status,
-             *     verbatim (including the `check`/`healthy`/`result` keys), so the
+             * @description The check's own fields from its latest report, verbatim, so the
              *     row can expand to the same per-check detail the server page shows.
              */
             data: unknown;
             /**
              * Format: date-time
-             * @description When this check started failing on this server: the `first_seen`
-             *     of the still-active issue canopy filed at `(status,
-             *     health/<check>)` when the check degraded. `None` for servers
-             *     currently reporting the check healthy, and for failing servers
-             *     with no active issue on file (e.g. the issue was
-             *     operator-resolved, or the ref is silenced so nothing was filed).
+             * @description When the check's current degradation streak began. `None` for
+             *     servers currently reporting the check healthy.
              */
             failing_since?: string | null;
             /**
@@ -3715,7 +3730,7 @@ export interface components {
             /** @description The server's group name, if it belongs to one. */
             group_name?: string | null;
             /**
-             * @description The check's result on this server's latest status. The UI shows
+             * @description The check's observed result on its latest report. The UI shows
              *     warning/failed/broken servers by default and puts passed/skipped
              *     ones behind a "show healthy" toggle.
              */
@@ -3729,9 +3744,103 @@ export interface components {
             server_name: string;
             /**
              * Format: date-time
-             * @description When the reporting status was recorded.
+             * @description When the check state last updated (the check's latest report).
              */
             status_created_at: string;
+        };
+        /**
+         * @description One (source, check)'s policy: the ceiling capping its effective
+         *     result, the escalation flag, plus optional conditional rules that can
+         *     grade a given report differently.
+         */
+        CheckPolicyData: {
+            /**
+             * @description The maximum effective result for this check when no conditional
+             *     rule (see `rules`) overrides it: an observed result more urgent
+             *     than the ceiling grades down to it. One of `failed`, `warning`,
+             *     `passed`, or `skipped` (`skipped` also tells the reporting source
+             *     it may stop running the check).
+             */
+            ceiling: string;
+            /** @description The healthcheck's name, exactly as reported by monitored servers. */
+            check_name: string;
+            /**
+             * @description Operator-authored documentation for this check: a single markdown
+             *     document. By convention it covers what the check observes, what
+             *     each result means, and hints for solving a failure, but no
+             *     structure is enforced. `null` when nobody has documented it yet.
+             */
+            documentation?: string | null;
+            /**
+             * @description Whether an effective failure of this check notifies immediately,
+             *     bypassing the incident grace period.
+             */
+            escalates: boolean;
+            /**
+             * Format: date-time
+             * @description When this check was first reported and this policy entry was
+             *     created.
+             */
+            first_seen: string;
+            /** @description Free-form operator notes about this check. */
+            notes?: string | null;
+            /** @description `true` if no operator has reviewed this policy yet. */
+            pending_review: boolean;
+            /**
+             * Format: date-time
+             * @description When an operator last reviewed or updated this policy. `null` if
+             *     it has never been reviewed.
+             */
+            reviewed_at?: string | null;
+            /**
+             * @description The operator who last reviewed this policy. `null` if it has
+             *     never been reviewed.
+             */
+            reviewed_by?: string | null;
+            /**
+             * Format: int32
+             * @description Number of condition/result branches in `rules`; `0` when
+             *     `rules` is `null` or couldn't be parsed. Lets a caller tell
+             *     whether conditional rules exist without parsing `rules` itself.
+             */
+            rule_count: number;
+            /**
+             * @description Conditional rules that can grade a report to a different result
+             *     than the ceiling would — in any direction — depending on the
+             *     check's own fields, the surrounding status report, or the
+             *     reporting server's tags. `null` means no conditional rules are
+             *     configured, and the ceiling always applies.
+             *
+             *     When present, this is a single-key object shaped like
+             *     `{"if": [condition_1, result_1, condition_2, result_2, ...]}`.
+             *     Conditions are tried in order, and the result paired with the
+             *     first matching condition is used; if none match, the observed
+             *     result capped at the ceiling is used instead. There's no explicit
+             *     "else" branch — the ceiling fallback plays that role — so the
+             *     array must have an even number of entries and at least one pair.
+             *
+             *     Each condition is a single-key object naming a comparison
+             *     operator — one of `==`, `!=`, `<`, `<=`, `>`, `>=`, or `in_range`
+             *     — whose value is a two-element array: a variable reference and a
+             *     value to compare it against. A variable reference has the shape
+             *     `{"var": "<namespace>.<field>"}`, where `<namespace>` is one of
+             *     `check` (a field on the failing check itself), `status` (a
+             *     top-level field on the status report that contained it), or
+             *     `tag` (a tag on the reporting server, merged with its group's
+             *     tags). `in_range` compares a version-like string against a
+             *     semantic version range (e.g. `">=1.2.0 <2.0.0"`). If the named
+             *     variable isn't present in the data being evaluated, the condition
+             *     doesn't match. A `rules` value that doesn't parse into this shape
+             *     is treated the same as `null` (no conditional rules).
+             */
+            rules?: unknown;
+            /** @description The source that reports this check. */
+            source: string;
+            /**
+             * Format: date-time
+             * @description When this policy was last modified.
+             */
+            updated_at: string;
         };
         /**
          * @description Outcome of a single health check reported in a server's status update.
@@ -4052,52 +4161,6 @@ export interface components {
              */
             ticket: string;
         };
-        /**
-         * @description A single recorded occurrence of an issue's underlying condition — one
-         *     push from a device or a manually submitted event.
-         */
-        EventData: {
-            /** @description Whether the underlying condition was active as of this event. */
-            active: boolean;
-            /**
-             * Format: date-time
-             * @description When this event was recorded on the server.
-             */
-            created_at: string;
-            /** @description Short headline for this event, if one was given. */
-            description?: string | null;
-            /**
-             * Format: uuid
-             * @description Unique identifier for this event.
-             */
-            id: string;
-            /**
-             * Format: uuid
-             * @description Id of the issue this event belongs to.
-             */
-            issue_id: string;
-            /**
-             * Format: date-time
-             * @description When this condition was last seen recurring.
-             */
-            last_seen: string;
-            /** @description Human-readable message describing this event. */
-            message: string;
-            /**
-             * Format: date-time
-             * @description When the underlying condition actually occurred, if reported
-             *     separately from the time it was recorded.
-             */
-            occurred_at?: string | null;
-            /**
-             * Format: int32
-             * @description Number of times this same condition has repeated and been coalesced
-             *     into this event rather than creating a new one.
-             */
-            occurrences: number;
-            /** @description Severity reported for this event. */
-            severity: components["schemas"]["Severity"];
-        };
         /** @description Request body for running a query in the SQL playground. */
         ExecuteArgs: {
             /** @description The query to execute. */
@@ -4261,7 +4324,7 @@ export interface components {
         /**
          * @description A real-world sample of the data a conditional rule can reference for a
          *     given healthcheck, taken from the most recent status report (across
-         *     all servers) that included it.
+         *     all servers) from the check's own source that included it.
          */
         HealthcheckSample: {
             /**
@@ -4306,102 +4369,33 @@ export interface components {
             check_name: string;
             sample?: null | components["schemas"]["HealthcheckSample"];
         };
-        /**
-         * @description A named healthcheck's alerting policy: the base severity assigned to
-         *     its failures, plus optional conditional rules that can override that
-         *     severity based on the details of a given failure.
-         */
-        HealthcheckSeverityData: {
-            /** @description The healthcheck's name, exactly as reported by monitored servers. */
-            check_name: string;
-            /**
-             * Format: date-time
-             * @description When this check was first reported and this policy entry was
-             *     created.
-             */
-            first_seen: string;
-            /** @description Free-form operator notes about this check. */
-            notes?: string | null;
-            /** @description `true` if no operator has reviewed this policy yet. */
-            pending_review: boolean;
-            /**
-             * Format: date-time
-             * @description When an operator last reviewed or updated this policy. `null` if
-             *     it has never been reviewed.
-             */
-            reviewed_at?: string | null;
-            /**
-             * @description The operator who last reviewed this policy. `null` if it has
-             *     never been reviewed.
-             */
-            reviewed_by?: string | null;
-            /**
-             * Format: int32
-             * @description Number of condition/severity branches in `rules`; `0` when
-             *     `rules` is `null` or couldn't be parsed. Lets a caller tell
-             *     whether conditional rules exist without parsing `rules` itself.
-             */
-            rule_count: number;
-            /**
-             * @description Conditional rules that can assign a different severity than
-             *     `severity`, depending on the failing check's own fields, the
-             *     surrounding status report, or the reporting server's tags. `null`
-             *     means no conditional rules are configured, and `severity` always
-             *     applies.
-             *
-             *     When present, this is a single-key object shaped like
-             *     `{"if": [condition_1, severity_1, condition_2, severity_2, ...]}`.
-             *     Conditions are tried in order, and the severity paired with the
-             *     first matching condition is used; if none match, the base
-             *     `severity` is used instead. There's no explicit "else" branch —
-             *     the fallback to `severity` plays that role — so the array must
-             *     have an even number of entries and at least one pair.
-             *
-             *     Each condition is a single-key object naming a comparison
-             *     operator — one of `==`, `!=`, `<`, `<=`, `>`, `>=`, or `in_range`
-             *     — whose value is a two-element array: a variable reference and a
-             *     value to compare it against. A variable reference has the shape
-             *     `{"var": "<namespace>.<field>"}`, where `<namespace>` is one of
-             *     `check` (a field on the failing check itself), `status` (a
-             *     top-level field on the status report that contained it), or
-             *     `tag` (a tag on the reporting server, merged with its group's
-             *     tags). `in_range` compares a version-like string against a
-             *     semantic version range (e.g. `">=1.2.0 <2.0.0"`). If the named
-             *     variable isn't present in the data being evaluated, the condition
-             *     doesn't match. A `rules` value that doesn't parse into this shape
-             *     is treated the same as `null` (no conditional rules).
-             */
-            rules?: unknown;
-            /**
-             * @description The severity assigned to a failure of this check when no
-             *     conditional rule (see `rules`) overrides it.
-             */
-            severity: components["schemas"]["Severity"];
-            /**
-             * Format: date-time
-             * @description When this policy was last modified.
-             */
-            updated_at: string;
-        };
-        /** @description Request body for updating a healthcheck's base severity policy. */
+        /** @description Request body for updating a check's base policy. */
         HealthcheckUpdateArgs: {
+            /**
+             * @description The ceiling to apply to this check's observed results when no
+             *     conditional rule overrides it: one of `failed`, `warning`,
+             *     `passed`, or `skipped`.
+             */
+            ceiling: string;
             /**
              * @description The healthcheck name to update; must already exist in the
              *     catalog.
              */
             check_name: string;
             /**
-             * @description Operator notes to store alongside the new severity. Omitting this
+             * @description Whether an effective failure of this check should notify
+             *     immediately, bypassing the incident grace period.
+             */
+            escalates?: boolean;
+            /**
+             * @description Operator notes to store alongside the new policy. Omitting this
              *     or sending `null` clears any existing notes — there's no way to
              *     leave them unchanged implicitly, so resend the current value to
              *     keep it.
              */
             notes?: string | null;
-            /**
-             * @description The severity to assign to this check's failures when no
-             *     conditional rule overrides it.
-             */
-            severity: components["schemas"]["Severity"];
+            /** @description The source whose check to update. */
+            source: string;
         };
         /** @description Pagination parameters for browsing the shared query history. */
         HistoryArgs: {
@@ -4473,11 +4467,6 @@ export interface components {
              */
             created_at: string;
             /**
-             * Format: int64
-             * @description Total number of events across all contributing issues.
-             */
-            event_count: number;
-            /**
              * Format: uuid
              * @description Unique identifier of the incident.
              */
@@ -4527,13 +4516,14 @@ export interface components {
             resolved_reason?: string | null;
             /**
              * Format: uuid
-             * @description Identifier of the server group the incident belongs to.
+             * @description Identifier of the server group the incident belongs to, or null for
+             *     a canopy-wide incident (aggregating canopy's self-alerts).
              */
-            server_group_id: string;
+            server_group_id?: string | null;
             /**
-             * @description Display name of the group this incident rolls up to. Empty only if
-             *     the group no longer exists, which should not happen in normal
-             *     operation.
+             * @description Display name of the group this incident rolls up to — `Canopy` for
+             *     a canopy-wide incident. Empty only if the group no longer exists,
+             *     which should not happen in normal operation.
              */
             server_group_name: string;
             /**
@@ -4693,18 +4683,35 @@ export interface components {
              */
             active: boolean;
             /**
+             * @description The check this issue tracks, when it is check state (health-check
+             *     issues). Absent for issues that aren't check results yet.
+             */
+            check_name?: string | null;
+            /**
              * Format: date-time
              * @description When this issue record was created.
              */
             created_at: string;
             /** @description Short headline describing the issue, if one was given. */
             description?: string | null;
+            /** @description The check's own fields from the latest report, verbatim. */
+            detail?: unknown;
             /**
              * Format: uuid
              * @description Id of the device that reported the underlying event, if the issue
              *     originated from a device push rather than a manual entry.
              */
             device_id?: string | null;
+            /**
+             * @description What policy made of the latest observed result — the result canopy
+             *     acts on.
+             */
+            effective_result?: string | null;
+            /**
+             * @description Whether the check's policy escalates: an effective failure notifies
+             *     immediately, bypassing incident grace.
+             */
+            escalates: boolean;
             /**
              * Format: date-time
              * @description When the issue was first raised.
@@ -4727,6 +4734,8 @@ export interface components {
             last_seen: string;
             /** @description Latest human-readable message describing the issue's state. */
             message: string;
+            /** @description The result the source reported on the latest filing, before policy. */
+            observed_result?: string | null;
             /**
              * @description Identifier used to match new incoming events to this issue; unique
              *     within its source and server.
@@ -4777,8 +4786,6 @@ export interface components {
              *     `server_host` when absent.
              */
             server_name?: string | null;
-            /** @description Current severity level of the issue. */
-            severity: components["schemas"]["Severity"];
             /**
              * Format: date-time
              * @description If set, the issue is snoozed and won't demand attention again until
@@ -4846,15 +4853,15 @@ export interface components {
              */
             limit?: number | null;
             /**
+             * @description Restrict to issues whose latest effective result is one of these.
+             *     Omit to include all results.
+             */
+            results?: string[] | null;
+            /**
              * Format: uuid
              * @description Restrict to issues whose server belongs to this group.
              */
             serverGroupId?: string | null;
-            /**
-             * @description Restrict to issues at one of these severity levels. Omit to include
-             *     all severities.
-             */
-            severities?: components["schemas"]["Severity"][] | null;
         };
         /** @description Filters for listing the issues raised against one server. */
         IssueListForServerArgs: {
@@ -4999,24 +5006,6 @@ export interface components {
              * @description Maximum number of incidents to return; defaults to 100.
              */
             limit?: number | null;
-        };
-        /** @description Selects an issue and a page of its events. */
-        ListEventsArgs: {
-            /**
-             * Format: uuid
-             * @description Id of the issue whose events to list.
-             */
-            issue_id: string;
-            /**
-             * Format: int64
-             * @description Maximum number of events to return. Defaults to 100 when omitted.
-             */
-            limit?: number | null;
-            /**
-             * Format: int64
-             * @description Number of events to skip, for pagination. Defaults to 0.
-             */
-            offset?: number | null;
         };
         /** @description Filters for listing the issues raised by one device. */
         ListForDeviceArgs: {
@@ -5252,58 +5241,6 @@ export interface components {
             total: number;
         };
         /** @description A single page of a paginated list response. */
-        Page_EventData: {
-            /** @description The items in this page. */
-            items: {
-                /** @description Whether the underlying condition was active as of this event. */
-                active: boolean;
-                /**
-                 * Format: date-time
-                 * @description When this event was recorded on the server.
-                 */
-                created_at: string;
-                /** @description Short headline for this event, if one was given. */
-                description?: string | null;
-                /**
-                 * Format: uuid
-                 * @description Unique identifier for this event.
-                 */
-                id: string;
-                /**
-                 * Format: uuid
-                 * @description Id of the issue this event belongs to.
-                 */
-                issue_id: string;
-                /**
-                 * Format: date-time
-                 * @description When this condition was last seen recurring.
-                 */
-                last_seen: string;
-                /** @description Human-readable message describing this event. */
-                message: string;
-                /**
-                 * Format: date-time
-                 * @description When the underlying condition actually occurred, if reported
-                 *     separately from the time it was recorded.
-                 */
-                occurred_at?: string | null;
-                /**
-                 * Format: int32
-                 * @description Number of times this same condition has repeated and been coalesced
-                 *     into this event rather than creating a new one.
-                 */
-                occurrences: number;
-                /** @description Severity reported for this event. */
-                severity: components["schemas"]["Severity"];
-            }[];
-            /**
-             * Format: int64
-             * @description The total number of items across all pages, not just this one — use
-             *     this to render page counts without a separate request.
-             */
-            total: number;
-        };
-        /** @description A single page of a paginated list response. */
         Page_ServerInfo: {
             /** @description The items in this page. */
             items: {
@@ -5314,12 +5251,6 @@ export interface components {
                  *     is `true`. The default at creation is 600 (10 minutes).
                  */
                 alert_when_down_for: number;
-                /**
-                 * @description Whether this server may use the retired legacy `/status` format (a
-                 *     push with no `health` array). Off by default; when on, such a push
-                 *     only refreshes reachability and carries prior healthchecks forward.
-                 */
-                allow_legacy_status: boolean;
                 /** @description Whether the server is archived (soft-deleted). */
                 archived: boolean;
                 /** @description Whether this server runs in a cloud environment, if known. */
@@ -6230,6 +6161,12 @@ export interface components {
         SampleArgs: {
             /** @description The healthcheck name to sample. */
             check_name: string;
+            /**
+             * @description The source that reports the check. A check's identity is the
+             *     (source, check) pair; another source's same-named check may carry
+             *     entirely different fields.
+             */
+            source: string;
         };
         /**
          * @description Request body for creating a new snippet, or saving a new version of an
@@ -6279,6 +6216,13 @@ export interface components {
              *     an operator has resolved the alert.
              */
             active: boolean;
+            /** @description What policy made of it — the result canopy acts on. */
+            effective_result?: string | null;
+            /**
+             * @description Whether this condition's policy escalates: an effective failure
+             *     notifies immediately, bypassing incident grace.
+             */
+            escalates: boolean;
             /**
              * Format: date-time
              * @description When this condition was first raised.
@@ -6296,6 +6240,8 @@ export interface components {
             last_seen: string;
             /** @description Full detail message describing the condition. */
             message: string;
+            /** @description What canopy observed on the latest raise, before policy. */
+            observed_result?: string | null;
             /**
              * @description The stable identifier of the underlying condition, e.g.
              *     `mcp-token-expiry`. Stable across repeated raises of the same
@@ -6313,11 +6259,6 @@ export interface components {
              *     has not been resolved.
              */
             resolved_by?: string | null;
-            /**
-             * @description How severe the condition is, from `critical` (most severe) down to
-             *     `debug` (least).
-             */
-            severity: components["schemas"]["Severity"];
             /** @description Single-line headline. */
             title?: string | null;
         };
@@ -6402,11 +6343,6 @@ export interface components {
              *     down. Omit to leave unchanged.
              */
             alert_when_down_for?: number | null;
-            /**
-             * @description Whether to accept the retired legacy status format from this
-             *     server. Omit to leave unchanged.
-             */
-            allow_legacy_status?: boolean | null;
             /**
              * @description Whether the server runs in a cloud environment, or `null` to clear.
              *     Omit to leave unchanged.
@@ -6641,12 +6577,6 @@ export interface components {
              *     is `true`. The default at creation is 600 (10 minutes).
              */
             alert_when_down_for: number;
-            /**
-             * @description Whether this server may use the retired legacy `/status` format (a
-             *     push with no `health` array). Off by default; when on, such a push
-             *     only refreshes reachability and carries prior healthchecks forward.
-             */
-            allow_legacy_status: boolean;
             /** @description Whether the server is archived (soft-deleted). */
             archived: boolean;
             /** @description Whether this server runs in a cloud environment, if known. */
@@ -6759,6 +6689,11 @@ export interface components {
             platform?: string | null;
             /** @description PostgreSQL version the server reported, if any. */
             postgres?: string | null;
+            /**
+             * @description The source that pushed this status (e.g. `alertd`). Silences on
+             *     the checks it carries are keyed by this source.
+             */
+            source: string;
             /** @description Timezone the server reported, if any. */
             timezone?: string | null;
             version?: null | components["schemas"]["VersionStr"];
@@ -6895,29 +6830,6 @@ export interface components {
             type: string;
         };
         /**
-         * @description Canopy's severity vocabulary, narrowed from RFC 5424 to a five-level
-         *     set with operator semantics:
-         *
-         *     - `Debug`: never participates in incidents (filed for the audit
-         *       trail / per-server view only).
-         *     - `Info`, `Warning`: join an open incident for context but don't
-         *       open one or keep one open on their own.
-         *     - `Error`: opens an incident; sits in the per-group `slack_open_delay`
-         *       holding window before the Slack notification ships.
-         *     - `Critical`: opens an incident and bypasses the holding window —
-         *       the Slack notification is enqueued for immediate delivery.
-         *
-         *     Stored as text in Postgres; validated as this enum at the API layer.
-         *     Default is `Error` (the most common severity for a deliberately
-         *     filed event). The legacy syslog severities `emergency` / `alert` /
-         *     `notice` have been retired — see the
-         *     `2026-05-29-000000-0000_restrict_severities` migration; the
-         *     `FromStr` impl still accepts them as aliases for forward-compat with
-         *     any device that hasn't been updated.
-         * @enum {string}
-         */
-        Severity: "critical" | "error" | "warning" | "info" | "debug";
-        /**
          * @description Reachability of a server, based on how recently it last reported a status update.
          * @enum {string}
          */
@@ -7047,13 +6959,12 @@ export interface components {
          */
         StatusSnapshotData: {
             /**
-             * @description For each currently-unhealthy check in this push, the severity it
-             *     would be filed at if it turned into an issue. Healthy checks are
-             *     omitted. An unhealthy check with no severity listed here should be
-             *     treated as a default (warning-level) severity.
+             * @description For each currently-unhealthy check in this push, the effective
+             *     result its policy grades it to. Healthy checks are omitted. An
+             *     unhealthy check not listed here should be treated as warning.
              */
-            check_severities: {
-                [key: string]: components["schemas"]["Severity"];
+            check_results: {
+                [key: string]: string;
             };
             /**
              * Format: date-time
@@ -7130,39 +7041,41 @@ export interface components {
              */
             version_distance?: number | null;
         };
-        /** @description A manually entered event to record against a server. */
+        /** @description A manually raised condition to record against a server. */
         SubmitManualEventArgs: {
             /**
              * @description Whether the underlying condition is currently active. Defaults to
-             *     `true` when omitted.
+             *     `true` when omitted; `false` records it as cleared regardless of
+             *     `result`.
              */
             active?: boolean | null;
             /**
-             * @description Short, single-line headline for the event. Must not contain
+             * @description Short, single-line headline for the condition. Must not contain
              *     newlines — use `message` for multi-line detail.
              */
             description?: string | null;
-            /** @description Human-readable message describing the event. May be multi-line. */
+            /**
+             * @description Whether the condition's failures should notify immediately,
+             *     bypassing the incident grace period. Only consulted the first time
+             *     a `ref` is seen (it seeds the condition's catalog entry); adjust
+             *     later from the healthchecks catalog.
+             */
+            escalates?: boolean | null;
+            /** @description Human-readable message describing the condition. May be multi-line. */
             message: string;
             /**
-             * Format: date-time
-             * @description When the underlying condition actually occurred, if different from
-             *     the time of submission. Defaults to now when omitted.
-             */
-            occurredAt?: string | null;
-            /**
-             * @description Identifier for the underlying condition. Events with the same `ref`
-             *     on the same server are coalesced into the same issue rather than
-             *     opening a new one each time; use a fresh unique value if that
-             *     deduplication isn't wanted.
+             * @description Identifier for the underlying condition. Reports with the same
+             *     `ref` on the same server update the same issue rather than opening
+             *     a new one each time; use a fresh unique value if that deduplication
+             *     isn't wanted.
              */
             ref: string;
+            result?: null | components["schemas"]["CheckResult"];
             /**
              * Format: uuid
-             * @description Id of the server the event applies to.
+             * @description Id of the server the condition applies to.
              */
             serverId: string;
-            severity?: null | components["schemas"]["Severity"];
         };
         /** @description Fleet-wide summary of software versions currently running in production. */
         SummaryData: {
@@ -7282,6 +7195,18 @@ export interface components {
             /** @description Exact version string to update (e.g. `"1.2.3"`). */
             version: string;
         };
+        /** @description Request body for replacing a check's documentation. */
+        UpdateDocumentationArgs: {
+            /**
+             * @description The healthcheck name to document; must already exist in the
+             *     catalog.
+             */
+            check_name: string;
+            /** @description The new markdown document, or `null` (or blank) to clear it. */
+            documentation?: string | null;
+            /** @description The source whose check to document. */
+            source: string;
+        };
         /** @description Request to rename (or clear the name of) a device key. */
         UpdateKeyNameArgs: {
             /**
@@ -7292,7 +7217,7 @@ export interface components {
             /** @description New display name for the key, or null to clear it. */
             name?: string | null;
         };
-        /** @description Request body for replacing a healthcheck's conditional severity rules. */
+        /** @description Request body for replacing a check's conditional rules. */
         UpdateRulesArgs: {
             /**
              * @description The healthcheck name whose rules to replace; must already exist
@@ -7301,11 +7226,13 @@ export interface components {
             check_name: string;
             /**
              * @description The new conditional rules to store, or `null` to remove all
-             *     conditional rules and rely solely on the base severity. Same
-             *     shape as the `rules` field returned when listing checks. A ladder
-             *     with no condition/severity pairs is treated the same as `null`.
+             *     conditional rules and rely solely on the ceiling. Same shape as
+             *     the `rules` field returned when listing checks. A ladder with no
+             *     condition/result pairs is treated the same as `null`.
              */
             rules?: unknown;
+            /** @description The source whose check's rules to replace. */
+            source: string;
         };
         /** @description Identifies a version and the publication status to set on it. */
         UpdateStatusArgs: {
@@ -9196,13 +9123,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Catalog rows ordered by check_name. */
+            /** @description Catalog rows ordered by source then check_name. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HealthcheckSeverityData"][];
+                    "application/json": components["schemas"]["CheckPolicyData"][];
                 };
             };
             401: {
@@ -9318,7 +9245,47 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HealthcheckSeverityData"];
+                    "application/json": components["schemas"]["CheckPolicyData"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    healthcheck_update_documentation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateDocumentationArgs"];
+            };
+        };
+        responses: {
+            /** @description Updated catalog row. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CheckPolicyData"];
                 };
             };
             401: {
@@ -9358,7 +9325,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HealthcheckSeverityData"];
+                    "application/json": components["schemas"]["CheckPolicyData"];
                 };
             };
             400: {
@@ -9679,29 +9646,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IssueData"][];
-                };
-            };
-        };
-    };
-    list_events: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ListEventsArgs"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Page_EventData"];
                 };
             };
         };
@@ -10263,7 +10207,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Alert marked operator-resolved; a pending notification is cancelled. */
+            /** @description Alert marked operator-resolved. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -11251,7 +11195,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The check's catalog severity and the servers currently reporting it. */
+            /** @description The check's catalog policy and the servers currently reporting it. */
             200: {
                 headers: {
                     [name: string]: unknown;

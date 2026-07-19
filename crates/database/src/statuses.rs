@@ -5,7 +5,6 @@ use std::{
 
 use commons_errors::{AppError, Result};
 use commons_types::{
-	issue::Severity,
 	server::rank::ServerRank,
 	status::{CheckResult, HealthState, ShortStatus},
 	version::VersionStr,
@@ -19,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use crate::issues::{Issue, NewEvent};
+use crate::issues::Issue;
 use crate::servers::Server;
 
 /// Source value canopy uses when it files reachability issues on behalf of a
@@ -30,6 +29,35 @@ pub const CANOPY_SOURCE: &str = "canopy";
 /// the find-or-create in [`NewEvent::save`] coalesces every cycle into the
 /// same issue row.
 pub const REACHABILITY_REF: &str = "reachability";
+
+/// Ref prefix for the per-(server, source) staleness checks canopy files
+/// when a reporting source stops reporting: `stale/<source>`, e.g.
+/// `stale/alertd`. A contract with stored silences and policy rows.
+pub const STALE_REF_PREFIX: &str = "stale/";
+
+pub const REACHABILITY_DOC: &str = "## Description
+
+Nothing is reaching canopy about this server: no source has reported and no ping has succeeded within the server's down threshold. This is the all-sources-stale signal — the server is presented as unreachable.
+
+## Results
+
+- **fail** — no status from any source within the threshold (or ever); recovers as soon as anything reports.
+
+## Solve
+
+Check whether the server itself is down, its network/VPN path to canopy, and whether its reporting agents are running. The per-source `stale/<source>` checks narrow down which reporter went quiet first.";
+
+pub const STALE_DOC: &str = "## Description
+
+A source that has been reporting on this server has gone quiet: its most recent report is older than the server's down threshold, while other paths may still reach canopy.
+
+## Results
+
+- **warn** — the source's last report crossed the threshold; recovers when it reports again.
+
+## Solve
+
+Check that the reporting agent for this source is running on the server and can reach canopy. If the source was deliberately decommissioned, silence this check for the server.";
 
 fn server_label(s: &Server) -> String {
 	s.name
@@ -91,6 +119,9 @@ pub struct Status {
 	/// `check` name and a result; any extra per-check fields are passed
 	/// through verbatim.
 	pub health: serde_json::Value,
+	/// The source that pushed this status: the named reporter (e.g.
+	/// `alertd`), or `canopy` for statuses generated internally.
+	pub source: String,
 }
 
 #[derive(Debug, Insertable)]
@@ -104,6 +135,7 @@ pub struct NewStatus {
 	pub extra: serde_json::Value,
 	pub healthy: bool,
 	pub health: serde_json::Value,
+	pub source: String,
 }
 
 impl Default for NewStatus {
@@ -115,6 +147,7 @@ impl Default for NewStatus {
 			extra: serde_json::Value::Object(Default::default()),
 			healthy: true,
 			health: serde_json::Value::Array(Default::default()),
+			source: CANOPY_SOURCE.into(),
 		}
 	}
 }
@@ -162,6 +195,7 @@ impl Status {
 					// to avoid false-positive unhealthy events from this path.
 					healthy: true,
 					health: serde_json::Value::Array(Default::default()),
+					source: CANOPY_SOURCE.into(),
 				})
 			}
 			Err(err) => {
@@ -215,18 +249,26 @@ impl Status {
 		Ok(())
 	}
 
-	/// Sweep every server's most recent status. For each monitored server
-	/// (`is_monitored = true`) whose freshness has crossed the per-server
-	/// `alert_when_down_for` threshold, file (or close) a canopy-sourced
-	/// issue keyed by [`REACHABILITY_REF`].
+	/// Sweep every monitored server (`is_monitored = true`) for staleness
+	/// against its per-server `alert_when_down_for` threshold, on two
+	/// levels:
 	///
-	/// Most servers report by pushing their own status to the public-server
-	/// (so their `device_id` is non-null); the pingtask only handles legacy
-	/// foreign servers without a registered device. Both paths feed the same
-	/// `statuses` table, so this sweep doesn't care which one is in play.
+	/// - **Reachability**: the server's most recent status row, from any
+	///   source. Every source's report (and every pingtask probe) lands a
+	///   status row, so this goes stale exactly when *all* of the server's
+	///   sources are stale — the server is unreachable. Filed (or closed)
+	///   as a canopy-sourced check keyed by [`REACHABILITY_REF`]. This arm
+	///   also covers servers that have never reported at all, and legacy
+	///   foreign servers without a registered device that only the
+	///   pingtask reaches.
+	/// - **Per-source staleness**: a source that has reported checks on a
+	///   server is expected to keep reporting. When its most recent report
+	///   is older than the threshold, file a `stale/<source>` check (see
+	///   [`STALE_REF_PREFIX`]) — catching one reporter going quiet while
+	///   others keep the server reachable.
 	///
 	/// Returns the number of events filed in this pass.
-	pub async fn sweep_reachability(db: &mut AsyncPgConnection) -> Result<usize> {
+	pub async fn sweep_staleness(db: &mut AsyncPgConnection) -> Result<usize> {
 		let servers = Server::get_all(db, 0, None).await?;
 		let monitored: Vec<&Server> = servers
 			.iter()
@@ -264,24 +306,16 @@ impl Status {
 			};
 			let existing = issue_map.get(&server.id).copied();
 
-			let event = match (down, existing) {
+			let (observed, message) = match (down, existing) {
 				(false, None) => continue,
 				(false, Some(issue)) if !issue.active => continue,
-				(false, Some(_)) => NewEvent {
-					source: CANOPY_SOURCE.into(),
-					r#ref: REACHABILITY_REF.into(),
-					severity: Some(Severity::Info),
-					description: None,
-					message: format!("Server {} is reachable again", server_label(server)),
-					active: Some(false),
-					occurred_at: Some(now),
-				},
-				(true, _) => NewEvent {
-					source: CANOPY_SOURCE.into(),
-					r#ref: REACHABILITY_REF.into(),
-					severity: Some(Severity::Error),
-					description: None,
-					message: match elapsed {
+				(false, Some(_)) => (
+					CheckResult::Passed,
+					format!("Server {} is reachable again", server_label(server)),
+				),
+				(true, _) => (
+					CheckResult::Failed,
+					match elapsed {
 						Some(e) => format!(
 							"Server {} has not reported for {} (threshold {})",
 							server_label(server),
@@ -294,23 +328,142 @@ impl Status {
 							format_secs(threshold.as_secs()),
 						),
 					},
-					active: Some(true),
-					occurred_at: Some(now),
-				},
+				),
 			};
-			event.save(db, server.id, None).await?;
+			crate::issues::file_check(
+				db,
+				crate::issues::CheckFiling {
+					source: CANOPY_SOURCE,
+					scope: crate::issues::FilingScope::Server {
+						server_id: server.id,
+						device_id: None,
+					},
+					check: REACHABILITY_REF,
+					observed,
+					title: Some("Server unreachable"),
+					message: &message,
+					detail: Some(serde_json::json!({
+						"elapsed_secs": elapsed.map(|e| e.as_secs()),
+						"threshold_secs": threshold.as_secs(),
+					})),
+					default_ceiling: CheckResult::Failed,
+					default_escalates: false,
+					documentation: Some(REACHABILITY_DOC),
+				},
+			)
+			.await?;
+			filed += 1;
+		}
+
+		filed += Self::sweep_source_staleness(db, &monitored, now).await?;
+		Ok(filed)
+	}
+
+	/// The per-source arm of [`Self::sweep_staleness`]: file (or close) a
+	/// `stale/<source>` check for each (monitored server, reporting source)
+	/// whose most recent report has crossed the server's threshold.
+	///
+	/// Freshness comes from check state, not the statuses history: every
+	/// report re-stamps `last_seen` on the state rows of the checks it
+	/// mentions, so [`Issue::source_freshness`] is both the set of sources
+	/// expected to report and when each last did. Registered at a warning
+	/// ceiling — one quiet reporter degrades a server, full unreachability
+	/// is the reachability arm's failure.
+	async fn sweep_source_staleness(
+		db: &mut AsyncPgConnection,
+		monitored: &[&Server],
+		now: Timestamp,
+	) -> Result<usize> {
+		let server_map: std::collections::HashMap<Uuid, &Server> =
+			monitored.iter().map(|s| (s.id, *s)).collect();
+		let server_ids: Vec<Uuid> = monitored.iter().map(|s| s.id).collect();
+		let freshness = Issue::source_freshness(db, &server_ids).await?;
+		if freshness.is_empty() {
+			return Ok(0);
+		}
+
+		let refs: Vec<String> = freshness
+			.iter()
+			.map(|(_, source, _)| format!("{STALE_REF_PREFIX}{source}"))
+			.collect::<std::collections::BTreeSet<_>>()
+			.into_iter()
+			.collect();
+		let existing = Issue::list_by_source_refs(db, CANOPY_SOURCE, &refs, &server_ids).await?;
+		let existing_map: std::collections::HashMap<(Uuid, &str), &Issue> = existing
+			.iter()
+			.filter_map(|i| i.server_id.map(|sid| ((sid, i.r#ref.as_str()), i)))
+			.collect();
+
+		let mut filed = 0usize;
+		for (server_id, source, last_seen) in &freshness {
+			let Some(server) = server_map.get(server_id) else {
+				continue;
+			};
+			let threshold = server.alert_when_down_for.0;
+			let elapsed = now.duration_since(*last_seen).abs();
+			let stale = elapsed >= threshold;
+			let check = format!("{STALE_REF_PREFIX}{source}");
+			let existing = existing_map.get(&(*server_id, check.as_str())).copied();
+
+			let (observed, message) = match (stale, existing) {
+				(false, None) => continue,
+				(false, Some(issue)) if !issue.active => continue,
+				(false, Some(_)) => (
+					CheckResult::Passed,
+					format!(
+						"Source {source} on server {} is reporting again",
+						server_label(server),
+					),
+				),
+				(true, _) => (
+					CheckResult::Failed,
+					format!(
+						"Source {source} on server {} has not reported for {} (threshold {})",
+						server_label(server),
+						format_secs(elapsed.as_secs()),
+						format_secs(threshold.as_secs()),
+					),
+				),
+			};
+			crate::issues::file_check(
+				db,
+				crate::issues::CheckFiling {
+					source: CANOPY_SOURCE,
+					scope: crate::issues::FilingScope::Server {
+						server_id: *server_id,
+						device_id: None,
+					},
+					check: &check,
+					observed,
+					title: Some("Source stopped reporting"),
+					message: &message,
+					detail: Some(serde_json::json!({
+						"source": source,
+						"last_reported": last_seen.to_string(),
+						"elapsed_secs": elapsed.as_secs(),
+						"threshold_secs": threshold.as_secs(),
+					})),
+					default_ceiling: CheckResult::Warning,
+					default_escalates: false,
+					documentation: Some(STALE_DOC),
+				},
+			)
+			.await?;
 			filed += 1;
 		}
 		Ok(filed)
 	}
 
-	/// Most recent status row (across all servers) whose `health` array
-	/// contains an entry for `check_name`. Used by the rule-editor UI to
-	/// surface a realistic sample of the variables an operator can
-	/// predicate on (the check's extras, the status-level extras, and
-	/// the server's tags resolved up the group).
+	/// Most recent status row (across all servers) pushed by `source`
+	/// whose `health` array contains an entry for `check_name`. Used by
+	/// the rule-editor UI to surface a realistic sample of the variables
+	/// an operator can predicate on (the check's extras, the status-level
+	/// extras, and the server's tags resolved up the group). Scoped to
+	/// the check's own source — another source's same-named check may
+	/// carry entirely different fields.
 	pub async fn latest_for_check_name(
 		db: &mut AsyncPgConnection,
+		source: &str,
 		check_name: &str,
 	) -> Result<Option<Status>> {
 		use diesel::sql_types::{Text, Uuid as DUuid};
@@ -327,9 +480,11 @@ impl Status {
 		// express cleanly), then load the typed Status row by id.
 		let picked: Option<Picked> = sql_query(
 			"SELECT id FROM statuses \
-			 WHERE health @> jsonb_build_array(jsonb_build_object('check', $1::text)) \
+			 WHERE source = $1 \
+			 AND health @> jsonb_build_array(jsonb_build_object('check', $2::text)) \
 			 ORDER BY created_at DESC LIMIT 1",
 		)
+		.bind::<Text, _>(source)
 		.bind::<Text, _>(check_name)
 		.get_result(db)
 		.await
@@ -446,76 +601,6 @@ impl Status {
 		.bind::<diesel::sql_types::Array<diesel::sql_types::Uuid>, _>(server_ids);
 
 		query.load::<Status>(db).await.map_err(AppError::from)
-	}
-
-	/// Live (non-deleted, non-canopy-own) servers whose latest status
-	/// reports `check_name` at **any** result, paired with that status —
-	/// the data backing the per-healthcheck "who's affected" page (which
-	/// shows the failing servers by default and the healthy ones behind a
-	/// toggle). Mirrors the live-server scoping in
-	/// [`crate::servers::Server::get_all`] / the status-board queries:
-	/// archived servers and canopy's own row (`id = Uuid::nil()`) never
-	/// appear.
-	///
-	/// The check-name filter stays on the Rust side rather than folding
-	/// into the SQL: reproducing [`CheckResult::from_entry`]'s legacy
-	/// `healthy: bool` fallback as a jsonb predicate would just duplicate
-	/// logic that already lives in [`Self::check_entry`], and the
-	/// per-server latest-status set is small.
-	pub async fn reporting_check_with_servers(
-		db: &mut AsyncPgConnection,
-		check_name: &str,
-	) -> Result<Vec<(Server, Status)>> {
-		use crate::schema::servers::dsl as servers_dsl;
-
-		let servers: Vec<Server> = servers_dsl::servers
-			.select(Server::as_select())
-			.filter(servers_dsl::id.ne(Uuid::nil()))
-			.filter(servers_dsl::deleted_at.is_null())
-			.load(db)
-			.await
-			.map_err(AppError::from)?;
-		let server_ids: Vec<Uuid> = servers.iter().map(|s| s.id).collect();
-
-		let mut status_map: std::collections::HashMap<Uuid, Status> =
-			Self::latest_for_servers(db, &server_ids)
-				.await?
-				.into_iter()
-				.map(|s| (s.server_id, s))
-				.collect();
-
-		Ok(servers
-			.into_iter()
-			.filter_map(|s| {
-				let status = status_map.remove(&s.id)?;
-				status
-					.check_entry(check_name)
-					.is_some()
-					.then_some((s, status))
-			})
-			.collect())
-	}
-
-	/// This status row's `health[]` entry for `check_name`: the normalised
-	/// result plus the entry's full JSON object (including the reserved
-	/// `check`/`healthy`/`result` keys, so callers can ship it to a UI
-	/// that renders it the same way the server-detail checks table does).
-	/// `None` when the row doesn't report that check, or the entry is
-	/// malformed (no readable result — same rule as every other `health[]`
-	/// reader).
-	pub fn check_entry(
-		&self,
-		check_name: &str,
-	) -> Option<(CheckResult, serde_json::Map<String, serde_json::Value>)> {
-		let arr = self.health.as_array()?;
-		arr.iter().find_map(|entry| {
-			let obj = entry.as_object()?;
-			if obj.get("check")?.as_str()? != check_name {
-				return None;
-			}
-			let result = CheckResult::from_entry(obj)?;
-			Some((result, obj.clone()))
-		})
 	}
 
 	pub async fn production_versions(db: &mut AsyncPgConnection) -> Result<Vec<VersionStr>> {

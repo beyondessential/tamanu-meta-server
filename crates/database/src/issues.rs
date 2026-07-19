@@ -1,12 +1,11 @@
 //! Issues, events, incidents.
 
 use commons_errors::{AppError, Result};
-use commons_types::issue::Severity;
+use commons_types::status::CheckResult;
 use diesel::prelude::*;
 use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
-use jiff::Timestamp;
+use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{devices::Device, server_groups::ServerGroup, servers::Server};
@@ -55,9 +54,6 @@ pub struct Issue {
 	#[diesel(column_name = "ref_")]
 	#[serde(rename = "ref")]
 	pub r#ref: String,
-	/// The issue's current severity.
-	#[diesel(deserialize_as = String, serialize_as = String)]
-	pub severity: Severity,
 	/// A short, single-line title for the issue, shown as its headline in
 	/// the UI and in Slack notifications. `None` if no title was given.
 	pub description: Option<String>,
@@ -86,30 +82,73 @@ pub struct Issue {
 	/// excluded from incidents and notifications even while still active.
 	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
 	pub snoozed_until: Option<Timestamp>,
+	/// The check this issue tracks, for issues that are check state (the
+	/// ref minus its namespace prefix). `None` for issues that predate the
+	/// check-state model or that no filing has stamped yet.
+	pub check_name: Option<String>,
+	/// The result the source reported on the latest filing, before policy.
+	#[diesel(deserialize_as = MaybeCheckResult, serialize_as = Option<String>)]
+	pub observed_result: Option<CheckResult>,
+	/// What policy made of the latest observed result. This is the result
+	/// canopy acts on; the transitional `severity` is derived from it.
+	#[diesel(deserialize_as = MaybeCheckResult, serialize_as = Option<String>)]
+	pub effective_result: Option<CheckResult>,
+	/// The check's own fields from the latest report, verbatim (minus the
+	/// reserved keys), for display alongside the state.
+	pub detail: Option<serde_json::Value>,
+	/// When the current degradation streak began, for state that is
+	/// currently degraded (effective warning/failed/broken). `None` while
+	/// healthy; a recovery clears it and a later degradation starts a
+	/// fresh streak.
+	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
+	pub degraded_since: Option<Timestamp>,
+	/// When this state last filed degraded. Never cleared: distinguishes
+	/// a recovered issue (worth listing) from always-healthy check state.
+	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
+	pub last_degraded_at: Option<Timestamp>,
+	/// Whether this check's policy escalates: an effective failure
+	/// notifies immediately, bypassing incident grace. Stamped from the
+	/// catalog on every filing.
+	pub escalates: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Queryable, Selectable, Associations)]
-#[diesel(belongs_to(Issue))]
-#[diesel(table_name = crate::schema::events)]
-#[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct Event {
-	pub id: Uuid,
-	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
-	pub created_at: Timestamp,
-	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
-	pub occurred_at: Option<Timestamp>,
-	pub issue_id: Uuid,
-	#[diesel(deserialize_as = String, serialize_as = String)]
-	pub severity: Severity,
-	/// Single-line title/subject. See [`NewEvent::description`].
-	pub description: Option<String>,
-	/// Body / long detail. See [`NewEvent::message`].
-	pub message: String,
-	pub active: bool,
-	pub hash: Vec<u8>,
-	pub occurrences: i32,
-	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
-	pub last_seen: Timestamp,
+impl Issue {
+	/// Does this state open an incident on its own? An effective failure
+	/// does; anything less joins an already-open incident but doesn't
+	/// create (or hold open) one.
+	pub fn opens_incident(&self) -> bool {
+		self.effective_result == Some(CheckResult::Failed)
+	}
+
+	/// Is this state an escalating failure right now — one whose
+	/// notification bypasses the incident grace period?
+	pub fn escalates_now(&self) -> bool {
+		self.opens_incident() && self.escalates
+	}
+}
+
+/// Diesel helper: a nullable text column read as an optional
+/// [`CheckResult`], treating unparseable text as `None` rather than
+/// failing the whole row load.
+pub struct MaybeCheckResult(Option<CheckResult>);
+
+impl From<MaybeCheckResult> for Option<CheckResult> {
+	fn from(v: MaybeCheckResult) -> Self {
+		v.0
+	}
+}
+
+impl
+	diesel::deserialize::Queryable<
+		diesel::sql_types::Nullable<diesel::sql_types::Text>,
+		diesel::pg::Pg,
+	> for MaybeCheckResult
+{
+	type Row = Option<String>;
+
+	fn build(row: Option<String>) -> diesel::deserialize::Result<Self> {
+		Ok(Self(row.and_then(|s| s.parse().ok())))
+	}
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Queryable, Selectable, Associations)]
@@ -122,7 +161,9 @@ pub struct Incident {
 	pub created_at: Timestamp,
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub updated_at: Timestamp,
-	pub server_group_id: Uuid,
+	/// The server group this incident targets, or `None` for a canopy-wide
+	/// incident (aggregating canopy-wide issues — self-alerts).
+	pub server_group_id: Option<Uuid>,
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub opened_at: Timestamp,
 	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
@@ -151,9 +192,8 @@ pub struct IncidentIssue {
 
 /// A single occurrence to report against an issue, sent either by a device
 /// or by an operator. If an issue with the same `source` and `ref` is
-/// already open, this occurrence is folded into it (bumping its last-seen
-/// time, and coalescing into the latest recorded event when the content is
-/// identical); otherwise a new issue is created.
+/// already open, this occurrence is folded into it (updating its state and
+/// bumping its last-seen time); otherwise a new issue is created.
 #[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct NewEvent {
@@ -165,9 +205,6 @@ pub struct NewEvent {
 	/// Required — mint a UUID if deduplication isn't needed.
 	#[serde(rename = "ref")]
 	pub r#ref: String,
-	/// Severity of this event. Defaults to a standard severity if omitted.
-	#[serde(default)]
-	pub severity: Option<Severity>,
 	/// A short, single-line title for this event, shown as the issue's
 	/// headline in the UI and as the subject of any Slack notification.
 	/// Must not contain newlines. Use `message` for the full body text.
@@ -200,42 +237,88 @@ pub enum IssueFilter {
 #[derive(Debug, Clone, Default)]
 pub struct IssueListFilters {
 	pub active_only: bool,
-	pub severities: Option<Vec<Severity>>,
+	/// Restrict to issues whose latest effective result is one of these.
+	pub results: Option<Vec<CheckResult>>,
 	/// Restrict to issues whose server belongs to this group.
 	pub server_group_id: Option<Uuid>,
 	/// When `Some`, restrict to issues last seen at or after this time.
 	pub since: Option<Timestamp>,
 }
 
-fn hash_event(
-	severity: Severity,
-	active: bool,
-	message: &str,
-	description: Option<&str>,
-) -> Vec<u8> {
-	let mut h = Sha256::new();
-	h.update(severity.to_string().as_bytes());
-	h.update([0]);
-	h.update([u8::from(active)]);
-	h.update([0]);
-	h.update(message.as_bytes());
-	h.update([0]);
-	h.update(description.unwrap_or("").as_bytes());
-	h.finalize().to_vec()
+/// The check-state stamp accompanying a filing that is a check result:
+/// which check, both sides of the policy transform, and the check's own
+/// detail from the report. Filings that aren't check results (device
+/// event pushes, producers not yet on the check-state model) carry no
+/// stamp and leave the state columns null.
+#[derive(Debug, Clone)]
+pub struct CheckStateStamp {
+	pub check: String,
+	pub observed: CheckResult,
+	pub effective: CheckResult,
+	/// Whether the check's policy escalates (see [`Issue::escalates`]).
+	pub escalates: bool,
+	pub detail: Option<serde_json::Value>,
+}
+
+/// Write a filing's check-state stamp onto its issue row, maintaining the
+/// degraded-streak timestamps: `degraded_since` holds while degraded
+/// (starting a fresh streak on the healthy → degraded transition, using
+/// `prior` — the row's value before this filing), clears on recovery;
+/// `last_degraded_at` never clears. Returns the updated row.
+async fn stamp_check_state(
+	conn: &mut AsyncPgConnection,
+	issue_id: Uuid,
+	prior: Option<(Option<Timestamp>, Option<Timestamp>)>,
+	stamp: &CheckStateStamp,
+	at: Timestamp,
+) -> Result<Issue> {
+	use crate::schema::issues;
+
+	let degraded = matches!(
+		stamp.effective,
+		CheckResult::Warning | CheckResult::Failed | CheckResult::Broken
+	);
+	let (prior_degraded_since, prior_last_degraded) = prior.unwrap_or((None, None));
+	let degraded_since = if degraded {
+		Some(jiff_diesel::Timestamp::from(
+			prior_degraded_since.unwrap_or(at),
+		))
+	} else {
+		None
+	};
+	let last_degraded_at = if degraded {
+		Some(jiff_diesel::Timestamp::from(at))
+	} else {
+		prior_last_degraded.map(jiff_diesel::Timestamp::from)
+	};
+	diesel::update(issues::table.filter(issues::id.eq(issue_id)))
+		.set((
+			issues::check_name.eq(&stamp.check),
+			issues::observed_result.eq(stamp.observed.to_string()),
+			issues::effective_result.eq(stamp.effective.to_string()),
+			issues::escalates.eq(stamp.escalates),
+			issues::detail.eq(&stamp.detail),
+			issues::degraded_since.eq(degraded_since),
+			issues::last_degraded_at.eq(last_degraded_at),
+		))
+		.returning(Issue::as_select())
+		.get_result(conn)
+		.await
+		.map_err(AppError::from)
 }
 
 impl NewEvent {
 	/// Persist this event push:
 	/// 1. find-or-create the issue keyed by (server_id, source, ref),
-	/// 2. append the event or coalesce into the latest matching one,
-	/// 3. if the server is in a group: (re)evaluate incident contribution.
+	///    updating its state from this report,
+	/// 2. if the server is in a group: (re)evaluate incident contribution.
 	///
 	/// `server_id` is the server the issue is attached to: derived from the
 	/// device for public submissions, supplied by the operator for manual.
 	/// `device_id` is `None` for manual events.
 	///
 	/// Issues from an **ungrouped** server are still recorded — the issue
-	/// and event rows go in just like any other push — but the incident
+	/// row goes in just like any other push — but the incident
 	/// flow is skipped (`server_group_id` would have nowhere to point).
 	/// When the operator later assigns the server to a group,
 	/// [`Server::assign_to_group`] runs `reevaluate_open_issues_for_server`
@@ -247,7 +330,20 @@ impl NewEvent {
 		server_id: Uuid,
 		device_id: Option<Uuid>,
 	) -> Result<Issue> {
-		use crate::schema::{events, issues};
+		self.save_with_state(db, server_id, device_id, None).await
+	}
+
+	/// [`Self::save`], stamping the issue's check-state columns from a
+	/// check result. Status ingestion passes the stamp; everything else
+	/// files via [`Self::save`].
+	pub async fn save_with_state(
+		self,
+		db: &mut AsyncPgConnection,
+		server_id: Uuid,
+		device_id: Option<Uuid>,
+		state: Option<&CheckStateStamp>,
+	) -> Result<Issue> {
+		use crate::schema::issues;
 
 		// description is the single-line title; reject multi-line input
 		// up front so the UI never has to fight with a multi-line
@@ -261,12 +357,10 @@ impl NewEvent {
 			));
 		}
 
-		let severity = self.severity.unwrap_or_default();
 		let active = self.active.unwrap_or(true);
 		let now = Timestamp::now();
 		let effective_time = self.occurred_at.unwrap_or(now);
 		let description = self.description.as_deref();
-		let hash = hash_event(severity, active, &self.message, description);
 
 		// Look up the server's group up-front; needed by the incident-open
 		// path. If `None`, we still record the issue/event but skip
@@ -304,10 +398,19 @@ impl NewEvent {
 				// operator-resolved issue clears the resolved_* fields (issue is back
 				// in unresolved state).
 				let clear_resolved = active && existing.resolved_at.is_some();
+				if let Some(stamp) = state {
+					stamp_check_state(
+						conn,
+						existing.id,
+						Some((existing.degraded_since, existing.last_degraded_at)),
+						stamp,
+						effective_time,
+					)
+					.await?;
+				}
 				let issue = diesel::update(issues::table.filter(issues::id.eq(existing.id)))
 					.set((
 						issues::device_id.eq(device_id),
-						issues::severity.eq(severity),
 						issues::description.eq(description),
 						issues::message.eq(&self.message),
 						issues::active.eq(active),
@@ -339,13 +442,12 @@ impl NewEvent {
 					.await?;
 				issue
 			} else {
-				diesel::insert_into(issues::table)
+				let inserted: Issue = diesel::insert_into(issues::table)
 					.values((
 						issues::server_id.eq(server_id),
 						issues::device_id.eq(device_id),
 						issues::source.eq(&self.source),
 						issues::ref_.eq(&self.r#ref),
-						issues::severity.eq(severity),
 						issues::description.eq(description),
 						issues::message.eq(&self.message),
 						issues::active.eq(active),
@@ -354,54 +456,28 @@ impl NewEvent {
 					))
 					.returning(Issue::as_select())
 					.get_result(conn)
-					.await?
+					.await?;
+				match state {
+					Some(stamp) => {
+						stamp_check_state(conn, inserted.id, None, stamp, effective_time).await?
+					}
+					None => inserted,
+				}
 			};
 
-			// 2. coalesce into latest event or insert new.
-			let latest_event: Option<Event> = events::table
-				.select(Event::as_select())
-				.filter(events::issue_id.eq(issue.id))
-				.order(events::created_at.desc())
-				.first(conn)
-				.await
-				.optional()?;
-
-			let coalesce = matches!(&latest_event, Some(e) if e.hash == hash);
-			if let (true, Some(latest)) = (coalesce, latest_event) {
-				let new_last = if effective_time > latest.last_seen {
-					effective_time
-				} else {
-					latest.last_seen
-				};
-				diesel::update(events::table.filter(events::id.eq(latest.id)))
-					.set((
-						events::occurrences.eq(latest.occurrences + 1),
-						events::last_seen.eq(jiff_diesel::Timestamp::from(new_last)),
-					))
-					.execute(conn)
-					.await?;
-			} else {
-				diesel::insert_into(events::table)
-					.values((
-						events::issue_id.eq(issue.id),
-						events::occurred_at.eq(self.occurred_at.map(jiff_diesel::Timestamp::from)),
-						events::severity.eq(severity),
-						events::description.eq(description),
-						events::message.eq(&self.message),
-						events::active.eq(active),
-						events::hash.eq(&hash),
-						events::last_seen.eq(jiff_diesel::Timestamp::from(effective_time)),
-					))
-					.execute(conn)
-					.await?;
-			}
-
-			// 3. (re-)evaluate incident contribution against the new issue state.
+			// 2. (re-)evaluate incident contribution against the new issue state.
 			//    `by = None`: this came from a device push, not an operator action.
 			//    Skipped when the server is ungrouped: incidents are group-keyed.
 			if let Some(gid) = server_group_id {
-				re_evaluate_incident_membership(conn, &issue, gid, monitored, effective_time, None)
-					.await?;
+				re_evaluate_incident_membership(
+					conn,
+					&issue,
+					IncidentTarget::Group(gid),
+					monitored,
+					effective_time,
+					None,
+				)
+				.await?;
 			}
 
 			Ok(issue)
@@ -418,8 +494,8 @@ impl NewEvent {
 /// Mirrors [`NewEvent::save`] but keys the issue on
 /// `(server_group_id, source, ref)` instead of `(server_id, …)`:
 /// 1. find-or-create the group-scoped issue (server_id = NULL),
-/// 2. append the event or coalesce into the latest matching one,
-/// 3. run incident membership evaluation with `monitored = true` so the
+///    updating its state from this report,
+/// 2. run incident membership evaluation with `monitored = true` so the
 ///    incident opens/pages regardless of any member server's monitored flag.
 ///
 /// Recovery is the same `(source, ref)` with `active = false` at a lower
@@ -427,18 +503,29 @@ impl NewEvent {
 /// identical lifecycle to the per-server path.
 ///
 /// `description` is an optional single-line headline (rejected if multi-line);
-/// `message` is the body. Both feed the dedup hash, so a repeated identical
-/// alert coalesces into one event with a bumped occurrence count.
+/// `message` is the body.
 pub async fn raise_group_event(
 	conn: &mut AsyncPgConnection,
 	group_id: Uuid,
 	r#ref: &str,
-	severity: Severity,
 	description: Option<&str>,
 	message: &str,
 	active: bool,
 ) -> Result<Issue> {
-	use crate::schema::{events, issues};
+	raise_group_event_with_state(conn, group_id, r#ref, description, message, active, None).await
+}
+
+/// [`raise_group_event`], stamping the issue's check-state columns.
+pub async fn raise_group_event_with_state(
+	conn: &mut AsyncPgConnection,
+	group_id: Uuid,
+	r#ref: &str,
+	description: Option<&str>,
+	message: &str,
+	active: bool,
+	state: Option<&CheckStateStamp>,
+) -> Result<Issue> {
+	use crate::schema::issues;
 
 	if let Some(d) = description
 		&& d.contains('\n')
@@ -450,7 +537,6 @@ pub async fn raise_group_event(
 
 	let source = crate::statuses::CANOPY_SOURCE;
 	let now = Timestamp::now();
-	let hash = hash_event(severity, active, message, description);
 
 	conn.transaction::<_, AppError, _>(async |conn| {
 		// 1. find-or-create the group-scoped issue.
@@ -467,6 +553,9 @@ pub async fn raise_group_event(
 			.await
 			.optional()?;
 
+		let prior_state = existing
+			.as_ref()
+			.map(|e| (e.degraded_since, e.last_degraded_at));
 		let issue: Issue = if let Some(existing) = existing {
 			let new_last_seen = if now > existing.last_seen {
 				now
@@ -476,7 +565,6 @@ pub async fn raise_group_event(
 			let clear_resolved = active && existing.resolved_at.is_some();
 			diesel::update(issues::table.filter(issues::id.eq(existing.id)))
 				.set((
-					issues::severity.eq(severity),
 					issues::description.eq(description),
 					issues::message.eq(message),
 					issues::active.eq(active),
@@ -512,7 +600,6 @@ pub async fn raise_group_event(
 					issues::server_group_id.eq(group_id),
 					issues::source.eq(source),
 					issues::ref_.eq(r#ref),
-					issues::severity.eq(severity),
 					issues::description.eq(description),
 					issues::message.eq(message),
 					issues::active.eq(active),
@@ -524,76 +611,497 @@ pub async fn raise_group_event(
 				.await?
 		};
 
-		// 2. coalesce into latest event or insert new.
-		let latest_event: Option<Event> = events::table
-			.select(Event::as_select())
-			.filter(events::issue_id.eq(issue.id))
-			.order(events::created_at.desc())
-			.first(conn)
-			.await
-			.optional()?;
+		let issue = match state {
+			Some(stamp) => stamp_check_state(conn, issue.id, prior_state, stamp, now).await?,
+			None => issue,
+		};
 
-		let coalesce = matches!(&latest_event, Some(e) if e.hash == hash);
-		if let (true, Some(latest)) = (coalesce, latest_event) {
-			let new_last = if now > latest.last_seen {
-				now
-			} else {
-				latest.last_seen
-			};
-			diesel::update(events::table.filter(events::id.eq(latest.id)))
-				.set((
-					events::occurrences.eq(latest.occurrences + 1),
-					events::last_seen.eq(jiff_diesel::Timestamp::from(new_last)),
-				))
-				.execute(conn)
-				.await?;
-		} else {
-			diesel::insert_into(events::table)
-				.values((
-					events::issue_id.eq(issue.id),
-					events::severity.eq(severity),
-					events::description.eq(description),
-					events::message.eq(message),
-					events::active.eq(active),
-					events::hash.eq(&hash),
-					events::last_seen.eq(jiff_diesel::Timestamp::from(now)),
-				))
-				.execute(conn)
-				.await?;
-		}
-
-		// 3. group-aware incident evaluation — monitored = true unconditionally.
-		re_evaluate_incident_membership(conn, &issue, group_id, true, now, None).await?;
+		// 2. group-aware incident evaluation — monitored = true unconditionally.
+		re_evaluate_incident_membership(
+			conn,
+			&issue,
+			IncidentTarget::Group(group_id),
+			true,
+			now,
+			None,
+		)
+		.await?;
 
 		Ok(issue)
 	})
 	.await
 }
 
+/// Open (or recover) a **canopy-wide** issue: one scoped to neither a
+/// server nor a group, keyed `(source = canopy, ref)` under the global
+/// partial unique index. This is the state store for canopy monitoring
+/// its own operation (self-alerts).
+///
+/// Mirrors [`raise_group_event`]'s find-or-create; incident evaluation
+/// runs against the global target, so canopy-wide issues get the full
+/// incident lifecycle (grace, escalation, resolution) like any other.
+pub async fn raise_global_event(
+	conn: &mut AsyncPgConnection,
+	r#ref: &str,
+	description: Option<&str>,
+	message: &str,
+	active: bool,
+) -> Result<Issue> {
+	raise_global_event_with_state(conn, r#ref, description, message, active, None).await
+}
+
+/// [`raise_global_event`], stamping the issue's check-state columns.
+pub async fn raise_global_event_with_state(
+	conn: &mut AsyncPgConnection,
+	r#ref: &str,
+	description: Option<&str>,
+	message: &str,
+	active: bool,
+	state: Option<&CheckStateStamp>,
+) -> Result<Issue> {
+	use crate::schema::issues;
+
+	if let Some(d) = description
+		&& d.contains('\n')
+	{
+		return Err(AppError::BadRequest(
+			"description must be a single line (no newlines); use `message` for body text".into(),
+		));
+	}
+
+	let source = crate::statuses::CANOPY_SOURCE;
+	let now = Timestamp::now();
+
+	conn.transaction::<_, AppError, _>(async |conn| {
+		let existing: Option<Issue> = issues::table
+			.select(Issue::as_select())
+			.filter(
+				issues::server_id
+					.is_null()
+					.and(issues::server_group_id.is_null())
+					.and(issues::source.eq(source))
+					.and(issues::ref_.eq(r#ref)),
+			)
+			.for_update()
+			.first(conn)
+			.await
+			.optional()?;
+
+		let prior_state = existing
+			.as_ref()
+			.map(|e| (e.degraded_since, e.last_degraded_at));
+		let issue: Issue = if let Some(existing) = existing {
+			let new_last_seen = if now > existing.last_seen {
+				now
+			} else {
+				existing.last_seen
+			};
+			let clear_resolved = active && existing.resolved_at.is_some();
+			diesel::update(issues::table.filter(issues::id.eq(existing.id)))
+				.set((
+					issues::description.eq(description),
+					issues::message.eq(message),
+					issues::active.eq(active),
+					issues::last_seen.eq(jiff_diesel::Timestamp::from(new_last_seen)),
+					issues::resolved_at.eq(diesel::dsl::sql::<
+						diesel::sql_types::Nullable<diesel::sql_types::Timestamptz>,
+					>(if clear_resolved {
+						"NULL"
+					} else {
+						"issues.resolved_at"
+					})),
+					issues::resolved_by.eq(diesel::dsl::sql::<
+						diesel::sql_types::Nullable<diesel::sql_types::Text>,
+					>(if clear_resolved {
+						"NULL"
+					} else {
+						"issues.resolved_by"
+					})),
+					issues::resolved_reason.eq(diesel::dsl::sql::<
+						diesel::sql_types::Nullable<diesel::sql_types::Text>,
+					>(if clear_resolved {
+						"NULL"
+					} else {
+						"issues.resolved_reason"
+					})),
+				))
+				.returning(Issue::as_select())
+				.get_result(conn)
+				.await?
+		} else {
+			diesel::insert_into(issues::table)
+				.values((
+					issues::source.eq(source),
+					issues::ref_.eq(r#ref),
+					issues::description.eq(description),
+					issues::message.eq(message),
+					issues::active.eq(active),
+					issues::first_seen.eq(jiff_diesel::Timestamp::from(now)),
+					issues::last_seen.eq(jiff_diesel::Timestamp::from(now)),
+				))
+				.returning(Issue::as_select())
+				.get_result(conn)
+				.await?
+		};
+
+		let issue = match state {
+			Some(stamp) => stamp_check_state(conn, issue.id, prior_state, stamp, now).await?,
+			None => issue,
+		};
+
+		// Global incident evaluation — always monitored.
+		re_evaluate_incident_membership(conn, &issue, IncidentTarget::Global, true, now, None)
+			.await?;
+
+		Ok(issue)
+	})
+	.await
+}
+
+/// Where a canopy-determined check's state attaches.
+#[derive(Debug, Clone, Copy)]
+pub enum FilingScope {
+	Server {
+		server_id: Uuid,
+		device_id: Option<Uuid>,
+	},
+	Group(Uuid),
+	Global,
+}
+
+/// The source operator-raised manual conditions file under.
+pub const MANUAL_SOURCE: &str = "manual";
+
+/// One canopy-determined or operator-raised check result to file:
+/// reachability, backup health, key expiry, self-monitoring, manual
+/// conditions, and the like.
+#[derive(Debug, Clone)]
+pub struct CheckFiling<'a> {
+	/// The reserved source this filing belongs to: [`MANUAL_SOURCE`] for
+	/// operator-raised conditions (server scope only), `canopy` for
+	/// canopy's own determinations.
+	pub source: &'a str,
+	pub scope: FilingScope,
+	/// The check's stable name (doubles as the issue ref under the
+	/// source): a contract with stored silences.
+	pub check: &'a str,
+	/// What was observed this pass. Policy grades it from there.
+	pub observed: CheckResult,
+	/// Single-line headline for degraded filings.
+	pub title: Option<&'a str>,
+	pub message: &'a str,
+	/// The check's own fields, available to policy rules as `check.*`
+	/// and displayed alongside the state.
+	pub detail: Option<serde_json::Value>,
+	/// The policy this check registers with on first sight — the ceiling
+	/// and escalation its condition warrants. Operator edits stick;
+	/// these only seed the catalog row.
+	pub default_ceiling: CheckResult,
+	pub default_escalates: bool,
+	/// The documentation canopy's own checks ship with, seeded into the
+	/// catalog on first sight (never overwriting operator edits). See
+	/// the CHK spec's Documentation section for the convention.
+	pub documentation: Option<&'a str>,
+}
+
+/// File one canopy-determined or operator-raised check result: register
+/// its catalog entry (first sight only), grade the observation through
+/// the operator's policy, and upsert the check state at the right scope
+/// — driving incident membership exactly like a device-reported check.
+///
+/// Group- and canopy-wide scopes are canopy's own (their raise paths
+/// file under the `canopy` source); manual conditions are server-scoped.
+///
+/// Until issues themselves carry results, the effective result maps to
+/// the issue severity the same way status ingestion does: failed →
+/// error (critical when the policy escalates), warning/broken →
+/// warning; passed and skipped record healthy state and close.
+pub async fn file_check(conn: &mut AsyncPgConnection, filing: CheckFiling<'_>) -> Result<Issue> {
+	use crate::check_policies::{CheckPolicy, EvaluationContext};
+
+	let source = filing.source;
+	debug_assert!(
+		matches!(filing.scope, FilingScope::Server { .. })
+			|| source == crate::statuses::CANOPY_SOURCE,
+		"group- and canopy-wide filings are canopy's own",
+	);
+	CheckPolicy::register(
+		conn,
+		source,
+		filing.check,
+		filing.default_ceiling,
+		filing.default_escalates,
+		filing.documentation,
+	)
+	.await?;
+
+	// Rule-evaluation context: the check's detail (with the normalised
+	// result injected, mirroring status ingestion), no report-wide
+	// extras, and the server's tags where there is a server. Filings
+	// whose observation policy shouldn't touch (an operator explicitly
+	// raising a manual condition) still flow through so the catalog row
+	// and stamps exist, but manual entries register at a failed ceiling
+	// so the operator's chosen result passes through ungraded by default.
+	let mut check_extra = filing
+		.detail
+		.as_ref()
+		.and_then(|d| d.as_object().cloned())
+		.unwrap_or_default();
+	check_extra.insert(
+		"result".into(),
+		serde_json::Value::String(filing.observed.to_string()),
+	);
+	let status_extra = serde_json::Map::new();
+	let (tags, scope_server, scope_group): (
+		std::collections::HashMap<String, serde_json::Value>,
+		Option<Uuid>,
+		Option<Uuid>,
+	) = match filing.scope {
+		FilingScope::Server { server_id, .. } => {
+			let server = Server::get_by_id(conn, server_id).await?;
+			let group_id = server.group_id;
+			let tags = server
+				.tags_merged_with_group(conn)
+				.await?
+				.0
+				.into_iter()
+				.map(|(k, v)| (k, serde_json::Value::String(v)))
+				.collect();
+			(tags, Some(server_id), group_id)
+		}
+		FilingScope::Group(group_id) => (Default::default(), None, Some(group_id)),
+		FilingScope::Global => (Default::default(), None, None),
+	};
+	let ctx = EvaluationContext {
+		status_extra: &status_extra,
+		check_extra: &check_extra,
+		tags: &tags,
+	};
+	let graded = CheckPolicy::apply_scoped(
+		conn,
+		source,
+		filing.check,
+		filing.observed,
+		&ctx,
+		scope_server,
+		scope_group,
+	)
+	.await?;
+
+	let active = matches!(
+		graded.effective,
+		CheckResult::Failed | CheckResult::Warning | CheckResult::Broken
+	);
+	let description = if active { filing.title } else { None };
+	let stamp = CheckStateStamp {
+		check: filing.check.to_string(),
+		observed: filing.observed,
+		effective: graded.effective,
+		escalates: graded.escalates,
+		detail: filing.detail.clone(),
+	};
+
+	match filing.scope {
+		FilingScope::Server {
+			server_id,
+			device_id,
+		} => {
+			NewEvent {
+				source: source.to_string(),
+				r#ref: filing.check.to_string(),
+				description: description.map(str::to_string),
+				message: filing.message.to_string(),
+				active: Some(active),
+				occurred_at: None,
+			}
+			.save_with_state(conn, server_id, device_id, Some(&stamp))
+			.await
+		}
+		FilingScope::Group(gid) => {
+			raise_group_event_with_state(
+				conn,
+				gid,
+				filing.check,
+				description,
+				filing.message,
+				active,
+				Some(&stamp),
+			)
+			.await
+		}
+		FilingScope::Global => {
+			raise_global_event_with_state(
+				conn,
+				filing.check,
+				description,
+				filing.message,
+				active,
+				Some(&stamp),
+			)
+			.await
+		}
+	}
+}
+
+/// Per-server health rollup from current check state: the worst
+/// effective result across every source's checks on the server — any
+/// failure ⇒ unhealthy, otherwise any warning or brokenness ⇒ warning,
+/// otherwise healthy. Silenced checks are skipped. Servers with no
+/// check state are absent from the map (callers default them healthy,
+/// matching the "no signal" semantics).
+pub async fn health_from_check_state(
+	conn: &mut AsyncPgConnection,
+	servers: &[(Uuid, Option<Uuid>)],
+) -> Result<std::collections::HashMap<Uuid, commons_types::status::HealthState>> {
+	use crate::schema::{issues, scoped_check_policies};
+	use commons_types::status::HealthState;
+	use std::collections::{HashMap, HashSet};
+
+	let mut out: HashMap<Uuid, HealthState> = HashMap::new();
+	if servers.is_empty() {
+		return Ok(out);
+	}
+	let server_ids: Vec<Uuid> = servers.iter().map(|(id, _)| *id).collect();
+	let group_of: HashMap<Uuid, Option<Uuid>> = servers.iter().copied().collect();
+
+	let rows: Vec<(Option<Uuid>, String, Option<String>, Option<String>)> = issues::table
+		.select((
+			issues::server_id,
+			issues::source,
+			issues::check_name,
+			issues::effective_result,
+		))
+		.filter(issues::server_id.eq_any(&server_ids))
+		.filter(issues::check_name.is_not_null())
+		.filter(issues::effective_result.is_not_null())
+		.load(conn)
+		.await?;
+
+	let group_ids: Vec<Uuid> = group_of.values().filter_map(|g| *g).collect();
+	let silence_rows: Vec<(Option<Uuid>, Option<Uuid>, String, String)> =
+		scoped_check_policies::table
+			.select((
+				scoped_check_policies::server_id,
+				scoped_check_policies::server_group_id,
+				scoped_check_policies::source,
+				scoped_check_policies::check_name,
+			))
+			.filter(scoped_check_policies::ceiling.eq("skipped"))
+			.filter(
+				scoped_check_policies::server_id
+					.eq_any(&server_ids)
+					.or(scoped_check_policies::server_group_id.eq_any(&group_ids)),
+			)
+			.load(conn)
+			.await?;
+	let mut server_silences: HashSet<(Uuid, String, String)> = HashSet::new();
+	let mut group_silences: HashSet<(Uuid, String, String)> = HashSet::new();
+	for (server_id, group_id, source, check) in silence_rows {
+		if let Some(sid) = server_id {
+			server_silences.insert((sid, source, check));
+		} else if let Some(gid) = group_id {
+			group_silences.insert((gid, source, check));
+		}
+	}
+
+	for (server_id, source, check_name, effective) in rows {
+		let Some(server_id) = server_id else {
+			continue;
+		};
+		let Some(check_name) = check_name else {
+			continue;
+		};
+		let key = (server_id, source, check_name);
+		if server_silences.contains(&key) {
+			continue;
+		}
+		if let Some(Some(gid)) = group_of.get(&server_id)
+			&& group_silences.contains(&(*gid, key.1.clone(), key.2.clone()))
+		{
+			continue;
+		}
+		let contribution = match effective.as_deref().and_then(|e| e.parse().ok()) {
+			Some(CheckResult::Failed) => HealthState::Unhealthy,
+			Some(CheckResult::Warning | CheckResult::Broken) => HealthState::Warning,
+			_ => continue,
+		};
+		let entry = out.entry(server_id).or_insert(HealthState::Healthy);
+		if contribution == HealthState::Unhealthy || *entry == HealthState::Healthy {
+			*entry = contribution;
+		}
+	}
+
+	Ok(out)
+}
+
+impl Issue {
+	/// Server-scoped check state for one (source, check). The per-check
+	/// attention page's data source: rows carry the observed/effective
+	/// results, the check's detail, and the degraded-streak timestamps.
+	/// A check's identity is the pair — a same-named check from another
+	/// source is a different check.
+	pub async fn check_state_for_check(
+		conn: &mut AsyncPgConnection,
+		source: &str,
+		check_name: &str,
+	) -> Result<Vec<Issue>> {
+		use crate::schema::issues::dsl;
+
+		dsl::issues
+			.select(Issue::as_select())
+			.filter(dsl::source.eq(source))
+			.filter(dsl::check_name.eq(check_name))
+			.filter(dsl::server_id.is_not_null())
+			.filter(dsl::observed_result.is_not_null())
+			.load(conn)
+			.await
+			.map_err(AppError::from)
+	}
+}
+
+/// The canopy-wide issue at `(canopy, ref)`, if it has ever been raised.
+pub async fn get_global_issue(conn: &mut AsyncPgConnection, r#ref: &str) -> Result<Option<Issue>> {
+	use crate::schema::issues::dsl;
+
+	dsl::issues
+		.select(Issue::as_select())
+		.filter(
+			dsl::server_id
+				.is_null()
+				.and(dsl::server_group_id.is_null())
+				.and(dsl::source.eq(crate::statuses::CANOPY_SOURCE))
+				.and(dsl::ref_.eq(r#ref)),
+		)
+		.first(conn)
+		.await
+		.optional()
+		.map_err(AppError::from)
+}
+
 /// Compute whether the issue *should* currently be contributing to an
 /// open incident, and apply join/leave accordingly. The rules:
 ///
 /// - **Leave**: `!active || resolved || snoozed || silenced || !monitored`.
-///   Severity downgrade alone does *not* remove an issue — once
+///   A result downgrade alone does *not* remove an issue — once
 ///   contributing, it stays until it's actually gone or explicitly
 ///   suppressed. Flipping the server to unmonitored *does* remove it: the
 ///   operator has said they're not watching this server, so its issues
-///   stop counting. The same applies if `(source, ref)` is on the server
-///   or group silence list — see [`crate::silenced_refs`].
+///   stop counting. The same applies if the check is silenced at server
+///   or group scope — see [`crate::silenced_refs`].
 /// - **Join**: not leaving, AND one of:
-///   - severity ≥ floor (`error`), so this issue is high-priority enough to
-///     create a new incident on its own; or
-///   - the group already has an open incident — then any active issue,
-///     even low-severity ones, joins it. The threshold only governs
-///     incident *creation*; once an incident is in progress everything else
-///     piles in for context.
-/// - **Close**: the incident auto-closes when the last contributor at
-///   severity ≥ error leaves. Low-severity contributors that joined
-///   because the group had an open incident stay attached (so the audit
-///   trail and Slack thread retain them) but **do not** hold the incident
-///   open by themselves. Without this asymmetry, a check that's stuck
-///   firing at warning could keep an incident open indefinitely after the
-///   higher-severity contributor that opened it has long since gone away.
+///   - the state opens incidents on its own — an effective failure (see
+///     [`Issue::opens_incident`]); or
+///   - the target already has an open incident — then any active issue,
+///     warnings included, joins it. The threshold only governs incident
+///     *creation*; once an incident is in progress everything else piles
+///     in for context.
+/// - **Close**: the incident auto-closes when the last effective-failure
+///   contributor leaves. Lesser contributors that joined because the
+///   target had an open incident stay attached (so the audit trail and
+///   Slack thread retain them) but **do not** hold the incident open by
+///   themselves. Without this asymmetry, a check that's stuck firing at
+///   warning could keep an incident open indefinitely after the failure
+///   that opened it has long since gone away.
 ///
 /// `monitored` reflects the server's `is_monitored()` at call time. When
 /// `false`, the issue is treated as a "leave": this is what makes
@@ -609,7 +1117,7 @@ pub async fn raise_group_event(
 async fn re_evaluate_incident_membership(
 	conn: &mut AsyncPgConnection,
 	issue: &Issue,
-	server_group_id: Uuid,
+	target: IncidentTarget,
 	monitored: bool,
 	transition_time: Timestamp,
 	by: Option<&str>,
@@ -620,39 +1128,30 @@ async fn re_evaluate_incident_membership(
 	let snoozed = issue.snoozed_until.map_or(false, |t| t > Timestamp::now());
 	// A group-scoped issue (server_id = None) can only be silenced at the
 	// group level; pass the nil server so only the group list is consulted.
+	// Canopy-wide issues have no silence scope (yet).
 	let silenced = crate::silenced_refs::is_silenced(
 		conn,
 		issue.server_id.unwrap_or(Uuid::nil()),
-		Some(server_group_id),
+		target.group_id(),
 		&issue.source,
 		&issue.r#ref,
 	)
 	.await?;
-	let group_open = group_has_open_incident(conn, server_group_id).await?;
+	let target_open = target_has_open_incident(conn, target).await?;
 
-	// Debug-severity issues are intentionally invisible to the incident
-	// workflow: they don't join, and any that are currently attached
-	// (because their catalog/rule severity dropped to Debug after they
-	// joined) get treated as a leave on next re-evaluation.
-	let is_debug = issue.severity == Severity::Debug;
-	let should_leave = is_debug
-		|| !issue.active
-		|| issue.resolved_at.is_some()
-		|| snoozed
-		|| silenced
-		|| !monitored;
-	let should_join = !is_debug
-		&& monitored
+	let should_leave =
+		!issue.active || issue.resolved_at.is_some() || snoozed || silenced || !monitored;
+	let should_join = monitored
 		&& !silenced
 		&& issue.active
 		&& issue.resolved_at.is_none()
 		&& !snoozed
-		&& (issue.severity.opens_incident() || group_open);
+		&& (issue.opens_incident() || target_open);
 
 	match (was_in, should_join, should_leave) {
 		(false, true, _) => {
 			let (incident_id, newly_opened) =
-				find_or_open_incident(conn, server_group_id, transition_time).await?;
+				find_or_open_incident(conn, target, transition_time).await?;
 			diesel::insert_into(incident_issues::table)
 				.values((
 					incident_issues::incident_id.eq(incident_id),
@@ -662,9 +1161,9 @@ async fn re_evaluate_incident_membership(
 				.execute(conn)
 				.await?;
 			if newly_opened {
-				enqueue_slack_open(conn, incident_id, server_group_id, issue).await?;
-			} else if issue.severity == Severity::Critical {
-				// Two sub-cases when a Critical joins an existing incident:
+				enqueue_slack_open(conn, incident_id, target, issue).await?;
+			} else if issue.escalates_now() {
+				// Two sub-cases when an escalating failure joins an existing incident:
 				//  - The original open is still pending in the outbox →
 				//    accelerate so the "incident opened" message lands
 				//    immediately. No second message: the open hasn't been
@@ -687,7 +1186,7 @@ async fn re_evaluate_incident_membership(
 					.await
 					.optional()?;
 					if escalated.is_some() {
-						enqueue_slack_open(conn, incident_id, server_group_id, issue).await?;
+						enqueue_slack_open(conn, incident_id, target, issue).await?;
 					}
 				}
 			}
@@ -733,14 +1232,10 @@ async fn re_evaluate_incident_membership(
 			.execute(conn)
 			.await?;
 
-			// Only count contributors that are *currently* at a severity
-			// that opens an incident. Low-severity issues stay attached
-			// for context but don't hold the incident open on their own;
-			// see the function doc-comment for the rationale.
-			let opens_incident_severities: Vec<String> = Severity::OPENS_INCIDENT
-				.iter()
-				.map(|s| s.to_string())
-				.collect();
+			// Only count contributors that *currently* open an incident
+			// (effective failures). Lesser contributors stay attached for
+			// context but don't hold the incident open on their own; see
+			// the function doc-comment for the rationale.
 			use crate::schema::issues;
 			let remaining_open: i64 = incident_issues::table
 				.inner_join(issues::table.on(issues::id.eq(incident_issues::issue_id)))
@@ -748,17 +1243,17 @@ async fn re_evaluate_incident_membership(
 					incident_issues::incident_id
 						.eq(open_link.incident_id)
 						.and(incident_issues::left_at.is_null())
-						.and(issues::severity.eq_any(&opens_incident_severities)),
+						.and(issues::effective_result.eq("failed")),
 				)
 				.count()
 				.get_result(conn)
 				.await?;
 			if remaining_open == 0 {
 				// Filter on `closed_at IS NULL` so that when a stranded
-				// low-severity contributor eventually leaves an already-
-				// closed incident (because the severity-filter close above
-				// already retired it), we skip both the no-op update and
-				// the double Slack resolve.
+				// lesser contributor eventually leaves an already-closed
+				// incident (because the failure-filter close above already
+				// retired it), we skip both the no-op update and the
+				// double Slack resolve.
 				let closed: Option<Incident> = diesel::update(
 					incidents::table
 						.filter(incidents::id.eq(open_link.incident_id))
@@ -779,8 +1274,8 @@ async fn re_evaluate_incident_membership(
 	Ok(())
 }
 
-/// Resolve the `(server_group_id, monitored)` pair an issue should be
-/// re-evaluated against, handling both server-scoped and group-scoped issues.
+/// Resolve the `(target, monitored)` pair an issue should be re-evaluated
+/// against, handling all three scopes.
 ///
 /// - Server-scoped (`server_id = Some`): look the server up; its `group_id`
 ///   and `is_monitored` drive the evaluation. `None` group → ungrouped, no
@@ -788,17 +1283,20 @@ async fn re_evaluate_incident_membership(
 /// - Group-scoped (`server_group_id = Some`): use the group directly and force
 ///   `monitored = true` so the per-server gate never silences a control-plane
 ///   issue.
-async fn issue_group_and_monitored(
+/// - Canopy-wide (neither): the global target, always monitored.
+async fn issue_target_and_monitored(
 	conn: &mut AsyncPgConnection,
 	issue: &Issue,
-) -> Result<Option<(Uuid, bool)>> {
+) -> Result<Option<(IncidentTarget, bool)>> {
 	match (issue.server_id, issue.server_group_id) {
-		(_, Some(gid)) => Ok(Some((gid, true))),
+		(_, Some(gid)) => Ok(Some((IncidentTarget::Group(gid), true))),
 		(Some(sid), None) => {
 			let server = Server::get_by_id(conn, sid).await?;
-			Ok(server.group_id.map(|gid| (gid, server.is_monitored)))
+			Ok(server
+				.group_id
+				.map(|gid| (IncidentTarget::Group(gid), server.is_monitored)))
 		}
-		(None, None) => Ok(None),
+		(None, None) => Ok(Some((IncidentTarget::Global, true))),
 	}
 }
 
@@ -832,7 +1330,15 @@ pub async fn reevaluate_open_issues_for_server(
 
 	let now = Timestamp::now();
 	for issue in open_issues {
-		re_evaluate_incident_membership(db, &issue, gid, monitored, now, None).await?;
+		re_evaluate_incident_membership(
+			db,
+			&issue,
+			IncidentTarget::Group(gid),
+			monitored,
+			now,
+			None,
+		)
+		.await?;
 	}
 	Ok(())
 }
@@ -867,7 +1373,15 @@ pub async fn reevaluate_open_issues_for_server_ref(
 
 	let now = Timestamp::now();
 	for issue in open_issues {
-		re_evaluate_incident_membership(db, &issue, gid, monitored, now, None).await?;
+		re_evaluate_incident_membership(
+			db,
+			&issue,
+			IncidentTarget::Group(gid),
+			monitored,
+			now,
+			None,
+		)
+		.await?;
 	}
 	Ok(())
 }
@@ -919,7 +1433,15 @@ pub async fn reevaluate_open_issues_for_group_ref(
 			Some(sid) => monitored_by_server.get(&sid).copied().unwrap_or(true),
 			None => true,
 		};
-		re_evaluate_incident_membership(db, &issue, server_group_id, monitored, now, None).await?;
+		re_evaluate_incident_membership(
+			db,
+			&issue,
+			IncidentTarget::Group(server_group_id),
+			monitored,
+			now,
+			None,
+		)
+		.await?;
 	}
 	Ok(())
 }
@@ -973,7 +1495,15 @@ pub async fn reconcile_open_incidents(db: &mut AsyncPgConnection) -> Result<(usi
 				// Group-scoped issue: resolve its group directly, bypass the
 				// per-server is_monitored gate (monitored = true).
 				(None, Some(gid)) => {
-					re_evaluate_incident_membership(conn, &issue, gid, true, now, None).await?;
+					re_evaluate_incident_membership(
+						conn,
+						&issue,
+						IncidentTarget::Group(gid),
+						true,
+						now,
+						None,
+					)
+					.await?;
 					evaluated += 1;
 				}
 				// Server-scoped issue: look up the server and its group.
@@ -988,7 +1518,7 @@ pub async fn reconcile_open_incidents(db: &mut AsyncPgConnection) -> Result<(usi
 					re_evaluate_incident_membership(
 						conn,
 						&issue,
-						gid,
+						IncidentTarget::Group(gid),
 						server.is_monitored,
 						now,
 						None,
@@ -996,7 +1526,19 @@ pub async fn reconcile_open_incidents(db: &mut AsyncPgConnection) -> Result<(usi
 					.await?;
 					evaluated += 1;
 				}
-				(None, None) => continue,
+				// Canopy-wide issue: the global target, always monitored.
+				(None, None) => {
+					re_evaluate_incident_membership(
+						conn,
+						&issue,
+						IncidentTarget::Global,
+						true,
+						now,
+						None,
+					)
+					.await?;
+					evaluated += 1;
+				}
 			}
 		}
 		Ok((by_id.len(), evaluated))
@@ -1018,18 +1560,45 @@ async fn is_issue_in_open_incident(db: &mut AsyncPgConnection, issue_id: Uuid) -
 	Ok(count > 0)
 }
 
-async fn group_has_open_incident(
+/// What an issue's incident contribution attaches to: its server's group,
+/// or canopy as a whole for canopy-wide issues (self-alerts). Issues on
+/// ungrouped servers have no target and no incident path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IncidentTarget {
+	Group(Uuid),
+	Global,
+}
+
+impl IncidentTarget {
+	/// The `incidents.server_group_id` value for this target.
+	fn group_id(self) -> Option<Uuid> {
+		match self {
+			Self::Group(gid) => Some(gid),
+			Self::Global => None,
+		}
+	}
+
+	/// The target an existing incident row belongs to.
+	pub fn of_incident(incident: &Incident) -> Self {
+		match incident.server_group_id {
+			Some(gid) => Self::Group(gid),
+			None => Self::Global,
+		}
+	}
+}
+
+async fn target_has_open_incident(
 	db: &mut AsyncPgConnection,
-	server_group_id: Uuid,
+	target: IncidentTarget,
 ) -> Result<bool> {
 	use crate::schema::incidents::dsl;
 
-	let count: i64 = dsl::incidents
-		.filter(dsl::server_group_id.eq(server_group_id))
-		.filter(dsl::closed_at.is_null())
-		.count()
-		.get_result(db)
-		.await?;
+	let mut q = dsl::incidents.filter(dsl::closed_at.is_null()).into_boxed();
+	q = match target {
+		IncidentTarget::Group(gid) => q.filter(dsl::server_group_id.eq(gid)),
+		IncidentTarget::Global => q.filter(dsl::server_group_id.is_null()),
+	};
+	let count: i64 = q.count().get_result(db).await?;
 	Ok(count > 0)
 }
 
@@ -1038,32 +1607,46 @@ async fn group_has_open_incident(
 /// whether a Slack `incident_open` outbox row should be enqueued (re-joining
 /// an existing incident shouldn't re-notify).
 ///
-/// Two parallel event pushes against the same group must not each insert a
-/// fresh incident row. We take a `FOR UPDATE` lock on the group's row
-/// up-front so the find-or-create pair serializes per-group. A unique
-/// partial index on `incidents (server_group_id) WHERE closed_at IS NULL`
-/// is the belt-and-braces backstop at the DB layer.
+/// Two parallel event pushes against the same target must not each insert
+/// a fresh incident row. For a group target we take a `FOR UPDATE` lock on
+/// the group's row up-front so the find-or-create pair serializes
+/// per-group; the global target has no row to lock, so it serializes on a
+/// transaction-scoped advisory lock instead. The unique partial indexes on
+/// open incidents are the belt-and-braces backstop at the DB layer.
 async fn find_or_open_incident(
 	db: &mut AsyncPgConnection,
-	server_group_id: Uuid,
+	target: IncidentTarget,
 	opened_at: Timestamp,
 ) -> Result<(Uuid, bool)> {
 	use crate::schema::{incidents, server_groups};
 
-	let _group_lock: Uuid = server_groups::table
-		.select(server_groups::id)
-		.filter(server_groups::id.eq(server_group_id))
-		.for_update()
-		.first(db)
-		.await?;
+	match target {
+		IncidentTarget::Group(gid) => {
+			let _group_lock: Uuid = server_groups::table
+				.select(server_groups::id)
+				.filter(server_groups::id.eq(gid))
+				.for_update()
+				.first(db)
+				.await?;
+		}
+		IncidentTarget::Global => {
+			// Arbitrary constant, stable across releases: the one global
+			// incident slot.
+			diesel::sql_query("SELECT pg_advisory_xact_lock(818_723_001)")
+				.execute(db)
+				.await?;
+		}
+	}
 
-	let open: Option<Incident> = incidents::table
+	let mut q = incidents::table
 		.select(Incident::as_select())
-		.filter(
-			incidents::server_group_id
-				.eq(server_group_id)
-				.and(incidents::closed_at.is_null()),
-		)
+		.filter(incidents::closed_at.is_null())
+		.into_boxed();
+	q = match target {
+		IncidentTarget::Group(gid) => q.filter(incidents::server_group_id.eq(gid)),
+		IncidentTarget::Global => q.filter(incidents::server_group_id.is_null()),
+	};
+	let open: Option<Incident> = q
 		.order(incidents::opened_at.desc())
 		.first(db)
 		.await
@@ -1074,7 +1657,7 @@ async fn find_or_open_incident(
 
 	let new_incident: Incident = diesel::insert_into(incidents::table)
 		.values((
-			incidents::server_group_id.eq(server_group_id),
+			incidents::server_group_id.eq(target.group_id()),
 			incidents::opened_at.eq(jiff_diesel::Timestamp::from(opened_at)),
 		))
 		.returning(Incident::as_select())
@@ -1083,35 +1666,55 @@ async fn find_or_open_incident(
 	Ok((new_incident.id, true))
 }
 
+/// Flap grace for canopy-wide incidents, mirroring the per-group
+/// `slack_open_delay` default (the global target has no config row).
+const GLOBAL_OPEN_GRACE: SignedDuration = SignedDuration::from_secs(3 * 60);
+
 async fn enqueue_slack_open(
 	conn: &mut AsyncPgConnection,
 	incident_id: Uuid,
-	server_group_id: Uuid,
+	target: IncidentTarget,
 	issue: &Issue,
 ) -> Result<()> {
-	let group = ServerGroup::get_by_id(conn, server_group_id).await?;
-	let server = match issue.server_id {
-		Some(sid) => Some(Server::get_by_id(conn, sid).await?),
-		None => None,
+	let (label, open_delay) = match target {
+		IncidentTarget::Group(gid) => {
+			let group = ServerGroup::get_by_id(conn, gid).await?;
+			let server = match issue.server_id {
+				Some(sid) => Some(Server::get_by_id(conn, sid).await?),
+				None => None,
+			};
+			(
+				format_group_label(&group, server.as_ref()),
+				group.slack_open_delay.0,
+			)
+		}
+		IncidentTarget::Global => ("Canopy".to_string(), GLOBAL_OPEN_GRACE),
 	};
-	let label = format_group_label(&group, server.as_ref());
+	// The deployed Slack workflow's trigger declares a `severity`
+	// variable; feed it the result-derived urgency label.
+	let urgency = if issue.escalates_now() {
+		"Critical"
+	} else if issue.opens_incident() {
+		"Error"
+	} else {
+		"Warning"
+	};
 	let payload = crate::slack_outbox::vars::incident_open(
 		&label,
-		issue.severity,
+		urgency,
 		&issue.source,
 		&issue.r#ref,
 		&issue.message,
 	);
-	// Normally the row sits in the outbox for the group's
-	// `slack_open_delay` before the drainer can ship it — that's the
-	// flap-suppression window, so a transient open/close pair never
-	// reaches Slack. Critical bypasses this: it's the
-	// "stop-the-world" tier where operators have signalled they don't
-	// want any delay.
-	let deliver_after = if issue.severity == Severity::Critical {
+	// Normally the row sits in the outbox for the target's open delay
+	// before the drainer can ship it — that's the flap-suppression
+	// window, so a transient open/close pair never reaches Slack.
+	// An escalating failure bypasses this: the operator has marked the
+	// check's policy as escalating — they don't want any delay.
+	let deliver_after = if issue.escalates_now() {
 		Timestamp::now()
 	} else {
-		Timestamp::now() + group.slack_open_delay.0
+		Timestamp::now() + open_delay
 	};
 	crate::slack_outbox::SlackOutbox::enqueue(
 		conn,
@@ -1184,8 +1787,13 @@ async fn enqueue_slack_resolve_inner(
 	if cancelled > 0 {
 		return Ok(());
 	}
-	let group = ServerGroup::get_by_id(conn, incident.server_group_id).await?;
-	let label = format_group_label(&group, None);
+	let label = match incident.server_group_id {
+		Some(gid) => {
+			let group = ServerGroup::get_by_id(conn, gid).await?;
+			format_group_label(&group, None)
+		}
+		None => "Canopy".to_string(),
+	};
 	let payload = crate::slack_outbox::vars::incident_resolve(&label, by);
 	crate::slack_outbox::SlackOutbox::enqueue(
 		conn,
@@ -1227,6 +1835,9 @@ impl Issue {
 		let mut q = dsl::issues
 			.select(Self::as_select())
 			.filter(dsl::device_id.eq(device_id))
+			// Healthy check state (rows that never degraded) isn't an
+			// issue; it has its own read surfaces.
+			.filter(dsl::active.eq(true).or(dsl::last_degraded_at.is_not_null()))
 			.into_boxed();
 		if filter == IssueFilter::ActiveOnly {
 			q = q
@@ -1251,6 +1862,9 @@ impl Issue {
 		let mut q = dsl::issues
 			.select(Self::as_select())
 			.filter(dsl::server_id.eq(server_id))
+			// Healthy check state (rows that never degraded) isn't an
+			// issue; it has its own read surfaces.
+			.filter(dsl::active.eq(true).or(dsl::last_degraded_at.is_not_null()))
 			.into_boxed();
 		if filter == IssueFilter::ActiveOnly {
 			q = q
@@ -1269,7 +1883,8 @@ impl Issue {
 	/// - `active_only`: when true, only `active = true` *and* unresolved
 	///   issues — operator-resolved items don't count even if the source
 	///   keeps pushing them.
-	/// - `severities`: when `Some` and non-empty, restrict to those.
+	/// - `results`: when `Some` and non-empty, restrict to issues whose
+	///   latest effective result is one of those.
 	/// - `server_group_id`: when `Some`, restrict to issues whose server is
 	///   in that group. A direct `IN (SELECT id FROM servers WHERE group_id = $)`.
 	pub async fn list(
@@ -1282,18 +1897,26 @@ impl Issue {
 
 		let mut q = dsl::issues
 			.select(Self::as_select())
-			// Self-alerts (the nil "Canopy" server's issues) have their own
-			// surface (`crate::self_alerts`); they are not fleet issues.
-			.filter(dsl::server_id.is_distinct_from(Uuid::nil()))
+			// Canopy-wide issues (self-alerts: neither server- nor
+			// group-scoped) have their own surface (`crate::self_alerts`);
+			// they are not fleet issues.
+			.filter(
+				dsl::server_id
+					.is_not_null()
+					.or(dsl::server_group_id.is_not_null()),
+			)
+			// Healthy check state (rows that never degraded) isn't an
+			// issue; it has its own read surfaces.
+			.filter(dsl::active.eq(true).or(dsl::last_degraded_at.is_not_null()))
 			.into_boxed();
 		if filters.active_only {
 			q = q
 				.filter(dsl::active.eq(true))
 				.filter(dsl::resolved_at.is_null());
 		}
-		if let Some(sevs) = filters.severities.as_ref().filter(|v| !v.is_empty()) {
-			let strs: Vec<String> = sevs.iter().map(|s| s.to_string()).collect();
-			q = q.filter(dsl::severity.eq_any(strs));
+		if let Some(results) = filters.results.as_ref().filter(|v| !v.is_empty()) {
+			let strs: Vec<String> = results.iter().map(|r| r.to_string()).collect();
+			q = q.filter(dsl::effective_result.eq_any(strs));
 		}
 		if let Some(gid) = filters.server_group_id {
 			let server_ids: Vec<Uuid> = servers::table
@@ -1403,6 +2026,72 @@ impl Issue {
 			.map_err(AppError::from)
 	}
 
+	/// Like [`Self::list_by_source_ref`], but matching any of several refs
+	/// at once. Used by the staleness sweep, whose per-source check refs
+	/// are only known at runtime.
+	pub async fn list_by_source_refs(
+		db: &mut AsyncPgConnection,
+		source: &str,
+		refs: &[String],
+		server_ids: &[Uuid],
+	) -> Result<Vec<Self>> {
+		use crate::schema::issues::dsl;
+		if server_ids.is_empty() || refs.is_empty() {
+			return Ok(Vec::new());
+		}
+		dsl::issues
+			.select(Self::as_select())
+			.filter(
+				dsl::source
+					.eq(source)
+					.and(dsl::ref_.eq_any(refs))
+					.and(dsl::server_id.eq_any(server_ids)),
+			)
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// Most recent check-state stamp per (server, reporting source): every
+	/// report a source pushes re-stamps `last_seen` on the state rows of
+	/// the checks it mentions, so the max per source is when that source
+	/// last reported — maintained incrementally by ingestion, with no scan
+	/// of the statuses history. The reserved sources are excluded (canopy
+	/// and manual filings aren't reports), as are rows never stamped by
+	/// the check-state model.
+	pub async fn source_freshness(
+		db: &mut AsyncPgConnection,
+		server_ids: &[Uuid],
+	) -> Result<Vec<(Uuid, String, Timestamp)>> {
+		use crate::schema::issues::dsl;
+		if server_ids.is_empty() {
+			return Ok(Vec::new());
+		}
+		let rows: Vec<(Uuid, String, jiff_diesel::Timestamp)> = dsl::issues
+			.filter(
+				dsl::server_id
+					.eq_any(server_ids)
+					.and(
+						dsl::source
+							.ne_all([crate::statuses::CANOPY_SOURCE, crate::issues::MANUAL_SOURCE]),
+					)
+					.and(dsl::check_name.is_not_null()),
+			)
+			.group_by((dsl::server_id, dsl::source))
+			.select((
+				dsl::server_id.assume_not_null(),
+				dsl::source,
+				diesel::dsl::max(dsl::last_seen).assume_not_null(),
+			))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(rows
+			.into_iter()
+			.map(|(server, source, seen)| (server, source, seen.into()))
+			.collect())
+	}
+
 	/// Mark an issue as operator-resolved. Triggers incident-membership
 	/// re-evaluation (typically: leaves the incident).
 	pub async fn resolve(
@@ -1424,8 +2113,8 @@ impl Issue {
 				.returning(Self::as_select())
 				.get_result(conn)
 				.await?;
-			if let Some((gid, monitored)) = issue_group_and_monitored(conn, &issue).await? {
-				re_evaluate_incident_membership(conn, &issue, gid, monitored, now, Some(by))
+			if let Some((target, monitored)) = issue_target_and_monitored(conn, &issue).await? {
+				re_evaluate_incident_membership(conn, &issue, target, monitored, now, Some(by))
 					.await?;
 			}
 			Ok(issue)
@@ -1448,8 +2137,8 @@ impl Issue {
 				.get_result(conn)
 				.await?;
 			// Unresolve rejoins; cascade close path doesn't fire here.
-			if let Some((gid, monitored)) = issue_group_and_monitored(conn, &issue).await? {
-				re_evaluate_incident_membership(conn, &issue, gid, monitored, now, None).await?;
+			if let Some((target, monitored)) = issue_target_and_monitored(conn, &issue).await? {
+				re_evaluate_incident_membership(conn, &issue, target, monitored, now, None).await?;
 			}
 			Ok(issue)
 		})
@@ -1477,8 +2166,8 @@ impl Issue {
 				.returning(Self::as_select())
 				.get_result(conn)
 				.await?;
-			if let Some((gid, monitored)) = issue_group_and_monitored(conn, &issue).await? {
-				re_evaluate_incident_membership(conn, &issue, gid, monitored, now, None).await?;
+			if let Some((target, monitored)) = issue_target_and_monitored(conn, &issue).await? {
+				re_evaluate_incident_membership(conn, &issue, target, monitored, now, None).await?;
 			}
 			Ok(issue)
 		})
@@ -1495,8 +2184,8 @@ impl Issue {
 				.returning(Self::as_select())
 				.get_result(conn)
 				.await?;
-			if let Some((gid, monitored)) = issue_group_and_monitored(conn, &issue).await? {
-				re_evaluate_incident_membership(conn, &issue, gid, monitored, now, None).await?;
+			if let Some((target, monitored)) = issue_target_and_monitored(conn, &issue).await? {
+				re_evaluate_incident_membership(conn, &issue, target, monitored, now, None).await?;
 			}
 			Ok(issue)
 		})
@@ -1517,7 +2206,6 @@ pub struct IssueIncidentRef {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct IncidentStats {
 	pub issue_count: i64,
-	pub event_count: i64,
 	/// `incident_notes` for this incident + `issue_notes` across all linked issues.
 	pub note_count: i64,
 }
@@ -1529,18 +2217,18 @@ impl Incident {
 	/// `incident_issues` is keyed on `(incident_id, issue_id, joined_at)`,
 	/// so an issue that leaves and rejoins the same incident produces
 	/// multiple rows for the same pair. Counts must dedupe on the pair
-	/// before joining to `events` or `issue_notes`, otherwise every event
-	/// or note gets multiplied by the rejoin count.
+	/// before joining to `issue_notes`, otherwise every note gets
+	/// multiplied by the rejoin count.
 	///
 	/// Strategy: pull the distinct `(incident_id, issue_id)` pairs first,
-	/// then run the per-issue event/note counts and the direct
-	/// incident_notes count concurrently. Takes the pool (`&Db`) so the
-	/// parallel futures don't fight over one mutable conn handle.
+	/// then run the per-issue note counts and the direct incident_notes
+	/// count concurrently. Takes the pool (`&Db`) so the parallel futures
+	/// don't fight over one mutable conn handle.
 	pub async fn stats_for(
 		pool: &crate::Db,
 		incident_ids: &[Uuid],
 	) -> Result<std::collections::HashMap<Uuid, IncidentStats>> {
-		use crate::schema::{events, incident_issues, incident_notes, issue_notes};
+		use crate::schema::{incident_issues, incident_notes, issue_notes};
 		use diesel::dsl::count_star;
 		use std::collections::{HashMap, HashSet};
 
@@ -1582,19 +2270,6 @@ impl Incident {
 			.into_iter()
 			.collect();
 
-		let f_events = async {
-			if unique_issue_ids.is_empty() {
-				return Result::<Vec<(Uuid, i64)>>::Ok(Vec::new());
-			}
-			let mut c = pool.get().await?;
-			events::table
-				.group_by(events::issue_id)
-				.select((events::issue_id, count_star()))
-				.filter(events::issue_id.eq_any(&unique_issue_ids))
-				.load::<(Uuid, i64)>(&mut c)
-				.await
-				.map_err(AppError::from)
-		};
 		let f_inotes = async {
 			let mut c = pool.get().await?;
 			incident_notes::table
@@ -1618,16 +2293,13 @@ impl Incident {
 				.await
 				.map_err(AppError::from)
 		};
-		let (event_rows, inote_rows, jnote_rows) =
-			futures::try_join!(f_events, f_inotes, f_jnotes)?;
+		let (inote_rows, jnote_rows) = futures::try_join!(f_inotes, f_jnotes)?;
 
-		let events_per_issue: HashMap<Uuid, i64> = event_rows.into_iter().collect();
 		let notes_per_issue: HashMap<Uuid, i64> = jnote_rows.into_iter().collect();
 
 		for (incident_id, issues) in &issues_by_incident {
 			let entry = out.entry(*incident_id).or_default();
 			for issue_id in issues {
-				entry.event_count += events_per_issue.get(issue_id).copied().unwrap_or(0);
 				entry.note_count += notes_per_issue.get(issue_id).copied().unwrap_or(0);
 			}
 		}
@@ -1636,38 +2308,6 @@ impl Incident {
 		}
 
 		Ok(out)
-	}
-}
-
-impl Event {
-	pub async fn list_for_issue(
-		db: &mut AsyncPgConnection,
-		issue_id: Uuid,
-		offset: i64,
-		limit: i64,
-	) -> Result<Vec<Self>> {
-		use crate::schema::events::dsl;
-
-		dsl::events
-			.select(Self::as_select())
-			.filter(dsl::issue_id.eq(issue_id))
-			.order(dsl::created_at.desc())
-			.offset(offset)
-			.limit(limit)
-			.load(db)
-			.await
-			.map_err(AppError::from)
-	}
-
-	pub async fn count_for_issue(db: &mut AsyncPgConnection, issue_id: Uuid) -> Result<i64> {
-		use crate::schema::events::dsl;
-
-		dsl::events
-			.filter(dsl::issue_id.eq(issue_id))
-			.count()
-			.get_result(db)
-			.await
-			.map_err(AppError::from)
 	}
 }
 
@@ -1868,7 +2508,7 @@ impl Incident {
 				.filter(incidents::id.eq(incident_id))
 				.first(conn)
 				.await?;
-			let gid = incident_loaded.server_group_id;
+			let target = IncidentTarget::of_incident(&incident_loaded);
 
 			let open_issue_ids: Vec<Uuid> = incident_issues::table
 				.select(incident_issues::issue_id)
@@ -1908,7 +2548,7 @@ impl Incident {
 					Some(sid) => Server::get_by_id(conn, sid).await?.is_monitored,
 					None => true,
 				};
-				re_evaluate_incident_membership(conn, &issue, gid, monitored, now, Some(by))
+				re_evaluate_incident_membership(conn, &issue, target, monitored, now, Some(by))
 					.await?;
 			}
 

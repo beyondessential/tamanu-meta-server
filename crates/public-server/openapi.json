@@ -370,83 +370,6 @@
         }
       }
     },
-    "/events": {
-      "post": {
-        "tags": [
-          "events"
-        ],
-        "summary": "Report an event against the calling device's server.",
-        "description": "Requires a device certificate with the server role (or admin). Used to\npush a status update — a healthcheck result, an alert condition, or a\n\"condition cleared\" notice — which canopy records as an issue and, if\nthe server belongs to a group, may fold into an incident. An event\nwith the same `source` and `ref` as an already-open issue on this\nserver updates that issue instead of opening a new one.\n\nThe calling device must already be enrolled against exactly one\nserver, otherwise the request fails with 412. The `source` value\n`\"manual\"` is reserved for operator-entered events and is rejected\nwith 400 here, as is an empty `ref`.\n\nReturns the issue the event was recorded against (existing or newly\ncreated).",
-        "operationId": "submit_event",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/NewEvent"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Issue"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          },
-          "412": {
-            "description": "Device is not registered against any server.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "server-device": []
-          }
-        ]
-      }
-    },
     "/restore-capabilities": {
       "post": {
         "tags": [
@@ -753,7 +676,7 @@
           }
         ],
         "requestBody": {
-          "description": "Status push. A `health` array is required (it may be empty); a body without it is rejected with 400, unless the server has `allow_legacy_status` set, in which case the push refreshes reachability only and carries the last known healthchecks forward.",
+          "description": "Status push. A body without a `health` array is the legacy Tamanu direct-report format, treated as the `tamanu` source reporting a single always-passing `tasks` heartbeat check.",
           "content": {
             "application/json": {
               "schema": {
@@ -818,7 +741,7 @@
           "statuses"
         ],
         "summary": "Fetch the effective healthcheck severity mapping for a server.",
-        "description": "Returns, for every healthcheck canopy knows about, how a failure of that\ncheck is classified for this server: `skip` (the check is silenced for\nthis server — at server or group scope — or its severity is below\nwarning), `warn` (warning), or `fail` (error or critical). Keys are check\nnames as reported in `health[].check` on status pushes. Only the static\nseverity baseline is reflected; operator-defined conditional rules are\nevaluated per push and not included here. The same mapping also rides\nalong every status-push response as `check_severities`.\n\nThe calling device must be the one enrolled for this exact server (or\nhold the admin role).",
+        "description": "Returns, for every healthcheck the `alertd` source reports, how that\ncheck is handled for this server: `skip` (the check is silenced for\nthis server — at server or group scope — or its policy ceiling means it\nnever alerts), `warn` (graded at most a warning), or `fail` (failures\ncount as failures). Keys are check names as reported in\n`health[].check` on status pushes. Only the static policy ceiling is\nreflected; operator-defined conditional rules are evaluated per push\nand not included here. The same mapping also rides along every\nstatus-push response as `check_severities`, scoped to the pushing\nsource.\n\nThe calling device must be the one enrolled for this exact server (or\nhold the admin role).",
         "operationId": "check_severities",
         "parameters": [
           {
@@ -1421,7 +1344,7 @@
       },
       "CheckSeverity": {
         "type": "string",
-        "description": "How a server should treat one of its healthchecks, distilled from\ncanopy's operator-side configuration (the severity catalog and the\nsilence lists) into a three-level device-facing vocabulary.",
+        "description": "How a server should treat one of its healthchecks, distilled from\ncanopy's operator-side configuration (the policy catalog and the\nsilences) into a three-level device-facing vocabulary.",
         "enum": [
           "skip",
           "warn",
@@ -1544,7 +1467,7 @@
                   },
                   {
                     "$ref": "#/components/schemas/CheckResult",
-                    "description": "Outcome of the check: `passed`, `warning`, `failed`, `broken`, or\n`skipped`. Exactly one of `result` / `healthy` must be present per\nentry. `warning` and `failed` open an issue at the check's catalog\nseverity; `broken` (the check itself errored, not the system under\ntest) opens a separate issue at a fixed Warning severity without\nconfirming or clearing a known failure; `skipped` (a precondition was\nnot met) and `passed` open nothing and close prior issues."
+                    "description": "Outcome of the check: `passed`, `warning`, `failed`, `broken`, or\n`skipped`. Exactly one of `result` / `healthy` must be present per\nentry. `warning` and `failed` open the check's issue as graded by\nits policy; `broken` (the check itself errored, not the system under\ntest) neither confirms nor clears a known failure — the issue stays\nopen, retaining its contribution; `skipped` (a precondition was\nnot met) and `passed` open nothing and close prior issues."
                   }
                 ]
               }
@@ -1581,186 +1504,6 @@
               "type": "string"
             },
             "description": "Behaviours this intent opts into. Recognised values are `check` (a\nhealth report is expected for each replica), `once` (a given snapshot\nis only ever dispatched to a replica once, rather than repeatedly\nuntil overdue), and `url` (a replica's health report includes a link\nto it). Unrecognised values are stored but have no effect."
-          }
-        }
-      },
-      "Issue": {
-        "type": "object",
-        "description": "A tracked problem or condition on a server, or on a server group as a\nwhole. An issue is opened the first time its source reports it and stays\nopen (accumulating events) until the source reports it as no longer\nactive or an operator resolves it. Issues are the basic unit that drives\nincidents, Slack notifications, and the fleet health view.",
-        "required": [
-          "id",
-          "created_at",
-          "updated_at",
-          "source",
-          "ref",
-          "severity",
-          "message",
-          "active",
-          "first_seen",
-          "last_seen"
-        ],
-        "properties": {
-          "active": {
-            "type": "boolean",
-            "description": "Whether the condition behind this issue is still ongoing. Set to\n`false` when the source reports the condition has cleared."
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "description": "When this issue was first created."
-          },
-          "description": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "A short, single-line title for the issue, shown as its headline in\nthe UI and in Slack notifications. `None` if no title was given."
-          },
-          "device_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid",
-            "description": "The device that reported this issue, if it was raised by a device\npush. `None` for issues raised by an operator or by the platform\nitself."
-          },
-          "first_seen": {
-            "type": "string",
-            "format": "date-time",
-            "description": "When this issue was first reported."
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Unique identifier for this issue."
-          },
-          "last_seen": {
-            "type": "string",
-            "format": "date-time",
-            "description": "When this issue was most recently reported or updated."
-          },
-          "message": {
-            "type": "string",
-            "description": "The full body text describing the issue."
-          },
-          "ref": {
-            "type": "string",
-            "description": "A caller-chosen identifier for this issue within its `source`. The\nsame `(source, ref)` pair reported again updates this issue instead\nof creating a new one."
-          },
-          "resolved_at": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time",
-            "description": "When an operator marked this issue resolved. `None` if it hasn't\nbeen resolved."
-          },
-          "resolved_by": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The operator who resolved this issue. `None` if it hasn't been\nresolved."
-          },
-          "resolved_reason": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The reason given when the issue was resolved (for example: fixed,\nfalse positive, won't fix). `None` if it hasn't been resolved."
-          },
-          "server_group_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid",
-            "description": "The server group this issue is attached to, for a control-plane issue\n(e.g. backup corruption, a failed preflight check) that isn't tied to\nany single server. `None` for an ordinary server-scoped issue.\nGroup-scoped issues are always considered even if an individual\nserver in the group has monitoring turned off."
-          },
-          "server_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid",
-            "description": "The server this issue is attached to. `None` for a group-scoped issue\n(see `server_group_id`) — exactly one of the two is always set."
-          },
-          "severity": {
-            "$ref": "#/components/schemas/Severity",
-            "description": "The issue's current severity."
-          },
-          "snoozed_until": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time",
-            "description": "If set, this issue is snoozed until this time: it's temporarily\nexcluded from incidents and notifications even while still active."
-          },
-          "source": {
-            "type": "string",
-            "description": "Identifies what raised this issue — a healthcheck, a backup pipeline,\nan operator, etc. Used together with `ref` to detect repeat reports\nof the same underlying problem."
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time",
-            "description": "When this issue was last modified."
-          }
-        }
-      },
-      "NewEvent": {
-        "type": "object",
-        "description": "A single occurrence to report against an issue, sent either by a device\nor by an operator. If an issue with the same `source` and `ref` is\nalready open, this occurrence is folded into it (bumping its last-seen\ntime, and coalescing into the latest recorded event when the content is\nidentical); otherwise a new issue is created.",
-        "required": [
-          "source",
-          "ref",
-          "message"
-        ],
-        "properties": {
-          "active": {
-            "type": [
-              "boolean",
-              "null"
-            ],
-            "description": "Whether the condition this event describes is still ongoing.\nDefaults to `true`. Sending `false` marks the condition as cleared,\nwhich can close the issue's contribution to any open incident."
-          },
-          "description": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "A short, single-line title for this event, shown as the issue's\nheadline in the UI and as the subject of any Slack notification.\nMust not contain newlines. Use `message` for the full body text."
-          },
-          "message": {
-            "type": "string",
-            "description": "The full body text for this event. Free-form, multi-line text is\nfine. If `description` is omitted, the UI falls back to using the\nfirst line of this field as the headline."
-          },
-          "occurredAt": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time",
-            "description": "When the event actually happened, if known and different from when\nit was received. Defaults to the time the event was received."
-          },
-          "ref": {
-            "type": "string",
-            "description": "A caller-chosen identifier for this specific problem within `source`,\nused to detect repeated reports of the same underlying condition.\nRequired — mint a UUID if deduplication isn't needed."
-          },
-          "severity": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/Severity",
-                "description": "Severity of this event. Defaults to a standard severity if omitted."
-              }
-            ]
-          },
-          "source": {
-            "type": "string",
-            "description": "Identifies what is reporting this event — a healthcheck, a backup\npipeline, an operator, etc."
           }
         }
       },
@@ -2002,17 +1745,6 @@
           "dev"
         ]
       },
-      "Severity": {
-        "type": "string",
-        "description": "Canopy's severity vocabulary, narrowed from RFC 5424 to a five-level\nset with operator semantics:\n\n- `Debug`: never participates in incidents (filed for the audit\n  trail / per-server view only).\n- `Info`, `Warning`: join an open incident for context but don't\n  open one or keep one open on their own.\n- `Error`: opens an incident; sits in the per-group `slack_open_delay`\n  holding window before the Slack notification ships.\n- `Critical`: opens an incident and bypasses the holding window —\n  the Slack notification is enqueued for immediate delivery.\n\nStored as text in Postgres; validated as this enum at the API layer.\nDefault is `Error` (the most common severity for a deliberately\nfiled event). The legacy syslog severities `emergency` / `alert` /\n`notice` have been retired — see the\n`2026-05-29-000000-0000_restrict_severities` migration; the\n`FromStr` impl still accepts them as aliases for forward-compat with\nany device that hasn't been updated.",
-        "enum": [
-          "critical",
-          "error",
-          "warning",
-          "info",
-          "debug"
-        ]
-      },
       "SnippetResponse": {
         "type": "object",
         "description": "A single named SQL snippet from the bestool snippet library.",
@@ -2050,7 +1782,7 @@
                 "items": {
                   "$ref": "#/components/schemas/HealthCheck"
                 },
-                "description": "Per-check breakdown. **Required** — a push without a `health` array is\nrejected with 400 (unless an operator has opted the server into the\nlegacy format, in which case such a push only refreshes reachability\nand carries the previously reported checks forward). May be empty\n(`[]`) for a server that genuinely runs no checks. Each entry must\ninclude a non-empty `check` name and exactly one of `result` /\n`healthy`; any additional fields per check (latency, free disk %,\ncertificate expiry, etc.) are passed through verbatim and shown in the\nstatus UI.\n\nEvery check name seen — whatever its result — is added to the\noperator-facing check catalog, where the severity assigned to its\nfailures can be reviewed and adjusted. A failed or warning check opens\n(or keeps open) an issue for that check at the catalog's current\nseverity; a broken check opens a separate issue at a fixed Warning\nseverity; passed and skipped results open nothing and close prior\nissues."
+                "description": "Per-check breakdown. A push without a `health` array is the legacy\nTamanu direct-report format: it is treated as the `tamanu` source\nreporting a single always-passing `tasks` heartbeat check. May be\nempty (`[]`) for a source that genuinely runs no checks — which\nrecovers every check it previously reported. Each entry must\ninclude a non-empty `check` name and exactly one of `result` /\n`healthy`; any additional fields per check (latency, free disk %,\ncertificate expiry, etc.) are passed through verbatim and shown in the\nstatus UI.\n\nEvery check name seen — whatever its result — is added to the\noperator-facing check catalog, where the policy grading its results\ncan be reviewed and adjusted. A check whose effective result is\nfailed or warning opens (or keeps open) its issue; a broken check\nkeeps the same issue open, retaining a known failure's contribution\nwhile warning the check itself is broken; effective passed and\nskipped results open nothing and close prior issues."
               },
               "healthy": {
                 "type": [
@@ -2058,6 +1790,13 @@
                   "null"
                 ],
                 "description": "Overall self-reported health of the server. **Absent means `true`**,\nso senders that predate this field are never treated as unhealthy by\nomission. Recorded for historical analysis and display, but **not\nconsulted for incident or severity decisions** — those are derived\nfrom the per-check results in `health`, with each check's severity\ncontrolled by an operator-managed catalog."
+              },
+              "source": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The name of the source pushing this status: the reporting agent, e.g.\n`alertd`. Multiple sources may report on one server, each with its own\nset of checks; a source's push only opens and recovers its own checks.\n\n**Transitionally optional: this field will become mandatory.** A push\nwithout a `source` is attributed to `alertd`; new reporters must send\ntheir own name. Must be a non-empty string; the names `canopy` and\n`manual` are reserved for canopy itself and are rejected."
               }
             }
           }
@@ -2078,7 +1817,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Backup types the server should back up now: operator-requested\none-offs plus scheduled backups that are due. Each serializes as a\nplain string (e.g. `\"tamanu-postgres\"`). The device should run each\nlisted type, then report via `POST /backup-report`; an empty list\nmeans nothing to do."
+            "description": "Backup types the server should back up now: operator-requested\none-offs plus scheduled backups that are due. Each serializes as a\nplain string (e.g. `\"tamanu-postgres\"`). The device should run each\nlisted type, then report via `POST /backup-report`; an empty list\nmeans nothing to do. Only sent to `alertd` pushes (the agent that\nruns backups); other sources always receive an empty list."
           },
           "check_severities": {
             "type": "object",
@@ -2458,10 +2197,6 @@
     {
       "name": "bestool",
       "description": "Bestool SQL snippet read API."
-    },
-    {
-      "name": "events",
-      "description": "Device-pushed events; rolled up into issues and incidents server-side."
     },
     {
       "name": "restore",

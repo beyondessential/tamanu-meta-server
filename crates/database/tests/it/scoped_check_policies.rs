@@ -1,0 +1,280 @@
+//! Scoped check policies: transforms applied after the fleet catalog —
+//! fleet, then group, then server — with the operator silence as a
+//! scoped skipped-ceiling. Grade-time behaviour is exercised through
+//! `file_check`; the silence CRUD through the `silenced_refs` facade.
+
+use commons_types::status::CheckResult;
+use database::{
+	check_policies::{CheckPolicy, EvaluationContext, PolicyScope, ScopedCheckPolicy},
+	issues::{CheckFiling, FilingScope, Issue, file_check},
+	silenced_refs::ServerSilencedRef,
+	statuses::CANOPY_SOURCE,
+};
+use diesel::{QueryableByName, sql_query, sql_types};
+use diesel_async::RunQueryDsl;
+use uuid::Uuid;
+
+#[derive(QueryableByName)]
+struct RowId {
+	#[diesel(sql_type = sql_types::Uuid)]
+	id: Uuid,
+}
+
+async fn insert_group(conn: &mut diesel_async::AsyncPgConnection) -> Uuid {
+	let row: RowId = sql_query("INSERT INTO server_groups (name) VALUES ('g') RETURNING id")
+		.get_result(conn)
+		.await
+		.expect("insert group");
+	row.id
+}
+
+async fn insert_server(conn: &mut diesel_async::AsyncPgConnection, group_id: Option<Uuid>) -> Uuid {
+	let row: RowId = sql_query(
+		"INSERT INTO servers (host, group_id) VALUES ('http://scoped.invalid/', $1) RETURNING id",
+	)
+	.bind::<sql_types::Nullable<sql_types::Uuid>, _>(group_id)
+	.get_result(conn)
+	.await
+	.expect("insert server");
+	row.id
+}
+
+fn filing(server_id: Uuid, check: &str, observed: CheckResult) -> CheckFiling<'_> {
+	CheckFiling {
+		source: CANOPY_SOURCE,
+		scope: FilingScope::Server {
+			server_id,
+			device_id: None,
+		},
+		check,
+		observed,
+		title: Some("Scoped test"),
+		message: "scoped test filing",
+		detail: None,
+		default_ceiling: CheckResult::Failed,
+		default_escalates: false,
+		documentation: None,
+	}
+}
+
+async fn state_for(
+	conn: &mut diesel_async::AsyncPgConnection,
+	server_id: Uuid,
+	check: &str,
+) -> Issue {
+	Issue::list_by_source_ref(conn, CANOPY_SOURCE, check, &[server_id])
+		.await
+		.expect("list")
+		.into_iter()
+		.next()
+		.expect("state row filed")
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn server_silence_grades_filings_to_skipped() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server_id = insert_server(&mut conn, None).await;
+		ServerSilencedRef::add(&mut conn, server_id, CANOPY_SOURCE, "noisy", None)
+			.await
+			.expect("silence");
+
+		file_check(&mut conn, filing(server_id, "noisy", CheckResult::Failed))
+			.await
+			.expect("file");
+
+		let state = state_for(&mut conn, server_id, "noisy").await;
+		assert_eq!(state.observed_result, Some(CheckResult::Failed));
+		assert_eq!(
+			state.effective_result,
+			Some(CheckResult::Skipped),
+			"a silenced check records its observation but grades to skipped"
+		);
+		assert!(!state.active);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn group_silence_covers_member_servers() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group_id = insert_group(&mut conn).await;
+		let server_id = insert_server(&mut conn, Some(group_id)).await;
+		ScopedCheckPolicy::silence(
+			&mut conn,
+			PolicyScope::Group(group_id),
+			CANOPY_SOURCE,
+			"noisy",
+			Some("op"),
+		)
+		.await
+		.expect("group silence");
+
+		file_check(&mut conn, filing(server_id, "noisy", CheckResult::Failed))
+			.await
+			.expect("file");
+		let state = state_for(&mut conn, server_id, "noisy").await;
+		assert_eq!(state.effective_result, Some(CheckResult::Skipped));
+
+		// Lifting the group silence restores normal grading on the next
+		// filing.
+		ScopedCheckPolicy::unsilence(
+			&mut conn,
+			PolicyScope::Group(group_id),
+			CANOPY_SOURCE,
+			"noisy",
+		)
+		.await
+		.expect("unsilence");
+		file_check(&mut conn, filing(server_id, "noisy", CheckResult::Failed))
+			.await
+			.expect("file again");
+		let state = state_for(&mut conn, server_id, "noisy").await;
+		assert_eq!(state.effective_result, Some(CheckResult::Failed));
+		assert!(state.active);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn server_scoped_rule_can_upgrade_past_the_fleet_ceiling() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server_id = insert_server(&mut conn, None).await;
+
+		// Fleet catalog grades this check down to warning...
+		CheckPolicy::register(
+			&mut conn,
+			CANOPY_SOURCE,
+			"tiered",
+			CheckResult::Warning,
+			false,
+			None,
+		)
+		.await
+		.expect("register");
+
+		// ...but a server-scoped rule upgrades observed failures back to
+		// failed for this one server (the backend admits arbitrary scoped
+		// transforms; only silences are surfaced in the UI).
+		sql_query(
+			r#"
+				INSERT INTO scoped_check_policies (source, check_name, server_id, rules)
+				VALUES ($1, 'tiered', $2,
+					'{"if": [{"==": [{"var": "check.result"}, "failed"]}, "failed"]}'::jsonb)
+			"#,
+		)
+		.bind::<sql_types::Text, _>(CANOPY_SOURCE)
+		.bind::<sql_types::Uuid, _>(server_id)
+		.execute(&mut conn)
+		.await
+		.expect("scoped rule");
+
+		let ctx = EvaluationContext {
+			status_extra: &serde_json::Map::new(),
+			check_extra: &serde_json::Map::from_iter([(
+				"result".to_string(),
+				serde_json::Value::String("failed".into()),
+			)]),
+			tags: &Default::default(),
+		};
+		let graded = CheckPolicy::apply_scoped(
+			&mut conn,
+			CANOPY_SOURCE,
+			"tiered",
+			CheckResult::Failed,
+			&ctx,
+			Some(server_id),
+			None,
+		)
+		.await
+		.expect("apply");
+		assert_eq!(
+			graded.effective,
+			CheckResult::Failed,
+			"the server-scoped rule has the last word over the fleet ceiling"
+		);
+
+		// A different server without the scoped rule keeps the fleet grade.
+		let other = insert_server(&mut conn, None).await;
+		let graded = CheckPolicy::apply_scoped(
+			&mut conn,
+			CANOPY_SOURCE,
+			"tiered",
+			CheckResult::Failed,
+			&ctx,
+			Some(other),
+			None,
+		)
+		.await
+		.expect("apply other");
+		assert_eq!(graded.effective, CheckResult::Warning);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn silence_on_a_scoped_rule_row_keeps_the_rules() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server_id = insert_server(&mut conn, None).await;
+		sql_query(
+			r#"
+				INSERT INTO scoped_check_policies (source, check_name, server_id, rules)
+				VALUES ('alertd', 'ruled', $1,
+					'{"if": [{"==": [{"var": "check.result"}, "failed"]}, "failed"]}'::jsonb)
+			"#,
+		)
+		.bind::<sql_types::Uuid, _>(server_id)
+		.execute(&mut conn)
+		.await
+		.expect("scoped rule");
+
+		ScopedCheckPolicy::silence(
+			&mut conn,
+			PolicyScope::Server(server_id),
+			"alertd",
+			"ruled",
+			Some("op"),
+		)
+		.await
+		.expect("silence");
+		let row =
+			ScopedCheckPolicy::get(&mut conn, PolicyScope::Server(server_id), "alertd", "ruled")
+				.await
+				.expect("get")
+				.expect("row exists");
+		assert_eq!(row.ceiling.as_deref(), Some("skipped"));
+		assert!(row.rules.is_some(), "silencing keeps the scoped rules");
+
+		// Unsilencing lifts the ceiling but keeps the rules row.
+		ScopedCheckPolicy::unsilence(&mut conn, PolicyScope::Server(server_id), "alertd", "ruled")
+			.await
+			.expect("unsilence");
+		let row =
+			ScopedCheckPolicy::get(&mut conn, PolicyScope::Server(server_id), "alertd", "ruled")
+				.await
+				.expect("get")
+				.expect("row still exists");
+		assert_eq!(row.ceiling, None);
+		assert!(row.rules.is_some());
+
+		// A plain silence row deletes outright on unsilence.
+		ScopedCheckPolicy::silence(
+			&mut conn,
+			PolicyScope::Server(server_id),
+			"alertd",
+			"plain",
+			None,
+		)
+		.await
+		.expect("plain silence");
+		ScopedCheckPolicy::unsilence(&mut conn, PolicyScope::Server(server_id), "alertd", "plain")
+			.await
+			.expect("plain unsilence");
+		assert!(
+			ScopedCheckPolicy::get(&mut conn, PolicyScope::Server(server_id), "alertd", "plain")
+				.await
+				.expect("get")
+				.is_none()
+		);
+	})
+	.await
+}

@@ -95,10 +95,6 @@ pub struct ServerInfo {
 	/// reachability sweep skips it and its issues don't contribute to
 	/// incidents.
 	pub is_monitored: bool,
-	/// Whether this server may use the retired legacy `/status` format (a
-	/// push with no `health` array). Off by default; when on, such a push
-	/// only refreshes reachability and carries prior healthchecks forward.
-	pub allow_legacy_status: bool,
 	/// Threshold in seconds for the reachability sweep to consider this
 	/// server down. Always positive; only consulted when `is_monitored`
 	/// is `true`. The default at creation is 600 (10 minutes).
@@ -155,6 +151,9 @@ pub struct ServerLastStatusData {
 	/// Per-check health breakdown from this push. Empty for reports
 	/// predating structured per-check health.
 	pub health: JsonValue,
+	/// The source that pushed this status (e.g. `alertd`). Silences on
+	/// the checks it carries are keyed by this source.
+	pub source: String,
 	/// Additional endpoint-defined data included with this status push.
 	pub extra: JsonValue,
 	/// Operators identified as connected to the server as of this push,
@@ -226,10 +225,6 @@ pub struct ServerDataUpdate {
 	/// unchanged.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub is_monitored: Option<bool>,
-	/// Whether to accept the retired legacy status format from this
-	/// server. Omit to leave unchanged.
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub allow_legacy_status: Option<bool>,
 	/// New downtime threshold in seconds before this server is considered
 	/// down. Omit to leave unchanged.
 	#[serde(skip_serializing_if = "Option::is_none")]
@@ -268,7 +263,6 @@ pub(super) fn server_to_info(s: Server) -> ServerInfo {
 		cloud: s.cloud,
 		geolocation: s.geolocation,
 		is_monitored: s.is_monitored,
-		allow_legacy_status: s.allow_legacy_status,
 		alert_when_down_for: s.alert_when_down_for.0.as_secs(),
 		notes: s.notes,
 		tags: s.tags,
@@ -294,20 +288,15 @@ pub(super) async fn decorate_with_status(
 	let statuses = Status::latest_for_servers(conn, &ids).await?;
 	let by_server: std::collections::HashMap<Uuid, &Status> =
 		statuses.iter().map(|s| (s.server_id, s)).collect();
-	// Operator-silenced healthchecks don't count toward the health dot.
+	// Health comes from current check state across every source
+	// (silenced checks already skipped in the rollup).
 	let server_groups: Vec<(Uuid, Option<Uuid>)> =
 		infos.iter().map(|i| (i.id, i.group_id)).collect();
-	let silenced =
-		database::silenced_refs::silenced_health_checks_for_servers(conn, &server_groups).await?;
-	let no_silences = std::collections::BTreeSet::new();
+	let health = database::issues::health_from_check_state(conn, &server_groups).await?;
 	for info in infos.iter_mut() {
 		let st = by_server.get(&info.id).copied();
-		let silenced_checks = silenced.get(&info.id).unwrap_or(&no_silences);
 		info.up = Some(st.map(|s| s.short_status()).unwrap_or_default());
-		info.health = Some(
-			st.map(|s| s.health_state_ignoring(silenced_checks))
-				.unwrap_or_default(),
-		);
+		info.health = Some(health.get(&info.id).copied().unwrap_or_default());
 	}
 	Ok(())
 }
@@ -604,18 +593,15 @@ pub async fn get_detail(
 		.as_ref()
 		.map(|s| s.short_status())
 		.unwrap_or_default();
-	// Operator-silenced healthchecks don't count toward the headline
-	// health chip; the checks table still shows them (as skipped).
-	let silenced_checks = database::silenced_refs::silenced_health_checks_for_server(
-		&mut conn,
-		server.id,
-		server.group_id,
-	)
-	.await?;
-	let health = status
-		.as_ref()
-		.map(|s| s.health_state_ignoring(&silenced_checks))
-		.unwrap_or_default();
+	// The headline health chip rolls up current check state across every
+	// source; silenced checks are already skipped in the rollup, while
+	// the checks table still shows them (as skipped).
+	let health =
+		database::issues::health_from_check_state(&mut conn, &[(server.id, server.group_id)])
+			.await?
+			.get(&server.id)
+			.copied()
+			.unwrap_or_default();
 
 	let device_with_info = if let Some(device_id) = device_id {
 		Some(Device::get_with_info(&mut conn, device_id).await?)
@@ -670,6 +656,7 @@ pub async fn get_detail(
 				.and_then(|s| s.as_str().map(|s| s.to_string())),
 			healthy: st.healthy,
 			health: st.health.clone(),
+			source: st.source.clone(),
 			extra: st.extra.clone(),
 			operators,
 		})
@@ -782,7 +769,6 @@ pub async fn update(
 		cloud: args.data.cloud,
 		geolocation: args.data.geolocation,
 		is_monitored: args.data.is_monitored,
-		allow_legacy_status: args.data.allow_legacy_status,
 		alert_when_down_for: args
 			.data
 			.alert_when_down_for
@@ -925,7 +911,6 @@ pub async fn create(
 		cloud: args.cloud,
 		geolocation: args.geolocation,
 		is_monitored: args.is_monitored.unwrap_or(true),
-		allow_legacy_status: false,
 		alert_when_down_for: PgDuration(jiff::SignedDuration::from_secs(
 			args.alert_when_down_for.unwrap_or(DEFAULT_ALERT_SECS),
 		)),
@@ -1252,7 +1237,6 @@ pub async fn attach_tailscale_device(
 			cloud: None,
 			geolocation: None,
 			is_monitored: None,
-			allow_legacy_status: None,
 			alert_when_down_for: None,
 			notes: None,
 			tags: None,

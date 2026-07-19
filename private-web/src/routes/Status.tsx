@@ -50,13 +50,17 @@ export default function Status() {
 	const now = Date.now();
 	const openIncidentGroups = new Map<string, IncidentLoudness>(
 		incidents.status === "ok"
-			? incidents.data.map((i) => [
-					i.server_group_id,
-					i.notification_held_until &&
-					Date.parse(i.notification_held_until) > now
-						? "held"
-						: "loud",
-				])
+			? incidents.data
+					// Canopy-wide incidents (no group) surface via the
+					// self-alerts banner, not the group cards.
+					.filter((i) => i.server_group_id != null)
+					.map((i): [string, IncidentLoudness] => [
+						i.server_group_id as string,
+						i.notification_held_until &&
+						Date.parse(i.notification_held_until) > now
+							? "held"
+							: "loud",
+					])
 			: [],
 	);
 	return (

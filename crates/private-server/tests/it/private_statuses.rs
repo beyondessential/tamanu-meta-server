@@ -1046,7 +1046,7 @@ struct CheckAttentionServer {
 #[derive(Debug, Deserialize)]
 struct CheckAttentionResponse {
 	check: String,
-	severity: Option<String>,
+	ceiling: Option<String>,
 	servers: Vec<CheckAttentionServer>,
 }
 
@@ -1055,12 +1055,12 @@ async fn check_attention_empty_database() {
 	commons_tests::server::run(async |_conn, _, private| {
 		let r = private
 			.post("/api/statuses/check_attention")
-			.json(&serde_json::json!({"check": "postgres"}))
+			.json(&serde_json::json!({"source": "alertd", "check": "postgres"}))
 			.await;
 		r.assert_status_ok();
 		let data: CheckAttentionResponse = r.json();
 		assert_eq!(data.check, "postgres");
-		assert_eq!(data.severity, None);
+		assert_eq!(data.ceiling, None);
 		assert!(data.servers.is_empty());
 	})
 	.await
@@ -1078,28 +1078,28 @@ async fn check_attention_lists_servers_reporting_that_check_ordered_failed_first
 			('33333333-3333-3333-3333-333333333333', 'Healthy Server', 'https://healthy.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
 			('44444444-4444-4444-4444-444444444444', 'Other Check Server', 'https://other.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
 
-			INSERT INTO statuses (server_id, created_at, healthy, health) VALUES
-			('11111111-1111-1111-1111-111111111111', NOW(), true,
-				'[{\"check\":\"postgres\",\"result\":\"warning\"}]'::jsonb),
-			('22222222-2222-2222-2222-222222222222', NOW(), true,
-				'[{\"check\":\"postgres\",\"result\":\"failed\",\"free_pct\":2}]'::jsonb),
-			('33333333-3333-3333-3333-333333333333', NOW(), true,
-				'[{\"check\":\"postgres\",\"result\":\"passed\"}]'::jsonb),
-			('44444444-4444-4444-4444-444444444444', NOW(), true,
-				'[{\"check\":\"disk_space\",\"result\":\"failed\"}]'::jsonb)",
+			INSERT INTO issues (server_id, source, \"ref\", check_name, observed_result, effective_result, detail, message, active, first_seen, last_seen, degraded_since, last_degraded_at) VALUES
+			('11111111-1111-1111-1111-111111111111', 'alertd', 'health/postgres', 'postgres', 'warning', 'warning',
+				'{\"check\":\"postgres\",\"result\":\"warning\"}'::jsonb, 'warned', true, NOW(), NOW(), NOW(), NOW()),
+			('22222222-2222-2222-2222-222222222222', 'alertd', 'health/postgres', 'postgres', 'failed', 'failed',
+				'{\"check\":\"postgres\",\"result\":\"failed\",\"free_pct\":2}'::jsonb, 'failed', true, NOW(), NOW(), NOW(), NOW()),
+			('33333333-3333-3333-3333-333333333333', 'alertd', 'health/postgres', 'postgres', 'passed', 'passed',
+				'{\"check\":\"postgres\",\"result\":\"passed\"}'::jsonb, 'passing', false, NOW(), NOW(), NULL, NULL),
+			('44444444-4444-4444-4444-444444444444', 'alertd', 'health/disk_space', 'disk_space', 'failed', 'failed',
+				'{\"check\":\"disk_space\",\"result\":\"failed\"}'::jsonb, 'failed', true, NOW(), NOW(), NOW(), NOW())",
 		)
 		.await
 		.unwrap();
 
 		let r = private
 			.post("/api/statuses/check_attention")
-			.json(&serde_json::json!({"check": "postgres"}))
+			.json(&serde_json::json!({"source": "alertd", "check": "postgres"}))
 			.await;
 		r.assert_status_ok();
 		let data: CheckAttentionResponse = r.json();
 
 		assert_eq!(data.check, "postgres");
-		assert_eq!(data.severity, None, "no catalog row was ever created");
+		assert_eq!(data.ceiling, None, "no catalog row was ever created");
 		assert_eq!(
 			data.servers.len(),
 			3,
@@ -1123,14 +1123,14 @@ async fn check_attention_lists_servers_reporting_that_check_ordered_failed_first
 			data.servers[0].server_id,
 			"22222222-2222-2222-2222-222222222222"
 		);
-		// The full health[] entry rides along for the expandable row.
+		// The check's detail rides along for the expandable row.
 		assert_eq!(
 			data.servers[0].data,
 			serde_json::json!({"check": "postgres", "result": "failed", "free_pct": 2}),
 		);
-		assert_eq!(
-			data.servers[0].failing_since, None,
-			"no issue on file for this failure"
+		assert!(
+			data.servers[0].failing_since.is_some(),
+			"a degraded state row carries its streak start"
 		);
 
 		assert_eq!(data.servers[1].server_name, "Warning Server");
@@ -1151,27 +1151,21 @@ async fn check_attention_failing_since_comes_from_the_active_issue() {
 			('11111111-1111-1111-1111-111111111111', 'Failing Server', 'https://failing.example.com', 'production', 'central'),
 			('22222222-2222-2222-2222-222222222222', 'Recovered Issue Server', 'https://recovered.example.com', 'production', 'central');
 
-			INSERT INTO statuses (server_id, created_at, healthy, health) VALUES
-			('11111111-1111-1111-1111-111111111111', NOW(), true,
-				'[{\"check\":\"postgres\",\"result\":\"failed\"}]'::jsonb),
-			('22222222-2222-2222-2222-222222222222', NOW(), true,
-				'[{\"check\":\"postgres\",\"result\":\"failed\"}]'::jsonb);
-
-			-- Active issue: its first_seen is the failing-since timestamp.
-			INSERT INTO issues (server_id, source, \"ref\", severity, message, active, first_seen, last_seen) VALUES
-			('11111111-1111-1111-1111-111111111111', 'status', 'health/postgres', 'error',
-				'postgres check failing', true, NOW() - INTERVAL '3 hours', NOW()),
-			-- Inactive issue (check recovered then re-failed without a new
-			-- push being processed yet): must NOT be used.
-			('22222222-2222-2222-2222-222222222222', 'status', 'health/postgres', 'error',
-				'postgres check failing', false, NOW() - INTERVAL '9 hours', NOW() - INTERVAL '8 hours')",
+		-- Active state: its degraded_since is the failing-since timestamp.
+			INSERT INTO issues (server_id, source, \"ref\", check_name, observed_result, effective_result, message, active, first_seen, last_seen, degraded_since, last_degraded_at) VALUES
+			('11111111-1111-1111-1111-111111111111', 'alertd', 'health/postgres', 'postgres', 'failed', 'failed',
+				'postgres check failing', true, NOW() - INTERVAL '3 hours', NOW(), NOW() - INTERVAL '3 hours', NOW()),
+			-- Recovered state (inactive): shows the last observed result but
+			-- carries no streak.
+			('22222222-2222-2222-2222-222222222222', 'alertd', 'health/postgres', 'postgres', 'failed', 'failed',
+				'postgres check failing', false, NOW() - INTERVAL '9 hours', NOW() - INTERVAL '8 hours', NULL, NOW() - INTERVAL '8 hours')",
 		)
 		.await
 		.unwrap();
 
 		let r = private
 			.post("/api/statuses/check_attention")
-			.json(&serde_json::json!({"check": "postgres"}))
+			.json(&serde_json::json!({"source": "alertd", "check": "postgres"}))
 			.await;
 		r.assert_status_ok();
 		let data: CheckAttentionResponse = r.json();
@@ -1200,7 +1194,7 @@ async fn check_attention_failing_since_comes_from_the_active_issue() {
 			.unwrap();
 		assert_eq!(
 			recovered.failing_since, None,
-			"inactive issues don't provide failing_since"
+			"recovered state doesn't provide failing_since"
 		);
 	})
 	.await
@@ -1216,18 +1210,16 @@ async fn check_attention_excludes_ungrouped_and_archived_servers() {
 
 			UPDATE servers SET deleted_at = NOW() WHERE id = '22222222-2222-2222-2222-222222222222';
 
-			INSERT INTO statuses (server_id, created_at, healthy, health) VALUES
-			('11111111-1111-1111-1111-111111111111', NOW(), true,
-				'[{\"check\":\"postgres\",\"result\":\"failed\"}]'::jsonb),
-			('22222222-2222-2222-2222-222222222222', NOW(), true,
-				'[{\"check\":\"postgres\",\"result\":\"failed\"}]'::jsonb)",
+			INSERT INTO issues (server_id, source, \"ref\", check_name, observed_result, effective_result, message, active, first_seen, last_seen, degraded_since, last_degraded_at) VALUES
+			('11111111-1111-1111-1111-111111111111', 'alertd', 'health/postgres', 'postgres', 'failed', 'failed', 'failed', true, NOW(), NOW(), NOW(), NOW()),
+			('22222222-2222-2222-2222-222222222222', 'alertd', 'health/postgres', 'postgres', 'failed', 'failed', 'failed', true, NOW(), NOW(), NOW(), NOW())",
 		)
 		.await
 		.unwrap();
 
 		let r = private
 			.post("/api/statuses/check_attention")
-			.json(&serde_json::json!({"check": "postgres"}))
+			.json(&serde_json::json!({"source": "alertd", "check": "postgres"}))
 			.await;
 		r.assert_status_ok();
 		let data: CheckAttentionResponse = r.json();
@@ -1241,15 +1233,14 @@ async fn check_attention_excludes_ungrouped_and_archived_servers() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn check_attention_returns_catalog_severity_and_ignores_non_matching_check() {
+async fn check_attention_returns_catalog_policy_and_ignores_non_matching_check() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO healthcheck_severities (check_name, severity) VALUES ('postgres', 'error');
+			"INSERT INTO check_policies (source, check_name, ceiling) VALUES ('alertd', 'postgres', 'failed');
 			INSERT INTO servers (id, name, host, rank, kind) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Failing Server', 'https://failing.example.com', 'production', 'central');
-			INSERT INTO statuses (server_id, created_at, healthy, health) VALUES
-			('11111111-1111-1111-1111-111111111111', NOW(), true,
-				'[{\"check\":\"postgres\",\"result\":\"failed\"}]'::jsonb)",
+			INSERT INTO issues (server_id, source, \"ref\", check_name, observed_result, effective_result, message, active, first_seen, last_seen, degraded_since, last_degraded_at) VALUES
+			('11111111-1111-1111-1111-111111111111', 'alertd', 'health/postgres', 'postgres', 'failed', 'failed', 'failed', true, NOW(), NOW(), NOW(), NOW())",
 		)
 		.await
 		.unwrap();
@@ -1257,43 +1248,43 @@ async fn check_attention_returns_catalog_severity_and_ignores_non_matching_check
 		// The check this server is actually failing.
 		let r = private
 			.post("/api/statuses/check_attention")
-			.json(&serde_json::json!({"check": "postgres"}))
+			.json(&serde_json::json!({"source": "alertd", "check": "postgres"}))
 			.await;
 		r.assert_status_ok();
 		let data: CheckAttentionResponse = r.json();
-		assert_eq!(data.severity, Some("error".to_string()));
+		assert_eq!(data.ceiling, Some("failed".to_string()));
 		assert_eq!(data.servers.len(), 1);
 
 		// A different, never-reported check name: no servers, but the
 		// catalog lookup still runs (and correctly finds nothing).
 		let r = private
 			.post("/api/statuses/check_attention")
-			.json(&serde_json::json!({"check": "unrelated_check"}))
+			.json(&serde_json::json!({"source": "alertd", "check": "unrelated_check"}))
 			.await;
 		r.assert_status_ok();
 		let data: CheckAttentionResponse = r.json();
 		assert_eq!(data.check, "unrelated_check");
-		assert_eq!(data.severity, None);
+		assert_eq!(data.ceiling, None);
 		assert!(data.servers.is_empty());
 	})
 	.await
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn snapshot_surfaces_per_check_severity() {
+async fn snapshot_surfaces_per_check_results() {
 	commons_tests::server::run(async |mut conn, _, private| {
-		// Seed catalog: catalog_only stays at the default warning;
-		// elevated has its base severity bumped to error so the snapshot
-		// returns the operator-set value, not the legacy heuristic;
-		// version_gated has a rules ladder firing on a specific
-		// status.bestoolVersion.
+		// Seed catalog: catalog_only stays at the default warning
+		// ceiling; elevated has its ceiling lifted to failed so the
+		// snapshot returns the operator-set grading; version_gated has a
+		// rules ladder firing on a specific status.bestoolVersion, and
+		// escalates.
 		conn.batch_execute(
-			"INSERT INTO healthcheck_severities (check_name, severity) VALUES \
-				('catalog_only', 'warning'), \
-				('elevated', 'error'), \
-				('version_gated', 'warning'); \
-			 UPDATE healthcheck_severities \
-				SET rules = '{\"if\":[{\"in_range\":[{\"var\":\"status.bestoolVersion\"},\">=1.0.0 <2.0.0\"]},\"critical\"]}'::jsonb \
+			"INSERT INTO check_policies (source, check_name, ceiling, escalates) VALUES \
+				('alertd', 'catalog_only', 'warning', FALSE), \
+				('alertd', 'elevated', 'failed', FALSE), \
+				('alertd', 'version_gated', 'warning', TRUE); \
+			 UPDATE check_policies \
+				SET rules = '{\"if\":[{\"in_range\":[{\"var\":\"status.bestoolVersion\"},\">=1.0.0 <2.0.0\"]},\"failed\"]}'::jsonb \
 				WHERE check_name = 'version_gated';",
 		)
 		.await
@@ -1321,30 +1312,30 @@ async fn snapshot_surfaces_per_check_severity() {
 			.await;
 		r.assert_status_ok();
 		let body: serde_json::Value = r.json();
-		let severities = &body["check_severities"];
-		assert_eq!(severities["catalog_only"], "warning");
-		assert_eq!(severities["elevated"], "error");
+		let results = &body["check_results"];
+		assert_eq!(results["catalog_only"], "warning");
+		assert_eq!(results["elevated"], "failed");
 		// version_gated's rule fires because bestoolVersion 1.5.0 is in
-		// the >=1.0.0 <2.0.0 range — Critical wins over the base.
-		assert_eq!(severities["version_gated"], "critical");
+		// the >=1.0.0 <2.0.0 range — graded failed.
+		assert_eq!(results["version_gated"], "failed");
 		// Passing checks must not appear in the map.
 		assert!(
-			severities.get("passing").is_none(),
-			"healthy checks are omitted; got {severities}",
+			results.get("passing").is_none(),
+			"healthy checks are omitted; got {results}",
 		);
 	})
 	.await
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn snapshot_check_severities_cover_result_form() {
+async fn snapshot_check_results_cover_result_form() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		// `elevated` has its catalog base bumped to error: a failed
 		// result uses it, a warning result ignores it (fixed Warning).
 		conn.batch_execute(
-			"INSERT INTO healthcheck_severities (check_name, severity) VALUES \
-				('elevated', 'error'), \
-				('degraded', 'error');",
+			"INSERT INTO check_policies (source, check_name, ceiling) VALUES \
+				('alertd', 'elevated', 'failed'), \
+				('alertd', 'degraded', 'failed');",
 		)
 		.await
 		.unwrap();
@@ -1372,17 +1363,17 @@ async fn snapshot_check_severities_cover_result_form() {
 			.await;
 		r.assert_status_ok();
 		let body: serde_json::Value = r.json();
-		let severities = &body["check_severities"];
-		assert_eq!(severities["elevated"], "error");
+		let results = &body["check_results"];
+		assert_eq!(results["elevated"], "failed");
 		assert_eq!(
-			severities["degraded"], "warning",
-			"warning result lands at fixed Warning regardless of catalog base"
+			results["degraded"], "warning",
+			"a warning observation is already below the ceiling"
 		);
 		// Broken/skipped/passed don't go through the rules engine.
 		for check in ["busted", "absent", "fine"] {
 			assert!(
-				severities.get(check).is_none(),
-				"{check} must be omitted; got {severities}",
+				results.get(check).is_none(),
+				"{check} must be omitted; got {results}",
 			);
 		}
 	})
@@ -1404,7 +1395,10 @@ async fn get_detail_health_excludes_silenced_checks() {
 
 			INSERT INTO statuses (server_id, version, healthy, health, extra, created_at) VALUES
 			('11111111-1111-1111-1111-111111111111', '1.0.0', true,
-			 '[{\"check\": \"postgres\", \"result\": \"failed\"}]'::jsonb, '{}'::jsonb, NOW())",
+			 '[{\"check\": \"postgres\", \"result\": \"failed\"}]'::jsonb, '{}'::jsonb, NOW());
+
+			INSERT INTO issues (server_id, source, ref, check_name, observed_result, effective_result, message, active, first_seen, last_seen, degraded_since, last_degraded_at) VALUES
+			('11111111-1111-1111-1111-111111111111', 'alertd', 'health/postgres', 'postgres', 'failed', 'failed', 'postgres failed', true, NOW(), NOW(), NOW(), NOW())",
 		)
 		.await
 		.unwrap();
@@ -1423,8 +1417,8 @@ async fn get_detail_health_excludes_silenced_checks() {
 		assert_eq!(body["health"], "unhealthy");
 
 		conn.batch_execute(
-			"INSERT INTO server_silenced_refs (server_id, source, ref) VALUES
-			('11111111-1111-1111-1111-111111111111', 'status', 'health/postgres')",
+			"INSERT INTO scoped_check_policies (server_id, source, check_name, ceiling) VALUES
+			('11111111-1111-1111-1111-111111111111', 'alertd', 'postgres', 'skipped')",
 		)
 		.await
 		.unwrap();
@@ -1437,7 +1431,9 @@ async fn get_detail_health_excludes_silenced_checks() {
 			"raw check result must stay on the status payload"
 		);
 
-		conn.batch_execute("DELETE FROM server_silenced_refs").await.unwrap();
+		conn.batch_execute("DELETE FROM scoped_check_policies")
+			.await
+			.unwrap();
 		let body = detail().await;
 		assert_eq!(body["health"], "unhealthy");
 	})
@@ -1465,8 +1461,11 @@ async fn group_details_member_health_excludes_group_silenced_checks() {
 			('11111111-1111-1111-1111-111111111111', '1.0.0', true,
 			 '[{\"check\": \"disk\", \"result\": \"failed\"}]'::jsonb, '{}'::jsonb, NOW());
 
-			INSERT INTO server_group_silenced_refs (server_group_id, source, ref) VALUES
-			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'status', 'health/disk')",
+			INSERT INTO issues (server_id, source, ref, check_name, observed_result, effective_result, message, active, first_seen, last_seen, degraded_since, last_degraded_at) VALUES
+			('11111111-1111-1111-1111-111111111111', 'alertd', 'health/disk', 'disk', 'failed', 'failed', 'disk failed', true, NOW(), NOW(), NOW(), NOW());
+
+			INSERT INTO scoped_check_policies (server_group_id, source, check_name, ceiling) VALUES
+			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'alertd', 'disk', 'skipped')",
 		)
 		.await
 		.unwrap();
@@ -1495,8 +1494,8 @@ async fn snapshot_reports_and_excludes_silenced_checks() {
 			('11111111-1111-1111-1111-111111111111', '1.0.0', true,
 			 '[{\"check\": \"postgres\", \"result\": \"failed\"}, {\"check\": \"disk\", \"result\": \"passed\"}]'::jsonb, '{}'::jsonb, NOW());
 
-			INSERT INTO server_silenced_refs (server_id, source, ref) VALUES
-			('11111111-1111-1111-1111-111111111111', 'status', 'health/postgres')",
+			INSERT INTO scoped_check_policies (server_id, source, check_name, ceiling) VALUES
+			('11111111-1111-1111-1111-111111111111', 'alertd', 'postgres', 'skipped')",
 		)
 		.await
 		.unwrap();

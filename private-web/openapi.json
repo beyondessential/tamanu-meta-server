@@ -2512,18 +2512,18 @@
         "tags": [
           "healthchecks"
         ],
-        "summary": "List the healthcheck severity catalog.",
-        "description": "Returns every known healthcheck name together with its current\nseverity policy, ordered by name. An entry exists for every check name\nany server has ever reported; new checks are added automatically the\nfirst time they're seen, with a default policy pending review.",
+        "summary": "List the check policy catalog.",
+        "description": "Returns every known (source, check) together with its current policy,\nordered by source then name. An entry exists for every check any\nsource has ever reported; new checks are added automatically the\nfirst time they're seen, with a default policy pending review.",
         "operationId": "healthcheck_list",
         "responses": {
           "200": {
-            "description": "Catalog rows ordered by check_name.",
+            "description": "Catalog rows ordered by source then check_name.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/HealthcheckSeverityData"
+                    "$ref": "#/components/schemas/CheckPolicyData"
                   }
                 }
               }
@@ -2669,8 +2669,8 @@
         "tags": [
           "healthchecks"
         ],
-        "summary": "Update a healthcheck's severity policy.",
-        "description": "Sets the base severity (and optionally notes) for the given check, and\nmarks it as reviewed by the caller. Saving with the same severity as\nbefore still counts as a review, so an operator can acknowledge a\ncheck without changing its policy.",
+        "summary": "Update a check's policy.",
+        "description": "Sets the ceiling and escalation flag (and optionally notes) for the\ngiven (source, check), and marks it as reviewed by the caller. Saving\nwith the same values as before still counts as a review, so an\noperator can acknowledge a check without changing its policy.",
         "operationId": "healthcheck_update",
         "requestBody": {
           "content": {
@@ -2688,7 +2688,64 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HealthcheckSeverityData"
+                  "$ref": "#/components/schemas/CheckPolicyData"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/healthchecks/update_documentation": {
+      "post": {
+        "tags": [
+          "healthchecks"
+        ],
+        "summary": "Replace a check's documentation.",
+        "description": "Stores the markdown document presented alongside the check wherever\nits state appears, and over MCP. Sending `null` or a blank document\nclears it. Doesn't mark the policy as reviewed — documenting a check\nis not the same as reviewing its grading.",
+        "operationId": "healthcheck_update_documentation",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateDocumentationArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated catalog row.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckPolicyData"
                 }
               }
             }
@@ -2726,8 +2783,8 @@
         "tags": [
           "healthchecks"
         ],
-        "summary": "Replace a healthcheck's conditional severity rules.",
-        "description": "Stores a new set of conditional rules for the given check (or removes\nthem, if `rules` is `null`), and marks the check as reviewed by the\ncaller. Returns 400 if `rules` doesn't parse as a valid ladder — for\nexample an unknown comparison operator, a malformed variable\nreference, or an odd number of entries.",
+        "summary": "Replace a check's conditional rules.",
+        "description": "Stores a new set of conditional rules for the given (source, check)\n(or removes them, if `rules` is `null`), and marks the check as\nreviewed by the caller. Returns 400 if `rules` doesn't parse as a\nvalid ladder — for example an unknown comparison operator, a\nmalformed variable reference, or an odd number of entries.",
         "operationId": "healthcheck_update_rules",
         "requestBody": {
           "content": {
@@ -2745,7 +2802,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HealthcheckSeverityData"
+                  "$ref": "#/components/schemas/CheckPolicyData"
                 }
               }
             }
@@ -3263,43 +3320,6 @@
         ]
       }
     },
-    "/api/issues/list_events": {
-      "post": {
-        "tags": [
-          "issues"
-        ],
-        "summary": "List the events recorded against a specific issue, most recent first.",
-        "description": "Returns a page of events along with the total number of events recorded\nfor the issue, for pagination with `offset`/`limit`.",
-        "operationId": "list_events",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ListEventsArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Page_EventData"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-user": []
-          }
-        ]
-      }
-    },
     "/api/issues/list_for_device": {
       "post": {
         "tags": [
@@ -3499,8 +3519,8 @@
         "tags": [
           "issues"
         ],
-        "summary": "Manually record an event against a server, creating or updating an issue.",
-        "description": "Finds or creates an issue keyed by the server and the given `ref`,\nappends this event to it, and returns the resulting issue. Returns 400\nif `ref` is empty or if `description` contains a newline.",
+        "summary": "Manually raise (or clear) a condition against a server.",
+        "description": "Finds or creates an issue keyed by the server and the given `ref`\nunder the `manual` source, grades the chosen result through the\ncondition's catalog policy, and returns the resulting issue. Returns\n400 if `ref` is empty or if `description` contains a newline.",
         "operationId": "submit_manual_event",
         "requestBody": {
           "content": {
@@ -4132,7 +4152,7 @@
           "self_alerts"
         ],
         "summary": "Mark a self-alert as resolved.",
-        "description": "Records that an operator has resolved the given self-alert and cancels\nits notification if one is still pending delivery (e.g. inside the\ninitial grace period before a low-severity alert is sent). Returns 404\nif no self-alert with that id exists.",
+        "description": "Records that an operator has resolved the given self-alert. Returns 404\nif no self-alert with that id exists.",
         "operationId": "self_alerts_resolve",
         "requestBody": {
           "content": {
@@ -4146,7 +4166,7 @@
         },
         "responses": {
           "200": {
-            "description": "Alert marked operator-resolved; a pending notification is cancelled."
+            "description": "Alert marked operator-resolved."
           },
           "401": {
             "description": "",
@@ -5572,8 +5592,8 @@
         "tags": [
           "statuses"
         ],
-        "summary": "List the servers whose latest status reports one named healthcheck.",
-        "description": "Everything the per-healthcheck page needs: the catalog's configured\nseverity for `check` (if any) plus every live server whose **latest**\nstatus reports it — the current, real-time picture, not a history of\npast issues/events, though each failing server carries a\n`failing_since` timestamp derived from its active issue. This is the\ndata behind the `/healthchecks/:check` \"who's affected\" page, which\ndoubles as an operator TODO list and as a way to correlate servers\nsharing the same issue during a fleet-wide incident.",
+        "summary": "List the servers whose check state reports one (source, check).",
+        "description": "Everything the per-healthcheck page needs: the catalog's configured\npolicy for the (source, check) (if any) plus every live server's\ncurrent state for it — the real-time picture, with each degraded row\ncarrying `failing_since` (the start of its current degradation\nstreak). This is the data behind the `/healthchecks/:source/:check`\n\"who's affected\" page, which doubles as an operator TODO list and as\na way to correlate servers sharing the same issue during a\nfleet-wide incident.",
         "operationId": "status_check_attention",
         "requestBody": {
           "content": {
@@ -5587,7 +5607,7 @@
         },
         "responses": {
           "200": {
-            "description": "The check's catalog severity and the servers currently reporting it.",
+            "description": "The check's catalog policy and the servers currently reporting it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6886,44 +6906,62 @@
         "type": "object",
         "description": "Request body for [`check_attention`].",
         "required": [
+          "source",
           "check"
         ],
         "properties": {
           "check": {
             "type": "string",
             "description": "The healthcheck name to look up, exactly as reported by devices in\n`health[].check` (an arbitrary, device/plugin-defined string)."
+          },
+          "source": {
+            "type": "string",
+            "description": "The source that reports the check. A check's identity is the\n(source, check) pair — a same-named check from another source is\na different check."
           }
         }
       },
       "CheckAttentionData": {
         "type": "object",
-        "description": "Response for [`check_attention`]: the queried check's catalog severity\n(if it has one yet) and every live server whose latest status reports\nit, failing or healthy.",
+        "description": "Response for [`check_attention`]: the queried check's catalog policy\n(if it has one yet) and every live server whose latest status reports\nit, failing or healthy.",
         "required": [
+          "source",
           "check",
+          "escalates",
           "servers"
         ],
         "properties": {
+          "ceiling": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The configured policy ceiling for this (source, check), or `None`\nif the source has never reported it (so it has no catalog row)."
+          },
           "check": {
             "type": "string",
-            "description": "The check name that was queried, echoed back so the page can\nrender its heading without re-decoding the request."
+            "description": "The check name that was queried."
+          },
+          "documentation": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Operator-authored documentation for this (source, check)\n(markdown), or `None` if nobody has written it yet."
+          },
+          "escalates": {
+            "type": "boolean",
+            "description": "Whether this check's policy escalates its effective failures."
           },
           "servers": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/CheckAttentionServerData"
             },
-            "description": "Every live server whose latest status reports this check, at any\nresult, ordered as a TODO list: failed, warning, broken, passed,\nskipped (most urgent first), then by group name then server name.\nThe client filters out the passed/skipped tail unless the \"show\nhealthy\" toggle is on."
+            "description": "Every live server whose latest state from this source reports\nthis check, at any result, ordered as a TODO list: failed,\nwarning, broken, passed, skipped (most urgent first), then by\ngroup name then server name. The client filters out the\npassed/skipped tail unless the \"show healthy\" toggle is on."
           },
-          "severity": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/Severity",
-                "description": "The catalog's configured base severity for this check, or `None`\nif no server has ever reported it yet (so it has no catalog row)."
-              }
-            ]
+          "source": {
+            "type": "string",
+            "description": "The source that was queried, echoed back with `check` so the page\ncan render its heading without re-decoding the request."
           }
         }
       },
@@ -6939,7 +6977,7 @@
         ],
         "properties": {
           "data": {
-            "description": "The check's full `health[]` entry from this server's latest status,\nverbatim (including the `check`/`healthy`/`result` keys), so the\nrow can expand to the same per-check detail the server page shows."
+            "description": "The check's own fields from its latest report, verbatim, so the\nrow can expand to the same per-check detail the server page shows."
           },
           "failing_since": {
             "type": [
@@ -6947,7 +6985,7 @@
               "null"
             ],
             "format": "date-time",
-            "description": "When this check started failing on this server: the `first_seen`\nof the still-active issue canopy filed at `(status,\nhealth/<check>)` when the check degraded. `None` for servers\ncurrently reporting the check healthy, and for failing servers\nwith no active issue on file (e.g. the issue was\noperator-resolved, or the ref is silenced so nothing was filed)."
+            "description": "When the check's current degradation streak began. `None` for\nservers currently reporting the check healthy."
           },
           "group_id": {
             "type": [
@@ -6966,7 +7004,7 @@
           },
           "result": {
             "$ref": "#/components/schemas/CheckResult",
-            "description": "The check's result on this server's latest status. The UI shows\nwarning/failed/broken servers by default and puts passed/skipped\nones behind a \"show healthy\" toggle."
+            "description": "The check's observed result on its latest report. The UI shows\nwarning/failed/broken servers by default and puts passed/skipped\nones behind a \"show healthy\" toggle."
           },
           "server_id": {
             "type": "string",
@@ -6980,7 +7018,91 @@
           "status_created_at": {
             "type": "string",
             "format": "date-time",
-            "description": "When the reporting status was recorded."
+            "description": "When the check state last updated (the check's latest report)."
+          }
+        }
+      },
+      "CheckPolicyData": {
+        "type": "object",
+        "description": "One (source, check)'s policy: the ceiling capping its effective\nresult, the escalation flag, plus optional conditional rules that can\ngrade a given report differently.",
+        "required": [
+          "source",
+          "check_name",
+          "ceiling",
+          "escalates",
+          "first_seen",
+          "updated_at",
+          "pending_review",
+          "rule_count"
+        ],
+        "properties": {
+          "ceiling": {
+            "type": "string",
+            "description": "The maximum effective result for this check when no conditional\nrule (see `rules`) overrides it: an observed result more urgent\nthan the ceiling grades down to it. One of `failed`, `warning`,\n`passed`, or `skipped` (`skipped` also tells the reporting source\nit may stop running the check)."
+          },
+          "check_name": {
+            "type": "string",
+            "description": "The healthcheck's name, exactly as reported by monitored servers."
+          },
+          "documentation": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Operator-authored documentation for this check: a single markdown\ndocument. By convention it covers what the check observes, what\neach result means, and hints for solving a failure, but no\nstructure is enforced. `null` when nobody has documented it yet."
+          },
+          "escalates": {
+            "type": "boolean",
+            "description": "Whether an effective failure of this check notifies immediately,\nbypassing the incident grace period."
+          },
+          "first_seen": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this check was first reported and this policy entry was\ncreated."
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Free-form operator notes about this check."
+          },
+          "pending_review": {
+            "type": "boolean",
+            "description": "`true` if no operator has reviewed this policy yet."
+          },
+          "reviewed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When an operator last reviewed or updated this policy. `null` if\nit has never been reviewed."
+          },
+          "reviewed_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The operator who last reviewed this policy. `null` if it has\nnever been reviewed."
+          },
+          "rule_count": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Number of condition/result branches in `rules`; `0` when\n`rules` is `null` or couldn't be parsed. Lets a caller tell\nwhether conditional rules exist without parsing `rules` itself.",
+            "minimum": 0
+          },
+          "rules": {
+            "description": "Conditional rules that can grade a report to a different result\nthan the ceiling would — in any direction — depending on the\ncheck's own fields, the surrounding status report, or the\nreporting server's tags. `null` means no conditional rules are\nconfigured, and the ceiling always applies.\n\nWhen present, this is a single-key object shaped like\n`{\"if\": [condition_1, result_1, condition_2, result_2, ...]}`.\nConditions are tried in order, and the result paired with the\nfirst matching condition is used; if none match, the observed\nresult capped at the ceiling is used instead. There's no explicit\n\"else\" branch — the ceiling fallback plays that role — so the\narray must have an even number of entries and at least one pair.\n\nEach condition is a single-key object naming a comparison\noperator — one of `==`, `!=`, `<`, `<=`, `>`, `>=`, or `in_range`\n— whose value is a two-element array: a variable reference and a\nvalue to compare it against. A variable reference has the shape\n`{\"var\": \"<namespace>.<field>\"}`, where `<namespace>` is one of\n`check` (a field on the failing check itself), `status` (a\ntop-level field on the status report that contained it), or\n`tag` (a tag on the reporting server, merged with its group's\ntags). `in_range` compares a version-like string against a\nsemantic version range (e.g. `\">=1.2.0 <2.0.0\"`). If the named\nvariable isn't present in the data being evaluated, the condition\ndoesn't match. A `rules` value that doesn't parse into this shape\nis treated the same as `null` (no conditional rules)."
+          },
+          "source": {
+            "type": "string",
+            "description": "The source that reports this check."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this policy was last modified."
           }
         }
       },
@@ -7541,74 +7663,6 @@
           }
         }
       },
-      "EventData": {
-        "type": "object",
-        "description": "A single recorded occurrence of an issue's underlying condition — one\npush from a device or a manually submitted event.",
-        "required": [
-          "id",
-          "issue_id",
-          "created_at",
-          "severity",
-          "message",
-          "active",
-          "occurrences",
-          "last_seen"
-        ],
-        "properties": {
-          "active": {
-            "type": "boolean",
-            "description": "Whether the underlying condition was active as of this event."
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "description": "When this event was recorded on the server."
-          },
-          "description": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Short headline for this event, if one was given."
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Unique identifier for this event."
-          },
-          "issue_id": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Id of the issue this event belongs to."
-          },
-          "last_seen": {
-            "type": "string",
-            "format": "date-time",
-            "description": "When this condition was last seen recurring."
-          },
-          "message": {
-            "type": "string",
-            "description": "Human-readable message describing this event."
-          },
-          "occurred_at": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time",
-            "description": "When the underlying condition actually occurred, if reported\nseparately from the time it was recorded."
-          },
-          "occurrences": {
-            "type": "integer",
-            "format": "int32",
-            "description": "Number of times this same condition has repeated and been coalesced\ninto this event rather than creating a new one."
-          },
-          "severity": {
-            "$ref": "#/components/schemas/Severity",
-            "description": "Severity reported for this event."
-          }
-        }
-      },
       "ExecuteArgs": {
         "type": "object",
         "description": "Request body for running a query in the SQL playground.",
@@ -7869,7 +7923,7 @@
       },
       "HealthcheckSample": {
         "type": "object",
-        "description": "A real-world sample of the data a conditional rule can reference for a\ngiven healthcheck, taken from the most recent status report (across\nall servers) that included it.",
+        "description": "A real-world sample of the data a conditional rule can reference for a\ngiven healthcheck, taken from the most recent status report (across\nall servers) from the check's own source that included it.",
         "required": [
           "status_extra",
           "check_extra",
@@ -7950,95 +8004,37 @@
           }
         }
       },
-      "HealthcheckSeverityData": {
-        "type": "object",
-        "description": "A named healthcheck's alerting policy: the base severity assigned to\nits failures, plus optional conditional rules that can override that\nseverity based on the details of a given failure.",
-        "required": [
-          "check_name",
-          "severity",
-          "first_seen",
-          "updated_at",
-          "pending_review",
-          "rule_count"
-        ],
-        "properties": {
-          "check_name": {
-            "type": "string",
-            "description": "The healthcheck's name, exactly as reported by monitored servers."
-          },
-          "first_seen": {
-            "type": "string",
-            "format": "date-time",
-            "description": "When this check was first reported and this policy entry was\ncreated."
-          },
-          "notes": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Free-form operator notes about this check."
-          },
-          "pending_review": {
-            "type": "boolean",
-            "description": "`true` if no operator has reviewed this policy yet."
-          },
-          "reviewed_at": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time",
-            "description": "When an operator last reviewed or updated this policy. `null` if\nit has never been reviewed."
-          },
-          "reviewed_by": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The operator who last reviewed this policy. `null` if it has\nnever been reviewed."
-          },
-          "rule_count": {
-            "type": "integer",
-            "format": "int32",
-            "description": "Number of condition/severity branches in `rules`; `0` when\n`rules` is `null` or couldn't be parsed. Lets a caller tell\nwhether conditional rules exist without parsing `rules` itself.",
-            "minimum": 0
-          },
-          "rules": {
-            "description": "Conditional rules that can assign a different severity than\n`severity`, depending on the failing check's own fields, the\nsurrounding status report, or the reporting server's tags. `null`\nmeans no conditional rules are configured, and `severity` always\napplies.\n\nWhen present, this is a single-key object shaped like\n`{\"if\": [condition_1, severity_1, condition_2, severity_2, ...]}`.\nConditions are tried in order, and the severity paired with the\nfirst matching condition is used; if none match, the base\n`severity` is used instead. There's no explicit \"else\" branch —\nthe fallback to `severity` plays that role — so the array must\nhave an even number of entries and at least one pair.\n\nEach condition is a single-key object naming a comparison\noperator — one of `==`, `!=`, `<`, `<=`, `>`, `>=`, or `in_range`\n— whose value is a two-element array: a variable reference and a\nvalue to compare it against. A variable reference has the shape\n`{\"var\": \"<namespace>.<field>\"}`, where `<namespace>` is one of\n`check` (a field on the failing check itself), `status` (a\ntop-level field on the status report that contained it), or\n`tag` (a tag on the reporting server, merged with its group's\ntags). `in_range` compares a version-like string against a\nsemantic version range (e.g. `\">=1.2.0 <2.0.0\"`). If the named\nvariable isn't present in the data being evaluated, the condition\ndoesn't match. A `rules` value that doesn't parse into this shape\nis treated the same as `null` (no conditional rules)."
-          },
-          "severity": {
-            "$ref": "#/components/schemas/Severity",
-            "description": "The severity assigned to a failure of this check when no\nconditional rule (see `rules`) overrides it."
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time",
-            "description": "When this policy was last modified."
-          }
-        }
-      },
       "HealthcheckUpdateArgs": {
         "type": "object",
-        "description": "Request body for updating a healthcheck's base severity policy.",
+        "description": "Request body for updating a check's base policy.",
         "required": [
+          "source",
           "check_name",
-          "severity"
+          "ceiling"
         ],
         "properties": {
+          "ceiling": {
+            "type": "string",
+            "description": "The ceiling to apply to this check's observed results when no\nconditional rule overrides it: one of `failed`, `warning`,\n`passed`, or `skipped`."
+          },
           "check_name": {
             "type": "string",
             "description": "The healthcheck name to update; must already exist in the\ncatalog."
           },
+          "escalates": {
+            "type": "boolean",
+            "description": "Whether an effective failure of this check should notify\nimmediately, bypassing the incident grace period."
+          },
           "notes": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Operator notes to store alongside the new severity. Omitting this\nor sending `null` clears any existing notes — there's no way to\nleave them unchanged implicitly, so resend the current value to\nkeep it."
+            "description": "Operator notes to store alongside the new policy. Omitting this\nor sending `null` clears any existing notes — there's no way to\nleave them unchanged implicitly, so resend the current value to\nkeep it."
           },
-          "severity": {
-            "$ref": "#/components/schemas/Severity",
-            "description": "The severity to assign to this check's failures when no\nconditional rule overrides it."
+          "source": {
+            "type": "string",
+            "description": "The source whose check to update."
           }
         }
       },
@@ -8124,11 +8120,9 @@
         "description": "An operational incident: a group-scoped roll-up of related issues.\n\nAn incident opens when an issue on a server in the group crosses the\nseverity threshold, gathers further contributing issues while open, and\ncloses automatically once the last serious contributor clears. Operators\ncan additionally mark an incident resolved with a reason.",
         "required": [
           "id",
-          "server_group_id",
           "server_group_name",
           "opened_at",
           "issue_count",
-          "event_count",
           "note_count",
           "created_at",
           "updated_at"
@@ -8146,11 +8140,6 @@
             "type": "string",
             "format": "date-time",
             "description": "When the incident record was created."
-          },
-          "event_count": {
-            "type": "integer",
-            "format": "int64",
-            "description": "Total number of events across all contributing issues."
           },
           "id": {
             "type": "string",
@@ -8217,13 +8206,16 @@
             "description": "Reason given when resolving: one of `fixed`, `wont_fix`, `expected`,\n`duplicate`, or `flapping`."
           },
           "server_group_id": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "format": "uuid",
-            "description": "Identifier of the server group the incident belongs to."
+            "description": "Identifier of the server group the incident belongs to, or null for\na canopy-wide incident (aggregating canopy's self-alerts)."
           },
           "server_group_name": {
             "type": "string",
-            "description": "Display name of the group this incident rolls up to. Empty only if\nthe group no longer exists, which should not happen in normal\noperation."
+            "description": "Display name of the group this incident rolls up to — `Canopy` for\na canopy-wide incident. Empty only if the group no longer exists,\nwhich should not happen in normal operation."
           },
           "updated_at": {
             "type": "string",
@@ -8453,7 +8445,7 @@
           "server_host",
           "source",
           "ref",
-          "severity",
+          "escalates",
           "message",
           "active",
           "first_seen",
@@ -8467,6 +8459,13 @@
             "type": "boolean",
             "description": "Whether the underlying condition is still ongoing. `false` once the\ncondition has stopped recurring."
           },
+          "check_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The check this issue tracks, when it is check state (health-check\nissues). Absent for issues that aren't check results yet."
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -8479,6 +8478,9 @@
             ],
             "description": "Short headline describing the issue, if one was given."
           },
+          "detail": {
+            "description": "The check's own fields from the latest report, verbatim."
+          },
           "device_id": {
             "type": [
               "string",
@@ -8486,6 +8488,17 @@
             ],
             "format": "uuid",
             "description": "Id of the device that reported the underlying event, if the issue\noriginated from a device push rather than a manual entry."
+          },
+          "effective_result": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What policy made of the latest observed result — the result canopy\nacts on."
+          },
+          "escalates": {
+            "type": "boolean",
+            "description": "Whether the check's policy escalates: an effective failure notifies\nimmediately, bypassing incident grace."
           },
           "first_seen": {
             "type": "string",
@@ -8512,6 +8525,13 @@
           "message": {
             "type": "string",
             "description": "Latest human-readable message describing the issue's state."
+          },
+          "observed_result": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The result the source reported on the latest filing, before policy."
           },
           "ref": {
             "type": "string",
@@ -8586,10 +8606,6 @@
               "null"
             ],
             "description": "Display name of the affected server, when one is set. Falls back to\n`server_host` when absent."
-          },
-          "severity": {
-            "$ref": "#/components/schemas/Severity",
-            "description": "Current severity level of the issue."
           },
           "snoozed_until": {
             "type": [
@@ -8685,6 +8701,16 @@
             "format": "int64",
             "description": "Maximum number of issues to return. Defaults to 100 when omitted."
           },
+          "results": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Restrict to issues whose latest effective result is one of these.\nOmit to include all results."
+          },
           "serverGroupId": {
             "type": [
               "string",
@@ -8692,16 +8718,6 @@
             ],
             "format": "uuid",
             "description": "Restrict to issues whose server belongs to this group."
-          },
-          "severities": {
-            "type": [
-              "array",
-              "null"
-            ],
-            "items": {
-              "$ref": "#/components/schemas/Severity"
-            },
-            "description": "Restrict to issues at one of these severity levels. Omit to include\nall severities."
           }
         }
       },
@@ -8930,36 +8946,6 @@
             ],
             "format": "int64",
             "description": "Maximum number of incidents to return; defaults to 100."
-          }
-        }
-      },
-      "ListEventsArgs": {
-        "type": "object",
-        "description": "Selects an issue and a page of its events.",
-        "required": [
-          "issue_id"
-        ],
-        "properties": {
-          "issue_id": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Id of the issue whose events to list."
-          },
-          "limit": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "Maximum number of events to return. Defaults to 100 when omitted."
-          },
-          "offset": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "Number of events to skip, for pagination. Defaults to 0."
           }
         }
       },
@@ -9351,94 +9337,6 @@
           }
         }
       },
-      "Page_EventData": {
-        "type": "object",
-        "description": "A single page of a paginated list response.",
-        "required": [
-          "items",
-          "total"
-        ],
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "description": "A single recorded occurrence of an issue's underlying condition — one\npush from a device or a manually submitted event.",
-              "required": [
-                "id",
-                "issue_id",
-                "created_at",
-                "severity",
-                "message",
-                "active",
-                "occurrences",
-                "last_seen"
-              ],
-              "properties": {
-                "active": {
-                  "type": "boolean",
-                  "description": "Whether the underlying condition was active as of this event."
-                },
-                "created_at": {
-                  "type": "string",
-                  "format": "date-time",
-                  "description": "When this event was recorded on the server."
-                },
-                "description": {
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "description": "Short headline for this event, if one was given."
-                },
-                "id": {
-                  "type": "string",
-                  "format": "uuid",
-                  "description": "Unique identifier for this event."
-                },
-                "issue_id": {
-                  "type": "string",
-                  "format": "uuid",
-                  "description": "Id of the issue this event belongs to."
-                },
-                "last_seen": {
-                  "type": "string",
-                  "format": "date-time",
-                  "description": "When this condition was last seen recurring."
-                },
-                "message": {
-                  "type": "string",
-                  "description": "Human-readable message describing this event."
-                },
-                "occurred_at": {
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "format": "date-time",
-                  "description": "When the underlying condition actually occurred, if reported\nseparately from the time it was recorded."
-                },
-                "occurrences": {
-                  "type": "integer",
-                  "format": "int32",
-                  "description": "Number of times this same condition has repeated and been coalesced\ninto this event rather than creating a new one."
-                },
-                "severity": {
-                  "$ref": "#/components/schemas/Severity",
-                  "description": "Severity reported for this event."
-                }
-              }
-            },
-            "description": "The items in this page."
-          },
-          "total": {
-            "type": "integer",
-            "format": "int64",
-            "description": "The total number of items across all pages, not just this one — use\nthis to render page counts without a separate request.",
-            "minimum": 0
-          }
-        }
-      },
       "Page_ServerInfo": {
         "type": "object",
         "description": "A single page of a paginated list response.",
@@ -9457,7 +9355,6 @@
                 "kind",
                 "display_host",
                 "is_monitored",
-                "allow_legacy_status",
                 "alert_when_down_for",
                 "notes",
                 "tags",
@@ -9468,10 +9365,6 @@
                   "type": "integer",
                   "format": "int64",
                   "description": "Threshold in seconds for the reachability sweep to consider this\nserver down. Always positive; only consulted when `is_monitored`\nis `true`. The default at creation is 600 (10 minutes)."
-                },
-                "allow_legacy_status": {
-                  "type": "boolean",
-                  "description": "Whether this server may use the retired legacy `/status` format (a\npush with no `health` array). Off by default; when on, such a push\nonly refreshes reachability and carries prior healthchecks forward."
                 },
                 "archived": {
                   "type": "boolean",
@@ -10864,12 +10757,17 @@
         "type": "object",
         "description": "Request body identifying which healthcheck to sample data for.",
         "required": [
+          "source",
           "check_name"
         ],
         "properties": {
           "check_name": {
             "type": "string",
             "description": "The healthcheck name to sample."
+          },
+          "source": {
+            "type": "string",
+            "description": "The source that reports the check. A check's identity is the\n(source, check) pair; another source's same-named check may carry\nentirely different fields."
           }
         }
       },
@@ -10949,7 +10847,7 @@
         "required": [
           "id",
           "ref",
-          "severity",
+          "escalates",
           "message",
           "active",
           "first_seen",
@@ -10959,6 +10857,17 @@
           "active": {
             "type": "boolean",
             "description": "Whether the underlying condition is still ongoing. Becomes `false`\nonce the condition has cleared on its own, independently of whether\nan operator has resolved the alert."
+          },
+          "effective_result": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What policy made of it — the result canopy acts on."
+          },
+          "escalates": {
+            "type": "boolean",
+            "description": "Whether this condition's policy escalates: an effective failure\nnotifies immediately, bypassing incident grace."
           },
           "first_seen": {
             "type": "string",
@@ -10979,6 +10888,13 @@
             "type": "string",
             "description": "Full detail message describing the condition."
           },
+          "observed_result": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What canopy observed on the latest raise, before policy."
+          },
           "ref": {
             "type": "string",
             "description": "The stable identifier of the underlying condition, e.g.\n`mcp-token-expiry`. Stable across repeated raises of the same\ncondition."
@@ -10997,10 +10913,6 @@
               "null"
             ],
             "description": "The login of the operator who resolved this alert, or `null` if it\nhas not been resolved."
-          },
-          "severity": {
-            "$ref": "#/components/schemas/Severity",
-            "description": "How severe the condition is, from `critical` (most severe) down to\n`debug` (least)."
           },
           "title": {
             "type": [
@@ -11113,13 +11025,6 @@
             ],
             "format": "int64",
             "description": "New downtime threshold in seconds before this server is considered\ndown. Omit to leave unchanged."
-          },
-          "allow_legacy_status": {
-            "type": [
-              "boolean",
-              "null"
-            ],
-            "description": "Whether to accept the retired legacy status format from this\nserver. Omit to leave unchanged."
           },
           "cloud": {
             "type": [
@@ -11555,7 +11460,6 @@
           "kind",
           "display_host",
           "is_monitored",
-          "allow_legacy_status",
           "alert_when_down_for",
           "notes",
           "tags",
@@ -11566,10 +11470,6 @@
             "type": "integer",
             "format": "int64",
             "description": "Threshold in seconds for the reachability sweep to consider this\nserver down. Always positive; only consulted when `is_monitored`\nis `true`. The default at creation is 600 (10 minutes)."
-          },
-          "allow_legacy_status": {
-            "type": "boolean",
-            "description": "Whether this server may use the retired legacy `/status` format (a\npush with no `health` array). Off by default; when on, such a push\nonly refreshes reachability and carries prior healthchecks forward."
           },
           "archived": {
             "type": "boolean",
@@ -11722,6 +11622,7 @@
           "created_at",
           "healthy",
           "health",
+          "source",
           "extra",
           "operators"
         ],
@@ -11784,6 +11685,10 @@
               "null"
             ],
             "description": "PostgreSQL version the server reported, if any."
+          },
+          "source": {
+            "type": "string",
+            "description": "The source that pushed this status (e.g. `alertd`). Silences on\nthe checks it carries are keyed by this source."
           },
           "timezone": {
             "type": [
@@ -12030,17 +11935,6 @@
           }
         }
       },
-      "Severity": {
-        "type": "string",
-        "description": "Canopy's severity vocabulary, narrowed from RFC 5424 to a five-level\nset with operator semantics:\n\n- `Debug`: never participates in incidents (filed for the audit\n  trail / per-server view only).\n- `Info`, `Warning`: join an open incident for context but don't\n  open one or keep one open on their own.\n- `Error`: opens an incident; sits in the per-group `slack_open_delay`\n  holding window before the Slack notification ships.\n- `Critical`: opens an incident and bypasses the holding window —\n  the Slack notification is enqueued for immediate delivery.\n\nStored as text in Postgres; validated as this enum at the API layer.\nDefault is `Error` (the most common severity for a deliberately\nfiled event). The legacy syslog severities `emergency` / `alert` /\n`notice` have been retired — see the\n`2026-05-29-000000-0000_restrict_severities` migration; the\n`FromStr` impl still accepts them as aliases for forward-compat with\nany device that hasn't been updated.",
-        "enum": [
-          "critical",
-          "error",
-          "warning",
-          "info",
-          "debug"
-        ]
-      },
       "ShortStatus": {
         "type": "string",
         "description": "Reachability of a server, based on how recently it last reported a status update.",
@@ -12235,15 +12129,15 @@
           "health",
           "extra",
           "operators",
-          "check_severities",
+          "check_results",
           "silenced_checks"
         ],
         "properties": {
-          "check_severities": {
+          "check_results": {
             "type": "object",
-            "description": "For each currently-unhealthy check in this push, the severity it\nwould be filed at if it turned into an issue. Healthy checks are\nomitted. An unhealthy check with no severity listed here should be\ntreated as a default (warning-level) severity.",
+            "description": "For each currently-unhealthy check in this push, the effective\nresult its policy grades it to. Healthy checks are omitted. An\nunhealthy check not listed here should be treated as warning.",
             "additionalProperties": {
-              "$ref": "#/components/schemas/Severity"
+              "type": "string"
             },
             "propertyNames": {
               "type": "string"
@@ -12362,7 +12256,7 @@
       },
       "SubmitManualEventArgs": {
         "type": "object",
-        "description": "A manually entered event to record against a server.",
+        "description": "A manually raised condition to record against a server.",
         "required": [
           "serverId",
           "ref",
@@ -12374,46 +12268,45 @@
               "boolean",
               "null"
             ],
-            "description": "Whether the underlying condition is currently active. Defaults to\n`true` when omitted."
+            "description": "Whether the underlying condition is currently active. Defaults to\n`true` when omitted; `false` records it as cleared regardless of\n`result`."
           },
           "description": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Short, single-line headline for the event. Must not contain\nnewlines — use `message` for multi-line detail."
+            "description": "Short, single-line headline for the condition. Must not contain\nnewlines — use `message` for multi-line detail."
+          },
+          "escalates": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the condition's failures should notify immediately,\nbypassing the incident grace period. Only consulted the first time\na `ref` is seen (it seeds the condition's catalog entry); adjust\nlater from the healthchecks catalog."
           },
           "message": {
             "type": "string",
-            "description": "Human-readable message describing the event. May be multi-line."
-          },
-          "occurredAt": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time",
-            "description": "When the underlying condition actually occurred, if different from\nthe time of submission. Defaults to now when omitted."
+            "description": "Human-readable message describing the condition. May be multi-line."
           },
           "ref": {
             "type": "string",
-            "description": "Identifier for the underlying condition. Events with the same `ref`\non the same server are coalesced into the same issue rather than\nopening a new one each time; use a fresh unique value if that\ndeduplication isn't wanted."
+            "description": "Identifier for the underlying condition. Reports with the same\n`ref` on the same server update the same issue rather than opening\na new one each time; use a fresh unique value if that deduplication\nisn't wanted."
           },
-          "serverId": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Id of the server the event applies to."
-          },
-          "severity": {
+          "result": {
             "oneOf": [
               {
                 "type": "null"
               },
               {
-                "$ref": "#/components/schemas/Severity",
-                "description": "Severity to record. If omitted, a default severity is used."
+                "$ref": "#/components/schemas/CheckResult",
+                "description": "The condition's result: `failed` (can open an incident) or\n`warning` (context only). Defaults to `failed`. `passed` records\nthe condition as cleared, same as `active: false`."
               }
             ]
+          },
+          "serverId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id of the server the condition applies to."
           }
         }
       },
@@ -12647,6 +12540,31 @@
           }
         }
       },
+      "UpdateDocumentationArgs": {
+        "type": "object",
+        "description": "Request body for replacing a check's documentation.",
+        "required": [
+          "source",
+          "check_name"
+        ],
+        "properties": {
+          "check_name": {
+            "type": "string",
+            "description": "The healthcheck name to document; must already exist in the\ncatalog."
+          },
+          "documentation": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The new markdown document, or `null` (or blank) to clear it."
+          },
+          "source": {
+            "type": "string",
+            "description": "The source whose check to document."
+          }
+        }
+      },
       "UpdateKeyNameArgs": {
         "type": "object",
         "description": "Request to rename (or clear the name of) a device key.",
@@ -12670,8 +12588,9 @@
       },
       "UpdateRulesArgs": {
         "type": "object",
-        "description": "Request body for replacing a healthcheck's conditional severity rules.",
+        "description": "Request body for replacing a check's conditional rules.",
         "required": [
+          "source",
           "check_name"
         ],
         "properties": {
@@ -12680,7 +12599,11 @@
             "description": "The healthcheck name whose rules to replace; must already exist\nin the catalog."
           },
           "rules": {
-            "description": "The new conditional rules to store, or `null` to remove all\nconditional rules and rely solely on the base severity. Same\nshape as the `rules` field returned when listing checks. A ladder\nwith no condition/severity pairs is treated the same as `null`."
+            "description": "The new conditional rules to store, or `null` to remove all\nconditional rules and rely solely on the ceiling. Same shape as\nthe `rules` field returned when listing checks. A ladder with no\ncondition/result pairs is treated the same as `null`."
+          },
+          "source": {
+            "type": "string",
+            "description": "The source whose check's rules to replace."
           }
         }
       },

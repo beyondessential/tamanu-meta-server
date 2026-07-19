@@ -5,7 +5,6 @@ import {
 	IconButton,
 	Link as MuiLink,
 	MenuItem,
-	Pagination,
 	Stack,
 	TextField,
 	Typography,
@@ -17,14 +16,15 @@ import NotificationsOffOutlinedIcon from "@mui/icons-material/NotificationsOffOu
 import SnoozeIcon from "@mui/icons-material/Snooze";
 import { Fragment, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
-import { useApi, useApiAction } from "../api";
+import { useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { humanDuration } from "../lib/humanDuration";
 import MessageView from "./MessageView";
 import NotesList, { AddNoteButton } from "./NotesList";
 import ResolverAvatar from "./ResolverAvatar";
 import ServerNameWithGroup from "./ServerNameWithGroup";
-import SeverityChip from "./SeverityChip";
+import CheckDocButton from "./CheckDocButton";
+import CheckResultChip from "./CheckResultChip";
 import StatusSnapshotPanel, { StatusSnapshotButton } from "./StatusSnapshot";
 import TimeAgo from "./TimeAgo";
 import {
@@ -32,6 +32,7 @@ import {
 	RESOLVED_REASON_LABEL,
 	healthcheckNameFromRef,
 	healthcheckPath,
+	type CheckResult,
 	type IssueData,
 	type IssueIncidentLink,
 	type ResolvedReason,
@@ -50,10 +51,10 @@ function headline(issue: IssueData): string {
 }
 
 /** One issue. Expanded by default: shows a provenance line (source, ref,
- * incident links), the message body, action buttons and a two-column
- * Events / Notes panel. When collapsed, only the header row is visible —
+ * incident links), the message body, action buttons and the notes panel.
+ * When collapsed, only the header row is visible —
  * even the action buttons are hidden. Header layout:
- * `[toggle] [server] [headline] [resolver-avatar?] [snapshot] [severity] [time]`.
+ * `[toggle] [server] [headline] [resolver-avatar?] [snapshot] [result] [time]`.
  * The headline is struck through when the issue is inactive or resolved.
  * The server is always shown because incidents can span child servers in
  * a group — relying on a page H1 to identify the server is insufficient.
@@ -220,9 +221,19 @@ function Header({
 					tooltip="Status snapshot when this issue was last seen"
 				/>
 			</Box>
-			<Box sx={{ flexShrink: 0 }}>
-				<SeverityChip severity={issue.severity} />
-			</Box>
+			{issue.effective_result && (
+				<Box sx={{ flexShrink: 0 }}>
+					<CheckResultChip result={issue.effective_result as CheckResult} />
+				</Box>
+			)}
+			{headerCheckName(issue) && (
+				<Box sx={{ flexShrink: 0 }}>
+					<CheckDocButton
+						source={issue.source}
+						check={headerCheckName(issue) as string}
+					/>
+				</Box>
+			)}
 			<Typography
 				variant="body2"
 				color="text.secondary"
@@ -232,6 +243,13 @@ function Header({
 			</Typography>
 		</Stack>
 	);
+}
+
+/** The check this issue tracks, for the header's documentation button:
+ * the stamped check name, or derived from the ref for rows that predate
+ * the check-state model. */
+function headerCheckName(issue: IssueData): string | null {
+	return issue.check_name ?? healthcheckNameFromRef(issue.source, issue.ref);
 }
 
 /** Header time slot. For closed issues, gives the closure context — reason
@@ -304,18 +322,7 @@ function Body({
 					onChanged={onChanged}
 				/>
 			)}
-			<Box
-				sx={{
-					mt: 1.5,
-					display: "grid",
-					gridTemplateColumns: {
-						xs: "minmax(0, 1fr)",
-						sm: "minmax(0, 1fr) minmax(0, 1fr)",
-					},
-					gap: 2,
-				}}
-			>
-				<EventLog issueId={issue.id} serverId={issue.server_id ?? undefined} />
+			<Box sx={{ mt: 1.5 }}>
 				<NotesList
 					apiModule="issues"
 					parentKey="issue_id"
@@ -586,7 +593,7 @@ function IssueMeta({ issue }: { issue: IssueData }) {
 				sx={{ fontFamily: "monospace", fontSize: "0.9em" }}
 			>
 				{checkName ? (
-					<MuiLink component={RouterLink} to={healthcheckPath(checkName)}>
+					<MuiLink component={RouterLink} to={healthcheckPath(issue.source, checkName)}>
 						{issue.ref}
 					</MuiLink>
 				) : (
@@ -639,153 +646,5 @@ function IncidentRef({ inc }: { inc: IssueIncidentLink }) {
 			)}
 			)
 		</>
-	);
-}
-
-const COLLAPSED_EVENT_COUNT = 3;
-const EXPANDED_PAGE_SIZE = 10;
-
-function EventLog({
-	issueId,
-	serverId,
-}: {
-	issueId: string;
-	serverId?: string;
-}) {
-	const [expanded, setExpanded] = useState(false);
-	const [page, setPage] = useState(0);
-	const limit = expanded ? EXPANDED_PAGE_SIZE : COLLAPSED_EVENT_COUNT;
-	const offset = expanded ? page * EXPANDED_PAGE_SIZE : 0;
-	const result = useApi(
-		"issues",
-		"list_events",
-		{ issue_id: issueId, offset, limit },
-		[issueId, offset, limit],
-	);
-	const [snapshotOpen, setSnapshotOpen] = useState<ReadonlySet<string>>(
-		() => new Set(),
-	);
-	const toggleSnapshot = (eventId: string) =>
-		setSnapshotOpen((prev) => {
-			const next = new Set(prev);
-			if (next.has(eventId)) next.delete(eventId);
-			else next.add(eventId);
-			return next;
-		});
-	const closeSnapshot = (eventId: string) =>
-		setSnapshotOpen((prev) => {
-			if (!prev.has(eventId)) return prev;
-			const next = new Set(prev);
-			next.delete(eventId);
-			return next;
-		});
-
-	if (result.status === "loading" || result.status === "idle")
-		return (
-			<Typography variant="caption" color="text.secondary">
-				Loading…
-			</Typography>
-		);
-	if (result.status === "error")
-		return <MuiAlert severity="error">{result.error.message}</MuiAlert>;
-	const { items, total } = result.data;
-	if (total === 0)
-		return (
-			<Typography variant="caption" color="text.secondary">
-				No events recorded.
-			</Typography>
-		);
-
-	const pageCount = Math.max(1, Math.ceil(total / EXPANDED_PAGE_SIZE));
-	const hiddenCount = Math.max(0, total - COLLAPSED_EVENT_COUNT);
-
-	return (
-		<Stack spacing={0.5}>
-			{items.map((e) => {
-				const at = e.occurred_at ?? e.created_at;
-				const open = snapshotOpen.has(e.id);
-				return (
-					<Box
-						key={e.id}
-						sx={{
-							p: 1,
-							border: 1,
-							borderColor: "divider",
-							borderRadius: 1,
-							minWidth: 0,
-						}}
-					>
-						<Stack
-							direction="row"
-							spacing={1}
-							sx={{ alignItems: "center", mb: 0.5 }}
-						>
-							<SeverityChip severity={e.severity} />
-							{e.occurrences > 1 && (
-								<Typography variant="caption" color="text.secondary">
-									×{e.occurrences}
-								</Typography>
-							)}
-							<Box sx={{ flex: 1 }} />
-							<StatusSnapshotButton
-								open={open}
-								onClick={() => toggleSnapshot(e.id)}
-								tooltip="Status snapshot at this event"
-							/>
-							<Typography variant="caption" color="text.secondary">
-								<TimeAgo timestamp={at} />
-							</Typography>
-						</Stack>
-						<Box sx={{ minWidth: 0, overflow: "hidden" }}>
-							<MessageView message={e.message} />
-						</Box>
-						{open && serverId && (
-							<StatusSnapshotPanel
-								serverId={serverId}
-								at={at}
-								onClose={() => closeSnapshot(e.id)}
-							/>
-						)}
-					</Box>
-				);
-			})}
-			{!expanded && hiddenCount > 0 && (
-				<Button
-					size="small"
-					onClick={() => {
-						setExpanded(true);
-						setPage(0);
-					}}
-					sx={{ alignSelf: "flex-start" }}
-				>
-					Show {hiddenCount} more {hiddenCount === 1 ? "event" : "events"}
-				</Button>
-			)}
-			{expanded && (
-				<Stack
-					direction="row"
-					spacing={1}
-					sx={{ alignItems: "center", justifyContent: "space-between" }}
-				>
-					<Button
-						size="small"
-						onClick={() => {
-							setExpanded(false);
-							setPage(0);
-						}}
-					>
-						Show less
-					</Button>
-					{pageCount > 1 && (
-						<Pagination
-							size="small"
-							count={pageCount}
-							page={page + 1}
-							onChange={(_, p) => setPage(p - 1)}
-						/>
-					)}
-				</Stack>
-			)}
-		</Stack>
 	);
 }

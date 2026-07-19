@@ -36,11 +36,11 @@ pub mod vars;
 pub const KIND_INCIDENT_OPEN: &str = "incident_open";
 /// Incident resolved — Phase A: top-level; Phase B: reply in the incident thread.
 pub const KIND_INCIDENT_RESOLVE: &str = "incident_resolve";
-/// Self-alert became active ([`crate::self_alerts`]). No incident; `issue_id`
-/// carries the nil-server issue.
+/// Legacy: direct self-alert notices, from before self-alerts flowed
+/// through canopy-wide incidents. Nothing enqueues these anymore; the
+/// constants remain so the drainer can drain straggler rows harmlessly.
 pub const KIND_SELF_ALERT_OPEN: &str = "self_alert_open";
-/// Self-alert recovered. Routed to the same webhook as the open; the payload's
-/// `state` field tells the workflow which is which.
+/// Legacy: see [`KIND_SELF_ALERT_OPEN`].
 pub const KIND_SELF_ALERT_RESOLVE: &str = "self_alert_resolve";
 
 #[derive(Clone, Debug, Serialize, Deserialize, Queryable, Selectable)]
@@ -51,7 +51,7 @@ pub struct SlackOutbox {
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub created_at: Timestamp,
 	pub kind: String,
-	/// `None` for self-alert rows, which have no incident.
+	/// `None` for legacy self-alert rows, which had no incident.
 	pub incident_id: Option<Uuid>,
 	pub issue_id: Option<Uuid>,
 	pub note_id: Option<Uuid>,
@@ -130,34 +130,6 @@ impl SlackOutbox {
 			dsl::slack_outbox
 				.filter(dsl::incident_id.eq(Some(incident_id)))
 				.filter(dsl::kind.eq(KIND_INCIDENT_OPEN))
-				.filter(dsl::delivered_at.is_null())
-				.filter(dsl::gave_up_at.is_null()),
-		)
-		.set((
-			dsl::gave_up_at.eq(jiff_diesel::Timestamp::from(now)),
-			dsl::last_error.eq(reason),
-		))
-		.execute(db)
-		.await
-		.map_err(AppError::from)?;
-		Ok(rows)
-	}
-
-	/// Self-alert twin of [`cancel_pending_open`](Self::cancel_pending_open),
-	/// keyed on the nil-server issue instead of an incident. Same contract: a
-	/// non-zero return means the open never reached Slack and the caller
-	/// should skip the resolve enqueue.
-	pub async fn cancel_pending_self_alert_open(
-		db: &mut AsyncPgConnection,
-		issue_id: Uuid,
-		reason: &str,
-	) -> Result<usize> {
-		use crate::schema::slack_outbox::dsl;
-		let now = Timestamp::now();
-		let rows = diesel::update(
-			dsl::slack_outbox
-				.filter(dsl::issue_id.eq(Some(issue_id)))
-				.filter(dsl::kind.eq(KIND_SELF_ALERT_OPEN))
 				.filter(dsl::delivered_at.is_null())
 				.filter(dsl::gave_up_at.is_null()),
 		)

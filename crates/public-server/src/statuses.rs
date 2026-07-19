@@ -13,19 +13,18 @@ use commons_servers::{
 use commons_types::{
 	backup::BackupType,
 	device::DeviceRole,
-	issue::Severity,
 	server::TagMap,
 	status::{CheckResult, CheckSeverity},
 	version::VersionStr,
 };
 use database::{
 	Db,
+	check_policies::{CheckPolicy, EvaluationContext, GradedResult},
 	devices::Device,
 	diesel_async::{AsyncConnection, AsyncPgConnection},
-	healthcheck_severities::{EvaluationContext, HealthcheckSeverity},
-	issues::{Issue, NewEvent},
+	issues::{CheckStateStamp, Issue, NewEvent},
 	servers::Server,
-	silenced_refs::silenced_refs_with_prefix,
+	silenced_refs::silenced_health_checks_for_server,
 	statuses::{NewStatus, Status},
 };
 use jiff::Timestamp;
@@ -43,6 +42,16 @@ use crate::state::AppState;
 /// status data.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct StatusPayload {
+	/// The name of the source pushing this status: the reporting agent, e.g.
+	/// `alertd`. Multiple sources may report on one server, each with its own
+	/// set of checks; a source's push only opens and recovers its own checks.
+	///
+	/// **Transitionally optional: this field will become mandatory.** A push
+	/// without a `source` is attributed to `alertd`; new reporters must send
+	/// their own name. Must be a non-empty string; the names `canopy` and
+	/// `manual` are reserved for canopy itself and are rejected.
+	pub source: Option<String>,
+
 	/// Overall self-reported health of the server. **Absent means `true`**,
 	/// so senders that predate this field are never treated as unhealthy by
 	/// omission. Recorded for historical analysis and display, but **not
@@ -51,23 +60,23 @@ pub struct StatusPayload {
 	/// controlled by an operator-managed catalog.
 	pub healthy: Option<bool>,
 
-	/// Per-check breakdown. **Required** — a push without a `health` array is
-	/// rejected with 400 (unless an operator has opted the server into the
-	/// legacy format, in which case such a push only refreshes reachability
-	/// and carries the previously reported checks forward). May be empty
-	/// (`[]`) for a server that genuinely runs no checks. Each entry must
+	/// Per-check breakdown. A push without a `health` array is the legacy
+	/// Tamanu direct-report format: it is treated as the `tamanu` source
+	/// reporting a single always-passing `tasks` heartbeat check. May be
+	/// empty (`[]`) for a source that genuinely runs no checks — which
+	/// recovers every check it previously reported. Each entry must
 	/// include a non-empty `check` name and exactly one of `result` /
 	/// `healthy`; any additional fields per check (latency, free disk %,
 	/// certificate expiry, etc.) are passed through verbatim and shown in the
 	/// status UI.
 	///
 	/// Every check name seen — whatever its result — is added to the
-	/// operator-facing check catalog, where the severity assigned to its
-	/// failures can be reviewed and adjusted. A failed or warning check opens
-	/// (or keeps open) an issue for that check at the catalog's current
-	/// severity; a broken check opens a separate issue at a fixed Warning
-	/// severity; passed and skipped results open nothing and close prior
-	/// issues.
+	/// operator-facing check catalog, where the policy grading its results
+	/// can be reviewed and adjusted. A check whose effective result is
+	/// failed or warning opens (or keeps open) its issue; a broken check
+	/// keeps the same issue open, retaining a known failure's contribution
+	/// while warning the check itself is broken; effective passed and
+	/// skipped results open nothing and close prior issues.
 	pub health: Vec<HealthCheck>,
 
 	/// Free-form additional data (uptime, database version, timezone,
@@ -93,10 +102,10 @@ pub struct HealthCheck {
 	pub check: String,
 	/// Outcome of the check: `passed`, `warning`, `failed`, `broken`, or
 	/// `skipped`. Exactly one of `result` / `healthy` must be present per
-	/// entry. `warning` and `failed` open an issue at the check's catalog
-	/// severity; `broken` (the check itself errored, not the system under
-	/// test) opens a separate issue at a fixed Warning severity without
-	/// confirming or clearing a known failure; `skipped` (a precondition was
+	/// entry. `warning` and `failed` open the check's issue as graded by
+	/// its policy; `broken` (the check itself errored, not the system under
+	/// test) neither confirms nor clears a known failure — the issue stays
+	/// open, retaining its contribution; `skipped` (a precondition was
 	/// not met) and `passed` open nothing and close prior issues.
 	pub result: Option<CheckResult>,
 	/// Legacy pass/fail form: `true` means `passed`, `false` means `failed`.
@@ -110,19 +119,25 @@ pub struct HealthCheck {
 	pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
-/// `source` value for the events filed below. Distinct from
-/// `canopy` (reachability sweep) so operators can tell apart "we
-/// couldn't reach you" from "you told us you're sick".
-const STATUS_SOURCE: &str = "status";
-/// Prefix for per-check refs. Each failed check is filed at
-/// `(status, health/<check_name>)`.
+/// The source a push is attributed to when it names none: the reporter
+/// deployed before the `source` field existed. Also the migration value for
+/// pre-source history. Transitional — the field will become mandatory.
+const DEFAULT_SOURCE: &str = "alertd";
+/// The source legacy-format pushes (no `health` array) are attributed to:
+/// they come from Tamanu's own direct reporting, not from alertd.
+const LEGACY_SOURCE: &str = "tamanu";
+/// The synthetic check a legacy push reports: a liveness heartbeat,
+/// always passing on receipt. Its value is that it stops — a Tamanu
+/// server that goes quiet trips the source-staleness net.
+const LEGACY_CHECK: &str = "tasks";
+/// Source names a push may not claim: `canopy` is canopy's own
+/// determinations (reachability sweep etc.), `manual` is operator-entered.
+const RESERVED_SOURCES: &[&str] = &[database::statuses::CANOPY_SOURCE, "manual"];
+/// Prefix for per-check refs. Each check is filed at
+/// `(<source>, health/<check_name>)` — one thread per check, brokenness
+/// included (a broken check retains the previous definite result's
+/// contribution while additionally warning that the check is broken).
 const HEALTH_REF: &str = "health";
-/// Prefix for broken-check refs. A check reporting `result: broken`
-/// files at `(status, health-broken/<check_name>)` — a separate ref
-/// from the check's failure issue, so a known failure can stay open
-/// (unconfirmed either way) while the check itself is broken, and so
-/// operators can silence the two independently.
-const BROKEN_REF: &str = "health-broken";
 
 /// The status-push response: only the return-path instructions the device
 /// can act on. The stored status record is deliberately not echoed back —
@@ -133,7 +148,8 @@ pub struct StatusResponse {
 	/// one-offs plus scheduled backups that are due. Each serializes as a
 	/// plain string (e.g. `"tamanu-postgres"`). The device should run each
 	/// listed type, then report via `POST /backup-report`; an empty list
-	/// means nothing to do.
+	/// means nothing to do. Only sent to `alertd` pushes (the agent that
+	/// runs backups); other sources always receive an empty list.
 	#[schema(value_type = Vec<String>)]
 	pub backup_now: Vec<BackupType>,
 	/// The effective handling of every healthcheck canopy knows about, keyed
@@ -188,7 +204,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 	),
 	request_body(
 		content = StatusPayload,
-		description = "Status push. A `health` array is required (it may be empty); a body without it is rejected with 400, unless the server has `allow_legacy_status` set, in which case the push refreshes reachability only and carries the last known healthchecks forward.",
+		description = "Status push. A body without a `health` array is the legacy Tamanu direct-report format, treated as the `tamanu` source reporting a single always-passing `tasks` heartbeat check.",
 	),
 	responses(
 		(status = 200, body = StatusResponse),
@@ -216,18 +232,8 @@ async fn create(
 		));
 	}
 
-	// Tell the device which backup types to run now (operator one-offs +
-	// schedule-due), riding the heartbeat response. Empty for an ungrouped
-	// server or one whose group has no `ready` backup config.
-	let backup_now = match server.group_id {
-		Some(group_id) => {
-			backups_due_now_for_server(&mut db, server_id, group_id, Timestamp::now()).await?
-		}
-		None => Vec::new(),
-	};
-
 	let raw = body.map(|j| j.0).unwrap_or(serde_json::Value::Null);
-	let (healthy, health, extra) = split_health_from_extra(raw)?;
+	let (source, healthy, health, extra) = split_health_from_extra(raw)?;
 
 	// The server version canopy tracks (and compares against the published
 	// version catalog) is the Tamanu version. Prefer the payload's
@@ -235,22 +241,17 @@ async fn create(
 	// reporters that predate carrying it in the body. Either may be absent.
 	let version = resolve_version(&extra, current_version.map(|v| v.0));
 
-	let Some(health) = health else {
-		// Legacy format (no `health` array). Off by default — only servers an
-		// operator has explicitly opted in via `allow_legacy_status` may use
-		// it, until their reporter speaks the new format.
-		if !server.allow_legacy_status {
-			return Err(AppError::BadRequest("`health` array is required".into()));
-		}
-		create_legacy_status(&mut db, server_id, id, extra, version).await?;
-		let check_severities =
-			effective_check_severities(&mut db, server_id, server.group_id).await?;
-		let tags = crate::tags::effective_tags_for_server(&mut db, &server).await?;
-		return Ok(Json(StatusResponse {
-			backup_now,
-			check_severities,
-			tags,
-		}));
+	// Legacy format (no `health` array): Tamanu's direct reporting. It
+	// becomes a heartbeat from the `tamanu` source — a single `tasks`
+	// check that always passes on receipt — and flows through the normal
+	// path from here, so it records state, registers its catalog entry,
+	// and participates in source staleness like any source.
+	let (source, health) = match health {
+		Some(health) => (source, health),
+		None => (
+			LEGACY_SOURCE.to_string(),
+			serde_json::json!([{ "check": LEGACY_CHECK, "result": "passed" }]),
+		),
 	};
 
 	// Resolve the server's effective tag map outside the write transaction.
@@ -273,19 +274,33 @@ async fn create(
 			extra,
 			healthy,
 			health,
+			source: source.clone(),
 		}
 		.save(conn)
 		.await?;
 
-		file_health_events(conn, server_id, Some(id), &status, &tags).await?;
+		file_health_events(conn, server_id, server.group_id, Some(id), &status, &tags).await?;
 
 		Ok(())
 	})
 	.await?;
 
+	// Tell the device which backup types to run now (operator one-offs +
+	// schedule-due), riding the heartbeat response. Only alertd runs
+	// backups — other sources (the tamanu heartbeat, seedling) would
+	// treat an instruction they can't act on as noise at best. Empty for
+	// an ungrouped server or one whose group has no `ready` backup config.
+	let backup_now = match server.group_id {
+		Some(group_id) if source == DEFAULT_SOURCE => {
+			backups_due_now_for_server(&mut db, server_id, group_id, Timestamp::now()).await?
+		}
+		_ => Vec::new(),
+	};
+
 	// Computed after the transaction so checks first seen on this very push
 	// (upserted into the catalog above) are already in the map.
-	let check_severities = effective_check_severities(&mut db, server_id, server.group_id).await?;
+	let check_severities =
+		effective_check_severities(&mut db, server_id, server.group_id, &source).await?;
 	let effective_tags = crate::tags::effective_tags_for_server(&mut db, &server).await?;
 
 	Ok(Json(StatusResponse {
@@ -297,14 +312,16 @@ async fn create(
 
 /// Fetch the effective healthcheck severity mapping for a server.
 ///
-/// Returns, for every healthcheck canopy knows about, how a failure of that
-/// check is classified for this server: `skip` (the check is silenced for
-/// this server — at server or group scope — or its severity is below
-/// warning), `warn` (warning), or `fail` (error or critical). Keys are check
-/// names as reported in `health[].check` on status pushes. Only the static
-/// severity baseline is reflected; operator-defined conditional rules are
-/// evaluated per push and not included here. The same mapping also rides
-/// along every status-push response as `check_severities`.
+/// Returns, for every healthcheck the `alertd` source reports, how that
+/// check is handled for this server: `skip` (the check is silenced for
+/// this server — at server or group scope — or its policy ceiling means it
+/// never alerts), `warn` (graded at most a warning), or `fail` (failures
+/// count as failures). Keys are check names as reported in
+/// `health[].check` on status pushes. Only the static policy ceiling is
+/// reflected; operator-defined conditional rules are evaluated per push
+/// and not included here. The same mapping also rides along every
+/// status-push response as `check_severities`, scoped to the pushing
+/// source.
 ///
 /// The calling device must be the one enrolled for this exact server (or
 /// hold the admin role).
@@ -339,69 +356,37 @@ async fn check_severities(
 		));
 	}
 
-	let map = effective_check_severities(&mut db, server_id, server.group_id).await?;
+	let map =
+		effective_check_severities(&mut db, server_id, server.group_id, DEFAULT_SOURCE).await?;
 	Ok(Json(map))
 }
 
-/// Build the effective per-check severity map for a server: every check in
-/// the operator catalog mapped from its static base severity (error and
-/// above → `fail`, warning → `warn`, below warning → `skip`), then any check
-/// silenced for this server (at server or group scope) forced to `skip`.
-/// Conditional severity rules are deliberately not consulted — they depend
-/// on each push's contents, so only the static baseline can be mapped ahead
-/// of time.
+/// Build the effective per-check map for a server and source: every check
+/// in the source's catalog mapped from its static policy ceiling (`failed`
+/// → `fail`, `warning`/`broken` → `warn`, `passed`/`skipped` → `skip`),
+/// then any check silenced for this server (at server or group scope)
+/// forced to `skip`. Conditional rules are deliberately not consulted —
+/// they depend on each push's contents, so only the static ceiling can be
+/// mapped ahead of time.
 async fn effective_check_severities(
 	db: &mut AsyncPgConnection,
 	server_id: Uuid,
 	group_id: Option<Uuid>,
+	source: &str,
 ) -> Result<BTreeMap<String, CheckSeverity>> {
-	let mut map: BTreeMap<String, CheckSeverity> = HealthcheckSeverity::base_severity_map(db)
+	let mut map: BTreeMap<String, CheckSeverity> = CheckPolicy::ceiling_map_for_source(db, source)
 		.await?
 		.into_iter()
-		.map(|(name, severity)| (name, severity.into()))
+		.map(|(name, ceiling)| (name, ceiling.into()))
 		.collect();
 
-	let health_prefix = format!("{HEALTH_REF}/");
-	for r#ref in
-		silenced_refs_with_prefix(db, server_id, group_id, STATUS_SOURCE, &health_prefix).await?
-	{
-		if let Some(check) = r#ref.strip_prefix(&health_prefix) {
-			map.insert(check.to_string(), CheckSeverity::Skip);
-		}
+	// Silences are keyed per (source, check): only this source's own
+	// silences force its checks to skip.
+	for check in silenced_health_checks_for_server(db, server_id, group_id, source).await? {
+		map.insert(check, CheckSeverity::Skip);
 	}
 
 	Ok(map)
-}
-
-/// Store a legacy-format push (no `health` array) for a server that's opted
-/// into [`Server::allow_legacy_status`]. The push only refreshes reachability:
-/// the new row carries the server's last known `healthy`/`health` forward
-/// (defaulting to "healthy, no checks" if the server has never reported the
-/// new format) rather than wiping them, and no health events are filed. So a
-/// server straddling an old and a new reporter doesn't flap its per-check
-/// issues every time the legacy endpoint pings.
-async fn create_legacy_status(
-	db: &mut AsyncPgConnection,
-	server_id: Uuid,
-	device_id: Uuid,
-	extra: serde_json::Value,
-	version: Option<VersionStr>,
-) -> Result<()> {
-	let (healthy, health) = match Status::latest_for_server(db, server_id).await? {
-		Some(prior) => (prior.healthy, prior.health),
-		None => (true, serde_json::Value::Array(Vec::new())),
-	};
-	NewStatus {
-		server_id,
-		device_id: Some(device_id),
-		version,
-		extra,
-		healthy,
-		health,
-	}
-	.save(db)
-	.await?;
-	Ok(())
 }
 
 /// Resolve the server version to record on this status. Prefers the payload's
@@ -421,23 +406,28 @@ fn resolve_version(extra: &serde_json::Value, header: Option<VersionStr>) -> Opt
 /// Per-push event filing. Warning/failed checks land at
 /// `(status, health/<check>)`; recoveries close those issues. Broken
 /// checks (`result: broken` — the check itself errored, not the
-/// system under test) land at `(status, health-broken/<check>)` at a
-/// fixed Warning; a broken check neither confirms nor clears a known
-/// failure, so its `health/<check>` issue stays open. Skipped checks
+/// system under test) neither confirm nor clear a known failure: the
+/// check's issue stays open, retaining its contribution. Skipped checks
 /// (`result: skipped` — precondition not met) file nothing and close
-/// both refs.
+/// the check's issue.
 ///
-/// Severity for each warning/failed check comes from the
-/// operator-owned `healthcheck_severities` catalog (see
-/// [`HealthcheckSeverity::severity_for`] for the rules/fallback
-/// contract). Every check seen on a push — whatever its result —
-/// upserts a default catalog row so new checks are visible to
-/// operators immediately at the default Warning severity.
-/// `status.healthy` is intentionally not consulted: the catalog is
-/// canopy's single source of truth for per-check severity.
+/// Each check's effective result comes from applying the operator-owned
+/// `check_policies` catalog entry for `(source, check)` (see
+/// [`CheckPolicy::apply`] for the rules/ceiling contract) to the
+/// observed result. Every check seen on a push — whatever its result —
+/// upserts a default catalog row so new checks are visible to operators
+/// immediately at the default warning ceiling. `status.healthy` is
+/// intentionally not consulted: the catalog is canopy's single source
+/// of truth for per-check grading.
+///
+/// Until issues themselves carry results, the effective result maps to
+/// the issue severity: failed → error (critical when the policy
+/// escalates), warning and broken → warning; passed and skipped file
+/// nothing and close prior issues.
 async fn file_health_events(
 	conn: &mut AsyncPgConnection,
 	server_id: Uuid,
+	group_id: Option<Uuid>,
 	device_id: Option<Uuid>,
 	status: &Status,
 	tags: &std::collections::HashMap<String, serde_json::Value>,
@@ -446,22 +436,20 @@ async fn file_health_events(
 	let occurred_at = Some(status.created_at);
 
 	// Upsert a catalog row for every check name seen on this push,
-	// whatever its result. New checks land at default Warning;
-	// operators can review and adjust from the /healthchecks page.
+	// whatever its result. New checks land at the default warning
+	// ceiling; operators can review and adjust from the /healthchecks
+	// page.
 	for check_name in curr_check_results.keys() {
-		HealthcheckSeverity::upsert_default(conn, check_name).await?;
+		CheckPolicy::upsert_default(conn, &status.source, check_name).await?;
 	}
 
 	// Status-level extras are shared across every per-check evaluation.
 	let empty_map = serde_json::Map::new();
 	let status_extra = status.extra.as_object().unwrap_or(&empty_map);
 
-	// Per-check opens: warning and failed file on the same ref (one
-	// thread per check; the filed severity is what differs).
-	for (check, result) in curr_check_results
-		.iter()
-		.filter(|(_, r)| matches!(r, CheckResult::Warning | CheckResult::Failed))
-	{
+	// Grade every check in the push through its policy.
+	let mut effective: BTreeMap<&String, GradedResult> = BTreeMap::new();
+	for (check, result) in &curr_check_results {
 		let entry = find_health_entry(&status.health, check);
 		// Strip the reserved `check` / `healthy` keys, and replace any
 		// wire-form `result` with the normalised value so rules see a
@@ -479,110 +467,164 @@ async fn file_health_events(
 			check_extra: &check_extra,
 			tags,
 		};
-		let severity = HealthcheckSeverity::severity_for(conn, check, *result, &ctx).await?;
-		let described = match result {
-			CheckResult::Warning => "warned",
-			_ => "failed",
-		};
-		NewEvent {
-			source: STATUS_SOURCE.into(),
-			r#ref: format!("{HEALTH_REF}/{check}"),
-			severity: Some(severity),
-			description: Some(format!("Health check '{check}' {described}")),
-			message: per_check_description(entry).unwrap_or_default(),
-			active: Some(true),
-			occurred_at,
-		}
-		.save(conn, server_id, device_id)
+		let graded = CheckPolicy::apply_scoped(
+			conn,
+			&status.source,
+			check,
+			*result,
+			&ctx,
+			Some(server_id),
+			group_id,
+		)
 		.await?;
+		effective.insert(check, graded);
 	}
 
-	// Broken opens: separate ref, fixed Warning. A broken check is a
-	// monitoring blind spot — actionable (fix the check), but not the
-	// system under test failing, so it doesn't inherit the catalog
-	// severity and can't open incidents.
-	for (check, _) in curr_check_results
-		.iter()
-		.filter(|(_, r)| matches!(r, CheckResult::Broken))
-	{
-		let entry = find_health_entry(&status.health, check);
-		NewEvent {
-			source: STATUS_SOURCE.into(),
-			r#ref: format!("{BROKEN_REF}/{check}"),
-			severity: Some(Severity::Warning),
-			description: Some(format!("Health check '{check}' is broken")),
-			message: per_check_description(entry).unwrap_or_default(),
-			active: Some(true),
-			occurred_at,
-		}
-		.save(conn, server_id, device_id)
-		.await?;
-	}
-
-	// Per-check closes are derived from the issues that are actually
-	// open, not from the previous status row: an issue can stay open
-	// across pushes that don't re-file it (failed → broken keeps the
-	// failure open), so the previous push alone can't tell us what
-	// needs closing.
-
-	// Failure closes: an open `health/<check>` closes when the check
-	// is now passed, skipped, or unmentioned ("trust the reporter").
-	// Broken does NOT close a prior failure — the check can't confirm
-	// the failure either way while it's broken.
+	// The pushing source's previously-open issues: consulted for close
+	// messages ("recovered" vs "was never trouble") and for the
+	// unmentioned-check closes below.
 	let health_prefix = format!("{HEALTH_REF}/");
-	for r#ref in
-		Issue::active_refs_with_prefix(conn, server_id, STATUS_SOURCE, &health_prefix).await?
-	{
-		let Some(check) = r#ref.strip_prefix(&health_prefix) else {
-			continue;
+	let previously_active: std::collections::BTreeSet<String> =
+		Issue::active_refs_with_prefix(conn, server_id, &status.source, &health_prefix)
+			.await?
+			.into_iter()
+			.filter_map(|r| {
+				r.strip_prefix(&health_prefix)
+					.map(|check| check.to_string())
+			})
+			.collect();
+
+	// File every check in the push — passing ones included, so the state
+	// row records the current result and when it was last reported. An
+	// effective broken result neither confirms nor clears the previous
+	// definite result: the filing retains an open effective failure's
+	// contribution, or counts as a warning when there was nothing to
+	// retain (broken contributes as a warning in the rollups).
+	//
+	// Degraded checks file before recoveries: when one failure swaps for
+	// another in a single push, the incoming failure must join the open
+	// incident before the outgoing one leaves, or the incident closes
+	// and reopens as two.
+	let filing_order = effective.iter().filter(|(_, g)| {
+		matches!(
+			g.effective,
+			CheckResult::Warning | CheckResult::Failed | CheckResult::Broken
+		)
+	});
+	let filing_order = filing_order.chain(
+		effective
+			.iter()
+			.filter(|(_, g)| matches!(g.effective, CheckResult::Passed | CheckResult::Skipped)),
+	);
+	for (check, graded) in filing_order {
+		let was_active = previously_active.contains(*check);
+		let (effective, escalates, active, description, message) = match graded.effective {
+			CheckResult::Failed => (
+				CheckResult::Failed,
+				graded.escalates,
+				true,
+				Some(format!("Health check '{check}' failed")),
+				None,
+			),
+			CheckResult::Warning => (
+				CheckResult::Warning,
+				graded.escalates,
+				true,
+				Some(format!("Health check '{check}' warned")),
+				None,
+			),
+			CheckResult::Broken => {
+				let retained = Issue::list_by_source_ref(
+					conn,
+					&status.source,
+					&format!("{HEALTH_REF}/{check}"),
+					&[server_id],
+				)
+				.await?
+				.into_iter()
+				.next()
+				.filter(|i| i.active && i.effective_result == Some(CheckResult::Failed));
+				let (effective, escalates) = match retained {
+					Some(prior) => (CheckResult::Failed, prior.escalates),
+					None => (CheckResult::Broken, graded.escalates),
+				};
+				(
+					effective,
+					escalates,
+					true,
+					Some(format!("Health check '{check}' is broken")),
+					None,
+				)
+			}
+			CheckResult::Passed => (
+				CheckResult::Passed,
+				graded.escalates,
+				false,
+				None,
+				Some(if was_active {
+					format!("Health check '{check}' recovered")
+				} else {
+					format!("Health check '{check}' passing")
+				}),
+			),
+			CheckResult::Skipped => (
+				CheckResult::Skipped,
+				graded.escalates,
+				false,
+				None,
+				Some(if was_active {
+					format!("Health check '{check}' is now skipped")
+				} else {
+					format!("Health check '{check}' skipped")
+				}),
+			),
 		};
-		let curr = curr_check_results.get(check);
-		if matches!(
-			curr,
-			Some(CheckResult::Warning | CheckResult::Failed | CheckResult::Broken)
-		) {
-			continue;
-		}
-		let message = if matches!(curr, Some(CheckResult::Skipped)) {
-			format!("Health check '{check}' is now skipped")
-		} else {
-			format!("Health check '{check}' recovered")
+		let entry = find_health_entry(&status.health, check);
+		let stamp = CheckStateStamp {
+			check: (*check).clone(),
+			observed: curr_check_results[*check],
+			effective,
+			escalates,
+			detail: entry.cloned().map(serde_json::Value::Object),
 		};
 		NewEvent {
-			source: STATUS_SOURCE.into(),
-			r#ref,
-			severity: Some(Severity::Info),
-			description: None,
-			message,
-			active: Some(false),
+			source: status.source.clone(),
+			r#ref: format!("{HEALTH_REF}/{check}"),
+			description,
+			message: message
+				.or_else(|| per_check_description(entry))
+				.unwrap_or_default(),
+			active: Some(active),
 			occurred_at,
 		}
-		.save(conn, server_id, device_id)
+		.save_with_state(conn, server_id, device_id, Some(&stamp))
 		.await?;
 	}
 
-	// Broken closes: any result other than broken (or absence) means
-	// the check itself is no longer broken.
-	let broken_prefix = format!("{BROKEN_REF}/");
-	for r#ref in
-		Issue::active_refs_with_prefix(conn, server_id, STATUS_SOURCE, &broken_prefix).await?
-	{
-		let Some(check) = r#ref.strip_prefix(&broken_prefix) else {
-			continue;
-		};
-		if matches!(curr_check_results.get(check), Some(CheckResult::Broken)) {
+	// Unmentioned closes: a check the source previously reported but
+	// omits from this push has recovered ("trust the reporter"). Scoped
+	// to the pushing source: one source's push says nothing about
+	// another's checks.
+	for check in &previously_active {
+		if curr_check_results.contains_key(check) {
 			continue;
 		}
+		let stamp = CheckStateStamp {
+			check: check.clone(),
+			observed: CheckResult::Passed,
+			effective: CheckResult::Passed,
+			escalates: false,
+			detail: None,
+		};
 		NewEvent {
-			source: STATUS_SOURCE.into(),
-			r#ref: format!("{BROKEN_REF}/{check}"),
-			severity: Some(Severity::Info),
+			source: status.source.clone(),
+			r#ref: format!("{HEALTH_REF}/{check}"),
 			description: None,
-			message: format!("Health check '{check}' is no longer broken"),
+			message: format!("Health check '{check}' recovered"),
 			active: Some(false),
 			occurred_at,
 		}
-		.save(conn, server_id, device_id)
+		.save_with_state(conn, server_id, device_id, Some(&stamp))
 		.await?;
 	}
 
@@ -639,11 +681,15 @@ fn per_check_description(
 	(!lines.is_empty()).then(|| lines.join("\n"))
 }
 
-/// Pulls the reserved `healthy` and `health` keys out of the incoming
-/// status body and returns them alongside the rest of the payload
+/// Pulls the reserved `source`, `healthy`, and `health` keys out of the
+/// incoming status body and returns them alongside the rest of the payload
 /// (`extra`). Validates types per the contract:
 ///
-/// - missing or `null` body → `healthy = true`, `health = []`, `extra = {}`
+/// - missing or `null` body → `source = alertd`, `healthy = true`,
+///   `health = []`, `extra = {}`
+/// - `source` absent ⇒ `alertd` (transitional — the field will become
+///   mandatory); present must be a non-empty string and not one of the
+///   reserved names (`canopy`, `manual`)
 /// - `healthy` absent ⇒ `true` (legacy compat — non-negotiable, this is
 ///   what stops every legacy server from false-positiving unhealthy on
 ///   the day we deploy)
@@ -657,7 +703,7 @@ fn per_check_description(
 ///   verbatim.
 fn split_health_from_extra(
 	raw: serde_json::Value,
-) -> Result<(bool, Option<serde_json::Value>, serde_json::Value)> {
+) -> Result<(String, bool, Option<serde_json::Value>, serde_json::Value)> {
 	let mut obj = match raw {
 		serde_json::Value::Null => serde_json::Map::new(),
 		serde_json::Value::Object(m) => m,
@@ -668,18 +714,34 @@ fn split_health_from_extra(
 		}
 	};
 
+	let source = match obj.remove("source") {
+		None => DEFAULT_SOURCE.to_string(),
+		Some(serde_json::Value::String(s)) if !s.is_empty() => {
+			if RESERVED_SOURCES.iter().any(|r| s.eq_ignore_ascii_case(r)) {
+				return Err(AppError::BadRequest(format!(
+					"`source` must not be a reserved name ({})",
+					RESERVED_SOURCES.join(", "),
+				)));
+			}
+			s
+		}
+		Some(_) => {
+			return Err(AppError::BadRequest(
+				"`source` must be a non-empty string".into(),
+			));
+		}
+	};
+
 	let healthy = match obj.remove("healthy") {
 		None => true,
 		Some(serde_json::Value::Bool(b)) => b,
 		Some(_) => return Err(AppError::BadRequest("`healthy` must be a boolean".into())),
 	};
 
-	// A push without a `health` key is the retired legacy format. We don't
-	// reject it here — the caller decides, per the server's
-	// `allow_legacy_status` flag, whether to accept it (reachability-only,
-	// carrying prior healthchecks forward) or 400 it.
+	// A push without a `health` key is the legacy Tamanu direct-report
+	// format; the caller transforms it into the tamanu/tasks heartbeat.
 	let Some(health_value) = obj.remove("health") else {
-		return Ok((healthy, None, serde_json::Value::Object(obj)));
+		return Ok((source, healthy, None, serde_json::Value::Object(obj)));
 	};
 	let health_arr = match health_value {
 		serde_json::Value::Array(a) => a,
@@ -732,6 +794,7 @@ fn split_health_from_extra(
 	}
 
 	Ok((
+		source,
 		healthy,
 		Some(serde_json::Value::Array(health_arr)),
 		serde_json::Value::Object(obj),

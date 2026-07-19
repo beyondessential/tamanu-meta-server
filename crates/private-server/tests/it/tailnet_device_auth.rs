@@ -19,28 +19,29 @@ async fn provision_server(
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn tailnet_server_device_can_post_event() {
+async fn tailnet_server_device_can_push_status() {
 	commons_tests::server::run_with_tailnet_device_auth(
 		"server",
 		async |mut conn, tailnet_ip, _node_id, device_id, _public, private| {
 			let server_id = provision_server(&mut conn, device_id).await;
 
 			let response = private
-				.post("/public/events")
+				.post(&format!("/public/status/{server_id}"))
 				.add_header("Forwarded", &format!("for={tailnet_ip}"))
 				.json(&serde_json::json!({
-					"source": "watchdog",
-					"ref": "disk-/var",
-					"message": "less than 5% free",
+					"health": [ { "check": "disk", "result": "passed" } ],
 				}))
 				.await;
 			response.assert_status_ok();
 
-			let body: serde_json::Value = response.json();
-			assert_eq!(
-				body.get("server_id").and_then(|v| v.as_str()),
-				Some(server_id.to_string().as_str()),
-			);
+			// The push landed as a status row against the right server.
+			conn.batch_execute(&format!(
+				"DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM statuses \
+				 WHERE server_id = '{server_id}' AND device_id = '{device_id}') \
+				 THEN RAISE EXCEPTION 'status row not recorded'; END IF; END $$;"
+			))
+			.await
+			.expect("status row recorded for the server");
 		},
 	)
 	.await
@@ -98,13 +99,9 @@ async fn unknown_tailnet_node_is_rejected_without_creating_a_row() {
 		let private = TestServer::new(private_router);
 
 		let response = private
-			.post("/public/events")
+			.post(&format!("/public/status/{}", Uuid::new_v4()))
 			.add_header("Forwarded", &format!("for={tailnet_ip}"))
-			.json(&serde_json::json!({
-				"source": "watchdog",
-				"ref": "x",
-				"message": "first contact",
-			}))
+			.json(&serde_json::json!({ "health": [] }))
 			.await;
 		assert_eq!(response.status_code().as_u16(), 401);
 
@@ -133,16 +130,12 @@ async fn non_tailnet_source_ip_rejected() {
 	commons_tests::server::run_with_tailnet_device_auth(
 		"server",
 		async |mut conn, _tailnet_ip, _node_id, device_id, _public, private| {
-			provision_server(&mut conn, device_id).await;
+			let server_id = provision_server(&mut conn, device_id).await;
 
 			let response = private
-				.post("/public/events")
+				.post(&format!("/public/status/{server_id}"))
 				.add_header("Forwarded", "for=203.0.113.7")
-				.json(&serde_json::json!({
-					"source": "watchdog",
-					"ref": "x",
-					"message": "spoofed",
-				}))
+				.json(&serde_json::json!({ "health": [] }))
 				.await;
 			assert_eq!(response.status_code().as_u16(), 401);
 			let body: serde_json::Value = response.json();

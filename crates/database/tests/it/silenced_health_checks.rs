@@ -1,15 +1,15 @@
-//! `silenced_refs::silenced_health_checks_for_server(s)`: resolving the
-//! set of healthcheck names silenced for a server from its `(status,
-//! health/<check>)` silence entries, at server and group scope, in one
-//! batch. This set feeds `Status::health_state_ignoring` so silenced
-//! checks don't count toward the health rollup.
+//! `silenced_refs::silenced_health_checks_for_server`: resolving the set
+//! of healthcheck names silenced for a server under one reporting
+//! source, at server and group scope. This set feeds
+//! `Status::health_state_ignoring` so silenced checks don't count toward
+//! the health rollup — scoped to the status row's own source, since a
+//! check's identity is the (source, check) pair.
 
 use std::collections::BTreeSet;
 
 use commons_tests::db::TestDb;
 use database::silenced_refs::{
 	ServerGroupSilencedRef, ServerSilencedRef, silenced_health_checks_for_server,
-	silenced_health_checks_for_servers,
 };
 use diesel::{sql_query, sql_types};
 use diesel_async::RunQueryDsl;
@@ -55,75 +55,80 @@ fn checks(names: &[&str]) -> BTreeSet<String> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn resolves_server_and_group_scopes_in_batch() {
+async fn combines_server_and_group_scopes() {
 	TestDb::run(async |mut conn, _url| {
 		let group = insert_group(&mut conn, "g").await;
 		let grouped = insert_server(&mut conn, Some(group)).await;
 		let ungrouped = insert_server(&mut conn, None).await;
 		let unsilenced = insert_server(&mut conn, Some(group)).await;
 
-		ServerSilencedRef::add(&mut conn, grouped, "status", "health/postgres", None)
+		ServerSilencedRef::add(&mut conn, grouped, "alertd", "health/postgres", None)
 			.await
 			.unwrap();
-		ServerSilencedRef::add(&mut conn, ungrouped, "status", "health/disk", None)
+		ServerSilencedRef::add(&mut conn, ungrouped, "alertd", "health/disk", None)
 			.await
 			.unwrap();
-		ServerGroupSilencedRef::add(&mut conn, group, "status", "health/uploads", None)
+		ServerGroupSilencedRef::add(&mut conn, group, "alertd", "health/uploads", None)
 			.await
 			.unwrap();
-
-		let map = silenced_health_checks_for_servers(
-			&mut conn,
-			&[
-				(grouped, Some(group)),
-				(ungrouped, None),
-				(unsilenced, Some(group)),
-			],
-		)
-		.await
-		.unwrap();
 
 		// Server scope and group scope combine for the grouped server.
-		assert_eq!(map.get(&grouped), Some(&checks(&["postgres", "uploads"])));
-		// The ungrouped server only sees its own silences.
-		assert_eq!(map.get(&ungrouped), Some(&checks(&["disk"])));
-		// A group member with no server-scope silence still inherits the
-		// group's.
-		assert_eq!(map.get(&unsilenced), Some(&checks(&["uploads"])));
-
-		// The single-server convenience agrees.
 		assert_eq!(
-			silenced_health_checks_for_server(&mut conn, grouped, Some(group))
+			silenced_health_checks_for_server(&mut conn, grouped, Some(group), "alertd")
 				.await
 				.unwrap(),
 			checks(&["postgres", "uploads"]),
+		);
+		// The ungrouped server only sees its own silences.
+		assert_eq!(
+			silenced_health_checks_for_server(&mut conn, ungrouped, None, "alertd")
+				.await
+				.unwrap(),
+			checks(&["disk"]),
+		);
+		// A group member with no server-scope silence still inherits the
+		// group's.
+		assert_eq!(
+			silenced_health_checks_for_server(&mut conn, unsilenced, Some(group), "alertd")
+				.await
+				.unwrap(),
+			checks(&["uploads"]),
 		);
 	})
 	.await
 }
 
-/// Only `(status, health/<check>)` silences are healthcheck silences:
-/// other sources and non-health refs (e.g. canopy reachability) don't
-/// leak into the set.
+/// A check's identity is the (source, check) pair: another source's
+/// silence on a same-named check never applies, and neither do canopy's
+/// own or manual silences.
 #[tokio::test(flavor = "multi_thread")]
-async fn ignores_non_healthcheck_silences() {
+async fn scoped_to_the_reporting_source() {
 	TestDb::run(async |mut conn, _url| {
 		let server = insert_server(&mut conn, None).await;
 
 		ServerSilencedRef::add(&mut conn, server, "canopy", "reachability", None)
 			.await
 			.unwrap();
-		ServerSilencedRef::add(&mut conn, server, "backups", "health/postgres", None)
+		ServerSilencedRef::add(&mut conn, server, "seedling", "health/postgres", None)
 			.await
 			.unwrap();
-		ServerSilencedRef::add(&mut conn, server, "status", "something-else", None)
+		ServerSilencedRef::add(&mut conn, server, "alertd", "health/disk", None)
 			.await
 			.unwrap();
 
-		let map = silenced_health_checks_for_servers(&mut conn, &[(server, None)])
-			.await
-			.unwrap();
-		assert_eq!(map.get(&server), None);
+		assert_eq!(
+			silenced_health_checks_for_server(&mut conn, server, None, "alertd")
+				.await
+				.unwrap(),
+			checks(&["disk"]),
+			"only alertd's own silence applies to alertd's checks",
+		);
+		assert_eq!(
+			silenced_health_checks_for_server(&mut conn, server, None, "seedling")
+				.await
+				.unwrap(),
+			checks(&["postgres"]),
+		);
 	})
 	.await
 }
@@ -134,21 +139,21 @@ async fn unsilencing_removes_the_check() {
 	TestDb::run(async |mut conn, _url| {
 		let server = insert_server(&mut conn, None).await;
 
-		ServerSilencedRef::add(&mut conn, server, "status", "health/postgres", None)
+		ServerSilencedRef::add(&mut conn, server, "alertd", "health/postgres", None)
 			.await
 			.unwrap();
 		assert_eq!(
-			silenced_health_checks_for_server(&mut conn, server, None)
+			silenced_health_checks_for_server(&mut conn, server, None, "alertd")
 				.await
 				.unwrap(),
 			checks(&["postgres"]),
 		);
 
-		ServerSilencedRef::remove(&mut conn, server, "status", "health/postgres")
+		ServerSilencedRef::remove(&mut conn, server, "alertd", "health/postgres")
 			.await
 			.unwrap();
 		assert_eq!(
-			silenced_health_checks_for_server(&mut conn, server, None)
+			silenced_health_checks_for_server(&mut conn, server, None, "alertd")
 				.await
 				.unwrap(),
 			BTreeSet::new(),

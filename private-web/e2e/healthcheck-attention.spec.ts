@@ -1,8 +1,7 @@
 import { expect, test } from "./test-fixtures";
 import {
 	resetSeededTables,
-	seedHealthcheckSeverity,
-	seedIssue,
+	seedCheckPolicy,
 	seedServer,
 	seedServerGroup,
 	seedStatus,
@@ -16,7 +15,7 @@ test.describe("healthcheck attention page", () => {
 	test("renders an empty state when no server flags the check", async ({
 		page,
 	}) => {
-		await page.goto("/healthchecks/postgres");
+		await page.goto("/healthchecks/alertd/postgres");
 		await expect(
 			page.getByText("No servers currently flag"),
 		).toBeVisible();
@@ -69,7 +68,7 @@ test.describe("healthcheck attention page", () => {
 			health: [{ check: "disk_space", result: "failed", free_pct: 3 }],
 		});
 
-		await page.goto("/healthchecks/postgres");
+		await page.goto("/healthchecks/alertd/postgres");
 
 		const failingLink = page.getByRole("link", { name: "Korolevu Facility" });
 		const warningLink = page.getByRole("link", { name: "Sigatoka Facility" });
@@ -124,7 +123,7 @@ test.describe("healthcheck attention page", () => {
 			health: [{ check: "postgres", result: "passed", latency_ms: 12 }],
 		});
 
-		await page.goto("/healthchecks/postgres");
+		await page.goto("/healthchecks/alertd/postgres");
 		await expect(
 			page.getByRole("link", { name: "Mendi Facility" }),
 		).toBeVisible();
@@ -175,7 +174,7 @@ test.describe("healthcheck attention page", () => {
 			health: [{ check: "disk_space", result: "warning" }],
 		});
 
-		await page.goto("/healthchecks/disk_space");
+		await page.goto("/healthchecks/alertd/disk_space");
 		await expect(
 			page.getByRole("link", { name: "Labasa Facility" }),
 		).toBeVisible();
@@ -222,23 +221,29 @@ test.describe("healthcheck attention page", () => {
 				{ check: "postgres", result: "failed", error: "connection refused" },
 			],
 		});
-		await seedIssue(sql, {
-			serverId: failing.id,
-			source: "status",
-			ref: "health/postgres",
-			message: "postgres check failing",
-			firstSeen: new Date(Date.now() - 3 * 3_600_000).toISOString(),
-		});
+		// The failing server's degradation streak started three hours ago;
+		// the other server's state row predates the check-state stamps
+		// (inactive, no streak), which renders the placeholder.
+		await sql.query(
+			`UPDATE issues SET degraded_since = NOW() - INTERVAL '3 hours'
+			 WHERE server_id = $1 AND ref = 'health/postgres'`,
+			[failing.id],
+		);
+		await sql.query(
+			`UPDATE issues SET active = false, degraded_since = NULL
+			 WHERE server_id = $1 AND ref = 'health/postgres'`,
+			[fresh.id],
+		);
 
-		await page.goto("/healthchecks/postgres");
+		await page.goto("/healthchecks/alertd/postgres");
 
-		// The issue-backed row shows a relative failing-since; the row
-		// without an issue shows the em-dash placeholder.
+		// The state-backed row shows a relative failing-since; the row
+		// without an active streak shows the em-dash placeholder.
 		await expect(page.getByText("3h ago")).toBeVisible();
 		await expect(page.getByText("—")).toBeVisible();
 	});
 
-	test("shows the catalog severity when one is configured", async ({
+	test("shows the catalog ceiling when one is configured", async ({
 		page,
 		sql,
 	}) => {
@@ -247,13 +252,75 @@ test.describe("healthcheck attention page", () => {
 			serverId: server.id,
 			health: [{ check: "disk_space", result: "failed", free_pct: 2 }],
 		});
-		await seedHealthcheckSeverity(sql, {
+		await seedCheckPolicy(sql, {
 			checkName: "disk_space",
-			severity: "critical",
+			ceiling: "failed",
+			escalates: true,
 		});
 
-		await page.goto("/healthchecks/disk_space");
-		await expect(page.getByText("critical", { exact: true })).toBeVisible();
+		await page.goto("/healthchecks/alertd/disk_space");
+		// The heading chip renders the configured ceiling, plus the
+		// escalates marker.
+		await expect(
+			page.getByRole("heading", { name: "disk_space" }),
+		).toBeVisible();
+		await expect(page.getByText("escalates", { exact: true })).toBeVisible();
+	});
+
+	test("shows operator documentation in an expandable panel", async ({
+		page,
+		sql,
+	}) => {
+		const server = await seedServer(sql, { name: "Doc Facility" });
+		await seedStatus(sql, {
+			serverId: server.id,
+			health: [{ check: "disk_space", result: "failed" }],
+		});
+		await seedCheckPolicy(sql, {
+			checkName: "disk_space",
+			documentation:
+				"## Description\n\nWatches free disk space.\n\n## Solve\n\nClear old backups.",
+		});
+
+		await page.goto("/healthchecks/alertd/disk_space");
+		await page.getByText("About this check").click();
+		await expect(page.getByText("Watches free disk space.")).toBeVisible();
+		await expect(page.getByText("Clear old backups.")).toBeVisible();
+	});
+
+	test("documentation is written from the healthcheck settings page, seeded with the template", async ({
+		page,
+		sql,
+	}) => {
+		await seedCheckPolicy(sql, { checkName: "disk_space" });
+
+		await page.goto("/settings/healthchecks/disk_space");
+		await expect(
+			page.getByText("Nobody has documented this check yet", { exact: false }),
+		).toBeVisible();
+		await page.getByRole("button", { name: "Write documentation" }).click();
+
+		// The editor seeds the conventional template.
+		const editor = page.getByRole("textbox", {
+			name: "Documentation markdown",
+		});
+		await expect(editor).toHaveValue(/## Description/);
+		await expect(editor).toHaveValue(/## Results/);
+		await expect(editor).toHaveValue(/## Solve/);
+
+		await editor.fill("## Description\n\nDisk space watcher.");
+		await page.getByRole("button", { name: "Save documentation" }).click();
+
+		// The saved document renders as markdown.
+		await expect(
+			page.getByRole("heading", { name: "Description" }),
+		).toBeVisible();
+		await expect(page.getByText("Disk space watcher.")).toBeVisible();
+
+		const rows = await sql.query<{ documentation: string | null }>(
+			"SELECT documentation FROM check_policies WHERE source = 'alertd' AND check_name = 'disk_space'",
+		);
+		expect(rows[0]!.documentation).toContain("Disk space watcher.");
 	});
 
 	test("URL-encodes check names with special characters", async ({
@@ -267,7 +334,7 @@ test.describe("healthcheck attention page", () => {
 			health: [{ check: checkName, result: "failed" }],
 		});
 
-		await page.goto(`/healthchecks/${encodeURIComponent(checkName)}`);
+		await page.goto(`/healthchecks/alertd/${encodeURIComponent(checkName)}`);
 		await expect(
 			page.getByRole("heading", { name: checkName }),
 		).toBeVisible();
@@ -293,6 +360,6 @@ test.describe("healthcheck attention page", () => {
 		const checkLink = page.getByRole("link", { name: "postgres" });
 		await expect(checkLink).toBeVisible();
 		await checkLink.click();
-		await expect(page).toHaveURL(/\/healthchecks\/postgres$/);
+		await expect(page).toHaveURL(/\/healthchecks\/alertd\/postgres$/);
 	});
 });

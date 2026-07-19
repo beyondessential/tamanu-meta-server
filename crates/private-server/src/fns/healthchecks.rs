@@ -1,5 +1,5 @@
-//! Operator-owned catalog of healthcheck names → severity. Read and
-//! edit endpoints for the catalog page at /healthchecks. Ingestion
+//! Operator-owned catalog of check policies per (source, check). Read
+//! and edit endpoints for the catalog page at /healthchecks. Ingestion
 //! (in the public-server status handler) maintains the rows; this
 //! module exposes them to admins.
 
@@ -8,8 +8,8 @@ use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
-use commons_types::issue::Severity;
-use database::healthcheck_severities::{HealthcheckSeverity, IfLadder};
+use commons_types::status::CheckResult;
+use database::check_policies::{CheckPolicy, IfLadder};
 use database::servers::Server;
 use database::statuses::Status;
 use jiff::Timestamp;
@@ -25,20 +25,30 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(list))
 		.routes(routes!(update))
 		.routes(routes!(update_rules))
+		.routes(routes!(update_documentation))
 		.routes(routes!(sample))
 		.routes(routes!(tag_keys))
 }
 
-/// A named healthcheck's alerting policy: the base severity assigned to
-/// its failures, plus optional conditional rules that can override that
-/// severity based on the details of a given failure.
+/// One (source, check)'s policy: the ceiling capping its effective
+/// result, the escalation flag, plus optional conditional rules that can
+/// grade a given report differently.
 #[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct HealthcheckSeverityData {
+pub struct CheckPolicyData {
+	/// The source that reports this check.
+	pub source: String,
 	/// The healthcheck's name, exactly as reported by monitored servers.
 	pub check_name: String,
-	/// The severity assigned to a failure of this check when no
-	/// conditional rule (see `rules`) overrides it.
-	pub severity: Severity,
+	/// The maximum effective result for this check when no conditional
+	/// rule (see `rules`) overrides it: an observed result more urgent
+	/// than the ceiling grades down to it. One of `failed`, `warning`,
+	/// `passed`, or `skipped` (`skipped` also tells the reporting source
+	/// it may stop running the check).
+	#[schema(value_type = String)]
+	pub ceiling: CheckResult,
+	/// Whether an effective failure of this check notifies immediately,
+	/// bypassing the incident grace period.
+	pub escalates: bool,
 	/// When this check was first reported and this policy entry was
 	/// created.
 	pub first_seen: Timestamp,
@@ -52,21 +62,26 @@ pub struct HealthcheckSeverityData {
 	pub notes: Option<String>,
 	/// When this policy was last modified.
 	pub updated_at: Timestamp,
+	/// Operator-authored documentation for this check: a single markdown
+	/// document. By convention it covers what the check observes, what
+	/// each result means, and hints for solving a failure, but no
+	/// structure is enforced. `null` when nobody has documented it yet.
+	pub documentation: Option<String>,
 	/// `true` if no operator has reviewed this policy yet.
 	pub pending_review: bool,
-	/// Conditional rules that can assign a different severity than
-	/// `severity`, depending on the failing check's own fields, the
-	/// surrounding status report, or the reporting server's tags. `null`
-	/// means no conditional rules are configured, and `severity` always
-	/// applies.
+	/// Conditional rules that can grade a report to a different result
+	/// than the ceiling would — in any direction — depending on the
+	/// check's own fields, the surrounding status report, or the
+	/// reporting server's tags. `null` means no conditional rules are
+	/// configured, and the ceiling always applies.
 	///
 	/// When present, this is a single-key object shaped like
-	/// `{"if": [condition_1, severity_1, condition_2, severity_2, ...]}`.
-	/// Conditions are tried in order, and the severity paired with the
-	/// first matching condition is used; if none match, the base
-	/// `severity` is used instead. There's no explicit "else" branch —
-	/// the fallback to `severity` plays that role — so the array must
-	/// have an even number of entries and at least one pair.
+	/// `{"if": [condition_1, result_1, condition_2, result_2, ...]}`.
+	/// Conditions are tried in order, and the result paired with the
+	/// first matching condition is used; if none match, the observed
+	/// result capped at the ceiling is used instead. There's no explicit
+	/// "else" branch — the ceiling fallback plays that role — so the
+	/// array must have an even number of entries and at least one pair.
 	///
 	/// Each condition is a single-key object naming a comparison
 	/// operator — one of `==`, `!=`, `<`, `<=`, `>`, `>=`, or `in_range`
@@ -83,7 +98,7 @@ pub struct HealthcheckSeverityData {
 	/// is treated the same as `null` (no conditional rules).
 	#[schema(value_type = Option<serde_json::Value>)]
 	pub rules: Option<JsonValue>,
-	/// Number of condition/severity branches in `rules`; `0` when
+	/// Number of condition/result branches in `rules`; `0` when
 	/// `rules` is `null` or couldn't be parsed. Lets a caller tell
 	/// whether conditional rules exist without parsing `rules` itself.
 	pub rule_count: u32,
@@ -96,18 +111,21 @@ fn rule_count(rules: &Option<JsonValue>) -> u32 {
 		.unwrap_or(0)
 }
 
-impl From<HealthcheckSeverity> for HealthcheckSeverityData {
-	fn from(h: HealthcheckSeverity) -> Self {
+impl From<CheckPolicy> for CheckPolicyData {
+	fn from(h: CheckPolicy) -> Self {
 		let pending_review = h.reviewed_at.is_none();
 		let rule_count = rule_count(&h.rules);
 		Self {
+			source: h.source,
 			check_name: h.check_name,
-			severity: h.severity,
+			ceiling: h.ceiling,
+			escalates: h.escalates,
 			first_seen: h.first_seen,
 			reviewed_at: h.reviewed_at,
 			reviewed_by: h.reviewed_by,
 			notes: h.notes,
 			updated_at: h.updated_at,
+			documentation: h.documentation,
 			pending_review,
 			rules: h.rules,
 			rule_count,
@@ -115,11 +133,11 @@ impl From<HealthcheckSeverity> for HealthcheckSeverityData {
 	}
 }
 
-/// List the healthcheck severity catalog.
+/// List the check policy catalog.
 ///
-/// Returns every known healthcheck name together with its current
-/// severity policy, ordered by name. An entry exists for every check name
-/// any server has ever reported; new checks are added automatically the
+/// Returns every known (source, check) together with its current policy,
+/// ordered by source then name. An entry exists for every check any
+/// source has ever reported; new checks are added automatically the
 /// first time they're seen, with a default policy pending review.
 #[utoipa::path(
 	post,
@@ -128,7 +146,7 @@ impl From<HealthcheckSeverity> for HealthcheckSeverityData {
 	tag = "healthchecks",
 	security(("tailscale-admin" = [])),
 	responses(
-		(status = 200, description = "Catalog rows ordered by check_name.", body = Vec<HealthcheckSeverityData>),
+		(status = 200, description = "Catalog rows ordered by source then check_name.", body = Vec<CheckPolicyData>),
 		(status = 401, body = ProblemDetailsSchema),
 		(status = 403, body = ProblemDetailsSchema),
 	),
@@ -136,22 +154,30 @@ impl From<HealthcheckSeverity> for HealthcheckSeverityData {
 pub async fn list(
 	State(state): State<AppState>,
 	_admin: TailscaleAdmin,
-) -> Result<Json<Vec<HealthcheckSeverityData>>> {
+) -> Result<Json<Vec<CheckPolicyData>>> {
 	let mut conn = state.db.get().await?;
-	let rows = HealthcheckSeverity::list(&mut conn).await?;
+	let rows = CheckPolicy::list(&mut conn).await?;
 	Ok(Json(rows.into_iter().map(Into::into).collect()))
 }
 
-/// Request body for updating a healthcheck's base severity policy.
+/// Request body for updating a check's base policy.
 #[derive(Deserialize, ToSchema)]
 pub struct HealthcheckUpdateArgs {
+	/// The source whose check to update.
+	pub source: String,
 	/// The healthcheck name to update; must already exist in the
 	/// catalog.
 	pub check_name: String,
-	/// The severity to assign to this check's failures when no
-	/// conditional rule overrides it.
-	pub severity: Severity,
-	/// Operator notes to store alongside the new severity. Omitting this
+	/// The ceiling to apply to this check's observed results when no
+	/// conditional rule overrides it: one of `failed`, `warning`,
+	/// `passed`, or `skipped`.
+	#[schema(value_type = String)]
+	pub ceiling: CheckResult,
+	/// Whether an effective failure of this check should notify
+	/// immediately, bypassing the incident grace period.
+	#[serde(default)]
+	pub escalates: bool,
+	/// Operator notes to store alongside the new policy. Omitting this
 	/// or sending `null` clears any existing notes — there's no way to
 	/// leave them unchanged implicitly, so resend the current value to
 	/// keep it.
@@ -159,12 +185,12 @@ pub struct HealthcheckUpdateArgs {
 	pub notes: Option<String>,
 }
 
-/// Update a healthcheck's severity policy.
+/// Update a check's policy.
 ///
-/// Sets the base severity (and optionally notes) for the given check, and
-/// marks it as reviewed by the caller. Saving with the same severity as
-/// before still counts as a review, so an operator can acknowledge a
-/// check without changing its policy.
+/// Sets the ceiling and escalation flag (and optionally notes) for the
+/// given (source, check), and marks it as reviewed by the caller. Saving
+/// with the same values as before still counts as a review, so an
+/// operator can acknowledge a check without changing its policy.
 #[utoipa::path(
 	post,
 	path = "/update",
@@ -173,7 +199,7 @@ pub struct HealthcheckUpdateArgs {
 	security(("tailscale-admin" = [])),
 	request_body = HealthcheckUpdateArgs,
 	responses(
-		(status = 200, description = "Updated catalog row.", body = HealthcheckSeverityData),
+		(status = 200, description = "Updated catalog row.", body = CheckPolicyData),
 		(status = 401, body = ProblemDetailsSchema),
 		(status = 403, body = ProblemDetailsSchema),
 	),
@@ -182,12 +208,22 @@ pub async fn update(
 	State(state): State<AppState>,
 	admin: TailscaleAdmin,
 	Json(args): Json<HealthcheckUpdateArgs>,
-) -> Result<Json<HealthcheckSeverityData>> {
+) -> Result<Json<CheckPolicyData>> {
+	if !matches!(
+		args.ceiling,
+		CheckResult::Failed | CheckResult::Warning | CheckResult::Passed | CheckResult::Skipped
+	) {
+		return Err(AppError::BadRequest(
+			"ceiling must be one of failed, warning, passed, skipped".into(),
+		));
+	}
 	let mut conn = state.db.get().await?;
-	let row = HealthcheckSeverity::update(
+	let row = CheckPolicy::update(
 		&mut conn,
+		&args.source,
 		&args.check_name,
-		args.severity,
+		args.ceiling,
+		args.escalates,
 		args.notes.as_deref(),
 		&admin.0.login,
 	)
@@ -195,28 +231,79 @@ pub async fn update(
 	Ok(Json(row.into()))
 }
 
-/// Request body for replacing a healthcheck's conditional severity rules.
+/// Request body for replacing a check's documentation.
+#[derive(Deserialize, ToSchema)]
+pub struct UpdateDocumentationArgs {
+	/// The source whose check to document.
+	pub source: String,
+	/// The healthcheck name to document; must already exist in the
+	/// catalog.
+	pub check_name: String,
+	/// The new markdown document, or `null` (or blank) to clear it.
+	#[serde(default)]
+	pub documentation: Option<String>,
+}
+
+/// Replace a check's documentation.
+///
+/// Stores the markdown document presented alongside the check wherever
+/// its state appears, and over MCP. Sending `null` or a blank document
+/// clears it. Doesn't mark the policy as reviewed — documenting a check
+/// is not the same as reviewing its grading.
+#[utoipa::path(
+	post,
+	path = "/update_documentation",
+	operation_id = "healthcheck_update_documentation",
+	tag = "healthchecks",
+	security(("tailscale-admin" = [])),
+	request_body = UpdateDocumentationArgs,
+	responses(
+		(status = 200, description = "Updated catalog row.", body = CheckPolicyData),
+		(status = 401, body = ProblemDetailsSchema),
+		(status = 403, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn update_documentation(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<UpdateDocumentationArgs>,
+) -> Result<Json<CheckPolicyData>> {
+	let documentation = args
+		.documentation
+		.as_deref()
+		.map(str::trim)
+		.filter(|d| !d.is_empty());
+	let mut conn = state.db.get().await?;
+	let row =
+		CheckPolicy::update_documentation(&mut conn, &args.source, &args.check_name, documentation)
+			.await?;
+	Ok(Json(row.into()))
+}
+
+/// Request body for replacing a check's conditional rules.
 #[derive(Deserialize, ToSchema)]
 pub struct UpdateRulesArgs {
+	/// The source whose check's rules to replace.
+	pub source: String,
 	/// The healthcheck name whose rules to replace; must already exist
 	/// in the catalog.
 	pub check_name: String,
 	/// The new conditional rules to store, or `null` to remove all
-	/// conditional rules and rely solely on the base severity. Same
-	/// shape as the `rules` field returned when listing checks. A ladder
-	/// with no condition/severity pairs is treated the same as `null`.
+	/// conditional rules and rely solely on the ceiling. Same shape as
+	/// the `rules` field returned when listing checks. A ladder with no
+	/// condition/result pairs is treated the same as `null`.
 	#[schema(value_type = Option<serde_json::Value>)]
 	#[serde(default)]
 	pub rules: Option<JsonValue>,
 }
 
-/// Replace a healthcheck's conditional severity rules.
+/// Replace a check's conditional rules.
 ///
-/// Stores a new set of conditional rules for the given check (or removes
-/// them, if `rules` is `null`), and marks the check as reviewed by the
-/// caller. Returns 400 if `rules` doesn't parse as a valid ladder — for
-/// example an unknown comparison operator, a malformed variable
-/// reference, or an odd number of entries.
+/// Stores a new set of conditional rules for the given (source, check)
+/// (or removes them, if `rules` is `null`), and marks the check as
+/// reviewed by the caller. Returns 400 if `rules` doesn't parse as a
+/// valid ladder — for example an unknown comparison operator, a
+/// malformed variable reference, or an odd number of entries.
 #[utoipa::path(
 	post,
 	path = "/update_rules",
@@ -225,7 +312,7 @@ pub struct UpdateRulesArgs {
 	security(("tailscale-admin" = [])),
 	request_body = UpdateRulesArgs,
 	responses(
-		(status = 200, description = "Updated catalog row.", body = HealthcheckSeverityData),
+		(status = 200, description = "Updated catalog row.", body = CheckPolicyData),
 		(status = 400, body = ProblemDetailsSchema),
 		(status = 401, body = ProblemDetailsSchema),
 		(status = 403, body = ProblemDetailsSchema),
@@ -235,7 +322,7 @@ pub async fn update_rules(
 	State(state): State<AppState>,
 	admin: TailscaleAdmin,
 	Json(args): Json<UpdateRulesArgs>,
-) -> Result<Json<HealthcheckSeverityData>> {
+) -> Result<Json<CheckPolicyData>> {
 	let ladder: Option<IfLadder> = match args.rules {
 		None | Some(JsonValue::Null) => None,
 		Some(v) => {
@@ -251,8 +338,9 @@ pub async fn update_rules(
 		}
 	};
 	let mut conn = state.db.get().await?;
-	let row = HealthcheckSeverity::update_rules(
+	let row = CheckPolicy::update_rules(
 		&mut conn,
+		&args.source,
 		&args.check_name,
 		ladder.as_ref(),
 		&admin.0.login,
@@ -264,13 +352,17 @@ pub async fn update_rules(
 /// Request body identifying which healthcheck to sample data for.
 #[derive(Deserialize, ToSchema)]
 pub struct SampleArgs {
+	/// The source that reports the check. A check's identity is the
+	/// (source, check) pair; another source's same-named check may carry
+	/// entirely different fields.
+	pub source: String,
 	/// The healthcheck name to sample.
 	pub check_name: String,
 }
 
 /// A real-world sample of the data a conditional rule can reference for a
 /// given healthcheck, taken from the most recent status report (across
-/// all servers) that included it.
+/// all servers) from the check's own source that included it.
 #[derive(Serialize, ToSchema)]
 pub struct HealthcheckSample {
 	/// Additional top-level fields submitted with the status report that
@@ -330,7 +422,9 @@ pub async fn sample(
 	Json(args): Json<SampleArgs>,
 ) -> Result<Json<HealthcheckSampleResponse>> {
 	let mut conn = state.db.get().await?;
-	let Some(status) = Status::latest_for_check_name(&mut conn, &args.check_name).await? else {
+	let Some(status) =
+		Status::latest_for_check_name(&mut conn, &args.source, &args.check_name).await?
+	else {
 		return Ok(Json(HealthcheckSampleResponse {
 			check_name: args.check_name,
 			sample: None,
@@ -346,7 +440,7 @@ pub async fn sample(
 	// by name; we don't require a failing result here so we still
 	// surface the check's typical shape even on a passing push). Strip
 	// the reserved fields and inject the normalised `result` so the UI
-	// sees exactly what the ingestion path passes to severity_for —
+	// sees exactly what the ingestion path passes to the policy —
 	// including a `check.result` value on legacy (`healthy: bool`)
 	// pushes.
 	let check_extra = status

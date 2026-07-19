@@ -6,7 +6,6 @@ use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleUser;
 use commons_types::{
-	issue::Severity,
 	server::{
 		cards::{FacilityServerStatus, ServerGroupCard},
 		rank::ServerRank,
@@ -15,7 +14,7 @@ use commons_types::{
 	version::VersionStr,
 };
 use database::{
-	devices::DeviceConnection, healthcheck_severities::HealthcheckSeverity, issues::Issue,
+	check_policies::CheckPolicy, devices::DeviceConnection, issues::Issue,
 	server_groups::ServerGroup, servers::Server, statuses::Status,
 	tailscale_users::TailscaleUser as CachedTailscaleUser, versions::Version,
 };
@@ -220,13 +219,12 @@ pub async fn group_details(
 		.into_iter()
 		.map(|s| (s.server_id, s))
 		.collect();
-	// Operator-silenced healthchecks don't count toward member health.
+	// Member health rolls up current check state across every source
+	// (silenced checks already skipped in the rollup).
 	let member_groups: Vec<(Uuid, Option<Uuid>)> =
 		servers.iter().map(|s| (s.id, s.group_id)).collect();
-	let silenced =
-		database::silenced_refs::silenced_health_checks_for_servers(&mut conn, &member_groups)
-			.await?;
-	let no_silences = BTreeSet::new();
+	let member_health =
+		database::issues::health_from_check_state(&mut conn, &member_groups).await?;
 
 	// The card's headline version is the cached last reported version of the
 	// group's canonical member (highest rank, then highest kind), maintained by
@@ -251,14 +249,11 @@ pub async fn group_details(
 				}
 				_ => Vec::new(),
 			};
-			let silenced_checks = silenced.get(&s.id).unwrap_or(&no_silences);
 			FacilityServerStatus {
 				id: s.id,
 				name: s.name.clone().unwrap_or_default(),
 				up,
-				health: st
-					.map(|s| s.health_state_ignoring(silenced_checks))
-					.unwrap_or_default(),
+				health: member_health.get(&s.id).copied().unwrap_or_default(),
 				operators,
 				rank: s.rank,
 				kind: s.kind,
@@ -294,49 +289,56 @@ pub struct CheckAttentionServerData {
 	pub group_id: Option<Uuid>,
 	/// The server's group name, if it belongs to one.
 	pub group_name: Option<String>,
-	/// The check's result on this server's latest status. The UI shows
+	/// The check's observed result on its latest report. The UI shows
 	/// warning/failed/broken servers by default and puts passed/skipped
 	/// ones behind a "show healthy" toggle.
 	pub result: CheckResult,
-	/// The check's full `health[]` entry from this server's latest status,
-	/// verbatim (including the `check`/`healthy`/`result` keys), so the
+	/// The check's own fields from its latest report, verbatim, so the
 	/// row can expand to the same per-check detail the server page shows.
 	pub data: serde_json::Value,
-	/// When this check started failing on this server: the `first_seen`
-	/// of the still-active issue canopy filed at `(status,
-	/// health/<check>)` when the check degraded. `None` for servers
-	/// currently reporting the check healthy, and for failing servers
-	/// with no active issue on file (e.g. the issue was
-	/// operator-resolved, or the ref is silenced so nothing was filed).
+	/// When the check's current degradation streak began. `None` for
+	/// servers currently reporting the check healthy.
 	pub failing_since: Option<Timestamp>,
-	/// When the reporting status was recorded.
+	/// When the check state last updated (the check's latest report).
 	pub status_created_at: Timestamp,
 }
 
 /// Request body for [`check_attention`].
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct CheckAttentionArgs {
+	/// The source that reports the check. A check's identity is the
+	/// (source, check) pair — a same-named check from another source is
+	/// a different check.
+	pub source: String,
 	/// The healthcheck name to look up, exactly as reported by devices in
 	/// `health[].check` (an arbitrary, device/plugin-defined string).
 	pub check: String,
 }
 
-/// Response for [`check_attention`]: the queried check's catalog severity
+/// Response for [`check_attention`]: the queried check's catalog policy
 /// (if it has one yet) and every live server whose latest status reports
 /// it, failing or healthy.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct CheckAttentionData {
-	/// The check name that was queried, echoed back so the page can
-	/// render its heading without re-decoding the request.
+	/// The source that was queried, echoed back with `check` so the page
+	/// can render its heading without re-decoding the request.
+	pub source: String,
+	/// The check name that was queried.
 	pub check: String,
-	/// The catalog's configured base severity for this check, or `None`
-	/// if no server has ever reported it yet (so it has no catalog row).
-	pub severity: Option<Severity>,
-	/// Every live server whose latest status reports this check, at any
-	/// result, ordered as a TODO list: failed, warning, broken, passed,
-	/// skipped (most urgent first), then by group name then server name.
-	/// The client filters out the passed/skipped tail unless the "show
-	/// healthy" toggle is on.
+	/// The configured policy ceiling for this (source, check), or `None`
+	/// if the source has never reported it (so it has no catalog row).
+	#[schema(value_type = Option<String>)]
+	pub ceiling: Option<CheckResult>,
+	/// Whether this check's policy escalates its effective failures.
+	pub escalates: bool,
+	/// Operator-authored documentation for this (source, check)
+	/// (markdown), or `None` if nobody has written it yet.
+	pub documentation: Option<String>,
+	/// Every live server whose latest state from this source reports
+	/// this check, at any result, ordered as a TODO list: failed,
+	/// warning, broken, passed, skipped (most urgent first), then by
+	/// group name then server name. The client filters out the
+	/// passed/skipped tail unless the "show healthy" toggle is on.
 	pub servers: Vec<CheckAttentionServerData>,
 }
 
@@ -354,16 +356,16 @@ fn check_result_rank(result: CheckResult) -> u8 {
 	}
 }
 
-/// List the servers whose latest status reports one named healthcheck.
+/// List the servers whose check state reports one (source, check).
 ///
 /// Everything the per-healthcheck page needs: the catalog's configured
-/// severity for `check` (if any) plus every live server whose **latest**
-/// status reports it — the current, real-time picture, not a history of
-/// past issues/events, though each failing server carries a
-/// `failing_since` timestamp derived from its active issue. This is the
-/// data behind the `/healthchecks/:check` "who's affected" page, which
-/// doubles as an operator TODO list and as a way to correlate servers
-/// sharing the same issue during a fleet-wide incident.
+/// policy for the (source, check) (if any) plus every live server's
+/// current state for it — the real-time picture, with each degraded row
+/// carrying `failing_since` (the start of its current degradation
+/// streak). This is the data behind the `/healthchecks/:source/:check`
+/// "who's affected" page, which doubles as an operator TODO list and as
+/// a way to correlate servers sharing the same issue during a
+/// fleet-wide incident.
 #[utoipa::path(
 	post,
 	path = "/check_attention",
@@ -371,7 +373,7 @@ fn check_result_rank(result: CheckResult) -> u8 {
 	tag = "statuses",
 	request_body = CheckAttentionArgs,
 	responses(
-		(status = 200, description = "The check's catalog severity and the servers currently reporting it.", body = CheckAttentionData),
+		(status = 200, description = "The check's catalog policy and the servers currently reporting it.", body = CheckAttentionData),
 		(status = 500, body = ProblemDetailsSchema),
 	),
 )]
@@ -380,11 +382,26 @@ pub async fn check_attention(
 	Json(args): Json<CheckAttentionArgs>,
 ) -> Result<Json<CheckAttentionData>> {
 	let mut conn = state.db_read.get().await?;
-	let reporting = Status::reporting_check_with_servers(&mut conn, &args.check).await?;
+	let states = Issue::check_state_for_check(&mut conn, &args.source, &args.check).await?;
 
-	let group_ids: Vec<Uuid> = reporting
+	// Live servers only: archived servers and canopy's own row never
+	// appear on the attention list.
+	let server_ids: Vec<Uuid> = states
 		.iter()
-		.filter_map(|(s, _)| s.group_id)
+		.filter_map(|st| st.server_id)
+		.collect::<BTreeSet<_>>()
+		.into_iter()
+		.collect();
+	let live: HashMap<Uuid, database::servers::Server> =
+		database::servers::Server::get_by_ids(&mut conn, &server_ids)
+			.await?
+			.into_iter()
+			.filter(|s| s.deleted_at.is_none() && s.id != Uuid::nil())
+			.map(|s| (s.id, s))
+			.collect();
+	let group_ids: Vec<Uuid> = live
+		.values()
+		.filter_map(|s| s.group_id)
 		.collect::<BTreeSet<_>>()
 		.into_iter()
 		.collect();
@@ -394,38 +411,27 @@ pub async fn check_attention(
 		.map(|g| (g.id, g.name))
 		.collect();
 
-	// "Failing since" comes from the issue the public-server status
-	// handler files at `(status, health/<check>)` when a check degrades:
-	// an active issue's first_seen is exactly when the current failure
-	// streak began (recoveries close the issue, so a re-failure starts a
-	// fresh one).
-	let server_ids: Vec<Uuid> = reporting.iter().map(|(s, _)| s.id).collect();
-	let failing_since: HashMap<Uuid, Timestamp> = Issue::list_by_source_ref(
-		&mut conn,
-		"status",
-		&format!("health/{}", args.check),
-		&server_ids,
-	)
-	.await?
-	.into_iter()
-	.filter(|issue| issue.active)
-	.filter_map(|issue| issue.server_id.map(|sid| (sid, issue.first_seen)))
-	.collect();
-
-	let mut servers: Vec<CheckAttentionServerData> = reporting
+	let mut servers: Vec<CheckAttentionServerData> = states
 		.into_iter()
-		.filter_map(|(server, status)| {
-			let (result, entry) = status.check_entry(&args.check)?;
+		.filter_map(|st| {
+			let server = st.server_id.and_then(|sid| live.get(&sid))?;
+			let result = st.observed_result?;
 			let group_name = server.group_id.and_then(|g| group_names.get(&g).cloned());
+			// failing_since is the current degradation streak; recovered
+			// rows have none. first_seen is the fallback for rows stamped
+			// before degraded_since existed.
+			let failing_since = st
+				.active
+				.then_some(st.degraded_since.unwrap_or(st.first_seen));
 			Some(CheckAttentionServerData {
 				server_id: server.id,
 				server_name: server.name.clone().unwrap_or_default(),
 				group_id: server.group_id,
 				group_name,
 				result,
-				data: serde_json::Value::Object(entry),
-				failing_since: failing_since.get(&server.id).copied(),
-				status_created_at: status.created_at,
+				data: st.detail.unwrap_or_else(|| serde_json::json!({})),
+				failing_since,
+				status_created_at: st.last_seen,
 			})
 		})
 		.collect();
@@ -436,13 +442,14 @@ pub async fn check_attention(
 			.then_with(|| a.server_name.cmp(&b.server_name))
 	});
 
-	let severity = HealthcheckSeverity::get(&mut conn, &args.check)
-		.await?
-		.map(|row| row.severity);
+	let policy = CheckPolicy::get(&mut conn, &args.source, &args.check).await?;
 
 	Ok(Json(CheckAttentionData {
+		source: args.source,
 		check: args.check,
-		severity,
+		ceiling: policy.as_ref().map(|p| p.ceiling),
+		escalates: policy.as_ref().is_some_and(|p| p.escalates),
+		documentation: policy.and_then(|p| p.documentation),
 		servers,
 	}))
 }
@@ -493,11 +500,11 @@ pub struct StatusSnapshotData {
 	/// with display name and profile picture filled in where known. Not
 	/// filtered by recency — reflects this specific point-in-time snapshot.
 	pub operators: Vec<OperatorPresence>,
-	/// For each currently-unhealthy check in this push, the severity it
-	/// would be filed at if it turned into an issue. Healthy checks are
-	/// omitted. An unhealthy check with no severity listed here should be
-	/// treated as a default (warning-level) severity.
-	pub check_severities: std::collections::HashMap<String, commons_types::issue::Severity>,
+	/// For each currently-unhealthy check in this push, the effective
+	/// result its policy grades it to. Healthy checks are omitted. An
+	/// unhealthy check not listed here should be treated as warning.
+	#[schema(value_type = std::collections::HashMap<String, String>)]
+	pub check_results: std::collections::HashMap<String, commons_types::status::CheckResult>,
 	/// Check names currently silenced for this server (at server or
 	/// group scope). These don't count toward `health_state` and the UI
 	/// renders them with its skipped affordance. Reflects the silence
@@ -590,14 +597,17 @@ pub async fn snapshot(
 	// Compute the per-unhealthy-check severity the rules engine would
 	// file at given this push. Healthy checks are omitted; the UI
 	// renders them with its 'passing' affordance regardless.
-	let check_severities = compute_check_severities(&mut conn, &server, &status).await?;
+	let check_results = compute_check_results(&mut conn, &server, &status).await?;
 	// Operator-silenced healthchecks present as skipped and don't count
 	// toward the rollup, even on historical snapshots — a silence
 	// expresses current operator intent about the check, not the push.
+	// Scoped to the push's own source: a silence on another source's
+	// same-named check is about a different check.
 	let silenced_checks = database::silenced_refs::silenced_health_checks_for_server(
 		&mut conn,
 		server.id,
 		server.group_id,
+		&status.source,
 	)
 	.await?;
 	let health_state = status.health_state_ignoring(&silenced_checks);
@@ -621,7 +631,7 @@ pub async fn snapshot(
 		health: status.health,
 		extra: status.extra,
 		operators,
-		check_severities,
+		check_results,
 		silenced_checks,
 	})))
 }
@@ -655,20 +665,19 @@ pub(crate) async fn enrich_operators(
 	Ok(())
 }
 
-/// For every warning/failed check on `status`, resolve the catalog +
-/// rules severity given the snapshot's actual extras and the server's
-/// resolved tag map. Mirrors the public-server ingestion path
-/// (`file_health_events`) so the UI displays what *would* be filed.
-/// Broken checks aren't included — they file at a fixed Warning and
-/// the UI renders them from the result directly; passed/skipped file
-/// nothing.
-async fn compute_check_severities(
+/// For every warning/failed check on `status`, resolve the policy +
+/// rules grading given the snapshot's actual extras and the server's
+/// resolved tag map: the effective result ingestion would file. Mirrors
+/// the public-server ingestion path (`file_health_events`) so the UI
+/// displays what *would* be filed. Broken checks aren't included — they
+/// file as warnings and the UI renders them from the result directly.
+async fn compute_check_results(
 	conn: &mut database::diesel_async::AsyncPgConnection,
 	server: &Server,
 	status: &Status,
-) -> commons_errors::Result<std::collections::HashMap<String, commons_types::issue::Severity>> {
+) -> commons_errors::Result<std::collections::HashMap<String, commons_types::status::CheckResult>> {
 	use commons_types::status::CheckResult;
-	use database::healthcheck_severities::{EvaluationContext, HealthcheckSeverity};
+	use database::check_policies::{CheckPolicy, EvaluationContext};
 
 	let Some(arr) = status.health.as_array() else {
 		return Ok(Default::default());
@@ -723,8 +732,20 @@ async fn compute_check_severities(
 			check_extra: &check_extra,
 			tags: &tags,
 		};
-		let sev = HealthcheckSeverity::severity_for(conn, &name, result, &ctx).await?;
-		out.insert(name, sev);
+		let graded = CheckPolicy::apply_scoped(
+			conn,
+			&status.source,
+			&name,
+			result,
+			&ctx,
+			Some(server.id),
+			server.group_id,
+		)
+		.await?;
+		match graded.effective {
+			CheckResult::Passed | CheckResult::Skipped => continue,
+			effective => out.insert(name, effective),
+		};
 	}
 	Ok(out)
 }

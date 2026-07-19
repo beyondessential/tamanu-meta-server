@@ -1,12 +1,13 @@
-//! Queries backing the device-facing effective check-severity map:
-//! `HealthcheckSeverity::base_severity_map` (static catalog severities,
-//! ignoring conditional rules) and `silenced_refs::silenced_refs_with_prefix`
-//! (server- plus group-scope silences under a source/ref prefix).
+//! Queries backing the device-facing effective check map:
+//! `CheckPolicy::ceiling_map_for_source` (static policy ceilings,
+//! ignoring conditional rules) and
+//! `silenced_refs::silenced_health_checks_for_server` (server- plus
+//! group-scope silences under one reporting source).
 
-use commons_types::issue::Severity;
-use database::healthcheck_severities::{HealthcheckSeverity, IfLadder};
+use commons_types::status::CheckResult;
+use database::check_policies::{CheckPolicy, IfLadder};
 use database::silenced_refs::{
-	ServerGroupSilencedRef, ServerSilencedRef, silenced_refs_with_prefix,
+	ServerGroupSilencedRef, ServerSilencedRef, silenced_health_checks_for_server,
 };
 use diesel::{sql_query, sql_types};
 use diesel_async::RunQueryDsl;
@@ -38,92 +39,120 @@ async fn insert_server(conn: &mut diesel_async::AsyncPgConnection, group_id: Opt
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn base_severity_map_returns_static_severities() {
+async fn ceiling_map_returns_static_ceilings_for_one_source() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		for check in ["disk_space", "cert_expiry", "chatty"] {
-			HealthcheckSeverity::upsert_default(&mut conn, check)
+			CheckPolicy::upsert_default(&mut conn, "alertd", check)
 				.await
 				.expect("seed");
 		}
-		HealthcheckSeverity::update(&mut conn, "disk_space", Severity::Error, None, "alice")
+		CheckPolicy::upsert_default(&mut conn, "seedling", "other_source_check")
 			.await
-			.expect("update disk_space");
-		HealthcheckSeverity::update(&mut conn, "chatty", Severity::Info, None, "alice")
-			.await
-			.expect("update chatty");
+			.expect("seed other source");
+		CheckPolicy::update(
+			&mut conn,
+			"alertd",
+			"disk_space",
+			CheckResult::Failed,
+			false,
+			None,
+			"alice",
+		)
+		.await
+		.expect("update disk_space");
+		CheckPolicy::update(
+			&mut conn,
+			"alertd",
+			"chatty",
+			CheckResult::Passed,
+			false,
+			None,
+			"alice",
+		)
+		.await
+		.expect("update chatty");
 
-		let map = HealthcheckSeverity::base_severity_map(&mut conn)
+		let map = CheckPolicy::ceiling_map_for_source(&mut conn, "alertd")
 			.await
 			.expect("map");
-		assert_eq!(map.len(), 3);
-		assert_eq!(map.get("disk_space"), Some(&Severity::Error));
-		assert_eq!(map.get("cert_expiry"), Some(&Severity::Warning));
-		assert_eq!(map.get("chatty"), Some(&Severity::Info));
+		assert_eq!(map.len(), 3, "only the requested source's checks");
+		assert_eq!(map.get("disk_space"), Some(&CheckResult::Failed));
+		assert_eq!(map.get("cert_expiry"), Some(&CheckResult::Warning));
+		assert_eq!(map.get("chatty"), Some(&CheckResult::Passed));
 	})
 	.await
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn base_severity_map_ignores_conditional_rules() {
+async fn ceiling_map_ignores_conditional_rules() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		HealthcheckSeverity::upsert_default(&mut conn, "ruled")
+		CheckPolicy::upsert_default(&mut conn, "alertd", "ruled")
 			.await
 			.expect("seed");
 		let ladder: IfLadder = serde_json::from_value(json!({"if": [
-			{"==": [{"var": "check.result"}, "failed"]}, "critical",
+			{"==": [{"var": "check.result"}, "failed"]}, "failed",
 		]}))
 		.expect("parse ladder");
-		HealthcheckSeverity::update_rules(&mut conn, "ruled", Some(&ladder), "alice")
+		CheckPolicy::update_rules(&mut conn, "alertd", "ruled", Some(&ladder), "alice")
 			.await
 			.expect("set rules");
 
-		// The expression could raise a failure to critical at push time, but
-		// the static map must only reflect the base severity column.
-		let map = HealthcheckSeverity::base_severity_map(&mut conn)
+		// The expression could grade a failure through at push time, but
+		// the static map must only reflect the ceiling column.
+		let map = CheckPolicy::ceiling_map_for_source(&mut conn, "alertd")
 			.await
 			.expect("map");
-		assert_eq!(map.get("ruled"), Some(&Severity::Warning));
+		assert_eq!(map.get("ruled"), Some(&CheckResult::Warning));
 	})
 	.await
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn silenced_refs_with_prefix_combines_scopes_and_filters() {
+async fn silenced_checks_combine_scopes_and_stay_per_source() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let group_id = insert_group(&mut conn).await;
 		let server_id = insert_server(&mut conn, Some(group_id)).await;
 		let other_server_id = insert_server(&mut conn, None).await;
 
-		ServerSilencedRef::add(&mut conn, server_id, "status", "health/flaky", None)
+		ServerSilencedRef::add(&mut conn, server_id, "alertd", "health/flaky", None)
 			.await
 			.expect("server silence");
-		ServerGroupSilencedRef::add(&mut conn, group_id, "status", "health/groupwide", None)
+		ServerGroupSilencedRef::add(&mut conn, group_id, "alertd", "health/groupwide", None)
 			.await
 			.expect("group silence");
-		// None of these may leak into the result: wrong source, wrong ref
-		// prefix (broken issues are a separate thread), wrong server.
-		ServerSilencedRef::add(&mut conn, server_id, "canopy", "health/wrong-source", None)
+		// None of these may leak into alertd's set: a check's identity is
+		// the (source, check) pair, so another source's silence never
+		// applies; nor do canopy's own silences or other servers'.
+		ServerSilencedRef::add(
+			&mut conn,
+			server_id,
+			"seedling",
+			"health/other-source",
+			None,
+		)
+		.await
+		.expect("other-source silence");
+		ServerSilencedRef::add(&mut conn, server_id, "canopy", "reachability", None)
 			.await
-			.expect("other-source silence");
-		ServerSilencedRef::add(&mut conn, server_id, "status", "health-broken/flaky", None)
-			.await
-			.expect("broken silence");
-		ServerSilencedRef::add(&mut conn, other_server_id, "status", "health/other", None)
+			.expect("canopy silence");
+		ServerSilencedRef::add(&mut conn, other_server_id, "alertd", "health/other", None)
 			.await
 			.expect("other-server silence");
 
-		let mut refs =
-			silenced_refs_with_prefix(&mut conn, server_id, Some(group_id), "status", "health/")
+		let checks =
+			silenced_health_checks_for_server(&mut conn, server_id, Some(group_id), "alertd")
 				.await
-				.expect("refs");
-		refs.sort();
-		assert_eq!(refs, vec!["health/flaky", "health/groupwide"]);
+				.expect("checks");
+		assert_eq!(
+			checks.into_iter().collect::<Vec<_>>(),
+			vec!["flaky", "groupwide"]
+		);
 
 		// Ungrouped lookup only sees the server-scope silences.
-		let refs = silenced_refs_with_prefix(&mut conn, server_id, None, "status", "health/")
+		let checks = silenced_health_checks_for_server(&mut conn, server_id, None, "alertd")
 			.await
-			.expect("refs without group");
-		assert_eq!(refs, vec!["health/flaky"]);
+			.expect("checks without group");
+		assert_eq!(checks.into_iter().collect::<Vec<_>>(), vec!["flaky"]);
 	})
 	.await
 }

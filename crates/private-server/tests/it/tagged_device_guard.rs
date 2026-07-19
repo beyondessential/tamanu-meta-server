@@ -81,13 +81,9 @@ async fn public_mount_is_not_subject_to_tagged_device_guard() {
 	// test fixture), NOT a 403 from the guard.
 	commons_tests::server::run(async |_conn, _public, private| {
 		let response = private
-			.post("/public/events")
+			.post(&format!("/public/status/{}", uuid::Uuid::new_v4()))
 			.add_header("Forwarded", "for=100.64.0.42")
-			.json(&serde_json::json!({
-				"source": "watchdog",
-				"ref": "x",
-				"message": "nope",
-			}))
+			.json(&serde_json::json!({ "health": [] }))
 			.await;
 		assert_eq!(response.status_code().as_u16(), 401);
 		let body: serde_json::Value = response.json();

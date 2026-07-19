@@ -1,5 +1,5 @@
 // Client-side mirror of the Rust IfLadder evaluator (see
-// crates/database/src/healthcheck_severities.rs). Used by the rule
+// crates/database/src/check_policies.rs). Used by the rule
 // editor to preview whether a candidate rule would match a sampled
 // status push.
 //
