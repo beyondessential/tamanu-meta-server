@@ -4,13 +4,15 @@ import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi } from "../api";
 import { useIsNotificationHeld } from "../hooks/useIsNotificationHeld";
+import { isIncidentLingering } from "../types";
 
 /** Server-detail header button into the incidents view. Any server id in
  * a group works — the backend resolves to the group root. Three states:
- * - open incident exists → direct link to /incidents/:id (error-coloured,
- *   or warning-coloured when the Slack notice is still inside the
- *   per-group cooldown window so the operator can tell at a glance that
- *   nobody else has been paged yet)
+ * - open incident exists → direct link to /incidents/:id (error-coloured;
+ *   warning-coloured when the Slack notice is still inside the per-group
+ *   cooldown window so the operator can tell at a glance that nobody else
+ *   has been paged yet; info-coloured when the incident is lingering —
+ *   every failure has recovered and it closes if things stay quiet)
  * - no open incident, but active issues → /incidents filtered to this group
  * - nothing active → same, with `showAll=1` so closed/inactive surface */
 export default function IncidentsLink({
@@ -39,25 +41,29 @@ export default function IncidentsLink({
 	);
 	const hasActive = issues.status === "ok" && issues.data.length > 0;
 
-	const held = useIsNotificationHeld(
+	const heldUntilActive = useIsNotificationHeld(
 		openIncident?.notification_held_until ?? null,
 	);
 	if (openIncident) {
+		const lingering = isIncidentLingering(openIncident);
+		const held = heldUntilActive && !lingering;
 		return (
 			<Button
 				component={RouterLink}
 				to={`/incidents/${openIncident.id}`}
 				variant="outlined"
-				color={held ? "warning" : "error"}
+				color={lingering ? "info" : held ? "warning" : "error"}
 				startIcon={<WarningAmberIcon />}
 				title={
-					held
-						? "Slack notice still inside the per-group cooldown window"
-						: undefined
+					lingering
+						? "All failures have recovered; the incident closes if they stay quiet through the linger window"
+						: held
+							? "Slack notice still inside the per-group cooldown window"
+							: undefined
 				}
 			>
 				Incident {openIncident.id.slice(0, 8)}
-				{held && " (held)"}
+				{lingering ? " (recovering)" : held ? " (held)" : ""}
 			</Button>
 		);
 	}

@@ -138,6 +138,12 @@ function EditForm({
 	const [slackOpenDelayMinutes, setSlackOpenDelayMinutes] = useState<string>(
 		Math.max(0, Math.round(group.slack_open_delay / 60)).toString(),
 	);
+	// Linger window: how long an incident stays open after its last failure
+	// recovers, so a failure coming straight back continues the same
+	// incident instead of opening (and re-notifying) a new one.
+	const [slackCloseDelayMinutes, setSlackCloseDelayMinutes] = useState<string>(
+		Math.max(0, Math.round(group.slack_close_delay / 60)).toString(),
+	);
 
 	const onSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
@@ -151,6 +157,10 @@ function EditForm({
 					slack_open_delay: Math.max(
 						0,
 						Math.round(Number(slackOpenDelayMinutes) * 60),
+					),
+					slack_close_delay: Math.max(
+						0,
+						Math.round(Number(slackCloseDelayMinutes) * 60),
 					),
 				},
 			});
@@ -232,6 +242,30 @@ function EditForm({
 						If the incident resolves inside the window, no Slack notice is
 						sent for either edge — useful for flappy probes. Set to 0 to ship
 						opens immediately.
+					</Typography>
+					<Stack
+						direction={{ xs: "column", md: "row" }}
+						spacing={2}
+						sx={{ alignItems: { md: "center" } }}
+					>
+						<Typography variant="body2">
+							Keep incidents open after recovery for
+						</Typography>
+						<TextField
+							label="minutes"
+							type="number"
+							value={slackCloseDelayMinutes}
+							onChange={(e) => setSlackCloseDelayMinutes(e.target.value)}
+							disabled={pending}
+							slotProps={{ htmlInput: { min: 0, step: 1 } }}
+							sx={{ width: 140 }}
+						/>
+					</Stack>
+					<Typography variant="caption" color="text.secondary">
+						A failure coming back inside this window continues the same
+						incident instead of opening — and notifying about — a new one.
+						The resolved notice waits it out. Set to 0 to close incidents
+						the moment their last failure recovers.
 					</Typography>
 				</Stack>
 

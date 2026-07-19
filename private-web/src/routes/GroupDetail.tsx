@@ -28,6 +28,7 @@ import {
 	type BackupConfigStatus,
 	aggregateOperators,
 	groupServersByRank,
+	isIncidentLingering,
 	type AggregatedOperator,
 	type IncidentData,
 } from "../types";
@@ -360,12 +361,14 @@ function OperatorsSection({
 
 function ActiveIncidentCard({ incident }: { incident: IncidentData }) {
 	const held = useIsNotificationHeld(incident.notification_held_until);
+	const lingering = isIncidentLingering(incident);
+	const tone = lingering ? "info" : held ? "warning" : "error";
 	return (
 		<Paper
 			variant="outlined"
 			sx={{
 				p: 2,
-				borderColor: held ? "warning.main" : "error.main",
+				borderColor: `${tone}.main`,
 				borderWidth: 2,
 			}}
 		>
@@ -375,7 +378,7 @@ function ActiveIncidentCard({ incident }: { incident: IncidentData }) {
 				sx={{ alignItems: "center", justifyContent: "space-between" }}
 			>
 				<Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
-					<WarningAmberIcon color={held ? "warning" : "error"} />
+					<WarningAmberIcon color={tone} />
 					<Box>
 						<Typography variant="h6" component="h2">
 							Active incident
@@ -395,7 +398,13 @@ function ActiveIncidentCard({ incident }: { incident: IncidentData }) {
 						<Typography variant="body2" color="text.secondary">
 							opened <TimeAgo timestamp={incident.opened_at} />
 						</Typography>
-						{held && incident.notification_held_until && (
+						{lingering && incident.lingering_since && (
+							<Typography variant="body2" sx={{ color: "info.main" }}>
+								Recovering; last failure cleared{" "}
+								<TimeAgo timestamp={incident.lingering_since} />
+							</Typography>
+						)}
+						{!lingering && held && incident.notification_held_until && (
 							<Typography variant="body2" sx={{ color: "warning.main" }}>
 								Holding; posting{" "}
 								<TimeAgo timestamp={incident.notification_held_until} />
@@ -407,7 +416,7 @@ function ActiveIncidentCard({ incident }: { incident: IncidentData }) {
 					component={RouterLink}
 					to={`/incidents/${incident.id}`}
 					variant="outlined"
-					color={held ? "warning" : "error"}
+					color={tone}
 				>
 					Open
 				</Button>

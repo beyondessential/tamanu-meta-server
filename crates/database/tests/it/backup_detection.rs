@@ -944,12 +944,33 @@ async fn group_event_pages_even_when_all_members_unmonitored() {
 			0,
 			"recovery removes the issue from its incident",
 		);
+		// The incident lingers (close-side grace) rather than closing on
+		// the spot; once the window elapses the sweep closes it.
 		let still_open = database::issues::Incident::list_for_group(&mut conn, group_id, false, 10)
 			.await
 			.expect("list incidents 2");
+		assert_eq!(
+			still_open.len(),
+			1,
+			"incident lingers after its only contributor recovers",
+		);
+		sql_query(
+			"UPDATE incidents SET closing_at = closing_at - INTERVAL '1 hour' \
+			 WHERE server_group_id = $1",
+		)
+		.bind::<sql_types::Uuid, _>(group_id)
+		.execute(&mut conn)
+		.await
+		.expect("expire linger");
+		database::issues::sweep_lingering_incidents(&mut conn)
+			.await
+			.expect("linger sweep");
+		let still_open = database::issues::Incident::list_for_group(&mut conn, group_id, false, 10)
+			.await
+			.expect("list incidents 3");
 		assert!(
 			still_open.is_empty(),
-			"incident auto-closes when its only contributor recovers",
+			"linger sweep closes the incident once the window elapses",
 		);
 	})
 	.await;

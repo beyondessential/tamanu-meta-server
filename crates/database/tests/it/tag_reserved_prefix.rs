@@ -96,6 +96,7 @@ async fn server_group_create_rejects_reserved_tag_keys() {
 			notes: String::new(),
 			tags: reserved_tags(),
 			slack_open_delay: None,
+			slack_close_delay: None,
 		};
 		assert_bad_request(ServerGroup::create(&mut conn, new).await);
 	})
@@ -112,6 +113,7 @@ async fn server_group_update_rejects_reserved_tag_keys() {
 				notes: String::new(),
 				tags: TagMap::default(),
 				slack_open_delay: None,
+				slack_close_delay: None,
 			},
 		)
 		.await
@@ -121,6 +123,7 @@ async fn server_group_update_rejects_reserved_tag_keys() {
 			notes: None,
 			tags: Some(reserved_tags()),
 			slack_open_delay: None,
+			slack_close_delay: None,
 		};
 		assert_bad_request(ServerGroup::update(&mut conn, group.id, changes).await);
 	})

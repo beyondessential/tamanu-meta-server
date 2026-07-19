@@ -1,9 +1,11 @@
 //! Self-alert lifecycle: a raise files one coalescing canopy-wide issue
 //! which opens a canopy-wide incident, enqueuing exactly one Slack open on
 //! the not-alerting → alerting transition (with flap grace for
-//! non-escalating checks, immediate for escalating ones); recovery inside
-//! the grace cancels the open and sends nothing; recovery after delivery
-//! enqueues the resolve; idle recovers write nothing.
+//! non-escalating checks, immediate for escalating ones); recovery starts
+//! the incident lingering, and a re-raise within the linger continues the
+//! same incident without a new notification; a flap whose open never
+//! shipped is cancelled silently at linger expiry; recovery after delivery
+//! enqueues the resolve at linger expiry; idle recovers write nothing.
 
 use commons_types::status::CheckResult;
 use database::self_alerts;
@@ -46,6 +48,22 @@ async fn outbox_rows(conn: &mut diesel_async::AsyncPgConnection) -> Vec<SlackOut
 		.expect("load outbox")
 }
 
+/// Backdate the canopy-wide incident's `closing_at` past the global linger
+/// window, then run the sweep — the test-speed way to let the close-side
+/// grace elapse.
+async fn expire_linger(conn: &mut diesel_async::AsyncPgConnection) {
+	diesel::sql_query(
+		"UPDATE incidents SET closing_at = closing_at - INTERVAL '1 hour' \
+		 WHERE server_group_id IS NULL",
+	)
+	.execute(conn)
+	.await
+	.expect("expire linger");
+	database::issues::sweep_lingering_incidents(conn)
+		.await
+		.expect("linger sweep");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn raise_enqueues_once_and_flap_recovery_is_silent() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
@@ -85,11 +103,33 @@ async fn raise_enqueues_once_and_flap_recovery_is_silent() {
 		raise_with(&mut conn, false).await;
 		assert_eq!(outbox_rows(&mut conn).await.len(), 1);
 
-		// Recover inside the grace: open cancelled, no resolve enqueued.
+		// Recover: the incident lingers — the pending open is neither
+		// shipped nor cancelled yet, and no resolve is enqueued.
 		self_alerts::recover(&mut conn, REF, "fixed")
 			.await
 			.expect("recover")
 			.expect("was active");
+		let rows = outbox_rows(&mut conn).await;
+		assert_eq!(rows.len(), 1, "no resolve while lingering: {rows:?}");
+		assert!(
+			rows[0].gave_up_at.is_none(),
+			"pending open survives the linger"
+		);
+
+		// Re-raise within the linger: the same incident continues — no
+		// second open row. This is the close-then-reopen noise the linger
+		// exists to absorb.
+		raise_with(&mut conn, false).await;
+		let rows = outbox_rows(&mut conn).await;
+		assert_eq!(rows.len(), 1, "rejoin continues the incident: {rows:?}");
+
+		// Recover again and let the linger elapse: the open (never shipped)
+		// is cancelled and no resolve follows — the whole flap was silent.
+		self_alerts::recover(&mut conn, REF, "fixed again")
+			.await
+			.expect("recover")
+			.expect("was active");
+		expire_linger(&mut conn).await;
 		let rows = outbox_rows(&mut conn).await;
 		assert_eq!(rows.len(), 1, "no resolve for a flap: {rows:?}");
 		assert!(rows[0].gave_up_at.is_some(), "pending open cancelled");
@@ -112,8 +152,8 @@ async fn escalating_ships_immediately_and_recovery_after_delivery_resolves() {
 			"an escalating check skips the grace"
 		);
 
-		// Simulate the drainer shipping the open, then recover: a resolve
-		// row is enqueued and ships immediately.
+		// Simulate the drainer shipping the open, then recover: the incident
+		// lingers first, and the resolve is enqueued when the linger elapses.
 		SlackOutbox::mark_delivered(&mut conn, rows[0].id, "ok")
 			.await
 			.expect("mark delivered");
@@ -121,6 +161,12 @@ async fn escalating_ships_immediately_and_recovery_after_delivery_resolves() {
 			.await
 			.expect("recover")
 			.expect("was active");
+		assert_eq!(
+			outbox_rows(&mut conn).await.len(),
+			1,
+			"resolve waits out the linger"
+		);
+		expire_linger(&mut conn).await;
 		let rows = outbox_rows(&mut conn).await;
 		assert_eq!(rows.len(), 2);
 		let resolve = &rows[1];

@@ -208,13 +208,26 @@ impl SlackOutbox {
 	/// [`mark_failed`](Self::mark_failed), or
 	/// [`mark_given_up`](Self::mark_given_up) before committing.
 	pub async fn claim_pending(db: &mut AsyncPgConnection, limit: i64) -> Result<Vec<Self>> {
-		use crate::schema::slack_outbox::dsl;
+		use crate::schema::{incidents, slack_outbox::dsl};
+		use diesel::dsl::{exists, not};
 		let now = Timestamp::now();
 		dsl::slack_outbox
 			.select(Self::as_select())
 			.filter(dsl::delivered_at.is_null())
 			.filter(dsl::gave_up_at.is_null())
 			.filter(dsl::deliver_after.le(jiff_diesel::Timestamp::from(now)))
+			// An `incident_open` for a lingering incident (its last effective
+			// failure has left, the linger window hasn't elapsed) must not
+			// ship: a one-off blip would otherwise notify purely because the
+			// linger held the incident open past its `deliver_after`. The row
+			// stays pending — it ships when a failure returns, or is
+			// cancelled when the linger expires and the incident closes.
+			.filter(not(dsl::kind.eq(KIND_INCIDENT_OPEN).and(exists(
+				incidents::table
+					.filter(incidents::id.nullable().eq(dsl::incident_id))
+					.filter(incidents::closed_at.is_null())
+					.filter(incidents::closing_at.is_not_null()),
+			))))
 			.order(dsl::created_at.asc())
 			.limit(limit)
 			.for_update()

@@ -95,6 +95,14 @@ pub struct ServerGroup {
 		treat_none_as_default_value = false
 	)]
 	pub deleted_at: Option<Timestamp>,
+	/// How long, in seconds, an incident lingers after its last failure
+	/// recovers before it closes and the resolved notification is sent. A
+	/// failure returning within this window continues the same incident
+	/// instead of opening (and notifying about) a new one — the close-side
+	/// mirror of `slack_open_delay`, for a red check that briefly blips
+	/// green.
+	#[schema(value_type = i64, format = "int64")]
+	pub slack_close_delay: PgDuration,
 }
 
 /// Fields required to create a new server group.
@@ -117,6 +125,12 @@ pub struct NewServerGroup {
 	#[serde(default)]
 	#[schema(value_type = Option<i64>, format = "int64")]
 	pub slack_open_delay: Option<PgDuration>,
+	/// How long, in seconds, an incident lingers after its last failure
+	/// recovers before it closes and notifies as resolved. Defaults to the
+	/// system default if omitted.
+	#[serde(default)]
+	#[schema(value_type = Option<i64>, format = "int64")]
+	pub slack_close_delay: Option<PgDuration>,
 }
 
 /// Fields to update on an existing server group. Only the fields present
@@ -135,6 +149,9 @@ pub struct PartialServerGroup {
 	/// New incident-opened notification delay, in seconds.
 	#[schema(value_type = Option<i64>, format = "int64")]
 	pub slack_open_delay: Option<PgDuration>,
+	/// New incident linger window, in seconds.
+	#[schema(value_type = Option<i64>, format = "int64")]
+	pub slack_close_delay: Option<PgDuration>,
 }
 
 impl ServerGroup {

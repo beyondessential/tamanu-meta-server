@@ -86,6 +86,20 @@ async fn mark_open_delivered(conn: &mut diesel_async::AsyncPgConnection, inciden
 		.expect("mark delivered");
 }
 
+/// Backdate a lingering incident's `closing_at` past any realistic linger
+/// window, then run the sweep — the test-speed way to let the close-side
+/// grace elapse.
+async fn expire_linger(conn: &mut diesel_async::AsyncPgConnection, incident_id: Uuid) {
+	sql_query("UPDATE incidents SET closing_at = closing_at - INTERVAL '1 hour' WHERE id = $1")
+		.bind::<sql_types::Uuid, _>(incident_id)
+		.execute(conn)
+		.await
+		.expect("expire linger");
+	database::issues::sweep_lingering_incidents(conn)
+		.await
+		.expect("linger sweep");
+}
+
 async fn count_resolve_rows(conn: &mut diesel_async::AsyncPgConnection, incident_id: Uuid) -> i64 {
 	#[derive(QueryableByName)]
 	struct Count {
@@ -166,13 +180,24 @@ async fn warning_does_not_hold_incident_open_after_error_resolves() {
 		)
 		.await;
 
-		// New logic: incident closes despite the warning still being active.
+		// The incident lingers rather than closing on the spot — the still-
+		// active warning must not hold it past the window, so once the
+		// linger elapses the sweep closes it despite the warning.
+		let lingering = Incident::list_for_server(&mut conn, server_id, false, 10)
+			.await
+			.expect("list");
+		assert_eq!(
+			lingering.len(),
+			1,
+			"incident lingers after the failure recovers"
+		);
+		expire_linger(&mut conn, incident.id).await;
 		let still_open = Incident::list_for_server(&mut conn, server_id, false, 10)
 			.await
 			.expect("list");
 		assert!(
 			still_open.is_empty(),
-			"incident must close once no severity≥error contributor is alive, got: {still_open:?}",
+			"incident must close once no failure contributor is alive, got: {still_open:?}",
 		);
 
 		// One Slack resolve enqueued (not two — the guard against re-close fires).
@@ -269,7 +294,8 @@ async fn stranded_warning_resolve_does_not_re_enqueue_slack() {
 		)
 		.await;
 
-		// Error resolves → incident closes (one slack resolve).
+		// Error resolves → incident lingers, then the sweep closes it
+		// (one slack resolve).
 		save_event(
 			&mut conn,
 			server_id,
@@ -279,6 +305,7 @@ async fn stranded_warning_resolve_does_not_re_enqueue_slack() {
 			"recovered",
 		)
 		.await;
+		expire_linger(&mut conn, incident.id).await;
 		assert_eq!(count_resolve_rows(&mut conn, incident.id).await, 1);
 
 		// Warning eventually resolves too. Incident is already closed; this

@@ -4477,6 +4477,16 @@ export interface components {
              */
             issue_count: number;
             /**
+             * Format: date-time
+             * @description When set, the incident is lingering: its last effective failure
+             *     recovered at this time, and the incident stays open for the group's
+             *     linger window in case the failure comes back (which would continue
+             *     this incident rather than open a new one). Null while a failure is
+             *     live, and always null on a closed incident. Lets a client
+             *     distinguish "open and failing" from "open but currently recovered".
+             */
+            lingering_since?: string | null;
+            /**
              * Format: int64
              * @description Combined count of notes on the incident itself plus notes on all its
              *     contributing issues.
@@ -5378,6 +5388,11 @@ export interface components {
             name?: string | null;
             /** @description New free-form operator notes for the group. */
             notes?: string | null;
+            /**
+             * Format: int64
+             * @description New incident linger window, in seconds.
+             */
+            slack_close_delay?: number | null;
             /**
              * Format: int64
              * @description New incident-opened notification delay, in seconds.
@@ -6439,6 +6454,16 @@ export interface components {
             notes?: string;
             /**
              * Format: int64
+             * @description How long, in seconds, an incident lingers after its last failure
+             *     recovers before it closes and the resolved notification is sent. A
+             *     failure returning within this window continues the same incident
+             *     instead of opening (and notifying about) a new one — the close-side
+             *     mirror of `slack_open_delay`, for a red check that briefly blips
+             *     green.
+             */
+            slack_close_delay: number;
+            /**
+             * Format: int64
              * @description How long, in seconds, an incident-opened notification waits before
              *     it's sent. If the incident resolves within this window, the
              *     notification is cancelled outright and never sent — useful for
@@ -6519,6 +6544,14 @@ export interface components {
             name: string;
             /** @description Free-form notes about the group. Defaults to empty. */
             notes?: string;
+            /**
+             * Format: int64
+             * @description Optional linger window, in whole seconds: how long an incident stays
+             *     open after its last failure recovers, so a failure returning within
+             *     the window continues the same incident instead of opening (and
+             *     notifying about) a new one. Omit to accept the default.
+             */
+            slack_close_delay?: number | null;
             /**
              * Format: int64
              * @description Optional initial delay, in whole seconds, before an "incident opened"

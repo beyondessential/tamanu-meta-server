@@ -125,6 +125,16 @@ export type HealthcheckSampleResponse = Solidify<Schemas["HealthcheckSampleRespo
 export type IssueData = Solidify<Schemas["IssueData"]>;
 export type IssueIncidentLink = Solidify<Schemas["IssueIncidentLink"]>;
 export type IncidentData = Solidify<Schemas["IncidentData"]>;
+
+/// An open incident whose last effective failure has recovered: it stays
+/// open for the group's linger window in case the failure comes back, and
+/// closes (backdated) if things stay quiet. Distinct from "held", which is
+/// about the Slack open notice still sitting inside the notification delay.
+export function isIncidentLingering(
+	incident: Pick<IncidentData, "closed_at" | "lingering_since">,
+): boolean {
+	return incident.closed_at == null && incident.lingering_since != null;
+}
 export type IncidentIssueData = Solidify<Schemas["IncidentIssueData"]>;
 export type IncidentWithIssues = Solidify<Schemas["IncidentWithIssues"]>;
 export type IssueNoteData = Solidify<Schemas["IssueNoteData"]>;

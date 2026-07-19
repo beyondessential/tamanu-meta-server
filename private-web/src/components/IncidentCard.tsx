@@ -4,16 +4,19 @@ import NotesIcon from "@mui/icons-material/StickyNote2";
 import { Link as RouterLink } from "react-router-dom";
 import TimeAgo from "./TimeAgo";
 import { useIsNotificationHeld } from "../hooks/useIsNotificationHeld";
-import type { IncidentData } from "../types";
+import { type IncidentData, isIncidentLingering } from "../types";
 
 /** Compact view of an open incident; click-through goes to the incident
  * detail page. The body has a stats row (bottom-right) with issue / event
  * / note counts. A warning-coloured border (rather than the default error)
  * signals that the Slack notice is still inside the per-group cooldown
  * window — operators scanning the /incidents grid can tell at a glance
- * which cards have already paged out. */
+ * which cards have already paged out — and an info-coloured border that
+ * every failure has recovered and the incident is lingering, closing if
+ * things stay quiet. */
 export default function IncidentCard({ incident }: { incident: IncidentData }) {
 	const held = useIsNotificationHeld(incident.notification_held_until);
+	const lingering = isIncidentLingering(incident);
 	return (
 		<Box
 			component={RouterLink}
@@ -21,7 +24,11 @@ export default function IncidentCard({ incident }: { incident: IncidentData }) {
 			sx={{
 				p: 1.5,
 				border: 1,
-				borderColor: held ? "warning.main" : "error.main",
+				borderColor: lingering
+					? "info.main"
+					: held
+						? "warning.main"
+						: "error.main",
 				borderRadius: 1,
 				textDecoration: "none",
 				color: "text.primary",
@@ -36,7 +43,13 @@ export default function IncidentCard({ incident }: { incident: IncidentData }) {
 				<Typography variant="body2" color="text.secondary">
 					opened <TimeAgo timestamp={incident.opened_at} />
 				</Typography>
-				{held && incident.notification_held_until && (
+				{lingering && incident.lingering_since && (
+					<Typography variant="body2" sx={{ color: "info.main" }}>
+						Recovering; last failure cleared{" "}
+						<TimeAgo timestamp={incident.lingering_since} />
+					</Typography>
+				)}
+				{!lingering && held && incident.notification_held_until && (
 					<Typography variant="body2" sx={{ color: "warning.main" }}>
 						Holding; posting{" "}
 						<TimeAgo timestamp={incident.notification_held_until} />

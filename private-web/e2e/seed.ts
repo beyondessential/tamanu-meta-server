@@ -69,29 +69,35 @@ export async function seedServerGroup(
 		tags?: Record<string, string>;
 		/** Slack open cooldown in seconds. Omit to keep the migration default. */
 		slackOpenDelaySeconds?: number;
+		/** Incident linger window in seconds. Omit to keep the migration default. */
+		slackCloseDelaySeconds?: number;
 	} = {},
 ): Promise<SeededServerGroup> {
 	const id = randomUUID();
 	const name = opts.name ?? randomLabel("group");
+	const columns = ["id", "name", "notes", "tags"];
+	const values: unknown[] = [
+		id,
+		name,
+		opts.notes ?? "",
+		JSON.stringify(opts.tags ?? {}),
+	];
+	const exprs = ["$1", "$2", "$3", "$4::jsonb"];
 	if (opts.slackOpenDelaySeconds !== undefined) {
-		await sql.query(
-			`INSERT INTO server_groups (id, name, notes, tags, slack_open_delay)
-			 VALUES ($1, $2, $3, $4::jsonb, make_interval(secs => $5))`,
-			[
-				id,
-				name,
-				opts.notes ?? "",
-				JSON.stringify(opts.tags ?? {}),
-				opts.slackOpenDelaySeconds,
-			],
-		);
-	} else {
-		await sql.query(
-			`INSERT INTO server_groups (id, name, notes, tags)
-			 VALUES ($1, $2, $3, $4::jsonb)`,
-			[id, name, opts.notes ?? "", JSON.stringify(opts.tags ?? {})],
-		);
+		columns.push("slack_open_delay");
+		values.push(opts.slackOpenDelaySeconds);
+		exprs.push(`make_interval(secs => $${values.length})`);
 	}
+	if (opts.slackCloseDelaySeconds !== undefined) {
+		columns.push("slack_close_delay");
+		values.push(opts.slackCloseDelaySeconds);
+		exprs.push(`make_interval(secs => $${values.length})`);
+	}
+	await sql.query(
+		`INSERT INTO server_groups (${columns.join(", ")})
+		 VALUES (${exprs.join(", ")})`,
+		values,
+	);
 	return { id, name };
 }
 
@@ -455,6 +461,46 @@ export async function seedIssue(
 			active ? (opts.firstSeen ?? new Date().toISOString()) : null,
 		],
 	);
+	return { id };
+}
+
+export interface SeededIncident {
+	id: string;
+}
+
+/** Seed an open incident directly, optionally lingering (`closingAt` set:
+ * its last effective failure recovered then and it closes if things stay
+ * quiet) and optionally linking issues into its timeline. */
+export async function seedIncident(
+	sql: Sql,
+	opts: {
+		/** Group the incident targets; null/absent seeds a canopy-wide one. */
+		serverGroupId?: string | null;
+		/** ISO 8601; defaults to NOW(). */
+		openedAt?: string;
+		/** ISO 8601; sets the incident lingering since this time. */
+		closingAt?: string | null;
+		/** Issues to link, each with optional join/leave times. */
+		issues?: Array<{
+			issueId: string;
+			joinedAt?: string;
+			leftAt?: string | null;
+		}>;
+	} = {},
+): Promise<SeededIncident> {
+	const id = randomUUID();
+	await sql.query(
+		`INSERT INTO incidents (id, server_group_id, opened_at, closing_at)
+		 VALUES ($1, $2, COALESCE($3::timestamptz, NOW()), $4::timestamptz)`,
+		[id, opts.serverGroupId ?? null, opts.openedAt ?? null, opts.closingAt ?? null],
+	);
+	for (const link of opts.issues ?? []) {
+		await sql.query(
+			`INSERT INTO incident_issues (incident_id, issue_id, joined_at, left_at)
+			 VALUES ($1, $2, COALESCE($3::timestamptz, NOW()), $4::timestamptz)`,
+			[id, link.issueId, link.joinedAt ?? null, link.leftAt ?? null],
+		);
+	}
 	return { id };
 }
 

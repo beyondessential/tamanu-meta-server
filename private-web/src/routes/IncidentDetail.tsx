@@ -32,6 +32,7 @@ import { humanDuration } from "../lib/humanDuration";
 import {
 	RESOLVED_REASONS,
 	RESOLVED_REASON_LABEL,
+	isIncidentLingering,
 	type IncidentIssueData,
 	type IncidentNoteData,
 	type IncidentWithIssues,
@@ -132,7 +133,10 @@ function Header({
 	const heldUntilActive = useIsNotificationHeld(
 		incident.notification_held_until,
 	);
-	const held = open && heldUntilActive;
+	const lingering = isIncidentLingering(incident);
+	// A lingering incident's open notice is also gated by the drainer, so
+	// the held countdown would be wrong — the recovery state wins.
+	const held = open && heldUntilActive && !lingering;
 	const isAdmin = useIsAdmin() === true;
 	const resolve = useApiAction("incidents", "resolve");
 	const unresolve = useApiAction("incidents", "unresolve");
@@ -251,6 +255,32 @@ function Header({
 							<Typography variant="caption" color="text.secondary">
 								Resolving inside the window cancels the open and skips
 								the resolve, so Slack never hears about either edge.
+							</Typography>
+						</Stack>
+					)}
+					{lingering && incident.lingering_since && (
+						<Stack
+							direction="row"
+							spacing={1}
+							sx={{ mt: 1, alignItems: "center", flexWrap: "wrap" }}
+							useFlexGap
+						>
+							<Chip
+								icon={<AccessTimeIcon />}
+								label={
+									<>
+										Recovering; last failure cleared{" "}
+										<TimeAgo timestamp={incident.lingering_since} />
+									</>
+								}
+								color="info"
+								variant="outlined"
+								size="small"
+							/>
+							<Typography variant="caption" color="text.secondary">
+								A failure returning within the linger window continues
+								this incident; otherwise it closes as of when the last
+								failure cleared.
 							</Typography>
 						</Stack>
 					)}
