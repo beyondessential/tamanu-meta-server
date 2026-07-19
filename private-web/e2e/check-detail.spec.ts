@@ -235,7 +235,7 @@ test.describe("check detail page", () => {
 		await expect(
 			page.locator(`a[href="/groups/${group.id}"]`),
 		).toHaveText("Backup Coast");
-		await expect(page.getByText("whole group")).toBeVisible();
+		await expect(page.getByText("whole group", { exact: true })).toBeVisible();
 
 		// Canopy's own state gets the trailing section.
 		await expect(page.getByText("canopy", { exact: true })).toBeVisible();
@@ -286,7 +286,7 @@ test.describe("check detail page", () => {
 		// The state-backed row shows a relative failing-since; the row
 		// without an active streak shows the em-dash placeholder.
 		await expect(page.getByText("3h ago")).toBeVisible();
-		await expect(page.getByText("—")).toBeVisible();
+		await expect(page.getByText("—", { exact: true })).toBeVisible();
 	});
 
 	test("shows the catalog ceiling when one is configured", async ({
@@ -544,5 +544,18 @@ test.describe("fleet stability", () => {
 		await expect(
 			fleet.locator('[data-testid="duty-cell"][data-fraction="0.3"]'),
 		).toHaveCount(1);
+
+		// The group heading carries its own aggregate — here identical to
+		// the fleet's, since the fleet is one group — and expands to the
+		// group-scoped rollup (a second heatmap).
+		await expect(
+			page.getByText("2 flips/24h across 2 servers"),
+		).toBeVisible();
+		await expect(page.getByTestId("duty-cell")).toHaveCount(168);
+		await page.getByRole("button", { name: "Expand group" }).click();
+		await expect(page.getByTestId("duty-cell")).toHaveCount(336);
+		await expect(
+			page.getByText(/across 2 servers with a record/i),
+		).toHaveCount(2);
 	});
 });

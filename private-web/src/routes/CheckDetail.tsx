@@ -42,6 +42,7 @@ import {
 	type CheckDetailServerData,
 	type CheckResult,
 	type ServerRank,
+	type StabilityData,
 } from "../types";
 
 const HEALTHY_RESULTS: readonly string[] = ["passed", "skipped"];
@@ -274,6 +275,32 @@ function AttentionList({
 		sectionFor(s.rank, s.group_id, s.group_name).servers.push(s);
 	}
 
+	// Group-level aggregates come from *all* of the group's records —
+	// the healthy toggle hides rows, not statistics.
+	const groupAgg = new Map<string, GroupAggregate>();
+	const aggFor = (groupId: string) => {
+		let agg = groupAgg.get(groupId);
+		if (!agg) {
+			agg = { records: [], serverCount: 0, hasGroupState: false };
+			groupAgg.set(groupId, agg);
+		}
+		return agg;
+	};
+	for (const s of data.servers) {
+		if (s.group_id && s.stability) {
+			const agg = aggFor(s.group_id);
+			agg.records.push(s.stability);
+			agg.serverCount += 1;
+		}
+	}
+	for (const g of data.groups) {
+		if (g.stability) {
+			const agg = aggFor(g.group_id);
+			agg.records.push(g.stability);
+			agg.hasGroupState = true;
+		}
+	}
+
 	const rankOrder: RankKey[] = [...SERVER_RANK_ORDER, null];
 	return (
 		<Stack spacing={2}>
@@ -301,30 +328,14 @@ function AttentionList({
 						<StateTable>
 							{sections.map((section) => (
 								<Fragment key={section.key}>
-									<TableRow>
-										<TableCell
-											colSpan={6}
-											sx={{ bgcolor: "action.hover", py: 0.5 }}
-										>
-											{section.groupId ? (
-												<MuiLink
-													component={RouterLink}
-													to={`/groups/${section.groupId}`}
-													underline="hover"
-													variant="subtitle2"
-												>
-													{section.groupName || "(unnamed group)"}
-												</MuiLink>
-											) : (
-												<Typography
-													variant="subtitle2"
-													color="text.secondary"
-												>
-													Ungrouped
-												</Typography>
-											)}
-										</TableCell>
-									</TableRow>
+									<GroupHeaderRow
+										section={section}
+										agg={
+											section.groupId
+												? (groupAgg.get(section.groupId) ?? null)
+												: null
+										}
+									/>
 									{section.groupState && (
 										<StateRow
 											label={
@@ -395,6 +406,101 @@ function compareServersByRankThenKind_(
 	return compareServersByRankThenKind(
 		{ rank: a.rank, kind: a.kind, name: a.server_name },
 		{ rank: b.rank, kind: b.kind, name: b.server_name },
+	);
+}
+
+/// A group's stability inputs: every member server's record plus the
+/// group's own state record, untouched by the healthy toggle.
+type GroupAggregate = {
+	records: StabilityData[];
+	serverCount: number;
+	hasGroupState: boolean;
+};
+
+/// A group's section heading: the linked group name plus the group-level
+/// stability aggregate, expandable to the combined heatmap and statistics
+/// — the same rollup the fleet section shows, scoped to one group.
+function GroupHeaderRow({
+	section,
+	agg,
+}: {
+	section: Section;
+	agg: GroupAggregate | null;
+}) {
+	const [expanded, setExpanded] = useState(false);
+	const headerSx = { bgcolor: "action.hover", py: 0.5 } as const;
+	const name = section.groupId ? (
+		<MuiLink
+			component={RouterLink}
+			to={`/groups/${section.groupId}`}
+			underline="hover"
+			variant="subtitle2"
+		>
+			{section.groupName || "(unnamed group)"}
+		</MuiLink>
+	) : (
+		<Typography variant="subtitle2" color="text.secondary">
+			Ungrouped
+		</Typography>
+	);
+	if (!agg || agg.records.length === 0) {
+		return (
+			<TableRow>
+				<TableCell colSpan={6} sx={headerSx}>
+					{name}
+				</TableCell>
+			</TableRow>
+		);
+	}
+
+	const flips24 = agg.records.reduce((n, r) => n + r.stats.flips_24h, 0);
+	const flips7d = agg.records.reduce((n, r) => n + r.stats.flips_7d, 0);
+	const summary =
+		flips7d === 0
+			? "steady"
+			: flips24 > 0
+				? `${flips24} flips/24h`
+				: `${flips7d} flips/7d`;
+	const subject = [
+		agg.serverCount > 0 &&
+			`${agg.serverCount} server${agg.serverCount === 1 ? "" : "s"}`,
+		agg.hasGroupState && "the group's own state",
+	]
+		.filter(Boolean)
+		.join(" and ");
+	return (
+		<>
+			<TableRow>
+				<TableCell sx={headerSx}>
+					<IconButton
+						aria-label={expanded ? "Collapse group" : "Expand group"}
+						size="small"
+						onClick={() => setExpanded((v) => !v)}
+					>
+						{expanded ? (
+							<ExpandLessIcon fontSize="small" />
+						) : (
+							<ExpandMoreIcon fontSize="small" />
+						)}
+					</IconButton>
+				</TableCell>
+				<TableCell colSpan={2} sx={headerSx}>
+					{name}
+				</TableCell>
+				<TableCell colSpan={3} sx={headerSx}>
+					<Typography variant="body2" color="text.secondary">
+						{summary} across {subject}
+					</Typography>
+				</TableCell>
+			</TableRow>
+			{expanded && (
+				<TableRow>
+					<TableCell colSpan={6} sx={{ py: 1 }}>
+						<FleetStabilitySummary records={agg.records} subject={subject} />
+					</TableCell>
+				</TableRow>
+			)}
+		</>
 	);
 }
 
