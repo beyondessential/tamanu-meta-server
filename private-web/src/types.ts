@@ -93,6 +93,10 @@ export type CheckDetailData = Solidify<Schemas["CheckDetailData"]>;
 export type CheckDetailServerData = Solidify<
 	Schemas["CheckDetailServerData"]
 >;
+export type CheckDetailGroupData = Solidify<Schemas["CheckDetailGroupData"]>;
+export type CheckDetailCanopyData = Solidify<
+	Schemas["CheckDetailCanopyData"]
+>;
 export type TagMap = Solidify<Schemas["TagMap"]>;
 
 export type VersionData = Solidify<Schemas["VersionData"]>;

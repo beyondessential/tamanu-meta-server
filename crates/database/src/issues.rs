@@ -1046,11 +1046,11 @@ pub async fn health_from_check_state(
 }
 
 impl Issue {
-	/// Server-scoped check state for one (source, check). The per-check
-	/// detail page's data source: rows carry the observed/effective
-	/// results, the check's detail, and the degraded-streak timestamps.
-	/// A check's identity is the pair — a same-named check from another
-	/// source is a different check.
+	/// Check state for one (source, check), across every scope — server,
+	/// group, and canopy-wide. The check detail page's data source: rows
+	/// carry the observed/effective results, the check's detail, and the
+	/// degraded-streak timestamps. A check's identity is the pair — a
+	/// same-named check from another source is a different check.
 	pub async fn check_state_for_check(
 		conn: &mut AsyncPgConnection,
 		source: &str,
@@ -1062,7 +1062,6 @@ impl Issue {
 			.select(Issue::as_select())
 			.filter(dsl::source.eq(source))
 			.filter(dsl::check_name.eq(check_name))
-			.filter(dsl::server_id.is_not_null())
 			.filter(dsl::observed_result.is_not_null())
 			.load(conn)
 			.await

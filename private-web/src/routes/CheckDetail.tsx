@@ -22,7 +22,7 @@ import {
 } from "@mui/material";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import { useApi } from "../api";
 import CheckExtrasList, { checkEntryExtras } from "../components/CheckExtras";
@@ -31,11 +31,18 @@ import CheckStabilityPanel, {
 } from "../components/CheckStabilityPanel";
 import Markdown from "../components/Markdown";
 import CheckResultChip from "../components/CheckResultChip";
-import ServerNameWithGroup from "../components/ServerNameWithGroup";
 import TimeAgo from "../components/TimeAgo";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { useReloadInterval } from "../hooks/useReloadInterval";
-import { type CheckDetailServerData, type CheckResult } from "../types";
+import {
+	SERVER_RANK_ORDER,
+	compareServersByRankThenKind,
+	type CheckDetailData,
+	type CheckDetailGroupData,
+	type CheckDetailServerData,
+	type CheckResult,
+	type ServerRank,
+} from "../types";
 
 const HEALTHY_RESULTS: readonly string[] = ["passed", "skipped"];
 
@@ -108,17 +115,15 @@ export default function CheckDetail() {
 				</Accordion>
 			)}
 
-			{result.status === "ok" && (
-				<FleetStability servers={result.data.servers} />
-			)}
+			{result.status === "ok" && <FleetStability data={result.data} />}
 
 			<Box>
 				<Typography variant="h6" component="h2">
 					Needs attention
 				</Typography>
 				<Typography variant="body2" color="text.secondary">
-					Servers whose latest report from this source currently flags this
-					check, most urgent first.
+					Everything whose current state from this source flags this check —
+					servers, whole groups, and canopy itself — by rank and group.
 				</Typography>
 			</Box>
 			<FormControlLabel
@@ -137,9 +142,9 @@ export default function CheckDetail() {
 			) : result.status === "error" ? (
 				<Alert severity="error">{result.error.message}</Alert>
 			) : (
-				<ServersTable
+				<AttentionList
 					check={check ?? ""}
-					servers={result.data.servers}
+					data={result.data}
 					showHealthy={showHealthy}
 				/>
 			)}
@@ -148,48 +153,252 @@ export default function CheckDetail() {
 }
 
 /// The check's stability across the whole fleet: one heatmap over every
-/// server's duty profile (healthy reporters included), so a shared
-/// load-dependent pattern reads at a glance even when no single server
-/// stands out. Hidden until at least one server has a record.
-function FleetStability({ servers }: { servers: CheckDetailServerData[] }) {
-	const records = servers.flatMap((s) => (s.stability ? [s.stability] : []));
+/// target's duty profile (healthy reporters included, group and canopy
+/// states too), so a shared load-dependent pattern reads at a glance
+/// even when no single target stands out. Hidden until at least one
+/// target has a record.
+function FleetStability({ data }: { data: CheckDetailData }) {
+	const serverRecords = data.servers.flatMap((s) =>
+		s.stability ? [s.stability] : [],
+	);
+	const groupRecords = data.groups.flatMap((g) =>
+		g.stability ? [g.stability] : [],
+	);
+	const canopyRecord = data.canopy?.stability ?? null;
+	const records = [
+		...serverRecords,
+		...groupRecords,
+		...(canopyRecord ? [canopyRecord] : []),
+	];
 	if (records.length === 0) return null;
+	const subject = [
+		serverRecords.length > 0 &&
+			`${serverRecords.length} server${serverRecords.length === 1 ? "" : "s"}`,
+		groupRecords.length > 0 &&
+			`${groupRecords.length} group${groupRecords.length === 1 ? "" : "s"}`,
+		canopyRecord && "canopy",
+	]
+		.filter(Boolean)
+		.join(", ");
 	return (
 		<Box>
 			<Typography variant="h6" component="h2" sx={{ mb: 1 }}>
 				Fleet stability
 			</Typography>
-			<FleetStabilitySummary records={records} />
+			<FleetStabilitySummary records={records} subject={subject} />
 		</Box>
 	);
 }
 
-function ServersTable({
+type RankKey = ServerRank | null;
+
+/// A row's state fields, shared by server, group, and canopy rows.
+type StateFields = Pick<
+	CheckDetailServerData,
+	"result" | "data" | "failing_since" | "status_created_at" | "stability"
+>;
+
+/// One group's slice of a rank bucket: the group's own state for this
+/// check (if any) followed by its member servers.
+type Section = {
+	key: string;
+	groupId: string | null;
+	groupName: string | null;
+	groupState: CheckDetailGroupData | null;
+	servers: CheckDetailServerData[];
+};
+
+/// The needs-attention list, in the standard list shape used across the
+/// UI: rank buckets in display order (unranked last, without a heading),
+/// groups alphabetical within a bucket — each with its own group-scoped
+/// state first, then its member servers by kind then name — ungrouped
+/// servers last, and canopy's own state as a trailing section.
+function AttentionList({
 	check,
-	servers,
+	data,
 	showHealthy,
 }: {
 	check: string;
-	servers: CheckDetailServerData[];
+	data: CheckDetailData;
 	showHealthy: boolean;
 }) {
-	const visible = showHealthy
-		? servers
-		: servers.filter((s) => !HEALTHY_RESULTS.includes(s.result));
+	const healthy = (result: string) => HEALTHY_RESULTS.includes(result);
+	const servers = showHealthy
+		? data.servers
+		: data.servers.filter((s) => !healthy(s.result));
+	const groups = showHealthy
+		? data.groups
+		: data.groups.filter((g) => !healthy(g.result));
+	const canopy =
+		data.canopy && (showHealthy || !healthy(data.canopy.result))
+			? data.canopy
+			: null;
 
-	if (visible.length === 0) {
-		const healthyCount = servers.length;
+	if (servers.length === 0 && groups.length === 0 && !canopy) {
+		const healthyCount =
+			data.servers.length + data.groups.length + (data.canopy ? 1 : 0);
 		return (
 			<Alert severity="success">
-				No servers currently flag <code>{check}</code>.
+				Nothing currently flags <code>{check}</code>.
 				{healthyCount > 0 &&
 					` ${healthyCount} ${
-						healthyCount === 1 ? "server reports" : "servers report"
+						healthyCount === 1 ? "reporter shows" : "reporters show"
 					} it healthy — use the toggle above to see them.`}
 			</Alert>
 		);
 	}
 
+	const buckets = new Map<RankKey, Map<string, Section>>();
+	const sectionFor = (
+		rank: RankKey,
+		groupId: string | null,
+		groupName: string | null,
+	): Section => {
+		let bucket = buckets.get(rank);
+		if (!bucket) {
+			bucket = new Map();
+			buckets.set(rank, bucket);
+		}
+		const key = groupId ?? "__ungrouped";
+		let section = bucket.get(key);
+		if (!section) {
+			section = { key, groupId, groupName, groupState: null, servers: [] };
+			bucket.set(key, section);
+		}
+		return section;
+	};
+	for (const g of groups) {
+		sectionFor(g.rank, g.group_id, g.group_name).groupState = g;
+	}
+	for (const s of servers) {
+		sectionFor(s.rank, s.group_id, s.group_name).servers.push(s);
+	}
+
+	const rankOrder: RankKey[] = [...SERVER_RANK_ORDER, null];
+	return (
+		<Stack spacing={2}>
+			{rankOrder.map((rank) => {
+				const bucket = buckets.get(rank);
+				if (!bucket) return null;
+				const sections = [...bucket.values()].sort((a, b) => {
+					// Ungrouped servers trail the named groups.
+					if ((a.groupId == null) !== (b.groupId == null)) {
+						return a.groupId == null ? 1 : -1;
+					}
+					return (a.groupName ?? "").localeCompare(b.groupName ?? "");
+				});
+				return (
+					<Box key={rank ?? "_unranked"}>
+						{rank && (
+							<Typography
+								variant="overline"
+								color="text.secondary"
+								sx={{ display: "block", mb: 0.5 }}
+							>
+								{rank}
+							</Typography>
+						)}
+						<StateTable>
+							{sections.map((section) => (
+								<Fragment key={section.key}>
+									<TableRow>
+										<TableCell
+											colSpan={6}
+											sx={{ bgcolor: "action.hover", py: 0.5 }}
+										>
+											{section.groupId ? (
+												<MuiLink
+													component={RouterLink}
+													to={`/groups/${section.groupId}`}
+													underline="hover"
+													variant="subtitle2"
+												>
+													{section.groupName || "(unnamed group)"}
+												</MuiLink>
+											) : (
+												<Typography
+													variant="subtitle2"
+													color="text.secondary"
+												>
+													Ungrouped
+												</Typography>
+											)}
+										</TableCell>
+									</TableRow>
+									{section.groupState && (
+										<StateRow
+											label={
+												<Typography
+													variant="body2"
+													sx={{ fontStyle: "italic" }}
+												>
+													whole group
+												</Typography>
+											}
+											state={section.groupState}
+										/>
+									)}
+									{[...section.servers]
+										.sort(compareServersByRankThenKind_)
+										.map((server) => (
+											<StateRow
+												key={server.server_id}
+												label={
+													<MuiLink
+														component={RouterLink}
+														to={`/servers/${server.server_id}`}
+														underline="hover"
+													>
+														{server.server_name || "(unnamed)"}
+													</MuiLink>
+												}
+												state={server}
+											/>
+										))}
+								</Fragment>
+							))}
+						</StateTable>
+					</Box>
+				);
+			})}
+			{canopy && (
+				<Box>
+					<Typography
+						variant="overline"
+						color="text.secondary"
+						sx={{ display: "block", mb: 0.5 }}
+					>
+						canopy
+					</Typography>
+					<StateTable>
+						<StateRow
+							label={
+								<Typography variant="body2" sx={{ fontStyle: "italic" }}>
+									Canopy (self-monitoring)
+								</Typography>
+							}
+							state={canopy}
+						/>
+					</StateTable>
+				</Box>
+			)}
+		</Stack>
+	);
+}
+
+/// The servers within a section share a rank bucket; ordering reduces to
+/// the standard kind-then-name comparison.
+function compareServersByRankThenKind_(
+	a: CheckDetailServerData,
+	b: CheckDetailServerData,
+): number {
+	return compareServersByRankThenKind(
+		{ rank: a.rank, kind: a.kind, name: a.server_name },
+		{ rank: b.rank, kind: b.kind, name: b.server_name },
+	);
+}
+
+function StateTable({ children }: { children: React.ReactNode }) {
 	return (
 		<Paper variant="outlined">
 			<TableContainer>
@@ -197,33 +406,36 @@ function ServersTable({
 					<TableHead>
 						<TableRow>
 							<TableCell width={40} />
-							<TableCell>Server</TableCell>
+							<TableCell>Target</TableCell>
 							<TableCell>Result</TableCell>
 							<TableCell>Stability</TableCell>
 							<TableCell>Failing since</TableCell>
 							<TableCell>As of</TableCell>
 						</TableRow>
 					</TableHead>
-					<TableBody>
-						{visible.map((server) => (
-							<AttentionRow key={server.server_id} server={server} />
-						))}
-					</TableBody>
+					<TableBody>{children}</TableBody>
 				</Table>
 			</TableContainer>
 		</Paper>
 	);
 }
 
-/// One server row, expandable to the check's full `health[]` entry data —
-/// the same key/value rendering the server detail checks table uses.
-function AttentionRow({ server }: { server: CheckDetailServerData }) {
+/// One state row — a server, a whole group, or canopy itself — expandable
+/// to the check's full data (the same key/value rendering the server
+/// detail checks table uses) and the state's stability record.
+function StateRow({
+	label,
+	state,
+}: {
+	label: React.ReactNode;
+	state: StateFields;
+}) {
 	const [expanded, setExpanded] = useState(false);
 	const entry =
-		typeof server.data === "object" &&
-		server.data !== null &&
-		!Array.isArray(server.data)
-			? (server.data as Record<string, unknown>)
+		typeof state.data === "object" &&
+		state.data !== null &&
+		!Array.isArray(state.data)
+			? (state.data as Record<string, unknown>)
 			: {};
 	const extras = checkEntryExtras(entry);
 	return (
@@ -242,26 +454,19 @@ function AttentionRow({ server }: { server: CheckDetailServerData }) {
 						)}
 					</IconButton>
 				</TableCell>
-				<TableCell>
-					<ServerNameWithGroup
-						groupName={server.group_name}
-						groupId={server.group_id}
-						serverName={server.server_name || "(unnamed)"}
-						serverId={server.server_id}
-					/>
-				</TableCell>
+				<TableCell>{label}</TableCell>
 				<TableCell>
 					<CheckResultChip
-						result={server.result as CheckResult}
+						result={state.result as CheckResult}
 						variant="outlined"
 					/>
 				</TableCell>
 				<TableCell>
-					<StabilityCell stability={server.stability} />
+					<StabilityCell stability={state.stability} />
 				</TableCell>
 				<TableCell>
-					{server.failing_since ? (
-						<TimeAgo timestamp={server.failing_since} />
+					{state.failing_since ? (
+						<TimeAgo timestamp={state.failing_since} />
 					) : (
 						<Typography variant="body2" color="text.secondary">
 							—
@@ -269,7 +474,7 @@ function AttentionRow({ server }: { server: CheckDetailServerData }) {
 					)}
 				</TableCell>
 				<TableCell>
-					<TimeAgo timestamp={server.status_created_at} />
+					<TimeAgo timestamp={state.status_created_at} />
 				</TableCell>
 			</TableRow>
 			{expanded && (
@@ -283,8 +488,8 @@ function AttentionRow({ server }: { server: CheckDetailServerData }) {
 									No additional data reported for this check.
 								</Typography>
 							)}
-							{server.stability && (
-								<CheckStabilityPanel stability={server.stability} />
+							{state.stability && (
+								<CheckStabilityPanel stability={state.stability} />
 							)}
 						</Stack>
 					</TableCell>

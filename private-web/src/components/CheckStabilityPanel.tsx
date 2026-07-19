@@ -58,18 +58,21 @@ export default function CheckStabilityPanel({
 	);
 }
 
-/// Fleet-level rollup of a check's stability across every server on the
+/// Fleet-level rollup of a check's stability across every target on the
 /// page: summed duty profiles into one heatmap, plus aggregate flap
-/// counts. Renders nothing when no server has a record yet.
+/// counts. `subject` names what was aggregated (e.g. "12 servers, 1
+/// group"). Renders nothing when no target has a record yet.
 export function FleetStabilitySummary({
 	records,
+	subject,
 }: {
 	records: StabilityData[];
+	subject: string;
 }) {
 	if (records.length === 0) return null;
 	const flips24 = records.reduce((n, r) => n + r.stats.flips_24h, 0);
 	const flips7d = records.reduce((n, r) => n + r.stats.flips_7d, 0);
-	const flappedServers = records.filter((r) => r.stats.flips_7d > 0).length;
+	const flapped = records.filter((r) => r.stats.flips_7d > 0).length;
 	const cells = Array.from({ length: 168 }, (_, i) => ({
 		observations: records.reduce(
 			(n, r) => n + (r.duty_cycle[i]?.observations ?? 0),
@@ -80,13 +83,11 @@ export function FleetStabilitySummary({
 	return (
 		<Stack spacing={1}>
 			<Typography variant="body2" color="text.secondary">
-				Across {records.length} server{records.length === 1 ? "" : "s"} with a
-				record:{" "}
+				Across {subject} with a record:{" "}
 				{flips7d > 0 ? (
 					<>
 						{flips24} state change{flips24 === 1 ? "" : "s"} in 24 h, {flips7d}{" "}
-						in 7 days, on {flappedServers} server
-						{flappedServers === 1 ? "" : "s"}.
+						in 7 days, on {flapped} target{flapped === 1 ? "" : "s"}.
 					</>
 				) : (
 					<>no state changes in the last 7 days.</>

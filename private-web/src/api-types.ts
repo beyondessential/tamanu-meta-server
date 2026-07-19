@@ -3671,12 +3671,31 @@ export interface components {
              */
             source: string;
         };
+        /** @description The canopy-wide state of this check (self-monitoring), if any. */
+        CheckDetailCanopyData: {
+            /** @description The check's own fields from its latest filing, verbatim. */
+            data: unknown;
+            /**
+             * Format: date-time
+             * @description When the current degradation streak began; `None` while healthy.
+             */
+            failing_since?: string | null;
+            /** @description The check's observed result on its latest filing. */
+            result: components["schemas"]["CheckResult"];
+            stability?: null | components["schemas"]["StabilityData"];
+            /**
+             * Format: date-time
+             * @description When the check state last updated.
+             */
+            status_created_at: string;
+        };
         /**
          * @description Response for [`check_detail`]: the queried check's catalog policy
          *     (if it has one yet) and every live server whose latest status reports
          *     it, failing or healthy.
          */
         CheckDetailData: {
+            canopy?: null | components["schemas"]["CheckDetailCanopyData"];
             /**
              * @description The configured policy ceiling for this (source, check), or `None`
              *     if the source has never reported it (so it has no catalog row).
@@ -3692,6 +3711,11 @@ export interface components {
             /** @description Whether this check's policy escalates its effective failures. */
             escalates: boolean;
             /**
+             * @description Group-scoped states of this check, ordered by group name. The
+             *     client files each under its group in the list.
+             */
+            groups: components["schemas"]["CheckDetailGroupData"][];
+            /**
              * @description Every live server whose latest state from this source reports
              *     this check, at any result, ordered as a TODO list: failed,
              *     warning, broken, passed, skipped (most urgent first), then by
@@ -3704,6 +3728,36 @@ export interface components {
              *     can render its heading without re-decoding the request.
              */
             source: string;
+        };
+        /**
+         * @description A group-scoped state of this check — a condition Canopy determines
+         *     about the group's control plane (backup health and the like) — for
+         *     the group's section of the check detail list.
+         */
+        CheckDetailGroupData: {
+            /** @description The check's own fields from its latest filing, verbatim. */
+            data: unknown;
+            /**
+             * Format: date-time
+             * @description When the current degradation streak began; `None` while healthy.
+             */
+            failing_since?: string | null;
+            /**
+             * Format: uuid
+             * @description The group's id — the UI links to `/groups/{group_id}`.
+             */
+            group_id: string;
+            /** @description The group's display name. */
+            group_name: string;
+            rank?: null | components["schemas"]["ServerRank"];
+            /** @description The check's observed result on its latest filing. */
+            result: components["schemas"]["CheckResult"];
+            stability?: null | components["schemas"]["StabilityData"];
+            /**
+             * Format: date-time
+             * @description When the check state last updated.
+             */
+            status_created_at: string;
         };
         /**
          * @description One server whose latest status reports [`CheckDetailData::check`],
@@ -3729,6 +3783,9 @@ export interface components {
             group_id?: string | null;
             /** @description The server's group name, if it belongs to one. */
             group_name?: string | null;
+            /** @description The server's kind, for the standard within-rank ordering. */
+            kind: components["schemas"]["ServerKind"];
+            rank?: null | components["schemas"]["ServerRank"];
             /**
              * @description The check's observed result on its latest report. The UI shows
              *     warning/failed/broken servers by default and puts passed/skipped

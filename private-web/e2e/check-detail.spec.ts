@@ -3,6 +3,7 @@ import {
 	resetSeededTables,
 	seedCheckPolicy,
 	seedCheckStability,
+	seedIssue,
 	seedServer,
 	seedServerGroup,
 	seedStatus,
@@ -18,12 +19,12 @@ test.describe("check detail page", () => {
 	}) => {
 		await page.goto("/healthchecks/alertd/postgres");
 		await expect(
-			page.getByText("No servers currently flag"),
+			page.getByText("Nothing currently flags"),
 		).toBeVisible();
 		await expect(page.getByRole("heading", { name: "postgres" })).toBeVisible();
 	});
 
-	test("lists servers flagging the check, ordered failed before warning, with server and group links", async ({
+	test("lists servers flagging the check under their group heading, with server and group links", async ({
 		page,
 		sql,
 	}) => {
@@ -78,20 +79,21 @@ test.describe("check detail page", () => {
 		await expect(page.getByText("Pacific Central")).toHaveCount(0);
 		await expect(page.getByText("Navua Facility")).toHaveCount(0);
 
-		// Each row carries two links: the group's display name to the
-		// group page, the server's display name to the server page.
+		// The group renders once, as the section heading linking to the
+		// group page; server rows link to their server pages.
 		await expect(failingLink).toHaveAttribute(
 			"href",
 			`/servers/${failing.id}`,
 		);
 		await expect(page.locator(`a[href="/groups/${group.id}"]`)).toHaveCount(
-			2,
+			1,
 		);
 		await expect(
-			page.locator(`a[href="/groups/${group.id}"]`).first(),
+			page.locator(`a[href="/groups/${group.id}"]`),
 		).toHaveText("Coral Coast");
 
-		// Failed sorts above warning.
+		// Standard list ordering within the group: kind then name
+		// (Korolevu before Sigatoka).
 		const failingY = (await failingLink.boundingBox())!.y;
 		const warningY = (await warningLink.boundingBox())!.y;
 		expect(failingY).toBeLessThan(warningY);
@@ -136,12 +138,14 @@ test.describe("check detail page", () => {
 			page.getByRole("link", { name: "Goroka Facility" }),
 		).toBeVisible();
 		await expect(page.getByText("passed", { exact: true })).toBeVisible();
-		// The failing server stays listed, above the healthy one.
+		// Both are listed in the standard name order (Goroka before
+		// Mendi) — position no longer encodes urgency, the result chip
+		// does.
 		const failingLink = page.getByRole("link", { name: "Mendi Facility" });
 		const healthyLink = page.getByRole("link", { name: "Goroka Facility" });
 		const failingY = (await failingLink.boundingBox())!.y;
 		const healthyY = (await healthyLink.boundingBox())!.y;
-		expect(failingY).toBeLessThan(healthyY);
+		expect(healthyY).toBeLessThan(failingY);
 	});
 
 	test("a row expands to the check's full data, like the server detail table", async ({
@@ -195,6 +199,47 @@ test.describe("check detail page", () => {
 		await expect(
 			page.getByText("No additional data reported for this check."),
 		).toBeVisible();
+	});
+
+	test("group and canopy states file under their own sections", async ({
+		page,
+		sql,
+	}) => {
+		// The group's rank bucket comes from its highest-ranked member.
+		const group = await seedServerGroup(sql, { name: "Backup Coast" });
+		await seedServer(sql, {
+			name: "Anchor Central",
+			kind: "central",
+			rank: "production",
+			groupId: group.id,
+		});
+		// A group-scoped canopy check (control-plane condition)...
+		await seedIssue(sql, {
+			serverGroupId: group.id,
+			source: "canopy",
+			ref: "backup-maintenance",
+			message: "maintenance failing",
+		});
+		// ...and canopy's own state for the same check.
+		await seedIssue(sql, {
+			source: "canopy",
+			ref: "backup-maintenance",
+			message: "self-monitoring",
+		});
+
+		await page.goto("/healthchecks/canopy/backup-maintenance");
+
+		// The group's state sits under the production rank heading, in the
+		// group's section, labelled as the whole group.
+		await expect(page.getByText("production", { exact: true })).toBeVisible();
+		await expect(
+			page.locator(`a[href="/groups/${group.id}"]`),
+		).toHaveText("Backup Coast");
+		await expect(page.getByText("whole group")).toBeVisible();
+
+		// Canopy's own state gets the trailing section.
+		await expect(page.getByText("canopy", { exact: true })).toBeVisible();
+		await expect(page.getByText("Canopy (self-monitoring)")).toBeVisible();
 	});
 
 	test("shows since when the check has been failing, from the active issue", async ({
@@ -491,7 +536,7 @@ test.describe("fleet stability", () => {
 			page.getByText(/across 2 servers with a record/i),
 		).toBeVisible();
 		await expect(
-			page.getByText(/2 state changes in 24 h, 2 in 7 days, on 1 server/i),
+			page.getByText(/2 state changes in 24 h, 2 in 7 days, on 1 target/i),
 		).toBeVisible();
 		const fleet = page
 			.getByRole("heading", { name: "Fleet stability" })

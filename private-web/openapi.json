@@ -6920,6 +6920,48 @@
           }
         }
       },
+      "CheckDetailCanopyData": {
+        "type": "object",
+        "description": "The canopy-wide state of this check (self-monitoring), if any.",
+        "required": [
+          "result",
+          "data",
+          "status_created_at"
+        ],
+        "properties": {
+          "data": {
+            "description": "The check's own fields from its latest filing, verbatim."
+          },
+          "failing_since": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the current degradation streak began; `None` while healthy."
+          },
+          "result": {
+            "$ref": "#/components/schemas/CheckResult",
+            "description": "The check's observed result on its latest filing."
+          },
+          "stability": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/StabilityData",
+                "description": "The state's stability record; `None` for states that predate\nstability recording."
+              }
+            ]
+          },
+          "status_created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the check state last updated."
+          }
+        }
+      },
       "CheckDetailData": {
         "type": "object",
         "description": "Response for [`check_detail`]: the queried check's catalog policy\n(if it has one yet) and every live server whose latest status reports\nit, failing or healthy.",
@@ -6927,9 +6969,21 @@
           "source",
           "check",
           "escalates",
-          "servers"
+          "servers",
+          "groups"
         ],
         "properties": {
+          "canopy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CheckDetailCanopyData",
+                "description": "The canopy-wide state of this check, if canopy has ever filed one."
+              }
+            ]
+          },
           "ceiling": {
             "type": [
               "string",
@@ -6952,6 +7006,13 @@
             "type": "boolean",
             "description": "Whether this check's policy escalates its effective failures."
           },
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CheckDetailGroupData"
+            },
+            "description": "Group-scoped states of this check, ordered by group name. The\nclient files each under its group in the list."
+          },
           "servers": {
             "type": "array",
             "items": {
@@ -6965,12 +7026,77 @@
           }
         }
       },
+      "CheckDetailGroupData": {
+        "type": "object",
+        "description": "A group-scoped state of this check — a condition Canopy determines\nabout the group's control plane (backup health and the like) — for\nthe group's section of the check detail list.",
+        "required": [
+          "group_id",
+          "group_name",
+          "result",
+          "data",
+          "status_created_at"
+        ],
+        "properties": {
+          "data": {
+            "description": "The check's own fields from its latest filing, verbatim."
+          },
+          "failing_since": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the current degradation streak began; `None` while healthy."
+          },
+          "group_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The group's id — the UI links to `/groups/{group_id}`."
+          },
+          "group_name": {
+            "type": "string",
+            "description": "The group's display name."
+          },
+          "rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "Rank bucket for display: the highest rank held by any member\nserver, mirroring the status page's group bucketing."
+              }
+            ]
+          },
+          "result": {
+            "$ref": "#/components/schemas/CheckResult",
+            "description": "The check's observed result on its latest filing."
+          },
+          "stability": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/StabilityData",
+                "description": "The state's stability record; `None` for states that predate\nstability recording."
+              }
+            ]
+          },
+          "status_created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the check state last updated."
+          }
+        }
+      },
       "CheckDetailServerData": {
         "type": "object",
         "description": "One server whose latest status reports [`CheckDetailData::check`],\nfor [`check_detail`].",
         "required": [
           "server_id",
           "server_name",
+          "kind",
           "result",
           "data",
           "status_created_at"
@@ -7001,6 +7127,21 @@
               "null"
             ],
             "description": "The server's group name, if it belongs to one."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ServerKind",
+            "description": "The server's kind, for the standard within-rank ordering."
+          },
+          "rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "The server's rank, for the standard rank-bucket grouping."
+              }
+            ]
           },
           "result": {
             "$ref": "#/components/schemas/CheckResult",
