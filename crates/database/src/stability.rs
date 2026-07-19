@@ -184,6 +184,11 @@ pub async fn states_for_checks(
 /// replayed (recovery-by-omission isn't), 'skipped' and unparseable
 /// entries carry no signal, and states that already have a live-recorded
 /// row are left untouched.
+///
+/// TODO(backfill-removal): transitional. Once every deployment has run
+/// the backfill (its marker row is set), delete this constant,
+/// [`backfill_from_statuses`], the monitor pod's startup call, and the
+/// `check_stability_backfill` table (via a migration).
 const BACKFILL_SERVER_SQL: &str = r#"
 WITH obs AS (
 	SELECT
@@ -318,6 +323,9 @@ const BACKFILL_LOCK: i64 = 818_723_002;
 /// `ON CONFLICT DO NOTHING` makes replays converge) and by an advisory
 /// lock (so concurrent pods don't duplicate the scan). Returns the number
 /// of states backfilled, or `None` when there was nothing to do.
+///
+/// TODO(backfill-removal): transitional; delete once fully deployed —
+/// see [`BACKFILL_SERVER_SQL`].
 pub async fn backfill_from_statuses(conn: &mut AsyncPgConnection) -> Result<Option<usize>> {
 	use crate::schema::{check_stability_backfill, servers};
 

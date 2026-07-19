@@ -313,6 +313,9 @@ fn derived_stats_report_flips_and_typical_durations() {
 /// The startup backfill replays status history into stability rows,
 /// one server per transaction, and marks itself done so it never scans
 /// twice.
+///
+/// TODO(backfill-removal): goes with `backfill_from_statuses` once the
+/// backfill has run everywhere.
 #[tokio::test(flavor = "multi_thread")]
 async fn backfill_replays_status_history() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {

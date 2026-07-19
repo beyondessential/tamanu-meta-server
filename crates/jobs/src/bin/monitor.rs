@@ -77,6 +77,10 @@ async fn reconcile_on_startup(pool: &database::Db) {
 /// startup and from several pods at once. Deliberately not a data
 /// migration: a single fleet-wide transaction would hold FK row locks on
 /// live issues rows for its whole run, blocking ingestion filings.
+///
+/// TODO(backfill-removal): transitional; delete this (and its call
+/// below) once every deployment has run it — see
+/// `database::stability::backfill_from_statuses`.
 async fn backfill_stability_on_startup(pool: &database::Db) {
 	let Ok(mut db) = pool.get().await else {
 		warn!("stability backfill: failed to get database connection");

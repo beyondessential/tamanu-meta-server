@@ -37,6 +37,9 @@ SELECT diesel_manage_updated_at('check_stability');
 -- (FOR KEY SHARE) on most live issues rows until commit, blocking every
 -- concurrent filing's SELECT .. FOR UPDATE for the whole run — ingestion
 -- downtime. The pod inserts a row here when the backfill has completed.
+--
+-- TODO(backfill-removal): drop this table (in a new migration) together
+-- with the backfill code once every deployment has run it.
 CREATE TABLE check_stability_backfill (
 	done_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

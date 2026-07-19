@@ -279,8 +279,11 @@ and keep the pipeline ours.
    checks start cold, and recovery-by-omission isn't replayed), so the
    profiles are useful from day one — deliberately not a data migration,
    which would hold FK row locks on live issues rows for its whole run
-   and block concurrent ingestion filings. Independently useful for
-   triage even if nothing below ever ships.
+   and block concurrent ingestion filings. The backfill is transitional:
+   everything tagged `TODO(backfill-removal)` (the replay code, the
+   monitor-pod call, its test, and the marker table) is deleted once
+   every deployment has run it. Independently useful for triage even if
+   nothing below ever ships.
 3. **Adaptive linger, then adaptive open grace.** Derived from the
    aggregates, bounded, each decision traced in the UI.
 4. **Flapping state and pattern suggestions.** The operator-in-the-loop
