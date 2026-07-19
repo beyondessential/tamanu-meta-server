@@ -71,10 +71,30 @@ async fn reconcile_on_startup(pool: &database::Db) {
 	}
 }
 
+/// One-shot backfill of check-stability records from status history. Runs
+/// as its own task so a multi-minute replay never delays the sweeps; the
+/// marker table and advisory lock inside make it safe to fire on every
+/// startup and from several pods at once. Deliberately not a data
+/// migration: a single fleet-wide transaction would hold FK row locks on
+/// live issues rows for its whole run, blocking ingestion filings.
+async fn backfill_stability_on_startup(pool: &database::Db) {
+	let Ok(mut db) = pool.get().await else {
+		warn!("stability backfill: failed to get database connection");
+		return;
+	};
+	match database::stability::backfill_from_statuses(&mut db).await {
+		Ok(None) => debug!("stability backfill: already done (or another pod is on it)"),
+		Ok(Some(n)) => info!("stability backfill: replayed history into {n} state record(s)"),
+		Err(err) => warn!("stability backfill: failed (will retry next startup): {err}"),
+	}
+}
+
 pub fn spawn() -> JoinHandle<()> {
 	let pool = database::init();
 	task::spawn(async move {
 		reconcile_on_startup(&pool).await;
+		let backfill_pool = pool.clone();
+		task::spawn(async move { backfill_stability_on_startup(&backfill_pool).await });
 
 		// The directory is optional: in dev / single-tenant deploys the
 		// TAILSCALE_* env vars aren't set, and the key-expiry sweep just

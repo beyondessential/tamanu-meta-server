@@ -310,15 +310,14 @@ fn derived_stats_report_flips_and_typical_durations() {
 	assert_eq!(stats.typical_healthy_gap_secs, Some(30 * 60));
 }
 
-/// The backfill migration replays status history into stability rows;
-/// re-execute its SQL against seeded history and check the resulting
-/// record. (During normal test setup it runs against empty tables.)
+/// The startup backfill replays status history into stability rows,
+/// one server per transaction, and marks itself done so it never scans
+/// twice.
 #[tokio::test(flavor = "multi_thread")]
 async fn backfill_replays_status_history() {
-	const BACKFILL_SQL: &str = include_str!(
-		"../../../../migrations/2026-07-19-005219-0000_check_stability_backfill/up.sql"
-	);
 	commons_tests::db::TestDb::run(async |mut conn, _| {
+		use database::stability::backfill_from_statuses;
+
 		let server_id = insert_grouped_server(&mut conn).await;
 
 		// Three pushes: red two hours ago, red one hour ago, green now —
@@ -348,10 +347,10 @@ async fn backfill_replays_status_history() {
 		.await
 		.expect("seed issue");
 
-		sql_query(BACKFILL_SQL)
-			.execute(&mut conn)
+		let backfilled = backfill_from_statuses(&mut conn)
 			.await
 			.expect("backfill runs");
+		assert_eq!(backfilled, Some(1), "one state backfilled");
 
 		let row = stability_row(&mut conn, issue.id).await.expect("backfilled");
 		assert_eq!(row.observations, 3);
@@ -365,13 +364,28 @@ async fn backfill_replays_status_history() {
 		assert_eq!(duty.iter().map(|b| b.observations).sum::<i64>(), 3);
 		assert_eq!(duty.iter().map(|b| b.degraded).sum::<i64>(), 2);
 
-		// Idempotent: a second run leaves the row alone.
-		sql_query(BACKFILL_SQL)
-			.execute(&mut conn)
+		// The completion marker gates re-runs: a second call is a no-op
+		// without rescanning anything.
+		let rerun = backfill_from_statuses(&mut conn)
 			.await
 			.expect("backfill reruns");
+		assert_eq!(rerun, None, "marker short-circuits the second run");
 		let again = stability_row(&mut conn, issue.id).await.expect("row");
 		assert_eq!(again.observations, 3);
+
+		// A crash before the marker was written means a re-run over rows
+		// that already exist (from the partial pass, or from live
+		// recording that started meanwhile): they are left untouched.
+		sql_query("DELETE FROM check_stability_backfill")
+			.execute(&mut conn)
+			.await
+			.expect("clear marker");
+		let rerun = backfill_from_statuses(&mut conn)
+			.await
+			.expect("backfill after partial run");
+		assert_eq!(rerun, Some(0), "existing rows are not overwritten");
+		let after = stability_row(&mut conn, issue.id).await.expect("row");
+		assert_eq!(after.observations, 3);
 	})
 	.await
 }

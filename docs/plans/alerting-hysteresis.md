@@ -273,12 +273,14 @@ and keep the pipeline ours.
    leans recent — from observed results, invisible to behaviour. Surfaced
    read-only: a stability column + duty-cycle heatmap on the check
    attention page, and the `get_check_stability` MCP tool returning full
-   records (with derived flap statistics) for a set of checks. A data
-   migration backfills the records from the last 30 days of status
-   history (device-reported checks only; canopy's own checks start cold,
-   and recovery-by-omission isn't replayed), so the profiles are useful
-   from day one. Independently useful for triage even if nothing below
-   ever ships.
+   records (with derived flap statistics) for a set of checks. A one-shot
+   startup pass on the monitor pod backfills the records from the last 30
+   days of status history (device-reported checks only; canopy's own
+   checks start cold, and recovery-by-omission isn't replayed), so the
+   profiles are useful from day one — deliberately not a data migration,
+   which would hold FK row locks on live issues rows for its whole run
+   and block concurrent ingestion filings. Independently useful for
+   triage even if nothing below ever ships.
 3. **Adaptive linger, then adaptive open grace.** Derived from the
    aggregates, bounded, each decision traced in the UI.
 4. **Flapping state and pattern suggestions.** The operator-in-the-loop
