@@ -298,7 +298,7 @@ async fn stamp_check_state(
 	} else {
 		prior_last_degraded.map(jiff_diesel::Timestamp::from)
 	};
-	diesel::update(issues::table.filter(issues::id.eq(issue_id)))
+	let issue = diesel::update(issues::table.filter(issues::id.eq(issue_id)))
 		.set((
 			issues::check_name.eq(&stamp.check),
 			issues::observed_result.eq(stamp.observed.to_string()),
@@ -311,7 +311,11 @@ async fn stamp_check_state(
 		.returning(Issue::as_select())
 		.get_result(conn)
 		.await
-		.map_err(AppError::from)
+		.map_err(AppError::from)?;
+	// Every stamped filing also feeds the state's stability record (from
+	// the observed result, so policy never feeds back into it).
+	crate::stability::record_observation(conn, issue_id, stamp.observed, at).await?;
+	Ok(issue)
 }
 
 impl NewEvent {

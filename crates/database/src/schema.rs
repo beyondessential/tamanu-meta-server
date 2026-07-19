@@ -186,6 +186,20 @@ diesel::table! {
 }
 
 diesel::table! {
+	check_stability (issue_id) {
+		issue_id -> Uuid,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
+		observations -> Int8,
+		degraded_observations -> Int8,
+		last_observed_at -> Nullable<Timestamptz>,
+		last_observed_degraded -> Nullable<Bool>,
+		transitions -> Jsonb,
+		duty_cycle -> Jsonb,
+	}
+}
+
+diesel::table! {
 	chrome_releases (version) {
 		version -> Text,
 		release_date -> Text,
@@ -591,6 +605,7 @@ diesel::joinable!(device_connections -> devices (device_id));
 diesel::joinable!(device_keys -> devices (device_id));
 diesel::joinable!(device_server_associations -> devices (device_id));
 diesel::joinable!(device_server_associations -> servers (server_id));
+diesel::joinable!(check_stability -> issues (issue_id));
 diesel::joinable!(incident_issues -> incidents (incident_id));
 diesel::joinable!(incident_issues -> issues (issue_id));
 diesel::joinable!(incident_notes -> incidents (incident_id));
@@ -631,6 +646,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 	backup_type_defaults,
 	bestool_snippets,
 	check_policies,
+	check_stability,
 	chrome_releases,
 	device_connections,
 	device_keys,

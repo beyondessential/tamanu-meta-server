@@ -2,6 +2,7 @@ import { expect, test } from "./test-fixtures";
 import {
 	resetSeededTables,
 	seedCheckPolicy,
+	seedCheckStability,
 	seedServer,
 	seedServerGroup,
 	seedStatus,
@@ -361,5 +362,77 @@ test.describe("healthcheck attention page", () => {
 		await expect(checkLink).toBeVisible();
 		await checkLink.click();
 		await expect(page).toHaveURL(/\/healthchecks\/alertd\/postgres$/);
+	});
+});
+
+test.describe("stability record", () => {
+	test.beforeEach(async ({ sql }) => {
+		await resetSeededTables(sql);
+	});
+
+	test("shows the flap summary and the duty-cycle heatmap", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "Flap Coast" });
+		const server = await seedServer(sql, {
+			name: "Wobbly Facility",
+			groupId: group.id,
+		});
+		await seedStatus(sql, {
+			serverId: server.id,
+			health: [{ check: "postgres", result: "failed" }],
+		});
+		const minsAgo = (m: number) =>
+			new Date(Date.now() - m * 60_000).toISOString();
+		await seedCheckStability(sql, {
+			serverId: server.id,
+			check: "postgres",
+			observations: 20,
+			degradedObservations: 12,
+			transitions: [
+				{ at: minsAgo(200), degraded: true },
+				{ at: minsAgo(150), degraded: false },
+				{ at: minsAgo(90), degraded: true },
+				{ at: minsAgo(30), degraded: false },
+			],
+			dutyBuckets: { 0: [10, 8], 1: [10, 1] },
+		});
+
+		await page.goto("/healthchecks/alertd/postgres");
+		const row = page.getByRole("row", { name: /wobbly facility/i });
+		await expect(row.getByText("4 flips/24h")).toBeVisible();
+
+		await row.getByRole("button", { name: /expand/i }).click();
+		await expect(
+			page.getByText(/observed 20 times \(12 degraded\)/i),
+		).toBeVisible();
+		await expect(
+			page.getByText(/4 state changes in 24 h, 4 in 7 days/i),
+		).toBeVisible();
+		await expect(page.getByTestId("duty-cell")).toHaveCount(168);
+		// The two seeded buckets carry their degraded fractions.
+		await expect(
+			page.locator('[data-testid="duty-cell"][data-fraction="0.8"]'),
+		).toHaveCount(1);
+		await expect(
+			page.locator('[data-testid="duty-cell"][data-fraction="0.1"]'),
+		).toHaveCount(1);
+	});
+
+	test("a state without a record reads as unknown", async ({ page, sql }) => {
+		const group = await seedServerGroup(sql, { name: "Quiet Coast" });
+		const server = await seedServer(sql, {
+			name: "Quiet Facility",
+			groupId: group.id,
+		});
+		await seedStatus(sql, {
+			serverId: server.id,
+			health: [{ check: "postgres", result: "failed" }],
+		});
+
+		await page.goto("/healthchecks/alertd/postgres");
+		const row = page.getByRole("row", { name: /quiet facility/i });
+		await expect(row.getByText("no record")).toBeVisible();
 	});
 });

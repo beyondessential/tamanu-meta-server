@@ -76,6 +76,22 @@ All reported checks are kept, including passing ones, so that "every server repo
 A state whose effective result is warning or failed is an **issue**, eligible to contribute to incidents.
 "Degraded since" is the start of the current unbroken run of degradation; a recovery ends the run, and a later degradation starts a fresh one.
 
+### Stability
+
+Alongside each state, Canopy keeps a bounded stability record, updated as reports arrive.
+It is derived from **observed** results — untouched by policy, so operator grading and any noise damping built on the record never feed back into it.
+An observation is degraded when the observed result is warning, failed, or broken, and healthy when it is passed; skipped observations carry no signal and are not recorded.
+
+The record holds:
+
+- how many observations the state has received, and how many were degraded;
+- the most recent transitions between healthy and degraded, each with when it happened — a bounded ring, so a long-stable check remembers its distant history while a flapping one remembers only its recent churn;
+- an hour-of-week profile of how often the check is observed degraded, weighted towards recent weeks, so a load-dependent check (degraded during working hours, healthy overnight) is distinguishable from one degraded around the clock.
+
+From the ring, Canopy derives and presents how often the state has flapped recently and how long its degraded runs and healthy gaps typically last.
+The record is presented alongside the check on the per-check attention page and is available over the MCP interface (see [MCP](../private-server/mcp.md)).
+Nothing beyond the record is kept: it is a fixed-size summary per state, not a history.
+
 An effective broken result neither confirms nor clears the check's previous definite result: while broken, the state retains the contribution and degraded-since of its last definite effective result, and the brokenness itself additionally counts as a warning.
 A policy rule can grade brokenness differently — up to a failure where not being able to check is itself the failure, or down to a pass where a flaky check runner should not raise noise.
 A definite effective result (passed, warning, or failed) ends the broken condition and replaces the retained contribution.

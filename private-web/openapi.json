@@ -7015,6 +7015,17 @@
             "type": "string",
             "description": "The server's display name; empty string when the server has none."
           },
+          "stability": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/StabilityData",
+                "description": "The state's stability record (observation counters, transition\nring, hour-of-week duty profile, derived flap statistics). `None`\nfor states that predate stability recording."
+              }
+            ]
+          },
           "status_created_at": {
             "type": "string",
             "format": "date-time",
@@ -7606,6 +7617,26 @@
           "query": {
             "type": "string",
             "description": "Search text, matched against key material, key names, connection\nIP addresses, and Tailscale identity fields. Also resolved\nagainst the live tailnet directory (when configured) to catch\ndevices identified by an IP, node id, or DNS name they haven't\nconnected with yet."
+          }
+        }
+      },
+      "DutyBucket": {
+        "type": "object",
+        "description": "One hour-of-week bucket of the degradation profile.",
+        "required": [
+          "observations",
+          "degraded"
+        ],
+        "properties": {
+          "degraded": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many of them were degraded."
+          },
+          "observations": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Observations landing in this hour-of-week."
           }
         }
       },
@@ -12147,6 +12178,108 @@
           }
         }
       },
+      "StabilityData": {
+        "type": "object",
+        "description": "A state's full stability record on the wire: the stored counters, ring,\nand profile, plus the derived statistics. Shared by the private API and\nthe MCP interface.",
+        "required": [
+          "observations",
+          "degraded_observations",
+          "transitions",
+          "duty_cycle",
+          "stats"
+        ],
+        "properties": {
+          "degraded_observations": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many of them were degraded (observed warning/failed/broken)."
+          },
+          "duty_cycle": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DutyBucket"
+            },
+            "description": "Hour-of-week degradation profile: 168 buckets, UTC, Monday 00:00\nfirst, each with how many observations landed there and how many\nwere degraded. Recent-leaning: bucket counters halve at a cap."
+          },
+          "last_observed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the state was last observed (skipped observations excluded)."
+          },
+          "last_observed_degraded": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the last observation was degraded."
+          },
+          "observations": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total observations recorded for this state."
+          },
+          "stats": {
+            "$ref": "#/components/schemas/StabilityStats",
+            "description": "Statistics derived from the transition ring."
+          },
+          "transitions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Transition"
+            },
+            "description": "The remembered healthy↔degraded transitions, oldest first."
+          }
+        }
+      },
+      "StabilityStats": {
+        "type": "object",
+        "description": "Flap statistics derived from a transition ring.",
+        "required": [
+          "flips_24h",
+          "flips_7d"
+        ],
+        "properties": {
+          "flips_24h": {
+            "type": "integer",
+            "format": "int32",
+            "description": "State changes recorded in the last 24 hours.",
+            "minimum": 0
+          },
+          "flips_7d": {
+            "type": "integer",
+            "format": "int32",
+            "description": "State changes recorded in the last 7 days.",
+            "minimum": 0
+          },
+          "ring_covers_from": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "The oldest remembered transition: the flip counts only see back to\nhere, so on a heavily flapping state they are lower bounds."
+          },
+          "typical_degraded_run_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Median length of the completed degraded runs the ring remembers,\nin seconds."
+          },
+          "typical_healthy_gap_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Median length of the completed healthy gaps between remembered\ndegraded runs, in seconds."
+          }
+        }
+      },
       "StatusSnapshotData": {
         "type": "object",
         "description": "A single status push from a server, as of a point in time, with derived\nhealth and version information.",
@@ -12438,6 +12571,25 @@
           "tailnet": {
             "type": "string",
             "description": "The tailnet (Tailscale network) this node belongs to."
+          }
+        }
+      },
+      "Transition": {
+        "type": "object",
+        "description": "One healthy↔degraded transition: the state became (or was first\nobserved) `degraded`/healthy at `at`.",
+        "required": [
+          "at",
+          "degraded"
+        ],
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the state changed."
+          },
+          "degraded": {
+            "type": "boolean",
+            "description": "Whether it became degraded (true) or healthy (false)."
           }
         }
       },

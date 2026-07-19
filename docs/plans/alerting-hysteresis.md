@@ -266,10 +266,19 @@ and keep the pipeline ours.
    Only report-driven recoveries linger: operator suppression (resolve,
    snooze, silence, monitoring-off) closes immediately — an explicit
    action isn't a flap.
-2. **Transition aggregates.** Recorded at filing time, invisible to
-   behaviour; surfaced read-only as a stability indicator on the check
-   attention page and over MCP. Independently useful for triage even if
-   nothing below ever ships.
+2. **Transition aggregates.** ✅ Implemented (this PR). Recorded at filing
+   time as a per-state `check_stability` row — lifetime observation
+   counters, a 32-entry healthy↔degraded transition ring, and a 168-bucket
+   hour-of-week duty profile whose buckets halve at a cap so the profile
+   leans recent — from observed results, invisible to behaviour. Surfaced
+   read-only: a stability column + duty-cycle heatmap on the check
+   attention page, and the `get_check_stability` MCP tool returning full
+   records (with derived flap statistics) for a set of checks. A data
+   migration backfills the records from the last 30 days of status
+   history (device-reported checks only; canopy's own checks start cold,
+   and recovery-by-omission isn't replayed), so the profiles are useful
+   from day one. Independently useful for triage even if nothing below
+   ever ships.
 3. **Adaptive linger, then adaptive open grace.** Derived from the
    aggregates, bounded, each decision traced in the UI.
 4. **Flapping state and pattern suggestions.** The operator-in-the-loop

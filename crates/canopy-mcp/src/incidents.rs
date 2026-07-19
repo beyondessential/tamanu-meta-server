@@ -86,6 +86,53 @@ pub struct IssueIdArgs {
 	pub issue_id: String,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct CheckRefArg {
+	/// The source that reports the check (e.g. `alertd`, `canopy`).
+	pub source: String,
+	/// The check's name.
+	pub check_name: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct CheckStabilityArgs {
+	/// The (source, check) pairs to fetch stability for. Up to 32.
+	pub checks: Vec<CheckRefArg>,
+	/// Restrict to one server's id.
+	pub server_id: Option<String>,
+	/// Restrict to one group's id (its servers plus its group-scoped
+	/// checks).
+	pub group_id: Option<String>,
+}
+
+#[derive(Serialize)]
+struct CheckStabilityRow {
+	issue_id: Uuid,
+	/// The server the state belongs to; `null` for group- or canopy-wide
+	/// states.
+	server_id: Option<Uuid>,
+	server_name: Option<String>,
+	/// The group for group-scoped states; `null` otherwise.
+	group_id: Option<Uuid>,
+	source: String,
+	check_name: Option<String>,
+	observed_result: Option<CheckResult>,
+	effective_result: Option<CheckResult>,
+	active: bool,
+	/// The full stability record: observation counters, the
+	/// healthy↔degraded transition ring (oldest first), the hour-of-week
+	/// duty profile (168 buckets, UTC, Monday 00:00 first), and derived
+	/// flap statistics. `null` for states that predate stability
+	/// recording.
+	stability: Option<database::stability::StabilityData>,
+}
+
+#[derive(Serialize)]
+struct CheckStabilityOut {
+	/// One row per matching check state across all scopes.
+	rows: Vec<CheckStabilityRow>,
+}
+
 #[derive(Serialize)]
 struct IncidentSummary {
 	id: Uuid,
@@ -507,6 +554,72 @@ impl CanopyMcp {
 			escalates: policy.escalates,
 			documentation: policy.documentation,
 		})
+	}
+
+	#[tool(
+		description = "Full stability records for a set of checks, one row per (target, source, \
+		               check) state: observation counts, the recent healthy<->degraded transition \
+		               ring, an hour-of-week degradation profile (168 buckets, UTC, Monday 00:00 \
+		               first), and derived flap statistics (recent flip counts, typical \
+		               degraded-run and healthy-gap durations). Built from observed results, \
+		               before policy, so grading never distorts it. The raw material for telling \
+		               a flap from a load-dependent pattern from a real change in behaviour. \
+		               Optionally narrow to one server or one group."
+	)]
+	async fn get_check_stability(
+		&self,
+		Parameters(args): Parameters<CheckStabilityArgs>,
+	) -> Result<CallToolResult, McpError> {
+		if args.checks.is_empty() {
+			return Err(McpError::invalid_params(
+				"checks must name at least one (source, check_name) pair".to_string(),
+				None,
+			));
+		}
+		if args.checks.len() > 32 {
+			return Err(McpError::invalid_params(
+				"too many checks: at most 32 (source, check_name) pairs per call".to_string(),
+				None,
+			));
+		}
+		let server_id = parse_opt_uuid(&args.server_id, "server_id")?;
+		let group_id = parse_opt_uuid(&args.group_id, "group_id")?;
+		let pairs: Vec<(String, String)> = args
+			.checks
+			.into_iter()
+			.map(|c| (c.source, c.check_name))
+			.collect();
+
+		let mut conn = self.conn().await?;
+		let states = database::stability::states_for_checks(&mut conn, &pairs, server_id, group_id)
+			.await
+			.map_err(mcp_err)?;
+
+		let server_ids: Vec<Uuid> = unique(states.iter().filter_map(|(st, _)| st.server_id));
+		let names = Server::names_by_ids(&mut conn, &server_ids)
+			.await
+			.map_err(mcp_err)?;
+		let now = Timestamp::now();
+		let rows: Vec<CheckStabilityRow> = states
+			.into_iter()
+			.map(|(st, stability)| CheckStabilityRow {
+				issue_id: st.id,
+				server_id: st.server_id,
+				server_name: st
+					.server_id
+					.and_then(|sid| names.get(&sid))
+					.and_then(|(n, _)| n.clone()),
+				group_id: st.server_group_id,
+				source: st.source,
+				check_name: st.check_name,
+				observed_result: st.observed_result,
+				effective_result: st.effective_result,
+				active: st.active,
+				stability: stability
+					.map(|row| database::stability::StabilityData::from_row(&row, now)),
+			})
+			.collect();
+		ok_json(&CheckStabilityOut { rows })
 	}
 }
 

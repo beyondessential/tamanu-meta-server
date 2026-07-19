@@ -301,6 +301,10 @@ pub struct CheckAttentionServerData {
 	pub failing_since: Option<Timestamp>,
 	/// When the check state last updated (the check's latest report).
 	pub status_created_at: Timestamp,
+	/// The state's stability record (observation counters, transition
+	/// ring, hour-of-week duty profile, derived flap statistics). `None`
+	/// for states that predate stability recording.
+	pub stability: Option<database::stability::StabilityData>,
 }
 
 /// Request body for [`check_attention`].
@@ -411,6 +415,11 @@ pub async fn check_attention(
 		.map(|g| (g.id, g.name))
 		.collect();
 
+	let issue_ids: Vec<Uuid> = states.iter().map(|st| st.id).collect();
+	let stability =
+		database::stability::CheckStability::for_issue_ids(&mut conn, &issue_ids).await?;
+	let now = jiff::Timestamp::now();
+
 	let mut servers: Vec<CheckAttentionServerData> = states
 		.into_iter()
 		.filter_map(|st| {
@@ -423,6 +432,9 @@ pub async fn check_attention(
 			let failing_since = st
 				.active
 				.then_some(st.degraded_since.unwrap_or(st.first_seen));
+			let stability = stability
+				.get(&st.id)
+				.map(|row| database::stability::StabilityData::from_row(row, now));
 			Some(CheckAttentionServerData {
 				server_id: server.id,
 				server_name: server.name.clone().unwrap_or_default(),
@@ -432,6 +444,7 @@ pub async fn check_attention(
 				data: st.detail.unwrap_or_else(|| serde_json::json!({})),
 				failing_since,
 				status_created_at: st.last_seen,
+				stability,
 			})
 		})
 		.collect();

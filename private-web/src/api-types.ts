@@ -3742,6 +3742,7 @@ export interface components {
             server_id: string;
             /** @description The server's display name; empty string when the server has none. */
             server_name: string;
+            stability?: null | components["schemas"]["StabilityData"];
             /**
              * Format: date-time
              * @description When the check state last updated (the check's latest report).
@@ -4114,6 +4115,19 @@ export interface components {
              *     connected with yet.
              */
             query: string;
+        };
+        /** @description One hour-of-week bucket of the degradation profile. */
+        DutyBucket: {
+            /**
+             * Format: int64
+             * @description How many of them were degraded.
+             */
+            degraded: number;
+            /**
+             * Format: int64
+             * @description Observations landing in this hour-of-week.
+             */
+            observations: number;
         };
         /**
          * @description A server's enrollment state: whether a device has registered, and
@@ -6987,6 +7001,71 @@ export interface components {
             rows: unknown[][];
         };
         /**
+         * @description A state's full stability record on the wire: the stored counters, ring,
+         *     and profile, plus the derived statistics. Shared by the private API and
+         *     the MCP interface.
+         */
+        StabilityData: {
+            /**
+             * Format: int64
+             * @description How many of them were degraded (observed warning/failed/broken).
+             */
+            degraded_observations: number;
+            /**
+             * @description Hour-of-week degradation profile: 168 buckets, UTC, Monday 00:00
+             *     first, each with how many observations landed there and how many
+             *     were degraded. Recent-leaning: bucket counters halve at a cap.
+             */
+            duty_cycle: components["schemas"]["DutyBucket"][];
+            /**
+             * Format: date-time
+             * @description When the state was last observed (skipped observations excluded).
+             */
+            last_observed_at?: string | null;
+            /** @description Whether the last observation was degraded. */
+            last_observed_degraded?: boolean | null;
+            /**
+             * Format: int64
+             * @description Total observations recorded for this state.
+             */
+            observations: number;
+            /** @description Statistics derived from the transition ring. */
+            stats: components["schemas"]["StabilityStats"];
+            /** @description The remembered healthy↔degraded transitions, oldest first. */
+            transitions: components["schemas"]["Transition"][];
+        };
+        /** @description Flap statistics derived from a transition ring. */
+        StabilityStats: {
+            /**
+             * Format: int32
+             * @description State changes recorded in the last 24 hours.
+             */
+            flips_24h: number;
+            /**
+             * Format: int32
+             * @description State changes recorded in the last 7 days.
+             */
+            flips_7d: number;
+            /**
+             * Format: date-time
+             * @description The oldest remembered transition: the flip counts only see back to
+             *     here, so on a heavily flapping state they are lower bounds.
+             */
+            ring_covers_from?: string | null;
+            /**
+             * Format: int64
+             * @description Median length of the completed degraded runs the ring remembers,
+             *     in seconds.
+             */
+            typical_degraded_run_secs?: number | null;
+            /**
+             * Format: int64
+             * @description Median length of the completed healthy gaps between remembered
+             *     degraded runs, in seconds.
+             */
+            typical_healthy_gap_secs?: number | null;
+        };
+        /**
          * @description A single status push from a server, as of a point in time, with derived
          *     health and version information.
          */
@@ -7163,6 +7242,19 @@ export interface components {
             tags: string[];
             /** @description The tailnet (Tailscale network) this node belongs to. */
             tailnet: string;
+        };
+        /**
+         * @description One healthy↔degraded transition: the state became (or was first
+         *     observed) `degraded`/healthy at `at`.
+         */
+        Transition: {
+            /**
+             * Format: date-time
+             * @description When the state changed.
+             */
+            at: string;
+            /** @description Whether it became degraded (true) or healthy (false). */
+            degraded: boolean;
         };
         /** @description Identifies a device and the role to trust it at. */
         TrustArgs: {

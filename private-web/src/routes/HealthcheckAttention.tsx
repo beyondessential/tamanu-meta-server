@@ -26,6 +26,7 @@ import { useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import { useApi } from "../api";
 import CheckExtrasList, { checkEntryExtras } from "../components/CheckExtras";
+import CheckStabilityPanel from "../components/CheckStabilityPanel";
 import Markdown from "../components/Markdown";
 import CheckResultChip from "../components/CheckResultChip";
 import ServerNameWithGroup from "../components/ServerNameWithGroup";
@@ -166,6 +167,7 @@ function ServersTable({
 							<TableCell width={40} />
 							<TableCell>Server</TableCell>
 							<TableCell>Result</TableCell>
+							<TableCell>Stability</TableCell>
 							<TableCell>Failing since</TableCell>
 							<TableCell>As of</TableCell>
 						</TableRow>
@@ -223,6 +225,9 @@ function AttentionRow({ server }: { server: CheckAttentionServerData }) {
 					/>
 				</TableCell>
 				<TableCell>
+					<StabilityCell stability={server.stability} />
+				</TableCell>
+				<TableCell>
 					{server.failing_since ? (
 						<TimeAgo timestamp={server.failing_since} />
 					) : (
@@ -237,17 +242,51 @@ function AttentionRow({ server }: { server: CheckAttentionServerData }) {
 			</TableRow>
 			{expanded && (
 				<TableRow>
-					<TableCell colSpan={5} sx={{ py: 1 }}>
-						{extras.length > 0 ? (
-							<CheckExtrasList extras={extras} />
-						) : (
-							<Typography variant="body2" color="text.secondary">
-								No additional data reported for this check.
-							</Typography>
-						)}
+					<TableCell colSpan={6} sx={{ py: 1 }}>
+						<Stack spacing={2}>
+							{extras.length > 0 ? (
+								<CheckExtrasList extras={extras} />
+							) : (
+								<Typography variant="body2" color="text.secondary">
+									No additional data reported for this check.
+								</Typography>
+							)}
+							{server.stability && (
+								<CheckStabilityPanel stability={server.stability} />
+							)}
+						</Stack>
 					</TableCell>
 				</TableRow>
 			)}
 		</>
+	);
+}
+
+/// Compact flap summary for the table: recent state changes, or steady /
+/// unknown. The expanded row carries the full record.
+function StabilityCell({
+	stability,
+}: {
+	stability: CheckAttentionServerData["stability"];
+}) {
+	if (!stability) {
+		return (
+			<Typography variant="body2" color="text.secondary">
+				no record
+			</Typography>
+		);
+	}
+	const { flips_24h, flips_7d } = stability.stats;
+	if (flips_7d === 0) {
+		return (
+			<Typography variant="body2" color="text.secondary">
+				steady
+			</Typography>
+		);
+	}
+	return (
+		<Typography variant="body2">
+			{flips_24h > 0 ? `${flips_24h} flips/24h` : `${flips_7d} flips/7d`}
+		</Typography>
 	);
 }

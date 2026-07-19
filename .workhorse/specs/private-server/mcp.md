@@ -97,6 +97,9 @@ A summary or ranking of incidents should count published incidents rather than r
 **Get check documentation** takes a source and check name and returns the check's operator-authored markdown documentation (see [CHK](../monitoring/checks.md), "Documentation"), which by convention covers what the check observes, what each result means, and how to solve a failure.
 A client investigating an issue consults this before deriving a check's meaning from other sources.
 
+**Get check stability** takes a set of (source, check) pairs — optionally narrowed to one server or one group — and returns each matching state's full stability record (see [CHK](../monitoring/checks.md), "Stability"): the observation counts, the transition ring, and the hour-of-week degradation profile, together with the derived flap statistics (recent flap counts, typical degraded-run and healthy-gap durations).
+This is the raw material for analysing whether a check's noise is a flap, a load-dependent pattern, or a real change in behaviour.
+
 ## Result semantics
 
 A server's reported status reflects reports received within the recent-activity window; a server silent beyond that window reads as not recently seen rather than as a stale "up".
