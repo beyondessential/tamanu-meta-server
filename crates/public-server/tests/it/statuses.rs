@@ -153,6 +153,62 @@ async fn expire_linger(conn: &mut diesel_async::AsyncPgConnection) {
 		.expect("linger sweep");
 }
 
+/// Stand in for the monitor pod's reeval worker: drain every queued
+/// server so the test sees the settled incident state that the ingest
+/// request no longer computes inline.
+async fn drain_reeval(conn: &mut diesel_async::AsyncPgConnection) {
+	database::issues::process_incident_reeval_queue(conn, i64::MAX)
+		.await
+		.expect("drain incident reeval queue");
+}
+
+/// The ingest request records the status and per-check issues, but incident
+/// (re-)evaluation — the part that takes the per-group lock — is deferred to
+/// the reeval worker. Nothing opens an incident until the queue is drained.
+#[tokio::test(flavor = "multi_thread")]
+async fn submit_status_defers_incident_open_until_reeval_drained() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+			set_check_severity(&mut conn, "database", "error").await;
+
+			// Raw post (bypassing the auto-draining test helpers) so we can
+			// observe the state between ingest and reeval.
+			public
+				.post(&format!("/status/{server_id}"))
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"healthy": false,
+					"health": [ { "check": "database", "healthy": false } ],
+				}))
+				.await
+				.assert_status_ok();
+
+			// The per-check issue is recorded synchronously on the request.
+			assert!(
+				fetch_issue(&mut conn, server_id, "alertd", "health/database")
+					.await
+					.is_some(),
+				"per-check issue must be recorded on the ingest request"
+			);
+			// The incident is NOT opened by the request itself.
+			assert!(
+				fetch_open_incident(&mut conn, server_id).await.is_none(),
+				"incident open must be deferred off the ingest request"
+			);
+
+			// The worker drains the queue and the incident opens.
+			drain_reeval(&mut conn).await;
+			assert!(
+				fetch_open_incident(&mut conn, server_id).await.is_some(),
+				"incident opens once the reeval queue is drained"
+			);
+		},
+	)
+	.await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn submit_status() {
 	commons_tests::server::run_with_device_auth(
@@ -810,6 +866,7 @@ async fn submit_status_legacy_transforms_to_tamanu_heartbeat() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({ "healthy": false, "uptime": 7 }),
 			)
@@ -860,6 +917,7 @@ async fn submit_status_legacy_leaves_other_sources_alone() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"health": [ { "check": "disk", "healthy": false, "free_pct": 4 } ],
@@ -875,6 +933,7 @@ async fn submit_status_legacy_leaves_other_sources_alone() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({ "healthy": true, "uptime": 99 }),
 			)
@@ -896,6 +955,7 @@ async fn submit_status_legacy_leaves_other_sources_alone() {
 async fn post_status(
 	public: &axum_test::TestServer,
 	cert: &str,
+	conn: &mut diesel_async::AsyncPgConnection,
 	server_id: Uuid,
 	body: serde_json::Value,
 ) {
@@ -905,6 +965,10 @@ async fn post_status(
 		.json(&body)
 		.await;
 	response.assert_status_ok();
+	// Incident evaluation is deferred off the ingest request to the reeval
+	// worker; drain it here so callers observe the settled incident state,
+	// as they would shortly after a real push.
+	drain_reeval(conn).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -917,6 +981,7 @@ async fn submit_status_legacy_files_no_health_issues() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({ "uptime": 1, "health": [] }),
 			)
@@ -943,6 +1008,7 @@ async fn submit_status_warning_check_only() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"healthy": true,
@@ -994,6 +1060,7 @@ async fn submit_status_unhealthy_with_checks_opens_incident() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"healthy": false,
@@ -1045,6 +1112,7 @@ async fn submit_status_unhealthy_no_checks_files_nothing() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({ "healthy": false, "health": [] }),
 			)
@@ -1092,6 +1160,7 @@ async fn submit_status_with_all_failing_checks_silenced_opens_no_incident() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"healthy": false,
@@ -1150,6 +1219,7 @@ async fn submit_status_with_partial_silence_opens_incident_for_unsilenced() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"healthy": false,
@@ -1198,6 +1268,7 @@ async fn submit_status_per_check_severity_is_catalog_driven() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"healthy": false,
@@ -1215,6 +1286,7 @@ async fn submit_status_per_check_severity_is_catalog_driven() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"healthy": true,
@@ -1249,6 +1321,7 @@ async fn submit_status_check_recovery_explicit() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"healthy": false,
@@ -1259,6 +1332,7 @@ async fn submit_status_check_recovery_explicit() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"healthy": true,
@@ -1286,6 +1360,7 @@ async fn submit_status_check_recovery_via_drop() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"healthy": false,
@@ -1298,6 +1373,7 @@ async fn submit_status_check_recovery_via_drop() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"healthy": true,
@@ -1330,6 +1406,7 @@ async fn submit_status_full_recovery_closes_incident() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"healthy": false,
@@ -1345,6 +1422,7 @@ async fn submit_status_full_recovery_closes_incident() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"healthy": true,
@@ -1404,6 +1482,7 @@ async fn submit_status_reachability_to_health_handoff() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"healthy": false,
@@ -1460,6 +1539,7 @@ async fn submit_status_keeps_incident_open_when_failure_swaps() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"healthy": false,
@@ -1477,6 +1557,7 @@ async fn submit_status_keeps_incident_open_when_failure_swaps() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"healthy": false,
@@ -1550,6 +1631,7 @@ async fn submit_status_seeds_catalog_for_new_checks() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"healthy": true,
@@ -1593,6 +1675,7 @@ async fn submit_status_uses_catalog_severity_on_failure() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"healthy": false,
@@ -1672,6 +1755,7 @@ async fn submit_status_rule_on_check_extra_overrides_base() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"healthy": false,
@@ -1690,6 +1774,7 @@ async fn submit_status_rule_on_check_extra_overrides_base() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"healthy": false,
@@ -1730,6 +1815,7 @@ async fn submit_status_rule_on_bestool_version_range() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"healthy": false,
@@ -1747,6 +1833,7 @@ async fn submit_status_rule_on_bestool_version_range() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"healthy": false,
@@ -1791,6 +1878,7 @@ async fn submit_status_rule_on_server_tag() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"healthy": false,
@@ -1832,6 +1920,7 @@ async fn submit_status_tiered_ladder() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"healthy": false,
@@ -1850,6 +1939,7 @@ async fn submit_status_tiered_ladder() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"healthy": false,
@@ -1883,6 +1973,7 @@ async fn submit_status_result_validation() {
 				post_status(
 					&public,
 					&cert,
+					&mut conn,
 					server_id,
 					serde_json::json!({
 						"health": [ { "check": "db", "result": result } ],
@@ -1937,6 +2028,7 @@ async fn submit_status_result_failed_uses_catalog_severity() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"health": [ { "check": "db", "result": "failed", "lag_ms": 5000 } ],
@@ -1975,6 +2067,7 @@ async fn submit_status_result_warning_ignores_catalog_severity() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"health": [ { "check": "db", "result": "warning" } ],
@@ -2020,6 +2113,7 @@ async fn submit_status_result_rule_on_check_result() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"health": [ { "check": "db", "result": "warning" } ],
@@ -2052,6 +2146,7 @@ async fn submit_status_result_broken_warns_on_the_check_ref() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"health": [ { "check": "db", "result": "broken", "error": "config not found" } ],
@@ -2081,6 +2176,7 @@ async fn submit_status_result_broken_warns_on_the_check_ref() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"health": [ { "check": "db", "result": "passed" } ],
@@ -2111,6 +2207,7 @@ async fn submit_status_failed_then_broken_retains_the_failure() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"health": [ { "check": "db", "result": "failed" } ],
@@ -2120,6 +2217,7 @@ async fn submit_status_failed_then_broken_retains_the_failure() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"health": [ { "check": "db", "result": "broken" } ],
@@ -2152,6 +2250,7 @@ async fn submit_status_failed_then_broken_retains_the_failure() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"health": [ { "check": "db", "result": "passed" } ],
@@ -2179,6 +2278,7 @@ async fn submit_status_result_skipped_closes_failure_with_message() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"health": [ { "check": "cert", "result": "failed" } ],
@@ -2188,6 +2288,7 @@ async fn submit_status_result_skipped_closes_failure_with_message() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"health": [ { "check": "cert", "result": "skipped" } ],
@@ -2224,6 +2325,7 @@ async fn submit_status_result_skipped_closes_broken() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"health": [ { "check": "cert", "result": "broken" } ],
@@ -2233,6 +2335,7 @@ async fn submit_status_result_skipped_closes_broken() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"health": [ { "check": "cert", "result": "skipped" } ],
@@ -2262,6 +2365,7 @@ async fn submit_status_legacy_to_result_transition() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"healthy": false,
@@ -2272,6 +2376,7 @@ async fn submit_status_legacy_to_result_transition() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"health": [ { "check": "db", "result": "passed" } ],
@@ -2301,6 +2406,7 @@ async fn submit_status_result_all_kinds_upsert_catalog() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({
 					"health": [
@@ -2596,6 +2702,7 @@ async fn submit_status_version_prefers_tamanu_version_over_header() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({ "tamanuVersion": "2.11.0", "health": [] }),
 			)
@@ -2623,6 +2730,7 @@ async fn submit_status_version_falls_back_to_header() {
 			post_status(
 				&public,
 				&cert,
+				&mut conn,
 				server_id,
 				serde_json::json!({ "health": [] }),
 			)

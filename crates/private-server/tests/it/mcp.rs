@@ -804,7 +804,7 @@ async fn observe_wobbly(
 		active: Some(active),
 		occurred_at: None,
 	}
-	.save_with_state(conn, server_id, None, Some(&stamp))
+	.save_with_state(conn, server_id, None, Some(&stamp), false)
 	.await
 	.expect("file observation");
 }

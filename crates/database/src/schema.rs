@@ -279,6 +279,13 @@ diesel::table! {
 }
 
 diesel::table! {
+	incident_reeval_queue (server_id) {
+		server_id -> Uuid,
+		enqueued_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
 	incidents (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
@@ -615,6 +622,7 @@ diesel::joinable!(check_stability -> issues (issue_id));
 diesel::joinable!(incident_issues -> incidents (incident_id));
 diesel::joinable!(incident_issues -> issues (issue_id));
 diesel::joinable!(incident_notes -> incidents (incident_id));
+diesel::joinable!(incident_reeval_queue -> servers (server_id));
 diesel::joinable!(incidents -> server_groups (server_group_id));
 diesel::joinable!(issue_notes -> issues (issue_id));
 diesel::joinable!(issues -> devices (device_id));
@@ -661,6 +669,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 	devices,
 	incident_issues,
 	incident_notes,
+	incident_reeval_queue,
 	incidents,
 	issue_notes,
 	issues,

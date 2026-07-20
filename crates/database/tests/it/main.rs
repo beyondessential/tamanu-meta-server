@@ -14,6 +14,7 @@ mod event_validation;
 mod incident_close_result;
 mod incident_get_with_issues;
 mod incident_linger;
+mod incident_reeval_queue;
 mod incident_result_semantics;
 mod incident_stats;
 mod mcp_tokens;

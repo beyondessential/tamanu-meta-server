@@ -30,6 +30,8 @@ An issue can leave and rejoin the same incident.
 
 Operator actions that change what counts (monitoring toggles, group membership changes, policy and silence changes) re-evaluate the affected issues' incident membership.
 
+Membership evaluation is asynchronous. A report records its issue state immediately; the resulting open, join, leave, or close follows within a short bounded delay rather than synchronously with the report. Membership is therefore eventually consistent with the current issue state.
+
 ## Notification
 
 Operators are notified over the notification channel: group incidents to the group's configured channel, Canopy-wide incidents to the operator channel.
