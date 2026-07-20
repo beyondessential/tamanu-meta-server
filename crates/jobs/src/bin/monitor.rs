@@ -93,12 +93,44 @@ async fn backfill_stability_on_startup(pool: &database::Db) {
 	}
 }
 
+/// How often the deferred incident-reeval worker drains its queue. Short so
+/// incidents open/close promptly after a status push; work is coalesced per
+/// server, so a tight cadence is cheap.
+const REEVAL_INTERVAL: Duration = Duration::from_secs(2);
+
+/// Backstop cap on servers drained per reeval tick, so one tick can't hog the
+/// pod. The queue coalesces per server, so this is rarely reached.
+const REEVAL_BATCH: i64 = 256;
+
 pub fn spawn() -> JoinHandle<()> {
 	let pool = database::init();
 	task::spawn(async move {
 		reconcile_on_startup(&pool).await;
 		let backfill_pool = pool.clone();
 		task::spawn(async move { backfill_stability_on_startup(&backfill_pool).await });
+
+		// Deferred incident (re-)evaluation worker. The status-ingest path
+		// enqueues servers instead of evaluating incident membership inline
+		// (which took the per-group `server_groups` lock and convoyed the
+		// fleet under load). This single worker drains the queue on a short
+		// cadence, so it — not request traffic — is the only taker of that
+		// lock, and incidents still open/close promptly. The main loop below
+		// drains too, as a backstop if this task ever dies.
+		let reeval_pool = pool.clone();
+		task::spawn(async move {
+			loop {
+				sleep(REEVAL_INTERVAL).await;
+				let Ok(mut db) = reeval_pool.get().await else {
+					error!("reeval worker: failed to get database connection");
+					continue;
+				};
+				match database::issues::process_incident_reeval_queue(&mut db, REEVAL_BATCH).await {
+					Ok(0) => {}
+					Ok(n) => debug!("reeval worker: processed {n} queued server(s)"),
+					Err(err) => error!("incident reeval worker failed: {err}"),
+				}
+			}
+		});
 
 		// The directory is optional: in dev / single-tenant deploys the
 		// TAILSCALE_* env vars aren't set, and the key-expiry sweep just
@@ -145,6 +177,16 @@ pub fn spawn() -> JoinHandle<()> {
 				Ok(0) => {}
 				Ok(n) => debug!("closed {n} lingering incident(s)"),
 				Err(err) => error!("incident linger sweep failed: {err}"),
+			}
+
+			// Backstop drain of the incident-reeval queue in case the dedicated
+			// worker task above has died. Safe to run concurrently with it:
+			// `process_incident_reeval_queue` claims rows `FOR UPDATE SKIP
+			// LOCKED`, so the two never double-process a server.
+			match database::issues::process_incident_reeval_queue(&mut db, REEVAL_BATCH).await {
+				Ok(0) => {}
+				Ok(n) => debug!("reeval backstop: processed {n} queued server(s)"),
+				Err(err) => error!("incident reeval backstop failed: {err}"),
 			}
 
 			// Backup staleness + report-vs-inventory reconciliation: another

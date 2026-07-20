@@ -597,7 +597,7 @@ async fn file_health_events(
 			active: Some(active),
 			occurred_at,
 		}
-		.save_with_state(conn, server_id, device_id, Some(&stamp))
+		.save_with_state(conn, server_id, device_id, Some(&stamp), true)
 		.await?;
 	}
 
@@ -624,8 +624,17 @@ async fn file_health_events(
 			active: Some(false),
 			occurred_at,
 		}
-		.save_with_state(conn, server_id, device_id, Some(&stamp))
+		.save_with_state(conn, server_id, device_id, Some(&stamp), true)
 		.await?;
+	}
+
+	// Incident (re-)evaluation is deferred off this request: the issue state
+	// above is recorded synchronously, but the incident work — which takes
+	// the per-group `server_groups` lock — is handed to the reeval worker so
+	// concurrent check-ins never convoy on that lock. Only grouped servers
+	// participate in incidents.
+	if group_id.is_some() {
+		database::issues::enqueue_incident_reeval(conn, server_id).await?;
 	}
 
 	Ok(())

@@ -134,7 +134,7 @@ async fn opening_incident_enqueues_slack_open_row() {
 			occurred_at: None,
 		};
 		let issue = event
-			.save_with_state(&mut conn, server_id, None, Some(&stamp))
+			.save_with_state(&mut conn, server_id, None, Some(&stamp), false)
 			.await
 			.expect("save");
 
@@ -211,7 +211,7 @@ async fn resolving_incident_after_open_delivered_enqueues_resolve_row() {
 			occurred_at: None,
 		};
 		event
-			.save_with_state(&mut conn, server_id, None, Some(&stamp))
+			.save_with_state(&mut conn, server_id, None, Some(&stamp), false)
 			.await
 			.expect("save");
 		let incident = Incident::list_for_server(&mut conn, server_id, false, 10)
@@ -266,7 +266,7 @@ async fn resolving_before_open_ships_cancels_open_and_skips_resolve() {
 			occurred_at: None,
 		};
 		event
-			.save_with_state(&mut conn, server_id, None, Some(&stamp))
+			.save_with_state(&mut conn, server_id, None, Some(&stamp), false)
 			.await
 			.expect("save");
 		let incident = Incident::list_for_server(&mut conn, server_id, false, 10)
@@ -346,7 +346,7 @@ async fn cascade_close_via_issue_resolve_attributes_to_operator() {
 			occurred_at: None,
 		};
 		let issue = event
-			.save_with_state(&mut conn, server_id, None, Some(&stamp))
+			.save_with_state(&mut conn, server_id, None, Some(&stamp), false)
 			.await
 			.expect("save");
 		let incident = Incident::list_for_server(&mut conn, server_id, false, 10)
@@ -407,7 +407,7 @@ async fn nil_server_events_do_not_open_incidents() {
 			occurred_at: None,
 		};
 		event
-			.save_with_state(&mut conn, Uuid::nil(), None, Some(&stamp))
+			.save_with_state(&mut conn, Uuid::nil(), None, Some(&stamp), false)
 			.await
 			.expect("save");
 
@@ -442,7 +442,7 @@ async fn mark_given_up_removes_row_from_claim_pending() {
 			occurred_at: None,
 		};
 		event
-			.save_with_state(&mut conn, server_id, None, Some(&stamp))
+			.save_with_state(&mut conn, server_id, None, Some(&stamp), false)
 			.await
 			.expect("save");
 		// `event.save` enqueues an open whose deliver_after sits
@@ -495,7 +495,7 @@ async fn claim_pending_skips_rows_whose_deliver_after_is_in_the_future() {
 			occurred_at: None,
 		};
 		event
-			.save_with_state(&mut conn, server_id, None, Some(&stamp))
+			.save_with_state(&mut conn, server_id, None, Some(&stamp), false)
 			.await
 			.expect("save");
 		let pending_before = SlackOutbox::claim_pending(&mut conn, 10)
@@ -546,7 +546,7 @@ async fn open_delay_honours_per_group_slack_open_delay() {
 			occurred_at: None,
 		};
 		event
-			.save_with_state(&mut conn, server_id, None, Some(&stamp))
+			.save_with_state(&mut conn, server_id, None, Some(&stamp), false)
 			.await
 			.expect("save");
 
@@ -594,7 +594,7 @@ async fn pending_opens_until_filters_to_undelivered_in_window() {
 			occurred_at: None,
 		};
 		event
-			.save_with_state(&mut conn, held_server, None, Some(&stamp))
+			.save_with_state(&mut conn, held_server, None, Some(&stamp), false)
 			.await
 			.expect("save held");
 		let held_incident = Incident::list_for_server(&mut conn, held_server, false, 10)
@@ -620,7 +620,7 @@ async fn pending_opens_until_filters_to_undelivered_in_window() {
 			occurred_at: None,
 		};
 		event
-			.save_with_state(&mut conn, delivered_server, None, Some(&stamp))
+			.save_with_state(&mut conn, delivered_server, None, Some(&stamp), false)
 			.await
 			.expect("save delivered");
 		let delivered_incident = Incident::list_for_server(&mut conn, delivered_server, false, 10)
@@ -675,7 +675,7 @@ async fn rejoining_open_incident_does_not_re_enqueue_open() {
 			occurred_at: None,
 		};
 		event_a
-			.save_with_state(&mut conn, server_id, None, Some(&stamp_a))
+			.save_with_state(&mut conn, server_id, None, Some(&stamp_a), false)
 			.await
 			.expect("save a");
 		let incident = Incident::list_for_server(&mut conn, server_id, false, 10)
@@ -702,7 +702,7 @@ async fn rejoining_open_incident_does_not_re_enqueue_open() {
 			occurred_at: None,
 		};
 		event_b
-			.save_with_state(&mut conn, server_id, None, Some(&stamp_b))
+			.save_with_state(&mut conn, server_id, None, Some(&stamp_b), false)
 			.await
 			.expect("save b");
 

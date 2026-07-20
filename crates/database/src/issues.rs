@@ -341,7 +341,8 @@ impl NewEvent {
 		server_id: Uuid,
 		device_id: Option<Uuid>,
 	) -> Result<Issue> {
-		self.save_with_state(db, server_id, device_id, None).await
+		self.save_with_state(db, server_id, device_id, None, false)
+			.await
 	}
 
 	/// [`Self::save`], stamping the issue's check-state columns from a
@@ -353,6 +354,7 @@ impl NewEvent {
 		server_id: Uuid,
 		device_id: Option<Uuid>,
 		state: Option<&CheckStateStamp>,
+		defer_incident_eval: bool,
 	) -> Result<Issue> {
 		use crate::schema::issues;
 
@@ -479,7 +481,13 @@ impl NewEvent {
 			// 2. (re-)evaluate incident contribution against the new issue state.
 			//    `by = None`: this came from a device push, not an operator action.
 			//    Skipped when the server is ungrouped: incidents are group-keyed.
-			if let Some(gid) = server_group_id {
+			//    Skipped when `defer_incident_eval`: the high-frequency device
+			//    ingest path enqueues the server for the reeval worker instead
+			//    (see `enqueue_incident_reeval`), keeping the per-group lock off
+			//    the request path.
+			if let Some(gid) = server_group_id
+				&& !defer_incident_eval
+			{
 				re_evaluate_incident_membership(
 					conn,
 					&issue,
@@ -925,7 +933,7 @@ pub async fn file_check(conn: &mut AsyncPgConnection, filing: CheckFiling<'_>) -
 				active: Some(active),
 				occurred_at: None,
 			}
-			.save_with_state(conn, server_id, device_id, Some(&stamp))
+			.save_with_state(conn, server_id, device_id, Some(&stamp), false)
 			.await
 		}
 		FilingScope::Group(gid) => {
@@ -1425,6 +1433,136 @@ pub async fn reevaluate_open_issues_for_server(
 		.await?;
 	}
 	Ok(())
+}
+
+/// Enqueue `server_id` for deferred incident (re-)evaluation.
+///
+/// The device status-ingest path calls this in place of the inline
+/// `re_evaluate_incident_membership` it used to run: recording the issue
+/// state is kept synchronous, but the incident work — which takes the
+/// per-group `server_groups` lock — is handed to the queue worker so
+/// request traffic never contends on that lock.
+///
+/// Idempotent: the primary key coalesces a burst of pushes into one queued
+/// unit. A push arriving while a re-evaluation is already pending is a
+/// no-op — the pending run reads current state when it fires, so it already
+/// covers the later push.
+pub async fn enqueue_incident_reeval(conn: &mut AsyncPgConnection, server_id: Uuid) -> Result<()> {
+	use crate::schema::incident_reeval_queue::dsl;
+	diesel::insert_into(dsl::incident_reeval_queue)
+		.values(dsl::server_id.eq(server_id))
+		.on_conflict(dsl::server_id)
+		.do_nothing()
+		.execute(conn)
+		.await?;
+	Ok(())
+}
+
+/// Re-evaluate incident membership for every issue on `server_id` that can
+/// currently affect an incident: issues that are active-and-unresolved
+/// (candidates to *join*), plus issues still linked to an open incident
+/// (candidates to *leave* — e.g. a check that just recovered and went
+/// inactive). [`reevaluate_open_issues_for_server`] deliberately only walks
+/// active issues, so it can't drive the leave transitions the ingest path
+/// needs; this is the ingest-equivalent set.
+///
+/// Active issues are evaluated before inactive ones so that when a failure
+/// replaces another within a single push, the incoming failure (re)joins
+/// the incident before the outgoing one leaves — otherwise the incident
+/// would briefly close and reopen. This mirrors the ingest-time filing
+/// order.
+pub async fn reevaluate_incidents_for_server(
+	conn: &mut AsyncPgConnection,
+	server_id: Uuid,
+) -> Result<()> {
+	use crate::schema::{incident_issues, incidents, issues};
+
+	let server = Server::get_by_id(conn, server_id).await?;
+	let Some(gid) = server.group_id else {
+		return Ok(());
+	};
+	let monitored = server.is_monitored;
+
+	let mut candidates: Vec<Issue> = issues::table
+		.select(Issue::as_select())
+		.filter(issues::server_id.eq(server_id))
+		.filter(
+			issues::active
+				.eq(true)
+				.and(issues::resolved_at.is_null())
+				.or(issues::id.eq_any(
+					incident_issues::table
+						.inner_join(
+							incidents::table.on(incidents::id.eq(incident_issues::incident_id)),
+						)
+						.filter(incident_issues::left_at.is_null())
+						.filter(incidents::closed_at.is_null())
+						.select(incident_issues::issue_id),
+				)),
+		)
+		.load(conn)
+		.await?;
+
+	// Active (potential joiners) before inactive (leavers).
+	candidates.sort_by_key(|issue| !issue.active);
+
+	let now = Timestamp::now();
+	for issue in candidates {
+		re_evaluate_incident_membership(
+			conn,
+			&issue,
+			IncidentTarget::Group(gid),
+			monitored,
+			now,
+			None,
+		)
+		.await?;
+	}
+	Ok(())
+}
+
+/// Drain the incident re-evaluation queue, running
+/// [`reevaluate_incidents_for_server`] for up to `limit` queued servers and
+/// removing each once handled. Returns the number of servers processed.
+///
+/// Each server is claimed and processed in its own transaction with
+/// `FOR UPDATE SKIP LOCKED`, so a slow re-evaluation doesn't hold a batch of
+/// queue rows locked, overlapping ticks don't double-process, and a failure
+/// on one server doesn't roll back the others.
+pub async fn process_incident_reeval_queue(
+	conn: &mut AsyncPgConnection,
+	limit: i64,
+) -> Result<usize> {
+	use crate::schema::incident_reeval_queue::dsl;
+
+	let mut processed = 0usize;
+	while (processed as i64) < limit {
+		let claimed: Option<Uuid> = conn
+			.transaction::<_, AppError, _>(async |tx| {
+				let Some(server_id): Option<Uuid> = dsl::incident_reeval_queue
+					.select(dsl::server_id)
+					.order(dsl::enqueued_at.asc())
+					.for_update()
+					.skip_locked()
+					.first(tx)
+					.await
+					.optional()?
+				else {
+					return Ok(None);
+				};
+				reevaluate_incidents_for_server(tx, server_id).await?;
+				diesel::delete(dsl::incident_reeval_queue.filter(dsl::server_id.eq(server_id)))
+					.execute(tx)
+					.await?;
+				Ok(Some(server_id))
+			})
+			.await?;
+		match claimed {
+			Some(_) => processed += 1,
+			None => break,
+		}
+	}
+	Ok(processed)
 }
 
 /// Re-evaluate every currently-open issue on `server_id` with the given
