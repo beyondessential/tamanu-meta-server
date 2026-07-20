@@ -49,8 +49,8 @@ An entry carries:
 - optional **rules** — conditional transforms evaluated against the check's own detail, the report's server-wide detail, and the server's effective tags; a rule can move a result in any direction, including upward: a warning graded as a failure, or a pass with a particular detail graded as a warning.
 - an **escalates** flag — an effective failure of this check notifies immediately, bypassing incident grace (see [INC](incidents.md)).
 
-A check is registered in the catalog with a ceiling of `warning` the first time it is reported; operators adjust from there.
-Canopy's own checks register with the policy their condition warrants instead of the default.
+A check is registered in the catalog with a ceiling of `warning` the first time it is reported, and is pending operator review; operators confirm or adjust its policy from there, and checks still awaiting review are surfaced for it.
+Canopy's own checks register already reviewed, with the policy their condition warrants instead of the default.
 
 ### Scoped policy
 
@@ -104,14 +104,28 @@ Omission by one source never affects another source's checks.
 
 ## Source staleness
 
-A source that has reported on a server is expected to keep reporting.
+A source that has reported on a server is expected to keep reporting, unless all of its checks have been decommissioned.
 When a source's most recent report for a server is older than the server's down threshold, Canopy raises a staleness check for that (server, source) under the `canopy` source, and clears it when the source reports again.
 A server all of whose sources are stale is presented as unreachable.
 
+## Liveness and decommissioning
+
+Source staleness is a per-server signal about a reporter that has gone quiet; check liveness is a fleet-wide signal about a (source, check) that has gone away everywhere.
+For each catalogued (source, check) Canopy tracks when it was most recently reported on any server.
+
+A (source, check) not reported anywhere for seven days is surfaced to operators as a candidate for decommissioning.
+A (source, check) not reported anywhere for thirty days raises a Canopy-wide warning (see [SELF](../private-server/self-alerts.md)).
+
+Decommissioning is an operator action, never automatic: the candidate list and the Canopy-wide warning surface what has gone away, and an operator decides.
+A decommissioned (source, check) is retired fleet-wide: its state on every server is resolved, recording decommissioning as the reason, and it then contributes to nothing — not health, not incidents, not source staleness.
+A source all of whose checks are decommissioned is no longer expected to report, so its staleness clears.
+
+If a decommissioned check is reported again it is treated as newly registered — pending operator review, at the warning ceiling — so a resurrected check never silently resumes a retired policy.
+
 ## Health rollup
 
-A server's health is derived from its current effective results across all sources: any failure makes it unhealthy; otherwise any warning or brokenness makes it degraded; otherwise it is healthy.
-Passed and skipped checks do not count against a server.
+A server's health is derived from the checks currently contributing across all its sources: any effective failure makes it unhealthy; otherwise any effective warning or brokenness makes it degraded; otherwise it is healthy.
+Passed and skipped checks, and states that are resolved, snoozed, or decommissioned, do not count against a server.
 
 ## Operator controls
 
