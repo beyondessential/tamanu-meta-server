@@ -18,6 +18,8 @@ use serde::{Deserialize, Serialize};
 /// - `Duplicate` — a duplicate of another issue.
 /// - `Flapping` — too noisy; suppressed rather than fixed (often paired with
 ///   a snooze).
+/// - `Decommissioned` — the check itself was retired fleet-wide; its states
+///   are resolved as a side effect, not by an operator addressing them.
 #[derive(
 	Debug,
 	Clone,
@@ -39,10 +41,13 @@ pub enum ResolvedReason {
 	Expected,
 	Duplicate,
 	Flapping,
+	Decommissioned,
 }
 
 #[derive(Debug, Clone, Copy, thiserror::Error)]
-#[error("invalid resolved reason; expected one of: fixed, wont_fix, expected, duplicate, flapping")]
+#[error(
+	"invalid resolved reason; expected one of: fixed, wont_fix, expected, duplicate, flapping, decommissioned"
+)]
 pub struct ResolvedReasonFromStringError;
 
 impl std::str::FromStr for ResolvedReason {
@@ -55,6 +60,7 @@ impl std::str::FromStr for ResolvedReason {
 			"expected" => Ok(Self::Expected),
 			"duplicate" | "dup" => Ok(Self::Duplicate),
 			"flapping" | "flap" => Ok(Self::Flapping),
+			"decommissioned" | "decommission" => Ok(Self::Decommissioned),
 			_ => Err(ResolvedReasonFromStringError),
 		}
 	}
@@ -76,6 +82,7 @@ impl std::fmt::Display for ResolvedReason {
 			Self::Expected => "expected",
 			Self::Duplicate => "duplicate",
 			Self::Flapping => "flapping",
+			Self::Decommissioned => "decommissioned",
 		};
 		write!(f, "{}", s)
 	}

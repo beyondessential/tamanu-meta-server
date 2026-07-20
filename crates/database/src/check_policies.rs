@@ -169,6 +169,72 @@ impl CheckPolicy {
 			.map_err(AppError::from)
 	}
 
+	/// Decommission a `(source, check)` fleet-wide: mark the catalog row,
+	/// resolve the check's outstanding states on every server (recording
+	/// decommissioning as the reason, re-evaluating incident membership),
+	/// and — when the source has no live checks left — clear its per-server
+	/// staleness so a retired reporter stops being flagged. Operator action.
+	pub async fn decommission(
+		db: &mut AsyncPgConnection,
+		source: &str,
+		check_name: &str,
+		by: &str,
+	) -> Result<()> {
+		use crate::schema::check_policies::dsl as cp;
+		use crate::schema::issues::dsl as iss;
+		use commons_types::issue::ResolvedReason;
+
+		let now = jiff_diesel::Timestamp::from(Timestamp::now());
+		diesel::update(
+			cp::check_policies.filter(cp::source.eq(source).and(cp::check_name.eq(check_name))),
+		)
+		.set((
+			cp::decommissioned_at.eq(Some(now)),
+			cp::decommissioned_by.eq(Some(by)),
+		))
+		.execute(db)
+		.await?;
+
+		// Resolve the check's outstanding states on every server, so they
+		// stop counting toward health and incidents.
+		let state_ids: Vec<Uuid> = iss::issues
+			.select(iss::id)
+			.filter(iss::source.eq(source))
+			.filter(iss::check_name.eq(check_name))
+			.filter(iss::server_id.is_not_null())
+			.filter(iss::resolved_at.is_null())
+			.load(db)
+			.await?;
+		for id in state_ids {
+			crate::issues::Issue::resolve(db, id, by, ResolvedReason::Decommissioned).await?;
+		}
+
+		// A source with no live checks left is no longer expected to report;
+		// clear any per-server staleness it still carries (source_freshness
+		// now excludes it, so nothing re-files these).
+		let live: i64 = cp::check_policies
+			.filter(cp::source.eq(source))
+			.filter(cp::decommissioned_at.is_null())
+			.count()
+			.get_result(db)
+			.await?;
+		if live == 0 {
+			let stale_ref = format!("{}{}", crate::statuses::STALE_REF_PREFIX, source);
+			let stale_ids: Vec<Uuid> = iss::issues
+				.select(iss::id)
+				.filter(iss::source.eq(crate::statuses::CANOPY_SOURCE))
+				.filter(iss::check_name.eq(&stale_ref))
+				.filter(iss::server_id.is_not_null())
+				.filter(iss::resolved_at.is_null())
+				.load(db)
+				.await?;
+			for id in stale_ids {
+				crate::issues::Issue::resolve(db, id, by, ResolvedReason::Decommissioned).await?;
+			}
+		}
+		Ok(())
+	}
+
 	/// Insert a row for `(source, check_name)` with default values
 	/// (ceiling = warning) if and only if no row exists yet. Idempotent:
 	/// safe to call on every status push for every check seen, including

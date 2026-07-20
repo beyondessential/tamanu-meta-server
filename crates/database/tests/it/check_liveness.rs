@@ -2,12 +2,36 @@
 //! freshness that drives per-server staleness must ignore decommissioned
 //! checks, so a source whose every check is retired stops being expected.
 
-use commons_types::status::CheckResult;
+use commons_types::status::{CheckResult, HealthState};
 use database::check_policies::CheckPolicy;
-use database::issues::{CheckFiling, FilingScope, Issue, file_check};
+use database::issues::{CheckFiling, FilingScope, Issue, file_check, health_from_check_state};
+use database::statuses::CANOPY_SOURCE;
 use diesel::{QueryableByName, sql_query, sql_types};
 use diesel_async::RunQueryDsl;
 use uuid::Uuid;
+
+fn filing_result<'a>(
+	server_id: Uuid,
+	source: &'a str,
+	check: &'a str,
+	observed: CheckResult,
+) -> CheckFiling<'a> {
+	CheckFiling {
+		source,
+		scope: FilingScope::Server {
+			server_id,
+			device_id: None,
+		},
+		check,
+		observed,
+		title: Some("decommission test"),
+		message: "decommission test filing",
+		detail: None,
+		default_ceiling: CheckResult::Failed,
+		default_escalates: false,
+		documentation: None,
+	}
+}
 
 #[derive(QueryableByName)]
 struct RowId {
@@ -211,6 +235,87 @@ async fn reconcile_reanimates_a_reported_decommissioned_check() {
 		assert!(!p.decommissioned, "a re-reported check is re-animated");
 		assert_eq!(p.ceiling, "warning", "re-animated at the warning ceiling");
 		assert!(!p.reviewed, "re-animated pending operator review");
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn decommission_resolves_states_and_marks_catalog() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server_id = insert_server(&mut conn).await;
+		file_check(
+			&mut conn,
+			filing_result(server_id, "alertd", "x", CheckResult::Failed),
+		)
+		.await
+		.expect("file");
+		assert_eq!(
+			health_from_check_state(&mut conn, &[(server_id, None)])
+				.await
+				.expect("rollup")
+				.get(&server_id)
+				.copied()
+				.unwrap_or(HealthState::Healthy),
+			HealthState::Unhealthy,
+		);
+
+		CheckPolicy::decommission(&mut conn, "alertd", "x", "op")
+			.await
+			.expect("decommission");
+
+		assert!(policy(&mut conn, "alertd", "x").await.decommissioned);
+		let state = Issue::list_by_source_ref(&mut conn, "alertd", "x", &[server_id])
+			.await
+			.expect("state")
+			.into_iter()
+			.next()
+			.expect("state row");
+		assert!(
+			state.resolved_at.is_some(),
+			"decommissioning resolves the check's states",
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn decommission_clears_stale_when_source_fully_retired() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server_id = insert_server(&mut conn).await;
+		// The source's only check, plus a live per-server staleness issue.
+		file_check(
+			&mut conn,
+			filing_result(server_id, "alertd", "x", CheckResult::Passed),
+		)
+		.await
+		.expect("file");
+		file_check(
+			&mut conn,
+			filing_result(
+				server_id,
+				CANOPY_SOURCE,
+				"stale/alertd",
+				CheckResult::Failed,
+			),
+		)
+		.await
+		.expect("file stale");
+
+		CheckPolicy::decommission(&mut conn, "alertd", "x", "op")
+			.await
+			.expect("decommission");
+
+		let stale =
+			Issue::list_by_source_ref(&mut conn, CANOPY_SOURCE, "stale/alertd", &[server_id])
+				.await
+				.expect("stale")
+				.into_iter()
+				.next()
+				.expect("stale row");
+		assert!(
+			stale.resolved_at.is_some(),
+			"retiring a source's last check clears its staleness",
+		);
 	})
 	.await
 }
